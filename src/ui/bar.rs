@@ -1,5 +1,5 @@
 //! Floating action bar: the action registry as one row of buttons, under the selection.
-use iced::widget::{pin, row, tooltip};
+use iced::widget::{opaque, pin, row, tooltip};
 use iced::{Element, Point, Rectangle, Size};
 
 use super::widgets::{self, CONTROL, SURFACE_PADDING, TEXT_BUTTON_WIDTH};
@@ -33,7 +33,8 @@ pub fn view<'a, Message: Clone + 'a>(
         widgets::with_tip(button, action.tip, tip_side).into()
     });
     let bar = widgets::surface(row(buttons).spacing(SPACING));
-    pin(bar).position(at).into()
+    // opaque: a press between two buttons doesn't start a new selection.
+    pin(opaque(bar)).position(at).into()
 }
 
 /// What the button shows for its key, e.g. "Ctrl C".

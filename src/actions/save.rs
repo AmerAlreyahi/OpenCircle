@@ -10,7 +10,7 @@ pub const ACTION: Action = Action {
         letter: 's',
     },
     icon: '\u{e0b6}', // lucide "download"
-    run,
+    run: super::Run::Finish(run),
 };
 
 fn run(crop: Crop) -> Result<(), String> {

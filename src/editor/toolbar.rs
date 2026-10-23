@@ -35,14 +35,14 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
     let mut group = None;
     for t in TOOLS {
         if group != Some(t.group) {
-            bar.push(widgets::divider());
+            bar.push(widgets::toolbar_divider());
             step(1.0);
             group = Some(t.group);
         }
         bar.push(icon(t.icon, e.tool == t.tool, Message::Tool(t.tool), t.tip));
         step(CONTROL);
     }
-    bar.push(widgets::divider());
+    bar.push(widgets::toolbar_divider());
     step(1.0);
     let colour = Color::from_rgba8(
         e.colour[0],
@@ -59,10 +59,10 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
         )
         .into(),
     );
-    bar.push(widgets::divider());
+    bar.push(widgets::toolbar_divider());
     bar.push(icon(UNDO, false, Message::Undo, "Undo (Ctrl+Z)"));
     bar.push(icon(REDO, false, Message::Redo, "Redo (Ctrl+Shift+Z)"));
-    bar.push(widgets::divider());
+    bar.push(widgets::toolbar_divider());
     bar.push(widgets::text_button(COPY, "Copy", "Ctrl C".into(), true, Message::Copy).into());
     bar.push(widgets::text_button(SAVE, "Save", "Ctrl S".into(), false, Message::Save).into());
 

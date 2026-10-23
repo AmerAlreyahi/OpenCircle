@@ -13,7 +13,7 @@ pub const ACTION: Action = Action {
         letter: 'c',
     },
     icon: '\u{e0a2}', // lucide "copy"
-    run,
+    run: super::Run::Finish(run),
 };
 
 thread_local! {
@@ -23,17 +23,28 @@ thread_local! {
 }
 
 fn run(crop: Crop) -> Result<(), String> {
+    with_clipboard(|clipboard| {
+        clipboard.set_image(arboard::ImageData {
+            width: crop.width as usize,
+            height: crop.height as usize,
+            bytes: Cow::Owned(crop.rgba),
+        })
+    })
+}
+
+/// Puts `text` on the clipboard (the Text panel's Copy).
+pub fn text(text: String) -> Result<(), String> {
+    with_clipboard(|clipboard| clipboard.set_text(text))
+}
+
+fn with_clipboard(
+    set: impl FnOnce(&mut arboard::Clipboard) -> Result<(), arboard::Error>,
+) -> Result<(), String> {
     CLIPBOARD.with_borrow_mut(|slot| {
         let clipboard = match slot {
             Some(clipboard) => clipboard,
             None => slot.insert(arboard::Clipboard::new().map_err(|e| e.to_string())?),
         };
-        clipboard
-            .set_image(arboard::ImageData {
-                width: crop.width as usize,
-                height: crop.height as usize,
-                bytes: Cow::Owned(crop.rgba),
-            })
-            .map_err(|e| e.to_string())
+        set(clipboard).map_err(|e| e.to_string())
     })
 }

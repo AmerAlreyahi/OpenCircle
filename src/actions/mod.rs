@@ -1,13 +1,22 @@
 //! The action registry: ONE list of what can be done with a selection. The action
 //! bar renders it in order; the first entry is the default (Enter).
 //! To add an action: see ARCHITECTURE.md ("Add an action").
-mod copy;
+pub mod ask;
+pub mod copy;
+pub mod lens;
 mod save;
+pub mod text;
 
 use iced::Rectangle;
 
 /// Every action, in action-bar order. The first one runs on Enter.
-pub const ACTIONS: &[Action] = &[copy::ACTION, save::ACTION];
+pub const ACTIONS: &[Action] = &[
+    lens::ACTION,
+    ask::ACTION,
+    text::ACTION,
+    copy::ACTION,
+    save::ACTION,
+];
 
 #[derive(Debug)]
 pub struct Action {
@@ -20,7 +29,24 @@ pub struct Action {
     pub key: Key,
     /// Glyph in `assets/lucide/lucide-subset.ttf` (must be listed in its `subset.sh`).
     pub icon: char,
-    pub run: fn(Crop) -> Result<(), String>,
+    pub run: Run,
+}
+
+/// What running an action does.
+#[derive(Debug, Clone, Copy)]
+pub enum Run {
+    /// Close the overlay, then do this with the crop (Copy, Save).
+    Finish(fn(Crop) -> Result<(), String>),
+    /// Open this result panel beside the selection; the overlay stays.
+    Panel(Panel),
+}
+
+/// The result panels (`ui/panel.rs` draws them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Panel {
+    Lens,
+    Text,
+    Ask,
 }
 
 /// The action's key while the overlay is open: a Latin letter (layout-independent),
@@ -38,6 +64,7 @@ pub fn for_key(letter: char, ctrl: bool) -> Option<&'static Action> {
 }
 
 /// A crop of the frozen frame, in physical pixels.
+#[derive(Clone)]
 pub struct Crop {
     pub width: u32,
     pub height: u32,
@@ -76,13 +103,19 @@ pub fn write_png(
     height: u32,
     rgba: &[u8],
 ) -> Result<(), String> {
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+    std::fs::write(path, encode_png(width, height, rgba)?).map_err(|e| e.to_string())
+}
+
+/// An RGBA image as 8-bit PNG bytes.
+pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
     writer.write_image_data(rgba).map_err(|e| e.to_string())?;
-    writer.finish().map_err(|e| e.to_string())
+    writer.finish().map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 #[cfg(test)]

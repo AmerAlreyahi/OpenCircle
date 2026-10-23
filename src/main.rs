@@ -38,6 +38,7 @@ const USAGE: &str =
     "usage: opencircle [capture | run <action> [--target full_screen|circle|last_region]]";
 
 fn main() -> ExitCode {
+    ui::limit_malloc_arenas();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = match args.first().map(String::as_str) {
         None => None,

@@ -62,6 +62,8 @@ pub const STROKE_END: Color = Color::from_rgb8(0x5f, 0xe0, 0xf0);
 /// Accent gradient (both themes): primary buttons, active tools.
 pub const ACCENT_START: Color = Color::from_rgb8(0x8f, 0x80, 0xff);
 pub const ACCENT_END: Color = Color::from_rgb8(0x4f, 0xc9, 0xe0);
+/// Selected text in inputs (both themes): the accent, see-through.
+pub const SELECTION: Color = Color::from_rgba8(0x8f, 0x80, 0xff, 0.35);
 /// Text and icons on the accent gradient.
 pub const ON_ACCENT: Color = Color::from_rgb8(0x10, 0x10, 0x1c);
 

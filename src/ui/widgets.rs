@@ -3,7 +3,11 @@
 //!
 //! Glass later: blur the frozen frame once per overlay and paint the blurred crop
 //! behind each surface (no nested/live blur).
-use iced::widget::{Button, Container, Tooltip, button, container, row, space, text, tooltip};
+use iced::widget::text::IntoFragment;
+use iced::widget::{
+    Button, Container, Text, TextInput, Tooltip, button, container, progress_bar, row, scrollable,
+    space, text, text_editor, text_input, tooltip,
+};
 use iced::{Background, Border, Color, Element, Font, Shadow, Vector, gradient};
 
 use super::theme;
@@ -11,6 +15,10 @@ use super::theme;
 /// The icon font (Lucide subset, see `assets/lucide/`); load it once at start.
 pub const ICON_FONT_BYTES: &[u8] = include_bytes!("../../assets/lucide/lucide-subset.ttf");
 const ICON_FONT: Font = Font::with_name("lucide");
+/// Glyphs of the icon font used outside the action registry.
+pub const SEND: char = '\u{e04e}'; // lucide "arrow-up"
+pub const STOP: char = '\u{e16a}'; // lucide "square"
+pub const CLOSE: char = '\u{e1b1}'; // lucide "x"
 
 /// Every button is this tall (DESIGN.md: 44 px controls).
 pub const CONTROL: f32 = 44.0;
@@ -52,7 +60,7 @@ pub fn text_button<'a, Message: Clone + 'a>(
         (palette.text, palette.muted)
     };
     let content = row![
-        text(icon).font(ICON_FONT).size(16).color(fg),
+        self::icon(icon).color(fg),
         text(label).size(14).color(fg),
         space::horizontal(),
         text(key_hint).size(11).color(hint),
@@ -65,20 +73,176 @@ pub fn text_button<'a, Message: Clone + 'a>(
         .height(CONTROL)
         .padding([0, 12])
         .on_press(on_press)
-        .style(move |_, status| {
-            let background = match (primary, status) {
-                (true, _) => Some(accent(status)),
-                (false, button::Status::Hovered) => Some(palette.hover.into()),
-                (false, button::Status::Pressed) => Some(palette.pressed.into()),
-                (false, _) => None,
-            };
-            button::Style {
-                background,
-                text_color: fg,
-                border: Border::default().rounded(14),
-                ..button::Style::default()
-            }
+        .style(move |_, status| button::Style {
+            background: quiet_or_accent(primary, status),
+            text_color: fg,
+            border: Border::default().rounded(14),
+            ..button::Style::default()
         })
+}
+
+/// A glyph from the icon font.
+pub fn icon<'a>(glyph: char) -> Text<'a> {
+    text(glyph)
+        .font(ICON_FONT)
+        .size(16)
+        .color(theme::current().text)
+}
+
+/// Panel title.
+pub fn heading<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
+    text(label).size(16).color(theme::current().text)
+}
+
+/// Running text: answers, messages.
+pub fn body<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
+    text(label).size(14).color(theme::current().text)
+}
+
+/// Secondary small text: notes, model name, progress.
+pub fn caption<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
+    text(label).size(12).color(theme::current().muted)
+}
+
+/// An error message.
+pub fn error<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
+    text(label).size(14).color(theme::current().danger)
+}
+
+/// A suggestion (e.g. a prompt): small, fully rounded, outlined, quiet.
+pub fn chip<'a, Message: Clone + 'a>(label: &'a str, on_press: Message) -> Button<'a, Message> {
+    let palette = theme::current();
+    button(text(label).size(13).color(palette.text))
+        .padding([8, 14])
+        .on_press(on_press)
+        .style(move |_, status| button::Style {
+            background: quiet_or_accent(false, status),
+            text_color: palette.text,
+            border: Border {
+                color: palette.border,
+                width: 1.0,
+                radius: 999.0.into(),
+            },
+            ..button::Style::default()
+        })
+}
+
+/// One-line text field, `CONTROL` tall.
+pub fn input<'a, Message: Clone + 'a>(
+    id: &'static str,
+    placeholder: &str,
+    value: &str,
+    on_input: impl Fn(String) -> Message + 'a,
+    on_submit: Message,
+) -> TextInput<'a, Message> {
+    let palette = theme::current();
+    text_input(placeholder, value)
+        .id(id)
+        .on_input(on_input)
+        .on_submit(on_submit)
+        .size(14)
+        .padding([13, 14])
+        .style(move |_, status| text_input::Style {
+            background: palette.hover.into(),
+            border: field_border(matches!(status, text_input::Status::Focused { .. })),
+            icon: palette.muted,
+            placeholder: palette.muted,
+            value: palette.text,
+            selection: theme::SELECTION,
+        })
+}
+
+/// Multi-line editable text (the Text panel's result).
+pub fn editor<'a, Message: Clone + 'a>(
+    content: &'a text_editor::Content,
+    on_action: impl Fn(text_editor::Action) -> Message + 'a,
+) -> Element<'a, Message> {
+    let palette = theme::current();
+    text_editor(content)
+        .on_action(on_action)
+        .size(14)
+        .padding(14)
+        .style(move |_, status| text_editor::Style {
+            background: palette.hover.into(),
+            border: field_border(matches!(status, text_editor::Status::Focused { .. })),
+            placeholder: palette.muted,
+            value: palette.text,
+            selection: theme::SELECTION,
+        })
+        .height(iced::Fill)
+        .into()
+}
+
+/// Progress bar, `value` in 0..=1.
+pub fn progress<'a, Message: 'a>(value: f32) -> Element<'a, Message> {
+    let palette = theme::current();
+    progress_bar(0.0..=1.0, value)
+        .girth(6)
+        .style(move |_| progress_bar::Style {
+            background: palette.hover.into(),
+            bar: accent(button::Status::Active),
+            border: Border::default().rounded(3),
+        })
+        .into()
+}
+
+/// The user's own message in a chat: a soft rounded bubble.
+pub fn bubble<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
+    let palette = theme::current();
+    container(content)
+        .padding([8, 12])
+        .style(move |_| container::Style {
+            background: Some(palette.pressed.into()),
+            border: Border::default().rounded(14),
+            ..container::Style::default()
+        })
+}
+
+/// Vertical scroll area with a thin scroller from the palette.
+pub fn scroll<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> scrollable::Scrollable<'a, Message> {
+    let palette = theme::current();
+    scrollable(content)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new().width(4).scroller_width(4),
+        ))
+        .style(move |theme, status| {
+            let mut style = scrollable::default(theme, status);
+            style.vertical_rail = scrollable::Rail {
+                background: None,
+                border: Border::default(),
+                scroller: scrollable::Scroller {
+                    background: palette.border.into(),
+                    border: Border::default().rounded(2),
+                },
+            };
+            style
+        })
+}
+
+fn field_border(focused: bool) -> Border {
+    let palette = theme::current();
+    Border {
+        color: if focused {
+            theme::ACCENT_START
+        } else {
+            palette.border
+        },
+        width: 1.0,
+        radius: 14.0.into(),
+    }
+}
+
+/// Button background: accent gradient for `primary`, else clear until hovered.
+fn quiet_or_accent(primary: bool, status: button::Status) -> Option<Background> {
+    let palette = theme::current();
+    match (primary, status) {
+        (true, _) => Some(accent(status)),
+        (false, button::Status::Hovered) => Some(palette.hover.into()),
+        (false, button::Status::Pressed) => Some(palette.pressed.into()),
+        (false, _) => None,
+    }
 }
 
 /// Shows `tip` in a pill beside `content` on hover; also the control's description.
@@ -110,7 +274,7 @@ pub fn icon_button<'a, Message: Clone + 'a>(
 }
 
 /// Thin vertical line between toolbar groups.
-pub fn divider<'a, Message: 'a>() -> Element<'a, Message> {
+pub fn toolbar_divider<'a, Message: 'a>() -> Element<'a, Message> {
     container(space::horizontal())
         .width(1)
         .height(24)
@@ -776,5 +940,17 @@ pub mod shot {
             crate::actions::write_png(&dir.join(format!("{name}.png")), w, h, &rgba).unwrap();
         }
         rgba
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn glyphs_are_in_the_subset_font() {
+        let script = include_str!("../../assets/lucide/subset.sh");
+        for glyph in [super::SEND, super::STOP, super::CLOSE] {
+            let code = format!("U+{:04X}", glyph as u32);
+            assert!(script.contains(&code), "add {code} to subset.sh");
+        }
     }
 }

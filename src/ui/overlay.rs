@@ -22,7 +22,6 @@ pub enum Event {
     Press(Point),
     Move(Point),
     Release,
-    Close,
     /// Enter: the default action.
     Enter,
     /// A letter key (Latin, lower-case, keyboard-layout independent), with Ctrl or not.
@@ -155,7 +154,6 @@ impl canvas::Program<Event> for Overlay<'_> {
                 modifiers,
                 ..
             }) => match key {
-                keyboard::Key::Named(Named::Escape) => Event::Close,
                 keyboard::Key::Named(Named::Enter) => Event::Enter,
                 _ => Event::Key {
                     letter: key.to_latin(*physical_key)?.to_ascii_lowercase(),
