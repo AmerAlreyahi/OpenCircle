@@ -7,7 +7,7 @@ use crate::actions::{ACTIONS, Action, Key};
 
 const SPACING: f32 = 4.0;
 /// Between the bar and the selection, and the bar's minimum distance to screen edges.
-const GAP: f32 = 16.0;
+pub(super) const GAP: f32 = 16.0;
 
 /// The bar for `selection` on a `screen`-sized overlay (logical px).
 pub fn view<'a, Message: Clone + 'a>(
@@ -59,7 +59,7 @@ fn size(buttons: usize) -> Size {
 /// Top-left corner for a `bar`: centred under the selection, else above it, else
 /// over its bottom edge (selection fills the screen). Always inside the screen,
 /// `GAP` from its edges, unless the bar is bigger than the screen.
-fn place(selection: Rectangle, bar: Size, screen: Size) -> Point {
+pub(super) fn place(selection: Rectangle, bar: Size, screen: Size) -> Point {
     let x = (selection.center_x() - bar.width / 2.0)
         .min(screen.width - GAP - bar.width)
         .max(GAP);

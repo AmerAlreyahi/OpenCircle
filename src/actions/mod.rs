@@ -3,8 +3,9 @@
 //! To add an action: see ARCHITECTURE.md ("Add an action").
 pub mod ask;
 pub mod copy;
+mod edit;
 pub mod lens;
-mod save;
+pub mod save;
 pub mod text;
 
 use iced::Rectangle;
@@ -14,6 +15,7 @@ pub const ACTIONS: &[Action] = &[
     lens::ACTION,
     ask::ACTION,
     text::ACTION,
+    edit::ACTION,
     copy::ACTION,
     save::ACTION,
 ];
@@ -39,6 +41,8 @@ pub enum Run {
     Finish(fn(Crop) -> Result<(), String>),
     /// Open this result panel beside the selection; the overlay stays.
     Panel(Panel),
+    /// Turn the action bar into the editing toolbar over the selection.
+    Edit,
 }
 
 /// The result panels (`ui/panel.rs` draws them).
@@ -71,18 +75,18 @@ pub struct Crop {
     pub rgba: Vec<u8>,
 }
 
+/// Its size only (a log line, not megabytes of pixels).
+impl std::fmt::Debug for Crop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Crop({}x{})", self.width, self.height)
+    }
+}
+
 /// Cuts `area` (logical px) out of an RGBA frame whose pixels are `scale` times the
 /// logical size. Edges round outwards; `None` if nothing is left on the frame.
 pub fn crop(rgba: &[u8], width: u32, height: u32, scale: f32, area: Rectangle) -> Option<Crop> {
-    let edge =
-        |v: f32, max: u32, round: fn(f32) -> f32| (round(v * scale).max(0.0) as u32).min(max);
-    let (x0, y0) = (
-        edge(area.x, width, f32::floor),
-        edge(area.y, height, f32::floor),
-    );
-    let x1 = edge(area.x + area.width, width, f32::ceil);
-    let y1 = edge(area.y + area.height, height, f32::ceil);
-    if x1 <= x0 || y1 <= y0 || rgba.len() < width as usize * height as usize * 4 {
+    let [x0, y0, x1, y1] = crop_bounds(width, height, scale, area)?;
+    if rgba.len() < width as usize * height as usize * 4 {
         return None;
     }
     let row = |y: u32| {
@@ -94,6 +98,19 @@ pub fn crop(rgba: &[u8], width: u32, height: u32, scale: f32, area: Rectangle) -
         height: y1 - y0,
         rgba: (y0..y1).flat_map(row).copied().collect(),
     })
+}
+
+/// The frame pixels `crop` takes for `area`: `[x0, y0, x1, y1]`, ends exclusive.
+pub fn crop_bounds(width: u32, height: u32, scale: f32, area: Rectangle) -> Option<[u32; 4]> {
+    let edge =
+        |v: f32, max: u32, round: fn(f32) -> f32| (round(v * scale).max(0.0) as u32).min(max);
+    let (x0, y0) = (
+        edge(area.x, width, f32::floor),
+        edge(area.y, height, f32::floor),
+    );
+    let x1 = edge(area.x + area.width, width, f32::ceil);
+    let y1 = edge(area.y + area.height, height, f32::ceil);
+    (x1 > x0 && y1 > y0).then_some([x0, y0, x1, y1])
 }
 
 /// Writes an RGBA image as an 8-bit PNG.

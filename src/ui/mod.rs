@@ -1,9 +1,12 @@
 //! The iced daemon: owns the (pre-created, hidden) overlay window and its state.
 mod bar;
+mod edit;
 mod onboarding;
 mod overlay;
 mod panel;
+mod quick;
 mod settings;
+mod snip;
 pub mod theme;
 mod tray;
 pub(crate) mod widgets;
@@ -12,18 +15,24 @@ mod windows;
 pub use tray::start as start_tray;
 
 use std::cell::Cell;
-use std::sync::Mutex;
-use std::time::Instant;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use iced::futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use iced::futures::stream::{self, Stream, StreamExt};
 use iced::keyboard::{self, key::Named};
 use iced::widget::{canvas, container, image, space, stack};
 use iced::window::{self, Level, Mode};
-use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task};
+use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
-use crate::actions::{self, Action, Crop, Run, lens};
+use crate::actions::{self, Action, Crop, Run, copy, lens, save, text};
+use crate::config::Target;
+use crate::editor::{self, Output};
 use crate::{Trigger, capture};
+use edit::Editing;
+use quick::{Quick, Start};
+use snip::Snip;
 
 const HINT: &str = "Circle, drag or tap anything · Esc to close";
 
@@ -71,6 +80,23 @@ enum Message {
     Resized(Size),
     /// Settings / onboarding windows and the OS theme (`windows.rs`).
     Windows(windows::Msg),
+    /// From the annotation editor (Edit in place, Snip).
+    Editor(editor::Message),
+    Snip(snip::Msg),
+    /// The copy-text quick action read this.
+    TextRead(Result<String, String>),
+    /// The toast has been shown long enough.
+    ToastDone,
+}
+
+/// What the open overlay is for.
+enum Purpose {
+    /// Circle to Search: select, then the action bar.
+    Search,
+    /// A quick action: runs on its target's area, or on the first selection.
+    Quick(Quick, Target),
+    /// Snip: pick an area, then the editor (no action bar).
+    Snip(Box<Snip>),
 }
 
 /// Closing steps. The renderer frees the frame cache and resizes its buffers only
@@ -101,6 +127,8 @@ struct Shot {
     /// Logical px: the monitor's origin and size.
     origin: Point,
     size: Size,
+    /// Snip mode: the windows on this monitor (logical px, topmost first).
+    windows: Option<Vec<Rectangle>>,
 }
 
 struct App {
@@ -128,6 +156,15 @@ struct App {
     /// Lens pages opened from this overlay, released when it closes.
     lens_pages: Vec<lens::Held>,
     windows: windows::Windows,
+    purpose: Purpose,
+    /// The annotation editor on the selection; kept when going back to the bar.
+    edit: Option<Editing>,
+    /// The shown monitor's origin (logical px): the key of `regions`.
+    origin: Point,
+    /// The last selection per monitor, for `last_region` (memory only).
+    regions: Vec<(Point, Rectangle)>,
+    /// A short status over the frame (copy text).
+    toast: Option<&'static str>,
 }
 
 impl App {
@@ -157,6 +194,11 @@ impl App {
             panels: 0,
             lens_pages: Vec::new(),
             windows: windows::Windows::default(),
+            purpose: Purpose::Search,
+            edit: None,
+            origin: Point::ORIGIN,
+            regions: Vec::new(),
+            toast: None,
         };
         let start = app.windows.start().map(Message::Windows);
         (app, Task::batch([open.discard(), start]))
@@ -175,29 +217,56 @@ impl App {
             {
                 Task::none()
             }
-            Message::Trigger(Trigger::Capture(at)) => self.capture(at),
-            Message::Trigger(Trigger::Quick(at, quick)) => {
-                eprintln!(
-                    "quick action {} not wired yet; opening the overlay",
-                    quick.action
-                );
-                self.capture(at)
+            Message::Trigger(Trigger::Capture(at)) => {
+                self.purpose = Purpose::Search;
+                self.capture(at, false)
+            }
+            Message::Trigger(Trigger::Quick(at, qa)) => {
+                self.purpose = Purpose::Search;
+                if qa.action == "snip" {
+                    return self.capture(at, true);
+                }
+                match Quick::for_id(&qa.action) {
+                    Some(q) => self.purpose = Purpose::Quick(q, qa.target),
+                    // ponytail: the lead wires translate with its pipeline.
+                    None => eprintln!("{} not wired yet; opening the overlay", qa.action),
+                }
+                self.capture(at, false)
             }
             Message::Captured(at, shot) => self.open(at, shot),
             Message::Overlay(event) => self.on_overlay(event),
             Message::Escape if self.frame.is_none() => Task::none(),
-            Message::Escape if std::env::var_os(TEST_SHOT).is_some() => {
-                // Shoot after the next frame, with no message (= no relayout) in
-                // between: a relayout drops the text editor's drawn text.
-                let overlay = self.overlay;
+            Message::Escape if let Some(scroll) = self.scroll() => {
+                scroll.stop(); // what was gathered opens in the editor
+                Task::none()
+            }
+            // The editor has its own Esc (finish typing, close the picker, back).
+            Message::Escape if self.edit.as_ref().is_some_and(Editing::is_open) => Task::none(),
+            Message::Escape if std::env::var_os(TEST_SHOT).is_some() => self.test_shot(),
+            Message::Escape => self.close(),
+            Message::Editor(msg) => self.on_editor(msg),
+            Message::Snip(msg) => self.on_snip(msg),
+            Message::TextRead(read) if self.toast.is_some() => {
+                let copied = read.and_then(|t| match t.trim() {
+                    "" => Err("no text found".into()),
+                    _ => copy::text(t),
+                });
+                self.toast = Some(match copied {
+                    Ok(()) => "Text copied",
+                    Err(e) => {
+                        eprintln!("copy text failed: {e}");
+                        "No text copied"
+                    }
+                });
                 background(|tx| {
-                    std::thread::sleep(std::time::Duration::from_millis(150));
+                    std::thread::sleep(Duration::from_millis(900));
                     let _ = tx.unbounded_send(());
                 })
-                .then(move |()| window::screenshot(overlay))
-                .map(Message::TestShot)
+                .map(|()| Message::ToastDone)
             }
-            Message::Escape => self.close(),
+            Message::TextRead(_) => Task::none(), // closed meanwhile
+            Message::ToastDone if self.toast.is_some() => self.close(),
+            Message::ToastDone => Task::none(),
             Message::Panel(id, msg) => self.on_panel(id, msg),
             Message::Run(action) => self.run(action),
             // Leave full-screen while still shown (on Windows, leaving it while hidden
@@ -246,16 +315,28 @@ impl App {
     }
 
     /// Captures on a thread: a Wayland portal may wait minutes for the user's OK.
-    fn capture(&mut self, at: Instant) -> Task<Message> {
+    /// `windows`: also list the windows (Snip), while the overlay is still hidden.
+    fn capture(&mut self, at: Instant, list_windows: bool) -> Task<Message> {
         self.capturing = true;
-        background(|tx| {
+        background(move |tx| {
             let shot = capture::monitor_under_cursor().map(|frame| {
                 let scale = frame.scale;
+                let logical = |x: i32, y: i32, w: u32, h: u32| {
+                    let (x, y) = ((x - frame.x) as f32, (y - frame.y) as f32);
+                    Rectangle::new(Point::new(x, y), Size::new(w as f32, h as f32)) * (1.0 / scale)
+                };
+                let windows = list_windows.then(|| {
+                    let list = capture::window_rect::list();
+                    list.into_iter()
+                        .map(|(x, y, w, h)| logical(x, y, w, h))
+                        .collect()
+                });
                 Shot {
                     origin: Point::new(frame.x as f32 / scale, frame.y as f32 / scale),
                     size: Size::new(frame.width as f32, frame.height as f32) * (1.0 / scale),
                     image: image::Handle::from_rgba(frame.width, frame.height, frame.rgba),
                     scale,
+                    windows,
                 }
             });
             let _ = tx.unbounded_send(shot);
@@ -269,6 +350,7 @@ impl App {
             Ok(shot) => shot,
             Err(e) => {
                 eprintln!("capture failed: {e}");
+                self.purpose = Purpose::Search;
                 return Task::none();
             }
         };
@@ -278,72 +360,361 @@ impl App {
             shot.size.height * shot.scale,
             at.elapsed().as_millis()
         );
-        let (origin, size) = (shot.origin, shot.size);
+        let size = shot.size;
         self.frame = Some(shot.image);
         self.scale = shot.scale;
         self.screen = size;
+        self.origin = shot.origin;
         self.opening = self.opening.wrapping_add(1);
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
-        // Place and size the hidden window to cover the monitor BEFORE set_mode shows
-        // it: iced makes it visible before going full-screen, so whatever is shown
+        if let Some(windows) = shot.windows {
+            let snip = Snip::new(windows, size, snip::can_scroll());
+            self.purpose = Purpose::Snip(Box::new(snip));
+        }
+        let Purpose::Quick(quick, target) = self.purpose else {
+            return self.show();
+        };
+        let Start::Area(area) = quick::start(target, size, self.last_region()) else {
+            return self.show(); // the first selection runs it
+        };
+        self.select(area);
+        if let Quick::Action(
+            action @ Action {
+                run: Run::Finish(_),
+                ..
+            },
+        ) = quick
+        {
+            // Copy, Save: nothing to show; the window stays hidden.
+            let done = self.run(action);
+            self.hiding = Hiding::No;
+            return done;
+        }
+        let run = self.run_quick(quick);
+        self.show().chain(run)
+    }
+
+    /// Shows the (hidden or pill-sized) window over the whole monitor.
+    fn show(&self) -> Task<Message> {
+        // Place and size the window to cover the monitor BEFORE set_mode shows it:
+        // iced makes it visible before going full-screen, so whatever is shown
         // first must already cover the monitor (no small black box flash).
         // ponytail: mixed-DPI multi-monitor placement untested (needs real hardware).
-        window::move_to(self.overlay, origin)
-            .chain(window::resize(self.overlay, size))
+        window::move_to(self.overlay, self.origin)
+            .chain(window::resize(self.overlay, self.screen))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
             .chain(window::gain_focus(self.overlay))
     }
 
     fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {
+        // The editor, a toast or a scrolling capture has the screen.
+        if self.edit.as_ref().is_some_and(Editing::is_open)
+            || self.toast.is_some()
+            || self.scroll().is_some()
+        {
+            return Task::none();
+        }
         match event {
             overlay::Event::Press(p) => {
-                // A new selection: the panel was about the old one.
+                // A new selection: the panel and the edits were about the old one.
                 self.panel = None;
+                self.edit = None;
                 self.stroke = vec![p];
                 self.selection = None;
                 self.drawing = true;
             }
             overlay::Event::Move(p) if self.drawing => self.stroke.push(p),
             overlay::Event::Move(_) => {}
+            overlay::Event::Hover(p) => {
+                // Snip's Window mode: the window under the pointer lights up.
+                if let Purpose::Snip(snip) = &self.purpose {
+                    match snip.window_at(p) {
+                        Some(w) if self.selection.map(|s| s.area) != Some(w) => self.select(w),
+                        Some(_) => {}
+                        None => {
+                            self.selection = None;
+                            self.stroke.clear();
+                        }
+                    }
+                }
+            }
             overlay::Event::Release => {
                 self.drawing = false;
                 self.selection = overlay::select(&self.stroke);
-                if self.selection.is_none() {
-                    self.stroke.clear();
+                let area = self.selection.map(|s| s.area);
+                if let Some(area) = area {
+                    self.regions.retain(|(origin, _)| *origin != self.origin);
+                    self.regions.push((self.origin, area));
+                }
+                match &self.purpose {
+                    Purpose::Snip(snip) => {
+                        let at = self.stroke.last().copied().unwrap_or(Point::ORIGIN);
+                        let next = snip.pick(area, at, self.screen);
+                        return self.snip_next(next);
+                    }
+                    Purpose::Quick(quick, _) if area.is_some() => {
+                        let quick = *quick;
+                        return self.run_quick(quick);
+                    }
+                    _ if area.is_none() => self.stroke.clear(),
+                    _ => {}
                 }
             }
-            overlay::Event::Enter => {
+            overlay::Event::Enter if matches!(self.purpose, Purpose::Search) => {
                 if let Some(default) = actions::ACTIONS.first() {
                     return self.run(default);
                 }
             }
-            overlay::Event::Key { letter, ctrl } => {
+            overlay::Event::Key { letter, ctrl } if matches!(self.purpose, Purpose::Search) => {
                 if let Some(action) = actions::for_key(letter, ctrl) {
                     return self.run(action);
                 }
             }
+            overlay::Event::Enter | overlay::Event::Key { .. } => {}
         }
         Task::none()
     }
 
+    /// Makes `area` the selection, drawn as a dragged rectangle.
+    fn select(&mut self, area: Rectangle) {
+        self.selection = Some(overlay::Selection { area, drag: true });
+        self.stroke = vec![area.position(), area.position() + Vector::from(area.size())];
+    }
+
+    /// The previous selection on the shown monitor.
+    fn last_region(&self) -> Option<Rectangle> {
+        let mine = self
+            .regions
+            .iter()
+            .find(|(origin, _)| *origin == self.origin);
+        mine.map(|(_, area)| *area)
+    }
+
     /// Runs `action` on the selection: a finishing action closes the overlay first
-    /// (so dialogs aren't hidden under it); a panel action opens its panel.
-    /// No selection yet = nothing to do.
+    /// (so dialogs aren't hidden under it); a panel action opens its panel; Edit
+    /// turns the bar into the editing toolbar. No selection yet = nothing to do.
     fn run(&mut self, action: &'static Action) -> Task<Message> {
+        if let Run::Edit = action.run {
+            return self.open_editor();
+        }
         let Some(crop) = self.crop() else {
             return Task::none();
         };
         match action.run {
-            Run::Finish(finish) => {
-                let closing = self.close();
-                if let Err(e) = finish(crop) {
-                    eprintln!("{} failed: {e}", action.id);
-                }
-                closing
-            }
+            Run::Finish(_) => self.finish(action, crop),
             Run::Panel(kind) => self.open_panel(kind, crop, None),
+            Run::Edit => Task::none(), // handled above
         }
+    }
+
+    /// Closes the overlay, then runs a finishing action (Copy, Save) on `crop`.
+    fn finish(&mut self, action: &Action, crop: Crop) -> Task<Message> {
+        let Run::Finish(finish) = action.run else {
+            return Task::none();
+        };
+        let closing = self.close();
+        if let Err(e) = finish(crop) {
+            eprintln!("{} failed: {e}", action.id);
+        }
+        closing
+    }
+
+    /// Runs a quick action on the selection (no action bar). Only once: a new
+    /// selection after it gets the bar.
+    fn run_quick(&mut self, quick: Quick) -> Task<Message> {
+        self.purpose = Purpose::Search;
+        match quick {
+            Quick::Action(action) => self.run(action),
+            // No OCR models yet: the Text panel asks before downloading them.
+            Quick::CopyText if !text::models_present() => self.run(&text::ACTION),
+            Quick::CopyText => {
+                let Some(crop) = self.crop() else {
+                    return Task::none();
+                };
+                self.toast = Some("Reading text…");
+                background(move |tx| {
+                    let _ = tx.unbounded_send(text::read(&crop, |_| {}));
+                })
+                .map(Message::TextRead)
+            }
+            Quick::Explain => match self.crop() {
+                Some(crop) => self.open_panel(actions::Panel::Ask, crop, Some("Explain".into())),
+                None => Task::none(),
+            },
+        }
+    }
+
+    /// Edit in place: the selection's pixels become the editor's canvas, at their
+    /// place on screen; the toolbar takes the bar's place. Edits made before
+    /// (then Back) are still there.
+    fn open_editor(&mut self) -> Task<Message> {
+        self.panel = None;
+        if let Some(edit) = &mut self.edit {
+            edit.reopen();
+            return Task::none();
+        }
+        let (
+            Some(image::Handle::Rgba {
+                width,
+                height,
+                pixels,
+                ..
+            }),
+            Some(selection),
+        ) = (&self.frame, self.selection)
+        else {
+            return Task::none();
+        };
+        let bounds = actions::crop_bounds(*width, *height, self.scale, selection.area);
+        let crop = actions::crop(pixels, *width, *height, self.scale, selection.area);
+        if let (Some(bounds), Some(crop)) = (bounds, crop) {
+            self.edit = Some(Editing::in_place(crop, bounds, self.scale));
+        }
+        Task::none()
+    }
+
+    fn on_editor(&mut self, msg: editor::Message) -> Task<Message> {
+        // Test hook: the editor's Esc (Back) takes the shot of the editor instead.
+        if matches!(msg, editor::Message::Back) && std::env::var_os(TEST_SHOT).is_some() {
+            return self.test_shot();
+        }
+        let Some(edit) = &mut self.edit else {
+            return Task::none();
+        };
+        match edit.editor.update(msg) {
+            None => Task::none(),
+            // Snip has no action bar: back to picking an area.
+            Some(Output::Back) if matches!(self.purpose, Purpose::Snip(_)) => {
+                self.edit = None;
+                self.selection = None;
+                self.stroke.clear();
+                Task::none()
+            }
+            Some(Output::Back) => {
+                edit.back();
+                Task::none()
+            }
+            Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
+            Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
+        }
+    }
+
+    /// The running scrolling capture.
+    fn scroll(&self) -> Option<&snip::Scroll> {
+        match &self.purpose {
+            Purpose::Snip(snip) => snip.scroll.as_ref(),
+            _ => None,
+        }
+    }
+
+    fn on_snip(&mut self, msg: snip::Msg) -> Task<Message> {
+        let Purpose::Snip(snip) = &mut self.purpose else {
+            return Task::none();
+        };
+        match msg {
+            snip::Msg::Kind(kind) => {
+                self.selection = None;
+                self.stroke.clear();
+                let next = snip.switch(kind, self.screen);
+                self.snip_next(next)
+            }
+            snip::Msg::Stop => {
+                if let Some(scroll) = &snip.scroll {
+                    scroll.stop();
+                }
+                Task::none()
+            }
+            snip::Msg::Progress(height) => {
+                if let Some(scroll) = &mut snip.scroll {
+                    scroll.progress(height);
+                }
+                Task::none()
+            }
+            snip::Msg::Done(stitched) => {
+                snip.scroll = None;
+                self.selection = None;
+                self.stroke.clear();
+                match stitched {
+                    Ok(crop) if crop.height > 0 => {
+                        self.edit = Some(Editing::fitted(crop, self.screen, self.scale));
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("scrolling capture failed: {e}"),
+                }
+                self.show()
+            }
+        }
+    }
+
+    /// Where a snip pick leads: the editor on the area, or a scrolling capture.
+    fn snip_next(&mut self, next: Option<snip::Next>) -> Task<Message> {
+        match next {
+            None => {
+                self.selection = None;
+                self.stroke.clear();
+                Task::none()
+            }
+            Some(snip::Next::Edit(area)) => {
+                self.select(area);
+                self.open_editor()
+            }
+            Some(snip::Next::Scroll(area)) => self.start_scroll(area),
+        }
+    }
+
+    /// Auto-scrolls and stitches `area` on a thread. The overlay shrinks to the
+    /// progress pill beside the area, so it is in none of the frames.
+    fn start_scroll(&mut self, area: Rectangle) -> Task<Message> {
+        let (Some(image::Handle::Rgba { width, height, .. }), Purpose::Snip(snip)) =
+            (&self.frame, &mut self.purpose)
+        else {
+            return Task::none();
+        };
+        let Some([x0, y0, x1, y1]) = actions::crop_bounds(*width, *height, self.scale, area) else {
+            return Task::none();
+        };
+        let at = |v: f32, offset: u32| (v * self.scale).round() as i32 + offset as i32;
+        let region = (
+            at(self.origin.x, x0),
+            at(self.origin.y, y0),
+            x1 - x0,
+            y1 - y0,
+        );
+        let stop = Arc::new(AtomicBool::new(false));
+        snip.scroll = Some(snip::Scroll::new(x1 - x0, stop.clone()));
+        let work = background(move |tx| {
+            // Let the window shrink first.
+            std::thread::sleep(Duration::from_millis(150));
+            let progress = |height| {
+                let _ = tx.unbounded_send(snip::Msg::Progress(height));
+            };
+            let stitched = snip::scroll_capture(region, &stop, progress);
+            let _ = tx.unbounded_send(snip::Msg::Done(stitched));
+        })
+        .map(Message::Snip);
+        // ponytail: an area as tall as the screen leaves the pill over its bottom
+        // edge (in the frames); the stitcher drops it like a sticky footer.
+        let at = bar::place(area, snip::PILL, self.screen);
+        let pill = self.origin + Vector::new(at.x, at.y);
+        window::set_mode(self.overlay, Mode::Windowed)
+            .chain(window::resize(self.overlay, snip::PILL))
+            .chain(window::move_to(self.overlay, pill))
+            .chain(window::gain_focus(self.overlay))
+            .chain(work)
+    }
+
+    /// Test hook: shoot what the overlay shows after the next frame, then close.
+    fn test_shot(&self) -> Task<Message> {
+        // No message (= no relayout) in between: a relayout drops the text
+        // editor's drawn text.
+        let overlay = self.overlay;
+        background(|tx| {
+            std::thread::sleep(Duration::from_millis(150));
+            let _ = tx.unbounded_send(());
+        })
+        .then(move |()| window::screenshot(overlay))
+        .map(Message::TestShot)
     }
 
     fn open_panel(
@@ -398,8 +769,12 @@ impl App {
         Task::none()
     }
 
-    /// The selection cut out of the frozen frame, in physical pixels.
+    /// The selection cut out of the frozen frame, in physical pixels; with the
+    /// edits once it was edited (Ask AI then sees the annotations).
     fn crop(&self) -> Option<Crop> {
+        if let Some(edit) = &self.edit {
+            return Some(edit.image());
+        }
         let (
             Some(image::Handle::Rgba {
                 width,
@@ -418,12 +793,18 @@ impl App {
     /// Frees the frame and drops the panel (stopping its work); Lens pages go
     /// once old enough. The window is shrunk and hidden in steps (see `Hiding`).
     fn close(&mut self) -> Task<Message> {
+        if let Some(scroll) = self.scroll() {
+            scroll.stop();
+        }
         self.panel = None;
         self.lens_pages.drain(..).for_each(lens::Held::release);
         self.frame = None;
         self.stroke = Vec::new();
         self.selection = None;
         self.drawing = false;
+        self.purpose = Purpose::Search;
+        self.edit = None;
+        self.toast = None;
         self.hiding = Hiding::Empty;
         Task::none()
     }
@@ -439,35 +820,61 @@ impl App {
         let Some(frame) = &self.frame else {
             return space().into();
         };
+        let snip = match &self.purpose {
+            Purpose::Snip(snip) => Some(snip),
+            _ => None,
+        };
+        // Scrolling: the window is only the progress pill.
+        if let Some(pill) = snip.and_then(|s| s.progress_view()) {
+            return pill.map(Message::Snip);
+        }
         let overlay = overlay::Overlay {
             stroke: &self.stroke,
             selection: self.selection,
             opening: self.opening,
             first_draw: &self.first_draw,
+            hover: snip.is_some_and(|s| s.kind == snip::Kind::Window) && self.edit.is_none(),
         };
         // The frame is its own layer: iced draws a canvas's images above its shapes.
-        let layers = stack![
+        let mut layers = stack![
             image(frame.clone())
                 .width(Fill)
                 .height(Fill)
                 .content_fit(ContentFit::Fill),
             Element::from(canvas(overlay).width(Fill).height(Fill)).map(Message::Overlay),
         ];
-        match (&self.panel, self.selection) {
-            (Some((id, panel)), _) => {
-                let id = *id;
-                layers.push(
-                    panel
-                        .view(self.screen)
-                        .map(move |msg| Message::Panel(id, msg)),
-                )
+        if let Some(edit) = &self.edit {
+            if edit.is_open() {
+                return layers
+                    .push(edit.view(self.screen).map(Message::Editor))
+                    .into();
             }
-            (None, Some(selection)) => {
-                layers.push(bar::view(selection.area, self.screen, Message::Run))
-            }
-            (None, None) => layers.push(container(widgets::pill(HINT)).center_x(Fill).padding(24)),
+            layers = layers.extend(edit.flat_view());
         }
-        .into()
+        let top = if let Some(toast) = self.toast {
+            container(widgets::pill(toast))
+                .center_x(Fill)
+                .padding(24)
+                .into()
+        } else if let Some((id, panel)) = &self.panel {
+            let id = *id;
+            panel
+                .view(self.screen)
+                .map(move |msg| Message::Panel(id, msg))
+        } else if let Some(snip) = snip {
+            snip.view().map(Message::Snip)
+        } else if let Some(selection) = self.selection {
+            match self.purpose {
+                Purpose::Search => bar::view(selection.area, self.screen, Message::Run),
+                _ => space().into(),
+            }
+        } else {
+            container(widgets::pill(HINT))
+                .center_x(Fill)
+                .padding(24)
+                .into()
+        };
+        layers.push(top).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -553,6 +960,11 @@ mod tests {
             panels: 0,
             lens_pages: Vec::new(),
             windows: windows::Windows::default(),
+            purpose: Purpose::Search,
+            edit: None,
+            origin: Point::ORIGIN,
+            regions: Vec::new(),
+            toast: None,
         };
         let _ = app.close();
         app

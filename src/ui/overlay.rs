@@ -21,6 +21,8 @@ const DRAG_STRAY: f32 = 0.2;
 pub enum Event {
     Press(Point),
     Move(Point),
+    /// The pointer moved with no button down (only when `Overlay::hover`).
+    Hover(Point),
     Release,
     /// Enter: the default action.
     Enter,
@@ -120,6 +122,8 @@ pub struct Overlay<'a> {
     /// Counts overlay openings: pointer state from an earlier opening is stale.
     pub opening: u32,
     pub first_draw: &'a Cell<Option<(Instant, Size)>>,
+    /// Report moves without a button down too (snip's Window mode).
+    pub hover: bool,
 }
 
 /// The pointer as the canvas saw it, event by event. Events can arrive in one batch
@@ -168,10 +172,11 @@ impl canvas::Program<Event> for Overlay<'_> {
             canvas::Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 let at = *position - (bounds.position() - Point::ORIGIN);
                 pointer.at = Some(at);
-                if !pointer.down {
-                    return None;
+                match (pointer.down, self.hover) {
+                    (true, _) => Event::Move(at),
+                    (false, true) => Event::Hover(at),
+                    (false, false) => return None,
                 }
-                Event::Move(at)
             }
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
                 if pointer.down =>

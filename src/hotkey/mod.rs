@@ -20,9 +20,9 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use crate::config::{Config, QuickAction, Target, parse_shortcut};
 use crate::{Trigger, Triggers};
 
-/// Ids of quick actions whose code is not in the action registry yet.
-// ponytail: delete once translate/ai_explain/copy_text/lens are in `actions::ACTIONS`.
-const PLANNED_ACTIONS: &[&str] = &["translate", "ai_explain", "copy_text", "lens"];
+/// Ids `opencircle run` takes that are not in the action registry (`ui/quick.rs`
+/// runs ai_explain and copy_text; snip opens Snip mode; translate comes later).
+const PLANNED_ACTIONS: &[&str] = &["translate", "ai_explain", "copy_text", "lens", "snip"];
 
 /// Is `id` an action `opencircle run` may start?
 fn known_action(id: &str) -> bool {
