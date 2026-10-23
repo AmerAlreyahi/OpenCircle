@@ -11,7 +11,6 @@
 //!
 //! The API key goes to the OS keyring (same `KeyField` as Settings) and is never
 //! shown again or written anywhere else.
-#![allow(dead_code)] // used once ui/mod.rs opens the window
 
 use std::fmt;
 use std::path::PathBuf;
@@ -146,6 +145,7 @@ impl State {
         }
     }
 
+    #[cfg(test)]
     pub fn step(&self) -> Step {
         self.step
     }

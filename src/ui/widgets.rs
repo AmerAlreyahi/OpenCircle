@@ -446,9 +446,6 @@ fn glass(radius: f32) -> container::Style {
     }
 }
 
-// ponytail: the allow goes (with the glob re-export's) once ui/mod.rs opens Settings and
-// Onboarding and every form widget below is used.
-#[allow(dead_code)]
 mod forms {
     use iced::widget::{
         Button, Container, PickList, Text, TextInput, button, column, container, pick_list, row,
@@ -470,11 +467,6 @@ mod forms {
     /// Screen title text.
     pub fn title<'a>(label: impl text::IntoFragment<'a>) -> Text<'a> {
         text(label).size(22).color(theme::current().text)
-    }
-
-    /// Paragraph text under a title.
-    pub fn body<'a>(label: impl text::IntoFragment<'a>) -> Text<'a> {
-        text(label).size(14).color(theme::current().muted)
     }
 
     /// Muted small text (captions, hints).
@@ -852,16 +844,6 @@ pub use forms::*;
 thread_local! {
     pub static TIPS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
-
-// ponytail: until ui/mod.rs declares `mod settings; mod onboarding;`, tests compile the
-// two screens from here (they only use `crate::ui::..` paths and `super::settings`, so
-// both layouts work). Delete these four lines when mod.rs declares them.
-#[cfg(test)]
-#[path = "onboarding.rs"]
-pub mod onboarding;
-#[cfg(test)]
-#[path = "settings.rs"]
-pub mod settings;
 
 /// Headless renders for tests: an `Element` to RGBA pixels, and to a PNG when
 /// `OPENCIRCLE_RENDER_DIR` is set.

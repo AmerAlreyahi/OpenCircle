@@ -30,6 +30,7 @@
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use global_hotkey::hotkey::{Code, HotKey, HotKeyParseError, Modifiers};
 use serde::de::DeserializeOwned;
@@ -317,6 +318,31 @@ impl Config {
     }
 }
 
+// ---- the running app's config: one source of truth ----
+
+static CURRENT: RwLock<Option<Config>> = RwLock::new(None);
+
+/// The config the running app uses (any thread). Read from disk on first use;
+/// after that only `set_current` changes it (Settings saved, onboarding finished).
+pub fn current() -> Config {
+    if let Some(c) = CURRENT.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        return c.clone();
+    }
+    let (config, warnings) = Config::load();
+    for warning in warnings {
+        eprintln!("[opencircle] config: {warning}");
+    }
+    CURRENT
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert(config)
+        .clone()
+}
+
+pub fn set_current(config: Config) {
+    *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = Some(config);
+}
+
 // ---- field readers: each returns the default (plus a warning) on a bad value ----
 
 fn section<'a>(root: &'a Table, name: &str, w: &mut Vec<String>) -> Option<&'a Table> {
@@ -441,6 +467,18 @@ mod tests {
         let d = std::env::temp_dir().join(format!("oc-config-test-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn set_current_replaces_what_everyone_reads() {
+        // The only test that touches the process-wide config.
+        let mut c = Config::default();
+        c.ai.model = "model-from-settings".into();
+        set_current(c.clone());
+        assert_eq!(current(), c);
+        c.theme = Theme::Light;
+        set_current(c.clone());
+        assert_eq!(current(), c, "the next save replaces it");
     }
 
     #[test]

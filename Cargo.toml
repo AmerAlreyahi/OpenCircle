@@ -10,6 +10,7 @@ description = "Circle anything on screen to search, read, translate or ask about
 # < 40 MB idle). Re-measure wgpu on Windows (D3D12) before adding it back.
 iced = { version = "0.14", default-features = false, features = [
     "tiny-skia", "x11", "wayland", "thread-pool", "canvas", "image-without-codecs",
+    "linux-theme-detection", # System theme follows the OS (Linux; Windows is built in)
     "advanced", # font system + headless renderer for the editor (no extra code)
 ] }
 arboard = "3.7"

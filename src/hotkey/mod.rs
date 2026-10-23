@@ -255,7 +255,6 @@ pub fn start(tx: Triggers, cfg: &Config) {
 /// Applies a changed config: unregisters the old shortcuts, registers the new ones.
 /// Call from the thread that called `start` (the main thread).
 // On Wayland the portal has no "unbind": the session is closed and a new one opened.
-#[allow(dead_code)] // called by the settings screen once it exists
 pub fn reload(cfg: &Config) {
     let (planned, warnings) = plan(cfg);
     log_all(&warnings);

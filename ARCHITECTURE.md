@@ -10,14 +10,17 @@ capture the screen and show it.
 |---|---|
 | `main.rs` | Argument parsing, single-instance hand-off, starts tray + shortcut + UI. `Trigger` = what any source asks for. |
 | `hotkey/` | Global shortcuts from the config (capture + one per quick action; `global-hotkey`, or the Wayland portal) and the per-user command socket behind `opencircle capture` / `opencircle run <action>`. `hotkey::reload(&Config)` re-registers after a settings change. |
+| `config.rs` | The one config reader/validator. `config::current()` is the running app's config (one source of truth: panels read it, `set_current` replaces it when Settings saves). |
 | `capture/` | One frozen RGBA frame of the monitor under the cursor; one file per platform. |
 | `ui/mod.rs` | The iced daemon: overlay window state, capture on a thread, open / close (the multi-step `Hiding`), running actions, held Lens pages, `background` (thread work → messages). |
 | `ui/overlay.rs` | The canvas over the frozen frame: dim, stroke, selection rules (loop vs. drag), mouse and key events. |
 | `ui/bar.rs` | The floating action bar: the action registry as buttons, placed under/above the selection. |
 | `ui/panel.rs` | Result panels (Search, Text, Ask AI): one `surface` docked right (bottom sheet on narrow screens); their state, views and background work. |
 | `ui/widgets.rs` | The shared components (`pill`, `surface`, `text_button`, `icon_button`, `chip`, `input`, `editor`, `progress`, `bubble`, `scroll`, text styles, `with_tip`). Only place that styles a widget. |
-| `ui/theme.rs` | The only place colours live (Light/Dark palettes, accent, dims). |
-| `ui/tray.rs` | Tray icon and menu. |
+| `ui/theme.rs` | The only place colours live (Light/Dark palettes, accent, dims). `apply(Theme)` = the Settings choice, `set_os(Mode)` = what the OS reports; System follows the OS. |
+| `ui/tray.rs` | Tray icon and menu (Circle to search, Settings…, Quit). Without libayatana-appindicator (Linux) it logs one line and the app runs on shortcut / CLI. |
+| `ui/windows.rs` | The normal windows beside the overlay: Settings and first-run Onboarding (one of each, a second request focuses it), their close handling, the OS-theme feed, and `apply(cfg)` after a save. |
+| `ui/settings.rs`, `ui/onboarding.rs` | The two screens as self-contained components (`State`, `update` returning an `Outcome`, `view`). |
 | `actions/mod.rs` | The action registry (`ACTIONS`), `Run` (finish or open a panel), `crop`, `encode_png`, `write_png`. One file per action: `lens.rs` (page + its minimum life), `ask.rs` (setup, `Chat`, streaming), `text.rs` (consent check, OCR, line joining), `copy.rs`, `save.rs`. |
 | `assets/lucide/` | Icon font: a subset of Lucide (ISC, see its LICENSE) with only the glyphs we use. |
 

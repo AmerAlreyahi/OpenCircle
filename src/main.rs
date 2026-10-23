@@ -34,6 +34,8 @@ pub enum Trigger {
     Capture(Instant),
     /// A quick action (its shortcut or `opencircle run`): action id + target + live flag.
     Quick(Instant, config::QuickAction),
+    /// Tray "Settings…": open the Settings window, or focus it if it is open.
+    OpenSettings,
     Quit,
 }
 
@@ -111,6 +113,7 @@ fn main() -> ExitCode {
         eprintln!("[opencircle] config: {warning}");
     }
     hotkey::start(tx.clone(), &config);
+    config::set_current(config);
     let _tray = ui::start_tray(tx.clone());
     if let Some(command) = &command {
         let _ = tx.unbounded_send(hotkey::trigger(command, Instant::now()));

@@ -3,6 +3,8 @@ use std::cell::Cell;
 
 use iced::Color;
 
+use crate::config::Theme;
+
 /// One theme's surface colours.
 pub struct Palette {
     pub panel: Color,
@@ -91,36 +93,67 @@ pub const ANNOTATION: [Color; 12] = [
 /// Light palette instead of dark on this thread (the editor's snapshot test).
 #[allow(dead_code)]
 pub fn set_light(light: bool) {
-    DARK_MODE.with(|d| d.set(!light));
+    apply(if light { Theme::Light } else { Theme::Dark });
 }
 
 /// The palette in use.
-// ponytail: "System" is hard-wired to dark; read the OS theme + the Light/Dark/System
-// setting once settings exist.
 pub fn current() -> &'static Palette {
-    palette(DARK_MODE.with(Cell::get))
+    palette(SETTING.with(Cell::get), OS_DARK.with(Cell::get))
 }
 
 thread_local! {
-    /// The UI thread's resolved theme (tests render Light and Dark side by side).
-    static DARK_MODE: Cell<bool> = const { Cell::new(true) };
+    /// The UI thread's theme choice and the OS's mode (tests render Light and Dark
+    /// side by side).
+    static SETTING: Cell<Theme> = const { Cell::new(Theme::System) };
+    static OS_DARK: Cell<bool> = const { Cell::new(true) };
 }
 
-/// Switch the palette `current()` returns, from the Settings choice.
-// ponytail: System = dark until the OS theme is read.
-#[allow(dead_code)] // called by the Settings/Onboarding screens once ui/mod.rs opens them
-pub fn apply(theme: crate::config::Theme) {
-    DARK_MODE.with(|d| d.set(theme != crate::config::Theme::Light));
+/// The Light / Dark / System choice from Settings; System follows `set_os`.
+pub fn apply(theme: Theme) {
+    SETTING.with(|s| s.set(theme));
 }
 
-fn palette(dark: bool) -> &'static Palette {
-    if dark { &DARK } else { &LIGHT }
+/// What the OS reports (at start, then on every change). "No preference" counts as dark.
+pub fn set_os(mode: iced::theme::Mode) {
+    OS_DARK.with(|d| d.set(mode != iced::theme::Mode::Light));
+}
+
+fn palette(setting: Theme, os_dark: bool) -> &'static Palette {
+    match (setting, os_dark) {
+        (Theme::Dark, _) | (Theme::System, true) => &DARK,
+        (Theme::Light, _) | (Theme::System, false) => &LIGHT,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use iced::theme::Mode;
+
     #[test]
     fn light_and_dark_differ() {
-        assert_ne!(super::palette(true).text, super::palette(false).text);
+        assert_ne!(DARK.text, LIGHT.text);
+    }
+
+    #[test]
+    fn system_follows_the_os_and_the_others_force() {
+        let text = |setting, os_dark| palette(setting, os_dark).text;
+        assert_eq!(text(Theme::System, true), DARK.text);
+        assert_eq!(text(Theme::System, false), LIGHT.text);
+        assert_eq!(text(Theme::Light, true), LIGHT.text);
+        assert_eq!(text(Theme::Dark, false), DARK.text);
+    }
+
+    #[test]
+    fn os_mode_reaches_current() {
+        apply(Theme::System);
+        set_os(Mode::Light);
+        assert_eq!(current().text, LIGHT.text);
+        set_os(Mode::Dark);
+        assert_eq!(current().text, DARK.text);
+        set_os(Mode::None);
+        assert_eq!(current().text, DARK.text);
+        apply(Theme::Light);
+        assert_eq!(current().text, LIGHT.text);
     }
 }

@@ -13,7 +13,6 @@
 //! checked with `config::parse_shortcut`, and the API key is write-only: it goes
 //! to the OS keyring through `KeyStore`, is never shown, and is never part of any
 //! `Debug` output (`Secret` is redacted).
-#![allow(dead_code)] // used once ui/mod.rs opens the window
 
 use std::fmt;
 use std::path::PathBuf;
@@ -515,14 +514,6 @@ impl State {
         };
         s.revalidate();
         s
-    }
-
-    pub fn config(&self) -> &Config {
-        &self.draft
-    }
-
-    pub fn problems(&self) -> &[String] {
-        &self.problems
     }
 
     fn dirty(&self) -> bool {

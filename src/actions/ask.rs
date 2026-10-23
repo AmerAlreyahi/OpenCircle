@@ -42,11 +42,7 @@ impl fmt::Debug for Setup {
 /// Reads the config and the key, encodes the crop. Blocking (file, keyring,
 /// PNG): call off the UI thread. `Err` = what to tell the user, with the steps.
 pub fn setup(crop: &Crop) -> Result<Setup, String> {
-    let (config, warnings) = Config::load();
-    for warning in warnings {
-        eprintln!("config: {warning}");
-    }
-    let cfg = config.ai;
+    let cfg = crate::config::current().ai;
     let key = match secrets::get(cfg.provider) {
         Ok(key) => key.filter(|key| !key.is_empty()),
         // A local OpenAI-compatible server needs no key: go on without the keyring.
@@ -99,7 +95,8 @@ fn steps(provider: Provider) -> String {
          model = \"{}\"\n\
          base_url = \"\"  (openai_compatible: e.g. http://localhost:11434/v1)\n\n\
          2. Save the API key in the system keyring, never in that file.\n{keyring}\n\n\
-         Then press A again.",
+         Then restart OpenCircle and press A again.\n\n\
+         Easier: tray icon > Settings > AI does all of this and needs no restart.",
         ai::DEFAULT_ANTHROPIC_MODEL
     )
 }

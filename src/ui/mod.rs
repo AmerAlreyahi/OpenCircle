@@ -1,10 +1,13 @@
 //! The iced daemon: owns the (pre-created, hidden) overlay window and its state.
 mod bar;
+mod onboarding;
 mod overlay;
 mod panel;
+mod settings;
 pub mod theme;
 mod tray;
 pub(crate) mod widgets;
+mod windows;
 
 pub use tray::start as start_tray;
 
@@ -44,6 +47,7 @@ pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     *TRIGGERS.lock().unwrap() = Some(triggers);
     crate::lens::sweep_stale(); // pages left by a crash
     iced::daemon(App::boot, App::update, App::view)
+        .title(App::title)
         .font(widgets::ICON_FONT_BYTES)
         .subscription(App::subscription)
         .run()
@@ -65,6 +69,8 @@ enum Message {
     /// While closing: a frame was drawn / the window was resized (see `Hiding`).
     Drawn,
     Resized(Size),
+    /// Settings / onboarding windows and the OS theme (`windows.rs`).
+    Windows(windows::Msg),
 }
 
 /// Closing steps. The renderer frees the frame cache and resizes its buffers only
@@ -121,6 +127,7 @@ struct App {
     panels: u32,
     /// Lens pages opened from this overlay, released when it closes.
     lens_pages: Vec<lens::Held>,
+    windows: windows::Windows,
 }
 
 impl App {
@@ -134,7 +141,7 @@ impl App {
             exit_on_close_request: false,
             ..window::Settings::default()
         });
-        let app = App {
+        let mut app = App {
             overlay,
             capturing: false,
             frame: None,
@@ -149,13 +156,20 @@ impl App {
             panel: None,
             panels: 0,
             lens_pages: Vec::new(),
+            windows: windows::Windows::default(),
         };
-        (app, open.discard())
+        let start = app.windows.start().map(Message::Windows);
+        (app, Task::batch([open.discard(), start]))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Trigger(Trigger::Quit) => iced::exit(),
+            Message::Trigger(Trigger::OpenSettings) => self
+                .windows
+                .open(windows::Kind::Settings)
+                .map(Message::Windows),
+            Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..))
                 if self.frame.is_some() || self.capturing =>
             {
@@ -414,7 +428,14 @@ impl App {
         Task::none()
     }
 
-    fn view(&self, _window: window::Id) -> Element<'_, Message> {
+    fn title(&self, window: window::Id) -> String {
+        self.windows.title(window).to_string()
+    }
+
+    fn view(&self, window: window::Id) -> Element<'_, Message> {
+        if let Some(page) = self.windows.view(window) {
+            return page.map(Message::Windows);
+        }
         let Some(frame) = &self.frame else {
             return space().into();
         };
@@ -450,7 +471,10 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let triggers = Subscription::run(triggers).map(Message::Trigger);
+        let triggers = Subscription::batch([
+            Subscription::run(triggers).map(Message::Trigger),
+            self.windows.subscription().map(Message::Windows),
+        ]);
         if self.frame.is_some() {
             // Also when a text field took the key (it only unfocuses on Esc).
             let escape = iced::event::listen_with(|event, _, _| match event {
@@ -528,6 +552,7 @@ mod tests {
             panel: None,
             panels: 0,
             lens_pages: Vec::new(),
+            windows: windows::Windows::default(),
         };
         let _ = app.close();
         app
