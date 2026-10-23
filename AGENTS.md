@@ -91,6 +91,9 @@ production systems.
   copy/save), rebuilt clean-room from its behaviour, never from its binary.
   Scrolling capture is in v0.1; annotation must be more modern than iTop
   (smart shapes, curved arrows, callouts, spotlight — see DESIGN.md).
+- Editor after every capture (owner, 2026-10-23): blur, shapes, arrows,
+  text etc. are reachable from any capture via the action bar's Edit (`E`),
+  not only from Snip mode.
 - Themes (owner, 2026-10-23): Light, Dark and System, from one token set.
 - Workflow (owner, 2026-10-23): planning first; execution starts only after
   the owner reviews the plan and adds rules.

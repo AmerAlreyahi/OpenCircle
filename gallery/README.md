@@ -26,7 +26,7 @@ Click a word for its meaning in context:
 ### Copy or translate text from a selection
 ![Text panel](06-text-and-translate-selection.png)
 
-### Snip and annotate
+### Edit any capture: blur, shapes, arrows, text, steps
 ![Snip and annotate](07-snip-and-annotate.png)
 
 ### Scrolling capture

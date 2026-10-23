@@ -37,9 +37,10 @@ images, video frames, games — and choose what to do with it.
 - **Search with Google Lens** — opens the results in your own browser. No
   third-party image hosts in between.
 - **Copy text** from anything, even images and videos, read offline.
-- **Snip and annotate** — region, window, full-screen and scrolling
-  screenshots; smart shapes, curved arrows, callouts, numbered steps,
-  spotlight, highlighter, blur and magnifier; copy, save or pin to screen.
+- **Snip and edit** — region, window, full-screen and scrolling
+  screenshots. Any capture opens in the editor: blur private details, add
+  smart shapes, curved arrows, text, callouts, numbered steps, spotlight,
+  highlighter and magnifier; then copy, save or pin it to the screen.
 - **Quick actions** — give any action its own shortcut and skip the menu
   (for example `Ctrl+Shift+T` translates the screen at once).
 - **Light, dark and system themes.**
