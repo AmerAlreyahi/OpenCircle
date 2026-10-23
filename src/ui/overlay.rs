@@ -12,7 +12,6 @@ use super::theme;
 
 /// A selection smaller than this (logical px, either side) is a tap, not a circle.
 const MIN_SIDE: f32 = 12.0;
-const SELECTION_RADIUS: f32 = 16.0;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Event {
@@ -32,6 +31,27 @@ pub fn fit_selection(stroke: &[Point]) -> Option<Rectangle> {
     }
     let size = Size::new(max.x - min.x, max.y - min.y);
     (size.width >= MIN_SIDE && size.height >= MIN_SIDE).then(|| Rectangle::new(min, size))
+}
+
+/// The stroke as quadratic curves `(control, end)` from `stroke[0]`, through the
+/// segment midpoints: smooth, and never outside the stroke's bounding box.
+fn smooth(stroke: &[Point]) -> Vec<(Point, Point)> {
+    let mid = |a: Point, b: Point| Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+    let mut curves: Vec<_> = stroke.windows(2).map(|w| (w[0], mid(w[0], w[1]))).collect();
+    curves.extend(stroke.last().map(|&p| (p, p)));
+    curves
+}
+
+/// Adds the smoothed stroke to `p`; `closed` joins its end back to its start.
+fn trace(p: &mut canvas::path::Builder, stroke: &[Point], closed: bool) {
+    let Some(&first) = stroke.first() else { return };
+    p.move_to(first);
+    smooth(stroke)
+        .into_iter()
+        .for_each(|(control, end)| p.quadratic_curve_to(control, end));
+    if closed {
+        p.close();
+    }
 }
 
 pub struct Overlay<'a> {
@@ -83,28 +103,29 @@ impl canvas::Program<Event> for Overlay<'_> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let screen = Rectangle::with_size(bounds.size());
 
-        match self.selection {
-            Some(sel) => {
-                let outside = Path::new(|p| {
-                    p.rectangle(Point::ORIGIN, screen.size());
-                    p.rounded_rectangle(sel.position(), sel.size(), SELECTION_RADIUS.into());
-                });
-                frame.fill(
-                    &outside,
-                    Fill {
-                        style: canvas::Style::Solid(theme::DIM_OUTSIDE),
-                        rule: fill::Rule::EvenOdd,
-                    },
-                );
-            }
-            None => frame.fill_rectangle(Point::ORIGIN, screen.size(), theme::DIM_IDLE),
+        // After release, the clear region is the drawn shape itself (closed), not its
+        // bounding box.
+        // ponytail: even-odd re-dims areas circled twice; trim the stroke at its first
+        // self-crossing if users circle twice.
+        let closed = self.selection.is_some();
+        if closed {
+            let outside = Path::new(|p| {
+                p.rectangle(Point::ORIGIN, screen.size());
+                trace(p, self.stroke, true);
+            });
+            frame.fill(
+                &outside,
+                Fill {
+                    style: canvas::Style::Solid(theme::DIM_OUTSIDE),
+                    rule: fill::Rule::EvenOdd,
+                },
+            );
+        } else {
+            frame.fill_rectangle(Point::ORIGIN, screen.size(), theme::DIM_IDLE);
         }
 
         if self.stroke.len() >= 2 {
-            let path = Path::new(|p| {
-                p.move_to(self.stroke[0]);
-                self.stroke[1..].iter().for_each(|&q| p.line_to(q));
-            });
+            let path = Path::new(|p| trace(p, self.stroke, closed));
             let span = fit_selection(self.stroke).unwrap_or(screen);
             // Soft glow = the same stroke, wider and fainter, under the core line.
             for (width, alpha) in [(18.0, 0.10), (10.0, 0.22), (3.5, 1.0)] {
@@ -163,6 +184,46 @@ mod tests {
         let sel = fit_selection(&circle).unwrap();
         assert!((sel.x - 150.0).abs() < 0.5 && (sel.y - 70.0).abs() < 0.5);
         assert!((sel.width - 100.0).abs() < 0.5 && (sel.height - 60.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn smoothed_stroke_stays_in_its_box_and_survives_odd_input() {
+        // A figure eight: self-intersecting.
+        let eight: Vec<Point> = (0..=64)
+            .map(|i| {
+                let a = i as f32 / 64.0 * std::f32::consts::TAU;
+                Point::new(100.0 + 80.0 * a.sin(), 100.0 + 40.0 * (2.0 * a).sin())
+            })
+            .collect();
+        let sel = fit_selection(&eight).unwrap();
+        let curves = smooth(&eight);
+        assert_eq!(curves.len(), eight.len());
+        for (control, end) in &curves {
+            for p in [control, end] {
+                assert!(
+                    sel.x - 0.01 <= p.x && p.x <= sel.x + sel.width + 0.01,
+                    "{p:?}"
+                );
+                assert!(
+                    sel.y - 0.01 <= p.y && p.y <= sel.y + sel.height + 0.01,
+                    "{p:?}"
+                );
+            }
+        }
+        // Curves end at segment midpoints (not the raw points) and finish on the last point.
+        let mid = Point::new(
+            (eight[1].x + eight[2].x) / 2.0,
+            (eight[1].y + eight[2].y) / 2.0,
+        );
+        assert_eq!(curves[1], (eight[1], mid));
+        assert_eq!(curves.last(), Some(&(eight[64], eight[64])));
+
+        // Degenerate strokes build a path without panicking.
+        assert!(smooth(&[]).is_empty());
+        let dot = [Point::new(5.0, 5.0)];
+        for stroke in [&eight[..], &[], &dot, &[dot[0], dot[0]]] {
+            let _ = Path::new(|p| trace(p, stroke, true));
+        }
     }
 
     #[test]
