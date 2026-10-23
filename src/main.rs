@@ -1,6 +1,7 @@
 //! OpenCircle: resident tray app. Shortcut, tray or `opencircle capture` → frozen overlay.
 mod capture;
 mod hotkey;
+mod lens;
 mod ui;
 
 use std::process::ExitCode;
