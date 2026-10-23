@@ -1,0 +1,42 @@
+[package]
+name = "opencircle"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+description = "Circle anything on screen to search, read, translate or ask about it"
+
+[dependencies]
+iced = { version = "0.14", default-features = false, features = [
+    "wgpu", "tiny-skia", "x11", "wayland", "thread-pool", "canvas", "image-without-codecs",
+] }
+global-hotkey = "0.9"
+interprocess = "2.4"
+png = "0.18"
+tray-icon = "0.26"
+xcap = "0.9"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+xcb = "1.7"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.release]
+strip = true
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[package.metadata.packager]
+product-name = "OpenCircle"
+identifier = "com.opencircle.app"
+before-packaging-command = "cargo build --release"
+icons = [
+    "assets/icons/opencircle.ico",
+    "assets/icons/32x32.png",
+    "assets/icons/128x128.png",
+    "assets/icons/256x256.png",
+    "assets/icons/512x512.png",
+]
+formats = ["nsis", "wix", "appimage", "deb", "rpm"]
