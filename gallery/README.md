@@ -20,6 +20,10 @@ Click a word for its meaning in context:
 ### Circle to search
 ![Circle to search overlay](01-circle-to-search.png)
 
+Click **Edit** and the same bar turns into an editing toolbar (shapes, arrows, pen, highlighter, text, steps, blur, spotlight, crop, colours, undo/redo); the back arrow returns to the actions:
+
+![Edit in place](01b-edit-in-place.png)
+
 ### Ask AI
 ![Ask AI panel](05-ask-ai.png)
 
