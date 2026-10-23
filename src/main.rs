@@ -21,29 +21,42 @@ use std::time::Instant;
 use iced::futures::channel::mpsc;
 
 /// Something asked the app to act. `Instant` = when the trigger arrived (latency log).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Trigger {
     Capture(Instant),
+    /// A quick action (its shortcut or `opencircle run`): action id + target + live flag.
+    Quick(Instant, config::QuickAction),
     Quit,
 }
 
 /// Where every trigger source (shortcut, tray, CLI socket) sends.
 pub type Triggers = mpsc::UnboundedSender<Trigger>;
 
+const USAGE: &str =
+    "usage: opencircle [capture | run <action> [--target full_screen|circle|last_region]]";
+
 fn main() -> ExitCode {
-    let capture_now = match std::env::args().nth(1).as_deref() {
-        None => false,
-        Some("capture") => true,
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let command = match args.first().map(String::as_str) {
+        None => None,
         Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
+        Some("capture" | "run") => match hotkey::Command::from_args(&args) {
+            Ok(command) => Some(command),
+            Err(e) => {
+                eprintln!("{e}\n{USAGE}");
+                return ExitCode::from(2);
+            }
+        },
         Some(_) => {
-            eprintln!("usage: opencircle [capture]");
+            eprintln!("{USAGE}");
             return ExitCode::from(2);
         }
     };
 
     // A running instance takes the command; this launch is done.
-    if hotkey::forward(if capture_now { "capture" } else { "" }).is_ok() {
-        if !capture_now {
+    let line = command.as_ref().map(hotkey::Command::line);
+    if hotkey::forward(line.as_deref().unwrap_or("")).is_ok() {
+        if command.is_none() {
             eprintln!("OpenCircle is already running");
         }
         return ExitCode::SUCCESS;
@@ -54,10 +67,14 @@ fn main() -> ExitCode {
         eprintln!("cannot open the command socket: {e}");
         return ExitCode::FAILURE;
     }
-    let _shortcut = hotkey::start(tx.clone());
+    let (config, warnings) = config::Config::load();
+    for warning in &warnings {
+        eprintln!("[opencircle] config: {warning}");
+    }
+    hotkey::start(tx.clone(), &config);
     let _tray = ui::start_tray(tx.clone());
-    if capture_now {
-        let _ = tx.unbounded_send(Trigger::Capture(Instant::now()));
+    if let Some(command) = &command {
+        let _ = tx.unbounded_send(hotkey::trigger(command, Instant::now()));
     }
 
     match ui::run(rx) {

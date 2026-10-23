@@ -115,6 +115,14 @@ impl App {
             Message::Trigger(Trigger::Quit) => iced::exit(),
             Message::Trigger(Trigger::Capture(_)) if self.frame.is_some() => Task::none(),
             Message::Trigger(Trigger::Capture(at)) => self.open(at),
+            Message::Trigger(Trigger::Quick(..)) if self.frame.is_some() => Task::none(),
+            Message::Trigger(Trigger::Quick(at, quick)) => {
+                eprintln!(
+                    "quick action {} not wired yet; opening the overlay",
+                    quick.action
+                );
+                self.open(at)
+            }
             Message::Overlay(event) => self.on_overlay(event),
             Message::Run(action) => self.run(action),
             // Leave full-screen while still shown (on Windows, leaving it while hidden

@@ -1,5 +1,6 @@
 //! Single instance + CLI trigger: later launches send one line to the running app.
-//! Protocol: one UTF-8 line; `capture` opens the overlay, anything else is ignored.
+//! Protocol: one ASCII line, `capture` or `run <action> [<target>]`; anything else
+//! is dropped (see `parse_command`, the one place that decides what is accepted).
 //!
 //! The endpoint is per user, so another account can neither squat it (making our
 //! instance think one is already running) nor send it commands:
@@ -12,10 +13,112 @@ use std::time::Instant;
 use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{ListenerOptions, Name};
 
-use crate::{Trigger, Triggers};
+use crate::Triggers;
+use crate::config::Target;
 
 /// Longest accepted command line; anything longer is dropped.
 const MAX_LINE: u64 = 64;
+const MAX_ACTION: usize = 32;
+
+/// A command from a later launch. Built only by `parse_command` / `from_args`, so an
+/// action here is always well-formed and known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    Capture,
+    /// `target: None` = the target the user configured for that action.
+    Run {
+        action: String,
+        target: Option<Target>,
+    },
+}
+
+impl Command {
+    /// The wire form, without the newline.
+    pub fn line(&self) -> String {
+        match self {
+            Command::Capture => "capture".into(),
+            Command::Run {
+                action,
+                target: None,
+            } => format!("run {action}"),
+            Command::Run {
+                action,
+                target: Some(t),
+            } => format!("run {action} {}", super::target_name(*t)),
+        }
+    }
+
+    /// Parses the command line after the program name:
+    /// `capture` (extra words ignored, as before) or `run <action> [--target <t>]`.
+    pub fn from_args(args: &[String]) -> Result<Command, String> {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        match args.as_slice() {
+            ["capture", ..] => Ok(Command::Capture),
+            ["run", action] => run(action, None),
+            ["run", action, "--target", t] => run(action, Some(t)),
+            ["run", action, t] if t.starts_with("--target=") => {
+                run(action, Some(&t["--target=".len()..]))
+            }
+            ["run"] => Err("run needs an action, like `opencircle run translate`".into()),
+            _ => Err("unrecognised arguments".into()),
+        }
+    }
+}
+
+fn run(action: &str, target: Option<&str>) -> Result<Command, String> {
+    let well_formed = (1..=MAX_ACTION).contains(&action.len())
+        && action
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    if !well_formed || !super::known_action(action) {
+        return Err(format!("unknown action \"{}\"", printable(action)));
+    }
+    let target = match target {
+        None => None,
+        Some(t) => Some(super::parse_target(t).ok_or_else(|| {
+            format!(
+                "unknown target \"{}\" (full_screen, circle or last_region)",
+                printable(t)
+            )
+        })?),
+    };
+    Ok(Command::Run {
+        action: action.into(),
+        target,
+    })
+}
+
+/// Echo-safe copy of untrusted text for an error message.
+fn printable(s: &str) -> String {
+    s.chars()
+        .take(MAX_ACTION)
+        .map(|c| if c.is_ascii_graphic() { c } else { '?' })
+        .collect()
+}
+
+/// Strict parse of one wire line (newline included: an unfinished line is rejected).
+pub fn parse_command(line: &str) -> Result<Command, String> {
+    let line = line.strip_suffix('\n').ok_or("incomplete line")?;
+    if !line.bytes().all(|b| b.is_ascii_graphic() || b == b' ') {
+        return Err("not plain ASCII text".into());
+    }
+    let words: Vec<&str> = line.split(' ').collect();
+    match words.as_slice() {
+        ["capture"] => Ok(Command::Capture),
+        ["run", action] => run(action, None),
+        ["run", action, target] => run(action, Some(target)),
+        _ => Err("unknown command".into()),
+    }
+}
+
+/// Reads one command from a peer: at most `MAX_LINE` bytes, valid UTF-8, complete.
+fn read_command(peer: impl Read) -> Result<Command, String> {
+    let mut line = String::new();
+    BufReader::new(peer.take(MAX_LINE))
+        .read_line(&mut line)
+        .map_err(|e| e.to_string())?;
+    parse_command(&line)
+}
 
 /// Sends `command` to the running instance. `Err` = no instance is running.
 pub fn forward(command: &str) -> io::Result<()> {
@@ -37,11 +140,9 @@ pub fn listen(tx: Triggers) -> io::Result<()> {
             // client costs one parked thread, not the service.
             let tx = tx.clone();
             std::thread::spawn(move || {
-                let mut line = String::new();
-                let read = BufReader::new(conn.take(MAX_LINE)).read_line(&mut line);
-                // Only complete lines count.
-                if read.is_ok() && line.strip_suffix('\n') == Some("capture") {
-                    let _ = tx.unbounded_send(Trigger::Capture(Instant::now()));
+                // Dropped silently: the peer is a script, not a person to explain to.
+                if let Ok(command) = read_command(conn) {
+                    let _ = tx.unbounded_send(super::trigger(&command, Instant::now()));
                 }
             });
         }
@@ -153,6 +254,128 @@ fn peer_is_us(_conn: &LocalSocketStream) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    fn run_of(action: &str, target: Option<Target>) -> Command {
+        Command::Run {
+            action: action.into(),
+            target,
+        }
+    }
+
+    #[test]
+    fn parses_the_wire_lines() {
+        assert_eq!(parse_command("capture\n"), Ok(Command::Capture));
+        assert_eq!(
+            parse_command("run translate\n"),
+            Ok(run_of("translate", None))
+        );
+        assert_eq!(
+            parse_command("run ai_explain circle\n"),
+            Ok(run_of("ai_explain", Some(Target::Circle)))
+        );
+        assert_eq!(
+            parse_command("run copy_text last_region\n"),
+            Ok(run_of("copy_text", Some(Target::LastRegion)))
+        );
+    }
+
+    #[test]
+    fn rejects_bad_wire_lines() {
+        for bad in [
+            "capture", // unfinished
+            "",
+            "\n",
+            "Capture\n",
+            "capture now\n",
+            "capture \n",
+            "run\n",
+            "run \n",
+            "run  translate\n", // empty word
+            "run nope\n",       // unknown action
+            "run Translate\n",
+            "run translate sideways\n", // bad target
+            "run translate circle x\n",
+            "run translate\r\n",
+            "run trans\tlate\n",
+            "run tr\u{e4}nslate\n",
+            "run ../../etc/passwd\n",
+            "run translate\0\n",
+            "\x1b[2Jrun translate\n",
+            "capture\nrun translate\n",
+            &format!("run {}\n", "a".repeat(33)),
+        ] {
+            assert!(parse_command(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn reads_from_a_peer_with_limits() {
+        let read = |bytes: &[u8]| read_command(io::Cursor::new(bytes.to_vec()));
+        assert_eq!(read(b"capture\n"), Ok(Command::Capture));
+        assert!(read(b"capture\n\xff").is_ok(), "only the first line counts");
+        assert!(read(b"run tran\xffslate\n").is_err(), "invalid UTF-8");
+        assert!(read(&[0xff; 10]).is_err());
+        assert!(read(b"").is_err());
+        // Longer than MAX_LINE: cut short before the newline, so incomplete.
+        let long = format!("run translate {}\n", "x".repeat(200));
+        assert!(read(long.as_bytes()).is_err());
+        let just_over = format!("run {}\n", "a".repeat(MAX_LINE as usize));
+        assert!(read(just_over.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn parses_cli_arguments() {
+        assert_eq!(
+            Command::from_args(&args(&["capture"])),
+            Ok(Command::Capture)
+        );
+        assert_eq!(
+            Command::from_args(&args(&["capture", "extra"])),
+            Ok(Command::Capture)
+        );
+        assert_eq!(
+            Command::from_args(&args(&["run", "translate"])),
+            Ok(run_of("translate", None))
+        );
+        assert_eq!(
+            Command::from_args(&args(&["run", "lens", "--target", "full_screen"])),
+            Ok(run_of("lens", Some(Target::FullScreen)))
+        );
+        assert_eq!(
+            Command::from_args(&args(&["run", "lens", "--target=circle"])),
+            Ok(run_of("lens", Some(Target::Circle)))
+        );
+        for bad in [
+            &["run"][..],
+            &["run", "nope"],
+            &["run", "lens", "--target"],
+            &["run", "lens", "--target", "x"],
+            &["run", "lens", "--target=x"],
+            &["run", "lens", "circle"],
+            &["run", "lens", "--target", "circle", "more"],
+            &["run", "lens\n"],
+            &["go"],
+        ] {
+            assert!(Command::from_args(&args(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn what_we_send_is_what_we_accept() {
+        for command in [
+            Command::Capture,
+            run_of("translate", None),
+            run_of("ai_explain", Some(Target::Circle)),
+            run_of("copy_text", Some(Target::LastRegion)),
+            run_of("lens", Some(Target::FullScreen)),
+        ] {
+            assert_eq!(parse_command(&format!("{}\n", command.line())), Ok(command));
+        }
+    }
 
     #[cfg(unix)]
     #[test]

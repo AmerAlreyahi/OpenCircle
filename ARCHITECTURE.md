@@ -9,7 +9,7 @@ capture the screen and show it.
 | Module | Role |
 |---|---|
 | `main.rs` | Argument parsing, single-instance hand-off, starts tray + shortcut + UI. `Trigger` = what any source asks for. |
-| `hotkey/` | Global shortcut (`global-hotkey`) and the per-user command socket behind `opencircle capture`. |
+| `hotkey/` | Global shortcuts from the config (capture + one per quick action; `global-hotkey`, or the Wayland portal) and the per-user command socket behind `opencircle capture` / `opencircle run <action>`. `hotkey::reload(&Config)` re-registers after a settings change. |
 | `capture/` | One frozen RGBA frame of the monitor under the cursor; one file per platform. |
 | `ui/mod.rs` | The iced daemon: overlay window state, open / close (the multi-step `Hiding`), running actions. |
 | `ui/overlay.rs` | The canvas over the frozen frame: dim, stroke, selection rules (loop vs. drag), mouse and key events. |
@@ -22,7 +22,7 @@ capture the screen and show it.
 
 ## Data flow
 
-1. **Trigger**: shortcut, tray or `opencircle capture` sends `Trigger::Capture` into one channel.
+1. **Trigger**: shortcut, tray or `opencircle capture` sends `Trigger::Capture` or `Trigger::Quick` into one channel.
 2. **Capture**: `capture::monitor_under_cursor()` returns a `Frame` (RGBA, size, origin, scale).
 3. **Overlay**: the RGBA bytes become the `image::Handle` drawn full-screen. The same
    bytes are later cropped by actions (shared, never copied whole).
