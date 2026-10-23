@@ -11,10 +11,13 @@ capture the screen and show it.
 | `main.rs` | Argument parsing, single-instance hand-off, starts tray + shortcut + UI. `Trigger` = what any source asks for. |
 | `hotkey/` | Global shortcuts from the config (capture + one per quick action; `global-hotkey`, or the Wayland portal) and the per-user command socket behind `opencircle capture` / `opencircle run <action>`. `hotkey::reload(&Config)` re-registers after a settings change. |
 | `config.rs` | The one config reader/validator. `config::current()` is the running app's config (one source of truth: panels read it, `set_current` replaces it when Settings saves). |
-| `capture/` | One frozen RGBA frame of the monitor under the cursor; one file per platform. |
+| `capture/` | One frozen RGBA frame of the monitor under the cursor; one file per platform. `window_rect.rs`: visible windows, topmost first (snip Window mode). `stitch.rs` + `scroll.rs`: scrolling capture. |
 | `ui/mod.rs` | The iced daemon: overlay window state, capture on a thread, open / close (the multi-step `Hiding`), running actions, held Lens pages, `background` (thread work → messages). |
 | `ui/overlay.rs` | The canvas over the frozen frame: dim, stroke, selection rules (loop vs. drag), mouse and key events. |
 | `ui/bar.rs` | The floating action bar: the action registry as buttons, placed under/above the selection. |
+| `ui/edit.rs` | Edit in place: the editor (`crate::editor`) over the selection at its own pixels (zoom 1/scale), its toolbar where the bar was; Back keeps the edits (shown flattened) and later actions get the edited image. Also the fitted editor for a scrolling capture. |
+| `ui/quick.rs` | Quick actions: id → what runs (registry action, copy_text, ai_explain), target → area (full_screen, circle, last_region per monitor). |
+| `ui/snip.rs` | Snip mode (`opencircle run snip`, tray): Region · Window · Full · Scrolling switch, then the editor; scrolling runs on a thread while the overlay is a progress pill beside the area. |
 | `ui/panel.rs` | Result panels (Search, Text, Ask AI): one `surface` docked right (bottom sheet on narrow screens); their state, views and background work. |
 | `ui/widgets.rs` | The shared components (`pill`, `surface`, `text_button`, `icon_button`, `chip`, `input`, `editor`, `progress`, `bubble`, `scroll`, text styles, `with_tip`). Only place that styles a widget. |
 | `ui/theme.rs` | The only place colours live (Light/Dark palettes, accent, dims). `apply(Theme)` = the Settings choice, `set_os(Mode)` = what the OS reports; System follows the OS. |
@@ -81,6 +84,8 @@ if it is theme-independent). Nowhere else.
 ## Test hooks (not for users)
 
 - `OPENCIRCLE_TEST_FRAME=<8-bit RGBA PNG>`: capture returns this image instead of the screen.
+- `OPENCIRCLE_TEST_SCROLL=<tall PNG>`: a scrolling snip reads this page (100 px per wheel notch)
+  instead of scrolling the screen. With the editor open, its Esc (Back) takes the test shot.
 - `OPENCIRCLE_TEST_SHOT=<out.png>`: Esc saves what the overlay shows before closing
   (shot ~150 ms after Esc, with no message in between: a relayout would drop the
   text editor's drawn text from the shot).
