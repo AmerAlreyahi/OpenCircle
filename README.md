@@ -5,8 +5,9 @@
 <h1 align="center">OpenCircle</h1>
 
 <p align="center">
-  <b>Circle anything on your screen — search it, translate it, ask AI about it, or snip it.</b><br>
-  Fast, private and lightweight. For Windows and Linux.
+  <b>The open-source alternative to Google's Circle to Search — for Windows and Linux.</b><br>
+  Circle anything on your screen to search it, translate it in place, ask AI about it, or snip and annotate it.<br>
+  Fast, private and lightweight.
 </p>
 
 <p align="center">
@@ -25,8 +26,10 @@
 
 ## What it does
 
-Press a shortcut. The screen freezes. Circle, drag or tap anything — text,
-images, video frames, games — and choose what to do with it.
+Android has Circle to Search; the PC never got it. OpenCircle brings that
+experience to Windows and Linux — free, open source and private. Press a
+shortcut. The screen freezes. Circle, drag or tap anything — text, images,
+video frames, games — and choose what to do with it.
 
 - **Translate the whole screen, in place** — every piece of text is replaced
   where it stands, in the same colours and size, as if the app or game shipped
@@ -122,5 +125,6 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 [MIT](LICENSE)
 
 OpenCircle is an independent project and is not affiliated with or endorsed
-by Google. "Google Lens" is a trademark of Google LLC and is used only to name
-the service OpenCircle can open for you.
+by Google. "Google", "Google Lens" and "Circle to Search" are trademarks of
+Google LLC, used here only to describe the feature OpenCircle offers an
+alternative to and the service it can open for you.

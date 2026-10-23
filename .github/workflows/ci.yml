@@ -45,6 +45,16 @@ jobs:
       - if: steps.crate.outputs.present == 'true'
         run: cargo test
 
+      # Ready-to-run Windows build for manual testing (no Rust needed on the test PC).
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
+        run: cargo build --release
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencircle-windows-exe
+          path: target/release/opencircle.exe
+          retention-days: 7
+
   audit:
     runs-on: ubuntu-22.04
     permissions:
