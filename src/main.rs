@@ -1,4 +1,5 @@
 //! OpenCircle: resident tray app. Shortcut, tray or `opencircle capture` → frozen overlay.
+mod actions;
 #[allow(dead_code)] // library API, wired into the UI later
 mod ai;
 mod capture;

@@ -1,4 +1,5 @@
 //! The iced daemon: owns the (pre-created, hidden) overlay window and its state.
+mod bar;
 mod overlay;
 pub mod theme;
 mod tray;
@@ -14,8 +15,9 @@ use iced::futures::channel::mpsc::UnboundedReceiver;
 use iced::futures::stream::{self, Stream, StreamExt};
 use iced::widget::{canvas, container, image, space, stack};
 use iced::window::{self, Level, Mode};
-use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task};
+use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task};
 
+use crate::actions::{self, Action};
 use crate::{Trigger, capture};
 
 const HINT: &str = "Circle, drag or tap anything · Esc to close";
@@ -26,6 +28,7 @@ static TRIGGERS: Mutex<Option<UnboundedReceiver<Trigger>>> = Mutex::new(None);
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     *TRIGGERS.lock().unwrap() = Some(triggers);
     iced::daemon(App::boot, App::update, App::view)
+        .font(widgets::ICON_FONT_BYTES)
         .subscription(App::subscription)
         .run()
 }
@@ -34,6 +37,8 @@ pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
 enum Message {
     Trigger(Trigger),
     Overlay(overlay::Event),
+    /// Run an action on the selection (action bar button or its key).
+    Run(&'static Action),
     TestShot(window::Screenshot),
     /// While closing: a frame was drawn / the window was resized (see `Hiding`).
     Drawn,
@@ -63,10 +68,17 @@ const SHRINK_FRAMES: u8 = 10;
 struct App {
     overlay: window::Id,
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
+    /// Its RGBA bytes are also what actions crop (shared, never copied whole).
     frame: Option<image::Handle>,
+    /// Physical px per logical px of `frame`.
+    scale: f32,
+    /// The overlay's logical size (the monitor's).
+    screen: Size,
     stroke: Vec<Point>,
     drawing: bool,
-    selection: Option<Rectangle>,
+    selection: Option<overlay::Selection>,
+    /// Bumped on every open (resets the overlay's pointer state).
+    opening: u32,
     /// Trigger time + expected size of the full-screen frame not drawn yet (latency log).
     first_draw: Cell<Option<(Instant, Size)>>,
     hiding: Hiding,
@@ -86,9 +98,12 @@ impl App {
         let app = App {
             overlay,
             frame: None,
+            scale: 1.0,
+            screen: Size::ZERO,
             stroke: Vec::new(),
             drawing: false,
             selection: None,
+            opening: 0,
             first_draw: Cell::new(None),
             hiding: Hiding::No,
         };
@@ -101,6 +116,7 @@ impl App {
             Message::Trigger(Trigger::Capture(_)) if self.frame.is_some() => Task::none(),
             Message::Trigger(Trigger::Capture(at)) => self.open(at),
             Message::Overlay(event) => self.on_overlay(event),
+            Message::Run(action) => self.run(action),
             // Leave full-screen while still shown (on Windows, leaving it while hidden
             // restores a placement saved while visible: shows it again), then shrink.
             // open() resizes it back before showing.
@@ -159,6 +175,9 @@ impl App {
             frame.rgba,
         ));
         let size = Size::new(frame.width as f32, frame.height as f32) * (1.0 / frame.scale);
+        self.scale = frame.scale;
+        self.screen = size;
+        self.opening = self.opening.wrapping_add(1);
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
         let origin = Point::new(frame.x as f32 / frame.scale, frame.y as f32 / frame.scale);
@@ -183,9 +202,19 @@ impl App {
             overlay::Event::Move(_) => {}
             overlay::Event::Release => {
                 self.drawing = false;
-                self.selection = overlay::fit_selection(&self.stroke);
+                self.selection = overlay::select(&self.stroke);
                 if self.selection.is_none() {
                     self.stroke.clear();
+                }
+            }
+            overlay::Event::Enter => {
+                if let Some(default) = actions::ACTIONS.first() {
+                    return self.run(default);
+                }
+            }
+            overlay::Event::Key { letter, ctrl } => {
+                if let Some(action) = actions::for_key(letter, ctrl) {
+                    return self.run(action);
                 }
             }
             overlay::Event::Close if std::env::var_os(TEST_SHOT).is_some() => {
@@ -194,6 +223,31 @@ impl App {
             overlay::Event::Close => return self.close(),
         }
         Task::none()
+    }
+
+    /// Crops the selection, closes the overlay (so dialogs aren't hidden under it),
+    /// then runs `action` on the crop. No selection yet = nothing to do.
+    fn run(&mut self, action: &'static Action) -> Task<Message> {
+        let (
+            Some(image::Handle::Rgba {
+                width,
+                height,
+                pixels,
+                ..
+            }),
+            Some(selection),
+        ) = (&self.frame, self.selection)
+        else {
+            return Task::none();
+        };
+        let Some(crop) = actions::crop(pixels, *width, *height, self.scale, selection.area) else {
+            return Task::none();
+        };
+        let closing = self.close();
+        if let Err(e) = (action.run)(crop) {
+            eprintln!("{} failed: {e}", action.id);
+        }
+        closing
     }
 
     /// Frees the frame; the window is shrunk and hidden in steps (see `Hiding`).
@@ -212,20 +266,23 @@ impl App {
         };
         let overlay = overlay::Overlay {
             stroke: &self.stroke,
-            drawing: self.drawing,
             selection: self.selection,
+            opening: self.opening,
             first_draw: &self.first_draw,
         };
         // The frame is its own layer: iced draws a canvas's images above its shapes.
-        Element::from(stack![
+        let layers = stack![
             image(frame.clone())
                 .width(Fill)
                 .height(Fill)
                 .content_fit(ContentFit::Fill),
-            canvas(overlay).width(Fill).height(Fill),
-            container(widgets::pill(HINT)).center_x(Fill).padding(24),
-        ])
-        .map(Message::Overlay)
+            Element::from(canvas(overlay).width(Fill).height(Fill)).map(Message::Overlay),
+        ];
+        match self.selection {
+            Some(selection) => layers.push(bar::view(selection.area, self.screen, Message::Run)),
+            None => layers.push(container(widgets::pill(HINT)).center_x(Fill).padding(24)),
+        }
+        .into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -252,17 +309,7 @@ fn save_test_shot(shot: &window::Screenshot) {
     let Some(path) = std::env::var_os(TEST_SHOT) else {
         return;
     };
-    let result = std::fs::File::create(&path)
-        .map_err(|e| e.to_string())
-        .and_then(|file| {
-            let mut encoder = png::Encoder::new(file, shot.size.width, shot.size.height);
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-            let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-            writer
-                .write_image_data(&shot.rgba)
-                .map_err(|e| e.to_string())
-        });
+    let result = actions::write_png(path.as_ref(), shot.size.width, shot.size.height, &shot.rgba);
     if let Err(e) = result {
         eprintln!("test shot failed: {e}");
     }
@@ -280,9 +327,12 @@ mod tests {
         let mut app = App {
             overlay: window::Id::unique(),
             frame: None,
+            scale: 1.0,
+            screen: Size::ZERO,
             stroke: Vec::new(),
             drawing: false,
             selection: None,
+            opening: 0,
             first_draw: Cell::new(None),
             hiding: Hiding::No,
         };

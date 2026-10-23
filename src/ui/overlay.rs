@@ -1,5 +1,5 @@
-//! Overlay canvas (drawn over the frozen frame): dim, freehand circle with a glowing
-//! gradient stroke.
+//! Overlay canvas (drawn over the frozen frame): dim, then the selection (a freehand
+//! loop or a dragged rectangle) with a glowing gradient stroke.
 use std::cell::Cell;
 use std::time::Instant;
 
@@ -13,16 +13,77 @@ use super::theme;
 /// A selection smaller than this (logical px, either side) is a tap, not a circle.
 const MIN_SIDE: f32 = 12.0;
 
+/// A press-drag is a rectangle if no point strays further than this fraction of
+/// the start→end distance from the start→end segment (a loop strays much further).
+const DRAG_STRAY: f32 = 0.2;
+
 #[derive(Debug, Clone, Copy)]
 pub enum Event {
     Press(Point),
     Move(Point),
     Release,
     Close,
+    /// Enter: the default action.
+    Enter,
+    /// A letter key (Latin, lower-case, keyboard-layout independent), with Ctrl or not.
+    Key {
+        letter: char,
+        ctrl: bool,
+    },
+}
+
+/// What a finished stroke selects.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Selection {
+    /// Logical px. For a loop: its bounding box (the crop).
+    pub area: Rectangle,
+    /// A dragged rectangle (`area` is the shape) rather than a freehand loop.
+    pub drag: bool,
+}
+
+/// The selection a stroke means, or `None` for a tap / thin line.
+pub fn select(stroke: &[Point]) -> Option<Selection> {
+    let drag = is_drag(stroke);
+    let area = if drag {
+        drag_rect(stroke)
+    } else {
+        fit_selection(stroke)?
+    };
+    (area.width >= MIN_SIDE && area.height >= MIN_SIDE).then_some(Selection { area, drag })
+}
+
+/// A mostly straight press-drag that doesn't loop back: every point stays near the
+/// segment from the first point to the last.
+// ponytail: one threshold, no timing/speed; tune DRAG_STRAY if real strokes misfire.
+fn is_drag(stroke: &[Point]) -> bool {
+    let (Some(&a), Some(&b)) = (stroke.first(), stroke.last()) else {
+        return false;
+    };
+    let chord = a.distance(b);
+    chord > 0.0
+        && stroke
+            .iter()
+            .all(|&p| to_segment(p, a, b) <= DRAG_STRAY * chord)
+}
+
+/// Distance from `p` to the segment `a`–`b` (`a` ≠ `b`).
+fn to_segment(p: Point, a: Point, b: Point) -> f32 {
+    let (ab, ap) = (b - a, p - a);
+    let t = ((ap.x * ab.x + ap.y * ab.y) / (ab.x * ab.x + ab.y * ab.y)).clamp(0.0, 1.0);
+    p.distance(a + ab * t)
+}
+
+/// The rectangle a drag spans: first and last points are opposite corners.
+fn drag_rect(stroke: &[Point]) -> Rectangle {
+    let (Some(&a), Some(&b)) = (stroke.first(), stroke.last()) else {
+        return Rectangle::default();
+    };
+    let min = Point::new(a.x.min(b.x), a.y.min(b.y));
+    Rectangle::new(min, Size::new((a.x - b.x).abs(), (a.y - b.y).abs()))
 }
 
 /// The selection a stroke means: its bounding box, or `None` for a tiny stroke.
-pub fn fit_selection(stroke: &[Point]) -> Option<Rectangle> {
+fn fit_selection(stroke: &[Point]) -> Option<Rectangle> {
     let first = stroke.first()?;
     let (mut min, mut max) = (*first, *first);
     for p in stroke {
@@ -56,35 +117,68 @@ fn trace(p: &mut canvas::path::Builder, stroke: &[Point], closed: bool) {
 
 pub struct Overlay<'a> {
     pub stroke: &'a [Point],
-    pub drawing: bool,
-    pub selection: Option<Rectangle>,
+    pub selection: Option<Selection>,
+    /// Counts overlay openings: pointer state from an earlier opening is stale.
+    pub opening: u32,
     pub first_draw: &'a Cell<Option<(Instant, Size)>>,
 }
 
+/// The pointer as the canvas saw it, event by event. Events can arrive in one batch
+/// (behind a slow frame): `cursor` and the app state are then already stale.
+#[derive(Default)]
+pub struct Pointer {
+    opening: u32,
+    at: Option<Point>,
+    down: bool,
+}
+
 impl canvas::Program<Event> for Overlay<'_> {
-    type State = ();
+    type State = Pointer;
 
     fn update(
         &self,
-        _state: &mut (),
+        pointer: &mut Pointer,
         event: &canvas::Event,
         bounds: Rectangle,
         cursor: Cursor,
     ) -> Option<Action<Event>> {
+        if pointer.opening != self.opening {
+            *pointer = Pointer {
+                opening: self.opening,
+                ..Pointer::default()
+            };
+        }
         let event = match event {
             canvas::Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Named(Named::Escape),
+                key,
+                physical_key,
+                modifiers,
                 ..
-            }) => Event::Close,
+            }) => match key {
+                keyboard::Key::Named(Named::Escape) => Event::Close,
+                keyboard::Key::Named(Named::Enter) => Event::Enter,
+                _ => Event::Key {
+                    letter: key.to_latin(*physical_key)?.to_ascii_lowercase(),
+                    ctrl: modifiers.command(),
+                },
+            },
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                Event::Press(cursor.position_in(bounds)?)
+                let now = cursor.position_in(bounds)?; // None = over the action bar
+                pointer.down = true;
+                Event::Press(pointer.at.unwrap_or(now))
             }
-            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) if self.drawing => {
-                Event::Move(cursor.position_in(bounds)?)
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                let at = *position - (bounds.position() - Point::ORIGIN);
+                pointer.at = Some(at);
+                if !pointer.down {
+                    return None;
+                }
+                Event::Move(at)
             }
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-                if self.drawing =>
+                if pointer.down =>
             {
+                pointer.down = false;
                 Event::Release
             }
             _ => return None,
@@ -94,7 +188,7 @@ impl canvas::Program<Event> for Overlay<'_> {
 
     fn draw(
         &self,
-        _state: &(),
+        _pointer: &Pointer,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -108,10 +202,20 @@ impl canvas::Program<Event> for Overlay<'_> {
         // ponytail: even-odd re-dims areas circled twice; trim the stroke at its first
         // self-crossing if users circle twice.
         let closed = self.selection.is_some();
+        // While drawing, a straight drag already shows as the rectangle it will select.
+        let drag = self.selection.map_or(is_drag(self.stroke), |s| s.drag);
+        let shape = |p: &mut canvas::path::Builder| {
+            if drag {
+                let r = drag_rect(self.stroke);
+                p.rectangle(r.position(), r.size());
+            } else {
+                trace(p, self.stroke, closed);
+            }
+        };
         if closed {
             let outside = Path::new(|p| {
                 p.rectangle(Point::ORIGIN, screen.size());
-                trace(p, self.stroke, true);
+                shape(p);
             });
             frame.fill(
                 &outside,
@@ -125,7 +229,7 @@ impl canvas::Program<Event> for Overlay<'_> {
         }
 
         if self.stroke.len() >= 2 {
-            let path = Path::new(|p| trace(p, self.stroke, closed));
+            let path = Path::new(shape);
             let span = fit_selection(self.stroke).unwrap_or(screen);
             // Soft glow = the same stroke, wider and fainter, under the core line.
             for (width, alpha) in [(18.0, 0.10), (10.0, 0.22), (3.5, 1.0)] {
@@ -156,7 +260,7 @@ impl canvas::Program<Event> for Overlay<'_> {
         vec![frame.into_geometry()]
     }
 
-    fn mouse_interaction(&self, _: &(), _: Rectangle, _: Cursor) -> mouse::Interaction {
+    fn mouse_interaction(&self, _: &Pointer, _: Rectangle, _: Cursor) -> mouse::Interaction {
         mouse::Interaction::Crosshair
     }
 }
@@ -226,6 +330,58 @@ mod tests {
         }
     }
 
+    fn ellipse(cx: f32, cy: f32, rx: f32, ry: f32, turn: f32) -> Vec<Point> {
+        (0..=64)
+            .map(|i| {
+                let a = i as f32 / 64.0 * turn * std::f32::consts::TAU;
+                Point::new(cx + rx * a.cos(), cy + ry * a.sin())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_straight_drag_selects_the_rectangle_it_spans() {
+        // Slow 45° mouse drag: a pixel staircase, up-left (end before start).
+        let mut stairs = vec![Point::new(300.0, 200.0)];
+        for i in 0..150 {
+            let last = *stairs.last().unwrap();
+            stairs.push(if i % 2 == 0 {
+                Point::new(last.x - 1.0, last.y)
+            } else {
+                Point::new(last.x, last.y - 1.0)
+            });
+        }
+        let sel = select(&stairs).unwrap();
+        assert!(sel.drag);
+        assert_eq!(
+            sel.area,
+            Rectangle::new(Point::new(225.0, 125.0), Size::new(75.0, 75.0))
+        );
+
+        // A wobbly, slightly bowed drag is still a drag.
+        let wobbly: Vec<Point> = (0..=50)
+            .map(|i| {
+                let t = i as f32 / 50.0;
+                let bow = 25.0 * (t * std::f32::consts::PI).sin();
+                Point::new(100.0 + 300.0 * t + bow, 100.0 + 120.0 * t + (i % 3) as f32)
+            })
+            .collect();
+        assert!(select(&wobbly).unwrap().drag);
+    }
+
+    #[test]
+    fn loops_and_arcs_select_their_bounding_box() {
+        for stroke in [
+            ellipse(200.0, 100.0, 50.0, 30.0, 1.0),  // closed loop
+            ellipse(200.0, 100.0, 50.0, 30.0, 0.85), // loop not quite closed
+            ellipse(200.0, 100.0, 50.0, 50.0, 0.5),  // half circle (a "C")
+        ] {
+            let sel = select(&stroke).unwrap();
+            assert!(!sel.drag, "{:?}", stroke.last());
+            assert_eq!(Some(sel.area), fit_selection(&stroke));
+        }
+    }
+
     #[test]
     fn tiny_strokes_are_ignored() {
         assert_eq!(fit_selection(&[]), None);
@@ -236,5 +392,11 @@ mod tests {
             None
         );
         assert!(fit_selection(&[Point::new(0.0, 0.0), Point::new(12.0, 12.0)]).is_some());
+        // A flat drag is a line, not a rectangle.
+        assert_eq!(
+            select(&[Point::new(0.0, 0.0), Point::new(300.0, 4.0)]),
+            None
+        );
+        assert_eq!(select(&[Point::new(5.0, 5.0)]), None);
     }
 }

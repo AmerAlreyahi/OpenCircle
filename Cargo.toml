@@ -11,6 +11,7 @@ description = "Circle anything on screen to search, read, translate or ask about
 iced = { version = "0.14", default-features = false, features = [
     "tiny-skia", "x11", "wayland", "thread-pool", "canvas", "image-without-codecs",
 ] }
+arboard = "3.7"
 base64 = "0.22"
 dirs = "7"
 global-hotkey = "0.9"
@@ -22,6 +23,8 @@ png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"
+# Save dialog. xdg-portal on Linux (the tray owns the GTK thread, so no gtk3 backend).
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 tray-icon = "0.26"
 # Blocking HTTP for the AI clients: rustls (ring), no gzip, no async runtime.
 ureq = { version = "3.5", default-features = false, features = ["rustls"] }
@@ -36,7 +39,7 @@ xcb = { version = "1.7", features = ["randr", "xtest"] }
 [target.'cfg(windows)'.dependencies]
 widestring = "1"
 xcap = "0.9"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 strip = true
