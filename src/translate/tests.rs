@@ -468,7 +468,7 @@ fn render_replaces_text_and_stays_inside_its_blocks() {
     assert!(same == c.img);
 }
 
-fn save_png(path: &std::path::Path, (w, h): (usize, usize), rgba: &[u8]) {
+pub(super) fn save_png(path: &std::path::Path, (w, h): (usize, usize), rgba: &[u8]) {
     let f = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
     let mut e = png::Encoder::new(f, w as u32, h as u32);
     e.set_color(png::ColorType::Rgba);
@@ -490,6 +490,48 @@ fn bench_full_frame() {
         }
     }
 
+    let dims = (1920, 1080);
+    let (img, lines) = game_frame();
+    let blocks = group_blocks(&lines);
+    let tr: Vec<String> = blocks
+        .iter()
+        .map(|b| ar(&b.text).unwrap().to_string())
+        .collect();
+    let mut warm = img.clone();
+    render(&mut warm, 1920, 1080, &blocks, &tr, true); // font load + glyph cache
+    let (mut times, mut erase_ms) = (Vec::new(), Vec::new());
+    let mut out = img.clone();
+    for _ in 0..5 {
+        let mut e = img.clone();
+        let t0 = std::time::Instant::now();
+        for l in &lines {
+            erase::erase_line(&mut e, 1920, 1080, l.bounds);
+        }
+        erase_ms.push(t0.elapsed().as_secs_f64() * 1000.0);
+        out = img.clone();
+        let t0 = std::time::Instant::now();
+        render(&mut out, 1920, 1080, &blocks, &tr, true);
+        times.push(t0.elapsed().as_secs_f64() * 1000.0);
+    }
+    times.sort_by(f64::total_cmp);
+    erase_ms.sort_by(f64::total_cmp);
+    eprintln!(
+        "{} lines, {} blocks: render {:.1} ms median (min {:.1}), of which erase {:.1} ms",
+        lines.len(),
+        blocks.len(),
+        times[2],
+        times[0],
+        erase_ms[2]
+    );
+    save_png(&dir.join("frame_before.png"), dims, &img);
+    save_png(&dir.join("frame_after.png"), dims, &out);
+    eprintln!("PNGs in {}", dir.display());
+    assert!(times[2] < 50.0, "budget: {:.1} ms", times[2]);
+}
+
+/// A synthetic 1920x1080 game frame (dialogue box, quest list, menu, prompt,
+/// outlined subtitle, settings rows) and its OCR-like lines.
+pub(super) fn game_frame() -> (Rgba, Vec<Line>) {
     let dims = (1920, 1080);
     let mut img = paint(dims.0, dims.1, |x, y| art(x, y, 1080.0));
     panel(&mut img, 1920, [160, 790, 1600, 240], [8, 10, 20], 0.7);
@@ -602,60 +644,34 @@ fn bench_full_frame() {
         t((1340.0, y, 0.0), a, 26.0, 500, WHITE, Fx::None);
         t((1820.0, y, 1.0), b, 26.0, 500, GOLD, Fx::None);
     }
-    let blocks = group_blocks(&lines);
-    let ar = |en: &str| -> &str {
-        match en {
-            "ELDRIN" => "إلدرين",
-            "THE LOST CROWN" => "التاج المفقود",
-            "Find the old map" => "اعثر على الخريطة القديمة",
-            "Speak to the blacksmith" => "تحدث إلى الحداد",
-            "Reach the northern gate" => "اذهب إلى البوابة الشمالية",
-            "Continue" => "متابعة",
-            "New Game" => "لعبة جديدة",
-            "Load Game" => "تحميل لعبة",
-            "Settings" => "الإعدادات",
-            "Credits" => "الشكر",
-            "Quit" => "خروج",
-            "Press E to interact" => "اضغط E للتفاعل",
-            "Difficulty" => "الصعوبة",
-            "Normal" => "عادي",
-            "Subtitles" => "الترجمة",
-            "On" => "مفعّلة",
-            s if s.starts_with("Bring") => {
-                "أحضر [[حجر الشمس]] إلى المعبد القديم قبل حلول الليل، ولا تبتعد عن الطريق. الغابة ليست آمنة بعد حلول الظلام."
-            }
-            _ => "لم أظن أبدا أنني سأرى هذا المكان مرة أخرى بعد كل هذه السنين.",
+    (img, lines)
+}
+
+/// Arabic for the game frame's texts (grouped as `group_blocks` does).
+pub(super) fn ar(en: &str) -> Option<&'static str> {
+    Some(match en {
+        "ELDRIN" => "إلدرين",
+        "THE LOST CROWN" => "التاج المفقود",
+        "Find the old map" => "اعثر على الخريطة القديمة",
+        "Speak to the blacksmith" => "تحدث إلى الحداد",
+        "Reach the northern gate" => "اذهب إلى البوابة الشمالية",
+        "Continue" => "متابعة",
+        "New Game" => "لعبة جديدة",
+        "Load Game" => "تحميل لعبة",
+        "Settings" => "الإعدادات",
+        "Credits" => "الشكر",
+        "Quit" => "خروج",
+        "Press E to interact" => "اضغط E للتفاعل",
+        "Difficulty" => "الصعوبة",
+        "Normal" => "عادي",
+        "Subtitles" => "الترجمة",
+        "On" => "مفعّلة",
+        s if s.starts_with("Bring") => {
+            "أحضر [[حجر الشمس]] إلى المعبد القديم قبل حلول الليل، ولا تبتعد عن الطريق. الغابة ليست آمنة بعد حلول الظلام."
         }
-    };
-    let tr: Vec<String> = blocks.iter().map(|b| ar(&b.text).to_string()).collect();
-    let mut warm = img.clone();
-    render(&mut warm, 1920, 1080, &blocks, &tr, true); // font load + glyph cache
-    let (mut times, mut erase_ms) = (Vec::new(), Vec::new());
-    let mut out = img.clone();
-    for _ in 0..5 {
-        let mut e = img.clone();
-        let t0 = std::time::Instant::now();
-        for l in &lines {
-            erase::erase_line(&mut e, 1920, 1080, l.bounds);
+        s if s.starts_with("I never") => {
+            "لم أظن أبدا أنني سأرى هذا المكان مرة أخرى بعد كل هذه السنين."
         }
-        erase_ms.push(t0.elapsed().as_secs_f64() * 1000.0);
-        out = img.clone();
-        let t0 = std::time::Instant::now();
-        render(&mut out, 1920, 1080, &blocks, &tr, true);
-        times.push(t0.elapsed().as_secs_f64() * 1000.0);
-    }
-    times.sort_by(f64::total_cmp);
-    erase_ms.sort_by(f64::total_cmp);
-    eprintln!(
-        "{} lines, {} blocks: render {:.1} ms median (min {:.1}), of which erase {:.1} ms",
-        lines.len(),
-        blocks.len(),
-        times[2],
-        times[0],
-        erase_ms[2]
-    );
-    save_png(&dir.join("frame_before.png"), dims, &img);
-    save_png(&dir.join("frame_after.png"), dims, &out);
-    eprintln!("PNGs in {}", dir.display());
-    assert!(times[2] < 50.0, "budget: {:.1} ms", times[2]);
+        _ => return None,
+    })
 }

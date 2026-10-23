@@ -1,0 +1,620 @@
+//! One-shot full-screen translate: OCR -> lines -> [`group_blocks`] -> skip
+//! what needs no translation -> ONE AI call (cache first) -> [`render`] into
+//! a copy of the frame. Live mode (`live.rs`) reuses [`translate_blocks`] and
+//! the [`Cache`].
+
+use std::collections::HashMap;
+use std::fmt;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use super::{Block, Line, MARKUP, group_blocks, render};
+use crate::ai::{self, AiError, Message};
+use crate::config::AiConfig;
+use crate::ocr::{self, OcrError, TextBlock};
+use crate::secrets::Secret;
+
+/// OCR and AI, behind a trait so tests inject fakes. [`Real`] is the app's.
+pub trait Deps {
+    /// Text lines of an RGBA image, in reading order.
+    fn recognize(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError>;
+    /// ONE call: exactly `texts.len()` translations, in order, with
+    /// [`MARKUP`] spans.
+    fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError>;
+}
+
+/// OCR in the helper process, AI with the user's config and key.
+pub struct Real {
+    pub ai: AiConfig,
+    pub key: Option<Secret>,
+}
+
+impl Deps for Real {
+    fn recognize(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {
+        ocr::recognize_in_child(rgba, width, height)
+    }
+
+    fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
+        ai::translate_with(texts, target, |msgs| {
+            ai::ask(&self.ai, self.key.as_ref(), &with_markup(msgs))
+        })
+    }
+}
+
+/// The batched translate prompt plus the [`MARKUP`] rules.
+// ponytail: appended to ai's system prompt; an `extra` parameter on
+// ai::translate_lines would be cleaner (ai/ is another worker's file).
+fn with_markup(msgs: &[Message]) -> Vec<Message> {
+    let mut msgs = msgs.to_vec();
+    if let Some(system) = msgs.first_mut() {
+        system.text = format!("{}\n{MARKUP}", system.text);
+    }
+    msgs
+}
+
+#[derive(Debug)]
+pub enum Error {
+    Ocr(OcrError),
+    Ai(AiError),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::Ocr(e) => e.fmt(f),
+            Error::Ai(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// Wall time per stage (goal: total < 1.5 s on a cloud model).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Timings {
+    pub ocr: Duration,
+    /// Zero when every text came from the cache.
+    pub translate: Duration,
+    pub render: Duration,
+    pub total: Duration,
+}
+
+/// One text block on screen, for "click a block -> explanation".
+#[derive(Debug, Clone, PartialEq)]
+pub struct Translation {
+    /// x, y, w, h in frame pixels.
+    pub bounds: [f32; 4],
+    pub original: String,
+    /// Without `[[ ]]`; "" = left as it was (numbers, already in the target
+    /// language, or the model returned it unchanged).
+    pub translation: String,
+}
+
+pub struct Translated {
+    /// The frame with every translated block erased and redrawn.
+    pub rgba: Vec<u8>,
+    pub blocks: Vec<Translation>,
+    pub timings: Timings,
+}
+
+/// Translates every text block of an RGBA frame in place. An OCR or AI
+/// error returns before anything is drawn (never a half-translated frame).
+pub fn translate_frame(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    target: &str,
+    cache: &Cache,
+    deps: &impl Deps,
+) -> Result<Translated, Error> {
+    let start = Instant::now();
+    check_frame(rgba, width, height)?;
+    let found = deps.recognize(rgba, width, height).map_err(Error::Ocr)?;
+    let lines: Vec<Line> = (found.into_iter())
+        .map(|b| to_line(b, width, height))
+        .collect();
+    let ocr = start.elapsed();
+    let blocks = group_blocks(&lines);
+    let t = Instant::now();
+    let tr = translate_blocks(&blocks, target, cache, deps).map_err(Error::Ai)?;
+    let translate = t.elapsed();
+    let t = Instant::now();
+    let mut out = rgba.to_vec();
+    render(&mut out, width, height, &blocks, &tr, is_rtl(target));
+    let render = t.elapsed();
+    Ok(Translated {
+        rgba: out,
+        blocks: translations(&blocks, &tr),
+        timings: Timings {
+            ocr,
+            translate,
+            render,
+            total: start.elapsed(),
+        },
+    })
+}
+
+pub(super) fn check_frame(rgba: &[u8], width: u32, height: u32) -> Result<(), Error> {
+    if width == 0 || height == 0 || rgba.len() as u64 != width as u64 * height as u64 * 4 {
+        return Err(Error::Ocr(OcrError::BadImage(format!(
+            "{width}x{height} RGBA needs {} bytes, got {}",
+            width as u64 * height as u64 * 4,
+            rgba.len()
+        ))));
+    }
+    Ok(())
+}
+
+/// An OCR box hugs the ink; `render`'s erase wants the line's box (it reads
+/// the background just inside the edge), so pad it like a layout line box:
+/// 15% of the height above and below, 10% left and right, inside the frame.
+pub(super) fn to_line(b: TextBlock, width: u32, height: u32) -> Line {
+    let [x, y, w, h] = b.bounds;
+    let (x0, y0) = ((x - 0.1 * h).max(0.0), (y - 0.15 * h).max(0.0));
+    let x1 = (x + w + 0.1 * h).min(width as f32);
+    let y1 = (y + h + 0.15 * h).min(height as f32);
+    Line {
+        bounds: [x0, y0, x1 - x0, y1 - y0],
+        text: b.text,
+    }
+}
+
+pub(super) fn translations(blocks: &[Block], tr: &[String]) -> Vec<Translation> {
+    blocks
+        .iter()
+        .zip(tr)
+        .map(|(b, t)| Translation {
+            bounds: b.bounds,
+            original: b.text.clone(),
+            translation: unmarked(t),
+        })
+        .collect()
+}
+
+/// One translation per block ("" = keep the original): cache first, then
+/// ONE call for the rest (each distinct text once, in reading order).
+pub(super) fn translate_blocks(
+    blocks: &[Block],
+    target: &str,
+    cache: &Cache,
+    deps: &impl Deps,
+) -> Result<Vec<String>, AiError> {
+    let keys: Vec<Option<String>> = blocks
+        .iter()
+        .map(|b| needs_translation(&b.text, target).then(|| normalise(&b.text)))
+        .collect();
+    let mut found: HashMap<&str, String> = HashMap::new();
+    let mut todo: Vec<String> = Vec::new();
+    for k in keys.iter().flatten() {
+        if found.contains_key(k.as_str()) || todo.contains(k) {
+            continue;
+        }
+        match cache.get(k, target) {
+            Some(t) => {
+                found.insert(k, t);
+            }
+            None => todo.push(k.clone()),
+        }
+    }
+    if !todo.is_empty() {
+        let out = deps.translate(&todo, target)?;
+        if out.len() != todo.len() {
+            return Err(AiError::BadResponse(format!(
+                "expected {} translated lines, got {}",
+                todo.len(),
+                out.len()
+            )));
+        }
+        for (k, t) in todo.iter().zip(out) {
+            // the model echoing the source (a name, noise) = nothing to redraw
+            let t = if normalise(&unmarked(&t)) == *k {
+                String::new()
+            } else {
+                t
+            };
+            cache.put(k, target, t.clone());
+            found.insert(k, t);
+        }
+    }
+    Ok(keys
+        .iter()
+        .map(|k| {
+            k.as_ref()
+                .map(|k| found[k.as_str()].clone())
+                .unwrap_or_default()
+        })
+        .collect())
+}
+
+/// False for numbers/punctuation only, and for text already in the target's
+/// script (Latin targets can't be told from English: the model decides).
+fn needs_translation(text: &str, target: &str) -> bool {
+    let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
+    match script(target) {
+        _ if letters.is_empty() => false,
+        Some(in_script) => letters.iter().filter(|c| in_script(**c)).count() * 2 < letters.len(),
+        None => true,
+    }
+}
+
+fn lang(target: &str) -> String {
+    let code = target.split(['-', '_']).next().unwrap_or_default();
+    code.to_ascii_lowercase()
+}
+
+/// The target language's script, for the common non-Latin ones.
+fn script(target: &str) -> Option<fn(char) -> bool> {
+    Some(match lang(target).as_str() {
+        "ar" | "fa" | "ur" | "ps" | "sd" | "ug" | "ckb" => {
+            |c| matches!(c, '\u{0600}'..='\u{08FF}' | '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
+        }
+        "he" | "yi" => |c| matches!(c, '\u{0590}'..='\u{05FF}'),
+        "ru" | "uk" | "bg" | "sr" | "be" | "mk" | "kk" => |c| matches!(c, '\u{0400}'..='\u{04FF}'),
+        "el" => |c| matches!(c, '\u{0370}'..='\u{03FF}'),
+        "zh" | "ja" => |c| matches!(c, '\u{3040}'..='\u{30FF}' | '\u{3400}'..='\u{9FFF}'),
+        "ko" => |c| matches!(c, '\u{1100}'..='\u{11FF}' | '\u{AC00}'..='\u{D7AF}'),
+        "th" => |c| matches!(c, '\u{0E00}'..='\u{0E7F}'),
+        "hi" | "mr" | "ne" => |c| matches!(c, '\u{0900}'..='\u{097F}'),
+        _ => return None,
+    })
+}
+
+/// Right-to-left target: text is right-aligned when drawn.
+pub fn is_rtl(target: &str) -> bool {
+    matches!(
+        lang(target).as_str(),
+        "ar" | "fa" | "ur" | "ps" | "sd" | "ug" | "ckb" | "he" | "yi" | "dv"
+    )
+}
+
+fn normalise(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn unmarked(t: &str) -> String {
+    t.replace("[[", "").replace("]]", "")
+}
+
+type Gen = HashMap<(String, String), String>;
+
+/// Translations by (normalised source text, target), shared by one-shot and
+/// live mode (one per app, e.g. in an `Arc`). Thread-safe.
+// ponytail: two generations instead of a true LRU: when the current one
+// fills, it becomes the old one and the previous old one is dropped; a hit in
+// the old one moves back. At most 2 x `cap` entries, O(1), std only.
+pub struct Cache {
+    cap: usize,
+    gens: Mutex<[Gen; 2]>,
+}
+
+impl Cache {
+    pub fn new(cap: usize) -> Self {
+        Cache {
+            cap: cap.max(1),
+            gens: Mutex::default(),
+        }
+    }
+
+    pub fn get(&self, text: &str, target: &str) -> Option<String> {
+        let key = (normalise(text), target.to_string());
+        let mut g = self.gens.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(t) = g[0].get(&key) {
+            return Some(t.clone());
+        }
+        let t = g[1].remove(&key)?;
+        self.insert(&mut g, key, t.clone());
+        Some(t)
+    }
+
+    pub fn put(&self, text: &str, target: &str, translation: String) {
+        let mut g = self.gens.lock().unwrap_or_else(|e| e.into_inner());
+        self.insert(&mut g, (normalise(text), target.to_string()), translation);
+    }
+
+    fn insert(&self, g: &mut [Gen; 2], key: (String, String), t: String) {
+        if g[0].len() >= self.cap && !g[0].contains_key(&key) {
+            g[1] = std::mem::take(&mut g[0]);
+        }
+        g[0].insert(key, t);
+    }
+}
+
+#[cfg(test)]
+pub(super) mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    type OcrFn = Box<dyn Fn(&[u8], u32, u32) -> Vec<TextBlock>>;
+
+    /// Records every call; OCR answers with `lines`, AI with `answer` per text.
+    pub struct Fake {
+        pub lines: OcrFn,
+        pub answer: fn(&str) -> String,
+        pub fail_ai: bool,
+        pub ocr_calls: RefCell<Vec<(u32, u32)>>,
+        pub ai_calls: RefCell<Vec<Vec<String>>>,
+    }
+
+    impl Fake {
+        pub fn new(lines: impl Fn(&[u8], u32, u32) -> Vec<TextBlock> + 'static) -> Self {
+            Fake {
+                lines: Box::new(lines),
+                answer: |s| format!("ترجمة {s}"),
+                fail_ai: false,
+                ocr_calls: RefCell::default(),
+                ai_calls: RefCell::default(),
+            }
+        }
+    }
+
+    impl Deps for Fake {
+        fn recognize(&self, rgba: &[u8], w: u32, h: u32) -> Result<Vec<TextBlock>, OcrError> {
+            self.ocr_calls.borrow_mut().push((w, h));
+            Ok((self.lines)(rgba, w, h))
+        }
+
+        fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
+            self.ai_calls.borrow_mut().push(texts.to_vec());
+            if self.fail_ai {
+                return Err(AiError::Server(503));
+            }
+            Ok(texts.iter().map(|t| (self.answer)(t)).collect())
+        }
+    }
+
+    pub fn tb(text: &str, bounds: [f32; 4]) -> TextBlock {
+        TextBlock {
+            text: text.into(),
+            bounds,
+            confidence: 0.9,
+        }
+    }
+
+    /// Dark frame with a light bar ("glyphs") under each OCR box.
+    pub fn frame(w: u32, h: u32, boxes: &[[f32; 4]]) -> Vec<u8> {
+        let mut img = [20u8, 24, 32, 255].repeat((w * h) as usize);
+        for b in boxes {
+            let [x, y, bw, bh] = b.map(|v| v as u32);
+            for py in y + bh / 4..y + bh * 3 / 4 {
+                for px in (x..x + bw).step_by(3) {
+                    let i = ((py * w + px) * 4) as usize;
+                    img[i..i + 3].copy_from_slice(&[240, 236, 226]);
+                }
+            }
+        }
+        img
+    }
+
+    fn screen() -> Vec<TextBlock> {
+        vec![
+            tb("Bring the Sunstone", [40.0, 40.0, 300.0, 30.0]),
+            tb("100 / 250", [40.0, 120.0, 120.0, 30.0]),
+            tb("مرحبا بك", [40.0, 200.0, 140.0, 30.0]),
+            tb("Quit", [40.0, 280.0, 80.0, 30.0]),
+            tb("Bring the  Sunstone", [400.0, 360.0, 300.0, 30.0]),
+        ]
+    }
+
+    #[test]
+    fn one_call_in_order_skipping_numbers_and_target_language() {
+        let boxes: Vec<[f32; 4]> = screen().iter().map(|b| b.bounds).collect();
+        let img = frame(800, 450, &boxes);
+        let fake = Fake::new(|_, _, _| screen());
+        let cache = Cache::new(64);
+        let out = translate_frame(&img, 800, 450, "ar", &cache, &fake).unwrap();
+        // the repeated line (other spacing) is sent once
+        assert_eq!(
+            *fake.ai_calls.borrow(),
+            vec![vec!["Bring the Sunstone".to_string(), "Quit".into()]]
+        );
+        let tr: Vec<&str> = out.blocks.iter().map(|b| b.translation.as_str()).collect();
+        assert_eq!(
+            tr,
+            [
+                "ترجمة Bring the Sunstone",
+                "",
+                "",
+                "ترجمة Quit",
+                "ترجمة Bring the Sunstone"
+            ]
+        );
+        assert_eq!(out.blocks[1].original, "100 / 250");
+        // OCR boxes padded to line boxes
+        assert_eq!(out.blocks[4].bounds, [397.0, 355.5, 306.0, 39.0]);
+        assert!(out.rgba != img, "translated blocks are redrawn");
+        let t = out.timings;
+        assert!(t.total >= t.ocr + t.translate + t.render && t.total > Duration::ZERO);
+
+        // second run: everything from the cache, no AI call at all
+        let again = translate_frame(&img, 800, 450, "ar", &cache, &fake).unwrap();
+        assert_eq!(fake.ai_calls.borrow().len(), 1);
+        assert!(again.rgba == out.rgba);
+    }
+
+    #[test]
+    fn markup_reaches_render_and_is_stripped_from_the_block_list() {
+        let lines = vec![tb("Bring the Sunstone", [40.0, 40.0, 300.0, 30.0])];
+        let img = frame(400, 120, &[lines[0].bounds]);
+        let mut fake = Fake::new(move |_, _, _| lines.clone());
+        fake.answer = |_| "أحضر [[حجر الشمس]]".into();
+        let out = translate_frame(&img, 400, 120, "ar", &Cache::new(8), &fake).unwrap();
+        assert_eq!(out.blocks[0].translation, "أحضر حجر الشمس");
+        let line = to_line(
+            tb("Bring the Sunstone", [40.0, 40.0, 300.0, 30.0]),
+            400,
+            120,
+        );
+        let blocks = group_blocks(&[line]);
+        let mut direct = img.clone();
+        render(
+            &mut direct,
+            400,
+            120,
+            &blocks,
+            &["أحضر [[حجر الشمس]]".into()],
+            true,
+        );
+        assert!(out.rgba == direct, "the [[ ]] spans went to render as is");
+        // and the real client asks for them
+        ai::translate_with(&["x".into()], "ar", |m| {
+            assert!(with_markup(m)[0].text.ends_with(MARKUP));
+            Ok(r#"["y"]"#.into())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn ai_error_means_no_render_and_nothing_cached() {
+        let mut fake = Fake::new(|_, _, _| screen());
+        fake.fail_ai = true;
+        let cache = Cache::new(8);
+        let img = frame(800, 450, &[]);
+        let err = translate_frame(&img, 800, 450, "ar", &cache, &fake)
+            .err()
+            .unwrap();
+        assert!(matches!(err, Error::Ai(AiError::Server(503))), "{err}");
+        assert_eq!(cache.get("Quit", "ar"), None);
+        // a bad frame fails before OCR
+        assert!(matches!(
+            translate_frame(&img[4..], 800, 450, "ar", &cache, &fake),
+            Err(Error::Ocr(OcrError::BadImage(_)))
+        ));
+        assert_eq!(fake.ocr_calls.borrow().len(), 1);
+    }
+
+    #[test]
+    fn echoed_text_is_left_alone() {
+        let mut fake = Fake::new(|_, _, _| vec![tb("Eldrin", [10.0, 10.0, 80.0, 30.0])]);
+        fake.answer = |s| format!("[[{s}]]");
+        let img = frame(200, 60, &[[10.0, 10.0, 80.0, 30.0]]);
+        let out = translate_frame(&img, 200, 60, "en", &Cache::new(8), &fake).unwrap();
+        assert_eq!(out.blocks[0].translation, "");
+        assert!(out.rgba == img);
+    }
+
+    #[test]
+    fn script_and_direction() {
+        assert!(!needs_translation("12:30 — 4/5 !", "ar"));
+        assert!(!needs_translation("القائمة الرئيسية", "ar-SA"));
+        assert!(needs_translation("Main menu", "ar"));
+        assert!(needs_translation("Главное меню", "ar"));
+        assert!(!needs_translation("Главное меню", "ru"));
+        assert!(needs_translation("Main menu", "fr"));
+        assert!(is_rtl("ar") && is_rtl("he-IL") && !is_rtl("en") && !is_rtl("fr"));
+    }
+
+    #[test]
+    fn cache_hit_miss_and_eviction() {
+        let c = Cache::new(2);
+        assert_eq!(c.get("a", "ar"), None);
+        c.put("a", "ar", "A".into());
+        c.put("b", "ar", "B".into());
+        assert_eq!(c.get("  a ", "ar").as_deref(), Some("A"), "normalised");
+        assert_eq!(c.get("a", "fr"), None, "keyed by target too");
+        c.put("c", "ar", "C".into()); // full: a, b move to the old generation
+        assert_eq!(c.get("a", "ar").as_deref(), Some("A")); // hit moves a back
+        c.put("d", "ar", "D".into()); // full again: b is dropped
+        assert_eq!(c.get("b", "ar"), None);
+        for (k, v) in [("a", "A"), ("c", "C"), ("d", "D")] {
+            assert_eq!(c.get(k, "ar").as_deref(), Some(v), "{k}");
+        }
+    }
+
+    /// Real OCR (in process; models from `ocr::models_dir()`), a fake
+    /// translator (fixed Arabic, else the text reversed), the synthetic 1080p
+    /// game frame; one-shot, then live steps. PNGs in the temp dir. Run:
+    /// cargo test --release e2e_real_ocr -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn e2e_real_ocr_fake_translator() {
+        use super::super::live::Live;
+        use super::super::tests::{ar, game_frame, save_png};
+
+        struct RealOcr(ocr::Engine);
+        impl Deps for RealOcr {
+            fn recognize(&self, rgba: &[u8], w: u32, h: u32) -> Result<Vec<TextBlock>, OcrError> {
+                self.0.recognize(rgba, w, h)
+            }
+            fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
+                Ok(texts
+                    .iter()
+                    .map(|t| ar(t).map_or_else(|| t.chars().rev().collect(), String::from))
+                    .collect())
+            }
+        }
+
+        let t = Instant::now();
+        let deps = RealOcr(ocr::Engine::load(&ocr::models_dir()).unwrap());
+        eprintln!("OCR engine load {:?}", t.elapsed());
+        let (img, _) = game_frame();
+        let (w, h) = (1920, 1080);
+        let cache = Cache::new(256);
+        for run in 1..=2 {
+            let out = translate_frame(&img, w, h, "ar", &Cache::new(256), &deps).unwrap();
+            eprintln!("one-shot run {run}: {:?}", out.timings);
+        }
+        let out = translate_frame(&img, w, h, "ar", &cache, &deps).unwrap();
+        for b in &out.blocks {
+            eprintln!("{:?} {:?} -> {:?}", b.bounds, b.original, b.translation);
+        }
+        let dir = std::env::temp_dir().join("opencircle-pipeline");
+        std::fs::create_dir_all(&dir).unwrap();
+        save_png(&dir.join("before.png"), (1920, 1080), &img);
+        save_png(&dir.join("after.png"), (1920, 1080), &out.rgba);
+        let translated = out.blocks.iter().filter(|b| !b.translation.is_empty());
+        assert!(translated.count() >= 10, "{:?}", out.blocks);
+
+        // live: first frame reads everything (translations from the cache)
+        let mut live = Live::new();
+        let t = live.step(&img, w, h, "ar", &cache, &deps).unwrap().unwrap();
+        eprintln!("live first frame: {t:?}, {} patches", live.patches().len());
+        let t = Instant::now();
+        assert!(
+            live.step(&img, w, h, "ar", &cache, &deps)
+                .unwrap()
+                .is_none()
+        );
+        eprintln!("live unchanged frame: {:?}", t.elapsed());
+        // X11: the capture shows our layer -> still nothing to do
+        let mut shown = img.clone();
+        let mut layer = img.clone();
+        for p in live.patches() {
+            let [x, y, pw, _] = p.bounds.map(|v| v as usize);
+            for (row, src) in p.rgba.chunks_exact(pw * 4).enumerate() {
+                let i = ((y + row) * 1920 + x) * 4;
+                shown[i..i + pw * 4].copy_from_slice(src);
+                layer[i..i + pw * 4].copy_from_slice(src);
+            }
+        }
+        save_png(&dir.join("live_layer.png"), (1920, 1080), &layer);
+        assert!(
+            live.step(&shown, w, h, "ar", &cache, &deps)
+                .unwrap()
+                .is_none()
+        );
+        // the prompt "Press E to interact" goes away: only its region is read
+        let mut next = img.clone();
+        for y in 590..640 {
+            for x in 800..1120 {
+                let i = (y * 1920 + x) * 4;
+                let src = (y * 1920 + 790) * 4;
+                next.copy_within(src..src + 4, i);
+            }
+        }
+        let n = live.blocks().len();
+        let t = live
+            .step(&next, w, h, "ar", &cache, &deps)
+            .unwrap()
+            .unwrap();
+        eprintln!(
+            "live, one block gone: {t:?}; blocks {n} -> {}",
+            live.blocks().len()
+        );
+        assert!(
+            live.blocks()
+                .iter()
+                .all(|b| !b.original.starts_with("Press"))
+        );
+        eprintln!("PNGs in {}", dir.display());
+    }
+}

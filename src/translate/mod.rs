@@ -4,9 +4,13 @@
 //!
 //! Flow: OCR lines -> [`group_blocks`] -> AI translates each `Block::text`
 //! (see [`MARKUP`]) -> [`render`] on the captured RGBA frame.
+//! `pipeline::translate_frame` runs it once; `live::Live` runs it per
+//! frame, re-reading only what changed.
 
 mod draw;
 mod erase;
+pub mod live;
+pub mod pipeline;
 #[cfg(test)]
 mod tests;
 
