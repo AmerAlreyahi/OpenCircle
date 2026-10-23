@@ -83,7 +83,10 @@ impl App {
             Message::Overlay(event) => self.on_overlay(event),
             Message::Drawn if self.hiding => {
                 self.hiding = false;
-                window::set_mode(self.overlay, Mode::Hidden)
+                // Leave full-screen while still shown, then hide: on Windows, leaving it
+                // while hidden restores a placement saved while visible (shows it again).
+                window::set_mode(self.overlay, Mode::Windowed)
+                    .chain(window::set_mode(self.overlay, Mode::Hidden))
             }
             Message::Drawn => Task::none(),
             Message::TestShot(shot) => {
@@ -116,8 +119,12 @@ impl App {
         self.first_draw.set(Some((at, size)));
         self.hiding = false;
         let origin = Point::new(frame.x as f32 / frame.scale, frame.y as f32 / frame.scale);
+        // Place and size the hidden window to cover the monitor BEFORE set_mode shows
+        // it: iced makes it visible before going full-screen, so whatever is shown
+        // first must already cover the monitor (no small black box flash).
         // ponytail: mixed-DPI multi-monitor placement untested (needs real hardware).
         window::move_to(self.overlay, origin)
+            .chain(window::resize(self.overlay, size))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
             .chain(window::gain_focus(self.overlay))
     }
