@@ -17,7 +17,7 @@ pub enum Quick {
 }
 
 impl Quick {
-    /// `None` = nothing to run yet (translate, wired later) or an unknown id.
+    /// `None` = not a quick action here (snip is its own mode) or an unknown id.
     pub fn for_id(id: &str) -> Option<Quick> {
         match id {
             "copy_text" => Some(Quick::CopyText),
@@ -95,14 +95,13 @@ mod tests {
     fn quick_ids_map_to_what_they_run() {
         assert!(matches!(Quick::for_id("copy_text"), Some(Quick::CopyText)));
         assert!(matches!(Quick::for_id("ai_explain"), Some(Quick::Explain)));
-        for id in ["lens", "ai", "text", "edit", "copy", "save"] {
+        for id in ["lens", "ai", "text", "translate", "edit", "copy", "save"] {
             assert!(
                 matches!(Quick::for_id(id), Some(Quick::Action(a)) if a.id == id),
                 "{id}"
             );
         }
-        // Translate is wired by the translate pipeline; snip is its own mode.
-        assert!(Quick::for_id("translate").is_none());
+        // Snip is its own mode.
         assert!(Quick::for_id("snip").is_none());
         assert!(Quick::for_id("").is_none());
     }

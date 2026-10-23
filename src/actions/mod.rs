@@ -7,6 +7,7 @@ mod edit;
 pub mod lens;
 pub mod save;
 pub mod text;
+pub mod translate;
 
 use iced::Rectangle;
 
@@ -15,6 +16,7 @@ pub const ACTIONS: &[Action] = &[
     lens::ACTION,
     ask::ACTION,
     text::ACTION,
+    translate::ACTION,
     edit::ACTION,
     copy::ACTION,
     save::ACTION,
@@ -43,6 +45,8 @@ pub enum Run {
     Panel(Panel),
     /// Turn the action bar into the editing toolbar over the selection.
     Edit,
+    /// Replace the selection's text by its translation, in place.
+    Translate,
 }
 
 /// The result panels (`ui/panel.rs` draws them).

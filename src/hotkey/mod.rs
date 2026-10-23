@@ -21,8 +21,8 @@ use crate::config::{Config, QuickAction, Target, parse_shortcut};
 use crate::{Trigger, Triggers};
 
 /// Ids `opencircle run` takes that are not in the action registry (`ui/quick.rs`
-/// runs ai_explain and copy_text; snip opens Snip mode; translate comes later).
-const PLANNED_ACTIONS: &[&str] = &["translate", "ai_explain", "copy_text", "lens", "snip"];
+/// runs ai_explain and copy_text; snip opens Snip mode).
+const PLANNED_ACTIONS: &[&str] = &["ai_explain", "copy_text", "snip"];
 
 /// Is `id` an action `opencircle run` may start?
 fn known_action(id: &str) -> bool {

@@ -1,4 +1,4 @@
-//! Tray icon with "Circle to search", "Snip", "Settings…" and "Quit". A missing tray is not
+//! Tray icon with "Circle to search", "Snip", "Live translate on/off", "Settings…" and "Quit". A missing tray is not
 //! an error: the app keeps working through its shortcut and `opencircle capture`.
 use std::time::Instant;
 
@@ -57,14 +57,16 @@ fn linux_tray_missing() -> Option<&'static str> {
 fn build(tx: Triggers) -> Option<TrayIcon> {
     let circle = MenuItem::new("Circle to search", true, None);
     let snip = MenuItem::new("Snip", true, None);
+    let live = MenuItem::new("Live translate on/off", true, None);
     let settings = MenuItem::new("Settings…", true, None);
     let quit = MenuItem::new("Quit", true, None);
-    let menu = Menu::with_items(&[&circle, &snip, &settings, &quit])
+    let menu = Menu::with_items(&[&circle, &snip, &live, &settings, &quit])
         .map_err(|e| eprintln!("[opencircle] tray unavailable: {e}"))
         .ok()?;
-    let (circle, snip, settings, quit) = (
+    let (circle, snip, live, settings, quit) = (
         circle.id().clone(),
         snip.id().clone(),
+        live.id().clone(),
         settings.id().clone(),
         quit.id().clone(),
     );
@@ -77,6 +79,14 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
                 target: None,
             };
             crate::hotkey::trigger(&run, Instant::now())
+        } else if event.id == live {
+            let toggle = crate::config::QuickAction {
+                action: "translate".into(),
+                shortcut: String::new(),
+                target: crate::config::Target::FullScreen,
+                live: true,
+            };
+            Trigger::Quick(Instant::now(), toggle)
         } else if event.id == settings {
             Trigger::OpenSettings
         } else if event.id == quit {

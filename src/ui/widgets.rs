@@ -35,6 +35,20 @@ pub fn pill<'a, Message: 'a>(label: &'a str) -> Container<'a, Message> {
         .style(|_| glass(999.0))
 }
 
+/// The status pill of the live layer: like `pill`, but opaque and without a
+/// shadow (Windows keys the layer by colour: a see-through pill would be tinted).
+// ponytail: its anti-aliased round ends still blend a few key-coloured pixels.
+pub fn layer_pill<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a, Message> {
+    let palette = theme::current();
+    container(text(label).size(13).color(palette.text))
+        .padding([6, 16])
+        .style(move |_| container::Style {
+            background: Some(palette.window.into()),
+            border: Border::default().rounded(999),
+            ..container::Style::default()
+        })
+}
+
 /// Glass panel (20 px radius): action bar, toolbars, popovers, side panels.
 pub fn surface<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,

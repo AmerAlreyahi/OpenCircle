@@ -42,6 +42,14 @@ impl fmt::Debug for Setup {
 /// Reads the config and the key, encodes the crop. Blocking (file, keyring,
 /// PNG): call off the UI thread. `Err` = what to tell the user, with the steps.
 pub fn setup(crop: &Crop) -> Result<Setup, String> {
+    let (cfg, key) = credentials()?;
+    let png = super::encode_png(crop.width, crop.height, &crop.rgba)?;
+    Ok(Setup { cfg, key, png })
+}
+
+/// The provider settings and the key, checked. Blocking (file, keyring): call
+/// off the UI thread. `Err` = what to tell the user (first line), then the steps.
+pub fn credentials() -> Result<(AiConfig, Option<Secret>), String> {
     let cfg = crate::config::current().ai;
     let key = match secrets::get(cfg.provider) {
         Ok(key) => key.filter(|key| !key.is_empty()),
@@ -66,8 +74,7 @@ pub fn setup(crop: &Crop) -> Result<Setup, String> {
             steps(cfg.provider)
         ));
     }
-    let png = super::encode_png(crop.width, crop.height, &crop.rgba)?;
-    Ok(Setup { cfg, key, png })
+    Ok((cfg, key))
 }
 
 /// The exact steps to set the AI up by hand (until the Settings window does it).

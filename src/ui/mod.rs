@@ -1,6 +1,7 @@
 //! The iced daemon: owns the (pre-created, hidden) overlay window and its state.
 mod bar;
 mod edit;
+mod live_layer;
 mod onboarding;
 mod overlay;
 mod panel;
@@ -8,6 +9,7 @@ mod quick;
 mod settings;
 mod snip;
 pub mod theme;
+mod translate;
 mod tray;
 pub(crate) mod widgets;
 mod windows;
@@ -27,8 +29,9 @@ use iced::window::{self, Level, Mode};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
 use crate::actions::{self, Action, Crop, Run, copy, lens, save, text};
-use crate::config::{self, Target};
+use crate::config::{self, QuickAction, Target};
 use crate::editor::{self, Output};
+use crate::translate::pipeline::Cache;
 use crate::{Trigger, capture};
 use edit::Editing;
 use quick::{Quick, Start};
@@ -58,6 +61,9 @@ pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     iced::daemon(App::boot, App::update, App::view)
         .title(App::title)
         .font(widgets::ICON_FONT_BYTES)
+        // Arabic for the word card and the Text panel's translation
+        .font(include_bytes!("../../assets/fonts/NotoSansArabic.ttf").as_slice())
+        .theme(App::theme)
         .subscription(App::subscription)
         .run()
 }
@@ -87,6 +93,11 @@ enum Message {
     TextRead(Result<String, String>),
     /// The toast has been shown long enough.
     ToastDone,
+    /// From the translate session with this number (stale numbers are ignored).
+    Translate(u32, translate::Msg),
+    /// Alt went down / up (peek at the original under a translation).
+    Peek(bool),
+    Live(live_layer::Msg),
 }
 
 /// What the open overlay is for.
@@ -166,7 +177,17 @@ struct App {
     regions: Vec<(Point, Rectangle)>,
     /// A short status over the frame (copy text).
     toast: Option<&'static str>,
+    /// Translate in place on this overlay, and its number.
+    translate: Option<(u32, translate::Session)>,
+    translates: u32,
+    /// Translations by text, shared by one-shot and live mode.
+    cache: Arc<Cache>,
+    /// Live translate, while on.
+    live: Option<live_layer::Live>,
 }
+
+/// Translations kept for reuse (each a short text).
+const CACHE_SIZE: usize = 512;
 
 impl App {
     fn boot() -> (Self, Task<Message>) {
@@ -200,6 +221,10 @@ impl App {
             origin: Point::ORIGIN,
             regions: Vec::new(),
             toast: None,
+            translate: None,
+            translates: 0,
+            cache: Arc::new(Cache::new(CACHE_SIZE)),
+            live: None,
         };
         let start = app.windows.start().map(Message::Windows);
         (app, Task::batch([open.discard(), start]))
@@ -213,6 +238,19 @@ impl App {
                 .open(windows::Kind::Settings)
                 .map(Message::Windows),
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
+            Message::Trigger(Trigger::Quick(at, qa))
+                if qa.live && qa.action == actions::translate::ACTION.id =>
+            {
+                self.toggle_live(at)
+            }
+            Message::Live(msg) => self.on_live(msg),
+            Message::Translate(id, msg) => self.on_translate(id, msg),
+            Message::Peek(down) => {
+                if let Some((_, session)) = &mut self.translate {
+                    let _ = session.update(translate::Msg::Peek(down));
+                }
+                Task::none()
+            }
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..))
                 if self.frame.is_some() || self.capturing =>
             {
@@ -229,8 +267,7 @@ impl App {
                 }
                 match Quick::for_id(&qa.action) {
                     Some(q) => self.purpose = Purpose::Quick(q, qa.target),
-                    // ponytail: the lead wires translate with its pipeline.
-                    None => eprintln!("{} not wired yet; opening the overlay", qa.action),
+                    None => eprintln!("unknown action {}; opening the overlay", qa.action),
                 }
                 self.capture(at, None)
             }
@@ -419,6 +456,35 @@ impl App {
         {
             return Task::none();
         }
+        // Over a translation: a tap opens a block's word card, E / A are the
+        // card's; a new selection leaves the translation.
+        if let Some((id, session)) = &mut self.translate {
+            let id = *id;
+            match event {
+                overlay::Event::Key {
+                    letter: 'e',
+                    ctrl: false,
+                } if session.has_card() => {
+                    return self.on_translate(id, translate::Msg::Explain);
+                }
+                overlay::Event::Key {
+                    letter: 'a',
+                    ctrl: false,
+                } if session.has_card() => {
+                    return self.on_translate(id, translate::Msg::Ask);
+                }
+                overlay::Event::Key { .. } | overlay::Event::Enter => return Task::none(),
+                overlay::Event::Release if overlay::select(&self.stroke).is_none() => {
+                    let at = self.stroke.last().copied().unwrap_or(Point::ORIGIN);
+                    session.click(Point::new(at.x * self.scale, at.y * self.scale));
+                    self.drawing = false;
+                    self.stroke.clear();
+                    return Task::none();
+                }
+                overlay::Event::Release => self.translate = None,
+                _ => {}
+            }
+        }
         match event {
             overlay::Event::Press(p) => {
                 // A new selection: the panel and the edits were about the old one.
@@ -497,8 +563,10 @@ impl App {
     /// (so dialogs aren't hidden under it); a panel action opens its panel; Edit
     /// turns the bar into the editing toolbar. No selection yet = nothing to do.
     fn run(&mut self, action: &'static Action) -> Task<Message> {
-        if let Run::Edit = action.run {
-            return self.open_editor();
+        match action.run {
+            Run::Edit => return self.open_editor(),
+            Run::Translate => return self.start_translate(),
+            _ => {}
         }
         let Some(crop) = self.crop() else {
             return Task::none();
@@ -506,7 +574,7 @@ impl App {
         match action.run {
             Run::Finish(_) => self.finish(action, crop),
             Run::Panel(kind) => self.open_panel(kind, crop, None),
-            Run::Edit => Task::none(), // handled above
+            Run::Edit | Run::Translate => Task::none(), // handled above
         }
     }
 
@@ -815,17 +883,133 @@ impl App {
         self.purpose = Purpose::Search;
         self.edit = None;
         self.toast = None;
+        self.translate = None;
         self.hiding = Hiding::Empty;
         Task::none()
     }
 
+    /// Translate in place: the selection (or, with no selection left, the whole
+    /// frame) is translated on a thread, then swapped in.
+    fn start_translate(&mut self) -> Task<Message> {
+        let (Some(frame @ image::Handle::Rgba { width, height, .. }), Some(selection)) =
+            (&self.frame, self.selection)
+        else {
+            return Task::none();
+        };
+        let Some(area) = actions::crop_bounds(*width, *height, self.scale, selection.area) else {
+            return Task::none();
+        };
+        self.panel = None;
+        self.edit = None;
+        let models = text::models_present();
+        let (session, task) =
+            translate::Session::start(frame.clone(), area, self.cache.clone(), models);
+        if session.full() {
+            // nothing to outline: the translation is the whole screen
+            self.selection = None;
+            self.stroke.clear();
+        }
+        self.translates = self.translates.wrapping_add(1);
+        let id = self.translates;
+        self.translate = Some((id, session));
+        task.map(move |msg| Message::Translate(id, msg))
+    }
+
+    fn on_translate(&mut self, id: u32, msg: translate::Msg) -> Task<Message> {
+        let Some((_, session)) = self.translate.as_mut().filter(|(open, _)| *open == id) else {
+            return Task::none();
+        };
+        match msg {
+            translate::Msg::Close => self.close(),
+            translate::Msg::OpenSettings => {
+                let closing = self.close();
+                let settings = self.windows.open(windows::Kind::Settings);
+                closing.chain(settings.map(Message::Windows))
+            }
+            // The word card goes on as an Ask AI chat (its crop, its explanation).
+            translate::Msg::Ask => match session.take_chat() {
+                Some((crop, chat)) => {
+                    self.panels = self.panels.wrapping_add(1);
+                    let id = self.panels;
+                    let (panel, task) = panel::Panel::open_chat(crop, chat);
+                    self.panel = Some((id, panel));
+                    task.map(move |msg| Message::Panel(id, msg))
+                }
+                None => Task::none(),
+            },
+            msg => session
+                .update(msg)
+                .map(move |msg| Message::Translate(id, msg)),
+        }
+    }
+
+    /// Ctrl+Shift+L (or the tray): live translate on, or off again.
+    fn toggle_live(&mut self, at: Instant) -> Task<Message> {
+        if let Some(live) = self.live.take() {
+            eprintln!("[opencircle] live translate off");
+            return live.stop().map(Message::Live);
+        }
+        if live_layer::unsupported() {
+            eprintln!(
+                "[opencircle] live translate: Wayland has no layer over other apps; translating once"
+            );
+            return self.translate_once(at);
+        }
+        let (live, task) = live_layer::Live::start(self.cache.clone());
+        self.live = Some(live);
+        task.map(Message::Live)
+    }
+
+    fn on_live(&mut self, msg: live_layer::Msg) -> Task<Message> {
+        let Some(live) = &mut self.live else {
+            return Task::none();
+        };
+        let off = |app: &mut Self| match app.live.take() {
+            Some(live) => live.stop().map(Message::Live),
+            None => Task::none(),
+        };
+        match live.update(msg) {
+            live_layer::Outcome::Task(task) => task.map(Message::Live),
+            live_layer::Outcome::Off => off(self),
+            live_layer::Outcome::OneShot => {
+                let stopped = off(self);
+                stopped.chain(self.translate_once(Instant::now()))
+            }
+        }
+    }
+
+    /// The one-shot full-screen translate (Ctrl+Shift+T).
+    fn translate_once(&mut self, at: Instant) -> Task<Message> {
+        let once = QuickAction {
+            action: actions::translate::ACTION.id.into(),
+            shortcut: String::new(),
+            target: Target::FullScreen,
+            live: false,
+        };
+        self.update(Message::Trigger(Trigger::Quick(at, once)))
+    }
+
     fn title(&self, window: window::Id) -> String {
+        if self.live.as_ref().and_then(live_layer::Live::window) == Some(window) {
+            return "OpenCircle live translate".into();
+        }
         self.windows.title(window).to_string()
+    }
+
+    /// The live layer's see-through background; the rest follow the OS.
+    fn theme(&self, window: window::Id) -> Option<iced::Theme> {
+        let live = self.live.as_ref().and_then(live_layer::Live::window);
+        (live == Some(window)).then(live_layer::theme)
     }
 
     fn view(&self, window: window::Id) -> Element<'_, Message> {
         if let Some(page) = self.windows.view(window) {
             return page.map(Message::Windows);
+        }
+        if let Some(live) = &self.live
+            && live.window() == Some(window)
+        {
+            return live.view().map(Message::Live);
         }
         let Some(frame) = &self.frame else {
             return space().into();
@@ -844,10 +1028,12 @@ impl App {
             opening: self.opening,
             first_draw: &self.first_draw,
             hover: snip.is_some_and(|s| s.kind == snip::Kind::Window) && self.edit.is_none(),
+            dim: self.translate.is_none() || self.selection.is_some(),
         };
+        let translation = self.translate.as_ref().and_then(|(_, s)| s.image());
         // The frame is its own layer: iced draws a canvas's images above its shapes.
         let mut layers = stack![
-            image(frame.clone())
+            image(translation.unwrap_or(frame).clone())
                 .width(Fill)
                 .height(Fill)
                 .content_fit(ContentFit::Fill),
@@ -871,6 +1057,11 @@ impl App {
             panel
                 .view(self.screen)
                 .map(move |msg| Message::Panel(id, msg))
+        } else if let Some((id, session)) = &self.translate {
+            let id = *id;
+            session
+                .view(self.scale, self.screen)
+                .map(move |msg| Message::Translate(id, msg))
         } else if let Some(snip) = snip {
             snip.view().map(Message::Snip)
         } else if let Some(selection) = self.selection {
@@ -901,7 +1092,19 @@ impl App {
                 }) => Some(Message::Escape),
                 _ => None,
             });
-            Subscription::batch([triggers, escape])
+            // Alt held = the original under a translation.
+            let alt = iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+                    Some(Message::Peek(m.alt()))
+                }
+                _ => None,
+            });
+            let alt = if self.translate.is_some() {
+                alt
+            } else {
+                Subscription::none()
+            };
+            Subscription::batch([triggers, escape, alt])
         } else if self.hiding != Hiding::No {
             // One stream for both, so a resize is always seen before the frames after it.
             // Every message makes iced redraw, so frames keep coming while this runs.
@@ -975,6 +1178,10 @@ mod tests {
             origin: Point::ORIGIN,
             regions: Vec::new(),
             toast: None,
+            translate: None,
+            translates: 0,
+            cache: Arc::new(Cache::new(8)),
+            live: None,
         };
         let _ = app.close();
         app
@@ -1001,5 +1208,24 @@ mod tests {
         assert_ne!(app.hiding, Hiding::No);
         let _ = app.update(Message::Drawn);
         assert_eq!(app.hiding, Hiding::No);
+    }
+
+    #[test]
+    fn a_translation_ends_with_its_overlay() {
+        let mut app = closing_app();
+        let frame = image::Handle::from_rgba(40, 20, vec![0; 40 * 20 * 4]);
+        // no models: the session waits for consent (no thread starts)
+        let (session, _) =
+            translate::Session::start(frame.clone(), [0, 0, 40, 20], app.cache.clone(), false);
+        app.frame = Some(frame);
+        app.hiding = Hiding::No;
+        app.translate = Some((7, session));
+        let _ = app.update(Message::Translate(6, translate::Msg::Close));
+        assert!(app.frame.is_some(), "a stale session's message is ignored");
+        let _ = app.update(Message::Peek(true));
+        // declining the download closes the overlay and drops the session
+        let _ = app.update(Message::Translate(7, translate::Msg::Close));
+        assert!(app.translate.is_none() && app.frame.is_none());
+        assert_eq!(app.hiding, Hiding::Empty);
     }
 }

@@ -51,6 +51,9 @@ pub enum Msg {
     CopyText,
     /// Search the crop with Lens (from the Text panel).
     Search,
+    /// Translate the read text (Text panel), shown under it.
+    Translate,
+    Translated(Result<String, String>),
 }
 
 pub struct Panel {
@@ -58,8 +61,10 @@ pub struct Panel {
     state: State,
     /// The follow-up input's text.
     input: String,
-    /// The running stream or OCR; dropping the handle aborts it.
+    /// The running stream, OCR or translation; dropping the handle aborts it.
     work: Option<task::Handle>,
+    /// The Text panel's translation of the read text, once asked for.
+    translation: Option<Result<String, String>>,
 }
 
 enum State {
@@ -93,6 +98,7 @@ impl Panel {
             state: State::Lens(None),
             input: question.unwrap_or_default(),
             work: None,
+            translation: None,
         };
         let task = match kind {
             actions::Panel::Lens => background(move |tx| {
@@ -118,6 +124,16 @@ impl Panel {
                 })
             }
         };
+        (panel, task)
+    }
+
+    /// Ask AI, continuing `chat` (e.g. the translate word card's explanation).
+    pub fn open_chat(crop: Crop, mut chat: Chat) -> (Panel, Task<Msg>) {
+        chat.cancel(); // a stream still running belonged to the card; it stopped
+        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None);
+        if let State::Ask { chat: open, .. } = &mut panel.state {
+            *open = chat;
+        }
         (panel, task)
     }
 
@@ -207,6 +223,20 @@ impl Panel {
                 };
             }
             (State::Text(Reading::Done(content)), Msg::Edit(action)) => content.perform(action),
+            (State::Text(Reading::Done(content)), Msg::Translate) if self.work.is_none() => {
+                let text = content.text();
+                self.translation = None;
+                let (task, handle) = background(move |tx| {
+                    let _ = tx.unbounded_send(Msg::Translated(actions::translate::text(&text)));
+                })
+                .abortable();
+                self.work = Some(handle.abort_on_drop());
+                return task;
+            }
+            (State::Text(_), Msg::Translated(result)) => {
+                self.work = None;
+                self.translation = Some(result);
+            }
             _ => {}
         }
         Task::none()
@@ -255,7 +285,7 @@ impl Panel {
         let area = place(screen);
         let (action, body) = match &self.state {
             State::Lens(status) => (&actions::lens::ACTION, self.lens_view(status.as_ref())),
-            State::Text(reading) => (&actions::text::ACTION, text_view(reading)),
+            State::Text(reading) => (&actions::text::ACTION, self.text_view(reading)),
             State::Ask { thumb, setup, chat } => (
                 &actions::ask::ACTION,
                 self.ask_view(thumb, setup.as_ref(), chat),
@@ -365,58 +395,83 @@ impl Panel {
     }
 }
 
-fn text_view(reading: &Reading) -> Element<'_, Msg> {
-    let no_hint = String::new;
-    match reading {
-        Reading::Consent => column![
-            widgets::body(
-                "Download the text-recognition model (about 20 MB) from GitHub? Nothing else is sent."
+/// Asks before the one-time OCR model download (Text panel, translate).
+pub(super) fn consent<'a, M: Clone + 'a>(download: M, cancel: M) -> Element<'a, M> {
+    column![
+        widgets::body(
+            "Download the text-recognition model (about 20 MB) from GitHub? Nothing else is sent."
+        ),
+        row![
+            widgets::text_button(
+                '\u{e0b6}', // download
+                "Download",
+                String::new(),
+                true,
+                download
             ),
-            row![
-                widgets::text_button(
-                    '\u{e0b6}', // download
-                    "Download",
-                    no_hint(),
-                    true,
-                    Msg::Download
-                ),
-                widgets::text_button(widgets::CLOSE, "Cancel", no_hint(), false, Msg::Cancel),
+            widgets::text_button(widgets::CLOSE, "Cancel", String::new(), false, cancel),
+        ]
+        .spacing(8),
+    ]
+    .spacing(16)
+    .into()
+}
+
+impl Panel {
+    fn text_view<'a>(&'a self, reading: &'a Reading) -> Element<'a, Msg> {
+        let no_hint = String::new;
+        match reading {
+            Reading::Consent => consent(Msg::Download, Msg::Cancel),
+            Reading::Downloading(done) => column![
+                widgets::body("Downloading the text-recognition model…"),
+                widgets::progress(*done),
+                widgets::caption(format!("{:.0} %", done * 100.0)),
             ]
-            .spacing(8),
-        ]
-        .spacing(16)
-        .into(),
-        Reading::Downloading(done) => column![
-            widgets::body("Downloading the text-recognition model…"),
-            widgets::progress(*done),
-            widgets::caption(format!("{:.0} %", done * 100.0)),
-        ]
-        .spacing(10)
-        .into(),
-        Reading::Busy => widgets::caption("Reading the text…").into(),
-        Reading::Done(content) => column![
-            widgets::editor(content, Msg::Edit),
-            row![
-                widgets::text_button(
-                    actions::copy::ACTION.icon,
-                    "Copy",
-                    no_hint(),
-                    true,
-                    Msg::CopyText
-                ),
-                widgets::text_button(
-                    actions::lens::ACTION.icon,
-                    "Search",
-                    no_hint(),
-                    false,
-                    Msg::Search
-                ),
-            ]
-            .spacing(8),
-        ]
-        .spacing(12)
-        .into(),
-        Reading::Failed(e) => widgets::error(e).into(),
+            .spacing(10)
+            .into(),
+            Reading::Busy => widgets::caption("Reading the text…").into(),
+            Reading::Done(content) => {
+                let translate = &actions::translate::ACTION;
+                let mut body = column![widgets::editor(content, Msg::Edit)].spacing(12);
+                body = match &self.translation {
+                    _ if self.work.is_some() => body.push(widgets::caption("Translating…")),
+                    Some(Ok(text)) => {
+                        body.push(widgets::scroll(widgets::body(text).width(Fill)).height(Fill))
+                    }
+                    Some(Err(e)) => body.push(widgets::error(e)),
+                    None => body,
+                };
+                body.push(
+                    row![
+                        widgets::text_button(
+                            actions::copy::ACTION.icon,
+                            "Copy",
+                            no_hint(),
+                            true,
+                            Msg::CopyText
+                        ),
+                        widgets::text_button(
+                            actions::lens::ACTION.icon,
+                            "Search",
+                            no_hint(),
+                            false,
+                            Msg::Search
+                        ),
+                        widgets::text_button(
+                            translate.icon,
+                            translate.label,
+                            no_hint(),
+                            false,
+                            Msg::Translate
+                        ),
+                    ]
+                    .spacing(8)
+                    .wrap(),
+                )
+                .into()
+            }
+            Reading::Failed(e) => widgets::error(e).into(),
+        }
     }
 }
 

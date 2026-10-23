@@ -17,6 +17,8 @@ capture the screen and show it.
 | `ui/bar.rs` | The floating action bar: the action registry as buttons, placed under/above the selection. |
 | `ui/edit.rs` | Edit in place: the editor (`crate::editor`) over the selection at its own pixels (zoom 1/scale), its toolbar where the bar was; Back keeps the edits (shown flattened) and later actions get the edited image. Also the fitted editor for a scrolling capture. |
 | `ui/quick.rs` | Quick actions: id → what runs (registry action, copy_text, ai_explain), target → area (full_screen, circle, last_region per monitor; `window` is snip-only and counts as circle elsewhere). |
+| `ui/translate.rs` | Translate in place (Ctrl+Shift+T = full screen; `R` in the bar = the selection): `Session` runs `translate::pipeline` on a thread with `actions::translate::deps()`, swaps the translated frame in only when every block is ready (an error leaves the original), Alt = peek, a tap on a block = word card (Explain = one streamed AI call with the block's text + crop; `A` = Ask AI panel with that chat). Missing OCR models: the Text panel's consent prompt (`panel::consent`). |
+| `ui/live_layer.rs` | Live translate (Ctrl+Shift+L, tray item): a monitor-sized, always-on-top window made click-through by `live::prepare_layer`, see-through except the patches (`theme::LAYER_CLEAR`); a thread captures about once a second and runs `translate::live::Live::step`, one step at a time. Off = stop flag + window closed. Wayland / no layer: one-shot instead. |
 | `ui/snip.rs` | Snip mode (`opencircle run snip`, tray; default keys Print Screen / Alt+ / Ctrl+ = the circle / window / full_screen target of the three default `snip` quick actions): Region · Window · Full · Scrolling switch, then the editor; scrolling runs on a thread while the overlay is a progress pill beside the area. |
 | `ui/panel.rs` | Result panels (Search, Text, Ask AI): one `surface` docked right (bottom sheet on narrow screens); their state, views and background work. |
 | `ui/widgets.rs` | The shared components (`pill`, `surface`, `text_button`, `icon_button`, `chip`, `input`, `editor`, `progress`, `bubble`, `scroll`, text styles, `with_tip`). Only place that styles a widget. |
@@ -24,7 +26,7 @@ capture the screen and show it.
 | `ui/tray.rs` | Tray icon and menu (Circle to search, Settings…, Quit). Without libayatana-appindicator (Linux) it logs one line and the app runs on shortcut / CLI. |
 | `ui/windows.rs` | The normal windows beside the overlay: Settings and first-run Onboarding (one of each, a second request focuses it), their close handling, the OS-theme feed, and `apply(cfg)` after a save. Also the pinned images (editor Pin / `Ctrl+P`): any number of borderless always-on-top windows, each owning its image (drag, scroll = zoom, hover bar Copy / Save / Close, `Esc` or double-click closes), and the Settings side effects (folder picker, project link). |
 | `ui/settings.rs`, `ui/onboarding.rs` | The two screens as self-contained components (`State`, `update` returning an `Outcome`, `view`). |
-| `actions/mod.rs` | The action registry (`ACTIONS`), `Run` (finish or open a panel), `crop`, `encode_png`, `write_png`. One file per action: `lens.rs` (page + its minimum life), `ask.rs` (setup, `Chat`, streaming), `text.rs` (consent check, OCR, line joining), `copy.rs`, `save.rs`. |
+| `actions/mod.rs` | The action registry (`ACTIONS`), `Run` (finish or open a panel), `crop`, `encode_png`, `write_png`. One file per action: `lens.rs` (page + its minimum life), `ask.rs` (setup, `Chat`, streaming), `text.rs` (consent check, OCR, line joining), `translate.rs` (the pipeline's deps from config + keyring; the Text panel's Translate), `copy.rs`, `save.rs`. |
 | `assets/lucide/` | Icon font: a subset of Lucide (ISC, see its LICENSE) with only the glyphs we use. |
 
 ## Data flow
@@ -86,6 +88,7 @@ if it is theme-independent). Nowhere else.
 - `OPENCIRCLE_TEST_FRAME=<8-bit RGBA PNG>`: capture returns this image instead of the screen.
 - `OPENCIRCLE_TEST_SCROLL=<tall PNG>`: a scrolling snip reads this page (100 px per wheel notch)
   instead of scrolling the screen. With the editor open, its Esc (Back) takes the test shot.
+- `OPENCIRCLE_TEST_LIVE_SHOT=<out.png>`: live translate saves its layer once the first patches are drawn.
 - `OPENCIRCLE_TEST_SHOT=<out.png>`: Esc saves what the overlay shows before closing
   (shot ~150 ms after Esc, with no message in between: a relayout would drop the
   text editor's drawn text from the shot).

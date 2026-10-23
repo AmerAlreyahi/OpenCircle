@@ -20,6 +20,7 @@
 //! target = "ar"                     # language code to translate into
 //! engine = "ai"                     # ai (the only engine; anything else warns and uses ai)
 //! live_interval_ms = 1000           # live translate repeats every N ms (500-5000)
+//! live_note_shown = false           # the one-time live-mode note was shown
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
@@ -146,6 +147,9 @@ pub struct TranslateConfig {
     pub engine: Engine,
     /// Live translate repeats every this many ms (`LIVE_INTERVAL_MS`).
     pub live_interval_ms: u32,
+    /// Live mode's one-time note (games must be borderless) was shown.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub live_note_shown: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
@@ -182,6 +186,7 @@ impl Default for TranslateConfig {
             target: DEFAULT_TRANSLATE_TARGET.to_string(),
             engine: Engine::Ai,
             live_interval_ms: DEFAULT_LIVE_INTERVAL_MS,
+            live_note_shown: false,
         }
     }
 }
@@ -369,6 +374,7 @@ impl Config {
                     })
                 },
             );
+            c.translate.live_note_shown = get(t, "translate.", "live_note_shown", false, &mut w);
         }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
@@ -643,6 +649,7 @@ mod tests {
         c.general.default_action = DefaultAction::Copy;
         c.general.save_folder = std::env::temp_dir().to_string_lossy().into_owned();
         c.translate.live_interval_ms = 2500;
+        c.translate.live_note_shown = true;
         c.quick_actions.pop();
         c.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();

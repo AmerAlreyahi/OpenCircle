@@ -124,6 +124,8 @@ pub struct Overlay<'a> {
     pub first_draw: &'a Cell<Option<(Instant, Size)>>,
     /// Report moves without a button down too (snip's Window mode).
     pub hover: bool,
+    /// Dim the frame (not over a full-screen translation).
+    pub dim: bool,
 }
 
 /// The pointer as the canvas saw it, event by event. Events can arrive in one batch
@@ -227,7 +229,7 @@ impl canvas::Program<Event> for Overlay<'_> {
                     rule: fill::Rule::EvenOdd,
                 },
             );
-        } else {
+        } else if self.dim {
             frame.fill_rectangle(Point::ORIGIN, screen.size(), theme::DIM_IDLE);
         }
 

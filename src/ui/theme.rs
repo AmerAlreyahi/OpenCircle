@@ -73,6 +73,16 @@ pub const ON_ACCENT: Color = Color::from_rgb8(0x10, 0x10, 0x1c);
 pub const DIM_IDLE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.12);
 pub const DIM_OUTSIDE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
 
+/// The live-translate layer's background: see-through where no patch is.
+/// Windows keys out `live::COLOUR_KEY`; elsewhere the window is transparent.
+#[cfg(windows)]
+pub const LAYER_CLEAR: Color = {
+    let [r, g, b] = crate::live::COLOUR_KEY;
+    Color::from_rgb8(r, g, b)
+};
+#[cfg(not(windows))]
+pub const LAYER_CLEAR: Color = Color::TRANSPARENT;
+
 /// The editor's colour picker (annotations keep their colour in both themes:
 /// they belong to the image, not the UI). The first is the default.
 pub const ANNOTATION: [Color; 12] = [
