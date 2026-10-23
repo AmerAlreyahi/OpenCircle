@@ -47,16 +47,18 @@ enum Hiding {
     No,
     /// Wait for one empty full-size frame (drops the cached frame).
     Empty,
-    /// Left full-screen and asked for 1x1; wait for the resize to land.
-    Shrinking,
+    /// Left full-screen and asked for 1x1; wait for the resize to land (frames so far).
+    Shrinking(u8),
     /// Wait for one frame at the small size (shrinks the buffers), then hide.
     Shrunk,
 }
 
 /// Below this (logical px) the window counts as shrunk.
-// ponytail: a WM that refuses to shrink this far would leave the window up; add a
-// frame-count fallback if one shows up.
 const SHRUNK: f32 = 64.0;
+/// Hide anyway after this many frames without the shrink (a WM may refuse it): a
+/// window left on top of the screen would be far worse than unshrunk buffers.
+// ponytail: fixed frame count, not a timer; frames come back to back while closing.
+const SHRINK_FRAMES: u8 = 10;
 
 struct App {
     overlay: window::Id,
@@ -103,21 +105,33 @@ impl App {
             // restores a placement saved while visible: shows it again), then shrink.
             // open() resizes it back before showing.
             Message::Drawn if self.hiding == Hiding::Empty => {
-                self.hiding = Hiding::Shrinking;
+                self.hiding = Hiding::Shrinking(0);
                 window::set_mode(self.overlay, Mode::Windowed)
                     .chain(window::resize(self.overlay, Size::new(1.0, 1.0)))
             }
             Message::Resized(size)
-                if self.hiding == Hiding::Shrinking && size.width.max(size.height) < SHRUNK =>
+                if matches!(self.hiding, Hiding::Shrinking(_))
+                    && size.width.max(size.height) < SHRUNK =>
             {
                 self.hiding = Hiding::Shrunk;
                 Task::none()
             }
-            Message::Drawn if self.hiding == Hiding::Shrunk => {
+            Message::Drawn
+                if matches!(
+                    self.hiding,
+                    Hiding::Shrunk | Hiding::Shrinking(SHRINK_FRAMES..)
+                ) =>
+            {
                 self.hiding = Hiding::No;
                 window::set_mode(self.overlay, Mode::Hidden)
             }
-            Message::Drawn | Message::Resized(_) => Task::none(),
+            Message::Drawn => {
+                if let Hiding::Shrinking(frames) = &mut self.hiding {
+                    *frames += 1;
+                }
+                Task::none()
+            }
+            Message::Resized(_) => Task::none(),
             Message::TestShot(shot) => {
                 save_test_shot(&shot);
                 self.close()
@@ -256,4 +270,46 @@ fn save_test_shot(shot: &window::Screenshot) {
 
 fn triggers() -> impl Stream<Item = Trigger> {
     stream::iter(TRIGGERS.lock().unwrap().take()).flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn closing_app() -> App {
+        let mut app = App {
+            overlay: window::Id::unique(),
+            frame: None,
+            stroke: Vec::new(),
+            drawing: false,
+            selection: None,
+            first_draw: Cell::new(None),
+            hiding: Hiding::No,
+        };
+        let _ = app.close();
+        app
+    }
+
+    #[test]
+    fn close_shrinks_then_hides() {
+        let mut app = closing_app();
+        let _ = app.update(Message::Drawn);
+        let _ = app.update(Message::Drawn); // a full-size frame before the resize lands
+        let _ = app.update(Message::Resized(Size::new(3440.0, 1440.0)));
+        assert_eq!(app.hiding, Hiding::Shrinking(1));
+        let _ = app.update(Message::Resized(Size::new(1.0, 1.0)));
+        let _ = app.update(Message::Drawn);
+        assert_eq!(app.hiding, Hiding::No);
+    }
+
+    #[test]
+    fn close_hides_even_if_the_window_never_shrinks() {
+        let mut app = closing_app();
+        for _ in 0..=SHRINK_FRAMES {
+            let _ = app.update(Message::Drawn);
+        }
+        assert_ne!(app.hiding, Hiding::No);
+        let _ = app.update(Message::Drawn);
+        assert_eq!(app.hiding, Hiding::No);
+    }
 }
