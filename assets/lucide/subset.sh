@@ -17,6 +17,21 @@ ICONS=$(printf '%s,' \
   U+E197 `# type` \
   U+E103 `# languages` \
   U+E1F8 `# pencil` \
+  U+E04C `# arrow-left (editor: back)` \
+  U+E1C2 `# mouse-pointer-2 (select)` \
+  U+E16A `# square (rectangle)` \
+  U+E07A `# circle (ellipse)` \
+  U+E497 `# move-up-right (arrow)` \
+  U+E133 `# pen-line (pen)` \
+  U+E0F7 `# highlighter` \
+  U+E1D0 `# list-ordered (numbered step)` \
+  U+E503 `# grid-2x2 (blur)` \
+  U+E29D `# focus (spotlight)` \
+  U+E11A `# message-square (callout)` \
+  U+E1B5 `# zoom-in (magnifier)` \
+  U+E0AF `# crop` \
+  U+E2A0 `# undo-2` \
+  U+E29F `# redo-2` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'
