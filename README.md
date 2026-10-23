@@ -5,61 +5,96 @@
 <h1 align="center">OpenCircle</h1>
 
 <p align="center">
-  <b>The open-source alternative to Google's Circle to Search — for Windows and Linux.</b><br>
-  Circle anything on your screen to search it, translate it in place, ask AI about it, or snip and annotate it.<br>
+  <b>The open-source alternative to Circle to Search for Windows and Linux.</b><br>
+  Circle anything on your screen to search it, read it, translate it in place, ask an AI about it, or snip and annotate it.<br>
   Fast, private and lightweight.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7a6cf0"></a>
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-4fc9e0">
-  <img alt="Status" src="https://img.shields.io/badge/status-early%20development-ff6b4a">
 </p>
-
-> **Status:** early development. There is no release yet; the features below
-> are what the first version (v0.1) is being built to do.
 
 <p align="center">
   <img src="gallery/00-translate-before-after.png" alt="Full-screen translate: before and after" width="900"><br>
-  <sub>Design concept — the original text is replaced in place. More in the <a href="gallery/README.md">gallery</a>.</sub>
+  <sub>Design concept of in-place translation. More in the <a href="gallery/README.md">gallery</a>.</sub>
 </p>
 
 ## What it does
 
-Android has Circle to Search; the PC never got it. OpenCircle brings that
-experience to Windows and Linux — free, open source and private. Press a
-shortcut. The screen freezes. Circle, drag or tap anything — text, images,
-video frames, games — and choose what to do with it.
+Android has Circle to Search; the PC never got it. Press a shortcut and the
+screen freezes. Circle, drag or tap anything (text, images, video frames,
+games) and choose what to do with it.
 
-- **Translate the whole screen, in place** — every piece of text is replaced
-  where it stands, in the same colours and size, as if the app or game shipped
-  in your language. A live mode keeps translating while you play. Hold `Alt`
-  to peek at the original; click a word for its meaning in context.
-- **Ask AI** — about what you circled, with follow-up questions. Use Claude,
-  OpenAI, Gemini, or a local model through Ollama with your own key or none.
-- **Search with Google Lens** — opens the results in your own browser. No
-  third-party image hosts in between.
-- **Copy text** from anything, even images and videos, read offline.
-- **Snip and edit** — region, window, full-screen and scrolling
-  screenshots. Any capture opens in the editor: blur private details, add
-  smart shapes, curved arrows, text, callouts, numbered steps, spotlight,
-  highlighter and magnifier; then copy, save or pin it to the screen.
-- **Quick actions** — give any action its own shortcut and skip the menu
-  (for example `Ctrl+Shift+T` translates the screen at once).
+- **Translate in place, built for games.** Every piece of text is erased and
+  redrawn in your language where it stood, with matching colour and size, not
+  a box laid on top. Arabic and many more target languages. A live mode keeps
+  translating while you play (Windows and X11). Hold `Alt` to peek at the
+  original; click a block for its meaning in context.
+  See [Translate](docs/translate.md).
+- **Search with Google Lens in your own browser.** The picture goes from your
+  browser straight to Lens. No image-hosting service in between.
+- **Read text from anything.** Copy text out of images, videos and games. OCR
+  runs on your PC, offline, after a one-time download of about 20 MB.
+- **Ask AI about what you circled**, with follow-up questions. Bring your own
+  key: Claude, or any OpenAI-compatible service, including a local model with
+  Ollama or LM Studio, or OpenRouter. See [AI setup](docs/ai-setup.md).
+- **Snip and annotate.** Region, window, full-screen and scrolling captures.
+  Smart shapes, curved arrows, callouts, numbered steps, text, highlighter,
+  spotlight, magnifier and blur that cannot be reversed. Copy or save.
+  See [Snip and annotate](docs/snip-and-annotate.md).
+- **Quick-action shortcuts.** Give an action its own global shortcut and skip
+  the menu. See [Shortcuts](docs/shortcuts.md).
 - **Light, dark and system themes.**
 
 ## Private by design
 
 - Nothing leaves your computer until you choose an action.
 - No accounts, no telemetry, no image-hosting services.
-- API keys are kept in your system's password store, never in plain files.
-- Text reading (OCR) runs on your machine.
+- API keys live in your operating system's keyring, never in a file.
+- Temporary files are deleted when you are done.
+
+Details: [Privacy](docs/privacy.md).
 
 ## Lightweight
 
-A single native program written in Rust — no browser engine inside. The
-target is under 40 MB of memory while it waits in the tray, and under
-150 ms from shortcut to frozen screen.
+One native program written in Rust, with no browser engine inside. It uses
+about 20–30 MB of RAM while it waits in the tray in our tests (Windows and
+Linux). Reading text starts a short-lived helper process that uses more memory
+while it works and exits afterwards.
+
+## Install
+
+Download from the [Releases](https://github.com/AmerAlreyahi/OpenCircle/releases)
+page:
+
+| System | Files |
+|---|---|
+| Windows 10 / 11 | `.exe` installer (NSIS) or `.msi` |
+| Linux | `.AppImage`, `.deb`, `.rpm` |
+
+Verify a download with `SHA256SUMS.txt` from the same release:
+
+```bash
+sha256sum -c SHA256SUMS.txt --ignore-missing
+```
+
+**Windows SmartScreen.** Binaries are not code-signed (a certificate costs
+money and the project is free), so Windows may show "Windows protected your
+PC". Click **More info**, then **Run anyway**. You or your organisation can
+sign the installer with your own certificate: see [Signing](docs/signing.md).
+
+**Linux runtime libraries.** The `.deb` and `.rpm` pull in what is needed
+(GTK 3, AppIndicator, X11/xcb, xkbcommon, Wayland client libraries and
+`xdg-desktop-portal`). The AppImage needs the same libraries on the host.
+Without AppIndicator the tray icon is missing but the app still runs from its
+shortcuts and the command line. See [Linux notes](docs/linux-notes.md).
+
+## First run
+
+OpenCircle starts in the tray and shows a short welcome: your shortcut, an
+optional AI provider, and a theme. Press `Ctrl+Shift+Space`, circle something,
+and pick an action. [Getting started](docs/getting-started.md) walks through it.
 
 ## Default shortcuts
 
@@ -68,34 +103,24 @@ target is under 40 MB of memory while it waits in the tray, and under
 | Circle to search | `Ctrl+Shift+Space` |
 | Translate the full screen | `Ctrl+Shift+T` |
 | Live translate on / off | `Ctrl+Shift+L` |
-| Circle → explain with AI | `Ctrl+Shift+E` |
-| Circle → copy text | `Ctrl+Shift+X` |
-| Snip a region | `Print Screen` |
-| Scrolling snip | `Ctrl+Print Screen` |
+| Circle, then explain with AI | `Ctrl+Shift+E` |
+| Circle, then copy text | `Ctrl+Shift+X` |
 
-All shortcuts can be changed in Settings. On Wayland, the desktop asks once
-to allow them; where it can't, bind `opencircle capture` in your desktop's
-keyboard settings.
+All of them can be changed in Settings. Snip mode opens from the tray menu or
+with `opencircle run snip`, and can be given a shortcut. On Wayland, the
+desktop asks once to allow shortcuts; where it cannot, bind the commands in
+your desktop's keyboard settings. Full list: [Shortcuts](docs/shortcuts.md).
 
 ## Platforms
 
-- **Windows** 10 and 11
-- **Linux** — X11 and Wayland (GNOME, KDE Plasma, Hyprland, Sway). Live
-  translate and scrolling capture depend on what the Wayland compositor
-  allows.
+- **Windows** 10 and 11.
+- **Linux** on X11 and Wayland. On Wayland, global shortcuts need a desktop
+  with the GlobalShortcuts portal (GNOME 48+, KDE Plasma 6); elsewhere you bind
+  `opencircle capture` yourself. Some features depend on what the compositor
+  allows. See [Linux notes](docs/linux-notes.md).
 
 Games must run in borderless or windowed mode for live translate: no app can
 draw over exclusive fullscreen.
-
-## Install
-
-Releases will be published on the [Releases](../../releases) page:
-Windows `.exe` / `.msi`, Linux `.AppImage` / `.deb` / `.rpm`, with a
-`SHA256SUMS.txt` to verify downloads.
-
-Binaries are not code-signed, so Windows SmartScreen may warn on first run
-("More info" → "Run anyway"). Organisations can sign the installer with their
-own certificate before distributing it.
 
 ## Build from source
 
@@ -110,6 +135,19 @@ Linux build dependencies (Debian/Ubuntu):
 ```bash
 sudo apt-get install libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libgtk-3-dev libxdo-dev
 ```
+
+[ARCHITECTURE.md](ARCHITECTURE.md) describes how the code is organised.
+
+## Guides
+
+[Getting started](docs/getting-started.md) ·
+[Shortcuts](docs/shortcuts.md) ·
+[AI setup](docs/ai-setup.md) ·
+[Translate](docs/translate.md) ·
+[Snip and annotate](docs/snip-and-annotate.md) ·
+[Privacy](docs/privacy.md) ·
+[Linux notes](docs/linux-notes.md) ·
+[Signing](docs/signing.md)
 
 ## Contributing
 
