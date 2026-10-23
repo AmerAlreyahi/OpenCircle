@@ -35,9 +35,28 @@ enum Message {
     Trigger(Trigger),
     Overlay(overlay::Event),
     TestShot(window::Screenshot),
-    /// A frame was drawn while closing: the empty overlay is on screen, hide it now.
+    /// While closing: a frame was drawn / the window was resized (see `Hiding`).
     Drawn,
+    Resized(Size),
 }
+
+/// Closing steps. The renderer frees the frame cache and resizes its buffers only
+/// when it draws, and a hidden window never draws, so shrink first, then hide.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Hiding {
+    No,
+    /// Wait for one empty full-size frame (drops the cached frame).
+    Empty,
+    /// Left full-screen and asked for 1x1; wait for the resize to land.
+    Shrinking,
+    /// Wait for one frame at the small size (shrinks the buffers), then hide.
+    Shrunk,
+}
+
+/// Below this (logical px) the window counts as shrunk.
+// ponytail: a WM that refuses to shrink this far would leave the window up; add a
+// frame-count fallback if one shows up.
+const SHRUNK: f32 = 64.0;
 
 struct App {
     overlay: window::Id,
@@ -48,8 +67,7 @@ struct App {
     selection: Option<Rectangle>,
     /// Trigger time + expected size of the full-screen frame not drawn yet (latency log).
     first_draw: Cell<Option<(Instant, Size)>>,
-    /// Closing: waiting for one empty frame so the renderer drops its frame cache.
-    hiding: bool,
+    hiding: Hiding,
 }
 
 impl App {
@@ -70,7 +88,7 @@ impl App {
             drawing: false,
             selection: None,
             first_draw: Cell::new(None),
-            hiding: false,
+            hiding: Hiding::No,
         };
         (app, open.discard())
     }
@@ -81,17 +99,25 @@ impl App {
             Message::Trigger(Trigger::Capture(_)) if self.frame.is_some() => Task::none(),
             Message::Trigger(Trigger::Capture(at)) => self.open(at),
             Message::Overlay(event) => self.on_overlay(event),
-            Message::Drawn if self.hiding => {
-                self.hiding = false;
-                // Leave full-screen while still shown, then hide: on Windows, leaving it
-                // while hidden restores a placement saved while visible (shows it again).
+            // Leave full-screen while still shown (on Windows, leaving it while hidden
+            // restores a placement saved while visible: shows it again), then shrink.
+            // open() resizes it back before showing.
+            Message::Drawn if self.hiding == Hiding::Empty => {
+                self.hiding = Hiding::Shrinking;
                 window::set_mode(self.overlay, Mode::Windowed)
-                    .chain(window::set_mode(self.overlay, Mode::Hidden))
-                    // Shrink while hidden so the renderer drops its monitor-sized buffers
-                    // (open() resizes it back before showing).
                     .chain(window::resize(self.overlay, Size::new(1.0, 1.0)))
             }
-            Message::Drawn => Task::none(),
+            Message::Resized(size)
+                if self.hiding == Hiding::Shrinking && size.width.max(size.height) < SHRUNK =>
+            {
+                self.hiding = Hiding::Shrunk;
+                Task::none()
+            }
+            Message::Drawn if self.hiding == Hiding::Shrunk => {
+                self.hiding = Hiding::No;
+                window::set_mode(self.overlay, Mode::Hidden)
+            }
+            Message::Drawn | Message::Resized(_) => Task::none(),
             Message::TestShot(shot) => {
                 save_test_shot(&shot);
                 self.close()
@@ -120,7 +146,7 @@ impl App {
         ));
         let size = Size::new(frame.width as f32, frame.height as f32) * (1.0 / frame.scale);
         self.first_draw.set(Some((at, size)));
-        self.hiding = false;
+        self.hiding = Hiding::No;
         let origin = Point::new(frame.x as f32 / frame.scale, frame.y as f32 / frame.scale);
         // Place and size the hidden window to cover the monitor BEFORE set_mode shows
         // it: iced makes it visible before going full-screen, so whatever is shown
@@ -156,14 +182,13 @@ impl App {
         Task::none()
     }
 
-    /// Frees the frame, then hides the window after one empty frame is drawn: the
-    /// renderer only drops its cached copy of the frame on a draw without it.
+    /// Frees the frame; the window is shrunk and hidden in steps (see `Hiding`).
     fn close(&mut self) -> Task<Message> {
         self.frame = None;
         self.stroke = Vec::new();
         self.selection = None;
         self.drawing = false;
-        self.hiding = true;
+        self.hiding = Hiding::Empty;
         Task::none()
     }
 
@@ -191,8 +216,15 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         let triggers = Subscription::run(triggers).map(Message::Trigger);
-        if self.hiding {
-            Subscription::batch([triggers, window::frames().map(|_| Message::Drawn)])
+        if self.hiding != Hiding::No {
+            // One stream for both, so a resize is always seen before the frames after it.
+            // Every message makes iced redraw, so frames keep coming while this runs.
+            let steps = iced::event::listen_raw(|event, _, _| match event {
+                iced::Event::Window(window::Event::RedrawRequested(_)) => Some(Message::Drawn),
+                iced::Event::Window(window::Event::Resized(size)) => Some(Message::Resized(size)),
+                _ => None,
+            });
+            Subscription::batch([triggers, steps])
         } else {
             triggers
         }
