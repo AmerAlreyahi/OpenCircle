@@ -250,6 +250,7 @@ mod tests {
         ));
     }
 
+    #[cfg(target_os = "linux")]
     fn rss() -> String {
         std::fs::read_to_string("/proc/self/status")
             .ok()
@@ -258,6 +259,7 @@ mod tests {
     }
 
     /// Peak RSS of the largest finished child process, in MB (Linux).
+    #[cfg(target_os = "linux")]
     fn child_peak_mb() -> i64 {
         let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
         // SAFETY: getrusage only writes into the struct we pass.

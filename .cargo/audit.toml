@@ -1,0 +1,7 @@
+# cargo-audit settings (also read by rustsec/audit-check in CI).
+[advisories]
+# zip 8.6 comes only through oar-ocr (which requires ^8.6, so 9.x can't be used).
+# All three advisories are in ZipArchive::extract / ZipStreamReader::extract; oar-ocr
+# only opens an archive and reads one entry by name (src/indra/lm.rs, a language-model
+# loader OpenCircle doesn't use) and never extracts. Drop these when oar-ocr moves to zip 9.
+ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"]
