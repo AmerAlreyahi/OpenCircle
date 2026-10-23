@@ -125,7 +125,7 @@ jobs:
           echo "== direct NEEDED libraries and their packages =="
           for lib in $(readelf -d "$bin" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'); do
             path=$(ldconfig -p | awk -v l="$lib" '$1==l {print $NF; exit}')
-            echo "$lib -> $(dpkg -S "${path:-$lib}" 2>/dev/null | head -1 | cut -d: -f1)"
+            echo "$lib -> $(dpkg -S "$(readlink -f "${path:-$lib}")" 2>/dev/null | head -1 | cut -d: -f1)"
           done
           echo "== dlopened libraries =="
           strings "$bin" | grep -oE 'lib[A-Za-z0-9_+-]+\.so\.[0-9]+' | sort -u
