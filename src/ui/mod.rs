@@ -35,6 +35,8 @@ enum Message {
     Trigger(Trigger),
     Overlay(overlay::Event),
     TestShot(window::Screenshot),
+    /// A frame was drawn while closing: the empty overlay is on screen, hide it now.
+    Drawn,
 }
 
 struct App {
@@ -46,6 +48,8 @@ struct App {
     selection: Option<Rectangle>,
     /// Trigger time + expected size of the full-screen frame not drawn yet (latency log).
     first_draw: Cell<Option<(Instant, Size)>>,
+    /// Closing: waiting for one empty frame so the renderer drops its frame cache.
+    hiding: bool,
 }
 
 impl App {
@@ -66,6 +70,7 @@ impl App {
             drawing: false,
             selection: None,
             first_draw: Cell::new(None),
+            hiding: false,
         };
         (app, open.discard())
     }
@@ -76,6 +81,11 @@ impl App {
             Message::Trigger(Trigger::Capture(_)) if self.frame.is_some() => Task::none(),
             Message::Trigger(Trigger::Capture(at)) => self.open(at),
             Message::Overlay(event) => self.on_overlay(event),
+            Message::Drawn if self.hiding => {
+                self.hiding = false;
+                window::set_mode(self.overlay, Mode::Hidden)
+            }
+            Message::Drawn => Task::none(),
             Message::TestShot(shot) => {
                 save_test_shot(&shot);
                 self.close()
@@ -104,6 +114,7 @@ impl App {
         ));
         let size = Size::new(frame.width as f32, frame.height as f32) * (1.0 / frame.scale);
         self.first_draw.set(Some((at, size)));
+        self.hiding = false;
         let origin = Point::new(frame.x as f32 / frame.scale, frame.y as f32 / frame.scale);
         // ponytail: mixed-DPI multi-monitor placement untested (needs real hardware).
         window::move_to(self.overlay, origin)
@@ -135,15 +146,15 @@ impl App {
         Task::none()
     }
 
-    // ponytail: our copy of the frame is dropped here, but the renderer keeps its cached
-    // raster/texture of it (and window-size buffers) until the next draw, so RSS stays up
-    // while hidden (S3 report). Draw one empty frame before hiding if that matters.
+    /// Frees the frame, then hides the window after one empty frame is drawn: the
+    /// renderer only drops its cached copy of the frame on a draw without it.
     fn close(&mut self) -> Task<Message> {
         self.frame = None;
         self.stroke = Vec::new();
         self.selection = None;
         self.drawing = false;
-        window::set_mode(self.overlay, Mode::Hidden)
+        self.hiding = true;
+        Task::none()
     }
 
     fn view(&self, _window: window::Id) -> Element<'_, Message> {
@@ -169,7 +180,12 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::run(triggers).map(Message::Trigger)
+        let triggers = Subscription::run(triggers).map(Message::Trigger);
+        if self.hiding {
+            Subscription::batch([triggers, window::frames().map(|_| Message::Drawn)])
+        } else {
+            triggers
+        }
     }
 }
 

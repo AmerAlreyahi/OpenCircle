@@ -6,8 +6,10 @@ license = "MIT"
 description = "Circle anything on screen to search, read, translate or ask about it"
 
 [dependencies]
+# ponytail: tiny-skia (CPU) only: wgpu cost ~110 MB idle on WSLg (owner target
+# < 40 MB idle). Re-measure wgpu on Windows (D3D12) before adding it back.
 iced = { version = "0.14", default-features = false, features = [
-    "wgpu", "tiny-skia", "x11", "wayland", "thread-pool", "canvas", "image-without-codecs",
+    "tiny-skia", "x11", "wayland", "thread-pool", "canvas", "image-without-codecs",
 ] }
 global-hotkey = "0.9"
 interprocess = "2.4"
@@ -15,11 +17,15 @@ png = "0.18"
 tray-icon = "0.26"
 xcap = "0.9"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
 xcb = "1.7"
 
 [target.'cfg(windows)'.dependencies]
+widestring = "1"
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
