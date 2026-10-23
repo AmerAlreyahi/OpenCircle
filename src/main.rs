@@ -43,7 +43,7 @@ pub enum Trigger {
 pub type Triggers = mpsc::UnboundedSender<Trigger>;
 
 const USAGE: &str =
-    "usage: opencircle [capture | run <action> [--target full_screen|circle|last_region]]";
+    "usage: opencircle [capture | run <action> [--target full_screen|circle|last_region|window]]";
 
 /// A GUI-subsystem exe has no stdout/stderr. When started from a terminal, attach
 /// to its console so `eprintln!` shows; a redirect (file, pipe) is already valid

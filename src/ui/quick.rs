@@ -45,7 +45,8 @@ pub fn start(target: Target, screen: Size, last: Option<Rectangle>) -> Start {
     let whole = Rectangle::with_size(screen);
     match target {
         Target::FullScreen => Start::Area(whole),
-        Target::Circle => Start::Select,
+        // Window is a snip target; for any other action it is a drawn area.
+        Target::Circle | Target::Window => Start::Select,
         // A previous region now (partly) off screen (resolution change) is clipped.
         Target::LastRegion => last
             .and_then(|r| r.intersection(&whole))
@@ -70,6 +71,7 @@ mod tests {
             Start::Area(whole)
         );
         assert_eq!(start(Target::Circle, SCREEN, Some(last)), Start::Select);
+        assert_eq!(start(Target::Window, SCREEN, Some(last)), Start::Select);
         assert_eq!(
             start(Target::LastRegion, SCREEN, Some(last)),
             Start::Area(last)

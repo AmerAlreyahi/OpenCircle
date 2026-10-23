@@ -111,14 +111,14 @@ fn on_screen([x0, y0, x1, y1]: [u32; 4], scale: f32) -> Rectangle {
 }
 
 /// The editing toolbar's size (as `editor/toolbar.rs` lays it out: back, tools in
-/// groups, colour, undo/redo, Copy and Save; a divider before each group, before
+/// groups, colour, undo/redo, Pin, Copy and Save; a divider before each group, before
 /// undo and before Copy; 4 px apart).
 fn toolbar_size() -> Size {
     let groups = 1 + TOOLS
         .windows(2)
         .filter(|w| w[0].group != w[1].group)
         .count();
-    let icons = 1 + TOOLS.len() + 1 + 2;
+    let icons = 1 + TOOLS.len() + 1 + 2 + 1; // back, tools, colour, undo/redo, pin
     let dividers = groups + 3;
     let texts = 2;
     let gaps = (icons + dividers + texts - 1) as f32 * 4.0;

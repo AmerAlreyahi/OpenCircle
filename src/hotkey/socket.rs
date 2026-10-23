@@ -77,7 +77,7 @@ fn run(action: &str, target: Option<&str>) -> Result<Command, String> {
         None => None,
         Some(t) => Some(super::parse_target(t).ok_or_else(|| {
             format!(
-                "unknown target \"{}\" (full_screen, circle or last_region)",
+                "unknown target \"{}\" (full_screen, circle, last_region or window)",
                 printable(t)
             )
         })?),

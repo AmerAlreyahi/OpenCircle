@@ -5,8 +5,10 @@ circled selection: press `E` in the action bar.
 
 ## Take a snip
 
-Open Snip mode from the tray menu (**Snip**), with `opencircle run snip`, or
-with a shortcut you set ([Shortcuts](shortcuts.md)). Choose a mode:
+Press `Print Screen` (region), `Alt+Print Screen` (window) or
+`Ctrl+Print Screen` (full screen), or open Snip mode from the tray menu
+(**Snip**) or with `opencircle run snip`. All of these can be changed
+([Shortcuts](shortcuts.md)). Choose a mode:
 
 | Mode | How |
 |---|---|
@@ -45,10 +47,15 @@ editable until you copy or save. `Esc` goes back.
 blurred, randomised and coarsely quantised, so the hidden text cannot be
 recovered from the pixels.
 
-## Copy or save
+## Copy, save or pin
 
 - **Copy** (`Ctrl+C`) puts the image on the clipboard.
 - **Save** (`Ctrl+S`) opens the system save dialog and writes a PNG, where you
-  choose.
+  choose. It starts in the folder set in **Settings → General** (the file is
+  named `OpenCircle-<date>-<time>.png`).
+- **Pin** (`Ctrl+P`, or the pin button) keeps the image on screen in a small
+  always-on-top window, right where you took it. Drag it to move it, scroll to
+  zoom, hover for Copy, Save and Close; `Esc` or a double-click closes it. You
+  can pin as many as you like; each frees its memory when closed.
 
 Nothing is written to disk until you save.

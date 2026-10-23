@@ -13,6 +13,7 @@ const UNDO: char = '\u{e2a0}'; // lucide "undo-2"
 const REDO: char = '\u{e29f}'; // lucide "redo-2"
 const COPY: char = '\u{e0a2}'; // lucide "copy"
 const SAVE: char = '\u{e0b6}'; // lucide "download"
+const PIN: char = '\u{e258}'; // lucide "pin"
 
 pub fn view(e: &Editor) -> Element<'_, Message> {
     let side = tooltip::Position::Bottom;
@@ -63,6 +64,12 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
     bar.push(icon(UNDO, false, Message::Undo, "Undo (Ctrl+Z)"));
     bar.push(icon(REDO, false, Message::Redo, "Redo (Ctrl+Shift+Z)"));
     bar.push(widgets::toolbar_divider());
+    bar.push(icon(
+        PIN,
+        false,
+        Message::Pin,
+        "Pin to screen: a floating copy (Ctrl+P)",
+    ));
     bar.push(widgets::text_button(COPY, "Copy", "Ctrl C".into(), true, Message::Copy).into());
     bar.push(widgets::text_button(SAVE, "Save", "Ctrl S".into(), false, Message::Save).into());
 

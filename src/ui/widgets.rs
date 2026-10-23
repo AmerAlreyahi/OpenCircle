@@ -44,6 +44,18 @@ pub fn surface<'a, Message: 'a>(
         .style(|_| glass(20.0))
 }
 
+/// The thin frame around a pinned image (a pin window has no title bar).
+pub fn pinned<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
+    container(content)
+        .width(iced::Fill)
+        .height(iced::Fill)
+        .padding(1)
+        .style(|_| container::Style {
+            background: Some(theme::current().border.into()),
+            ..container::Style::default()
+        })
+}
+
 /// Icon + label + key hint. `primary` = accent gradient (the default action),
 /// otherwise quiet (transparent until hovered).
 pub fn text_button<'a, Message: Clone + 'a>(
@@ -489,6 +501,25 @@ mod forms {
             .style(|_| container::Style {
                 background: Some(theme::current().window.into()),
                 text_color: Some(theme::current().text),
+                ..container::Style::default()
+            })
+    }
+
+    /// A read-only value shown like a field: same size and fill as the other form
+    /// controls, `muted` text for "nothing chosen" values.
+    pub fn value_field<'a, Message: 'a>(
+        value: impl text::IntoFragment<'a>,
+        muted: bool,
+    ) -> Container<'a, Message> {
+        let palette = theme::current();
+        let colour = if muted { palette.muted } else { palette.text };
+        container(text(value).size(14).color(colour))
+            .padding([0, 14])
+            .center_y(CONTROL)
+            .width(FORM_WIDTH)
+            .style(|_| container::Style {
+                background: Some(theme::current().field.into()),
+                border: Border::default().rounded(FIELD_RADIUS),
                 ..container::Style::default()
             })
     }

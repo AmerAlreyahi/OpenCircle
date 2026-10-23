@@ -7,6 +7,10 @@
 //! theme = "system"                  # system | light | dark
 //! shortcut = "Ctrl+Shift+Space"     # global capture shortcut
 //!
+//! [general]
+//! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
+//! save_folder = ""                  # Save dialog starts here; "" = the system's choice
+//!
 //! [ai]                              # the API key is NOT here: OS keyring only
 //! provider = "anthropic"            # anthropic | openai_compatible
 //! base_url = ""                     # "" = provider default (Anthropic only)
@@ -14,13 +18,15 @@
 //!
 //! [translate]
 //! target = "ar"                     # language code to translate into
-//! engine = "ai"                     # ai | offline
+//! engine = "ai"                     # ai (the only engine; anything else warns and uses ai)
+//! live_interval_ms = 1000           # live translate repeats every N ms (500-5000)
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
 //! shortcut = "Ctrl+Shift+T"         # "" = not bound
-//! target = "full_screen"            # full_screen | circle | last_region
+//! target = "full_screen"            # full_screen | circle | last_region | window
 //! live = false                      # optional: repeat while shown
+//!                                   # (snip: circle = region, window, full_screen)
 //! ```
 //!
 //! Rules: an invalid value gives a warning plus that field's default, never a
@@ -41,6 +47,9 @@ use toml::{Table, Value};
 pub const VERSION: u32 = 1;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
+/// Live translate repeats this often (ms); the allowed range is `LIVE_INTERVAL_MS`.
+pub const DEFAULT_LIVE_INTERVAL_MS: u32 = 1000;
+pub const LIVE_INTERVAL_MS: std::ops::RangeInclusive<u32> = 500..=5000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,12 +78,38 @@ impl Provider {
     }
 }
 
+/// How text is translated. Only the AI engine exists; an "offline" engine may come
+/// later, and a config that names it (or anything else) is read as `Ai` with a warning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Engine {
     #[default]
     Ai,
-    Offline,
+}
+
+/// What Enter does on the action bar. The serialized names are action-registry ids.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultAction {
+    #[default]
+    Lens,
+    Ai,
+    Text,
+    Copy,
+}
+
+impl DefaultAction {
+    pub const ALL: [DefaultAction; 4] = [Self::Lens, Self::Ai, Self::Text, Self::Copy];
+
+    /// The id in `actions::ACTIONS`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Lens => "lens",
+            Self::Ai => "ai",
+            Self::Text => "text",
+            Self::Copy => "copy",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -84,6 +119,8 @@ pub enum Target {
     FullScreen,
     Circle,
     LastRegion,
+    /// Snip only: click a window. Other actions treat it like `circle`.
+    Window,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -107,6 +144,15 @@ pub struct AiConfig {
 pub struct TranslateConfig {
     pub target: String,
     pub engine: Engine,
+    /// Live translate repeats every this many ms (`LIVE_INTERVAL_MS`).
+    pub live_interval_ms: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct GeneralConfig {
+    pub default_action: DefaultAction,
+    /// Where the Save dialog starts; "" = the system's choice.
+    pub save_folder: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -114,6 +160,7 @@ pub struct Config {
     pub version: u32,
     pub theme: Theme,
     pub shortcut: String,
+    pub general: GeneralConfig,
     pub ai: AiConfig,
     pub translate: TranslateConfig,
     pub quick_actions: Vec<QuickAction>,
@@ -134,6 +181,7 @@ impl Default for TranslateConfig {
         TranslateConfig {
             target: DEFAULT_TRANSLATE_TARGET.to_string(),
             engine: Engine::Ai,
+            live_interval_ms: DEFAULT_LIVE_INTERVAL_MS,
         }
     }
 }
@@ -150,6 +198,7 @@ impl Default for Config {
             version: VERSION,
             theme: Theme::System,
             shortcut: DEFAULT_CAPTURE_SHORTCUT.to_string(),
+            general: GeneralConfig::default(),
             ai: AiConfig::default(),
             translate: TranslateConfig::default(),
             // DESIGN.md "Quick actions".
@@ -159,6 +208,10 @@ impl Default for Config {
                 qa("ai_explain", "Ctrl+Shift+E", Target::Circle, false),
                 qa("copy_text", "Ctrl+Shift+X", Target::Circle, false),
                 qa("lens", "", Target::Circle, false),
+                // Snip mode: region, window, full screen (DESIGN.md "Shortcuts").
+                qa("snip", "PrintScreen", Target::Circle, false),
+                qa("snip", "Alt+PrintScreen", Target::Window, false),
+                qa("snip", "Ctrl+PrintScreen", Target::FullScreen, false),
             ],
         }
     }
@@ -250,6 +303,23 @@ impl Config {
             parse_shortcut(s).map(drop)
         });
 
+        if let Some(t) = section(&root, "general", &mut w) {
+            c.general.default_action = get(
+                t,
+                "general.",
+                "default_action",
+                d.general.default_action,
+                &mut w,
+            );
+            c.general.save_folder = get_checked(
+                t,
+                "general.",
+                "save_folder",
+                d.general.save_folder,
+                &mut w,
+                |s: &String| check_folder(s),
+            );
+        }
         if let Some(t) = section(&root, "ai", &mut w) {
             c.ai.provider = get(t, "ai.", "provider", d.ai.provider, &mut w);
             c.ai.base_url =
@@ -269,7 +339,36 @@ impl Config {
                 &mut w,
                 |s: &String| check_lang(s),
             );
-            c.translate.engine = get(t, "translate.", "engine", d.translate.engine, &mut w);
+            // Read as text so "offline" (or anything else) gets a clear warning;
+            // the engine is Ai either way.
+            let _: String = get_checked(
+                t,
+                "translate.",
+                "engine",
+                "ai".to_string(),
+                &mut w,
+                |s: &String| {
+                    (s == "ai")
+                        .then_some(())
+                        .ok_or_else(|| "only \"ai\" is available in this version".into())
+                },
+            );
+            c.translate.live_interval_ms = get_checked(
+                t,
+                "translate.",
+                "live_interval_ms",
+                d.translate.live_interval_ms,
+                &mut w,
+                |n: &u32| {
+                    LIVE_INTERVAL_MS.contains(n).then_some(()).ok_or_else(|| {
+                        format!(
+                            "expected {} to {} milliseconds",
+                            LIVE_INTERVAL_MS.start(),
+                            LIVE_INTERVAL_MS.end()
+                        )
+                    })
+                },
+            );
         }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
@@ -396,6 +495,13 @@ fn check_base_url(s: &str) -> Result<(), String> {
         .ok_or_else(|| "expected empty or an http(s):// URL".into())
 }
 
+/// Empty (system choice) or an absolute path; it need not exist (checked on use).
+fn check_folder(s: &str) -> Result<(), String> {
+    (s.is_empty() || Path::new(s).is_absolute())
+        .then_some(())
+        .ok_or_else(|| "expected empty or an absolute folder path".into())
+}
+
 fn check_model(s: &str) -> Result<(), String> {
     let ok = s.len() <= 200 && !s.contains(char::is_whitespace);
     ok.then_some(())
@@ -489,8 +595,27 @@ mod tests {
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
         assert_eq!(c.translate.target, "ar");
         assert_eq!(c.ai.provider, Provider::Anthropic);
-        assert_eq!(c.quick_actions.len(), 5);
+        assert_eq!(c.quick_actions.len(), 8);
         assert!(c.quick_actions[1].live);
+        assert_eq!(c.general.default_action, DefaultAction::Lens);
+        assert_eq!(c.general.save_folder, "");
+        assert_eq!(c.translate.live_interval_ms, 1000);
+        assert_eq!(c.translate.engine, Engine::Ai);
+        // Snip: Print Screen = region, Alt = window, Ctrl = full screen.
+        let snip: Vec<_> = c
+            .quick_actions
+            .iter()
+            .filter(|q| q.action == "snip")
+            .map(|q| (q.shortcut.as_str(), q.target))
+            .collect();
+        assert_eq!(
+            snip,
+            [
+                ("PrintScreen", Target::Circle),
+                ("Alt+PrintScreen", Target::Window),
+                ("Ctrl+PrintScreen", Target::FullScreen),
+            ]
+        );
         // Every default shortcut is valid and unique.
         let (c2, warnings) = Config::parse("");
         assert_eq!(c2, c);
@@ -515,7 +640,9 @@ mod tests {
         c.ai.provider = Provider::OpenaiCompatible;
         c.ai.base_url = "http://localhost:11434/v1".into();
         c.ai.model = "llama3:8b".into();
-        c.translate.engine = Engine::Offline;
+        c.general.default_action = DefaultAction::Copy;
+        c.general.save_folder = std::env::temp_dir().to_string_lossy().into_owned();
+        c.translate.live_interval_ms = 2500;
         c.quick_actions.pop();
         c.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -527,7 +654,80 @@ mod tests {
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(back, c);
         assert!(!path.with_extension("toml.tmp").exists());
+        assert!(text.contains("[general]") && text.contains("default_action = \"copy\""));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn new_fields_are_validated() {
+        let (c, w) = Config::parse(
+            "[general]\ndefault_action = \"text\"\nsave_folder = \"relative/dir\"\n\
+             [translate]\nlive_interval_ms = 100\n",
+        );
+        assert_eq!(
+            c.general.default_action,
+            DefaultAction::Text,
+            "good survives"
+        );
+        assert_eq!(c.general.save_folder, "");
+        assert_eq!(c.translate.live_interval_ms, 1000);
+        assert!(
+            w.iter().any(|m| m.starts_with("general.save_folder")),
+            "{w:?}"
+        );
+        assert!(
+            w.iter()
+                .any(|m| m.starts_with("translate.live_interval_ms") && m.contains("500")),
+            "{w:?}"
+        );
+        for bad in ["\"nope\"", "7", "\"translate\""] {
+            let (c, w) = Config::parse(&format!("[general]\ndefault_action = {bad}\n"));
+            assert_eq!(c.general.default_action, DefaultAction::Lens);
+            assert!(
+                w.iter().any(|m| m.starts_with("general.default_action")),
+                "{w:?}"
+            );
+        }
+        // Range ends are valid; a string or a negative number is not.
+        for ok in [500, 5000] {
+            let (c, w) = Config::parse(&format!("[translate]\nlive_interval_ms = {ok}\n"));
+            assert_eq!((c.translate.live_interval_ms, w.len()), (ok, 0));
+        }
+        for bad in ["5001", "499", "-1", "\"1000\"", "1.5"] {
+            let (c, w) = Config::parse(&format!("[translate]\nlive_interval_ms = {bad}\n"));
+            assert_eq!(c.translate.live_interval_ms, 1000, "{bad}");
+            assert_eq!(w.len(), 1, "{bad}: {w:?}");
+        }
+        let abs = std::env::temp_dir().to_string_lossy().replace('\\', "/");
+        let (c, w) = Config::parse(&format!("[general]\nsave_folder = \"{abs}\"\n"));
+        assert_eq!((c.general.save_folder.as_str(), w.len()), (abs.as_str(), 0));
+    }
+
+    #[test]
+    fn offline_engine_warns_and_uses_ai() {
+        for value in ["\"offline\"", "\"gemini\"", "3"] {
+            let (c, w) = Config::parse(&format!("[translate]\nengine = {value}\n"));
+            assert_eq!(c.translate.engine, Engine::Ai);
+            assert_eq!(w.len(), 1, "{value}: {w:?}");
+            assert!(w[0].starts_with("translate.engine"), "{w:?}");
+        }
+        let (_, w) = Config::parse("[translate]\nengine = \"ai\"\n");
+        assert!(w.is_empty());
+        // A config rewritten by this build never names another engine.
+        let text = toml::to_string_pretty(&Config::default()).unwrap();
+        assert!(text.contains("engine = \"ai\""), "{text}");
+    }
+
+    #[test]
+    fn default_action_ids_are_registry_actions() {
+        for a in DefaultAction::ALL {
+            assert!(
+                crate::actions::ACTIONS.iter().any(|x| x.id == a.id()),
+                "{a:?}"
+            );
+            let (c, w) = Config::parse(&format!("[general]\ndefault_action = \"{}\"\n", a.id()));
+            assert_eq!((c.general.default_action, w.len()), (a, 0));
+        }
     }
 
     #[test]

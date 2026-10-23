@@ -577,6 +577,12 @@ fn keys_pick_tools_shortcuts_and_type_text() {
     ));
     assert!(matches!(key(&e, &letter("c"), ctrl), Some(Message::Copy)));
     assert!(matches!(key(&e, &letter("s"), ctrl), Some(Message::Save)));
+    // Pin is Ctrl+P; plain P stays the Pen tool.
+    assert!(matches!(key(&e, &letter("p"), ctrl), Some(Message::Pin)));
+    assert!(matches!(
+        key(&e, &letter("p"), Modifiers::empty()),
+        Some(Message::Tool(Tool::Pen))
+    ));
     assert!(matches!(
         key(&e, &Key::Named(Named::Escape), Modifiers::empty()),
         Some(Message::Back)
@@ -933,4 +939,21 @@ fn timing() {
          commit {commit:?}; step move per move {step_move:?}; spotlight drag per move \
          {spot:?}; render (Copy/Save) {flatten:?}"
     );
+}
+
+#[test]
+fn pin_hands_over_the_flattened_image() {
+    let mut e = editor(40, 30);
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(5.0, 5.0), &[], pt(25.0, 20.0));
+    let Some(Output::Pin(flat)) = e.update(Message::Pin) else {
+        panic!("Pin gives Output::Pin")
+    };
+    assert_eq!((flat.width, flat.height), (40, 30));
+    assert_eq!(flat.rgba.len(), 40 * 30 * 4);
+    // The annotation is in it: the same image as Copy gets.
+    let Some(Output::Copy(copy)) = e.update(Message::Copy) else {
+        panic!("Copy gives Output::Copy")
+    };
+    assert!(flat.rgba == copy.rgba);
 }

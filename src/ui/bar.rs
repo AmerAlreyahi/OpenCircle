@@ -22,12 +22,14 @@ pub fn view<'a, Message: Clone + 'a>(
     } else {
         tooltip::Position::Bottom
     };
-    let buttons = ACTIONS.iter().enumerate().map(|(i, action)| {
+    // The accent button is what Enter runs.
+    let default = crate::actions::default_for(&crate::config::current()).id;
+    let buttons = ACTIONS.iter().map(|action| {
         let button = widgets::text_button(
             action.icon,
             action.label,
             key_hint(action.key),
-            i == 0,
+            action.id == default,
             on_press(action),
         );
         widgets::with_tip(button, action.tip, tip_side).into()

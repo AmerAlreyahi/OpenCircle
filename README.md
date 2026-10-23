@@ -105,9 +105,11 @@ and pick an action. [Getting started](docs/getting-started.md) walks through it.
 | Live translate on / off | `Ctrl+Shift+L` |
 | Circle, then explain with AI | `Ctrl+Shift+E` |
 | Circle, then copy text | `Ctrl+Shift+X` |
+| Snip a region / window / full screen | `Print Screen` / `Alt+Print Screen` / `Ctrl+Print Screen` |
 
-All of them can be changed in Settings. Snip mode opens from the tray menu or
-with `opencircle run snip`, and can be given a shortcut. On Wayland, the
+All of them can be changed in Settings. Snip mode also opens from the tray menu
+or with `opencircle run snip`. On Windows, `Print Screen` may belong to the
+system; [Shortcuts](docs/shortcuts.md) says how to free it. On Wayland, the
 desktop asks once to allow shortcuts; where it cannot, bind the commands in
 your desktop's keyboard settings. Full list: [Shortcuts](docs/shortcuts.md).
 

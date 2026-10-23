@@ -18,15 +18,15 @@ use std::fmt;
 use std::path::PathBuf;
 
 use iced::widget::tooltip::Position;
-use iced::widget::{column, container, row, space, text};
+use iced::widget::{column, container, row, space};
 use iced::{Element, Length, Size, Subscription, event, keyboard};
 
-use crate::config::{Config, Engine, Provider, Target, Theme, parse_shortcut};
+use crate::config::{Config, DefaultAction, Provider, Target, Theme, parse_shortcut};
 use crate::secrets::{self, Secret, SecretsError};
 use crate::ui::theme;
 use crate::ui::widgets::{
-    self, CONTROL, FORM_WIDTH, FieldState, caption, divider, error_text, form_row, label_button,
-    nav_item, segmented, shortcut_field, text_field, tip, title, vertical_divider,
+    self, FORM_WIDTH, FieldState, caption, divider, error_text, form_row, label_button, nav_item,
+    segmented, shortcut_field, text_field, tip, title, value_field, vertical_divider,
 };
 
 /// Logical size of the Settings window.
@@ -137,20 +137,11 @@ impl KeyField {
     }
 
     pub fn view(&self) -> Element<'_, KeyMessage> {
-        let palette = theme::current();
         let mut col = column![].spacing(8).width(FORM_WIDTH);
         match (&self.status, self.replacing) {
             (KeyStatus::Unavailable(why), _) => col = col.push(error_text(why.as_str())),
             (KeyStatus::Saved, false) => {
-                let saved = container(text("Saved in your keyring").size(14).color(palette.muted))
-                    .padding([0, 14])
-                    .center_y(CONTROL)
-                    .width(FORM_WIDTH)
-                    .style(|_| container::Style {
-                        background: Some(theme::current().field.into()),
-                        border: iced::Border::default().rounded(14),
-                        ..container::Style::default()
-                    });
+                let saved = value_field("Saved in your keyring", true);
                 let replace = label_button("Replace", false, Some(KeyMessage::Replace));
                 let remove = label_button("Remove", false, Some(KeyMessage::Remove));
                 col = col.push(saved).push(
@@ -282,8 +273,13 @@ pub const LANGUAGES: &[Language] = &[
     lang("zh-Hant", "Chinese (Traditional)"),
 ];
 
-fn action_name(id: &str, live: bool) -> String {
+fn action_name(id: &str, live: bool, target: Target) -> String {
     match (id, live) {
+        ("snip", _) => match target {
+            Target::Window => "Snip a window".into(),
+            Target::FullScreen => "Snip the full screen".into(),
+            _ => "Snip a region".into(),
+        },
         ("translate", false) => "Translate".into(),
         ("translate", true) => "Translate (live)".into(),
         ("ai_explain", _) => "Explain with AI".into(),
@@ -304,6 +300,17 @@ fn target_name(t: Target) -> &'static str {
         Target::FullScreen => "Whole screen",
         Target::Circle => "The area you circle",
         Target::LastRegion => "The last region",
+        Target::Window => "The window you click",
+    }
+}
+
+/// The hint under a quick action's name: snip shows what the mode does.
+fn quick_hint(q: &crate::config::QuickAction) -> &'static str {
+    match (q.action.as_str(), q.target) {
+        ("snip", Target::Window) => "Click a window, then edit it",
+        ("snip", Target::FullScreen) => "The whole screen, then edit it",
+        ("snip", _) => "Drag or circle an area, then edit it",
+        (_, t) => target_name(t),
     }
 }
 
@@ -393,18 +400,25 @@ pub fn key_labels(shortcut: &str) -> Vec<String> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
+    General,
     Appearance,
     Shortcuts,
     Ai,
     Translate,
+    About,
 }
 
-const SECTIONS: [(Section, &str, &str); 4] = [
+const SECTIONS: [(Section, &str, &str); 6] = [
+    (Section::General, "General", "General settings"),
     (Section::Appearance, "Appearance", "Appearance settings"),
     (Section::Shortcuts, "Shortcuts", "Shortcut settings"),
     (Section::Ai, "AI", "AI settings"),
     (Section::Translate, "Translate", "Translate settings"),
+    (Section::About, "About", "About OpenCircle"),
 ];
+
+/// The project page the About section links to.
+pub const PROJECT_URL: &str = "https://github.com/AmerAlreyahi/OpenCircle";
 
 /// A shortcut field: the capture shortcut or quick action `n`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,6 +444,8 @@ pub struct State {
     shortcut_error: Option<(Slot, String)>,
     key: KeyField,
     quick_text: Vec<SlotText>,
+    /// What the live-interval field shows (kept as typed).
+    interval: String,
     /// "key: reason" lines from `Config`'s own validation of the draft.
     problems: Vec<String>,
     notice: Option<String>,
@@ -449,6 +465,14 @@ impl fmt::Debug for State {
 #[derive(Debug, Clone)]
 pub enum Message {
     Section(Section),
+    DefaultAction(DefaultAction),
+    /// The Browse button: the shell opens the folder picker.
+    BrowseFolder,
+    /// The picker's answer (`None` = cancelled).
+    Folder(Option<PathBuf>),
+    ClearFolder,
+    /// The Project button.
+    OpenProject,
     Theme(Theme),
     Record(Slot),
     Key(Chord),
@@ -458,7 +482,8 @@ pub enum Message {
     Model(String),
     ApiKey(KeyMessage),
     Language(Language),
-    Engine(Engine),
+    /// What was typed in the live-interval field.
+    LiveInterval(String),
     Save,
 }
 
@@ -467,6 +492,10 @@ pub enum Outcome {
     None,
     /// Written to disk: re-bind the shortcuts, re-read the theme.
     Saved(Config),
+    /// Show the folder picker; the answer comes back as `Message::Folder`.
+    Browse,
+    /// Open `PROJECT_URL` in the browser.
+    OpenProject,
 }
 
 impl State {
@@ -489,16 +518,17 @@ impl State {
             .quick_actions
             .iter()
             .map(|q| {
-                let label = action_name(&q.action, q.live);
+                let label = action_name(&q.action, q.live, q.target);
                 SlotText {
-                    hint: target_name(q.target).to_string(),
+                    hint: quick_hint(q).to_string(),
                     tip: format!("{label} shortcut"),
                     label,
                 }
             })
             .collect();
+        let interval = config.translate.live_interval_ms.to_string();
         let mut s = State {
-            section: Section::Appearance,
+            section: Section::General,
             saved: config.clone(),
             draft: config,
             path,
@@ -507,6 +537,7 @@ impl State {
             shortcut_error: None,
             key,
             quick_text,
+            interval,
             problems: Vec::new(),
             notice: warnings
                 .first()
@@ -679,7 +710,19 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             state.key.update(&*state.store, provider, k);
         }
         Message::Language(l) => state.draft.translate.target = l.code.to_string(),
-        Message::Engine(e) => state.draft.translate.engine = e,
+        Message::LiveInterval(s) => {
+            // Not a number = 0, which the range check reports under the field.
+            state.draft.translate.live_interval_ms = s.trim().parse().unwrap_or(0);
+            state.interval = s;
+        }
+        Message::DefaultAction(a) => state.draft.general.default_action = a,
+        Message::BrowseFolder => return Outcome::Browse,
+        Message::Folder(Some(dir)) => {
+            state.draft.general.save_folder = dir.to_string_lossy().into_owned();
+        }
+        Message::Folder(None) => {}
+        Message::ClearFolder => state.draft.general.save_folder.clear(),
+        Message::OpenProject => return Outcome::OpenProject,
         Message::Save => return save(state),
     }
     state.revalidate();
@@ -751,6 +794,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
 fn content(state: &State) -> Element<'_, Message> {
     let d = &state.draft;
     let (heading, rows): (&str, Vec<Element<'_, Message>>) = match state.section {
+        Section::General => ("General", general_rows(state)),
+        Section::About => ("About", about_rows()),
         Section::Appearance => (
             "Appearance",
             vec![form_row(
@@ -791,35 +836,139 @@ fn content(state: &State) -> Element<'_, Message> {
                     ),
                     issue(&state.problems, "translate.target"),
                 ),
-                form_row(
-                    "Engine",
-                    "AI uses your provider; Offline stays on this PC",
-                    segmented(
-                        &[
-                            (Engine::Ai, "AI", "Translate with your AI provider"),
-                            (Engine::Offline, "Offline", "Translate on this device only"),
-                        ],
-                        d.translate.engine,
-                        Message::Engine,
-                    ),
-                    None,
-                ),
+                {
+                    let error = issue(&state.problems, "translate.live_interval_ms");
+                    form_row(
+                        "Live refresh",
+                        "Milliseconds between updates in live translate",
+                        tip(
+                            text_field(
+                                "1000",
+                                &state.interval,
+                                error.is_some(),
+                                Message::LiveInterval,
+                            ),
+                            "Live translate refresh interval",
+                            Position::Top,
+                        ),
+                        error,
+                    )
+                },
             ],
         ),
     };
-    let mut col = column![title(heading), space::vertical().height(8)];
+    // The rows scroll under the title: the Shortcuts list outgrows the window.
+    let mut list = column![].padding(iced::Padding::ZERO.right(12));
     for (i, r) in rows.into_iter().enumerate() {
         if i > 0 {
-            col = col.push(divider());
+            list = list.push(divider());
         }
-        col = col.push(r);
+        list = list.push(r);
     }
-    col.into()
+    column![
+        title(heading),
+        space::vertical().height(8),
+        widgets::scroll(list).height(Length::Fill)
+    ]
+    .height(Length::Fill)
+    .into()
+}
+
+/// A long folder path cut in the middle so it fits its field.
+fn shorten(path: &str) -> String {
+    const MAX: usize = 38;
+    let n = path.chars().count();
+    if n <= MAX {
+        return path.to_string();
+    }
+    let tail: String = path.chars().skip(n - (MAX - 1)).collect();
+    format!("…{tail}")
+}
+
+fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
+    let folder = state.draft.general.save_folder.as_str();
+    let shown = if folder.is_empty() {
+        value_field("Chosen by your system", true)
+    } else {
+        value_field(shorten(folder), false)
+    };
+    let browse = label_button("Browse…", false, Some(Message::BrowseFolder));
+    let reset = label_button(
+        "Reset",
+        false,
+        (!folder.is_empty()).then_some(Message::ClearFolder),
+    );
+    let folder_control = column![
+        tip(shown, "Save folder", Position::Top),
+        row![
+            tip(browse, "Choose the save folder", Position::Bottom),
+            tip(reset, "Use the system's folder", Position::Bottom),
+        ]
+        .spacing(8),
+    ]
+    .spacing(8)
+    .width(FORM_WIDTH);
+    let error = issue(&state.problems, "general.save_folder");
+    vec![
+        form_row(
+            "Default action",
+            "What Enter does after you select something",
+            segmented(
+                &[
+                    (
+                        DefaultAction::Lens,
+                        "Search",
+                        "Enter searches with Google Lens",
+                    ),
+                    (DefaultAction::Ai, "Ask AI", "Enter asks the AI about it"),
+                    (DefaultAction::Text, "Text", "Enter reads the text"),
+                    (DefaultAction::Copy, "Copy", "Enter copies the image"),
+                ],
+                state.draft.general.default_action,
+                Message::DefaultAction,
+            ),
+            None,
+        ),
+        form_row(
+            "Save folder",
+            "Where Save starts. Files are OpenCircle-date-time.png",
+            folder_control,
+            error,
+        ),
+    ]
+}
+
+fn about_rows<'a>() -> Vec<Element<'a, Message>> {
+    let project = label_button("Open GitHub", false, Some(Message::OpenProject));
+    vec![
+        form_row(
+            "Version",
+            "OpenCircle",
+            value_field(env!("CARGO_PKG_VERSION"), false),
+            None,
+        ),
+        form_row(
+            "License",
+            "Free and open source",
+            value_field("MIT", false),
+            None,
+        ),
+        form_row(
+            "Project",
+            "Source code and issue tracker",
+            tip(project, "Open the project page", Position::Top),
+            None,
+        ),
+        form_row(
+            "Telemetry",
+            "A capture leaves this PC only when you choose an action",
+            value_field("None", false),
+            None,
+        ),
+    ]
 }
 
 fn shortcut_rows(state: &State) -> Vec<Element<'_, Message>> {
-    // ponytail: no scrolling; ~7 quick actions fit the window. Add a scrollable
-    // (themed in widgets.rs) when users add more.
     state
         .slots()
         .map(|slot| {
@@ -1146,7 +1295,9 @@ pub(super) mod tests {
         update(&mut s, Message::Preset(PRESETS[3]));
         update(&mut s, Message::Model("llama3:8b".into()));
         update(&mut s, Message::Language(LANGUAGES[1]));
-        update(&mut s, Message::Engine(Engine::Offline));
+        update(&mut s, Message::DefaultAction(DefaultAction::Copy));
+        update(&mut s, Message::Folder(Some(std::env::temp_dir())));
+        update(&mut s, Message::LiveInterval("2500".into()));
         update(&mut s, Message::Record(Slot::Quick(4)));
         press(&mut s, chord(true, true, "KeyY"));
         assert!(s.problems.is_empty(), "{:?}", s.problems);
@@ -1160,7 +1311,13 @@ pub(super) mod tests {
         assert_eq!(back.ai.base_url, "http://localhost:11434/v1");
         assert_eq!(back.ai.model, "llama3:8b");
         assert_eq!(back.translate.target, "en");
-        assert_eq!(back.translate.engine, Engine::Offline);
+        assert_eq!(back.translate.engine, crate::config::Engine::Ai);
+        assert_eq!(back.general.default_action, DefaultAction::Copy);
+        assert_eq!(
+            back.general.save_folder,
+            std::env::temp_dir().to_string_lossy()
+        );
+        assert_eq!(back.translate.live_interval_ms, 2500);
         assert_eq!(back.quick_actions[4].shortcut, "Ctrl+Shift+Y");
         assert!(!s.dirty());
         theme::apply(Theme::Dark);
@@ -1279,12 +1436,7 @@ pub(super) mod tests {
         let (mut s, _) = state(None);
         update(&mut s, Message::Provider(Provider::OpenaiCompatible));
         let mut all = Vec::new();
-        for section in [
-            Section::Appearance,
-            Section::Shortcuts,
-            Section::Ai,
-            Section::Translate,
-        ] {
+        for (section, ..) in SECTIONS {
             update(&mut s, Message::Section(section));
             TIPS.with(|t| t.borrow_mut().clear());
             let _ = view(&s);
@@ -1292,20 +1444,154 @@ pub(super) mod tests {
         }
         // Remove the sidebar labels counted once per section.
         all.sort();
-        let sidebar = [
-            "Appearance settings",
-            "Shortcut settings",
-            "AI settings",
-            "Translate settings",
-        ];
+        let sidebar = SECTIONS.map(|(_, _, hint)| hint);
         for name in sidebar {
-            assert_eq!(all.iter().filter(|t| *t == name).count(), 4, "{name}");
+            assert_eq!(
+                all.iter().filter(|t| *t == name).count(),
+                SECTIONS.len(),
+                "{name}"
+            );
         }
         all.retain(|t| !sidebar.contains(&t.as_str()) && t != "Save settings");
         let mut unique = all.clone();
         unique.dedup();
         assert_eq!(all, unique, "duplicate control labels");
-        assert!(all.len() >= 18, "{all:?}");
+        assert!(all.len() >= 24, "{all:?}");
+    }
+
+    #[test]
+    fn general_section_edits_default_action_and_save_folder() {
+        let path = tmp("general");
+        let (mut s, _) = state(Some(path.clone()));
+        assert_eq!(s.section, Section::General, "the first section opens");
+        assert_eq!(s.draft.general.default_action, DefaultAction::Lens);
+        update(&mut s, Message::DefaultAction(DefaultAction::Text));
+        // Browse asks the shell for the picker; nothing changes until it answers.
+        assert_eq!(update(&mut s, Message::BrowseFolder), Outcome::Browse);
+        assert_eq!(s.draft.general.save_folder, "");
+        update(&mut s, Message::Folder(None));
+        assert_eq!(s.draft.general.save_folder, "", "cancelled");
+        let dir = std::env::temp_dir();
+        update(&mut s, Message::Folder(Some(dir.clone())));
+        assert_eq!(s.draft.general.save_folder, dir.to_string_lossy());
+        assert!(s.problems.is_empty(), "{:?}", s.problems);
+        let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+            panic!("not saved: {:?}", s.notice)
+        };
+        assert_eq!(cfg.general.default_action, DefaultAction::Text);
+        assert_eq!(
+            Config::load_from(&path).0.general.save_folder,
+            dir.to_string_lossy()
+        );
+        update(&mut s, Message::ClearFolder);
+        assert_eq!(s.draft.general.save_folder, "");
+        // The control shows the choice (a long path is cut in the middle).
+        update(
+            &mut s,
+            Message::Folder(Some(PathBuf::from("/a".repeat(40)))),
+        );
+        let texts = shot::texts(view(&s));
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.starts_with('…') && t.chars().count() == 38),
+            "{texts:?}"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn live_interval_is_checked_against_its_range() {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::Section(Section::Translate));
+        assert_eq!(s.interval, "1000");
+        for ok in ["500", "1000", "5000", " 2500 "] {
+            update(&mut s, Message::LiveInterval(ok.into()));
+            assert!(s.problems.is_empty(), "{ok}: {:?}", s.problems);
+        }
+        for bad in ["499", "5001", "", "fast", "-3"] {
+            update(&mut s, Message::LiveInterval(bad.into()));
+            let why = issue(&s.problems, "translate.live_interval_ms");
+            assert!(why.is_some_and(|w| w.contains("500 to 5000")), "{bad}");
+            assert_eq!(s.interval, bad, "the field keeps what was typed");
+            assert_eq!(update(&mut s, Message::Save), Outcome::None, "{bad}");
+        }
+        assert_eq!(*crate::config::LIVE_INTERVAL_MS.start(), 500);
+    }
+
+    #[test]
+    fn offline_is_not_offered_anywhere() {
+        let (mut s, _) = state(None);
+        for (section, ..) in SECTIONS {
+            update(&mut s, Message::Section(section));
+            let texts = shot::texts(view(&s));
+            assert!(
+                !texts.iter().any(|t| t.to_lowercase().contains("offline")),
+                "{section:?}: {texts:?}"
+            );
+        }
+        // A saved "offline" is read as AI with a warning, and Settings shows it.
+        let (cfg, warnings) = Config::parse("[translate]\nengine = \"offline\"\n");
+        let s = State::new(cfg, warnings, None, Box::new(MemoryStore::default()));
+        assert_eq!(s.draft.translate.engine, crate::config::Engine::Ai);
+        assert!(
+            s.notice
+                .as_deref()
+                .is_some_and(|n| n.contains("translate.engine"))
+        );
+    }
+
+    #[test]
+    fn about_shows_version_license_project_and_no_telemetry() {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::Section(Section::About));
+        let texts = shot::texts(view(&s));
+        for want in [env!("CARGO_PKG_VERSION"), "MIT", "Telemetry", "None"] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        assert_eq!(update(&mut s, Message::OpenProject), Outcome::OpenProject);
+        assert!(PROJECT_URL.starts_with("https://github.com/"));
+        assert!(!s.dirty(), "About changes nothing");
+    }
+
+    #[test]
+    fn snip_shortcuts_are_listed_and_editable() {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::Section(Section::Shortcuts));
+        let texts = shot::texts(view(&s));
+        for want in ["Snip a region", "Snip a window", "Snip the full screen"] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        let names: Vec<_> = s.quick_text.iter().map(|t| t.label.as_str()).collect();
+        for want in ["Snip a region", "Snip a window", "Snip the full screen"] {
+            assert!(names.contains(&want), "{names:?}");
+        }
+        let i = s
+            .draft
+            .quick_actions
+            .iter()
+            .position(|q| q.shortcut == "Alt+PrintScreen")
+            .unwrap();
+        update(&mut s, Message::Record(Slot::Quick(i)));
+        press(&mut s, chord(false, false, "F8"));
+        assert_eq!(s.draft.quick_actions[i].shortcut, "F8");
+        // Print Screen is a valid lone key but each key still does one job.
+        update(&mut s, Message::Record(Slot::Quick(i)));
+        let key = Chord {
+            ctrl: false,
+            alt: false,
+            shift: false,
+            logo: false,
+            key: "PrintScreen".into(),
+        };
+        press(&mut s, key);
+        assert!(
+            s.shortcut_error
+                .as_ref()
+                .unwrap()
+                .1
+                .starts_with("Already used")
+        );
     }
 
     #[test]

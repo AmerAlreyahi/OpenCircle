@@ -27,7 +27,7 @@ use iced::window::{self, Level, Mode};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
 use crate::actions::{self, Action, Crop, Run, copy, lens, save, text};
-use crate::config::Target;
+use crate::config::{self, Target};
 use crate::editor::{self, Output};
 use crate::{Trigger, capture};
 use edit::Editing;
@@ -127,8 +127,9 @@ struct Shot {
     /// Logical px: the monitor's origin and size.
     origin: Point,
     size: Size,
-    /// Snip mode: the windows on this monitor (logical px, topmost first).
-    windows: Option<Vec<Rectangle>>,
+    /// Snip mode: the mode to start in, and the windows on this monitor (logical
+    /// px, topmost first).
+    snip: Option<(snip::Kind, Vec<Rectangle>)>,
 }
 
 struct App {
@@ -219,19 +220,19 @@ impl App {
             }
             Message::Trigger(Trigger::Capture(at)) => {
                 self.purpose = Purpose::Search;
-                self.capture(at, false)
+                self.capture(at, None)
             }
             Message::Trigger(Trigger::Quick(at, qa)) => {
                 self.purpose = Purpose::Search;
                 if qa.action == "snip" {
-                    return self.capture(at, true);
+                    return self.capture(at, Some(snip::Kind::for_target(qa.target)));
                 }
                 match Quick::for_id(&qa.action) {
                     Some(q) => self.purpose = Purpose::Quick(q, qa.target),
                     // ponytail: the lead wires translate with its pipeline.
                     None => eprintln!("{} not wired yet; opening the overlay", qa.action),
                 }
-                self.capture(at, false)
+                self.capture(at, None)
             }
             Message::Captured(at, shot) => self.open(at, shot),
             Message::Overlay(event) => self.on_overlay(event),
@@ -315,8 +316,9 @@ impl App {
     }
 
     /// Captures on a thread: a Wayland portal may wait minutes for the user's OK.
-    /// `windows`: also list the windows (Snip), while the overlay is still hidden.
-    fn capture(&mut self, at: Instant, list_windows: bool) -> Task<Message> {
+    /// `snip`: Snip mode in this kind; also lists the windows, while the overlay is
+    /// still hidden.
+    fn capture(&mut self, at: Instant, snip: Option<snip::Kind>) -> Task<Message> {
         self.capturing = true;
         background(move |tx| {
             let shot = capture::monitor_under_cursor().map(|frame| {
@@ -325,18 +327,17 @@ impl App {
                     let (x, y) = ((x - frame.x) as f32, (y - frame.y) as f32);
                     Rectangle::new(Point::new(x, y), Size::new(w as f32, h as f32)) * (1.0 / scale)
                 };
-                let windows = list_windows.then(|| {
+                let snip = snip.map(|kind| {
                     let list = capture::window_rect::list();
-                    list.into_iter()
-                        .map(|(x, y, w, h)| logical(x, y, w, h))
-                        .collect()
+                    let windows = list.into_iter().map(|(x, y, w, h)| logical(x, y, w, h));
+                    (kind, windows.collect())
                 });
                 Shot {
                     origin: Point::new(frame.x as f32 / scale, frame.y as f32 / scale),
                     size: Size::new(frame.width as f32, frame.height as f32) * (1.0 / scale),
                     image: image::Handle::from_rgba(frame.width, frame.height, frame.rgba),
                     scale,
-                    windows,
+                    snip,
                 }
             });
             let _ = tx.unbounded_send(shot);
@@ -368,12 +369,15 @@ impl App {
         self.opening = self.opening.wrapping_add(1);
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
-        if let Some(windows) = shot.windows {
-            let snip = Snip::new(windows, size, snip::can_scroll());
+        let mut first = None;
+        if let Some((kind, windows)) = shot.snip {
+            let mut snip = Snip::new(windows, size, snip::can_scroll());
+            first = snip.start(kind, size); // Full = the editor on the whole screen
             self.purpose = Purpose::Snip(Box::new(snip));
         }
         let Purpose::Quick(quick, target) = self.purpose else {
-            return self.show();
+            let editor = first.map(|next| self.snip_next(Some(next)));
+            return editor.unwrap_or_else(Task::none).chain(self.show());
         };
         let Start::Area(area) = quick::start(target, size, self.last_region()) else {
             return self.show(); // the first selection runs it
@@ -462,9 +466,7 @@ impl App {
                 }
             }
             overlay::Event::Enter if matches!(self.purpose, Purpose::Search) => {
-                if let Some(default) = actions::ACTIONS.first() {
-                    return self.run(default);
-                }
+                return self.run(actions::default_for(&config::current()));
             }
             overlay::Event::Key { letter, ctrl } if matches!(self.purpose, Purpose::Search) => {
                 if let Some(action) = actions::for_key(letter, ctrl) {
@@ -597,7 +599,15 @@ impl App {
             }
             Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
             Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
+            Some(Output::Pin(crop)) => self.pin(crop),
         }
+    }
+
+    /// Pin: the overlay closes and the image floats where the selection was.
+    fn pin(&mut self, crop: Crop) -> Task<Message> {
+        let at = (self.selection).map(|s| self.origin + Vector::new(s.area.x, s.area.y));
+        let pinned = self.windows.pin(crop, at, self.scale).map(Message::Windows);
+        Task::batch([self.close(), pinned])
     }
 
     /// The running scrolling capture.

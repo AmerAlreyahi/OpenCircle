@@ -14,6 +14,7 @@ use super::widgets::{self, STOP};
 use crate::actions::Crop;
 use crate::capture::scroll::{self, Params};
 use crate::capture::stitch::Stitcher;
+use crate::config::Target;
 
 /// Test hook: a tall PNG stands in for the scrolled page (WSLg/CI can't scroll).
 const TEST_SCROLL: &str = "OPENCIRCLE_TEST_SCROLL";
@@ -27,6 +28,16 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// The mode a snip quick action starts in: circle (or last region) = Region,
+    /// window = Window, full screen = Full.
+    pub fn for_target(target: Target) -> Kind {
+        match target {
+            Target::Circle | Target::LastRegion => Kind::Region,
+            Target::Window => Kind::Window,
+            Target::FullScreen => Kind::Full,
+        }
+    }
+
     fn label(self) -> &'static str {
         ["Region", "Window", "Full", "Scrolling"][self as usize]
     }
@@ -137,6 +148,17 @@ impl Snip {
     /// The topmost window under `p`.
     pub fn window_at(&self, p: Point) -> Option<Rectangle> {
         self.windows.iter().copied().find(|w| w.contains(p))
+    }
+
+    /// Starts in `kind` if this screen offers it (else Region, no Window list on
+    /// Wayland). Full picks the whole screen at once.
+    pub fn start(&mut self, kind: Kind, screen: Size) -> Option<Next> {
+        let kind = if self.kinds().contains(&kind) {
+            kind
+        } else {
+            Kind::Region
+        };
+        self.switch(kind, screen)
     }
 
     /// Switches mode; Full picks the whole screen at once.
@@ -338,6 +360,42 @@ mod tests {
         assert_eq!(s.switch(Kind::Scrolling, SCREEN), None);
         assert_eq!(s.pick(drag, click, SCREEN), Some(Next::Scroll(area)));
         assert_eq!(s.pick(None, click, SCREEN), None);
+    }
+
+    #[test]
+    fn snip_quick_actions_start_in_the_mode_of_their_target() {
+        let windows = vec![rect(0.0, 0.0, 400.0, 300.0)];
+        for (target, kind) in [
+            (Target::Circle, Kind::Region),
+            (Target::LastRegion, Kind::Region),
+            (Target::Window, Kind::Window),
+            (Target::FullScreen, Kind::Full),
+        ] {
+            assert_eq!(Kind::for_target(target), kind, "{target:?}");
+        }
+        // Print Screen / Alt+Print Screen / Ctrl+Print Screen from the default config.
+        let by_key = |key: &str| {
+            let q = (crate::config::Config::default().quick_actions.into_iter())
+                .find(|q| q.shortcut == key)
+                .unwrap();
+            assert_eq!(q.action, "snip");
+            Kind::for_target(q.target)
+        };
+        assert_eq!(by_key("PrintScreen"), Kind::Region);
+        assert_eq!(by_key("Alt+PrintScreen"), Kind::Window);
+        assert_eq!(by_key("Ctrl+PrintScreen"), Kind::Full);
+
+        let mut s = Snip::new(windows, SCREEN, true);
+        assert_eq!(s.start(Kind::Window, SCREEN), None, "waits for a click");
+        assert_eq!(s.kind, Kind::Window);
+        // Full opens the editor on the whole screen at once.
+        let whole = Rectangle::with_size(SCREEN);
+        assert_eq!(s.start(Kind::Full, SCREEN), Some(Next::Edit(whole)));
+        assert_eq!(s.kind, Kind::Full);
+        // No window list (Wayland): the window shortcut falls back to Region.
+        let mut wayland = Snip::new(Vec::new(), SCREEN, false);
+        assert_eq!(wayland.start(Kind::Window, SCREEN), None);
+        assert_eq!(wayland.kind, Kind::Region);
     }
 
     #[test]

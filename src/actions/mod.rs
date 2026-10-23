@@ -67,6 +67,13 @@ pub fn for_key(letter: char, ctrl: bool) -> Option<&'static Action> {
     ACTIONS.iter().find(|action| action.key == key)
 }
 
+/// The action Enter runs: the config's `general.default_action` (the first
+/// registry entry if the registry ever lacks it).
+pub fn default_for(cfg: &crate::config::Config) -> &'static Action {
+    let id = cfg.general.default_action.id();
+    ACTIONS.iter().find(|a| a.id == id).unwrap_or(&ACTIONS[0])
+}
+
 /// A crop of the frozen frame, in physical pixels.
 #[derive(Clone)]
 pub struct Crop {
@@ -152,6 +159,25 @@ mod tests {
             assert!(a.key.letter.is_ascii_lowercase(), "{}", a.id);
             assert_eq!(for_key(a.key.letter, a.key.ctrl).map(|f| f.id), Some(a.id));
         }
+    }
+
+    #[test]
+    fn enter_runs_the_configured_default_action() {
+        use crate::config::{Config, DefaultAction};
+        let mut cfg = Config::default();
+        assert_eq!(default_for(&cfg).id, "lens", "Lens out of the box");
+        for (choice, id) in [
+            (DefaultAction::Ai, "ai"),
+            (DefaultAction::Text, "text"),
+            (DefaultAction::Copy, "copy"),
+            (DefaultAction::Lens, "lens"),
+        ] {
+            cfg.general.default_action = choice;
+            assert_eq!(default_for(&cfg).id, id);
+        }
+        // A saved choice survives the config file.
+        let (back, _) = Config::parse("[general]\ndefault_action = \"text\"\n");
+        assert_eq!(default_for(&back).id, "text");
     }
 
     #[test]

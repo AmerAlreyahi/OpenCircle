@@ -10,13 +10,25 @@
 | Explain with AI | `Ctrl+Shift+E` | Circle something; the AI explains it |
 | Copy text | `Ctrl+Shift+X` | Circle something; its text is copied |
 | Search with Lens | unset | Circle something; Lens opens |
+| Snip a region | `Print Screen` | Drag or circle an area, then edit it |
+| Snip a window | `Alt+Print Screen` | Click a window, then edit it |
+| Snip the full screen | `Ctrl+Print Screen` | The whole screen, then edit it |
 
-Snip mode has no default key: open it from the tray menu (**Snip**) or give it
-one, see below.
+Snip mode also opens from the tray menu (**Snip**, the region mode) and with
+`opencircle run snip`.
 
-While the overlay is open: `Esc` closes, `Enter` runs Search, and the action
-keys are `L` Search, `A` Ask AI, `T` Text, `E` Edit, `Ctrl+C` Copy, `Ctrl+S`
-Save.
+**If Print Screen does nothing.** On Windows, the system uses `Print Screen`
+for its own screen capture. OpenCircle logs one line when it cannot register the
+key. Free it in Windows Settings → Accessibility → Keyboard → turn off **Use the
+Print screen key to open screen capture**, then restart OpenCircle. (Or give the
+snip shortcuts other keys in Settings → Shortcuts; the rest keep working.) On
+Linux, a desktop's own screenshot tool may hold the key: unbind it in your
+desktop's keyboard shortcut settings.
+
+While the overlay is open: `Esc` closes, `Enter` runs the default action
+(Search unless you changed it in **Settings → General**), and the action keys
+are `L` Search, `A` Ask AI, `T` Text, `E` Edit, `Ctrl+C` Copy, `Ctrl+S` Save.
+In the editor, `Ctrl+P` pins the image to the screen (`P` alone is the Pen).
 
 ## Change a shortcut
 
@@ -35,18 +47,30 @@ file:
 [[quick_actions]]
 action = "copy_text"        # translate | ai_explain | copy_text | lens | snip | ai | text | edit | copy | save
 shortcut = "Ctrl+Shift+X"   # "" = not bound
-target = "circle"           # full_screen | circle | last_region
+target = "circle"           # full_screen | circle | last_region | window
 live = false                # translate only: keep translating
 ```
 
 Targets: `full_screen` acts on the whole screen, `circle` lets you draw the
 area first, `last_region` repeats the previous area (handy for a game's
-subtitle bar). For example, to open Snip mode with `Print Screen`:
+subtitle bar). `window` is for Snip only: click a window. For `snip`, the target
+picks the mode, which is how the three defaults differ:
 
 ```toml
 [[quick_actions]]
 action = "snip"
 shortcut = "PrintScreen"
+target = "circle"           # region
+
+[[quick_actions]]
+action = "snip"
+shortcut = "Alt+PrintScreen"
+target = "window"
+
+[[quick_actions]]
+action = "snip"
+shortcut = "Ctrl+PrintScreen"
+target = "full_screen"
 ```
 
 Edit the file while OpenCircle is closed, or change shortcuts in Settings.
@@ -59,12 +83,13 @@ desktop's own shortcut settings. They talk to the running copy (or start it):
 ```bash
 opencircle capture
 opencircle run snip
+opencircle run snip --target window
 opencircle run copy_text --target circle
 opencircle run lens --target circle
 ```
 
-Targets are `full_screen`, `circle`, `last_region`; without `--target` the
-one set in the config is used.
+Targets are `full_screen`, `circle`, `last_region`, `window`; without
+`--target` the first entry for that action in the config is used.
 
 ## Wayland without the shortcut portal
 

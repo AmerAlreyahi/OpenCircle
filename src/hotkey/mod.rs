@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
-use global_hotkey::hotkey::HotKey;
+use global_hotkey::hotkey::{Code, HotKey};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
 use crate::config::{Config, QuickAction, Target, parse_shortcut};
@@ -35,13 +35,19 @@ fn target_name(target: Target) -> &'static str {
         Target::FullScreen => "full_screen",
         Target::Circle => "circle",
         Target::LastRegion => "last_region",
+        Target::Window => "window",
     }
 }
 
 fn parse_target(name: &str) -> Option<Target> {
-    [Target::FullScreen, Target::Circle, Target::LastRegion]
-        .into_iter()
-        .find(|t| target_name(*t) == name)
+    [
+        Target::FullScreen,
+        Target::Circle,
+        Target::LastRegion,
+        Target::Window,
+    ]
+    .into_iter()
+    .find(|t| target_name(*t) == name)
 }
 
 /// What a shortcut does.
@@ -279,13 +285,28 @@ fn regrab(grab: &mut Grab, planned: &[Binding]) {
     for b in planned {
         match grab.manager.register(b.hotkey) {
             Ok(()) => grab.held.push(b.hotkey),
-            Err(e) => eprintln!(
-                "[opencircle] shortcut {} ({}) is unavailable: {e}. Another app may use it; \
-                 pick a different one in Settings.",
-                b.shortcut, b.description
-            ),
+            Err(e) => eprintln!("[opencircle] {}", unavailable(b, &e.to_string())),
         }
     }
+}
+
+/// The one log line for a shortcut the OS refused. Print Screen also says how to
+/// free it: the desktop's own screenshot tool usually owns that key.
+fn unavailable(b: &Binding, why: &str) -> String {
+    let mut line = format!(
+        "shortcut {} ({}) is unavailable: {why}. Another app may use it; pick a different one in Settings.",
+        b.shortcut, b.description
+    );
+    if b.hotkey.key == Code::PrintScreen {
+        line.push_str(if cfg!(windows) {
+            " To free Print Screen: Windows Settings > Accessibility > Keyboard > \
+             \"Use the Print screen key to open screen capture\" > off, then restart OpenCircle."
+        } else {
+            " To free Print Screen, unbind it from your desktop's screenshot tool in its \
+             keyboard shortcut settings, then restart OpenCircle."
+        });
+    }
+    line
 }
 
 fn log_all(warnings: &[String]) {
@@ -328,7 +349,10 @@ mod tests {
                 "quick-translate-full_screen",
                 "quick-translate-full_screen-live",
                 "quick-ai_explain-circle",
-                "quick-copy_text-circle"
+                "quick-copy_text-circle",
+                "quick-snip-circle",
+                "quick-snip-window",
+                "quick-snip-full_screen",
             ]
         );
         assert_eq!(b[0].shortcut, "Ctrl+Shift+Space");
@@ -486,11 +510,32 @@ mod tests {
 
     #[test]
     fn target_names_round_trip() {
-        for t in [Target::FullScreen, Target::Circle, Target::LastRegion] {
+        for t in [
+            Target::FullScreen,
+            Target::Circle,
+            Target::LastRegion,
+            Target::Window,
+        ] {
             assert_eq!(parse_target(target_name(t)), Some(t));
         }
         assert_eq!(parse_target("Circle"), None);
         assert_eq!(parse_target(""), None);
+    }
+
+    #[test]
+    fn a_refused_print_screen_says_how_to_free_it() {
+        let (b, _) = plan(&Config::default());
+        let by = |id: &str| b.iter().find(|b| b.id == id).unwrap();
+        let line = unavailable(by("quick-snip-circle"), "already registered");
+        assert!(line.contains("PrintScreen") && line.contains("already registered"));
+        #[cfg(windows)]
+        assert!(line.contains("Use the Print screen key to open screen capture"));
+        #[cfg(not(windows))]
+        assert!(line.contains("screenshot tool"));
+        // Alt+Print Screen needs the same hint; other keys get none.
+        assert!(unavailable(by("quick-snip-window"), "x").contains("free Print Screen"));
+        assert!(!unavailable(by("quick-copy_text-circle"), "x").contains("free Print Screen"));
+        assert_eq!(line.lines().count(), 1, "one line");
     }
 
     #[test]

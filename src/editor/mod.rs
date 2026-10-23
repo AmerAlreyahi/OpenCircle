@@ -146,6 +146,8 @@ pub enum Message {
     Delete,
     Copy,
     Save,
+    /// Pin the flattened image to the screen.
+    Pin,
     Back,
 }
 
@@ -156,6 +158,8 @@ pub enum Output {
     /// The flattened image, for the Copy / Save actions.
     Copy(Crop),
     Save(Crop),
+    /// A floating always-on-top copy of the image.
+    Pin(Crop),
 }
 
 /// An item being drawn, moved, resized or typed: shown live, committed as one edit.
@@ -271,13 +275,13 @@ impl Editor {
                     self.refresh();
                 }
             }
-            Message::Copy | Message::Save => {
+            Message::Copy | Message::Save | Message::Pin => {
                 self.commit();
                 let flat = render(&self.doc);
-                return Some(if matches!(message, Message::Copy) {
-                    Output::Copy(flat)
-                } else {
-                    Output::Save(flat)
+                return Some(match message {
+                    Message::Copy => Output::Copy(flat),
+                    Message::Save => Output::Save(flat),
+                    _ => Output::Pin(flat),
                 });
             }
             Message::Back => {

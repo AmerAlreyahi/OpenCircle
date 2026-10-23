@@ -215,6 +215,8 @@ impl Editor {
                 (true, true, 'z') | (true, _, 'y') => Some(Message::Redo),
                 (true, _, 'c') => Some(Message::Copy),
                 (true, _, 's') => Some(Message::Save),
+                // Ctrl: plain P is the Pen tool.
+                (true, _, 'p') => Some(Message::Pin),
                 (false, _, letter) => TOOLS
                     .iter()
                     .find(|t| t.key == letter)
