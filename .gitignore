@@ -1,0 +1,9 @@
+AGENTS.local.md
+docs/internal/
+builds/
+.claude/
+node_modules/
+dist/
+target/
+.env
+*.log
