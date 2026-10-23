@@ -42,11 +42,7 @@ fn main() -> ExitCode {
         eprintln!("cannot open the command socket: {e}");
         return ExitCode::FAILURE;
     }
-    let _shortcut = hotkey::register(tx.clone())
-        .map_err(|e| {
-            eprintln!("global shortcut unavailable ({e}); bind `opencircle capture` instead")
-        })
-        .ok();
+    let _shortcut = hotkey::start(tx.clone());
     let _tray = ui::start_tray(tx.clone());
     if capture_now {
         let _ = tx.unbounded_send(Trigger::Capture(Instant::now()));
