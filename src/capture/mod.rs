@@ -88,11 +88,11 @@ fn from_png(path: &std::ffi::OsStr) -> Result<Frame, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsStr;
 
     #[cfg(target_os = "linux")]
     #[test]
     fn detects_a_wayland_session() {
+        use std::ffi::OsStr;
         let w = Some(OsStr::new("wayland-0"));
         assert!(is_wayland(w, Some(OsStr::new("wayland"))));
         assert!(!is_wayland(w, Some(OsStr::new("x11"))));
