@@ -37,9 +37,7 @@ pub(crate) fn build_request(
         return Err(AiError::NotConfigured("choose a model".into()));
     }
     let key = key.filter(|k| !k.is_empty());
-    if key.is_some() && is_plain_http_to_remote(&cfg.base_url) {
-        return Err(AiError::NotConfigured("the endpoint uses plain http:// with an API key; use https:// (http is allowed only for localhost)".into()));
-    }
+    super::check_endpoint(&cfg.base_url, key.is_some())?;
 
     let msgs: Vec<Value> = messages
         .iter()
@@ -73,28 +71,6 @@ pub(crate) fn build_request(
         headers,
         body: json!({"model": cfg.model, "stream": true, "messages": msgs}),
     })
-}
-
-/// True for `http://` URLs whose host is not this machine.
-fn is_plain_http_to_remote(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("http://") else {
-        return false;
-    };
-    let authority = rest.split('/').next().unwrap_or_default();
-    let host_port = authority.rsplit('@').next().unwrap_or_default();
-    let host = if host_port.starts_with('[') {
-        host_port
-            .split(']')
-            .next()
-            .unwrap_or_default()
-            .trim_start_matches('[')
-    } else {
-        host_port.split(':').next().unwrap_or_default()
-    };
-    !(host == "localhost"
-        || host.ends_with(".localhost")
-        || host == "::1"
-        || host.starts_with("127."))
 }
 
 /// One SSE `data:` payload: `[DONE]`, an error object, or a chunk with `choices[0].delta.content`.
@@ -209,6 +185,7 @@ data: {"id":"never read","choices":[{"delta":{"content":"X"}}]}
             "http://localhost:11434/v1",
             "http://127.0.0.1:1234/v1",
             "http://[::1]:8080/v1",
+            "HTTP://LocalHost:1234/v1",
         ] {
             c.base_url = local.into();
             assert!(build_request(&c, Some(&key), &[]).is_ok(), "{local}");
@@ -217,6 +194,8 @@ data: {"id":"never read","choices":[{"delta":{"content":"X"}}]}
             "http://192.168.1.5:1234/v1",
             "http://example.com/v1",
             "http://localhost@evil.com/v1",
+            "HTTP://example.com/v1",
+            "http://127.evil.com/v1",
         ] {
             c.base_url = remote.into();
             let err = build_request(&c, Some(&key), &[]).err().expect(remote);

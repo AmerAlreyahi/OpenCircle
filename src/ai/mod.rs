@@ -323,6 +323,44 @@ pub(crate) fn scrub(text: &str, key: Option<&Secret>) -> String {
     one_line.chars().take(300).collect()
 }
 
+/// The one transport check, run by both clients before any key header exists.
+/// Scheme is matched case-insensitively. `https://` always passes; `http://`
+/// only for this machine (host `localhost` / `*.localhost`, or an IP literal
+/// that `is_loopback()`), unless there is no key to leak; any other scheme fails.
+pub(crate) fn check_endpoint(url: &str, has_key: bool) -> Result<(), AiError> {
+    let bad = |why: &str| Err(AiError::NotConfigured(why.to_string()));
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return bad("the endpoint must be an http(s):// URL");
+    };
+    if scheme.eq_ignore_ascii_case("https") || (!has_key && scheme.eq_ignore_ascii_case("http")) {
+        return Ok(());
+    }
+    if !scheme.eq_ignore_ascii_case("http") {
+        return bad("the endpoint must be an http(s):// URL");
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    // Backslashes and spaces are parsed differently by different URL parsers: refuse.
+    let host_port = authority.rsplit('@').next().unwrap_or_default();
+    let host = match host_port.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or_default(),
+        None => host_port.split(':').next().unwrap_or_default(),
+    };
+    let host_lc = host.to_ascii_lowercase();
+    let local = !authority.contains(['\\', ' '])
+        && (host_lc == "localhost"
+            || host_lc.ends_with(".localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback()));
+    if local {
+        Ok(())
+    } else {
+        bad(
+            "the endpoint uses plain http:// with an API key; use https:// (http is allowed only for localhost)",
+        )
+    }
+}
+
 /// `base` without trailing slashes.
 pub(crate) fn join_url(base: &str, path: &str) -> String {
     format!("{}{path}", base.trim_end_matches('/'))
@@ -339,6 +377,48 @@ mod tests {
 
     fn lines(n: usize) -> Vec<String> {
         (0..n).map(|i| format!("line {i}")).collect()
+    }
+
+    #[test]
+    fn endpoint_check_with_a_key() {
+        for ok in [
+            "https://api.anthropic.com",
+            "HTTPS://api.openai.com/v1",
+            "http://localhost:11434/v1",
+            "HTTP://LOCALHOST/v1",
+            "http://app.localhost/v1",
+            "http://127.0.0.1:1234",
+            "http://127.1.2.3/v1",
+            "http://[::1]:11434",
+            "http://user:pw@127.0.0.1:1234/v1",
+        ] {
+            assert!(check_endpoint(ok, true).is_ok(), "{ok}");
+        }
+        for bad in [
+            "HTTP://example.com",
+            "http://example.com/v1",
+            "http://127.evil.com",
+            "http://localhost.evil.com",
+            "http://localhost@evil.com/v1",
+            "http://127.0.0.1@evil.com/v1",
+            "http://127.0.0.1\\@evil.com/v1",
+            "http://192.168.1.5:1234/v1",
+            "http://[2001:db8::1]/v1",
+            "http://0.0.0.0:1234",
+            "ftp://x",
+            "file:///etc/passwd",
+            "api.anthropic.com",
+            "",
+        ] {
+            assert!(check_endpoint(bad, true).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn endpoint_check_without_a_key_only_needs_http_or_https() {
+        assert!(check_endpoint("http://192.168.1.5:1234/v1", false).is_ok());
+        assert!(check_endpoint("HTTP://example.com", false).is_ok());
+        assert!(check_endpoint("ftp://x", false).is_err());
     }
 
     #[test]

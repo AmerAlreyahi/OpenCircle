@@ -35,6 +35,14 @@ pub(crate) fn build_request(
     let key = key
         .filter(|k| !k.is_empty())
         .ok_or_else(|| AiError::NotConfigured("add your Anthropic API key".into()))?;
+    super::check_endpoint(
+        if cfg.base_url.is_empty() {
+            DEFAULT_BASE_URL
+        } else {
+            &cfg.base_url
+        },
+        true,
+    )?;
     let model = if cfg.model.is_empty() {
         DEFAULT_ANTHROPIC_MODEL
     } else {
@@ -238,6 +246,31 @@ data: {"type":"message_stop"}
                 .body["model"],
             DEFAULT_ANTHROPIC_MODEL
         );
+    }
+
+    #[test]
+    fn key_is_never_sent_over_plain_http_to_a_remote_host() {
+        let key = Secret::new(FAKE_KEY);
+        let mut c = cfg();
+        for remote in [
+            "http://example.com",
+            "HTTP://example.com/v1",
+            "http://127.evil.com",
+            "ftp://x",
+        ] {
+            c.base_url = remote.into();
+            let err = build_request(&c, Some(&key), &[]).err().expect(remote);
+            assert!(matches!(err, AiError::NotConfigured(_)), "{remote}");
+            assert!(!err.to_string().contains(FAKE_KEY));
+        }
+        for ok in [
+            "https://api.anthropic.com",
+            "http://127.0.0.1:1234",
+            "http://[::1]:11434",
+        ] {
+            c.base_url = ok.into();
+            assert!(build_request(&c, Some(&key), &[]).is_ok(), "{ok}");
+        }
     }
 
     #[test]
