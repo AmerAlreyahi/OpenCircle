@@ -3,8 +3,9 @@
 //! `win.rs` (Windows, xcap). Scrolling capture: `stitch.rs` + `scroll.rs`.
 #[cfg(target_os = "linux")]
 pub mod portal;
-mod scroll;
-mod stitch;
+pub mod scroll;
+pub mod stitch;
+pub mod window_rect;
 
 #[cfg(target_os = "linux")]
 mod x11;
@@ -55,7 +56,7 @@ fn is_wayland(display: Option<&std::ffi::OsStr>, session_type: Option<&std::ffi:
     display.is_some_and(|d| !d.is_empty()) && session_type.is_some_and(|t| t == "wayland")
 }
 
-fn from_png(path: &std::ffi::OsStr) -> Result<Frame, String> {
+pub(crate) fn from_png(path: &std::ffi::OsStr) -> Result<Frame, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
