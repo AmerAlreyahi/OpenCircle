@@ -307,17 +307,20 @@ impl Editor {
                 .content_fit(ContentFit::Fill)
                 .into(),
         ];
-        if let Some((r, handle)) = &self.live {
+        // Always a layer here, live or not: the canvas must keep its index, or iced
+        // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
+        let live = self.live.as_ref().map(|(r, handle)| {
             let at = Point::new((r.x - view.x) * self.zoom, (r.y - view.y) * self.zoom);
-            layers.push(
-                pin(image(handle.clone())
-                    .width(r.width * self.zoom)
-                    .height(r.height * self.zoom)
-                    .content_fit(ContentFit::Fill))
-                .position(at)
-                .into(),
-            );
-        }
+            pin(image(handle.clone())
+                .width(r.width * self.zoom)
+                .height(r.height * self.zoom)
+                .content_fit(ContentFit::Fill))
+            .position(at)
+        });
+        layers.push(match live {
+            Some(live) => live.into(),
+            None => iced::widget::space().into(),
+        });
         layers.push(
             iced::widget::canvas(canvas::Input { editor: self })
                 .width(size.width)
