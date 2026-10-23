@@ -1,7 +1,13 @@
 //! OpenCircle: resident tray app. Shortcut, tray or `opencircle capture` → frozen overlay.
+#[allow(dead_code)] // library API, wired into the UI later
+mod ai;
 mod capture;
+#[allow(dead_code)] // library API, wired into the UI later
+mod config;
 mod hotkey;
 mod lens;
+#[allow(dead_code)] // library API, wired into the UI later
+mod secrets;
 mod ui;
 
 use std::process::ExitCode;
