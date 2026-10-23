@@ -109,6 +109,13 @@ production systems.
   the owner reviews the plan and adds rules.
 - Releases (owner rules): unsigned binaries, GitHub Releases via Actions,
   owner approves each publish.
+- Merging (owner, 2026-10-23): the lead merges verified work to main itself once
+  CI + the local gate are green (and Windows-tested when it touches the UI).
+- Progress tracking (owner, 2026-10-23): no GitHub Projects board for this repo;
+  progress lives in the handover file only.
+- Selection look (owner, 2026-10-23): the clear area follows the drawn shape
+  (no snap-to-box).
+- Translate default target (owner, 2026-10-23): Arabic, changeable in settings.
 
 ## Domain quirks
 
