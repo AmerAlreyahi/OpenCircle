@@ -69,3 +69,9 @@ icons = [
     "assets/icons/512x512.png",
 ]
 formats = ["nsis", "wix", "appimage", "deb", "rpm"]
+
+[dev-dependencies]
+# Headless renders of the UI screens in tests (the versions iced already builds).
+iced = { version = "0.14", default-features = false, features = ["advanced"] }
+iced_runtime = "0.14"
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
