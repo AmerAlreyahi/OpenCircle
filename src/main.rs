@@ -7,6 +7,8 @@ mod capture;
 mod config;
 mod hotkey;
 mod lens;
+#[allow(dead_code, unused_imports)] // library for the Text/Translate actions; not wired in yet
+mod ocr;
 #[allow(dead_code)] // library API, wired into the UI later
 mod secrets;
 mod ui;
@@ -30,6 +32,7 @@ fn main() -> ExitCode {
     let capture_now = match std::env::args().nth(1).as_deref() {
         None => false,
         Some("capture") => true,
+        Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
         Some(_) => {
             eprintln!("usage: opencircle [capture]");
             return ExitCode::from(2);
