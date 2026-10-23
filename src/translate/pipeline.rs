@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use super::{Block, Line, MARKUP, group_blocks, render};
-use crate::ai::{self, AiError, Message};
+use crate::ai::{self, AiError};
 use crate::config::AiConfig;
 use crate::ocr::{self, OcrError, TextBlock};
 use crate::secrets::Secret;
@@ -35,21 +35,8 @@ impl Deps for Real {
     }
 
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
-        ai::translate_with(texts, target, |msgs| {
-            ai::ask(&self.ai, self.key.as_ref(), &with_markup(msgs))
-        })
+        ai::translate_lines(&self.ai, self.key.as_ref(), texts, target, MARKUP)
     }
-}
-
-/// The batched translate prompt plus the [`MARKUP`] rules.
-// ponytail: appended to ai's system prompt; an `extra` parameter on
-// ai::translate_lines would be cleaner (ai/ is another worker's file).
-fn with_markup(msgs: &[Message]) -> Vec<Message> {
-    let mut msgs = msgs.to_vec();
-    if let Some(system) = msgs.first_mut() {
-        system.text = format!("{}\n{MARKUP}", system.text);
-    }
-    msgs
 }
 
 #[derive(Debug)]
@@ -456,8 +443,8 @@ pub(super) mod tests {
         );
         assert!(out.rgba == direct, "the [[ ]] spans went to render as is");
         // and the real client asks for them
-        ai::translate_with(&["x".into()], "ar", |m| {
-            assert!(with_markup(m)[0].text.ends_with(MARKUP));
+        ai::translate_with(&["x".into()], "ar", MARKUP, |m| {
+            assert!(m[0].text.ends_with(MARKUP));
             Ok(r#"["y"]"#.into())
         })
         .unwrap();

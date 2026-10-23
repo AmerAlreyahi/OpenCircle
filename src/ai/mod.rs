@@ -144,29 +144,35 @@ pub fn ask_stream(
 
 /// Translate many on-screen lines in ONE call. The answer must be a JSON array
 /// of exactly `lines.len()` strings, in order, or this fails (never a silent
-/// shift of lines onto the wrong boxes).
+/// shift of lines onto the wrong boxes). `extra_instructions` ("" = none) is
+/// added to the rules (e.g. translate's markup for highlighted names).
 pub fn translate_lines(
     cfg: &AiConfig,
     key: Option<&Secret>,
     lines: &[String],
     target: &str,
+    extra_instructions: &str,
 ) -> Result<Vec<String>, AiError> {
-    translate_with(lines, target, |msgs| ask(cfg, key, msgs))
+    translate_with(lines, target, extra_instructions, |msgs| {
+        ask(cfg, key, msgs)
+    })
 }
 
 pub(crate) fn translate_with(
     lines: &[String],
     target: &str,
+    extra_instructions: &str,
     ask: impl FnOnce(&[Message]) -> Result<String, AiError>,
 ) -> Result<Vec<String>, AiError> {
     if lines.is_empty() {
         return Ok(Vec::new());
     }
     let input = serde_json::to_string(lines).map_err(|e| AiError::BadResponse(e.to_string()))?;
-    let msgs = [
-        Message::new(Role::System, translate_system_prompt(target, lines.len())),
-        Message::user(input),
-    ];
+    let mut system = translate_system_prompt(target, lines.len());
+    if !extra_instructions.is_empty() {
+        system = format!("{system}\n{extra_instructions}");
+    }
+    let msgs = [Message::new(Role::System, system), Message::user(input)];
     parse_translation(&ask(&msgs)?, lines.len())
 }
 
@@ -423,19 +429,19 @@ mod tests {
 
     #[test]
     fn translate_rejects_wrong_length() {
-        let err = translate_with(&lines(3), "ar", |_| Ok(r#"["a","b"]"#.into())).unwrap_err();
+        let err = translate_with(&lines(3), "ar", "", |_| Ok(r#"["a","b"]"#.into())).unwrap_err();
         assert!(
             matches!(err, AiError::BadResponse(ref m) if m.contains("expected 3") && m.contains("got 2")),
             "{err}"
         );
-        assert!(translate_with(&lines(1), "ar", |_| Ok(r#"["a","b"]"#.into())).is_err());
+        assert!(translate_with(&lines(1), "ar", "", |_| Ok(r#"["a","b"]"#.into())).is_err());
     }
 
     #[test]
     fn translate_rejects_non_arrays() {
         for bad in ["I cannot", "[1,2]", r#"{"a":"b"}"#, "[\"a\""] {
             assert!(
-                translate_with(&lines(2), "ar", |_| Ok(bad.into())).is_err(),
+                translate_with(&lines(2), "ar", "", |_| Ok(bad.into())).is_err(),
                 "{bad}"
             );
         }
@@ -443,7 +449,7 @@ mod tests {
 
     #[test]
     fn translate_accepts_fenced_answer_and_keeps_order() {
-        let out = translate_with(&lines(2), "ar", |_| {
+        let out = translate_with(&lines(2), "ar", "", |_| {
             Ok("```json\n[\"واحد\", \"two\"]\n```".into())
         })
         .unwrap();
@@ -454,7 +460,7 @@ mod tests {
     fn translate_request_is_one_call_with_json_input() {
         let mut seen = Vec::new();
         let input = vec!["Start Game".to_string(), "Potion \"X\"".to_string()];
-        translate_with(&input, "ar", |m| {
+        translate_with(&input, "ar", "", |m| {
             seen = m.to_vec();
             Ok(r#"["a","b"]"#.into())
         })
@@ -472,7 +478,7 @@ mod tests {
     #[test]
     fn empty_input_makes_no_call() {
         assert_eq!(
-            translate_with(&[], "ar", |_| panic!("no call expected")).unwrap(),
+            translate_with(&[], "ar", "", |_| panic!("no call expected")).unwrap(),
             Vec::<String>::new()
         );
     }
