@@ -24,6 +24,10 @@ Click **Edit** and the same bar turns into an editing toolbar (shapes, arrows, p
 
 ![Edit in place](01b-edit-in-place.png)
 
+One colour button opens the picker (12 colours, stroke width, custom colour):
+
+![Colour picker](01c-edit-colour-picker.png)
+
 ### Ask AI
 ![Ask AI panel](05-ask-ai.png)
 

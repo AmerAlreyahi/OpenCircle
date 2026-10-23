@@ -95,6 +95,11 @@ production systems.
   same floating bar into the editing toolbar (shapes, arrows, blur, text,
   steps, …) with a back arrow to the actions; works on any capture. One
   editor shared with Snip mode.
+- Visual consistency (owner, 2026-10-23): controls of the same kind look
+  identical — same width, height, radius, spacing and alignment (e.g. every
+  shortcut field is the same width with one keycap per key). No crowded
+  rows of options: group them behind one control (e.g. one colour button
+  opening a picker instead of a row of swatches).
 - Themes (owner, 2026-10-23): Light, Dark and System, from one token set.
 - Workflow (owner, 2026-10-23): planning first; execution starts only after
   the owner reviews the plan and adds rules.
