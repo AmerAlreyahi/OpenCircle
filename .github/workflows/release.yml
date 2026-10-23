@@ -1,13 +1,40 @@
-# On tag v*: build Windows + Linux installers, add SHA256SUMS, create a DRAFT release.
-# The owner reviews and publishes the draft (owner rule: approve every release).
+# Release build. Two ways in:
+#   * push of a tag `v*`      -> build everything, then create a DRAFT release.
+#   * manual "Run workflow"   -> dry run: build everything, upload it as workflow
+#     artifacts, create NO release (not even with dry_run unticked: only a tag
+#     push can create the draft).
+# The workflow never publishes. The owner reviews the draft and publishes it
+# (owner rule: approve every release). Binaries are unsigned (owner rule).
+#
+# The version comes from the tag (`v1.2.3` -> 1.2.3) and is stamped into Cargo.toml
+# on the runner only; Cargo.toml stays at 0.0.0 in git. Every action is pinned to
+# a commit SHA; the tools are pinned to versions.
 name: release
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (build and upload artifacts, never a release)
+        type: boolean
+        default: true
+      version:
+        description: Version to stamp in a manual run (X.Y.Z; a tag push uses the tag)
+        type: string
+        default: 0.0.1
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  CARGO_PACKAGER_VERSION: 0.11.8
+  CARGO_GENERATE_RPM_VERSION: 0.21.1
 
 jobs:
   build:
@@ -16,31 +43,97 @@ jobs:
       matrix:
         include:
           - os: windows-latest   # NSIS .exe + .msi
-            formats: nsis,wix
+            artifact: build-windows
           - os: ubuntu-22.04     # .AppImage + .deb + .rpm (22.04 = widest glibc reach)
-            formats: appimage,deb,rpm
+            artifact: build-linux
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Stamp the version from the tag
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version="$INPUT_VERSION"; fi
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version '$version' is not X.Y.Z (tag vX.Y.Z)"; exit 1
+          fi
+          sed -i "0,/^version = \".*\"/s//version = \"$version\"/" Cargo.toml
+          grep -m1 '^version = ' Cargo.toml
+          grep -qx "version = \"$version\"" Cargo.toml
 
       - name: Linux build deps
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libgtk-3-dev libxdo-dev
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libgtk-3-dev
 
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-packager --locked
-
-      - name: Build and package
-        env:
-          FORMATS: ${{ matrix.formats }}
-        run: cargo packager --release --formats "$FORMATS" --out-dir dist
-
-      - uses: actions/upload-artifact@v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          name: dist-${{ matrix.os }}
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Install packagers
+        shell: bash
+        run: |
+          cargo install cargo-packager --version "$CARGO_PACKAGER_VERSION" --locked
+          if [ "$RUNNER_OS" = Linux ]; then
+            cargo install cargo-generate-rpm --version "$CARGO_GENERATE_RPM_VERSION" --locked
+          fi
+
+      # cargo-packager runs `cargo build --release` itself (before-packaging-command).
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: cargo packager --release --formats nsis,wix --out-dir dist
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo packager --release --formats deb,appimage --out-dir dist
+          cargo generate-rpm -o dist/
+
+      # The exe must be GUI-subsystem (2) and carry the icon + version info.
+      - name: Check the Windows exe
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = "target\release\opencircle.exe"
+          $b = [IO.File]::ReadAllBytes($exe)
+          $pe = [BitConverter]::ToInt32($b, 0x3C)
+          $subsystem = [BitConverter]::ToUInt16($b, $pe + 24 + 68)
+          "subsystem = $subsystem (2 = GUI, 3 = console)"
+          $info = (Get-Item $exe).VersionInfo
+          $info | Format-List FileVersion, ProductVersion, ProductName, FileDescription, OriginalFilename
+          if ($subsystem -ne 2) { throw "release exe is not GUI-subsystem" }
+          if (-not $info.FileVersion.StartsWith((Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value)) { throw "version info does not match Cargo.toml" }
+
+      # Prove the runtime dependencies. ldd lists what is linked (and fails on a
+      # missing library); the libraries gtk/winit/tray-icon dlopen are not linked,
+      # so they are listed from the binary's strings and must be in the package's
+      # depends (Cargo.toml [package.metadata.packager.deb]).
+      - name: Check the Linux runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          bin=target/release/opencircle
+          echo "== ldd =="; ldd "$bin" | tee ldd.txt
+          if grep 'not found' ldd.txt; then exit 1; fi
+          echo "== direct NEEDED libraries and their packages =="
+          for lib in $(readelf -d "$bin" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'); do
+            path=$(ldconfig -p | awk -v l="$lib" '$1==l {print $NF; exit}')
+            echo "$lib -> $(dpkg -S "${path:-$lib}" 2>/dev/null | head -1 | cut -d: -f1)"
+          done
+          echo "== dlopened libraries =="
+          strings "$bin" | grep -oE 'lib[A-Za-z0-9_+-]+\.so\.[0-9]+' | sort -u
+          echo "== deb =="; dpkg-deb -I dist/*.deb
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.artifact }}
           path: |
             dist/*.exe
             dist/*.msi
@@ -48,20 +141,46 @@ jobs:
             dist/*.deb
             dist/*.rpm
           if-no-files-found: error
+          retention-days: 14
 
-  draft:
+  checksums:
     needs: build
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
-      - name: Checksums + draft release
+      - name: SHA256SUMS.txt
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # The only job that can write to the repository, and only for a tag push.
+  draft:
+    needs: checksums
+    if: github.ref_type == 'tag' && !inputs.dry_run
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist
+      - name: Create the DRAFT release (never published here)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          cd dist
-          sha256sum * > SHA256SUMS.txt
-          gh release create "$TAG" * --repo "$GITHUB_REPOSITORY" --draft --title "OpenCircle $TAG" --notes "Release notes are written before publishing."
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "OpenCircle $TAG" --notes "Release notes are written before publishing."

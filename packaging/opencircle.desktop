@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=OpenCircle
+Comment=Circle anything on screen to search, read, translate or ask about it
+Exec=opencircle
+Icon=opencircle
+Terminal=false
+Categories=Utility;

@@ -76,6 +76,21 @@ fn engine_err(e: impl fmt::Display) -> OcrError {
     OcrError::Engine(e.to_string())
 }
 
+/// The ORT DLL is checksum-verified, so on Windows a failed `LoadLibraryExW`
+/// means one of its own imports (MSVCP140, VCRUNTIME140_1) is missing. We never
+/// bundle or download the redistributable: we say where to get it.
+fn load_err(e: impl fmt::Display) -> OcrError {
+    let msg = e.to_string();
+    if msg.contains("LoadLibraryExW") {
+        OcrError::Engine(format!(
+            "Install the Microsoft Visual C++ Redistributable (x64): \
+             https://aka.ms/vs/17/release/vc_redist.x64.exe ({msg})"
+        ))
+    } else {
+        OcrError::Engine(msg)
+    }
+}
+
 /// ORT plus loaded models. Runs in the `ocr-worker` process only.
 pub struct Engine {
     det: TextDetectionPredictor,
@@ -87,7 +102,7 @@ impl Engine {
     pub fn load(models: &Path) -> Result<Engine, OcrError> {
         let rec_files = &models::RECOGNIZER;
         ort::init_from(models.join(models::ORT.name))
-            .map_err(engine_err)?
+            .map_err(load_err)?
             .commit();
         // Memory patterns cache a plan per input shape; every capture has a new
         // shape, so they only add RAM (~100 MB measured).
@@ -213,6 +228,21 @@ fn reading_order(mut blocks: Vec<TextBlock>) -> Vec<TextBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_dll_load_points_to_the_vc_redistributable() {
+        // What ort's LoadError::Dlopen prints on Windows (libloading's LoadLibraryExW variant).
+        let e = load_err("failed to load from `C:\\ocr\\onnxruntime.dll`: LoadLibraryExW failed");
+        let text = e.to_string();
+        assert!(text.contains("Install the Microsoft Visual C++ Redistributable (x64): https://aka.ms/vs/17/release/vc_redist.x64.exe"), "{text}");
+        assert!(
+            text.contains("LoadLibraryExW failed"),
+            "keeps the detail: {text}"
+        );
+        // Any other failure keeps its own message.
+        let other = load_err("ort 2.0 is not compatible with the ONNX Runtime binary").to_string();
+        assert!(!other.contains("Redistributable"), "{other}");
+    }
 
     fn block(text: &str, x: f32, y: f32) -> TextBlock {
         TextBlock {

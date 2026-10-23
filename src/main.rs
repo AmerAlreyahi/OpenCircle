@@ -1,4 +1,8 @@
 //! OpenCircle: resident tray app. Shortcut, tray or `opencircle capture` → frozen overlay.
+// Release builds on Windows are GUI-subsystem: no console window on double-click.
+// Debug builds keep the console. `attach_parent_console` brings the logs back when
+// a release exe is run from a terminal.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod actions;
 #[allow(dead_code)] // library API, wired into the UI later
 mod ai;
@@ -39,7 +43,37 @@ pub type Triggers = mpsc::UnboundedSender<Trigger>;
 const USAGE: &str =
     "usage: opencircle [capture | run <action> [--target full_screen|circle|last_region]]";
 
+/// A GUI-subsystem exe has no stdout/stderr. When started from a terminal, attach
+/// to its console so `eprintln!` shows; a redirect (file, pipe) is already valid
+/// and is left alone. Limit: cmd.exe does not wait for a GUI exe, so the prompt
+/// may come back before the output (use `start /wait` or `| more`).
+#[cfg(all(windows, not(debug_assertions)))]
+fn attach_parent_console() {
+    use std::os::windows::io::IntoRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        SetStdHandle,
+    };
+    // SAFETY: plain Win32 calls; the opened console handle is leaked on purpose.
+    unsafe {
+        if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
+            return; // double-click or service: no console to join
+        }
+        for std_handle in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            if GetStdHandle(std_handle).is_ok_and(|h| !h.0.is_null()) {
+                continue;
+            }
+            if let Ok(console) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
+                let _ = SetStdHandle(std_handle, HANDLE(console.into_raw_handle()));
+            }
+        }
+    }
+}
+
 fn main() -> ExitCode {
+    #[cfg(all(windows, not(debug_assertions)))]
+    attach_parent_console();
     ui::limit_malloc_arenas();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = match args.first().map(String::as_str) {

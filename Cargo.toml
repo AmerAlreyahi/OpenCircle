@@ -53,7 +53,7 @@ xcb = { version = "1.7", features = ["randr", "xtest", "xfixes", "shape"] }
 [target.'cfg(windows)'.dependencies]
 widestring = "1"
 xcap = "0.9"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 strip = true
@@ -64,6 +64,9 @@ winresource = "0.1"
 [package.metadata.packager]
 product-name = "OpenCircle"
 identifier = "com.opencircle.app"
+category = "Utility"
+authors = ["OpenCircle contributors"]
+homepage = "https://github.com/AmerAlreyahi/OpenCircle"
 before-packaging-command = "cargo build --release"
 icons = [
     "assets/icons/opencircle.ico",
@@ -72,7 +75,50 @@ icons = [
     "assets/icons/256x256.png",
     "assets/icons/512x512.png",
 ]
-formats = ["nsis", "wix", "appimage", "deb", "rpm"]
+# cargo-packager has no rpm format: the .rpm comes from cargo-generate-rpm (below).
+formats = ["nsis", "wix", "appimage", "deb"]
+
+# Linux runtime libraries. `ldd target/release/opencircle` links gtk3, glib and
+# libxcb; winit, iced and tray-icon dlopen the rest (X11, xkbcommon, wayland,
+# appindicator), so ldd alone never shows them. release.yml prints both lists.
+[package.metadata.packager.deb]
+package_name = "opencircle"
+depends = [
+    "libgtk-3-0",
+    "libayatana-appindicator3-1",
+    "libxcb1",
+    "libx11-6",
+    "libx11-xcb1",
+    "libxcursor1",
+    "libxi6",
+    "libxkbcommon0",
+    "libxkbcommon-x11-0",
+    "libwayland-client0",
+    "xdg-desktop-portal",
+]
+
+# .rpm: `cargo generate-rpm` after `cargo build --release`. Same libraries, Fedora names.
+[package.metadata.generate-rpm]
+auto-req = "disabled"
+assets = [
+    { source = "target/release/opencircle", dest = "/usr/bin/opencircle", mode = "755" },
+    { source = "packaging/opencircle.desktop", dest = "/usr/share/applications/opencircle.desktop", mode = "644" },
+    { source = "assets/icons/256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/opencircle.png", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/licenses/opencircle/LICENSE", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+gtk3 = "*"
+libayatana-appindicator-gtk3 = "*"
+libxcb = "*"
+libX11 = "*"
+libX11-xcb = "*"
+libXcursor = "*"
+libXi = "*"
+libxkbcommon = "*"
+libxkbcommon-x11 = "*"
+libwayland-client = "*"
+xdg-desktop-portal = "*"
 
 [dev-dependencies]
 # Headless renders of the UI screens in tests (the versions iced already builds).
