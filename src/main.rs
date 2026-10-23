@@ -5,6 +5,8 @@ mod ai;
 mod capture;
 #[allow(dead_code)] // library API, wired into the UI later
 mod config;
+#[allow(dead_code)] // the annotation editor; the UI wires it (Edit in place, Snip mode)
+mod editor;
 mod hotkey;
 mod lens;
 #[allow(dead_code, unused_imports)] // library for the Text/Translate actions; not wired in yet

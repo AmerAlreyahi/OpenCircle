@@ -10,6 +10,7 @@ description = "Circle anything on screen to search, read, translate or ask about
 # < 40 MB idle). Re-measure wgpu on Windows (D3D12) before adding it back.
 iced = { version = "0.14", default-features = false, features = [
     "tiny-skia", "x11", "wayland", "thread-pool", "canvas", "image-without-codecs",
+    "advanced", # font system + headless renderer for the editor (no extra code)
 ] }
 arboard = "3.7"
 base64 = "0.22"
@@ -34,6 +35,8 @@ tray-icon = "0.26"
 oar-ocr = { version = "0.10.1", default-features = false, features = ["simd"] }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic"] }
 image = { version = "0.25", default-features = false }
+# Same version iced_tiny_skia already builds: the editor flattens annotations with it.
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 hmac-sha256 = "1.1"
 flate2 = "1"
 # Blocking HTTP for the AI clients: rustls (ring), no gzip, no async runtime.

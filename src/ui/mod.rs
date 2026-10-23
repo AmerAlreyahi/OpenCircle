@@ -3,7 +3,7 @@ mod bar;
 mod overlay;
 pub mod theme;
 mod tray;
-mod widgets;
+pub(crate) mod widgets;
 
 pub use tray::start as start_tray;
 

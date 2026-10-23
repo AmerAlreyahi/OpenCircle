@@ -90,6 +90,160 @@ pub fn with_tip<'a, Message: 'a>(
     tooltip(content, pill(tip), side).gap(10)
 }
 
+/// Square 44x44 icon button (toolbar tools, back, undo/redo): quiet, hover,
+/// `active` = accent gradient.
+pub fn icon_button<'a, Message: Clone + 'a>(
+    glyph: char,
+    active: bool,
+    on_press: Message,
+) -> Button<'a, Message> {
+    let fg = if active {
+        theme::ON_ACCENT
+    } else {
+        theme::current().text
+    };
+    square_button(
+        text(glyph).font(ICON_FONT).size(18).color(fg),
+        active,
+        on_press,
+    )
+}
+
+/// Thin vertical line between toolbar groups.
+pub fn divider<'a, Message: 'a>() -> Element<'a, Message> {
+    container(space::horizontal())
+        .width(1)
+        .height(24)
+        .style(|_| container::Style {
+            background: Some(theme::current().border.into()),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// The ONE colour control: a 44x44 button showing the current colour; it opens
+/// `colour_popover`.
+pub fn colour_button<'a, Message: Clone + 'a>(
+    colour: Color,
+    open: bool,
+    on_press: Message,
+) -> Button<'a, Message> {
+    square_button(dot(colour, 22.0, true), open, on_press)
+}
+
+/// The colour picker popover: the colour swatches, stroke widths (thin/medium/
+/// thick, `width` = the chosen one) and a custom colour as hex.
+#[allow(clippy::too_many_arguments)]
+pub fn colour_popover<'a, Message: Clone + 'a>(
+    colours: &[Color],
+    current: Color,
+    width: usize,
+    hex: &'a str,
+    on_colour: impl Fn(Color) -> Message,
+    on_width: impl Fn(usize) -> Message,
+    on_hex: impl Fn(String) -> Message + 'a,
+) -> Container<'a, Message> {
+    let palette = theme::current();
+    let swatch = |&c: &Color| -> Element<'a, Message> {
+        let ring = if c == current {
+            palette.text
+        } else {
+            palette.border
+        };
+        button(dot(c, 26.0, true))
+            .padding(3)
+            .on_press(on_colour(c))
+            .style(move |_, status| button::Style {
+                background: matches!(status, button::Status::Hovered).then(|| palette.hover.into()),
+                border: Border {
+                    color: ring,
+                    width: if c == current { 2.0 } else { 0.0 },
+                    radius: 999.0.into(),
+                },
+                ..button::Style::default()
+            })
+            .into()
+    };
+    let rows = colours
+        .chunks(6)
+        .map(|chunk| row(chunk.iter().map(swatch)).spacing(6).into());
+    let widths = row((0..3).map(|i| {
+        let size = [4.0, 8.0, 12.0][i];
+        square_button(dot(palette.text, size, false), i == width, on_width(i)).into()
+    }))
+    .spacing(4);
+    use iced::widget::{column, text_input};
+    let custom = text_input("#RRGGBB", hex)
+        .on_input(on_hex)
+        .size(14)
+        .padding([8, 12])
+        .style(|_, _| text_input::Style {
+            background: palette.hover.into(),
+            border: Border {
+                color: palette.border,
+                width: 1.0,
+                radius: 10.0.into(),
+            },
+            icon: palette.muted,
+            placeholder: palette.muted,
+            value: palette.text,
+            selection: theme::ACCENT_START.scale_alpha(0.4),
+        });
+    surface(
+        column![column(rows).spacing(6), widths, custom]
+            .spacing(10)
+            .padding(4)
+            .width(6.0 * 32.0 + 5.0 * 6.0 + 8.0),
+    )
+}
+
+/// A filled circle; `ring` adds a thin outline (so white reads on a light panel).
+fn dot<'a, Message: 'a>(colour: Color, size: f32, ring: bool) -> Element<'a, Message> {
+    let border = theme::current().border;
+    container(space::horizontal())
+        .width(size)
+        .height(size)
+        .style(move |_| container::Style {
+            background: Some(colour.into()),
+            border: Border {
+                color: border,
+                width: if ring { 1.5 } else { 0.0 },
+                radius: 999.0.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// 44x44 button around centred `content`, styled like a quiet `text_button`
+/// (accent gradient when `active`).
+fn square_button<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    active: bool,
+    on_press: Message,
+) -> Button<'a, Message> {
+    let palette = theme::current();
+    button(container(content).center(iced::Fill))
+        .width(CONTROL)
+        .height(CONTROL)
+        .padding(0)
+        .on_press(on_press)
+        .style(move |_, status| {
+            let background = match (active, status) {
+                (true, _) => Some(accent(status)),
+                (false, button::Status::Hovered) => Some(palette.hover.into()),
+                (false, button::Status::Pressed) => Some(palette.pressed.into()),
+                (false, _) => None,
+            };
+            button::Style {
+                background,
+                text_color: palette.text,
+                border: Border::default().rounded(14),
+                ..button::Style::default()
+            }
+        })
+}
+
 /// The accent gradient; hover/press brighten it a little.
 fn accent(status: button::Status) -> Background {
     let lift = match status {
