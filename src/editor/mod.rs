@@ -555,7 +555,11 @@ impl Editor {
                 at: p,
                 radius: self.width.badge() / z,
             },
-            Tool::Blur => Shape::Blur { a: p, b: p },
+            Tool::Blur => Shape::Blur {
+                a: p,
+                b: p,
+                seed: blur::seed(),
+            },
             Tool::Spotlight => Shape::Spotlight { a: p, b: p },
             Tool::Magnifier => Shape::Magnifier {
                 at: p,

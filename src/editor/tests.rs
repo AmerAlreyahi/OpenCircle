@@ -149,6 +149,7 @@ fn blur_changes_only_its_region() {
     let blur = item(Shape::Blur {
         a: pt(20.0, 16.0),
         b: pt(68.0, 52.0),
+        seed: 7,
     });
     let plain = render(&doc_with(checker(100, 80), vec![]));
     let blurred = render(&doc_with(checker(100, 80), vec![blur]));
@@ -169,6 +170,108 @@ fn blur_changes_only_its_region() {
     for (x, y) in [(31, 16), (20, 27), (31, 27)] {
         assert_eq!(px(&blurred, x, y), cell);
     }
+}
+
+/// A password field: `secret` in dark text on an off-white field.
+fn field(secret: &str) -> Image {
+    let (w, h) = (240, 40);
+    let mut layer = document::Layer {
+        pm: tiny_skia::Pixmap::from_vec(
+            image_of(w, h, |_, _| [250, 250, 250, 255]).rgba,
+            tiny_skia::IntSize::from_wh(w, h).unwrap(),
+        )
+        .unwrap(),
+        origin: Point::ORIGIN,
+    };
+    text::paint(
+        &mut layer,
+        pt(8.0, 8.0),
+        secret,
+        20.0,
+        [20, 20, 30, 255],
+        false,
+    );
+    Image {
+        width: w,
+        height: h,
+        rgba: layer.pm.take(),
+    }
+}
+
+#[test]
+fn blur_destroys_the_text_it_hides() {
+    let (a, b) = (pt(4.0, 4.0), pt(236.0, 36.0));
+    let blurred = |secret: &str, seed| {
+        let blur = item(Shape::Blur { a, b, seed });
+        render(&doc_with(field(secret), vec![blur]))
+    };
+    let region = |c: &Crop| -> Vec<[u8; 4]> {
+        (4..36)
+            .flat_map(|y| (4..236).map(move |x| (x, y)))
+            .map(|(x, y)| px(c, x, y))
+            .collect()
+    };
+    let original = field("hunter2");
+    let out = blurred("hunter2", 1);
+    let block = blur::block(document::span(&[a, b])) as usize;
+    assert!(
+        block >= 12 && 32 / block <= 3,
+        "a text line is at most ~3 cells"
+    );
+
+    // Every pixel is replaced: none keeps its original value.
+    let raw = |x: usize, y: usize| -> [u8; 4] {
+        let i = (y * 240 + x) * 4;
+        original.rgba[i..i + 4].try_into().unwrap()
+    };
+    for y in 4..36 {
+        for x in 4..236 {
+            assert_ne!(
+                px(&out, x as u32, y as u32),
+                raw(x, y),
+                "({x}, {y}) survived"
+            );
+        }
+    }
+
+    // Not the deterministic block mean (what a plain mosaic, and Depix, rely on).
+    let mut means_kept = 0;
+    let mut cells = 0;
+    for cy in (4..36).step_by(block) {
+        for cx in (4..236).step_by(block) {
+            let pixels: Vec<_> = (cy..(cy + block).min(36))
+                .flat_map(|y| (cx..(cx + block).min(236)).map(move |x| (x, y)))
+                .collect();
+            let mean: Vec<u8> = (0..3)
+                .map(|c| {
+                    let sum: usize = pixels.iter().map(|&(x, y)| raw(x, y)[c] as usize).sum();
+                    (sum / pixels.len()) as u8
+                })
+                .collect();
+            cells += 1;
+            means_kept += (px(&out, cx as u32, cy as u32)[..3] == mean[..]) as usize;
+        }
+    }
+    assert_eq!(
+        means_kept, 0,
+        "{means_kept} of {cells} cells are the plain mean"
+    );
+
+    // Two different passwords differ less than the same password under two seeds:
+    // what is left of the text is drowned by the noise.
+    let diff = |p: &Crop, q: &Crop| -> f32 {
+        let (p, q) = (region(p), region(q));
+        let total: u32 = p
+            .iter()
+            .zip(&q)
+            .map(|(a, b)| (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>())
+            .sum();
+        total as f32 / (p.len() * 3) as f32
+    };
+    let noise = diff(&out, &blurred("hunter2", 2));
+    let text = diff(&out, &blurred("letmein", 1));
+    assert!(noise > 4.0, "noise {noise}");
+    assert!(text < noise, "text signal {text} vs noise {noise}");
 }
 
 #[test]

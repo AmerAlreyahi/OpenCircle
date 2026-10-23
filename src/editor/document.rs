@@ -48,9 +48,12 @@ pub enum Shape {
         at: Point,
         radius: f32,
     },
+    /// `seed`: OS-random per item, never shown; drives the noise that makes the
+    /// mosaic irreversible (see `blur`).
     Blur {
         a: Point,
         b: Point,
+        seed: u64,
     },
     /// Everything outside the union of all spotlights is dimmed.
     Spotlight {
@@ -86,7 +89,7 @@ impl Shape {
         match self {
             Shape::Rect { a, b }
             | Shape::Ellipse { a, b }
-            | Shape::Blur { a, b }
+            | Shape::Blur { a, b, .. }
             | Shape::Spotlight { a, b } => (*a, *b) = (f(*a), f(*b)),
             Shape::Arrow { a, b, bend, .. } => (*a, *b, *bend) = (f(*a), f(*b), f(*bend)),
             Shape::Pen(points) | Shape::Highlighter(points) => {
@@ -108,7 +111,7 @@ impl Item {
         match &self.shape {
             Shape::Rect { a, b }
             | Shape::Ellipse { a, b }
-            | Shape::Blur { a, b }
+            | Shape::Blur { a, b, .. }
             | Shape::Spotlight { a, b } => span(&[*a, *b]),
             Shape::Arrow { a, b, bend, .. } => span(&[*a, *b, arrow::middle(*a, *b, *bend)]),
             Shape::Pen(points) | Shape::Highlighter(points) => span(points),
@@ -433,7 +436,7 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
             Shape::Highlighter(points) => highlighter::paint(&mut layer, points, c, w),
             Shape::Text { at, text, size } => text::paint(&mut layer, *at, text, *size, c, true),
             Shape::Step { at, radius } => step::paint(&mut layer, *at, *radius, steps, c),
-            Shape::Blur { a, b } => blur::paint(&mut layer, span(&[*a, *b])),
+            Shape::Blur { a, b, seed } => blur::paint(&mut layer, span(&[*a, *b]), *seed),
             Shape::Spotlight { .. } => {}
             Shape::Callout {
                 tip,
