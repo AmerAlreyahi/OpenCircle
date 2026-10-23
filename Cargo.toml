@@ -31,12 +31,12 @@ libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
-xcb = { version = "1.7", features = ["randr"] }
+xcb = { version = "1.7", features = ["randr", "xtest"] }
 
 [target.'cfg(windows)'.dependencies]
 widestring = "1"
 xcap = "0.9"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 strip = true

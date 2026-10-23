@@ -1,8 +1,11 @@
 //! Screen capture: one frozen frame of the monitor under the cursor.
 //! One file per platform: `x11.rs` (Linux X11/XWayland), `portal.rs` (Linux Wayland),
-//! `win.rs` (Windows, xcap).
+//! `win.rs` (Windows, xcap). Scrolling capture: `stitch.rs` + `scroll.rs`.
 #[cfg(target_os = "linux")]
 pub mod portal;
+mod scroll;
+mod stitch;
+
 #[cfg(target_os = "linux")]
 mod x11;
 #[cfg(target_os = "linux")]
