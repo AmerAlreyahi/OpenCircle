@@ -14,6 +14,8 @@ iced = { version = "0.14", default-features = false, features = [
 arboard = "3.7"
 base64 = "0.22"
 dirs = "7"
+# same version iced already builds: no second text stack in the binary
+cosmic-text = "0.15"
 global-hotkey = "0.9"
 interprocess = "2.4"
 # OS keyring for AI keys (Windows Credential Manager / Linux Secret Service over

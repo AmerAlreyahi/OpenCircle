@@ -4064,6 +4064,7 @@ version = "0.0.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "cosmic-text",
  "dirs",
  "flate2",
  "global-hotkey",

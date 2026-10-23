@@ -11,6 +11,8 @@ mod lens;
 mod ocr;
 #[allow(dead_code)] // library API, wired into the UI later
 mod secrets;
+#[allow(dead_code)] // library for full-screen translate; the UI wires it
+mod translate;
 mod ui;
 
 use std::process::ExitCode;
