@@ -87,6 +87,9 @@ impl App {
                 // while hidden restores a placement saved while visible (shows it again).
                 window::set_mode(self.overlay, Mode::Windowed)
                     .chain(window::set_mode(self.overlay, Mode::Hidden))
+                    // Shrink while hidden so the renderer drops its monitor-sized buffers
+                    // (open() resizes it back before showing).
+                    .chain(window::resize(self.overlay, Size::new(1.0, 1.0)))
             }
             Message::Drawn => Task::none(),
             Message::TestShot(shot) => {
