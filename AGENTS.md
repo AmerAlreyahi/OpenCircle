@@ -100,6 +100,10 @@ production systems.
   shortcut field is the same width with one keycap per key). No crowded
   rows of options: group them behind one control (e.g. one colour button
   opening a picker instead of a row of swatches).
+- Shared UI (owner, 2026-10-23): every widget and popup uses the same shared
+  components (Surface, Pill, IconButton, TextButton, KeyCap, Segmented, …;
+  list in DESIGN.md) styled only from theme.rs — same background, blur,
+  border, radius and shadow everywhere.
 - Themes (owner, 2026-10-23): Light, Dark and System, from one token set.
 - Workflow (owner, 2026-10-23): planning first; execution starts only after
   the owner reviews the plan and adds rules.

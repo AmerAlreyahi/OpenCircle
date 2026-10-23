@@ -20,25 +20,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Nothing to check until the Rust crate lands on main.
+      - id: crate
+        shell: bash
+        run: echo "present=$([ -f Cargo.toml ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Linux build deps
-        if: runner.os == 'Linux'
+        if: steps.crate.outputs.present == 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libgtk-3-dev libxdo-dev
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.crate.outputs.present == 'true'
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        if: steps.crate.outputs.present == 'true'
 
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - if: steps.crate.outputs.present == 'true'
+        run: cargo fmt --check
+      - if: steps.crate.outputs.present == 'true'
+        run: cargo clippy --all-targets -- -D warnings
+      - if: steps.crate.outputs.present == 'true'
+        run: cargo test
 
   audit:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - id: crate
+        run: echo "present=$([ -f Cargo.lock ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: rustsec/audit-check@v2
+        if: steps.crate.outputs.present == 'true'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
