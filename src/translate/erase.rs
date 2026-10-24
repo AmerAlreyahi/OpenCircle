@@ -221,10 +221,10 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
     // (ClearType fringes are orange, blue or near white), so the biggest
     // cluster can be a fringe mix. It is the text's colour (a link's blue
     // among black brackets) only if about as dark as the darkest fifth of
-    // the glyphs; otherwise that darkest fifth is. (Light text on a light
-    // background, white on a bright sky, keeps its cluster.)
+    // the glyphs; otherwise that darkest fifth is. (Text clearly lighter than
+    // a light background, white on a bright sky, keeps its cluster.)
     let color = match (cl.first(), darkest(&glyph, &px)) {
-        (Some(c), Some(core)) if bg_luma > 170.0 && luma(c.color) < bg_luma - 8.0 => {
+        (Some(c), Some(core)) if bg_luma > 170.0 && luma(c.color) < bg_luma + 8.0 => {
             let contrast = |c: [u8; 3]| bg_luma - luma(c);
             if contrast(c.color) >= 0.7 * contrast(core) {
                 c.color

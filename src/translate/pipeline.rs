@@ -144,7 +144,8 @@ pub(crate) fn by_sentence(
 }
 
 /// Sentence ends: `.`, `!` or `?`, then a space and a capital, a digit, a
-/// quote or a bracket. ponytail: "Dr. Who" splits too; harmless for MT.
+/// quote or a bracket; not after an initial or a short abbreviation ("T.
+/// Goldsmith", "U.S. Patent", "Dr. Who": a fragment comes back as noise).
 fn sentences(t: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut start = 0;
@@ -152,7 +153,10 @@ fn sentences(t: &str) -> Vec<String> {
         let next = t[i + c.len_utf8()..]
             .strip_prefix(' ')
             .and_then(|r| r.chars().next());
+        let word = t[..i].rsplit(' ').next().unwrap_or_default();
+        let short = c == '.' && (word.chars().count() <= 2 || word.contains('.'));
         if matches!(c, '.' | '!' | '?')
+            && !short
             && next.is_some_and(|n| n.is_uppercase() || n.is_ascii_digit() || "\"'(“".contains(n))
         {
             out.push(t[start..=i].trim().to_string());

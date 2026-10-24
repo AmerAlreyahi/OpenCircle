@@ -290,9 +290,9 @@ fn active() -> Option<(WinRect, String, bool)> {
         QueryFullProcessImageNameW,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GW_HWNDNEXT, GWL_EXSTYLE, GetClassNameW, GetForegroundWindow, GetTopWindow, GetWindow,
-        GetWindowInfo, GetWindowLongW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-        IsZoomed, WINDOWINFO, WS_EX_TOOLWINDOW,
+        GA_ROOTOWNER, GW_HWNDNEXT, GWL_EXSTYLE, GetAncestor, GetClassNameW, GetForegroundWindow,
+        GetTopWindow, GetWindow, GetWindowInfo, GetWindowLongW, GetWindowThreadProcessId, IsIconic,
+        IsWindowVisible, IsZoomed, WINDOWINFO, WS_EX_TOOLWINDOW,
     };
     use windows::core::PWSTR;
 
@@ -337,6 +337,12 @@ fn active() -> Option<(WinRect, String, bool)> {
                 }
                 next = GetWindow(h, GW_HWNDNEXT).ok();
             };
+        }
+        // a popup (a browser's "Restore pages" bubble, a dialog): the app
+        // window that owns it
+        let owner = GetAncestor(hwnd, GA_ROOTOWNER);
+        if !owner.is_invalid() && usable(owner) {
+            hwnd = owner;
         }
         let c = class(hwnd);
         if matches!(c.as_str(), "Progman" | "WorkerW") || taskbar(&c) {

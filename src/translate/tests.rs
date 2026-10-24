@@ -1153,15 +1153,16 @@ mod real {
     fn offline_mt_gets_one_sentence_at_a_time() {
         let texts = [
             "The first game was Pong. It came out in 1972! Was it fun? Yes.".to_string(),
-            "No end mark here".to_string(),
+            "Thomas T. Goldsmith got U.S. Patent 2455992 in 1948. No end mark here".to_string(),
             String::new(),
         ];
         // a translator that keeps only the first sentence of what it gets
+        // (Marian on "Pong. It came out")
         let mut calls = Vec::new();
         let out = by_sentence(&texts, |t| {
             calls.push(t.to_vec());
             Ok(t.iter()
-                .map(|s| format!("<{}>", s.split(". ").next().unwrap()))
+                .map(|s| format!("<{}>", s.split(". It").next().unwrap()))
                 .collect())
         })
         .unwrap();
@@ -1170,7 +1171,7 @@ mod real {
             out,
             [
                 "<The first game was Pong.> <It came out in 1972!> <Was it fun?> <Yes.>",
-                "<No end mark here>",
+                "<Thomas T. Goldsmith got U.S. Patent 2455992 in 1948.> <No end mark here>",
                 ""
             ]
         );
