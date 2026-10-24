@@ -17,8 +17,33 @@ Press `Print Screen` (region), `Alt+Print Screen` (window) or
 | Full | The whole screen |
 | Scrolling | Drag over the scrolling area; OpenCircle scrolls it and stitches the pieces into one tall image. `Esc` or Stop keeps what was gathered. |
 
-The editor then opens on the capture. On Wayland there is no window list and no
-synthetic scrolling, so only Region and Full are offered.
+While you drag, the edges snap to windows and, on Windows, to the buttons and
+fields of the app you were in; hold `Shift` to place them freely. A loupe beside
+the pointer shows the pixels under it at 8x, with their position and colour.
+
+**Timer** (Off / 3 s / 5 s / 10 s, next to the modes): the overlay hides and
+counts down in a small pill, so you can open a menu or a tooltip; then it
+captures again.
+
+**After a capture** (Settings → Snip): by default the snip goes straight to the
+clipboard, ready to paste into an AI chat, and a toast offers **Edit** for 4
+seconds. Choose *Editor* to open the editor instead, or *Both*. On Windows the
+copy also carries the text OCR reads in it (once the text models are
+downloaded), so a chat app pastes the image and a text editor the text.
+
+**Size for AI**: Copy and Save scale the long edge down to 1568 px (Settings →
+Snip: 1024, 1568, 2048 or Original); AI chats shrink bigger images anyway. Save
+writes PNG or JPEG and can keep the original size.
+
+**Recent** (Settings → Snip, off by default): keeps your last 20 captures on
+this PC only (your local app-data folder), shown as a strip under the modes;
+click one to copy or edit it again, × clears them. Turning it off deletes them.
+
+**Mouse pointer** (Settings → Snip, off by default): draws the pointer into the
+capture (Windows and X11).
+
+On Wayland there is no window list and no synthetic scrolling, so only Region
+and Full are offered.
 
 ## Annotate
 
@@ -49,8 +74,8 @@ recovered from the pixels.
 
 ## Copy, save or pin
 
-- **Copy** (`Ctrl+C`) puts the image on the clipboard.
-- **Save** (`Ctrl+S`) opens the system save dialog and writes a PNG, where you
+- **Copy** (`Ctrl+C`) puts the image on the clipboard (scaled for AI chats, see above).
+- **Save** (`Ctrl+S`) opens the system save dialog and writes a PNG (or JPEG), where you
   choose. It starts in the folder set in **Settings → General** (the file is
   named `OpenCircle-<date>-<time>.png`).
 - **Pin** (`Ctrl+P`, or the pin button) keeps the image on screen in a small
@@ -58,4 +83,4 @@ recovered from the pixels.
   zoom, hover for Copy, Save and Close; `Esc` or a double-click closes it. You
   can pin as many as you like; each frees its memory when closed.
 
-Nothing is written to disk until you save.
+Nothing is written to disk until you save (or turn Recent on).
