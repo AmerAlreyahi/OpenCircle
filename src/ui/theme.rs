@@ -3,7 +3,7 @@ use std::cell::Cell;
 
 use iced::Color;
 
-use crate::config::Theme;
+use crate::config::{self, BarStyle, BracketColour, ColourSet, Look, Rgb, Theme};
 
 /// One theme's surface colours.
 pub struct Palette {
@@ -91,9 +91,160 @@ pub const SELECTION: Color = Color::from_rgba8(0x8f, 0x80, 0xff, 0.35);
 /// Text and icons on the accent gradient.
 pub const ON_ACCENT: Color = Color::from_rgb8(0x10, 0x10, 0x1c);
 
-/// Dim over the frozen frame: whole frame before a selection, outside it after.
-pub const DIM_IDLE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.12);
+/// Dim outside the editor's crop (the overlay's dims follow the look: `dims`).
 pub const DIM_OUTSIDE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
+
+// ---- Active looks (config `[look]`): the presets' colours, one table ----
+
+/// A palette's edge colours (spaced evenly round the screen edge, clockwise
+/// from the top-left corner, back to the first) and its accent gradient.
+pub struct Colours {
+    pub edge: &'static [Color],
+    pub accent: (Color, Color),
+}
+
+const AURORA: Colours = Colours {
+    edge: &[STROKE_START, STROKE_END],
+    accent: (ACCENT_START, ACCENT_END),
+};
+
+/// Our own spectrum: violet, coral, amber, lemon, mint, sky.
+const SPECTRUM: Colours = Colours {
+    edge: &[
+        Color::from_rgb8(0x9b, 0x7b, 0xff),
+        Color::from_rgb8(0xff, 0x6b, 0x5e),
+        Color::from_rgb8(0xff, 0xb5, 0x47),
+        Color::from_rgb8(0xf2, 0xdc, 0x5a),
+        Color::from_rgb8(0x5f, 0xd3, 0x8a),
+        Color::from_rgb8(0x4a, 0xa8, 0xff),
+    ],
+    accent: (ACCENT_START, ACCENT_END),
+};
+
+const SUNSET: Colours = Colours {
+    edge: &[
+        Color::from_rgb8(0xff, 0x8f, 0x3f),
+        Color::from_rgb8(0xff, 0x55, 0x9a),
+    ],
+    accent: (
+        Color::from_rgb8(0xff, 0xa0, 0x58),
+        Color::from_rgb8(0xff, 0x6f, 0xa8),
+    ),
+};
+
+const OCEAN: Colours = Colours {
+    edge: &[
+        Color::from_rgb8(0x2a, 0xd4, 0xc7),
+        Color::from_rgb8(0x3d, 0x7b, 0xff),
+    ],
+    accent: (
+        Color::from_rgb8(0x3f, 0xd8, 0xcc),
+        Color::from_rgb8(0x5a, 0x92, 0xff),
+    ),
+};
+
+const NEON: Colours = Colours {
+    edge: &[
+        Color::from_rgb8(0x00, 0xf0, 0xff),
+        Color::from_rgb8(0xff, 0x3f, 0xd0),
+    ],
+    accent: (
+        Color::from_rgb8(0x2a, 0xf2, 0xff),
+        Color::from_rgb8(0xff, 0x5c, 0xd8),
+    ),
+};
+
+const MONO: Colours = Colours {
+    edge: &[
+        Color::from_rgb8(0xff, 0xff, 0xff),
+        Color::from_rgb8(0x9a, 0xa0, 0xaa),
+    ],
+    accent: (
+        Color::from_rgb8(0xe8, 0xe8, 0xee),
+        Color::from_rgb8(0xb4, 0xb8, 0xc2),
+    ),
+};
+
+/// `palette`'s colours (`TwoColour`: Aurora's; its own two are in the look).
+pub fn colours(palette: ColourSet) -> &'static Colours {
+    match palette {
+        ColourSet::Spectrum => &SPECTRUM,
+        ColourSet::Aurora | ColourSet::TwoColour => &AURORA,
+        ColourSet::Sunset => &SUNSET,
+        ColourSet::Ocean => &OCEAN,
+        ColourSet::Neon => &NEON,
+        ColourSet::Mono => &MONO,
+    }
+}
+
+fn rgb(c: Rgb) -> Color {
+    let [r, g, b] = c.0;
+    Color::from_rgb8(r, g, b)
+}
+
+/// The look's edge colours (a `TwoColour` look: its own two).
+pub fn edge_colours(look: &Look) -> Vec<Color> {
+    match look.palette {
+        ColourSet::TwoColour => look.colours.map(rgb).to_vec(),
+        p => colours(p).edge.to_vec(),
+    }
+}
+
+/// The accent gradient of the active look (buttons, handles, the stroke).
+pub fn accent() -> (Color, Color) {
+    accent_of(&config::look())
+}
+
+pub fn accent_of(look: &Look) -> (Color, Color) {
+    match look.palette {
+        ColourSet::TwoColour => (rgb(look.colours[0]), rgb(look.colours[1])),
+        p => colours(p).accent,
+    }
+}
+
+/// The colour at `u` (0..1, clockwise from the top-left corner) round the edge
+/// of a screen framed in `stops`: cosine-eased between neighbours, cyclic.
+pub fn along(stops: &[Color], u: f32) -> Color {
+    let n = stops.len().max(1);
+    let at = u.rem_euclid(1.0) * n as f32;
+    let i = (at as usize).min(n - 1);
+    let k = 0.5 - 0.5 * (std::f32::consts::PI * (at - i as f32)).cos();
+    let (a, b) = (stops[i % n], stops[(i + 1) % n]);
+    let m = |a: f32, b: f32| a + (b - a) * k;
+    Color::from_rgb(m(a.r, b.r), m(a.g, b.g), m(a.b, b.b))
+}
+
+/// The dim over the whole frozen frame (before a selection) and outside a
+/// selection, for the look's `dim` %.
+pub fn dims(look: &Look) -> (Color, Color) {
+    let idle = f32::from(look.dim) / 100.0;
+    (
+        Color::from_rgba(0.0, 0.0, 0.0, idle),
+        Color::from_rgba(0.0, 0.0, 0.0, (0.33 + idle).min(0.85)),
+    )
+}
+
+/// The selection's corner brackets.
+pub fn bracket(look: &Look) -> Color {
+    match look.brackets {
+        BracketColour::White => Color::WHITE,
+        BracketColour::Accent => accent_of(look).0,
+    }
+}
+
+/// Text highlighted in select-text mode: every word, and the picked ones.
+pub const WORD: Color = Color::from_rgba8(0x9b, 0xb4, 0xff, 0.22);
+pub const WORD_PICKED: Color = Color::from_rgba8(0x5a, 0x8c, 0xff, 0.55);
+
+/// The palette floating surfaces (bar, pills, panels) use under the active
+/// look's bar style: glass dark / light force one; the rest follow the app.
+pub fn floating() -> &'static Palette {
+    match config::look().bar {
+        BarStyle::GlassDark => &DARK,
+        BarStyle::GlassLight => &LIGHT,
+        _ => current(),
+    }
+}
 
 /// The live-translate layer's background: see-through where no patch is.
 /// Windows keys out `live::COLOUR_KEY`; elsewhere the window is transparent.

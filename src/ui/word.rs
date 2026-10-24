@@ -97,6 +97,13 @@ fn words(line: &Line) -> Vec<(Rectangle, &str)> {
     out
 }
 
+/// Every word's highlight box in `lines` (select-text mode shows them all).
+pub fn boxes(lines: &[Line]) -> Vec<Rectangle> {
+    (lines.iter())
+        .flat_map(|l| words(l).into_iter().map(|(r, _)| r.expand(PAD)))
+        .collect()
+}
+
 /// The word of `line` nearest to `x` (the one that holds it, else by gap).
 fn word_at(line: &Line, x: f32) -> Option<usize> {
     let gap = |r: &Rectangle| (r.x - x).max(x - r.x - r.width).max(0.0);

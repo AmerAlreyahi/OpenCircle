@@ -1,6 +1,8 @@
 //! Overlay canvas (drawn over the frozen frame): dim, then the selections (freehand
 //! loops, dragged rectangles, tapped words) with a glowing gradient stroke, the
-//! resize handles and the count badge. Also `View`: the zoomed / panned part of
+//! resize handles and the count badge. A snapped selection (`[selection] style =
+//! "snap"`) morphs from the drawn stroke into a rounded box with corner brackets
+//! (they resize it); in select-text mode every word in it is highlighted. Also `View`: the zoomed / panned part of
 //! the frame on screen. Selections live in image coordinates (the overlay's
 //! logical px at 1x); events arrive in screen px and the App maps them.
 use std::cell::Cell;
@@ -14,6 +16,7 @@ use iced::widget::text::Alignment;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, Vector};
 
 use super::theme;
+use crate::config::{BracketStyle, Look};
 
 /// A selection smaller than this (screen px, either side) is a tap, not a circle.
 pub const MIN_SIDE: f32 = 12.0;
@@ -37,6 +40,17 @@ const SCRIBBLE_PAD: f32 = 14.0;
 /// Corner handles: drawn radius, and how near (screen px) a press grabs one.
 const HANDLE: f32 = 5.0;
 const HANDLE_HIT: f32 = 12.0;
+
+/// A snapped box: its corner radius (at most), how long the stroke takes to
+/// become it, and its corner brackets (gap outside the box, arm length range,
+/// line width; screen px).
+const SNAP_RADIUS: f32 = 16.0;
+pub const MORPH: Duration = Duration::from_millis(200);
+const BRACKET_GAP: f32 = 3.0;
+const BRACKET_ARM: (f32, f32) = (14.0, 36.0);
+const BRACKET_WIDTH: f32 = 4.0;
+/// Points round a morphing outline.
+const MORPH_POINTS: usize = 96;
 
 /// Zoom per wheel notch, and the most it zooms in.
 const ZOOM_STEP: f32 = 1.25;
@@ -87,6 +101,9 @@ pub enum Kind {
     Word,
     /// A zig-zag over an area: the clear area is its padded convex hull.
     Scribble,
+    /// Snapped to a rounded box with corner brackets; the stroke is its
+    /// top-left and bottom-right corners.
+    Snap,
 }
 
 /// What a press-drag-release means.
@@ -305,6 +322,10 @@ fn shape(p: &mut canvas::path::Builder, kind: Kind, stroke: &[Point], closed: bo
             let r = drag_rect(stroke);
             p.rectangle(r.position(), r.size());
         }
+        Kind::Snap => {
+            let r = drag_rect(stroke);
+            p.rounded_rectangle(r.position(), r.size(), snap_radius(r).into());
+        }
         Kind::Word => {
             for pair in stroke.as_chunks::<2>().0 {
                 let r = drag_rect(&pair[..]);
@@ -332,6 +353,11 @@ fn corners(r: Rectangle) -> [Point; 4] {
         Point::new(x1, y1),
         Point::new(r.x, y1),
     ]
+}
+
+/// Corner `i` of `r` (top-left, top-right, bottom-right, bottom-left).
+pub fn corner(r: Rectangle, i: usize) -> Point {
+    corners(r)[i % 4]
 }
 
 /// The corner handle of `area` (screen px) under `p`, as an index into `corners`.
@@ -366,6 +392,198 @@ pub fn refit(stroke: &[Point], from: Rectangle, to: Rectangle) -> Vec<Point> {
     let (sx, sy) = (ratio(from.width, to.width), ratio(from.height, to.height));
     let map = |p: &Point| Point::new(to.x + (p.x - from.x) * sx, to.y + (p.y - from.y) * sy);
     stroke.iter().map(map).collect()
+}
+
+/// A stroke's selection snapped: the box `area` (image px) as a snapped
+/// selection and its stroke (two corners).
+pub fn snap(area: Rectangle) -> (Selection, Vec<Point>) {
+    let sel = Selection {
+        area,
+        kind: Kind::Snap,
+    };
+    (
+        sel,
+        vec![area.position(), area.position() + Vector::from(area.size())],
+    )
+}
+
+/// A snapped box's corner radius (screen px).
+pub fn snap_radius(r: Rectangle) -> f32 {
+    SNAP_RADIUS.min(r.width / 4.0).min(r.height / 4.0).max(0.0)
+}
+
+/// How far a morph started at `start` is at `now` (0..1, eased out).
+pub fn morph_progress(start: Instant, now: Instant) -> f32 {
+    let t = now.saturating_duration_since(start).as_secs_f32() / MORPH.as_secs_f32();
+    1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
+}
+
+/// `n` points round the outline of `r` with corners rounded by `radius`,
+/// clockwise on screen from the top edge's left end.
+pub fn rounded_outline(r: Rectangle, radius: f32, n: usize) -> Vec<Point> {
+    let rad = radius.min(r.width / 2.0).min(r.height / 2.0).max(0.0);
+    let (w, h) = (r.width - 2.0 * rad, r.height - 2.0 * rad);
+    let arc = std::f32::consts::FRAC_PI_2 * rad;
+    let total = 2.0 * (w + h) + 4.0 * arc;
+    // the four sides and four arcs in order: (length, start, direction / arc centre)
+    let at = |mut s: f32| -> Point {
+        let corner = |cx: f32, cy: f32, from: f32, s: f32| {
+            let a = from + s / rad.max(1e-6);
+            Point::new(cx + rad * a.cos(), cy + rad * a.sin())
+        };
+        let (x0, y0, x1, y1) = (r.x + rad, r.y + rad, r.x + rad + w, r.y + rad + h);
+        use std::f32::consts::{FRAC_PI_2, PI};
+        if s < w {
+            return Point::new(x0 + s, r.y);
+        }
+        s -= w;
+        if s < arc {
+            return corner(x1, y0, -FRAC_PI_2, s);
+        }
+        s -= arc;
+        if s < h {
+            return Point::new(r.x + r.width, y0 + s);
+        }
+        s -= h;
+        if s < arc {
+            return corner(x1, y1, 0.0, s);
+        }
+        s -= arc;
+        if s < w {
+            return Point::new(x1 - s, r.y + r.height);
+        }
+        s -= w;
+        if s < arc {
+            return corner(x0, y1, FRAC_PI_2, s);
+        }
+        s -= arc;
+        if s < h {
+            return Point::new(r.x, y1 - s);
+        }
+        s -= h;
+        corner(x0, y0, PI, s.min(arc))
+    };
+    (0..n).map(|i| at(total * i as f32 / n as f32)).collect()
+}
+
+/// `stroke` as a closed outline of `n` points evenly spaced along it, clockwise
+/// on screen, starting nearest to `start`.
+fn resample(stroke: &[Point], n: usize, start: Point) -> Vec<Point> {
+    let Some(&first) = stroke.first() else {
+        return vec![start; n];
+    };
+    let mut pts = stroke.to_vec();
+    pts.push(first); // closed
+    // anticlockwise on screen (negative area in y-down coordinates): reverse
+    let area: f32 = pts
+        .windows(2)
+        .map(|w| w[0].x * w[1].y - w[1].x * w[0].y)
+        .sum();
+    if area < 0.0 {
+        pts.reverse();
+    }
+    let lengths: Vec<f32> = pts.windows(2).map(|w| w[0].distance(w[1])).collect();
+    let total: f32 = lengths.iter().sum();
+    if total <= 0.0 {
+        return vec![first; n];
+    }
+    let mut out = Vec::with_capacity(n);
+    let (mut seg, mut done) = (0, 0.0);
+    for i in 0..n {
+        let want = total * i as f32 / n as f32;
+        while seg + 1 < lengths.len() && done + lengths[seg] < want {
+            done += lengths[seg];
+            seg += 1;
+        }
+        let k = if lengths[seg] > 0.0 {
+            ((want - done) / lengths[seg]).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        out.push(pts[seg] + (pts[seg + 1] - pts[seg]) * k);
+    }
+    let nearest = (0..n)
+        .min_by(|&a, &b| out[a].distance(start).total_cmp(&out[b].distance(start)))
+        .unwrap_or(0);
+    out.rotate_left(nearest);
+    out
+}
+
+/// The outline `t` (0..1) of the way from the drawn `stroke` to the snapped
+/// box `to` (both screen px).
+pub fn morph(stroke: &[Point], to: Rectangle, t: f32) -> Vec<Point> {
+    let target = rounded_outline(to, snap_radius(to), MORPH_POINTS);
+    let from = resample(stroke, MORPH_POINTS, target[0]);
+    (from.iter().zip(&target))
+        .map(|(&a, &b)| a + (b - a) * t.clamp(0.0, 1.0))
+        .collect()
+}
+
+/// A bracket's arm length on the box `r` (screen px).
+fn bracket_arm(r: Rectangle) -> f32 {
+    (r.width.min(r.height) / 4.0).clamp(BRACKET_ARM.0, BRACKET_ARM.1)
+}
+
+/// The corner bracket of the snapped box `area` (screen px) under `p`, as an
+/// index into `corners`: on (or near) either arm of the L.
+pub fn bracket_at(area: Rectangle, p: Point) -> Option<usize> {
+    let r = area.expand(BRACKET_GAP);
+    let arm = bracket_arm(area);
+    corners(r).iter().position(|&c| {
+        let (sx, sy) = (
+            if c.x > r.center_x() { -1.0 } else { 1.0 },
+            if c.y > r.center_y() { -1.0 } else { 1.0 },
+        );
+        let along_x = to_segment(p, c, c + Vector::new(sx * arm, 0.0));
+        let along_y = to_segment(p, c, c + Vector::new(0.0, sy * arm));
+        along_x.min(along_y) <= HANDLE_HIT
+    })
+}
+
+/// The grip (index into `corners`) of a selection of `kind` at `area` (screen
+/// px) under `p`: a snapped box's brackets, otherwise its corner handles.
+pub fn grip_at(kind: Kind, area: Rectangle, p: Point) -> Option<usize> {
+    match kind {
+        Kind::Snap => bracket_at(area, p),
+        _ => handle_at(area, p),
+    }
+}
+
+/// The four corner brackets of the snapped box `r` (screen px), `alpha` shown.
+fn brackets(frame: &mut canvas::Frame, r: Rectangle, look: &Look, alpha: f32) {
+    let colour = theme::bracket(look).scale_alpha(alpha);
+    let shadow = Color::from_rgba(0.0, 0.0, 0.0, 0.35 * alpha);
+    let line = |colour, width| Stroke {
+        style: canvas::Style::Solid(colour),
+        width,
+        line_cap: stroke::LineCap::Round,
+        line_join: stroke::LineJoin::Round,
+        ..Stroke::default()
+    };
+    let out = r.expand(BRACKET_GAP);
+    let rad = snap_radius(r) + BRACKET_GAP;
+    let path = match look.bracket_style {
+        BracketStyle::Frame => Path::rounded_rectangle(out.position(), out.size(), rad.into()),
+        BracketStyle::Corners => {
+            let arm = bracket_arm(r).max(rad + 2.0);
+            Path::new(|p| {
+                for c in corners(out) {
+                    let sx = if c.x > out.center_x() { -1.0 } else { 1.0 };
+                    let sy = if c.y > out.center_y() { -1.0 } else { 1.0 };
+                    p.move_to(c + Vector::new(0.0, sy * arm));
+                    p.line_to(c + Vector::new(0.0, sy * rad));
+                    p.quadratic_curve_to(c, c + Vector::new(sx * rad, 0.0));
+                    p.line_to(c + Vector::new(sx * arm, 0.0));
+                }
+            })
+        }
+    };
+    let width = match look.bracket_style {
+        BracketStyle::Frame => 2.0,
+        BracketStyle::Corners => BRACKET_WIDTH,
+    };
+    frame.stroke(&path, line(shadow, width + 3.0));
+    frame.stroke(&path, line(colour, width));
 }
 
 /// What part of the frozen frame the overlay shows: all of it at 1x, a part of
@@ -499,6 +717,15 @@ pub struct Overlay<'a> {
     pub hover: bool,
     /// Dim the frame (not over a full-screen translation).
     pub dim: bool,
+    /// The active look: dims, stroke colours, brackets.
+    pub look: Look,
+    /// A snapped selection's drawn stroke (image px) and when it began to
+    /// morph into the box.
+    pub morph: Option<(&'a [Point], Instant)>,
+    /// Select-text mode: every word read in the selection, and the highlight
+    /// of the picked ones (image px).
+    pub words: &'a [Rectangle],
+    pub picked: Vec<Rectangle>,
 }
 
 /// The pointer as the canvas saw it, event by event. Events can arrive in one batch
@@ -532,6 +759,11 @@ impl canvas::Program<Event> for Overlay<'_> {
             };
         }
         let event = match event {
+            // A morph in progress draws its next frame.
+            canvas::Event::Window(iced::window::Event::RedrawRequested(now)) => {
+                let (_, start) = self.morph?;
+                return (morph_progress(start, *now) < 1.0).then(Action::request_redraw);
+            }
             canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                 pointer.shift = m.shift();
                 return None;
@@ -631,6 +863,18 @@ impl canvas::Program<Event> for Overlay<'_> {
             .map(|(s, stroke)| (s.kind, on_screen(stroke)))
             .collect();
 
+        // A snapped box on its way from the drawn stroke: the outline between.
+        let (dim_idle, dim_outside) = theme::dims(&self.look);
+        let snapped = (self.selection).filter(|s| s.kind == Kind::Snap);
+        let box_on_screen = snapped.map(|s| self.view.rect_to_screen(s.area));
+        let morph = match (box_on_screen, self.morph) {
+            (Some(r), Some((from, start))) => {
+                let t = morph_progress(start, Instant::now());
+                (t < 1.0).then(|| (t, morph(&on_screen(from), r, t)))
+            }
+            _ => None,
+        };
+
         // After release, the clear region is the drawn shape itself (closed), not its
         // bounding box.
         // ponytail: even-odd re-dims areas circled twice (or two overlapping
@@ -642,40 +886,71 @@ impl canvas::Program<Event> for Overlay<'_> {
                 for (kind, s) in &others {
                     shape(p, *kind, s, true);
                 }
-                if closed {
-                    shape(p, kind, &current, true);
+                match &morph {
+                    Some((_, outline)) => shape(p, Kind::Scribble, outline, true),
+                    None if closed => shape(p, kind, &current, true),
+                    None => {}
                 }
             });
             frame.fill(
                 &outside,
                 Fill {
-                    style: canvas::Style::Solid(theme::DIM_OUTSIDE),
+                    style: canvas::Style::Solid(dim_outside),
                     rule: fill::Rule::EvenOdd,
                 },
             );
         } else if self.dim {
-            frame.fill_rectangle(Point::ORIGIN, screen.size(), theme::DIM_IDLE);
+            frame.fill_rectangle(Point::ORIGIN, screen.size(), dim_idle);
         }
 
+        let accent = theme::accent_of(&self.look);
         for (kind, s) in &others {
-            glow(&mut frame, *kind, s, true, screen);
+            glow(&mut frame, *kind, s, true, screen, accent, 1.0);
         }
-        glow(&mut frame, kind, &current, closed, screen);
+        match (&morph, box_on_screen) {
+            (Some((t, outline)), Some(r)) => {
+                glow(
+                    &mut frame,
+                    Kind::Scribble,
+                    outline,
+                    true,
+                    screen,
+                    accent,
+                    1.0 - t,
+                );
+                brackets(&mut frame, r, &self.look, *t);
+            }
+            (None, Some(r)) => brackets(&mut frame, r, &self.look, 1.0),
+            _ => glow(&mut frame, kind, &current, closed, screen, accent, 1.0),
+        }
+
+        // Select-text mode: every word, the picked ones stronger.
+        for (rects, colour) in [
+            (self.words, theme::WORD),
+            (&self.picked[..], theme::WORD_PICKED),
+        ] {
+            for r in rects {
+                let r = self.view.rect_to_screen(*r);
+                let radius = (r.height / 4.0).min(6.0);
+                let path = Path::rounded_rectangle(r.position(), r.size(), radius.into());
+                frame.fill(&path, colour);
+            }
+        }
 
         if let Some(sel) = self.selection {
             let r = self.view.rect_to_screen(sel.area);
-            if self.handles {
+            if self.handles && sel.kind != Kind::Snap {
                 for c in corners(r) {
                     let dot = Path::circle(c, HANDLE);
                     frame.fill(&dot, Color::WHITE);
-                    let ring = Stroke::default().with_color(theme::ACCENT_START);
+                    let ring = Stroke::default().with_color(accent.0);
                     frame.stroke(&dot, ring.with_width(2.0));
                 }
             }
             // How many selections the actions get.
             if !self.others.is_empty() {
                 let at = Point::new(r.x + r.width + 14.0, r.y - 14.0);
-                frame.fill(&Path::circle(at, 11.0), theme::ACCENT_START);
+                frame.fill(&Path::circle(at, 11.0), accent.0);
                 frame.fill_text(canvas::Text {
                     content: (self.others.len() + 1).to_string(),
                     position: at,
@@ -715,7 +990,7 @@ impl canvas::Program<Event> for Overlay<'_> {
             (self.handles, self.selection, cursor.position_in(bounds))
         {
             let r = self.view.rect_to_screen(sel.area);
-            match handle_at(r, p) {
+            match grip_at(sel.kind, r, p) {
                 Some(0 | 2) => return mouse::Interaction::ResizingDiagonallyDown,
                 Some(_) => return mouse::Interaction::ResizingDiagonallyUp,
                 None if r.contains(p) => return mouse::Interaction::Grab,
@@ -726,16 +1001,24 @@ impl canvas::Program<Event> for Overlay<'_> {
     }
 }
 
-/// A selection's stroke (screen px): the glowing gradient line; a word is a
-/// tinted highlight with a thin line.
-fn glow(frame: &mut canvas::Frame, kind: Kind, stroke: &[Point], closed: bool, screen: Rectangle) {
-    if stroke.len() < 2 {
+/// A selection's stroke (screen px): the glowing `accent` gradient line, `fade`
+/// of its strength; a word is a tinted highlight with a thin line.
+fn glow(
+    frame: &mut canvas::Frame,
+    kind: Kind,
+    stroke: &[Point],
+    closed: bool,
+    screen: Rectangle,
+    accent: (Color, Color),
+    fade: f32,
+) {
+    if stroke.len() < 2 || fade <= 0.0 {
         return;
     }
     let path = Path::new(|p| shape(p, kind, stroke, closed));
     let span = bounds(stroke).unwrap_or(screen);
-    let line = |width, alpha| Stroke {
-        style: gradient_style(span, alpha),
+    let line = |width, alpha: f32| Stroke {
+        style: gradient_style(span, alpha * fade, accent),
         width,
         line_cap: stroke::LineCap::Round,
         line_join: stroke::LineJoin::Round,
@@ -752,11 +1035,11 @@ fn glow(frame: &mut canvas::Frame, kind: Kind, stroke: &[Point], closed: bool, s
     }
 }
 
-fn gradient_style(span: Rectangle, alpha: f32) -> canvas::Style {
+fn gradient_style(span: Rectangle, alpha: f32, (start, end): (Color, Color)) -> canvas::Style {
     let tint = |c: Color| c.scale_alpha(alpha);
     let linear = gradient::Linear::new(span.position(), span.position() + span.size().into())
-        .add_stop(0.0, tint(theme::STROKE_START))
-        .add_stop(1.0, tint(theme::STROKE_END));
+        .add_stop(0.0, tint(start))
+        .add_stop(1.0, tint(end));
     canvas::Style::Gradient(linear.into())
 }
 
@@ -1178,6 +1461,116 @@ mod tests {
         let dot = [Point::new(5.0, 5.0)];
         let moved = refit(&dot, rect(5.0, 5.0, 0.0, 0.0), rect(7.0, 9.0, 0.0, 0.0));
         assert_eq!(moved, [Point::new(7.0, 9.0)]);
+    }
+
+    /// Distance from `p` to the outline of `r` rounded by `rad`.
+    fn off_outline(r: Rectangle, rad: f32, p: Point) -> f32 {
+        let (cx, cy) = (r.center_x(), r.center_y());
+        let qx = (p.x - cx).abs() - (r.width / 2.0 - rad);
+        let qy = (p.y - cy).abs() - (r.height / 2.0 - rad);
+        (qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - rad).abs()
+    }
+
+    fn signed_area(pts: &[Point]) -> f32 {
+        (0..pts.len())
+            .map(|i| {
+                let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                a.x * b.y - b.x * a.y
+            })
+            .sum()
+    }
+
+    #[test]
+    fn a_snapped_box_is_the_strokes_box_rounded_and_the_stroke_morphs_into_it() {
+        let lp = ellipse(400.0, 300.0, 120.0, 70.0, 1.0);
+        let (sel, _) = settle(&lp, 1.0, Size::new(1920.0, 1080.0)).unwrap();
+        let (snapped, corners) = snap(sel.area);
+        assert_eq!(snapped.kind, Kind::Snap);
+        assert_eq!(snapped.area, sel.area);
+        assert_eq!(
+            drag_rect(&corners),
+            sel.area,
+            "the stroke is its two corners"
+        );
+        let r = sel.area;
+        assert_eq!(snap_radius(r), SNAP_RADIUS);
+        assert_eq!(
+            snap_radius(rect(0.0, 0.0, 40.0, 20.0)),
+            5.0,
+            "small box: smaller corners"
+        );
+        // the outline: on the rounded box, clockwise, from the top edge's left end
+        let outline = rounded_outline(r, SNAP_RADIUS, 96);
+        assert_eq!(outline.len(), 96);
+        assert!(
+            outline
+                .iter()
+                .all(|&p| off_outline(r, SNAP_RADIUS, p) < 0.05)
+        );
+        assert!(outline[0].distance(Point::new(r.x + SNAP_RADIUS, r.y)) < 0.01);
+        assert!(signed_area(&outline) > 0.0, "clockwise on screen");
+        // the morph: the stroke at 0, the box at 1, halfway between them at 0.5
+        let start = morph(&lp, r, 0.0);
+        let end = morph(&lp, r, 1.0);
+        let mid = morph(&lp, r, 0.5);
+        assert_eq!(end, outline);
+        for p in &start {
+            let on_stroke = lp.windows(2).any(|w| to_segment(*p, w[0], w[1]) < 0.01);
+            assert!(on_stroke, "{p:?} is not on the stroke");
+        }
+        for ((a, b), m) in start.iter().zip(&end).zip(&mid) {
+            assert!(m.distance(Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)) < 0.01);
+        }
+        // drawn the other way round: the same morph (no twist through the middle)
+        let mut back = lp.clone();
+        back.reverse();
+        let other = morph(&back, r, 0.0);
+        assert!(signed_area(&other) > 0.0);
+        assert!(
+            other[0].distance(start[0]) < 8.0,
+            "{:?} vs {:?}",
+            other[0],
+            start[0]
+        );
+        // the start point is the stroke's point nearest the outline's start
+        assert!(start[0].distance(outline[0]) < 60.0);
+        // odd strokes don't panic
+        assert_eq!(morph(&[], r, 0.5).len(), MORPH_POINTS);
+        assert_eq!(morph(&[Point::ORIGIN; 3], r, 1.0), outline);
+        // progress: eased, 0 at the start, 1 from MORPH on
+        let t0 = Instant::now();
+        assert_eq!(morph_progress(t0, t0), 0.0);
+        let half = morph_progress(t0, t0 + MORPH / 2);
+        assert!(half > 0.5 && half < 1.0, "eased out: {half}");
+        assert_eq!(morph_progress(t0, t0 + MORPH * 2), 1.0);
+        assert!(MORPH <= Duration::from_millis(220));
+    }
+
+    #[test]
+    fn the_brackets_grab_their_corner_and_nothing_else() {
+        let r = rect(100.0, 100.0, 200.0, 100.0); // arms: 25 px
+        // the corner itself, just outside the box
+        assert_eq!(bracket_at(r, Point::new(97.0, 97.0)), Some(0));
+        // along the top-left arm, either way
+        assert_eq!(bracket_at(r, Point::new(118.0, 99.0)), Some(0));
+        assert_eq!(bracket_at(r, Point::new(96.0, 120.0)), Some(0));
+        // every corner
+        assert_eq!(bracket_at(r, Point::new(300.0, 98.0)), Some(1));
+        assert_eq!(bracket_at(r, Point::new(303.0, 185.0)), Some(2));
+        assert_eq!(bracket_at(r, Point::new(110.0, 204.0)), Some(3));
+        // the middle of an edge, the inside and far away: not a bracket
+        assert_eq!(bracket_at(r, Point::new(200.0, 97.0)), None);
+        assert_eq!(bracket_at(r, Point::new(303.0, 150.0)), None);
+        assert_eq!(bracket_at(r, Point::new(200.0, 150.0)), None);
+        assert_eq!(bracket_at(r, Point::new(60.0, 60.0)), None);
+        // a snapped box's grip is its brackets (an arm), others their corner dots
+        let arm = Point::new(125.0, 97.0);
+        assert_eq!(grip_at(Kind::Snap, r, arm), Some(0));
+        assert_eq!(grip_at(Kind::Drag, r, arm), None);
+        assert_eq!(grip_at(Kind::Drag, r, Point::new(101.0, 99.0)), Some(0));
+        // a tiny box: the arms keep their minimum length
+        let tiny = rect(100.0, 100.0, 20.0, 20.0);
+        assert_eq!(bracket_at(tiny, Point::new(97.0 + 14.0, 97.0)), Some(0));
     }
 
     /// 2x scale: the frame is 3840x2160, the overlay 1920x1080.

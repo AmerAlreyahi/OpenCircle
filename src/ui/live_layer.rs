@@ -557,7 +557,7 @@ impl Live {
         // child is a layer, and each layer costs a clip-mask pass per changed
         // strip), and at a fixed index, so new patches never restart it.
         let mut layers = stack![border::view(
-            border::Mode::Flow,
+            border::Mode::Live,
             monitor.scale,
             cfg!(windows)
         )];

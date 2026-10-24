@@ -23,6 +23,27 @@
 //! live_interval_ms = 1000           # live translate repeats every N ms (500-5000)
 //! live_note_shown = false           # the one-time live-mode note was shown
 //!
+//! [selection]
+//! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
+//! after = "search"                  # search (run search_with at once) | wait (show the action bar)
+//! search_with = "lens"              # lens | ai | both
+//!
+//! [look]                            # how the screen looks while OpenCircle is active
+//! theme = "spectrum"                # spectrum | aurora | sunset | ocean | neon | mono | calm | custom
+//! [look.custom]                     # theme = "custom" only (a copy of a preset to edit)
+//! palette = "spectrum"              # spectrum | aurora | sunset | ocean | neon | mono | two_colour
+//! colours = ["#8f80ff", "#4fc9e0"]  # palette = two_colour: from, to
+//! glow = 80                         # edge glow strength, 0-100 %
+//! dim = 12                          # dim over the frozen screen, 0-60 %
+//! activation_glow = true            # a wide glow fades in when the overlay opens
+//! brackets = "white"                # white | accent: the selection's corner colour
+//! bracket_style = "corners"         # corners | frame
+//! bar = "glass"                     # glass | glass_dark | glass_light | solid | outline
+//! [look.custom.overlay]             # the screen edge per mode: overlay, live, snip
+//! style = "glow"                    # glow | thin | none
+//! thickness = 6                     # 1-12 px
+//! animate = true                    # overlay/snip: once on open; live: keeps moving
+//!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
 //! shortcut = "Ctrl+Shift+T"         # "" = not bound
@@ -216,12 +237,347 @@ pub struct GeneralConfig {
     pub save_folder: String,
 }
 
+/// How a finished stroke shows (`[selection] style`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectStyle {
+    /// The stroke turns into a rounded box with corner brackets.
+    #[default]
+    Snap,
+    /// The stroke stays as drawn.
+    Shape,
+}
+
+/// What happens when a selection is made (`[selection] after`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum After {
+    /// Run `search_with` at once (the action bar stays one click away).
+    #[default]
+    Search,
+    /// Show the action bar and wait.
+    Wait,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchWith {
+    #[default]
+    Lens,
+    Ai,
+    Both,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+pub struct SelectionConfig {
+    pub style: SelectStyle,
+    pub after: After,
+    pub search_with: SearchWith,
+}
+
+/// The active look: a preset, or the user's own bundle (`[look.custom]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LookTheme {
+    #[default]
+    Spectrum,
+    Aurora,
+    Sunset,
+    Ocean,
+    Neon,
+    Mono,
+    Calm,
+    Custom,
+}
+
+/// The edge / accent colours: a preset palette (its colours live in
+/// `ui/theme.rs`) or two of the user's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColourSet {
+    #[default]
+    Spectrum,
+    Aurora,
+    Sunset,
+    Ocean,
+    Neon,
+    Mono,
+    TwoColour,
+}
+
+/// The screen edge: a soft glow fading inward, a thin line, or nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeStyle {
+    #[default]
+    Glow,
+    Thin,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BracketColour {
+    #[default]
+    White,
+    Accent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BracketStyle {
+    /// Four L-shaped corners.
+    #[default]
+    Corners,
+    /// A thin outline all round.
+    Frame,
+}
+
+/// The floating bar / pill surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BarStyle {
+    /// Glass in the app theme's colours.
+    #[default]
+    Glass,
+    GlassDark,
+    GlassLight,
+    /// Opaque, app theme colours.
+    Solid,
+    /// See-through with an accent outline.
+    Outline,
+}
+
+/// A colour written as "#rrggbb".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rgb(pub [u8; 3]);
+
+impl Rgb {
+    pub fn parse(s: &str) -> Option<Rgb> {
+        let s = s.trim().strip_prefix('#')?;
+        if s.len() != 6 || !s.is_ascii() {
+            return None;
+        }
+        let byte = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
+        Some(Rgb([byte(0)?, byte(2)?, byte(4)?]))
+    }
+
+    pub fn hex(self) -> String {
+        let [r, g, b] = self.0;
+        format!("#{r:02x}{g:02x}{b:02x}")
+    }
+}
+
+impl Serialize for Rgb {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.hex())
+    }
+}
+
+impl<'de> Deserialize<'de> for Rgb {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Rgb, D::Error> {
+        let s = String::deserialize(d)?;
+        Rgb::parse(&s).ok_or_else(|| serde::de::Error::custom("expected a colour like \"#8f80ff\""))
+    }
+}
+
+/// One mode's screen edge (overlay, live translate, snip).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Edge {
+    pub style: EdgeStyle,
+    /// Logical px (`EDGE_THICKNESS`); a glow reaches 8x this far inward.
+    pub thickness: u8,
+    /// Overlay / snip: once when it opens. Live: all the time.
+    pub animate: bool,
+}
+
+pub const EDGE_THICKNESS: std::ops::RangeInclusive<u8> = 1..=12;
+pub const GLOW: std::ops::RangeInclusive<u8> = 0..=100;
+pub const DIM: std::ops::RangeInclusive<u8> = 0..=60;
+
+/// Everything an active look sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Look {
+    pub palette: ColourSet,
+    /// `palette = two_colour`: from, to.
+    pub colours: [Rgb; 2],
+    /// Edge glow strength, % (`GLOW`).
+    pub glow: u8,
+    /// Dim over the frozen screen, % (`DIM`).
+    pub dim: u8,
+    pub activation_glow: bool,
+    pub brackets: BracketColour,
+    pub bracket_style: BracketStyle,
+    pub bar: BarStyle,
+    pub overlay: Edge,
+    pub live: Edge,
+    pub snip: Edge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct LookConfig {
+    pub theme: LookTheme,
+    /// The user's own look (`theme = "custom"`); kept when a preset is chosen.
+    pub custom: Look,
+}
+
+const fn edge(style: EdgeStyle, thickness: u8, animate: bool) -> Edge {
+    Edge {
+        style,
+        thickness,
+        animate,
+    }
+}
+
+const fn preset(palette: ColourSet, glow: u8, dim: u8, activation: bool, bar: BarStyle) -> Look {
+    Look {
+        palette,
+        colours: [Rgb([0x8f, 0x80, 0xff]), Rgb([0x4f, 0xc9, 0xe0])],
+        glow,
+        dim,
+        activation_glow: activation,
+        brackets: BracketColour::White,
+        bracket_style: BracketStyle::Corners,
+        bar,
+        overlay: edge(EdgeStyle::Glow, 6, true),
+        live: edge(EdgeStyle::Glow, 6, true),
+        snip: edge(EdgeStyle::Thin, 3, false),
+    }
+}
+
+/// The presets: one table (their colours: `ui::theme::palette`).
+pub const PRESETS: [(LookTheme, Look); 7] = {
+    let thin = edge(EdgeStyle::Thin, 3, true);
+    let still = edge(EdgeStyle::Thin, 2, false);
+    [
+        (
+            LookTheme::Spectrum,
+            preset(ColourSet::Spectrum, 80, 12, true, BarStyle::Glass),
+        ),
+        // Today's look: the thin violet → cyan line with its sweep.
+        (
+            LookTheme::Aurora,
+            Look {
+                overlay: thin,
+                live: thin,
+                ..preset(ColourSet::Aurora, 70, 12, false, BarStyle::Glass)
+            },
+        ),
+        (
+            LookTheme::Sunset,
+            preset(ColourSet::Sunset, 80, 15, true, BarStyle::GlassDark),
+        ),
+        (
+            LookTheme::Ocean,
+            preset(ColourSet::Ocean, 70, 12, true, BarStyle::Glass),
+        ),
+        (
+            LookTheme::Neon,
+            Look {
+                brackets: BracketColour::Accent,
+                overlay: edge(EdgeStyle::Glow, 8, true),
+                live: edge(EdgeStyle::Glow, 8, true),
+                ..preset(ColourSet::Neon, 100, 25, true, BarStyle::Outline)
+            },
+        ),
+        (
+            LookTheme::Mono,
+            Look {
+                bracket_style: BracketStyle::Frame,
+                overlay: thin,
+                live: thin,
+                ..preset(ColourSet::Mono, 50, 10, false, BarStyle::Solid)
+            },
+        ),
+        (
+            LookTheme::Calm,
+            Look {
+                overlay: still,
+                live: still,
+                snip: still,
+                ..preset(ColourSet::Aurora, 0, 6, false, BarStyle::Glass)
+            },
+        ),
+    ]
+};
+
+impl LookTheme {
+    /// What this theme looks like (`custom` for `Custom`).
+    pub fn look(self, custom: &Look) -> Look {
+        PRESETS
+            .iter()
+            .find(|(t, _)| *t == self)
+            .map_or(*custom, |(_, look)| *look)
+    }
+}
+
+impl Look {
+    pub fn edge(&self, mode: EdgeMode) -> Edge {
+        match mode {
+            EdgeMode::Overlay => self.overlay,
+            EdgeMode::Live => self.live,
+            EdgeMode::Snip => self.snip,
+        }
+    }
+
+    fn edge_mut(&mut self, mode: EdgeMode) -> &mut Edge {
+        match mode {
+            EdgeMode::Overlay => &mut self.overlay,
+            EdgeMode::Live => &mut self.live,
+            EdgeMode::Snip => &mut self.snip,
+        }
+    }
+}
+
+/// Where a screen edge is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeMode {
+    Overlay,
+    Live,
+    Snip,
+}
+
+impl EdgeMode {
+    pub const ALL: [EdgeMode; 3] = [EdgeMode::Overlay, EdgeMode::Live, EdgeMode::Snip];
+
+    fn key(self) -> &'static str {
+        match self {
+            EdgeMode::Overlay => "overlay",
+            EdgeMode::Live => "live",
+            EdgeMode::Snip => "snip",
+        }
+    }
+}
+
+impl LookConfig {
+    /// The look in use.
+    pub fn active(&self) -> Look {
+        self.theme.look(&self.custom)
+    }
+
+    /// Edit `mode`'s edge of the custom look (Settings).
+    pub fn edge_mut(&mut self, mode: EdgeMode) -> &mut Edge {
+        self.custom.edge_mut(mode)
+    }
+}
+
+impl Default for LookConfig {
+    fn default() -> Self {
+        LookConfig {
+            theme: LookTheme::Spectrum,
+            custom: PRESETS[0].1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Config {
     pub version: u32,
     pub theme: Theme,
     pub shortcut: String,
     pub general: GeneralConfig,
+    pub selection: SelectionConfig,
+    pub look: LookConfig,
     pub ai: AiConfig,
     pub translate: TranslateConfig,
     pub quick_actions: Vec<QuickAction>,
@@ -262,6 +618,8 @@ impl Default for Config {
             theme: Theme::System,
             shortcut: DEFAULT_CAPTURE_SHORTCUT.to_string(),
             general: GeneralConfig::default(),
+            selection: SelectionConfig::default(),
+            look: LookConfig::default(),
             ai: AiConfig::default(),
             translate: TranslateConfig::default(),
             // DESIGN.md "Quick actions".
@@ -393,6 +751,18 @@ impl Config {
                 |s: &String| check_folder(s),
             );
         }
+        if let Some(t) = section(&root, "selection", &mut w) {
+            let (p, d) = ("selection.", d.selection);
+            c.selection.style = get(t, p, "style", d.style, &mut w);
+            c.selection.after = get(t, p, "after", d.after, &mut w);
+            c.selection.search_with = get(t, p, "search_with", d.search_with, &mut w);
+        }
+        if let Some(t) = section(&root, "look", &mut w) {
+            c.look.theme = get(t, "look.", "theme", d.look.theme, &mut w);
+            if let Some(custom) = sub_section(t, "look.", "custom", &mut w) {
+                c.look.custom = read_look(custom, d.look.custom, &mut w);
+            }
+        }
         if root.get("ai").is_some_and(|v| !v.is_table()) {
             w.push(format!("ai: expected a table; using defaults{AI_OFF}"));
             c.ai.provider = Provider::Unreadable;
@@ -496,6 +866,15 @@ impl Config {
 
 static CURRENT: RwLock<Option<Config>> = RwLock::new(None);
 
+/// The active look, without cloning the whole config (the screen edge reads it
+/// every frame, the widgets on every style).
+pub fn look() -> Look {
+    if let Some(c) = CURRENT.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        return c.look.active();
+    }
+    current().look.active()
+}
+
 /// The config the running app uses (any thread). Read from disk on first use;
 /// after that only `set_current` changes it (Settings saved, onboarding finished).
 pub fn current() -> Config {
@@ -520,13 +899,64 @@ pub fn set_current(config: Config) {
 // ---- field readers: each returns the default (plus a warning) on a bad value ----
 
 fn section<'a>(root: &'a Table, name: &str, w: &mut Vec<String>) -> Option<&'a Table> {
-    match root.get(name)? {
+    sub_section(root, "", name, w)
+}
+
+fn sub_section<'a>(
+    t: &'a Table,
+    prefix: &str,
+    name: &str,
+    w: &mut Vec<String>,
+) -> Option<&'a Table> {
+    match t.get(name)? {
         Value::Table(t) => Some(t),
         _ => {
-            w.push(format!("{name}: expected a table; using defaults"));
+            w.push(format!("{prefix}{name}: expected a table; using defaults"));
             None
         }
     }
+}
+
+/// `n` is in `range` (`unit` names it in the warning).
+fn within(
+    range: std::ops::RangeInclusive<u8>,
+    unit: &'static str,
+) -> impl Fn(&u8) -> Result<(), String> {
+    move |n| {
+        (range.contains(n))
+            .then_some(())
+            .ok_or_else(|| format!("expected {} to {}{unit}", range.start(), range.end()))
+    }
+}
+
+/// `[look.custom]`, field by field over `d`.
+fn read_look(t: &Table, d: Look, w: &mut Vec<String>) -> Look {
+    let p = "look.custom.";
+    let mut look = Look {
+        palette: get(t, p, "palette", d.palette, w),
+        colours: get(t, p, "colours", d.colours, w),
+        glow: get_checked(t, p, "glow", d.glow, w, within(GLOW, " %")),
+        dim: get_checked(t, p, "dim", d.dim, w, within(DIM, " %")),
+        activation_glow: get(t, p, "activation_glow", d.activation_glow, w),
+        brackets: get(t, p, "brackets", d.brackets, w),
+        bracket_style: get(t, p, "bracket_style", d.bracket_style, w),
+        bar: get(t, p, "bar", d.bar, w),
+        ..d
+    };
+    for mode in EdgeMode::ALL {
+        let Some(e) = sub_section(t, p, mode.key(), w) else {
+            continue;
+        };
+        let p = format!("{p}{}.", mode.key());
+        let old = d.edge(mode);
+        let thickness = within(EDGE_THICKNESS, " px");
+        *look.edge_mut(mode) = Edge {
+            style: get(e, &p, "style", old.style, w),
+            thickness: get_checked(e, &p, "thickness", old.thickness, w, thickness),
+            animate: get(e, &p, "animate", old.animate, w),
+        };
+    }
+    look
 }
 
 fn get<T: DeserializeOwned>(
@@ -695,6 +1125,97 @@ mod tests {
         let (c2, warnings) = Config::parse("");
         assert_eq!(c2, c);
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn look_and_selection_defaults_round_trip_and_old_files_keep_working() {
+        let d = Config::default();
+        assert_eq!(d.selection.style, SelectStyle::Snap);
+        assert_eq!(d.selection.after, After::Search);
+        assert_eq!(d.selection.search_with, SearchWith::Lens);
+        assert_eq!(d.look.theme, LookTheme::Spectrum);
+        let look = d.look.active();
+        assert_eq!(look.overlay, edge(EdgeStyle::Glow, 6, true));
+        assert_eq!(look.live, edge(EdgeStyle::Glow, 6, true));
+        assert_eq!(look.snip, edge(EdgeStyle::Thin, 3, false));
+        assert!(look.activation_glow && look.dim == 12);
+        // a file from before these sections: the defaults, no warning
+        let (old, w) = Config::parse("theme = \"dark\"\n[general]\ndefault_action = \"ai\"\n");
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!((old.selection, old.look), (d.selection, d.look));
+        // every preset is a theme, and every theme but Custom has one
+        for (theme, _) in PRESETS {
+            assert_ne!(theme, LookTheme::Custom);
+        }
+        assert_eq!(PRESETS.len(), 7);
+        // a custom look and a selection setting survive a save
+        let mut c = Config {
+            selection: SelectionConfig {
+                style: SelectStyle::Shape,
+                after: After::Wait,
+                search_with: SearchWith::Both,
+            },
+            ..Config::default()
+        };
+        c.look.theme = LookTheme::Custom;
+        c.look.custom.palette = ColourSet::TwoColour;
+        c.look.custom.colours = [Rgb([1, 2, 3]), Rgb([0xfe, 0xdc, 0xba])];
+        c.look.custom.bar = BarStyle::Outline;
+        *c.look.edge_mut(EdgeMode::Live) = edge(EdgeStyle::None, 12, false);
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert!(
+            text.contains("\"#fedcba\"") && text.contains("[look.custom.live]"),
+            "{text}"
+        );
+        let (back, w) = Config::parse(&text);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back, c);
+        assert_eq!(back.look.active().live.style, EdgeStyle::None);
+        // a preset ignores the custom look but keeps it
+        c.look.theme = LookTheme::Calm;
+        assert_eq!(c.look.active().overlay.style, EdgeStyle::Thin);
+        assert_eq!(c.look.custom.bar, BarStyle::Outline);
+    }
+
+    #[test]
+    fn look_values_are_checked_one_by_one() {
+        let (c, w) = Config::parse(
+            "[selection]\nstyle = \"blob\"\nafter = \"wait\"\n\
+             [look]\ntheme = \"custom\"\n\
+             [look.custom]\nglow = 101\ndim = 61\ncolours = [\"#12345\", \"#000000\"]\n\
+             bar = \"solid\"\n\
+             [look.custom.overlay]\nthickness = 13\nstyle = \"thin\"\n\
+             [look.custom.snip]\nthickness = 0\n",
+        );
+        let d = Config::default();
+        assert_eq!(c.selection.style, SelectStyle::Snap);
+        assert_eq!(c.selection.after, After::Wait, "good survives");
+        let look = c.look.active();
+        assert_eq!((look.glow, look.dim), (80, 12));
+        assert_eq!(look.colours, d.look.custom.colours);
+        assert_eq!(look.bar, BarStyle::Solid);
+        assert_eq!(look.overlay.style, EdgeStyle::Thin);
+        assert_eq!(look.overlay.thickness, 6);
+        assert_eq!(look.snip.thickness, 3);
+        for key in [
+            "selection.style",
+            "look.custom.glow",
+            "look.custom.dim",
+            "look.custom.colours",
+            "look.custom.overlay.thickness",
+            "look.custom.snip.thickness",
+        ] {
+            assert!(w.iter().any(|m| m.starts_with(key)), "{key}: {w:?}");
+        }
+        assert_eq!(w.len(), 6, "{w:?}");
+        // range ends are fine
+        let (c, w) = Config::parse(
+            "[look.custom]\nglow = 0\ndim = 60\n[look.custom.live]\nthickness = 12\n",
+        );
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!((c.look.custom.glow, c.look.custom.dim), (0, 60));
+        assert_eq!(Rgb::parse("#8F80ff"), Some(Rgb([0x8f, 0x80, 0xff])));
+        assert_eq!(Rgb::parse("8f80ff"), None);
     }
 
     #[test]

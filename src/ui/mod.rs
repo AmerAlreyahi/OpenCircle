@@ -33,7 +33,7 @@ use iced::window::{self, Level, Mode};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
 use crate::actions::{self, Action, Crop, Run, copy, lens, qr, save, text};
-use crate::config::{self, QuickAction, Target};
+use crate::config::{self, After, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target};
 use crate::editor::{self, Output};
 use crate::ocr::{self, TextBlock};
 use crate::translate::pipeline::Cache;
@@ -140,7 +140,34 @@ enum Message {
     /// The ask bar's text, and Enter in it.
     AskInput(String),
     AskSubmit,
+    /// The "Select text" chip under a snapped box, and the lines OCR read in it.
+    SelectText,
+    TextLines(Rectangle, Result<Vec<word::Line>, String>),
+    /// The "More" chip: the action bar beside an auto-search.
+    More,
+    /// The select-text popup.
+    Picked(PickAct),
 }
+
+/// What the select-text popup does with the picked words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PickAct {
+    Copy,
+    Translate,
+    Search,
+}
+
+/// Select-text mode on a snapped box: its words (`None` while OCR reads them)
+/// and the ones picked by a press-drag over them.
+struct TextMode {
+    lines: Option<Vec<word::Line>>,
+    boxes: Vec<Rectangle>,
+    picked: Option<word::Picked>,
+    picking: bool,
+}
+
+/// The chips under a snapped box and the select-text popup (logical px).
+const CHIP_GAP: f32 = 8.0;
 
 /// What an OCR read for words was asked for, to place its answer.
 #[derive(Debug, Clone, Copy)]
@@ -279,6 +306,13 @@ struct App {
     /// One warm OCR / translation helper while the overlay is open (tap a
     /// word, Text, Translate), started by the first of them.
     helper: Option<ocr::Hold>,
+    /// How selections behave (`[selection]`), read when the overlay opens.
+    behaviour: SelectionConfig,
+    /// A snapped selection's drawn stroke (image px) morphing into its box.
+    morph: Option<(Vec<Point>, Instant)>,
+    text_mode: Option<TextMode>,
+    /// The action bar is shown although the selection searched by itself.
+    more: bool,
 }
 
 /// Translations kept for reuse (each a short text).
@@ -341,6 +375,15 @@ impl App {
             cache: Arc::new(Cache::new(8)),
             live: None,
             helper: None,
+            // As before the setting existed; `open` reads the config.
+            behaviour: SelectionConfig {
+                style: SelectStyle::Shape,
+                after: After::Wait,
+                search_with: SearchWith::Lens,
+            },
+            morph: None,
+            text_mode: None,
+            more: false,
         }
     }
 
@@ -455,6 +498,16 @@ impl App {
             Message::Panel(id, msg) => self.on_panel(id, msg),
             Message::Run(action) => self.run(action),
             Message::Tapped(what, read) => self.on_tapped(what, read),
+            Message::SelectText => self.select_text(),
+            Message::TextLines(area, read) => {
+                self.on_text_lines(area, read);
+                Task::none()
+            }
+            Message::More => {
+                self.more = true;
+                Task::none()
+            }
+            Message::Picked(act) => self.on_picked(act),
             Message::AskInput(text) => {
                 self.ask = text;
                 Task::none()
@@ -582,6 +635,7 @@ impl App {
         self.opening = self.opening.wrapping_add(1);
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
+        self.behaviour = config::current().selection;
         let mut first = None;
         if let Some((kind, windows)) = shot.snip {
             let mut snip = Snip::new(windows, size, snip::can_scroll());
@@ -700,9 +754,34 @@ impl App {
             }
         }
         match event {
+            // Select-text mode: a press on the box picks words, a drag stretches them.
+            overlay::Event::Press {
+                at: p,
+                shift: false,
+            } if self.picks_text_at(p) => {
+                let area = self.area();
+                if let Some(mode) = &mut self.text_mode {
+                    let lines = mode.lines.clone().unwrap_or_default();
+                    mode.picked = word::Picked::new(lines, area, p);
+                    mode.picking = mode.picked.is_some();
+                }
+            }
+            overlay::Event::Move(p) if self.text_mode.as_ref().is_some_and(|m| m.picking) => {
+                if let Some(picked) = self.text_mode.as_mut().and_then(|m| m.picked.as_mut()) {
+                    picked.extend(p);
+                }
+            }
+            overlay::Event::Release if self.text_mode.as_ref().is_some_and(|m| m.picking) => {
+                if let Some(mode) = &mut self.text_mode {
+                    mode.picking = false;
+                }
+            }
             overlay::Event::Press { at: p, shift } => {
                 // A new selection: the panel and the edits were about the old one.
                 self.panel = None;
+                self.text_mode = None;
+                self.morph = None;
+                self.more = false;
                 self.edit = None;
                 self.scan = None;
                 self.taps = self.taps.wrapping_add(1); // a tap still reading is stale
@@ -741,7 +820,8 @@ impl App {
                 return if grab.moved && grab.text {
                     self.extend_words(grab.to)
                 } else if grab.moved {
-                    self.selected()
+                    let scan = self.selected();
+                    Task::batch([scan, self.auto_search()])
                 } else {
                     self.tap(grab.from) // a click on the selection
                 };
@@ -749,7 +829,16 @@ impl App {
             overlay::Event::Release => {
                 self.drawing = false;
                 let zoom = self.view.zoom();
-                let settled = overlay::settle(&self.stroke, zoom, self.screen);
+                let mut settled = overlay::settle(&self.stroke, zoom, self.screen);
+                // Snap: the stroke becomes a rounded box (it morphs there).
+                if let Some((sel, kept)) = &mut settled
+                    && self.snaps()
+                {
+                    if sel.kind != overlay::Kind::Drag {
+                        self.morph = Some((kept.clone(), Instant::now()));
+                    }
+                    (*sel, *kept) = overlay::snap(sel.area);
+                }
                 self.selection = settled.as_ref().map(|(sel, _)| *sel);
                 let drawn = match settled {
                     Some((_, kept)) => std::mem::replace(&mut self.stroke, kept),
@@ -782,7 +871,12 @@ impl App {
                 } else if overlay::is_tap(&drawn, zoom) {
                     return self.tap(drawn[0]);
                 }
-                return self.selected();
+                let scan = self.selected();
+                let search = match self.others.is_empty() {
+                    true => self.auto_search(),
+                    false => Task::none(), // Shift: more to come
+                };
+                return Task::batch([scan, search]);
             }
             overlay::Event::Enter if matches!(self.purpose, Purpose::Search) => {
                 return self.run(actions::default_for(&config::current()));
@@ -860,9 +954,13 @@ impl App {
     /// The selection shows its handles (and can be resized / moved) while the
     /// action bar is there.
     fn handles(&self) -> bool {
+        let snapped = self
+            .selection
+            .is_some_and(|s| s.kind == overlay::Kind::Snap);
         matches!(self.purpose, Purpose::Search)
             && !self.drawing
-            && self.panel.is_none()
+            && (self.panel.is_none() || snapped)
+            && self.text_mode.is_none()
             && self.edit.is_none()
             && self.translate.is_none()
     }
@@ -872,7 +970,7 @@ impl App {
     fn grab_at(&self, p: Point) -> Option<Grab> {
         let sel = self.selection.filter(|_| self.handles())?;
         let on_screen = self.view.rect_to_screen(sel.area);
-        let corner = overlay::handle_at(on_screen, self.view.to_screen(p));
+        let corner = overlay::grip_at(sel.kind, on_screen, self.view.to_screen(p));
         // On highlighted words a drag stretches them, it doesn't move the box.
         let text = corner.is_none() && self.word.as_ref().is_some_and(|w| w.on_text(p));
         (corner.is_some() || sel.area.contains(p)).then(|| Grab {
@@ -907,13 +1005,18 @@ impl App {
         }
         let (start, stroke) = &grab.start;
         let area = match grab.corner {
-            Some(corner) => overlay::resize(start.area, corner, p, overlay::MIN_SIDE / zoom),
+            Some(corner) => {
+                // the corner follows the pointer from where it was grabbed (a bracket arm is off it)
+                let to = overlay::corner(start.area, corner) + (p - grab.from);
+                overlay::resize(start.area, corner, to, overlay::MIN_SIDE / zoom)
+            }
             None => start.area + (p - grab.from),
         };
         let kind = match start.kind {
-            overlay::Kind::Loop | overlay::Kind::Scribble => start.kind,
+            overlay::Kind::Loop | overlay::Kind::Scribble | overlay::Kind::Snap => start.kind,
             overlay::Kind::Drag | overlay::Kind::Word => overlay::Kind::Drag,
         };
+        self.morph = None;
         self.stroke = overlay::refit(stroke, start.area, area);
         self.selection = Some(overlay::Selection { area, kind });
         self.word = None; // the words are no longer what is selected
@@ -1070,6 +1173,128 @@ impl App {
             kind: overlay::Kind::Drag,
         });
         self.stroke = vec![area.position(), area.position() + Vector::from(area.size())];
+    }
+
+    /// A finished stroke snaps to a box (`[selection] style`; not in Snip).
+    fn snaps(&self) -> bool {
+        self.behaviour.style == SelectStyle::Snap
+            && matches!(self.purpose, Purpose::Search | Purpose::Quick(..))
+    }
+
+    /// The selection's box (image px), or nothing.
+    fn area(&self) -> Rectangle {
+        self.selection.map(|s| s.area).unwrap_or_default()
+    }
+
+    /// What runs by itself once a selection is made.
+    fn auto_actions(&self) -> &'static [&'static Action] {
+        let word = self
+            .selection
+            .is_some_and(|s| s.kind == overlay::Kind::Word);
+        if !matches!(self.purpose, Purpose::Search) || word || self.selection.is_none() {
+            return &[];
+        }
+        auto_targets(self.behaviour)
+    }
+
+    /// Runs `auto_actions` (Lens and Ask AI: the Lens page opens in the browser
+    /// and stays held whichever panel then shows).
+    fn auto_search(&mut self) -> Task<Message> {
+        let runs: Vec<_> = (self.auto_actions().iter()).map(|a| self.run(a)).collect();
+        Task::batch(runs)
+    }
+
+    /// The "Select text" chip: OCR reads the box (the warm helper) and every
+    /// word in it becomes pickable. Without the OCR models the Text panel asks
+    /// before downloading them.
+    fn select_text(&mut self) -> Task<Message> {
+        if self.text_mode.take().is_some() {
+            return Task::none(); // "Done"
+        }
+        if !text::models_present() {
+            return self.run(&text::ACTION);
+        }
+        let area = self.area();
+        let Some(image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        }) = &self.frame
+        else {
+            return Task::none();
+        };
+        let (Some([x0, y0, ..]), Some(crop)) = (
+            actions::crop_bounds(*width, *height, self.scale, area),
+            actions::crop(pixels, *width, *height, self.scale, area),
+        ) else {
+            return Task::none();
+        };
+        self.panel = None;
+        self.text_mode = Some(TextMode {
+            lines: None,
+            boxes: Vec::new(),
+            picked: None,
+            picking: false,
+        });
+        let scale = self.scale;
+        background(move |tx| {
+            let read = ocr::recognize_in_child(&crop.rgba, crop.width, crop.height);
+            let lines = read.map(|blocks| word::lines(blocks, [x0, y0], scale));
+            let _ = tx.unbounded_send(lines.map_err(|e| e.to_string()));
+        })
+        .map(move |read| Message::TextLines(area, read))
+    }
+
+    /// OCR read the box `area` for select-text mode (dropped if the selection
+    /// moved on or the mode was left).
+    fn on_text_lines(&mut self, area: Rectangle, read: Result<Vec<word::Line>, String>) {
+        let same = self.area() == area;
+        let Some(mode) = self.text_mode.as_mut().filter(|_| same) else {
+            return;
+        };
+        match read {
+            Ok(lines) => {
+                mode.boxes = word::boxes(&lines);
+                mode.lines = Some(lines);
+            }
+            Err(e) => {
+                eprintln!("[opencircle] select text failed: {e}");
+                self.text_mode = None;
+            }
+        }
+    }
+
+    /// A press at `p` (image px) picks words: select-text mode is on, read, and
+    /// `p` is in the box.
+    fn picks_text_at(&self, p: Point) -> bool {
+        self.text_mode.as_ref().is_some_and(|m| m.lines.is_some()) && self.area().contains(p)
+    }
+
+    /// The select-text popup: Copy closes with the words copied; Translate and
+    /// Search make the words' box the selection and translate it in place / search it.
+    fn on_picked(&mut self, act: PickAct) -> Task<Message> {
+        let Some(picked) = self.text_mode.as_ref().and_then(|m| m.picked.clone()) else {
+            return Task::none();
+        };
+        if act == PickAct::Copy {
+            let closing = self.close();
+            if let Err(e) = copy::text(picked.text()) {
+                eprintln!("copy text failed: {e}");
+            }
+            return closing;
+        }
+        self.text_mode = None;
+        self.morph = None;
+        (self.selection, self.stroke) = {
+            let (sel, stroke) = overlay::snap(picked.area());
+            (Some(sel), stroke)
+        };
+        self.remember_region();
+        match act {
+            PickAct::Translate => self.start_translate(),
+            _ => self.run(&lens::ACTION),
+        }
     }
 
     /// The previous selection on the shown monitor.
@@ -1462,6 +1687,9 @@ impl App {
         self.scan = None;
         self.translate = None;
         self.helper = None;
+        self.morph = None;
+        self.text_mode = None;
+        self.more = false;
         self.hiding = Hiding::Empty;
         Task::none()
     }
@@ -1610,6 +1838,9 @@ impl App {
         if let Some(pill) = snip.and_then(|s| s.progress_view()) {
             return pill.map(Message::Snip);
         }
+        let picked: Vec<Rectangle> = (self.text_mode.as_ref())
+            .and_then(|m| m.picked.as_ref())
+            .map_or_else(Vec::new, word::Picked::rects);
         let overlay = overlay::Overlay {
             stroke: &self.stroke,
             selection: self.selection,
@@ -1620,6 +1851,10 @@ impl App {
             first_draw: &self.first_draw,
             hover: snip.is_some_and(|s| s.kind == snip::Kind::Window) && self.edit.is_none(),
             dim: self.translate.is_none() || self.selection.is_some(),
+            look: config::look(),
+            morph: (self.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
+            words: (self.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
+            picked,
         };
         let translation = self.translate.as_ref().and_then(|(_, s)| s.image());
         // The frame is its own layer: iced draws a canvas's images above its shapes.
@@ -1635,8 +1870,8 @@ impl App {
             Element::from(canvas(overlay).width(Fill).height(Fill)).map(Message::Overlay),
             border::view(
                 match snip {
-                    Some(_) => border::Mode::Static,
-                    None => border::Mode::Sweep,
+                    Some(_) => border::Mode::Snip,
+                    None => border::Mode::Overlay,
                 },
                 self.scale,
                 false,
@@ -1669,20 +1904,7 @@ impl App {
             snip.view().map(Message::Snip)
         } else if let Some(selection) = self.selection {
             match self.purpose {
-                Purpose::Search if !self.drawing => {
-                    let chip = self
-                        .scan
-                        .as_ref()
-                        .and_then(|s| s.qr.as_deref())
-                        .map(|text| {
-                            let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
-                            bar::qr_chip(text, Message::Qr(qr::Act::Copy), open)
-                        });
-                    // The action bar keeps clear of the ask bar at the bottom.
-                    let above = Size::new(self.screen.width, self.screen.height - ASK_ZONE);
-                    let area = self.view.rect_to_screen(selection.area);
-                    stack![bar::view(area, above, chip, Message::Run), self.ask_bar()].into()
-                }
+                Purpose::Search if !self.drawing => self.selection_ui(selection),
                 _ => space().into(),
             }
         } else {
@@ -1692,6 +1914,12 @@ impl App {
                 .into()
         };
         layers = layers.push(top);
+        // Beside a panel (an auto-search's): the chips, and the bar after More.
+        if let (Some(_), Some(selection), Purpose::Search, false) =
+            (&self.panel, self.selection, &self.purpose, self.drawing)
+        {
+            layers = layers.push(self.selection_ui(selection));
+        }
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
         if self.selection.is_some() && self.scan.as_ref().is_some_and(|s| s.protected) {
             layers = layers.push(
@@ -1699,6 +1927,65 @@ impl App {
                     .center_x(Fill)
                     .padding(24),
             );
+        }
+        layers.into()
+    }
+
+    /// What floats around `selection`: the chips under a snapped box ("Select
+    /// text", "More" while the bar waits behind an auto-search), the
+    /// select-text popup, the action bar and the ask bar (not beside a panel).
+    fn selection_ui(&self, selection: overlay::Selection) -> Element<'_, Message> {
+        let area = self.view.rect_to_screen(selection.area);
+        let panel = self.panel.is_some();
+        let word = selection.kind == overlay::Kind::Word;
+        let waits = self.behaviour.after == After::Wait || word;
+        let bar_shown = self.text_mode.is_none() && ((waits && !panel) || self.more);
+        let mut chips: Vec<Element<'_, Message>> = Vec::new();
+        if selection.kind == overlay::Kind::Snap {
+            let label = match &self.text_mode {
+                None => "Select text",
+                Some(TextMode { lines: None, .. }) => "Reading text…",
+                Some(_) => "Done",
+            };
+            chips.push(widgets::float_chip(label, Message::SelectText).into());
+        }
+        if !word && !waits && !self.more && self.text_mode.is_none() {
+            chips.push(widgets::float_chip("More", Message::More).into());
+        }
+        let mut layers = stack![];
+        let mut below = area;
+        if !chips.is_empty() {
+            let n = chips.len() as f32;
+            let size = Size::new(
+                n * widgets::TEXT_BUTTON_WIDTH + (n - 1.0) * CHIP_GAP,
+                widgets::CONTROL,
+            );
+            let at = chips_at(area, size, self.screen);
+            below.height = (at.y + size.height - area.y).max(area.height);
+            let row = iced::widget::row(chips).spacing(CHIP_GAP);
+            layers = layers.push(iced::widget::pin(opaque(row)).position(at));
+        }
+        let picked = (self.text_mode.as_ref())
+            .filter(|m| !m.picking)
+            .and_then(|m| m.picked.as_ref());
+        if let Some(picked) = picked {
+            layers = layers.push(pick_popup(
+                self.view.rect_to_screen(picked.area()),
+                self.screen,
+            ));
+        } else if bar_shown {
+            let chip = (self.scan.as_ref())
+                .and_then(|s| s.qr.as_deref())
+                .map(|text| {
+                    let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
+                    bar::qr_chip(text, Message::Qr(qr::Act::Copy), open)
+                });
+            // The action bar keeps clear of the ask bar at the bottom.
+            let above = Size::new(self.screen.width, self.screen.height - ASK_ZONE);
+            layers = layers.push(bar::view(below, above, chip, Message::Run));
+        }
+        if !panel && picked.is_none() {
+            layers = layers.push(self.ask_bar());
         }
         layers.into()
     }
@@ -1779,6 +2066,57 @@ impl App {
         } else {
             triggers
         }
+    }
+}
+
+/// Where the chips (`size`) go: centred on the bottom edge of the box `area`
+/// (like a tab on it), kept on the `screen` (logical px).
+fn chips_at(area: Rectangle, size: Size, screen: Size) -> Point {
+    let x = (area.center_x() - size.width / 2.0)
+        .min(screen.width - bar::GAP - size.width)
+        .max(bar::GAP);
+    let y = (area.y + area.height - size.height / 2.0)
+        .min(screen.height - bar::GAP - size.height)
+        .max(bar::GAP);
+    Point::new(x, y)
+}
+
+/// Copy / Translate / Search for the picked words, by their box `picked`.
+fn pick_popup<'a>(picked: Rectangle, screen: Size) -> Element<'a, Message> {
+    let buttons = [
+        (copy::ACTION.icon, "Copy", PickAct::Copy),
+        (
+            actions::translate::ACTION.icon,
+            "Translate",
+            PickAct::Translate,
+        ),
+        (lens::ACTION.icon, "Search", PickAct::Search),
+    ]
+    .map(|(icon, label, act)| {
+        widgets::text_button(icon, label, String::new(), false, Message::Picked(act)).into()
+    });
+    let n = buttons.len() as f32;
+    let size = Size::new(
+        n * widgets::TEXT_BUTTON_WIDTH + (n - 1.0) * 4.0 + 2.0 * widgets::SURFACE_PADDING,
+        widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING,
+    );
+    // above the words (the text below stays readable), else under them
+    let mut at = bar::place(picked, size, screen);
+    let above = picked.y - bar::GAP - size.height;
+    if above >= bar::GAP {
+        at.y = above;
+    }
+    let popup = widgets::surface(iced::widget::row(buttons).spacing(4));
+    iced::widget::pin(opaque(popup)).position(at).into()
+}
+
+/// The actions a selection runs by itself under `behaviour`.
+fn auto_targets(behaviour: SelectionConfig) -> &'static [&'static Action] {
+    match (behaviour.after, behaviour.search_with) {
+        (After::Wait, _) => &[],
+        (After::Search, SearchWith::Lens) => &[&lens::ACTION],
+        (After::Search, SearchWith::Ai) => &[&actions::ask::ACTION],
+        (After::Search, SearchWith::Both) => &[&lens::ACTION, &actions::ask::ACTION],
     }
 }
 
@@ -2582,5 +2920,219 @@ mod tests {
         assert_eq!(px(0, 1 + STACK_GAP), [0, 0, 255, 255]);
         assert_eq!(px(1, 1 + STACK_GAP), [255; 4], "beside the narrow one");
         assert!(stack_crops(&[]).is_none());
+    }
+
+    fn behaviour(style: SelectStyle, after: After, search_with: SearchWith) -> SelectionConfig {
+        SelectionConfig {
+            style,
+            after,
+            search_with,
+        }
+    }
+
+    #[test]
+    fn auto_search_runs_what_the_setting_says_and_only_for_a_search() {
+        let ids = |b| auto_targets(b).iter().map(|a| a.id).collect::<Vec<_>>();
+        let snap = SelectStyle::Snap;
+        assert!(ids(behaviour(snap, After::Wait, SearchWith::Both)).is_empty());
+        assert_eq!(
+            ids(behaviour(snap, After::Search, SearchWith::Lens)),
+            ["lens"]
+        );
+        assert_eq!(ids(behaviour(snap, After::Search, SearchWith::Ai)), ["ai"]);
+        assert_eq!(
+            ids(behaviour(snap, After::Search, SearchWith::Both)),
+            ["lens", "ai"]
+        );
+        // the defaults: snap, then Lens at once
+        assert_eq!(
+            config::Config::default().selection,
+            behaviour(snap, After::Search, SearchWith::Lens)
+        );
+        // an App: a drawn selection searches; a tapped word, Snip or nothing doesn't
+        let mut app = open_app(400, 300, 1.0);
+        app.behaviour = behaviour(snap, After::Search, SearchWith::Ai);
+        assert!(app.auto_actions().is_empty(), "no selection yet");
+        app.select(Rectangle::new(
+            Point::new(10.0, 10.0),
+            Size::new(80.0, 60.0),
+        ));
+        assert_eq!(app.auto_actions().len(), 1);
+        app.selection.as_mut().unwrap().kind = overlay::Kind::Word;
+        assert!(app.auto_actions().is_empty(), "a tapped word waits");
+        app.selection.as_mut().unwrap().kind = overlay::Kind::Snap;
+        app.purpose = Purpose::Snip(Box::new(Snip::new(Vec::new(), app.screen, false)));
+        assert!(app.auto_actions().is_empty(), "Snip has no search");
+        // an App opened before the setting existed behaves as before
+        assert!(auto_targets(App::idle(window::Id::unique()).behaviour).is_empty());
+    }
+
+    #[test]
+    fn a_circle_snaps_to_a_box_that_morphs_and_resizes_by_its_brackets() {
+        let mut app = open_app(800, 600, 1.0);
+        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        circle(&mut app, Point::new(300.0, 250.0), 80.0, false);
+        let sel = app.selection.unwrap();
+        assert_eq!(sel.kind, overlay::Kind::Snap);
+        assert!(close_to(
+            sel.area,
+            Rectangle::new(Point::new(220.0, 170.0), Size::new(160.0, 160.0))
+        ));
+        assert_eq!(app.stroke.len(), 2, "the box's corners");
+        let (from, _) = app.morph.as_ref().expect("it morphs from the drawn loop");
+        assert!(from.len() > 20);
+        // a straight drag is already a box: no morph
+        drag(
+            &mut app,
+            Point::new(100.0, 100.0),
+            Point::new(300.0, 200.0),
+            false,
+        );
+        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        assert!(app.morph.is_none());
+        // the bottom-right bracket's arm resizes it; it stays a snapped box
+        let arm = Point::new(303.0, 185.0);
+        drag(&mut app, arm, arm + Vector::new(50.0, 40.0), false);
+        let grown = app.selection.unwrap();
+        assert_eq!(grown.kind, overlay::Kind::Snap);
+        assert!(close_to(
+            grown.area,
+            Rectangle::new(Point::new(100.0, 100.0), Size::new(250.0, 140.0))
+        ));
+        // "As drawn": the loop as before
+        app.behaviour.style = SelectStyle::Shape;
+        circle(&mut app, Point::new(500.0, 300.0), 60.0, false);
+        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Loop);
+        assert!(app.morph.is_none());
+    }
+
+    /// A snapped box over `text_app`'s lines 1-3, in select-text mode with its words read.
+    fn select_text_app() -> App {
+        let mut app = text_app();
+        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        let (sel, stroke) = overlay::snap(Rectangle::new(
+            Point::new(40.0, 66.0),
+            Size::new(480.0, 112.0),
+        ));
+        (app.selection, app.stroke) = (Some(sel), stroke);
+        app.text_mode = Some(TextMode {
+            lines: None,
+            boxes: Vec::new(),
+            picked: None,
+            picking: false,
+        });
+        let lines = word::lines(text_blocks(), [0, 0], 1.0);
+        let inside: Vec<_> = (lines.into_iter())
+            .filter(|l| sel.area.contains(l.bounds.center()))
+            .collect();
+        app.on_text_lines(sel.area, Ok(inside));
+        app
+    }
+
+    #[test]
+    fn select_text_highlights_every_word_and_a_drag_picks_some() {
+        let mut app = select_text_app();
+        let texts = widgets::shot::texts(app.view(app.overlay));
+        assert!(texts.contains(&"Done".to_string()), "{texts:?}");
+        let mode = app.text_mode.as_ref().unwrap();
+        assert_eq!(mode.boxes.len(), 17, "every word of lines 1-3");
+        // a stale read (the box moved on) is dropped
+        app.on_text_lines(Rectangle::default(), Ok(Vec::new()));
+        assert_eq!(app.text_mode.as_ref().unwrap().boxes.len(), 17);
+        // press on "while", drag to "words": two lines picked, the box stays
+        drag(&mut app, at_word(1, 7.0), at_word(2, 11.0), false);
+        let mode = app.text_mode.as_ref().unwrap();
+        let picked = mode.picked.as_ref().unwrap();
+        assert_eq!(picked.text(), "while you drag a finger\nacross the words");
+        assert!(!mode.picking);
+        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        // the popup offers Copy / Translate / Search, the bar and ask bar wait
+        let texts = widgets::shot::texts(app.view(app.overlay));
+        for want in ["Copy", "Translate", "Search"] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        assert!(!texts.iter().any(|t| t == "Ask AI"), "{texts:?}");
+        // Done leaves the mode; a press outside the box starts over
+        let _ = app.update(Message::SelectText);
+        assert!(app.text_mode.is_none());
+        let _ = app.update(Message::SelectText); // no OCR models here: the Text panel asks
+        drag(
+            &mut app,
+            Point::new(700.0, 300.0),
+            Point::new(900.0, 400.0),
+            false,
+        );
+        assert!(app.text_mode.is_none());
+    }
+
+    #[test]
+    fn after_an_auto_search_the_bar_is_one_click_away() {
+        let mut app = open_app(800, 600, 1.0);
+        app.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+        let (sel, stroke) = overlay::snap(Rectangle::new(
+            Point::new(200.0, 150.0),
+            Size::new(300.0, 200.0),
+        ));
+        (app.selection, app.stroke) = (Some(sel), stroke);
+        let texts = widgets::shot::texts(app.view(app.overlay));
+        for want in ["Select text", "More"] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        assert!(
+            !texts.iter().any(|t| t == "Ask AI"),
+            "no bar yet: {texts:?}"
+        );
+        let _ = app.update(Message::More);
+        let texts = widgets::shot::texts(app.view(app.overlay));
+        assert!(texts.iter().any(|t| t == "Ask AI"), "{texts:?}");
+        assert!(!texts.iter().any(|t| t == "More"));
+        // waiting for an action: the bar at once, no More
+        app.behaviour.after = After::Wait;
+        app.more = false;
+        let texts = widgets::shot::texts(app.view(app.overlay));
+        assert!(texts.iter().any(|t| t == "Ask AI") && !texts.iter().any(|t| t == "More"));
+    }
+
+    /// `OPENCIRCLE_LOOK_PNG=<dir> cargo test ui::tests::look_shots -- --ignored`:
+    /// a snapped selection (mid-morph and settled, with its chips), select-text
+    /// mode with the popup, and the bar after More, over a frame with the edge glow.
+    #[test]
+    #[ignore = "writes PNGs to look at"]
+    fn look_shots() {
+        let dir = std::path::PathBuf::from(
+            std::env::var("OPENCIRCLE_LOOK_PNG").expect("OPENCIRCLE_LOOK_PNG=<dir>"),
+        );
+        let shot = |app: &App, name: &str| {
+            let rgba = widgets::shot::render(app.view(app.overlay), 960, 420);
+            actions::write_png(&dir.join(name), 960, 420, &rgba).unwrap();
+        };
+        let glowing = |app: &mut App| {
+            if let Some(image::Handle::Rgba { pixels, .. }) = &app.frame {
+                let mut rgba = pixels.to_vec();
+                let look = config::look();
+                border::paint(&mut rgba, 960, 420, 1.0, &look, border::Mode::Overlay);
+                app.frame = Some(image::Handle::from_rgba(960, 420, rgba));
+            }
+        };
+        let mut app = text_app();
+        glowing(&mut app);
+        app.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+        let ring = ring(280.0, 122.0, 110.0)
+            .into_iter()
+            .map(|p| Point::new(p.x * 1.9 - 250.0, p.y * 0.9 + 12.0))
+            .collect::<Vec<_>>();
+        let (sel, stroke) = overlay::snap(overlay::select(&ring, 1.0).unwrap().area);
+        (app.selection, app.stroke) = (Some(sel), stroke);
+        app.morph = Some((ring, Instant::now() - overlay::MORPH / 3));
+        shot(&app, "look-1-snap-morphing.png");
+        app.morph = None;
+        shot(&app, "look-2-snapped-chips.png");
+        let _ = app.update(Message::More);
+        shot(&app, "look-3-more-bar.png");
+        let mut app = select_text_app();
+        glowing(&mut app);
+        shot(&app, "look-4-select-text.png");
+        drag(&mut app, at_word(1, 7.0), at_word(2, 11.0), false);
+        shot(&app, "look-5-select-text-popup.png");
     }
 }

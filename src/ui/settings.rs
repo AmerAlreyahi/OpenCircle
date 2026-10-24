@@ -18,19 +18,25 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
+use iced::widget::image::Handle;
 use iced::widget::tooltip::Position;
 use iced::widget::{column, container, row, space};
-use iced::{Element, Length, Size, Subscription, event, keyboard};
+use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 
-use crate::config::{Config, DefaultAction, Engine, Provider, Target, Theme, parse_shortcut};
+use crate::config::{
+    After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
+    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle, Target,
+    Theme, parse_shortcut,
+};
 use crate::hotkey::{DesktopKey, managed};
 use crate::mt;
 use crate::secrets::{self, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES, Language};
 use crate::ui::theme;
 use crate::ui::widgets::{
-    self, FORM_WIDTH, FieldState, caption, divider, error_text, form_row, label_button, nav_item,
-    segmented, shortcut_field, text_field, tip, title, value_field, vertical_divider,
+    self, FORM_WIDTH, FieldState, caption, divider, error_text, form_row, label_button, look_tile,
+    nav_item, segmented, shortcut_field, slider, text_field, tip, title, value_field,
+    vertical_divider,
 };
 
 /// Logical size of the Settings window.
@@ -376,15 +382,21 @@ pub fn key_labels(shortcut: &str) -> Vec<String> {
 pub enum Section {
     General,
     Appearance,
+    Look,
     Shortcuts,
     Ai,
     Translate,
     About,
 }
 
-const SECTIONS: [(Section, &str, &str); 6] = [
+const SECTIONS: [(Section, &str, &str); 7] = [
     (Section::General, "General", "General settings"),
     (Section::Appearance, "Appearance", "Appearance settings"),
+    (
+        Section::Look,
+        "Look & behaviour",
+        "Look and behaviour settings",
+    ),
     (Section::Shortcuts, "Shortcuts", "Shortcut settings"),
     (Section::Ai, "AI", "AI settings"),
     (Section::Translate, "Translate", "Translate settings"),
@@ -425,6 +437,13 @@ pub struct State {
     notice: Option<String>,
     /// The desktop's own say on a running key (`hotkey::desktop_key`; tests swap it).
     desktop: fn(&str) -> Option<DesktopKey>,
+    /// Look & behaviour: whose screen edge the custom look edits, which of its
+    /// two colours has the picker open (and the hex typed there), and the
+    /// preview of each look (presets, then custom).
+    edge_mode: EdgeMode,
+    picker: Option<usize>,
+    hex: String,
+    previews: Vec<Handle>,
 }
 
 impl fmt::Debug for State {
@@ -462,8 +481,116 @@ pub enum Message {
     Engine(Engine),
     /// What was typed in the live-interval field.
     LiveInterval(String),
+    SelectStyle(SelectStyle),
+    After(After),
+    SearchWith(SearchWith),
+    Look(LookTheme),
+    /// The custom look's controls.
+    Palette(PaletteChoice),
+    Glow(u8),
+    Dim(u8),
+    Activation(bool),
+    Brackets(BracketColour),
+    BracketStyle(BracketStyle),
+    Bar(BarChoice),
+    EdgeMode(EdgeMode),
+    EdgeStyle(EdgeStyle),
+    Thickness(u8),
+    Animate(bool),
+    /// Open / close the picker for custom colour 0 (from) or 1 (to).
+    Picker(usize),
+    PickColour(Color),
+    Hex(String),
     Save,
 }
+
+/// A colour set in the custom look's dropdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaletteChoice(ColourSet);
+
+impl fmt::Display for PaletteChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self.0 {
+            ColourSet::Spectrum => "Spectrum",
+            ColourSet::Aurora => "Aurora",
+            ColourSet::Sunset => "Sunset",
+            ColourSet::Ocean => "Ocean",
+            ColourSet::Neon => "Neon",
+            ColourSet::Mono => "Mono",
+            ColourSet::TwoColour => "Two colours of my own",
+        })
+    }
+}
+
+const PALETTES: [PaletteChoice; 7] = [
+    PaletteChoice(ColourSet::Spectrum),
+    PaletteChoice(ColourSet::Aurora),
+    PaletteChoice(ColourSet::Sunset),
+    PaletteChoice(ColourSet::Ocean),
+    PaletteChoice(ColourSet::Neon),
+    PaletteChoice(ColourSet::Mono),
+    PaletteChoice(ColourSet::TwoColour),
+];
+
+/// A bar style in the custom look's dropdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BarChoice(BarStyle);
+
+impl fmt::Display for BarChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self.0 {
+            BarStyle::Glass => "Glass (app theme)",
+            BarStyle::GlassDark => "Dark glass",
+            BarStyle::GlassLight => "Light glass",
+            BarStyle::Solid => "Solid",
+            BarStyle::Outline => "Outline",
+        })
+    }
+}
+
+const BARS: [BarChoice; 5] = [
+    BarChoice(BarStyle::Glass),
+    BarChoice(BarStyle::GlassDark),
+    BarChoice(BarStyle::GlassLight),
+    BarChoice(BarStyle::Solid),
+    BarChoice(BarStyle::Outline),
+];
+
+/// The looks in the grid: the presets, then Custom.
+const LOOKS: [(LookTheme, &str, &str); 8] = [
+    (
+        LookTheme::Spectrum,
+        "Spectrum",
+        "Spectrum look: soft glow in many colours",
+    ),
+    (
+        LookTheme::Aurora,
+        "Aurora",
+        "Aurora look: thin violet to cyan line",
+    ),
+    (
+        LookTheme::Sunset,
+        "Sunset",
+        "Sunset look: orange to pink glow",
+    ),
+    (LookTheme::Ocean, "Ocean", "Ocean look: teal to blue glow"),
+    (
+        LookTheme::Neon,
+        "Neon",
+        "Neon look: strong cyan and pink glow",
+    ),
+    (
+        LookTheme::Mono,
+        "Mono",
+        "Mono look: white and grey, minimal",
+    ),
+    (
+        LookTheme::Calm,
+        "Calm",
+        "Calm look: no glow, thin line, light dim",
+    ),
+    (LookTheme::Custom, "Custom", "Custom look: your own choices"),
+];
 
 // One short-lived value per message: a boxed Config would buy nothing.
 #[allow(clippy::large_enum_variant)]
@@ -524,13 +651,31 @@ impl State {
                 // Not "reset": an unknown or unread provider is kept off, not defaulted.
                 .map(|w| format!("Some saved settings were invalid ({w})")),
             desktop: crate::hotkey::desktop_key,
+            edge_mode: EdgeMode::Overlay,
+            picker: None,
+            hex: String::new(),
+            previews: Vec::new(),
         };
+        s.previews = LOOKS.iter().map(|(t, ..)| preview(&s.look(*t))).collect();
         s.revalidate();
         s
     }
 
+    /// What look `theme` is (Custom: the draft's own).
+    fn look(&self, theme: LookTheme) -> Look {
+        theme.look(&self.draft.look.custom)
+    }
+
     fn dirty(&self) -> bool {
         self.draft != self.saved
+    }
+
+    /// The custom look changed: its preview again.
+    fn refresh_custom(&mut self) {
+        let custom = self.look(LookTheme::Custom);
+        if let Some(last) = self.previews.last_mut() {
+            *last = preview(&custom);
+        }
     }
 
     fn revalidate(&mut self) {
@@ -736,6 +881,69 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             state.interval = s;
         }
         Message::DefaultAction(a) => state.draft.general.default_action = a,
+        Message::SelectStyle(v) => state.draft.selection.style = v,
+        Message::After(v) => state.draft.selection.after = v,
+        Message::SearchWith(v) => state.draft.selection.search_with = v,
+        Message::Look(t) => {
+            // The first time Custom is picked it starts as the look in use.
+            let look = &mut state.draft.look;
+            if t == LookTheme::Custom
+                && look.theme != t
+                && look.custom == LookConfig::default().custom
+            {
+                look.custom = look.active();
+            }
+            look.theme = t;
+            state.picker = None;
+            state.refresh_custom();
+        }
+        Message::EdgeMode(m) => state.edge_mode = m,
+        Message::Picker(i) => {
+            state.picker = (state.picker != Some(i)).then_some(i);
+            state.hex = state.draft.look.custom.colours[i.min(1)].hex();
+        }
+        Message::Hex(hex) => {
+            if let (Some(i), Some(c)) = (state.picker, Rgb::parse(&hex)) {
+                state.draft.look.custom.colours[i] = c;
+                state.refresh_custom();
+            }
+            state.hex = hex;
+        }
+        Message::PickColour(c) => {
+            if let Some(i) = state.picker {
+                let [r, g, b, _] = c.into_rgba8();
+                state.draft.look.custom.colours[i] = Rgb([r, g, b]);
+                state.hex = Rgb([r, g, b]).hex();
+                state.refresh_custom();
+            }
+        }
+        Message::Palette(_)
+        | Message::Glow(_)
+        | Message::Dim(_)
+        | Message::Activation(_)
+        | Message::Brackets(_)
+        | Message::BracketStyle(_)
+        | Message::Bar(_)
+        | Message::EdgeStyle(_)
+        | Message::Thickness(_)
+        | Message::Animate(_) => {
+            let mode = state.edge_mode;
+            let custom = &mut state.draft.look.custom;
+            match message {
+                Message::Palette(p) => custom.palette = p.0,
+                Message::Glow(v) => custom.glow = v,
+                Message::Dim(v) => custom.dim = v,
+                Message::Activation(v) => custom.activation_glow = v,
+                Message::Brackets(v) => custom.brackets = v,
+                Message::BracketStyle(v) => custom.bracket_style = v,
+                Message::Bar(v) => custom.bar = v.0,
+                Message::EdgeStyle(v) => state.draft.look.edge_mut(mode).style = v,
+                Message::Thickness(v) => state.draft.look.edge_mut(mode).thickness = v,
+                Message::Animate(v) => state.draft.look.edge_mut(mode).animate = v,
+                _ => {}
+            }
+            state.refresh_custom();
+        }
         Message::BrowseFolder => return Outcome::Browse,
         Message::Folder(Some(dir)) => {
             state.draft.general.save_folder = dir.to_string_lossy().into_owned();
@@ -815,6 +1023,7 @@ fn content(state: &State) -> Element<'_, Message> {
     let d = &state.draft;
     let (heading, rows): (&str, Vec<Element<'_, Message>>) = match state.section {
         Section::General => ("General", general_rows(state)),
+        Section::Look => ("Look & behaviour", look_rows(state)),
         Section::About => ("About", about_rows()),
         Section::Appearance => (
             "Appearance",
@@ -1005,6 +1214,373 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
             error,
         ),
     ]
+}
+
+fn look_rows(state: &State) -> Vec<Element<'_, Message>> {
+    let sel = state.draft.selection;
+    let look = &state.draft.look;
+    let mut rows = vec![
+        form_row(
+            "Selection",
+            "Snap: a rounded box with corners to drag",
+            segmented(
+                &[
+                    (
+                        SelectStyle::Snap,
+                        "Snap to box",
+                        "Selections snap to a rounded box",
+                    ),
+                    (
+                        SelectStyle::Shape,
+                        "As drawn",
+                        "Selections keep the drawn shape",
+                    ),
+                ],
+                sel.style,
+                Message::SelectStyle,
+            ),
+            None,
+        ),
+        form_row(
+            "After selecting",
+            match sel.after {
+                After::Search => "Searches at once; More shows every action",
+                After::Wait => "Shows the action bar",
+            },
+            segmented(
+                &[
+                    (After::Search, "Search", "Search the selection at once"),
+                    (After::Wait, "Show actions", "Show the action bar and wait"),
+                ],
+                sel.after,
+                Message::After,
+            ),
+            None,
+        ),
+        form_row(
+            "Search with",
+            "What searching a selection opens",
+            segmented(
+                &[
+                    (
+                        SearchWith::Lens,
+                        "Lens",
+                        "Search with Google Lens in your browser",
+                    ),
+                    (SearchWith::Ai, "Ask AI", "Ask the AI about the selection"),
+                    (SearchWith::Both, "Both", "Open Lens and ask the AI"),
+                ],
+                sel.search_with,
+                Message::SearchWith,
+            ),
+            None,
+        ),
+    ];
+    // The looks, as a grid of previews (4 per row).
+    let tiles: Vec<Element<'_, Message>> = (LOOKS.iter().zip(&state.previews))
+        .map(|(&(theme, label, hint), preview)| {
+            let tile = look_tile(
+                preview.clone(),
+                label,
+                look.theme == theme,
+                Message::Look(theme),
+            );
+            tip(tile, hint, Position::Top)
+        })
+        .collect();
+    let mut grid = column![].spacing(8);
+    let mut tiles = tiles.into_iter();
+    loop {
+        let line: Vec<_> = tiles.by_ref().take(4).collect();
+        if line.is_empty() {
+            break;
+        }
+        grid = grid.push(row(line).spacing(8));
+    }
+    let hint = match look.theme {
+        LookTheme::Custom => "Your own look: change it below",
+        _ => "How the screen looks while OpenCircle is open. Custom changes every part",
+    };
+    rows.push(
+        column![
+            column![
+                iced::widget::text("Active look")
+                    .size(14)
+                    .color(theme::current().text),
+                caption(hint)
+            ]
+            .spacing(2),
+            grid
+        ]
+        .spacing(12)
+        .padding([12, 0])
+        .into(),
+    );
+    if look.theme == LookTheme::Custom {
+        rows.extend(custom_rows(state));
+    }
+    rows
+}
+
+/// The custom look's controls.
+fn custom_rows(state: &State) -> Vec<Element<'_, Message>> {
+    let c = &state.draft.look.custom;
+    let edge = c.edge(state.edge_mode);
+    let mut rows = vec![form_row(
+        "Colours",
+        "The screen edge, selection and buttons",
+        tip(
+            widgets::dropdown(
+                &PALETTES,
+                Some(PaletteChoice(c.palette)),
+                "Choose colours",
+                Message::Palette,
+            ),
+            "Look colours",
+            Position::Top,
+        ),
+        None,
+    )];
+    if c.palette == ColourSet::TwoColour {
+        let rgb = |i: usize| {
+            let [r, g, b] = c.colours[i].0;
+            Color::from_rgb8(r, g, b)
+        };
+        let buttons = row![
+            tip(
+                widgets::colour_button(rgb(0), state.picker == Some(0), Message::Picker(0)),
+                "First colour",
+                Position::Top,
+            ),
+            tip(
+                widgets::colour_button(rgb(1), state.picker == Some(1), Message::Picker(1)),
+                "Second colour",
+                Position::Top,
+            ),
+        ]
+        .spacing(8);
+        let mut control = column![buttons].spacing(8);
+        if let Some(i) = state.picker {
+            control = control.push(widgets::colour_picker(
+                &theme::ANNOTATION,
+                rgb(i),
+                &state.hex,
+                Message::PickColour,
+                Message::Hex,
+            ));
+        }
+        rows.push(form_row(
+            "Your two colours",
+            "From the top-left corner round to the opposite one",
+            control,
+            None,
+        ));
+    }
+    rows.extend([
+        form_row(
+            "Glow strength",
+            "How bright the edge glow is",
+            tip(
+                slider(crate::config::GLOW, c.glow, " %", Message::Glow),
+                "Glow strength",
+                Position::Top,
+            ),
+            None,
+        ),
+        form_row(
+            "Dim",
+            "How much the frozen screen darkens",
+            tip(
+                slider(crate::config::DIM, c.dim, " %", Message::Dim),
+                "Dim strength",
+                Position::Top,
+            ),
+            None,
+        ),
+        form_row(
+            "Activation glow",
+            "A wide glow when the screen freezes",
+            segmented(
+                &[
+                    (true, "On", "Glow when the screen freezes"),
+                    (false, "Off", "No glow when the screen freezes"),
+                ],
+                c.activation_glow,
+                Message::Activation,
+            ),
+            None,
+        ),
+        form_row(
+            "Selection corners",
+            "The brackets on a snapped box",
+            segmented(
+                &[
+                    (BracketColour::White, "White", "White corners"),
+                    (
+                        BracketColour::Accent,
+                        "Accent",
+                        "Corners in the look's colour",
+                    ),
+                ],
+                c.brackets,
+                Message::Brackets,
+            ),
+            None,
+        ),
+        form_row(
+            "Corner style",
+            "Four corners, or a frame all round",
+            segmented(
+                &[
+                    (BracketStyle::Corners, "Corners", "Four corner brackets"),
+                    (BracketStyle::Frame, "Frame", "A thin frame all round"),
+                ],
+                c.bracket_style,
+                Message::BracketStyle,
+            ),
+            None,
+        ),
+        form_row(
+            "Bars and pills",
+            "The action bar, chips and panels",
+            tip(
+                widgets::dropdown(
+                    &BARS,
+                    Some(BarChoice(c.bar)),
+                    "Choose a style",
+                    Message::Bar,
+                ),
+                "Bar style",
+                Position::Top,
+            ),
+            None,
+        ),
+        form_row(
+            "Screen edge for",
+            "Each mode has its own edge",
+            segmented(
+                &[
+                    (EdgeMode::Overlay, "Circle", "The edge while circling"),
+                    (EdgeMode::Live, "Live", "The edge of live translate"),
+                    (EdgeMode::Snip, "Snip", "The edge while snipping"),
+                ],
+                state.edge_mode,
+                Message::EdgeMode,
+            ),
+            None,
+        ),
+        form_row(
+            "Edge style",
+            "A soft glow, a thin line, or none",
+            segmented(
+                &[
+                    (EdgeStyle::Glow, "Glow", "A soft glow fading inward"),
+                    (EdgeStyle::Thin, "Thin", "A thin line"),
+                    (EdgeStyle::None, "None", "No screen edge"),
+                ],
+                edge.style,
+                Message::EdgeStyle,
+            ),
+            None,
+        ),
+        form_row(
+            "Edge thickness",
+            "A glow reaches 8 times as far",
+            tip(
+                slider(
+                    crate::config::EDGE_THICKNESS,
+                    edge.thickness,
+                    " px",
+                    Message::Thickness,
+                ),
+                "Edge thickness",
+                Position::Top,
+            ),
+            None,
+        ),
+        form_row(
+            "Edge motion",
+            match state.edge_mode {
+                EdgeMode::Live => "Moves while live translate runs",
+                _ => "Once when it opens",
+            },
+            segmented(
+                &[
+                    (true, "Animate", "The edge moves"),
+                    (false, "Still", "The edge stays still"),
+                ],
+                edge.animate,
+                Message::Animate,
+            ),
+            None,
+        ),
+    ]);
+    rows
+}
+
+/// A small picture of `look` over a sample screen: the dim, a snapped box
+/// with its corners, the screen edge and a pill in the bar style.
+fn preview(look: &Look) -> Handle {
+    let (w, h) = (
+        widgets::TILE.width as u32 * 2,
+        widgets::TILE.height as u32 * 2,
+    );
+    // a sample screen: a dark page with lines of "text" (ours, made up)
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let line = (y % 22) < 6 && y > 20 && x > 30 && x < w - 30 - (y * 7 % 60);
+            let c = if line { [120, 128, 150] } else { [34, 38, 52] };
+            rgba.extend([c[0], c[1], c[2], 255]);
+        }
+    }
+    // dim outside a snapped box, its corners (or frame) 3 px outside it
+    let (_, outside) = theme::dims(look);
+    let corner = theme::bracket(look).into_rgba8();
+    let (bx, by) = (80..160u32, 40..96u32);
+    let frame = look.bracket_style == BracketStyle::Frame;
+    for y in 0..h {
+        for x in 0..w {
+            let i = ((y * w + x) * 4) as usize;
+            if bx.contains(&x) && by.contains(&y) {
+                continue;
+            }
+            let ring = (77..163).contains(&x) && (37..99).contains(&y);
+            let near_corner = !(94..=145).contains(&x) && !(52..=83).contains(&y);
+            if ring && (frame || near_corner) {
+                rgba[i..i + 4].copy_from_slice(&corner);
+            } else {
+                for c in &mut rgba[i..i + 3] {
+                    *c = (f32::from(*c) * (1.0 - outside.a)) as u8;
+                }
+            }
+        }
+    }
+    crate::ui::border::paint(&mut rgba, w, h, 0.3, look, EdgeMode::Overlay);
+    // a pill in the bar style at the bottom
+    let (start, _) = theme::accent_of(look);
+    let fill = match look.bar {
+        BarStyle::GlassLight => Color::from_rgb8(0xf2, 0xf2, 0xf6),
+        BarStyle::Outline => Color::from_rgb8(0x22, 0x24, 0x30),
+        _ => Color::from_rgb8(0x1c, 0x1d, 0x2a),
+    }
+    .into_rgba8();
+    let edge = start.into_rgba8();
+    let (px0, px1, py0, py1) = (w / 2 - 40, w / 2 + 40, h - 26, h - 12);
+    for y in py0..py1 {
+        for x in px0..px1 {
+            let border = x == px0 || x == px1 - 1 || y == py0 || y == py1 - 1;
+            let i = ((y * w + x) * 4) as usize;
+            let button = x > px0 + 6 && x < px0 + 30 && y > py0 + 4 && y < py1 - 4;
+            let c = if (border && look.bar == BarStyle::Outline) || button {
+                edge // the outline, and the accent button
+            } else {
+                fill
+            };
+            rgba[i..i + 4].copy_from_slice(&c);
+        }
+    }
+    Handle::from_rgba(w, h, rgba)
 }
 
 fn about_rows<'a>() -> Vec<Element<'a, Message>> {
@@ -1811,6 +2387,111 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
+        let path = tmp("look");
+        let (mut s, _) = state(Some(path.clone()));
+        update(&mut s, Message::Section(Section::Look));
+        let texts = shot::texts(view(&s));
+        for want in [
+            "Active look",
+            "Spectrum",
+            "Neon",
+            "Calm",
+            "Custom",
+            "Snap to box",
+        ] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        assert!(
+            !texts.iter().any(|t| t == "Edge style"),
+            "a preset has no custom rows"
+        );
+        assert_eq!(s.previews.len(), LOOKS.len());
+        // every preset's preview differs from the others
+        for (i, a) in s.previews.iter().enumerate().take(7) {
+            for b in &s.previews[i + 1..7] {
+                assert_ne!(a.id(), b.id());
+                let (Handle::Rgba { pixels: a, .. }, Handle::Rgba { pixels: b, .. }) = (a, b)
+                else {
+                    panic!("rgba previews")
+                };
+                assert_ne!(a, b);
+            }
+        }
+        update(&mut s, Message::SelectStyle(SelectStyle::Shape));
+        update(&mut s, Message::After(After::Wait));
+        update(&mut s, Message::SearchWith(SearchWith::Both));
+        // Custom starts as the look in use (Neon here), then changes on its own
+        update(&mut s, Message::Look(LookTheme::Neon));
+        update(&mut s, Message::Look(LookTheme::Custom));
+        assert_eq!(
+            s.draft.look.custom,
+            LookTheme::Neon.look(&s.draft.look.custom)
+        );
+        let before = s.previews.last().unwrap().id();
+        update(&mut s, Message::Glow(55));
+        update(&mut s, Message::Dim(30));
+        update(&mut s, Message::EdgeMode(EdgeMode::Live));
+        update(&mut s, Message::EdgeStyle(EdgeStyle::Thin));
+        update(&mut s, Message::Thickness(9));
+        update(&mut s, Message::Animate(false));
+        update(&mut s, Message::Bar(BarChoice(BarStyle::Solid)));
+        update(
+            &mut s,
+            Message::Palette(PaletteChoice(ColourSet::TwoColour)),
+        );
+        update(&mut s, Message::Picker(1));
+        update(&mut s, Message::Hex("#12345".into())); // not a colour yet: kept as typed
+        update(&mut s, Message::Hex("#123456".into()));
+        update(&mut s, Message::Picker(0));
+        update(&mut s, Message::PickColour(Color::from_rgb8(255, 0, 0)));
+        assert_ne!(
+            s.previews.last().unwrap().id(),
+            before,
+            "the preview follows"
+        );
+        let texts = shot::texts(view(&s));
+        for want in [
+            "Edge style",
+            "Glow strength",
+            "Your two colours",
+            "Bars and pills",
+        ] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        assert!(s.problems.is_empty(), "{:?}", s.problems);
+        let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+            panic!("not saved: {:?}", s.notice)
+        };
+        let (back, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back, cfg);
+        let look = back.look.active();
+        assert_eq!((look.glow, look.dim, look.bar), (55, 30, BarStyle::Solid));
+        assert_eq!(look.live.style, EdgeStyle::Thin);
+        assert_eq!((look.live.thickness, look.live.animate), (9, false));
+        assert_eq!(
+            look.overlay,
+            LookTheme::Neon.look(&look).overlay,
+            "other modes kept"
+        );
+        assert_eq!(look.colours, [Rgb([255, 0, 0]), Rgb([0x12, 0x34, 0x56])]);
+        assert_eq!(back.selection.search_with, SearchWith::Both);
+        // the page in both themes, a preset and the custom look
+        for (name, theme_choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
+            update(&mut s, Message::Theme(theme_choice));
+            assert_eq!(s.picker, Some(0), "the picker is open");
+            shot::save(
+                &format!("settings-look-custom-{name}"),
+                view(&s),
+                Size::new(820.0, 1640.0),
+            );
+        }
+        theme::apply(Theme::Dark);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn renders_every_section_in_both_themes() {
         for (name, theme_choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
             let (mut s, _) = state(None);
@@ -1828,7 +2509,8 @@ pub(super) mod tests {
                     );
                     press(&mut s, chord(true, true, "Space"));
                 }
-                let file = format!("settings-{}-{name}", label.to_lowercase());
+                let slug = label.to_lowercase().replace(" & ", "-");
+                let file = format!("settings-{slug}-{name}");
                 let px = shot::save(&file, view(&s), WINDOW_SIZE);
                 let window = theme::current().window;
                 // Not blank: more than the window colour is on screen.

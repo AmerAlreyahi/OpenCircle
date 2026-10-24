@@ -11,6 +11,7 @@ use iced::widget::{
 use iced::{Background, Border, Color, Element, Font, Shadow, Vector, gradient};
 
 use super::theme;
+use crate::config::BarStyle;
 
 /// The icon font (Lucide subset, see `assets/lucide/`); load it once at start.
 pub const ICON_FONT_BYTES: &[u8] = include_bytes!("../../assets/lucide/lucide-subset.ttf");
@@ -29,7 +30,7 @@ pub const SURFACE_PADDING: f32 = 6.0;
 
 /// Fully rounded glass pill with one line of text (overlay hint, tooltips).
 pub fn pill<'a, Message: 'a>(label: &'a str) -> Container<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     container(text(label).size(14).color(palette.text))
         .padding([8, 18])
         .style(|_| glass(999.0))
@@ -39,7 +40,7 @@ pub fn pill<'a, Message: 'a>(label: &'a str) -> Container<'a, Message> {
 /// shadow (Windows keys the layer by colour: a see-through pill would be tinted).
 // ponytail: its anti-aliased round ends still blend a few key-coloured pixels.
 pub fn layer_pill<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     container(text(label).size(13).color(palette.text))
         .padding([6, 16])
         .style(move |_| container::Style {
@@ -64,7 +65,7 @@ pub fn docked<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Cont
     container(content).padding(SURFACE_PADDING).style(|_| {
         let glass = glass(20.0);
         container::Style {
-            background: Some(theme::current().panel_solid.into()),
+            background: Some(theme::floating().panel_solid.into()),
             ..glass
         }
     })
@@ -75,7 +76,7 @@ pub fn docked<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Cont
 pub fn solid_surface<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     container(content)
         .padding(SURFACE_PADDING)
         .style(move |_| container::Style {
@@ -110,7 +111,7 @@ pub fn pinned<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Cont
         .height(iced::Fill)
         .padding(1)
         .style(|_| container::Style {
-            background: Some(theme::current().border.into()),
+            background: Some(theme::floating().border.into()),
             ..container::Style::default()
         })
 }
@@ -124,7 +125,7 @@ pub fn text_button<'a, Message: Clone + 'a>(
     primary: bool,
     on_press: Message,
 ) -> Button<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     let (fg, hint) = if primary {
         (theme::ON_ACCENT, theme::ON_ACCENT)
     } else {
@@ -157,27 +158,27 @@ pub fn icon<'a>(glyph: char) -> Text<'a> {
     text(glyph)
         .font(ICON_FONT)
         .size(16)
-        .color(theme::current().text)
+        .color(theme::floating().text)
 }
 
 /// Panel title.
 pub fn heading<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
-    text(label).size(16).color(theme::current().text)
+    text(label).size(16).color(theme::floating().text)
 }
 
 /// Running text: answers, messages.
 pub fn body<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
-    text(label).size(14).color(theme::current().text)
+    text(label).size(14).color(theme::floating().text)
 }
 
 /// Secondary small text: notes, model name, progress.
 pub fn caption<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
-    text(label).size(12).color(theme::current().muted)
+    text(label).size(12).color(theme::floating().muted)
 }
 
 /// An error message.
 pub fn error<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
-    text(label).size(14).color(theme::current().danger)
+    text(label).size(14).color(theme::floating().danger)
 }
 
 /// A suggestion (e.g. a prompt): small, fully rounded, outlined, quiet.
@@ -185,7 +186,7 @@ pub fn chip<'a, Message: Clone + 'a>(
     label: impl IntoFragment<'a>,
     on_press: Message,
 ) -> Button<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     button(text(label).size(13).color(palette.text))
         .padding([8, 14])
         .on_press(on_press)
@@ -201,6 +202,34 @@ pub fn chip<'a, Message: Clone + 'a>(
         })
 }
 
+/// A pill button floating over the frozen frame ("Select text", "More"): the
+/// glass of `pill`, `TEXT_BUTTON_WIDTH` wide, `CONTROL` tall.
+pub fn float_chip<'a, Message: Clone + 'a>(
+    label: &'a str,
+    on_press: Message,
+) -> Button<'a, Message> {
+    let palette = theme::floating();
+    button(text(label).size(14).color(palette.text).center())
+        .width(TEXT_BUTTON_WIDTH)
+        .height(CONTROL)
+        .on_press(on_press)
+        .style(move |_, status| {
+            let glass = glass(999.0);
+            button::Style {
+                background: match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(palette.panel_solid.into())
+                    }
+                    _ => glass.background,
+                },
+                text_color: palette.text,
+                border: glass.border,
+                shadow: glass.shadow,
+                ..button::Style::default()
+            }
+        })
+}
+
 /// One-line text field, `CONTROL` tall.
 pub fn input<'a, Message: Clone + 'a>(
     id: &'static str,
@@ -209,7 +238,7 @@ pub fn input<'a, Message: Clone + 'a>(
     on_input: impl Fn(String) -> Message + 'a,
     on_submit: Message,
 ) -> TextInput<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     text_input(placeholder, value)
         .id(id)
         .on_input(on_input)
@@ -231,7 +260,7 @@ pub fn editor<'a, Message: Clone + 'a>(
     content: &'a text_editor::Content,
     on_action: impl Fn(text_editor::Action) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     text_editor(content)
         .on_action(on_action)
         .size(14)
@@ -249,7 +278,7 @@ pub fn editor<'a, Message: Clone + 'a>(
 
 /// Progress bar, `value` in 0..=1.
 pub fn progress<'a, Message: 'a>(value: f32) -> Element<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     progress_bar(0.0..=1.0, value)
         .girth(6)
         .style(move |_| progress_bar::Style {
@@ -262,7 +291,7 @@ pub fn progress<'a, Message: 'a>(value: f32) -> Element<'a, Message> {
 
 /// The user's own message in a chat: a soft rounded bubble.
 pub fn bubble<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     container(content)
         .padding([8, 12])
         .style(move |_| container::Style {
@@ -276,7 +305,7 @@ pub fn bubble<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Cont
 pub fn scroll<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> scrollable::Scrollable<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     scrollable(content)
         .direction(scrollable::Direction::Vertical(
             scrollable::Scrollbar::new().width(4).scroller_width(4),
@@ -296,10 +325,10 @@ pub fn scroll<'a, Message: 'a>(
 }
 
 fn field_border(focused: bool) -> Border {
-    let palette = theme::current();
+    let palette = theme::floating();
     Border {
         color: if focused {
-            theme::ACCENT_START
+            theme::accent().0
         } else {
             palette.border
         },
@@ -310,7 +339,7 @@ fn field_border(focused: bool) -> Border {
 
 /// Button background: accent gradient for `primary`, else clear until hovered.
 fn quiet_or_accent(primary: bool, status: button::Status) -> Option<Background> {
-    let palette = theme::current();
+    let palette = theme::floating();
     match (primary, status) {
         (true, _) => Some(accent(status)),
         (false, button::Status::Hovered) => Some(palette.hover.into()),
@@ -338,7 +367,7 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     let fg = if active {
         theme::ON_ACCENT
     } else {
-        theme::current().text
+        theme::floating().text
     };
     square_button(
         text(glyph).font(ICON_FONT).size(18).color(fg),
@@ -353,7 +382,7 @@ pub fn toolbar_divider<'a, Message: 'a>() -> Element<'a, Message> {
         .width(1)
         .height(24)
         .style(|_| container::Style {
-            background: Some(theme::current().border.into()),
+            background: Some(theme::floating().border.into()),
             ..container::Style::default()
         })
         .into()
@@ -381,7 +410,43 @@ pub fn colour_popover<'a, Message: Clone + 'a>(
     on_width: impl Fn(usize) -> Message,
     on_hex: impl Fn(String) -> Message + 'a,
 ) -> Container<'a, Message> {
-    let palette = theme::current();
+    let text = theme::floating().text;
+    let widths = row((0..3).map(|i| {
+        let size = [4.0, 8.0, 12.0][i];
+        square_button(dot(text, size, false), i == width, on_width(i)).into()
+    }))
+    .spacing(4);
+    picker(
+        colours,
+        current,
+        Some(widths.into()),
+        hex,
+        on_colour,
+        on_hex,
+    )
+}
+
+/// `colour_popover` without stroke widths (a colour only: Settings' look colours).
+pub fn colour_picker<'a, Message: Clone + 'a>(
+    colours: &[Color],
+    current: Color,
+    hex: &'a str,
+    on_colour: impl Fn(Color) -> Message,
+    on_hex: impl Fn(String) -> Message + 'a,
+) -> Container<'a, Message> {
+    picker(colours, current, None, hex, on_colour, on_hex)
+}
+
+/// The colour swatches, `extra` (stroke widths) and a custom colour as hex.
+fn picker<'a, Message: Clone + 'a>(
+    colours: &[Color],
+    current: Color,
+    extra: Option<Element<'a, Message>>,
+    hex: &'a str,
+    on_colour: impl Fn(Color) -> Message,
+    on_hex: impl Fn(String) -> Message + 'a,
+) -> Container<'a, Message> {
+    let palette = theme::floating();
     let swatch = |&c: &Color| -> Element<'a, Message> {
         let ring = if c == current {
             palette.text
@@ -405,11 +470,6 @@ pub fn colour_popover<'a, Message: Clone + 'a>(
     let rows = colours
         .chunks(6)
         .map(|chunk| row(chunk.iter().map(swatch)).spacing(6).into());
-    let widths = row((0..3).map(|i| {
-        let size = [4.0, 8.0, 12.0][i];
-        square_button(dot(palette.text, size, false), i == width, on_width(i)).into()
-    }))
-    .spacing(4);
     use iced::widget::{column, text_input};
     let custom = text_input("#RRGGBB", hex)
         .on_input(on_hex)
@@ -425,10 +485,12 @@ pub fn colour_popover<'a, Message: Clone + 'a>(
             icon: palette.muted,
             placeholder: palette.muted,
             value: palette.text,
-            selection: theme::ACCENT_START.scale_alpha(0.4),
+            selection: theme::accent().0.scale_alpha(0.4),
         });
     surface(
-        column![column(rows).spacing(6), widths, custom]
+        column![column(rows).spacing(6)]
+            .push(extra)
+            .push(custom)
             .spacing(10)
             .padding(4)
             .width(6.0 * 32.0 + 5.0 * 6.0 + 8.0),
@@ -437,7 +499,7 @@ pub fn colour_popover<'a, Message: Clone + 'a>(
 
 /// A filled circle; `ring` adds a thin outline (so white reads on a light panel).
 fn dot<'a, Message: 'a>(colour: Color, size: f32, ring: bool) -> Element<'a, Message> {
-    let border = theme::current().border;
+    let border = theme::floating().border;
     container(space::horizontal())
         .width(size)
         .height(size)
@@ -460,7 +522,7 @@ fn square_button<'a, Message: Clone + 'a>(
     active: bool,
     on_press: Message,
 ) -> Button<'a, Message> {
-    let palette = theme::current();
+    let palette = theme::floating();
     button(container(content).center(iced::Fill))
         .width(CONTROL)
         .height(CONTROL)
@@ -489,6 +551,7 @@ fn accent(status: button::Status) -> Background {
         button::Status::Pressed => 0.14,
         _ => 0.0,
     };
+    let (start, end) = theme::accent();
     let mix = |c: Color| Color {
         r: c.r + (1.0 - c.r) * lift,
         g: c.g + (1.0 - c.g) * lift,
@@ -496,19 +559,25 @@ fn accent(status: button::Status) -> Background {
         a: c.a,
     };
     gradient::Linear::new(std::f32::consts::FRAC_PI_2)
-        .add_stop(0.0, mix(theme::ACCENT_START))
-        .add_stop(1.0, mix(theme::ACCENT_END))
+        .add_stop(0.0, mix(start))
+        .add_stop(1.0, mix(end))
         .into()
 }
 
-/// The one glass style: panel colour, 1 px border, soft shadow.
+/// The one glass style: panel colour, 1 px border, soft shadow; the active
+/// look's bar style makes it solid or a see-through outline.
 fn glass(radius: f32) -> container::Style {
-    let palette = theme::current();
+    let palette = theme::floating();
+    let (background, border, width) = match crate::config::look().bar {
+        BarStyle::Solid => (palette.panel_solid, palette.border, 1.0),
+        BarStyle::Outline => (palette.panel.scale_alpha(0.55), theme::accent().0, 1.5),
+        _ => (palette.panel, palette.border, 1.0),
+    };
     container::Style {
-        background: Some(palette.panel.into()),
+        background: Some(background.into()),
         border: Border {
-            color: palette.border,
-            width: 1.0,
+            color: border,
+            width,
             radius: radius.into(),
         },
         shadow: Shadow {
@@ -716,6 +785,100 @@ mod forms {
             .into()
     }
 
+    /// A whole number in `range`, dragged; its value with `unit` beside it. The
+    /// whole control is `FORM_WIDTH` wide and `CONTROL` tall, like the others.
+    pub fn slider<'a, Message: Clone + 'a>(
+        range: std::ops::RangeInclusive<u8>,
+        value: u8,
+        unit: &'a str,
+        on_change: impl Fn(u8) -> Message + 'a,
+    ) -> Element<'a, Message> {
+        use iced::widget::slider as track;
+        let bar = track(range, value, on_change).style(|_, status| {
+            let palette = theme::current();
+            let (start, _) = theme::accent();
+            let rail = track::Rail {
+                backgrounds: (start.into(), palette.field_focus.into()),
+                width: 4.0,
+                border: Border::default().rounded(2),
+            };
+            let handle = track::Handle {
+                shape: track::HandleShape::Circle { radius: 8.0 },
+                background: match status {
+                    track::Status::Active => palette.text.into(),
+                    _ => start.into(),
+                },
+                border_width: 0.0,
+                border_color: Color::TRANSPARENT,
+            };
+            track::Style { rail, handle }
+        });
+        container(
+            row![
+                bar,
+                text(format!("{value}{unit}"))
+                    .size(13)
+                    .color(theme::current().muted)
+                    .width(48)
+                    .align_x(iced::alignment::Horizontal::Right),
+            ]
+            .spacing(12)
+            .align_y(iced::Center),
+        )
+        .padding([0, 14])
+        .center_y(CONTROL)
+        .width(FORM_WIDTH)
+        .style(|_| container::Style {
+            background: Some(theme::current().field.into()),
+            border: Border::default().rounded(FIELD_RADIUS),
+            ..container::Style::default()
+        })
+        .into()
+    }
+
+    /// One choice in a grid of looks: its preview image over its name; the
+    /// chosen one is outlined in the accent. Every tile is `TILE` wide.
+    pub fn look_tile<'a, Message: Clone + 'a>(
+        preview: iced::widget::image::Handle,
+        label: &'a str,
+        selected: bool,
+        on_press: Message,
+    ) -> Button<'a, Message> {
+        let picture = iced::widget::image(preview)
+            .width(TILE.width)
+            .height(TILE.height)
+            .border_radius(8.0);
+        let name = text(label).size(13).color(theme::current().text);
+        button(column![picture, name].spacing(6).align_x(iced::Center))
+            .padding(4)
+            .on_press(on_press)
+            .style(move |_, status| {
+                let palette = theme::current();
+                button::Style {
+                    background: match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(palette.field_focus.into())
+                        }
+                        _ => None,
+                    },
+                    text_color: palette.text,
+                    border: Border {
+                        color: if selected {
+                            theme::accent().0
+                        } else {
+                            Color::TRANSPARENT
+                        },
+                        width: 2.0,
+                        radius: 12.0.into(),
+                    },
+                    ..button::Style::default()
+                }
+            })
+    }
+
+    /// A look tile's preview size.
+    pub const TILE: iced::Size = iced::Size::new(120.0, 68.0);
+
     /// Single-line text field. Focus (and hover) = a softer fill, never a ring.
     pub fn text_field<'a, Message: Clone + 'a>(
         placeholder: &str,
@@ -756,7 +919,7 @@ mod forms {
                     value: palette.text,
                     selection: Color {
                         a: 0.35,
-                        ..theme::ACCENT_START
+                        ..theme::accent().0
                     },
                 }
             })
