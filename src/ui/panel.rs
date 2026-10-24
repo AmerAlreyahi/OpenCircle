@@ -6,7 +6,7 @@
 //! its running work.
 use std::sync::Arc;
 
-use iced::widget::{column, container, image, operation, row, text_editor};
+use iced::widget::{column, container, image, operation, row, space, text_editor};
 use iced::{Center, ContentFit, Element, Fill, Rectangle, Size, Task, task};
 
 use super::background;
@@ -16,6 +16,7 @@ use crate::actions::entities::{self, Entity, Kind};
 use crate::actions::text::{self, Progress};
 use crate::actions::{self, Crop, lens};
 use crate::ai;
+use crate::sheet;
 
 /// A card's body and its footer.
 type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
@@ -58,6 +59,10 @@ pub enum Msg {
     Translated(Result<String, String>),
     /// A link, email or phone chip under the text (index into `entities`).
     Chip(usize),
+    /// The results card started, showed or was closed.
+    Sheet(sheet::Event),
+    /// The results card could not open: the browser shows the results.
+    FellBack,
 }
 
 pub struct Panel {
@@ -73,6 +78,23 @@ pub struct Panel {
     entities: Vec<Entity>,
     /// What the last chip click did (or why it could not).
     note: Option<Result<&'static str, String>>,
+    /// Google's results card (Lens, AI Mode): `crate::sheet`.
+    sheet: Sheet,
+}
+
+/// The results card this panel opens: Google's page in the helper's web view.
+#[derive(Default)]
+struct Sheet {
+    /// The selection's centre (share of the screen width): the card goes away from it.
+    near: Option<f32>,
+    /// Results show in the card (else in the browser), decided when the panel opened.
+    wanted: bool,
+    /// The running helper; dropping it ends it.
+    guard: Option<Arc<sheet::Guard>>,
+    /// The card is on screen: this panel hides (the card is where it would be).
+    shown: bool,
+    /// The card could not open and the browser did instead.
+    fell_back: bool,
 }
 
 enum State {
@@ -110,9 +132,21 @@ enum Reading {
 
 impl Panel {
     /// Opens `kind` for `crop`. `question` (Ask AI only) is sent once ready:
-    /// the user already pressed Enter on it elsewhere (Lens follow-up).
-    pub fn open(kind: actions::Panel, crop: Crop, question: Option<String>) -> (Panel, Task<Msg>) {
+    /// the user already pressed Enter on it elsewhere (Lens follow-up). `near`:
+    /// the selection's centre as a share of the screen width (the results card
+    /// opens on the other side).
+    pub fn open(
+        kind: actions::Panel,
+        crop: Crop,
+        question: Option<String>,
+        near: Option<f32>,
+    ) -> (Panel, Task<Msg>) {
         let crop = Arc::new(crop);
+        let wanted = match kind {
+            actions::Panel::Lens => sheet::wanted(sheet::Kind::Lens),
+            actions::Panel::Ask => sheet::wanted(sheet::Kind::Ai),
+            actions::Panel::Text => false,
+        };
         let mut panel = Panel {
             crop: crop.clone(),
             state: State::Lens(None),
@@ -121,12 +155,28 @@ impl Panel {
             translation: None,
             entities: Vec::new(),
             note: None,
+            sheet: Sheet {
+                near,
+                wanted,
+                ..Sheet::default()
+            },
         };
         let task = match kind {
-            actions::Panel::Lens => background(move |tx| {
-                let _ = tx.unbounded_send(Msg::LensOpened(lens::open(&crop)));
-            })
-            .chain(operation::focus(INPUT)),
+            actions::Panel::Lens => {
+                let colours = wanted.then(sheet::colours);
+                background(move |tx| {
+                    // The card first; the browser if it can't open.
+                    if let (Some(colours), Ok(page)) = (colours, lens::page(&crop)) {
+                        let on = |e| tx.unbounded_send(Msg::Sheet(e)).is_ok();
+                        if sheet::run(sheet::Kind::Lens, page.into(), near, colours, on).is_ok() {
+                            return;
+                        }
+                        let _ = tx.unbounded_send(Msg::FellBack);
+                    }
+                    let _ = tx.unbounded_send(Msg::LensOpened(lens::open(&crop)));
+                })
+                .chain(operation::focus(INPUT))
+            }
             actions::Panel::Text if text::models_present() => {
                 panel.state = State::Text(Reading::Busy);
                 panel.read()
@@ -153,7 +203,7 @@ impl Panel {
     /// Ask AI, continuing `chat` (e.g. the translate word card's explanation).
     pub fn open_chat(crop: Crop, mut chat: Chat) -> (Panel, Task<Msg>) {
         chat.cancel(); // a stream still running belonged to the card; it stopped
-        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None);
+        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None, None);
         if let State::Ask { chat: open, .. } = &mut panel.state {
             *open = chat;
         }
@@ -185,6 +235,17 @@ impl Panel {
     /// and the Lens follow-up first).
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match (&mut self.state, msg) {
+            (_, Msg::Sheet(sheet::Event::Started(guard))) => self.sheet.guard = Some(guard),
+            (_, Msg::Sheet(sheet::Event::Shown)) => self.sheet.shown = true,
+            // The user closed the card: back to the selection.
+            (_, Msg::Sheet(sheet::Event::Closed)) => {
+                self.sheet.guard = None;
+                return Task::done(Msg::Cancel);
+            }
+            (_, Msg::FellBack) => {
+                self.sheet.guard = None;
+                self.sheet.fell_back = true;
+            }
             (State::Lens(status), Msg::LensOpened(result)) => *status = Some(result.map(drop)),
             (_, Msg::Input(value)) => self.input = value,
             // Not ready or still answering: the question stays in the input.
@@ -387,6 +448,7 @@ impl Panel {
         };
         chat.ask(&prompt, &[]); // the turn (and "busy"); nothing is sent by this
         let (setup, crop) = (setup.clone(), self.crop.clone());
+        let (near, colours) = (self.sheet.near, self.sheet.wanted.then(sheet::colours));
         let (task, handle) = background(move |tx| {
             let read = read_text.then(|| {
                 text::read(&crop, |progress| {
@@ -394,6 +456,22 @@ impl Panel {
                 })
             });
             let (question, note) = browser_turn(&prompt, read);
+            // The results card first; the browser if it can't open.
+            if let Some(colours) = colours {
+                let url = sheet::ai_url(&question).into_bytes();
+                let shown = sheet::run(sheet::Kind::Ai, url, near, colours, |e| {
+                    if matches!(e, sheet::Event::Shown) {
+                        let line = format!("Opened in Google AI Mode.{note}");
+                        let _ = tx.unbounded_send(Msg::Delta(line));
+                    }
+                    tx.unbounded_send(Msg::Sheet(e)).is_ok()
+                });
+                if shown.is_ok() {
+                    let _ = tx.unbounded_send(Msg::Answered(Ok(())));
+                    return;
+                }
+                let _ = tx.unbounded_send(Msg::FellBack);
+            }
             let messages = [ai::Message::user(question)];
             let result = ask::stream(&setup, &messages, |piece| {
                 tx.unbounded_send(Msg::Delta(piece.into())).is_ok()
@@ -411,6 +489,9 @@ impl Panel {
     /// The panel as a floating card at `at` on a `screen` (`widgets::card`);
     /// `hover`: the pointer is on its resize edge.
     pub fn view(&self, at: Rectangle, screen: Size, hover: bool) -> Element<'_, Msg> {
+        if self.sheet.shown {
+            return space().into(); // the results card is in its place
+        }
         let (action, (body, footer)) = match &self.state {
             State::Lens(status) => (&actions::lens::ACTION, self.lens_view(status.as_ref())),
             State::Text(reading) => (&actions::text::ACTION, (self.text_view(reading), None)),
@@ -446,12 +527,15 @@ impl Panel {
     /// Body and footer.
     fn lens_view(&self, status: Option<&Result<(), String>>) -> Part<'_> {
         let status: Element<'_, Msg> = match status {
-            None => widgets::body("Opening Google Lens in your browser…").into(),
+            None => widgets::body("Opening Google Lens…").into(),
             Some(Ok(())) => widgets::body("Opened in your browser").into(),
             Some(Err(e)) => widgets::error(format!("Could not open the browser: {e}")).into(),
         };
-        let note = "Only this selection goes to Google Lens, from your browser.";
-        let body = column![status, widgets::caption(note)].spacing(8);
+        let note = "Only this selection goes to Google Lens.";
+        let mut body = column![status, widgets::caption(note)].spacing(8);
+        if self.sheet.fell_back {
+            body = body.push(widgets::caption(sheet::FALLBACK));
+        }
         (body.into(), Some(self.follow_up("Ask AI about it…", false)))
     }
 
@@ -492,6 +576,9 @@ impl Panel {
                     ]
                     .spacing(6)
                     .into(),
+                    _ if browser && self.sheet.wanted && !self.sheet.fell_back => {
+                        Element::from(widgets::caption("Opening Google AI Mode…"))
+                    }
                     _ if browser => Element::from(widgets::caption("Opening your browser…")),
                     _ => widgets::caption("Thinking…").into(),
                 });
@@ -511,6 +598,9 @@ impl Panel {
             Status::Failed(e) => log = log.push(widgets::error(e)),
             Status::Cancelled => log = log.push(widgets::caption("Stopped.")),
             _ => {}
+        }
+        if self.sheet.fell_back {
+            log = log.push(widgets::caption(sheet::FALLBACK));
         }
         if let Browse::Consent(question) = browse {
             // Waiting for the user's choice: the question is theirs, not yet a turn.
@@ -553,7 +643,10 @@ impl Panel {
         } else {
             self.follow_up("Ask a follow-up…", chat.status == Status::Streaming)
         };
-        let privacy = if browser {
+        let privacy = if browser && self.sheet.wanted && !self.sheet.fell_back {
+            "When you send, your question and the text read from the selection go to Google \
+             AI Mode. The image is not uploaded unless you choose Lens."
+        } else if browser {
             "When you send, your question and the text read from the selection go to Google \
              through your browser. The image is not uploaded unless you choose Lens."
         } else {
@@ -757,6 +850,7 @@ mod tests {
             translation: None,
             entities: Vec::new(),
             note: None,
+            sheet: Sheet::default(),
         };
         let msg = ask::tests::invalid_provider_error();
         let _ = panel.update(Msg::Ready(Err(msg.clone())));
@@ -795,10 +889,31 @@ mod tests {
             translation: None,
             entities: Vec::new(),
             note: None,
+            sheet: Sheet::default(),
         }
     }
 
     const SCREEN: Size = Size::new(1000.0, 700.0);
+
+    #[test]
+    fn the_results_card_hides_the_panel_and_closing_it_closes_the_panel() {
+        let mut panel = panel_in(State::Lens(None));
+        panel.sheet.wanted = true;
+        let shows = |p: &Panel| !widgets::shot::texts(p.view(at(SCREEN), SCREEN, false)).is_empty();
+        assert!(shows(&panel), "while the card starts: Opening…");
+        let _ = panel.update(Msg::Sheet(sheet::Event::Shown));
+        assert!(!shows(&panel), "the card is in the panel's place");
+        let _ = panel.update(Msg::Sheet(sheet::Event::Closed));
+        // (Closed answers with Msg::Cancel: the App drops the panel.)
+
+        // It could not open: the browser did, and the panel says why.
+        let mut panel = panel_in(State::Lens(None));
+        panel.sheet.wanted = true;
+        let _ = panel.update(Msg::FellBack);
+        let _ = panel.update(Msg::LensOpened(Err("x".into())));
+        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+        assert!(texts.iter().any(|t| t == sheet::FALLBACK), "{texts:?}");
+    }
 
     fn not_blank(px: &[u8]) -> bool {
         px.as_chunks::<4>().0.iter().any(|p| p[..] != px[..4])

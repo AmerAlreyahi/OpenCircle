@@ -71,7 +71,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libgtk-3-dev
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -86,7 +86,8 @@ jobs:
             cargo install cargo-generate-rpm --version "$CARGO_GENERATE_RPM_VERSION" --locked
           fi
 
-      # cargo-packager runs `cargo build --release` itself (before-packaging-command).
+      # cargo-packager runs `cargo build --release --features sheet` itself
+      # (before-packaging-command): the app and the results card's helper.
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: cargo packager --release --formats nsis,wix --out-dir dist
@@ -105,14 +106,18 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          foreach ($exe in "target\release\opencircle.exe", "target\release\opencircle-sheet.exe") {
+            $b = [IO.File]::ReadAllBytes($exe)
+            $pe = [BitConverter]::ToInt32($b, 0x3C)
+            $subsystem = [BitConverter]::ToUInt16($b, $pe + 24 + 68)
+            "$exe subsystem = $subsystem (2 = GUI, 3 = console)"
+            if ($subsystem -ne 2) { throw "$exe is not GUI-subsystem" }
+          }
+          # The resident app never links the web view (only the helper does).
+          if (Select-String -Path target\release\opencircle.exe -Pattern "WebView2Loader" -SimpleMatch -Quiet) { throw "opencircle.exe links WebView2" }
           $exe = "target\release\opencircle.exe"
-          $b = [IO.File]::ReadAllBytes($exe)
-          $pe = [BitConverter]::ToInt32($b, 0x3C)
-          $subsystem = [BitConverter]::ToUInt16($b, $pe + 24 + 68)
-          "subsystem = $subsystem (2 = GUI, 3 = console)"
           $info = (Get-Item $exe).VersionInfo
           $info | Format-List FileVersion, ProductVersion, ProductName, FileDescription, OriginalFilename
-          if ($subsystem -ne 2) { throw "release exe is not GUI-subsystem" }
           if (-not $info.FileVersion.StartsWith((Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value)) { throw "version info does not match Cargo.toml" }
 
       # Prove the runtime dependencies. ldd lists what is linked (and fails on a
@@ -132,11 +137,28 @@ jobs:
           done
           echo "== dlopened libraries =="
           strings "$bin" | grep -oE 'lib[A-Za-z0-9_+-]+\.so\.[0-9]+' | sort -u
+          # The resident app never links WebKitGTK (+23 MB idle, spike S9): only
+          # the results card's helper does, and the packages only recommend it.
+          if grep -qE 'webkit|javascriptcore|soup' ldd.txt; then echo "::error::opencircle links WebKitGTK"; exit 1; fi
+          echo "== helper (opencircle-sheet) NEEDED =="
+          readelf -d target/release/opencircle-sheet | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'
           echo "== deb =="; dpkg-deb -I dist/*.deb
-          dpkg-deb -c dist/*.deb | grep -E 'applications/|apps/'
+          dpkg-deb -c dist/*.deb | grep -E 'applications/|apps/|bin/'
+          dpkg-deb -c dist/*.deb | grep -q 'usr/bin/opencircle-sheet$'
           if command -v rpm >/dev/null; then
             echo "== rpm =="; rpm -qlp dist/*.rpm | grep -x /usr/share/applications/com.opencircle.app.desktop
+            rpm -qlp dist/*.rpm | grep -x /usr/bin/opencircle-sheet
+            rpm -qp --recommends dist/*.rpm
           fi
+          echo "== AppImage =="
+          appimage=$(ls dist/*.AppImage)
+          chmod +x "$appimage"
+          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
+          ls -la "$RUNNER_TEMP/squashfs-root/usr/bin"
+          test -x "$RUNNER_TEMP/squashfs-root/usr/bin/opencircle-sheet"
+          if find "$RUNNER_TEMP/squashfs-root" -name 'libwebkit2gtk*' | grep -q .; then echo "::error::the AppImage bundles WebKitGTK"; exit 1; fi
+          echo "bundled libraries: $(find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' | wc -l)"
+          find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' -printf '%f\n' | sort | head -100
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

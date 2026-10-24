@@ -21,6 +21,7 @@ mod music;
 mod ocr;
 #[allow(dead_code)] // library API, wired into the UI later
 mod secrets;
+mod sheet;
 #[allow(dead_code)] // library for full-screen translate; the UI wires it
 mod translate;
 mod ui;

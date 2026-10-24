@@ -10,6 +10,7 @@
 //! [general]
 //! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
+//! google_results = "app"            # Lens / AI Mode pages: app (a card) | browser
 //!
 //! [ai]                              # the API key is NOT here: OS keyring only
 //! provider = "browser"              # browser | anthropic | openai_compatible (missing = browser)
@@ -238,6 +239,18 @@ pub struct GeneralConfig {
     pub default_action: DefaultAction,
     /// Where the Save dialog starts; "" = the system's choice.
     pub save_folder: String,
+    pub google_results: GoogleResults,
+}
+
+/// Where Google's Lens and AI Mode pages show (`[general] google_results`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoogleResults {
+    /// The results card in OpenCircle (`crate::sheet`); the browser when it can't.
+    #[default]
+    App,
+    /// The user's own browser.
+    Browser,
 }
 
 /// How a finished stroke shows (`[selection] style`).
@@ -773,6 +786,13 @@ impl Config {
                 d.general.save_folder,
                 &mut w,
                 |s: &String| check_folder(s),
+            );
+            c.general.google_results = get(
+                t,
+                "general.",
+                "google_results",
+                d.general.google_results,
+                &mut w,
             );
         }
         if let Some(t) = section(&root, "selection", &mut w) {
@@ -1357,6 +1377,15 @@ mod tests {
         let abs = std::env::temp_dir().to_string_lossy().replace('\\', "/");
         let (c, w) = Config::parse(&format!("[general]\nsave_folder = \"{abs}\"\n"));
         assert_eq!((c.general.save_folder.as_str(), w.len()), (abs.as_str(), 0));
+        // Google results: the card by default; a bad value warns and keeps it.
+        let (c, w) = Config::parse("[general]\ngoogle_results = \"browser\"\n");
+        assert_eq!(
+            (c.general.google_results, w.len()),
+            (GoogleResults::Browser, 0)
+        );
+        let (c, w) = Config::parse("[general]\ngoogle_results = \"webview\"\n");
+        assert_eq!(c.general.google_results, GoogleResults::App);
+        assert!(w.iter().any(|m| m.starts_with("general.google_results")));
     }
 
     #[test]

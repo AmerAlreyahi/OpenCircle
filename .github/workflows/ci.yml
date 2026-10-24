@@ -30,7 +30,7 @@ jobs:
         if: steps.crate.outputs.present == 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libgtk-3-dev libxdo-dev
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libgtk-3-dev libxdo-dev libwebkit2gtk-4.1-dev
 
       - uses: dtolnay/rust-toolchain@stable
         if: steps.crate.outputs.present == 'true'
@@ -43,17 +43,31 @@ jobs:
         run: cargo fmt --check
       - if: steps.crate.outputs.present == 'true'
         run: cargo clippy --all-targets -- -D warnings
+      # Feature `sheet`: the results card's helper binary (release builds have it).
+      - if: steps.crate.outputs.present == 'true'
+        run: cargo clippy --all-targets --features sheet -- -D warnings
       - if: steps.crate.outputs.present == 'true'
         run: cargo test
 
-      # Ready-to-run Windows build for manual testing (no Rust needed on the test PC).
-      - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
-        run: cargo build --release
+      # Ready-to-run builds for manual testing (no Rust needed on the test PC):
+      # the app and the results card's helper, side by side.
+      - if: steps.crate.outputs.present == 'true'
+        run: cargo build --release --features sheet
       - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: opencircle-windows-exe
-          path: target/release/opencircle.exe
+          path: |
+            target/release/opencircle.exe
+            target/release/opencircle-sheet.exe
+          retention-days: 7
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencircle-linux-bin
+          path: |
+            target/release/opencircle
+            target/release/opencircle-sheet
           retention-days: 7
 
   audit:

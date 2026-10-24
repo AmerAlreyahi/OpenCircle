@@ -25,8 +25,8 @@ use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{
     After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
-    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
-    SongSource, Target, Theme, parse_shortcut,
+    EdgeStyle, Engine, GoogleResults, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith,
+    SelectStyle, SongSource, Target, Theme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::mt;
@@ -528,6 +528,7 @@ impl fmt::Debug for State {
 pub enum Message {
     Section(Section),
     DefaultAction(DefaultAction),
+    GoogleResults(GoogleResults),
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
     /// The picker's answer (`None` = cancelled).
@@ -967,6 +968,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             state.interval = s;
         }
         Message::DefaultAction(a) => state.draft.general.default_action = a,
+        Message::GoogleResults(g) => state.draft.general.google_results = g,
         Message::SelectStyle(v) => state.draft.selection.style = v,
         Message::After(v) => state.draft.selection.after = v,
         Message::SearchWith(v) => state.draft.selection.search_with = v,
@@ -1250,6 +1252,18 @@ fn shorten(path: &str) -> String {
     format!("…{tail}")
 }
 
+/// The one line under "Show Google results": where they show, or why the card can't.
+fn google_results_hint(choice: GoogleResults) -> &'static str {
+    match (choice, crate::sheet::unavailable()) {
+        (GoogleResults::Browser, _) => "Lens and AI Mode open in your browser",
+        (GoogleResults::App, Some(why)) => why,
+        (GoogleResults::App, None) if cfg!(windows) => {
+            "Lens and AI Mode in a card beside your selection"
+        }
+        (GoogleResults::App, None) => "AI Mode in a card; Lens opens in your browser",
+    }
+}
+
 fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     let folder = state.draft.general.save_folder.as_str();
     let shown = if folder.is_empty() {
@@ -1291,6 +1305,27 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
                 ],
                 state.draft.general.default_action,
                 Message::DefaultAction,
+            ),
+            None,
+        ),
+        form_row(
+            "Show Google results",
+            google_results_hint(state.draft.general.google_results),
+            segmented(
+                &[
+                    (
+                        GoogleResults::App,
+                        "In OpenCircle",
+                        "Lens and AI Mode in a card beside your selection",
+                    ),
+                    (
+                        GoogleResults::Browser,
+                        "In my browser",
+                        "Lens and AI Mode open in your browser",
+                    ),
+                ],
+                state.draft.general.google_results,
+                Message::GoogleResults,
             ),
             None,
         ),

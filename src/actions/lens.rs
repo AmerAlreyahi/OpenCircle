@@ -1,4 +1,5 @@
-//! Search: the crop in Google Lens, in the user's own browser (see `crate::lens`).
+//! Search: the crop in Google Lens, in the results card (`crate::sheet`) or the
+//! user's own browser (see `crate::lens`).
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,7 +9,7 @@ use crate::lens::LensPage;
 pub const ACTION: Action = Action {
     id: "lens",
     label: "Search",
-    tip: "Search the selection with Google Lens in your browser",
+    tip: "Search the selection with Google Lens",
     key: Key {
         ctrl: false,
         letter: 'l',
@@ -20,6 +21,13 @@ pub const ACTION: Action = Action {
 /// The browser reads the page a while after we launch it (a cold browser start
 /// can take seconds): never delete a page younger than this.
 const MIN_LIFE: Duration = Duration::from_secs(10);
+
+/// The Lens page for `crop`, in memory, for the results card (`crate::sheet`).
+/// Blocking (PNG encode): call off the UI thread.
+pub fn page(crop: &Crop) -> Result<String, String> {
+    let png = super::encode_png(crop.width, crop.height, &crop.rgba)?;
+    crate::lens::page(&png, crop.width, crop.height).map_err(|e| e.to_string())
+}
 
 /// Writes the Lens page for `crop` and opens it in the default browser.
 /// Blocking (PNG encode, file write, process spawn): call off the UI thread.
