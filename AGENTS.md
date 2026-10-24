@@ -179,6 +179,18 @@ production systems.
   an on-device model, not an AI service.
 - Test machines (owner, 2026-10-24): two test VMs, agents may do anything on them
   (access details in AGENTS.local.md). Prefer them over the owner's own PC.
+- Windows first (owner, 2026-10-24, to save credits): VM testing and
+  Linux-only fixes are on hold; Windows is the priority. Linux must still build and
+  pass CI. Linux VM testing resumes later, on the owner's word.
+- Widget themes (owner, 2026-10-24): add a frosted-glass theme in the spirit
+  of Apple's glass look (own name and visuals, nothing copied) plus several more
+  elegant themes, as options for the floating widgets (bar, cards, popups). The
+  current theme stays the default. All of them come from the one token set in
+  theme.rs.
+- Credits (owner, 2026-10-24): choose the cheaper way whenever quality barely
+  changes: at most 3 workers at once, mid model for routine work (strong model
+  only for security, hard bugs, design), one contact sheet per visual proof,
+  short replies, only key videos.
 - Results card placement (owner, 2026-10-24, supersedes "away from the
   selection" and "only the size is remembered"): results (Lens, AI Mode) show
   directly in the floating card. It sits on the left or right side by the user's
