@@ -4,9 +4,13 @@
 //! It must not be reversible. A plain blur or mosaic is a fixed function of the
 //! text, so an attacker renders candidate strings and matches them (Depix). So:
 //! a strong Gaussian (sigma >= 0.6 x the brush height, i.e. the line height:
-//! glyph shapes are gone, only a smear of the line's average remains), then
-//! per-pixel noise from a secret OS-random seed and a coarse quantisation, so
-//! what is left of the text is smaller than the noise.
+//! glyph shapes are gone, only a smear of the ink density remains), then
+//! grain from a secret OS-random seed and a coarse quantisation. The grain is
+//! spatially correlated (one secret value per cell of half a line, plus long
+//! streaks, smoothly interpolated): averaging a column or a row cannot cancel it
+//! the way it cancels per-pixel noise, and it is larger than what is left of the text (`GRAIN`, see
+//! the tests). Full strength over the whole covered line; only the edge outside
+//! it is feathered.
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -16,8 +20,11 @@ use tiny_skia::{FillRule, LineCap, LineJoin, Mask, Stroke, Transform};
 use super::document::{Layer, span};
 use super::pen;
 
-/// Per-pixel noise, ± per channel.
-const NOISE: u64 = 14;
+/// Cell grain amplitude, ± levels: above the residual text signal after the
+/// Gaussian (measured in `tests::blur_brush_residual_is_below_the_grain`).
+pub const GRAIN: f32 = 28.0;
+/// Fine per-pixel grain, ± levels (the photographic look only; not the defence).
+const FINE: f32 = 5.0;
 /// Quantisation step; values are `STEP / 2 + k * STEP`.
 const STEP: f32 = 6.0;
 
@@ -52,6 +59,18 @@ pub fn reach(size: f32) -> f32 {
 /// Blurs the stroke `points` (brush `size`, image px) in `layer`. Deterministic
 /// for (seed, pixel): a repaint of any region gives the same pixels.
 pub fn paint(layer: &mut Layer, points: &[Point], size: f32, seed: u64) {
+    paint_with(layer, points, size, seed, GRAIN, FINE);
+}
+
+/// `paint` with the grain amplitudes given (0, 0 = the bare Gaussian, for tests).
+pub fn paint_with(
+    layer: &mut Layer,
+    points: &[Point],
+    size: f32,
+    seed: u64,
+    grain: f32,
+    fine: f32,
+) {
     let (w, h) = (layer.pm.width() as i64, layer.pm.height() as i64);
     let (ox, oy) = (layer.origin.x, layer.origin.y);
     let f = feather(size);
@@ -107,6 +126,7 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, seed: u64) {
         .collect();
     blur2d(&mut buf, sw, sh, r, 3);
 
+    let cell = (size * 0.5).max(4.0);
     for y in ay0..ay1 {
         for x in ax0..ax1 {
             let m = alpha[(y - ay0) as usize * aw + (x - ax0) as usize][0];
@@ -114,15 +134,27 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, seed: u64) {
                 continue;
             }
             let blurred = buf[(y - sy0) as usize * sw + (x - sx0) as usize];
-            // The noise is keyed to the image pixel, not the pixmap one.
-            let (ix, iy) = ((x as f32 + ox) as i64 as u64, (y as f32 + oy) as i64 as u64);
-            // One noise value per pixel (grey grain, no colour speckles).
-            let noise = (mix(seed ^ mix(ix | iy << 32)) % (2 * NOISE + 1)) as f32 - NOISE as f32;
+            // Keyed to the image pixel, not the pixmap one; grey (no colour speckles).
+            let (ix, iy) = ((x as f32 + ox) as i64, (y as f32 + oy) as i64);
+            // Round cells, plus long flat streaks so a row average keeps grain too.
+            let (fx, fy) = (ix as f32, iy as f32);
+            let noise = grain
+                * (cell_noise(seed, fx, fy, cell, cell)
+                    + 0.8 * cell_noise(seed ^ 0x57ea, fx, fy, 6.0 * cell, cell))
+                + fine * unit(mix(seed ^ 0x5eed ^ mix(ix as u64 | (iy as u64) << 32)));
             let i = index(x, y);
             for c in 0..3 {
-                let k = ((blurred[c] + noise) / STEP)
-                    .floor()
-                    .clamp(0.0, 255.0 / STEP - 1.0);
+                // Reflected at black and white, not clipped: on a white or black
+                // background clipping would cut half the grain away.
+                let v = blurred[c] + noise;
+                let v = if v < 0.0 {
+                    -v
+                } else if v > 255.0 {
+                    510.0 - v
+                } else {
+                    v
+                };
+                let k = (v / STEP).floor().clamp(0.0, 255.0 / STEP - 1.0);
                 let v = k * STEP + STEP / 2.0;
                 data[i + c] = (v * m + data[i + c] as f32 * (1.0 - m)).round() as u8;
             }
@@ -171,6 +203,24 @@ fn box_blur<const N: usize>(values: &mut [[f32; N]], r: usize, tmp: &mut Vec<[f3
         let (add, sub) = (at(i + r + 1), at(i - r));
         (0..N).for_each(|c| sum[c] += add[c] - sub[c]);
     }
+}
+
+/// Smooth value noise in -1..=1: a secret value per grid point (`cw` x `ch`
+/// apart), interpolated with smoothstep (soft grain, no mosaic edges).
+fn cell_noise(seed: u64, x: f32, y: f32, cw: f32, ch: f32) -> f32 {
+    let (gx, gy) = (x / cw, y / ch);
+    let (x0, y0) = (gx.floor(), gy.floor());
+    let smooth = |t: f32| t * t * (3.0 - 2.0 * t);
+    let (tx, ty) = (smooth(gx - x0), smooth(gy - y0));
+    let at = |i: f32, j: f32| unit(mix(seed ^ mix(i as i64 as u64 ^ (j as i64 as u64) << 32)));
+    let top = at(x0, y0) * (1.0 - tx) + at(x0 + 1.0, y0) * tx;
+    let bottom = at(x0, y0 + 1.0) * (1.0 - tx) + at(x0 + 1.0, y0 + 1.0) * tx;
+    top * (1.0 - ty) + bottom * ty
+}
+
+/// A hash as a value in -1..=1.
+fn unit(hash: u64) -> f32 {
+    (hash >> 11) as f32 / (1u64 << 53) as f32 * 2.0 - 1.0
 }
 
 /// splitmix64 finaliser: a well-mixed hash of `x`.

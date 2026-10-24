@@ -358,8 +358,8 @@ impl Windows {
                 pin.dragged = None; // one temp file per pin
                 if let Some(crop) = pin.crop() {
                     match DragFile::write(&crop) {
-                        Ok(file) => {
-                            if let Err(e) = dragout::start(&file, &crop) {
+                        Ok(mut file) => {
+                            if let Err(e) = dragout::start(&mut file, &crop, false) {
                                 eprintln!("[opencircle] {e}");
                             }
                             pin.dragged = Some(file);
