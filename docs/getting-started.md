@@ -32,6 +32,11 @@ AI provider (optional) and a theme. You can change all of it later in
 
 `Esc` closes everything.
 
+By default the selection snaps to a rounded box with corner brackets (drag a
+corner to resize it) and is searched with Google Lens at once; **More** under
+the box brings the bar back, **Select text** highlights every word in it (drag
+over words for Copy, Translate or Search). See Customize below to change this.
+
 ## Read text (OCR)
 
 The first time you use **Text**, OpenCircle asks before downloading the
@@ -53,9 +58,27 @@ may be needed; OpenCircle tells you if it is.
 - Screenshots: [Snip and annotate](snip-and-annotate.md).
 - Changing or adding shortcuts: [Shortcuts](shortcuts.md).
 
+## Customize
+
+**Settings > Look & behaviour**:
+
+- **Selection**: snap to a box, or keep the shape you drew.
+- **After selecting**: search at once, or show the action bar and wait.
+- **Search with**: Lens, Ask AI or both.
+- **Active look**: how the screen looks while OpenCircle is open. Spectrum
+  (a soft glow in many colours, the default), Aurora (a thin violet-to-cyan
+  line), Sunset, Ocean, Neon, Mono, Calm (no glow, light dim), or Custom: your
+  own colours, glow strength, dim, activation glow, corner style, bar style and
+  a screen edge per mode (circle, live translate, snip: glow, thin or none,
+  thickness, moving or still).
+
+Changes apply when you press Save; nothing needs a restart. The app theme
+(Light, Dark, System) is under **Appearance**.
+
 ## Settings and config file
 
-Settings (tray menu) has Appearance, Shortcuts, AI and Translate. It writes a
+Settings (tray menu) has General, Appearance, Look & behaviour, Shortcuts, AI
+and Translate. It writes a
 plain TOML file you may also edit by hand:
 
 - Windows: `%APPDATA%\opencircle\config.toml`
