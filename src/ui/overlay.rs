@@ -34,6 +34,8 @@ const TAP: f32 = 4.0;
 const TURN_STEP: f32 = 8.0;
 const TURN_ANGLE: f32 = 100.0;
 const SCRIBBLE_TURNS: usize = 3;
+/// A press that began on text is a circle after all once it turns this far.
+const LOOP_TURN: f32 = 300.0;
 /// How far (screen px) a scribble's clear area reaches past the stroke's hull.
 const SCRIBBLE_PAD: f32 = 14.0;
 
@@ -252,6 +254,29 @@ fn hull(points: &[Point]) -> Vec<Point> {
     out
 }
 
+/// A loop that is clearly a circle: the path's heading turns at least
+/// `LOOP_TURN` degrees one way (sampled every `TURN_STEP` px on screen). A drag
+/// along text that runs to a line's end and back to the next line's start
+/// turns about half that; a zig-zag's turns cancel out.
+pub fn winds(stroke: &[Point], zoom: f32) -> bool {
+    let step = TURN_STEP / zoom;
+    let mut pts: Vec<Point> = stroke.first().copied().into_iter().collect();
+    for &p in stroke {
+        if pts.last().is_some_and(|q| q.distance(p) >= step) {
+            pts.push(p);
+        }
+    }
+    let heading = |w: &[Point]| (w[1].y - w[0].y).atan2(w[1].x - w[0].x);
+    let headings: Vec<f32> = pts.windows(2).map(heading).collect();
+    let turned: f32 = (headings.windows(2))
+        .map(|h| {
+            let d = h[1] - h[0];
+            (d + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+        })
+        .sum();
+    turned.abs().to_degrees() >= LOOP_TURN
+}
+
 /// A mostly straight press-drag that doesn't loop back: every point stays near the
 /// segment from the first point to the last.
 // ponytail: one threshold, no timing/speed; tune DRAG_STRAY if real strokes misfire.
@@ -383,6 +408,35 @@ pub fn handle_at(area: Rectangle, p: Point) -> Option<usize> {
     corners(area)
         .iter()
         .position(|c| c.distance(p) <= HANDLE_HIT)
+}
+
+/// A word selection's two ends, from its stroke on screen (a top-left /
+/// bottom-right pair per line): the first line's start edge and the last
+/// line's end edge, each (dot, other end of the bar). The start's dot is above
+/// the line, the end's below, like a text selection's handles.
+// ponytail: left-to-right only; on an RTL line the start handle still sits
+// at the line's left edge.
+fn word_ends(stroke: &[Point]) -> Option<[(Point, Point); 2]> {
+    let pairs = stroke.as_chunks::<2>().0;
+    let (first, last) = (pairs.first()?, pairs.last()?);
+    let lift = Vector::new(0.0, HANDLE);
+    Some([
+        (first[0] - lift, Point::new(first[0].x, first[1].y)),
+        (last[1] + lift, Point::new(last[1].x, last[0].y)),
+    ])
+}
+
+/// The end of a word selection (its stroke on screen) under `p`: `Some(true)`
+/// = its start, `Some(false)` = its end.
+pub fn word_end_at(stroke: &[Point], p: Point) -> Option<bool> {
+    let [start, end] = word_ends(stroke)?;
+    let near = |(dot, bar): (Point, Point)| to_segment(p, dot, bar) <= HANDLE_HIT;
+    match (near(start), near(end)) {
+        (true, true) => Some(p.distance(start.0) <= p.distance(end.0)),
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        (false, false) => None,
+    }
 }
 
 /// `area` with its corner `corner` dragged to `to`. The opposite corner stays;
@@ -954,7 +1008,15 @@ impl canvas::Program<Event> for Overlay<'_> {
 
         if let Some(sel) = self.selection {
             let r = self.view.rect_to_screen(sel.area);
-            if self.handles && sel.kind != Kind::Snap {
+            if self.handles && sel.kind == Kind::Word {
+                for (dot, bar) in word_ends(&current).into_iter().flatten() {
+                    let line = Stroke::default().with_color(accent.0).with_width(2.0);
+                    frame.stroke(&Path::line(dot, bar), line);
+                    let dot = Path::circle(dot, HANDLE);
+                    frame.fill(&dot, Color::WHITE);
+                    frame.stroke(&dot, line);
+                }
+            } else if self.handles && sel.kind != Kind::Snap {
                 for c in corners(r) {
                     let dot = Path::circle(c, HANDLE);
                     frame.fill(&dot, Color::WHITE);
@@ -1005,6 +1067,16 @@ impl canvas::Program<Event> for Overlay<'_> {
             (self.handles, self.selection, cursor.position_in(bounds))
         {
             let r = self.view.rect_to_screen(sel.area);
+            if sel.kind == Kind::Word {
+                let stroke: Vec<Point> = (self.stroke.iter())
+                    .map(|&q| self.view.to_screen(q))
+                    .collect();
+                match word_end_at(&stroke, p) {
+                    Some(_) => return mouse::Interaction::ResizingHorizontally,
+                    None if r.contains(p) => return mouse::Interaction::Text,
+                    None => return mouse::Interaction::Crosshair,
+                }
+            }
             match grip_at(sel.kind, r, p) {
                 Some(0 | 2) => return mouse::Interaction::ResizingDiagonallyDown,
                 Some(_) => return mouse::Interaction::ResizingDiagonallyUp,
@@ -1210,6 +1282,30 @@ mod tests {
             (220.0, 136.0),
             (100.0, 148.0),
         ])
+    }
+
+    #[test]
+    fn only_a_real_loop_winds() {
+        // circles, either way, closed or nearly
+        assert!(winds(&ellipse(200.0, 100.0, 50.0, 30.0, 1.0), 1.0));
+        assert!(winds(&ellipse(200.0, 100.0, 50.0, 30.0, -1.0), 1.0));
+        assert!(winds(&ellipse(200.0, 100.0, 60.0, 60.0, 0.9), 1.0));
+        assert!(winds(&ellipse(200.0, 100.0, 40.0, 40.0, 2.5), 1.0));
+        // a text drag: along a line, back to the next line's start, along it
+        let text = through(&[
+            (100.0, 100.0),
+            (400.0, 100.0),
+            (60.0, 130.0),
+            (200.0, 130.0),
+        ]);
+        assert!(!winds(&text, 1.0));
+        // up a column of lines and over; a C; a zig-zag; a straight drag
+        let up = through(&[(300.0, 300.0), (60.0, 270.0), (400.0, 240.0), (60.0, 210.0)]);
+        assert!(!winds(&up, 1.0));
+        assert!(!winds(&ellipse(200.0, 100.0, 50.0, 50.0, 0.5), 1.0));
+        assert!(!winds(&zigzag(), 1.0));
+        assert!(!winds(&through(&[(0.0, 0.0), (300.0, 40.0)]), 1.0));
+        assert!(!winds(&[], 1.0));
     }
 
     #[test]

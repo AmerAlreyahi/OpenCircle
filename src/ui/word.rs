@@ -199,6 +199,17 @@ impl Picked {
         true
     }
 
+    /// One end of the range is held (a handle): the range's start if `start`,
+    /// else its end. The other end becomes the anchor, so `extend` moves the
+    /// held one.
+    pub fn hold(&mut self, start: bool) {
+        let forward = self.anchor <= self.end;
+        if forward == start {
+            (self.anchor, self.end) = (self.end, self.anchor);
+            (self.from, self.to) = (self.to, self.from);
+        }
+    }
+
     /// OCR has read `lines` over `covered` (a wider band): the range is the same
     /// words, found again. If they are not there any more nothing changes.
     pub fn reread(&mut self, lines: Vec<Line>, covered: Rectangle) {
@@ -418,6 +429,25 @@ mod tests {
         let mut one = picked(paragraph(), Point::new(155.0, 158.0)).unwrap();
         assert!(one.extend(Point::new(155.0, 158.0)));
         assert_eq!(one.text(), "and");
+    }
+
+    #[test]
+    fn a_held_end_moves_and_the_other_stays() {
+        // "quick" to "lazy", picked either way round
+        for (a, b) in [
+            ((150.0, 110.0), (270.0, 134.0)),
+            ((270.0, 134.0), (150.0, 110.0)),
+        ] {
+            let mut p = picked(paragraph(), Point::new(a.0, a.1)).unwrap();
+            assert!(p.extend(Point::new(b.0, b.1)));
+            assert_eq!(p.text(), "quick brown fox\njumps over the lazy");
+            p.hold(true); // the start, to "the" on line 1
+            assert!(p.extend(Point::new(105.0, 110.0)));
+            assert_eq!(p.text(), "the quick brown fox\njumps over the lazy");
+            p.hold(false); // the end, to "dog" on line 3
+            assert!(p.extend(Point::new(105.0, 158.0)));
+            assert_eq!(p.text(), "the quick brown fox\njumps over the lazy\ndog");
+        }
     }
 
     #[test]

@@ -23,7 +23,8 @@ type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
 
 /// The crop's thumbnail in the Ask AI panel.
 const THUMB_HEIGHT: f32 = 112.0;
-/// The follow-up input (focused when it appears).
+/// The follow-up input. Never focused by itself: until it is clicked, letters
+/// are the overlay's action shortcuts.
 const INPUT: &str = "panel-input";
 /// The Ask AI conversation (scrolled to the end as the answer grows).
 const LOG: &str = "panel-log";
@@ -126,8 +127,7 @@ impl Panel {
         let task = match kind {
             actions::Panel::Lens => background(move |tx| {
                 let _ = tx.unbounded_send(Msg::LensOpened(lens::open(&crop)));
-            })
-            .chain(operation::focus(INPUT)),
+            }),
             actions::Panel::Text if text::models_present() => {
                 panel.state = State::Text(Reading::Busy);
                 panel.read()
@@ -238,10 +238,7 @@ impl Panel {
                 *setup = Some(result);
                 if ready && !self.input.trim().is_empty() {
                     let question = self.take_input();
-                    return self.send(&question).chain(operation::focus(INPUT));
-                }
-                if ready {
-                    return operation::focus(INPUT);
+                    return self.send(&question);
                 }
             }
             (State::Ask { chat, .. }, Msg::Delta(piece)) => {
