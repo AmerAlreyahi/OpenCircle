@@ -1,6 +1,7 @@
 //! Tray icon with "Circle to search", "Snip", "Live translate on/off", "Settings…" and "Quit". A missing tray is not
-//! an error: the app keeps working through its shortcut and `opencircle capture`.
-use std::time::Instant;
+//! an error: the app keeps working through its shortcut and `opencircle capture`. The capturing items wait until the
+//! menu is off the screen, so it is never captured.
+use std::time::{Duration, Instant};
 
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -137,7 +138,18 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
         } else {
             return;
         };
-        let _ = tx.unbounded_send(trigger);
+        // Circle, Snip and Live capture the screen: not while our menu (or
+        // its fade-out) is still on it, or it is captured and translated.
+        let captures = !matches!(trigger, Trigger::OpenSettings | Trigger::Quit);
+        let tx = tx.clone();
+        let send = move || {
+            let _ = tx.unbounded_send(trigger);
+        };
+        if captures {
+            std::thread::spawn(|| after_menu(menu_shown, MENU_WAIT, send));
+        } else {
+            send();
+        }
     }));
     let icon = icon();
     add_with_fallback(|guid| {
@@ -159,6 +171,41 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
     })
     .map_err(|e| eprintln!("[opencircle] tray unavailable: {e}"))
     .ok()
+}
+
+/// The longest wait for the menu to go (then the capture goes ahead).
+const MENU_WAIT: Duration = Duration::from_secs(1);
+/// After the menu is gone: the screen redraws what it covered.
+const SETTLE: Duration = Duration::from_millis(150);
+
+/// Runs `then` once `shown` says the menu is off the screen (polled, at most
+/// `wait`) and the screen had `SETTLE` to redraw.
+fn after_menu(shown: impl Fn() -> bool, wait: Duration, then: impl FnOnce()) {
+    let start = Instant::now();
+    while shown() && start.elapsed() < wait {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(SETTLE);
+    then();
+}
+
+/// A popup menu (ours, from the tray) or its fade-out is on the screen.
+#[cfg(windows)]
+fn menu_shown() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindowVisible};
+    use windows::core::w;
+    // SAFETY: lookups of top-level windows by class; nothing is changed.
+    [w!("#32768"), w!("SysFader")]
+        .into_iter()
+        .any(|class| unsafe {
+            FindWindowW(class, None).is_ok_and(|h| IsWindowVisible(h).as_bool())
+        })
+}
+
+/// GTK's menu lives in the shell (no handle here): the settle delay only.
+#[cfg(not(windows))]
+fn menu_shown() -> bool {
+    false
 }
 
 /// Adds the icon under the fixed identity first; if the shell refuses it (Windows binds a GUID to the exe path,
@@ -192,6 +239,33 @@ fn icon() -> Icon {
 #[cfg(test)]
 mod tests {
     use super::{TRAY_GUID, add_with_fallback};
+
+    /// Started from the tray menu, a capture waits until the menu (and its
+    /// fade-out) is gone and the screen settled. Before: the menu was
+    /// captured and its translation stayed over the page.
+    #[test]
+    fn a_capture_from_the_menu_waits_for_it_to_close() {
+        use super::{SETTLE, after_menu};
+        use std::cell::Cell;
+        use std::time::{Duration, Instant};
+        let start = Instant::now();
+        let polls = Cell::new(0);
+        let shown = || {
+            polls.set(polls.get() + 1);
+            start.elapsed() < Duration::from_millis(100) // closes after 100 ms
+        };
+        let sent = Cell::new(None);
+        after_menu(shown, Duration::from_secs(1), || {
+            sent.set(Some(start.elapsed()))
+        });
+        let at = sent.get().expect("sent");
+        assert!(at >= Duration::from_millis(100) + SETTLE, "{at:?}");
+        assert!(polls.get() > 1);
+        // a menu that never reports closed does not hold the capture forever
+        let start = Instant::now();
+        after_menu(|| true, Duration::from_millis(50), || {});
+        assert!(start.elapsed() < Duration::from_millis(50) + SETTLE + Duration::from_millis(100));
+    }
 
     #[test]
     fn the_fixed_identity_is_tried_first_and_used_when_accepted() {

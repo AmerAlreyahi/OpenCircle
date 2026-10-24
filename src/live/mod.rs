@@ -52,6 +52,20 @@ pub fn prepare_controller(handle: RawWindowHandle) -> Result<bool, LayerError> {
     }
 }
 
+/// Where this app's own windows show in a capture (desktop px, x0, y0, x1,
+/// y1): every visible top-level window of this process, except the ones
+/// captures leave out (excluded from capture) and the click-through layer
+/// (its patches have their own guard). A step blanks these out, so our own
+/// UI (a menu, a card, a pill, a toast) is never read or translated.
+// ponytail: Windows only; X11 needs a walk of the window tree by _NET_WM_PID,
+// so there only the controller's rect is masked (`ui::live_layer`).
+pub fn own_windows() -> Vec<[i32; 4]> {
+    #[cfg(windows)]
+    return win::own_windows();
+    #[cfg(not(windows))]
+    Vec::new()
+}
+
 pub fn prepare_layer(handle: RawWindowHandle) -> Result<Layer, LayerError> {
     match handle {
         #[cfg(windows)]
@@ -77,6 +91,42 @@ mod win {
         SetWindowPos, WDA_EXCLUDEFROMCAPTURE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
         WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     };
+
+    pub fn own_windows() -> Vec<[i32; 4]> {
+        use windows::Win32::Foundation::{LPARAM, RECT};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            EnumWindows, GetWindowDisplayAffinity, GetWindowRect, GetWindowThreadProcessId,
+            IsWindowVisible,
+        };
+        unsafe extern "system" fn each(hwnd: HWND, out: LPARAM) -> windows::core::BOOL {
+            // SAFETY: `out` is the Vec below, alive for the whole EnumWindows call;
+            // the calls only read the window's state.
+            unsafe {
+                let out = &mut *(out.0 as *mut Vec<[i32; 4]>);
+                let mut pid = 0;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                let mut affinity = 0;
+                let _ = GetWindowDisplayAffinity(hwnd, &mut affinity);
+                let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+                let mut r = RECT::default();
+                if pid == std::process::id()
+                    && IsWindowVisible(hwnd).as_bool()
+                    && affinity != WDA_EXCLUDEFROMCAPTURE.0
+                    && ex & WS_EX_TRANSPARENT.0 == 0
+                    && GetWindowRect(hwnd, &mut r).is_ok()
+                    && r.right > r.left
+                    && r.bottom > r.top
+                {
+                    out.push([r.left, r.top, r.right, r.bottom]);
+                }
+            }
+            true.into()
+        }
+        let mut out: Vec<[i32; 4]> = Vec::new();
+        // SAFETY: the callback only touches `out`, which outlives the call.
+        let _ = unsafe { EnumWindows(Some(each), LPARAM(&mut out as *mut _ as isize)) };
+        out
+    }
 
     /// `click_through`: the layer (clicks go to the game); the controller takes them.
     pub fn prepare(hwnd: isize, click_through: bool) -> Result<Layer, LayerError> {

@@ -511,6 +511,8 @@ impl Live {
                 if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
                     live_controller::mask(&mut frame.rgba, w, h, rect);
                 }
+                // our own UI is never read (a menu, a card, a toast)
+                blank_own(&mut frame.rgba, (frame.x, frame.y, w, h), &live::own_windows());
                 // the foreground window's page (a full-screen game: all of
                 // it), unless the whole screen is asked for
                 let area = (!config::current().translate.whole_screen)
@@ -614,6 +616,17 @@ pub fn theme() -> iced::Theme {
         iced::Theme::custom("live layer", palette)
     });
     THEME.clone()
+}
+
+/// Blanks `rects` (desktop px, x0, y0, x1, y1) out of a capture of the
+/// monitor at `(x, y)`, `w` x `h` px: the parts on it, as the controller's.
+fn blank_own(rgba: &mut [u8], (x, y, w, h): (i32, i32, u32, u32), rects: &[[i32; 4]]) {
+    for r in rects {
+        let clip = |v: i32, o: i32, max: u32| (v - o).clamp(0, max as i32) as u32;
+        let (x0, y0) = (clip(r[0], x, w), clip(r[1], y, h));
+        let (x1, y1) = (clip(r[2], x, w), clip(r[3], y, h));
+        live_controller::mask(rgba, w, h, [x0, y0, x1 - x0, y1 - y0]);
+    }
 }
 
 /// A step error once (not every second), then nothing until it changes.
@@ -907,6 +920,27 @@ mod tests {
             Outcome::Off
         ));
         assert!(l.stop().units() == 0, "no window to close");
+    }
+
+    /// Our own windows (a menu, a card) are blanked out of the capture the
+    /// step reads, on whichever part of them lies on the monitor; the rest
+    /// of the screen is read as it is.
+    #[test]
+    fn own_windows_are_left_out_of_what_is_read() {
+        // a 40 x 20 monitor at desktop (100, 50), all white
+        let (w, h) = (40u32, 20u32);
+        let mut rgba = vec![255u8; (w * h * 4) as usize];
+        // a menu half off the monitor's left edge, a card past its bottom
+        let rects = [[90, 52, 110, 60], [130, 65, 200, 90]];
+        blank_own(&mut rgba, (100, 50, w, h), &rects);
+        let black = |x: u32, y: u32| rgba[((y * w + x) * 4) as usize] == 0;
+        let blanked: Vec<(u32, u32)> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .filter(|&(x, y)| black(x, y))
+            .collect();
+        let want = |(x, y): (u32, u32)| (x < 10 && (2..10).contains(&y)) || (x >= 30 && y >= 15);
+        assert_eq!(blanked.len(), 10 * 8 + 10 * 5);
+        assert!(blanked.into_iter().all(want));
     }
 
     #[test]
