@@ -128,6 +128,10 @@ production systems.
   recognition service (AudD first); the button stays hidden until a key is set;
   a ~10 s clip of the chosen audio is sent to that service only on press (say so
   plainly); key in the OS keyring; history off by default.
+- Snip's main use (owner, 2026-10-24): explaining things to an AI with images.
+  Optimise for capture → annotate → paste into an AI chat in seconds: copy after
+  capture, AI-friendly size, image + OCR text, delay timer, snapping + loupe,
+  combine captures, numbered legend, presets, drag-out, local recent captures.
 - Results sheet (owner, 2026-10-24): explore a slide-up sheet showing Google's own
   page (Lens / AI Mode) in the system web view (WebView2 / WebKitGTK), loaded only
   while open; no scraping, no copying Google's UI. Placement (owner, 2026-10-24):
