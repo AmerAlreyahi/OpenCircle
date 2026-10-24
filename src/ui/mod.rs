@@ -2727,6 +2727,11 @@ impl App {
             None => (self.word.as_ref())
                 .filter(|_| word && self.text_press.is_none() && self.grab.is_none()),
         };
+        // The bar and the popup keep clear of the card and of the bottom bar.
+        let mut room = room;
+        if self.bottom_bar_shown() {
+            room.height = room.height.min(self.screen.height - ASK_ZONE);
+        }
         if let Some(picked) = picked {
             layers = layers.push(pick_popup(self.view.rect_to_screen(picked.area()), room));
         } else if bar_shown && !word {
@@ -2736,11 +2741,6 @@ impl App {
                     let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
                     bar::qr_chip(text, Message::Qr(qr::Act::Copy), open)
                 });
-            // The action bar keeps clear of the card and of the ask bar at the bottom.
-            let mut room = room;
-            if !panel {
-                room.height = room.height.min(self.screen.height - ASK_ZONE);
-            }
             layers = layers.push(bar::view(below, room, chip, Message::Run));
         }
         layers.into()
