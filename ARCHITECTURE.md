@@ -13,7 +13,8 @@ capture the screen and show it.
 | `config.rs` | The one config reader/validator. `config::current()` is the running app's config (one source of truth: panels read it, `set_current` replaces it when Settings saves). New settings: add the field + default + check in `parse` + a round-trip test, then a row in `ui/settings.rs`. `general.default_action` = what Enter runs (`actions::default_for`), `general.save_folder` = Save's start folder, `translate.live_interval_ms` = the live layer's period. |
 | `capture/` | One frozen RGBA frame of the monitor under the cursor; one file per platform. `window_rect.rs`: visible windows, topmost first (snip Window mode). `stitch.rs` + `scroll.rs`: scrolling capture. |
 | `ui/mod.rs` | The iced daemon: overlay window state, capture on a thread, open / close (the multi-step `Hiding`), running actions, held Lens pages, `background` (thread work → messages). |
-| `ui/overlay.rs` | The canvas over the frozen frame: dim, stroke, selection rules (loop vs. drag), mouse and key events. |
+| `ui/overlay.rs` | The canvas over the frozen frame: dim, strokes, selection rules (loop vs. drag vs. tap), corner handles (resize / move math), the Shift count badge, mouse / wheel / key events. `View` = the zoomed (1x–4x) and panned part of the frame: selections live in image px (the overlay at 1x), so crops are right at any zoom. |
+| `ui/word.rs` | Tap a word: OCR lines around the tap (`recognize_in_child` on a crop, on a thread; no models = no-op), split into words by character share; a second tap on the line makes a range. Copy then copies the text. |
 | `ui/bar.rs` | The floating action bar: the action registry as buttons, placed under/above the selection. |
 | `ui/edit.rs` | Edit in place: the editor (`crate::editor`) over the selection at its own pixels (zoom 1/scale), its toolbar where the bar was; Back keeps the edits (shown flattened) and later actions get the edited image. Also the fitted editor for a scrolling capture. |
 | `ui/quick.rs` | Quick actions: id → what runs (registry action, copy_text, ai_explain), target → area (full_screen, circle, last_region per monitor; `window` is snip-only and counts as circle elsewhere). |
@@ -38,9 +39,13 @@ capture the screen and show it.
    `Message::Captured` then shows the pre-created window.
 3. **Overlay**: the RGBA bytes become the `image::Handle` drawn full-screen. The same
    bytes are later cropped by actions (shared, never copied whole).
-4. **Selection**: the canvas reports press/move/release; on release `overlay::select`
-   decides: a mostly straight drag = the rectangle it spans, anything else = the
-   loop's bounding box. A new press starts over (redraw).
+4. **Selection**: the canvas reports press/move/release (screen px; the App maps them
+   to image px through `overlay::View`); on release `overlay::select` decides: a mostly
+   straight drag = the rectangle it spans, anything else = the loop's bounding box, a
+   tap = the word there (`ui/word.rs`). A new press starts over (redraw); a press on a
+   corner handle resizes, inside moves; Shift adds a selection (Ask AI / Text get every
+   crop stacked in one image, the rest the box around all). The ask bar at the bottom
+   opens Ask AI with its text.
 5. **Action**: a bar button, Enter (the first action) or the action's key sends
    `Message::Run(&Action)`. `App::run` crops the selection in physical pixels, then:
    `Run::Finish(f)` closes the overlay (so dialogs aren't under it) and calls `f(crop)`;

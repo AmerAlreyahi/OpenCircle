@@ -15,7 +15,7 @@ const CHIP_GAP: f32 = 8.0;
 const QR_SHOWN: usize = 36;
 
 /// The chip for a QR code found in the selection: its text (made safe to show, see
-/// [`qr::shown`]) copies it, and "Open link" with the link's whole host beside it
+/// [`qr::shown`]) copies it, and "Open link · host" (the link's whole host)
 /// (only offered for an http(s) link) opens it. Neither happens by itself.
 pub fn qr_chip<'a, Message: Clone + 'a>(
     text: &str,
@@ -35,10 +35,9 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
     }
     let host = qr::web_url(text).and_then(crate::lens::web_host);
     if let (Some(open), Some(host)) = (open, host) {
-        // The whole host beside the button: the site it really opens, never cut.
-        chips = chips
-            .push(widgets::chip("Open link", open))
-            .push(widgets::body(host));
+        // The whole host on the button (like the Text panel's link chips): the
+        // site it really opens, never cut.
+        chips = chips.push(widgets::chip(format!("Open link · {host}"), open));
     }
     widgets::surface(chips)
         .height(CONTROL + 2.0 * SURFACE_PADDING)
@@ -201,10 +200,8 @@ mod tests {
             "{texts:?}"
         );
         // The whole host, never cut, on the button that opens it.
-        let open = texts.iter().position(|t| t == "Open link");
-        assert_eq!(
-            open.and_then(|i| texts.get(i + 1)).map(String::as_str),
-            Some("example.com"),
+        assert!(
+            texts.contains(&"Open link · example.com".to_string()),
             "{texts:?}"
         );
         let px = widgets::shot::save("bar-qr-chip", with_link(), screen);

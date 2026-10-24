@@ -15,6 +15,7 @@ mod translate;
 mod tray;
 pub(crate) mod widgets;
 mod windows;
+mod word;
 
 pub use tray::start as start_tray;
 
@@ -26,13 +27,14 @@ use std::time::{Duration, Instant};
 use iced::futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use iced::futures::stream::{self, Stream, StreamExt};
 use iced::keyboard::{self, key::Named};
-use iced::widget::{canvas, container, image, space, stack};
+use iced::widget::{canvas, container, image, opaque, space, stack};
 use iced::window::{self, Level, Mode};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
 use crate::actions::{self, Action, Crop, Run, copy, lens, qr, save, text};
 use crate::config::{self, QuickAction, Target};
 use crate::editor::{self, Output};
+use crate::ocr::{self, TextBlock};
 use crate::translate::pipeline::Cache;
 use crate::{Trigger, capture};
 use edit::Editing;
@@ -42,6 +44,16 @@ use snip::Snip;
 const HINT: &str = "Circle, drag or tap anything · Esc to close";
 /// Shown over a selection that came out black (DRM / protected windows).
 const PROTECTED: &str = "This window is protected; it can't be captured";
+
+/// The ask bar at the bottom of the overlay: its text field, width, and the
+/// height kept free for it (the action bar stays above it).
+const ASK_INPUT: &str = "overlay-ask";
+const ASK_WIDTH: f32 = 480.0;
+const ASK_ZONE: f32 = widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING + 2.0 * ASK_MARGIN;
+const ASK_MARGIN: f32 = 24.0;
+
+/// Between stacked crops (several selections sent as one image).
+const STACK_GAP: u32 = 16;
 
 /// Handed from `run` to the subscription (a subscription builder can't capture).
 static TRIGGERS: Mutex<Option<UnboundedReceiver<Trigger>>> = Mutex::new(None);
@@ -106,6 +118,24 @@ enum Message {
     /// Alt went down / up (peek at the original under a translation).
     Peek(bool),
     Live(live_layer::Msg),
+    /// OCR around tap number `.0` at `.1` (image px) read these lines (frame px of
+    /// a crop at `.2`).
+    Tapped(u32, Point, [u32; 2], Result<Vec<TextBlock>, String>),
+    /// The ask bar's text, and Enter in it.
+    AskInput(String),
+    AskSubmit,
+}
+
+/// A press on the selection: resizing it by a corner handle, or moving it.
+struct Grab {
+    /// The corner (index into the handles), or `None` = move.
+    corner: Option<usize>,
+    /// Where the press was (image px).
+    from: Point,
+    /// The selection and its stroke when the press began.
+    start: (overlay::Selection, Vec<Point>),
+    /// It moved further than a tap.
+    moved: bool,
 }
 
 /// What the open overlay is for.
@@ -162,9 +192,24 @@ struct App {
     scale: f32,
     /// The overlay's logical size (the monitor's).
     screen: Size,
+    /// The stroke being drawn or the selection's (image px; see `overlay::View`).
     stroke: Vec<Point>,
     drawing: bool,
     selection: Option<overlay::Selection>,
+    /// Selections kept with Shift before the current one, with their strokes.
+    others: Vec<(overlay::Selection, Vec<Point>)>,
+    /// The stroke being drawn adds to `others` (Shift).
+    adding: bool,
+    /// Resizing or moving the selection.
+    grab: Option<Grab>,
+    /// The zoomed / panned part of the frame on screen; a pan's start.
+    view: overlay::View,
+    pan: Option<(Point, overlay::View)>,
+    /// The tapped word(s) the selection is, and the latest tap's number.
+    word: Option<word::Picked>,
+    taps: u32,
+    /// The ask bar's text.
+    ask: String,
     /// Bumped on every open (resets the overlay's pointer state).
     opening: u32,
     /// Trigger time + expected size of the full-screen frame not drawn yet (latency log).
@@ -211,6 +256,16 @@ impl App {
             ..window::Settings::default()
         });
         let mut app = App {
+            cache: Arc::new(Cache::new(CACHE_SIZE)),
+            ..App::idle(overlay)
+        };
+        let start = app.windows.start().map(Message::Windows);
+        (app, Task::batch([open.discard(), start]))
+    }
+
+    /// Nothing open yet (the overlay window `overlay` hidden).
+    fn idle(overlay: window::Id) -> App {
+        App {
             overlay,
             capturing: false,
             frame: None,
@@ -219,6 +274,14 @@ impl App {
             stroke: Vec::new(),
             drawing: false,
             selection: None,
+            others: Vec::new(),
+            adding: false,
+            grab: None,
+            view: overlay::View::new(1, 1, Size::new(1.0, 1.0)),
+            pan: None,
+            word: None,
+            taps: 0,
+            ask: String::new(),
             opening: 0,
             first_draw: Cell::new(None),
             hiding: Hiding::No,
@@ -234,11 +297,9 @@ impl App {
             scan: None,
             translate: None,
             translates: 0,
-            cache: Arc::new(Cache::new(CACHE_SIZE)),
+            cache: Arc::new(Cache::new(8)),
             live: None,
-        };
-        let start = app.windows.start().map(Message::Windows);
-        (app, Task::batch([open.discard(), start]))
+        }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -325,6 +386,19 @@ impl App {
             Message::ToastDone => Task::none(),
             Message::Panel(id, msg) => self.on_panel(id, msg),
             Message::Run(action) => self.run(action),
+            Message::Tapped(id, at, origin, read) => self.on_tapped(id, at, origin, read),
+            Message::AskInput(text) => {
+                self.ask = text;
+                Task::none()
+            }
+            Message::AskSubmit => {
+                let question = std::mem::take(&mut self.ask);
+                let crop = (!question.trim().is_empty()).then(|| self.stacked());
+                match crop.flatten() {
+                    Some(crop) => self.open_panel(actions::Panel::Ask, crop, Some(question)),
+                    None => Task::none(),
+                }
+            }
             // Leave full-screen while still shown (on Windows, leaving it while hidden
             // restores a placement saved while visible: shows it again), then shrink.
             // open() resizes it back before showing.
@@ -417,6 +491,8 @@ impl App {
             at.elapsed().as_millis()
         );
         let size = shot.size;
+        let px = |v: f32| (v * shot.scale).round() as u32;
+        self.view = overlay::View::new(px(size.width), px(size.height), size);
         self.frame = Some(shot.image);
         self.scale = shot.scale;
         self.screen = size;
@@ -474,6 +550,36 @@ impl App {
         {
             return Task::none();
         }
+        // Zoom and pan move the view; pointer events go on in image px.
+        let event = match event {
+            overlay::Event::Zoom { at, notches } => {
+                if self.can_zoom() {
+                    self.view = self.view.zoomed(at, notches);
+                }
+                return Task::none();
+            }
+            overlay::Event::PanStart(at) => {
+                self.pan = self.can_zoom().then_some((at, self.view));
+                return Task::none();
+            }
+            overlay::Event::PanMove(at) => {
+                if let Some((from, start)) = self.pan {
+                    self.view = start.panned(at - from);
+                }
+                return Task::none();
+            }
+            overlay::Event::ZoomReset => {
+                self.view = self.view.reset();
+                return Task::none();
+            }
+            overlay::Event::Press { at, shift } => overlay::Event::Press {
+                at: self.view.to_image(at),
+                shift,
+            },
+            overlay::Event::Move(at) => overlay::Event::Move(self.view.to_image(at)),
+            overlay::Event::Hover(at) => overlay::Event::Hover(self.view.to_image(at)),
+            event => event,
+        };
         // Over a translation: a tap opens a block's word card, E / A are the
         // card's; a new selection leaves the translation.
         if let Some((id, session)) = &mut self.translate {
@@ -492,7 +598,7 @@ impl App {
                     return self.on_translate(id, translate::Msg::Ask);
                 }
                 overlay::Event::Key { .. } | overlay::Event::Enter => return Task::none(),
-                overlay::Event::Release if overlay::select(&self.stroke).is_none() => {
+                overlay::Event::Release if overlay::select(&self.stroke, 1.0).is_none() => {
                     let at = self.stroke.last().copied().unwrap_or(Point::ORIGIN);
                     session.click(Point::new(at.x * self.scale, at.y * self.scale));
                     self.drawing = false;
@@ -504,15 +610,28 @@ impl App {
             }
         }
         match event {
-            overlay::Event::Press(p) => {
+            overlay::Event::Press { at: p, shift } => {
                 // A new selection: the panel and the edits were about the old one.
                 self.panel = None;
                 self.edit = None;
                 self.scan = None;
+                self.taps = self.taps.wrapping_add(1); // a tap still reading is stale
+                if !shift && let Some(grab) = self.grab_at(p) {
+                    self.grab = Some(grab);
+                    return Task::none();
+                }
+                // Shift keeps the selection and adds the next one.
+                self.adding = shift && matches!(self.purpose, Purpose::Search);
+                match self.selection.take() {
+                    Some(sel) if self.adding => {
+                        self.others.push((sel, std::mem::take(&mut self.stroke)));
+                    }
+                    _ => self.others.clear(),
+                }
                 self.stroke = vec![p];
-                self.selection = None;
                 self.drawing = true;
             }
+            overlay::Event::Move(p) if self.grab.is_some() => self.drag_grab(p),
             overlay::Event::Move(p) if self.drawing => self.stroke.push(p),
             overlay::Event::Move(_) => {}
             overlay::Event::Hover(p) => {
@@ -528,28 +647,38 @@ impl App {
                     }
                 }
             }
+            overlay::Event::Release if let Some(grab) = self.grab.take() => {
+                return if grab.moved {
+                    self.selected()
+                } else {
+                    self.tap(grab.from) // a click on the selection
+                };
+            }
             overlay::Event::Release => {
                 self.drawing = false;
-                self.selection = overlay::select(&self.stroke);
-                let area = self.selection.map(|s| s.area);
-                if let Some(area) = area {
-                    self.regions.retain(|(origin, _)| *origin != self.origin);
-                    self.regions.push((self.origin, area));
+                let zoom = self.view.zoom();
+                self.selection = overlay::select(&self.stroke, zoom);
+                if let Purpose::Snip(snip) = &self.purpose {
+                    let area = self.selection.map(|s| s.area);
+                    let at = self.stroke.last().copied().unwrap_or(Point::ORIGIN);
+                    let next = snip.pick(area, at, self.screen);
+                    self.remember_region();
+                    return self.snip_next(next);
                 }
-                match &self.purpose {
-                    Purpose::Snip(snip) => {
-                        let at = self.stroke.last().copied().unwrap_or(Point::ORIGIN);
-                        let next = snip.pick(area, at, self.screen);
-                        return self.snip_next(next);
-                    }
-                    Purpose::Quick(quick, _) if area.is_some() => {
-                        let quick = *quick;
-                        return self.run_quick(quick);
-                    }
-                    Purpose::Search if let Some(area) = area => return self.scan(area),
-                    _ if area.is_none() => self.stroke.clear(),
-                    _ => {}
+                if std::mem::take(&mut self.adding)
+                    && self.selection.is_none()
+                    && let Some((sel, stroke)) = self.others.pop()
+                {
+                    // Nothing added (a tap, a line): the last one is current again.
+                    (self.selection, self.stroke) = (Some(sel), stroke);
+                    return Task::none();
                 }
+                if self.selection.is_some() {
+                    self.word = None;
+                } else if overlay::is_tap(&self.stroke, zoom) {
+                    return self.tap(self.stroke[0]);
+                }
+                return self.selected();
             }
             overlay::Event::Enter if matches!(self.purpose, Purpose::Search) => {
                 return self.run(actions::default_for(&config::current()));
@@ -560,6 +689,11 @@ impl App {
                 }
             }
             overlay::Event::Enter | overlay::Event::Key { .. } => {}
+            // mapped above
+            overlay::Event::Zoom { .. }
+            | overlay::Event::PanStart(_)
+            | overlay::Event::PanMove(_)
+            | overlay::Event::ZoomReset => {}
         }
         Task::none()
     }
@@ -611,9 +745,176 @@ impl App {
         .map(|()| Message::ToastDone)
     }
 
+    /// The frame can be zoomed: Circle to Search and quick actions (Snip, the
+    /// editor and a translation draw at 1x).
+    fn can_zoom(&self) -> bool {
+        matches!(self.purpose, Purpose::Search | Purpose::Quick(..))
+            && self.edit.is_none()
+            && self.translate.is_none()
+    }
+
+    /// The selection shows its handles (and can be resized / moved) while the
+    /// action bar is there.
+    fn handles(&self) -> bool {
+        matches!(self.purpose, Purpose::Search)
+            && !self.drawing
+            && self.panel.is_none()
+            && self.edit.is_none()
+            && self.translate.is_none()
+    }
+
+    /// A press at `p` (image px) on the selection: a corner handle resizes it,
+    /// anywhere inside moves it.
+    fn grab_at(&self, p: Point) -> Option<Grab> {
+        let sel = self.selection.filter(|_| self.handles())?;
+        let on_screen = self.view.rect_to_screen(sel.area);
+        let corner = overlay::handle_at(on_screen, self.view.to_screen(p));
+        (corner.is_some() || sel.area.contains(p)).then(|| Grab {
+            corner,
+            from: p,
+            start: (sel, self.stroke.clone()),
+            moved: false,
+        })
+    }
+
+    /// Resizes / moves the grabbed selection to the pointer at `p` (image px). A
+    /// freehand loop scales with its box; anything else becomes that box.
+    fn drag_grab(&mut self, p: Point) {
+        let Some(grab) = &mut self.grab else { return };
+        let zoom = self.view.zoom();
+        grab.moved |= !overlay::is_tap(&[grab.from, p], zoom);
+        if !grab.moved {
+            return;
+        }
+        let (start, stroke) = &grab.start;
+        let area = match grab.corner {
+            Some(corner) => overlay::resize(start.area, corner, p, overlay::MIN_SIDE / zoom),
+            None => start.area + (p - grab.from),
+        };
+        let kind = match start.kind {
+            overlay::Kind::Loop => overlay::Kind::Loop,
+            overlay::Kind::Drag | overlay::Kind::Word => overlay::Kind::Drag,
+        };
+        self.stroke = overlay::refit(stroke, start.area, area);
+        self.selection = Some(overlay::Selection { area, kind });
+        self.word = None; // the words are no longer what is selected
+    }
+
+    /// The selection on the shown monitor, for `last_region`.
+    fn remember_region(&mut self) {
+        if let Some(sel) = self.selection {
+            self.regions.retain(|(origin, _)| *origin != self.origin);
+            self.regions.push((self.origin, sel.area));
+        }
+    }
+
+    /// A selection was made (drawn, moved, a word tapped): remembered, and a
+    /// quick action waiting for it runs. No selection: the stroke goes.
+    fn selected(&mut self) -> Task<Message> {
+        if self.selection.is_none() {
+            self.stroke.clear();
+            return Task::none();
+        }
+        self.remember_region();
+        match (&self.purpose, self.selection) {
+            (Purpose::Quick(quick, _), _) => {
+                let quick = *quick;
+                self.run_quick(quick)
+            }
+            // A tapped word is text OCR just read: no QR code, not protected.
+            (Purpose::Search, Some(sel)) if sel.kind != overlay::Kind::Word => self.scan(sel.area),
+            _ => Task::none(),
+        }
+    }
+
+    /// A tap at `at` (image px): the word there becomes the selection. Lines read
+    /// for an earlier tap are reused (a tap on the same line makes a range);
+    /// otherwise OCR reads around the tap on a thread. Without the OCR models a
+    /// tap does nothing (it never asks to download them).
+    fn tap(&mut self, at: Point) -> Task<Message> {
+        if self.selection.is_none() {
+            self.stroke.clear(); // the tap's own dot
+        }
+        if let Some(word) = &mut self.word
+            && word.tap(at)
+        {
+            self.select_word();
+            return self.selected();
+        }
+        // A click on a selection keeps it unless a word is found there.
+        let Some(image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        }) = &self.frame
+        else {
+            return Task::none();
+        };
+        if !text::models_present() {
+            return Task::none();
+        }
+        let region = word::region(at, self.screen);
+        let (Some([x0, y0, ..]), Some(crop)) = (
+            actions::crop_bounds(*width, *height, self.scale, region),
+            actions::crop(pixels, *width, *height, self.scale, region),
+        ) else {
+            return Task::none();
+        };
+        self.taps = self.taps.wrapping_add(1);
+        let id = self.taps;
+        background(move |tx| {
+            let read = ocr::recognize_in_child(&crop.rgba, crop.width, crop.height);
+            let _ = tx.unbounded_send(read.map_err(|e| e.to_string()));
+        })
+        .map(move |read| Message::Tapped(id, at, [x0, y0], read))
+    }
+
+    /// OCR for tap `id` is back: the word under the tap is the selection.
+    fn on_tapped(
+        &mut self,
+        id: u32,
+        at: Point,
+        origin: [u32; 2],
+        read: Result<Vec<TextBlock>, String>,
+    ) -> Task<Message> {
+        if id != self.taps || self.frame.is_none() {
+            return Task::none(); // pressed again meanwhile, or closed
+        }
+        let blocks = match read {
+            Ok(blocks) => blocks,
+            Err(e) => {
+                eprintln!("[opencircle] reading the tapped word failed: {e}");
+                return Task::none();
+            }
+        };
+        let Some(picked) = word::Picked::new(word::lines(blocks, origin, self.scale), at) else {
+            return Task::none(); // no text there
+        };
+        self.word = Some(picked);
+        self.select_word();
+        self.selected()
+    }
+
+    /// The tapped word(s) as the (only) selection: a rounded highlight on their box.
+    fn select_word(&mut self) {
+        self.others.clear();
+        if let Some(word) = &self.word {
+            let area = word.area();
+            self.selection = Some(overlay::Selection {
+                area,
+                kind: overlay::Kind::Word,
+            });
+            self.stroke = vec![area.position(), area.position() + Vector::from(area.size())];
+        }
+    }
+
     /// Makes `area` the selection, drawn as a dragged rectangle.
     fn select(&mut self, area: Rectangle) {
-        self.selection = Some(overlay::Selection { area, drag: true });
+        self.selection = Some(overlay::Selection {
+            area,
+            kind: overlay::Kind::Drag,
+        });
         self.stroke = vec![area.position(), area.position() + Vector::from(area.size())];
     }
 
@@ -633,9 +934,25 @@ impl App {
         match action.run {
             Run::Edit => return self.open_editor(),
             Run::Translate => return self.start_translate(),
+            // A tapped word: Copy copies its text.
+            Run::Finish(_) if action.id == copy::ACTION.id && self.edit.is_none() => {
+                if let Some(text) = self.word.as_ref().map(word::Picked::text) {
+                    let closing = self.close();
+                    if let Err(e) = copy::text(text) {
+                        eprintln!("copy text failed: {e}");
+                    }
+                    return closing;
+                }
+            }
             _ => {}
         }
-        let Some(crop) = self.crop() else {
+        // Several selections: Ask AI and Text get each of them (stacked), the
+        // rest the box around all of them.
+        let all = matches!(
+            action.run,
+            Run::Panel(actions::Panel::Ask | actions::Panel::Text)
+        );
+        let Some(crop) = (if all { self.stacked() } else { self.crop() }) else {
             return Task::none();
         };
         match action.run {
@@ -691,6 +1008,7 @@ impl App {
     /// (then Back) are still there.
     fn open_editor(&mut self) -> Task<Message> {
         self.panel = None;
+        self.view = self.view.reset(); // the editor works at 1x
         if let Some(edit) = &mut self.edit {
             edit.reopen();
             return Task::none();
@@ -936,7 +1254,33 @@ impl App {
         else {
             return None;
         };
-        actions::crop(pixels, *width, *height, self.scale, selection.area)
+        let all = (self.others.iter()).fold(selection.area, |all, (s, _)| all.union(&s.area));
+        actions::crop(pixels, *width, *height, self.scale, all)
+    }
+
+    /// Every selection's crop, in the order made, stacked top to bottom on white
+    /// (one image: the Text panel reads them in that order, Ask AI sees them all).
+    /// One selection: just its crop.
+    // ponytail: one stacked image, not one image per selection: the Ask panel
+    // (panel.rs) sends one; give `ai::Message` several images when it can.
+    fn stacked(&self) -> Option<Crop> {
+        if self.others.is_empty() || self.edit.is_some() {
+            return self.crop();
+        }
+        let Some(image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        }) = &self.frame
+        else {
+            return None;
+        };
+        let areas = (self.others.iter().map(|(s, _)| s.area)).chain(self.selection.map(|s| s.area));
+        let crops: Vec<Crop> = areas
+            .filter_map(|area| actions::crop(pixels, *width, *height, self.scale, area))
+            .collect();
+        stack_crops(&crops)
     }
 
     /// Frees the frame and drops the panel (stopping its work); Lens pages go
@@ -950,6 +1294,12 @@ impl App {
         self.frame = None;
         self.stroke = Vec::new();
         self.selection = None;
+        self.others = Vec::new();
+        self.adding = false;
+        self.grab = None;
+        self.pan = None;
+        self.word = None;
+        self.ask = String::new();
         self.drawing = false;
         self.purpose = Purpose::Search;
         self.edit = None;
@@ -973,6 +1323,7 @@ impl App {
         };
         self.panel = None;
         self.edit = None;
+        self.view = self.view.reset(); // the translation is drawn at 1x
         let models = text::models_present();
         let (session, task) =
             translate::Session::start(frame.clone(), area, self.cache.clone(), models);
@@ -1106,6 +1457,9 @@ impl App {
         let overlay = overlay::Overlay {
             stroke: &self.stroke,
             selection: self.selection,
+            others: &self.others,
+            view: self.view,
+            handles: self.handles(),
             opening: self.opening,
             first_draw: &self.first_draw,
             hover: snip.is_some_and(|s| s.kind == snip::Kind::Window) && self.edit.is_none(),
@@ -1113,11 +1467,15 @@ impl App {
         };
         let translation = self.translate.as_ref().and_then(|(_, s)| s.image());
         // The frame is its own layer: iced draws a canvas's images above its shapes.
+        let mut shown = image(translation.unwrap_or(frame).clone())
+            .width(Fill)
+            .height(Fill)
+            .content_fit(ContentFit::Fill);
+        if let Some(part) = self.view.crop() {
+            shown = shown.crop(part); // zoomed in
+        }
         let mut layers = stack![
-            image(translation.unwrap_or(frame).clone())
-                .width(Fill)
-                .height(Fill)
-                .content_fit(ContentFit::Fill),
+            shown,
             Element::from(canvas(overlay).width(Fill).height(Fill)).map(Message::Overlay),
             border::view(
                 match snip {
@@ -1155,7 +1513,7 @@ impl App {
             snip.view().map(Message::Snip)
         } else if let Some(selection) = self.selection {
             match self.purpose {
-                Purpose::Search => {
+                Purpose::Search if !self.drawing => {
                     let chip = self
                         .scan
                         .as_ref()
@@ -1164,7 +1522,10 @@ impl App {
                             let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
                             bar::qr_chip(text, Message::Qr(qr::Act::Copy), open)
                         });
-                    bar::view(selection.area, self.screen, chip, Message::Run)
+                    // The action bar keeps clear of the ask bar at the bottom.
+                    let above = Size::new(self.screen.width, self.screen.height - ASK_ZONE);
+                    let area = self.view.rect_to_screen(selection.area);
+                    stack![bar::view(area, above, chip, Message::Run), self.ask_bar()].into()
                 }
                 _ => space().into(),
             }
@@ -1184,6 +1545,24 @@ impl App {
             );
         }
         layers.into()
+    }
+
+    /// "Ask about your selection…" at the bottom centre: Enter opens Ask AI with it.
+    fn ask_bar(&self) -> Element<'_, Message> {
+        let field = widgets::input(
+            ASK_INPUT,
+            "Ask about your selection…",
+            &self.ask,
+            Message::AskInput,
+            Message::AskSubmit,
+        );
+        // opaque: a press on it doesn't start a new selection.
+        let bar = opaque(widgets::surface(field.width(ASK_WIDTH)));
+        container(bar)
+            .center_x(Fill)
+            .align_bottom(Fill)
+            .padding(ASK_MARGIN)
+            .into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -1252,6 +1631,29 @@ fn save_test_shot(shot: &window::Screenshot) {
     }
 }
 
+/// `crops` one under the other, left-aligned, `STACK_GAP` px of white between
+/// them and right of the narrower ones. `None` for no crops.
+fn stack_crops(crops: &[Crop]) -> Option<Crop> {
+    let width = crops.iter().map(|c| c.width).max()?;
+    let gaps = STACK_GAP * (crops.len() as u32 - 1);
+    let height = crops.iter().map(|c| c.height).sum::<u32>() + gaps;
+    let mut rgba = vec![255; width as usize * height as usize * 4];
+    let mut y = 0;
+    for c in crops {
+        let row = c.width as usize * 4;
+        for (i, line) in c.rgba.chunks_exact(row).enumerate() {
+            let at = (y + i) * width as usize * 4;
+            rgba[at..at + row].copy_from_slice(line);
+        }
+        y += (c.height + STACK_GAP) as usize;
+    }
+    Some(Crop {
+        width,
+        height,
+        rgba,
+    })
+}
+
 /// Runs `work` on its own thread; what it sends arrives as messages, so the UI
 /// never waits on it. Dropping (aborting) the task disconnects `work`'s sender.
 fn background<T: Send + 'static>(
@@ -1276,33 +1678,7 @@ mod tests {
     use super::*;
 
     fn closing_app() -> App {
-        let mut app = App {
-            overlay: window::Id::unique(),
-            capturing: false,
-            frame: None,
-            scale: 1.0,
-            screen: Size::ZERO,
-            stroke: Vec::new(),
-            drawing: false,
-            selection: None,
-            opening: 0,
-            first_draw: Cell::new(None),
-            hiding: Hiding::No,
-            panel: None,
-            panels: 0,
-            lens_pages: Vec::new(),
-            windows: windows::Windows::default(),
-            purpose: Purpose::Search,
-            edit: None,
-            origin: Point::ORIGIN,
-            regions: Vec::new(),
-            toast: None,
-            scan: None,
-            translate: None,
-            translates: 0,
-            cache: Arc::new(Cache::new(8)),
-            live: None,
-        };
+        let mut app = App::idle(window::Id::unique());
         let _ = app.close();
         app
     }
@@ -1360,7 +1736,11 @@ mod tests {
         ));
         app.hiding = Hiding::No;
         app.screen = area.size();
-        app.selection = Some(overlay::Selection { area, drag: true });
+        app.view = overlay::View::new(frame.width, frame.height, app.screen);
+        app.selection = Some(overlay::Selection {
+            area,
+            kind: overlay::Kind::Drag,
+        });
         (app, area)
     }
 
@@ -1388,7 +1768,10 @@ mod tests {
             Point::new(700.0, 20.0),
             Size::new(code.width as f32, code.height as f32),
         );
-        app.selection = Some(overlay::Selection { area, drag: true });
+        app.selection = Some(overlay::Selection {
+            area,
+            kind: overlay::Kind::Drag,
+        });
         // The scan of a selection that has since moved on is dropped.
         let moved = Rectangle::with_size(area.size() * 0.5);
         let _ = app.update(Message::Scanned(moved, qr::scan(&frame)));
@@ -1402,7 +1785,7 @@ mod tests {
             texts.contains(&"QR code: https://example.com/menu".into()),
             "{texts:?}"
         );
-        assert!(texts.contains(&"Open link".into()));
+        assert!(texts.contains(&"Open link · example.com".into()));
         assert!(
             app.toast.is_none() && app.frame.is_some(),
             "nothing happened by itself"
@@ -1411,9 +1794,10 @@ mod tests {
         widgets::shot::save("overlay-qr-chip", app.view(app.overlay), size);
 
         // A new press forgets the old code.
-        let _ = app.update(Message::Overlay(overlay::Event::Press(Point::new(
-            5.0, 5.0,
-        ))));
+        let _ = app.update(Message::Overlay(overlay::Event::Press {
+            at: Point::new(5.0, 5.0),
+            shift: false,
+        }));
         assert!(app.scan.is_none());
     }
 
@@ -1439,5 +1823,274 @@ mod tests {
         let (mut app, area) = selected_app(&grey);
         let _ = app.update(Message::Scanned(area, qr::scan(&app.crop().unwrap())));
         assert!(!overlay_texts(&app).contains(&PROTECTED.to_string()));
+    }
+
+    /// An open overlay on a `w` x `h` frame at `scale`; pixel (x, y) is
+    /// [x % 256, y % 256, x / 256, 255].
+    fn open_app(w: u32, h: u32, scale: f32) -> App {
+        let mut app = App::idle(window::Id::unique());
+        let rgba: Vec<u8> = (0..h)
+            .flat_map(|y| (0..w).flat_map(move |x| [x as u8, y as u8, (x >> 8) as u8, 255]))
+            .collect();
+        app.frame = Some(image::Handle::from_rgba(w, h, rgba));
+        app.scale = scale;
+        app.screen = Size::new(w as f32 / scale, h as f32 / scale);
+        app.view = overlay::View::new(w, h, app.screen);
+        app
+    }
+
+    fn event(app: &mut App, e: overlay::Event) {
+        let _ = app.on_overlay(e);
+    }
+
+    /// A press-drag-release on screen from `a` to `b`.
+    fn drag(app: &mut App, a: Point, b: Point, shift: bool) {
+        event(app, overlay::Event::Press { at: a, shift });
+        for i in 1..=10 {
+            event(app, overlay::Event::Move(a + (b - a) * (i as f32 / 10.0)));
+        }
+        event(app, overlay::Event::Release);
+    }
+
+    fn ring(cx: f32, cy: f32, r: f32) -> Vec<Point> {
+        (0..=32)
+            .map(|i| {
+                let a = i as f32 / 32.0 * std::f32::consts::TAU;
+                Point::new(cx + r * a.cos(), cy + r * a.sin())
+            })
+            .collect()
+    }
+
+    fn circle(app: &mut App, c: Point, r: f32, shift: bool) {
+        let ring = ring(c.x, c.y, r);
+        event(app, overlay::Event::Press { at: ring[0], shift });
+        ring[1..]
+            .iter()
+            .for_each(|&p| event(app, overlay::Event::Move(p)));
+        event(app, overlay::Event::Release);
+    }
+
+    fn close_to(a: Rectangle, b: Rectangle) -> bool {
+        [
+            (a.x, b.x),
+            (a.y, b.y),
+            (a.width, b.width),
+            (a.height, b.height),
+        ]
+        .iter()
+        .all(|(p, q)| (p - q).abs() < 0.01)
+    }
+
+    #[test]
+    fn handles_resize_and_moving_drags_at_any_zoom_and_scale() {
+        // scale 2 (a 400x300 overlay on 800x600 pixels), zoomed in 1.5625x
+        let mut app = open_app(800, 600, 2.0);
+        event(
+            &mut app,
+            overlay::Event::Zoom {
+                at: Point::new(200.0, 150.0),
+                notches: 2.0,
+            },
+        );
+        let v = app.view;
+        assert!(v.zoom() > 1.5);
+        drag(
+            &mut app,
+            Point::new(100.0, 100.0),
+            Point::new(200.0, 180.0),
+            false,
+        );
+        let sel = app.selection.expect("a rectangle");
+        assert!(
+            app.selected().units() > 0,
+            "a drawn selection is scanned (QR)"
+        );
+        assert_eq!(sel.kind, overlay::Kind::Drag);
+        let on_screen = v.rect_to_screen(sel.area);
+        let want = Rectangle::new(Point::new(100.0, 100.0), Size::new(100.0, 80.0));
+        assert!(close_to(on_screen, want), "{on_screen:?}");
+        assert!(app.handles());
+
+        // the bottom-right handle, 20 px right and 10 down on screen
+        drag(
+            &mut app,
+            Point::new(200.0, 180.0),
+            Point::new(220.0, 190.0),
+            false,
+        );
+        let resized = v.rect_to_screen(app.selection.unwrap().area);
+        let want = Rectangle::new(Point::new(100.0, 100.0), Size::new(120.0, 90.0));
+        assert!(close_to(resized, want), "{resized:?}");
+
+        // drag inside: it moves, same size
+        drag(
+            &mut app,
+            Point::new(150.0, 150.0),
+            Point::new(130.0, 160.0),
+            false,
+        );
+        let moved = v.rect_to_screen(app.selection.unwrap().area);
+        let want = Rectangle::new(Point::new(80.0, 110.0), Size::new(120.0, 90.0));
+        assert!(close_to(moved, want), "{moved:?}");
+        // the crop is what is under it: image px x 2, the top-left pixel included
+        let crop = app.crop().unwrap();
+        let area = app.selection.unwrap().area;
+        let first = [area.x * 2.0, area.y * 2.0].map(|v| v.floor() as u32);
+        assert_eq!(crop.rgba[..2], [first[0] as u8, first[1] as u8]);
+        assert!((crop.width as f32 - area.width * 2.0).abs() <= 1.0);
+
+        // a freehand loop resized by a corner scales its stroke with the box
+        circle(&mut app, Point::new(300.0, 150.0), 40.0, false);
+        let lp = app.selection.unwrap();
+        assert_eq!(lp.kind, overlay::Kind::Loop);
+        let box_ = v.rect_to_screen(lp.area);
+        let corner = Point::new(box_.x, box_.y);
+        drag(&mut app, corner, corner - Vector::new(40.0, 0.0), false);
+        let grown = app.selection.unwrap();
+        assert_eq!(grown.kind, overlay::Kind::Loop, "still the drawn shape");
+        assert!((grown.area.width - lp.area.width * 1.5).abs() < 0.5);
+        let xs = app.stroke.iter().map(|p| p.x);
+        let min = xs.fold(f32::MAX, f32::min);
+        assert!(
+            (min - grown.area.x).abs() < 0.01,
+            "the stroke fills the new box"
+        );
+
+        // double right-click: back to 1x
+        event(&mut app, overlay::Event::ZoomReset);
+        assert_eq!(app.view.zoom(), 1.0);
+    }
+
+    #[test]
+    fn shift_adds_selections_and_actions_get_all_of_them() {
+        let mut app = open_app(400, 300, 1.0);
+        circle(&mut app, Point::new(60.0, 60.0), 30.0, false);
+        circle(&mut app, Point::new(300.0, 200.0), 40.0, true);
+        assert_eq!(app.others.len(), 1, "two selections");
+        // a Shift tap adds nothing and keeps both
+        drag(
+            &mut app,
+            Point::new(10.0, 290.0),
+            Point::new(11.0, 290.0),
+            true,
+        );
+        assert_eq!(app.others.len(), 1);
+        assert!(app.selection.is_some());
+        let (a, b) = (app.others[0].0.area, app.selection.unwrap().area);
+
+        // Lens / Copy: the box around all of them
+        let union = app.crop().unwrap();
+        assert_eq!(
+            (union.width, union.height),
+            (
+                (b.x + b.width).ceil() as u32 - a.x.floor() as u32,
+                (b.y + b.height).ceil() as u32 - a.y.floor() as u32
+            )
+        );
+        // Ask AI / Text: each one, stacked in the order made
+        let stacked = app.stacked().unwrap();
+        let (ca, cb) = (
+            actions::crop(&pixels(&app), 400, 300, 1.0, a).unwrap(),
+            actions::crop(&pixels(&app), 400, 300, 1.0, b).unwrap(),
+        );
+        assert_eq!(stacked.width, ca.width.max(cb.width));
+        assert_eq!(stacked.height, ca.height + STACK_GAP + cb.height);
+        assert_eq!(stacked.rgba[..4], ca.rgba[..4]);
+        let second = (ca.height + STACK_GAP) as usize * stacked.width as usize * 4;
+        assert_eq!(stacked.rgba[second..second + 4], cb.rgba[..4]);
+        assert_eq!(
+            stacked.rgba[(ca.width as usize) * 4..][..4],
+            [255; 4],
+            "white beside"
+        );
+
+        // a new selection without Shift starts over
+        circle(&mut app, Point::new(200.0, 100.0), 30.0, false);
+        assert!(app.others.is_empty());
+        assert_eq!(app.stacked().unwrap().height, app.crop().unwrap().height);
+        let _ = app.close();
+        assert!(app.others.is_empty() && app.word.is_none() && app.ask.is_empty());
+    }
+
+    fn pixels(app: &App) -> Vec<u8> {
+        match &app.frame {
+            Some(image::Handle::Rgba { pixels, .. }) => pixels.to_vec(),
+            _ => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_tapped_word_is_the_selection_and_its_range_grows() {
+        let mut app = open_app(400, 300, 2.0);
+        // OCR read one line in a crop at frame px (100, 40): "Press any key", 10 image px a char
+        let block = TextBlock {
+            text: "Press any key".into(),
+            bounds: [20.0, 20.0, 260.0, 40.0],
+            confidence: 1.0,
+        };
+        app.taps = 7;
+        let at = Point::new(135.0, 40.0); // image px: on "any" (image x 120..150)
+        let stale = app.on_tapped(6, at, [100, 40], Ok(vec![block.clone()]));
+        assert!(stale.units() == 0 && app.selection.is_none(), "an old tap");
+        let scan = app.on_tapped(7, at, [100, 40], Ok(vec![block]));
+        assert_eq!(scan.units(), 0, "a word is not scanned for a QR code");
+        let sel = app.selection.expect("the word");
+        assert_eq!(sel.kind, overlay::Kind::Word);
+        assert_eq!(app.word.as_ref().unwrap().text(), "any");
+        // a second tap on the line (no OCR: the lines are kept) makes a range
+        let key = app.view.to_screen(Point::new(175.0, 40.0));
+        drag(&mut app, key, key, false);
+        assert_eq!(app.word.as_ref().unwrap().text(), "any key");
+        assert!(app.selection.unwrap().area.width > sel.area.width);
+        // resizing turns it into a plain box: no longer the words
+        let r = app.view.rect_to_screen(app.selection.unwrap().area);
+        let corner = Point::new(r.x + r.width, r.y + r.height);
+        drag(&mut app, corner, corner + Vector::new(30.0, 0.0), false);
+        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Drag);
+        assert!(app.word.is_none());
+    }
+
+    #[test]
+    fn the_ask_bar_shows_with_a_selection_and_opens_ask_ai() {
+        let mut app = open_app(400, 300, 1.0);
+        drag(
+            &mut app,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 120.0),
+            false,
+        );
+        let _ = app.update(Message::AskInput("what is this?".into()));
+        let texts = widgets::shot::texts(app.view(app.overlay));
+        assert!(texts.contains(&"what is this?".to_string()), "{texts:?}");
+        let _ = app.update(Message::AskInput("   ".into()));
+        let _ = app.update(Message::AskSubmit);
+        assert!(app.panel.is_none(), "a blank question opens nothing");
+        let _ = app.update(Message::AskInput("what is this?".into()));
+        let _ = app.update(Message::AskSubmit);
+        let (_, panel) = app.panel.as_ref().expect("Ask AI opens");
+        assert_eq!(panel.kind(), actions::Panel::Ask);
+        assert!(app.ask.is_empty());
+    }
+
+    #[test]
+    fn stacked_crops_keep_their_pixels() {
+        let red = Crop {
+            width: 2,
+            height: 1,
+            rgba: vec![255, 0, 0, 255, 255, 0, 0, 255],
+        };
+        let blue = Crop {
+            width: 1,
+            height: 2,
+            rgba: vec![0, 0, 255, 255, 0, 0, 255, 255],
+        };
+        let s = stack_crops(&[red, blue]).unwrap();
+        assert_eq!((s.width, s.height), (2, 1 + STACK_GAP + 2));
+        let px = |x: u32, y: u32| &s.rgba[((y * 2 + x) * 4) as usize..][..4];
+        assert_eq!(px(1, 0), [255, 0, 0, 255]);
+        assert_eq!(px(0, 1), [255; 4], "the gap");
+        assert_eq!(px(0, 1 + STACK_GAP), [0, 0, 255, 255]);
+        assert_eq!(px(1, 1 + STACK_GAP), [255; 4], "beside the narrow one");
+        assert!(stack_crops(&[]).is_none());
     }
 }
