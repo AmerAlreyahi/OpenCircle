@@ -10,6 +10,8 @@
 //! - Translate: `t`, JSON `[target, [text...]]`; reply `[text...]` (same length).
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use super::session::{self, MAX_REQUEST, Session};
 use super::{Engine, OcrError, TextBlock, check_image, models_dir};
@@ -21,6 +23,8 @@ const OCR: u8 = b'o';
 const TRANSLATE: u8 = b't';
 /// 1 MB of text is far beyond any screen.
 const MAX_TEXT: usize = 1 << 20;
+/// Idle this long, the helper gives its freed memory back to the OS.
+const IDLE_TRIM: Duration = Duration::from_secs(2);
 
 /// Reads the text lines of an RGBA image in the helper. The models must
 /// already be present (`ensure_models`); the helper never downloads.
@@ -103,6 +107,7 @@ fn parse<T: serde::de::DeserializeOwned>(reply: Vec<u8>) -> Result<T, OcrError> 
 /// A broken frame ends it (the app then starts another).
 pub fn worker_main() -> ExitCode {
     let (mut input, mut output) = (std::io::stdin().lock(), std::io::stdout().lock());
+    let idle = heap_keeper();
     let mut engine = None;
     let mut translator = None;
     loop {
@@ -111,15 +116,50 @@ pub fn worker_main() -> ExitCode {
             Ok(None) => return ExitCode::SUCCESS,
             Err(_) => return ExitCode::FAILURE,
         };
+        *idle.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let reply = match request.split_first() {
             Some((&OCR, body)) => json(recognize_here(body, &mut engine)),
             Some((&TRANSLATE, body)) => json(translate_here(body, &mut translator)),
             _ => json::<()>(Err(OcrError::BadImage("unknown request".into()))),
         };
+        drop(request);
         if session::write_frame(&mut output, id, &[&reply]).is_err() {
             return ExitCode::FAILURE;
         }
+        *idle.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
     }
+}
+
+/// glibc: freed memory stays in the heap while requests come (ORT runs
+/// without its arena, and a translation's ~200 MB would otherwise be mapped
+/// and zeroed again on every run, 4x slower), and goes back to the OS once
+/// the helper has been idle for `IDLE_TRIM` (the next live step then costs
+/// ~45 ms more). The serve loop sets the mark: `Some` = idle since then.
+// ponytail: a thread that wakes 4x a second; a condvar if that ever shows.
+fn heap_keeper() -> Arc<Mutex<Option<Instant>>> {
+    let idle = Arc::new(Mutex::new(None::<Instant>));
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        // SAFETY: allocator settings only; no memory is touched.
+        unsafe {
+            libc::mallopt(libc::M_MMAP_THRESHOLD, 256 << 20);
+            libc::mallopt(libc::M_TRIM_THRESHOLD, 1 << 30);
+        }
+        let mark = idle.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_millis(250));
+                let mut since = mark.lock().unwrap_or_else(|e| e.into_inner());
+                if since.is_some_and(|t| t.elapsed() >= IDLE_TRIM) {
+                    *since = None;
+                    drop(since);
+                    // SAFETY: malloc_trim only releases free heap pages.
+                    unsafe { libc::malloc_trim(0) };
+                }
+            }
+        });
+    }
+    idle
 }
 
 fn json<T: serde::Serialize>(reply: Result<T, OcrError>) -> Vec<u8> {

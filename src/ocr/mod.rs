@@ -17,7 +17,7 @@ use std::path::Path;
 
 use image::RgbImage;
 use image::imageops::FilterType::Triangle;
-use oar_ocr::core::config::OrtSessionConfig;
+use oar_ocr::core::config::{OrtExecutionProvider, OrtSessionConfig};
 use oar_ocr::core::traits::OrtConfigurable;
 use oar_ocr::domain::tasks::TextDetectionConfig;
 use oar_ocr::predictors::{TextDetectionPredictor, TextRecognitionPredictor};
@@ -129,7 +129,11 @@ impl Engine {
         let ort = OrtSessionConfig::new()
             .with_memory_pattern(false)
             .add_config_entry("session.intra_op.allow_spinning", "0")
-            .add_config_entry("session.inter_op.allow_spinning", "0");
+            .add_config_entry("session.inter_op.allow_spinning", "0")
+            // The CPU EP registered as ours = no ORT memory arena: a warm
+            // helper kept every capture's peak (~210 MB more after one 1080p
+            // read) for about the same speed.
+            .with_execution_providers(vec![OrtExecutionProvider::CPU]);
         let det = TextDetectionPredictor::builder()
             .with_config(TextDetectionConfig {
                 score_threshold: 0.3,

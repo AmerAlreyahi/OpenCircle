@@ -513,28 +513,30 @@ mod tests {
         println!("AFTER (one warm child)");
         println!("  tap a word (the first is cold): {:.0?}", taps(&call, 6));
         let pid = warm.lock().unwrap().pid().unwrap();
+        let rss = |what: &str| {
+            let (now, peak) = (mb(pid, "VmRSS"), mb(pid, "VmHWM"));
+            println!("  helper RSS {what}: {now} MB (peak {peak} MB)");
+        };
+        rss("after the taps");
+        let t = Instant::now();
+        super::super::worker::recognize_via(call, &frame, 1920, 1080).unwrap();
+        println!("  1080p OCR, warm: {:.0?}", t.elapsed());
+        rss("after a 1080p OCR");
+        for run in ["MT cold", "all warm", "all warm"] {
+            println!(
+                "  live, {run}: {}",
+                live_steps(&Via(call), &frame, &changed)
+            );
+            rss("after it");
+        }
+        std::thread::sleep(Duration::from_secs(3)); // past the helper's idle trim
+        rss("idle 3 s");
+        assert!(mb(pid, "VmRSS") < 400, "idle helper gave its memory back");
         println!(
-            "  helper RSS, OCR loaded: {} MB (peak {} MB)",
-            mb(pid, "VmRSS"),
-            mb(pid, "VmHWM")
-        );
-        println!(
-            "  live, MT cold: {}",
+            "  live, after idle: {}",
             live_steps(&Via(call), &frame, &changed)
         );
-        println!(
-            "  live, all warm: {}",
-            live_steps(&Via(call), &frame, &changed)
-        );
-        println!(
-            "  live, all warm: {}",
-            live_steps(&Via(call), &frame, &changed)
-        );
-        println!(
-            "  helper RSS, OCR + MT: {} MB (peak {} MB)",
-            mb(pid, "VmRSS"),
-            mb(pid, "VmHWM")
-        );
+        rss("after it");
         assert_eq!(
             warm.lock().unwrap().pid(),
             Some(pid),

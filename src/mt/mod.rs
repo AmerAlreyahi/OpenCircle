@@ -11,6 +11,7 @@ mod unigram;
 
 use std::path::{Path, PathBuf};
 
+use ort::session::builder::SessionBuilder;
 use ort::session::{Session, SessionInputValue};
 use ort::value::{DynValue, Tensor};
 
@@ -171,6 +172,18 @@ pub fn translate(texts: &[String], target: &str) -> Result<Vec<String>, OcrError
     ocr::translate_in_child(texts, target)
 }
 
+/// glibc: no ORT memory arena (~350 MB less in a warm helper at the same
+/// speed). Each run allocates ~200 MB; the helper's malloc settings
+/// (`ocr::worker`) keep that memory between runs instead of the arena.
+/// Elsewhere (not measured; without those settings a run was 4x slower) the
+/// arena stays.
+fn without_arena(b: SessionBuilder) -> ort::Result<SessionBuilder> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    return (b.with_execution_providers([ort::ep::CPU::default().build()])).map_err(Into::into);
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+    Ok(b)
+}
+
 fn engine_err(e: impl std::fmt::Display) -> OcrError {
     OcrError::Engine(e.to_string())
 }
@@ -198,6 +211,7 @@ impl Translator {
                 .and_then(|b| b.with_memory_pattern(false).map_err(Into::into))
                 .and_then(|b| b.with_intra_threads(THREADS).map_err(Into::into))
                 .and_then(|b| b.with_intra_op_spinning(false).map_err(Into::into))
+                .and_then(without_arena)
                 .and_then(|mut b| b.commit_from_file(dir.join(f.name)))
                 .map_err(engine_err)
         };
