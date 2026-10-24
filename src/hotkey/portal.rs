@@ -10,9 +10,10 @@ use std::time::{Duration, Instant};
 use gtk::gio::{Cancellable, DBusCallFlags, DBusConnection, DBusSignalFlags};
 use gtk::glib::{self, ToVariant, Variant, VariantDict, variant::ObjectPath};
 
-use super::{Binding, bindings, route_id};
+use super::{Binding, bindings, desktop_spelling, managed, route_id, set_desktop_keys};
 use crate::Triggers;
 use crate::capture::portal::{DESKTOP, PATH, handle_path, request, session_bus};
+use crate::config::parse_shortcut;
 
 const IFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
 
@@ -45,7 +46,8 @@ pub fn bind(tx: Triggers) {
 /// After a config change: opens a fresh session with the new shortcut list. (The portal
 /// can't unbind or change a bound shortcut; a new session is the one way that works on
 /// every desktop.) Before the portal is up, the new list is simply picked up when it binds.
-// ponytail: not tested against a real portal (none on the dev machine); try KDE and GNOME.
+/// A desktop may keep the key it stored for a shortcut id (GNOME does): the answer
+/// says which key is live, and Settings shows it.
 pub fn rebind() {
     let ctx = WAKE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if let Some(ctx) = ctx {
@@ -53,6 +55,7 @@ pub fn rebind() {
             PORTAL.with_borrow_mut(|portal| {
                 let Some(p) = portal else { return };
                 p.generation += 1;
+                set_desktop_keys(Vec::new()); // unknown until the desktop answers
                 let old = p.session.borrow().clone();
                 close(&p.conn, &old);
                 match open_session(&p.conn, p.generation) {
@@ -65,20 +68,8 @@ pub fn rebind() {
 }
 
 fn serve(tx: Triggers) -> Result<(), String> {
+    // Also registers our app id (GNOME needs it, with its desktop file).
     let conn = session_bus()?;
-    // Host (non-Flatpak) apps have no app id unless they register one first; some
-    // desktops refuse GlobalShortcuts without it. Older portals lack Registry: fine.
-    let _ = conn.call_sync(
-        Some(DESKTOP),
-        PATH,
-        "org.freedesktop.host.portal.Registry",
-        "Register",
-        Some(&("com.opencircle.app", VariantDict::new(None)).to_variant()),
-        None,
-        DBusCallFlags::NONE,
-        -1,
-        None::<&Cancellable>,
-    );
 
     let session = Rc::new(RefCell::new(open_session(&conn, 0)?));
 
@@ -99,6 +90,25 @@ fn serve(tx: Triggers) -> Result<(), String> {
                     let trigger = id.and_then(|id| route_id(&bindings(), &id, Instant::now()));
                     if let Some(trigger) = trigger {
                         let _ = tx.unbounded_send(trigger);
+                    }
+                }
+            },
+        );
+        // The user changed a key in the desktop's own settings.
+        let _changed = conn.signal_subscribe(
+            Some(DESKTOP),
+            Some(IFACE),
+            Some("ShortcutsChanged"),
+            Some(PATH),
+            None,
+            DBusSignalFlags::NONE,
+            {
+                let session = session.clone();
+                move |_, _, _, _, _, params| {
+                    let ours = params.n_children() == 2
+                        && params.child_value(0).str() == Some(session.borrow().as_str());
+                    if ours {
+                        record_keys(&bindings(), &params.child_value(1));
                     }
                 }
             },
@@ -155,21 +165,40 @@ fn open_session(conn: &DBusConnection, generation: u32) -> Result<String, String
             (path, shortcuts, "", options).to_variant()
         },
     )?;
-    let list = bound.lookup_value("shortcuts", None);
-    for b in &planned {
-        match list.as_ref().and_then(|list| trigger_of(list, &b.id)) {
-            Some(keys) => eprintln!(
-                "[opencircle] global shortcut {keys}: {} (desktop portal)",
-                b.description
-            ),
-            None => eprintln!(
-                "[opencircle] \"{}\" has no key assigned by the desktop; set one in its \
-                 shortcut settings",
-                b.description
-            ),
-        }
-    }
+    let none = Vec::<(String, VariantDict)>::new().to_variant();
+    let list = bound.lookup_value("shortcuts", None).unwrap_or(none);
+    record_keys(&planned, &list);
     Ok(session)
+}
+
+/// Keeps and logs what the desktop bound (`a(sa{sv})`) per planned shortcut. The
+/// desktop may keep a key chosen earlier over our preferred one: then say so.
+fn record_keys(planned: &[Binding], list: &Variant) {
+    let keys: Vec<(String, Option<String>)> = planned
+        .iter()
+        .map(|b| (b.id.clone(), trigger_of(list, &b.id)))
+        .collect();
+    for (b, (_, keys)) in planned.iter().zip(&keys) {
+        let keys = keys.as_deref().map(desktop_spelling);
+        let line = match keys {
+            None => format!(
+                "\"{}\" has no key: the desktop assigned none. {}",
+                b.description,
+                managed()
+            ),
+            Some(keys) if parse_shortcut(&keys).ok() == Some(b.hotkey) => {
+                format!("global shortcut {keys}: {} (desktop portal)", b.description)
+            }
+            Some(keys) => format!(
+                "\"{}\" stays on {keys}, not {} as set in OpenCircle. {}",
+                b.description,
+                b.shortcut,
+                managed()
+            ),
+        };
+        eprintln!("[opencircle] {line}");
+    }
+    set_desktop_keys(keys);
 }
 
 fn shortcut_options(b: &Binding) -> VariantDict {

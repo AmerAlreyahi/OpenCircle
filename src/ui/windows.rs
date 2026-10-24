@@ -14,12 +14,15 @@ use crate::config::{self, Config, Theme};
 pub enum Kind {
     Settings,
     Onboarding,
+    /// Wayland, after a refused capture: "OpenCircle needs screenshot permission".
+    Permission,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Settings(settings::Message),
     Onboarding(onboarding::Message),
+    Permission(onboarding::Message),
     /// Any window closed (ours are forgotten, the overlay never closes).
     Closed(window::Id),
     /// The OS light/dark mode, at start and on every change.
@@ -37,6 +40,7 @@ pub enum Msg {
 pub struct Windows {
     settings: Option<(window::Id, settings::State)>,
     onboarding: Option<(window::Id, onboarding::State)>,
+    permission: Option<(window::Id, onboarding::Access)>,
     pins: Vec<Pin>,
 }
 
@@ -205,6 +209,7 @@ impl Windows {
         match kind {
             Kind::Settings => self.settings.as_ref().map(|(id, _)| *id),
             Kind::Onboarding => self.onboarding.as_ref().map(|(id, _)| *id),
+            Kind::Permission => self.permission.as_ref().map(|(id, _)| *id),
         }
     }
 
@@ -213,14 +218,14 @@ impl Windows {
     pub fn pin(&mut self, crop: Crop, at: Option<Point>, scale: f32) -> Task<Msg> {
         let base = Size::new(crop.width as f32, crop.height as f32) * (1.0 / scale.max(0.1));
         let zoom = fit_zoom(base);
-        let (id, open) = window::open(window::Settings {
+        let (id, open) = window::open(app_window(window::Settings {
             size: base * zoom,
             position: at.map_or(Position::Centered, Position::Specific),
             decorations: false,
             resizable: false,
             level: Level::AlwaysOnTop,
             ..window::Settings::default()
-        });
+        }));
         eprintln!("[opencircle] pinned {}x{}", crop.width, crop.height);
         self.pins.push(Pin {
             id,
@@ -243,8 +248,9 @@ impl Windows {
         match kind {
             Kind::Settings => self.settings = Some((id, settings::State::open())),
             Kind::Onboarding => self.onboarding = Some((id, onboarding::State::open())),
+            Kind::Permission => self.permission = Some((id, onboarding::Access::Unasked)),
         }
-        open.discard()
+        open.discard().chain(window::gain_focus(id))
     }
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
@@ -266,19 +272,41 @@ impl Windows {
             }
             Msg::Pin(id, msg) => return self.on_pin(id, msg),
             Msg::Onboarding(msg) => {
-                if let Some((id, state)) = &mut self.onboarding
-                    && let onboarding::Outcome::Finished(cfg) = onboarding::update(state, msg)
-                {
+                if let Some((id, state)) = &mut self.onboarding {
+                    match onboarding::update(state, msg) {
+                        onboarding::Outcome::Finished(cfg) => {
+                            let id = *id;
+                            self.onboarding = None;
+                            apply(cfg);
+                            return window::close(id);
+                        }
+                        onboarding::Outcome::AskScreenshot => {
+                            return ask_screenshot(Msg::Onboarding);
+                        }
+                        onboarding::Outcome::None => {}
+                    }
+                }
+            }
+            Msg::Permission(msg) => {
+                if let Some((id, access)) = &mut self.permission {
                     let id = *id;
-                    self.onboarding = None;
-                    apply(cfg);
-                    return window::close(id);
+                    if onboarding::ask(access, msg) == onboarding::Outcome::AskScreenshot {
+                        return ask_screenshot(Msg::Permission);
+                    }
+                    if *access == onboarding::Access::Allowed {
+                        self.permission = None;
+                        return window::close(id);
+                    }
                 }
             }
             Msg::Closed(id) => {
                 self.pins.retain(|p| p.id != id); // the OS closed it: free the pixels
+                if self.id(Kind::Permission) == Some(id) {
+                    self.permission = None;
+                }
                 let ours =
                     self.id(Kind::Settings) == Some(id) || self.id(Kind::Onboarding) == Some(id);
+
                 if self.id(Kind::Settings) == Some(id) {
                     self.settings = None;
                 }
@@ -345,12 +373,20 @@ impl Windows {
         {
             return Some(onboarding::view(state).map(Msg::Onboarding));
         }
+        if let Some((id, access)) = &self.permission
+            && *id == window
+        {
+            return Some(onboarding::prompt_view(access).map(Msg::Permission));
+        }
         None
     }
 
     pub fn title(&self, window: window::Id) -> &'static str {
         if self.pins.iter().any(|p| p.id == window) {
             return "OpenCircle pin";
+        }
+        if self.id(Kind::Permission) == Some(window) {
+            return "OpenCircle needs screenshot permission";
         }
         match (self.id(Kind::Settings), self.id(Kind::Onboarding)) {
             (Some(id), _) if id == window => "OpenCircle Settings",
@@ -454,14 +490,44 @@ fn window_settings(kind: Kind) -> window::Settings {
     let (size, min_size, resizable) = match kind {
         Kind::Settings => (settings::WINDOW_SIZE, Some(Size::new(720.0, 520.0)), true),
         Kind::Onboarding => (onboarding::WINDOW_SIZE, None, false),
+        Kind::Permission => (onboarding::PROMPT_SIZE, None, false),
     };
-    window::Settings {
+    app_window(window::Settings {
         size,
         min_size,
         resizable,
         position: Position::Centered,
         ..window::Settings::default()
-    }
+    })
+}
+
+/// `settings` with our app id (Linux): the desktop ties the window to
+/// `APP_ID.desktop`, and GNOME asks for screenshot permission only for the app it
+/// sees in front.
+pub fn app_window(settings: window::Settings) -> window::Settings {
+    #[cfg(target_os = "linux")]
+    return window::Settings {
+        platform_specific: window::settings::PlatformSpecific {
+            application_id: crate::capture::portal::APP_ID.into(),
+            ..Default::default()
+        },
+        ..settings
+    };
+    #[cfg(not(target_os = "linux"))]
+    settings
+}
+
+/// One screenshot request on its own thread (Wayland), sent while the window asking
+/// has the focus; the answer comes back as `Allowed` to `to`.
+fn ask_screenshot(to: fn(onboarding::Message) -> Msg) -> Task<Msg> {
+    super::background(|tx| {
+        #[cfg(target_os = "linux")]
+        let answer = crate::capture::portal::allow();
+        #[cfg(not(target_os = "linux"))]
+        let answer = Ok(());
+        let _ = tx.unbounded_send(answer);
+    })
+    .map(move |answer| to(onboarding::Message::Allowed(answer)))
 }
 
 fn test_hook() -> Task<Msg> {
@@ -566,6 +632,22 @@ mod tests {
         assert!(windows.view(id).is_some());
         assert!(windows.view(window::Id::unique()).is_none());
         assert_eq!(windows.id(Kind::Onboarding), None);
+    }
+
+    #[test]
+    fn the_permission_prompt_closes_once_allowed() {
+        let mut windows = Windows::default();
+        let _ = windows.open(Kind::Permission);
+        let id = windows.id(Kind::Permission).unwrap();
+        assert_eq!(windows.title(id), "OpenCircle needs screenshot permission");
+        assert!(windows.view(id).is_some());
+        let _ = windows.update(Msg::Permission(onboarding::Message::Allow));
+        let refused = Err("refused by the desktop".to_string());
+        let _ = windows.update(Msg::Permission(onboarding::Message::Allowed(refused)));
+        assert_eq!(windows.id(Kind::Permission), Some(id), "stays to try again");
+        let _ = windows.update(Msg::Permission(onboarding::Message::Allow));
+        let _ = windows.update(Msg::Permission(onboarding::Message::Allowed(Ok(()))));
+        assert_eq!(windows.id(Kind::Permission), None);
     }
 
     #[test]

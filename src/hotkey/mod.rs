@@ -170,6 +170,113 @@ fn bindings() -> MutexGuard<'static, Vec<Binding>> {
     BINDINGS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Wayland: the key the desktop actually bound per binding id (`None` = no key), from
+/// the portal's last answer. Empty elsewhere and until the desktop answers.
+static DESKTOP_KEYS: Mutex<Vec<(String, Option<String>)>> = Mutex::new(Vec::new());
+
+fn desktop_keys() -> MutexGuard<'static, Vec<(String, Option<String>)>> {
+    DESKTOP_KEYS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Where the user changes a key the desktop keeps (logged, and shown in Settings).
+pub fn managed() -> &'static str {
+    managed_on(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default())
+}
+
+fn managed_on(desktop: &str) -> &'static str {
+    if desktop.split(':').any(|d| d.eq_ignore_ascii_case("gnome")) {
+        "Your desktop manages this shortcut: change it in Settings → Apps → OpenCircle → Global Shortcuts"
+    } else if desktop.split(':').any(|d| d.eq_ignore_ascii_case("kde")) {
+        "Your desktop manages this shortcut: change it in System Settings → Keyboard → Shortcuts"
+    } else {
+        "Your desktop manages this shortcut: change it in its keyboard shortcut settings"
+    }
+}
+
+/// What the desktop made of a shortcut it manages (Wayland portal).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopKey {
+    /// The desktop uses this key instead (in our spelling when we can read it).
+    Other(String),
+    /// The desktop gave it no key at all.
+    Unassigned,
+}
+
+/// The desktop's own say on `shortcut` (a key of the running config) when it is
+/// not simply that key. `None` = active as configured, or nothing known (not
+/// Wayland, the desktop hasn't answered yet, or not a running shortcut).
+pub fn desktop_key(shortcut: &str) -> Option<DesktopKey> {
+    desktop_key_in(&bindings(), &desktop_keys(), shortcut)
+}
+
+fn desktop_key_in(
+    bindings: &[Binding],
+    desktop: &[(String, Option<String>)],
+    shortcut: &str,
+) -> Option<DesktopKey> {
+    let hotkey = parse_shortcut(shortcut).ok()?;
+    let binding = bindings.iter().find(|b| b.hotkey == hotkey)?;
+    let (_, keys) = desktop.iter().find(|(id, _)| *id == binding.id)?;
+    let Some(keys) = keys else {
+        return Some(DesktopKey::Unassigned);
+    };
+    let keys = desktop_spelling(keys);
+    (parse_shortcut(&keys).ok() != Some(hotkey)).then_some(DesktopKey::Other(keys))
+}
+
+/// A desktop's name for a key, in our spelling where it can be read: GNOME says
+/// "Press <Shift><Control>space" (GTK accelerator), KDE "Ctrl+Shift+Space".
+fn desktop_spelling(said: &str) -> String {
+    let Some(start) = said.find('<') else {
+        // No modifiers ("Press Print") or already ours: the last word.
+        let last = said.split_whitespace().last().unwrap_or(said);
+        return key_name(last);
+    };
+    let mut rest = &said[start..];
+    let (mut ctrl, mut alt, mut shift, mut sup) = (false, false, false, false);
+    while let Some(end) = rest.strip_prefix('<').and_then(|r| r.find('>')) {
+        match rest[1..=end].to_ascii_lowercase().as_str() {
+            "control" | "ctrl" | "primary" => ctrl = true,
+            "alt" | "mod1" => alt = true,
+            "shift" => shift = true,
+            "super" | "meta" | "hyper" | "mod4" => sup = true,
+            _ => return said.trim().to_string(), // unknown: show it as the desktop says
+        }
+        rest = &rest[end + 2..];
+    }
+    let mods = [
+        (ctrl, "Ctrl"),
+        (alt, "Alt"),
+        (shift, "Shift"),
+        (sup, "Super"),
+    ];
+    let mut parts: Vec<String> = mods
+        .iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, m)| m.to_string())
+        .collect();
+    parts.push(key_name(rest.trim()));
+    parts.join("+")
+}
+
+/// An XKB key name ("space", "Print", "e") as we write keys.
+fn key_name(key: &str) -> String {
+    match key {
+        "space" => "Space".into(),
+        "Print" => "PrintScreen".into(),
+        "Return" => "Enter".into(),
+        "Escape" => "Esc".into(),
+        k if k.chars().count() == 1 => k.to_uppercase(),
+        k => k.to_string(),
+    }
+}
+
+/// The portal's answer: what the desktop bound, per binding id.
+#[cfg(target_os = "linux")]
+fn set_desktop_keys(keys: Vec<(String, Option<String>)>) {
+    *desktop_keys() = keys;
+}
+
 /// The trigger for a key press the OS reported by hotkey id.
 fn route_hotkey(bindings: &[Binding], id: u32, at: Instant) -> Option<Trigger> {
     bindings
@@ -536,6 +643,57 @@ mod tests {
         assert!(unavailable(by("quick-snip-window"), "x").contains("free Print Screen"));
         assert!(!unavailable(by("quick-copy_text-circle"), "x").contains("free Print Screen"));
         assert_eq!(line.lines().count(), 1, "one line");
+    }
+
+    #[test]
+    fn reads_the_desktops_key_names() {
+        for (said, ours) in [
+            ("Press <Shift><Control>space", "Ctrl+Shift+Space"),
+            ("Press <Control>Print", "Ctrl+PrintScreen"),
+            ("Press Print", "PrintScreen"),
+            ("Press <Super>o", "Super+O"),
+            ("<Alt>F5", "Alt+F5"),
+            ("Ctrl+Shift+Space", "Ctrl+Shift+Space"), // KDE: already ours
+            ("Press <Fancy>x", "Press <Fancy>x"),     // unknown: as said
+        ] {
+            assert_eq!(desktop_spelling(said), ours, "{said}");
+        }
+    }
+
+    #[test]
+    fn names_where_each_desktop_changes_its_keys() {
+        assert!(
+            managed_on("ubuntu:GNOME").ends_with("Settings → Apps → OpenCircle → Global Shortcuts")
+        );
+        assert!(managed_on("KDE").contains("System Settings → Keyboard → Shortcuts"));
+        assert!(managed_on("Hyprland").starts_with("Your desktop manages this shortcut"));
+    }
+
+    #[test]
+    fn the_desktops_key_is_reported_only_when_it_differs() {
+        let (b, _) = plan(&Config::default());
+        let desktop = vec![
+            (
+                "capture".to_string(),
+                Some("Press <Shift><Control>space".to_string()),
+            ),
+            (
+                "quick-ai_explain-circle".into(),
+                Some("Press <Super>e".into()),
+            ),
+            ("quick-copy_text-circle".into(), None),
+        ];
+        let say = |k: &str| desktop_key_in(&b, &desktop, k);
+        assert_eq!(say("Ctrl+Shift+Space"), None, "same key, other spelling");
+        assert_eq!(
+            say("Ctrl+Shift+E"),
+            Some(DesktopKey::Other("Super+E".into()))
+        );
+        assert_eq!(say("Ctrl+Shift+X"), Some(DesktopKey::Unassigned));
+        assert_eq!(say("Ctrl+Shift+T"), None, "the desktop hasn't said");
+        assert_eq!(say("Ctrl+Alt+9"), None, "not a running shortcut");
+        assert_eq!(say(""), None);
+        assert_eq!(desktop_key_in(&b, &[], "Ctrl+Shift+E"), None, "no portal");
     }
 
     #[test]

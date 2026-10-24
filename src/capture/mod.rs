@@ -42,6 +42,18 @@ pub fn monitor_under_cursor() -> Result<Frame, String> {
     platform::capture()
 }
 
+/// The desktop refused the capture (`monitor_under_cursor`'s error): on Wayland it
+/// wants permission, and GNOME asks only while one of our windows has the focus.
+pub fn refused(error: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    return error.contains(portal::REFUSED);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = error;
+        false
+    }
+}
+
 /// A native Wayland session: X11 calls there only see XWayland windows.
 #[cfg(target_os = "linux")]
 pub fn wayland_session() -> bool {

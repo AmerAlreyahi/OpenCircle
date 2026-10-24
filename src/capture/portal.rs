@@ -6,7 +6,9 @@
 // ponytail: exact on one monitor; multi-monitor or HiDPI needs the wl_output layout
 // plus the output the overlay lands on, to crop and scale. Add it with real hardware.
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Once;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -18,9 +20,66 @@ use super::Frame;
 pub const DESKTOP: &str = "org.freedesktop.portal.Desktop";
 pub const PATH: &str = "/org/freedesktop/portal/desktop";
 
+/// Our app id everywhere: portal registration, desktop file name, window app id,
+/// icon name, packager identifier. GNOME grants shortcuts and screenshots only to
+/// an app whose desktop file is `APP_ID.desktop`.
+pub const APP_ID: &str = "com.opencircle.app";
+
+/// In a refused request's error: the desktop said no (GNOME also says no when it
+/// would have to ask while another app has the focus).
+pub const REFUSED: &str = "refused by the desktop";
+
 /// The full desktop, without asking the user to pick (`interactive` = false). The
 /// desktop may still ask once for permission (GNOME does), hence the long wait.
 pub fn capture() -> Result<Frame, String> {
+    read_and_delete(&screenshot()?)
+}
+
+/// One screenshot request just for its permission dialog: call while one of our
+/// windows has the focus (GNOME won't ask otherwise). The image is deleted unread.
+pub fn allow() -> Result<(), String> {
+    forget_refusal();
+    let path = screenshot()?;
+    std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// After "Deny" GNOME refuses silently for good, and its Settings has no switch for
+/// a non-Flatpak app. The user just clicked Allow, asking to be asked: drop the
+/// stored "no" so the desktop shows its own dialog again (the desktop still decides).
+fn forget_refusal() {
+    const STORE: &str = "org.freedesktop.impl.portal.PermissionStore";
+    const STORE_PATH: &str = "/org/freedesktop/impl/portal/PermissionStore";
+    let Ok(conn) = session_bus() else { return };
+    let call = |method: &str, args: Variant| {
+        conn.call_sync(
+            Some(STORE),
+            STORE_PATH,
+            STORE,
+            method,
+            Some(&args),
+            None,
+            DBusCallFlags::NONE,
+            -1,
+            None::<&Cancellable>,
+        )
+    };
+    let Ok(found) = call("Lookup", ("screenshot", "screenshot").to_variant()) else {
+        return; // no table yet: never asked
+    };
+    let table = found
+        .child_value(0)
+        .get::<std::collections::HashMap<String, Vec<String>>>();
+    let ours = table.as_ref().and_then(|t| t.get(APP_ID));
+    if ours.is_some_and(|v| v.iter().any(|p| p == "no")) {
+        let _ = call(
+            "DeletePermission",
+            ("screenshot", "screenshot", APP_ID).to_variant(),
+        );
+    }
+}
+
+/// Asks the portal for a screenshot; returns the file it wrote.
+fn screenshot() -> Result<PathBuf, String> {
     let err = |e: String| format!("Wayland screenshot portal: {e}");
     let conn = session_bus().map_err(err)?;
     let results = request(
@@ -42,9 +101,14 @@ pub fn capture() -> Result<Frame, String> {
         .flatten()
         .ok_or_else(|| err("no image in the answer".into()))?;
     let (path, _) = glib::filename_from_uri(&uri).map_err(|e| err(format!("{uri}: {e}")))?;
+    Ok(path)
+}
+
+/// Decodes the portal's file, then deletes it whatever the decode did (AGENTS.md:
+/// no capture left on disk).
+fn read_and_delete(path: &Path) -> Result<Frame, String> {
     let frame = super::from_png(path.as_os_str());
-    // AGENTS.md: no capture left on disk, whatever the decode did.
-    if let Err(e) = std::fs::remove_file(&path) {
+    if let Err(e) = std::fs::remove_file(path) {
         eprintln!(
             "could not delete the portal screenshot {}: {e}",
             path.display()
@@ -53,9 +117,164 @@ pub fn capture() -> Result<Frame, String> {
     frame
 }
 
+/// The session bus, with our app id registered on it first (once per process: the
+/// portal takes an id only before any other portal call on the connection).
 pub fn session_bus() -> Result<DBusConnection, String> {
-    gio::bus_get_sync(gio::BusType::Session, None::<&Cancellable>)
-        .map_err(|e| format!("no D-Bus session bus ({e})"))
+    static REGISTER: Once = Once::new();
+    let conn = gio::bus_get_sync(gio::BusType::Session, None::<&Cancellable>)
+        .map_err(|e| format!("no D-Bus session bus ({e})"))?;
+    REGISTER.call_once(|| register(&conn));
+    Ok(conn)
+}
+
+/// Host (non-Flatpak) apps have no app id unless they register one, and the portal
+/// only takes an id that has a desktop file: make sure there is one, then register.
+/// Older portals lack Registry; an app the desktop launched may already have the id.
+fn register(conn: &DBusConnection) {
+    let wrote = match ensure_desktop_file() {
+        Ok(Some(path)) => {
+            eprintln!(
+                "[opencircle] wrote {} so the desktop knows OpenCircle as {APP_ID}; \
+                 delete it to remove that",
+                path.display()
+            );
+            true
+        }
+        Ok(None) => false,
+        Err(e) => {
+            eprintln!("[opencircle] could not write {APP_ID}.desktop: {e}");
+            false
+        }
+    };
+    // A file written just now reaches the portal's app list a moment later.
+    let mut tries = if wrote { 10 } else { 1 };
+    loop {
+        let called = conn.call_sync(
+            Some(DESKTOP),
+            PATH,
+            "org.freedesktop.host.portal.Registry",
+            "Register",
+            Some(&(APP_ID, VariantDict::new(None)).to_variant()),
+            None,
+            DBusCallFlags::NONE,
+            -1,
+            None::<&Cancellable>,
+        );
+        tries -= 1;
+        match called {
+            Ok(_) => return eprintln!("[opencircle] registered {APP_ID} with the desktop portal"),
+            Err(e) if tries == 0 => {
+                return eprintln!(
+                    "[opencircle] could not register {APP_ID} with the desktop portal ({e}). \
+                     Global shortcuts and screenshots may be refused: install the package, \
+                     or check ~/.local/share/applications/{APP_ID}.desktop"
+                );
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(200)),
+        }
+    }
+}
+
+/// A run without a package (raw binary, AppImage) has no desktop file: writes a
+/// minimal user-level one, only if no `APP_ID.desktop` exists yet (or the one we
+/// wrote names another path). Returns the path written.
+fn ensure_desktop_file() -> std::io::Result<Option<PathBuf>> {
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .ok_or_else(|| std::io::Error::other("no HOME"))?;
+    let dirs = std::env::var("XDG_DATA_DIRS")
+        .ok()
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+    let system: Vec<PathBuf> = dirs.split(':').map(PathBuf::from).collect();
+    // An AppImage runs from a new mount each time: name the image itself.
+    let exe = match std::env::var_os("APPIMAGE") {
+        Some(image) => PathBuf::from(image),
+        None => std::env::current_exe()?,
+    };
+    write_desktop_file(&data_home, &system, &exe)
+}
+
+/// Marks a desktop file OpenCircle wrote itself: it may rewrite that one, never a package's.
+const GENERATED: &str = "X-OpenCircle-Generated=true";
+
+fn write_desktop_file(
+    data_home: &Path,
+    system: &[PathBuf],
+    exe: &Path,
+) -> std::io::Result<Option<PathBuf>> {
+    let name = format!("{APP_ID}.desktop");
+    let installed = |dir: &Path| dir.join("applications").join(&name).exists();
+    if system.iter().any(|d| installed(d)) {
+        return Ok(None);
+    }
+    let path = data_home.join("applications").join(&name);
+    let wanted = desktop_entry(exe);
+    match std::fs::read_to_string(&path) {
+        Ok(have) if have == wanted || !have.contains(GENERATED) => return Ok(None),
+        Ok(_) => {} // ours, naming another path (a moved AppImage): rewrite
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    std::fs::create_dir_all(data_home.join("applications"))?;
+    std::fs::write(&path, wanted)?;
+    // Its icon, for the desktop's app list (where GNOME manages our shortcuts).
+    let icons = data_home.join(ICON_DIR);
+    if !icons.join(format!("{APP_ID}.png")).exists() {
+        std::fs::create_dir_all(&icons)?;
+        std::fs::write(icons.join(format!("{APP_ID}.png")), ICON)?;
+    }
+    Ok(Some(path))
+}
+
+const ICON_DIR: &str = "icons/hicolor/128x128/apps";
+const ICON: &[u8] = include_bytes!("../../assets/icons/128x128.png");
+
+/// The minimal entry. Not hidden: GNOME lists an app's global shortcuts on its
+/// page in Settings → Apps, which skips hidden entries.
+fn desktop_entry(exe: &Path) -> String {
+    format!(
+        "[Desktop Entry]\n\
+         # Written by OpenCircle: the desktop grants shortcuts and screenshots by app id.\n\
+         # Delete it (and ~/.local/share/{ICON_DIR}/{APP_ID}.png) to remove it;\n\
+         # the .deb and .rpm install their own.\n\
+         Type=Application\n\
+         Name=OpenCircle\n\
+         Comment=Circle anything on screen to search, read, translate or ask about it\n\
+         Exec={}\n\
+         Icon={APP_ID}\n\
+         StartupWMClass={APP_ID}\n\
+         Terminal=false\n\
+         Categories=Utility;\n\
+         {GENERATED}\n",
+        exec_quote(&exe.to_string_lossy())
+    )
+}
+
+/// `path` as the Exec program (desktop entry spec): quoted unless every character
+/// is plain; inside the quotes `"` `` ` `` `$` `\` take a backslash, then the
+/// string's own escaping doubles every backslash. `%` is always doubled.
+fn exec_quote(path: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "/._-+".contains(c);
+    if path.chars().all(plain) {
+        return path.to_string();
+    }
+    let mut out = String::from("\"");
+    for c in path.chars() {
+        match c {
+            '"' | '`' | '$' => {
+                out.push_str(r"\\");
+                out.push(c);
+            }
+            '\\' => out.push_str(r"\\\\"),
+            '%' => out.push_str("%%"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Calls a portal method that answers through a Request object and waits (up to
@@ -120,6 +339,20 @@ pub fn request(
                 timer.destroy();
             }
             conn.signal_unsubscribe(sub);
+            if called.is_ok() && answer.borrow().is_none() {
+                // Timed out: end the request and its dialog (no Response follows).
+                let _ = conn.call_sync(
+                    Some(DESKTOP),
+                    &path,
+                    "org.freedesktop.portal.Request",
+                    "Close",
+                    None,
+                    None,
+                    DBusCallFlags::NONE,
+                    -1,
+                    None::<&Cancellable>,
+                );
+            }
             called
                 .map(|_| answer.take())
                 .map_err(|e| format!("{interface} unavailable ({e})"))
@@ -138,7 +371,7 @@ fn response(code: u32) -> Result<(), String> {
     match code {
         0 => Ok(()),
         1 => Err("cancelled by the user".into()),
-        _ => Err("refused by the desktop (permission denied?)".into()),
+        _ => Err(format!("{REFUSED} (permission denied?)")),
     }
 }
 
@@ -196,5 +429,93 @@ mod tests {
             results.lookup::<String>("uri").unwrap().as_deref(),
             Some("file:///tmp/a.png")
         );
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("oc-portal-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_desktop_entry_names_our_id_and_the_exe() {
+        let entry = desktop_entry(Path::new("/opt/oc/opencircle"));
+        let lines: Vec<&str> = entry.lines().collect();
+        assert_eq!(lines[0], "[Desktop Entry]");
+        for want in [
+            "Type=Application",
+            "Name=OpenCircle",
+            "Exec=/opt/oc/opencircle",
+            "Icon=com.opencircle.app",
+            GENERATED,
+        ] {
+            assert!(lines.contains(&want), "{want} in {entry}");
+        }
+        // GNOME's Settings → Apps (where the shortcuts are changed) skips hidden apps.
+        assert!(!entry.contains("NoDisplay"));
+        // Spaces and specials are quoted per the desktop entry spec.
+        assert_eq!(exec_quote("/home/a b/oc"), r#""/home/a b/oc""#);
+        assert_eq!(exec_quote("/x/$y%"), r#""/x/\\$y%%""#);
+        assert_eq!(exec_quote(r"/x\y"), r#""/x\\\\y""#);
+    }
+
+    #[test]
+    fn writes_the_desktop_file_only_if_missing() {
+        let dir = scratch("desktop");
+        let (home, sys) = (dir.join("home"), dir.join("sys"));
+        let file = home.join("applications/com.opencircle.app.desktop");
+        let exe = Path::new("/opt/oc/opencircle");
+
+        // Nothing anywhere: written.
+        let wrote = write_desktop_file(&home, std::slice::from_ref(&sys), exe).unwrap();
+        assert_eq!(wrote.as_deref(), Some(file.as_path()));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), desktop_entry(exe));
+        let icon = home.join(ICON_DIR).join("com.opencircle.app.png");
+        assert_eq!(std::fs::read(&icon).unwrap(), ICON, "with its icon");
+        // Again: already there, untouched.
+        assert_eq!(
+            write_desktop_file(&home, std::slice::from_ref(&sys), exe).unwrap(),
+            None
+        );
+        // Ours, for a moved AppImage: rewritten to the new path.
+        let moved = Path::new("/home/me/OpenCircle.AppImage");
+        assert!(
+            write_desktop_file(&home, std::slice::from_ref(&sys), moved)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("Exec=/home/me/OpenCircle.AppImage")
+        );
+        // The user's own file (no marker) is never replaced.
+        std::fs::write(&file, "[Desktop Entry]\nExec=mine\n").unwrap();
+        assert_eq!(
+            write_desktop_file(&home, std::slice::from_ref(&sys), exe).unwrap(),
+            None
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "[Desktop Entry]\nExec=mine\n"
+        );
+        // A package's system-wide file: nothing written at user level.
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir_all(sys.join("applications")).unwrap();
+        std::fs::write(sys.join("applications/com.opencircle.app.desktop"), "x").unwrap();
+        assert_eq!(write_desktop_file(&home, &[sys], exe).unwrap(), None);
+        assert!(!file.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_screenshot_file_is_deleted_even_when_it_does_not_decode() {
+        let dir = scratch("shot");
+        let bad = dir.join("Screenshot.png");
+        std::fs::write(&bad, b"not a png").unwrap();
+        assert!(read_and_delete(&bad).is_err());
+        assert!(!bad.exists(), "deleted");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

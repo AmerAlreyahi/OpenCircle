@@ -93,8 +93,11 @@ jobs:
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
+        # The .deb's desktop file and icons get the app id's name (GNOME's portals
+        # look up com.opencircle.app.desktop); the .rpm lists them so in Cargo.toml.
         run: |
           cargo packager --release --formats deb,appimage --out-dir dist
+          packaging/deb-app-id.sh dist/*.deb
           cargo generate-rpm -o dist/
 
       # The exe must be GUI-subsystem (2) and carry the icon + version info.
@@ -130,6 +133,10 @@ jobs:
           echo "== dlopened libraries =="
           strings "$bin" | grep -oE 'lib[A-Za-z0-9_+-]+\.so\.[0-9]+' | sort -u
           echo "== deb =="; dpkg-deb -I dist/*.deb
+          dpkg-deb -c dist/*.deb | grep -E 'applications/|apps/'
+          if command -v rpm >/dev/null; then
+            echo "== rpm =="; rpm -qlp dist/*.rpm | grep -x /usr/share/applications/com.opencircle.app.desktop
+          fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

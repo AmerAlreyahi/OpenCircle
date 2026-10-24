@@ -22,6 +22,7 @@ use iced::widget::{column, container, row, space};
 use iced::{Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{Config, DefaultAction, Engine, Provider, Target, Theme, parse_shortcut};
+use crate::hotkey::{DesktopKey, managed};
 use crate::secrets::{self, Secret, SecretsError};
 use crate::ui::theme;
 use crate::ui::widgets::{
@@ -451,6 +452,8 @@ pub struct State {
     /// "key: reason" lines from `Config`'s own validation of the draft.
     problems: Vec<String>,
     notice: Option<String>,
+    /// The desktop's own say on a running key (`hotkey::desktop_key`; tests swap it).
+    desktop: fn(&str) -> Option<DesktopKey>,
 }
 
 impl fmt::Debug for State {
@@ -546,6 +549,7 @@ impl State {
                 .first()
                 // Not "reset": an unknown or unread provider is kept off, not defaulted.
                 .map(|w| format!("Some saved settings were invalid ({w})")),
+            desktop: crate::hotkey::desktop_key,
         };
         s.revalidate();
         s
@@ -571,6 +575,23 @@ impl State {
             Slot::Capture => &self.draft.shortcut,
             Slot::Quick(i) => &self.draft.quick_actions[i].shortcut,
         }
+    }
+
+    /// Wayland: what the desktop says about `slot`'s key when it isn't that key
+    /// (`None` also while the slot has unsaved changes: the desktop has the saved one).
+    fn desktop_note(&self, slot: Slot) -> Option<String> {
+        let saved = match slot {
+            Slot::Capture => Some(&self.saved.shortcut),
+            Slot::Quick(i) => self.saved.quick_actions.get(i).map(|q| &q.shortcut),
+        };
+        let shortcut = self.shortcut(slot);
+        if saved.map(String::as_str) != Some(shortcut) {
+            return None;
+        }
+        Some(match (self.desktop)(shortcut)? {
+            DesktopKey::Other(keys) => format!("In use: {keys}. {}", managed()),
+            DesktopKey::Unassigned => format!("No key in use. {}", managed()),
+        })
     }
 
     fn set_shortcut(&mut self, slot: Slot, value: String) {
@@ -1031,12 +1052,15 @@ fn shortcut_rows(state: &State) -> Vec<Element<'_, Message>> {
                     (t.label.as_str(), t.hint.as_str(), t.tip.as_str())
                 }
             };
+            let recording = state.recording == Some(slot);
             let error = state
                 .shortcut_error
                 .as_ref()
                 .filter(|(s, _)| *s == slot)
                 .map(|(_, e)| e.clone());
-            let recording = state.recording == Some(slot);
+            // Never claim a key the desktop doesn't use.
+            let note = (!recording).then(|| state.desktop_note(slot)).flatten();
+            let error = error.or(note);
             let field_state = match (recording, &error) {
                 (_, Some(_)) => FieldState::Invalid,
                 (true, None) => FieldState::Recording,
@@ -1695,6 +1719,40 @@ pub(super) mod tests {
         assert_eq!(update(&mut s, Message::OpenProject), Outcome::OpenProject);
         assert!(PROJECT_URL.starts_with("https://github.com/"));
         assert!(!s.dirty(), "About changes nothing");
+    }
+
+    #[test]
+    fn shortcuts_show_the_key_the_desktop_actually_uses() {
+        let (mut s, _) = state(None);
+        s.desktop = |keys| match keys {
+            "Ctrl+Shift+Space" => Some(DesktopKey::Other("Super+O".into())),
+            "Ctrl+Shift+E" => Some(DesktopKey::Unassigned),
+            _ => None,
+        };
+        update(&mut s, Message::Section(Section::Shortcuts));
+        let notes = |s: &State| -> Vec<String> {
+            let texts = shot::texts(view(s));
+            texts
+                .into_iter()
+                .filter(|t| t.ends_with(managed()))
+                .collect()
+        };
+        assert_eq!(
+            notes(&s),
+            [
+                format!("In use: Super+O. {}", managed()),
+                format!("No key in use. {}", managed()),
+            ]
+        );
+        // A key changed but not saved yet: the desktop only knows the saved one.
+        update(&mut s, Message::Record(Slot::Capture));
+        assert_eq!(notes(&s).len(), 1, "no note while recording");
+        press(&mut s, chord(true, true, "F7"));
+        assert_eq!(s.draft.shortcut, "Ctrl+Shift+F7");
+        assert_eq!(notes(&s), [format!("No key in use. {}", managed())]);
+        // Nothing to say (not Wayland, or the desktop uses our keys): no note at all.
+        s.desktop = |_| None;
+        assert!(notes(&s).is_empty());
     }
 
     #[test]

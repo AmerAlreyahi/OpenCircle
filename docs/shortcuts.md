@@ -91,6 +91,18 @@ opencircle run lens --target circle
 Targets are `full_screen`, `circle`, `last_region`, `window`; without
 `--target` the first entry for that action in the config is used.
 
+## Wayland: the desktop owns the keys
+
+On Wayland the desktop, not OpenCircle, decides which key runs each shortcut.
+The first start shows the desktop's own "Add Keyboard Shortcuts" dialog with
+OpenCircle's keys; after that the desktop keeps what you confirmed. If you
+change a key in OpenCircle's Settings, the desktop may keep its stored one
+(GNOME does). Settings then shows, under that shortcut, the key that actually
+works and where to change it:
+
+- **GNOME:** Settings → Apps → OpenCircle → Global Shortcuts.
+- **KDE Plasma:** System Settings → Keyboard → Shortcuts.
+
 ## Wayland without the shortcut portal
 
 Wayland does not let apps grab keys. OpenCircle asks the desktop through the

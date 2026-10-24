@@ -30,15 +30,39 @@ use crate::ui::widgets::{
 /// Logical size of the onboarding window.
 pub const WINDOW_SIZE: Size = Size::new(620.0, 520.0);
 
+/// Logical size of the prompt shown after a refused capture.
+pub const PROMPT_SIZE: Size = Size::new(500.0, 270.0);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
     Welcome,
+    /// Wayland only: the desktop's screenshot permission, asked while we have the focus.
+    Screenshots,
     Ai,
     Look,
     Done,
 }
 
 const STEPS: [Step; 4] = [Step::Welcome, Step::Ai, Step::Look, Step::Done];
+const WAYLAND_STEPS: [Step; 5] = [
+    Step::Welcome,
+    Step::Screenshots,
+    Step::Ai,
+    Step::Look,
+    Step::Done,
+];
+
+/// The desktop's screenshot permission (Wayland), as far as we asked. Onboarding's
+/// step and the prompt after a refused capture share it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Access {
+    #[default]
+    Unasked,
+    /// A request is out: the desktop's dialog is up.
+    Asking,
+    Allowed,
+    Failed(String),
+}
 
 /// What the user picks on the AI step. "Skip" is the footer button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +121,9 @@ pub struct State {
     /// `None` = the real config path.
     path: Option<PathBuf>,
     error: Option<String>,
+    /// Wayland: the Screenshots step is shown.
+    wayland: bool,
+    access: Access,
 }
 
 impl fmt::Debug for State {
@@ -119,6 +146,10 @@ pub enum Message {
     ApiKey(KeyMessage),
     Theme(Theme),
     Finish,
+    /// The Allow screenshots button.
+    Allow,
+    /// The desktop's answer to the screenshot request.
+    Allowed(Result<(), String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -126,13 +157,27 @@ pub enum Outcome {
     None,
     /// The config was written; close the window and carry on.
     Finished(Config),
+    /// Send one screenshot request now (this window has the focus); answer with
+    /// `Message::Allowed`.
+    AskScreenshot,
 }
 
 impl State {
     /// The real config file and the real keyring. Google AI Mode is preselected.
     pub fn open() -> Self {
         let (config, _warnings) = Config::load();
-        Self::new(config, None, Box::new(Keyring))
+        #[cfg(target_os = "linux")]
+        let wayland = crate::capture::wayland_session();
+        #[cfg(not(target_os = "linux"))]
+        let wayland = false;
+        State {
+            wayland,
+            ..Self::new(config, None, Box::new(Keyring))
+        }
+    }
+
+    fn steps(&self) -> &'static [Step] {
+        if self.wayland { &WAYLAND_STEPS } else { &STEPS }
     }
 
     pub fn new(base: Config, path: Option<PathBuf>, store: Box<dyn KeyStore>) -> Self {
@@ -147,6 +192,8 @@ impl State {
             store,
             path,
             error: None,
+            wayland: false,
+            access: Access::Unasked,
         }
     }
 
@@ -189,8 +236,28 @@ impl State {
     }
 
     fn go(&mut self, to: isize) {
-        let i = STEPS.iter().position(|s| *s == self.step).unwrap_or(0) as isize;
-        self.step = STEPS[(i + to).clamp(0, STEPS.len() as isize - 1) as usize];
+        let steps = self.steps();
+        let i = steps.iter().position(|s| *s == self.step).unwrap_or(0) as isize;
+        self.step = steps[(i + to).clamp(0, steps.len() as isize - 1) as usize];
+    }
+}
+
+/// The Allow button (or Allow again after a failure) and the screenshot request's
+/// answer: `Outcome::AskScreenshot` when a request should go out.
+pub fn ask(access: &mut Access, message: Message) -> Outcome {
+    match message {
+        Message::Allow if *access != Access::Asking => {
+            *access = Access::Asking;
+            Outcome::AskScreenshot
+        }
+        Message::Allowed(answer) => {
+            *access = match answer {
+                Ok(()) => Access::Allowed,
+                Err(e) => Access::Failed(e),
+            };
+            Outcome::None
+        }
+        _ => Outcome::None,
     }
 }
 
@@ -224,6 +291,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
                 Err(e) => state.error = Some(format!("Could not save your settings: {e}")),
             }
         }
+        Message::Allow | Message::Allowed(_) => return ask(&mut state.access, message),
     }
     Outcome::None
 }
@@ -231,6 +299,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
 pub fn view(state: &State) -> Element<'_, Message> {
     let page = match state.step {
         Step::Welcome => welcome(state),
+        Step::Screenshots => screenshots(state),
         Step::Ai => ai(state),
         Step::Look => look(state),
         Step::Done => done(state),
@@ -263,6 +332,66 @@ fn welcome(state: &State) -> Element<'_, Message> {
         caption("Nothing leaves your PC until you pick an action. You can change the shortcut in Settings."),
     ]
     .spacing(20)
+    .into()
+}
+
+fn screenshots(state: &State) -> Element<'_, Message> {
+    column![
+        title("Allow screenshots"),
+        body(
+            "Your desktop asks once whether OpenCircle may capture the screen, and only \
+             while an OpenCircle window is in front. Click Allow, then choose Allow in the \
+             dialog."
+        ),
+        access_control(&state.access),
+    ]
+    .spacing(20)
+    .into()
+}
+
+/// The Allow button and what came of the request.
+fn access_control(access: &Access) -> Element<'_, Message> {
+    let (label, press) = match access {
+        Access::Asking => ("Waiting…", None),
+        Access::Allowed => ("Allowed", None),
+        Access::Unasked | Access::Failed(_) => ("Allow", Some(Message::Allow)),
+    };
+    let button = tip(
+        label_button(label, true, press),
+        "Ask the desktop for screenshot permission",
+        Position::Top,
+    );
+    let status: Element<'_, Message> = match access {
+        Access::Unasked => caption("A test picture is taken and deleted at once.").into(),
+        Access::Asking => caption("Answer the dialog your desktop shows.").into(),
+        Access::Allowed => caption("OpenCircle can capture your screen now.").into(),
+        Access::Failed(e) if crate::capture::refused(e) => {
+            error_text("Your desktop said no. Try again, or allow it later.").into()
+        }
+        Access::Failed(e) => {
+            error_text(format!("Not allowed ({e}). Try again, or allow it later.")).into()
+        }
+    };
+    column![button, status].spacing(10).into()
+}
+
+/// The small window shown after a capture the desktop refused.
+pub fn prompt_view(access: &Access) -> Element<'_, Message> {
+    let content = column![
+        title("OpenCircle needs screenshot permission"),
+        body(
+            "Your desktop asks only while an OpenCircle window is in front. Click Allow \
+             and accept the dialog, then press your shortcut again."
+        ),
+        access_control(access),
+    ]
+    .spacing(16);
+    widgets::window(
+        container(content)
+            .padding([28, 32])
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
     .into()
 }
 
@@ -349,10 +478,11 @@ fn done(state: &State) -> Element<'_, Message> {
 }
 
 fn footer(state: &State) -> Element<'_, Message> {
-    let n = STEPS.iter().position(|s| *s == state.step).unwrap_or(0);
+    let steps = state.steps();
+    let n = steps.iter().position(|s| *s == state.step).unwrap_or(0);
     let left: Element<'_, Message> = match &state.error {
         Some(e) => error_text(e.as_str()).size(13).into(),
-        None => caption(format!("Step {} of {}", n + 1, STEPS.len()))
+        None => caption(format!("Step {} of {}", n + 1, steps.len()))
             .size(13)
             .into(),
     };
@@ -413,6 +543,64 @@ mod tests {
         assert_eq!(s.step(), Step::Done);
         update(&mut s, Message::Back);
         assert_eq!(s.step(), Step::Look);
+    }
+
+    #[test]
+    fn wayland_adds_the_screenshot_step_and_asks_once_at_a_time() {
+        let mut s = state(None);
+        next(&mut s, 1);
+        assert_eq!(s.step(), Step::Ai, "no Screenshots step off Wayland");
+        let mut s = state(None);
+        s.wayland = true;
+        next(&mut s, 1);
+        assert_eq!(s.step(), Step::Screenshots);
+        assert!(shot::texts(view(&s)).iter().any(|t| t == "Step 2 of 5"));
+
+        // Allow sends one request; a second click while it is out sends none.
+        assert_eq!(update(&mut s, Message::Allow), Outcome::AskScreenshot);
+        assert_eq!(s.access, Access::Asking);
+        assert_eq!(update(&mut s, Message::Allow), Outcome::None);
+        let texts = shot::texts(view(&s));
+        assert!(texts.iter().any(|t| t.contains("Waiting")), "{texts:?}");
+        // Refused: said so, and Allow works again.
+        update(&mut s, Message::Allowed(Err("no portal".into())));
+        let texts = shot::texts(view(&s));
+        assert!(
+            texts.iter().any(|t| t.contains("Not allowed (no portal)")),
+            "{texts:?}"
+        );
+        #[cfg(target_os = "linux")]
+        {
+            let refused = crate::capture::portal::REFUSED.to_string();
+            update(&mut s, Message::Allowed(Err(refused)));
+            let texts = shot::texts(view(&s));
+            assert!(
+                texts.iter().any(|t| t.starts_with("Your desktop said no")),
+                "{texts:?}"
+            );
+        }
+        assert_eq!(update(&mut s, Message::Allow), Outcome::AskScreenshot);
+        update(&mut s, Message::Allowed(Ok(())));
+        assert_eq!(s.access, Access::Allowed);
+        assert!(shot::texts(view(&s)).iter().any(|t| t == "Allowed"));
+        // Next goes on whatever the answer.
+        next(&mut s, 1);
+        assert_eq!(s.step(), Step::Ai);
+        // The prompt after a refused capture uses the same control.
+        let mut access = Access::Unasked;
+        assert_eq!(ask(&mut access, Message::Allow), Outcome::AskScreenshot);
+        let texts = shot::texts(prompt_view(&access));
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("needs screenshot permission"))
+        );
+        let px = shot::save(
+            "onboarding-prompt",
+            prompt_view(&Access::Unasked),
+            PROMPT_SIZE,
+        );
+        assert!(!px.is_empty());
     }
 
     #[test]
@@ -507,11 +695,11 @@ mod tests {
         for (name, choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
             let mut s = state(None);
             update(&mut s, Message::Theme(choice));
-            for (i, step) in STEPS.into_iter().enumerate() {
+            for (i, step) in WAYLAND_STEPS.into_iter().enumerate() {
                 s.step = step;
                 TIPS.with(|t| t.borrow_mut().clear());
                 let px = shot::save(
-                    &format!("onboarding-{}-{name}", i + 1),
+                    &format!("onboarding-{}-{step:?}-{name}", i + 1),
                     view(&s),
                     WINDOW_SIZE,
                 );

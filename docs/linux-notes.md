@@ -19,8 +19,31 @@ supported.
 | Snip modes | Region and Full only: there is no window list and apps cannot send scroll input, so Window and Scrolling are not offered. |
 | Live translate | Not available; each press of the translate shortcut translates once. |
 
-The portal paths are not yet verified on every desktop. If something fails, `opencircle` prints a line
-explaining it on its standard error; run it from a terminal to read it.
+The portal paths are verified on GNOME 50 (Ubuntu 26.04); other desktops are not
+yet. If something fails, `opencircle` prints a line explaining it on its
+standard error; run it from a terminal to read it.
+
+### App id and desktop file
+
+The desktop grants shortcuts and screenshots by app id, and GNOME needs a
+desktop file named after it. OpenCircle's app id is `com.opencircle.app`; the
+`.deb` and `.rpm` install `/usr/share/applications/com.opencircle.app.desktop`.
+A raw binary or an AppImage has none, so on its first start under Wayland it
+writes `~/.local/share/applications/com.opencircle.app.desktop` (pointing at
+the binary, or at the AppImage file) and its icon
+`~/.local/share/icons/hicolor/128x128/apps/com.opencircle.app.png`, only if no
+such desktop file exists yet. Delete both files to remove them; it writes them
+again on its next Wayland start.
+
+### Screenshot permission
+
+GNOME asks once whether OpenCircle may take screenshots, and only while an
+OpenCircle window is in front. The first-run setup has an **Allow** step for
+that. If a capture is refused later (for example after **Deny**), a small
+"OpenCircle needs screenshot permission" window opens; its **Allow** button
+asks the desktop again (on GNOME it first clears the earlier "Deny", so GNOME
+shows its dialog again). A capture that gets no answer within 20 seconds is
+given up, so the next shortcut press works.
 
 ## Tray
 

@@ -52,6 +52,10 @@ const ASK_WIDTH: f32 = 480.0;
 const ASK_ZONE: f32 = widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING + 2.0 * ASK_MARGIN;
 const ASK_MARGIN: f32 = 24.0;
 
+/// A capture still unanswered after this is given up (a Wayland portal may wait
+/// on a dialog; its late answer is dropped).
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Between stacked crops (several selections sent as one image).
 const STACK_GAP: u32 = 16;
 
@@ -97,8 +101,10 @@ pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
 #[derive(Debug, Clone)]
 enum Message {
     Trigger(Trigger),
-    /// The capture thread is done (`Instant` = trigger time, latency log).
-    Captured(Instant, Result<Shot, String>),
+    /// Capture number `.0`'s thread is done (`Instant` = trigger time, latency log).
+    Captured(u32, Instant, Result<Shot, String>),
+    /// Capture number `.0` has waited `CAPTURE_TIMEOUT`.
+    CaptureTimedOut(u32),
     Overlay(overlay::Event),
     /// Esc, wherever the focus is.
     Escape,
@@ -193,8 +199,11 @@ struct Shot {
 
 struct App {
     overlay: window::Id,
-    /// A capture is running on its thread.
-    capturing: bool,
+    /// The number of the capture running on its thread. Cleared by Esc or the
+    /// timeout: that capture's late answer is then dropped.
+    capturing: Option<u32>,
+    /// Captures started (numbers them).
+    captures: u32,
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
     /// Its RGBA bytes are also what actions crop (shared, never copied whole).
     frame: Option<image::Handle>,
@@ -260,14 +269,14 @@ const CACHE_SIZE: usize = 512;
 impl App {
     fn boot() -> (Self, Task<Message>) {
         // Created once, hidden, so a trigger only has to show it (latency).
-        let (overlay, open) = window::open(window::Settings {
+        let (overlay, open) = window::open(windows::app_window(window::Settings {
             visible: false,
             decorations: false,
             resizable: false,
             level: Level::AlwaysOnTop,
             exit_on_close_request: false,
             ..window::Settings::default()
-        });
+        }));
         let mut app = App {
             cache: Arc::new(Cache::new(CACHE_SIZE)),
             ..App::idle(overlay)
@@ -280,7 +289,8 @@ impl App {
     fn idle(overlay: window::Id) -> App {
         App {
             overlay,
-            capturing: false,
+            capturing: None,
+            captures: 0,
             frame: None,
             scale: 1.0,
             screen: Size::ZERO,
@@ -338,7 +348,7 @@ impl App {
                 Task::none()
             }
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..))
-                if self.frame.is_some() || self.capturing =>
+                if self.frame.is_some() || self.capturing.is_some() =>
             {
                 Task::none()
             }
@@ -357,7 +367,26 @@ impl App {
                 }
                 self.capture(at, None)
             }
-            Message::Captured(at, shot) => self.open(at, shot),
+            // Cancelled or timed out meanwhile: the frame is dropped (the portal's
+            // file is already deleted).
+            Message::Captured(n, ..) if self.capturing != Some(n) => Task::none(),
+            Message::Captured(_, at, shot) => self.open(at, shot),
+            Message::CaptureTimedOut(n) if self.capturing == Some(n) => {
+                eprintln!(
+                    "capture failed: no screenshot after {} s; try again",
+                    CAPTURE_TIMEOUT.as_secs()
+                );
+                self.capturing = None;
+                self.purpose = Purpose::Search;
+                Task::none()
+            }
+            Message::CaptureTimedOut(_) => Task::none(),
+            Message::Escape if self.capturing.is_some() => {
+                eprintln!("[opencircle] capture cancelled");
+                self.capturing = None;
+                self.purpose = Purpose::Search;
+                Task::none()
+            }
             Message::Overlay(event) => self.on_overlay(event),
             Message::Escape if self.frame.is_none() => Task::none(),
             Message::Escape if let Some(scroll) = self.scroll() => {
@@ -457,9 +486,18 @@ impl App {
     /// Captures on a thread: a Wayland portal may wait minutes for the user's OK.
     /// `snip`: Snip mode in this kind; also lists the windows, while the overlay is
     /// still hidden.
+    /// After `CAPTURE_TIMEOUT` the capture is given up (the next trigger works) and
+    /// its answer, if it still comes, is dropped.
     fn capture(&mut self, at: Instant, snip: Option<snip::Kind>) -> Task<Message> {
-        self.capturing = true;
-        background(move |tx| {
+        self.captures = self.captures.wrapping_add(1);
+        let n = self.captures;
+        self.capturing = Some(n);
+        let timeout = background(|tx| {
+            std::thread::sleep(CAPTURE_TIMEOUT);
+            let _ = tx.unbounded_send(());
+        })
+        .map(move |()| Message::CaptureTimedOut(n));
+        let shot = background(move |tx| {
             let shot = capture::monitor_under_cursor().map(|frame| {
                 let scale = frame.scale;
                 let logical = |x: i32, y: i32, w: u32, h: u32| {
@@ -481,17 +519,25 @@ impl App {
             });
             let _ = tx.unbounded_send(shot);
         })
-        .map(move |shot| Message::Captured(at, shot))
+        .map(move |shot| Message::Captured(n, at, shot));
+        Task::batch([shot, timeout])
     }
 
     fn open(&mut self, at: Instant, shot: Result<Shot, String>) -> Task<Message> {
-        self.capturing = false;
+        self.capturing = None;
         let shot = match shot {
             Ok(shot) => shot,
             Err(e) => {
                 eprintln!("capture failed: {e}");
                 self.purpose = Purpose::Search;
-                return Task::none();
+                if !capture::refused(&e) {
+                    return Task::none();
+                }
+                // Wayland: the desktop asks for permission only while we are in front.
+                return self
+                    .windows
+                    .open(windows::Kind::Permission)
+                    .map(Message::Windows);
             }
         };
         eprintln!(
@@ -1593,15 +1639,23 @@ impl App {
             self.windows.subscription().map(Message::Windows),
             moved,
         ]);
-        if self.frame.is_some() {
-            // Also when a text field took the key (it only unfocuses on Esc).
-            let escape = iced::event::listen_with(|event, _, _| match event {
+        // Also when a text field took the key (it only unfocuses on Esc).
+        let escape = || {
+            iced::event::listen_with(|event, _, _| match event {
                 iced::Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(Named::Escape),
                     ..
                 }) => Some(Message::Escape),
                 _ => None,
-            });
+            })
+        };
+        // Esc in any of our windows cancels a pending capture.
+        let triggers = match self.capturing {
+            Some(_) => Subscription::batch([triggers, escape()]),
+            None => triggers,
+        };
+        if self.frame.is_some() {
+            let escape = escape();
             // Alt held = the original under a translation.
             let alt = iced::event::listen_with(|event, _, _| match event {
                 iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
@@ -1693,6 +1747,53 @@ mod tests {
         let mut app = App::idle(window::Id::unique());
         let _ = app.close();
         app
+    }
+
+    fn a_shot() -> Result<Shot, String> {
+        Ok(Shot {
+            image: image::Handle::from_rgba(4, 4, vec![9; 4 * 4 * 4]),
+            scale: 1.0,
+            origin: Point::ORIGIN,
+            size: Size::new(4.0, 4.0),
+            snip: None,
+        })
+    }
+
+    #[test]
+    fn a_timed_out_capture_frees_the_trigger_and_its_late_answer_is_dropped() {
+        let mut app = App::idle(window::Id::unique());
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        let first = app.capturing.expect("pending");
+        // A second press while it is out does nothing.
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        assert_eq!(app.capturing, Some(first));
+        let _ = app.update(Message::CaptureTimedOut(first));
+        assert_eq!(app.capturing, None, "the next trigger may start");
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        let second = app.capturing.expect("a new capture started");
+        assert_ne!(first, second);
+        // The first capture's answer arrives late: ignored, the new one still waits.
+        let _ = app.update(Message::Captured(first, Instant::now(), a_shot()));
+        assert!(app.frame.is_none());
+        assert_eq!(app.capturing, Some(second));
+        // A stale timeout doesn't touch the new capture.
+        let _ = app.update(Message::CaptureTimedOut(first));
+        assert_eq!(app.capturing, Some(second));
+        let _ = app.update(Message::Captured(second, Instant::now(), a_shot()));
+        assert!(app.frame.is_some(), "the live one opens");
+        assert_eq!(app.capturing, None);
+    }
+
+    #[test]
+    fn esc_cancels_a_pending_capture() {
+        let mut app = App::idle(window::Id::unique());
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        let n = app.capturing.expect("pending");
+        let _ = app.update(Message::Escape);
+        assert_eq!(app.capturing, None);
+        let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
+        assert!(app.frame.is_none(), "the overlay doesn't open");
+        assert_eq!(app.hiding, Hiding::No);
     }
 
     #[test]
