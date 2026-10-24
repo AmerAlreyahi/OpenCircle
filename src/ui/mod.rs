@@ -327,6 +327,13 @@ impl App {
                 }
                 Task::none()
             }
+            // Lens / Ask handed off to the browser (Windows): the shortcut brings
+            // the overlay, with its panel, back to the front.
+            Message::Trigger(Trigger::Capture(_))
+                if self.frame.is_some() && crate::lens::take_handed_off() =>
+            {
+                self.show()
+            }
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..))
                 if self.frame.is_some() || self.capturing =>
             {
@@ -1304,6 +1311,7 @@ impl App {
         }
         self.panel = None;
         self.lens_pages.drain(..).for_each(lens::Held::release);
+        let _ = crate::lens::take_handed_off();
         self.frame = None;
         self.stroke = Vec::new();
         self.selection = None;
