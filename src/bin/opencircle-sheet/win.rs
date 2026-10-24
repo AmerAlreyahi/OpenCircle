@@ -405,7 +405,15 @@ impl ApplicationHandler for App {
         .with_bounds(bounds)
         .build_as_child(&*win);
         match view {
-            Ok(v) => self.view = Some(v),
+            Ok(v) => {
+                if let Err(e) = guard_links(&v, self.t0) {
+                    eprintln!("[sheet] cannot guard links: {e}");
+                    self.code = 1;
+                    el.exit();
+                    return;
+                }
+                self.view = Some(v);
+            }
             Err(e) => {
                 eprintln!("[sheet] web view: {e}");
                 self.code = NO_RUNTIME;
@@ -527,4 +535,50 @@ impl ApplicationHandler for App {
             _ => {}
         }
     }
+}
+
+/// Every navigation and new window the page asks for goes through `route`,
+/// with WebView2's word on whether the user started it (`IsUserInitiated`).
+/// New windows never open (the browser gets a clicked one).
+fn guard_links(view: &WebView, t0: Instant) -> windows::core::Result<()> {
+    use webview2_com::{
+        NavigationStartingEventHandler, NewWindowRequestedEventHandler, take_pwstr,
+    };
+    use windows::core::{BOOL, PWSTR};
+
+    let core = view.webview();
+    let links = crate::Links::default();
+    let (links_nav, mut token) = (links.clone(), 0i64);
+    let navigation = NavigationStartingEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let (mut uri, mut gesture) = (PWSTR::null(), BOOL::default());
+        // SAFETY: COM calls on live event args; `uri` is taken (freed) once.
+        unsafe {
+            args.Uri(&mut uri)?;
+            args.IsUserInitiated(&mut gesture)?;
+            let url = take_pwstr(uri);
+            if !crate::route(t0, &url, false, gesture.as_bool(), &links_nav) {
+                args.SetCancel(true)?;
+            }
+        }
+        Ok(())
+    }));
+    let window = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let (mut uri, mut gesture) = (PWSTR::null(), BOOL::default());
+        // SAFETY: as above.
+        unsafe {
+            args.SetHandled(true)?; // never a WebView2 popup window
+            args.Uri(&mut uri)?;
+            args.IsUserInitiated(&mut gesture)?;
+            crate::route(t0, &take_pwstr(uri), true, gesture.as_bool(), &links);
+        }
+        Ok(())
+    }));
+    // SAFETY: registering handlers on our live web view.
+    unsafe {
+        core.add_NavigationStarting(&navigation, &mut token)?;
+        core.add_NewWindowRequested(&window, &mut token)?;
+    }
+    Ok(())
 }

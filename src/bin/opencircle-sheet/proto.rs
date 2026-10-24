@@ -256,10 +256,113 @@ pub fn body(w: f64, h: f64) -> Rect4 {
     ]
 }
 
-/// What may load in the card: https, and our own in-memory page (`own`).
-/// Never file://, data:, javascript: or plain http.
+/// What may load in the card: Google's own pages over https (`google_host`),
+/// and our in-memory pages (`own`). Never file://, data:, javascript:, plain
+/// http or another site: those go to the user's browser on a click, or nowhere.
 pub fn allowed(url: &str, own: &str) -> bool {
-    url.starts_with("https://") || url == own || is_history(url, own) || url == "about:blank"
+    if url == own || is_history(url, own) || url == "about:blank" {
+        return true;
+    }
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    google_host(&rest[..end])
+}
+
+/// Google's hosts Lens and AI Mode need: google.<tld> (google.com, google.de,
+/// google.co.uk, google.com.br), www. / consent. of those, *.google.com,
+/// gstatic.com, googleusercontent.com, ggpht.com (and their subdomains).
+/// Exact ASCII labels only: no port, userinfo, punycode look-alike or
+/// "google.com.evil.example".
+pub fn google_host(host: &str) -> bool {
+    if host.is_empty()
+        || !host
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+    {
+        return false;
+    }
+    for base in [
+        "google.com",
+        "gstatic.com",
+        "googleusercontent.com",
+        "ggpht.com",
+    ] {
+        if host == base || host.strip_suffix(base).is_some_and(|s| s.ends_with('.')) {
+            return host
+                .split('.')
+                .all(|l| !l.is_empty() && !l.starts_with("xn--"));
+        }
+    }
+    // google.<cc>, google.co.<cc>, google.com.<cc>, with www. or consent.
+    let host = (host
+        .strip_prefix("www.")
+        .or_else(|| host.strip_prefix("consent.")))
+    .unwrap_or(host);
+    let Some(tld) = host.strip_prefix("google.") else {
+        return false;
+    };
+    let cc = |l: &str| l.len() == 2 && l.bytes().all(|b| b.is_ascii_lowercase());
+    match tld.split_once('.') {
+        None => cc(tld),
+        Some((second, cc_)) => matches!(second, "co" | "com") && cc(cc_),
+    }
+}
+
+/// What the card does with a navigation or a new window the page asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Go {
+    /// Load it in the card.
+    Here,
+    /// Not in the card: the user's browser (a link the user clicked).
+    Browser,
+    /// Nowhere (not the user's doing, too many, or not a web link).
+    Drop,
+}
+
+/// Links the card hands to the browser: at most one a second, ten a card.
+#[derive(Debug, Default)]
+pub struct Limit {
+    sent: u32,
+    last: Option<std::time::Instant>,
+}
+
+impl Limit {
+    pub const MAX: u32 = 10;
+    const GAP: std::time::Duration = std::time::Duration::from_secs(1);
+
+    /// One more link to the browser at `now`, if within the limit.
+    pub fn take(&mut self, now: std::time::Instant) -> bool {
+        let spaced = self.last.is_none_or(|t| now.duration_since(t) >= Self::GAP);
+        let ok = spaced && self.sent < Self::MAX;
+        if ok {
+            self.sent += 1;
+            self.last = Some(now);
+        }
+        ok
+    }
+}
+
+/// Where `url` goes. `new_window`: the page asked for a new window (never one
+/// in the card); `gesture`: the user's own click or key started it.
+pub fn go(
+    url: &str,
+    own: &str,
+    new_window: bool,
+    gesture: bool,
+    limit: &mut Limit,
+    now: std::time::Instant,
+) -> Go {
+    if !new_window && allowed(url, own) {
+        return Go::Here;
+    }
+    let web = url.starts_with("https://") || url.starts_with("http://");
+    if gesture && web && limit.take(now) {
+        Go::Browser
+    } else {
+        Go::Drop
+    }
 }
 
 /// The History page's path under our own page.
@@ -452,10 +555,43 @@ mod tests {
     }
 
     #[test]
-    fn only_https_and_our_page_load() {
+    fn only_googles_pages_and_ours_load_in_the_card() {
         let own = "ocsheet://localhost/";
-        assert!(allowed("https://lens.google.com/search?p=x", own));
-        assert!(allowed(own, own));
+        for ok in [
+            "https://lens.google.com/search?p=x",
+            "https://www.google.com/search?udm=50&q=x",
+            "https://www.google.de/search?q=x",
+            "https://google.co.uk/",
+            "https://www.google.com.br/x",
+            "https://consent.google.fr/ml",
+            "https://www.gstatic.com/recaptcha/x.js",
+            "https://lh3.googleusercontent.com/a",
+            "https://yt3.ggpht.com/a",
+            "https://accounts.google.com/x",
+            own,
+        ] {
+            assert!(allowed(ok, own), "{ok}");
+        }
+        for bad in [
+            "https://google.com.evil.com/",
+            "https://www.google.com.evil.com/search",
+            "https://evil.com/google.com",
+            "https://evil.com/?u=https://www.google.com/",
+            "https://xn--googl-fsa.com/",
+            "https://googlé.com/",
+            "https://notgoogle.com/",
+            "https://evilgoogle.com/",
+            "https://google.evil/",
+            "https://google.co.evil.uk/",
+            "https://www.google.com:8443/",
+            "https://user@www.google.com/",
+            "https://GOOGLE.com/",
+            "https://en.wikipedia.org/wiki/Lighthouse",
+            "http://www.google.com/",
+            "https://ep2.adtrafficquality.google/sodar",
+        ] {
+            assert!(!allowed(bad, own), "{bad}");
+        }
         for bad in [
             "file:///etc/passwd",
             "http://example.com/",
@@ -478,6 +614,53 @@ mod tests {
         }
         assert_eq!(split_input("https://x"), ("https://x", None));
         assert_eq!(split_input("<p>\0<h>"), ("<p>", Some("<h>")));
+    }
+
+    #[test]
+    fn only_the_users_clicks_reach_the_browser_and_not_too_often() {
+        use std::time::{Duration, Instant};
+        let own = "ocsheet://localhost/";
+        let t = Instant::now();
+        let s = |n: u64| t + Duration::from_millis(n);
+        let mut limit = Limit::default();
+        let site = "https://en.wikipedia.org/wiki/Lighthouse";
+        // Google's own pages load here; another site never does.
+        let google = "https://www.google.com/search?q=x";
+        assert_eq!(go(google, own, false, false, &mut limit, s(0)), Go::Here);
+        // Not the user's doing (a script, an ad, a redirect chain): dropped.
+        assert_eq!(go(site, own, false, false, &mut limit, s(0)), Go::Drop);
+        assert_eq!(go(site, own, true, false, &mut limit, s(0)), Go::Drop);
+        // A click: the browser, at most once a second ...
+        assert_eq!(go(site, own, true, true, &mut limit, s(0)), Go::Browser);
+        assert_eq!(go(site, own, false, true, &mut limit, s(500)), Go::Drop);
+        assert_eq!(go(site, own, false, true, &mut limit, s(1000)), Go::Browser);
+        // ... new windows never open in the card, even Google's
+        assert_eq!(
+            go(google, own, true, true, &mut limit, s(2000)),
+            Go::Browser
+        );
+        // ... and ten a card.
+        for i in 3..10 {
+            assert_eq!(
+                go(site, own, true, true, &mut limit, s(i * 1000)),
+                Go::Browser
+            );
+        }
+        assert_eq!(go(site, own, true, true, &mut limit, s(60_000)), Go::Drop);
+        // Never a non-web link, even on a click.
+        let mut fresh = Limit::default();
+        for bad in [
+            "file:///etc/passwd",
+            "javascript:1",
+            "mailto:a@b.c",
+            "data:,x",
+        ] {
+            assert_eq!(
+                go(bad, own, true, true, &mut fresh, s(0)),
+                Go::Drop,
+                "{bad}"
+            );
+        }
     }
 
     #[test]

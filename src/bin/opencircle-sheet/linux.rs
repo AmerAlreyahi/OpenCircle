@@ -390,7 +390,10 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         }
     };
     match builder(&mut ctx, page, history, t0, gtk::main_quit, captcha).build_gtk(&content) {
-        Ok(v) => *view.borrow_mut() = Some(v),
+        Ok(v) => {
+            guard_links(&v, t0);
+            *view.borrow_mut() = Some(v);
+        }
         Err(e) => {
             eprintln!("[sheet] web view: {e}");
             return NO_RUNTIME;
@@ -429,4 +432,40 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         say(Line::Open(url));
     }
     0
+}
+
+/// Every navigation and new window the page asks for goes through `route`,
+/// with WebKit's word on whether the user's own click or key started it.
+fn guard_links(view: &wry::WebView, t0: Instant) {
+    use webkit2gtk::{
+        NavigationPolicyDecision, NavigationPolicyDecisionExt, PolicyDecisionExt,
+        PolicyDecisionType, URIRequestExt, WebViewExt,
+    };
+    use wry::WebViewExtUnix;
+    let links = crate::Links::default();
+    view.webview()
+        .connect_decide_policy(move |_, decision, kind| {
+            let new_window = match kind {
+                PolicyDecisionType::NavigationAction => false,
+                PolicyDecisionType::NewWindowAction => true,
+                _ => return false, // responses: WebKit's default
+            };
+            let action = decision
+                .downcast_ref::<NavigationPolicyDecision>()
+                .and_then(|d| d.navigation_action());
+            let Some(action) = action else {
+                decision.ignore();
+                return true;
+            };
+            let url = (action.request())
+                .and_then(|r| r.uri())
+                .map(|u| u.to_string())
+                .unwrap_or_default();
+            if crate::route(t0, &url, new_window, action.is_user_gesture(), &links) {
+                decision.use_();
+            } else {
+                decision.ignore();
+            }
+            true
+        });
 }

@@ -35,7 +35,35 @@ use std::time::{Duration, Instant};
 
 use proto::{Args, Kind, Line, Place};
 use wry::http::{Request, Response, header::CONTENT_TYPE};
-use wry::{NewWindowResponse, PageLoadEvent, PermissionResponse, WebContext, WebViewBuilder};
+use wry::{PageLoadEvent, PermissionResponse, WebContext, WebViewBuilder};
+
+/// Links the card hands to the browser this session (`proto::Limit`).
+pub type Links = std::rc::Rc<std::cell::RefCell<proto::Limit>>;
+
+/// Decides a navigation (`new_window`: the page asked for a window) the web
+/// view is about to make; `gesture`: the user's own click or key started it.
+/// True = load it in the card. Google's pages load here; anything else goes to
+/// the user's browser only on their click (rate-limited), else nowhere.
+pub fn route(t0: Instant, url: &str, new_window: bool, gesture: bool, links: &Links) -> bool {
+    let to = proto::go(
+        url,
+        &page_url(),
+        new_window,
+        gesture,
+        &mut links.borrow_mut(),
+        Instant::now(),
+    );
+    let what = match to {
+        proto::Go::Here => "nav",
+        proto::Go::Browser => "to the browser",
+        proto::Go::Drop => "blocked",
+    };
+    log(t0, what, url);
+    if to == proto::Go::Browser {
+        say(Line::Open(url.into())); // the app opens plain http(s) links only
+    }
+    to == proto::Go::Here
+}
 
 /// Exit code: no web view runtime on this system (the app turns the card off).
 const NO_RUNTIME: u8 = 3;
@@ -163,8 +191,7 @@ pub fn builder<'a>(
     close: impl Fn() + 'static,
     captcha: impl Fn(bool) + 'static,
 ) -> WebViewBuilder<'a> {
-    let own = page_url();
-    let own_ipc = own.clone();
+    let own_ipc = page_url();
     let b = WebViewBuilder::new_with_web_context(ctx)
         .with_devtools(false)
         .with_initialization_script(ESC_JS)
@@ -176,15 +203,8 @@ pub fn builder<'a>(
                 _ => {}
             }
         })
-        .with_navigation_handler(move |url| {
-            let ok = proto::allowed(&url, &own);
-            log(t0, if ok { "nav" } else { "nav BLOCKED" }, &url);
-            ok
-        })
-        .with_new_window_req_handler(|url, _| {
-            say(Line::Open(url)); // the app opens plain http(s) links only
-            NewWindowResponse::Deny
-        })
+        // Navigations and new windows: `route`, hooked on the platform's web
+        // view after it is built (wry's handlers can't tell a click from a script).
         .with_download_started_handler(|_, _| false)
         .with_permission_handler(|_| PermissionResponse::Deny)
         .with_on_page_load_handler(move |e, url| {
