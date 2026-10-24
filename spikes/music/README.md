@@ -20,7 +20,7 @@ test key (expires after a few days; a real app key needs a signed-in registratio
 | 30 s clip at 30 s, real duration | 3/14, one of them wrong (audiobook that uses the track) |
 | 60 s from the start | 1/14 (the 67 s track, i.e. nearly whole) |
 | 60 s at 30 s, real duration | 3/14, one wrong |
-| Ubuntu VM: 10 s captured from the monitor while playing | 0/1 |
+| Ubuntu VM: 10 s captured from the monitor while playing (10 tracks) | 0/10 |
 | Ubuntu VM: whole 67 s track captured from the monitor | 1/1 (Fluffing a Duck) |
 
 Fingerprint: 10 s clip < 2 ms, 3.5 min track ~25 ms (release). Lookup: 300–480 ms
