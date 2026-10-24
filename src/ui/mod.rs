@@ -726,6 +726,7 @@ impl App {
                 Task::none()
             }
             Message::BarGrab => {
+                eprintln!("[opencircle] bar held");
                 self.bar_drag = Some((None, self.bar_at()));
                 Task::none()
             }
@@ -3184,13 +3185,9 @@ impl App {
                 .width(shown * full - bar::SPACING)
                 .clip(true)
         });
-        let handle = iced::widget::mouse_area(
-            container(widgets::icon(widgets::DRAG))
-                .center_x(bar::HANDLE)
-                .center_y(widgets::CONTROL),
-        )
-        .on_press(Message::BarGrab)
-        .interaction(iced::mouse::Interaction::Grab);
+        let handle = container(widgets::icon(widgets::DRAG))
+            .center_x(bar::HANDLE)
+            .center_y(widgets::CONTROL);
         let chip = button(
             INCLUDE_SCREEN,
             "Include screen",
@@ -3203,8 +3200,12 @@ impl App {
             .extend(fixed)
             .spacing(bar::SPACING)
             .align_y(iced::Center);
-        // opaque: a press on it doesn't start a new selection.
-        opaque(widgets::surface(row))
+        // A press on the handle or the padding (not taken by the field or a
+        // button) drags the bar; opaque: a press on it never starts a selection.
+        let bar = iced::widget::mouse_area(widgets::surface(row))
+            .on_press(Message::BarGrab)
+            .interaction(iced::mouse::Interaction::Grab);
+        opaque(bar)
     }
 
     fn subscription(&self) -> Subscription<Message> {
