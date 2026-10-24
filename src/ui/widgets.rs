@@ -763,6 +763,18 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     )
 }
 
+/// A small picture as a 44x44 quiet button (Snip's Recent strip).
+pub fn thumbnail<'a, Message: Clone + 'a>(
+    picture: iced::widget::image::Handle,
+    on_press: Message,
+) -> Button<'a, Message> {
+    let shown = iced::widget::image(picture)
+        .width(CONTROL - 8.0)
+        .height(CONTROL - 8.0)
+        .content_fit(iced::ContentFit::Contain);
+    square_button(shown, false, on_press)
+}
+
 /// Thin vertical line between toolbar groups.
 pub fn toolbar_divider<'a, Message: 'a>() -> Element<'a, Message> {
     container(space::horizontal())

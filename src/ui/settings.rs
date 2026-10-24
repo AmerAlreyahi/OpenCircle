@@ -25,8 +25,8 @@ use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{
     After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
-    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
-    SongSource, Target, Theme, parse_shortcut,
+    EdgeStyle, Engine, Format, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
+    SnipAfter, SnipConfig, SongSource, Target, Theme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::mt;
@@ -445,13 +445,14 @@ pub enum Section {
     Appearance,
     Look,
     Shortcuts,
+    Snip,
     Ai,
     Translate,
     Song,
     About,
 }
 
-const SECTIONS: [(Section, &str, &str); 8] = [
+const SECTIONS: [(Section, &str, &str); 9] = [
     (Section::General, "General", "General settings"),
     (Section::Appearance, "Appearance", "Appearance settings"),
     (
@@ -460,6 +461,7 @@ const SECTIONS: [(Section, &str, &str); 8] = [
         "Look and behaviour settings",
     ),
     (Section::Shortcuts, "Shortcuts", "Shortcut settings"),
+    (Section::Snip, "Snip", "Snip settings"),
     (Section::Ai, "AI", "AI settings"),
     (Section::Translate, "Translate", "Translate settings"),
     (Section::Song, "Song search", "Song search settings"),
@@ -571,6 +573,8 @@ pub enum Message {
     Picker(usize),
     PickColour(Color),
     Hex(String),
+    /// The Snip section's choices.
+    Snip(SnipConfig),
     Save,
 }
 
@@ -1030,6 +1034,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             }
             state.refresh_custom();
         }
+        Message::Snip(snip) => state.draft.snip = snip,
         Message::BrowseFolder => return Outcome::Browse,
         Message::Folder(Some(dir)) => {
             state.draft.general.save_folder = dir.to_string_lossy().into_owned();
@@ -1129,6 +1134,7 @@ fn content(state: &State) -> Element<'_, Message> {
             )],
         ),
         Section::Shortcuts => ("Shortcuts", shortcut_rows(state)),
+        Section::Snip => ("Snip", snip_rows(&state.draft.snip)),
         Section::Ai => ("AI", ai_rows(state)),
         Section::Song => ("Song search", song_rows(state)),
         Section::Translate => (
@@ -1668,6 +1674,100 @@ fn preview(look: &Look) -> Handle {
         }
     }
     Handle::from_rgba(w, h, rgba)
+}
+
+/// Snip: what a capture does, the size and file it is copied and saved as,
+/// the pointer, and Recent (off = nothing kept on disk).
+fn snip_rows(d: &SnipConfig) -> Vec<Element<'_, Message>> {
+    // The draft's snip choices with one changed.
+    let edit = |change: &dyn Fn(&mut SnipConfig)| {
+        let mut next = d.clone();
+        change(&mut next);
+        Message::Snip(next)
+    };
+    vec![
+        form_row(
+            "After a capture",
+            "Copy: ready to paste into an AI chat, Edit a click away",
+            segmented(
+                &[
+                    (SnipAfter::Copy, "Copy", "Copy it; the toast offers Edit"),
+                    (SnipAfter::Editor, "Editor", "Open the editor on it"),
+                    (SnipAfter::Both, "Both", "Copy it and open the editor"),
+                ],
+                d.after,
+                move |after| edit(&|s| s.after = after),
+            ),
+            None,
+        ),
+        form_row(
+            "Image size",
+            "Long edge for Copy and Save; AI chats shrink bigger ones anyway",
+            segmented(
+                &[
+                    (1024, "1024", "Scale the long edge to 1024 px"),
+                    (1568, "1568", "Scale the long edge to 1568 px"),
+                    (2048, "2048", "Scale the long edge to 2048 px"),
+                    (0, "Original", "Keep the original size"),
+                ],
+                d.max_edge,
+                move |max_edge| edit(&|s| s.max_edge = max_edge),
+            ),
+            None,
+        ),
+        form_row(
+            "Save as",
+            "The file Save writes",
+            segmented(
+                &[
+                    (Format::Png, "PNG", "Save PNG files (sharp text)"),
+                    (Format::Jpeg, "JPEG", "Save JPEG files (smaller)"),
+                ],
+                d.format,
+                move |format| edit(&|s| s.format = format),
+            ),
+            None,
+        ),
+        form_row(
+            "Save size",
+            "Copy always uses the image size",
+            segmented(
+                &[
+                    (false, "Image size", "Save at the image size"),
+                    (true, "Original", "Save at the original size"),
+                ],
+                d.save_original,
+                move |original| edit(&|s| s.save_original = original),
+            ),
+            None,
+        ),
+        form_row(
+            "Mouse pointer",
+            "Draw the pointer into the capture",
+            segmented(
+                &[
+                    (false, "Off", "Leave the pointer out"),
+                    (true, "On", "Draw the pointer in"),
+                ],
+                d.cursor,
+                move |cursor| edit(&|s| s.cursor = cursor),
+            ),
+            None,
+        ),
+        form_row(
+            "Recent captures",
+            "The last 20, on this PC only. Off deletes them",
+            segmented(
+                &[
+                    (false, "Off", "Keep no captures"),
+                    (true, "On", "Keep the last 20 captures"),
+                ],
+                d.history,
+                move |history| edit(&|s| s.history = history),
+            ),
+            None,
+        ),
+    ]
 }
 
 fn about_rows<'a>() -> Vec<Element<'a, Message>> {
@@ -2501,6 +2601,36 @@ pub(super) mod tests {
         let s = State::new(cfg, warnings, None, Box::new(MemoryStore::default()));
         assert_eq!(s.draft.translate.engine, Engine::Offline);
         assert!(s.notice.is_none(), "{:?}", s.notice);
+    }
+
+    #[test]
+    fn snip_section_edits_the_snip_choices() {
+        let dir = tmp("snip-section");
+        let path = dir.join("config.toml");
+        let (mut s, _) = state(Some(path.clone()));
+        update(&mut s, Message::Section(Section::Snip));
+        let texts = shot::texts(view(&s));
+        for label in [
+            "After a capture",
+            "Image size",
+            "Save as",
+            "Recent captures",
+        ] {
+            assert!(texts.iter().any(|t| t == label), "{label}: {texts:?}");
+        }
+        let mut snip = s.draft.snip.clone();
+        assert!(!snip.history, "off until the user turns it on");
+        snip.after = SnipAfter::Both;
+        snip.max_edge = 0;
+        snip.format = Format::Jpeg;
+        snip.history = true;
+        update(&mut s, Message::Snip(snip.clone()));
+        assert_eq!(s.draft.snip, snip);
+        assert!(matches!(update(&mut s, Message::Save), Outcome::Saved(_)));
+        let (back, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back.snip, snip);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

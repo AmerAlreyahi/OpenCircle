@@ -290,9 +290,9 @@ struct Shot {
     /// Logical px: the monitor's origin and size.
     origin: Point,
     size: Size,
-    /// Snip mode: the mode to start in, and the windows on this monitor (logical
-    /// px, topmost first).
-    snip: Option<(snip::Kind, Vec<Rectangle>)>,
+    /// Snip mode: the mode to start in, the windows on this monitor (logical
+    /// px, topmost first) and the window the user was in (Windows).
+    snip: Option<(snip::Kind, Vec<Rectangle>, Option<isize>)>,
 }
 
 struct App {
@@ -493,6 +493,13 @@ impl App {
             {
                 self.show()
             }
+            // The snip toast is only a pill: a new shot replaces it.
+            Message::Trigger(trigger @ (Trigger::Capture(_) | Trigger::Quick(..)))
+                if self.snip_toast() =>
+            {
+                let closing = self.close();
+                closing.chain(self.update(Message::Trigger(trigger)))
+            }
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..))
                 if self.frame.is_some() || self.capturing.is_some() =>
             {
@@ -674,16 +681,17 @@ impl App {
         })
         .map(move |()| Message::CaptureTimedOut(n));
         let shot = background(move |tx| {
-            let shot = capture::monitor_under_cursor().map(|frame| {
+            let shot = capture::monitor_under_cursor().map(|mut frame| {
                 let scale = frame.scale;
-                let logical = |x: i32, y: i32, w: u32, h: u32| {
-                    let (x, y) = ((x - frame.x) as f32, (y - frame.y) as f32);
-                    Rectangle::new(Point::new(x, y), Size::new(w as f32, h as f32)) * (1.0 / scale)
-                };
                 let snip = snip.map(|kind| {
+                    if config::current().snip.cursor {
+                        capture::cursor::draw(&mut frame);
+                    }
+                    let foreground = capture::window_rect::foreground();
                     let list = capture::window_rect::list();
-                    let windows = list.into_iter().map(|(x, y, w, h)| logical(x, y, w, h));
-                    (kind, windows.collect())
+                    let windows =
+                        (list.into_iter()).map(|r| snip::to_logical(r, (frame.x, frame.y), scale));
+                    (kind, windows.collect(), foreground)
                 });
                 Shot {
                     origin: Point::new(frame.x as f32 / scale, frame.y as f32 / scale),
@@ -735,14 +743,21 @@ impl App {
         self.hiding = Hiding::No;
         self.behaviour = config::current().selection;
         let mut first = None;
-        if let Some((kind, windows)) = shot.snip {
-            let mut snip = Snip::new(windows, size, snip::can_scroll());
-            first = snip.start(kind, size); // Full = the editor on the whole screen
+        let mut extras = Task::none();
+        if let Some((kind, windows, foreground)) = shot.snip {
+            let mut snip = Snip::new(windows, size, snip::can_scroll(), foreground);
+            first = snip.start(kind, size); // Full = the whole screen at once
             self.purpose = Purpose::Snip(Box::new(snip));
+            let px = |v: f32| (v * shot.scale).round() as i32;
+            let origin = (px(shot.origin.x), px(shot.origin.y));
+            extras = self.snip_extras(foreground, origin, shot.scale);
         }
         let Purpose::Quick(quick, target) = self.purpose else {
-            let editor = first.map(|next| self.snip_next(Some(next)));
-            return editor.unwrap_or_else(Task::none).chain(self.show());
+            let next = first.map_or_else(Task::none, |next| self.snip_next(Some(next)));
+            if self.snip_pill() {
+                return Task::batch([next, extras]); // the toast is the window
+            }
+            return Task::batch([next.chain(self.show()), extras]);
         };
         if let Quick::Song = quick {
             let song = self.run_quick(quick); // listens at once, no area
@@ -799,7 +814,7 @@ impl App {
         // The editor, a toast or a scrolling capture has the screen.
         if self.edit.as_ref().is_some_and(Editing::is_open)
             || self.toast.is_some()
-            || self.scroll().is_some()
+            || self.snip_pill()
         {
             return Task::none();
         }
@@ -832,6 +847,25 @@ impl App {
             overlay::Event::Move(at) => overlay::Event::Move(self.view.to_image(at)),
             overlay::Event::Hover(at) => overlay::Event::Hover(self.view.to_image(at)),
             event => event,
+        };
+        // Snip: the loupe follows the pointer; a drag's ends snap to edges.
+        let event = match (&mut self.purpose, event) {
+            (Purpose::Snip(snip), overlay::Event::Press { at, shift }) => {
+                snip.pointer = Some(at);
+                overlay::Event::Press {
+                    at: snip.snap(at),
+                    shift,
+                }
+            }
+            (Purpose::Snip(snip), overlay::Event::Move(at)) => {
+                snip.pointer = Some(at);
+                overlay::Event::Move(snip.snap(at))
+            }
+            (Purpose::Snip(snip), overlay::Event::Hover(at)) => {
+                snip.pointer = Some(at);
+                overlay::Event::Hover(at)
+            }
+            (_, event) => event,
         };
         // Over a translation: a tap opens a block's word card, E / A are the
         // card's; a new selection leaves the translation.
@@ -914,7 +948,9 @@ impl App {
             overlay::Event::Move(_) => {}
             overlay::Event::Hover(p) => {
                 // Snip's Window mode: the window under the pointer lights up.
-                if let Purpose::Snip(snip) = &self.purpose {
+                if let Purpose::Snip(snip) = &self.purpose
+                    && snip.kind == snip::Kind::Window
+                {
                     match snip.window_at(p) {
                         Some(w) if self.selection.map(|s| s.area) != Some(w) => self.select(w),
                         Some(_) => {}
@@ -1455,11 +1491,11 @@ impl App {
         let Run::Finish(finish) = action.run else {
             return Task::none();
         };
-        let closing = self.close();
+        // Before close: Copy's text read keeps the overlay's warm OCR helper.
         if let Err(e) = finish(crop) {
             eprintln!("{} failed: {e}", action.id);
         }
-        closing
+        self.close()
     }
 
     /// Runs a quick action on the selection (no action bar). Only once: a new
@@ -1591,16 +1627,195 @@ impl App {
                 snip.scroll = None;
                 self.selection = None;
                 self.stroke.clear();
-                match stitched {
-                    Ok(crop) if crop.height > 0 => {
-                        self.edit = Some(Editing::fitted(crop, self.screen, self.scale));
+                let next = match stitched {
+                    Ok(crop) if crop.height > 0 => self.snip_captured(Some(crop), true),
+                    Ok(_) => Task::none(),
+                    Err(e) => {
+                        eprintln!("scrolling capture failed: {e}");
+                        Task::none()
                     }
-                    Ok(_) => {}
-                    Err(e) => eprintln!("scrolling capture failed: {e}"),
+                };
+                if self.snip_pill() {
+                    return next; // the toast keeps the window small
+                }
+                next.chain(self.show())
+            }
+            snip::Msg::Delay(secs) => {
+                let Some(id) = snip.delay(secs) else {
+                    return Task::none();
+                };
+                let foreground = snip.foreground;
+                self.selection = None;
+                self.stroke.clear();
+                let ticks = background(move |tx| {
+                    // The overlay is a pill now: the user's app gets the focus back.
+                    std::thread::sleep(Duration::from_millis(150));
+                    capture::window_rect::activate(foreground);
+                    for left in (0..secs).rev() {
+                        std::thread::sleep(Duration::from_secs(1));
+                        if tx.unbounded_send(left).is_err() {
+                            return;
+                        }
+                    }
+                })
+                .map(move |left| Message::Snip(snip::Msg::Tick(id, left)));
+                self.pill_at_top().chain(ticks)
+            }
+            snip::Msg::Tick(id, left) => match snip.tick(id, left) {
+                // Hidden first, so the pill is in no capture.
+                Some(true) => window::set_mode(self.overlay, Mode::Hidden).chain(
+                    background(|tx| {
+                        std::thread::sleep(Duration::from_millis(300));
+                        let _ = tx.unbounded_send(());
+                    })
+                    .map(move |()| Message::Snip(snip::Msg::Shoot(id))),
+                ),
+                _ => Task::none(),
+            },
+            snip::Msg::Shoot(id) => {
+                if !snip.shoot(id) {
+                    return Task::none();
+                }
+                let kind = snip.kind;
+                let _ = self.close();
+                self.hiding = Hiding::No; // already hidden
+                self.capture(Instant::now(), Some(kind))
+            }
+            snip::Msg::Cancel => self.close(),
+            snip::Msg::Edit => {
+                let Some(toast) = snip.take_toast() else {
+                    return Task::none();
+                };
+                if toast.in_place {
+                    let _ = self.open_editor();
+                } else {
+                    self.edit = Some(Editing::fitted(toast.crop, self.screen, self.scale));
                 }
                 self.show()
             }
+            snip::Msg::ToastDone(id) if snip.toast_showing(id) => self.close(),
+            snip::Msg::ToastDone(_) => Task::none(),
+            snip::Msg::Controls(opening, controls) => {
+                if opening == self.opening {
+                    snip.set_controls(controls, self.screen);
+                }
+                Task::none()
+            }
+            snip::Msg::Shift(held) => {
+                snip.set_shift(held);
+                Task::none()
+            }
+            snip::Msg::Recent(recent) => {
+                snip.set_recent(recent);
+                Task::none()
+            }
+            snip::Msg::OpenRecent(path) => background(move |tx| {
+                let _ = tx.unbounded_send(snip::open_recent(&path));
+            })
+            .map(|read| Message::Snip(snip::Msg::Loaded(read))),
+            snip::Msg::Loaded(Ok(crop)) => {
+                self.selection = None;
+                self.stroke.clear();
+                self.snip_captured(Some(crop), false)
+            }
+            snip::Msg::Loaded(Err(e)) => {
+                eprintln!("[opencircle] recent capture unreadable: {e}");
+                Task::none()
+            }
+            snip::Msg::ClearRecent => {
+                snip.set_recent(Vec::new());
+                snip::clear_recent();
+                Task::none()
+            }
         }
+    }
+
+    /// The window is only Snip's pill (scrolling, the timer, the toast).
+    fn snip_pill(&self) -> bool {
+        matches!(&self.purpose, Purpose::Snip(s) if s.is_pill())
+    }
+
+    /// Snip's "Copied" toast is showing.
+    fn snip_toast(&self) -> bool {
+        matches!(&self.purpose, Purpose::Snip(s) if s.has_toast())
+    }
+
+    /// Shrinks the overlay to the pill at the top of the monitor (no focus taken).
+    fn pill_at_top(&self) -> Task<Message> {
+        let x = (self.screen.width - snip::PILL.width) / 2.0;
+        let at = self.origin + Vector::new(x.max(0.0), ASK_MARGIN);
+        window::set_mode(self.overlay, Mode::Windowed)
+            .chain(window::resize(self.overlay, snip::PILL))
+            .chain(window::move_to(self.overlay, at))
+    }
+
+    /// Snip's slow extras, on threads: the Recent strip, and (Windows) the
+    /// controls of the app the user was in, for snapping.
+    fn snip_extras(
+        &self,
+        foreground: Option<isize>,
+        origin: (i32, i32),
+        scale: f32,
+    ) -> Task<Message> {
+        let recent = background(|tx| {
+            let _ = tx.unbounded_send(snip::load_recent());
+        })
+        .map(|recent| Message::Snip(snip::Msg::Recent(recent)));
+        let Some(window) = foreground.filter(|_| cfg!(windows)) else {
+            return recent;
+        };
+        let opening = self.opening;
+        let controls = background(move |tx| {
+            let rects = (capture::uia::controls(window).into_iter())
+                .map(|r| snip::to_logical(r, origin, scale))
+                .collect();
+            let _ = tx.unbounded_send(rects);
+        })
+        .map(move |rects| Message::Snip(snip::Msg::Controls(opening, rects)));
+        Task::batch([recent, controls])
+    }
+
+    /// A snip is taken: the selection on the frozen frame (`given: None`), or a
+    /// stitched / recent capture. Kept in Recent (`remember`, if history is on),
+    /// then copied (a toast offers Edit) and / or edited, as `snip.after` says.
+    fn snip_captured(&mut self, given: Option<Crop>, remember: bool) -> Task<Message> {
+        let in_place = given.is_none();
+        let Some(crop) = given.or_else(|| self.crop()) else {
+            return Task::none();
+        };
+        if remember {
+            snip::remember(&crop);
+        }
+        let (copy, edit) = snip::route(config::current().snip.after);
+        let copied = copy
+            && match copy::ACTION.run {
+                Run::Finish(copy) => copy(crop.clone())
+                    .inspect_err(|e| eprintln!("copy failed: {e}"))
+                    .is_ok(),
+                _ => false,
+            };
+        if edit || !copied {
+            // Copy failed: the editor, so the capture isn't lost.
+            if in_place {
+                return self.open_editor();
+            }
+            self.edit = Some(Editing::fitted(crop, self.screen, self.scale));
+            return Task::none();
+        }
+        let Purpose::Snip(snip) = &mut self.purpose else {
+            return Task::none();
+        };
+        let id = snip.toast(crop, in_place);
+        let foreground = snip.foreground;
+        let done = background(move |tx| {
+            // Once the pill is up, the user's app (their AI chat) gets the focus back.
+            std::thread::sleep(Duration::from_millis(150));
+            capture::window_rect::activate(foreground);
+            std::thread::sleep(Duration::from_secs(snip::TOAST_SECS));
+            let _ = tx.unbounded_send(());
+        })
+        .map(move |()| Message::Snip(snip::Msg::ToastDone(id)));
+        self.pill_at_top().chain(done)
     }
 
     /// Where a snip pick leads: the editor on the area, or a scrolling capture.
@@ -1613,7 +1828,7 @@ impl App {
             }
             Some(snip::Next::Edit(area)) => {
                 self.select(area);
-                self.open_editor()
+                self.snip_captured(None, true)
             }
             Some(snip::Next::Scroll(area)) => self.start_scroll(area),
         }
@@ -2011,8 +2226,8 @@ impl App {
             Purpose::Snip(snip) => Some(snip),
             _ => None,
         };
-        // Scrolling: the window is only the progress pill.
-        if let Some(pill) = snip.and_then(|s| s.progress_view()) {
+        // Scrolling, the timer, the toast: the window is only a pill.
+        if let Some(pill) = snip.and_then(|s| s.pill_view()) {
             return pill.map(Message::Snip);
         }
         let picked: Vec<Rectangle> = (self.text_mode.as_ref())
@@ -2026,7 +2241,7 @@ impl App {
             handles: self.handles(),
             opening: self.opening,
             first_draw: &self.first_draw,
-            hover: snip.is_some_and(|s| s.kind == snip::Kind::Window) && self.edit.is_none(),
+            hover: snip.is_some_and(|s| s.kind.picks()) && self.edit.is_none(),
             dim: self.translate.is_none() || self.selection.is_some(),
             look: config::look(),
             morph: (self.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
@@ -2061,6 +2276,12 @@ impl App {
                     .into();
             }
             layers = layers.extend(edit.flat_view());
+        }
+        // Snip: the loupe beside the pointer (under the mode switch).
+        if self.edit.is_none()
+            && let Some(loupe) = snip.and_then(|s| s.loupe(frame, self.scale))
+        {
+            layers = layers.push(loupe.map(Message::Snip));
         }
         let top = if let Some(toast) = self.toast {
             container(widgets::pill(toast))
@@ -2273,7 +2494,17 @@ impl App {
                 }),
                 None => Subscription::none(),
             };
-            Subscription::batch([triggers, escape, alt, card])
+            // Snip: Shift held = no snapping.
+            let shift = match self.purpose {
+                Purpose::Snip(_) => iced::event::listen_with(|event, _, _| match event {
+                    iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+                        Some(Message::Snip(snip::Msg::Shift(m.shift())))
+                    }
+                    _ => None,
+                }),
+                _ => Subscription::none(),
+            };
+            Subscription::batch([triggers, escape, alt, card, shift])
         } else if self.hiding != Hiding::No {
             // One stream for both, so a resize is always seen before the frames after it.
             // Every message makes iced redraw, so frames keep coming while this runs.
@@ -3247,7 +3478,7 @@ mod tests {
         app.selection.as_mut().unwrap().kind = overlay::Kind::Word;
         assert!(app.auto_actions().is_empty(), "a tapped word waits");
         app.selection.as_mut().unwrap().kind = overlay::Kind::Snap;
-        app.purpose = Purpose::Snip(Box::new(Snip::new(Vec::new(), app.screen, false)));
+        app.purpose = Purpose::Snip(Box::new(Snip::new(Vec::new(), app.screen, false, None)));
         assert!(app.auto_actions().is_empty(), "Snip has no search");
         // an App opened before the setting existed behaves as before
         assert!(auto_targets(App::idle(window::Id::unique()).behaviour).is_empty());
