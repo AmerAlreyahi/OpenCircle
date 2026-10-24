@@ -803,7 +803,9 @@ impl App {
         // iced makes it visible before going full-screen, so whatever is shown
         // first must already cover the monitor (no small black box flash).
         // ponytail: mixed-DPI multi-monitor placement untested (needs real hardware).
-        let show = window::move_to(self.overlay, self.origin)
+        let show = windows::uncut(self.overlay)
+            .map(Message::Windows)
+            .chain(window::move_to(self.overlay, self.origin))
             .chain(window::resize(self.overlay, self.screen))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
             .chain(window::gain_focus(self.overlay));
@@ -1777,6 +1779,8 @@ impl App {
                 self.overlay,
                 self.origin + Vector::new(at.x, at.y),
             ))
+            // The window is exactly the pill: cut it to the pill's shape (no box).
+            .chain(windows::cut(self.overlay, widgets::SURFACE_RADIUS).map(Message::Windows))
     }
 
     /// `Shoot(kind)` after `wait` (the overlay is gone by then).

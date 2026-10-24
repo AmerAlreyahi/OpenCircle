@@ -547,7 +547,14 @@ impl Snip {
             return None;
         };
         let bar = bar.spacing(16).padding([0, 12]).align_y(Center);
-        Some(container(widgets::surface(bar)).center(Fill).into())
+        // Exactly the window's size when it is only this pill (`windows::cut` shapes the
+        // window to it); over the frame (Wayland) it is the same flat pill, centred.
+        let pill = widgets::solid_surface(bar)
+            .width(PILL.width)
+            .height(PILL.height)
+            .align_x(Center)
+            .align_y(Center);
+        Some(container(pill).center(Fill).into())
     }
 
     /// While an area is picked by hand: the loupe beside the pointer and, unless

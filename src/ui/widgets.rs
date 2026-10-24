@@ -483,7 +483,7 @@ pub fn solid_surface<'a, Message: 'a>(
             border: Border {
                 color: palette.border,
                 width: 1.0,
-                radius: super::shape::radius(SURFACE_RADIUS).into(),
+                radius: SURFACE_RADIUS.into(),
             },
             ..container::Style::default()
         })

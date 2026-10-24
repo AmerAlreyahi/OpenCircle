@@ -45,6 +45,19 @@ pub fn round_rect(w: u32, h: u32, r: u32) -> Vec<(i32, i32, u32, u32)> {
     bands
 }
 
+/// Removes the shape: the window is whole again (the overlay went full-screen).
+pub fn clear(handle: RawWindowHandle) -> Result<(), String> {
+    match handle {
+        #[cfg(windows)]
+        RawWindowHandle::Win32(h) => win::clear(h.hwnd.get()),
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xlib(h) => x11::clear(h.window as u32),
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xcb(h) => x11::clear(h.window.get()),
+        _ => Ok(()),
+    }
+}
+
 /// Shapes the window behind `handle` to its rounded rectangle (`max_radius` in
 /// logical px, see `corner`). `Ok` also when this window system needs nothing.
 pub fn apply(handle: RawWindowHandle, max_radius: f32) -> Result<(), String> {
@@ -69,6 +82,12 @@ mod win {
     use windows::Win32::Graphics::Gdi::{CreateRectRgn, CreateRoundRectRgn, SetWindowRgn};
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    pub fn clear(hwnd: isize) -> Result<(), String> {
+        // SAFETY: `hwnd` is a live window of this process; no region = the whole window.
+        unsafe { SetWindowRgn(HWND(hwnd as *mut _), None, true) };
+        Ok(())
+    }
 
     pub fn apply(hwnd: isize, max_radius: f32) -> Result<(), String> {
         let hwnd = HWND(hwnd as *mut _);
@@ -98,6 +117,21 @@ mod win {
 mod x11 {
     use super::{corner, round_rect};
     use xcb::{XidNew, shape, x};
+
+    pub fn clear(window: u32) -> Result<(), String> {
+        let (conn, _) =
+            xcb::Connection::connect_with_extensions(None, &[xcb::Extension::Shape], &[])
+                .map_err(|e| format!("X11: {e:?}"))?;
+        conn.send_and_check_request(&shape::Mask {
+            operation: shape::So::Set,
+            destination_kind: shape::Sk::Bounding,
+            destination_window: x::Window::new(window),
+            x_offset: 0,
+            y_offset: 0,
+            source_bitmap: xcb::Xid::none(),
+        })
+        .map_err(|e| format!("X11: {e:?}"))
+    }
 
     pub fn apply(window: u32, max_radius: f32) -> Result<(), String> {
         let os = |e: &dyn std::fmt::Debug| format!("X11: {e:?}");
@@ -233,5 +267,8 @@ mod tests {
                 .any(|b| px >= b.0 && px < b.0 + b.2 as i32 && py >= b.1 && py < b.1 + b.3 as i32)
         };
         assert!(!inside(0, 0) && !inside(119, 39) && inside(60, 20));
+        // Cleared: the whole window again.
+        x11::clear(window.resource_id()).unwrap();
+        assert_eq!(area(&x11::bounding(window.resource_id())), 120 * 40);
     }
 }

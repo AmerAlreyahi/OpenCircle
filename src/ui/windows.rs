@@ -697,6 +697,28 @@ pub fn clear_theme() -> iced::Theme {
     THEME.clone()
 }
 
+/// Cuts an existing window (the capture overlay shrunk to a pill) to its content's
+/// rounded rectangle of at most `radius` px, now and after every resize, until
+/// `uncut`. Where a window is opened as a popup, `floating` does this itself.
+pub fn cut(id: window::Id, radius: f32) -> Task<Msg> {
+    forget_floating(id);
+    FLOATING.lock().unwrap().push((id, radius));
+    reshape(id)
+}
+
+/// Whole again (and not floating): the overlay is going full-screen.
+pub fn uncut(id: window::Id) -> Task<Msg> {
+    forget_floating(id);
+    window::run(id, |w| {
+        if let Ok(handle) = w.window_handle()
+            && let Err(e) = shape::clear(handle.as_raw())
+        {
+            eprintln!("[opencircle] window shape: {e}");
+        }
+    })
+    .discard()
+}
+
 /// Cuts the floating window `id` to its content's shape again (it was resized).
 /// Nothing for any other window.
 pub fn reshape(id: window::Id) -> Task<Msg> {
