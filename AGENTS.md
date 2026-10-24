@@ -188,6 +188,8 @@ production systems.
 - Windows first (owner, 2026-10-24, to save credits): VM testing and
   Linux-only fixes are on hold; Windows is the priority. Linux must still build and
   pass CI. Linux VM testing resumes later, on the owner's word.
+- Lightweight means (owner, 2026-10-24): the least resources at ALL times, idle
+  and busy (RAM, CPU, GPU, disk, download), not just a low idle footprint.
 - v0.1.0 scope (owner, 2026-10-24): release when Windows is fully tested; the
   Linux builds are attached and labelled "preview, known Wayland limits" in the
   release notes. The Linux tweak round comes in v0.1.x.
@@ -196,6 +198,13 @@ production systems.
   field, translate the screen, song search when a key is set). Text on screen can
   be selected directly: drag along text selects words, tap selects a word;
   circling still selects an area, the same way Circle to Search behaves.
+  Text selection works like a desktop (owner, 2026-10-24): I-beam cursor,
+  selection to the exact character, flat square highlight, no handles,
+  double-click a word, triple-click a line, Shift+click, Ctrl+C, Ctrl+A.
+  The bottom bar holds: the ask field, Ask AI, Translate screen, Live translate,
+  Search music and Edit image (owner, 2026-10-24). Search music is always shown
+  (supersedes "hidden until a key is set"): with no key it opens the key setup and
+  sends nothing.
 - Themes in v0.1.0 (owner, 2026-10-24, minimum): 2 new widget themes (one is
   the frosted glass below); the 7 existing live-border looks are enough (no new
   ones). A Settings switch turns the glass effect on or off for the widgets.
