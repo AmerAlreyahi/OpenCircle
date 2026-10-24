@@ -189,7 +189,17 @@ pub fn run(
         colours,
         shadow,
     };
-    let mut child = Command::new(path)
+    let mut command = Command::new(path);
+    // An AppImage bundles an older GLib/GTK than the system's WebKitGTK needs
+    // (seen: symbol lookup error on Ubuntu 26.04): the helper takes the
+    // system's libraries first.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("APPIMAGE").is_some()
+        && let Some(dir) = system_webkit_dir()
+    {
+        command.env("LD_LIBRARY_PATH", dir);
+    }
+    let mut child = command
         .args(args.to_vec())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -253,6 +263,24 @@ pub fn run(
         BROKEN.store(true, Ordering::Relaxed);
     }
     Err(format!("the results card did not open (exit {code:?})"))
+}
+
+/// The system folder that holds libwebkit2gtk-4.1 (Debian/Ubuntu multiarch,
+/// Fedora/openSUSE lib64, Arch lib), if any.
+#[cfg(target_os = "linux")]
+fn system_webkit_dir() -> Option<String> {
+    let arch = std::env::consts::ARCH;
+    [
+        format!("/usr/lib/{arch}-linux-gnu"),
+        "/usr/lib64".into(),
+        "/usr/lib".into(),
+    ]
+    .into_iter()
+    .find(|d| {
+        std::path::Path::new(d)
+            .join("libwebkit2gtk-4.1.so.0")
+            .exists()
+    })
 }
 
 /// A Lens results page (what the history reopens), as one plain https link.
