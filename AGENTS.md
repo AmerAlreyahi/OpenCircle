@@ -121,6 +121,10 @@ production systems.
   browser; the image goes only via Lens. API providers stay as options.
 - Screen border (owner, 2026-10-24): a thin gradient border around the captured
   screen; live translate animates it subtly; snip shows it static.
+- Priorities (owner, 2026-10-24): when choosing between options, speed first,
+  then lightweight, then free (no key, no account, no paid service) by default;
+  paid or heavier options only as opt-in extras. E.g. live translate defaults to
+  an on-device model, not an AI service.
 - Test machines (owner, 2026-10-24): two test VMs, agents may do anything on them
   (access details in AGENTS.local.md). Prefer them over the owner's own PC.
 
