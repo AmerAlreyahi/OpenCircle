@@ -8,7 +8,7 @@ use iced::widget::{
     Button, Container, Text, TextInput, Tooltip, button, container, progress_bar, row, scrollable,
     space, text, text_editor, text_input, tooltip,
 };
-use iced::{Background, Border, Color, Element, Font, Shadow, Vector, gradient};
+use iced::{Background, Border, Color, Element, Font, gradient};
 
 use super::theme;
 use crate::config::BarStyle;
@@ -106,6 +106,9 @@ pub mod card {
     const EDGE: f32 = 10.0;
     const PILL: f32 = 40.0;
     const RADIUS: f32 = 20.0;
+    /// The card's shadow rings: their width, and how much lower they sit.
+    const SHADOW_STEP: f32 = 4.0;
+    const SHADOW_DROP: f32 = 4.0;
 
     /// What a press on the card's frame does.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,11 +311,6 @@ pub mod card {
                     width: 1.0,
                     radius: RADIUS.into(),
                 },
-                shadow: iced::Shadow {
-                    color: palette.shadow,
-                    offset: Vector::new(0.0, 8.0),
-                    blur_radius: 24.0,
-                },
                 ..container::Style::default()
             });
         // the inner edge: a thin strip, its pill only while hovered
@@ -360,7 +358,26 @@ pub mod card {
         let layered = stack![card, pin(edge).position(place)]
             .width(at.width)
             .height(at.height);
-        pin(opaque(layered)).position(at.position()).into()
+        // its shadow: rings of quads under it (see `glass` for why no
+        // `iced::Shadow`), a little lower than the card
+        let ring = |d: f32, alpha: f32| {
+            let size = Size::new(at.width + 2.0 * d, at.height + 2.0 * d);
+            let ring = container(space::horizontal())
+                .width(size.width)
+                .height(size.height)
+                .style(move |_| container::Style {
+                    background: Some(palette.shadow.scale_alpha(alpha).into()),
+                    border: iced::Border::default().rounded(RADIUS + d),
+                    ..container::Style::default()
+                });
+            pin(ring).position(at.position() + Vector::new(-d, SHADOW_DROP - d))
+        };
+        stack![
+            ring(2.0 * SHADOW_STEP, 0.25),
+            ring(SHADOW_STEP, 0.5),
+            pin(opaque(layered)).position(at.position())
+        ]
+        .into()
     }
 
     #[cfg(test)]
@@ -1101,8 +1118,11 @@ fn accent(status: button::Status) -> Background {
         .into()
 }
 
-/// The one glass style: panel colour, 1 px border, soft shadow; the active
-/// look's bar style makes it solid or a see-through outline.
+/// The one glass style: panel colour, 1 px border; the active look's bar
+/// style makes it solid or a see-through outline. Never an `iced::Shadow`
+/// anywhere: tiny-skia draws a shadow whole on every redraw, outside the part
+/// being redrawn too, so it piles up into a black block (and a floating
+/// window can't show one: no alpha there).
 fn glass(radius: f32) -> container::Style {
     let palette = theme::floating();
     let (background, border, width) = match crate::config::look().bar {
@@ -1117,11 +1137,6 @@ fn glass(radius: f32) -> container::Style {
             width,
             radius: radius.into(),
         },
-        shadow: Shadow {
-            color: palette.shadow,
-            offset: Vector::new(0.0, 8.0),
-            blur_radius: 24.0,
-        },
         ..container::Style::default()
     }
 }
@@ -1131,7 +1146,7 @@ mod forms {
         Button, Container, PickList, Text, TextInput, button, column, container, pick_list, row,
         space, text, text_input, tooltip,
     };
-    use iced::{Border, Color, Element, Length, Shadow, Vector};
+    use iced::{Border, Color, Element, Length, Shadow};
 
     use super::{CONTROL, TEXT_BUTTON_WIDTH, accent, theme};
 
@@ -1503,11 +1518,7 @@ mod forms {
                     text_color: palette.text,
                     selected_text_color: theme::ON_ACCENT,
                     selected_background: accent(button::Status::Active),
-                    shadow: Shadow {
-                        color: palette.shadow,
-                        offset: Vector::new(0.0, 8.0),
-                        blur_radius: 24.0,
-                    },
+                    shadow: Shadow::default(),
                 }
             })
     }
@@ -2044,6 +2055,17 @@ pub mod shot {
     use iced_runtime::user_interface::{Cache, UserInterface};
 
     pub fn render<Message>(view: Element<'_, Message>, width: u32, height: u32) -> Vec<u8> {
+        render_twice(view, width, height, None).0
+    }
+
+    /// `view` drawn whole, then (if `damage`) drawn again over it within
+    /// `damage` only, as a window redraws what changed: (first, second).
+    pub fn render_twice<Message>(
+        view: Element<'_, Message>,
+        width: u32,
+        height: u32,
+        damage: Option<Rectangle>,
+    ) -> (Vec<u8>, Vec<u8>) {
         iced::advanced::graphics::text::font_system()
             .write()
             .unwrap()
@@ -2061,21 +2083,35 @@ pub mod shot {
             mouse::Cursor::Unavailable,
         );
         let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
+        let mut mask = tiny_skia::Mask::new(width, height).unwrap();
+        let viewport = Viewport::with_physical_size(Size::new(width, height), 1.0);
+        let background = super::theme::current().window;
+        // iced draws B, G, R, A.
+        let rgba = |p: &tiny_skia::Pixmap| -> Vec<u8> {
+            (p.data().as_chunks::<4>().0.iter())
+                .flat_map(|p| [p[2], p[1], p[0], p[3]])
+                .collect()
+        };
+        let all = Rectangle::with_size(size);
         renderer.draw(
             &mut pixmap.as_mut(),
-            &mut tiny_skia::Mask::new(width, height).unwrap(),
-            &Viewport::with_physical_size(Size::new(width, height), 1.0),
-            &[Rectangle::with_size(size)],
-            super::theme::current().window,
+            &mut mask,
+            &viewport,
+            &[all],
+            background,
         );
-        // iced draws B, G, R, A.
-        pixmap
-            .data()
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .flat_map(|p| [p[2], p[1], p[0], p[3]])
-            .collect()
+        let first = rgba(&pixmap);
+        let Some(damage) = damage else {
+            return (first, Vec::new());
+        };
+        renderer.draw(
+            &mut pixmap.as_mut(),
+            &mut mask,
+            &viewport,
+            &[damage],
+            background,
+        );
+        (first, rgba(&pixmap))
     }
 
     /// The messages one left click at `at` produces (press then release) in `view`.
@@ -2139,6 +2175,29 @@ pub mod shot {
 
 #[cfg(test)]
 mod tests {
+    /// No `iced::Shadow` with a blur anywhere (see `glass`): tiny-skia draws
+    /// it outside the part being redrawn and it piles up into black blocks.
+    #[test]
+    fn no_drawn_shadows() {
+        fn scan(dir: &std::path::Path, found: &mut Vec<String>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    scan(&p, found);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    let src = std::fs::read_to_string(&p).unwrap();
+                    let n = src.matches(concat!("blur", "_radius:")).count();
+                    if n > 0 {
+                        found.push(format!("{} ({n})", p.display()));
+                    }
+                }
+            }
+        }
+        let mut found = Vec::new();
+        scan(std::path::Path::new("src"), &mut found);
+        assert!(found.is_empty(), "drawn shadows in {found:?}");
+    }
+
     #[test]
     fn glyphs_are_in_the_subset_font() {
         let script = include_str!("../../assets/lucide/subset.sh");

@@ -681,6 +681,37 @@ mod tests {
         }
     }
 
+    /// A redraw of part of the screen (a hovered button, the progress bar)
+    /// leaves the rest as it was. Before: the card's shadow was drawn whole,
+    /// outside the redrawn part too (tiny-skia doesn't clip shadows), so it
+    /// piled up into a black block over the download prompt (VMs, 1125x575
+    /// and 1280x800).
+    #[test]
+    fn a_partial_redraw_leaves_the_rest_of_the_download_prompt() {
+        let mut s = session(false);
+        s.phase = Phase::Consent(Some((crate::mt::pair("en", "ar").unwrap(), 160_000_000)));
+        for (w, h) in [(1280.0, 800.0), (1125.0, 575.0)] {
+            let size = Size::new(w, h);
+            let at = widgets::card::place(size, None, None);
+            // the Download button's row
+            let damage = Rectangle::new(Point::new(at.x + 20.0, 150.0), Size::new(140.0, 60.0));
+            let (first, again) = widgets::shot::render_twice(
+                s.view(size, at, false),
+                w as u32,
+                h as u32,
+                Some(damage),
+            );
+            let outside = |i: usize| {
+                let p = Point::new((i % w as usize) as f32, (i / w as usize) as f32);
+                !damage.expand(1.0).contains(p)
+            };
+            let changed = (first.chunks(4).zip(again.chunks(4)).enumerate())
+                .filter(|&(i, (a, b))| a != b && outside(i))
+                .count();
+            assert_eq!(changed, 0, "{w}x{h}: {changed} pixels changed outside");
+        }
+    }
+
     #[test]
     fn translating_then_shown_then_peek() {
         let mut s = session(true);
