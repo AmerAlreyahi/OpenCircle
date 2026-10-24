@@ -52,6 +52,16 @@ pub struct LensPage {
     path: PathBuf,
 }
 
+impl LensPage {
+    /// A page with no file (tests).
+    #[cfg(test)]
+    pub fn none() -> LensPage {
+        LensPage {
+            path: PathBuf::new(),
+        }
+    }
+}
+
 impl Drop for LensPage {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);

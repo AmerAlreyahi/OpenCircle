@@ -2214,6 +2214,13 @@ impl App {
         if let panel::Msg::LensOpened(Ok(page)) = &msg {
             if self.frame.is_some() {
                 self.lens_pages.push(page.clone());
+                // The search is in the browser now. Windows put the overlay
+                // behind it (`lens::take_handed_off`); Linux can't (Wayland
+                // has no z-order and can't hide a window), so the overlay,
+                // its panel and pills would stay over the browser: close.
+                if !cfg!(windows) {
+                    return self.close();
+                }
             } else {
                 page.clone().release(); // the overlay closed meanwhile
             }
@@ -4324,6 +4331,24 @@ mod tests {
         // and with no card, the whole screen
         app.panel = None;
         assert_eq!(app.room(), Rectangle::with_size(app.screen));
+    }
+
+    #[test]
+    fn lens_in_the_browser_closes_the_overlay_where_it_cannot_go_behind() {
+        let mut app = open_app(1920, 1080, 1.0);
+        drag(
+            &mut app,
+            Point::new(100.0, 100.0),
+            Point::new(400.0, 300.0),
+            false,
+        );
+        let _ = app.update(Message::Run(&lens::ACTION));
+        let id = app.panel.as_ref().expect("the Lens panel").0;
+        let opened = panel::Msg::LensOpened(Ok(lens::Held::for_test()));
+        let _ = app.update(Message::Panel(id, opened));
+        // Windows: behind the browser, back on the shortcut; elsewhere: closed.
+        assert_eq!(app.frame.is_some(), cfg!(windows));
+        assert_eq!(app.panel.is_some(), cfg!(windows));
     }
 
     #[test]

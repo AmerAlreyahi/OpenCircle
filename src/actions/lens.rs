@@ -60,6 +60,15 @@ pub struct Held {
 }
 
 impl Held {
+    /// A held page with no file, for the overlay's tests.
+    #[cfg(test)]
+    pub fn for_test() -> Held {
+        Held {
+            _page: Arc::new(crate::lens::LensPage::none()),
+            opened: Instant::now(),
+        }
+    }
+
     /// The overlay is done with the page: delete it now, or once it is `MIN_LIFE` old.
     pub fn release(self) {
         let Some(wait) = linger(self.opened.elapsed()) else {
