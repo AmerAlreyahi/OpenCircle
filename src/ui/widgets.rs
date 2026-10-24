@@ -696,27 +696,28 @@ fn chip_style<'a, Message: Clone + 'a>(
 pub fn float_chip<'a, Message: Clone + 'a>(
     label: &'a str,
     on_press: Message,
-) -> Button<'a, Message> {
+) -> Container<'a, Message> {
     let palette = theme::floating();
-    button(text(label).size(14).color(palette.text).center())
+    // the pill's own glass (frosted with the widget theme), the button on it
+    // only lights up under the pointer
+    let blurred = super::glass::backdrop().is_some();
+    let button = button(text(label).size(14).color(palette.text).center())
         .width(TEXT_BUTTON_WIDTH)
         .height(CONTROL)
         .on_press(on_press)
-        .style(move |_, status| {
-            let glass = glass(999.0, false);
-            button::Style {
-                background: match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(palette.panel_solid.into())
-                    }
-                    _ => glass.background,
-                },
-                text_color: palette.text,
-                border: glass.border,
-                shadow: glass.shadow,
-                ..button::Style::default()
-            }
-        })
+        .style(move |_, status| button::Style {
+            background: match status {
+                button::Status::Hovered | button::Status::Pressed => Some(palette.hover.into()),
+                _ => None,
+            },
+            text_color: palette.text,
+            border: Border::default().rounded(super::shape::radius(PILL_RADIUS)),
+            ..button::Style::default()
+        });
+    glassed(
+        container(button).style(move |_| glass(999.0, blurred)),
+        999.0,
+    )
 }
 
 /// One-line text field, `CONTROL` tall.
