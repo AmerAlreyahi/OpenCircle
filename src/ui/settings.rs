@@ -1270,7 +1270,17 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
         (!folder.is_empty()).then_some(Message::ClearFolder),
     );
     let folder_control = column![
-        tip(shown, "Save folder", Position::Top),
+        if shorten(folder) == folder {
+            tip(shown, "Save folder", Position::Top)
+        } else {
+            // Cut in the middle: the tooltip is the whole path.
+            widgets::hint(
+                shown,
+                "Save folder",
+                widgets::Why::Cut(folder),
+                Position::Top,
+            )
+        },
         row![
             tip(browse, "Choose the save folder", Position::Bottom),
             tip(reset, "Use the system's folder", Position::Bottom),
@@ -1440,14 +1450,16 @@ fn custom_rows(state: &State) -> Vec<Element<'_, Message>> {
             Color::from_rgb8(r, g, b)
         };
         let buttons = row![
-            tip(
+            widgets::hint(
                 widgets::colour_button(rgb(0), state.picker == Some(0), Message::Picker(0)),
                 "First colour",
+                widgets::Why::Icon,
                 Position::Top,
             ),
-            tip(
+            widgets::hint(
                 widgets::colour_button(rgb(1), state.picker == Some(1), Message::Picker(1)),
                 "Second colour",
+                widgets::Why::Icon,
                 Position::Top,
             ),
         ]
@@ -2052,6 +2064,7 @@ pub(super) mod tests {
     use std::collections::HashMap;
 
     use super::*;
+    use crate::ui::widgets::tests_support::{assert_tips_add_something, shown};
     use crate::ui::widgets::{TIPS, shot};
 
     /// In-memory keyring.
@@ -2504,6 +2517,27 @@ pub(super) mod tests {
         unique.dedup();
         assert_eq!(all, unique, "duplicate control labels");
         assert!(all.len() >= 24, "{all:?}");
+    }
+
+    #[test]
+    fn no_visible_tooltip_repeats_its_control() {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::Provider(Provider::OpenaiCompatible));
+        for (section, name, _) in SECTIONS {
+            update(&mut s, Message::Section(section));
+            let _ = view(&s);
+            assert_tips_add_something(name);
+        }
+        // Text that says what it is shows no tooltip: Settings has none by default.
+        update(&mut s, Message::Section(Section::General));
+        let _ = view(&s);
+        assert_eq!(shown().len(), 0, "{:?}", shown());
+        // A save folder cut short does: the whole path.
+        let long = "/a".repeat(40);
+        update(&mut s, Message::Folder(Some(PathBuf::from(&long))));
+        let _ = view(&s);
+        assert_eq!(shown(), [long]);
+        assert_tips_add_something("a cut folder");
     }
 
     #[test]

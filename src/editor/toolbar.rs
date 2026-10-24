@@ -19,7 +19,12 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
     let side = tooltip::Position::Bottom;
     let icon =
         |glyph: char, active: bool, message: Message, tip: &'static str| -> Element<'_, Message> {
-            widgets::with_tip(widgets::icon_button(glyph, active, message), tip, side).into()
+            widgets::hint(
+                widgets::icon_button(glyph, active, message),
+                tip,
+                widgets::Why::Icon,
+                side,
+            )
         };
     let mut bar: Vec<Element<'_, Message>> = Vec::new();
     // Left edge of the next control, for placing the colour popover under its button.
@@ -52,14 +57,12 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
         e.colour[3] as f32 / 255.0,
     );
     let colour_at = x;
-    bar.push(
-        widgets::with_tip(
-            widgets::colour_button(colour, e.picker, Message::Picker),
-            "Colour and stroke",
-            side,
-        )
-        .into(),
-    );
+    bar.push(widgets::hint(
+        widgets::colour_button(colour, e.picker, Message::Picker),
+        "Colour and stroke",
+        widgets::Why::Icon,
+        side,
+    ));
     bar.push(widgets::toolbar_divider());
     bar.push(icon(UNDO, false, Message::Undo, "Undo (Ctrl+Z)"));
     bar.push(icon(REDO, false, Message::Redo, "Redo (Ctrl+Shift+Z)"));

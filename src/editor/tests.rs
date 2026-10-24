@@ -866,6 +866,19 @@ fn snapshots() {
     crate::actions::write_png(&path, flat.width, flat.height, &flat.rgba).unwrap();
 }
 
+/// The toolbar is icon-only: each button's tooltip is its only name, and none of
+/// them repeats words already on the button.
+#[test]
+fn toolbar_tooltips_are_for_icon_only_buttons() {
+    use crate::ui::widgets::tests_support::{assert_tips_add_something, shown};
+    let e = Editor::new(checker(200, 100), 1.0);
+    let _ = e.toolbar();
+    let tips = shown();
+    assert!(tips.len() >= 15, "{tips:?}");
+    assert!(tips.iter().any(|t| t == "Undo (Ctrl+Z)"), "{tips:?}");
+    assert_tips_add_something("editor toolbar");
+}
+
 /// Timings on a 3440x1440 crop:
 /// `cargo test --release editor::tests::timing -- --ignored --nocapture`
 #[test]

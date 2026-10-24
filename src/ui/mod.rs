@@ -11,6 +11,7 @@ mod panel;
 mod picker;
 mod quick;
 mod settings;
+mod shape;
 mod snip;
 mod song;
 pub mod theme;
@@ -266,7 +267,7 @@ fn winit_picks_wayland(
 
 /// The overlay window: hidden (pre-created), or full-screen at `size`.
 fn overlay_window(shown: Option<Size>) -> window::Settings {
-    windows::app_window(window::Settings {
+    window::Settings {
         size: shown.unwrap_or(window::Settings::default().size),
         visible: shown.is_some(),
         fullscreen: shown.is_some(),
@@ -275,7 +276,7 @@ fn overlay_window(shown: Option<Size>) -> window::Settings {
         level: Level::AlwaysOnTop,
         exit_on_close_request: false,
         ..window::Settings::default()
-    })
+    }
 }
 
 /// Below this (logical px) the window counts as shrunk.
@@ -396,7 +397,7 @@ impl App {
         // show it (latency). Elsewhere `show` opens it on each use.
         let (overlay, open) = match can_hide {
             true => {
-                let (id, open) = window::open(overlay_window(None));
+                let (id, open) = windows::screen(overlay_window(None));
                 (id, open.discard())
             }
             false => (window::Id::unique(), Task::none()),
@@ -793,7 +794,7 @@ impl App {
     /// it full-screen where it was closed (see `can_hide_windows`).
     fn show(&mut self) -> Task<Message> {
         if !self.overlay_open {
-            let (id, open) = window::open(overlay_window(Some(self.screen)));
+            let (id, open) = windows::screen(overlay_window(Some(self.screen)));
             eprintln!("[opencircle] overlay window opened");
             (self.overlay, self.overlay_open) = (id, true);
             return open.discard().chain(window::gain_focus(id));
@@ -2238,6 +2239,9 @@ impl App {
     /// The live layer's (and its controller's) see-through background; the rest
     /// follow the OS.
     fn theme(&self, window: window::Id) -> Option<iced::Theme> {
+        if windows::is_floating(window) {
+            return Some(windows::clear_theme());
+        }
         let live = self.live.as_ref()?;
         [live.window(), live.controller()]
             .contains(&Some(window))

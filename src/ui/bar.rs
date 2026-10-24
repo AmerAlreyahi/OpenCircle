@@ -78,7 +78,7 @@ pub fn view<'a, Message: Clone + 'a>(
                 action.id == default,
                 on_press(action),
             );
-            widgets::with_tip(button, action.tip, tip_side).into()
+            widgets::tip(button, action.tip, tip_side)
         });
         row(line).spacing(SPACING).into()
     });
@@ -208,6 +208,19 @@ mod tests {
 
     fn sel(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
         Rectangle::new(Point::new(x, y), Size::new(w, h))
+    }
+
+    #[test]
+    fn the_bar_buttons_say_it_themselves_so_no_tooltip() {
+        let v = view(
+            sel(800.0, 300.0, 200.0, 100.0),
+            Rectangle::with_size(SCREEN),
+            None,
+            |_| (),
+        );
+        let _ = v;
+        assert_eq!(widgets::tests_support::shown().len(), 0);
+        widgets::tests_support::assert_tips_add_something("action bar");
     }
 
     #[test]

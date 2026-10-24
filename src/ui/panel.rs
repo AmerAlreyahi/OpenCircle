@@ -6,6 +6,7 @@
 //! its running work.
 use std::sync::Arc;
 
+use iced::widget::tooltip::Position;
 use iced::widget::{column, container, image, operation, row, text_editor};
 use iced::{Center, ContentFit, Element, Fill, Rectangle, Size, Task, task};
 
@@ -569,9 +570,19 @@ impl Panel {
     /// The input with its send (or, while streaming, stop) button.
     fn follow_up(&self, placeholder: &str, streaming: bool) -> Element<'_, Msg> {
         let button = if streaming {
-            widgets::icon_button(STOP, false, Msg::Stop)
+            widgets::hint(
+                widgets::icon_button(STOP, false, Msg::Stop),
+                "Stop",
+                widgets::Why::Icon,
+                Position::Top,
+            )
         } else {
-            widgets::icon_button(SEND, true, Msg::Submit)
+            widgets::hint(
+                widgets::icon_button(SEND, true, Msg::Submit),
+                "Send",
+                widgets::Why::Keys("Enter"),
+                Position::Top,
+            )
         };
         row![
             widgets::input(INPUT, placeholder, &self.input, Msg::Input, Msg::Submit).width(Fill),

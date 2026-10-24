@@ -260,12 +260,12 @@ fn status<'a>(label: String) -> Element<'a, Msg> {
 /// (song search is opt-in; Settings > Song search says how to add one).
 pub fn button<'a, M: Clone + 'a>(has_key: bool, on_press: M) -> Option<Element<'a, M>> {
     has_key.then(|| {
-        widgets::with_tip(
+        widgets::hint(
             widgets::icon_button(MUSIC, false, on_press),
             "Search for a song",
+            widgets::Why::Icon,
             Position::Top,
         )
-        .into()
     })
 }
 

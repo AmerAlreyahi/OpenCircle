@@ -91,6 +91,10 @@ pub const SELECTION: Color = Color::from_rgba8(0x8f, 0x80, 0xff, 0.35);
 /// Text and icons on the accent gradient.
 pub const ON_ACCENT: Color = Color::from_rgb8(0x10, 0x10, 0x1c);
 
+/// The window header's close button under the cursor, and its glyph (both themes).
+pub const CLOSE_HOVER: Color = Color::from_rgb8(0xc4, 0x2b, 0x1c);
+pub const ON_CLOSE_HOVER: Color = Color::WHITE;
+
 /// Dim outside the editor's crop (the overlay's dims follow the look: `dims`).
 pub const DIM_OUTSIDE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
 
