@@ -109,6 +109,10 @@ pub fn start(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool
     use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOW, ShowWindow};
     use windows::core::HSTRING;
 
+    if cfg!(test) {
+        // The OS drag waits for a real mouse: never in a test run (CI hangs).
+        return Err("drag-out: no OS drag in tests".into());
+    }
     let e =
         |what: &'static str| move |err: windows::core::Error| format!("drag-out: {what}: {err}");
     // winit already initialised OLE on this thread (it is a drop target); this
