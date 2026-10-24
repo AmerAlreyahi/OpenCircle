@@ -49,9 +49,14 @@ pub fn handle_at(item: &Item, p: Point, reach: f32) -> Option<Handle> {
 // ponytail: bounding-box hit test; thin diagonal strokes are easy to hit near,
 // test against the path if that picks the wrong item in practice.
 pub fn hit(items: &[Item], p: Point, reach: f32) -> Option<usize> {
-    items
-        .iter()
-        .rposition(|item| item.bounds().expand(reach).contains(p))
+    items.iter().rposition(|item| {
+        // A blur's bounds include the far area its blur reads; its stroke is the frame.
+        let area = match item.shape {
+            Shape::Blur { .. } => item.frame(),
+            _ => item.bounds(),
+        };
+        area.expand(reach).contains(p)
+    })
 }
 
 pub fn moved(item: &Item, by: Vector) -> Item {

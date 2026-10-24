@@ -1593,6 +1593,10 @@ impl App {
             Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
             Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
             Some(Output::Pin(crop)) => self.pin(crop),
+            // TODO(lead): copy the text beside the image; open the region picker
+            // and hand its crop to `Editor::append`.
+            Some(Output::CopyWithText(crop, _text)) => self.finish(&copy::ACTION, crop),
+            Some(Output::AddCapture) => Task::none(),
         }
     }
 

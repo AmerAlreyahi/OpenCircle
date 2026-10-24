@@ -14,6 +14,7 @@ use super::widgets::chrome;
 use super::{onboarding, settings, shape, theme, widgets};
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::config::{self, Config, Theme};
+use crate::editor::dragout::{self, DragFile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -85,6 +86,8 @@ struct Pin {
     zoom: f32,
     /// The pointer is over it (the Copy / Save / Close bar shows).
     hover: bool,
+    /// The PNG of its last drag-out (deleted with the pin).
+    dragged: Option<DragFile>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +96,8 @@ pub enum PinMsg {
     Drag,
     Zoom(mouse::ScrollDelta),
     Hover(bool),
+    /// Left button down on the drag handle: OS drag of the image.
+    DragOut,
     Copy,
     Save,
     Close,
@@ -104,7 +109,7 @@ const PIN_ZOOM: std::ops::RangeInclusive<f32> = 0.1..=8.0;
 /// Scroll pixels that count as one wheel notch.
 const PIXELS_PER_NOTCH: f32 = 40.0;
 /// The hover bar needs this much window (logical px) to fit.
-const PIN_BAR_ROOM: Size = Size::new(190.0, 80.0);
+const PIN_BAR_ROOM: Size = Size::new(240.0, 80.0);
 
 impl Pin {
     fn size(&self) -> Size {
@@ -174,8 +179,17 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
                 Side::Bottom,
             )
         };
+        let drag = dragout::SUPPORTED.then(|| {
+            widgets::hint(
+                widgets::drag_handle(widgets::DRAG, PinMsg::DragOut),
+                "Drag the image into another app",
+                widgets::Why::Icon,
+                Side::Bottom,
+            )
+        });
         let bar = widgets::surface(
             row![
+                drag,
                 button(COPY, PinMsg::Copy, "Copy", "Ctrl+C"),
                 button(SAVE, PinMsg::Save, "Save", "Ctrl+S"),
                 button(widgets::CLOSE, PinMsg::Close, "Close", "Esc"),
@@ -265,6 +279,7 @@ impl Windows {
             base,
             zoom,
             hover: false,
+            dragged: None,
         });
         open.discard()
     }
@@ -435,6 +450,21 @@ impl Windows {
             PinMsg::Zoom(delta) => {
                 pin.zoom = zoom_after(pin.zoom, delta);
                 window::resize(id, pin.size())
+            }
+            PinMsg::DragOut => {
+                pin.dragged = None; // one temp file per pin
+                if let Some(crop) = pin.crop() {
+                    match DragFile::write(&crop) {
+                        Ok(file) => {
+                            if let Err(e) = dragout::start(&file, &crop) {
+                                eprintln!("[opencircle] {e}");
+                            }
+                            pin.dragged = Some(file);
+                        }
+                        Err(e) => eprintln!("[opencircle] drag-out: {e}"),
+                    }
+                }
+                Task::none()
             }
             PinMsg::Copy | PinMsg::Save => {
                 let action = if matches!(msg, PinMsg::Copy) {

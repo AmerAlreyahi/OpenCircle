@@ -7,7 +7,7 @@ use iced::widget::canvas::{self, Action, Fill, Frame, Geometry, LineDash, Path, 
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
 
 use super::document::span;
-use super::{Editor, Message, Shape, TOOLS, Tool, callout, select, text};
+use super::{Editor, Menu, Message, PRESETS, Shape, TOOLS, Tool, callout, label, select, text};
 use crate::ui::theme;
 
 pub struct Input<'a> {
@@ -44,6 +44,10 @@ impl canvas::Program<Message> for Input<'_> {
             {
                 pointer.down = false;
                 Message::Release
+            }
+            // Not captured: other widgets see modifiers too.
+            canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+                return Some(Action::publish(Message::Shift(m.shift())));
             }
             canvas::Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
@@ -95,6 +99,16 @@ impl canvas::Program<Message> for Input<'_> {
             );
         }
 
+        // Line assist: a faint guide over the line the brush is held on.
+        if let Some(lock) = &e.lock {
+            let b = lock.band;
+            let r = e.to_display(Rectangle::new(
+                Point::new(b.x0, b.y0),
+                Size::new(b.x1 - b.x0, b.height()),
+            ));
+            frame.fill_rectangle(r.position(), r.size(), theme::SELECTION.scale_alpha(0.4));
+        }
+
         let item = (e.pending.as_ref().map(|p| &p.item))
             .or_else(|| e.doc.selected.and_then(|i| e.doc.items.get(i)));
         if let Some(item) = item {
@@ -114,6 +128,17 @@ impl canvas::Program<Message> for Input<'_> {
                     Shape::Text { at, text, size } => Some((*at, text, *size)),
                     Shape::Callout { at, text, size, .. } => {
                         Some((callout::text_origin(*at, text, *size), text, *size))
+                    }
+                    Shape::Label { at, text, size } => {
+                        Some((label::text_origin(*at, *size), text, *size))
+                    }
+                    Shape::Arrow { a, text, .. } => {
+                        let size = label::arrow_size(item.width);
+                        let at = label::centred(*a, text, size);
+                        Some((label::text_origin(at, size), text, size))
+                    }
+                    Shape::Step { at, radius, note } => {
+                        Some(e.note_preview(&mut frame, *at, *radius, note))
                     }
                     _ => None,
                 };
@@ -149,6 +174,9 @@ impl canvas::Program<Message> for Input<'_> {
         let Some(at) = cursor.position_in(bounds) else {
             return mouse::Interaction::default();
         };
+        if e.picking {
+            return mouse::Interaction::Crosshair;
+        }
         match e.tool {
             Tool::Select => {
                 let reach = super::REACH / e.zoom;
@@ -158,13 +186,62 @@ impl canvas::Program<Message> for Input<'_> {
                     mouse::Interaction::default()
                 }
             }
-            Tool::Text | Tool::Callout => mouse::Interaction::Text,
+            Tool::Text | Tool::Label | Tool::Callout => mouse::Interaction::Text,
             _ => mouse::Interaction::Crosshair,
         }
     }
 }
 
 impl Editor {
+    /// While a step's note is typed: the note in a small pill beside the badge
+    /// (it shows in the legend once done). Returns where its text starts.
+    fn note_preview<'s>(
+        &self,
+        frame: &mut Frame,
+        at: Point,
+        radius: f32,
+        note: &'s String,
+    ) -> (Point, &'s String, f32) {
+        let size = (radius * 1.1).max(12.0 / self.zoom);
+        let origin = at + iced::Vector::new(radius * 1.6, -text::line_height(size) / 2.0);
+        let shown = if note.is_empty() {
+            "Note for the legend"
+        } else {
+            note
+        };
+        let box_ = text::measure(shown, size) * self.zoom;
+        let top = self.to_display_point(origin);
+        let pad = 6.0;
+        frame.fill(
+            &Path::rounded_rectangle(
+                top - iced::Vector::new(pad, 2.0),
+                Size::new(box_.width + 2.0 * pad, box_.height + 4.0),
+                8.0.into(),
+            ),
+            Color::from_rgba8(255, 255, 255, 0.94),
+        );
+        frame.fill_text(canvas::Text {
+            content: shown.to_string(),
+            position: top,
+            color: if note.is_empty() {
+                Color::from_rgb8(120, 120, 130)
+            } else {
+                Color::from_rgb8(28, 28, 36)
+            },
+            size: (size * self.zoom).into(),
+            line_height: iced::widget::text::LineHeight::Absolute(
+                (text::line_height(size) * self.zoom).into(),
+            ),
+            font: iced::Font {
+                family: iced::font::Family::SansSerif,
+                weight: iced::font::Weight::Semibold,
+                ..iced::Font::DEFAULT
+            },
+            ..canvas::Text::default()
+        });
+        (origin, note, size)
+    }
+
     /// Canvas px → image px.
     fn to_image(&self, p: Point) -> Point {
         let v = self.doc.view();
@@ -200,11 +277,15 @@ impl Editor {
                     .map(|t| Message::Type(t.to_string())),
             };
         }
-        if self.picker {
+        if self.menu == Some(Menu::Colour) {
             return matches!(key, Key::Named(Named::Escape)).then_some(Message::Picker);
         }
         match key {
-            Key::Named(Named::Escape) => Some(Message::Back),
+            Key::Named(Named::Escape) if self.picking => Some(Message::Eyedropper),
+            Key::Named(Named::Escape) => match self.menu {
+                Some(menu) => Some(Message::Menu(menu)),
+                None => Some(Message::Back),
+            },
             Key::Named(Named::Delete | Named::Backspace) => Some(Message::Delete),
             _ => match (
                 modifiers.command(),
@@ -213,10 +294,16 @@ impl Editor {
             ) {
                 (true, false, 'z') => Some(Message::Undo),
                 (true, true, 'z') | (true, _, 'y') => Some(Message::Redo),
+                (true, true, 'c') => Some(Message::CopyAll),
                 (true, _, 'c') => Some(Message::Copy),
                 (true, _, 's') => Some(Message::Save),
                 // Ctrl: plain P is the Pen tool.
                 (true, _, 'p') => Some(Message::Pin),
+                (false, _, 'd') => Some(Message::Eyedropper),
+                (false, _, digit @ '1'..='9') => {
+                    let i = digit as usize - '1' as usize;
+                    (i < PRESETS.len()).then_some(Message::Preset(i))
+                }
                 (false, _, letter) => TOOLS
                     .iter()
                     .find(|t| t.key == letter)
