@@ -1020,6 +1020,16 @@ fn dot<'a, Message: 'a>(colour: Color, size: f32, ring: bool) -> Element<'a, Mes
 
 /// 44x44 button around centred `content`, styled like a quiet `text_button`
 /// (accent gradient when `active`).
+/// A square option in a floating popover (a text's size, font, backdrop):
+/// `content` (a letter or a preview) on the shared square button.
+pub fn option_button<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    active: bool,
+    on_press: Message,
+) -> Button<'a, Message> {
+    square_button(content, active, Some(on_press))
+}
+
 fn square_button<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
     active: bool,

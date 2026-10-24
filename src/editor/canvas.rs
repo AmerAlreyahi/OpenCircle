@@ -124,26 +124,35 @@ impl canvas::Program<Message> for Input<'_> {
                 },
             );
             if e.typing() {
+                // Where the caret is (image px, top) and the font size.
+                let at_end =
+                    |origin: Point, s: &str, size: f32| (origin + text::caret(s, size), size);
                 let caret = match &item.shape {
-                    Shape::Text { at, text, size } => Some((*at, text, *size)),
+                    Shape::Text {
+                        at,
+                        text,
+                        size,
+                        style,
+                    } => Some((*at + text::caret_styled(text, *size, *style), *size)),
                     Shape::Callout { at, text, size, .. } => {
-                        Some((callout::text_origin(*at, text, *size), text, *size))
+                        Some(at_end(callout::text_origin(*at, text, *size), text, *size))
                     }
                     Shape::Label { at, text, size } => {
-                        Some((label::text_origin(*at, *size), text, *size))
+                        Some(at_end(label::text_origin(*at, *size), text, *size))
                     }
                     Shape::Arrow { a, text, .. } => {
                         let size = label::arrow_size(item.width);
                         let at = label::centred(*a, text, size);
-                        Some((label::text_origin(at, size), text, size))
+                        Some(at_end(label::text_origin(at, size), text, size))
                     }
                     Shape::Step { at, radius, note } => {
-                        Some(e.note_preview(&mut frame, *at, *radius, note))
+                        let (origin, s, size) = e.note_preview(&mut frame, *at, *radius, note);
+                        Some(at_end(origin, s, size))
                     }
                     _ => None,
                 };
-                if let Some((origin, s, size)) = caret {
-                    let top = e.to_display_point(origin + text::caret(s, size));
+                if let Some((caret, size)) = caret {
+                    let top = e.to_display_point(caret);
                     let height = text::line_height(size) * e.zoom;
                     frame.fill_rectangle(top, Size::new(2.0, height), theme::ACCENT_START);
                 }

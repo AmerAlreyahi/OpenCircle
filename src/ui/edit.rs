@@ -152,11 +152,14 @@ impl Editing {
         }
         let canvas = self.canvas_rect();
         let room = screen.width - 2.0 * GAP;
-        let at = bar::place(canvas, toolbar_size(room), screen);
+        let size = toolbar_size(room);
+        let at = bar::place(canvas, size, screen);
+        let (toolbar, popover) = self.editor.toolbar_at(room, Rectangle::new(at, size));
         stack![
             pin(self.editor.canvas()).position(canvas.position()),
-            pin(self.editor.toolbar_within(room)).position(at),
+            pin(toolbar).position(at),
         ]
+        .extend(popover)
         .into()
     }
 

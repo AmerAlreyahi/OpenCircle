@@ -35,6 +35,7 @@ mod toolbar;
 
 pub use document::{Document, Edit, Image, Item, Shape, render, span};
 pub use style::PRESETS;
+pub use text::Style as TextStyle;
 pub use toolbar::size as toolbar_size;
 
 use iced::widget::{column, image, pin, stack};
@@ -261,6 +262,10 @@ pub enum Message {
     Menu(Menu),
     Colour([u8; 4]),
     Width(Width),
+    /// The Text tool's options (its button's strip): font px on screen, and
+    /// font, weight, backdrop.
+    TextSize(f32),
+    TextStyle(TextStyle),
     /// The picker's custom colour field.
     Hex(String),
     /// The next click on the image picks its colour.
@@ -346,6 +351,9 @@ pub struct Editor {
     pub tool: Tool,
     colour: [u8; 4],
     width: Width,
+    /// The Text tool's font size (display px; a weight sets it too) and style.
+    text_size: f32,
+    text_style: TextStyle,
     menu: Option<Menu>,
     hex: String,
     /// Display px per image px.
@@ -383,6 +391,8 @@ impl Editor {
             tool: Tool::Arrow,
             colour,
             width: Width::Medium,
+            text_size: Width::Medium.font(),
+            text_style: TextStyle::default(),
             menu: None,
             hex: hex(colour),
             zoom,
@@ -445,7 +455,15 @@ impl Editor {
             Message::Menu(menu) => self.toggle(menu),
             Message::Colour(c) => self.set_colour(c),
             Message::Width(w) => {
-                self.width = w;
+                self.set_width(w);
+                self.restyle();
+            }
+            Message::TextSize(size) => {
+                self.text_size = size;
+                self.restyle();
+            }
+            Message::TextStyle(style) => {
+                self.text_style = style;
                 self.restyle();
             }
             Message::Hex(s) => {
@@ -469,7 +487,7 @@ impl Editor {
             }
             Message::PasteStyle => {
                 if let Some((colour, width)) = self.style {
-                    self.width = width;
+                    self.set_width(width);
                     self.set_colour(colour);
                 }
             }
@@ -599,9 +617,15 @@ impl Editor {
     }
 
     /// The toolbar within `max_width` (two rows when one does not fit; its size:
-    /// `toolbar_size(max_width)`).
-    pub fn toolbar_within(&self, max_width: f32) -> Element<'_, Message> {
-        toolbar::view(self, max_width)
+    /// `toolbar_size(max_width)`) for the screen rectangle `at`, and its open
+    /// popover: a full-screen layer to put at (0, 0) (it places itself under the
+    /// toolbar, above it when there is no room, always on screen).
+    pub fn toolbar_at(
+        &self,
+        max_width: f32,
+        at: Rectangle,
+    ) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
+        toolbar::view_at(self, max_width, at)
     }
 
     /// The canvas size, display px (changes with the crop, the board and the
@@ -632,6 +656,12 @@ impl Editor {
         self.tool = tool;
         self.menu = None;
         self.picking = false;
+    }
+
+    /// The weight; a text's size follows it.
+    fn set_width(&mut self, w: Width) {
+        self.width = w;
+        self.text_size = w.font();
     }
 
     fn set_colour(&mut self, c: [u8; 4]) {
@@ -673,7 +703,7 @@ impl Editor {
             self.pick_tool(p.tool);
             self.doc.selected = None; // the style is for the next item
         }
-        self.width = p.width;
+        self.set_width(p.width);
         self.set_colour(colour);
     }
 
@@ -768,6 +798,10 @@ impl Editor {
     /// Starts moving item `i` (`edits`: a click without a move types into it).
     fn pick_up(&mut self, i: usize, edits: bool, p: Point) {
         let from = self.doc.items[i].clone();
+        // A text's options show (and edit) its own.
+        if let Shape::Text { size, style, .. } = &from.shape {
+            (self.text_size, self.text_style) = (size * self.zoom, *style);
+        }
         self.begin(Some(i), from.clone(), Drag::Move { from, edits }, p);
     }
 
@@ -957,7 +991,8 @@ impl Editor {
             Tool::Text => Shape::Text {
                 at: p,
                 text: String::new(),
-                size: self.width.font() / z,
+                size: self.text_size / z,
+                style: self.text_style,
             },
             Tool::Label => Shape::Label {
                 at: p,
@@ -1009,7 +1044,10 @@ impl Editor {
             new.shape = item.shape.clone();
             let z = editor.zoom;
             match &mut new.shape {
-                Shape::Text { size, .. } => *size = editor.width.font() / z,
+                Shape::Text { size, style, .. } => {
+                    *size = editor.text_size / z;
+                    *style = editor.text_style;
+                }
                 Shape::Callout { size, .. } | Shape::Label { size, .. } => {
                     *size = editor.width.font() * 0.75 / z
                 }

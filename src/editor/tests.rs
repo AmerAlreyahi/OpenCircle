@@ -726,6 +726,84 @@ fn freehand_strokes_have_no_frame_and_move_by_the_stroke() {
     assert!(e.framed().is_some());
 }
 
+/// Every toolbar popover stays on screen: above the toolbar when it sits at the
+/// screen's bottom, pulled in from the sides.
+#[test]
+fn popovers_open_above_a_toolbar_at_the_bottom_and_stay_on_screen() {
+    let screen = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let on_screen = |r: Rectangle| {
+        r.x >= 0.0 && r.y >= 0.0 && r.x + r.width <= 800.0 && r.y + r.height <= 600.0
+    };
+    // A 52 px toolbar at y 540..592: laid out under it, the popover is off screen.
+    let under = Rectangle::new(pt(650.0, 600.0), Size::new(300.0, 260.0));
+    let shift = toolbar::place_popover(under, 52.0, screen);
+    let placed = Rectangle::new(under.position() + shift, under.size());
+    assert!(on_screen(placed), "{placed:?}");
+    assert_eq!(
+        placed.y + placed.height,
+        600.0 - 8.0 - 52.0 - 8.0,
+        "just above it"
+    );
+    assert_eq!(placed.x, 500.0, "pulled in from the right edge");
+    // Room below: where it was laid out.
+    let under = Rectangle::new(pt(100.0, 70.0), Size::new(300.0, 260.0));
+    assert_eq!(
+        toolbar::place_popover(under, 52.0, screen),
+        iced::Vector::ZERO
+    );
+}
+
+/// The Text tool's options (its button's strip): size, font, bold and backdrop
+/// apply to the next text and to the selected one, and change what is drawn.
+#[test]
+fn text_options_style_the_text() {
+    let mut e = editor(400, 200);
+    e.update(Message::Slot(Tool::Text));
+    assert_eq!(e.menu, Some(Menu::Variants(Tool::Text)));
+    let _ = e.toolbar(); // the options build
+    e.update(Message::TextSize(38.0));
+    let boxed = TextStyle {
+        font: text::Font::Serif,
+        bold: false,
+        back: text::Back::Box,
+    };
+    e.update(Message::TextStyle(boxed));
+    drag(&mut e, pt(20.0, 20.0), &[], pt(20.0, 20.0));
+    e.update(Message::Type("Note".into()));
+    e.update(Message::Finish);
+    assert!(
+        matches!(e.doc.items[0].shape, Shape::Text { size, style, .. } if size == 38.0 && style == boxed)
+    );
+    // A box paints behind the glyphs: more of the frame changes than plain.
+    let frame = e.doc.items[0].frame();
+    let changed = |e: &Editor| {
+        let plain = render(&doc_with(checker(400, 200), vec![]));
+        let c = render(&e.doc);
+        let mut n = 0;
+        for y in frame.y as u32..(frame.y + frame.height) as u32 {
+            for x in frame.x as u32..(frame.x + frame.width) as u32 {
+                n += usize::from(px(&c, x, y) != px(&plain, x, y));
+            }
+        }
+        n
+    };
+    let with_box = changed(&e);
+    // The selected text takes a new style (one undoable change).
+    let none = TextStyle {
+        back: text::Back::None,
+        ..boxed
+    };
+    e.update(Message::TextStyle(none));
+    assert!(matches!(e.doc.items[0].shape, Shape::Text { style, .. } if style == none));
+    assert!(changed(&e) * 2 < with_box, "the box is gone");
+    e.update(Message::Undo);
+    assert!(matches!(e.doc.items[0].shape, Shape::Text { style, .. } if style == boxed));
+    // Bold is wider than regular.
+    let regular = text::measure_styled("Note", 38.0, none);
+    let bold = text::measure_styled("Note", 38.0, TextStyle { bold: true, ..none });
+    assert!(bold.width > regular.width);
+}
+
 #[test]
 fn move_resize_bend_delete_and_crop_undo() {
     let mut e = editor(400, 300);
@@ -1160,7 +1238,7 @@ fn toolbar_size_matches_its_layout() {
     let small = 1125.0 - 48.0;
     let two = toolbar::size(small);
     assert!(two.width <= small && two.height > one.height, "{two:?}");
-    assert_eq!(laid_out(e.toolbar_within(small)), two);
+    assert_eq!(laid_out(e.toolbar_at(small, Rectangle::default()).0), two);
     assert_eq!(toolbar::size(one.width), one, "exactly fits: one row");
 }
 
@@ -1856,6 +1934,23 @@ fn shoot(
         iced::mouse::Cursor::Unavailable,
         &Rectangle::with_size(size),
     );
+    // Floating layers (a popover moved to stay on screen) draw over it.
+    if let Some(mut overlay) = element.as_widget_mut().overlay(
+        &mut tree,
+        Layout::new(&node),
+        &renderer,
+        &Rectangle::with_size(size),
+        iced::Vector::ZERO,
+    ) {
+        let floating = overlay.as_overlay_mut().layout(&renderer, size);
+        overlay.as_overlay().draw(
+            &mut renderer,
+            &iced::Theme::Dark,
+            &Style::default(),
+            Layout::new(&floating),
+            iced::mouse::Cursor::Unavailable,
+        );
+    }
     let scale = 2.0;
     let (w, h) = ((size.width * scale) as u32, (size.height * scale) as u32);
     let rgba = renderer.screenshot(Size::new(w, h), scale, background);
@@ -1889,6 +1984,40 @@ fn snapshots_move() {
     drag(&mut e, pt(560.0, 311.0), &[], pt(470.0, 331.0));
     assert_eq!(e.doc.items.len(), 2);
     shoot(e.view(), size, backdrop, &dir.join("move-1-after.png"));
+}
+
+/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test editor::tests::snapshots_popovers -- --ignored`
+/// writes the colour and the text popovers of a toolbar at the bottom of a small
+/// screen (they open above it).
+#[test]
+#[ignore = "writes PNGs to look at"]
+fn snapshots_popovers_at_the_bottom() {
+    use iced::widget::{pin, stack};
+    let dir = png_dir();
+    let screen = Size::new(1000.0, 520.0);
+    let mut e = Editor::new(demo_image(), 0.5);
+    let room = screen.width - 24.0;
+    let bar = toolbar_size(room);
+    let at = Point::new(
+        (screen.width - bar.width) / 2.0,
+        screen.height - bar.height - 12.0,
+    );
+    let backdrop = iced::Color::from_rgb8(0x2a, 0x2d, 0x3e);
+    for (name, open) in [
+        ("popover-colour-bottom.png", Message::Picker),
+        ("popover-text-bottom.png", Message::Slot(Tool::Text)),
+    ] {
+        e.update(open);
+        let (toolbar, popover) = e.toolbar_at(room, Rectangle::new(at, bar));
+        let view = stack![
+            pin(e.canvas()).position(Point::new(12.0, 12.0)),
+            pin(toolbar).position(at),
+        ]
+        .extend(popover)
+        .width(screen.width)
+        .height(screen.height);
+        shoot(view.into(), screen, backdrop, &dir.join(name));
+    }
 }
 
 /// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test editor::tests::snapshots -- --ignored`
@@ -2121,7 +2250,7 @@ fn snapshots_board() {
     e.update(Message::Picker);
     let small = 1125.0 - 48.0;
     shoot(
-        e.toolbar_within(small),
+        e.toolbar_at(small, Rectangle::default()).0,
         Size::new(small, 520.0),
         backdrop,
         &dir.join("toolbar-two-rows.png"),

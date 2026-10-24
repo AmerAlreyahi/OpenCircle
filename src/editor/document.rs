@@ -43,11 +43,12 @@ pub enum Shape {
     },
     Pen(Vec<Point>),
     Highlighter(Vec<Point>),
-    /// `at` = top-left, `size` = font px.
+    /// `at` = top-left, `size` = font px, `style` = font, weight, backdrop.
     Text {
         at: Point,
         text: String,
         size: f32,
+        style: text::Style,
     },
     /// A numbered badge; its number is its place among the steps. Its `note`
     /// shows in the legend.
@@ -158,7 +159,12 @@ impl Item {
                 }
             }
             Shape::Pen(points) | Shape::Highlighter(points) => span(points),
-            Shape::Text { at, text, size } => Rectangle::new(*at, text::measure(text, *size)),
+            Shape::Text {
+                at,
+                text,
+                size,
+                style,
+            } => Rectangle::new(*at, text::measure_styled(text, *size, *style)),
             Shape::Label { at, text, size } => label::bubble(*at, text, *size),
             Shape::Pointer { at, radius } => pointer::frame(*at, *radius),
             Shape::Step { at, radius, .. } | Shape::Magnifier { at, radius } => Rectangle::new(
@@ -649,7 +655,12 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
             }
             Shape::Pen(points) => pen::paint(&mut layer, points, c, w),
             Shape::Highlighter(points) => highlighter::paint(&mut layer, points, c, w),
-            Shape::Text { at, text, size } => text::paint(&mut layer, *at, text, *size, c, true),
+            Shape::Text {
+                at,
+                text,
+                size,
+                style,
+            } => text::paint_styled(&mut layer, *at, text, *size, c, *style),
             Shape::Step { at, radius, .. } => step::paint(&mut layer, *at, *radius, steps, c),
             Shape::Label { at, text, size } => label::paint(&mut layer, *at, text, *size, c),
             Shape::Pointer { at, radius } => pointer::paint(&mut layer, *at, *radius, c, w),
