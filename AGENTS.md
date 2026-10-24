@@ -157,7 +157,10 @@ production systems.
   while open; no scraping, no copying Google's UI. Placement (owner, 2026-10-24):
   on landscape screens it slides in from the side AWAY from the selection (auto;
   pinnable left/right), full height, resizable; bottom sheet only on portrait or
-  narrow screens. All result panels follow the same rule, as FLOATING cards
+  narrow screens. Everything happens inside the card where the platform allows
+  (Lens + AI Mode on Windows; Lens falls back to the browser on Linux, CAPTCHA).
+  Google sign-in doesn't work in embedded web views, so history = an opt-in LOCAL
+  OpenCircle search history + "Open in browser". All result panels follow the same rule, as FLOATING cards
   (owner, 2026-10-24): inset from the screen edges, rounded ~20 px, shadow,
   draggable + resizable, never a flat full-height slab.
 - Translate default target (owner, 2026-10-23): Arabic, changeable in settings.
