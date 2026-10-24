@@ -830,15 +830,13 @@ fn keep(dir: &Path, crop: &Crop, limit: usize) -> Result<PathBuf, String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
-    // Fixed-width names sort by time; a second capture in the same ms takes the next one.
-    let mut stamp = now;
-    let path = loop {
-        let path = dir.join(format!("{stamp:016}.png"));
-        if !path.exists() {
-            break path;
-        }
-        stamp += 1;
-    };
+    // Fixed-width names sort by time. Always after the newest kept one: a stamp freed
+    // by pruning must not be reused (it would sort as the oldest).
+    let newest = list(dir)
+        .first()
+        .and_then(|p| p.file_stem()?.to_str()?.parse::<u128>().ok());
+    let stamp = newest.map_or(now, |n| now.max(n + 1));
+    let path = dir.join(format!("{stamp:016}.png"));
     crate::actions::write_png(&path, crop.width, crop.height, &crop.rgba)?;
     for old in list(dir).into_iter().skip(limit) {
         let _ = std::fs::remove_file(old);
@@ -1413,6 +1411,24 @@ mod tests {
         assert_eq!(open_recent(&now[0]).unwrap().rgba, vec![22; 16]);
         clear_dir(&dir);
         assert!(!dir.exists() && list(&dir).is_empty());
+    }
+
+    #[test]
+    fn rapid_captures_with_pruning_stay_newest_first() {
+        let dir = std::env::temp_dir().join(format!("oc-recent-burst-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let shot = |v: u8| Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![v; 4],
+        };
+        // Many captures within a few ms: pruned stamps must never be reused.
+        let kept: Vec<_> = (0..40).map(|i| keep(&dir, &shot(i), 3).unwrap()).collect();
+        assert_eq!(
+            list(&dir),
+            vec![kept[39].clone(), kept[38].clone(), kept[37].clone()]
+        );
+        clear_dir(&dir);
     }
 
     #[test]
