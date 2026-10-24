@@ -1,10 +1,22 @@
 //! Cuts a floating window to the rounded rectangle of its content, so no pixel
-//! outside it exists (no white box behind a pill). Needed where the window has no
-//! per-pixel alpha: Windows with our CPU renderer (`SetWindowRgn`) and X11 without
-//! a compositor (the SHAPE extension). Wayland and X11 with a compositor draw real
-//! transparency, so nothing is cut there. Called by `windows.rs` after the window
-//! opens and on every resize.
+//! outside it exists (no white or black box behind a pill). Our CPU renderer
+//! (softbuffer) has no per-pixel alpha on any platform, so the window itself is
+//! cut: Windows `SetWindowRgn`, X11 the SHAPE extension (with or without a
+//! compositor). Wayland has no way to cut a window, so there floating contents
+//! are drawn square (`radius`) and fill the window: no stray pixel either.
+//! Called by `windows.rs` after a floating window opens and on every resize.
 use iced::window::raw_window_handle::RawWindowHandle;
+
+/// Whether a floating window can be cut to a rounded shape here (not on Wayland).
+pub fn available() -> bool {
+    super::can_hide_windows()
+}
+
+/// The corner radius a floating window's content should draw: `r` where the window
+/// is cut to match, else 0 (square: a rounded corner would leave stray pixels).
+pub fn radius(r: f32) -> f32 {
+    if available() { r } else { 0.0 }
+}
 
 /// The corner radius a `w` x `h` window can take: `max`, but never more than half
 /// its shorter side (so a pill's huge radius becomes a full round end).
@@ -89,12 +101,9 @@ mod x11 {
 
     pub fn apply(window: u32, max_radius: f32) -> Result<(), String> {
         let os = |e: &dyn std::fmt::Debug| format!("X11: {e:?}");
-        let (conn, screen) =
+        let (conn, _) =
             xcb::Connection::connect_with_extensions(None, &[xcb::Extension::Shape], &[])
                 .map_err(|e| os(&e))?;
-        if compositing(&conn, screen) {
-            return Ok(()); // real alpha: the corners are already see-through
-        }
         let window = x::Window::new(window);
         let geometry = conn
             .wait_for_reply(conn.send_request(&x::GetGeometry {
@@ -122,24 +131,6 @@ mod x11 {
             rectangles: &rects,
         })
         .map_err(|e| os(&e))
-    }
-
-    /// A compositing manager owns `_NET_WM_CM_S<screen>` (the EWMH signal).
-    pub fn compositing(conn: &xcb::Connection, screen: i32) -> bool {
-        let name = format!("_NET_WM_CM_S{screen}");
-        let atom = conn.send_request(&x::InternAtom {
-            only_if_exists: true,
-            name: name.as_bytes(),
-        });
-        let Ok(atom) = conn.wait_for_reply(atom).map(|r| r.atom()) else {
-            return false;
-        };
-        if atom == x::ATOM_NONE {
-            return false;
-        }
-        let owner = conn.send_request(&x::GetSelectionOwner { selection: atom });
-        conn.wait_for_reply(owner)
-            .is_ok_and(|r| r.owner() != x::WINDOW_NONE)
     }
 
     #[cfg(test)]
@@ -216,10 +207,6 @@ mod tests {
             return;
         }
         let (conn, screen) = xcb::Connection::connect(None).unwrap();
-        if x11::compositing(&conn, screen) {
-            eprintln!("a compositor draws real alpha here: nothing is cut, skipped");
-            return;
-        }
         let root = conn.get_setup().roots().nth(screen as usize).unwrap();
         let window: x::Window = conn.generate_id();
         conn.send_and_check_request(&x::CreateWindow {

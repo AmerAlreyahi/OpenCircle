@@ -52,7 +52,7 @@ pub fn layer_pill<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a
         .padding([6, 16])
         .style(move |_| container::Style {
             background: Some(palette.window.into()),
-            border: Border::default().rounded(999),
+            border: Border::default().rounded(super::shape::radius(PILL_RADIUS)),
             ..container::Style::default()
         })
 }
@@ -483,7 +483,7 @@ pub fn solid_surface<'a, Message: 'a>(
             border: Border {
                 color: palette.border,
                 width: 1.0,
-                radius: SURFACE_RADIUS.into(),
+                radius: super::shape::radius(SURFACE_RADIUS).into(),
             },
             ..container::Style::default()
         })
@@ -498,7 +498,7 @@ pub fn accent_dot<'a, Message: Clone + 'a>(size: f32, on_press: Message) -> Butt
         .on_press(on_press)
         .style(|_, status| button::Style {
             background: Some(accent(status)),
-            border: Border::default().rounded(999),
+            border: Border::default().rounded(super::shape::radius(PILL_RADIUS)),
             ..button::Style::default()
         })
 }
