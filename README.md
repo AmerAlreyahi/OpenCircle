@@ -36,9 +36,11 @@ games) and choose what to do with it.
   browser straight to Lens. No image-hosting service in between.
 - **Read text from anything.** Copy text out of images, videos and games. OCR
   runs on your PC, offline, after a one-time download of about 20 MB.
-- **Ask AI about what you circled**, with follow-up questions. Bring your own
-  key: Claude, or any OpenAI-compatible service, including a local model with
-  Ollama or LM Studio, or OpenRouter. See [AI setup](docs/ai-setup.md).
+- **Ask AI about what you circled.** By default your question opens in Google
+  AI Mode in your own browser: no key, no account. Or bring your own key for
+  answers in the app, with follow-up questions: Claude, or any
+  OpenAI-compatible service, including a local model with Ollama or LM Studio,
+  or OpenRouter. See [AI setup](docs/ai-setup.md).
 - **Snip and annotate.** Region, window, full-screen and scrolling captures.
   Smart shapes, curved arrows, callouts, numbered steps, text, highlighter,
   spotlight, magnifier and blur that cannot be reversed. Copy or save.

@@ -1,12 +1,15 @@
-//! AI: exactly two clients, picked by `config.ai.provider`: the Anthropic
+//! AI: exactly two API clients, picked by `config.ai.provider`: the Anthropic
 //! Messages API (`anthropic`) and OpenAI-compatible chat completions
 //! (`openai`: OpenAI, Gemini's OpenAI endpoint, OpenRouter, Ollama, LM Studio).
+//! The third provider, `browser`, has no client: it opens Google AI Mode in the
+//! user's own browser and nothing comes back.
 //!
 //! Blocking (ureq + rustls), no async runtime: call from a worker thread.
 //! Nothing here runs unless the caller does; the key comes from
 //! `crate::secrets` and never appears in an error, a log or a `Debug`.
 
 pub mod anthropic;
+pub mod browser;
 pub mod openai;
 
 use std::fmt;
@@ -137,6 +140,11 @@ pub fn ask_stream(
     on_delta: impl FnMut(&str),
 ) -> Result<String, AiError> {
     match cfg.provider {
+        Provider::Browser => Err(AiError::NotConfigured(
+            "this needs an AI provider with an API key (Settings, AI); Google AI Mode in your \
+             browser cannot send an answer back"
+                .into(),
+        )),
         Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, on_delta),
         Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, on_delta),
     }

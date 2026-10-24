@@ -12,7 +12,7 @@
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
 //!
 //! [ai]                              # the API key is NOT here: OS keyring only
-//! provider = "anthropic"            # anthropic | openai_compatible
+//! provider = "browser"              # browser | anthropic | openai_compatible
 //! base_url = ""                     # "" = provider default (Anthropic only)
 //! model = "claude-sonnet-5-5"       # model id sent to the provider
 //!
@@ -64,7 +64,9 @@ pub enum Theme {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
+    /// No key: the question opens in Google AI Mode in the user's own browser.
     #[default]
+    Browser,
     Anthropic,
     OpenaiCompatible,
 }
@@ -73,6 +75,7 @@ impl Provider {
     /// Stable id, used for the keyring entry name.
     pub fn id(self) -> &'static str {
         match self {
+            Provider::Browser => "browser",
             Provider::Anthropic => "anthropic",
             Provider::OpenaiCompatible => "openai_compatible",
         }
@@ -173,7 +176,7 @@ pub struct Config {
 impl Default for AiConfig {
     fn default() -> Self {
         AiConfig {
-            provider: Provider::Anthropic,
+            provider: Provider::Browser,
             base_url: String::new(),
             model: crate::ai::DEFAULT_ANTHROPIC_MODEL.to_string(),
         }
@@ -600,7 +603,7 @@ mod tests {
         assert_eq!(c.theme, Theme::System);
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
         assert_eq!(c.translate.target, "ar");
-        assert_eq!(c.ai.provider, Provider::Anthropic);
+        assert_eq!(c.ai.provider, Provider::Browser);
         assert_eq!(c.quick_actions.len(), 8);
         assert!(c.quick_actions[1].live);
         assert_eq!(c.general.default_action, DefaultAction::Lens);
@@ -734,6 +737,32 @@ mod tests {
             );
             let (c, w) = Config::parse(&format!("[general]\ndefault_action = \"{}\"\n", a.id()));
             assert_eq!((c.general.default_action, w.len()), (a, 0));
+        }
+    }
+
+    #[test]
+    fn browser_is_the_default_provider_and_old_configs_keep_theirs() {
+        assert_eq!(Config::parse("").0.ai.provider, Provider::Browser);
+        // A file written before the browser provider existed: no provider line, or an API one.
+        let (c, w) = Config::parse("[ai]\nmodel = \"claude-sonnet-5-5\"\n");
+        assert_eq!((c.ai.provider, w.len()), (Provider::Browser, 0));
+        for (id, provider) in [
+            ("browser", Provider::Browser),
+            ("anthropic", Provider::Anthropic),
+            ("openai_compatible", Provider::OpenaiCompatible),
+        ] {
+            assert_eq!(provider.id(), id);
+            let url = if provider == Provider::OpenaiCompatible {
+                "base_url = \"http://localhost:11434/v1\"\nmodel = \"llama3\"\n"
+            } else {
+                ""
+            };
+            let (c, w) = Config::parse(&format!("[ai]\nprovider = \"{id}\"\n{url}"));
+            assert_eq!((c.ai.provider, w.len()), (provider, 0), "{w:?}");
+            // and back through the serializer
+            let text = toml::to_string_pretty(&c).unwrap();
+            assert!(text.contains(&format!("provider = \"{id}\"")), "{text}");
+            assert_eq!(Config::parse(&text).0, c);
         }
     }
 

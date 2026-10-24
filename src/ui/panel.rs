@@ -13,6 +13,7 @@ use super::widgets::{self, SEND, STOP};
 use crate::actions::ask::{self, Chat, Setup, Status};
 use crate::actions::text::{self, Progress};
 use crate::actions::{self, Crop, lens};
+use crate::ai;
 
 /// Panel width when docked (DESIGN.md).
 const WIDTH: f32 = 420.0;
@@ -44,6 +45,8 @@ pub enum Msg {
     Answered(Result<(), String>),
     /// The user agreed to the model download.
     Download,
+    /// Browser provider: send the question without the selection's text.
+    SendWithoutText,
     Cancel,
     Progress(Progress),
     Read(Result<String, String>),
@@ -76,7 +79,19 @@ enum State {
         /// `None` while loading the config and key.
         setup: Option<Result<Arc<Setup>, String>>,
         chat: Chat,
+        browse: Browse,
     },
+}
+
+/// Browser provider (Google AI Mode): adding the selection's text to the
+/// question needs the OCR model, so it asks before the first download.
+#[derive(Default)]
+enum Browse {
+    #[default]
+    Idle,
+    /// No models yet: this question waits for the user's choice.
+    Consent(String),
+    Downloading(f32),
 }
 
 enum Reading {
@@ -118,6 +133,7 @@ impl Panel {
                     thumb: image::Handle::from_rgba(crop.width, crop.height, crop.rgba.clone()),
                     setup: None,
                     chat: Chat::default(),
+                    browse: Browse::Idle,
                 };
                 background(move |tx| {
                     let _ = tx.unbounded_send(Msg::Ready(ask::setup(&crop).map(Arc::new)));
@@ -169,6 +185,7 @@ impl Panel {
                 State::Ask {
                     chat,
                     setup: Some(Ok(_)),
+                    browse: Browse::Idle,
                     ..
                 },
                 Msg::Submit,
@@ -177,8 +194,31 @@ impl Panel {
                 return self.send(&question);
             }
             (State::Ask { .. }, Msg::Prompt(prompt)) => return self.send(prompt),
-            (State::Ask { chat, .. }, Msg::Stop) => {
+            (
+                State::Ask {
+                    browse: Browse::Consent(_),
+                    ..
+                },
+                Msg::Download,
+            ) => return self.resume(true),
+            (
+                State::Ask {
+                    browse: Browse::Consent(_),
+                    ..
+                },
+                Msg::SendWithoutText,
+            ) => return self.resume(false),
+            (
+                State::Ask {
+                    browse: browse @ Browse::Downloading(_),
+                    ..
+                },
+                Msg::Progress(Progress::Download(done)),
+            ) => *browse = Browse::Downloading(done),
+            (State::Ask { browse, .. }, Msg::Progress(Progress::Reading)) => *browse = Browse::Idle,
+            (State::Ask { chat, browse, .. }, Msg::Stop) => {
                 chat.cancel();
+                *browse = Browse::Idle;
                 self.work = None;
             }
             (State::Ask { setup, .. }, Msg::Ready(result)) => {
@@ -197,8 +237,9 @@ impl Panel {
                 // Follow the answer. (anchor_bottom() hid short content in iced 0.14.)
                 return operation::snap_to_end(LOG);
             }
-            (State::Ask { chat, .. }, Msg::Answered(result)) => {
+            (State::Ask { chat, browse, .. }, Msg::Answered(result)) => {
                 chat.finish(result);
+                *browse = Browse::Idle;
                 self.work = None;
             }
             (State::Text(reading @ Reading::Consent), Msg::Download) => {
@@ -261,11 +302,23 @@ impl Panel {
         let State::Ask {
             setup: Some(Ok(setup)),
             chat,
+            browse,
             ..
         } = &mut self.state
         else {
             return Task::none();
         };
+        if setup.browser() {
+            let question = question.trim();
+            if question.is_empty() || chat.status == Status::Streaming {
+                return Task::none();
+            }
+            if !text::models_present() {
+                *browse = Browse::Consent(question.into());
+                return Task::none();
+            }
+            return self.browse(question.into(), true);
+        }
         let Some(messages) = chat.ask(question, &setup.png) else {
             return Task::none();
         };
@@ -281,14 +334,67 @@ impl Panel {
         task
     }
 
+    /// The user chose about the text model (Browser provider): go on with the waiting question.
+    fn resume(&mut self, read_text: bool) -> Task<Msg> {
+        let State::Ask { browse, .. } = &mut self.state else {
+            return Task::none();
+        };
+        let Browse::Consent(question) = std::mem::take(browse) else {
+            return Task::none();
+        };
+        if read_text {
+            *browse = Browse::Downloading(0.0);
+        }
+        self.browse(question, read_text)
+    }
+
+    /// Browser provider: read the selection's text (`read_text`; the user agreed
+    /// to the model), then open `prompt` + that text in Google AI Mode.
+    fn browse(&mut self, prompt: String, read_text: bool) -> Task<Msg> {
+        let State::Ask {
+            setup: Some(Ok(setup)),
+            chat,
+            ..
+        } = &mut self.state
+        else {
+            return Task::none();
+        };
+        chat.ask(&prompt, &[]); // the turn (and "busy"); nothing is sent by this
+        let (setup, crop) = (setup.clone(), self.crop.clone());
+        let (task, handle) = background(move |tx| {
+            let read = read_text.then(|| {
+                text::read(&crop, |progress| {
+                    let _ = tx.unbounded_send(Msg::Progress(progress));
+                })
+            });
+            let (question, note) = browser_turn(&prompt, read);
+            let messages = [ai::Message::user(question)];
+            let result = ask::stream(&setup, &messages, |piece| {
+                tx.unbounded_send(Msg::Delta(piece.into())).is_ok()
+            });
+            if result.is_ok() {
+                let _ = tx.unbounded_send(Msg::Delta(note));
+            }
+            let _ = tx.unbounded_send(Msg::Answered(result));
+        })
+        .abortable();
+        self.work = Some(handle.abort_on_drop());
+        task
+    }
+
     pub fn view(&self, screen: Size) -> Element<'_, Msg> {
         let area = place(screen);
         let (action, body) = match &self.state {
             State::Lens(status) => (&actions::lens::ACTION, self.lens_view(status.as_ref())),
             State::Text(reading) => (&actions::text::ACTION, self.text_view(reading)),
-            State::Ask { thumb, setup, chat } => (
+            State::Ask {
+                thumb,
+                setup,
+                chat,
+                browse,
+            } => (
                 &actions::ask::ACTION,
-                self.ask_view(thumb, setup.as_ref(), chat),
+                self.ask_view(thumb, setup.as_ref(), chat, browse),
             ),
         };
         let mut header = row![widgets::icon(action.icon), widgets::heading(action.label)]
@@ -299,9 +405,12 @@ impl Panel {
             ..
         } = &self.state
         {
-            header = header
-                .push(space::horizontal())
-                .push(widgets::caption(&setup.cfg.model));
+            let who = if setup.browser() {
+                "Google AI Mode"
+            } else {
+                &setup.cfg.model
+            };
+            header = header.push(space::horizontal()).push(widgets::caption(who));
         }
         let panel = widgets::surface(column![header, body].spacing(16).height(Fill))
             .padding(20)
@@ -332,6 +441,7 @@ impl Panel {
         thumb: &'a image::Handle,
         setup: Option<&'a Result<Arc<Setup>, String>>,
         chat: &'a Chat,
+        browse: &'a Browse,
     ) -> Element<'a, Msg> {
         let thumb = container(
             image(thumb.clone())
@@ -347,6 +457,7 @@ impl Panel {
             return column![thumb, note].spacing(16).into();
         };
 
+        let browser = matches!(setup, Some(Ok(s)) if s.browser());
         let mut log = column![].spacing(12).width(Fill);
         for (i, turn) in chat.turns.iter().enumerate() {
             log = log
@@ -355,24 +466,83 @@ impl Panel {
             if !turn.answer.is_empty() {
                 log = log.push(widgets::body(&turn.answer));
             } else if last && chat.status == Status::Streaming {
-                log = log.push(widgets::caption("Thinking…"));
+                log = log.push(match browse {
+                    Browse::Downloading(done) => column![
+                        widgets::caption("Downloading the text-recognition model…"),
+                        widgets::progress(*done),
+                    ]
+                    .spacing(6)
+                    .into(),
+                    _ if browser => Element::from(widgets::caption("Opening your browser…")),
+                    _ => widgets::caption("Thinking…").into(),
+                });
             }
+        }
+        // Questions about the picture itself: Lens takes the crop (browser provider).
+        if browser && chat.status == Status::Done {
+            log = log.push(widgets::text_button(
+                actions::lens::ACTION.icon,
+                "Search the image with Lens",
+                String::new(),
+                false,
+                Msg::Search,
+            ));
         }
         match &chat.status {
             Status::Failed(e) => log = log.push(widgets::error(e)),
             Status::Cancelled => log = log.push(widgets::caption("Stopped.")),
             _ => {}
         }
-        if chat.turns.is_empty() {
+        if let Browse::Consent(question) = browse {
+            // Waiting for the user's choice: the question is theirs, not yet a turn.
+            log = log.push(container(widgets::bubble(widgets::body(question))).align_right(Fill));
+        } else if chat.turns.is_empty() {
             let prompts = PROMPTS.map(|p| widgets::chip(p, Msg::Prompt(p)).into());
             log = log.push(row(prompts).spacing(8));
         }
+        let input: Element<'a, Msg> = if matches!(browse, Browse::Consent(_)) {
+            column![
+                widgets::body(
+                    "To add the text of your selection to the question, OpenCircle downloads \
+                     the text-recognition model once (about 20 MB, from GitHub). \
+                     Nothing else is sent."
+                ),
+                row![
+                    widgets::text_button(
+                        '\u{e0b6}', // download
+                        "Download",
+                        String::new(),
+                        true,
+                        Msg::Download
+                    ),
+                    widgets::text_button(
+                        SEND,
+                        "Send without the text",
+                        String::new(),
+                        false,
+                        Msg::SendWithoutText
+                    ),
+                ]
+                .spacing(8)
+                .wrap(),
+            ]
+            .spacing(12)
+            .into()
+        } else {
+            self.follow_up("Ask a follow-up…", chat.status == Status::Streaming)
+        };
+        let privacy = if browser {
+            "When you send, your question and the text read from the selection go to Google \
+             through your browser. The image is not uploaded unless you choose Lens."
+        } else {
+            "Only this selection is sent, and only to the provider you chose."
+        };
         column![
             widgets::scroll(column![thumb, log].spacing(16))
                 .id(LOG)
                 .height(Fill),
-            self.follow_up("Ask a follow-up…", chat.status == Status::Streaming),
-            widgets::caption("Only this selection is sent, and only to the provider you chose."),
+            input,
+            widgets::caption(privacy),
         ]
         .spacing(12)
         .into()
@@ -475,6 +645,26 @@ impl Panel {
     }
 }
 
+/// Browser provider: the question to open in AI Mode and the line to add to the
+/// answer. `read` is the OCR result (`None` = the user declined to read text).
+fn browser_turn(prompt: &str, read: Option<Result<String, String>>) -> (String, String) {
+    let alone = |why: String| {
+        (
+            ai::browser::question(prompt, None),
+            format!("\n{why} Only your question was sent."),
+        )
+    };
+    match read {
+        Some(Ok(text)) if !text.trim().is_empty() => (
+            ai::browser::question(prompt, Some(&text)),
+            "\nSent with the text read from your selection.".into(),
+        ),
+        Some(Ok(_)) => alone("No text was found in the selection.".into()),
+        Some(Err(e)) => alone(format!("Could not read the text ({e}).")),
+        None => alone("The image itself cannot be passed to AI Mode.".into()),
+    }
+}
+
 /// Where the panel goes on a `screen`-sized overlay (logical px): docked right,
 /// full height; on narrow screens a bottom sheet. Always inside the screen.
 fn place(screen: Size) -> Rectangle {
@@ -504,6 +694,23 @@ mod tests {
             && r.y >= GAP
             && r.x + r.width <= screen.width - GAP + 0.01
             && r.y + r.height <= screen.height - GAP + 0.01
+    }
+
+    #[test]
+    fn browser_turn_sends_text_or_says_why_not() {
+        let (q, note) = browser_turn("Explain", Some(Ok("Sunstone\nRare gem".into())));
+        assert_eq!(q, "Explain\n\nText from my screen:\nSunstone\nRare gem");
+        assert!(note.contains("Sent with the text"));
+        // Declined (no model download), empty, failed: the prompt alone, and the reason.
+        for (read, why) in [
+            (None, "cannot be passed"),
+            (Some(Ok("  \n".into())), "No text was found"),
+            (Some(Err("helper crashed".into())), "helper crashed"),
+        ] {
+            let (q, note) = browser_turn("Explain", read);
+            assert_eq!(q, "Explain");
+            assert!(note.contains(why) && note.contains("Only your question was sent"));
+        }
     }
 
     #[test]

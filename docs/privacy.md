@@ -8,7 +8,8 @@ Every network action is something you start.
 | When you... | What is sent | To whom |
 |---|---|---|
 | Press **Search** | The selected area, as an image | Google Lens, from your own browser. OpenCircle writes a small local web page that holds the image and submits it to Lens when your browser opens it. No image-hosting service is involved. |
-| Ask AI / Explain | The selected area and your questions | The AI provider you configured (or your local server) |
+| Press **Send** in Ask AI / Explain, with the default **Google AI Mode (browser)** | Your question and the text read from your selection (text only; the screenshot is not uploaded unless you choose Lens) | Google, from your own browser, which OpenCircle opens at `google.com/search` with the question in the address. If you decline the one-time OCR download, only your prompt is sent. |
+| Ask AI / Explain, with an API provider | The selected area and your questions | The AI provider you configured (or your local server) |
 | Translate with AI | The text read from the screen (text only, not the image) | The AI provider you configured |
 | Use **Text** for the first time | Nothing of yours. It downloads the OCR runtime and models (about 20 MB) | GitHub (ONNX Runtime releases and the oar-ocr model release), checked against pinned checksums |
 | Anything else (circle, copy, save, snip, annotate, read text) | Nothing | Nobody |
@@ -43,4 +44,4 @@ only to the server you configured. A remote server must use `https://`; plain
 
 Circle, Text (after the one-time download), Copy, Save and Snip work with no
 network. Search, Ask AI and AI translation need one; a local model removes the
-need for the last two.
+need for the last two (the browser provider always needs the web).

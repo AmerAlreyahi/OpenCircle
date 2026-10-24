@@ -269,26 +269,56 @@ fn fit(png: &[u8], w: u32, h: u32) -> io::Result<(Vec<u8>, u32, u32)> {
 
 // ---- browser ------------------------------------------------------------
 
+/// The only web address we open by URL: Google, over https.
+const GOOGLE: &str = "https://www.google.com/";
+
 /// Open `path` in the default browser. No shell, no URL: the path is one argv
 /// entry and must be absolute, so it can never read as an option.
 fn launch(path: &Path) -> io::Result<()> {
     if !path.is_absolute() {
         return Err(bad("page path must be absolute"));
     }
+    spawn(path.as_os_str())
+}
+
+/// Open a `https://www.google.com/...` URL in the default browser (Google AI
+/// Mode). Same launcher as the Lens page: no shell, the URL is one argv entry.
+/// Any other host, scheme or a URL with spaces/control bytes is refused.
+pub fn open_url(url: &str) -> io::Result<()> {
+    if !url.starts_with(GOOGLE) || !url.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(bad("only https://www.google.com/ URLs can be opened"));
+    }
+    spawn(std::ffi::OsStr::new(url))
+}
+
+fn spawn(target: &std::ffi::OsStr) -> io::Result<()> {
+    // Debug builds only: tests and manual runs point this at a script that
+    // gets the target as its one argument, so no real browser opens.
+    #[cfg(debug_assertions)]
+    let test_browser = std::env::var_os("OPENCIRCLE_TEST_BROWSER");
+    #[cfg(not(debug_assertions))]
+    let test_browser: Option<std::ffi::OsString> = None;
+    if let Some(program) = test_browser {
+        return reap(Command::new(program).arg(target));
+    }
     #[cfg(windows)]
     let mut cmd = {
         use std::os::windows::process::CommandExt;
         let mut c = Command::new("rundll32");
-        c.arg("url.dll,FileProtocolHandler").arg(path);
+        c.arg("url.dll,FileProtocolHandler").arg(target);
         c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         c
     };
     #[cfg(not(windows))]
     let mut cmd = {
         let mut c = Command::new("xdg-open");
-        c.arg(path);
+        c.arg(target);
         c
     };
+    reap(&mut cmd)
+}
+
+fn reap(cmd: &mut Command) -> io::Result<()> {
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -432,5 +462,21 @@ mod tests {
     #[test]
     fn launch_rejects_relative_path() {
         assert!(launch(Path::new("-x.html")).is_err());
+    }
+
+    #[test]
+    fn open_url_takes_only_google_https() {
+        for bad in [
+            "http://www.google.com/search?q=a",
+            "https://www.google.com.evil.test/search?q=a",
+            "https://evil.test/https://www.google.com/",
+            "https://www.google.com/search?q=a b",
+            "https://www.google.com/search?q=a\nb",
+            "file:///etc/passwd",
+            "-x",
+            "",
+        ] {
+            assert!(open_url(bad).is_err(), "{bad:?}");
+        }
     }
 }

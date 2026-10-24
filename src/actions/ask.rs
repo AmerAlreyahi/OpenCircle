@@ -39,9 +39,25 @@ impl fmt::Debug for Setup {
     }
 }
 
+impl Setup {
+    /// The no-key provider: questions open in Google AI Mode in the browser.
+    pub fn browser(&self) -> bool {
+        self.cfg.provider == Provider::Browser
+    }
+}
+
 /// Reads the config and the key, encodes the crop. Blocking (file, keyring,
 /// PNG): call off the UI thread. `Err` = what to tell the user, with the steps.
 pub fn setup(crop: &Crop) -> Result<Setup, String> {
+    let cfg = crate::config::current().ai;
+    if cfg.provider == Provider::Browser {
+        // No key, and the image never leaves (Lens re-encodes the crop itself).
+        return Ok(Setup {
+            cfg,
+            key: None,
+            png: Vec::new(),
+        });
+    }
     let (cfg, key) = credentials()?;
     let png = super::encode_png(crop.width, crop.height, &crop.rgba)?;
     Ok(Setup { cfg, key, png })
@@ -51,6 +67,14 @@ pub fn setup(crop: &Crop) -> Result<Setup, String> {
 /// off the UI thread. `Err` = what to tell the user (first line), then the steps.
 pub fn credentials() -> Result<(AiConfig, Option<Secret>), String> {
     let cfg = crate::config::current().ai;
+    if cfg.provider == Provider::Browser {
+        return Err(
+            "This needs an AI provider with an API key: Google AI Mode in your \
+            browser cannot send text back.\n\nIn Settings > AI choose Anthropic or \
+            OpenAI-compatible and add your key."
+                .into(),
+        );
+    }
     let key = match secrets::get(cfg.provider) {
         Ok(key) => key.filter(|key| !key.is_empty()),
         // A local OpenAI-compatible server needs no key: go on without the keyring.
@@ -181,11 +205,20 @@ struct Stopped;
 
 /// Streams the answer to `messages`; `on_delta` gets each piece and returns
 /// `false` to stop. Blocking (network): call off the UI thread.
+///
+/// The browser provider calls no API: the last message (the question, already
+/// holding any text read from the selection) opens in Google AI Mode in the
+/// user's browser, and `on_delta` gets one line saying so.
 pub fn stream(
     setup: &Setup,
     messages: &[ai::Message],
     mut on_delta: impl FnMut(&str) -> bool,
 ) -> Result<(), String> {
+    if setup.browser() {
+        let question = messages.last().map_or("", |m| m.text.as_str());
+        on_delta(&ai::browser::ask(question)?);
+        return Ok(());
+    }
     let run = panic::catch_unwind(AssertUnwindSafe(|| {
         ai::ask_stream(&setup.cfg, setup.key.as_ref(), messages, |piece| {
             if !on_delta(piece) {
@@ -313,6 +346,82 @@ mod tests {
             key: None,
             png: b"png".to_vec(),
         }
+    }
+
+    /// Runs the browser provider end to end with a fake browser (a script that
+    /// records its one argument): the URL, and no call to any API server.
+    #[cfg(all(unix, debug_assertions))]
+    #[test]
+    fn browser_provider_opens_ai_mode_and_calls_no_api() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("oc-ask-browser-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-browser.sh");
+        let seen = dir.join("url.txt");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s' \"$1\" > '{0}.tmp' && mv '{0}.tmp' '{0}'\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // SAFETY: the only test that touches this variable.
+        unsafe { std::env::set_var("OPENCIRCLE_TEST_BROWSER", &script) };
+
+        // A server that would answer, if the API client were used.
+        let api = TcpListener::bind("127.0.0.1:0").unwrap();
+        api.set_nonblocking(true).unwrap();
+        let setup = Setup {
+            cfg: AiConfig {
+                provider: Provider::Browser,
+                base_url: format!("http://{}/v1", api.local_addr().unwrap()),
+                model: "stub".into(),
+            },
+            key: None,
+            png: Vec::new(),
+        };
+        assert!(setup.browser());
+        let question = ai::browser::question("Explain", Some("Pastel de nata\n1,40 €"));
+        let mut lines = Vec::new();
+        let result = stream(&setup, &[ai::Message::user(question)], |piece| {
+            lines.push(piece.to_string());
+            true
+        });
+        assert_eq!(result, Ok(()));
+        assert_eq!(lines, ["Opened in your browser."]);
+
+        let mut url = String::new();
+        for _ in 0..100 {
+            if let Ok(u) = std::fs::read_to_string(&seen) {
+                url = u;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        println!("SAMPLE URL: {url}");
+        assert_eq!(
+            url,
+            "https://www.google.com/search?udm=50&q=Explain%0A%0AText%20from%20my%20screen%3A%0A\
+             Pastel%20de%20nata%0A1%2C40%20%E2%82%AC"
+        );
+        assert!(
+            matches!(api.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "the API server was contacted"
+        );
+
+        // A launcher that cannot start is reported, not swallowed.
+        unsafe { std::env::set_var("OPENCIRCLE_TEST_BROWSER", dir.join("missing")) };
+        let result = stream(&setup, &[ai::Message::user("hi")], |_| true);
+        assert!(
+            result
+                .unwrap_err()
+                .starts_with("Could not open the browser")
+        );
+        unsafe { std::env::remove_var("OPENCIRCLE_TEST_BROWSER") };
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

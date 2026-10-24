@@ -43,13 +43,16 @@ const STEPS: [Step; 4] = [Step::Welcome, Step::Ai, Step::Look, Step::Done];
 /// What the user picks on the AI step. "Skip" is the footer button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Choice {
+    /// Google AI Mode in the user's browser: no key.
+    Browser,
     Claude,
     /// Index into `settings::PRESETS`.
     Preset(usize),
     Skip,
 }
 
-pub static CHOICES: [Choice; 6] = [
+pub static CHOICES: [Choice; 7] = [
+    Choice::Browser,
     Choice::Claude,
     Choice::Preset(0),
     Choice::Preset(1),
@@ -61,6 +64,7 @@ pub static CHOICES: [Choice; 6] = [
 impl fmt::Display for Choice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Choice::Browser => f.write_str("Google AI Mode (browser, no key)"),
             Choice::Claude => f.write_str("Claude (Anthropic)"),
             Choice::Preset(i) => f.write_str(PRESETS[*i].name),
             Choice::Skip => f.write_str("Skip, set up later"),
@@ -71,6 +75,7 @@ impl fmt::Display for Choice {
 impl Choice {
     fn provider(self) -> Option<Provider> {
         match self {
+            Choice::Browser => Some(Provider::Browser),
             Choice::Claude => Some(Provider::Anthropic),
             Choice::Preset(_) => Some(Provider::OpenaiCompatible),
             Choice::Skip => None,
@@ -124,7 +129,7 @@ pub enum Outcome {
 }
 
 impl State {
-    /// The real config file and the real keyring. Claude is preselected.
+    /// The real config file and the real keyring. Google AI Mode is preselected.
     pub fn open() -> Self {
         let (config, _warnings) = Config::load();
         Self::new(config, None, Box::new(Keyring))
@@ -137,7 +142,7 @@ impl State {
             step: Step::Welcome,
             theme: base.theme,
             base,
-            choice: Choice::Claude,
+            choice: Choice::Browser,
             key,
             store,
             path,
@@ -155,6 +160,7 @@ impl State {
         let mut c = self.base.clone();
         c.theme = self.theme;
         match self.choice {
+            Choice::Browser => c.ai.provider = Provider::Browser,
             Choice::Claude => {
                 c.ai.provider = Provider::Anthropic;
                 c.ai.base_url.clear();
@@ -175,7 +181,9 @@ impl State {
     fn choose(&mut self, choice: Choice) {
         let before = self.choice.provider();
         self.choice = choice;
-        if let Some(p) = choice.provider().filter(|p| Some(*p) != before) {
+        // The browser needs no key: nothing to look up.
+        let keyed = choice.provider().filter(|p| *p != Provider::Browser);
+        if let Some(p) = keyed.filter(|p| Some(*p) != before) {
             self.key.refresh(&*self.store, p);
         }
     }
@@ -197,7 +205,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         }
         Message::Choose(c) => state.choose(c),
         Message::ApiKey(k) => {
-            if let Some(p) = state.choice.provider() {
+            if let Some(p) = state.choice.provider().filter(|p| *p != Provider::Browser) {
                 state.key.update(&*state.store, p, k);
             }
         }
@@ -262,8 +270,8 @@ fn ai(state: &State) -> Element<'_, Message> {
     let mut col = column![
         title("Pick an AI (optional)"),
         body(
-            "An AI can explain what you circle and translate it in place. \
-             You can change this any time in Settings."
+            "An AI can explain what you circle. Google AI Mode needs no key; use your own \
+             key to translate in place too. You can change this any time in Settings."
         ),
         tip(
             widgets::dropdown(&CHOICES, Some(state.choice), "Provider", Message::Choose),
@@ -273,7 +281,12 @@ fn ai(state: &State) -> Element<'_, Message> {
     ]
     .spacing(20)
     .width(FORM_WIDTH + 40.0);
-    if state.choice.local() {
+    if state.choice == Choice::Browser {
+        col = col.push(caption(
+            "No key needed. Your question opens in Google AI Mode in your browser, \
+             only when you send it.",
+        ));
+    } else if state.choice.local() {
         col = col.push(caption("This runs on your PC. No API key needed."));
     } else if state.choice.provider().is_some() {
         col = col.push(state.key.view().map(Message::ApiKey));
@@ -308,7 +321,10 @@ fn look(state: &State) -> Element<'_, Message> {
 
 fn done(state: &State) -> Element<'_, Message> {
     let ai = match state.choice {
-        Choice::Skip => "AI: not set up yet".to_string(),
+        Choice::Skip if state.base.ai.provider != Provider::Browser => {
+            "AI: not set up yet".to_string()
+        }
+        Choice::Skip | Choice::Browser => "AI: Google AI Mode in your browser".to_string(),
         c if c.local() => format!("AI: {c}"),
         c if *state.key.status() == KeyStatus::Saved => format!("AI: {c}, key saved"),
         c => format!("AI: {c}, no key yet"),
@@ -385,9 +401,12 @@ mod tests {
     }
 
     #[test]
-    fn claude_is_preselected_and_steps_stay_in_range() {
+    fn the_browser_is_preselected_and_steps_stay_in_range() {
         let mut s = state(None);
-        assert_eq!(s.choice, Choice::Claude);
+        assert_eq!(s.choice, Choice::Browser);
+        assert_eq!(CHOICES[0], Choice::Browser, "listed first");
+        assert_eq!(s.config().ai, Config::default().ai);
+        assert_eq!(s.config().ai.provider, Provider::Browser);
         update(&mut s, Message::Back);
         assert_eq!(s.step(), Step::Welcome);
         next(&mut s, 9);
@@ -401,6 +420,7 @@ mod tests {
         let path = tmp("onboarding-claude");
         let mut s = state(Some(path.clone()));
         next(&mut s, 1);
+        update(&mut s, Message::Choose(Choice::Claude));
         update(
             &mut s,
             Message::ApiKey(KeyMessage::Input(Secret::new(FAKE_KEY))),
@@ -416,10 +436,11 @@ mod tests {
         let (back, warnings) = Config::load_from(&path);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(back, cfg);
-        let want = Config {
+        let mut want = Config {
             theme: Theme::Light,
             ..Config::default()
         };
+        want.ai.provider = Provider::Anthropic;
         assert_eq!(back, want);
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("FAKE"), "the key stays out of the file");
@@ -466,6 +487,7 @@ mod tests {
         let typing = Message::ApiKey(KeyMessage::Input(Secret::new(FAKE_KEY)));
         assert!(!format!("{typing:?}").contains("FAKE"));
         next(&mut s, 1);
+        update(&mut s, Message::Choose(Choice::Claude));
         update(&mut s, typing);
         update(&mut s, Message::ApiKey(KeyMessage::Save));
         assert_eq!(*s.key.status(), KeyStatus::Saved);

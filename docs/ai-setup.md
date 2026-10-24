@@ -1,12 +1,34 @@
 # AI setup
 
-OpenCircle has no AI of its own and no account. Ask AI, Explain and AI
-translation use a provider you choose, with your own key. Nothing is sent until
-you ask a question.
+OpenCircle has no AI of its own and no account. By default, Ask AI and Explain
+open your question in Google AI Mode in your own browser, with no key. If you
+want answers inside OpenCircle, and AI translation, choose a provider with your
+own key. Nothing is sent until you ask a question.
 
-## Providers
+## Google AI Mode (browser, no key) — the default
 
-Two kinds, set in **Settings → AI**:
+Nothing to set up. When you press Send in the Ask AI panel (or Explain on a
+word card, or the **Explain with AI** quick action), OpenCircle opens your
+default browser at Google Search's AI Mode with your question already typed in.
+
+- The question is your prompt plus the text read from your selection. Reading
+  the text uses the same offline OCR as the **Text** action; the first time,
+  OpenCircle asks before downloading its model (about 20 MB). If you say no, only
+  your prompt is sent, and the panel tells you the image could not be passed.
+- The answer appears in your browser, not in OpenCircle, so there are no
+  follow-ups inside the panel. Press **Search the image with Lens** for
+  questions about the picture itself.
+- Long questions are shortened at a word boundary (about 1,800 characters) and
+  the panel says so.
+- **Translate in place needs a provider with a key** (below): the browser cannot
+  send text back.
+- Only the question text goes to Google, through your own browser, when you
+  press Send. The screenshot is not uploaded unless you choose Lens. See
+  [Privacy](privacy.md).
+
+## Providers with your own key
+
+Two kinds, set in **Settings → AI** (choose **Anthropic** or **OpenAI-like**):
 
 | Provider | Covers |
 |---|---|
@@ -47,17 +69,20 @@ server with a key must use `https://`.
 ## Using it
 
 Circle something and press `A` (or use the **Explain with AI** quick action,
-`Ctrl+Shift+E`). The answer streams in a side panel, and you can ask follow-up
-questions. Only the selected area and your questions are sent, with the
-conversation so far. Closing the panel stops a running answer.
+`Ctrl+Shift+E`). With a key, the answer streams in a side panel and you can ask
+follow-up questions. Only the selected area and your questions are sent, with
+the conversation so far. Closing the panel stops a running answer. With the
+browser provider, Send opens Google AI Mode instead (see above).
 
 ## Config
 
 ```toml
 [ai]
-provider = "anthropic"            # anthropic | openai_compatible
+provider = "browser"              # browser | anthropic | openai_compatible
 base_url = ""                     # "" = provider default; required for openai_compatible
 model = "claude-sonnet-5-5"
 ```
 
-The key is not in this file; set it in Settings.
+`browser` is the default when the file has no `provider`. Settings made before
+it existed (`anthropic` or `openai_compatible`) keep working unchanged. The key
+is not in this file; set it in Settings.

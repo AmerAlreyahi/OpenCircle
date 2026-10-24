@@ -685,6 +685,13 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             let default_model = crate::ai::DEFAULT_ANTHROPIC_MODEL;
             ai.provider = p;
             match p {
+                // Hidden fields must stay valid: nothing half-typed blocks Save.
+                Provider::Browser => {
+                    ai.base_url.clear();
+                    if ai.model.is_empty() {
+                        ai.model = default_model.to_string();
+                    }
+                }
                 Provider::Anthropic => {
                     ai.base_url.clear();
                     if ai.model.is_empty() || PRESETS.iter().any(|x| x.model == ai.model) {
@@ -1018,13 +1025,22 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
     let compat = ai.provider == Provider::OpenaiCompatible;
     let mut rows = vec![form_row(
         "Provider",
-        "Who answers your questions",
+        if ai.provider == Provider::Browser {
+            "Opens Google AI Mode in your browser. No key"
+        } else {
+            "Who answers your questions"
+        },
         segmented(
             &[
+                (
+                    Provider::Browser,
+                    "Browser",
+                    "Google AI Mode in your browser, no key",
+                ),
                 (Provider::Anthropic, "Anthropic", "Use Anthropic (Claude)"),
                 (
                     Provider::OpenaiCompatible,
-                    "OpenAI-compatible",
+                    "OpenAI-like",
                     "Use an OpenAI-compatible server",
                 ),
             ],
@@ -1033,6 +1049,9 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
         ),
         None,
     )];
+    if ai.provider == Provider::Browser {
+        return rows; // no model, server or key: the question opens in the browser
+    }
     if compat {
         rows.push(form_row(
             "Preset",
@@ -1382,8 +1401,26 @@ pub(super) mod tests {
     const FAKE_KEY: &str = "sk-ant-FAKE-0123456789";
 
     #[test]
+    fn the_browser_provider_needs_no_key_model_or_server() {
+        let (mut s, store) = state(None);
+        update(&mut s, Message::Section(Section::Ai));
+        assert_eq!(s.draft.ai.provider, Provider::Browser, "the default");
+        let texts = shot::texts(view(&s));
+        assert!(texts.iter().any(|t| t == "Provider"), "{texts:?}");
+        for hidden in ["API key", "Model", "Server URL", "Preset"] {
+            assert!(!texts.iter().any(|t| t == hidden), "{hidden}: {texts:?}");
+        }
+        // Back from a half-filled server form: hidden fields do not block Save.
+        update(&mut s, Message::Provider(Provider::OpenaiCompatible));
+        update(&mut s, Message::Provider(Provider::Browser));
+        assert!(s.problems.is_empty(), "{:?}", s.problems);
+        assert!(store.0.borrow().is_empty(), "no keyring entry for it");
+    }
+
+    #[test]
     fn the_api_key_is_write_only() {
         let (mut s, store) = state(None);
+        update(&mut s, Message::Provider(Provider::Anthropic));
         let typing = Message::ApiKey(KeyMessage::Input(Secret::new(FAKE_KEY)));
         assert!(!format!("{typing:?}").contains("FAKE"), "message Debug");
         update(&mut s, typing);
