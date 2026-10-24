@@ -73,6 +73,23 @@ pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool) -> Element<'a, M> {
         scale,
         keyed,
         look: None,
+        opening: None,
+    })
+    .width(Fill)
+    .height(Fill)
+    .into()
+}
+
+/// The overlay's edge, its activation glow `opening` of the way through
+/// (0..1, linear; the overlay's opening steps, `overlay::opening_step`)
+/// rather than by the clock, so it keeps step with the dim and the bars.
+pub fn opening<'a, M: 'a>(scale: f32, opening: f32) -> Element<'a, M> {
+    canvas::Canvas::new(Border {
+        mode: Mode::Overlay,
+        scale,
+        keyed: false,
+        look: None,
+        opening: Some(opening),
     })
     .width(Fill)
     .height(Fill)
@@ -128,6 +145,8 @@ struct Border {
     keyed: bool,
     /// Tests: this look instead of the config's.
     look: Option<Look>,
+    /// The overlay's opening, 0..1 (`opening`): the activation's time.
+    opening: Option<f32>,
 }
 
 #[derive(Default)]
@@ -162,7 +181,12 @@ impl<M> canvas::Program<M> for Border {
             state.start = Some(*now);
             state.motion = motion_allowed();
         }
-        let elapsed = now.saturating_duration_since(state.start?);
+        let clock = now.saturating_duration_since(state.start?);
+        let elapsed = match self.opening {
+            Some(t) if t < 1.0 => ACTIVATION.mul_f32(t),
+            Some(_) => clock.max(ACTIVATION),
+            None => clock,
+        };
         let look = self.look.unwrap_or_else(config::look);
         let (spec, frame, next) = plan(self.mode, &look, elapsed, state.motion);
         let redraw = next.map(|d| Action::request_redraw_at(*now + d));
@@ -1076,6 +1100,7 @@ mod tests {
                 scale: 1.0,
                 keyed,
                 look: Some(look),
+                opening: None,
             })
             .width(Fill)
             .height(Fill)

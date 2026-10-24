@@ -462,12 +462,28 @@ pub fn morph_progress(start: Instant, now: Instant) -> f32 {
     progress(start, now, MORPH)
 }
 
-/// How far an animation of `length` started at `start` is at `now` (0..1,
-/// eased out: fast, then settling).
+/// How far an animation of `length` started at `start` is at `now` (0..1, eased
+/// out: fast, then settling).
 pub fn progress(start: Instant, now: Instant, length: Duration) -> f32 {
     let t = now.saturating_duration_since(start).as_secs_f32() / length.as_secs_f32();
+    ease_out(t)
+}
+
+/// `t` (0..1) eased out: fast, then settling.
+pub fn ease_out(t: f32) -> f32 {
     1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
 }
+
+/// The opening's next step from `t` (0..1, linear) after a frame that took
+/// `dt`: by the time it took, but at most `1 / OPENING_STEPS` of it, so a slow
+/// machine still shows the motion (slower) instead of jumping to the end.
+pub fn opening_step(t: f32, dt: Duration) -> f32 {
+    let step = (dt.as_secs_f32() / APPEAR.as_secs_f32()).min(1.0 / OPENING_STEPS);
+    (t + step).min(1.0)
+}
+
+/// The opening shows at least this many steps.
+const OPENING_STEPS: f32 = 6.0;
 
 /// `n` points round the outline of `r` with corners rounded by `radius`,
 /// clockwise on screen from the top edge's left end.

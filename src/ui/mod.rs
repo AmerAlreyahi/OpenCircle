@@ -76,7 +76,8 @@ const UIA_WINDOWS: usize = 4;
 const SLIDE: f32 = 80.0;
 
 /// Presses this close together are a double (triple) click.
-const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+// (Windows' default; also forgiving when a busy machine delays the second press.)
+const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
 /// How long the screen's text read waits after the overlay opens.
 const SCREEN_READ_DELAY: Duration = Duration::from_millis(150);
@@ -403,9 +404,9 @@ struct App {
     /// A press that began on text: its stroke so far (image px). It selects
     /// words unless it turns into a loop (`overlay::winds`).
     text_press: Option<Vec<Point>>,
-    /// The opening animation (`overlay::APPEAR`): when its first frame was
-    /// drawn, and the latest frame's time; `None` until the first frame.
-    appear: Option<(Instant, Instant)>,
+    /// The opening animation (`overlay::APPEAR`): the latest frame's time and
+    /// how far it is (0..1, linear); `None` until the first frame (t = 0).
+    appear: Option<(Instant, f32)>,
     /// Ask AI from the bottom bar about the screen (on at every opening), or
     /// a plain question with nothing from the screen.
     include_screen: bool,
@@ -773,8 +774,10 @@ impl App {
                 self.start_translate()
             }
             Message::Frame(now) => {
-                let start = self.appear.map_or(now, |(start, _)| start);
-                self.appear = Some((start, now));
+                self.appear = Some(match self.appear {
+                    None => (now, 0.0),
+                    Some((last, t)) => (now, overlay::opening_step(t, now - last)),
+                });
                 Task::none()
             }
             Message::ScreenText(opening, read)
@@ -2783,14 +2786,11 @@ impl App {
         let mut layers = stack![
             shown,
             Element::from(canvas(overlay).width(Fill).height(Fill)).map(Message::Overlay),
-            border::view(
-                match snip {
-                    Some(_) => border::Mode::Snip,
-                    None => border::Mode::Overlay,
-                },
-                self.scale,
-                false,
-            ),
+            match snip {
+                Some(_) => border::view(border::Mode::Snip, self.scale, false),
+                // the activation glow keeps step with the opening (`appear`)
+                None => border::opening(self.scale, self.appear.map_or(0.0, |(_, t)| t)),
+            },
         ];
         if let Some(edit) = &self.edit {
             if edit.is_open() {
@@ -2947,10 +2947,7 @@ impl App {
 
     /// How far the opening animation is (0..1, eased out); 0 on its first frame.
     fn appeared(&self) -> f32 {
-        let Some((start, now)) = self.appear else {
-            return 0.0;
-        };
-        overlay::progress(start, now, overlay::APPEAR)
+        self.appear.map_or(0.0, |(_, t)| overlay::ease_out(t))
     }
 
     /// The opening animation still runs (a frame drawn and more to come).
@@ -3608,8 +3605,7 @@ mod tests {
         app.screen = Size::new(w as f32 / scale, h as f32 / scale);
         app.view = overlay::View::new(w, h, app.screen);
         app.bar_keys = BarKeys::of(&config::Config::default());
-        let now = Instant::now();
-        app.appear = Some((now, now + overlay::APPEAR)); // opened
+        app.appear = Some((Instant::now(), 1.0)); // opened
         app
     }
 
@@ -4130,7 +4126,7 @@ mod tests {
         assert_eq!(rects[1].x, 60.0, "the middle line from its start");
         assert!((rects[1].x + rects[1].width - (60.0 + 28.0 * CHAR)).abs() < 0.01);
         // one click on text selects nothing; a double click the word, a triple the line
-        let mut app = read_app();
+        // (with text selected before, as on the VM)
         let shift = caret(4, 8.0); // in "Shift"
         click_at(&mut app, shift, false);
         assert!(app.selection.is_none() && app.word.is_none());
@@ -4377,13 +4373,15 @@ mod tests {
     }
 
     /// The opening as drawn `ms` after its first frame (`None`: the first frame).
+    /// (A frame every 10 ms.)
     fn opening_at(ms: Option<u64>) -> App {
         let mut app = text_app();
         app.appear = None;
         if let Some(ms) = ms {
             let start = Instant::now();
-            let _ = app.update(Message::Frame(start));
-            let _ = app.update(Message::Frame(start + Duration::from_millis(ms)));
+            for at in (0..=ms).step_by(10).chain([ms]) {
+                let _ = app.update(Message::Frame(start + Duration::from_millis(at)));
+            }
         }
         app
     }
@@ -4425,6 +4423,14 @@ mod tests {
         assert_eq!(done.appeared(), 1.0);
         assert!(!done.appearing(), "no more frames asked for");
         assert!(opening_at(Some(10)).appearing());
+        // a slow frame (a busy machine) is one step, not a jump to the end
+        let mut slow = opening_at(Some(0));
+        let _ = slow.update(Message::Frame(Instant::now() + Duration::from_millis(400)));
+        assert!(
+            slow.appeared() < 1.0 && slow.appearing(),
+            "{}",
+            slow.appeared()
+        );
         // a new opening starts again at t = 0
         let mut again = done;
         let _ = again.open(Instant::now(), a_shot());
@@ -4445,9 +4451,7 @@ mod tests {
         }
         let mut app = open_app(3440, 1440, 1.0);
         app.appear = None;
-        let start = Instant::now();
-        let _ = app.update(Message::Frame(start));
-        let _ = app.update(Message::Frame(start + Duration::from_millis(100)));
+        app.appear = Some((Instant::now(), 0.4));
         let t = Instant::now();
         for _ in 0..5 {
             widgets::shot::render(app.view(app.overlay), 3440, 1440);
