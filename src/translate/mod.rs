@@ -50,10 +50,18 @@ pub fn group_blocks(lines: &[Line]) -> Vec<Block> {
     let mut out: Vec<Block> = Vec::new();
     for l in lines {
         let [x, y, w, h] = l.bounds;
-        match out
-            .iter()
-            .rposition(|b| continues(b.lines.last().expect("never empty"), l))
-        {
+        // a line read in between (that did not join) keeps them apart: one
+        // block's box never covers another's line
+        let between = |p: &Line| {
+            out.iter().flat_map(|b| &b.lines).any(|m| {
+                let [mx, my, mw, _] = m.bounds;
+                my > p.bounds[1] && my < y && mx < x + w && x < mx + mw
+            })
+        };
+        match out.iter().rposition(|b| {
+            let p = b.lines.last().expect("never empty");
+            continues(p, l) && !between(p)
+        }) {
             Some(i) => {
                 let b = &mut out[i];
                 b.lines.push(l.clone());
@@ -84,7 +92,7 @@ fn continues(p: &Line, l: &Line) -> bool {
     let same_col = (px - x).abs() < 0.6 * h || (px + pw / 2.0 - x - w / 2.0).abs() < 0.6 * h;
     let close = y - (py + ph) < 0.6 * h && y > py;
     // OCR boxes of one font vary with ascenders, descenders and brackets
-    let similar = ph.max(h) / ph.min(h) < 1.35;
+    let similar = ph.max(h) / ph.min(h) < 1.45;
     let fits = w < pw + 5.0 * h;
     let list = |t: &str| t.contains(['·', '•', '|']);
     let goes_on = l.text.starts_with(char::is_lowercase)
