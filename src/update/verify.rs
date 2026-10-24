@@ -8,7 +8,7 @@ use std::io::Read;
 /// Empty = no key yet: every update is refused (fail closed).
 // The lead replaces this with the real key; its private half is the MINISIGN_KEY
 // secret of the release workflow (never in the repository).
-pub const RELEASE_PUBLIC_KEY: &str = "";
+pub const RELEASE_PUBLIC_KEY: &str = "RWSbS2U2Cjix7vMbkgnr+jEZI2VKl7+HWo2Scq4uImBxKNgXCPo+K5oY";
 
 /// `sums` is signed by `key` (base64 public key) with signature file `sig`.
 pub fn signed(sums: &[u8], sig: &str, key: &str) -> Result<(), String> {
