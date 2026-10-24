@@ -402,6 +402,16 @@ fn hand_off_foreground() {
         let _ = AllowSetForegroundWindow(ASFW_ANY);
         let _ = EnumWindows(Some(each), LPARAM(0));
     }
+    HANDED_OFF.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Set when `hand_off_foreground` put the overlay behind the browser: the next
+/// capture trigger then brings the overlay back instead of being ignored.
+static HANDED_OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True once after a launch pushed the overlay down (Windows only).
+pub fn take_handed_off() -> bool {
+    HANDED_OFF.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The OS command that opens `target` in the default app. `target` is its one
@@ -562,6 +572,13 @@ mod tests {
         assert!(fit(&big, 3200, 999).is_err()); // size mismatch
         assert!(fit(b"nope", 4000, 10).is_err()); // not a PNG
         assert!(fit(&small, 0, 30).is_err());
+    }
+
+    #[test]
+    fn the_hand_off_flag_is_taken_once() {
+        HANDED_OFF.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(take_handed_off());
+        assert!(!take_handed_off());
     }
 
     #[test]
