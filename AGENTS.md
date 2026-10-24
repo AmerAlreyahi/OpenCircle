@@ -123,9 +123,11 @@ production systems.
 - Themes (owner, 2026-10-24): besides the app theme (Light/Dark/System), "active
   look" themes for when the tool is over the screen (glow, border, dim, brackets,
   bar style, accent), several presets (Google-like multi-colour default) + custom.
-- Song search (owner, 2026-10-24): add Circle to Search's music button: identify
-  the song playing (system audio or mic) only on press; local fingerprint, free
-  lookup (AcoustID/MusicBrainz); audio never leaves the PC; history off by default.
+- Song search (owner, 2026-10-24): free fingerprint lookup (AcoustID) can't match
+  clips (spike: 1/28), so song search is OPT-IN, bring your own key for a clip
+  recognition service (AudD first); the button stays hidden until a key is set;
+  a ~10 s clip of the chosen audio is sent to that service only on press (say so
+  plainly); key in the OS keyring; history off by default.
 - Results sheet (owner, 2026-10-24): explore a slide-up sheet showing Google's own
   page (Lens / AI Mode) in the system web view (WebView2 / WebKitGTK), loaded only
   while open; no scraping, no copying Google's UI. Placement (owner, 2026-10-24):
