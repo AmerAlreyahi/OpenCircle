@@ -25,6 +25,15 @@ const DRAG_STRAY: f32 = 0.2;
 /// A press that stays within this (screen px, either side) is a tap.
 const TAP: f32 = 4.0;
 
+/// Scribble: the path is sampled every `TURN_STEP` px (screen), a corner is a
+/// heading change over two samples of more than `TURN_ANGLE` degrees, and a
+/// stroke with `SCRIBBLE_TURNS` of them zig-zags (a loop turns smoothly).
+const TURN_STEP: f32 = 8.0;
+const TURN_ANGLE: f32 = 100.0;
+const SCRIBBLE_TURNS: usize = 3;
+/// How far (screen px) a scribble's clear area reaches past the stroke's hull.
+const SCRIBBLE_PAD: f32 = 14.0;
+
 /// Corner handles: drawn radius, and how near (screen px) a press grabs one.
 const HANDLE: f32 = 5.0;
 const HANDLE_HIT: f32 = 12.0;
@@ -74,8 +83,23 @@ pub enum Kind {
     Loop,
     /// A dragged (or resized) rectangle.
     Drag,
-    /// A tapped word or range on a text line: a rounded highlight.
+    /// Tapped or dragged words, one rounded highlight per text line.
     Word,
+    /// A zig-zag over an area: the clear area is its padded convex hull.
+    Scribble,
+}
+
+/// What a press-drag-release means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gesture {
+    /// Hardly moved.
+    Tap,
+    /// Mostly straight: the rectangle it spans.
+    Drag,
+    /// Open, zig-zagging: the area it scribbles over.
+    Scribble,
+    /// Anything else: the loop's shape.
+    Loop,
 }
 
 /// What a finished stroke selects.
@@ -86,23 +110,129 @@ pub struct Selection {
     pub kind: Kind,
 }
 
+/// What a stroke (image px, seen at `zoom`) is, checked in this order:
+/// - tap: it stays within `TAP`;
+/// - scribble: at least `SCRIBBLE_TURNS` sharp corners (see `sharp_turns`). Before
+///   the drag test, because a back-and-forth over a line ends near a straight chord;
+/// - drag: every point stays near the segment from the first point to the last;
+/// - loop: anything else (a hook or a Z has too few corners to scribble).
+pub fn classify(stroke: &[Point], zoom: f32) -> Gesture {
+    if is_tap(stroke, zoom) {
+        Gesture::Tap
+    } else if sharp_turns(stroke, zoom) >= SCRIBBLE_TURNS {
+        Gesture::Scribble
+    } else if is_drag(stroke) {
+        Gesture::Drag
+    } else {
+        Gesture::Loop
+    }
+}
+
 /// The selection a stroke (image px, seen at `zoom`) means, or `None` for a tap
 /// or a thin line.
 pub fn select(stroke: &[Point], zoom: f32) -> Option<Selection> {
-    let drag = is_drag(stroke);
-    let area = if drag {
-        drag_rect(stroke)
-    } else {
-        bounds(stroke)?
-    };
+    settle(stroke, zoom, Size::new(f32::MAX, f32::MAX)).map(|(sel, _)| sel)
+}
+
+/// `select`, and the stroke the selection keeps: the stroke itself, or for a
+/// scribble its padded hull (so the clear area, handles and resizing all follow
+/// that shape, kept inside the `screen`). A scribble's area is the hull's box, so
+/// it holds the whole clear area; it may be thin (a scribble over one line of text).
+pub fn settle(stroke: &[Point], zoom: f32, screen: Size) -> Option<(Selection, Vec<Point>)> {
     let min = MIN_SIDE / zoom;
-    let kind = if drag { Kind::Drag } else { Kind::Loop };
-    (area.width >= min && area.height >= min).then_some(Selection { area, kind })
+    let (area, kind, kept) = match classify(stroke, zoom) {
+        Gesture::Tap => return None,
+        Gesture::Drag => (drag_rect(stroke), Kind::Drag, stroke.to_vec()),
+        Gesture::Loop => (bounds(stroke)?, Kind::Loop, stroke.to_vec()),
+        Gesture::Scribble => {
+            let mut hull = padded_hull(stroke, SCRIBBLE_PAD / zoom);
+            for p in &mut hull {
+                *p = Point::new(p.x.clamp(0.0, screen.width), p.y.clamp(0.0, screen.height));
+            }
+            let area = bounds(&hull)?;
+            let thin = bounds(stroke)?;
+            return (thin.width.max(thin.height) >= min).then_some((
+                Selection {
+                    area,
+                    kind: Kind::Scribble,
+                },
+                hull,
+            ));
+        }
+    };
+    (area.width >= min && area.height >= min).then_some((Selection { area, kind }, kept))
 }
 
 /// A press that hardly moved (image px, seen at `zoom`).
 pub fn is_tap(stroke: &[Point], zoom: f32) -> bool {
     bounds(stroke).is_some_and(|b| b.width.max(b.height) <= TAP / zoom)
+}
+
+/// How many sharp corners the path has (see `TURN_STEP`). Samples within the
+/// stroke's own points, so a coarse stroke (fast mouse) still counts its turns.
+fn sharp_turns(stroke: &[Point], zoom: f32) -> usize {
+    let step = TURN_STEP / zoom;
+    let mut pts: Vec<Point> = stroke.first().copied().into_iter().collect();
+    for &p in stroke {
+        if pts.last().is_some_and(|q| q.distance(p) >= step) {
+            pts.push(p);
+        }
+    }
+    let cos_limit = TURN_ANGLE.to_radians().cos();
+    let (mut turns, mut i) = (0, 2);
+    while i + 2 < pts.len() {
+        let (a, b) = (pts[i] - pts[i - 2], pts[i + 2] - pts[i]);
+        let cos = (a.x * b.x + a.y * b.y) / (a.x.hypot(a.y) * b.x.hypot(b.y));
+        if cos < cos_limit {
+            turns += 1;
+            i += 3; // the rest of this corner
+        } else {
+            i += 1;
+        }
+    }
+    turns
+}
+
+/// The convex hull of `points` grown by `pad` all round (corners rounded), as a
+/// polygon.
+fn padded_hull(points: &[Point], pad: f32) -> Vec<Point> {
+    let rounded: Vec<Point> = hull(points)
+        .iter()
+        .flat_map(|c| {
+            (0..16).map(move |i| {
+                let a = i as f32 / 16.0 * std::f32::consts::TAU;
+                Point::new(c.x + pad * a.cos(), c.y + pad * a.sin())
+            })
+        })
+        .collect();
+    hull(&rounded)
+}
+
+/// Convex hull (Andrew's monotone chain), counter-clockwise on screen.
+fn hull(points: &[Point]) -> Vec<Point> {
+    let mut pts = points.to_vec();
+    pts.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    pts.dedup();
+    if pts.len() < 3 {
+        return pts;
+    }
+    let cross =
+        |o: Point, a: Point, b: Point| (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    let mut out: Vec<Point> = Vec::new();
+    for pass in 0..2 {
+        let from = out.len();
+        for &p in &pts {
+            while out.len() >= from + 2 && cross(out[out.len() - 2], out[out.len() - 1], p) <= 0.0 {
+                out.pop();
+            }
+            out.push(p);
+        }
+        out.pop(); // the end is the next pass's start
+        if pass == 0 {
+            pts.reverse();
+        }
+    }
+    out
 }
 
 /// A mostly straight press-drag that doesn't loop back: every point stays near the
@@ -167,13 +297,29 @@ fn trace(p: &mut canvas::path::Builder, stroke: &[Point], closed: bool) {
     }
 }
 
-/// Adds a selection's shape (its stroke in screen px) to `p`.
+/// Adds a selection's shape (its stroke in screen px) to `p`. A word selection's
+/// stroke is a (top-left, bottom-right) pair per text line.
 fn shape(p: &mut canvas::path::Builder, kind: Kind, stroke: &[Point], closed: bool) {
-    let r = drag_rect(stroke);
     match kind {
-        Kind::Drag => p.rectangle(r.position(), r.size()),
-        Kind::Word => p.rounded_rectangle(r.position(), r.size(), (r.height / 4.0).min(8.0).into()),
+        Kind::Drag => {
+            let r = drag_rect(stroke);
+            p.rectangle(r.position(), r.size());
+        }
+        Kind::Word => {
+            for pair in stroke.as_chunks::<2>().0 {
+                let r = drag_rect(&pair[..]);
+                let radius = (r.height / 4.0).min(8.0);
+                p.rounded_rectangle(r.position(), r.size(), radius.into());
+            }
+        }
         Kind::Loop => trace(p, stroke, closed),
+        Kind::Scribble => {
+            if let Some((&first, rest)) = stroke.split_first() {
+                p.move_to(first);
+                rest.iter().for_each(|&q| p.line_to(q));
+                p.close();
+            }
+        }
     }
 }
 
@@ -745,6 +891,227 @@ mod tests {
         assert!(is_tap(&[Point::new(5.0, 5.0), Point::new(8.0, 7.0)], 1.0));
         assert!(!is_tap(&[Point::new(5.0, 5.0), Point::new(8.0, 7.0)], 4.0));
         assert!(!is_tap(&[], 1.0));
+    }
+
+    /// A path through `corners`, a point about every 3 px (a mouse's samples).
+    fn through(corners: &[(f32, f32)]) -> Vec<Point> {
+        let mut out = vec![Point::new(corners[0].0, corners[0].1)];
+        for w in corners.windows(2) {
+            let (a, b) = (Point::new(w[0].0, w[0].1), Point::new(w[1].0, w[1].1));
+            let n = (a.distance(b) / 3.0).ceil().max(1.0) as usize;
+            out.extend((1..=n).map(|i| a + (b - a) * (i as f32 / n as f32)));
+        }
+        out
+    }
+
+    fn zigzag() -> Vec<Point> {
+        through(&[
+            (100.0, 100.0),
+            (220.0, 112.0),
+            (100.0, 124.0),
+            (220.0, 136.0),
+            (100.0, 148.0),
+        ])
+    }
+
+    #[test]
+    fn strokes_are_a_tap_a_drag_a_loop_or_a_scribble() {
+        let kind = |s: &[Point]| classify(s, 1.0);
+        // tap: stays within 4 px; a bigger wiggle is not
+        assert_eq!(
+            kind(&[Point::new(9.0, 9.0), Point::new(11.0, 12.0)]),
+            Gesture::Tap
+        );
+        assert_ne!(kind(&through(&[(0.0, 0.0), (30.0, 0.0)])), Gesture::Tap);
+        // drag: straight, either direction, with a little hand wobble
+        assert_eq!(
+            kind(&through(&[(10.0, 10.0), (210.0, 90.0)])),
+            Gesture::Drag
+        );
+        assert_eq!(
+            kind(&through(&[(210.0, 90.0), (10.0, 10.0)])),
+            Gesture::Drag
+        );
+        let wobble: Vec<Point> = through(&[(0.0, 0.0), (240.0, 0.0)])
+            .iter()
+            .enumerate()
+            .map(|(i, p)| Point::new(p.x, p.y + [2.0, -2.0, 1.0][i % 3]))
+            .collect();
+        assert_eq!(kind(&wobble), Gesture::Drag);
+        // loops: closed, open (a C), several turns, a hook or a Z (too few corners)
+        for lp in [
+            ellipse(200.0, 100.0, 50.0, 30.0, 1.0),
+            ellipse(200.0, 100.0, 50.0, 30.0, 0.85),
+            ellipse(200.0, 100.0, 50.0, 50.0, 0.5),
+            ellipse(200.0, 100.0, 40.0, 40.0, 2.5),
+            ellipse(200.0, 100.0, 10.0, 10.0, 1.0),
+            through(&[(0.0, 0.0), (120.0, 0.0), (120.0, 90.0)]), // an L: 1 corner
+            through(&[(0.0, 0.0), (100.0, 0.0), (0.0, 80.0), (100.0, 80.0)]), // a Z: 2
+            through(&[(0.0, 0.0), (60.0, 80.0), (140.0, -20.0)]), // a tick
+        ] {
+            assert_eq!(kind(&lp), Gesture::Loop, "{:?}", lp.last());
+        }
+        // scribbles: 3+ sharp corners, any direction, any amplitude
+        assert_eq!(kind(&zigzag()), Gesture::Scribble);
+        let down = through(&[
+            (100.0, 100.0),
+            (112.0, 220.0),
+            (124.0, 100.0),
+            (136.0, 220.0),
+            (148.0, 100.0),
+        ]);
+        assert_eq!(kind(&down), Gesture::Scribble);
+        let diagonal = through(&[
+            (0.0, 0.0),
+            (90.0, 90.0),
+            (20.0, 20.0),
+            (110.0, 110.0),
+            (40.0, 40.0),
+            (130.0, 130.0),
+        ]);
+        assert_eq!(kind(&diagonal), Gesture::Scribble);
+        // back and forth over one line (5 passes end on the far side: a straight chord, but a scribble)
+        let sweep = through(&[
+            (100.0, 100.0),
+            (300.0, 103.0),
+            (100.0, 106.0),
+            (300.0, 109.0),
+            (100.0, 112.0),
+            (300.0, 115.0),
+        ]);
+        assert!(is_drag(&sweep));
+        assert_eq!(kind(&sweep), Gesture::Scribble);
+        // a star has five sharp corners
+        let star: Vec<(f32, f32)> = [0, 2, 4, 1, 3, 0]
+            .iter()
+            .map(|k| {
+                let a = *k as f32 / 5.0 * std::f32::consts::TAU;
+                (200.0 + 60.0 * a.sin(), 200.0 - 60.0 * a.cos())
+            })
+            .collect();
+        assert_eq!(kind(&through(&star)), Gesture::Scribble);
+        // the same scribble seen at 2x zoom (half the image px) is still one
+        let half: Vec<Point> = zigzag()
+            .iter()
+            .map(|p| Point::new(p.x * 0.5, p.y * 0.5))
+            .collect();
+        assert_eq!(classify(&half, 2.0), Gesture::Scribble);
+        // no points, one point: nothing to select
+        assert_eq!(select(&[], 1.0), None);
+        assert_eq!(kind(&[Point::new(1.0, 1.0)]), Gesture::Tap);
+    }
+
+    #[test]
+    fn a_scribble_selects_its_box_and_clears_a_padded_hull() {
+        let zig = zigzag();
+        let screen = Size::new(1920.0, 1080.0);
+        let (sel, hull) = settle(&zig, 1.0, screen).unwrap();
+        assert_eq!(sel.kind, Kind::Scribble);
+        let pad = SCRIBBLE_PAD;
+        // the area is the stroke's box grown by the pad: it holds the whole clear area
+        let want = rect(
+            100.0 - pad,
+            100.0 - pad,
+            120.0 + 2.0 * pad,
+            48.0 + 2.0 * pad,
+        );
+        for (got, want) in [
+            (sel.area.x, want.x),
+            (sel.area.y, want.y),
+            (sel.area.width, want.width),
+            (sel.area.height, want.height),
+        ] {
+            assert!((got - want).abs() < 0.5, "{:?} vs {want:?}", sel.area);
+        }
+        assert_eq!(Some(sel.area), bounds(&hull));
+        // the clear area is a convex shape with rounded corners, not the box
+        assert!(hull.len() > 8 && hull.len() < 200);
+        let corner = Point::new(sel.area.x, sel.area.y);
+        assert!(hull.iter().all(|p| p.distance(corner) > 2.0), "corner cut");
+        let turn =
+            |a: Point, b: Point, c: Point| (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        let side = turn(hull[0], hull[1], hull[2]).signum();
+        for i in 0..hull.len() {
+            let (a, b, c) = (
+                hull[i],
+                hull[(i + 1) % hull.len()],
+                hull[(i + 2) % hull.len()],
+            );
+            assert!(turn(a, b, c) * side >= -1e-3, "convex at {i}");
+        }
+        // every point of the stroke is inside it
+        for p in &zig {
+            assert!(
+                (0..hull.len())
+                    .all(|i| turn(hull[i], hull[(i + 1) % hull.len()], *p) * side >= -1e-3),
+                "{p:?} outside"
+            );
+        }
+        // the pad is on screen: at 2x zoom it is half as many image px
+        let half: Vec<Point> = zig
+            .iter()
+            .map(|p| Point::new(p.x * 0.5, p.y * 0.5))
+            .collect();
+        let (zoomed, _) = settle(&half, 2.0, screen).unwrap();
+        assert!(
+            (zoomed.area.width - (60.0 + pad)).abs() < 0.5,
+            "{:?}",
+            zoomed.area
+        );
+        // kept inside the screen
+        let near_edge = through(&[
+            (2.0, 2.0),
+            (120.0, 14.0),
+            (2.0, 26.0),
+            (120.0, 38.0),
+            (2.0, 50.0),
+        ]);
+        let (edge, hull) = settle(&near_edge, 1.0, screen).unwrap();
+        assert_eq!((edge.area.x, edge.area.y), (0.0, 0.0));
+        assert!(hull.iter().all(|p| p.x >= 0.0 && p.y >= 0.0));
+        // thin: a scribble over one line of text is still a selection
+        let thin = through(&[
+            (100.0, 100.0),
+            (300.0, 102.0),
+            (100.0, 104.0),
+            (300.0, 106.0),
+            (100.0, 108.0),
+            (300.0, 110.0),
+        ]);
+        let (sel, _) = settle(&thin, 1.0, screen).unwrap();
+        assert!(sel.area.height > 2.0 * pad && sel.kind == Kind::Scribble);
+        // but a tiny wiggle (under MIN_SIDE) is nothing
+        let tiny = through(&[
+            (100.0, 100.0),
+            (108.0, 101.0),
+            (100.0, 102.0),
+            (108.0, 103.0),
+            (100.0, 104.0),
+        ]);
+        assert!(settle(&tiny, 1.0, screen).is_none());
+        // a loop keeps its own stroke
+        let lp = ellipse(200.0, 100.0, 50.0, 30.0, 1.0);
+        let (sel, kept) = settle(&lp, 1.0, screen).unwrap();
+        assert_eq!((sel.kind, kept), (Kind::Loop, lp));
+    }
+
+    #[test]
+    fn the_hull_of_points() {
+        let square = [
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (5.0, 5.0),
+            (5.0, 0.0),
+        ]
+        .map(|(x, y)| Point::new(x, y));
+        let h = hull(&square);
+        assert_eq!(h.len(), 4, "the middle and edge points are inside: {h:?}");
+        assert_eq!(hull(&[Point::ORIGIN]).len(), 1);
+        let line = [0.0, 1.0, 2.0, 3.0].map(|x| Point::new(x, x));
+        assert_eq!(hull(&line).len(), 2, "collinear: its two ends");
+        assert!(hull(&[]).is_empty());
     }
 
     fn rect(x: f32, y: f32, w: f32, h: f32) -> Rectangle {

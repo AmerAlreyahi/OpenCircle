@@ -15,8 +15,8 @@ capture the screen and show it.
 | `ocr/`, `mt/` | OCR (PP-OCRv5) and offline translation (OPUS-MT) on ONNX Runtime, only in the helper process `opencircle ocr-worker` (`ocr/worker.rs`: requests, the serve loop; models load on first use and stay). `ocr/session.rs`: the app side (framed, request ids, one request at a time, timeout -> kill -> next call respawns). `ocr::hold()` keeps ONE warm helper while held: live mode (`ui/live_layer.rs`) and an open overlay (`App::helper`) each hold one; the last drop kills it. Unheld calls get a child per call. |
 | `translate/lang.rs` | The ONE language table (code, English and native name, script, RTL, OCR recognizer id): pickers, the AI prompt, RTL layout and recognizer choice read it. `ocr::models::RECOGNIZERS` = one pinned recognizer per script (en, latin, arabic, cyrillic, cjk; a source picks one, `auto` = English, then the other downloaded ones when it reads badly: `ocr::Read`); `mt::PAIRS` = one pinned OPUS-MT model per direction. New language: a row (+ a recognizer / pair entry if it has one). |
 | `ui/mod.rs` | The iced daemon: overlay window state, capture on a thread, open / close (the multi-step `Hiding`), running actions, held Lens pages, `background` (thread work → messages). |
-| `ui/overlay.rs` | The canvas over the frozen frame: dim, strokes, selection rules (loop vs. drag vs. tap), corner handles (resize / move math), the Shift count badge, mouse / wheel / key events. `View` = the zoomed (1x–4x) and panned part of the frame: selections live in image px (the overlay at 1x), so crops are right at any zoom. |
-| `ui/word.rs` | Tap a word: OCR lines around the tap (`recognize_in_child` on a crop, on a thread; no models = no-op), split into words by character share; a second tap on the line makes a range. Copy then copies the text. |
+| `ui/overlay.rs` | The canvas over the frozen frame: dim, strokes, selection rules (`classify`: tap / scribble / drag / loop; `settle` = the selection and the stroke it keeps, a scribble's padded hull), corner handles (resize / move math), the Shift count badge, mouse / wheel / key events. `View` = the zoomed (1x–4x) and panned part of the frame: selections live in image px (the overlay at 1x), so crops are right at any zoom. |
+| `ui/word.rs` | Tap a word: OCR lines around the tap (`recognize_in_child` on a crop, on a thread; no models = no-op), split into words by character share (RTL lines from the right); a second tap on the line makes a range. A press-drag from the highlight or a Shift+click stretches it across lines in reading order (`Picked::extend`; past the lines read, OCR reads a full-width band, `band` / `reread`); one highlight rect per line. Copy copies the text, a line break between lines. |
 | `ui/bar.rs` | The floating action bar: the action registry as buttons, placed under/above the selection. |
 | `ui/edit.rs` | Edit in place: the editor (`crate::editor`) over the selection at its own pixels (zoom 1/scale), its toolbar where the bar was; Back keeps the edits (shown flattened) and later actions get the edited image. Also the fitted editor for a scrolling capture. |
 | `ui/quick.rs` | Quick actions: id → what runs (registry action, copy_text, ai_explain), target → area (full_screen, circle, last_region per monitor; `window` is snip-only and counts as circle elsewhere). |
@@ -43,10 +43,12 @@ capture the screen and show it.
 3. **Overlay**: the RGBA bytes become the `image::Handle` drawn full-screen. The same
    bytes are later cropped by actions (shared, never copied whole).
 4. **Selection**: the canvas reports press/move/release (screen px; the App maps them
-   to image px through `overlay::View`); on release `overlay::select` decides: a mostly
-   straight drag = the rectangle it spans, anything else = the loop's bounding box, a
-   tap = the word there (`ui/word.rs`). A new press starts over (redraw); a press on a
-   corner handle resizes, inside moves; Shift adds a selection (Ask AI / Text get every
+   to image px through `overlay::View`); on release `overlay::settle` decides: a zig-zag
+   (3+ sharp corners) = a scribble (the box of its padded convex hull, which is also the
+   clear area), a mostly straight drag = the rectangle it spans, anything else = the
+   loop's bounding box, a tap = the word there (`ui/word.rs`). A new press starts over
+   (redraw); a press on a corner handle resizes, on highlighted words a drag stretches
+   them across lines (Shift+click too), elsewhere inside moves; Shift adds a selection (Ask AI / Text get every
    crop stacked in one image, the rest the box around all). The ask bar at the bottom
    opens Ask AI with its text.
 5. **Action**: a bar button, Enter (the first action) or the action's key sends
