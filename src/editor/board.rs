@@ -40,59 +40,45 @@ pub const BACKGROUND: [u8; 4] = [236, 238, 243, 255];
 const NUMBER: [u8; 4] = [28, 28, 36, 255];
 
 /// Where each capture of `sizes` goes and the board's size. One capture is the
-/// board itself (no gap).
+/// board itself (no gap). Captures are packed in rows (shelves) with `GAP`
+/// between them: stacked = one per row, side by side = one row, grid = the
+/// number of columns that makes the board closest to a 16:10 screen.
 pub fn place(sizes: &[(u32, u32)], layout: Layout) -> (Vec<Rectangle>, Size) {
-    let rect = |x: u32, y: u32, (w, h): (u32, u32)| {
-        Rectangle::new(
-            Point::new(x as f32, y as f32),
-            Size::new(w as f32, h as f32),
-        )
-    };
     if let [one] = sizes {
-        return (vec![rect(0, 0, *one)], rect(0, 0, *one).size());
+        let size = Size::new(one.0 as f32, one.1 as f32);
+        return (vec![Rectangle::new(Point::ORIGIN, size)], size);
     }
-    let max_w = sizes.iter().map(|s| s.0).max().unwrap_or(1);
-    let max_h = sizes.iter().map(|s| s.1).max().unwrap_or(1);
-    let n = sizes.len() as u32;
-    let cols = match layout {
-        Layout::Stack => 1,
-        Layout::Side => n,
-        Layout::Grid => (n as f32).sqrt().ceil() as u32,
-    };
-    let rows = n.div_ceil(cols);
+    let n = sizes.len().max(1);
+    match layout {
+        Layout::Stack => shelves(sizes, 1),
+        Layout::Side => shelves(sizes, n),
+        Layout::Grid => (1..=n)
+            .map(|cols| shelves(sizes, cols))
+            .min_by(|(_, a), (_, b)| {
+                let off = |s: &Size| (s.width / s.height - 1.6).abs();
+                off(a).total_cmp(&off(b))
+            })
+            .expect("at least one layout"),
+    }
+}
+
+/// `cols` captures per row, left to right, each row as tall as its tallest.
+fn shelves(sizes: &[(u32, u32)], cols: usize) -> (Vec<Rectangle>, Size) {
     let mut tiles = Vec::with_capacity(sizes.len());
-    let (mut x, mut y) = (GAP, GAP);
-    for (i, &(w, h)) in sizes.iter().enumerate() {
-        let (col, row) = (i as u32 % cols, i as u32 / cols);
-        tiles.push(match layout {
-            // Stacked: centred in one column, each as tall as it is.
-            Layout::Stack => {
-                let t = rect(GAP + (max_w - w) / 2, y, (w, h));
-                y += h + GAP;
-                t
-            }
-            Layout::Side => {
-                let t = rect(x, GAP + (max_h - h) / 2, (w, h));
-                x += w + GAP;
-                t
-            }
-            // Grid: equal cells, each capture centred in its cell.
-            Layout::Grid => rect(
-                GAP + col * (max_w + GAP) + (max_w - w) / 2,
-                GAP + row * (max_h + GAP) + (max_h - h) / 2,
-                (w, h),
-            ),
-        });
+    let (mut y, mut width) = (GAP, 0);
+    for row in sizes.chunks(cols.max(1)) {
+        let mut x = GAP;
+        for &(w, h) in row {
+            tiles.push(Rectangle::new(
+                Point::new(x as f32, y as f32),
+                Size::new(w as f32, h as f32),
+            ));
+            x += w + GAP;
+        }
+        width = width.max(x);
+        y += row.iter().map(|s| s.1).max().unwrap_or(0) + GAP;
     }
-    let size = match layout {
-        Layout::Stack => Size::new((max_w + 2 * GAP) as f32, y as f32),
-        Layout::Side => Size::new(x as f32, (max_h + 2 * GAP) as f32),
-        Layout::Grid => Size::new(
-            (GAP + cols * (max_w + GAP)) as f32,
-            (GAP + rows * (max_h + GAP)) as f32,
-        ),
-    };
-    (tiles, size)
+    (tiles, Size::new(width as f32, y as f32))
 }
 
 /// The board image of `sources` and where each one is on it.

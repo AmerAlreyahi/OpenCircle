@@ -995,13 +995,14 @@ fn laid_out(element: Element<'_, Message>) -> Size {
 #[test]
 fn toolbar_size_matches_its_layout() {
     let e = editor(100, 100);
-    assert_eq!(laid_out(e.toolbar()), toolbar::size());
-    // It still fits a 1366 px laptop screen.
-    assert!(
-        toolbar::size().width < 1366.0 - 48.0,
-        "{:?}",
-        toolbar::size()
-    );
+    let one = toolbar::size(f32::INFINITY);
+    assert_eq!(laid_out(e.toolbar()), one);
+    // A small screen (the 1125 px VM): two rows, both within it.
+    let small = 1125.0 - 48.0;
+    let two = toolbar::size(small);
+    assert!(two.width <= small && two.height > one.height, "{two:?}");
+    assert_eq!(laid_out(e.toolbar_within(small)), two);
+    assert_eq!(toolbar::size(one.width), one, "exactly fits: one row");
 }
 
 // ---- presets, copy / paste style, eyedropper -------------------------------------------
@@ -1129,42 +1130,56 @@ fn board_layouts_place_captures() {
         (vec![(0.0, 0.0)], Size::new(100.0, 50.0))
     );
 
+    // Packed: a fixed gap, each row as tall as its tallest, no centring voids.
     let (tiles, size) = place(&sizes, Layout::Stack);
     assert_eq!(
         at(&tiles),
-        [
-            (g + 10.0, g),
-            (g + 30.0, 2.0 * g + 50.0),
-            (g, 3.0 * g + 130.0)
-        ]
+        [(g, g), (g, 2.0 * g + 50.0), (g, 3.0 * g + 130.0)]
     );
     assert_eq!(size, Size::new(120.0 + 2.0 * g, 170.0 + 4.0 * g));
 
     let (tiles, size) = place(&sizes, Layout::Side);
     assert_eq!(
         at(&tiles),
-        [
-            (g, g + 15.0),
-            (2.0 * g + 100.0, g),
-            (3.0 * g + 160.0, g + 20.0)
-        ]
+        [(g, g), (2.0 * g + 100.0, g), (3.0 * g + 160.0, g)]
     );
     assert_eq!(size, Size::new(280.0 + 4.0 * g, 80.0 + 2.0 * g));
 
-    // Grid: 2 columns of 120x80 cells, each capture centred in its cell.
+    // Grid: the column count closest to 16:10 (here 2), rows packed.
     let (tiles, size) = place(&sizes, Layout::Grid);
     assert_eq!(
         at(&tiles),
-        [
-            (g + 10.0, g + 15.0),
-            (2.0 * g + 120.0 + 30.0, g),
-            (g, 2.0 * g + 80.0 + 20.0)
-        ]
+        [(g, g), (2.0 * g + 100.0, g), (g, 2.0 * g + 80.0)]
     );
-    assert_eq!(size, Size::new(240.0 + 3.0 * g, 160.0 + 3.0 * g));
+    assert_eq!(size, Size::new(160.0 + 3.0 * g, 120.0 + 3.0 * g));
     for (t, s) in tiles.iter().zip(sizes) {
         assert_eq!(t.size(), Size::new(s.0 as f32, s.1 as f32));
     }
+    // Never overlapping, always a gap.
+    for (i, a) in tiles.iter().enumerate() {
+        for b in &tiles[i + 1..] {
+            assert!(!a.expand(g / 2.0 - 0.5).intersects(&b.expand(g / 2.0 - 0.5)));
+        }
+    }
+}
+
+#[test]
+fn a_board_legend_sits_beside_the_captures() {
+    let mut e = Editor::new(image_of(300, 200, |_, _| SLATE), 1.0);
+    e.append(image_of(300, 80, |_, _| SLATE));
+    e.update(Message::Layout(board::Layout::Side));
+    step_with(&mut e, pt(60.0, 60.0), "Open it");
+    step_with(&mut e, pt(400.0, 60.0), "Then this");
+    let l = e.doc.legend_layout().unwrap();
+    // Under the short capture, inside the board: no band, no far corner.
+    let t = e.doc.tiles()[1];
+    assert_eq!(l.band, 0.0);
+    assert_eq!((l.at.x, l.at.y), (t.x, t.y + t.height + board::GAP as f32));
+    let flat = render(&e.doc);
+    assert_eq!(
+        (flat.width, flat.height),
+        (e.doc.image.width, e.doc.image.height)
+    );
 }
 
 #[test]
@@ -1190,10 +1205,7 @@ fn the_board_keeps_annotations_on_their_capture() {
     );
     let flat = render(&e.doc);
     assert_eq!(px(&flat, 2, 2), BACKGROUND);
-    assert_eq!(
-        px(&flat, (g + 20.0 + 50.0) as u32, (2.0 * g + 90.0) as u32),
-        blue
-    );
+    assert_eq!(px(&flat, (g + 30.0) as u32, (2.0 * g + 90.0) as u32), blue);
     // The number label on capture 1 (dark), the rectangle moved with it.
     assert!(luma(px(&flat, (g + 9.0) as u32, (g + 12.0) as u32)) < 60);
     let Shape::Rect { a, .. } = e.doc.items[0].shape else {
@@ -1208,22 +1220,19 @@ fn the_board_keeps_annotations_on_their_capture() {
     let tiles = e.doc.tiles().to_vec();
     assert_eq!(
         tiles.iter().map(|t| (t.x, t.y)).collect::<Vec<_>>(),
-        [(g, g + 15.0), (2.0 * g + 100.0, g)]
+        [(g, g), (2.0 * g + 100.0, g)]
     );
     let Shape::Rect { a, .. } = e.doc.items[0].shape else {
         panic!()
     };
-    assert_eq!(a, pt(40.0 + g, 30.0 + g));
+    assert_eq!(a, pt(40.0 + g, 15.0 + g));
     let Shape::Arrow { a, .. } = e.doc.items[1].shape else {
         panic!()
     };
-    // From (60, 120) on capture 2 at (g + 20, 2g + 50) to its new place.
+    // From (60, 120) on capture 2 at (g, 2g + 50) to its new place.
     assert_eq!(
         a,
-        pt(
-            60.0 - (g + 20.0) + tiles[1].x,
-            120.0 - (2.0 * g + 50.0) + tiles[1].y
-        )
+        pt(60.0 - g + tiles[1].x, 120.0 - (2.0 * g + 50.0) + tiles[1].y)
     );
 
     // Numbers off: the label is gone (the capture shows there).
@@ -1256,7 +1265,7 @@ fn the_board_keeps_annotations_on_their_capture() {
     e.update(Message::Layout(Layout::Grid));
     assert_eq!(e.doc.board.count, 3);
     assert_eq!(e.doc.tiles().len(), 3);
-    assert_eq!(e.size(), Size::new(200.0 + 3.0 * g, 160.0 + 3.0 * g));
+    assert_eq!(e.size(), Size::new(160.0 + 3.0 * g, 120.0 + 3.0 * g));
 }
 
 // ---- drag-out ------------------------------------------------------------------------
@@ -1919,6 +1928,16 @@ fn snapshots_board() {
         shoot(e.toolbar(), bar, backdrop, &dir.join(name));
     }
     theme::set_light(false);
+    // A small screen: two rows.
+    let mut e = Editor::new(demo_image(), 1.0);
+    e.update(Message::Picker);
+    let small = 1125.0 - 48.0;
+    shoot(
+        e.toolbar_within(small),
+        Size::new(small, 520.0),
+        backdrop,
+        &dir.join("toolbar-two-rows.png"),
+    );
 }
 
 /// Timings on a 3440x1440 crop:

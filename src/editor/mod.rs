@@ -588,7 +588,13 @@ impl Editor {
 
     /// The floating editing toolbar (with the open popover under it).
     pub fn toolbar(&self) -> Element<'_, Message> {
-        toolbar::view(self)
+        toolbar::view(self, f32::INFINITY)
+    }
+
+    /// The toolbar within `max_width` (two rows when one does not fit; its size:
+    /// `toolbar_size(max_width)`).
+    pub fn toolbar_within(&self, max_width: f32) -> Element<'_, Message> {
+        toolbar::view(self, max_width)
     }
 
     /// The canvas size, display px (changes with the crop, the board and the

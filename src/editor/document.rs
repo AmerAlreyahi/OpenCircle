@@ -372,7 +372,15 @@ impl Document {
     /// The legend as it shows now (`None`: off, or no step has a note).
     pub fn legend_layout(&self) -> Option<Legend> {
         self.legend
-            .then(|| legend::layout(self.view(), &self.items))
+            .then(|| {
+                // On a board, beside or under a capture before the corners.
+                let tiles = if self.board.count > 1 {
+                    &self.tiles[..]
+                } else {
+                    &[]
+                };
+                legend::layout(self.view(), &self.items, tiles)
+            })
             .flatten()
     }
 

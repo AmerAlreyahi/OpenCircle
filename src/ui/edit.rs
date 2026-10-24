@@ -77,10 +77,11 @@ impl Editing {
     /// The canvas over its place and the toolbar beside it (as the action bar is).
     pub fn view(&self, screen: Size) -> Element<'_, editor::Message> {
         let canvas = self.canvas_rect();
-        let at = bar::place(canvas, toolbar_size(), screen);
+        let room = screen.width - 2.0 * GAP;
+        let at = bar::place(canvas, toolbar_size(room), screen);
         stack![
             pin(self.editor.canvas()).position(canvas.position()),
-            pin(self.editor.toolbar()).position(at),
+            pin(self.editor.toolbar_within(room)).position(at),
         ]
         .into()
     }
@@ -116,7 +117,7 @@ use editor::toolbar_size;
 fn fit(size: Size, screen: Size, max_zoom: f32) -> (Point, f32) {
     let room = Size::new(
         screen.width - 2.0 * GAP,
-        screen.height - 3.0 * GAP - toolbar_size().height,
+        screen.height - 3.0 * GAP - toolbar_size(screen.width - 2.0 * GAP).height,
     );
     let zoom = max_zoom
         .min(room.width / size.width)
@@ -189,7 +190,7 @@ mod tests {
     #[test]
     fn tall_captures_fit_the_screen_with_the_toolbar() {
         let screen = Size::new(1920.0, 1080.0);
-        let bar = toolbar_size();
+        let bar = toolbar_size(screen.width - 2.0 * GAP);
         // A tall scrolling capture: scaled down, centred, toolbar room below.
         let (at, zoom) = fit(Size::new(780.0, 6000.0), screen, 1.0);
         assert!(zoom < 0.2, "{zoom}");

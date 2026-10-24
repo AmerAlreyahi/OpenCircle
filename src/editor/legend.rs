@@ -48,9 +48,19 @@ pub fn rows(items: &[Item]) -> Vec<Row> {
         .collect()
 }
 
-/// The text size for a view: readable at any capture size.
-fn font(view: Rectangle) -> f32 {
-    (view.width.min(view.height) / 28.0).clamp(13.0, 28.0)
+/// The text size: readable at any capture size (on a board, the largest
+/// capture's, not the whole board's).
+fn font(view: Rectangle, tiles: &[Rectangle]) -> f32 {
+    let basis = tiles
+        .iter()
+        .map(|t| t.width.min(t.height))
+        .fold(0.0, f32::max);
+    let basis = if tiles.is_empty() {
+        view.width.min(view.height)
+    } else {
+        basis
+    };
+    (basis / 28.0).clamp(13.0, 28.0)
 }
 
 /// Badge radius, row height and the text's left edge, for a font size.
@@ -73,28 +83,48 @@ fn box_size(rows: &[Row], size: f32) -> Size {
     )
 }
 
-/// Where the legend goes in `view` among `items`, or `None` (no notes).
-pub fn layout(view: Rectangle, items: &[Item]) -> Option<Legend> {
+/// Where the legend goes in `view` among `items`, or `None` (no notes). On a
+/// board (`tiles` = its captures) it first tries the space right of or under a
+/// capture, so it sits next to the pictures instead of in a far corner.
+pub fn layout(view: Rectangle, items: &[Item], tiles: &[Rectangle]) -> Option<Legend> {
     let rows = rows(items);
     if rows.is_empty() {
         return None;
     }
-    let size = font(view);
+    let size = font(view, tiles);
     let b = box_size(&rows, size);
     let margin = size * 0.8;
     let (left, top) = (view.x + margin, view.y + margin);
     let right = view.x + view.width - margin - b.width;
     let bottom = view.y + view.height - margin - b.height;
     let fits = right >= left && bottom >= top;
+    let gap = super::board::GAP as f32;
+    let beside = tiles.iter().flat_map(|t| {
+        [
+            Point::new(t.x + t.width + gap, t.y),
+            Point::new(t.x, t.y + t.height + gap),
+        ]
+    });
     // Bottom-right first: the usual place for a key, away from title bars.
-    let corner = [(right, bottom), (left, bottom), (right, top), (left, top)]
+    let corners = [(right, bottom), (left, bottom), (right, top), (left, top)]
         .into_iter()
-        .map(|(x, y)| Rectangle::new(Point::new(x, y), b))
+        .filter(|_| fits)
+        .map(|(x, y)| Point::new(x, y));
+    let inside = view.expand(-margin / 2.0);
+    let corner = beside
+        .chain(corners)
+        .map(|at| Rectangle::new(at, b))
         .find(|r| {
-            fits && !items.iter().any(|item| {
-                !matches!(item.shape, Shape::Spotlight { .. })
-                    && item.bounds().intersects(&r.expand(margin / 2.0))
-            })
+            let clear = r.expand(margin / 2.0);
+            inside.contains(r.position())
+                && inside.contains(Point::new(r.x + r.width, r.y + r.height))
+                && !tiles.iter().any(|t| t.intersects(&clear))
+                && !items.iter().any(|item| match item.shape {
+                    Shape::Spotlight { .. } => false,
+                    // A blur's bounds include what it reads; it paints its frame.
+                    Shape::Blur { .. } => item.frame().intersects(&clear),
+                    _ => item.bounds().intersects(&clear),
+                })
         });
     Some(match corner {
         Some(at) => Legend {

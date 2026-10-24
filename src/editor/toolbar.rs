@@ -36,30 +36,38 @@ fn slots() -> impl Iterator<Item = &'static super::ToolInfo> {
     TOOLS.iter().filter(|t| t.slot == t.tool)
 }
 
-/// The toolbar's size (as `view` lays it out without a popover): back, a divider
-/// before each tool group, the tool buttons, a divider, colour and board, a
-/// divider, undo/redo, a divider, drag (where supported) and pin, Copy and Save.
-pub fn size() -> Size {
+/// Widths (no padding) of the toolbar's two parts: back and the tools (a
+/// divider before each group), and the rest (a divider, colour and board, a
+/// divider, undo/redo, a divider, drag where supported, pin, Copy and Save).
+fn parts() -> (f32, f32) {
     let buttons = slots().count();
     let groups = 1 + TOOLS
         .windows(2)
         .filter(|w| w[0].group != w[1].group)
         .count();
-    let icons = 1 + buttons + 2 + 2 + 1 + usize::from(dragout::SUPPORTED);
-    let dividers = groups + 3;
-    let texts = 2;
-    let gaps = (icons + dividers + texts - 1) as f32 * SPACING;
-    Size::new(
-        2.0 * SURFACE_PADDING
-            + icons as f32 * CONTROL
-            + dividers as f32
-            + texts as f32 * TEXT_BUTTON_WIDTH
-            + gaps,
-        CONTROL + 2.0 * SURFACE_PADDING,
-    )
+    let tools = (1 + buttons) as f32 * CONTROL + groups as f32;
+    let tools = tools + (buttons + groups) as f32 * SPACING;
+    let icons = 5 + usize::from(dragout::SUPPORTED);
+    let rest = icons as f32 * CONTROL + 3.0 + 2.0 * TEXT_BUTTON_WIDTH;
+    let rest = rest + (icons + 3 + 2 - 1) as f32 * SPACING;
+    (tools, rest)
 }
 
-pub fn view(e: &Editor) -> Element<'_, Message> {
+/// The toolbar's size within `max_width` (as `view` lays it out without a
+/// popover): one row, or two (tools, then the rest) when one does not fit.
+pub fn size(max_width: f32) -> Size {
+    let (tools, rest) = parts();
+    let one = tools + SPACING + rest + 2.0 * SURFACE_PADDING;
+    if one <= max_width {
+        Size::new(one, CONTROL + 2.0 * SURFACE_PADDING)
+    } else {
+        // The second row starts without its divider.
+        let width = tools.max(rest - 1.0 - SPACING) + 2.0 * SURFACE_PADDING;
+        Size::new(width, 2.0 * CONTROL + SPACING + 2.0 * SURFACE_PADDING)
+    }
+}
+
+pub fn view(e: &Editor, max_width: f32) -> Element<'_, Message> {
     let side = tooltip::Position::Bottom;
     let icon =
         |glyph: char, active: bool, message: Message, tip: &'static str| -> Element<'_, Message> {
@@ -70,13 +78,14 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
                 side,
             )
         };
-    let mut bar: Vec<Element<'_, Message>> = Vec::new();
+    let wrap = size(max_width).height > CONTROL + 2.0 * SURFACE_PADDING;
+    let mut tools: Vec<Element<'_, Message>> = Vec::new();
     // Left edge of the next control, for placing a popover under its button.
     let mut x = SURFACE_PADDING;
     let mut at: Vec<(Menu, f32)> = Vec::new();
     let step = |width: f32, x: &mut f32| *x += width + SPACING;
 
-    bar.push(icon(
+    tools.push(icon(
         BACK,
         false,
         Message::Back,
@@ -87,14 +96,14 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
     let current = info(e.tool);
     for t in slots() {
         if group != Some(t.group) {
-            bar.push(widgets::toolbar_divider());
+            tools.push(widgets::toolbar_divider());
             step(1.0, &mut x);
             group = Some(t.group);
         }
         // The button shows the variant in use.
         let shown = if current.slot == t.tool { current } else { t };
         at.push((Menu::Variants(t.tool), x));
-        bar.push(icon(
+        tools.push(icon(
             shown.icon,
             current.slot == t.tool,
             Message::Slot(t.tool),
@@ -102,8 +111,13 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
         ));
         step(CONTROL, &mut x);
     }
-    bar.push(widgets::toolbar_divider());
-    step(1.0, &mut x);
+    let mut rest: Vec<Element<'_, Message>> = Vec::new();
+    if wrap {
+        x = SURFACE_PADDING; // the second row
+    } else {
+        rest.push(widgets::toolbar_divider());
+        step(1.0, &mut x);
+    }
     let colour = Color::from_rgba8(
         e.colour[0],
         e.colour[1],
@@ -111,7 +125,7 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
         e.colour[3] as f32 / 255.0,
     );
     at.push((Menu::Colour, x));
-    bar.push(widgets::hint(
+    rest.push(widgets::hint(
         widgets::colour_button(colour, e.menu == Some(Menu::Colour), Message::Picker),
         "Colour, stroke, eyedropper, presets",
         widgets::Why::Icon,
@@ -119,39 +133,47 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
     ));
     step(CONTROL, &mut x);
     at.push((Menu::Board, x));
-    bar.push(icon(
+    rest.push(icon(
         BOARD,
         e.menu == Some(Menu::Board),
         Message::Menu(Menu::Board),
         "Board: add captures, layout, legend",
     ));
-    bar.push(widgets::toolbar_divider());
-    bar.push(icon(UNDO, false, Message::Undo, "Undo (Ctrl+Z)"));
-    bar.push(icon(REDO, false, Message::Redo, "Redo (Ctrl+Shift+Z)"));
-    bar.push(widgets::toolbar_divider());
+    rest.push(widgets::toolbar_divider());
+    rest.push(icon(UNDO, false, Message::Undo, "Undo (Ctrl+Z)"));
+    rest.push(icon(REDO, false, Message::Redo, "Redo (Ctrl+Shift+Z)"));
+    rest.push(widgets::toolbar_divider());
     if dragout::SUPPORTED {
-        bar.push(widgets::hint(
+        rest.push(widgets::hint(
             widgets::drag_handle(widgets::DRAG, Message::DragOut),
             "Drag the image into another app (an AI chat, a document)",
             widgets::Why::Icon,
             side,
         ));
     }
-    bar.push(icon(
+    rest.push(icon(
         PIN,
         false,
         Message::Pin,
         "Pin to screen: a floating copy (Ctrl+P)",
     ));
-    bar.push(widgets::hint(
+    rest.push(widgets::hint(
         widgets::text_button(COPY, "Copy", "Ctrl C".into(), true, Message::Copy),
         "Copy with its text",
         widgets::Why::Keys("Ctrl+Shift+C"),
         side,
     ));
-    bar.push(widgets::text_button(SAVE, "Save", "Ctrl S".into(), false, Message::Save).into());
+    rest.push(widgets::text_button(SAVE, "Save", "Ctrl S".into(), false, Message::Save).into());
 
-    let bar = widgets::surface(row(bar).spacing(SPACING).align_y(iced::Center));
+    fn line(items: Vec<Element<'_, Message>>) -> iced::widget::Row<'_, Message> {
+        row(items).spacing(SPACING).align_y(iced::Center)
+    }
+    let bar = if wrap {
+        widgets::surface(column![line(tools), line(rest)].spacing(SPACING))
+    } else {
+        tools.extend(rest);
+        widgets::surface(line(tools))
+    };
     let Some(menu) = e.menu else {
         return bar.into();
     };
