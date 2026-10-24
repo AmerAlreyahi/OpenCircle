@@ -71,6 +71,16 @@ pub fn limit_malloc_arenas() {
     }
 }
 
+/// Gives freed heap memory back to the OS (glibc keeps it otherwise). Cheap
+/// (a few ms); call once big buffers are gone and the app is going idle.
+pub(crate) fn trim_heap() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    // SAFETY: malloc_trim only releases free heap pages.
+    unsafe {
+        libc::malloc_trim(0);
+    }
+}
+
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     *TRIGGERS.lock().unwrap() = Some(triggers);
     crate::lens::sweep_stale(); // pages left by a crash
@@ -427,11 +437,7 @@ impl App {
                 self.hiding = Hiding::No;
                 // Panel threads (PNG, HTTP, OCR I/O) leave freed memory in their
                 // own malloc arenas; give it back to the OS while idle.
-                #[cfg(all(target_os = "linux", target_env = "gnu"))]
-                // SAFETY: malloc_trim only releases free heap pages.
-                unsafe {
-                    libc::malloc_trim(0);
-                }
+                trim_heap();
                 window::set_mode(self.overlay, Mode::Hidden)
             }
             Message::Drawn => {

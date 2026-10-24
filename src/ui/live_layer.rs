@@ -428,6 +428,10 @@ impl Live {
                 }
             };
             pump(&stop, interval(), tick, |msg| tx.unbounded_send(msg).is_ok());
+            // Live off: its frames and patches are freed; give the memory
+            // back (glibc keeps it: the app stayed ~80 MB, not ~30).
+            drop(steps);
+            super::trim_heap();
         })
         .abortable();
         self.work = Some(handle.abort_on_drop());
