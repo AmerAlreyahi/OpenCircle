@@ -1597,6 +1597,7 @@ impl App {
             // and hand its crop to `Editor::append`.
             Some(Output::CopyWithText(crop, _text)) => self.finish(&copy::ACTION, crop),
             Some(Output::AddCapture) => Task::none(),
+            Some(Output::Dragged) => self.close(),
         }
     }
 

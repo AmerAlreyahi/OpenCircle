@@ -306,6 +306,9 @@ pub enum Output {
     Pin(Crop),
     /// Let the user pick another area; give it to `Editor::append`.
     AddCapture,
+    /// The image was dragged into another app (the overlay is already hidden):
+    /// close, as after Copy.
+    Dragged,
 }
 
 /// An item being drawn, moved, resized or typed: shown live, committed as one edit.
@@ -491,11 +494,15 @@ impl Editor {
                 // The previous drag's file goes first (one temp file at a time).
                 self.dragged = None;
                 match dragout::DragFile::write(&flat) {
-                    Ok(file) => {
-                        if let Err(e) = dragout::start(&file, &flat) {
-                            eprintln!("[opencircle] {e}");
-                        }
+                    Ok(mut file) => {
+                        // The overlay hides for the drag; dropped = done, like Copy.
+                        let dropped = dragout::start(&mut file, &flat, true);
                         self.dragged = Some(file);
+                        match dropped {
+                            Ok(true) => return Some(Output::Dragged),
+                            Ok(false) => {}
+                            Err(e) => eprintln!("[opencircle] {e}"),
+                        }
                     }
                     Err(e) => eprintln!("[opencircle] drag-out: {e}"),
                 }

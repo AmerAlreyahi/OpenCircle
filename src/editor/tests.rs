@@ -275,6 +275,110 @@ fn blur_brush_destroys_the_text_it_hides() {
     assert!(text < noise, "text signal {text} vs noise {noise}");
 }
 
+/// `secret` in the field, brushed over its line (as the editor does with line
+/// assist); `grain` = (cell, fine) amplitudes, `None` = the real ones.
+fn brushed(secret: &str, seed: u64, grain: Option<(f32, f32)>) -> (Image, lines::Band) {
+    let band = lines::detect(&field("hunter2"))[0];
+    let mut layer = document::Layer {
+        pm: tiny_skia::Pixmap::from_vec(
+            field(secret).rgba,
+            tiny_skia::IntSize::from_wh(240, 40).unwrap(),
+        )
+        .unwrap(),
+        origin: Point::ORIGIN,
+    };
+    let stroke = [pt(8.0, band.centre()), pt(232.0, band.centre())];
+    match grain {
+        Some((cell, fine)) => blur::paint_with(&mut layer, &stroke, band.brush(), seed, cell, fine),
+        None => blur::paint(&mut layer, &stroke, band.brush(), seed),
+    }
+    let image = Image {
+        width: 240,
+        height: 40,
+        rgba: layer.pm.take(),
+    };
+    (image, band)
+}
+
+/// Mean brightness of each column and each row of the band (x 10..230).
+fn profiles(image: &Image, band: lines::Band) -> (Vec<f32>, Vec<f32>) {
+    let (y0, y1) = (band.y0 as u32, band.y1.ceil() as u32);
+    let at = |x: u32, y: u32| {
+        let i = ((y * 240 + x) * 4) as usize;
+        luma(image.rgba[i..i + 4].try_into().unwrap()) as f32
+    };
+    let columns = (10..230)
+        .map(|x| (y0..y1).map(|y| at(x, y)).sum::<f32>() / (y1 - y0) as f32)
+        .collect();
+    let rows = (y0..y1)
+        .map(|y| (10..230).map(|x| at(x, y)).sum::<f32>() / 220.0)
+        .collect();
+    (columns, rows)
+}
+
+fn mean_gap(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).map(|(p, q)| (p - q).abs()).sum::<f32>() / a.len() as f32
+}
+
+const SECRETS: [(&str, &str); 3] = [
+    ("hunter2", "letmein"),
+    ("4f9a8b7c", "0d9e8f7a"),
+    ("password", "qwertyui"),
+];
+
+/// What is left of the text after the Gaussian alone, as brightness per pixel
+/// and per column average: the grain must be larger.
+#[test]
+fn blur_brush_residual_is_below_the_grain() {
+    let mut worst: f32 = 0.0;
+    for (a, b) in SECRETS {
+        let (pa, band) = brushed(a, 1, Some((0.0, 0.0)));
+        let (pb, _) = brushed(b, 1, Some((0.0, 0.0)));
+        let (ca, _) = profiles(&pa, band);
+        let (cb, _) = profiles(&pb, band);
+        let column = ca
+            .iter()
+            .zip(&cb)
+            .map(|(p, q)| (p - q).abs())
+            .fold(0.0, f32::max);
+        worst = worst.max(column);
+    }
+    eprintln!("residual text signal: max column-average gap {worst:.1} levels");
+    assert!(
+        blur::GRAIN >= 2.0 * worst,
+        "grain ±{} vs residual {worst}",
+        blur::GRAIN
+    );
+}
+
+/// An attacker averages columns (or rows) to cancel per-pixel noise. With the
+/// cell grain the averaged profiles of two different secrets differ less than
+/// those of one secret under two seeds: the text is below the noise.
+#[test]
+fn blur_brush_column_and_row_averages_hide_the_text() {
+    for (a, b) in SECRETS {
+        let (a1, band) = brushed(a, 1, None);
+        let (b1, _) = brushed(b, 1, None);
+        let (a2, _) = brushed(a, 2, None);
+        let (ca1, ra1) = profiles(&a1, band);
+        let (cb1, rb1) = profiles(&b1, band);
+        let (ca2, ra2) = profiles(&a2, band);
+        let (text_c, noise_c) = (mean_gap(&ca1, &cb1), mean_gap(&ca1, &ca2));
+        let (text_r, noise_r) = (mean_gap(&ra1, &rb1), mean_gap(&ra1, &ra2));
+        eprintln!(
+            "{a}/{b}: columns text {text_c:.1} noise {noise_c:.1}; rows text {text_r:.1} noise {noise_r:.1}"
+        );
+        assert!(
+            2.0 * text_c < noise_c,
+            "{a}/{b} columns: {text_c} vs {noise_c}"
+        );
+        assert!(
+            2.0 * text_r < noise_r,
+            "{a}/{b} rows: {text_r} vs {noise_r}"
+        );
+    }
+}
+
 #[test]
 fn redact_is_a_solid_box() {
     let redact = Item {
