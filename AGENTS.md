@@ -208,6 +208,13 @@ production systems.
   Text selection works like a desktop (owner, 2026-10-24): I-beam cursor,
   selection to the exact character, flat square highlight, no handles,
   double-click a word, triple-click a line, Shift+click, Ctrl+C, Ctrl+A.
+  ONE widget (owner, 2026-10-24): no action bar next to the selection; the
+  bottom bar (drag snaps to the nearest anchor: bottom-centre default, top-centre,
+  bottom-left, bottom-right; anchor remembered; moves aside so it never covers the
+  selection; default a clear gap above the
+  taskbar) holds everything as round icon buttons (no labels, tooltips), and
+  selection actions (Search, Text, Copy, Save) slide in when something is
+  selected. The Ask AI icon will become an OpenCircle-logo SVG later.
   The bottom bar holds: the ask field, Ask AI, Translate screen, Live translate,
   Search music and Edit image (owner, 2026-10-24). Search music is always shown
   (supersedes "hidden until a key is set"): with no key it opens the key setup and
