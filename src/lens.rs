@@ -283,37 +283,55 @@ fn launch(path: &Path) -> io::Result<()> {
 
 /// Open a `https://www.google.com/...` URL in the default browser (Google AI
 /// Mode). Same launcher as the Lens page: no shell, the URL is one argv entry.
-/// Any other host, scheme or a URL with spaces/control bytes is refused.
+/// Any other host, scheme or a URL that is not one plain link is refused.
 pub fn open_url(url: &str) -> io::Result<()> {
-    if !url.starts_with(GOOGLE) || !url.bytes().all(|b| b.is_ascii_graphic()) {
+    if !url.starts_with(GOOGLE) || web_host(url).as_deref() != Some("www.google.com") {
         return Err(bad("only https://www.google.com/ URLs can be opened"));
     }
     spawn(std::ffi::OsStr::new(url))
 }
 
-/// Whether `url` is one plain http(s) link: ASCII only, no spaces or control
-/// bytes, something after the scheme.
-pub fn is_web_url(url: &str) -> bool {
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"));
-    rest.is_some_and(|r| r.starts_with(|c: char| c.is_ascii_alphanumeric()))
-        && url.bytes().all(|b| b.is_ascii_graphic())
+/// The host of `url` (lower case, for the chip to show) if `url` is one plain
+/// http(s) link, else `None`. The one URL check every opener and chip uses.
+///
+/// Strict on purpose, so a browser can't read another host than the one we show:
+/// scheme http or https (any case), then only `host[:port]`: no userinfo ('@'),
+/// '%', '\\' or quotes; the host is LDH labels, IPv4 or a bracketed IPv6 literal.
+/// The path, query and fragment hold only RFC 3986 unreserved/reserved bytes and
+/// `%XX` escapes (so no spaces, controls, '\\', '"' or non-ASCII anywhere).
+pub fn web_host(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    if !(scheme.eq_ignore_ascii_case("https") || scheme.eq_ignore_ascii_case("http")) {
+        return None;
+    }
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(end);
+    let tail_ok = tail.bytes().enumerate().all(|(i, b)| match b {
+        b'%' => tail
+            .get(i + 1..i + 3)
+            .is_some_and(|h| h.bytes().all(|b| b.is_ascii_hexdigit())),
+        _ => crate::actions::entities::url_byte(b),
+    });
+    tail_ok.then(|| crate::actions::entities::host_name(authority))?
 }
 
 /// Open a link the user clicked (Text panel chip, QR chip) in the default
 /// browser. Only http(s): never a file, a script or another app's scheme.
 pub fn open_link(url: &str) -> io::Result<()> {
-    if !is_web_url(url) {
+    if web_host(url).is_none() {
         return Err(bad("only http(s) links can be opened"));
     }
     spawn(std::ffi::OsStr::new(url))
 }
 
 /// Open a new message to `address` (the Text panel's email chip) in the default
-/// mail app. `address` must be a plain address: no `?subject=` or other headers.
+/// mail app. `address` must be a plain address: no `?subject=`, `&`/`=` headers,
+/// `%` escapes that could smuggle them in, or anything but printable ASCII.
 pub fn open_mailto(address: &str) -> io::Result<()> {
-    if !crate::actions::entities::is_email(address) {
+    let plain = address
+        .bytes()
+        .all(|b| b.is_ascii_graphic() && !b"%?&=#".contains(&b));
+    if !plain || !crate::actions::entities::is_email(address) {
         return Err(bad("not an email address"));
     }
     spawn(std::ffi::OsStr::new(&format!("mailto:{address}")))
@@ -499,12 +517,21 @@ mod tests {
 
     #[test]
     fn open_link_takes_only_plain_http_urls() {
-        for ok in [
-            "https://example.com",
-            "http://example.com/a?b=c&d=e#f",
-            "https://192.168.0.1:8080/x",
+        for (ok, host) in [
+            ("https://example.com", "example.com"),
+            ("http://example.com/a?b=c&d=e#f", "example.com"),
+            ("https://192.168.0.1:8080/x", "192.168.0.1"),
+            ("HTTPS://Example.COM/Path", "example.com"),
+            ("https://[::1]:8443/x", "[::1]"),
+            ("https://medium.com/@user/post", "medium.com"),
+            ("https://a.io/x%20y?q=%E2%82%AC#top", "a.io"),
+            (
+                "https://en.wikipedia.org/wiki/Rust_(language)",
+                "en.wikipedia.org",
+            ),
+            ("https://example.com:65535", "example.com"),
         ] {
-            assert!(is_web_url(ok), "{ok:?}");
+            assert_eq!(web_host(ok).as_deref(), Some(host), "{ok:?}");
         }
         for bad in [
             "ftp://example.com",
@@ -512,7 +539,6 @@ mod tests {
             "javascript:alert(1)",
             "mailto:a@b.com",
             "data:text/html,x",
-            "HTTPS://example.com", // callers pass the normalised, lower-case scheme
             "https://",
             "https:// example.com",
             "https://exa mple.com",
@@ -522,8 +548,35 @@ mod tests {
             "--help",
             "https:///etc",
             "",
+            // userinfo, and the ways browsers and we could disagree on the host
+            "https://google.com@evil.com/",
+            "https://good.com\\@evil.com",
+            "https://good.com%2f@evil.com",
+            "https://good.com:443@evil.com",
+            "https://@evil.com",
+            "https://evil.com\\.good.com/",
+            "https://\"good.com\"/",
+            "https://good.com'/",
+            "https://good.com/\"onmouseover",
+            "https://good.com/a\\b",
+            "https://good.com/a%2",
+            "https://good.com/a%zz",
+            "https://good.com/a<b>",
+            "https://good.com/a`b",
+            "https://ex%61mple.com",
+            "https://example.com\u{202e}moc.live",
+            "https://example.com:",
+            "https://example.com:65536",
+            "https://example.com:8a",
+            "https://01.2.3.4/",
+            "https://999.1.1.1/",
+            "https://0x7f.0.0.1/",
+            "https://[::1%25eth0]/",
+            "https://[not-ip]/",
+            "https://localhost/",
+            "https://-bad-.com/",
         ] {
-            assert!(!is_web_url(bad), "{bad:?}");
+            assert_eq!(web_host(bad), None, "{bad:?}");
             assert!(open_link(bad).is_err(), "{bad:?}");
         }
     }
@@ -536,6 +589,16 @@ mod tests {
             "-oProxyCommand=x",
             "a@b",
             "",
+            // percent escapes and query bytes that would add headers
+            "a%3Fcc%3Dx@y.com",
+            "a%40b@c.com",
+            "x%26body%3Dhi@y.com",
+            "a&b@c.com",
+            "a=b@c.com",
+            "a#b@c.com",
+            "a@b.com&cc=x@y.com",
+            "\u{645}@b.com",
+            "a@b.com\n",
         ] {
             assert!(open_mailto(bad).is_err(), "{bad:?}");
         }
@@ -565,6 +628,9 @@ mod tests {
             "https://evil.test/https://www.google.com/",
             "https://www.google.com/search?q=a b",
             "https://www.google.com/search?q=a\nb",
+            "https://www.google.com/search?q=a\"b",
+            "https://www.google.com/search?q=a\\b",
+            "https://www.google.com/search?q=%zz",
             "file:///etc/passwd",
             "-x",
             "",

@@ -3,8 +3,7 @@ use iced::widget::{column, opaque, pin, row, tooltip};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::widgets::{self, CONTROL, SURFACE_PADDING, TEXT_BUTTON_WIDTH};
-use crate::actions::entities::shorten;
-use crate::actions::{ACTIONS, Action, Key};
+use crate::actions::{ACTIONS, Action, Key, qr};
 
 const SPACING: f32 = 4.0;
 /// Between the bar and the selection, and the bar's minimum distance to screen edges.
@@ -15,23 +14,31 @@ const CHIP_GAP: f32 = 8.0;
 /// The longest QR text the chip shows, in characters.
 const QR_SHOWN: usize = 36;
 
-/// The chip for a QR code found in the selection: its text (shortened) copies it,
-/// and "Open link" (only offered for an http(s) link) opens it. Neither happens
-/// by itself.
+/// The chip for a QR code found in the selection: its text (made safe to show, see
+/// [`qr::shown`]) copies it, and "Open link" with the link's whole host beside it
+/// (only offered for an http(s) link) opens it. Neither happens by itself.
 pub fn qr_chip<'a, Message: Clone + 'a>(
     text: &str,
     copy: Message,
     open: Option<Message>,
 ) -> Element<'a, Message> {
+    let shown = qr::shown(text, QR_SHOWN);
     let mut chips = row![
         widgets::icon(crate::actions::copy::ACTION.icon),
-        widgets::chip(format!("QR code: {}", shorten(text.trim(), QR_SHOWN)), copy),
+        widgets::chip(format!("QR code: {}", shown.text), copy),
     ]
     .spacing(10)
     .height(Fill)
     .align_y(Center);
-    if let Some(open) = open {
-        chips = chips.push(widgets::chip("Open link", open));
+    if shown.warn {
+        chips = chips.push(widgets::error("Hidden text-direction marks"));
+    }
+    let host = qr::web_url(text).and_then(crate::lens::web_host);
+    if let (Some(open), Some(host)) = (open, host) {
+        // The whole host beside the button: the site it really opens, never cut.
+        chips = chips
+            .push(widgets::chip("Open link", open))
+            .push(widgets::body(host));
     }
     widgets::surface(chips)
         .height(CONTROL + 2.0 * SURFACE_PADDING)
@@ -188,17 +195,34 @@ mod tests {
         };
         let texts = widgets::shot::texts(with_link());
         assert!(
-            texts.contains(&"QR code: https://example.com/a-long-link/that…".to_string()),
+            texts.contains(
+                &"QR code: https://example.com/a-long-link/that… (copies 59 chars)".to_string()
+            ),
             "{texts:?}"
         );
-        assert!(texts.contains(&"Open link".to_string()));
+        // The whole host, never cut, on the button that opens it.
+        let open = texts.iter().position(|t| t == "Open link");
+        assert_eq!(
+            open.and_then(|i| texts.get(i + 1)).map(String::as_str),
+            Some("example.com"),
+            "{texts:?}"
+        );
         let px = widgets::shot::save("bar-qr-chip", with_link(), screen);
         assert!(px.as_chunks::<4>().0.iter().any(|p| p[..] != px[..4]));
 
         let wifi = qr_chip("WIFI:S:cafe;T:WPA;P:secret;;", (), None);
         let texts = widgets::shot::texts(view(selection, screen, Some(wifi), |_| ()));
         assert!(texts.iter().any(|t| t.starts_with("QR code: WIFI:S:cafe")));
-        assert!(!texts.contains(&"Open link".to_string()));
+        assert!(!texts.iter().any(|t| t.starts_with("Open link")));
+        // Text-direction controls: dropped from the chip, and a warning beside it.
+        let rlo = qr_chip("https://evil.com/\u{202e}moc.elgoog", (), None);
+        let texts = widgets::shot::texts(view(selection, screen, Some(rlo), |_| ()));
+        assert!(
+            texts.contains(&"QR code: https://evil.com/moc.elgoog… (copies 28 chars)".to_string()),
+            "{texts:?}"
+        );
+        assert!(texts.contains(&"Hidden text-direction marks".to_string()));
+        assert!(!texts.iter().any(|t| t.contains('\u{202e}')));
         // No QR code: the bar alone.
         let texts = widgets::shot::texts(view(selection, screen, None::<Element<()>>, |_| ()));
         assert!(!texts.iter().any(|t| t.starts_with("QR code")));

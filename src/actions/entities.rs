@@ -35,14 +35,20 @@ impl Entity {
         }
     }
 
-    /// The value, short enough for a chip (a link without its scheme).
+    /// The value, short enough for a chip. A link shows its whole host, never cut,
+    /// so the chip names the site it opens (the path could be made to look like one).
+    /// Every entity is plain ASCII (the scanners only take ASCII bytes), so there
+    /// are no control or text-direction characters to hide here.
     pub fn shown(&self) -> String {
-        let text = self.text.as_str();
-        let text = match self.kind {
-            Kind::Link => text.split_once("://").map_or(text, |(_, rest)| rest),
-            _ => text,
-        };
-        shorten(text, 28)
+        match self.kind {
+            Kind::Link => crate::lens::web_host(&self.text).unwrap_or_default(),
+            _ => shorten(&self.text, 28),
+        }
+    }
+
+    /// The chip's text, e.g. "Open link · example.com".
+    pub fn chip(&self) -> String {
+        format!("{} · {}", self.label(), self.shown())
     }
 }
 
@@ -75,7 +81,8 @@ pub fn find(text: &str) -> Vec<Entity> {
     out
 }
 
-/// Whether `s` is an email address: what a `mailto:` may carry (no `?` headers).
+/// Whether `s` is an email address: what a `mailto:` may carry. The local part is
+/// letters, digits and `._+-` only, so no `%`, `?`, `&`, `=` or `#` can add headers.
 pub fn is_email(s: &str) -> bool {
     let mut copy = s.as_bytes().to_vec();
     emails(&mut copy) == [s] && !s.contains(char::is_whitespace)
@@ -131,7 +138,11 @@ fn link_in(token: &[u8]) -> Option<(usize, usize, String)> {
             (from, from, false)
         }
     };
-    let to = host_at + trim_end(&token_str[host_at..]).len();
+    // A link ends at the first byte a URL can't hold as itself ('"', '\\', '<', ...).
+    let cut = token_str[host_at..]
+        .find(|c: char| !(c == '%' || url_byte(c as u8)))
+        .map_or(token_str.len(), |n| host_at + n);
+    let to = host_at + trim_end(&token_str[host_at..cut]).len();
     let rest = &token_str[host_at..to];
     let host_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let host = host_name(&rest[..host_end])?;
@@ -149,7 +160,15 @@ fn link_in(token: &[u8]) -> Option<(usize, usize, String)> {
         "https://"
     };
     let url = format!("{scheme}{rest}");
+    // Same check as the opener: never a chip whose link can't be opened.
+    crate::lens::web_host(&url)?;
     Some((from, to, url))
+}
+
+/// Whether `b` may stand as itself in a URL's path, query or fragment: an RFC 3986
+/// unreserved or reserved character ('%' only as the start of a `%XX` escape).
+pub(crate) fn url_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=".contains(&b)
 }
 
 /// `s` without trailing sentence punctuation and unbalanced closing brackets.
@@ -176,27 +195,38 @@ fn trim_end(s: &str) -> &str {
     }
 }
 
-/// `host[:port]` as a lower-case host name, if it is one: dotted labels of
-/// letters, digits and '-', a letters-only ending of 2+ (or four numbers).
-fn host_name(authority: &str) -> Option<String> {
-    let host = match authority.split_once(':') {
-        Some((host, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => host,
-        Some(_) => return None,
-        None => authority,
+/// `host[:port]` as a lower-case host, if it is exactly that: dotted labels of
+/// letters, digits and '-' with a letters-only ending of 2+, an IPv4 address
+/// (no leading zeros) or a bracketed IPv6 literal; a port of digits up to 65535.
+/// Userinfo ('@'), '%', '\\', quotes or anything else make it not a host.
+pub(crate) fn host_name(authority: &str) -> Option<String> {
+    let (host, port) = match authority.rfind(':') {
+        Some(at) if !authority[at..].contains(']') => {
+            (&authority[..at], Some(&authority[at + 1..]))
+        }
+        _ => (authority, None),
     };
+    if port.is_some_and(|p| !p.bytes().all(|b| b.is_ascii_digit()) || p.parse::<u16>().is_err()) {
+        return None;
+    }
     let host = host.to_ascii_lowercase();
+    if let Some(ip) = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+        return ip.parse::<std::net::Ipv6Addr>().is_ok().then_some(host);
+    }
+    if host.parse::<std::net::Ipv4Addr>().is_ok() {
+        return Some(host);
+    }
     let labels: Vec<&str> = host.split('.').collect();
     let label_ok = |l: &&str| {
-        !l.is_empty()
+        (1..=63).contains(&l.len())
             && !l.starts_with('-')
             && !l.ends_with('-')
             && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
     };
-    let numeric = labels.iter().all(|l| l.bytes().all(|b| b.is_ascii_digit()));
     let last = labels.last()?;
-    let ending_ok = (numeric && labels.len() == 4)
-        || (last.len() >= 2 && last.bytes().all(|b| b.is_ascii_alphabetic()));
-    (labels.len() >= 2 && labels.iter().all(label_ok) && ending_ok).then_some(host)
+    let ending_ok = last.len() >= 2 && last.bytes().all(|b| b.is_ascii_alphabetic());
+    (host.len() <= 253 && labels.len() >= 2 && labels.iter().all(label_ok) && ending_ok)
+        .then_some(host)
 }
 
 // ---- emails ------------------------------------------------------------------
@@ -207,7 +237,8 @@ fn emails(bytes: &mut [u8]) -> Vec<String> {
         if bytes[at] != b'@' {
             continue;
         }
-        let local_char = |b: &u8| b.is_ascii_alphanumeric() || b"._%+-".contains(b);
+        // No '%': a mailto: would decode "%3F" into a '?' and read headers after it.
+        let local_char = |b: &u8| b.is_ascii_alphanumeric() || b"._+-".contains(b);
         let domain_char = |b: &u8| b.is_ascii_alphanumeric() || b"-.".contains(b);
         let from = at
             - bytes[..at]
@@ -385,6 +416,11 @@ mod tests {
                 "http://192.168.0.1:8080/admin",
             ),
             ("see:https://a.io/x", "https://a.io/x"),
+            // a link ends where a URL can't go on
+            ("https://a.io/x\"onclick=y", "https://a.io/x"),
+            ("<https://a.io/x>", "https://a.io/x"),
+            ("https://a.io/a\\b", "https://a.io/a"),
+            ("https://good.com\\@evil.com", "https://good.com"),
         ] {
             assert_eq!(links_in(text), [url], "{text:?}");
         }
@@ -405,6 +441,9 @@ mod tests {
             "user@example.com",
             "Node.js and Next.js",
             "done.Then more",
+            "https://google.com@evil.com/",
+            "https://good.com%2f@evil.com",
+            "https://999.1.1.1/",
         ] {
             assert!(
                 links_in(text).is_empty(),
@@ -447,6 +486,22 @@ mod tests {
             );
         }
         assert!(is_email("a@b.com") && !is_email("a@b.com?cc=x@y.com") && !is_email("a b@c.com"));
+        // '%' would decode into '?', '&' or '=' and add mailto: headers.
+        for bad in [
+            "a%3Fcc%3Dx@y.com",
+            "a%40b@c.com",
+            "a&b@c.com",
+            "a=b@c.com",
+            "a#b@c.com",
+        ] {
+            assert!(!is_email(bad), "{bad:?}");
+        }
+        assert!(
+            find("write to a%3Fbcc%3Dme@y.com")
+                .iter()
+                .all(|e| !e.text.contains('%')),
+            "the detector agrees with the opener"
+        );
         // an address is not also a link
         assert_eq!(find("hi@example.com").len(), 1);
     }
@@ -528,8 +583,17 @@ mod tests {
             "https://example.com/a/very/long/path/that/goes/on",
         );
         assert_eq!(e.label(), "Open link");
-        assert_eq!(e.shown(), "example.com/a/very/long/path…");
-        assert_eq!(of(Kind::Email, "a@b.com").shown(), "a@b.com");
+        assert_eq!(e.chip(), "Open link · example.com");
+        // The whole host, never cut: the part that says where the link goes.
+        let long = of(
+            Kind::Link,
+            "https://login.accounts.example-bank.co.uk.evil.example.com/x",
+        );
+        assert_eq!(
+            long.chip(),
+            "Open link · login.accounts.example-bank.co.uk.evil.example.com"
+        );
+        assert_eq!(of(Kind::Email, "a@b.com").chip(), "Write email · a@b.com");
         assert_eq!(shorten("héllo wörld", 5), "héllo…");
     }
 }

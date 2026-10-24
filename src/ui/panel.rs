@@ -643,9 +643,11 @@ impl Panel {
                     None => body,
                 };
                 if !self.entities.is_empty() {
-                    let chips = self.entities.iter().enumerate().map(|(i, e)| {
-                        widgets::chip(format!("{}: {}", e.label(), e.shown()), Msg::Chip(i)).into()
-                    });
+                    let chips = self
+                        .entities
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| widgets::chip(e.chip(), Msg::Chip(i)).into());
                     body = body.push(row(chips).spacing(8).wrap());
                 }
                 body = match &self.note {
@@ -878,9 +880,9 @@ mod tests {
         assert_eq!(kinds, [Kind::Link, Kind::Email, Kind::Phone]);
         let texts = widgets::shot::texts(panel.view(SCREEN));
         for chip in [
-            "Open link: shop.example/track/4412",
-            "Write email: help@shop.example",
-            "Copy number: +1 (555) 123-4567",
+            "Open link · shop.example",
+            "Write email · help@shop.example",
+            "Copy number · +1 (555) 123-4567",
         ] {
             assert!(texts.iter().any(|t| t == chip), "{chip}: {texts:?}");
         }

@@ -71,7 +71,58 @@ pub fn decode(crop: &Crop) -> Option<String> {
 /// `text` as a link to offer "Open" for: one http(s) URL and nothing else.
 pub fn web_url(text: &str) -> Option<&str> {
     let text = text.trim();
-    crate::lens::is_web_url(text).then_some(text)
+    crate::lens::web_host(text).is_some().then_some(text)
+}
+
+/// What the QR chip shows for the code's `text`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shown {
+    pub text: String,
+    /// The code holds text-direction controls: they can make it read as something
+    /// else (a link spelled backwards), so the chip warns.
+    pub warn: bool,
+}
+
+/// `text` safe to show in `max` characters. Control, text-direction and
+/// zero-width characters are dropped and line breaks shown as spaces, so the
+/// chip can't be made to read as something else; when what is shown is not
+/// exactly what Copy copies, it ends with "… (copies N chars)".
+pub fn shown(text: &str, max: usize) -> Shown {
+    let text = text.trim();
+    let bidi = |c: char| matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}');
+    let hidden = |c: char| {
+        bidi(c)
+            || c.is_control()
+            || matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}' | '\u{00AD}' | '\u{180E}')
+    };
+    // Whitespace first: '\n' is also a control, but it separates words.
+    let visible: String = text
+        .chars()
+        .filter(|&c| c.is_whitespace() || !hidden(c))
+        .collect();
+    let flat = visible.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = super::entities::shorten(&flat, max);
+    if out != text {
+        let head = out.strip_suffix('…').unwrap_or(&out).trim_end();
+        out = format!("{head}… (copies {} chars)", grouped(text.chars().count()));
+    }
+    Shown {
+        text: out,
+        warn: text.chars().any(bidi),
+    }
+}
+
+/// `n` with thousands separators: 1240 -> "1,240".
+fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, d) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(d);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -185,9 +236,55 @@ pub(crate) mod tests {
             "https://a.io/x y",
             "see https://a.io",
             "https://a.io\nhttps://b.io",
+            "https://google.com@evil.com/",
+            "https://good.com\\@evil.com",
+            "https://good.com%2f@evil.com",
+            "https://\u{202e}moc.elgoog",
             "",
         ] {
             assert_eq!(web_url(no), None, "{no:?}");
         }
+    }
+
+    #[test]
+    fn the_chip_never_shows_hidden_or_reordering_characters() {
+        // Short and plain: shown as it is.
+        assert_eq!(
+            shown(" hello ", 36),
+            Shown {
+                text: "hello".into(),
+                warn: false
+            }
+        );
+        // A right-to-left override would show "https://evil.com/moc.elgoog" as
+        // ending in "google.com": dropped, and the chip warns.
+        let s = shown("https://evil.com/\u{202e}moc.elgoog", 36);
+        assert_eq!(s.text, "https://evil.com/moc.elgoog… (copies 28 chars)");
+        assert!(s.warn);
+        for c in [
+            '\u{2066}', '\u{2069}', '\u{200e}', '\u{200f}', '\u{61c}', '\u{202a}',
+        ] {
+            let s = shown(&format!("a{c}b"), 36);
+            assert!(s.warn && !s.text.contains(c), "{c:?}");
+        }
+        // Zero-width and control characters are dropped, no warning.
+        let s = shown("pay\u{200b}pal\u{feff}.com\u{7}", 36);
+        assert_eq!(s.text, "paypal.com… (copies 13 chars)");
+        assert!(!s.warn);
+        // Line breaks: one line on the chip, and it says there is more to copy.
+        let s = shown("line one\nline two\r\nthree", 36);
+        assert_eq!(s.text, "line one line two three… (copies 24 chars)");
+        // Long: cut, with the full length.
+        let long = "x".repeat(1240);
+        assert_eq!(
+            shown(&long, 36).text,
+            format!("{}… (copies 1,240 chars)", "x".repeat(36))
+        );
+        // Arabic is text, not a control.
+        let s = shown("\u{645}\u{631}\u{62d}\u{628}\u{627}", 36);
+        assert_eq!(s.text, "\u{645}\u{631}\u{62d}\u{628}\u{627}");
+        assert!(!s.warn);
+        assert_eq!(grouped(7), "7");
+        assert_eq!(grouped(1_234_567), "1,234,567");
     }
 }
