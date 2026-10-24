@@ -132,6 +132,9 @@ production systems.
   Optimise for capture → annotate → paste into an AI chat in seconds: copy after
   capture, AI-friendly size, image + OCR text, delay timer, snapping + loupe,
   combine captures, numbered legend, presets, drag-out, local recent captures.
+- Window capture (owner, 2026-10-24, like iTop): in the default snip mode, hovering
+  outlines the window (or UI element) under the cursor live; click captures it,
+  drag draws a free region; wheel walks element → window → monitor.
 - Blur (owner, 2026-10-24): a soft Photoshop-style blur brush (no blocky mosaic),
   still irreversible (strong radius + noise), with line assist (the brush stays on
   the text line it started on unless the user clearly moves; Shift = free; can be
