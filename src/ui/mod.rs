@@ -1609,6 +1609,14 @@ impl App {
     }
 
     fn on_snip(&mut self, msg: snip::Msg) -> Task<Message> {
+        // The timer ran out and the overlay is gone (hidden or closed): capture
+        // again in that mode, unless something else opened meanwhile.
+        if let snip::Msg::Shoot(kind) = msg {
+            if self.frame.is_some() || self.capturing.is_some() {
+                return Task::none();
+            }
+            return self.capture(Instant::now(), Some(kind));
+        }
         let Purpose::Snip(snip) = &mut self.purpose else {
             return Task::none();
         };
@@ -1655,6 +1663,14 @@ impl App {
                 let foreground = snip.foreground;
                 self.selection = None;
                 self.stroke.clear();
+                if !self.can_hide {
+                    // Wayland: no pill (the window can't shrink or hide), so it
+                    // closes, waits, and captures again.
+                    let _ = snip.shoot(id);
+                    let kind = snip.kind;
+                    let wait = Duration::from_secs(secs.into()) + Duration::from_millis(300);
+                    return self.close().chain(Self::shoot_after(wait, kind));
+                }
                 let ticks = background(move |tx| {
                     // The overlay is a pill now: the user's app gets the focus back.
                     std::thread::sleep(Duration::from_millis(150));
@@ -1669,26 +1685,17 @@ impl App {
                 .map(move |left| Message::Snip(snip::Msg::Tick(id, left)));
                 self.pill_at_top().chain(ticks)
             }
+            // Time's up: the overlay goes first (hidden or closed, as anything
+            // closes), so the pill is in no capture.
             snip::Msg::Tick(id, left) => match snip.tick(id, left) {
-                // Hidden first, so the pill is in no capture.
-                Some(true) => window::set_mode(self.overlay, Mode::Hidden).chain(
-                    background(|tx| {
-                        std::thread::sleep(Duration::from_millis(300));
-                        let _ = tx.unbounded_send(());
-                    })
-                    .map(move |()| Message::Snip(snip::Msg::Shoot(id))),
-                ),
+                Some(true) if snip.shoot(id) => {
+                    let kind = snip.kind;
+                    let wait = Duration::from_millis(300);
+                    self.close().chain(Self::shoot_after(wait, kind))
+                }
                 _ => Task::none(),
             },
-            snip::Msg::Shoot(id) => {
-                if !snip.shoot(id) {
-                    return Task::none();
-                }
-                let kind = snip.kind;
-                let _ = self.close();
-                self.hiding = Hiding::No; // already hidden
-                self.capture(Instant::now(), Some(kind))
-            }
+            snip::Msg::Shoot(_) => Task::none(), // handled above
             snip::Msg::Cancel => self.close(),
             snip::Msg::Edit => {
                 let Some(toast) = snip.take_toast() else {
@@ -1757,13 +1764,27 @@ impl App {
     /// THE one way Snip's pills (toast, timer, scrolling progress) become a
     /// window: the overlay shrunk to `snip::PILL` at `at` (logical px on this
     /// monitor). Switch it to the shared floating-window helper when it lands.
+    /// Wayland can't move, shrink or hide a window (`can_hide_windows`): the
+    /// overlay stays full-screen there and `view` draws the pill over the frame.
     fn pill_window(&self, at: Point) -> Task<Message> {
+        if !self.can_hide {
+            return Task::none();
+        }
         window::set_mode(self.overlay, Mode::Windowed)
             .chain(window::resize(self.overlay, snip::PILL))
             .chain(window::move_to(
                 self.overlay,
                 self.origin + Vector::new(at.x, at.y),
             ))
+    }
+
+    /// `Shoot(kind)` after `wait` (the overlay is gone by then).
+    fn shoot_after(wait: Duration, kind: snip::Kind) -> Task<Message> {
+        background(move |tx| {
+            std::thread::sleep(wait);
+            let _ = tx.unbounded_send(());
+        })
+        .map(move |()| Message::Snip(snip::Msg::Shoot(kind)))
     }
 
     /// Snip's slow extras, on threads: the Recent strip, and (Windows) the
@@ -2242,8 +2263,11 @@ impl App {
             Purpose::Snip(snip) => Some(snip),
             _ => None,
         };
-        // Scrolling, the timer, the toast: the window is only a pill.
-        if let Some(pill) = snip.and_then(|s| s.pill_view()) {
+        // Scrolling, the timer, the toast: the window is only a pill (Wayland:
+        // the pill over the frame, see `pill_window`).
+        if self.can_hide
+            && let Some(pill) = snip.and_then(|s| s.pill_view())
+        {
             return pill.map(Message::Snip);
         }
         let picked: Vec<Rectangle> = (self.text_mode.as_ref())
@@ -2299,7 +2323,9 @@ impl App {
         {
             layers = layers.push(loupe.map(Message::Snip));
         }
-        let top = if let Some(toast) = self.toast {
+        let top = if let Some(pill) = snip.and_then(|s| s.pill_view()) {
+            pill.map(Message::Snip) // Wayland only (above)
+        } else if let Some(toast) = self.toast {
             container(widgets::pill(toast))
                 .center_x(Fill)
                 .padding(24)

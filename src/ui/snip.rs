@@ -110,7 +110,7 @@ pub enum Msg {
     /// Countdown `.0` has `.1` seconds left (0 = time to hide).
     Tick(u32, u8),
     /// Countdown `.0` is over and the overlay hidden: capture now.
-    Shoot(u32),
+    Shoot(Kind),
     /// The countdown's Cancel.
     Cancel,
     /// The toast's Edit: the editor on the capture.
