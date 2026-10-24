@@ -17,6 +17,34 @@ pub fn list() -> Vec<WinRect> {
     })
 }
 
+/// The window the user is in (Windows: its handle), read before the overlay shows.
+pub fn foreground() -> Option<isize> {
+    #[cfg(windows)]
+    {
+        // SAFETY: plain query.
+        let h = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        (!h.is_invalid()).then_some(h.0 as isize)
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+/// Gives the focus back to `foreground()`'s window (the overlay shrank to a pill:
+/// the user goes on in their app, e.g. pastes into a chat).
+pub fn activate(window: Option<isize>) {
+    #[cfg(windows)]
+    if let Some(h) = window {
+        // SAFETY: plain call on a handle; a stale one just fails.
+        let _ = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(
+                windows::Win32::Foundation::HWND(h as *mut _),
+            )
+        };
+    }
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
 #[cfg(target_os = "linux")]
 fn platform() -> Result<Vec<WinRect>, String> {
     use xcb::x;
