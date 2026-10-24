@@ -182,6 +182,17 @@ production systems.
 - Windows first (owner, 2026-10-24, to save credits): VM testing and
   Linux-only fixes are on hold; Windows is the priority. Linux must still build and
   pass CI. Linux VM testing resumes later, on the owner's word.
+- v0.1.0 scope (owner, 2026-10-24): release when Windows is fully tested; the
+  Linux builds are attached and labelled "preview, known Wayland limits" in the
+  release notes. The Linux tweak round comes in v0.1.x.
+- Main mode like Circle to Search (owner, 2026-10-24): when the overlay opens, a
+  bottom floating widget shows the main actions at once ("Ask about your screen"
+  field, translate the screen, song search when a key is set). Text on screen can
+  be selected directly: drag along text selects words, tap selects a word;
+  circling still selects an area, the same way Circle to Search behaves.
+- Themes in v0.1.0 (owner, 2026-10-24, minimum): 2 new widget themes (one is
+  the frosted glass below); the 7 existing live-border looks are enough (no new
+  ones). A Settings switch turns the glass effect on or off for the widgets.
 - Widget themes (owner, 2026-10-24): add a frosted-glass theme in the spirit
   of Apple's glass look (own name and visuals, nothing copied) plus several more
   elegant themes, as options for the floating widgets (bar, cards, popups). The
