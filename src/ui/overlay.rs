@@ -372,8 +372,7 @@ fn shape(p: &mut canvas::path::Builder, kind: Kind, stroke: &[Point], closed: bo
         Kind::Word => {
             for pair in stroke.as_chunks::<2>().0 {
                 let r = drag_rect(&pair[..]);
-                let radius = (r.height / 4.0).min(8.0);
-                p.rounded_rectangle(r.position(), r.size(), radius.into());
+                p.rectangle(r.position(), r.size());
             }
         }
         Kind::Loop => trace(p, stroke, closed),
@@ -408,35 +407,6 @@ pub fn handle_at(area: Rectangle, p: Point) -> Option<usize> {
     corners(area)
         .iter()
         .position(|c| c.distance(p) <= HANDLE_HIT)
-}
-
-/// A word selection's two ends, from its stroke on screen (a top-left /
-/// bottom-right pair per line): the first line's start edge and the last
-/// line's end edge, each (dot, other end of the bar). The start's dot is above
-/// the line, the end's below, like a text selection's handles.
-// ponytail: left-to-right only; on an RTL line the start handle still sits
-// at the line's left edge.
-fn word_ends(stroke: &[Point]) -> Option<[(Point, Point); 2]> {
-    let pairs = stroke.as_chunks::<2>().0;
-    let (first, last) = (pairs.first()?, pairs.last()?);
-    let lift = Vector::new(0.0, HANDLE);
-    Some([
-        (first[0] - lift, Point::new(first[0].x, first[1].y)),
-        (last[1] + lift, Point::new(last[1].x, last[0].y)),
-    ])
-}
-
-/// The end of a word selection (its stroke on screen) under `p`: `Some(true)`
-/// = its start, `Some(false)` = its end.
-pub fn word_end_at(stroke: &[Point], p: Point) -> Option<bool> {
-    let [start, end] = word_ends(stroke)?;
-    let near = |(dot, bar): (Point, Point)| to_segment(p, dot, bar) <= HANDLE_HIT;
-    match (near(start), near(end)) {
-        (true, true) => Some(p.distance(start.0) <= p.distance(end.0)),
-        (true, false) => Some(true),
-        (false, true) => Some(false),
-        (false, false) => None,
-    }
 }
 
 /// `area` with its corner `corner` dragged to `to`. The opposite corner stays;
@@ -801,6 +771,8 @@ pub struct Overlay<'a> {
     /// of the picked ones (image px).
     pub words: &'a [Rectangle],
     pub picked: Vec<Rectangle>,
+    /// The text lines on the frame (image px): the pointer is an I-beam over them.
+    pub text: Vec<Rectangle>,
 }
 
 /// The pointer as the canvas saw it, event by event. Events can arrive in one batch
@@ -1008,15 +980,7 @@ impl canvas::Program<Event> for Overlay<'_> {
 
         if let Some(sel) = self.selection {
             let r = self.view.rect_to_screen(sel.area);
-            if self.handles && sel.kind == Kind::Word {
-                for (dot, bar) in word_ends(&current).into_iter().flatten() {
-                    let line = Stroke::default().with_color(accent.0).with_width(2.0);
-                    frame.stroke(&Path::line(dot, bar), line);
-                    let dot = Path::circle(dot, HANDLE);
-                    frame.fill(&dot, Color::WHITE);
-                    frame.stroke(&dot, line);
-                }
-            } else if self.handles && sel.kind != Kind::Snap {
+            if self.handles && !matches!(sel.kind, Kind::Snap | Kind::Word) {
                 for c in corners(r) {
                     let dot = Path::circle(c, HANDLE);
                     frame.fill(&dot, Color::WHITE);
@@ -1067,29 +1031,26 @@ impl canvas::Program<Event> for Overlay<'_> {
             (self.handles, self.selection, cursor.position_in(bounds))
         {
             let r = self.view.rect_to_screen(sel.area);
-            if sel.kind == Kind::Word {
-                let stroke: Vec<Point> = (self.stroke.iter())
-                    .map(|&q| self.view.to_screen(q))
-                    .collect();
-                match word_end_at(&stroke, p) {
-                    Some(_) => return mouse::Interaction::ResizingHorizontally,
-                    None if r.contains(p) => return mouse::Interaction::Text,
-                    None => return mouse::Interaction::Crosshair,
-                }
-            }
-            match grip_at(sel.kind, r, p) {
+            match grip_at(sel.kind, r, p).filter(|_| sel.kind != Kind::Word) {
                 Some(0 | 2) => return mouse::Interaction::ResizingDiagonallyDown,
                 Some(_) => return mouse::Interaction::ResizingDiagonallyUp,
-                None if r.contains(p) => return mouse::Interaction::Grab,
+                None if r.contains(p) && sel.kind != Kind::Word => {
+                    return mouse::Interaction::Grab;
+                }
                 None => {}
             }
         }
-        mouse::Interaction::Crosshair
+        // Over text: it is selected like in a document.
+        let over = |p: Point| (self.text.iter()).any(|l| self.view.rect_to_screen(*l).contains(p));
+        match cursor.position_in(bounds) {
+            Some(p) if over(p) => mouse::Interaction::Text,
+            _ => mouse::Interaction::Crosshair,
+        }
     }
 }
 
 /// A selection's stroke (screen px): the glowing `accent` gradient line, `fade`
-/// of its strength; a word is a tinted highlight with a thin line.
+/// of its strength; selected text is a flat highlight.
 fn glow(
     frame: &mut canvas::Frame,
     kind: Kind,
@@ -1112,8 +1073,7 @@ fn glow(
         ..Stroke::default()
     };
     if kind == Kind::Word {
-        frame.fill(&path, theme::SELECTION);
-        frame.stroke(&path, line(2.0, 1.0));
+        frame.fill(&path, theme::SELECTION); // flat, like a document's selection
         return;
     }
     // Soft glow = the same stroke, wider and fainter, under the core line.
@@ -1820,11 +1780,76 @@ mod tests {
             morph: None,
             words: &[],
             picked: Vec::new(),
+            text: Vec::new(),
         };
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
             .height(iced::Fill);
         crate::ui::widgets::shot::render(canvas.into(), 960, 540)
+    }
+
+    /// Selected text is drawn like a document's selection: flat boxes with
+    /// square corners, no handles.
+    #[test]
+    fn selected_text_is_flat_and_square_without_handles() {
+        let first_draw = Cell::new(None);
+        // two lines: (100, 100)-(300, 124) and (100, 124)-(220, 148)
+        let stroke = [
+            Point::new(100.0, 100.0),
+            Point::new(300.0, 124.0),
+            Point::new(100.0, 124.0),
+            Point::new(220.0, 148.0),
+        ];
+        let area = Rectangle::new(Point::new(100.0, 100.0), Size::new(200.0, 48.0));
+        let overlay = Overlay {
+            stroke: &stroke,
+            selection: Some(Selection {
+                area,
+                kind: Kind::Word,
+            }),
+            others: &[],
+            view: View::new(960, 540, Size::new(960.0, 540.0)),
+            handles: true,
+            opening: 0,
+            first_draw: &first_draw,
+            hover: false,
+            dim: true,
+            live_drag: false,
+            look: crate::config::Config::default().look.active(),
+            morph: None,
+            words: &[],
+            picked: Vec::new(),
+            text: Vec::new(),
+        };
+        let canvas = iced::widget::canvas(overlay)
+            .width(iced::Fill)
+            .height(iced::Fill);
+        let rgba = crate::ui::widgets::shot::render(canvas.into(), 960, 540);
+        let fill = px(&rgba, Point::new(200.0, 112.0));
+        // the very corners are the same flat colour as the middle
+        for corner in [
+            (100.0, 100.0),
+            (299.0, 100.0),
+            (100.0, 147.0),
+            (219.0, 147.0),
+        ] {
+            assert_eq!(
+                px(&rgba, Point::new(corner.0, corner.1)),
+                fill,
+                "{corner:?}"
+            );
+        }
+        assert_ne!(
+            px(&rgba, Point::new(250.0, 140.0)),
+            fill,
+            "the second line ends at 220"
+        );
+        // no handle (white dot) anywhere
+        let white = rgba
+            .chunks(4)
+            .filter(|p| p[0] > 240 && p[1] > 240 && p[2] > 240)
+            .count();
+        assert_eq!(white, 0);
     }
 
     fn px(rgba: &[u8], p: Point) -> [u8; 4] {

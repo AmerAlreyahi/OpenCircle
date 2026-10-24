@@ -66,6 +66,9 @@ const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
 /// Snip reads the controls (UI Automation) of this many topmost windows.
 const UIA_WINDOWS: usize = 4;
 
+/// Presses this close together are a double (triple) click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+
 /// How long the screen's text read waits after the overlay opens.
 const SCREEN_READ_DELAY: Duration = Duration::from_millis(150);
 
@@ -222,12 +225,6 @@ struct Grab {
     start: (overlay::Selection, Vec<Point>),
     /// It moved further than a tap.
     moved: bool,
-    /// The press began on highlighted text: dragging stretches the words.
-    text: bool,
-    /// On a word selection's handle: its start (`true`) or end.
-    end: Option<bool>,
-    /// Where the pointer is now.
-    to: Point,
 }
 
 /// What the open overlay is for.
@@ -354,6 +351,8 @@ struct App {
     /// A press that began on text: its stroke so far (image px). It selects
     /// words unless it turns into a loop (`overlay::winds`).
     text_press: Option<Vec<Point>>,
+    /// The last press: when, where (image px), and how many in a row.
+    clicks: Option<(Instant, Point, u8)>,
     /// The ask bar's text.
     ask: String,
     /// Bumped on every open (resets the overlay's pointer state).
@@ -464,6 +463,7 @@ impl App {
             taps: 0,
             screen_text: None,
             text_press: None,
+            clicks: None,
             ask: String::new(),
             opening: 0,
             first_draw: Cell::new(None),
@@ -966,10 +966,10 @@ impl App {
                 at: p,
                 shift: false,
             } if self.picks_text_at(p) => {
-                let area = self.area();
+                let (area, unit) = (self.area(), self.click(p));
                 if let Some(mode) = &mut self.text_mode {
                     let lines = mode.lines.clone().unwrap_or_default();
-                    mode.picked = word::Picked::new(lines, area, p);
+                    mode.picked = word::Picked::new(lines, area, p, unit);
                     mode.picking = mode.picked.is_some();
                 }
             }
@@ -992,17 +992,23 @@ impl App {
                 self.edit = None;
                 self.scan = None;
                 self.taps = self.taps.wrapping_add(1); // a tap still reading is stale
+                let unit = self.click(p);
                 if !shift && let Some(grab) = self.grab_at(p) {
-                    if let (Some(start), Some(word)) = (grab.end, &mut self.word) {
-                        word.hold(start); // a handle: that end follows the drag
-                    }
                     self.grab = Some(grab);
                     return Task::none();
                 }
-                // On text (once the screen is read): the word there, and a drag
-                // along the text selects words, like selecting text.
-                if !shift && let Some(word) = self.text_at(p) {
-                    self.others.clear();
+                // On text (once the screen is read): selected like in a document.
+                // Shift+click stretches the text selection there.
+                if shift
+                    && self.text_at(p, unit).is_some()
+                    && let Some(word) = &mut self.word
+                    && word.extend(p)
+                {
+                    self.select_word();
+                    self.text_press = Some(vec![p]);
+                    return Task::none();
+                }
+                if !shift && let Some(word) = self.text_at(p, unit) {
                     self.word = Some(word);
                     self.select_word();
                     self.text_press = Some(vec![p]);
@@ -1038,11 +1044,14 @@ impl App {
                     }
                 }
             }
-            overlay::Event::Release if self.text_press.take().is_some() => return self.selected(),
+            overlay::Event::Release if self.text_press.take().is_some() => {
+                if self.word.as_ref().is_some_and(word::Picked::is_empty) {
+                    self.word = None; // a click on text: nothing selected
+                }
+                return self.selected();
+            }
             overlay::Event::Release if let Some(grab) = self.grab.take() => {
-                return if grab.moved && grab.text {
-                    self.extend_words(grab.to)
-                } else if grab.moved {
+                return if grab.moved {
                     // The search first: a waiting quick action (`selected`)
                     // turns the purpose back to Search, and must not get it too.
                     let search = self.auto_search();
@@ -1106,6 +1115,17 @@ impl App {
             }
             overlay::Event::Enter if matches!(self.purpose, Purpose::Search) => {
                 return self.run(actions::default_for(&config::current()));
+            }
+            // Ctrl+A: all the text on the screen.
+            overlay::Event::Key {
+                letter: 'a',
+                ctrl: true,
+            } if self.screen_text.is_some() => {
+                let all = Rectangle::with_size(self.screen);
+                self.word =
+                    (self.screen_text.clone()).and_then(|lines| word::Picked::all(lines, all));
+                self.select_word();
+                return self.selected();
             }
             overlay::Event::Key { letter, ctrl } if matches!(self.purpose, Purpose::Search) => {
                 if let Some(action) = actions::for_key(letter, ctrl) {
@@ -1269,32 +1289,16 @@ impl App {
     /// A press at `p` (image px) on the selection: a corner handle resizes it,
     /// anywhere inside moves it.
     fn grab_at(&self, p: Point) -> Option<Grab> {
-        let sel = self.selection.filter(|_| self.handles())?;
+        // Selected text is not a box: a press on it starts a new selection.
+        let sel = (self.selection).filter(|s| self.handles() && s.kind != overlay::Kind::Word)?;
         let on_screen = self.view.rect_to_screen(sel.area);
-        let grab = |corner, text, end| Grab {
+        let corner = overlay::grip_at(sel.kind, on_screen, self.view.to_screen(p));
+        (corner.is_some() || sel.area.contains(p)).then(|| Grab {
             corner,
             from: p,
             start: (sel, self.stroke.clone()),
             moved: false,
-            text,
-            end,
-            to: p,
-        };
-        // Words: their two handles move the range's ends.
-        if sel.kind == overlay::Kind::Word {
-            let stroke: Vec<Point> = self
-                .stroke
-                .iter()
-                .map(|&q| self.view.to_screen(q))
-                .collect();
-            if let Some(start) = overlay::word_end_at(&stroke, self.view.to_screen(p)) {
-                return Some(grab(None, true, Some(start)));
-            }
-        }
-        let corner = overlay::grip_at(sel.kind, on_screen, self.view.to_screen(p));
-        // On highlighted words a drag stretches them, it doesn't move the box.
-        let text = corner.is_none() && self.word.as_ref().is_some_and(|w| w.on_text(p));
-        (corner.is_some() || sel.area.contains(p)).then(|| grab(corner, text, None))
+        })
     }
 
     /// Resizes / moves the grabbed selection to the pointer at `p` (image px). A
@@ -1303,18 +1307,7 @@ impl App {
         let Some(grab) = &mut self.grab else { return };
         let zoom = self.view.zoom();
         grab.moved |= !overlay::is_tap(&[grab.from, p], zoom);
-        grab.to = p;
         if !grab.moved {
-            return;
-        }
-        if grab.text {
-            // Words in the lines already read follow at once; a drag past them is
-            // read when it is released (`extend_words`).
-            if let Some(word) = &mut self.word
-                && word.extend(p)
-            {
-                self.select_word();
-            }
             return;
         }
         let (start, stroke) = &grab.start;
@@ -1371,17 +1364,6 @@ impl App {
         if self.selection.is_none() {
             self.stroke.clear(); // the tap's own dot
         }
-        if let Some(word) = &mut self.word
-            && word.tap(at)
-        {
-            self.select_word();
-            return self.selected();
-        }
-        if let Some(word) = self.text_at(at) {
-            self.word = Some(word);
-            self.select_word();
-            return self.selected();
-        }
         if self.screen_text.is_some() {
             return Task::none(); // the screen is read: no text here
         }
@@ -1389,12 +1371,30 @@ impl App {
         self.read_words(word::region(at, self.screen), at, false)
     }
 
-    /// The word at `p` (image px) in the screen's text, read at open (main mode only).
-    fn text_at(&self, p: Point) -> Option<word::Picked> {
+    /// A press at `p` (image px) on the screen's text, read at open (main mode
+    /// only): the caret there, or its word or line (`unit`).
+    fn text_at(&self, p: Point, unit: word::Unit) -> Option<word::Picked> {
         let lines = self.screen_text.as_ref()?;
         let main = matches!(self.purpose, Purpose::Search) && self.translate.is_none();
         let all = Rectangle::with_size(self.screen);
-        main.then(|| word::Picked::new(lines.clone(), all, p))?
+        main.then(|| word::Picked::new(lines.clone(), all, p, unit))?
+    }
+
+    /// Counts a press at `p` (image px) as the first, second or third click in
+    /// a row (each within `DOUBLE_CLICK` of the last and near it): what it
+    /// selects on text.
+    fn click(&mut self, p: Point) -> word::Unit {
+        let now = Instant::now();
+        let n = match self.clicks {
+            Some((at, last, n)) if now - at <= DOUBLE_CLICK && last.distance(p) <= 4.0 => n + 1,
+            _ => 1,
+        };
+        self.clicks = Some((now, p, n));
+        match n {
+            1 => word::Unit::Caret,
+            2 => word::Unit::Word,
+            _ => word::Unit::Line,
+        }
     }
 
     /// A press that began on text moved to `p` (image px): the words stretch
@@ -1550,7 +1550,8 @@ impl App {
             word.reread(lines, what.region);
             word.extend(what.at);
         } else {
-            let Some(picked) = word::Picked::new(lines, what.region, what.at) else {
+            let Some(picked) = word::Picked::new(lines, what.region, what.at, word::Unit::Word)
+            else {
                 return Task::none(); // no text there
             };
             self.word = Some(picked);
@@ -1559,11 +1560,14 @@ impl App {
         self.selected()
     }
 
-    /// The picked words as the (only) selection: a rounded highlight per line
-    /// (the stroke holds a top-left / bottom-right pair for each).
+    /// The selected text as the (only) selection: a flat highlight per line
+    /// (the stroke holds a top-left / bottom-right pair for each). Nothing
+    /// selected yet (a caret): no selection.
     fn select_word(&mut self) {
         self.others.clear();
-        if let Some(word) = &self.word {
+        self.selection = None;
+        self.stroke.clear();
+        if let Some(word) = self.word.as_ref().filter(|w| !w.is_empty()) {
             self.selection = Some(overlay::Selection {
                 area: word.area(),
                 kind: overlay::Kind::Word,
@@ -2616,6 +2620,13 @@ impl App {
             morph: (self.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
             words: (self.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
             picked,
+            text: match self.translate {
+                None if matches!(self.purpose, Purpose::Search) => (self.screen_text.iter())
+                    .flatten()
+                    .map(|l| l.bounds)
+                    .collect(),
+                _ => Vec::new(),
+            },
         };
         let translation = self.translate.as_ref().and_then(|(_, s)| s.image());
         // The frame is its own layer: iced draws a canvas's images above its shapes.
@@ -3567,7 +3578,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tapped_word_is_the_selection_and_its_range_grows() {
+    fn a_tapped_word_is_the_selection() {
         let mut app = open_app(400, 300, 2.0);
         // OCR read one line in a crop at frame px (100, 40): "Press any key", 10 image px a char
         let block = TextBlock {
@@ -3591,18 +3602,6 @@ mod tests {
         let sel = app.selection.expect("the word");
         assert_eq!(sel.kind, overlay::Kind::Word);
         assert_eq!(app.word.as_ref().unwrap().text(), "any");
-        // a second tap on the line (no OCR: the lines are kept) makes a range
-        let key = app.view.to_screen(Point::new(175.0, 40.0));
-        drag(&mut app, key, key, false);
-        assert_eq!(app.word.as_ref().unwrap().text(), "any key");
-        assert!(app.selection.unwrap().area.width > sel.area.width);
-        // its corner is the end handle: the range's end follows, still the words
-        let r = app.view.rect_to_screen(app.selection.unwrap().area);
-        let corner = Point::new(r.x + r.width, r.y + r.height);
-        let press = app.view.to_screen(Point::new(105.0, 40.0));
-        drag(&mut app, corner, press, false);
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Word);
-        assert_eq!(app.word.as_ref().unwrap().text(), "Press any");
     }
 
     const TEXT: [&str; 6] = [
@@ -3630,6 +3629,11 @@ mod tests {
     /// A word on line `i`: image px at its middle (`c` = the character it starts at).
     fn at_word(i: usize, c: f32) -> Point {
         Point::new(60.0 + (c + 2.0) * CHAR, 43.0 + 32.0 * i as f32 + 13.0)
+    }
+
+    /// The caret before character `c` of line `i` (image px, mid-height).
+    fn caret(i: usize, c: f32) -> Point {
+        Point::new(60.0 + c * CHAR, 43.0 + 32.0 * i as f32 + 13.0)
     }
 
     /// An overlay on a 960x420 frame with `TEXT` drawn on it.
@@ -3668,63 +3672,16 @@ mod tests {
     }
 
     #[test]
-    fn dragging_from_the_highlight_selects_across_lines() {
-        let mut app = text_app();
-        let start = at_word(1, 7.0); // "while"
-        app.taps += 1;
-        read_back(&mut app, start, page(), false);
-        assert_eq!(app.word.as_ref().unwrap().text(), "while");
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Word);
-
-        // press on the highlighted word and drag down to line 3
-        drag(&mut app, start, at_word(3, 6.0), false);
-        let word = app.word.as_ref().unwrap();
-        assert_eq!(
-            word.text(),
-            "while you drag a finger\nacross the words you want to\ncopy, translate"
-        );
-        let sel = app.selection.unwrap();
-        assert_eq!(sel.kind, overlay::Kind::Word, "not turned into a moved box");
-        assert_eq!(sel.area, word.area());
-        assert_eq!(
-            app.stroke.len(),
-            6,
-            "a (top-left, bottom-right) pair per line"
-        );
-        assert!(app.others.is_empty() && app.grab.is_none());
-
-        // dragging back up shrinks it; the anchor stays where the press was
-        drag(&mut app, at_word(1, 7.0), at_word(0, 9.0), false);
-        assert_eq!(
-            app.word.as_ref().unwrap().text(),
-            "Search keeps the page\nfrozen while"
-        );
-        assert_eq!(app.stroke.len(), 4);
-
-        // a plain tap on the highlight is still the same-line range
-        let mut app = text_app();
-        app.taps += 1;
-        read_back(&mut app, start, page(), false);
-        drag(&mut app, start, start, false);
-        assert_eq!(app.word.as_ref().unwrap().text(), "while");
-    }
-
-    #[test]
-    fn a_drag_past_the_lines_read_reads_a_band_first() {
+    fn a_shift_click_past_the_lines_read_reads_a_band_first() {
         let mut app = text_app();
         let start = at_word(1, 7.0);
         let first = Rectangle::new(Point::new(0.0, 60.0), Size::new(960.0, 80.0)); // lines 1-2
         app.taps += 1;
         read_back(&mut app, start, first, false);
-        let end = at_word(5, 10.0); // "anywhere": not read yet
-        drag(&mut app, start, end, false);
+        let end = caret(5, 18.0); // after "anywhere": not read yet
+        drag(&mut app, end, end, true);
         let word = app.word.as_ref().unwrap();
-        assert!(word.text().starts_with("while you drag a finger\nacross"));
-        assert_eq!(
-            word.text().lines().count(),
-            2,
-            "as far as the lines read go"
-        );
+        assert_eq!(word.text(), "while", "unchanged until that is read");
         assert!(!word.covers(end), "the end is past what was read");
         // the band OCR reads for it: whole width, every line the drag crosses
         let band = word.band(end, app.screen);
@@ -3755,7 +3712,7 @@ mod tests {
         let mut app = text_app();
         app.taps += 1;
         read_back(&mut app, at_word(1, 7.0), page(), false);
-        let end = at_word(4, 14.0); // "add"
+        let end = caret(4, 18.0); // after "add"
         drag(&mut app, end, end, true);
         assert_eq!(
             app.word.as_ref().unwrap().text(),
@@ -3763,10 +3720,10 @@ mod tests {
         );
         assert!(app.others.is_empty(), "stretched, not a second selection");
         assert_eq!(app.selection.unwrap().kind, overlay::Kind::Word);
-        // Shift+click elsewhere on the first line picks backwards in reading order
-        drag(&mut app, at_word(0, 9.0), at_word(0, 9.0), true);
+        // Shift+click on the first line: from there to where it began ("while")
+        drag(&mut app, caret(0, 10.0), caret(0, 10.0), true);
         let text = app.word.as_ref().unwrap().text();
-        assert_eq!(text, "Search keeps the page\nfrozen while");
+        assert_eq!(text, "Search keeps the page\nfrozen");
         // a Shift drag still adds a second selection
         circle(&mut app, Point::new(700.0, 300.0), 40.0, true);
         assert_eq!(app.others.len(), 1);
@@ -3926,27 +3883,48 @@ mod tests {
         word.and(app.word.as_ref()).map(word::Picked::text)
     }
 
+    /// A click (press and release, no move) at `p`.
+    fn click_at(app: &mut App, p: Point, shift: bool) {
+        event(app, overlay::Event::Press { at: p, shift });
+        event(app, overlay::Event::Release);
+    }
+
     #[test]
-    fn with_the_screen_read_a_press_on_text_selects_words() {
-        // a drag along a line selects its words, highlighted, not a stroke
+    fn with_the_screen_read_text_is_selected_like_in_a_document() {
+        // a drag selects from the caret under the press to the one under the
+        // pointer: characters, not whole words; a flat highlight, not a stroke
         let mut app = read_app();
-        stroke(&mut app, &[at_word(1, 7.0), at_word(1, 19.0)]);
+        stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
         assert!(app.text_press.is_none() && !app.drawing);
-        // to a line's end and back to the start of the next ones: reading order
-        let end_of_1 = Point::new(60.0 + 30.0 * CHAR, at_word(1, 0.0).y);
+        stroke(&mut app, &[caret(1, 9.4), caret(1, 18.6)]);
+        assert_eq!(picked_text(&app).as_deref(), Some("ile you dr"));
+        // to a line's end and on to the next lines: reading order, middle lines whole
+        let end_of_1 = caret(1, 30.0);
         stroke(
             &mut app,
-            &[at_word(1, 7.0), end_of_1, at_word(3, 0.0), at_word(3, 6.0)],
+            &[caret(1, 7.0), end_of_1, caret(3, 0.0), caret(3, 15.0)],
         );
         assert_eq!(
             picked_text(&app).as_deref(),
             Some("while you drag a finger\nacross the words you want to\ncopy, translate")
         );
-        // a tap on a word selects that word
+        let rects = app.word.as_ref().unwrap().rects();
+        assert_eq!(rects.len(), 3);
+        assert_eq!(rects[1].x, 60.0, "the middle line from its start");
+        assert!((rects[1].x + rects[1].width - (60.0 + 28.0 * CHAR)).abs() < 0.01);
+        // one click on text selects nothing; a double click the word, a triple the line
         let mut app = read_app();
-        stroke(&mut app, &[at_word(4, 6.0), at_word(4, 6.0)]);
+        let shift = caret(4, 8.0); // in "Shift"
+        click_at(&mut app, shift, false);
+        assert!(app.selection.is_none() && app.word.is_none());
+        click_at(&mut app, shift, false);
         assert_eq!(picked_text(&app).as_deref(), Some("Shift"));
+        click_at(&mut app, shift, false);
+        assert_eq!(
+            picked_text(&app).as_deref(),
+            Some("Press Shift to add a second")
+        );
         // a loop that starts on text is a circle
         let mut app = read_app();
         let start = at_word(2, 11.0);
@@ -3969,34 +3947,40 @@ mod tests {
         assert_eq!(app.selection.unwrap().kind, overlay::Kind::Drag);
         // before the screen is read, a drag along text is a stroke too
         let mut app = text_app();
-        stroke(&mut app, &[at_word(1, 7.0), at_word(1, 19.0)]);
+        stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
         assert!(picked_text(&app).is_none());
     }
 
     #[test]
-    fn a_text_selection_has_handles_and_the_text_actions() {
+    fn selected_text_gets_the_text_actions_shift_extends_ctrl_a_takes_all() {
         let mut app = read_app();
-        stroke(&mut app, &[at_word(1, 7.0), at_word(1, 19.0)]); // "while you drag"
+        stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]); // "while you drag"
         let texts = overlay_texts(&app);
         for label in ["Copy", "Translate", "Search", "Ask AI"] {
             assert!(texts.contains(&label.to_string()), "{label}: {texts:?}");
         }
         assert!(!texts.contains(&"Edit".to_string()), "not the action bar");
-        // the end handle (right of "drag") stretches the range to the next line
-        let end = *app.stroke.last().unwrap();
-        stroke(&mut app, &[end, at_word(2, 11.0)]);
+        assert!(
+            !app.handles() || app.grab_at(caret(1, 21.0)).is_none(),
+            "no handles"
+        );
+        // Shift+click stretches it from where it began
+        click_at(&mut app, caret(2, 16.0), true);
         assert_eq!(
             picked_text(&app).as_deref(),
             Some("while you drag a finger\nacross the words")
         );
-        // the start handle (left of "while") moves the start back
-        let start = app.stroke[0];
-        stroke(&mut app, &[start, at_word(1, 0.0)]);
-        assert_eq!(
-            picked_text(&app).as_deref(),
-            Some("frozen while you drag a finger\nacross the words")
+        assert!(app.others.is_empty());
+        // Ctrl+A: all the text on the screen
+        event(
+            &mut app,
+            overlay::Event::Key {
+                letter: 'a',
+                ctrl: true,
+            },
         );
-        // Ask AI asks about the words' box, still the selection
+        assert_eq!(picked_text(&app).as_deref(), Some(TEXT.join("\n").as_str()));
+        // Ask AI asks about the text's box, still the selection
         let _ = app.update(Message::Picked(PickAct::Ask));
         let (_, panel) = app.panel.as_ref().expect("Ask AI opens");
         assert_eq!(panel.kind(), actions::Panel::Ask);
@@ -4338,8 +4322,8 @@ mod tests {
         // a stale read (the box moved on) is dropped
         app.on_text_lines(Rectangle::default(), Ok(Vec::new()));
         assert_eq!(app.text_mode.as_ref().unwrap().boxes.len(), 17);
-        // press on "while", drag to "words": two lines picked, the box stays
-        drag(&mut app, at_word(1, 7.0), at_word(2, 11.0), false);
+        // press before "while", drag to after "words": two lines picked, the box stays
+        drag(&mut app, caret(1, 7.0), caret(2, 16.0), false);
         let mode = app.text_mode.as_ref().unwrap();
         let picked = mode.picked.as_ref().unwrap();
         assert_eq!(picked.text(), "while you drag a finger\nacross the words");
