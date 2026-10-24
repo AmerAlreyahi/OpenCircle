@@ -226,14 +226,13 @@ pub fn run(
             }
             // The user's "Open in browser": never Google's check itself, the search.
             Some(Line::Leave(url)) => {
-                match &ai_url {
-                    Some(ai) if proto::is_captcha(&url) => open(kind, ai),
-                    None if proto::is_captcha(&url) => {
+                match leave(ai_url.as_deref(), &url) {
+                    Some(page) => open(kind, page),
+                    None => {
                         if !on(Event::ToBrowser) {
                             return Ok(());
                         }
                     }
-                    _ => open(kind, &url),
                 }
                 if !on(Event::Left) {
                     return Ok(());
@@ -268,6 +267,18 @@ pub fn run(
         BROKEN.store(true, Ordering::Relaxed);
     }
     Err(format!("the results card did not open (exit {code:?})"))
+}
+
+/// What the browser gets when the user takes the card's page `url` there:
+/// AI Mode's page (its question, not Google's human check); `None` for Lens =
+/// post the crop to Lens again in the browser (its results page is tied to
+/// the card's upload: the browser would show a broken image).
+fn leave<'a>(ai_url: Option<&'a str>, url: &'a str) -> Option<&'a str> {
+    match ai_url {
+        Some(ai) if proto::is_captcha(url) => Some(ai),
+        Some(_) => Some(url),
+        None => None,
+    }
 }
 
 /// `results` after the user resized the card: `None` = back to the default
@@ -372,6 +383,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn open_in_browser_takes_the_search_not_the_cards_session() {
+        let ai = "https://www.google.com/search?udm=50&q=x";
+        let lens = "https://www.google.com/search?vsrid=abc&lns_mode=un";
+        let check = "https://www.google.com/sorry/index?continue=x";
+        assert_eq!(leave(None, lens), None, "Lens: the crop again");
+        assert_eq!(leave(None, check), None);
+        let followed = "https://www.google.com/search?udm=50&q=y";
+        assert_eq!(leave(Some(ai), followed), Some(followed));
+        assert_eq!(leave(Some(ai), check), Some(ai), "never the check itself");
     }
 
     #[test]
