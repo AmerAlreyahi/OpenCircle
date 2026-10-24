@@ -116,6 +116,13 @@ production systems.
 - Selection look (owner, 2026-10-23): the clear area follows the drawn shape
   (no snap-to-box).
 - Translate default target (owner, 2026-10-23): Arabic, changeable in settings.
+- No-key AI (owner, 2026-10-24): until a key is set, Ask AI opens the question
+  (prompt + the selection's text) in Google Search AI Mode in the user's own
+  browser; the image goes only via Lens. API providers stay as options.
+- Screen border (owner, 2026-10-24): a thin gradient border around the captured
+  screen; live translate animates it subtly; snip shows it static.
+- Test machines (owner, 2026-10-24): two test VMs, agents may do anything on them
+  (access details in AGENTS.local.md). Prefer them over the owner's own PC.
 
 ## Domain quirks
 
