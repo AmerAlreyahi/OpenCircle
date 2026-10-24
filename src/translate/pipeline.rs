@@ -268,10 +268,10 @@ pub(super) fn check_frame(rgba: &[u8], width: u32, height: u32) -> Result<(), Er
 }
 
 /// A line the frame's top or bottom edge cuts through (a page scrolled
-/// halfway past it): OCR read half of it and the erase finds no background
-/// beyond it, so it is left as it is.
+/// halfway past it; its OCR box within 3 px of the edge): OCR read half of it
+/// and the erase finds no background beyond it, so it is left as it is.
 pub(super) fn cut_off(b: &TextBlock, height: u32) -> bool {
-    b.bounds[1] <= 1.0 || b.bounds[1] + b.bounds[3] >= height as f32 - 1.0
+    b.bounds[1] <= 3.0 || b.bounds[1] + b.bounds[3] >= height as f32 - 3.0
 }
 
 /// An OCR box hugs the ink; `render`'s erase wants the line's box (it reads

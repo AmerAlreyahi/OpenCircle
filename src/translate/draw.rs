@@ -232,8 +232,14 @@ fn weight(s: &LineStyle, em: f32) -> u16 {
 /// [`MIN_SCALE`] of it. `None` = it does not fit legibly.
 pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
     let s0 = &p.styles[0];
-    let accent = p.styles.iter().find_map(|s| s.accent).unwrap_or(s0.color);
-    let spans = parse_marked(text, s0.color, accent);
+    // a paragraph's colour is most of its lines' (one line of links does
+    // not turn it blue; on a tie, the first line's)
+    let near = |a: [u8; 3], b: [u8; 3]| (0..3).all(|k| a[k].abs_diff(b[k]) <= 40);
+    let color = (p.styles.iter().rev().map(|s| s.color))
+        .max_by_key(|&c| p.styles.iter().filter(|s| near(s.color, c)).count())
+        .unwrap_or(s0.color);
+    let accent = p.styles.iter().find_map(|s| s.accent).unwrap_or(color);
+    let spans = parse_marked(text, color, accent);
     let n = p.styles.len();
     let em = original_em(p);
     // pitch of the original lines (baseline to baseline), if it wrapped
