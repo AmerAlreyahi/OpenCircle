@@ -319,6 +319,7 @@ impl Engine {
         height: u32,
         read: Read,
     ) -> Result<Vec<TextBlock>, OcrError> {
+        let start = std::time::Instant::now();
         let img = to_rgb(rgba, width, height)?;
         let (dw, dh) = detect_size(width, height);
         let small = if (dw, dh) == (width, height) {
@@ -352,6 +353,7 @@ impl Engine {
         let n = boxes.len();
         let q =
             |i: usize, blocks: &[TextBlock]| quality(blocks, n, models::RECOGNIZERS[i].script());
+        let detected = start.elapsed();
         let mut best = (first, self.read_lines(first, &img, &boxes)?);
         if read == Read::Auto && q(first, &best.1) < AUTO_QUALITY {
             for i in 0..models::RECOGNIZERS.len() {
@@ -365,6 +367,11 @@ impl Engine {
             }
             self.auto = best.0;
         }
+        eprintln!(
+            "[opencircle] ocr {width}x{height}: detect at {dw}x{dh} {} ms, {n} lines read in {} ms",
+            detected.as_millis(),
+            (start.elapsed() - detected).as_millis()
+        );
         Ok(reading_order(best.1, models::RECOGNIZERS[best.0].rtl()))
     }
 

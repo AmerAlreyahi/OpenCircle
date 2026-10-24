@@ -223,7 +223,15 @@ fn recognize_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBl
     check_image(rgba, w, h)?;
     let engine = match engine {
         Some(e) => e,
-        None => engine.insert(Engine::load(&models_dir())?),
+        None => {
+            let t = Instant::now();
+            let e = engine.insert(Engine::load(&models_dir())?);
+            eprintln!(
+                "[opencircle] ocr engine loaded in {} ms",
+                t.elapsed().as_millis()
+            );
+            e
+        }
     };
     engine.recognize(rgba, w, h, read)
 }
@@ -239,10 +247,19 @@ fn translate_here(
         .map_err(|e| OcrError::BadImage(format!("bad request: {e}")))?;
     let pair = mt::pair(&source, &target)
         .ok_or_else(|| OcrError::Engine(mt::unavailable(&source, &target)))?;
+    let t = Instant::now();
     if !loaded.as_ref().is_some_and(|(p, _)| std::ptr::eq(*p, pair)) {
         *loaded = None; // free the other pair first
         *loaded = Some((pair, Translator::load(pair, &models_dir())?));
     }
+    let load = t.elapsed();
     let (_, translator) = loaded.as_mut().expect("just loaded");
-    translator.translate(&texts)
+    let out = translator.translate(&texts);
+    eprintln!(
+        "[opencircle] mt {} texts: load {} ms, translate {} ms",
+        texts.len(),
+        load.as_millis(),
+        (t.elapsed() - load).as_millis()
+    );
+    out
 }

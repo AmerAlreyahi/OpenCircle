@@ -989,6 +989,59 @@ fn real_frames() {
     .unwrap();
 }
 
+/// One-shot translate of real screenshots through the real helper (the built
+/// `OC_EXE`, warm as while the overlay is open): stage times, cold then warm
+/// (the helper logs its own stages). Not in CI; needs the models.
+/// `OC_EXE=<target>/release/opencircle OC_REAL=a.png cargo test --release profile_helper -- --ignored --nocapture`
+/// (`taskset -c 0,1` = a 2-core PC)
+#[test]
+#[ignore]
+fn profile_helper() {
+    use super::pipeline::{Cache, Deps, by_sentence, translate_frame};
+    use crate::ai::AiError;
+    use crate::ocr::session::Session;
+    use crate::ocr::{OcrError, Read, TextBlock, worker};
+    use std::sync::Mutex;
+    struct Helper(Mutex<Session>);
+    impl Helper {
+        fn call(&self, p: &[&[u8]]) -> Result<Vec<u8>, OcrError> {
+            self.0.lock().unwrap().call(p)
+        }
+    }
+    impl Deps for Helper {
+        fn recognize(&self, rgba: &[u8], w: u32, h: u32) -> Result<Vec<TextBlock>, OcrError> {
+            worker::recognize_via(|p| self.call(p), rgba, w, h, Read::One(0))
+        }
+        fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
+            let pair = crate::mt::pair("en", target).unwrap();
+            by_sentence(texts, |t| {
+                worker::translate_via(|p| self.call(p), t, pair)
+                    .map_err(|e| AiError::Offline(e.to_string()))
+            })
+        }
+    }
+    let exe = std::env::var("OC_EXE").unwrap();
+    let deps = Helper(Mutex::new(Session::worker(exe.as_ref())));
+    for p in std::env::var("OC_REAL").unwrap().split(',') {
+        let f = crate::capture::from_png(p.as_ref()).unwrap();
+        for run in ["cold", "warm"] {
+            let r = translate_frame(&f.rgba, f.width, f.height, "ar", &Cache::new(4096), &deps)
+                .unwrap();
+            let t = r.timings;
+            eprintln!(
+                "{p} {}x{} {run}: ocr {} ms, translate {} ms, render {} ms, total {} ms; {} blocks",
+                f.width,
+                f.height,
+                t.ocr.as_millis(),
+                t.translate.as_millis(),
+                t.render.as_millis(),
+                t.total.as_millis(),
+                r.blocks.len()
+            );
+        }
+    }
+}
+
 /// Crops of real screenshots (Edge on Wikipedia, Windows at 168 %, ClearType)
 /// with the lines the real OCR found in them, from the full-screen demo that
 /// went wrong: `fixtures/` (cut by a script from the demo's PNGs).
