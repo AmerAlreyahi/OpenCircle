@@ -12,13 +12,14 @@ Press `Print Screen` (region), `Alt+Print Screen` (window) or
 
 | Mode | How |
 |---|---|
-| Region | Drag a rectangle, or circle an area |
+| Region | Point at a window: it is outlined, with its name and size; click to take it. Point at a part of it (a toolbar, a panel, a button; Windows) to outline just that part, and scroll the wheel to step out to the bigger part, the window, the whole screen (and back). Or drag a rectangle, or circle an area. |
 | Window | Click a window |
 | Full | The whole screen |
 | Scrolling | Drag over the scrolling area; OpenCircle scrolls it and stitches the pieces into one tall image. `Esc` or Stop keeps what was gathered. |
 
-While you drag, the edges snap to windows and, on Windows, to the buttons and
-fields of the app you were in; hold `Shift` to place them freely. A loupe beside
+While you drag, the edges snap to windows and, on Windows, to their buttons,
+fields and panels; hold `Shift` to place them freely. On Wayland there is no
+window list: drag or circle the area. A loupe beside
 the pointer shows the pixels under it at 8x, with their position and colour.
 
 **Timer** (Off / 3 s / 5 s / 10 s, next to the modes): the overlay hides and
