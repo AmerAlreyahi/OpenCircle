@@ -21,6 +21,7 @@ capture the screen and show it.
 | `ui/live_layer.rs` | Live translate (Ctrl+Shift+L, tray item): a monitor-sized, always-on-top window made click-through by `live::prepare_layer`, see-through except the patches (`theme::LAYER_CLEAR`); a thread captures about once a second and runs `translate::live::Live::step`, one step at a time. Off = stop flag + window closed. Wayland / no layer: one-shot instead. |
 | `ui/snip.rs` | Snip mode (`opencircle run snip`, tray; default keys Print Screen / Alt+ / Ctrl+ = the circle / window / full_screen target of the three default `snip` quick actions): Region · Window · Full · Scrolling switch, then the editor; scrolling runs on a thread while the overlay is a progress pill beside the area. |
 | `ui/panel.rs` | Result panels (Search, Text, Ask AI): one `surface` docked right (bottom sheet on narrow screens); their state, views and background work. |
+| `ui/border.rs` | The screen-edge border (violet → cyan, theme tokens) over the overlay (one shimmer sweep when it opens), Snip (static) and the live layer (a soft light circles the edge, 20 fps, its base layer). Eight strip images rendered by hand: a frame swaps only the strips whose pixels changed (the renderer redraws only those), and the colour-keyed layer gets no partial alpha. `ANIMATE` turns motion off; Windows' "show animations" setting is respected. `mask` blanks it out of live captures (X11 shows the layer). |
 | `ui/widgets.rs` | The shared components (`pill`, `surface`, `text_button`, `icon_button`, `chip`, `input`, `editor`, `progress`, `bubble`, `scroll`, text styles, `with_tip`). Only place that styles a widget. |
 | `ui/theme.rs` | The only place colours live (Light/Dark palettes, accent, dims). `apply(Theme)` = the Settings choice, `set_os(Mode)` = what the OS reports; System follows the OS. |
 | `ui/tray.rs` | Tray icon and menu (Circle to search, Settings…, Quit). Without libayatana-appindicator (Linux) it logs one line and the app runs on shortcut / CLI. |
@@ -88,7 +89,7 @@ if it is theme-independent). Nowhere else.
 - `OPENCIRCLE_TEST_FRAME=<8-bit RGBA PNG>`: capture returns this image instead of the screen.
 - `OPENCIRCLE_TEST_SCROLL=<tall PNG>`: a scrolling snip reads this page (100 px per wheel notch)
   instead of scrolling the screen. With the editor open, its Esc (Back) takes the test shot.
-- `OPENCIRCLE_TEST_LIVE_SHOT=<out.png>`: live translate saves its layer once the first patches are drawn.
+- `OPENCIRCLE_TEST_LIVE_SHOT=<out.png>`: live translate saves its layer once the first patches (or the first error) are drawn.
 - `OPENCIRCLE_TEST_SHOT=<out.png>`: Esc saves what the overlay shows before closing
   (shot ~150 ms after Esc, with no message in between: a relayout would drop the
   text editor's drawn text from the shot).

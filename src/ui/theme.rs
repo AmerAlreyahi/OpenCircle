@@ -57,9 +57,11 @@ const LIGHT: Palette = Palette {
     danger: Color::from_rgb8(0xc6, 0x28, 0x28),
 };
 
-/// Selection stroke gradient (both themes): violet → cyan.
+/// Selection stroke and screen border gradient (both themes): violet → cyan.
 pub const STROKE_START: Color = Color::from_rgb8(0xa9, 0x9b, 0xff);
 pub const STROKE_END: Color = Color::from_rgb8(0x5f, 0xe0, 0xf0);
+/// The screen border's shimmer sweep lights the gradient toward this.
+pub const SHIMMER: Color = Color::WHITE;
 
 /// Accent gradient (both themes): primary buttons, active tools.
 pub const ACCENT_START: Color = Color::from_rgb8(0x8f, 0x80, 0xff);

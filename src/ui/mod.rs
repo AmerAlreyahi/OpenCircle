@@ -1,5 +1,6 @@
 //! The iced daemon: owns the (pre-created, hidden) overlay window and its state.
 mod bar;
+mod border;
 mod edit;
 mod live_layer;
 mod onboarding;
@@ -1038,6 +1039,14 @@ impl App {
                 .height(Fill)
                 .content_fit(ContentFit::Fill),
             Element::from(canvas(overlay).width(Fill).height(Fill)).map(Message::Overlay),
+            border::view(
+                match snip {
+                    Some(_) => border::Mode::Static,
+                    None => border::Mode::Sweep,
+                },
+                self.scale,
+                false,
+            ),
         ];
         if let Some(edit) = &self.edit {
             if edit.is_open() {

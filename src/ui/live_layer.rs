@@ -13,7 +13,7 @@ use iced::widget::{container, image, pin, space, stack};
 use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Task, task};
 
-use super::{background, theme, widgets};
+use super::{background, border, theme, widgets};
 use crate::capture;
 use crate::config;
 use crate::live::{self, LayerError};
@@ -29,7 +29,7 @@ fn interval() -> Duration {
 /// The first live run's note, shown once.
 const NOTE: &str = "Games must run borderless or windowed";
 const NOTE_TIME: Duration = Duration::from_secs(6);
-/// Test hook: after the first patches, the layer is saved here (PNG).
+/// Test hook: after the first patches (or error), the layer is saved here (PNG).
 const TEST_SHOT: &str = "OPENCIRCLE_TEST_LIVE_SHOT";
 
 /// The monitor the layer covers (physical px).
@@ -179,14 +179,12 @@ impl Live {
             Msg::Patches(patches) => {
                 self.patches = patches;
                 self.error = None;
-                if let (Some(window), false) = (self.window(), self.shot_taken)
-                    && std::env::var_os(TEST_SHOT).is_some()
-                {
-                    self.shot_taken = true;
-                    return Outcome::Task(shot_later(window));
-                }
+                return self.test_shot();
             }
-            Msg::Failed(e) => self.error = Some(e),
+            Msg::Failed(e) => {
+                self.error = Some(e);
+                return self.test_shot();
+            }
             Msg::NoteDone => {
                 self.note = false;
                 let mut cfg = config::current();
@@ -200,6 +198,18 @@ impl Live {
             Msg::Monitor(Ok(_)) => {}
         }
         Outcome::Task(Task::none())
+    }
+
+    /// Test hook: shoot the layer once, after its first patches or its first
+    /// error (no key or no models: the layer and its border still show).
+    fn test_shot(&mut self) -> Outcome {
+        match self.window() {
+            Some(window) if !self.shot_taken && std::env::var_os(TEST_SHOT).is_some() => {
+                self.shot_taken = true;
+                Outcome::Task(shot_later(window))
+            }
+            _ => Outcome::Task(Task::none()),
+        }
     }
 
     /// Turns live mode off: the step thread ends (after a running step), the
@@ -227,7 +237,7 @@ impl Live {
             let mut steps = Steps::new();
             let mut last_error = None;
             let tick = || {
-                let frame = match capture::monitor_under_cursor() {
+                let mut frame = match capture::monitor_under_cursor() {
                     Ok(f) => f,
                     Err(e) => return report(&mut last_error, format!("capture failed: {e}")),
                 };
@@ -238,6 +248,7 @@ impl Live {
                     return None;
                 }
                 let (w, h) = (frame.width, frame.height);
+                border::mask(&mut frame.rgba, w, h, monitor.scale);
                 match steps.step(&frame.rgba, w, h, &target, &cache, &deps) {
                     Ok(None) => None,
                     Ok(Some(t)) => {
@@ -275,7 +286,14 @@ impl Live {
         let Phase::Open { monitor, .. } = self.phase else {
             return space().into();
         };
-        let mut layers = stack![space().width(Fill).height(Fill)];
+        // The border first: in the window's base layer (each further stack
+        // child is a layer, and each layer costs a clip-mask pass per changed
+        // strip), and at a fixed index, so new patches never restart it.
+        let mut layers = stack![border::view(
+            border::Mode::Flow,
+            monitor.scale,
+            cfg!(windows)
+        )];
         for p in &self.patches {
             let [x, y, w, h] = p.bounds.map(|v| v as f32 / monitor.scale);
             let patch = image(p.image.clone())
