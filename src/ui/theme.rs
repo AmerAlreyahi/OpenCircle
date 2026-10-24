@@ -8,6 +8,9 @@ use crate::config::Theme;
 /// One theme's surface colours.
 pub struct Palette {
     pub panel: Color,
+    /// `panel` laid over `window` as one solid colour: for panels over busy
+    /// content (the frozen frame), where see-through glass shows text behind.
+    pub panel_solid: Color,
     pub border: Color,
     pub text: Color,
     /// Secondary text: key hints, captions.
@@ -27,15 +30,31 @@ pub struct Palette {
     pub danger: Color,
 }
 
+/// `over` (with its alpha) laid on `under`, as one opaque colour.
+const fn solid(over: Color, under: Color) -> Color {
+    Color {
+        r: over.r * over.a + under.r * (1.0 - over.a),
+        g: over.g * over.a + under.g * (1.0 - over.a),
+        b: over.b * over.a + under.b * (1.0 - over.a),
+        a: 1.0,
+    }
+}
+
+const DARK_PANEL: Color = Color::from_rgba8(22, 22, 34, 0.86);
+const DARK_WINDOW: Color = Color::from_rgb8(0x12, 0x13, 0x1f);
+const LIGHT_PANEL: Color = Color::from_rgba8(255, 255, 255, 0.90);
+const LIGHT_WINDOW: Color = Color::from_rgb8(0xf6, 0xf6, 0xfa);
+
 const DARK: Palette = Palette {
-    panel: Color::from_rgba8(22, 22, 34, 0.86),
+    panel: DARK_PANEL,
+    panel_solid: solid(DARK_PANEL, DARK_WINDOW),
     border: Color::from_rgba8(255, 255, 255, 0.09),
     text: Color::from_rgb8(0xec, 0xec, 0xf4),
     muted: Color::from_rgb8(0xa3, 0xa3, 0xb8),
     shadow: Color::from_rgba8(0, 0, 0, 0.35),
     hover: Color::from_rgba8(255, 255, 255, 0.08),
     pressed: Color::from_rgba8(255, 255, 255, 0.14),
-    window: Color::from_rgb8(0x12, 0x13, 0x1f),
+    window: DARK_WINDOW,
     field: Color::from_rgba8(255, 255, 255, 0.06),
     field_focus: Color::from_rgba8(255, 255, 255, 0.12),
     keycap: Color::from_rgba8(255, 255, 255, 0.10),
@@ -43,14 +62,15 @@ const DARK: Palette = Palette {
 };
 
 const LIGHT: Palette = Palette {
-    panel: Color::from_rgba8(255, 255, 255, 0.90),
+    panel: LIGHT_PANEL,
+    panel_solid: solid(LIGHT_PANEL, LIGHT_WINDOW),
     border: Color::from_rgba8(16, 16, 40, 0.10),
     text: Color::from_rgb8(0x1a, 0x1a, 0x24),
     muted: Color::from_rgb8(0x5b, 0x5b, 0x6e),
     shadow: Color::from_rgba8(16, 16, 40, 0.15),
     hover: Color::from_rgba8(16, 16, 40, 0.06),
     pressed: Color::from_rgba8(16, 16, 40, 0.11),
-    window: Color::from_rgb8(0xf6, 0xf6, 0xfa),
+    window: LIGHT_WINDOW,
     field: Color::from_rgba8(16, 16, 40, 0.05),
     field_focus: Color::from_rgba8(16, 16, 40, 0.10),
     keycap: Color::from_rgba8(255, 255, 255, 0.95),
@@ -145,6 +165,23 @@ mod tests {
     #[test]
     fn light_and_dark_differ() {
         assert_ne!(DARK.text, LIGHT.text);
+    }
+
+    #[test]
+    fn solid_panels_are_opaque_and_between_panel_and_window() {
+        for p in [&DARK, &LIGHT] {
+            assert_eq!(p.panel_solid.a, 1.0);
+            for (s, a, b) in [
+                (p.panel_solid.r, p.panel.r, p.window.r),
+                (p.panel_solid.g, p.panel.g, p.window.g),
+                (p.panel_solid.b, p.panel.b, p.window.b),
+            ] {
+                assert!(s >= a.min(b) - 1e-6 && s <= a.max(b) + 1e-6);
+            }
+        }
+        // 0.86 of (22,22,34) over (18,19,31): close to the panel colour
+        assert!((DARK.panel_solid.r - (22.0 * 0.86 + 18.0 * 0.14) / 255.0).abs() < 1e-3);
+        assert!((LIGHT.panel_solid.r - (255.0 * 0.9 + 246.0 * 0.1) / 255.0).abs() < 1e-3);
     }
 
     #[test]

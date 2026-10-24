@@ -338,6 +338,8 @@ pub fn open_mailto(address: &str) -> io::Result<()> {
 }
 
 fn spawn(target: &std::ffi::OsStr) -> io::Result<()> {
+    #[cfg(windows)]
+    hand_off_foreground();
     // Debug builds only: tests and manual runs point this at a script that
     // gets the target as its one argument, so no real browser opens.
     #[cfg(debug_assertions)]
@@ -348,6 +350,58 @@ fn spawn(target: &std::ffi::OsStr) -> io::Result<()> {
         return reap(Command::new(program).arg(target));
     }
     reap(&mut launcher(target))
+}
+
+/// Windows keeps a new window behind the always-on-top overlay, and only lets a
+/// process take the foreground if the foreground process allows it. Before the
+/// browser starts: allow any process to take the foreground, and drop our own
+/// full-screen overlay out of the topmost band (the next `show` re-asserts it).
+/// The live layer (click-through) and small pins are left alone.
+#[cfg(windows)]
+fn hand_off_foreground() {
+    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        ASFW_ANY, AllowSetForegroundWindow, EnumWindows, GWL_EXSTYLE, GetSystemMetrics,
+        GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, HWND_NOTOPMOST, IsWindowVisible,
+        SM_CXSCREEN, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, WS_EX_TOPMOST,
+        WS_EX_TRANSPARENT,
+    };
+    use windows::core::BOOL;
+
+    unsafe extern "system" fn each(hwnd: HWND, _: LPARAM) -> BOOL {
+        // SAFETY: plain queries on a window handle EnumWindows just gave us.
+        unsafe {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&raw mut pid));
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            let mut r = RECT::default();
+            let big = GetWindowRect(hwnd, &mut r).is_ok()
+                && (r.right - r.left) * 10 >= GetSystemMetrics(SM_CXSCREEN) * 9;
+            if pid == std::process::id()
+                && IsWindowVisible(hwnd).as_bool()
+                && ex & WS_EX_TOPMOST.0 != 0
+                && ex & WS_EX_TRANSPARENT.0 == 0
+                && big
+            {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_NOTOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+        }
+        BOOL(1)
+    }
+
+    // SAFETY: plain Win32 calls; `each` keeps no state.
+    unsafe {
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+        let _ = EnumWindows(Some(each), LPARAM(0));
+    }
 }
 
 /// The OS command that opens `target` in the default app. `target` is its one

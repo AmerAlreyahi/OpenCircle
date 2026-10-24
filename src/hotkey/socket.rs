@@ -8,7 +8,7 @@
 //!   `opencircle-<uid>` dir we own under the temp dir; peers must have our uid.
 //! - Windows: a pipe named after the user whose DACL admits only its owner.
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{ListenerOptions, Name};
@@ -125,6 +125,38 @@ pub fn forward(command: &str) -> io::Result<()> {
     let mut stream = LocalSocketStream::connect(endpoint()?)?;
     stream.write_all(command.as_bytes())?;
     stream.write_all(b"\n")
+}
+
+/// How long `forward_or_start` waits for a freshly started instance.
+const START_WAIT: Duration = Duration::from_secs(5);
+const START_POLL: Duration = Duration::from_millis(50);
+
+/// Sends `command` to the running instance; with none running, calls `start` (it
+/// launches the app in the background) and retries until the socket accepts or
+/// `START_WAIT` is over.
+pub fn forward_or_start(command: &str, start: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
+    retry_forward(|| forward(command), start, START_WAIT, START_POLL)
+}
+
+fn retry_forward(
+    mut send: impl FnMut() -> io::Result<()>,
+    start: impl FnOnce() -> io::Result<()>,
+    wait: Duration,
+    poll: Duration,
+) -> io::Result<()> {
+    if send().is_ok() {
+        return Ok(());
+    }
+    start()?;
+    let deadline = Instant::now() + wait;
+    loop {
+        std::thread::sleep(poll);
+        match send() {
+            Ok(()) => return Ok(()),
+            Err(e) if Instant::now() >= deadline => return Err(e),
+            Err(_) => {}
+        }
+    }
 }
 
 /// Becomes the running instance: serves commands from later launches on a thread.
@@ -390,6 +422,56 @@ mod tests {
             socket_dir(Some("".into()), 42, tmp),
             tmp.join("opencircle-42")
         );
+    }
+
+    #[test]
+    fn forward_or_start_starts_once_and_waits_for_the_socket() {
+        let err = || Err(io::Error::from(io::ErrorKind::NotFound));
+        let (mut sends, mut starts) = (0, 0);
+        // Socket comes up on the 4th try, after `start` ran once.
+        let r = retry_forward(
+            || {
+                sends += 1;
+                if sends >= 4 { Ok(()) } else { err() }
+            },
+            || {
+                starts += 1;
+                Ok(())
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+        );
+        assert!(r.is_ok());
+        assert_eq!((sends, starts), (4, 1));
+        // A running instance: no start at all.
+        let mut started = false;
+        let r = retry_forward(
+            || Ok(()),
+            || {
+                started = true;
+                Ok(())
+            },
+            Duration::ZERO,
+            Duration::ZERO,
+        );
+        assert!(r.is_ok() && !started);
+        // Never comes up: bounded, and the error comes back.
+        let t = Instant::now();
+        let r = retry_forward(
+            err,
+            || Ok(()),
+            Duration::from_millis(30),
+            Duration::from_millis(5),
+        );
+        assert!(r.is_err() && t.elapsed() < Duration::from_secs(2));
+        // Cannot start: error at once, no waiting.
+        let r = retry_forward(
+            err,
+            || Err(io::Error::other("no exe")),
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        );
+        assert_eq!(r.unwrap_err().to_string(), "no exe");
     }
 
     #[test]

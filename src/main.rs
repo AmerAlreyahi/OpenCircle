@@ -74,6 +74,21 @@ fn attach_parent_console() {
     }
 }
 
+/// Starts this exe with no arguments as the resident app, detached from the
+/// terminal (own process group / no console, no stdio), and returns at once.
+fn start_detached() -> std::io::Result<()> {
+    use std::process::{Command, Stdio};
+    let mut app = Command::new(std::env::current_exe()?);
+    app.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut app, 0x0000_0008 | 0x0000_0200); // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut app, 0); // Ctrl-C / terminal hang-up skip it
+    app.spawn().map(drop) // never waited for: it runs until Quit
+}
+
 fn main() -> ExitCode {
     #[cfg(all(windows, not(debug_assertions)))]
     attach_parent_console();
@@ -95,12 +110,21 @@ fn main() -> ExitCode {
         }
     };
 
-    // A running instance takes the command; this launch is done.
+    // A running instance takes the command; this launch is done. A command with
+    // none running starts the app in the background first, so the terminal is
+    // not taken over (a bare launch, e.g. a double-click, is the app itself).
     let line = command.as_ref().map(hotkey::Command::line);
-    if hotkey::forward(line.as_deref().unwrap_or("")).is_ok() {
-        if command.is_none() {
-            eprintln!("OpenCircle is already running");
-        }
+    if let Some(line) = &line {
+        return match hotkey::forward_or_start(line, start_detached) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("OpenCircle did not start: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if hotkey::forward("").is_ok() {
+        eprintln!("OpenCircle is already running");
         return ExitCode::SUCCESS;
     }
 
@@ -116,9 +140,6 @@ fn main() -> ExitCode {
     hotkey::start(tx.clone(), &config);
     config::set_current(config);
     let _tray = ui::start_tray(tx.clone());
-    if let Some(command) = &command {
-        let _ = tx.unbounded_send(hotkey::trigger(command, Instant::now()));
-    }
 
     match ui::run(rx) {
         Ok(()) => ExitCode::SUCCESS,

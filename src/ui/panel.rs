@@ -440,7 +440,7 @@ impl Panel {
             };
             header = header.push(space::horizontal()).push(widgets::caption(who));
         }
-        let panel = widgets::surface(column![header, body].spacing(16).height(Fill))
+        let panel = widgets::docked(column![header, body].spacing(16).height(Fill))
             .padding(20)
             .width(area.width)
             .height(area.height);
