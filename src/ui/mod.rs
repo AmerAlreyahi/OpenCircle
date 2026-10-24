@@ -593,10 +593,18 @@ impl App {
         // iced makes it visible before going full-screen, so whatever is shown
         // first must already cover the monitor (no small black box flash).
         // ponytail: mixed-DPI multi-monitor placement untested (needs real hardware).
-        window::move_to(self.overlay, self.origin)
+        let show = window::move_to(self.overlay, self.origin)
             .chain(window::resize(self.overlay, self.screen))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
-            .chain(window::gain_focus(self.overlay))
+            .chain(window::gain_focus(self.overlay));
+        // A Lens / Ask hand-off to the browser drops the overlay out of the topmost
+        // band behind iced's back (`lens::hand_off_foreground`): Normal then
+        // AlwaysOnTop makes it apply again.
+        #[cfg(windows)]
+        let show = window::set_level(self.overlay, Level::Normal)
+            .chain(window::set_level(self.overlay, Level::AlwaysOnTop))
+            .chain(show);
+        show
     }
 
     fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {

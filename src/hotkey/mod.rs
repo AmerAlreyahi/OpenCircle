@@ -8,7 +8,7 @@
 mod portal;
 mod socket;
 
-pub use socket::{Command, forward, listen};
+pub use socket::{Command, forward, forward_or_start, listen};
 
 use std::cell::RefCell;
 use std::sync::{Mutex, MutexGuard};

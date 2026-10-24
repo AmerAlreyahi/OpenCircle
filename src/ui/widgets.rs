@@ -58,6 +58,18 @@ pub fn surface<'a, Message: 'a>(
         .style(|_| glass(20.0))
 }
 
+/// A `surface` docked over busy content (the result panel over the frozen
+/// frame): the same glass, but solid, so nothing behind shows through.
+pub fn docked<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
+    container(content).padding(SURFACE_PADDING).style(|_| {
+        let glass = glass(20.0);
+        container::Style {
+            background: Some(theme::current().panel_solid.into()),
+            ..glass
+        }
+    })
+}
+
 /// A `surface` for a colour-keyed window (the live controller): opaque and
 /// without a shadow, like `layer_pill`.
 pub fn solid_surface<'a, Message: 'a>(
@@ -782,7 +794,7 @@ mod forms {
             .menu_style(|_| {
                 let palette = theme::current();
                 iced::overlay::menu::Style {
-                    background: opaque(palette.panel, palette.window).into(),
+                    background: palette.panel_solid.into(),
                     border: Border {
                         color: palette.border,
                         width: 1.0,
@@ -798,16 +810,6 @@ mod forms {
                     },
                 }
             })
-    }
-
-    /// `panel` laid over `under`, as one opaque colour (a menu can't show what is behind it).
-    fn opaque(panel: Color, under: Color) -> Color {
-        let mix = |p: f32, u: f32| p * panel.a + u * (1.0 - panel.a);
-        Color::from_rgb(
-            mix(panel.r, under.r),
-            mix(panel.g, under.g),
-            mix(panel.b, under.b),
-        )
     }
 
     /// Text-only button, as big as `text_button`. `on_press: None` = disabled (quiet, dimmed).
