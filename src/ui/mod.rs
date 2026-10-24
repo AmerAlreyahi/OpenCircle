@@ -11,6 +11,7 @@ mod picker;
 mod quick;
 mod settings;
 mod snip;
+mod song;
 pub mod theme;
 mod translate;
 mod tray;
@@ -151,6 +152,12 @@ enum Message {
     /// While the result card is dragged: the pointer moved / was let go.
     CardMoved(Point),
     CardReleased,
+    /// The music button (or the song_search quick action).
+    SongStart,
+    /// From the song search with this number (stale numbers are ignored).
+    Song(u32, song::Msg),
+    /// Whether a song-search key is saved (checked once, off the UI thread).
+    SongKey,
 }
 
 /// What the select-text popup does with the picked words.
@@ -325,6 +332,9 @@ struct App {
     card_drag: Option<(widgets::card::Drag, Option<Point>)>,
     /// The pointer is on the card's resize edge (its grip shows).
     card_hover: bool,
+    /// Song search on this overlay, and its number.
+    song: Option<(u32, song::Session)>,
+    songs: u32,
 }
 
 /// Translations kept for reuse (each a short text).
@@ -399,6 +409,8 @@ impl App {
             card: None,
             card_drag: None,
             card_hover: false,
+            song: None,
+            songs: 0,
         }
     }
 
@@ -453,7 +465,13 @@ impl App {
             // Cancelled or timed out meanwhile: the frame is dropped (the portal's
             // file is already deleted).
             Message::Captured(n, ..) if self.capturing != Some(n) => Task::none(),
-            Message::Captured(_, at, shot) => self.open(at, shot),
+            Message::Captured(_, at, shot) => {
+                let opened = self.open(at, shot);
+                Task::batch([opened, self.check_song_key()])
+            }
+            Message::SongKey => Task::none(), // remembered by `music::check_key`
+            Message::SongStart => self.start_song(),
+            Message::Song(id, msg) => self.on_song(id, msg),
             Message::CaptureTimedOut(n) if self.capturing == Some(n) => {
                 eprintln!(
                     "capture failed: no screenshot after {} s; try again",
@@ -675,6 +693,10 @@ impl App {
             let editor = first.map(|next| self.snip_next(Some(next)));
             return editor.unwrap_or_else(Task::none).chain(self.show());
         };
+        if let Quick::Song = quick {
+            let song = self.run_quick(quick); // listens at once, no area
+            return self.show().chain(song);
+        }
         let Start::Area(area) = quick::start(target, size, self.last_region()) else {
             return self.show(); // the first selection runs it
         };
@@ -1400,6 +1422,7 @@ impl App {
                 })
                 .map(Message::TextRead)
             }
+            Quick::Song => self.start_song(),
             Quick::Explain => match self.crop() {
                 Some(crop) => self.open_panel(
                     actions::Panel::Ask,
@@ -1723,8 +1746,63 @@ impl App {
         self.morph = None;
         self.text_mode = None;
         self.more = false;
+        self.song = None; // stops listening
         self.hiding = Hiding::Empty;
         Task::none()
+    }
+
+    /// Song search: listens on a thread; its pill, then its card, over the overlay.
+    fn start_song(&mut self) -> Task<Message> {
+        self.songs = self.songs.wrapping_add(1);
+        let id = self.songs;
+        // The song's card takes the result card's turn: one card at a time.
+        self.panel = None;
+        let (session, work) = song::Session::start();
+        self.song = Some((id, session));
+        work.map(move |msg| Message::Song(id, msg))
+    }
+
+    fn on_song(&mut self, id: u32, msg: song::Msg) -> Task<Message> {
+        let Some((current, session)) = &mut self.song else {
+            return Task::none();
+        };
+        if *current != id {
+            return Task::none();
+        }
+        match session.update(msg) {
+            song::Outcome::None => Task::none(),
+            song::Outcome::Close => {
+                self.song = None;
+                Task::none()
+            }
+            song::Outcome::Retry => self.start_song(),
+            // The browser comes to the front: the overlay closes so it isn't on top.
+            song::Outcome::Open(url) => {
+                let open = background(move |_: &UnboundedSender<()>| {
+                    if let Err(e) = crate::lens::open_link(&url) {
+                        eprintln!("[opencircle] can't open the link: {e}");
+                    }
+                })
+                .discard();
+                Task::batch([open, self.close()])
+            }
+        }
+    }
+
+    /// The music button shows only once a key is known to be saved.
+    fn has_song_key(&self) -> bool {
+        crate::music::key_known() == Some(true)
+    }
+
+    /// First open: ask the keyring (off the UI thread) whether a song key is saved.
+    fn check_song_key(&self) -> Task<Message> {
+        if crate::music::key_known().is_some() || cfg!(test) {
+            return Task::none();
+        }
+        background(|tx| {
+            let _ = tx.unbounded_send(crate::music::check_key());
+        })
+        .map(|_| Message::SongKey)
     }
 
     /// Translate in place: the selection (or, with no selection left, the whole
@@ -1923,6 +2001,10 @@ impl App {
                 .center_x(Fill)
                 .padding(24)
                 .into()
+        } else if let Some((id, song)) = &self.song {
+            let id = *id;
+            song.view(self.screen)
+                .map(move |msg| Message::Song(id, msg))
         } else if let Some((id, panel)) = &self.panel {
             let id = *id;
             panel
@@ -1941,10 +2023,18 @@ impl App {
                 _ => space().into(),
             }
         } else {
-            container(widgets::pill(HINT))
-                .center_x(Fill)
-                .padding(24)
-                .into()
+            let hint = container(widgets::pill(HINT)).center_x(Fill).padding(24);
+            // Nothing selected: the bottom bar holds only the music button.
+            match song::button(self.has_song_key(), Message::SongStart) {
+                Some(music) => {
+                    let bar = container(opaque(widgets::surface(music)))
+                        .center_x(Fill)
+                        .align_bottom(Fill)
+                        .padding(ASK_MARGIN);
+                    stack![hint, bar].into()
+                }
+                None => hint.into(),
+            }
         };
         layers = layers.push(top);
         // Beside a panel (an auto-search's): the chips, and the bar after More.
@@ -2046,8 +2136,12 @@ impl App {
             Message::AskInput,
             Message::AskSubmit,
         );
+        let mut bar = iced::widget::row![field.width(ASK_WIDTH)].align_y(iced::Center);
+        if let Some(music) = song::button(self.has_song_key(), Message::SongStart) {
+            bar = bar.push(music);
+        }
         // opaque: a press on it doesn't start a new selection.
-        let bar = opaque(widgets::surface(field.width(ASK_WIDTH)));
+        let bar = opaque(widgets::surface(bar));
         container(bar)
             .center_x(Fill)
             .align_bottom(Fill)

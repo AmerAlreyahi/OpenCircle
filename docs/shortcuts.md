@@ -45,7 +45,7 @@ file:
 
 ```toml
 [[quick_actions]]
-action = "copy_text"        # translate | ai_explain | copy_text | lens | snip | ai | text | edit | copy | save
+action = "copy_text"        # translate | ai_explain | copy_text | lens | snip | song_search | ai | text | edit | copy | save
 shortcut = "Ctrl+Shift+X"   # "" = not bound
 target = "circle"           # full_screen | circle | last_region | window
 live = false                # translate only: keep translating
@@ -86,6 +86,7 @@ opencircle run snip
 opencircle run snip --target window
 opencircle run copy_text --target circle
 opencircle run lens --target circle
+opencircle run song_search          # needs your key: see song-search.md
 ```
 
 Targets are `full_screen`, `circle`, `last_region`, `window`; without

@@ -35,6 +35,7 @@ ICONS=$(printf '%s,' \
   U+E04E `# arrow-up` \
   U+E1B1 `# x` \
   U+E258 `# pin (editor: pin to screen)` \
+  U+E125 `# music (song search)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

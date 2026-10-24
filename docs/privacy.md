@@ -14,6 +14,7 @@ Every network action is something you start.
 | Translate with the **Offline** engine | Nothing. The model runs on your PC | Nobody |
 | Use **Text** for the first time | Nothing of yours. It downloads the OCR runtime and models (about 20 MB) | GitHub (ONNX Runtime releases and the oar-ocr model release), checked against pinned checksums |
 | Translate offline for the first time, after you agree | Nothing of yours. It downloads the translation model (about 120 MB, plus the OCR files if missing) | Hugging Face (a pinned commit of the OPUS-MT model) and GitHub, checked against pinned checksums |
+| Press the **music button** (song search, only after you add your own key) | A ~10-second clip of the audio you choose (what this PC plays, or the microphone), plus your key. Then the song's cover image is downloaded | AudD (`api.audd.io`); the cover from Apple's image server (`mzstatic.com`) |
 | Anything else (circle, copy, save, snip, annotate, read text) | Nothing | Nobody |
 
 Lens and your AI provider have their own privacy policies; OpenCircle cannot
@@ -21,7 +22,7 @@ control what they do with what you send.
 
 ## Keys
 
-AI API keys are stored only in the operating system's keyring (Windows
+AI API keys and the song-search key are stored only in the operating system's keyring (Windows
 Credential Manager; Secret Service such as GNOME Keyring or KWallet on Linux).
 They are not written to the config file, logs or any export, and they are sent
 only to the server you configured. A remote server must use `https://`; plain
@@ -39,6 +40,10 @@ only to the server you configured. A remote server must use `https://`; plain
   right after it is read.
 - **OCR and offline translation files** (runtime and models, no personal
   data) stay in your user data folder so they are downloaded once.
+- **Song search** listens only while the "Listening…" pill shows; the clip
+  stays in memory and is dropped once AudD has answered. Song history is off
+  by default; when on, titles and artists (no audio) are kept in
+  `song_history.json` in your local data folder.
 - **Settings** are in `config.toml` in your user config folder; they hold no
   keys.
 

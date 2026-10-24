@@ -70,7 +70,12 @@ fn is_wayland(display: Option<&std::ffi::OsStr>, session_type: Option<&std::ffi:
 
 pub(crate) fn from_png(path: &std::ffi::OsStr) -> Result<Frame, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
+    decode_png(std::io::BufReader::new(file))
+}
+
+/// An RGB or RGBA PNG as RGBA (also the song card's cover).
+pub(crate) fn decode_png(png: impl std::io::BufRead + std::io::Seek) -> Result<Frame, String> {
+    let mut decoder = png::Decoder::new(png);
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
     let mut buf = vec![0; reader.output_buffer_size().ok_or("PNG too large")?];

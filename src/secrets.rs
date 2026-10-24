@@ -1,5 +1,5 @@
-//! AI API keys in the OS keyring (Windows Credential Manager, Linux Secret
-//! Service). One entry per provider. Never a plain file: with no keyring the
+//! API keys in the OS keyring (Windows Credential Manager, Linux Secret
+//! Service). One entry per AI provider, one per song-search service (`by_name`). Never a plain file: with no keyring the
 //! caller gets `SecretsError::Unavailable` and must tell the user.
 
 use std::fmt;
@@ -55,8 +55,42 @@ impl fmt::Display for SecretsError {
 
 impl std::error::Error for SecretsError {}
 
-fn entry(provider: Provider) -> Result<keyring::Entry, SecretsError> {
-    keyring::Entry::new(SERVICE, &format!("ai-key-{}", provider.id())).map_err(map_err)
+/// The keyring entry `name` (`ai-key-<provider>`, `song-key-<service>`).
+fn named(name: &str) -> Result<keyring::Entry, SecretsError> {
+    keyring::Entry::new(SERVICE, name).map_err(map_err)
+}
+
+/// Keys that are not an AI provider's (song search's service), by entry name.
+pub mod by_name {
+    use super::*;
+
+    pub fn get(name: &str) -> Result<Option<Secret>, SecretsError> {
+        match named(name)?.get_password() {
+            Ok(k) => Ok(Some(Secret::new(k))),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(map_err(e)),
+        }
+    }
+
+    /// Is a key saved? Finds the entry without reading it (no unlock prompt).
+    pub fn exists(name: &str) -> Result<bool, SecretsError> {
+        match named(name)?.inner.get_credential() {
+            Ok(_) => Ok(true),
+            Err(keyring::Error::NoEntry) => Ok(false),
+            Err(e) => Err(map_err(e)),
+        }
+    }
+
+    pub fn set(name: &str, key: &Secret) -> Result<(), SecretsError> {
+        named(name)?.set_password(key.expose()).map_err(map_err)
+    }
+
+    pub fn delete(name: &str) -> Result<(), SecretsError> {
+        match named(name)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(map_err(e)),
+        }
+    }
 }
 
 /// Only fixed text or the error's `Display`: never `Debug`, because
@@ -74,25 +108,22 @@ fn map_err(e: keyring::Error) -> SecretsError {
     }
 }
 
+fn ai_entry(provider: Provider) -> String {
+    format!("ai-key-{}", provider.id())
+}
+
 /// The stored key, or `None` if none was saved.
 pub fn get(provider: Provider) -> Result<Option<Secret>, SecretsError> {
-    match entry(provider)?.get_password() {
-        Ok(k) => Ok(Some(Secret::new(k))),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(map_err(e)),
-    }
+    by_name::get(&ai_entry(provider))
 }
 
 pub fn set(provider: Provider, key: &Secret) -> Result<(), SecretsError> {
-    entry(provider)?.set_password(key.expose()).map_err(map_err)
+    by_name::set(&ai_entry(provider), key)
 }
 
 /// Deleting a key that does not exist is fine.
 pub fn delete(provider: Provider) -> Result<(), SecretsError> {
-    match entry(provider)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(map_err(e)),
-    }
+    by_name::delete(&ai_entry(provider))
 }
 
 #[cfg(test)]

@@ -39,3 +39,11 @@ dozens of requests per press against a 3 req/s limit, and still wrong matches).
 Snippet recognition needs a landmark/peak-hash index (Shazam, ACRCloud, AudD). None
 is free + documented + private: Shazam has no public API (clients use a
 reverse-engineered endpoint), ACRCloud and AudD are paid with small trial tiers.
+
+## Follow-up: AudD (clip recognition, user's own key)
+
+10 s clips, mono WAV, AudD's `test` token (about 10 free calls a day): 8/8
+clips matched the audio (8 kHz and 12 kHz both work), 0.35–0.93 s per call,
+240 KB per 10 s at 12 kHz. For these royalty-free tracks 3 of 8 named Kevin
+MacLeod; the rest named re-uploads that use the same audio (an artefact of CC
+music, not of commercial songs). Built as opt-in song search in `src/music/`.

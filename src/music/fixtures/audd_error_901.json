@@ -1,0 +1,1 @@
+{"status":"error","error":{"error_code":901,"error_message":"Recognition failed: authorization failed: no api_token passed and the limit was reached. Get an api_token from dashboard.audd.io and make sure you're passing the token in the `api_token` parameter."}}

@@ -14,6 +14,8 @@ pub enum Quick {
     CopyText,
     /// Ask AI, with "Explain" already sent.
     Explain,
+    /// Song search: listen at once (no area).
+    Song,
 }
 
 impl Quick {
@@ -22,6 +24,7 @@ impl Quick {
         match id {
             "copy_text" => Some(Quick::CopyText),
             "ai_explain" => Some(Quick::Explain),
+            "song_search" => Some(Quick::Song),
             id => actions::ACTIONS
                 .iter()
                 .find(|a| a.id == id)
@@ -95,6 +98,7 @@ mod tests {
     fn quick_ids_map_to_what_they_run() {
         assert!(matches!(Quick::for_id("copy_text"), Some(Quick::CopyText)));
         assert!(matches!(Quick::for_id("ai_explain"), Some(Quick::Explain)));
+        assert!(matches!(Quick::for_id("song_search"), Some(Quick::Song)));
         for id in ["lens", "ai", "text", "translate", "edit", "copy", "save"] {
             assert!(
                 matches!(Quick::for_id(id), Some(Quick::Action(a)) if a.id == id),

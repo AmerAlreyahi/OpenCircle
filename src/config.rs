@@ -43,6 +43,9 @@
 //! style = "glow"                    # glow | thin | none
 //! thickness = 6                     # 1-12 px
 //! animate = true                    # overlay/snip: once on open; live: keeps moving
+//! [song]                            # song search (the service key: OS keyring only)
+//! source = "system"                 # system (what this PC plays) | microphone
+//! history = false                   # keep recent songs on this PC
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
@@ -581,6 +584,24 @@ pub struct Config {
     pub ai: AiConfig,
     pub translate: TranslateConfig,
     pub quick_actions: Vec<QuickAction>,
+    pub song: SongConfig,
+}
+
+/// What song search listens to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SongSource {
+    /// What this PC plays (loopback / the sink's monitor).
+    #[default]
+    System,
+    Microphone,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct SongConfig {
+    pub source: SongSource,
+    /// Keep recent songs on this PC (`music::history`). Off by default.
+    pub history: bool,
 }
 
 impl Default for AiConfig {
@@ -633,7 +654,10 @@ impl Default for Config {
                 qa("snip", "PrintScreen", Target::Circle, false),
                 qa("snip", "Alt+PrintScreen", Target::Window, false),
                 qa("snip", "Ctrl+PrintScreen", Target::FullScreen, false),
+                // Opt-in (needs the user's key): no key bound by default.
+                qa("song_search", "", Target::FullScreen, false),
             ],
+            song: SongConfig::default(),
         }
     }
 }
@@ -814,6 +838,10 @@ impl Config {
                 },
             );
             c.translate.live_note_shown = get(t, "translate.", "live_note_shown", false, &mut w);
+        }
+        if let Some(t) = section(&root, "song", &mut w) {
+            c.song.source = get(t, "song.", "source", d.song.source, &mut w);
+            c.song.history = get(t, "song.", "history", d.song.history, &mut w);
         }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
@@ -1100,7 +1128,15 @@ mod tests {
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
         assert_eq!(c.translate.target, "ar");
         assert_eq!(c.ai.provider, Provider::Browser);
-        assert_eq!(c.quick_actions.len(), 8);
+        assert_eq!(c.quick_actions.len(), 9);
+        // Song search: unbound, history off.
+        let song = c.quick_actions.last().unwrap();
+        assert_eq!(
+            (song.action.as_str(), song.shortcut.as_str()),
+            ("song_search", "")
+        );
+        assert_eq!(c.song.source, SongSource::System);
+        assert!(!c.song.history);
         assert!(c.quick_actions[1].live);
         assert_eq!(c.general.default_action, DefaultAction::Lens);
         assert_eq!(c.general.save_folder, "");
@@ -1241,6 +1277,8 @@ mod tests {
         c.translate.live_interval_ms = 2500;
         c.translate.live_note_shown = true;
         c.translate.source = "ja".into();
+        c.song.source = SongSource::Microphone;
+        c.song.history = true;
         c.quick_actions.pop();
         c.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();

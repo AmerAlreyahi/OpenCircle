@@ -25,11 +25,12 @@ use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{
     After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
-    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle, Target,
-    Theme, parse_shortcut,
+    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
+    SongSource, Target, Theme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::mt;
+use crate::music::{self, SERVICE, Service};
 use crate::secrets::{self, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES, Language};
 use crate::ui::theme;
@@ -44,10 +45,11 @@ pub const WINDOW_SIZE: Size = Size::new(820.0, 600.0);
 
 // ---- the OS keyring, behind a trait so tests never touch the real one ----
 
-pub trait KeyStore {
-    fn is_set(&self, provider: Provider) -> Result<bool, SecretsError>;
-    fn set(&self, provider: Provider, key: &Secret) -> Result<(), SecretsError>;
-    fn delete(&self, provider: Provider) -> Result<(), SecretsError>;
+/// `K` = whose key: an AI provider, or a song-search service.
+pub trait KeyStore<K = Provider> {
+    fn is_set(&self, provider: K) -> Result<bool, SecretsError>;
+    fn set(&self, provider: K, key: &Secret) -> Result<(), SecretsError>;
+    fn delete(&self, provider: K) -> Result<(), SecretsError>;
 }
 
 /// The real thing: `secrets` (Windows Credential Manager / Secret Service).
@@ -63,6 +65,27 @@ impl KeyStore for Keyring {
     fn delete(&self, provider: Provider) -> Result<(), SecretsError> {
         secrets::delete(provider)
     }
+}
+
+impl KeyStore<Service> for Keyring {
+    /// Finds the entry without reading the key (no unlock prompt).
+    fn is_set(&self, service: Service) -> Result<bool, SecretsError> {
+        secrets::by_name::exists(service.key_entry())
+    }
+    fn set(&self, service: Service, key: &Secret) -> Result<(), SecretsError> {
+        secrets::by_name::set(service.key_entry(), key)
+    }
+    fn delete(&self, service: Service) -> Result<(), SecretsError> {
+        secrets::by_name::delete(service.key_entry())
+    }
+}
+
+/// Song search's key store: tests get an in-memory one (never the real keyring).
+fn song_keyring() -> Box<dyn KeyStore<Service>> {
+    #[cfg(test)]
+    return Box::<tests::MemoryStore>::default();
+    #[cfg(not(test))]
+    Box::new(Keyring)
 }
 
 // ---- the write-only API key control (also used by onboarding) ----
@@ -91,22 +114,58 @@ pub struct KeyField {
     input: Secret,
     replacing: bool,
     error: Option<String>,
+    labels: KeyLabels,
 }
 
+/// What a key field calls its key (tooltips are the controls' names).
+#[derive(Debug, Clone, Copy)]
+pub struct KeyLabels {
+    pub placeholder: &'static str,
+    pub field: &'static str,
+    pub save: &'static str,
+    pub replace: &'static str,
+    pub remove: &'static str,
+    pub keep: &'static str,
+}
+
+const API_KEY: KeyLabels = KeyLabels {
+    placeholder: "Paste your API key",
+    field: "API key",
+    save: "Save the API key",
+    replace: "Replace the API key",
+    remove: "Remove the API key",
+    keep: "Keep the saved API key",
+};
+
+const SONG_KEY: KeyLabels = KeyLabels {
+    placeholder: "Paste your AudD API token",
+    field: "AudD API token",
+    save: "Save the AudD token",
+    replace: "Replace the AudD token",
+    remove: "Remove the AudD token",
+    keep: "Keep the saved AudD token",
+};
+
 impl KeyField {
-    pub fn new(store: &dyn KeyStore, provider: Provider) -> Self {
+    pub fn new<K>(store: &dyn KeyStore<K>, provider: K) -> Self {
         let mut f = KeyField {
             status: KeyStatus::NotSet,
             input: Secret::new(""),
             replacing: false,
             error: None,
+            labels: API_KEY,
         };
         f.refresh(store, provider);
         f
     }
 
+    pub fn labelled(mut self, labels: KeyLabels) -> Self {
+        self.labels = labels;
+        self
+    }
+
     /// Ask the keyring again (after the provider changed).
-    pub fn refresh(&mut self, store: &dyn KeyStore, provider: Provider) {
+    pub fn refresh<K>(&mut self, store: &dyn KeyStore<K>, provider: K) {
         self.input = Secret::new("");
         self.replacing = false;
         self.error = None;
@@ -121,7 +180,7 @@ impl KeyField {
         &self.status
     }
 
-    pub fn update(&mut self, store: &dyn KeyStore, provider: Provider, message: KeyMessage) {
+    pub fn update<K>(&mut self, store: &dyn KeyStore<K>, provider: K, message: KeyMessage) {
         self.error = None;
         match message {
             KeyMessage::Input(key) => self.input = key,
@@ -147,6 +206,7 @@ impl KeyField {
     }
 
     pub fn view(&self) -> Element<'_, KeyMessage> {
+        let l = self.labels;
         let mut col = column![].spacing(8).width(FORM_WIDTH);
         match (&self.status, self.replacing) {
             (KeyStatus::Unavailable(why), _) => col = col.push(error_text(why.as_str())),
@@ -156,14 +216,14 @@ impl KeyField {
                 let remove = label_button("Remove", false, Some(KeyMessage::Remove));
                 col = col.push(saved).push(
                     row![
-                        tip(replace, "Replace the API key", Position::Bottom),
-                        tip(remove, "Remove the API key", Position::Bottom),
+                        tip(replace, l.replace, Position::Bottom),
+                        tip(remove, l.remove, Position::Bottom),
                     ]
                     .spacing(8),
                 );
             }
             _ => {
-                let field = text_field("Paste your API key", self.input.expose(), false, |s| {
+                let field = text_field(l.placeholder, self.input.expose(), false, |s| {
                     KeyMessage::Input(Secret::new(s))
                 })
                 .secure(true)
@@ -173,12 +233,12 @@ impl KeyField {
                     true,
                     (!self.input.is_empty()).then_some(KeyMessage::Save),
                 );
-                let mut buttons = row![tip(save, "Save the API key", Position::Bottom)].spacing(8);
+                let mut buttons = row![tip(save, l.save, Position::Bottom)].spacing(8);
                 if self.replacing {
                     let cancel = label_button("Cancel", false, Some(KeyMessage::Cancel));
-                    buttons = buttons.push(tip(cancel, "Keep the saved API key", Position::Bottom));
+                    buttons = buttons.push(tip(cancel, l.keep, Position::Bottom));
                 }
-                col = col.push(tip(field, "API key", Position::Top)).push(buttons);
+                col = col.push(tip(field, l.field, Position::Top)).push(buttons);
             }
         }
         if let Some(e) = &self.error {
@@ -290,6 +350,7 @@ fn quick_hint(q: &crate::config::QuickAction) -> &'static str {
         ("snip", Target::Window) => "Click a window, then edit it",
         ("snip", Target::FullScreen) => "The whole screen, then edit it",
         ("snip", _) => "Drag or circle an area, then edit it",
+        ("song_search", _) => "Listens and names the song (needs a key)",
         (_, t) => target_name(t),
     }
 }
@@ -386,10 +447,11 @@ pub enum Section {
     Shortcuts,
     Ai,
     Translate,
+    Song,
     About,
 }
 
-const SECTIONS: [(Section, &str, &str); 7] = [
+const SECTIONS: [(Section, &str, &str); 8] = [
     (Section::General, "General", "General settings"),
     (Section::Appearance, "Appearance", "Appearance settings"),
     (
@@ -400,6 +462,7 @@ const SECTIONS: [(Section, &str, &str); 7] = [
     (Section::Shortcuts, "Shortcuts", "Shortcut settings"),
     (Section::Ai, "AI", "AI settings"),
     (Section::Translate, "Translate", "Translate settings"),
+    (Section::Song, "Song search", "Song search settings"),
     (Section::About, "About", "About OpenCircle"),
 ];
 
@@ -429,6 +492,10 @@ pub struct State {
     recording: Option<Slot>,
     shortcut_error: Option<(Slot, String)>,
     key: KeyField,
+    /// Song search's key: the store, and its field once the section was opened
+    /// (the keyring is asked only then).
+    song_store: Box<dyn KeyStore<Service>>,
+    song_key: Option<KeyField>,
     quick_text: Vec<SlotText>,
     /// What the live-interval field shows (kept as typed).
     interval: String,
@@ -476,6 +543,9 @@ pub enum Message {
     BaseUrl(String),
     Model(String),
     ApiKey(KeyMessage),
+    SongKey(KeyMessage),
+    SongSource(SongSource),
+    SongHistory(bool),
     Source(Language),
     Target(Language),
     Engine(Engine),
@@ -643,6 +713,8 @@ impl State {
             recording: None,
             shortcut_error: None,
             key,
+            song_store: song_keyring(),
+            song_key: None,
             quick_text,
             interval,
             problems: Vec::new(),
@@ -821,7 +893,21 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             state.section = s;
             state.recording = None;
             state.shortcut_error = None;
+            if s == Section::Song && state.song_key.is_none() {
+                let field = KeyField::new(&*state.song_store, SERVICE).labelled(SONG_KEY);
+                music::remember_key(field.status == KeyStatus::Saved);
+                state.song_key = Some(field);
+            }
         }
+        Message::SongKey(k) => {
+            if let Some(field) = &mut state.song_key {
+                field.update(&*state.song_store, SERVICE, k);
+                // The overlay's music button shows from now on (or hides).
+                music::remember_key(field.status == KeyStatus::Saved);
+            }
+        }
+        Message::SongSource(source) => state.draft.song.source = source,
+        Message::SongHistory(on) => state.draft.song.history = on,
         Message::Theme(t) => {
             state.draft.theme = t;
             theme::apply(t);
@@ -1044,6 +1130,7 @@ fn content(state: &State) -> Element<'_, Message> {
         ),
         Section::Shortcuts => ("Shortcuts", shortcut_rows(state)),
         Section::Ai => ("AI", ai_rows(state)),
+        Section::Song => ("Song search", song_rows(state)),
         Section::Translate => (
             "Translate",
             vec![
@@ -1766,6 +1853,71 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
     rows
 }
 
+/// What song search sends, and when (also in docs/privacy.md).
+pub const SONG_PRIVACY: &str = "When you press the music button, a ~10-second clip of the audio you choose is sent to AudD. Nothing is recorded at any other time.";
+
+fn song_rows(state: &State) -> Vec<Element<'_, Message>> {
+    let song = &state.draft.song;
+    let mut rows = vec![form_row(
+        "Service",
+        "Free fingerprint lookups can't name a short clip, so this needs your own key",
+        value_field(SERVICE.name(), false),
+        None,
+    )];
+    if let Some(field) = &state.song_key {
+        rows.push(form_row(
+            "API token",
+            "Sign up at dashboard.audd.io and paste your token. Kept in your system keyring",
+            field.view().map(Message::SongKey),
+            None,
+        ));
+    }
+    rows.push(form_row(
+        "Listen to",
+        match song.source {
+            SongSource::System => "What this PC plays: a video, a game, a stream",
+            SongSource::Microphone => "Your microphone: music playing near you",
+        },
+        segmented(
+            &[
+                (
+                    SongSource::System,
+                    "This PC",
+                    "Listen to what this PC plays",
+                ),
+                (
+                    SongSource::Microphone,
+                    "Microphone",
+                    "Listen with the microphone",
+                ),
+            ],
+            song.source,
+            Message::SongSource,
+        ),
+        None,
+    ));
+    rows.push(form_row(
+        "History",
+        "Recent songs, kept only on this PC. Off deletes them",
+        segmented(
+            &[
+                (false, "Off", "Keep no song history"),
+                (true, "On", "Keep recent songs on this PC"),
+            ],
+            song.history,
+            Message::SongHistory,
+        ),
+        None,
+    ));
+    rows.push(form_row(
+        "Privacy",
+        "",
+        widgets::caption(SONG_PRIVACY),
+        None,
+    ));
+    rows
+}
+
 fn footer(state: &State) -> Element<'_, Message> {
     let n = state.problems.len();
     let status: Element<'_, Message> = if n > 0 {
@@ -1818,6 +1970,58 @@ pub(super) mod tests {
             self.0.borrow_mut().remove(p.id());
             Ok(())
         }
+    }
+
+    impl KeyStore<Service> for MemoryStore {
+        fn is_set(&self, s: Service) -> Result<bool, SecretsError> {
+            Ok(self.0.borrow().contains_key(s.key_entry()))
+        }
+        fn set(&self, s: Service, key: &Secret) -> Result<(), SecretsError> {
+            self.0
+                .borrow_mut()
+                .insert(s.key_entry(), key.expose().to_string());
+            Ok(())
+        }
+        fn delete(&self, s: Service) -> Result<(), SecretsError> {
+            self.0.borrow_mut().remove(s.key_entry());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn song_search_section_saves_a_write_only_token_and_its_choices() {
+        let path = tmp("song");
+        let (mut s, _) = state(Some(path.clone()));
+        assert!(
+            s.song_key.is_none(),
+            "no keyring call before the section opens"
+        );
+        update(&mut s, Message::Section(Section::Song));
+        let texts = shot::texts(view(&s));
+        assert!(texts.iter().any(|t| t == SONG_PRIVACY), "{texts:?}");
+        assert!(texts.iter().any(|t| t.contains("dashboard.audd.io")));
+        // Write-only: once saved, the token is never shown again.
+        update(
+            &mut s,
+            Message::SongKey(KeyMessage::Input(Secret::new("FAKE-audd-1"))),
+        );
+        update(&mut s, Message::SongKey(KeyMessage::Save));
+        assert_eq!(s.song_key.as_ref().unwrap().status, KeyStatus::Saved);
+        assert_eq!(music::key_known(), Some(true), "the music button shows");
+        let texts = shot::texts(view(&s));
+        assert!(!texts.iter().any(|t| t.contains("FAKE")), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Saved in your keyring"));
+        shot::save("settings-song-saved", view(&s), WINDOW_SIZE);
+        update(&mut s, Message::SongKey(KeyMessage::Remove));
+        assert_eq!(music::key_known(), Some(false), "and hides again");
+        update(&mut s, Message::SongSource(SongSource::Microphone));
+        update(&mut s, Message::SongHistory(true));
+        let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+            panic!("not saved: {:?}", s.problems);
+        };
+        assert_eq!(cfg.song.source, SongSource::Microphone);
+        assert!(cfg.song.history);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     /// Shares a `MemoryStore` between the test and the state.
