@@ -645,9 +645,10 @@ fn text_moves_on_drag_and_edits_on_click() {
     let c = e.doc.items[0].frame().center(); // clear of its corner handles
     let to = c + iced::Vector::new(40.0, 30.0);
     drag(&mut e, c, &[], to);
-    assert!(
-        matches!(e.doc.items[0].shape, Shape::Text { at: moved, .. } if moved == at + iced::Vector::new(40.0, 30.0))
-    );
+    let Shape::Text { at: moved, .. } = e.doc.items[0].shape else {
+        panic!()
+    };
+    assert!(moved.distance(at + iced::Vector::new(40.0, 30.0)) < 0.01);
     assert!(!e.typing());
     drag(&mut e, to, &[], to);
     e.update(Message::Type("!".into()));
