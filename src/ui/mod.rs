@@ -754,6 +754,7 @@ impl App {
                 Some((_, at)) => {
                     let (_, size) = self.bar_size();
                     self.bar_anchor = bar::nearest(at, self.screen, size, self.work_inset);
+                    eprintln!("[opencircle] bar docked: {:?}", self.bar_anchor);
                     self.bar_now = Some(at);
                     self.remember_bar()
                 }
@@ -3284,9 +3285,11 @@ impl App {
                 true => window::frames().map(Message::Frame),
                 false => Subscription::none(),
             };
-            // Dragging the bottom bar by its handle: the pointer anywhere, until let go.
-            let bar = match self.bar_drag {
-                Some(_) => iced::event::listen_with(|event, _, _| match event {
+            // Dragging the bar by its handle: the pointer anywhere, until let go. On
+            // whenever the bar shows (not only once held), so no move or release
+            // is lost while the grab is still being handled.
+            let bar = match self.bottom_bar_shown() {
+                true => iced::event::listen_with(|event, _, _| match event {
                     iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                         Some(Message::BarMoved(position))
                     }
@@ -3295,7 +3298,7 @@ impl App {
                     )) => Some(Message::BarReleased),
                     _ => None,
                 }),
-                None => Subscription::none(),
+                false => Subscription::none(),
             };
             Subscription::batch([triggers, escape, alt, card, shift, frames, bar])
         } else if self.hiding != Hiding::No {
