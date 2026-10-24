@@ -47,6 +47,14 @@ pub fn recognize_as(
     source: &str,
 ) -> Result<Vec<TextBlock>, OcrError> {
     let read = Read::for_source(source);
+    // a bad image is the caller's error, models or not
+    if width == 0 || height == 0 || rgba.len() as u64 != width as u64 * height as u64 * 4 {
+        return Err(OcrError::BadImage(format!(
+            "{width}x{height} RGBA needs {} bytes, got {}",
+            width as u64 * height as u64 * 4,
+            rgba.len()
+        )));
+    }
     ready(read)?;
     recognize_via(session::call, rgba, width, height, read)
 }
