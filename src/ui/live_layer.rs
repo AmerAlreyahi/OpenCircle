@@ -17,6 +17,7 @@ use super::{background, border, theme, widgets};
 use crate::capture;
 use crate::config;
 use crate::live::{self, LayerError};
+use crate::ocr;
 use crate::translate::live::Live as Steps;
 use crate::translate::pipeline::Cache;
 
@@ -109,6 +110,8 @@ pub struct Live {
     stop: Arc<AtomicBool>,
     work: Option<task::Handle>,
     shot_taken: bool,
+    /// One warm OCR / translation helper while live mode is on.
+    _helper: ocr::Hold,
 }
 
 /// No click-through layer over other apps: native Wayland.
@@ -158,6 +161,7 @@ impl Live {
             stop: Arc::new(AtomicBool::new(false)),
             work: None,
             shot_taken: false,
+            _helper: ocr::hold(),
         }
     }
 

@@ -239,6 +239,9 @@ struct App {
     cache: Arc<Cache>,
     /// Live translate, while on.
     live: Option<live_layer::Live>,
+    /// One warm OCR / translation helper while the overlay is open (tap a
+    /// word, Text, Translate), started by the first of them.
+    helper: Option<ocr::Hold>,
 }
 
 /// Translations kept for reuse (each a short text).
@@ -299,6 +302,7 @@ impl App {
             translates: 0,
             cache: Arc::new(Cache::new(8)),
             live: None,
+            helper: None,
         }
     }
 
@@ -494,6 +498,7 @@ impl App {
         let px = |v: f32| (v * shot.scale).round() as u32;
         self.view = overlay::View::new(px(size.width), px(size.height), size);
         self.frame = Some(shot.image);
+        self.helper = Some(ocr::hold());
         self.scale = shot.scale;
         self.screen = size;
         self.origin = shot.origin;
@@ -1306,6 +1311,7 @@ impl App {
         self.toast = None;
         self.scan = None;
         self.translate = None;
+        self.helper = None;
         self.hiding = Hiding::Empty;
         Task::none()
     }

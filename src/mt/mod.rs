@@ -1,9 +1,9 @@
 //! Offline translation: no key, no account, nothing leaves the PC. OPUS-MT
 //! (Helsinki-NLP's Marian transformer models; attribution in `NOTICE`) as int8
 //! ONNX, greedy decoding on the ONNX Runtime that OCR already downloads.
-//! Like OCR it runs only in the short-lived helper process (`ocr-worker
-//! translate <target>`), so ORT and the ~600 MB it peaks at never stay in the
-//! app: the app calls [`translate`]. Source text is English (what OCR reads).
+//! Like OCR it runs only in the helper process (`ocr::worker`), so ORT and
+//! the ~600 MB it peaks at never stay in the app: the app calls
+//! [`translate`]. Source text is English (what OCR reads).
 //!
 //! Spike S7 (20 game lines, en->ar, this machine's CPU): about as good as
 //! Firefox's Bergamot model and opus-mt-tc-big, more literal than an AI model.
@@ -171,13 +171,6 @@ pub fn translate(texts: &[String], target: &str) -> Result<Vec<String>, OcrError
     ocr::translate_in_child(texts, target)
 }
 
-/// Helper side (`ocr-worker translate <target>`): load, translate, done.
-pub(crate) fn translate_here(texts: &[String], target: &str) -> Result<Vec<String>, OcrError> {
-    let pair = pair(target)
-        .ok_or_else(|| OcrError::Engine(format!("no offline model translates into {target}")))?;
-    Translator::load(pair, &ocr::models_dir())?.translate(texts)
-}
-
 fn engine_err(e: impl std::fmt::Display) -> OcrError {
     OcrError::Engine(e.to_string())
 }
@@ -199,10 +192,12 @@ impl Translator {
             .commit();
         let dir = pair.dir();
         // Every batch has a new shape: memory patterns would only add RAM.
+        // No spin-waiting threads after a run (they slowed the app, see OCR).
         let session = |f: &ModelFile| {
             Session::builder()
                 .and_then(|b| b.with_memory_pattern(false).map_err(Into::into))
                 .and_then(|b| b.with_intra_threads(THREADS).map_err(Into::into))
+                .and_then(|b| b.with_intra_op_spinning(false).map_err(Into::into))
                 .and_then(|mut b| b.commit_from_file(dir.join(f.name)))
                 .map_err(engine_err)
         };

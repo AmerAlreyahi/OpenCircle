@@ -1,12 +1,15 @@
 //! OCR: PP-OCRv5 mobile (detect lines, then read them) via oar-ocr on ONNX
 //! Runtime, CPU. Neither ORT nor the models ship with the app: `ensure_models`
 //! fetches them on first use (the only network access here). The app calls
-//! `recognize_in_child`, so ORT and its memory live only in a short-lived
-//! `opencircle ocr-worker` process that runs `Engine`.
+//! `recognize_in_child`, so ORT and its memory live only in an
+//! `opencircle ocr-worker` process that runs `Engine` (one per call, or one
+//! warm one while a `Hold` lives: `session`).
 pub(crate) mod models;
+pub(crate) mod session;
 pub(crate) mod worker;
 
 pub use models::{ensure_models, models_dir};
+pub use session::{Hold, hold};
 pub use worker::{WORKER_ARG, recognize_in_child, translate_in_child, worker_main};
 
 use std::fmt;
@@ -121,7 +124,12 @@ impl Engine {
             .commit();
         // Memory patterns cache a plan per input shape; every capture has a new
         // shape, so they only add RAM (~100 MB measured).
-        let ort = OrtSessionConfig::new().with_memory_pattern(false);
+        // No spin-waiting threads after a run: in a warm helper they kept
+        // the CPU busy while the app rendered (a live step 0.6 s -> 0.2 s).
+        let ort = OrtSessionConfig::new()
+            .with_memory_pattern(false)
+            .add_config_entry("session.intra_op.allow_spinning", "0")
+            .add_config_entry("session.inter_op.allow_spinning", "0");
         let det = TextDetectionPredictor::builder()
             .with_config(TextDetectionConfig {
                 score_threshold: 0.3,
