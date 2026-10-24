@@ -179,7 +179,9 @@ fn check(
     if *install == Install::Manual {
         return manual(handled);
     }
-    let dir = std::env::temp_dir().join(format!("{STAGE_PREFIX}{}", std::process::id()));
+    let Some(dir) = stage_dir() else {
+        return "no data folder: not installed".into();
+    };
     match release::stage(
         http,
         &release,
@@ -206,21 +208,18 @@ fn check(
     }
 }
 
-const STAGE_PREFIX: &str = "opencircle-update-";
+/// Where downloads are staged: `<local data dir>/opencircle/update`, this user's
+/// own (never the shared temp dir), made fresh and private for each download.
+fn stage_dir() -> Option<std::path::PathBuf> {
+    dirs::data_local_dir().map(|d| d.join("opencircle").join("update"))
+}
 
-/// Downloads left by an earlier run (only one instance runs, so none is in use).
+/// A download left by an earlier run (only one instance runs, so none is in use).
 fn remove_stale_downloads() {
-    let Ok(dir) = std::fs::read_dir(std::env::temp_dir()) else {
-        return;
-    };
-    for entry in dir.flatten() {
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(STAGE_PREFIX)
-        {
-            let _ = std::fs::remove_dir_all(entry.path());
-        }
+    if let Some(dir) = stage_dir()
+        && std::fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir())
+    {
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 
@@ -238,7 +237,7 @@ fn install_at(staged: &Staged, marker_path: &Path) -> Result<(), String> {
         Install::Exe(p) | Install::AppImage(p) => p,
         Install::Manual => return Err("this install updates by hand".into()),
     };
-    let backup = swap::replace(target, &staged.file)
+    let backup = swap::replace(target, &staged.file, &staged.sha256)
         .map_err(|e| format!("cannot replace {}: {e}", target.display()))?;
     let undo = |e: String| {
         let _ = swap::restore(target, &backup);
@@ -462,6 +461,7 @@ mod tests {
                 std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
                 Staged {
                     version: "9.9.9".into(),
+                    sha256: verify::sha256(body.as_bytes()).unwrap(),
                     file,
                     dir: dir.join("dl"),
                     install: Install::AppImage(target.clone()),
@@ -474,6 +474,13 @@ mod tests {
             assert!(err.contains("1.0.0"), "{err}");
             assert_eq!(std::fs::read(&target).unwrap(), b"old");
             assert!(!marker.exists() && !swap::backup_of(&target).exists());
+            // changed after it was verified: refused, nothing moved
+            let mut swapped = staged("#!/bin/sh\necho 9.9.9\n");
+            std::fs::write(&swapped.file, "#!/bin/sh\necho 9.9.9 # evil\n").unwrap();
+            swapped.dir = dir.join("dl-unused");
+            let err = install_at(&swapped, &marker).unwrap_err();
+            assert!(err.contains("changed after"), "{err}");
+            assert_eq!(std::fs::read(&target).unwrap(), b"old");
             // crashes: same
             assert!(install_at(&staged("#!/bin/sh\nexit 3\n"), &marker).is_err());
             assert_eq!(std::fs::read(&target).unwrap(), b"old");
@@ -499,6 +506,7 @@ mod tests {
                 &Staged {
                     version: "9.9.9".into(),
                     file: "x".into(),
+                    sha256: [0; 32],
                     dir: "y".into(),
                     install: Install::Manual,
                     notes: String::new(),

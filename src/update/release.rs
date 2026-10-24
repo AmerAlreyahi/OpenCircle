@@ -256,9 +256,11 @@ fn fetch_small(http: &dyn Http, asset: &Asset) -> Result<Vec<u8>, String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Staged {
     pub version: String,
-    /// The verified file (inside `dir`).
+    /// The verified file (inside `dir`) and its SHA-256: the install copies it
+    /// and checks the copy again, so only these bytes are ever installed.
     pub file: PathBuf,
-    /// Our temp dir for it: deleted after the install or on any failure.
+    pub sha256: [u8; 32],
+    /// Our private staging dir (`private_dir`): deleted after the install or on any failure.
     pub dir: PathBuf,
     pub install: Install,
     pub notes: String,
@@ -266,8 +268,8 @@ pub struct Staged {
 }
 
 /// Downloads `release`'s asset for `install` plus the checksums and signature into
-/// `dir`, checks the signature with `key`, then the asset's SHA-256. Any failure
-/// deletes `dir`.
+/// `dir` (made fresh and private: `private_dir`), checks the signature with `key`,
+/// then the asset's SHA-256. Any later failure deletes `dir`.
 pub fn stage(
     http: &dyn Http,
     release: &Release,
@@ -276,6 +278,7 @@ pub fn stage(
     dir: &Path,
     key: &str,
 ) -> Result<Staged, String> {
+    private_dir(dir).map_err(|e| format!("update folder: {e}"))?;
     let result = stage_in(http, release, install, arch, dir, key);
     if result.is_err() {
         let _ = std::fs::remove_dir_all(dir);
@@ -301,7 +304,6 @@ fn stage_in(
     let want =
         verify::sum_for(&sums, &asset.name).ok_or("the checksums do not list the download")?;
 
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let file = dir.join(&asset.name);
     let got = http.get(&asset.browser_download_url, None)?;
     if got.status != 200 {
@@ -314,6 +316,7 @@ fn stage_in(
     Ok(Staged {
         version: release.tag_name.trim_start_matches('v').to_string(),
         file,
+        sha256: hash,
         dir: dir.to_path_buf(),
         install: install.clone(),
         notes: release.body.clone().unwrap_or_default(),
@@ -321,7 +324,49 @@ fn stage_in(
     })
 }
 
-/// Writes `body` to `path` and returns its SHA-256.
+/// Makes `dir` new and private (0700 on Unix): a leftover of ours is removed
+/// first; anything else there (a symlink, a file, someone else's or an open
+/// folder) is refused. The folder is created, never reused, so nobody else can
+/// have put or swapped a file in it.
+pub fn private_dir(dir: &Path) -> io::Result<()> {
+    if let Ok(meta) = std::fs::symlink_metadata(dir) {
+        if !ours(&meta) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} is not OpenCircle's own private folder", dir.display()),
+            ));
+        }
+        std::fs::remove_dir_all(dir)?;
+    }
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    #[cfg(not(unix))]
+    let builder = &mut builder;
+    builder.create(dir) // fails if something appeared meanwhile
+}
+
+/// A real folder (not a link), and on Unix this user's with no access for others.
+fn ours(meta: &std::fs::Metadata) -> bool {
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let uid = unsafe { libc::geteuid() };
+        meta.uid() == uid && meta.mode() & 0o077 == 0
+    }
+    #[cfg(not(unix))]
+    true // the per-user local app data folder: only this user may write in it
+}
+
+/// Writes `body` to `path` (a new file: never an existing one or a link) and
+/// returns its SHA-256.
 fn save_hashed(body: impl Read, path: &Path) -> io::Result<[u8; 32]> {
     struct Tee<R> {
         inner: R,
@@ -336,7 +381,10 @@ fn save_hashed(body: impl Read, path: &Path) -> io::Result<[u8; 32]> {
     }
     let mut tee = Tee {
         inner: body,
-        out: File::create(path)?,
+        out: std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?,
     };
     let hash = verify::sha256(&mut tee)?;
     tee.out.sync_all()?;
@@ -601,6 +649,44 @@ pub(crate) mod tests {
             TEST_KEY,
         );
         assert_eq!(err, Err("the release is not signed".into()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_staging_dir_someone_else_made_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = release("v9.9.9");
+        let app = Install::AppImage("/x/OpenCircle.AppImage".into());
+        let fake = server(&r, v::SIG);
+        // a symlink to somewhere else
+        let base = temp("planted");
+        std::fs::create_dir_all(base.join("elsewhere")).unwrap();
+        let dir = base.join("update");
+        std::os::unix::fs::symlink(base.join("elsewhere"), &dir).unwrap();
+        let err = stage(&fake, &r, &app, "x86_64", &dir, TEST_KEY).unwrap_err();
+        assert!(err.contains("not OpenCircle's own"), "{err}");
+        assert!(
+            std::fs::symlink_metadata(&dir).is_ok(),
+            "left alone, not followed"
+        );
+        assert_eq!(
+            std::fs::read_dir(base.join("elsewhere")).unwrap().count(),
+            0
+        );
+        // a folder others may write in
+        std::fs::remove_file(&dir).unwrap();
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(stage(&fake, &r, &app, "x86_64", &dir, TEST_KEY).is_err());
+        // our own leftover: replaced by a fresh private folder
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(dir.join("stale"), b"x").unwrap();
+        let s = stage(&fake, &r, &app, "x86_64", &dir, TEST_KEY).unwrap();
+        assert!(!dir.join("stale").exists());
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        assert_eq!(s.sha256, verify::sha256(APPIMAGE).unwrap());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

@@ -1127,7 +1127,13 @@ impl App {
                     .toast(&update_card::ready_toast(&staged.version))
                     .map(Message::Windows);
                 self.update = Some(staged);
-                toast.chain(self.try_update())
+                // the notice stays readable before this process exits to update
+                let later = background(|tx| {
+                    std::thread::sleep(Duration::from_secs(6));
+                    let _ = tx.unbounded_send(());
+                })
+                .map(|()| Message::UpdateTick);
+                Task::batch([toast, later])
             }
         }
     }
@@ -2838,6 +2844,7 @@ mod tests {
         let staged = Staged {
             version: "9.9.9".into(),
             file: "missing".into(),
+            sha256: [0; 32],
             dir: std::env::temp_dir().join("oc-update-test-never-made"),
             install: Install::Manual, // even if it ran, it could not touch anything
             notes: String::new(),

@@ -23,13 +23,19 @@ fn sibling(target: &Path, ext: &str) -> PathBuf {
     name.into()
 }
 
-/// Puts `new` at `target`, keeping the old file as `backup_of(target)`. On any
-/// failure `target` is as before.
-pub fn replace(target: &Path, new: &Path) -> io::Result<PathBuf> {
+/// Puts `new` at `target`, keeping the old file as `backup_of(target)`. The copy
+/// beside the target must hash to `sha256` (the verified bytes), else nothing
+/// changes. On any failure `target` is as before.
+pub fn replace(target: &Path, new: &Path, sha256: &[u8; 32]) -> io::Result<PathBuf> {
     let staged = sibling(target, ".new");
     let backup = backup_of(target);
     let _ = std::fs::remove_file(&staged);
     std::fs::copy(new, &staged)?;
+    let copied = std::fs::File::open(&staged).and_then(super::verify::sha256);
+    if copied.as_ref().ok() != Some(sha256) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(io::Error::other("the file changed after it was verified"));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -127,8 +133,9 @@ mod tests {
         let new = dir.join("download.exe");
         std::fs::write(&target, b"old").unwrap();
         std::fs::write(&new, b"new").unwrap();
+        let hash = crate::update::verify::sha256(&b"new"[..]).unwrap();
 
-        let backup = replace(&target, &new).unwrap();
+        let backup = replace(&target, &new, &hash).unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
         assert_eq!(std::fs::read(&backup).unwrap(), b"old");
         assert!(!sibling(&target, ".new").exists());
@@ -148,7 +155,7 @@ mod tests {
         assert_eq!(roll_back(&marker_path), None, "nothing waiting");
 
         // A confirmed update: the old file and the marker go, the new one stays.
-        let backup = replace(&target, &new).unwrap();
+        let backup = replace(&target, &new, &hash).unwrap();
         marker.write(&marker_path).unwrap();
         assert_eq!(
             confirm(&marker_path).map(|m| m.version),
@@ -166,7 +173,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let target = dir.join("opencircle.exe");
         std::fs::write(&target, b"old").unwrap();
-        assert!(replace(&target, &dir.join("missing")).is_err());
+        assert!(replace(&target, &dir.join("missing"), &[0; 32]).is_err());
+        // changed after it was verified: refused, nothing moved
+        let new = dir.join("download.exe");
+        std::fs::write(&new, b"swapped").unwrap();
+        let verified = crate::update::verify::sha256(&b"verified"[..]).unwrap();
+        let err = replace(&target, &new, &verified).unwrap_err();
+        assert!(err.to_string().contains("changed after"), "{err}");
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
+        assert!(!sibling(&target, ".new").exists());
         assert_eq!(std::fs::read(&target).unwrap(), b"old");
         assert!(!backup_of(&target).exists());
         let _ = std::fs::remove_dir_all(&dir);
