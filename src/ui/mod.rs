@@ -1577,7 +1577,20 @@ impl App {
         let Some(edit) = &mut self.edit else {
             return Task::none();
         };
-        match edit.editor.update(msg) {
+        let out = edit.update(msg);
+        // Add capture: the area picked on the frozen frame joins the board.
+        if let Some(area) = edit.take_picked()
+            && let Some(image::Handle::Rgba {
+                width,
+                height,
+                pixels,
+                ..
+            }) = &self.frame
+            && let Some(crop) = actions::crop(pixels, *width, *height, self.scale, area)
+        {
+            edit.add(crop, self.screen);
+        }
+        match out {
             None => Task::none(),
             // Snip has no action bar: back to picking an area.
             Some(Output::Back) if matches!(self.purpose, Purpose::Snip(_)) => {
@@ -1593,10 +1606,14 @@ impl App {
             Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
             Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
             Some(Output::Pin(crop)) => self.pin(crop),
-            // TODO(lead): copy the text beside the image; open the region picker
-            // and hand its crop to `Editor::append`.
-            Some(Output::CopyWithText(crop, _text)) => self.finish(&copy::ACTION, crop),
-            Some(Output::AddCapture) => Task::none(),
+            Some(Output::CopyWithText(crop, words)) => {
+                // Before close: the text read keeps the overlay's warm OCR helper.
+                if let Err(e) = copy::with_text(crop, words) {
+                    eprintln!("copy failed: {e}");
+                }
+                self.close()
+            }
+            Some(Output::AddCapture) => Task::none(), // `edit` picks the area now
             Some(Output::Dragged) => self.close(),
         }
     }
@@ -3860,5 +3877,45 @@ mod tests {
         shot(&app, "look-4-select-text.png");
         drag(&mut app, at_word(1, 7.0), at_word(2, 11.0), false);
         shot(&app, "look-5-select-text-popup.png");
+    }
+
+    /// Add capture: the editor steps aside, an area dragged on the frozen frame
+    /// joins the board (Esc first: back to the editor, nothing added).
+    #[test]
+    fn add_capture_puts_a_picked_area_on_the_board() {
+        const BLUE: [u8; 4] = [20, 60, 230, 255];
+        // Left half white, right half blue.
+        let rgba = (0..1200 * 800)
+            .flat_map(|i| if i % 1200 < 600 { [255; 4] } else { BLUE })
+            .collect();
+        let frame = Crop {
+            width: 1200,
+            height: 800,
+            rgba,
+        };
+        let (mut app, _) = selected_app(&frame);
+        app.select(Rectangle::new(
+            Point::new(10.0, 10.0),
+            Size::new(300.0, 200.0),
+        ));
+        let _ = app.open_editor();
+        let mut editor = |msg| {
+            let _ = app.update(Message::Editor(msg));
+        };
+        editor(editor::Message::AddCapture);
+        editor(editor::Message::Back);
+        editor(editor::Message::AddCapture);
+        editor(editor::Message::Press(Point::new(700.0, 100.0)));
+        editor(editor::Message::Move(Point::new(1000.0, 400.0)));
+        editor(editor::Message::Release);
+        let edit = app.edit.as_ref().expect("still editing");
+        assert_eq!(edit.editor.doc.tiles().len(), 2);
+        let board = edit.image();
+        assert!(
+            board.rgba.chunks(4).any(|p| p == BLUE),
+            "the blue area is on it"
+        );
+        let r = edit.canvas_rect();
+        assert!(r.x >= 0.0 && r.y >= 0.0 && r.x + r.width <= 1200.0 && r.y + r.height <= 800.0);
     }
 }

@@ -1,11 +1,19 @@
 //! Edit in place and the snip editor: the annotation editor (`crate::editor`) over
 //! the frozen frame, its toolbar where the action bar was (DESIGN.md "Flow" 4).
-use iced::widget::{image, pin, stack};
-use iced::{ContentFit, Element, Point, Rectangle, Size};
+//! Add capture (board): the editor steps aside and an area is dragged on the
+//! frozen frame; its crop joins the board.
+use iced::mouse::{self, Cursor};
+use iced::widget::canvas::{self, Action, Frame, Geometry, Path, Stroke, fill};
+use iced::widget::{container, image, pin, stack};
+use iced::{Color, ContentFit, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
 
 use super::bar::{self, GAP};
+use super::{theme, widgets};
 use crate::actions::Crop;
-use crate::editor::{self, Editor, Image};
+use crate::editor::{self, Editor, Image, Message, Output};
+
+/// Shown while an area for the board is picked.
+const PICK_HINT: &str = "Drag an area to add to the board · Esc to go back";
 
 pub struct Editing {
     pub editor: Editor,
@@ -15,6 +23,10 @@ pub struct Editing {
     zoom: f32,
     /// Back at the action bar: the flattened edits, shown over the selection.
     flat: Option<image::Handle>,
+    /// Picking another capture's area: the drag so far (from, to; logical px).
+    picking: Option<Option<(Point, Point)>>,
+    /// The area just picked (logical px), for the host to crop (`take_picked`).
+    picked: Option<Rectangle>,
 }
 
 impl Editing {
@@ -42,7 +54,57 @@ impl Editing {
             origin,
             zoom,
             flat: None,
+            picking: None,
+            picked: None,
         }
+    }
+
+    /// The editor's messages; while an area is picked, the picker's (Esc = back
+    /// to the editor).
+    pub fn update(&mut self, message: Message) -> Option<Output> {
+        let Some(drag) = &mut self.picking else {
+            let out = self.editor.update(message);
+            if matches!(out, Some(Output::AddCapture)) {
+                self.picking = Some(None);
+            }
+            return out;
+        };
+        match message {
+            Message::Press(p) => *drag = Some((p, p)),
+            Message::Move(p) => {
+                if let Some((_, to)) = drag {
+                    *to = p;
+                }
+            }
+            Message::Release => {
+                let area = drag.take().map(|(a, b)| editor::span(&[a, b]));
+                // A click is no area: keep picking.
+                if let Some(area) = area.filter(|r| r.width >= 4.0 && r.height >= 4.0) {
+                    self.picking = None;
+                    self.picked = Some(area);
+                }
+            }
+            Message::Back => self.picking = None,
+            _ => {}
+        }
+        None
+    }
+
+    /// The area picked for the board (logical px), once.
+    pub fn take_picked(&mut self) -> Option<Rectangle> {
+        self.picked.take()
+    }
+
+    /// Adds `crop` to the board, refit to `screen` (never larger than now).
+    pub fn add(&mut self, crop: Crop, screen: Size) {
+        self.editor.append(Image {
+            width: crop.width,
+            height: crop.height,
+            rgba: crop.rgba,
+        });
+        let (origin, zoom) = fit(self.editor.doc.view().size(), screen, self.zoom);
+        (self.origin, self.zoom) = (origin, zoom);
+        self.editor.set_zoom(zoom);
     }
 
     /// The toolbar is showing (not back at the action bar).
@@ -76,6 +138,18 @@ impl Editing {
 
     /// The canvas over its place and the toolbar beside it (as the action bar is).
     pub fn view(&self, screen: Size) -> Element<'_, editor::Message> {
+        if let Some(drag) = self.picking {
+            let hint = container(widgets::pill(PICK_HINT))
+                .center_x(Fill)
+                .padding(24);
+            return stack![
+                iced::widget::canvas(Picker { drag })
+                    .width(Fill)
+                    .height(Fill),
+                hint,
+            ]
+            .into();
+        }
         let canvas = self.canvas_rect();
         let room = screen.width - 2.0 * GAP;
         let at = bar::place(canvas, toolbar_size(room), screen);
@@ -98,6 +172,81 @@ impl Editing {
             .position(r.position())
             .into(),
         )
+    }
+}
+
+/// The full-screen area picker: dims all but the dragged box.
+struct Picker {
+    drag: Option<(Point, Point)>,
+}
+
+impl canvas::Program<Message> for Picker {
+    type State = ();
+
+    fn update(
+        &self,
+        _state: &mut (),
+        event: &canvas::Event,
+        bounds: Rectangle,
+        cursor: Cursor,
+    ) -> Option<Action<Message>> {
+        use iced::keyboard::{self, Key, key::Named};
+        let message = match event {
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                Message::Press(cursor.position_in(bounds)?)
+            }
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) if self.drag.is_some() => {
+                Message::Move(cursor.position_in(bounds)?)
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                Message::Release
+            }
+            canvas::Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Escape),
+                ..
+            }) => Message::Back,
+            _ => return None,
+        };
+        Some(Action::publish(message).and_capture())
+    }
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let keep = self.drag.map(|(a, b)| editor::span(&[a, b]));
+        let outside = Path::new(|p| {
+            p.rectangle(Point::ORIGIN, bounds.size());
+            if let Some(r) = keep {
+                p.rectangle(r.position(), r.size());
+            }
+        });
+        frame.fill(
+            &outside,
+            canvas::Fill {
+                style: canvas::Style::Solid(theme::DIM_OUTSIDE),
+                rule: fill::Rule::EvenOdd,
+            },
+        );
+        if let Some(r) = keep {
+            let edge = Stroke::default().with_color(Color::WHITE).with_width(1.5);
+            frame.stroke(&Path::rectangle(r.position(), r.size()), edge);
+        }
+        vec![frame.into_geometry()]
+    }
+
+    fn mouse_interaction(
+        &self,
+        _state: &(),
+        _bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> mouse::Interaction {
+        mouse::Interaction::Crosshair
     }
 }
 

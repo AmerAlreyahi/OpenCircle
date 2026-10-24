@@ -7,7 +7,9 @@ use iced::widget::canvas::{self, Action, Fill, Frame, Geometry, LineDash, Path, 
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
 
 use super::document::span;
-use super::{Editor, Menu, Message, PRESETS, Shape, TOOLS, Tool, callout, label, select, text};
+use super::{
+    Drag, Editor, Menu, Message, PRESETS, Shape, TOOLS, Tool, callout, label, select, text,
+};
 use crate::ui::theme;
 
 pub struct Input<'a> {
@@ -177,22 +179,35 @@ impl canvas::Program<Message> for Input<'_> {
         if e.picking {
             return mouse::Interaction::Crosshair;
         }
-        match e.tool {
-            Tool::Select => {
-                let reach = super::REACH / e.zoom;
-                if select::hit(&e.doc.items, e.to_image(at), reach).is_some() {
-                    mouse::Interaction::Grab
-                } else {
-                    mouse::Interaction::default()
-                }
-            }
-            Tool::Text | Tool::Label | Tool::Callout => mouse::Interaction::Text,
-            _ => mouse::Interaction::Crosshair,
-        }
+        e.cursor(e.to_image(at))
     }
 }
 
 impl Editor {
+    /// The pointer over `p` (image px): grabbing while something moves; a resize
+    /// cursor on the selection's handles; a move cursor on what a press moves.
+    pub(super) fn cursor(&self, p: Point) -> mouse::Interaction {
+        use mouse::Interaction as I;
+        match self.pending.as_ref().map(|p| &p.drag) {
+            Some(Drag::Move { .. }) => return I::Grabbing,
+            Some(Drag::Draw | Drag::Resize(..) | Drag::Bend(_)) => return I::Crosshair,
+            Some(Drag::Type) | None => {}
+        }
+        let reach = super::REACH / self.zoom;
+        let handle = (self.doc.selected.and_then(|i| self.doc.items.get(i)))
+            .and_then(|item| select::handle_at(item, p, reach));
+        match (handle, self.tool) {
+            (Some(select::Handle::Corner(c)), _) if c % 2 == 0 => I::ResizingDiagonallyDown,
+            (Some(select::Handle::Corner(_)), _) => I::ResizingDiagonallyUp,
+            (Some(select::Handle::Bend), _) => I::Grab,
+            (None, Tool::Select) if select::hit(&self.doc.items, p, reach).is_some() => I::Grab,
+            (None, Tool::Select) => I::default(),
+            (None, _) if self.grabbed(p).is_some() => I::Move,
+            (None, Tool::Text | Tool::Label | Tool::Callout) => I::Text,
+            (None, _) => I::Crosshair,
+        }
+    }
+
     /// While a step's note is typed: the note in a small pill beside the badge
     /// (it shows in the legend once done). Returns where its text starts.
     fn note_preview<'s>(

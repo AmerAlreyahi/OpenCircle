@@ -488,11 +488,12 @@ fn drag(e: &mut Editor, from: Point, via: &[Point], to: Point) {
 }
 
 /// Draws one item with every tool; returns how many items it made.
+/// (Each one clear of the last: a press on an item moves it.)
 fn draw_with_every_tool(e: &mut Editor) -> usize {
     let mut made = 0;
     for info in TOOLS {
         e.update(Message::Tool(info.tool));
-        let base = pt(20.0 + 70.0 * made as f32, 30.0 + 25.0 * made as f32);
+        let base = pt(20.0 + 90.0 * made as f32, 30.0 + 25.0 * made as f32);
         match info.tool {
             Tool::Select | Tool::Crop => continue,
             // Click, then type (a step's note, a label's text...).
@@ -523,7 +524,7 @@ fn draw_with_every_tool(e: &mut Editor) -> usize {
 
 #[test]
 fn every_tool_makes_one_undoable_item() {
-    let mut e = editor(1300, 500);
+    let mut e = editor(1500, 500);
     let made = draw_with_every_tool(&mut e);
     assert_eq!(made, TOOLS.len() - 2);
     // Every tool but the variants of an existing shape (line, labelled arrow)
@@ -565,6 +566,100 @@ fn every_tool_makes_one_undoable_item() {
         e.update(Message::Redo);
         assert_eq!(e.doc.items, all[..n]);
     }
+}
+
+/// A press on an item moves it whatever the tool (no Select needed); a press on
+/// empty canvas draws; the selection's handles resize; undo puts it all back.
+#[test]
+fn any_tool_moves_what_it_is_pressed_on() {
+    use iced::mouse::Interaction;
+    let mut e = editor(400, 300);
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(50.0, 50.0), &[], pt(150.0, 120.0));
+    let drawn = e.doc.items[0].clone();
+    assert_eq!(e.cursor(pt(150.0, 85.0)), Interaction::Move);
+    assert_eq!(e.cursor(pt(100.0, 85.0)), Interaction::Crosshair); // inside: draws
+
+    // Rect tool on its edge: moved, nothing new.
+    drag(&mut e, pt(150.0, 80.0), &[pt(160.0, 85.0)], pt(170.0, 90.0));
+    assert_eq!(e.doc.items.len(), 1);
+    let moved = select::moved(&drawn, iced::Vector::new(20.0, 10.0));
+    assert_eq!(e.doc.items[0], moved);
+    // The pen, a few px off the thin edge (now x = 170): moved again.
+    e.update(Message::Tool(Tool::Pen));
+    drag(&mut e, pt(174.0, 95.0), &[], pt(174.0, 105.0));
+    assert_eq!(e.doc.items.len(), 1);
+    assert_eq!(e.doc.items[0].frame().y, 70.0);
+    // Inside the box, clear of its edge: a new rectangle.
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(100.0, 90.0), &[], pt(140.0, 120.0));
+    assert_eq!(e.doc.items.len(), 2);
+
+    // A thin arrow: 3 px off its line moves it, 12 px off draws.
+    e.update(Message::Tool(Tool::Arrow));
+    drag(&mut e, pt(50.0, 250.0), &[], pt(250.0, 250.0));
+    e.update(Message::Tool(Tool::Ellipse));
+    drag(&mut e, pt(200.0, 253.0), &[], pt(200.0, 243.0));
+    assert_eq!(e.doc.items.len(), 3);
+    assert!(matches!(e.doc.items[2].shape, Shape::Arrow { a, .. } if a == pt(50.0, 240.0)));
+    drag(&mut e, pt(200.0, 252.0), &[], pt(230.0, 280.0));
+    assert_eq!(e.doc.items.len(), 4);
+
+    // The selected item's corner handle resizes it with a drawing tool active.
+    e.update(Message::Tool(Tool::Rect));
+    drag(
+        &mut e,
+        pt(100.0, 90.0),
+        &[pt(105.0, 95.0)],
+        pt(110.0, 100.0),
+    ); // picks the inner box
+    assert_eq!(e.doc.selected, Some(1));
+    let f = e.doc.items[1].frame();
+    let corner = pt(f.x + f.width, f.y + f.height);
+    drag(&mut e, corner, &[], corner + iced::Vector::new(20.0, 10.0));
+    assert_eq!(e.doc.items.len(), 4);
+    assert_eq!(
+        e.doc.items[1].frame().size(),
+        f.size() + Size::new(20.0, 10.0)
+    );
+
+    // Undo: resize, inner move, ellipse, arrow move, arrow, inner box, pen move,
+    // rect move.
+    for _ in 0..8 {
+        e.update(Message::Undo);
+    }
+    assert_eq!(e.doc.items, vec![drawn]);
+}
+
+/// A text tool's click on its own text types into it, a drag moves it; a
+/// freehand tool paints over its own strokes.
+#[test]
+fn text_moves_on_drag_and_edits_on_click() {
+    let mut e = editor(300, 200);
+    e.update(Message::Tool(Tool::Text));
+    drag(&mut e, pt(20.0, 20.0), &[], pt(20.0, 20.0));
+    e.update(Message::Type("Hi".into()));
+    e.update(Message::Finish);
+    let Shape::Text { at, .. } = e.doc.items[0].shape else {
+        panic!()
+    };
+    let c = e.doc.items[0].frame().center(); // clear of its corner handles
+    let to = c + iced::Vector::new(40.0, 30.0);
+    drag(&mut e, c, &[], to);
+    assert!(
+        matches!(e.doc.items[0].shape, Shape::Text { at: moved, .. } if moved == at + iced::Vector::new(40.0, 30.0))
+    );
+    assert!(!e.typing());
+    drag(&mut e, to, &[], to);
+    e.update(Message::Type("!".into()));
+    e.update(Message::Finish);
+    assert!(matches!(&e.doc.items[0].shape, Shape::Text { text, .. } if text == "Hi!"));
+    assert_eq!(e.doc.items.len(), 1);
+
+    e.update(Message::Tool(Tool::Pen));
+    drag(&mut e, pt(20.0, 150.0), &[], pt(200.0, 150.0));
+    drag(&mut e, pt(100.0, 151.0), &[], pt(120.0, 180.0));
+    assert_eq!(e.doc.items.len(), 3);
 }
 
 #[test]

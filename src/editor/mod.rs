@@ -33,7 +33,7 @@ mod tests;
 mod text;
 mod toolbar;
 
-pub use document::{Document, Edit, Image, Item, Shape, render};
+pub use document::{Document, Edit, Image, Item, Shape, render, span};
 pub use style::PRESETS;
 pub use toolbar::size as toolbar_size;
 
@@ -324,8 +324,11 @@ struct Pending {
 
 enum Drag {
     Draw,
-    /// Last pointer position.
-    Move(Point),
+    /// The item as picked up; `edits`: released without moving, it is typed into.
+    Move {
+        from: Item,
+        edits: bool,
+    },
     Resize(usize, Item),
     Bend(Item),
     Type,
@@ -333,6 +336,10 @@ enum Drag {
 
 /// Handles react this close to the pointer (display px).
 const REACH: f32 = 10.0;
+/// A press this close to a stroke (display px) grabs it.
+const GRAB: f32 = 4.0;
+/// A press that moves less than this (display px) is a click.
+const SLOP: f32 = 3.0;
 
 pub struct Editor {
     pub doc: Document,
@@ -716,36 +723,55 @@ impl Editor {
                 return;
             }
         }
-        let hit = select::hit(&self.doc.items, p, reach);
-        match self.tool {
-            Tool::Select => {
-                self.doc.selected = hit;
-                if let Some(i) = hit {
-                    self.begin(Some(i), self.doc.items[i].clone(), Drag::Move(p), p);
-                }
+        if self.tool == Tool::Select {
+            let hit = select::hit(&self.doc.items, p, reach);
+            self.doc.selected = hit;
+            if let Some(i) = hit {
+                self.pick_up(i, false, p);
             }
+            return;
+        }
+        if let Some(i) = self.grabbed(p) {
+            self.doc.selected = Some(i);
+            let edits = edits(self.tool, &self.doc.items[i], p, reach);
+            self.pick_up(i, edits, p);
+            return;
+        }
+        match self.tool {
             Tool::Crop => self.cropping = Some((p, p)),
             Tool::Blur => {
                 let item = self.brush(p);
                 self.begin(None, item, Drag::Draw, p);
-            }
-            Tool::Text | Tool::Label | Tool::Callout | Tool::Step | Tool::ArrowLabel => {
-                // Clicking one of the tool's own items edits its text.
-                let editable = hit.filter(|&i| edits(self.tool, &self.doc.items[i], p, reach));
-                if let Some(i) = editable {
-                    self.doc.selected = Some(i);
-                    self.begin(Some(i), self.doc.items[i].clone(), Drag::Type, p);
-                    self.hide();
-                } else {
-                    let item = self.create(p);
-                    self.begin(None, item, Drag::Draw, p);
-                }
             }
             _ => {
                 let item = self.create(p);
                 self.begin(None, item, Drag::Draw, p);
             }
         }
+    }
+
+    /// The item a press at `p` moves instead of drawing: every drawing tool moves
+    /// what is painted under it (a click on one of its own text items types into
+    /// it). Freehand tools paint over their own strokes (a second pass, the next
+    /// letter); crop always crops.
+    fn grabbed(&self, p: Point) -> Option<usize> {
+        if self.tool == Tool::Crop {
+            return None;
+        }
+        let i = select::grab(&self.doc.items, p, GRAB / self.zoom)?;
+        let freehand = matches!(
+            (self.tool, &self.doc.items[i].shape),
+            (Tool::Pen, Shape::Pen(_))
+                | (Tool::Highlighter, Shape::Highlighter(_))
+                | (Tool::Blur, Shape::Blur { .. })
+        );
+        (!freehand).then_some(i)
+    }
+
+    /// Starts moving item `i` (`edits`: a click without a move types into it).
+    fn pick_up(&mut self, i: usize, edits: bool, p: Point) {
+        let from = self.doc.items[i].clone();
+        self.begin(Some(i), from.clone(), Drag::Move { from, edits }, p);
     }
 
     fn begin(&mut self, index: Option<usize>, item: Item, drag: Drag, start: Point) {
@@ -799,11 +825,9 @@ impl Editor {
         };
         pending.item = match &pending.drag {
             Drag::Draw => grow(&pending.item, pending.start, p, self.zoom, self.shift),
-            Drag::Move(last) => {
-                let item = select::moved(&pending.item, p - *last);
-                pending.drag = Drag::Move(p);
-                item
-            }
+            // A click that wobbles a pixel is not a move.
+            Drag::Move { from, .. } if p.distance(pending.start) * self.zoom < SLOP => from.clone(),
+            Drag::Move { from, .. } => select::moved(from, p - pending.start),
             Drag::Resize(corner, original) => select::resized(original, *corner, p),
             Drag::Bend(original) => select::bent(original, p),
             Drag::Type => return,
@@ -838,6 +862,7 @@ impl Editor {
                 | Shape::Step { .. },
             ) => true,
             (Drag::Draw, Shape::Arrow { .. }) => labelled && !self.too_small(&pending.item),
+            (Drag::Move { from, edits: true }, _) => pending.item == *from,
             _ => false,
         };
         let Some(pending) = &mut self.pending else {
@@ -845,6 +870,7 @@ impl Editor {
         };
         if typed {
             pending.drag = Drag::Type;
+            self.hide();
             self.update_live();
             return;
         }
