@@ -582,6 +582,30 @@ pub fn error<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
     text(label).size(14).color(theme::floating().danger)
 }
 
+/// Running text with links in it (`parts` = text, link): links in the accent,
+/// underlined; a click on one sends `on_link(url)`, nothing opens by itself.
+pub fn linked<'a, Message: 'a>(
+    parts: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+    size: f32,
+    on_link: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message> {
+    let palette = theme::floating();
+    let spans: Vec<iced::widget::text::Span<'a, String, Font>> = parts
+        .into_iter()
+        .map(|(label, link)| match link {
+            Some(url) => iced::widget::span(label)
+                .color(theme::accent().0)
+                .underline(true)
+                .link(url.to_string()),
+            None => iced::widget::span(label).color(palette.text),
+        })
+        .collect();
+    iced::widget::rich_text(spans)
+        .size(size)
+        .on_link_click(on_link)
+        .into()
+}
+
 /// A suggestion (e.g. a prompt): small, fully rounded, outlined, quiet.
 pub fn chip<'a, Message: Clone + 'a>(
     label: impl IntoFragment<'a>,

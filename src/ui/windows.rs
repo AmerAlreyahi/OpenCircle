@@ -11,7 +11,7 @@ use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
 use super::widgets::chrome;
-use super::{onboarding, settings, shape, theme, widgets};
+use super::{onboarding, settings, shape, theme, update_card, widgets};
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::config::{self, Config, Theme};
 use crate::editor::dragout::{self, DragFile};
@@ -46,6 +46,10 @@ pub enum Msg {
     /// Test hook step (see `test_hook`).
     Test(usize, String),
     TestShot(usize, &'static str, window::Screenshot),
+    /// From the update card.
+    UpdateCard(update_card::Msg),
+    /// The result of Settings > Check now.
+    UpdateStatus(String),
 }
 
 #[derive(Default)]
@@ -56,6 +60,8 @@ pub struct Windows {
     pins: Vec<Pin>,
     /// Small message windows (a pill each) and their text.
     toasts: Vec<(window::Id, String)>,
+    /// The update card (release notes), at most one.
+    update_card: Option<(window::Id, update_card::Card)>,
     /// What each normal window's header knows (see `Chrome`).
     chrome: HashMap<window::Id, Chrome>,
 }
@@ -298,7 +304,42 @@ impl Windows {
             widgets::PILL_RADIUS,
         );
         self.toasts.push((id, text.to_string()));
+        // gone after a few seconds (a thread sleeps, the UI never waits)
+        let (done, wait) = iced::futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            let _ = done.send(());
+        });
         open.discard()
+            .chain(Task::future(wait).then(move |_| window::close(id)))
+    }
+
+    /// The update card (release notes) with `card`; replaces an open one's content.
+    pub fn update_card(&mut self, card: update_card::Card) -> Task<Msg> {
+        if let Some((_, open)) = &mut self.update_card {
+            *open = card;
+            return Task::none();
+        }
+        let (id, open) = floating(
+            window::Settings {
+                size: update_card::SIZE,
+                position: Position::Centered,
+                resizable: false,
+                ..window::Settings::default()
+            },
+            widgets::SURFACE_RADIUS,
+        );
+        self.update_card = Some((id, card));
+        open.discard()
+    }
+
+    /// Something the user is in the middle of lives in a window: Settings,
+    /// onboarding, the permission prompt or a pinned image (an update waits).
+    pub fn busy(&self) -> bool {
+        self.settings.is_some()
+            || self.onboarding.is_some()
+            || self.permission.is_some()
+            || !self.pins.is_empty()
     }
 
     /// Opens the window, or focuses it when it is already open.
@@ -326,6 +367,7 @@ impl Windows {
                         settings::Outcome::Saved(cfg) => apply(cfg),
                         settings::Outcome::Browse => return pick_folder(),
                         settings::Outcome::OpenProject => open_url(settings::PROJECT_URL),
+                        settings::Outcome::CheckUpdate => crate::update::check_now(),
                         settings::Outcome::None => {}
                     }
                 }
@@ -336,6 +378,30 @@ impl Windows {
                 }
             }
             Msg::Pin(id, msg) => return self.on_pin(id, msg),
+            Msg::UpdateStatus(status) => {
+                if let Some((_, state)) = &mut self.settings {
+                    settings::update(state, settings::Message::UpdateStatus(status));
+                }
+            }
+            Msg::UpdateCard(msg) => {
+                let Some((id, card)) = &self.update_card else {
+                    return Task::none();
+                };
+                let id = *id;
+                match msg {
+                    update_card::Msg::Card(widgets::card::Event::Grab(
+                        widgets::card::Drag::Move,
+                    )) => {
+                        return window::drag(id);
+                    }
+                    update_card::Msg::Card(widgets::card::Event::Close) => {
+                        return window::close(id);
+                    }
+                    update_card::Msg::Card(_) => {}
+                    update_card::Msg::Link(url) => open_url(&url),
+                    update_card::Msg::Page => open_url(&card.url),
+                }
+            }
             Msg::Onboarding(msg) => {
                 if let Some((id, state)) = &mut self.onboarding {
                     match onboarding::update(state, msg) {
@@ -380,6 +446,9 @@ impl Windows {
                 forget_floating(id);
                 self.chrome.remove(&id);
                 self.toasts.retain(|(t, _)| *t != id);
+                if self.update_card.as_ref().is_some_and(|(c, _)| *c == id) {
+                    self.update_card = None;
+                }
                 self.pins.retain(|p| p.id != id); // the OS closed it: free the pixels
                 if self.id(Kind::Permission) == Some(id) {
                     self.permission = None;
@@ -489,6 +558,9 @@ impl Windows {
             let id = pin.id;
             return Some(pin_view(pin).map(move |msg| Msg::Pin(id, msg)));
         }
+        if let Some((_, card)) = self.update_card.as_ref().filter(|(c, _)| *c == window) {
+            return Some(update_card::view(card).map(Msg::UpdateCard));
+        }
         if let Some((_, text)) = self.toasts.iter().find(|(t, _)| *t == window) {
             return Some(
                 widgets::layer_pill(text.as_str())
@@ -534,6 +606,9 @@ impl Windows {
         }
         if self.id(Kind::Permission) == Some(window) {
             return "OpenCircle needs screenshot permission";
+        }
+        if self.update_card.as_ref().is_some_and(|(c, _)| *c == window) {
+            return "OpenCircle update";
         }
         match (self.id(Kind::Settings), self.id(Kind::Onboarding)) {
             (Some(id), _) if id == window => "OpenCircle Settings",
@@ -830,7 +905,12 @@ fn pick_folder() -> Task<Msg> {
 }
 
 /// Opens `url` (one of our own constants) in the default browser.
-fn open_url(url: &'static str) {
+/// Opens `url` in the browser if it is one plain web link (`lens::web_host`).
+fn open_url(url: &str) {
+    if crate::lens::web_host(url).is_none() {
+        eprintln!("[opencircle] not a web link: not opened");
+        return;
+    }
     #[cfg(windows)]
     let mut cmd = {
         use std::os::windows::process::CommandExt;

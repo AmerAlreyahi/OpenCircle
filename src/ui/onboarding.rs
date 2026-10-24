@@ -124,6 +124,8 @@ pub struct State {
     /// Wayland: the Screenshots step is shown.
     wayland: bool,
     access: Access,
+    /// "Keep OpenCircle up to date": on unless the user turns it off.
+    updates: bool,
 }
 
 impl fmt::Debug for State {
@@ -150,6 +152,7 @@ pub enum Message {
     Allow,
     /// The desktop's answer to the screenshot request.
     Allowed(Result<(), String>),
+    Updates(bool),
 }
 
 // One short-lived value per message: a boxed Config would buy nothing.
@@ -196,6 +199,7 @@ impl State {
             error: None,
             wayland: false,
             access: Access::Unasked,
+            updates: true,
         }
     }
 
@@ -208,6 +212,7 @@ impl State {
     pub fn config(&self) -> Config {
         let mut c = self.base.clone();
         c.theme = self.theme;
+        c.update.auto = Some(self.updates);
         match self.choice {
             Choice::Browser => c.ai.provider = Provider::Browser,
             Choice::Claude => {
@@ -278,6 +283,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
                 state.key.update(&*state.store, p, k);
             }
         }
+        Message::Updates(on) => state.updates = on,
         Message::Theme(t) => {
             state.theme = t;
             theme::apply(t);
@@ -473,6 +479,21 @@ fn done(state: &State) -> Element<'_, Message> {
                 Theme::Dark => "Dark",
             }
         )),
+        row![
+            body("Keep OpenCircle up to date"),
+            space::horizontal(),
+            segmented(
+                &[
+                    (false, "Off", "Don't check for updates"),
+                    (true, "On", "Check for updates and install them"),
+                ],
+                state.updates,
+                Message::Updates,
+            ),
+        ]
+        .align_y(iced::Center)
+        .width(FORM_WIDTH + 140.0),
+        caption(super::settings::UPDATE_PRIVACY),
         caption("Everything can be changed in Settings, from the tray icon."),
     ]
     .spacing(14)
@@ -632,6 +653,7 @@ mod tests {
             ..Config::default()
         };
         want.ai.provider = Provider::Anthropic;
+        want.update.auto = Some(true); // the switch is pre-set on
         assert_eq!(back, want);
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("FAKE"), "the key stays out of the file");
@@ -650,6 +672,16 @@ mod tests {
         };
         assert_eq!(cfg.ai.provider, Provider::OpenaiCompatible);
         assert_eq!(cfg.ai.base_url, "http://localhost:11434/v1");
+        // the update switch: on unless turned off, shown on the last step
+        let mut off = state(Some(path.clone()));
+        next(&mut off, 3);
+        assert!(
+            shot::texts(view(&off))
+                .iter()
+                .any(|t| t == "Keep OpenCircle up to date")
+        );
+        update(&mut off, Message::Updates(false));
+        assert_eq!(off.config().update.auto, Some(false));
         assert!(!cfg.ai.model.is_empty());
         // "Skip for now" moves on and leaves the AI settings as they were.
         let mut s = state(Some(path.clone()));

@@ -17,6 +17,7 @@ mod song;
 pub mod theme;
 mod translate;
 mod tray;
+mod update_card;
 pub(crate) mod widgets;
 mod windows;
 mod word;
@@ -163,6 +164,8 @@ enum Message {
     Song(u32, song::Msg),
     /// Whether a song-search key is saved (checked once, off the UI thread).
     SongKey,
+    /// Try the waiting update again (it waits while OpenCircle is in use).
+    UpdateTick,
 }
 
 /// What the select-text popup does with the picked words.
@@ -385,6 +388,8 @@ struct App {
     /// Song search on this overlay, and its number.
     song: Option<(u32, song::Session)>,
     songs: u32,
+    /// A verified update waiting until nothing is open (`is_idle`).
+    update: Option<crate::update::Staged>,
 }
 
 /// Translations kept for reuse (each a short text).
@@ -409,7 +414,15 @@ impl App {
             ..App::idle(overlay)
         };
         let start = app.windows.start().map(Message::Windows);
-        (app, Task::batch([open, start]))
+        // Started by an update: it is confirmed (the old program goes), notes shown.
+        let notes = match crate::update::confirm() {
+            Some((version, notes, url)) => app
+                .windows
+                .update_card(update_card::Card::installed(&version, &notes, &url))
+                .map(Message::Windows),
+            None => Task::none(),
+        };
+        (app, Task::batch([open, start, notes]))
     }
 
     /// Nothing open yet (the overlay window `overlay` pre-created, hidden).
@@ -466,6 +479,7 @@ impl App {
             card_hover: false,
             song: None,
             songs: 0,
+            update: None,
         }
     }
 
@@ -477,6 +491,8 @@ impl App {
                 .open(windows::Kind::Settings)
                 .map(Message::Windows),
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
+            Message::Trigger(Trigger::Update(event)) => self.on_update(event),
+            Message::UpdateTick => self.try_update(),
             Message::Trigger(Trigger::Quick(at, qa))
                 if qa.live && qa.action == actions::translate::ACTION.id =>
             {
@@ -1086,6 +1102,75 @@ impl App {
                 }
                 None => Task::none(),
             },
+        }
+    }
+
+    /// From the update thread.
+    fn on_update(&mut self, event: crate::update::Event) -> Task<Message> {
+        use crate::update::Event;
+        match event {
+            Event::Status(status) => self
+                .windows
+                .update(windows::Msg::UpdateStatus(status))
+                .map(Message::Windows),
+            Event::Manual {
+                version,
+                notes,
+                url,
+            } => self
+                .windows
+                .update_card(update_card::Card::available(&version, &notes, &url))
+                .map(Message::Windows),
+            Event::Ready(staged) => {
+                let toast = self
+                    .windows
+                    .toast(&update_card::ready_toast(&staged.version))
+                    .map(Message::Windows);
+                self.update = Some(staged);
+                toast.chain(self.try_update())
+            }
+        }
+    }
+
+    /// Nothing of OpenCircle is in use: no overlay (editor, snip, panel), capture,
+    /// live translate, Settings, onboarding or pinned image.
+    fn is_idle(&self) -> bool {
+        self.frame.is_none()
+            && self.capturing.is_none()
+            && self.live.is_none()
+            && self.hiding == Hiding::No
+            && !self.windows.busy()
+    }
+
+    /// Installs the waiting update now if idle (then this process exits), else
+    /// looks again in a minute.
+    fn try_update(&mut self) -> Task<Message> {
+        if self.update.is_none() {
+            return Task::none();
+        }
+        if !self.is_idle() {
+            return background(|tx| {
+                std::thread::sleep(Duration::from_secs(60));
+                let _ = tx.unbounded_send(());
+            })
+            .map(|()| Message::UpdateTick);
+        }
+        let Some(staged) = self.update.take() else {
+            return Task::none();
+        };
+        match crate::update::install(&staged) {
+            Ok(()) => iced::exit(),
+            Err(e) => {
+                eprintln!("[opencircle] update {}: {e}", staged.version);
+                // can't replace itself (e.g. installed for all users): the page instead
+                self.windows
+                    .update_card(update_card::Card::available(
+                        &staged.version,
+                        &staged.notes,
+                        &staged.url,
+                    ))
+                    .map(Message::Windows)
+            }
         }
     }
 
@@ -2745,6 +2830,40 @@ mod tests {
             size: Size::new(4.0, 4.0),
             snip: None,
         })
+    }
+
+    #[test]
+    fn an_update_waits_until_nothing_is_open() {
+        use crate::update::{Event, Install, Staged};
+        let staged = Staged {
+            version: "9.9.9".into(),
+            file: "missing".into(),
+            dir: std::env::temp_dir().join("oc-update-test-never-made"),
+            install: Install::Manual, // even if it ran, it could not touch anything
+            notes: String::new(),
+            url: String::new(),
+        };
+        let mut app = App::idle(window::Id::unique());
+        assert!(app.is_idle());
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        assert!(!app.is_idle(), "a capture is out");
+        let _ = app.update(Message::Trigger(Trigger::Update(Event::Ready(
+            staged.clone(),
+        ))));
+        assert_eq!(app.update, Some(staged.clone()), "kept for later");
+        let _ = app.update(Message::Captured(
+            app.capturing.unwrap(),
+            Instant::now(),
+            a_shot(),
+        ));
+        assert!(!app.is_idle(), "the overlay is open");
+        let _ = app.update(Message::UpdateTick);
+        assert_eq!(app.update, Some(staged), "still waiting");
+        let _ = app.close();
+        app.hiding = Hiding::No; // the hidden window drew its last frames
+        assert!(app.is_idle());
+        let _ = app.update(Message::UpdateTick);
+        assert_eq!(app.update, None, "tried once idle");
     }
 
     #[test]

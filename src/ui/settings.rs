@@ -468,6 +468,10 @@ const SECTIONS: [(Section, &str, &str); 9] = [
     (Section::About, "About", "About OpenCircle"),
 ];
 
+/// What the update switch says it does (Settings and onboarding).
+pub const UPDATE_PRIVACY: &str = "Asks GitHub for the latest version twice a day and installs it when \
+     OpenCircle is idle. Sends only that request: nothing about you or your screen";
+
 /// The project page the About section links to.
 pub const PROJECT_URL: &str = "https://github.com/AmerAlreyahi/OpenCircle";
 
@@ -513,6 +517,8 @@ pub struct State {
     picker: Option<usize>,
     hex: String,
     previews: Vec<Handle>,
+    /// The last Check now's result (`None` = not checked in this window).
+    update_status: Option<String>,
 }
 
 impl fmt::Debug for State {
@@ -575,6 +581,10 @@ pub enum Message {
     Hex(String),
     /// The Snip section's choices.
     Snip(SnipConfig),
+    /// About: keep OpenCircle up to date, Check now, and that check's result.
+    AutoUpdate(bool),
+    CheckUpdate,
+    UpdateStatus(String),
     Save,
 }
 
@@ -677,6 +687,8 @@ pub enum Outcome {
     Browse,
     /// Open `PROJECT_URL` in the browser.
     OpenProject,
+    /// Check for an update now; the answer comes back as `Message::UpdateStatus`.
+    CheckUpdate,
 }
 
 impl State {
@@ -731,6 +743,7 @@ impl State {
             picker: None,
             hex: String::new(),
             previews: Vec::new(),
+            update_status: None,
         };
         s.previews = LOOKS.iter().map(|(t, ..)| preview(&s.look(*t))).collect();
         s.revalidate();
@@ -1042,6 +1055,12 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         Message::Folder(None) => {}
         Message::ClearFolder => state.draft.general.save_folder.clear(),
         Message::OpenProject => return Outcome::OpenProject,
+        Message::AutoUpdate(on) => state.draft.update.auto = Some(on),
+        Message::CheckUpdate => {
+            state.update_status = Some("Checking…".into());
+            return Outcome::CheckUpdate;
+        }
+        Message::UpdateStatus(status) => state.update_status = Some(status),
         Message::Save => return save(state),
     }
     state.revalidate();
@@ -1115,7 +1134,7 @@ fn content(state: &State) -> Element<'_, Message> {
     let (heading, rows): (&str, Vec<Element<'_, Message>>) = match state.section {
         Section::General => ("General", general_rows(state)),
         Section::Look => ("Look & behaviour", look_rows(state)),
-        Section::About => ("About", about_rows()),
+        Section::About => ("About", about_rows(state)),
         Section::Appearance => (
             "Appearance",
             vec![form_row(
@@ -1782,9 +1801,32 @@ fn snip_rows(d: &SnipConfig) -> Vec<Element<'_, Message>> {
     ]
 }
 
-fn about_rows<'a>() -> Vec<Element<'a, Message>> {
+fn about_rows(state: &State) -> Vec<Element<'_, Message>> {
     let project = label_button("Open GitHub", false, Some(Message::OpenProject));
+    let check = label_button("Check now", false, Some(Message::CheckUpdate));
     vec![
+        form_row(
+            "Keep OpenCircle up to date",
+            UPDATE_PRIVACY,
+            segmented(
+                &[
+                    (false, "Off", "Don't check for updates"),
+                    (true, "On", "Check for updates and install them"),
+                ],
+                state.draft.update.auto == Some(true),
+                Message::AutoUpdate,
+            ),
+            None,
+        ),
+        form_row(
+            "Updates",
+            state
+                .update_status
+                .as_deref()
+                .unwrap_or("Look for a new version now"),
+            check,
+            None,
+        ),
         form_row(
             "Version",
             "OpenCircle",
@@ -2665,6 +2707,30 @@ pub(super) mod tests {
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(back.snip, snip);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn about_switches_updates_and_checks_now() {
+        let path = tmp("update");
+        let (mut s, _) = state(Some(path.clone()));
+        update(&mut s, Message::Section(Section::About));
+        assert_eq!(update(&mut s, Message::CheckUpdate), Outcome::CheckUpdate);
+        assert!(shot::texts(view(&s)).iter().any(|t| t == "Checking…"));
+        update(
+            &mut s,
+            Message::UpdateStatus("OpenCircle 1.0.0 is up to date".into()),
+        );
+        assert!(
+            shot::texts(view(&s))
+                .iter()
+                .any(|t| t == "OpenCircle 1.0.0 is up to date")
+        );
+        update(&mut s, Message::AutoUpdate(false));
+        let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+            panic!("saved");
+        };
+        assert_eq!(cfg.update.auto, Some(false));
+        assert_eq!(Config::load_from(&path).0.update.auto, Some(false));
     }
 
     #[test]

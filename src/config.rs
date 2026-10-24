@@ -48,6 +48,8 @@
 //! [song]                            # song search (the service key: OS keyring only)
 //! source = "system"                 # system (what this PC plays) | microphone
 //! history = false                   # keep recent songs on this PC
+//! [update]
+//! auto = true                       # keep OpenCircle up to date (unset = not asked yet: off)
 //! [snip]
 //! after = "copy"                    # after a capture: copy | editor | both
 //! max_edge = 1568                   # Copy / Save scale the long edge down to this; 0 = original
@@ -667,6 +669,15 @@ pub struct Config {
     pub snip: SnipConfig,
     pub quick_actions: Vec<QuickAction>,
     pub song: SongConfig,
+    pub update: UpdateConfig,
+}
+
+/// `[update]`: automatic updates from GitHub Releases (`crate::update`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+pub struct UpdateConfig {
+    /// `None` = never asked (no checks); onboarding asks, Settings changes it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto: Option<bool>,
 }
 
 /// What song search listens to.
@@ -743,6 +754,7 @@ impl Default for Config {
                 qa("song_search", "", Target::FullScreen, false),
             ],
             song: SongConfig::default(),
+            update: UpdateConfig::default(),
         }
     }
 }
@@ -931,6 +943,9 @@ impl Config {
         if let Some(t) = section(&root, "song", &mut w) {
             c.song.source = get(t, "song.", "source", d.song.source, &mut w);
             c.song.history = get(t, "song.", "history", d.song.history, &mut w);
+        }
+        if let Some(t) = section(&root, "update", &mut w) {
+            c.update.auto = get(t, "update.", "auto", None, &mut w);
         }
         if let Some(t) = section(&root, "snip", &mut w) {
             let p = "snip.";
@@ -1388,6 +1403,7 @@ mod tests {
         c.translate.source = "ja".into();
         c.song.source = SongSource::Microphone;
         c.song.history = true;
+        c.update.auto = Some(false);
         c.snip.after = SnipAfter::Editor;
         c.snip.history = true;
         c.snip.max_edge = 0;
@@ -1405,6 +1421,23 @@ mod tests {
         assert!(!path.with_extension("toml.tmp").exists());
         assert!(text.contains("[general]") && text.contains("default_action = \"copy\""));
         assert!(text.contains("[editor]\nline_assist = false"), "{text}");
+        assert!(text.contains("[update]\nauto = false"), "{text}");
+        // Not asked yet: no [update] key written, none read.
+        let unasked = Config::default();
+        assert!(
+            !toml::to_string(&unasked)
+                .unwrap()
+                .contains("[update]\nauto")
+        );
+        assert_eq!(
+            Config::parse("[update]\nauto = true\n").0.update.auto,
+            Some(true)
+        );
+        let (c, w) = Config::parse("[update]\nauto = \"yes\"\n");
+        assert!(
+            c.update.auto.is_none() && w[0].starts_with("update.auto"),
+            "{w:?}"
+        );
         // Older files have no [editor]: line assist on, no warning.
         let (c, w) = Config::parse("version = 1\n");
         assert!(c.editor.line_assist && w.is_empty(), "{w:?}");

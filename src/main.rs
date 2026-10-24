@@ -24,6 +24,7 @@ mod secrets;
 #[allow(dead_code)] // library for full-screen translate; the UI wires it
 mod translate;
 mod ui;
+mod update;
 
 use std::process::ExitCode;
 use std::time::Instant;
@@ -38,6 +39,8 @@ pub enum Trigger {
     Quick(Instant, config::QuickAction),
     /// Tray "Settings…": open the Settings window, or focus it if it is open.
     OpenSettings,
+    /// From the update thread (`update::Event`).
+    Update(update::Event),
     Quit,
 }
 
@@ -138,9 +141,17 @@ fn main() -> ExitCode {
     attach_parent_console();
     ui::limit_malloc_arenas();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let relaunched = args.first().map(String::as_str) == Some(update::RELAUNCH_ARG);
     let command = match args.first().map(String::as_str) {
         None => None,
         Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
+        Some(update::VERSION_ARG) => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        // hidden: started by an update, once the old process has exited
+        Some(update::RELAUNCH_ARG) if update::wait_for_old(|| hotkey::forward("").is_ok()) => None,
+        Some(update::RELAUNCH_ARG) => return ExitCode::FAILURE,
         Some("capture" | "run") => match hotkey::Command::from_args(&args) {
             Ok(command) => Some(command),
             Err(e) => {
@@ -184,11 +195,15 @@ fn main() -> ExitCode {
     hotkey::start(tx.clone(), &config);
     config::set_current(config);
     let _tray = ui::start_tray(tx.clone());
+    update::start(tx.clone());
 
     match ui::run(rx) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{e}");
+            if relaunched {
+                update::roll_back(); // a new version that can't start: the old one again
+            }
             ExitCode::FAILURE
         }
     }
