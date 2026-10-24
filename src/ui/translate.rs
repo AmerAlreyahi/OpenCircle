@@ -13,6 +13,7 @@ use super::{background, bar, panel, widgets};
 use crate::actions::ask::{self, Chat, Status};
 use crate::actions::{self, Crop};
 use crate::ai::AiError;
+use crate::capture::window_rect;
 use crate::mt::Pair;
 use crate::ocr::models;
 use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
@@ -86,6 +87,9 @@ pub struct Session {
     frame: image::Handle,
     /// What is translated, frame pixels: x0, y0, x1, y1 (ends exclusive).
     area: [u32; 4],
+    /// The whole frame was asked for (no selection to outline), even when
+    /// `area` is only the foreground window's page.
+    whole: bool,
     phase: Phase,
     peek: bool,
     card: Option<Card>,
@@ -113,18 +117,31 @@ impl Session {
     /// Translates `area` of `frame` from the configured source into the
     /// configured target. Asks first for what is missing: the OCR models
     /// (`models` = present), or, when translation will be offline, its
-    /// models with OCR's in one download.
+    /// models with OCR's in one download. The whole frame means the
+    /// foreground window's page (no taskbar, title bar or browser bars),
+    /// unless `translate.whole_screen`; `monitor` = the frame's origin in
+    /// desktop px and its scale (`None`: the whole frame as is).
     pub fn start(
         frame: image::Handle,
         area: [u32; 4],
         cache: Arc<Cache>,
         models: bool,
+        monitor: Option<(i32, i32, f32)>,
     ) -> (Session, Task<Msg>) {
         let cfg = crate::config::current().translate;
         let offline = actions::translate::will_be_offline();
+        let size = match &frame {
+            image::Handle::Rgba { width, height, .. } => (*width, *height),
+            _ => (0, 0),
+        };
+        let whole = area == [0, 0, size.0, size.1];
+        let window = monitor
+            .filter(|_| whole && !cfg.whole_screen)
+            .and_then(|(x, y, scale)| window_rect::region((x, y), size, scale));
         let mut session = Session {
             frame,
-            area,
+            area: window.unwrap_or(area),
+            whole,
             phase: Phase::Consent(None),
             peek: false,
             card: None,
@@ -156,12 +173,10 @@ impl Session {
         }
     }
 
-    /// The whole frame is translated (no selection to show).
+    /// The whole frame (or the window in it) is translated: no selection
+    /// to show.
     pub fn full(&self) -> bool {
-        match &self.frame {
-            image::Handle::Rgba { width, height, .. } => self.area == [0, 0, *width, *height],
-            _ => false,
-        }
+        self.whole
     }
 
     /// What to show instead of the original frame: the translation, unless
@@ -475,7 +490,8 @@ fn translate(
     })?;
     let t = out.timings;
     eprintln!(
-        "[opencircle] translate {}x{}: ocr {} ms, translate {} ms, render {} ms, total {} ms; {} blocks",
+        "[opencircle] translate {}x{} at {x0},{y0}: ocr {} ms, translate {} ms, render {} ms, \
+         total {} ms; {} blocks, {} drawn, {} left (busy background {}, no room {})",
         crop.width,
         crop.height,
         t.ocr.as_millis(),
@@ -483,6 +499,10 @@ fn translate(
         t.render.as_millis(),
         t.total.as_millis(),
         out.blocks.len(),
+        out.drawn.drawn,
+        out.drawn.busy + out.drawn.no_room,
+        out.drawn.busy,
+        out.drawn.no_room,
     );
     let mut full = pixels.to_vec();
     paste(&mut full, *width, area, &out.rgba);
@@ -643,6 +663,7 @@ mod tests {
         Session {
             frame: frame(200, 100),
             area: [0, 0, 200, 100],
+            whole: true,
             phase: if models {
                 Phase::Translating
             } else {
@@ -833,7 +854,14 @@ mod tests {
 
     #[test]
     fn the_result_is_pasted_in_place_or_nothing_is() {
-        let original = frame(200, 100);
+        // "glyphs" where OCR finds "Quit": (20, 10) of the area
+        let mut px = vec![7u8; 200 * 100 * 4];
+        for y in 64..76 {
+            for x in (120..160).step_by(3) {
+                px[(y * 200 + x) * 4..][..3].copy_from_slice(&[230; 3]);
+            }
+        }
+        let original = image::Handle::from_rgba(200, 100, px);
         let cache = Cache::new(8);
         let area = [100, 50, 200, 100];
         let ok = |a: Result<&'static str, AiError>| Ok((Fake(a), "ar".to_string()));

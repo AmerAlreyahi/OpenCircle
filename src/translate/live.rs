@@ -13,10 +13,10 @@ use std::hash::{DefaultHasher, Hasher};
 use std::time::Instant;
 
 use super::pipeline::{
-    Cache, Deps, Error, Timings, Translation, check_frame, is_rtl, to_line, translate_blocks,
-    translations,
+    Cache, Deps, Error, Timings, Translation, check_frame, cut_off, is_rtl, to_line,
+    translate_blocks, translations,
 };
-use super::{Block, Line, column_right, group_blocks, render};
+use super::{Block, Drawn, Line, group_blocks, render};
 use crate::ocr::TextBlock;
 
 /// Diff granularity in pixels.
@@ -41,6 +41,8 @@ pub struct Live {
     lines: Vec<Line>,
     blocks: Vec<Translation>,
     patches: Vec<Patch>,
+    /// What the last render drew and left as it was (its rooms dropped).
+    drawn: Drawn,
 }
 
 /// x0, y0, x1, y1 in frame pixels.
@@ -54,6 +56,11 @@ impl Live {
     /// Everything the layer shows now (all blocks, not just the changed ones).
     pub fn patches(&self) -> &[Patch] {
         &self.patches
+    }
+
+    /// What the last changed frame's render drew and left as it was.
+    pub fn drawn(&self) -> &Drawn {
+        &self.drawn
     }
 
     /// The blocks on screen, for "click a block -> explanation".
@@ -113,12 +120,12 @@ impl Live {
         let t = Instant::now();
         let rtl = is_rtl(target);
         let mut out = frame.to_vec();
-        render(&mut out, width, height, &blocks, &tr, rtl);
-        let patches = blocks
-            .iter()
-            .zip(&tr)
-            .filter(|(_, t)| !t.trim().is_empty())
-            .filter_map(|(b, _)| patch(&frame, &out, width, window(b, &blocks, rtl, width, height)))
+        let drawn = render(&mut out, width, height, &blocks, &tr, rtl);
+        let patches = (blocks.iter().zip(&tr).zip(&drawn.rooms))
+            .filter(|((_, t), _)| !t.trim().is_empty())
+            .filter_map(|((b, _), room)| {
+                patch(&frame, &out, width, window(b, *room, width, height))
+            })
             .collect();
         let render = t.elapsed();
 
@@ -128,6 +135,10 @@ impl Live {
             blocks: translations(&blocks, &tr),
             lines,
             patches,
+            drawn: Drawn {
+                rooms: Vec::new(),
+                ..drawn
+            },
         };
         Ok(Some(Timings {
             ocr,
@@ -272,19 +283,19 @@ fn read_regions(
             })?;
             let (r, top) = (regions[i], tops[i] as f32);
             let bounds = [x + r[0] as f32, y - top + r[1] as f32, w, h];
-            Some(to_line(TextBlock { bounds, ..b }, width, fh))
+            let b = TextBlock { bounds, ..b };
+            (!cut_off(&b, fh)).then(|| to_line(b, width, fh))
         })
         .collect())
 }
 
-/// Where `render` may have drawn for block `b`: its box, one line height
-/// above and below, two to each side (a short label grows toward its line
-/// start) and, for RTL, out to its column's right edge.
-fn window(b: &Block, blocks: &[Block], rtl: bool, w: u32, h: u32) -> Rect {
+/// Where `render` may have drawn for block `b`: its box and its room (see
+/// `render`), one line height above and below, two to each side.
+fn window(b: &Block, room: [f32; 4], w: u32, h: u32) -> Rect {
     let lh = b.lines[0].bounds[3];
     let [x, y, bw, bh] = b.bounds;
-    let right = if rtl { column_right(b, blocks) } else { x + bw };
-    let r = outer([x - 2.0 * lh, y - lh, right - x + 4.0 * lh, bh + 2.0 * lh]);
+    let (x0, x1) = (x.min(room[0]), (x + bw).max(room[0] + room[2]));
+    let r = outer([x0 - 2.0 * lh, y - lh, x1 - x0 + 4.0 * lh, bh + 2.0 * lh]);
     [r[0], r[1], r[2].min(w), r[3].min(h)]
 }
 

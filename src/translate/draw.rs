@@ -157,7 +157,7 @@ pub fn extent(buf: &Buffer) -> (f32, f32) {
 }
 
 /// Em size of the original from its ink height and text: ink height is the
-/// cap/ascender height (+ descender) of a Latin line.
+/// cap/ascender height (+ descender) of a Latin line; brackets reach both.
 /// ponytail: fixed Latin ratios (Inter-like); other scripts get 0.8.
 fn source_em(text: &str, ink_h: f32) -> f32 {
     if !text.chars().any(|c| c.is_ascii_alphanumeric()) {
@@ -165,15 +165,18 @@ fn source_em(text: &str, ink_h: f32) -> f32 {
     }
     let tall = text
         .chars()
-        .any(|c| c.is_uppercase() || c.is_ascii_digit() || "bdfhiklt/%".contains(c));
-    let desc = text.chars().any(|c| "gjpqy".contains(c));
+        .any(|c| c.is_uppercase() || c.is_ascii_digit() || "bdfhklt/%()[]{}|".contains(c));
+    let desc = text.chars().any(|c| "gjpqy()[]{}|,;".contains(c));
     ink_h / (if tall { 0.73 } else { 0.53 } + if desc { 0.21 } else { 0.0 })
 }
 
 /// Where and how a block's translation goes.
 pub struct Placement {
-    /// Block box x, y, w, h (union of its OCR line boxes).
+    /// The room it may use, x, y, w, h: the block's box (union of its OCR
+    /// line boxes), widened into free space by `render`.
     pub bounds: [f32; 4],
+    /// The first line's box height (padded OCR box): caps the em.
+    pub line_h: f32,
     /// Original line texts (for the em estimate).
     pub texts: Vec<String>,
     pub styles: Vec<LineStyle>,
@@ -181,33 +184,67 @@ pub struct Placement {
     pub centred: bool,
 }
 
-/// Lays out `text` to fit `p.bounds` and returns the buffer, its top-left
-/// and the size used.
-pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> (Buffer, (i32, i32), f32) {
+/// The laid-out translation: buffer, top-left, font size.
+pub type Fit = (Buffer, (i32, i32), f32);
+
+/// Smallest redraw, relative to the original size: below it, text is not
+/// legible as a replacement, so the original stays.
+const MIN_SCALE: f32 = 0.7;
+
+/// The original's size (em), from its ink, never above its OCR box (the line
+/// box without the padding) nor much above what its dense band says (the
+/// x-height of mixed-case Latin, ~0.53 em, else the cap height): an icon or
+/// a stray mark in the window cannot blow it up.
+fn original_em(p: &Placement) -> f32 {
+    let s0 = &p.styles[0];
+    let n = p.styles.len() as f32;
+    let text = &p.texts[0];
+    let band = s0.band
+        / if text.chars().any(|c| c.is_ascii_lowercase()) {
+            0.53
+        } else {
+            0.73
+        };
+    let ink = source_em(text, (s0.ink[3] - s0.ink[1]) as f32);
+    ink.min(if band > 0.0 { band * 1.15 } else { ink })
+        .min(p.line_h / 1.3)
+        .min(p.bounds[3] / n)
+        .max(6.0)
+}
+
+/// Font weight from stroke width per em (Inter: 400 about 0.08, 500 about
+/// 0.095, 700 from 0.11), capped at semibold (600); a link (saturated, dark
+/// text on a light page) is normal.
+fn weight(s: &LineStyle, em: f32) -> u16 {
+    let c = s.color;
+    let sat = c.iter().max().unwrap() - c.iter().min().unwrap();
+    let dark = (0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32) < 140.0;
+    match s.stroke / em {
+        _ if sat > 60 && dark => 400,
+        r if r > 0.115 => 600,
+        r if r > 0.09 => 500,
+        _ => 400,
+    }
+}
+
+/// Lays out `text` to fit `p.bounds`: the original size at most, shrunk
+/// (wrapping at the room's width, inside the block's height) down to
+/// [`MIN_SCALE`] of it. `None` = it does not fit legibly.
+pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
     let s0 = &p.styles[0];
     let accent = p.styles.iter().find_map(|s| s.accent).unwrap_or(s0.color);
     let spans = parse_marked(text, s0.color, accent);
     let n = p.styles.len();
-    let em = source_em(&p.texts[0], (s0.ink[3] - s0.ink[1]) as f32)
-        .min(p.bounds[3] / n as f32)
-        .max(6.0);
+    let em = original_em(p);
     // pitch of the original lines (baseline to baseline), if it wrapped
     let pitch = (n > 1).then(|| (p.styles[n - 1].ink[3] - s0.ink[3]) as f32 / (n - 1) as f32);
-    // ponytail: stroke/em threshold tuned on Inter 500 (<= 0.096) vs 700 (>= 0.110)
-    let weight = if s0.stroke / em > 0.10 { 700 } else { 500 };
+    let weight = weight(s0, em);
     let align = match (p.centred, p.rtl) {
         (true, _) => Align::Center,
         (false, true) => Align::Right,
         (false, false) => Align::Left,
     };
-    let [mut bx, by, mut bw, bh] = p.bounds;
-    // a short label may grow one em toward its line start (left for RTL)
-    if !p.centred {
-        bw += em;
-        bx -= if p.rtl { em } else { 0.0 };
-    }
-    // same em as the original, shrink until it fits the block (wrapping at
-    // the block width), floor at 40 %
+    let [bx, by, bw, bh] = p.bounds;
     let mut size = em;
     let (buf, h) = loop {
         let lh = pitch.map_or(size * 1.3, |pt| pt.min(size * 1.6).max(size * 1.2));
@@ -220,14 +257,17 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> (Buffer, (i32, i32),
             align,
         );
         let (w, h) = extent(&buf);
-        if (w <= bw + 0.5 && h <= bh.max(lh) + 0.5) || size < em * 0.4 {
+        if w <= bw + 0.5 && h <= bh.max(lh) + 0.5 {
             break (buf, h);
         }
         size *= 0.95;
+        if size < em * MIN_SCALE {
+            return None;
+        }
     };
     // the buffer is `bw` wide and aligned inside it; centre it vertically
     let top = by + (bh - h) / 2.0;
-    (buf, (bx.round() as i32, top.round() as i32), size)
+    Some((buf, (bx.round() as i32, top.round() as i32), size))
 }
 
 /// Draws the fitted translation (shadow or outline first, if the original had one).
@@ -235,10 +275,9 @@ pub fn draw_block(
     fonts: &mut Fonts,
     rgba: &mut [u8],
     dims: (usize, usize),
-    text: &str,
     p: &Placement,
+    (buf, (x, y), size): Fit,
 ) {
-    let (buf, (x, y), size) = fit(fonts, text, p);
     if let Some((c, offset)) = p.styles[0].shadow {
         let d = (size / 16.0).round().max(1.0) as i32;
         let offs: &[(i32, i32)] = if offset {
@@ -280,13 +319,17 @@ mod tests {
             shadow: None,
             ink,
             stroke: 3.0,
+            residual: 0.0,
+            band: 0.0,
         }
     }
 
     /// Glyph pixels drawn into a blank image: their bounding box.
     fn ink_box(text: &str, p: &Placement, dims: (usize, usize)) -> [i32; 4] {
         let mut img = vec![0u8; dims.0 * dims.1 * 4];
-        draw_block(&mut FONTS.lock().unwrap(), &mut img, dims, text, p);
+        let mut fonts = FONTS.lock().unwrap();
+        let fit = fit(&mut fonts, text, p).expect("fits");
+        draw_block(&mut fonts, &mut img, dims, p, fit);
         let mut e = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
         for (i, px) in img.chunks(4).enumerate() {
             if px[..3].iter().any(|&v| v > 0) {
@@ -301,6 +344,7 @@ mod tests {
         let lh = bounds[3] / lines as f32;
         Placement {
             bounds,
+            line_h: lh,
             texts: vec!["Bring the Sunstone".into(); lines],
             styles: (0..lines)
                 .map(|k| {
@@ -324,10 +368,6 @@ mod tests {
         let e = ink_box("أحضر حجر الشمس", &p, (800, 200));
         assert!((e[2] - 600).abs() <= 3, "right edge {e:?}");
         assert!(e[0] > 300, "short text should hug the right edge: {e:?}");
-        // a short label grows toward its start instead of shrinking to nothing
-        let p = placement([500.0, 50.0, 30.0, 40.0], 1, true);
-        let (_, _, size) = fit(&mut FONTS.lock().unwrap(), "مفعّلة", &p);
-        assert!(size > 20.0, "short label kept readable: {size}");
         let p = placement([100.0, 50.0, 500.0, 40.0], 1, false);
         let e = ink_box("Bring it", &p, (800, 200));
         assert!(
@@ -336,32 +376,72 @@ mod tests {
         );
     }
 
+    /// Never bigger than the original, never under 70 % of it: a translation
+    /// that does not fit legibly is not drawn (`render` keeps the original).
     #[test]
-    fn long_text_shrinks_then_wraps_inside_the_block() {
+    fn size_stays_between_70_and_100_percent_of_the_original() {
+        let mut fonts = FONTS.lock().unwrap();
+        // "Bring the Sunstone": ink 26 px with capitals and a descender = 27.7 px em
+        let p = placement([100.0, 50.0, 900.0, 40.0], 1, true);
+        let (_, _, size) = fit(&mut fonts, "خروج", &p).unwrap();
+        assert!(
+            (size - 27.7).abs() < 0.5,
+            "a short word keeps the size: {size}"
+        );
+        // a stray mark made the ink 3x taller: the OCR box caps the em
+        let mut tall = placement([100.0, 50.0, 900.0, 40.0], 1, true);
+        tall.styles[0].ink[1] -= 52;
+        let (_, _, size) = fit(&mut fonts, "خروج", &tall).unwrap();
+        assert!(size <= 40.0 / 1.3 + 0.1, "capped: {size}");
+        // too long for one line at 70 %: nothing
+        let p = placement([500.0, 50.0, 30.0, 40.0], 1, true);
+        assert!(fit(&mut fonts, "مفعّلة", &p).is_none());
         let long = "أحضر [[حجر الشمس]] إلى المعبد القديم قبل حلول الليل، ولا تبتعد عن الطريق \
                     فالغابة ليست آمنة بعد حلول الظلام أبدا";
-        for (bounds, lines) in [
-            ([100.0, 50.0, 400.0, 40.0], 1),
-            ([100.0, 50.0, 500.0, 120.0], 3),
-        ] {
-            let p = placement(bounds, lines, true);
-            let e = ink_box(long, &p, (800, 300));
-            let (x1, y1) = (
-                (bounds[0] + bounds[2]) as i32,
-                (bounds[1] + bounds[3]) as i32,
-            );
-            // the block, plus one em (~28 px here) of growth at the RTL line start
-            let x0 = bounds[0] as i32 - 28;
-            assert!(
-                e[0] >= x0 && e[1] >= bounds[1] as i32 && e[2] <= x1 && e[3] <= y1,
-                "ink {e:?} outside block {bounds:?}"
-            );
-            let (buf, _, size) = fit(&mut FONTS.lock().unwrap(), long, &p);
-            if lines == 3 {
-                assert!(buf.layout_runs().count() > 1, "paragraph wraps");
-                assert!(size > 12.0, "wrapping keeps it readable: {size}");
-            }
-        }
+        let p = placement([100.0, 50.0, 400.0, 40.0], 1, true);
+        assert!(fit(&mut fonts, long, &p).is_none());
+    }
+
+    #[test]
+    fn long_text_wraps_inside_the_block() {
+        let long = "أحضر [[حجر الشمس]] إلى المعبد القديم قبل حلول الليل، ولا تبتعد عن الطريق \
+                    فالغابة ليست آمنة بعد حلول الظلام أبدا";
+        let bounds = [100.0, 50.0, 500.0, 120.0];
+        let p = placement(bounds, 3, true);
+        let e = ink_box(long, &p, (800, 300));
+        let (x1, y1) = (
+            (bounds[0] + bounds[2]) as i32,
+            (bounds[1] + bounds[3]) as i32,
+        );
+        assert!(
+            e[0] >= bounds[0] as i32 && e[1] >= bounds[1] as i32 && e[2] <= x1 && e[3] <= y1,
+            "ink {e:?} outside block {bounds:?}"
+        );
+        let (buf, _, size) = fit(&mut FONTS.lock().unwrap(), long, &p).unwrap();
+        assert!(buf.layout_runs().count() > 1, "paragraph wraps");
+        assert!(
+            size >= 27.7 * MIN_SCALE,
+            "wrapping keeps it readable: {size}"
+        );
+    }
+
+    /// Weight from stroke per em, capped at semibold; links are normal.
+    #[test]
+    fn weight_is_capped_and_links_are_normal() {
+        let s = |stroke: f32, color: [u8; 3]| LineStyle {
+            stroke,
+            color,
+            ..style([0, 0, 1, 1])
+        };
+        assert_eq!(weight(&s(2.0, [240; 3]), 25.0), 400);
+        assert_eq!(weight(&s(2.5, [240; 3]), 25.0), 500);
+        assert_eq!(
+            weight(&s(6.0, [240; 3]), 25.0),
+            600,
+            "bold caps at semibold"
+        );
+        assert_eq!(weight(&s(6.0, [51, 102, 204]), 25.0), 400, "a link");
+        assert_eq!(weight(&s(6.0, [232, 190, 92]), 25.0), 600, "a gold name");
     }
 
     #[test]

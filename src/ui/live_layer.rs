@@ -14,7 +14,7 @@ use iced::{ContentFit, Element, Fill, Point, Size, Task, Vector, task};
 
 use super::live_controller::{self, Controller, Out};
 use super::{background, border, theme, widgets, windows};
-use crate::capture;
+use crate::capture::{self, window_rect};
 use crate::config;
 use crate::live::{self, LayerError};
 use crate::mt::Pair;
@@ -511,23 +511,48 @@ impl Live {
                 if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
                     live_controller::mask(&mut frame.rgba, w, h, rect);
                 }
-                match steps.step(&frame.rgba, w, h, target, &cache, &deps) {
+                // the foreground window's page (a full-screen game: all of
+                // it), unless the whole screen is asked for
+                let area = (!config::current().translate.whole_screen)
+                    .then(|| window_rect::region((frame.x, frame.y), (w, h), monitor.scale))
+                    .flatten()
+                    .unwrap_or([0, 0, w, h]);
+                let (cw, ch) = (area[2] - area[0], area[3] - area[1]);
+                let page = if (cw, ch) == (w, h) {
+                    frame.rgba
+                } else {
+                    (area[1]..area[3])
+                        .flat_map(|y| {
+                            let row = (y * w) as usize * 4;
+                            &frame.rgba[row + area[0] as usize * 4..row + area[2] as usize * 4]
+                        })
+                        .copied()
+                        .collect()
+                };
+                match steps.step(&page, cw, ch, target, &cache, &deps) {
                     Ok(None) => None,
                     Ok(Some(t)) => {
                         last_error = None;
+                        let d = steps.drawn();
                         eprintln!(
-                            "[opencircle] live step: ocr {} ms, translate {} ms, render {} ms, total {} ms; {} patches",
+                            "[opencircle] live step {cw}x{ch} at {},{}: ocr {} ms, translate {} ms, \
+                             render {} ms, total {} ms; {} patches, {} left (busy background {}, no room {})",
+                            area[0],
+                            area[1],
                             t.ocr.as_millis(),
                             t.translate.as_millis(),
                             t.render.as_millis(),
                             t.total.as_millis(),
-                            steps.patches().len()
+                            steps.patches().len(),
+                            d.busy + d.no_room,
+                            d.busy,
+                            d.no_room,
                         );
                         let shown = (steps.patches().iter())
                             .map(|p| {
-                                let [_, _, pw, ph] = p.bounds;
+                                let [px, py, pw, ph] = p.bounds;
                                 Shown {
-                                    bounds: p.bounds,
+                                    bounds: [px + area[0], py + area[1], pw, ph],
                                     image: image::Handle::from_rgba(pw, ph, p.rgba.clone()),
                                 }
                             })

@@ -22,6 +22,8 @@
 //! engine = "ai"                     # ai | offline (ai falls back to offline when AI isn't set up)
 //! live_interval_ms = 1000           # live translate repeats every N ms (500-5000)
 //! live_note_shown = false           # the one-time live-mode note was shown
+//! whole_screen = false              # full-screen and live translate read the whole screen,
+//!                                   # not just the foreground window (no taskbar, no browser bars)
 //!
 //! [selection]
 //! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
@@ -242,6 +244,10 @@ pub struct TranslateConfig {
     /// Live mode's one-time note (games must be borderless) was shown.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub live_note_shown: bool,
+    /// Full-screen and live translate read the whole screen instead of the
+    /// foreground window's page (`capture::window_rect::foreground`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub whole_screen: bool,
 }
 
 /// What a finished snip does.
@@ -684,6 +690,7 @@ impl Default for TranslateConfig {
             engine: Engine::Ai,
             live_interval_ms: DEFAULT_LIVE_INTERVAL_MS,
             live_note_shown: false,
+            whole_screen: false,
         }
     }
 }
@@ -901,6 +908,7 @@ impl Config {
                 },
             );
             c.translate.live_note_shown = get(t, "translate.", "live_note_shown", false, &mut w);
+            c.translate.whole_screen = get(t, "translate.", "whole_screen", false, &mut w);
         }
         if let Some(t) = section(&root, "song", &mut w) {
             c.song.source = get(t, "song.", "source", d.song.source, &mut w);
@@ -1358,6 +1366,7 @@ mod tests {
         c.general.save_folder = std::env::temp_dir().to_string_lossy().into_owned();
         c.translate.live_interval_ms = 2500;
         c.translate.live_note_shown = true;
+        c.translate.whole_screen = true;
         c.translate.source = "ja".into();
         c.song.source = SongSource::Microphone;
         c.song.history = true;
