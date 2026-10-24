@@ -14,23 +14,29 @@ const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 const MAX_TOKENS: u32 = 16_000;
 
 pub fn ask(cfg: &AiConfig, key: Option<&Secret>, messages: &[Message]) -> Result<String, AiError> {
-    ask_stream(cfg, key, messages, |_| {})
+    ask_stream(cfg, key, messages, None, |_| {})
 }
 
+/// `fast` = Some(max answer tokens) for translate calls (see `build_request`).
 pub fn ask_stream(
     cfg: &AiConfig,
     key: Option<&Secret>,
     messages: &[Message],
+    fast: Option<u32>,
     on_delta: impl FnMut(&str),
 ) -> Result<String, AiError> {
-    let req = build_request(cfg, key, messages)?;
+    let req = build_request(cfg, key, messages, fast)?;
     run_stream(&req, key, on_delta, parse_event)
 }
 
+/// `fast` (translate calls): the answer is capped at that many tokens and the
+/// model is told to think as little as possible. Never `temperature`: API
+/// version 2026-10-21 rejects sampling parameters with a 400.
 pub(crate) fn build_request(
     cfg: &AiConfig,
     key: Option<&Secret>,
     messages: &[Message],
+    fast: Option<u32>,
 ) -> Result<HttpRequest, AiError> {
     let key = key
         .filter(|k| !k.is_empty())
@@ -81,8 +87,17 @@ pub(crate) fn build_request(
         })
         .collect();
 
-    let mut body =
-        json!({"model": model, "max_tokens": MAX_TOKENS, "stream": true, "messages": turns});
+    let mut body = json!({"model": model, "max_tokens": fast.unwrap_or(MAX_TOKENS), "stream": true, "messages": turns});
+    if fast.is_some() {
+        if model.starts_with("claude-sonnet-5-5") {
+            // Claude Sonnet 5.5 400s on `disabled`; `between_tools` is its documented "off".
+            body["thinking"] = json!({"type": "between_tools"});
+        } else if !model.contains("-4-5") && !model.contains("-3-") {
+            // Lowest effort = least thinking. Haiku 4.5 / Sonnet 4.5 / 3.x reject
+            // `effort` (and don't think unless asked), so they get nothing.
+            body["output_config"] = json!({"effort": "low"});
+        }
+    }
     if !system.is_empty() {
         body["system"] = json!(system);
     }
@@ -183,7 +198,7 @@ data: {"type":"message_stop"}
             Message::new(Role::System, "Be brief."),
             Message::user("What is this?"),
         ];
-        let req = build_request(&cfg(), Some(&Secret::new(FAKE_KEY)), &msgs).unwrap();
+        let req = build_request(&cfg(), Some(&Secret::new(FAKE_KEY)), &msgs, None).unwrap();
         assert_eq!(req.url, "https://api.anthropic.com/v1/messages");
         let h = |n: &str| {
             req.headers
@@ -216,7 +231,7 @@ data: {"type":"message_stop"}
             Message::new(Role::Assistant, "It is a map."),
             Message::user("And the legend?"),
         ];
-        let req = build_request(&cfg(), Some(&Secret::new(FAKE_KEY)), &msgs).unwrap();
+        let req = build_request(&cfg(), Some(&Secret::new(FAKE_KEY)), &msgs, None).unwrap();
         let m = &req.body["messages"];
         assert_eq!(
             m[0]["content"][0],
@@ -231,17 +246,70 @@ data: {"type":"message_stop"}
         assert!(req.body.get("system").is_none());
     }
 
+    fn fast_body(model: &str) -> Value {
+        let mut c = cfg();
+        c.model = model.into();
+        build_request(
+            &c,
+            Some(&Secret::new(FAKE_KEY)),
+            &[Message::user("x")],
+            Some(300),
+        )
+        .unwrap()
+        .body
+    }
+
+    #[test]
+    fn translate_request_caps_answer_and_minimises_thinking() {
+        // Default model (Sonnet 5.5): thinking off via `between_tools`.
+        let b = build_request(&cfg(), Some(&Secret::new(FAKE_KEY)), &[], Some(300))
+            .unwrap()
+            .body;
+        assert_eq!(b["max_tokens"], 300);
+        assert_eq!(b["thinking"], json!({"type": "between_tools"}));
+        assert!(b.get("output_config").is_none());
+        // Other current models: lowest effort, no thinking block.
+        let b = fast_body("claude-haiku-5-5");
+        assert_eq!(b["max_tokens"], 300);
+        assert_eq!(b["output_config"], json!({"effort": "low"}));
+        assert!(b.get("thinking").is_none());
+        // Models that reject `effort`.
+        let b = fast_body("claude-haiku-4-5");
+        assert!(b.get("thinking").is_none() && b.get("output_config").is_none());
+        // Never sampling parameters.
+        for m in ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-4-5"] {
+            for k in ["temperature", "top_p", "top_k"] {
+                assert!(fast_body(m).get(k).is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn ask_request_is_unchanged_by_translate_options() {
+        let b = build_request(&cfg(), Some(&Secret::new(FAKE_KEY)), &[], None)
+            .unwrap()
+            .body;
+        assert_eq!(b["max_tokens"], 16000);
+        assert!(b.get("thinking").is_none() && b.get("output_config").is_none());
+    }
+
     #[test]
     fn custom_base_url_and_model() {
         let mut c = cfg();
         c.base_url = "https://proxy.example.com/v1/".into();
         c.model = "claude-haiku-5-5".into();
-        let req = build_request(&c, Some(&Secret::new(FAKE_KEY)), &[Message::user("x")]).unwrap();
+        let req = build_request(
+            &c,
+            Some(&Secret::new(FAKE_KEY)),
+            &[Message::user("x")],
+            None,
+        )
+        .unwrap();
         assert_eq!(req.url, "https://proxy.example.com/v1/messages");
         assert_eq!(req.body["model"], "claude-haiku-5-5");
         c.model.clear();
         assert_eq!(
-            build_request(&c, Some(&Secret::new(FAKE_KEY)), &[])
+            build_request(&c, Some(&Secret::new(FAKE_KEY)), &[], None)
                 .unwrap()
                 .body["model"],
             DEFAULT_ANTHROPIC_MODEL
@@ -259,7 +327,9 @@ data: {"type":"message_stop"}
             "ftp://x",
         ] {
             c.base_url = remote.into();
-            let err = build_request(&c, Some(&key), &[]).err().expect(remote);
+            let err = build_request(&c, Some(&key), &[], None)
+                .err()
+                .expect(remote);
             assert!(matches!(err, AiError::NotConfigured(_)), "{remote}");
             assert!(!err.to_string().contains(FAKE_KEY));
         }
@@ -269,7 +339,7 @@ data: {"type":"message_stop"}
             "http://[::1]:11434",
         ] {
             c.base_url = ok.into();
-            assert!(build_request(&c, Some(&key), &[]).is_ok(), "{ok}");
+            assert!(build_request(&c, Some(&key), &[], None).is_ok(), "{ok}");
         }
     }
 
@@ -277,7 +347,7 @@ data: {"type":"message_stop"}
     fn missing_key_is_a_setup_error_not_a_request() {
         for key in [None, Some(&Secret::new(""))] {
             assert!(matches!(
-                build_request(&cfg(), key, &[Message::user("x")]),
+                build_request(&cfg(), key, &[Message::user("x")], None),
                 Err(AiError::NotConfigured(_))
             ));
         }

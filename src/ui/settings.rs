@@ -207,7 +207,9 @@ pub const PRESETS: &[Preset] = &[
     Preset {
         name: "OpenRouter",
         base_url: "https://openrouter.ai/api/v1",
-        model: "openrouter/auto",
+        // Free, correct Arabic, ~3 s when measured. Fast paid option: anthropic/claude-haiku-5.5
+        // (shown as the placeholder while the model field is empty).
+        model: "nvidia/nemotron-3-ultra-550b-a55b:free",
         local: false,
     },
     Preset {
@@ -1108,7 +1110,9 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
         "The model id sent to the provider",
         tip(
             text_field(
-                if compat {
+                if compat && ai.base_url.contains("openrouter.ai") {
+                    "e.g. anthropic/claude-haiku-5.5 (fast, paid)"
+                } else if compat {
                     "e.g. gpt-4o-mini"
                 } else {
                     "claude-sonnet-5-5"

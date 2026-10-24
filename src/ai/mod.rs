@@ -139,6 +139,28 @@ pub fn ask_stream(
     messages: &[Message],
     on_delta: impl FnMut(&str),
 ) -> Result<String, AiError> {
+    stream(cfg, key, messages, None, on_delta)
+}
+
+/// Like `ask`, for short mechanical answers (translation): the answer is capped
+/// at `max_tokens` and the provider is asked not to "think" first. Only the
+/// request differs; the answer is read the same way.
+pub(crate) fn ask_fast(
+    cfg: &AiConfig,
+    key: Option<&Secret>,
+    messages: &[Message],
+    max_tokens: u32,
+) -> Result<String, AiError> {
+    stream(cfg, key, messages, Some(max_tokens), |_| {})
+}
+
+fn stream(
+    cfg: &AiConfig,
+    key: Option<&Secret>,
+    messages: &[Message],
+    fast: Option<u32>,
+    on_delta: impl FnMut(&str),
+) -> Result<String, AiError> {
     match &cfg.provider {
         Provider::Browser => Err(AiError::NotConfigured(
             "this needs an AI provider with an API key (Settings, AI); Google AI Mode in your \
@@ -151,8 +173,8 @@ pub fn ask_stream(
         Provider::Unreadable => Err(AiError::NotConfigured(
             "the settings file couldn't be read, so AI is off (Settings, AI)".into(),
         )),
-        Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, on_delta),
-        Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, on_delta),
+        Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, fast, on_delta),
+        Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, fast, on_delta),
     }
 }
 
@@ -167,9 +189,19 @@ pub fn translate_lines(
     target: &str,
     extra_instructions: &str,
 ) -> Result<Vec<String>, AiError> {
+    let cap = translate_max_tokens(lines);
     translate_with(lines, target, extra_instructions, |msgs| {
-        ask(cfg, key, msgs)
+        ask_fast(cfg, key, msgs, cap)
     })
+}
+
+/// Answer cap for a translation: about the input's size (the JSON array is
+/// roughly as long as its source in bytes; Arabic needs more tokens than
+/// English, so this is generous) plus room for the brackets and quotes.
+/// Clamped to 256..=4096 so one huge screen can't run away.
+pub(crate) fn translate_max_tokens(lines: &[String]) -> u32 {
+    let bytes: usize = lines.iter().map(String::len).sum();
+    (bytes + 256).clamp(256, 4096) as u32
 }
 
 pub(crate) fn translate_with(
@@ -487,6 +519,13 @@ mod tests {
             serde_json::from_str::<Vec<String>>(&seen[1].text).unwrap(),
             input
         );
+    }
+
+    #[test]
+    fn translate_cap_grows_with_input_and_is_clamped() {
+        assert_eq!(translate_max_tokens(&["Hi".into()]), 258);
+        assert_eq!(translate_max_tokens(&[]), 256);
+        assert_eq!(translate_max_tokens(&["x".repeat(100_000)]), 4096);
     }
 
     #[test]
