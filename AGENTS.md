@@ -48,7 +48,7 @@ the first code):
 | `src/hotkey/` | Global shortcuts (`global-hotkey`; Wayland GlobalShortcuts portal; CLI fallback) |
 | `src/actions/` | One file per action: lens, ocr, translate, ai, copy, save. Registry = one list (action bar and quick actions share it) |
 | `src/translate/` | OCR → erase → translate → redraw pipeline; live layer |
-| `src/ai/` | Two clients only: Anthropic Messages, OpenAI-compatible (covers OpenAI, Gemini, Ollama, LM Studio, OpenRouter) |
+| `src/ai/` | Two API clients only: Anthropic Messages, OpenAI-compatible (covers OpenAI, Gemini, Ollama, LM Studio, OpenRouter); plus the no-key browser provider (Google AI Mode in the user's browser, default) |
 | `src/ui/` | iced windows: overlay, action bar, panels, snip editor (one file per annotation tool), settings, onboarding; `theme.rs` = the only colour tokens |
 | `src/config.rs` | The one config reader/validator (TOML) |
 
