@@ -678,6 +678,12 @@ mod tests {
             include_bytes!("testdata/notepad161_1.png"),
         );
         assert_eq!((moved, again), (Push::Added(261), Push::NoMovement)); // 9 lines x 29 px
+        // The same at 96 DPI, where a digit is only ~7 px wide.
+        let (moved, again) = real_pair(
+            include_bytes!("testdata/notepad96_0.png"),
+            include_bytes!("testdata/notepad96_1.png"),
+        );
+        assert_eq!((moved, again), (Push::Added(162), Push::NoMovement)); // 9 lines x 18 px
     }
 
     #[test]
