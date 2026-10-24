@@ -266,6 +266,24 @@ fn is_drag(stroke: &[Point]) -> bool {
             .all(|&p| to_segment(p, a, b) <= DRAG_STRAY * chord)
 }
 
+/// How the stroke (screen px) shows: a selection as its kind; while drawing
+/// (no selection) only the open stroke, since the first points of a circle look
+/// like a straight drag. With `live_drag`, a straight drag at least `MIN_SIDE`
+/// both ways shows as its rectangle.
+fn shown_kind(stroke: &[Point], selection: Option<Selection>, live_drag: bool) -> Kind {
+    match selection {
+        Some(s) => s.kind,
+        None if live_drag && is_drag(stroke) => {
+            let r = drag_rect(stroke);
+            match r.width.min(r.height) >= MIN_SIDE {
+                true => Kind::Drag,
+                false => Kind::Loop,
+            }
+        }
+        None => Kind::Loop,
+    }
+}
+
 /// Distance from `p` to the segment `a`–`b` (`a` ≠ `b`).
 fn to_segment(p: Point, a: Point, b: Point) -> f32 {
     let (ab, ap) = (b - a, p - a);
@@ -717,6 +735,9 @@ pub struct Overlay<'a> {
     pub hover: bool,
     /// Dim the frame (not over a full-screen translation).
     pub dim: bool,
+    /// While drawing, a clear straight drag already shows as its rectangle
+    /// (snip). Otherwise only the stroke shows until release decides.
+    pub live_drag: bool,
     /// The active look: dims, stroke colours, brackets.
     pub look: Look,
     /// A snapped selection's drawn stroke (image px) and when it began to
@@ -850,15 +871,7 @@ impl canvas::Program<Event> for Overlay<'_> {
         let on_screen =
             |s: &[Point]| -> Vec<Point> { s.iter().map(|&p| self.view.to_screen(p)).collect() };
         let current = on_screen(self.stroke);
-        // While drawing, a straight drag already shows as the rectangle it will select.
-        let kind = (self.selection).map_or(
-            if is_drag(&current) {
-                Kind::Drag
-            } else {
-                Kind::Loop
-            },
-            |s| s.kind,
-        );
+        let kind = shown_kind(&current, self.selection, self.live_drag);
         let others: Vec<(Kind, Vec<Point>)> = (self.others.iter())
             .map(|(s, stroke)| (s.kind, on_screen(stroke)))
             .collect();
@@ -921,6 +934,8 @@ impl canvas::Program<Event> for Overlay<'_> {
                 brackets(&mut frame, r, &self.look, *t);
             }
             (None, Some(r)) => brackets(&mut frame, r, &self.look, 1.0),
+            // A press that hasn't moved yet may be a tap: nothing until it moves.
+            _ if !closed && is_tap(&current, 1.0) => {}
             _ => glow(&mut frame, kind, &current, closed, screen, accent, 1.0),
         }
 
@@ -1688,5 +1703,102 @@ mod tests {
         // back on screen, the selection sits where it was drawn
         let r = v.rect_to_screen(sel.area);
         assert!(near(r.position(), a) && (r.width - 300.0).abs() < 0.01);
+    }
+
+    /// The overlay drawn headless (960x540, image = screen px) with `stroke` and
+    /// `selection`, as RGBA.
+    fn drawn(stroke: &[Point], selection: Option<Selection>, live_drag: bool) -> Vec<u8> {
+        let first_draw = Cell::new(None);
+        let overlay = Overlay {
+            stroke,
+            selection,
+            others: &[],
+            view: View::new(960, 540, Size::new(960.0, 540.0)),
+            handles: false,
+            opening: 0,
+            first_draw: &first_draw,
+            hover: false,
+            dim: true,
+            live_drag,
+            look: crate::config::Config::default().look.active(),
+            morph: None,
+            words: &[],
+            picked: Vec::new(),
+        };
+        let canvas = iced::widget::canvas(overlay)
+            .width(iced::Fill)
+            .height(iced::Fill);
+        crate::ui::widgets::shot::render(canvas.into(), 960, 540)
+    }
+
+    fn px(rgba: &[u8], p: Point) -> [u8; 4] {
+        let (x, y) = (p.x.round() as usize, p.y.round() as usize);
+        rgba[(y * 960 + x) * 4..][..4].try_into().unwrap()
+    }
+
+    /// The start of a circle (centre (480, 300), radius 150) up to `deg` degrees.
+    fn arc(points: usize, deg: f32) -> Vec<Point> {
+        (0..points)
+            .map(|i| {
+                let a = (deg * i as f32 / (points - 1).max(1) as f32).to_radians();
+                Point::new(480.0 + 150.0 * a.cos(), 300.0 + 150.0 * a.sin())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn while_drawing_only_the_stroke_shows_never_a_box() {
+        let idle = px(&drawn(&[], None, false), Point::new(10.0, 10.0));
+        let short_drag = vec![Point::new(100.0, 100.0), Point::new(300.0, 200.0)];
+        for stroke in [short_drag.clone(), arc(5, 40.0), arc(2, 25.0)] {
+            assert!(is_drag(&stroke), "the first points look like a drag");
+            let rgba = drawn(&stroke, None, false);
+            // the rectangle it would select (first to last point): its other two
+            // corners, off the stroke, stay idle
+            let (a, b) = (stroke[0], stroke[stroke.len() - 1]);
+            for c in [Point::new(a.x, b.y), Point::new(b.x, a.y)] {
+                assert_eq!(px(&rgba, c), idle, "a box at {c:?}");
+            }
+            // and the stroke itself shows
+            let on = Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+            let on = if stroke.len() == 2 { on } else { stroke[2] };
+            assert_ne!(px(&rgba, on), idle, "the stroke");
+        }
+        // a press with no or one point, or a tap's jitter: nothing at all
+        let p = Point::new(400.0, 300.0);
+        for stroke in [vec![], vec![p], vec![p, p + Vector::new(2.0, 1.0)]] {
+            assert_eq!(px(&drawn(&stroke, None, false), p), idle);
+        }
+        // snip (live_drag): a clear drag shows its rectangle; a thin one doesn't
+        let corner = Point::new(300.0, 100.0);
+        assert_ne!(px(&drawn(&short_drag, None, true), corner), idle);
+        let thin = [Point::new(5.0, 5.0), Point::new(9.0, 30.0)];
+        assert_eq!(shown_kind(&thin, None, true), Kind::Loop);
+        // released and snapped: the brackets at the box's corner
+        let (sel, kept) = snap(Rectangle::new(
+            Point::new(330.0, 150.0),
+            Size::new(300.0, 300.0),
+        ));
+        let rgba = drawn(&kept, Some(sel), false);
+        assert_ne!(px(&rgba, Point::new(326.0, 160.0)), idle, "a bracket");
+    }
+
+    /// `OPENCIRCLE_DRAW_PNG=<dir> cargo test circle_frames -- --ignored` writes
+    /// the frames of a circle being drawn (stroke only), then released (brackets).
+    #[test]
+    #[ignore = "writes PNGs to look at"]
+    fn circle_frames() {
+        let dir = std::path::PathBuf::from(
+            std::env::var("OPENCIRCLE_DRAW_PNG").expect("OPENCIRCLE_DRAW_PNG=<dir>"),
+        );
+        let write = |name: String, rgba: &[u8]| {
+            crate::actions::write_png(&dir.join(name), 960, 540, rgba).unwrap();
+        };
+        let ring = arc(64, 360.0);
+        for n in [1, 2, 3, 5, 10, 20, 40, 64] {
+            write(format!("frame-{n:02}.png"), &drawn(&ring[..n], None, false));
+        }
+        let (sel, kept) = snap(bounds(&ring).unwrap());
+        write("frame-released.png".into(), &drawn(&kept, Some(sel), false));
     }
 }

@@ -2316,6 +2316,7 @@ impl App {
             first_draw: &self.first_draw,
             hover: snip.is_some_and(|s| s.kind.picks()) && self.edit.is_none(),
             dim: self.translate.is_none() || self.selection.is_some(),
+            live_drag: snip.is_some(),
             look: config::look(),
             morph: (self.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
             words: (self.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
@@ -3601,6 +3602,27 @@ mod tests {
         circle(&mut app, Point::new(500.0, 300.0), 60.0, false);
         assert_eq!(app.selection.unwrap().kind, overlay::Kind::Loop);
         assert!(app.morph.is_none());
+    }
+
+    #[test]
+    fn a_circle_snaps_and_searches_only_on_release() {
+        let mut app = open_app(800, 600, 1.0);
+        app.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+        let ring = ring(300.0, 250.0, 80.0);
+        let press = overlay::Event::Press {
+            at: ring[0],
+            shift: false,
+        };
+        event(&mut app, press);
+        for &p in &ring[1..] {
+            event(&mut app, overlay::Event::Move(p));
+            assert!(app.selection.is_none() && app.morph.is_none(), "drawing");
+            assert!(app.auto_actions().is_empty(), "nothing searches yet");
+        }
+        event(&mut app, overlay::Event::Release);
+        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        assert!(app.morph.is_some(), "the stroke morphs into the box");
+        assert!(!app.auto_actions().is_empty(), "then the search runs");
     }
 
     /// A snapped box over `text_app`'s lines 1-3, in select-text mode with its words read.
