@@ -231,7 +231,7 @@ pub struct TranslateConfig {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub live_note_shown: bool,
     /// Full-screen and live translate read the whole screen instead of the
-    /// foreground window's page (`capture::window_rect::foreground`).
+    /// foreground window's page (`capture::window_rect::region`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub whole_screen: bool,
 }

@@ -171,23 +171,19 @@ const BROWSERS: [&str; 7] = [
     "msedge", "chrome", "chromium", "firefox", "brave", "opera", "vivaldi",
 ];
 
-/// The window in use, for translating it instead of the whole screen: its
-/// client area (no title bar, frame or taskbar) in physical desktop px, and
-/// for a browser only the page below its tabs and address bar. Our own
-/// windows (the overlay, the live layer) are passed over for the next one
-/// down. `None`: unknown (Wayland), or the desktop itself. `scale` = the
-/// monitor's (for the browser bars).
-pub fn foreground(scale: f32) -> Option<WinRect> {
-    let (client, app, maximized) = active()?;
-    let browser = BROWSERS.iter().any(|b| app.to_lowercase().contains(b));
-    page(client, browser, maximized, scale)
-}
-
-/// [`foreground`] on a monitor whose frame starts at `origin` (desktop px)
-/// and is `size` big: frame px x0, y0, x1, y1 (ends exclusive). `None`:
-/// unknown, the desktop, or under 64 px of it on this monitor.
+/// The window in use, for translating it instead of the whole screen, on a
+/// monitor whose frame starts at `origin` (desktop px) and is `size` big:
+/// its client area (no title bar, frame or taskbar), and for a browser only
+/// the page below its tabs and address bar (unless it fills the monitor:
+/// full screen has no bars). Our own windows (the overlay, the live layer)
+/// are passed over for the next one down, a popup for its owner. Frame px
+/// x0, y0, x1, y1 (ends exclusive); `None`: unknown (Wayland), the desktop,
+/// or under 64 px of it on this monitor. `scale` = the monitor's.
 pub fn region(origin: (i32, i32), size: (u32, u32), scale: f32) -> Option<[u32; 4]> {
-    let (x, y, w, h) = foreground(scale)?;
+    let (client, app, maximized) = active()?;
+    let full = client == (origin.0, origin.1, size.0, size.1);
+    let browser = !full && BROWSERS.iter().any(|b| app.to_lowercase().contains(b));
+    let (x, y, w, h) = page(client, browser, maximized, scale)?;
     clip((x - origin.0, y - origin.1, w, h), size)
 }
 
@@ -197,7 +193,7 @@ fn clip((x, y, w, h): WinRect, (fw, fh): (u32, u32)) -> Option<[u32; 4]> {
     (x1 >= x0 + 64 && y1 >= y0 + 64).then_some([x0 as u32, y0 as u32, x1 as u32, y1 as u32])
 }
 
-/// The part of a client area that is content (see [`foreground`]).
+/// The part of a client area that is content (see [`region`]).
 fn page((x, y, w, h): WinRect, browser: bool, maximized: bool, scale: f32) -> Option<WinRect> {
     let bars = match (browser, maximized) {
         (false, _) => 0.0,
