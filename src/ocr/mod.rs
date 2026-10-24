@@ -26,8 +26,11 @@ use oar_ocr::predictors::{TextDetectionPredictor, TextRecognitionPredictor};
 use oar_ocr::processors::LimitType;
 
 /// Longest side the detector sees. 960 px read 35/36 lines at ~100 ms in spike
-/// S4; native 1080p read 36/36 but took 3x as long.
-const DETECT_SIDE: u32 = 960;
+/// S4 (native 1080p 36/36 at 3x the time), but on a 1716 px wide page it
+/// shrank 18 px body text to 10 px: whole lines were missed (left in English
+/// between translated ones) and words misread ("10s t early 80s"). 1280 px
+/// read them all, for ~50 ms more detection on 2 cores.
+const DETECT_SIDE: u32 = 1280;
 
 /// ...but it never shrinks an image more than this. Screen text is sized in
 /// pixels, not in screen widths (12-22 px at 100 % scale on any monitor), and
@@ -572,10 +575,12 @@ mod tests {
 
     #[test]
     fn detector_shrinks_big_screens_at_most_2x() {
-        assert_eq!(detect_size(1920, 1080), (960, 544)); // 960 px, as before
-        assert_eq!(detect_size(3440, 1440), (1728, 736)); // not 960x416
+        assert_eq!(detect_size(1920, 1080), (1280, 736));
+        // 18 px body text stays >= 12 px (at 960: 10 px, lines went missing)
+        assert_eq!(detect_size(1716, 1145), (1280, 864));
+        assert_eq!(detect_size(3440, 1440), (1728, 736)); // not 1280x544
         assert_eq!(detect_size(3840, 2160), (1920, 1088));
-        assert_eq!(detect_size(1280, 720), (960, 544));
+        assert_eq!(detect_size(1280, 720), (1280, 736)); // not shrunk (rounded to 32)
         assert_eq!(detect_size(640, 160), (640, 160)); // a selection: never grown
         assert_eq!(detect_size(10, 5), (32, 32));
     }

@@ -1038,6 +1038,18 @@ fn profile_helper() {
                 t.total.as_millis(),
                 r.blocks.len()
             );
+            if let Some(out) = std::env::var_os("OC_DUMP") {
+                let out = std::path::PathBuf::from(out);
+                let name = std::path::Path::new(p)
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy();
+                for b in &r.blocks {
+                    eprintln!("  {:?} {:?}", b.bounds.map(|v| v as i32), b.original);
+                }
+                let dims = (f.width as usize, f.height as usize);
+                save_png(&out.join(format!("{name}_after.png")), dims, &r.rgba);
+            }
         }
     }
 }
