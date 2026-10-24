@@ -10,8 +10,10 @@ use std::io::Read;
 // secret of the release workflow (never in the repository).
 pub const RELEASE_PUBLIC_KEY: &str = "RWSbS2U2Cjix7vMbkgnr+jEZI2VKl7+HWo2Scq4uImBxKNgXCPo+K5oY";
 
-/// `sums` is signed by `key` (base64 public key) with signature file `sig`.
-pub fn signed(sums: &[u8], sig: &str, key: &str) -> Result<(), String> {
+/// `sums` is signed by `key` (base64 public key) with signature file `sig`, and the
+/// signed (trusted) comment is `OpenCircle v<tag_version>`: an old signed release
+/// replayed under a newer tag is refused.
+pub fn signed(sums: &[u8], sig: &str, key: &str, tag_version: &str) -> Result<(), String> {
     if key.trim().is_empty() {
         return Err("this build has no release key".into());
     }
@@ -20,7 +22,15 @@ pub fn signed(sums: &[u8], sig: &str, key: &str) -> Result<(), String> {
     let sig =
         minisign_verify::Signature::decode(sig).map_err(|e| format!("bad signature file: {e}"))?;
     key.verify(sums, &sig, false)
-        .map_err(|e| format!("signature does not match: {e}"))
+        .map_err(|e| format!("signature does not match: {e}"))?;
+    let want = format!("OpenCircle v{tag_version}");
+    if sig.trusted_comment() != want {
+        return Err(format!(
+            "signature is for \"{}\", not \"{want}\"",
+            sig.trusted_comment()
+        ));
+    }
+    Ok(())
 }
 
 /// The SHA-256 that `sums` (`sha256sum` output: `<hex>  <name>` or `<hex> *<name>`)
@@ -61,8 +71,8 @@ pub(crate) mod tests {
     use super::*;
 
     /// A TEST keypair made for these tests only (its secret key was never committed).
-    pub const TEST_KEY: &str = "RWSO7c7AjCSJ6x7b/rtDwJRluGUie67xOl1tG4zcKxMe8e48ZLx5P5lQ";
-    pub const WRONG_KEY: &str = "RWT+CH5AYmeVvp3tyraKPRSd1FKY+U+bv4pVhs5TQ6MiZ1//hc7treYn";
+    pub const TEST_KEY: &str = "RWSgzdo6hR+6Sc4BS7E5EbUQ0oNvTzpWOxUcHtjz7NCgdU/drq8dH4wL";
+    pub const WRONG_KEY: &str = "RWTHvR4v6FeTQDjOyNbkFag6emGYS/XU+pGF0h0Vc3mCNWeDwcebDBLc";
     pub const EXE: &[u8] = b"OpenCircle 9.9.9 test build\n";
     pub const APPIMAGE: &[u8] = b"OpenCircle 9.9.9 test appimage\n";
     pub const SUMS: &str = "\
@@ -71,27 +81,42 @@ pub(crate) mod tests {
 ";
     /// `SUMS` signed by `TEST_KEY`.
     pub const SIG: &str = "untrusted comment: signature from rsign secret key
-RUSO7c7AjCSJ6w7t+veKlOgCvSikm6JRMpVYFJwBwiOmWBU0OcixmubWgiMNR16Mks1pRtGHEjreXDsIfJxPi9difHu2QTWLWAg=
-trusted comment: OpenCircle v9.9.9 test
-eC5m2nYihDIvh3nrky4QLxRNzLEvo8w1yaC7bPUujM6f2wrWLgwiK727+Yp3/W3Y0PVMoMEvy4esPy4jT92wCA==
+RUSgzdo6hR+6SXDqXJshXB6Uye/0C7TrTkRpJp4Su7PYFs/wGEjIkkoJwnn9wNL9de2XcwrOSug54JDoFWuXHg6iKCE6LuK7dQQ=
+trusted comment: OpenCircle v9.9.9
+WCpy6e+eWE3H34iMPtayBwO3eavwLD+Y7kqziwOB9ppmNXBwF16cko/XSKgB8qGBMThWkl84UTCkXhHE4P5yDQ==
+";
+
+    /// `SUMS` signed by `TEST_KEY` with rsign's default comment (none of ours).
+    const NO_COMMENT_SIG: &str = "untrusted comment: signature from rsign secret key
+RUSgzdo6hR+6Sfr38VpeDWtNhwFrBTsn6Ou4H5h6ZL9LISum6gePqKK9ieZzsMdnzU+zeYXwiT5weKk30wpiKc+DO0BjBwg4iwo=
+trusted comment: timestamp:1792867461	file:SUMS.txt	prehashed
+bCZq7D3cwe5DAF0R6TSagJIqwC0BZO+vusSZAFC6bxzBa8ibUFgdu9kHymlpIuimT93TuzkI1b5jcg7Svly0Bg==
 ";
 
     #[test]
     fn a_good_signature_passes() {
-        assert_eq!(signed(SUMS.as_bytes(), SIG, TEST_KEY), Ok(()));
+        assert_eq!(signed(SUMS.as_bytes(), SIG, TEST_KEY, "9.9.9"), Ok(()));
+    }
+
+    #[test]
+    fn the_trusted_comment_must_name_the_release() {
+        // Replay: a genuine signature of another version (or a bare one) is refused.
+        assert!(signed(SUMS.as_bytes(), SIG, TEST_KEY, "9.9.8").is_err());
+        assert!(signed(SUMS.as_bytes(), SIG, TEST_KEY, "").is_err());
+        assert!(signed(SUMS.as_bytes(), NO_COMMENT_SIG, TEST_KEY, "9.9.9").is_err());
     }
 
     #[test]
     fn tampered_sums_wrong_key_missing_key_or_garbage_fail() {
         let tampered = SUMS.replace("4072929c", "4072929d");
-        assert!(signed(tampered.as_bytes(), SIG, TEST_KEY).is_err());
-        assert!(signed(SUMS.as_bytes(), SIG, WRONG_KEY).is_err());
+        assert!(signed(tampered.as_bytes(), SIG, TEST_KEY, "9.9.9").is_err());
+        assert!(signed(SUMS.as_bytes(), SIG, WRONG_KEY, "9.9.9").is_err());
         assert!(
-            signed(SUMS.as_bytes(), SIG, "").is_err(),
+            signed(SUMS.as_bytes(), SIG, "", "9.9.9").is_err(),
             "no key = fail closed"
         );
-        assert!(signed(SUMS.as_bytes(), "", TEST_KEY).is_err());
-        assert!(signed(SUMS.as_bytes(), "not a signature", TEST_KEY).is_err());
+        assert!(signed(SUMS.as_bytes(), "", TEST_KEY, "9.9.9").is_err());
+        assert!(signed(SUMS.as_bytes(), "not a signature", TEST_KEY, "9.9.9").is_err());
     }
 
     #[test]

@@ -7,10 +7,10 @@
 # (owner rule: approve every release). Binaries are unsigned (owner rule), but
 # SHA256SUMS.txt is signed with minisign (SHA256SUMS.txt.minisig): the app's
 # auto-update installs nothing without that signature. The private key is the
-# secret MINISIGN_KEY (an unencrypted minisign secret key file; MINISIGN_PASSWORD
-# too if it has a password); its public key is src/update/verify.rs
+# secret MINISIGN_KEY of the `release` environment (an unencrypted minisign secret
+# key file), used only by the `sign` job on a tag push; its public key is src/update/verify.rs
 # RELEASE_PUBLIC_KEY, and the job checks the two match. A tag push without the
-# secret fails; a manual dry run without it only warns.
+# secret fails; a manual dry run never touches the key and skips signing.
 #
 # The version comes from the tag (`v1.2.3` -> 1.2.3) and is stamped into Cargo.toml
 # on the runner only; Cargo.toml stays at 0.0.0 in git. Every action is pinned to
@@ -206,28 +206,9 @@ jobs:
         run: |
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
-      - name: Sign SHA256SUMS.txt (minisign)
-        working-directory: dist
-        env:
-          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
-        run: |
-          if [ -z "$MINISIGN_KEY" ]; then
-            if [ "$GITHUB_REF_TYPE" = tag ]; then
-              echo "::error::secret MINISIGN_KEY is not set: an unsigned release cannot auto-update"; exit 1
-            fi
-            echo "::warning::secret MINISIGN_KEY is not set: this dry run is not signed"; exit 0
-          fi
-          pub=$(sed -n 's/^pub const RELEASE_PUBLIC_KEY: &str = "\(.*\)";/\1/p' ../src/update/verify.rs)
-          if [ -z "$pub" ]; then
-            echo "::error::src/update/verify.rs RELEASE_PUBLIC_KEY is empty: the app would refuse this release"; exit 1
-          fi
-          sudo apt-get update -qq && sudo apt-get install -y minisign
-          key="$RUNNER_TEMP/minisign.key"
-          (umask 077; printf '%s\n' "$MINISIGN_KEY" > "$key")
-          trap 'rm -f "$key"' EXIT
-          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" -m SHA256SUMS.txt -t "OpenCircle $GITHUB_REF_NAME"
-          minisign -V -P "$pub" -m SHA256SUMS.txt
+      - name: Signing is tag-only
+        if: github.ref_type != 'tag'
+        run: echo "::notice::dry run - SHA256SUMS.txt is not signed (the signing key is only used for tag pushes)"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-assets
@@ -235,9 +216,60 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # The only job that sees the signing key: tag pushes only, behind the `release`
+  # environment (tags v* only, holds MINISIGN_KEY, no password). rsign2 is
+  # minisign-compatible (minisign is not in ubuntu-22.04's apt). The trusted
+  # comment `OpenCircle v<version>` is checked again by the app, so an old signed
+  # release cannot be replayed as a new one.
+  sign:
+    needs: checksums
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-22.04
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: src/update/verify.rs
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist
+      - name: Sign SHA256SUMS.txt and verify with the app's public key
+        working-directory: dist
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          RSIGN_VERSION: 0.6.7
+        run: |
+          pub=$(sed -n 's/^pub const RELEASE_PUBLIC_KEY: &str = "\(.*\)";/\1/p' ../src/update/verify.rs)
+          if [ -z "$pub" ]; then
+            echo "::error::src/update/verify.rs RELEASE_PUBLIC_KEY is empty: the app would refuse this release"; exit 1
+          fi
+          if [ -z "$MINISIGN_KEY" ]; then
+            echo "::error::secret MINISIGN_KEY is not set: an unsigned release cannot auto-update"; exit 1
+          fi
+          cargo install rsign2 --version "$RSIGN_VERSION" --locked
+          key="$RUNNER_TEMP/minisign.key"
+          (umask 077; printf '%s\n' "$MINISIGN_KEY" > "$key")
+          trap 'rm -f "$key"' EXIT
+          comment="OpenCircle v${GITHUB_REF_NAME#v}"
+          rsign sign -s "$key" -W -t "$comment" -x SHA256SUMS.txt.minisig SHA256SUMS.txt
+          rsign verify -P "$pub" -x SHA256SUMS.txt.minisig SHA256SUMS.txt | tee verify.out
+          grep -qx "Trusted comment: $comment" verify.out
+          rm verify.out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-signature
+          path: dist/SHA256SUMS.txt.minisig
+          if-no-files-found: error
+          retention-days: 14
+
   # The only job that can write to the repository, and only for a tag push.
   draft:
-    needs: checksums
+    needs: [checksums, sign]
     if: github.ref_type == 'tag' && !inputs.dry_run
     runs-on: ubuntu-22.04
     permissions:
@@ -245,7 +277,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-assets
+          pattern: release-*
+          merge-multiple: true
           path: dist
       - name: Create the DRAFT release (never published here)
         env:

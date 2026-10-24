@@ -299,7 +299,7 @@ fn stage_in(
     let sig = release.asset(SIG).ok_or("the release is not signed")?;
     let sums = fetch_small(http, sums)?;
     let sig = String::from_utf8(fetch_small(http, sig)?).map_err(|_| "bad signature file")?;
-    verify::signed(&sums, &sig, key)?;
+    verify::signed(&sums, &sig, key, release.tag_name.trim_start_matches('v'))?;
     let sums = String::from_utf8(sums).map_err(|_| "bad checksums file")?;
     let want =
         verify::sum_for(&sums, &asset.name).ok_or("the checksums do not list the download")?;
