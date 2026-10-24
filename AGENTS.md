@@ -132,6 +132,10 @@ production systems.
   Optimise for capture → annotate → paste into an AI chat in seconds: copy after
   capture, AI-friendly size, image + OCR text, delay timer, snapping + loupe,
   combine captures, numbered legend, presets, drag-out, local recent captures.
+- Blur (owner, 2026-10-24): a soft Photoshop-style blur brush (no blocky mosaic),
+  still irreversible (strong radius + noise), with line assist (the brush stays on
+  the text line it started on unless the user clearly moves; Shift = free; can be
+  turned off). Solid "Redact" stays as a separate preset.
 - Results sheet (owner, 2026-10-24): explore a slide-up sheet showing Google's own
   page (Lens / AI Mode) in the system web view (WebView2 / WebKitGTK), loaded only
   while open; no scraping, no copying Google's UI. Placement (owner, 2026-10-24):
