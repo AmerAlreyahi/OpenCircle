@@ -136,6 +136,10 @@ production systems.
   Optimise for capture → annotate → paste into an AI chat in seconds: copy after
   capture, AI-friendly size, image + OCR text, delay timer, snapping + loupe,
   combine captures, numbered legend, presets, drag-out, local recent captures.
+- Windows + tooltips (owner, 2026-10-24): our own themed window header (logo,
+  title, styled window buttons) instead of the OS title bar. Every control keeps
+  an accessible label, but a VISIBLE tooltip only when it adds something (icon-
+  only button, truncated text, shortcut hint), never repeating the visible text.
 - Window capture (owner, 2026-10-24, like iTop): in the default snip mode, hovering
   outlines the window (or UI element) under the cursor live; click captures it,
   drag draws a free region; wheel walks element → window → monitor.
