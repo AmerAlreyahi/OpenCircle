@@ -74,41 +74,62 @@ fn attach_parent_console() {
     }
 }
 
-/// The app must not keep our stdout / stderr open: a script that captures this
-/// command's output (a pipe) would wait until the app quits. std gives the child
-/// NUL for its stdio, but Windows still hands it every inheritable handle, the
-/// pipe among them; make ours non-inheritable (this process exits right after).
-#[cfg(windows)]
-fn stop_inheriting_std_handles() {
-    use windows::Win32::Foundation::{HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation};
-    use windows::Win32::System::Console::{
-        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-    };
-    for std_handle in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-        // SAFETY: plain Win32 calls on this process's own standard handles.
-        unsafe {
-            if let Ok(h) = GetStdHandle(std_handle) {
-                let _ = SetHandleInformation(h, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0));
-            }
-        }
-    }
-}
-
 /// Starts this exe with no arguments as the resident app, detached from the
-/// terminal (own process group / no console, no stdio), and returns at once.
+/// terminal (own process group, no console, no stdio), and returns at once.
+#[cfg(unix)]
 fn start_detached() -> std::io::Result<()> {
     use std::process::{Command, Stdio};
     let mut app = Command::new(std::env::current_exe()?);
     app.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    #[cfg(windows)]
-    stop_inheriting_std_handles();
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut app, 0x0000_0008 | 0x0000_0200); // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-    #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut app, 0); // Ctrl-C / terminal hang-up skip it
     app.spawn().map(drop) // never waited for: it runs until Quit
+}
+
+/// Same on Windows, by `CreateProcessW` without handle inheritance: std's
+/// `Command` passes on every inheritable handle (cmd.exe keeps spare copies of
+/// its output pipe), so a script capturing this command's output would wait
+/// until the app quits.
+#[cfg(windows)]
+fn start_detached() -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        CREATE_NEW_PROCESS_GROUP, CreateProcessW, DETACHED_PROCESS, PROCESS_INFORMATION,
+        STARTUPINFOW,
+    };
+    use windows::core::{PCWSTR, PWSTR};
+
+    let exe = std::env::current_exe()?;
+    let mut cmdline: Vec<u16> = std::iter::once(b'"' as u16)
+        .chain(exe.as_os_str().encode_wide())
+        .chain([b'"' as u16, 0])
+        .collect();
+    let startup = STARTUPINFOW {
+        cb: size_of::<STARTUPINFOW>() as u32,
+        ..STARTUPINFOW::default()
+    };
+    let mut info = PROCESS_INFORMATION::default();
+    // SAFETY: `cmdline` is a writable NUL-terminated buffer; `startup` and `info`
+    // live through the call; the two handles it returns are closed right away.
+    unsafe {
+        CreateProcessW(
+            PCWSTR::null(),
+            Some(PWSTR(cmdline.as_mut_ptr())),
+            None,
+            None,
+            false,
+            DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            None,
+            PCWSTR::null(),
+            &startup,
+            &mut info,
+        )?;
+        let _ = CloseHandle(info.hThread);
+        let _ = CloseHandle(info.hProcess);
+    }
+    Ok(())
 }
 
 fn main() -> ExitCode {
