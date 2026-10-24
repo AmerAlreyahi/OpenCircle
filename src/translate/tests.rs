@@ -1002,7 +1002,7 @@ mod real {
 
     fn lines(name: &str, (w, h): (usize, usize)) -> Vec<Line> {
         (ocr(name).into_iter())
-            .filter(|b| !cut_off(b, h as u32))
+            .filter(|b| !cut_off(b, (w as u32, h as u32)))
             .map(|b| to_line(b, w as u32, h as u32))
             .collect()
     }
@@ -1231,9 +1231,11 @@ mod real {
             text: "x".into(),
             confidence: 0.9,
         };
-        assert!(cut_off(&tb(0.0), 200) && cut_off(&tb(180.0), 200));
-        assert!(cut_off(&tb(2.0), 200) && cut_off(&tb(178.0), 200));
-        assert!(!cut_off(&tb(5.0), 200) && !cut_off(&tb(170.0), 200));
+        let f = (300, 200);
+        assert!(cut_off(&tb(0.0), f) && cut_off(&tb(180.0), f));
+        assert!(cut_off(&tb(2.0), f) && cut_off(&tb(178.0), f));
+        assert!(!cut_off(&tb(5.0), f) && !cut_off(&tb(170.0), f));
+        assert!(cut_off(&tb(50.0), (108, 200)), "the right edge too");
     }
 }
 

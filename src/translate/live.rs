@@ -284,7 +284,7 @@ fn read_regions(
             let (r, top) = (regions[i], tops[i] as f32);
             let bounds = [x + r[0] as f32, y - top + r[1] as f32, w, h];
             let b = TextBlock { bounds, ..b };
-            (!cut_off(&b, fh)).then(|| to_line(b, width, fh))
+            (!cut_off(&b, (width, fh))).then(|| to_line(b, width, fh))
         })
         .collect())
 }
