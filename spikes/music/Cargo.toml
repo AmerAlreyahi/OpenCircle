@@ -1,0 +1,19 @@
+[package]
+name = "music-spike"
+version = "0.0.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+rusty-chromaprint = "0.3"
+base64 = "0.22"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pulseaudio = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+cpal = { version = "0.18", default-features = false }
+
+[profile.release]
+strip = true
