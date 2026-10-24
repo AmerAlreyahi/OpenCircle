@@ -206,7 +206,7 @@ impl Scroll {
 }
 
 /// The pill window's size (logical px): scrolling progress, countdown, toast.
-pub const PILL: Size = Size::new(420.0, 68.0);
+pub const PILL: Size = Size::new(500.0, 68.0);
 
 impl Snip {
     /// `windows`: logical px of this monitor, topmost first (empty = Window mode hidden).
@@ -1069,6 +1069,9 @@ mod tests {
         assert!(s.pill_view().is_none());
         let first = s.toast(crop.clone(), true);
         assert!(s.toast_showing(first) && s.pill_view().is_some());
+        let texts = widgets::shot::texts(s.pill_view().unwrap());
+        assert!(texts.iter().any(|t| t == COPIED), "{texts:?}");
+        widgets::shot::save("snip-toast", s.pill_view().unwrap(), PILL);
         let second = s.toast(crop, false);
         assert!(!s.toast_showing(first), "an older toast's timeout is stale");
         let t = s.take_toast().unwrap();
@@ -1089,6 +1092,7 @@ mod tests {
             texts.iter().any(|t| t.contains("Capturing in 3 s")),
             "{texts:?}"
         );
+        widgets::shot::save("snip-countdown", s.pill_view().unwrap(), PILL);
         assert_eq!(s.tick(id, 2), Some(false));
         assert_eq!(s.tick(id, 1), Some(false));
         assert!(!s.shoot(id), "not before zero");
@@ -1236,9 +1240,14 @@ mod tests {
         });
         std::thread::sleep(std::time::Duration::from_millis(50));
         assert_eq!(history_dir().map(|d| list(&d).len()), before);
-        // The strip is empty without history.
-        let s = Snip::new(Vec::new(), SCREEN, true, None);
+        // The strip is empty without history; with pictures it shows them.
+        let mut s = Snip::new(vec![rect(0.0, 0.0, 10.0, 10.0)], SCREEN, true, None);
         let texts = widgets::shot::texts(s.view());
         assert!(!texts.iter().any(|t| t == "Recent"), "{texts:?}");
+        let picture = image::Handle::from_rgba(2, 1, vec![200; 8]);
+        s.set_recent(vec![(PathBuf::from("a.png"), picture)]);
+        let texts = widgets::shot::texts(s.view());
+        assert!(texts.iter().any(|t| t == "Recent"), "{texts:?}");
+        widgets::shot::save("snip-switch", s.view(), Size::new(1280.0, 260.0));
     }
 }
