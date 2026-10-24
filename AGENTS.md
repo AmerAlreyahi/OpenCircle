@@ -179,6 +179,23 @@ production systems.
   an on-device model, not an AI service.
 - Test machines (owner, 2026-10-24): two test VMs, agents may do anything on them
   (access details in AGENTS.local.md). Prefer them over the owner's own PC.
+- Results card placement (owner, 2026-10-24, supersedes "away from the
+  selection" and "only the size is remembered"): results (Lens, AI Mode) show
+  directly in the floating card. It sits on the left or right side by the user's
+  preference, its width can be widened, and it moves sides with the common
+  pattern (drag the card's header; on release it docks to the nearer side). Side
+  and width are remembered across runs. Nothing ever opens in the browser
+  automatically: only the card's "Open in browser" button does that.
+- Editor moving (owner, 2026-10-24, like iTop): any annotation moves by holding and
+  dragging it, with any tool active. Pen and highlighter strokes never show a
+  selection box or handles.
+- Auto-update (owner, 2026-10-24, in v0.1): the app watches GitHub Releases, tells
+  the user an update exists, installs it quietly when idle, relaunches, then shows
+  that release's notes. Opt-in asked on first run (one onboarding switch, pre-set
+  on, changeable in Settings); the check sends nothing but the request. Every update
+  must pass a minisign signature over SHA256SUMS (public key in the app, private key
+  only in a GitHub Actions secret); no valid signature = no install. Binaries stay
+  unsigned. Where self-replace isn't possible (deb/rpm), notify + link only.
 
 ## Domain quirks
 
