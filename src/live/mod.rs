@@ -38,10 +38,24 @@ pub struct Layer {
     pub excluded_from_capture: bool,
 }
 
+/// The live controller's small window: topmost, takes clicks without taking the
+/// focus from the game, colour-keyed like the layer, and invisible to capture
+/// where the OS can (Windows). `Ok(excluded from capture)`.
+pub fn prepare_controller(handle: RawWindowHandle) -> Result<bool, LayerError> {
+    match handle {
+        #[cfg(windows)]
+        RawWindowHandle::Win32(h) => {
+            win::prepare(h.hwnd.get(), false).map(|l| l.excluded_from_capture)
+        }
+        // X11: topmost from the window's level; captures show it (the step masks it).
+        _ => Ok(false),
+    }
+}
+
 pub fn prepare_layer(handle: RawWindowHandle) -> Result<Layer, LayerError> {
     match handle {
         #[cfg(windows)]
-        RawWindowHandle::Win32(h) => win::prepare(h.hwnd.get()),
+        RawWindowHandle::Win32(h) => win::prepare(h.hwnd.get(), true),
         #[cfg(target_os = "linux")]
         RawWindowHandle::Xlib(h) => x11::prepare(h.window as u32),
         #[cfg(target_os = "linux")]
@@ -64,10 +78,16 @@ mod win {
         WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     };
 
-    pub fn prepare(hwnd: isize) -> Result<Layer, LayerError> {
+    /// `click_through`: the layer (clicks go to the game); the controller takes them.
+    pub fn prepare(hwnd: isize, click_through: bool) -> Result<Layer, LayerError> {
         let hwnd = HWND(hwnd as *mut _);
         let os = |e: windows::core::Error| LayerError::Os(e.to_string());
-        let ex = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOPMOST;
+        let ex = WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOPMOST;
+        let ex = if click_through {
+            ex | WS_EX_TRANSPARENT
+        } else {
+            ex
+        };
         let [r, g, b] = COLOUR_KEY.map(u32::from);
         // SAFETY: `hwnd` is a live window of this process (the UI's raw
         // handle); these calls only change its styles, z-order and affinity.

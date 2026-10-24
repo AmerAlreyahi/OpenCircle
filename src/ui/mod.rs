@@ -2,6 +2,7 @@
 mod bar;
 mod border;
 mod edit;
+mod live_controller;
 mod live_layer;
 mod onboarding;
 mod overlay;
@@ -1064,23 +1065,32 @@ impl App {
         if self.live.as_ref().and_then(live_layer::Live::window) == Some(window) {
             return "OpenCircle live translate".into();
         }
+        if self.live.as_ref().and_then(live_layer::Live::controller) == Some(window) {
+            return "OpenCircle live translate controls".into();
+        }
         self.windows.title(window).to_string()
     }
 
-    /// The live layer's see-through background; the rest follow the OS.
+    /// The live layer's (and its controller's) see-through background; the rest
+    /// follow the OS.
     fn theme(&self, window: window::Id) -> Option<iced::Theme> {
-        let live = self.live.as_ref().and_then(live_layer::Live::window);
-        (live == Some(window)).then(live_layer::theme)
+        let live = self.live.as_ref()?;
+        [live.window(), live.controller()]
+            .contains(&Some(window))
+            .then(live_layer::theme)
     }
 
     fn view(&self, window: window::Id) -> Element<'_, Message> {
         if let Some(page) = self.windows.view(window) {
             return page.map(Message::Windows);
         }
-        if let Some(live) = &self.live
-            && live.window() == Some(window)
-        {
-            return live.view().map(Message::Live);
+        if let Some(live) = &self.live {
+            if live.window() == Some(window) {
+                return live.view().map(Message::Live);
+            }
+            if live.controller() == Some(window) {
+                return live.controller_view().map(Message::Live);
+            }
         }
         let Some(frame) = &self.frame else {
             return space().into();
@@ -1177,9 +1187,20 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
+        // Live translate: where its controller was dragged.
+        let moved = match self.live {
+            Some(_) => iced::event::listen_with(|event, _, id| match event {
+                iced::Event::Window(window::Event::Moved(at)) => {
+                    Some(Message::Live(live_layer::Msg::Moved(id, at)))
+                }
+                _ => None,
+            }),
+            None => Subscription::none(),
+        };
         let triggers = Subscription::batch([
             Subscription::run(triggers).map(Message::Trigger),
             self.windows.subscription().map(Message::Windows),
+            moved,
         ]);
         if self.frame.is_some() {
             // Also when a text field took the key (it only unfocuses on Esc).

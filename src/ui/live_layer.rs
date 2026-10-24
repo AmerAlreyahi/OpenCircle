@@ -4,15 +4,15 @@
 //! only the translated patches; everything else is see-through. A thread
 //! captures the monitor about once a second and runs `translate::live::Live`,
 //! one step at a time, and sends what changed.
-use std::sync::Arc;
-use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use iced::widget::{container, image, pin, space, stack};
 use iced::window::{self, Level, Position};
-use iced::{ContentFit, Element, Fill, Point, Size, Task, task};
+use iced::{ContentFit, Element, Fill, Point, Size, Task, Vector, task};
 
+use super::live_controller::{self, Controller, Out};
 use super::{background, border, theme, widgets};
 use crate::capture;
 use crate::config;
@@ -31,6 +31,8 @@ const NOTE: &str = "Games must run borderless or windowed";
 const NOTE_TIME: Duration = Duration::from_secs(6);
 /// Test hook: after the first patches (or error), the layer is saved here (PNG).
 const TEST_SHOT: &str = "OPENCIRCLE_TEST_LIVE_SHOT";
+/// The controller starts at the monitor's top-right corner, this far in.
+const CONTROLLER_MARGIN: f32 = 24.0;
 
 /// The monitor the layer covers (physical px).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -59,6 +61,12 @@ pub enum Msg {
     Failed(String),
     NoteDone,
     TestShot(window::Screenshot),
+    /// From the mini-controller.
+    Controller(live_controller::Msg),
+    /// The controller window is set up (`Ok(excluded from capture)`).
+    ControllerReady(Result<bool, LayerError>),
+    /// A window moved (logical px); the controller's matters.
+    Moved(window::Id, Point),
 }
 
 /// What the App must do after a message.
@@ -81,8 +89,18 @@ enum Phase {
 
 pub struct Live {
     phase: Phase,
-    /// "Live · EN → AR".
-    status: String,
+    /// The mini-controller's window (once the layer is up), its state and its
+    /// top-left (logical px).
+    controller: Option<window::Id>,
+    ctl: Controller,
+    ctl_at: Point,
+    /// The controller is invisible to capture (else the step blanks it out).
+    excluded: bool,
+    /// What the step thread reads each time: paused, the target, and where the
+    /// controller is in a capture (monitor px; `None` = not in captures).
+    paused: Arc<AtomicBool>,
+    target: Arc<Mutex<String>>,
+    mask: Arc<Mutex<Option<[u32; 4]>>>,
     note: bool,
     error: Option<String>,
     patches: Vec<Shown>,
@@ -105,15 +123,8 @@ impl Live {
     pub fn start(cache: Arc<Cache>) -> (Live, Task<Msg>) {
         let cfg = config::current();
         let mut live = Live {
-            phase: Phase::Starting,
-            status: format!("Live · EN → {}", cfg.translate.target.to_uppercase()),
             note: !cfg.translate.live_note_shown,
-            error: None,
-            patches: Vec::new(),
-            cache,
-            stop: Arc::new(AtomicBool::new(false)),
-            work: None,
-            shot_taken: false,
+            ..Live::new(cache, &cfg.translate.target)
         };
         let (task, handle) = background(|tx| {
             let monitor = capture::monitor_under_cursor().map(|f| Monitor {
@@ -130,12 +141,121 @@ impl Live {
         (live, task)
     }
 
+    fn new(cache: Arc<Cache>, target: &str) -> Live {
+        Live {
+            phase: Phase::Starting,
+            controller: None,
+            ctl: Controller::new(target),
+            ctl_at: Point::ORIGIN,
+            excluded: false,
+            paused: Arc::new(AtomicBool::new(false)),
+            target: Arc::new(Mutex::new(target.into())),
+            mask: Arc::new(Mutex::new(None)),
+            note: false,
+            error: None,
+            patches: Vec::new(),
+            cache,
+            stop: Arc::new(AtomicBool::new(false)),
+            work: None,
+            shot_taken: false,
+        }
+    }
+
     /// The layer window, once open.
     pub fn window(&self) -> Option<window::Id> {
         match self.phase {
             Phase::Open { window, .. } => Some(window),
             Phase::Starting => None,
         }
+    }
+
+    /// The mini-controller's window, once open.
+    pub fn controller(&self) -> Option<window::Id> {
+        self.controller
+    }
+
+    pub fn controller_view(&self) -> Element<'_, Msg> {
+        self.ctl.view().map(Msg::Controller)
+    }
+
+    /// Opens the mini-controller at the monitor's top-right corner.
+    fn open_controller(&mut self, m: Monitor) -> Task<Msg> {
+        let size = self.ctl.size();
+        let (x, y) = (m.x as f32 / m.scale, m.y as f32 / m.scale);
+        let width = m.width as f32 / m.scale;
+        self.ctl_at = Point::new(
+            x + width - size.width - CONTROLLER_MARGIN,
+            y + CONTROLLER_MARGIN,
+        );
+        let (id, open) = window::open(window::Settings {
+            position: Position::Specific(self.ctl_at),
+            size,
+            decorations: false,
+            resizable: false,
+            transparent: cfg!(not(windows)), // Windows keys out a colour
+            level: Level::AlwaysOnTop,
+            exit_on_close_request: false,
+            ..window::Settings::default()
+        });
+        self.controller = Some(id);
+        let prepare = window::run(id, |w| match w.window_handle() {
+            Ok(handle) => live::prepare_controller(handle.as_raw()),
+            Err(e) => Err(LayerError::Os(e.to_string())),
+        });
+        open.discard().chain(prepare).map(Msg::ControllerReady)
+    }
+
+    /// Where the step thread blanks the controller out of captures (monitor
+    /// px), unless captures don't show it.
+    fn update_mask(&self) {
+        let Phase::Open { monitor: m, .. } = self.phase else {
+            return;
+        };
+        let rect = (!self.excluded && self.controller.is_some()).then(|| {
+            let size = self.ctl.size();
+            let edge = |v: f32, origin: i32, max: u32, round: fn(f32) -> f32| {
+                ((round(v * m.scale) as i32 - origin).max(0) as u32).min(max)
+            };
+            let x0 = edge(self.ctl_at.x, m.x, m.width, f32::floor);
+            let y0 = edge(self.ctl_at.y, m.y, m.height, f32::floor);
+            let x1 = edge(self.ctl_at.x + size.width, m.x, m.width, f32::ceil);
+            let y1 = edge(self.ctl_at.y + size.height, m.y, m.height, f32::ceil);
+            [x0, y0, x1 - x0, y1 - y0]
+        });
+        if let Ok(mut mask) = self.mask.lock() {
+            *mask = rect;
+        }
+    }
+
+    /// A controller message: pause, switch the language, hide, stop, drag.
+    fn on_controller(&mut self, msg: live_controller::Msg) -> Outcome {
+        let Some(id) = self.controller else {
+            return Outcome::Task(Task::none());
+        };
+        let before = self.ctl.clone();
+        match self.ctl.update(msg) {
+            Some(Out::Stop) => return Outcome::Off,
+            Some(Out::Drag) => return Outcome::Task(window::drag(id)),
+            None => {}
+        }
+        if self.ctl.paused != before.paused {
+            self.paused.store(self.ctl.paused, Ordering::Relaxed);
+            self.patches.clear(); // paused = the screen as it is
+        }
+        if self.ctl.target != before.target {
+            if let Ok(mut target) = self.target.lock() {
+                target.clone_from(&self.ctl.target);
+            }
+            self.patches.clear(); // the next step reads everything again
+        }
+        let (old, new) = (before.size(), self.ctl.size());
+        if old == new {
+            return Outcome::Task(Task::none());
+        }
+        // Grows / shrinks from its right edge (it starts at the right corner).
+        self.ctl_at += Vector::new(old.width - new.width, 0.0);
+        self.update_mask();
+        Outcome::Task(window::resize(id, new).chain(window::move_to(id, self.ctl_at)))
     }
 
     pub fn update(&mut self, msg: Msg) -> Outcome {
@@ -170,8 +290,24 @@ impl Live {
                 } else {
                     Task::none()
                 };
-                return Outcome::Task(Task::batch([steps, note]));
+                let controller = self.open_controller(monitor);
+                return Outcome::Task(Task::batch([steps, note, controller]));
             }
+            Msg::Controller(msg) => return self.on_controller(msg),
+            Msg::ControllerReady(ready) => {
+                self.excluded = ready.unwrap_or_else(|e| {
+                    eprintln!("[opencircle] live controller: {e}");
+                    false
+                });
+                self.update_mask();
+            }
+            Msg::Moved(id, at) if Some(id) == self.controller => {
+                self.ctl_at = at;
+                self.update_mask();
+            }
+            Msg::Moved(..) => {}
+            // A step that was running when Pause was pressed.
+            Msg::Patches(_) if self.ctl.paused => {}
             Msg::Prepared(Err(e)) => {
                 eprintln!("[opencircle] {e}; translating once instead");
                 return Outcome::OneShot;
@@ -216,17 +352,17 @@ impl Live {
     /// window closes, the patches and the step state are freed.
     pub fn stop(self) -> Task<Msg> {
         self.stop.store(true, Ordering::Relaxed);
-        match self.window() {
-            Some(window) => window::close(window),
-            None => Task::none(),
-        }
+        let windows = self.window().into_iter().chain(self.controller);
+        Task::batch(windows.map(window::close))
     }
 
     /// Captures and steps on a thread until `stop` (or the layer is dropped).
     fn run(&mut self, monitor: Monitor) -> Task<Msg> {
         let (stop, cache) = (self.stop.clone(), self.cache.clone());
+        let (paused, chosen, mask) = (self.paused.clone(), self.target.clone(), self.mask.clone());
         let (task, handle) = background(move |tx| {
-            let (deps, target) = match crate::actions::translate::deps() {
+            // The target is the controller's (it starts as the config's).
+            let (deps, _) = match crate::actions::translate::deps() {
                 Ok(deps) => deps,
                 Err(e) => {
                     let first = e.lines().next().unwrap_or_default().to_string();
@@ -236,7 +372,16 @@ impl Live {
             };
             let mut steps = Steps::new();
             let mut last_error = None;
+            let mut target = String::new();
             let tick = || {
+                if paused.load(Ordering::Relaxed) {
+                    return None;
+                }
+                let now = chosen.lock().map(|t| t.clone()).unwrap_or_default();
+                if now != target {
+                    steps = Steps::new(); // another language: read everything again
+                    target = now;
+                }
                 let mut frame = match capture::monitor_under_cursor() {
                     Ok(f) => f,
                     Err(e) => return report(&mut last_error, format!("capture failed: {e}")),
@@ -249,6 +394,9 @@ impl Live {
                 }
                 let (w, h) = (frame.width, frame.height);
                 border::mask(&mut frame.rgba, w, h, monitor.scale);
+                if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
+                    live_controller::mask(&mut frame.rgba, w, h, rect);
+                }
                 match steps.step(&frame.rgba, w, h, &target, &cache, &deps) {
                     Ok(None) => None,
                     Ok(Some(t)) => {
@@ -294,6 +442,7 @@ impl Live {
             monitor.scale,
             cfg!(windows)
         )];
+        // (Paused: `patches` is empty.)
         for p in &self.patches {
             let [x, y, w, h] = p.bounds.map(|v| v as f32 / monitor.scale);
             let patch = image(p.image.clone())
@@ -302,10 +451,11 @@ impl Live {
                 .content_fit(ContentFit::Fill);
             layers = layers.push(pin(patch).position(Point::new(x, y)));
         }
+        let status = self.ctl.status();
         let status = widgets::layer_pill(match (&self.error, self.note) {
-            (Some(e), _) => format!("{} · {e}", self.status),
-            (None, true) => format!("{} · {NOTE}", self.status),
-            (None, false) => self.status.clone(),
+            (Some(e), _) => format!("{status} · {e}"),
+            (None, true) => format!("{status} · {NOTE}"),
+            (None, false) => status,
         });
         layers
             .push(container(status).center_x(Fill).padding(12))
@@ -430,15 +580,8 @@ mod tests {
 
     fn live() -> Live {
         Live {
-            phase: Phase::Starting,
-            status: "Live · EN → AR".into(),
             note: true,
-            error: None,
-            patches: Vec::new(),
-            cache: Arc::new(Cache::new(8)),
-            stop: Arc::new(AtomicBool::new(false)),
-            work: None,
-            shot_taken: false,
+            ..Live::new(Arc::new(Cache::new(8)), "ar")
         }
     }
 
@@ -480,6 +623,58 @@ mod tests {
             "the step thread is told to end"
         );
         assert!(close.units() > 0, "the window closes");
+    }
+
+    #[test]
+    fn the_controller_pauses_switches_hides_and_stops() {
+        use live_controller::Msg as C;
+        let mut l = live();
+        // before the layer is up there is no controller to act on
+        assert!(matches!(
+            l.update(Msg::Controller(C::Stop)),
+            Outcome::Task(_)
+        ));
+        let _ = l.update(Msg::Monitor(Ok(MONITOR)));
+        let _ = l.open_controller(MONITOR);
+        let id = l.controller().expect("the controller opens");
+        assert_eq!(l.ctl_at.y, CONTROLLER_MARGIN, "top-right corner");
+        let right = l.ctl_at.x + l.ctl.size().width;
+        assert_eq!(right, 1920.0 - CONTROLLER_MARGIN);
+
+        // X11: captures show it, so the step blanks its spot
+        let _ = l.update(Msg::ControllerReady(Ok(false)));
+        let [x, y, w, h] = l.mask.lock().unwrap().unwrap();
+        assert_eq!((x, y), (right as u32 - w, 24));
+        assert_eq!(h as f32, l.ctl.size().height);
+        let _ = l.update(Msg::Moved(id, Point::new(100.0, 200.0)));
+        assert_eq!(l.mask.lock().unwrap().unwrap()[..2], [100, 200]);
+
+        // pause: the step thread skips, the patches go, late ones are dropped
+        let patch = || Shown {
+            bounds: [10, 10, 2, 2],
+            image: image::Handle::from_rgba(2, 2, vec![0; 16]),
+        };
+        let _ = l.update(Msg::Patches(vec![patch()]));
+        let _ = l.update(Msg::Controller(C::Pause));
+        assert!(l.paused.load(Ordering::Relaxed) && l.patches.is_empty());
+        let _ = l.update(Msg::Patches(vec![patch()]));
+        assert!(l.patches.is_empty());
+        let _ = l.update(Msg::Controller(C::Pause));
+        assert!(!l.paused.load(Ordering::Relaxed));
+
+        // another language reaches the step thread
+        let _ = l.update(Msg::Controller(C::Pick("ja".into())));
+        assert_eq!(*l.target.lock().unwrap(), "ja");
+
+        // hiding keeps its right edge; Windows' exclusion drops the mask
+        let right = l.ctl_at.x + l.ctl.size().width;
+        let _ = l.update(Msg::Controller(C::Minimise));
+        assert_eq!(l.ctl_at.x + l.ctl.size().width, right);
+        let _ = l.update(Msg::ControllerReady(Ok(true)));
+        assert_eq!(*l.mask.lock().unwrap(), None);
+
+        assert!(matches!(l.update(Msg::Controller(C::Stop)), Outcome::Off));
+        assert_eq!(l.stop().units(), 2, "the layer and the controller close");
     }
 
     #[test]

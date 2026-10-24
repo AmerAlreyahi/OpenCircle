@@ -58,6 +58,39 @@ pub fn surface<'a, Message: 'a>(
         .style(|_| glass(20.0))
 }
 
+/// A `surface` for a colour-keyed window (the live controller): opaque and
+/// without a shadow, like `layer_pill`.
+pub fn solid_surface<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> Container<'a, Message> {
+    let palette = theme::current();
+    container(content)
+        .padding(SURFACE_PADDING)
+        .style(move |_| container::Style {
+            background: Some(palette.window.into()),
+            border: Border {
+                color: palette.border,
+                width: 1.0,
+                radius: 20.0.into(),
+            },
+            ..container::Style::default()
+        })
+}
+
+/// A round accent button with nothing on it (a minimised control).
+pub fn accent_dot<'a, Message: Clone + 'a>(size: f32, on_press: Message) -> Button<'a, Message> {
+    button(space::horizontal())
+        .width(size)
+        .height(size)
+        .padding(0)
+        .on_press(on_press)
+        .style(|_, status| button::Style {
+            background: Some(accent(status)),
+            border: Border::default().rounded(999),
+            ..button::Style::default()
+        })
+}
+
 /// The thin frame around a pinned image (a pin window has no title bar).
 pub fn pinned<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
     container(content)
