@@ -152,6 +152,9 @@ fn plan(cfg: &Config) -> (Vec<Binding>, Vec<String>) {
 /// "Translate (full screen, live)" from the action id and target.
 fn describe(qa: &QuickAction) -> String {
     let mut name = qa.action.replace('_', " ");
+    if let Some(rest) = name.strip_prefix("ai ") {
+        name = format!("AI {rest}");
+    }
     if let Some(first) = name.get_mut(..1) {
         first.make_ascii_uppercase();
     }
@@ -464,7 +467,7 @@ mod tests {
         );
         assert_eq!(b[0].shortcut, "Ctrl+Shift+Space");
         assert_eq!(b[2].description, "Translate (full screen, live)");
-        assert_eq!(b[3].description, "Ai explain (circle)");
+        assert_eq!(b[3].description, "AI explain (circle)");
     }
 
     #[test]
