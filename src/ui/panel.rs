@@ -1,12 +1,13 @@
 //! Result panels (DESIGN.md Flow step 5): Search (Lens), Text and Ask AI. One
-//! `surface` docked right (a bottom sheet on narrow screens) over the frozen
-//! frame, so the selection stays visible. Slow work runs on its own thread
+//! floating card (`widgets::card`: on the side away from the selection, a card
+//! at the bottom on narrow screens; dragged and resized by its frame) over the
+//! frozen frame, so the selection stays visible. Slow work runs on its own thread
 //! (`super::background`); its results arrive as `Msg`s. Dropping a panel stops
 //! its running work.
 use std::sync::Arc;
 
-use iced::widget::{column, container, image, opaque, operation, pin, row, space, text_editor};
-use iced::{Center, ContentFit, Element, Fill, Point, Rectangle, Size, Task, task};
+use iced::widget::{column, container, image, operation, row, space, text_editor};
+use iced::{Center, ContentFit, Element, Fill, Rectangle, Task, task};
 
 use super::background;
 use super::widgets::{self, SEND, STOP};
@@ -16,14 +17,6 @@ use crate::actions::text::{self, Progress};
 use crate::actions::{self, Crop, lens};
 use crate::ai;
 
-/// Panel width when docked (DESIGN.md).
-const WIDTH: f32 = 420.0;
-/// Distance to the screen edges.
-const GAP: f32 = 16.0;
-/// Narrower screens (logical px) get a bottom sheet instead.
-const NARROW: f32 = 900.0;
-/// A bottom sheet is half the screen, but at least this tall (if the screen is).
-const SHEET_MIN: f32 = 260.0;
 /// The crop's thumbnail in the Ask AI panel.
 const THUMB_HEIGHT: f32 = 112.0;
 /// The follow-up input (focused when it appears).
@@ -33,6 +26,8 @@ const LOG: &str = "panel-log";
 
 #[derive(Debug, Clone)]
 pub enum Msg {
+    /// The card's grip or corner was pressed (the App moves / resizes it).
+    Card(widgets::card::Drag),
     /// The Lens page is written and the browser launched (the App holds the page).
     LensOpened(Result<lens::Held, String>),
     Input(String),
@@ -410,8 +405,8 @@ impl Panel {
         task
     }
 
-    pub fn view(&self, screen: Size) -> Element<'_, Msg> {
-        let area = place(screen);
+    /// The panel as a floating card at `at` (`widgets::card::place`).
+    pub fn view(&self, at: Rectangle) -> Element<'_, Msg> {
         let (action, body) = match &self.state {
             State::Lens(status) => (&actions::lens::ACTION, self.lens_view(status.as_ref())),
             State::Text(reading) => (&actions::text::ACTION, self.text_view(reading)),
@@ -440,12 +435,8 @@ impl Panel {
             };
             header = header.push(space::horizontal()).push(widgets::caption(who));
         }
-        let panel = widgets::docked(column![header, body].spacing(16).height(Fill))
-            .padding(20)
-            .width(area.width)
-            .height(area.height);
-        // opaque: clicks on the panel never reach the selection canvas below.
-        pin(opaque(panel)).position(area.position()).into()
+        let content = column![header, body].spacing(16).height(Fill);
+        widgets::card::frame(content, at, Msg::Card)
     }
 
     fn lens_view(&self, status: Option<&Result<(), String>>) -> Element<'_, Msg> {
@@ -724,35 +715,14 @@ fn browser_turn(prompt: &str, read: Option<Result<String, String>>) -> (String, 
     }
 }
 
-/// Where the panel goes on a `screen`-sized overlay (logical px): docked right,
-/// full height; on narrow screens a bottom sheet. Always inside the screen.
-fn place(screen: Size) -> Rectangle {
-    let inner = Size::new(
-        (screen.width - 2.0 * GAP).max(0.0),
-        (screen.height - 2.0 * GAP).max(0.0),
-    );
-    if screen.width >= NARROW {
-        return Rectangle::new(
-            Point::new(screen.width - GAP - WIDTH, GAP),
-            Size::new(WIDTH, inner.height),
-        );
-    }
-    let height = (screen.height / 2.0).max(SHEET_MIN).min(inner.height);
-    Rectangle::new(
-        Point::new(GAP, screen.height - GAP - height),
-        Size::new(inner.width, height),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::Size;
 
-    fn inside(r: Rectangle, screen: Size) -> bool {
-        r.x >= GAP
-            && r.y >= GAP
-            && r.x + r.width <= screen.width - GAP + 0.01
-            && r.y + r.height <= screen.height - GAP + 0.01
+    /// Where a panel shows on a `screen` (no selection).
+    fn at(screen: Size) -> Rectangle {
+        widgets::card::place(screen, None, None)
     }
 
     #[test]
@@ -802,7 +772,7 @@ mod tests {
         };
         assert!(chat.turns.is_empty() && chat.status == Status::Idle);
         assert!(matches!(browse, Browse::Idle) && panel.work.is_none());
-        let texts = widgets::shot::texts(panel.view(Size::new(1920.0, 1080.0)));
+        let texts = widgets::shot::texts(panel.view(at(Size::new(1920.0, 1080.0))));
         assert!(texts.contains(&msg), "{texts:?}");
     }
 
@@ -845,13 +815,13 @@ mod tests {
             browse: Browse::Idle,
         });
         let _ = panel.update(Msg::Ready(Ok(Arc::new(ask::tests::browser_setup()))));
-        let texts = widgets::shot::texts(panel.view(SCREEN));
+        let texts = widgets::shot::texts(panel.view(at(SCREEN)));
         for preset in PRESETS {
             assert!(texts.iter().any(|t| t == preset.label), "{texts:?}");
         }
         assert!(not_blank(&widgets::shot::save(
             "panel-ask-presets",
-            panel.view(SCREEN),
+            panel.view(at(SCREEN)),
             SCREEN
         )));
         // Once a question was asked the suggestions are gone.
@@ -859,7 +829,7 @@ mod tests {
             unreachable!()
         };
         chat.ask("Explain", &[]);
-        let texts = widgets::shot::texts(panel.view(SCREEN));
+        let texts = widgets::shot::texts(panel.view(at(SCREEN)));
         assert!(!texts.iter().any(|t| t == "Fact-check"), "{texts:?}");
     }
 
@@ -878,7 +848,7 @@ mod tests {
         let mut panel = text_panel(SAMPLE);
         let kinds: Vec<_> = panel.entities.iter().map(|e| e.kind).collect();
         assert_eq!(kinds, [Kind::Link, Kind::Email, Kind::Phone]);
-        let texts = widgets::shot::texts(panel.view(SCREEN));
+        let texts = widgets::shot::texts(panel.view(at(SCREEN)));
         for chip in [
             "Open link · shop.example",
             "Write email · help@shop.example",
@@ -895,7 +865,7 @@ mod tests {
         assert!(panel.note.is_none());
         assert!(not_blank(&widgets::shot::save(
             "panel-text-chips",
-            panel.view(SCREEN),
+            panel.view(at(SCREEN)),
             SCREEN
         )));
 
@@ -912,44 +882,7 @@ mod tests {
     fn text_without_entities_has_no_chips() {
         let panel = text_panel("Just some words, 3.50 and e.g. a note");
         assert!(panel.entities.is_empty());
-        let texts = widgets::shot::texts(panel.view(SCREEN));
+        let texts = widgets::shot::texts(panel.view(at(SCREEN)));
         assert!(!texts.iter().any(|t| t.starts_with("Open link")));
-    }
-
-    #[test]
-    fn panel_docks_right_at_full_height() {
-        let screen = Size::new(1920.0, 1080.0);
-        let r = place(screen);
-        assert_eq!(
-            r,
-            Rectangle::new(Point::new(1484.0, 16.0), Size::new(420.0, 1048.0))
-        );
-        assert!(inside(r, screen));
-        let ultrawide = Size::new(3440.0, 1440.0);
-        assert_eq!(place(ultrawide).x, 3440.0 - GAP - WIDTH);
-    }
-
-    #[test]
-    fn narrow_screens_get_a_bottom_sheet() {
-        let phone = Size::new(600.0, 1000.0);
-        let r = place(phone);
-        assert_eq!(
-            r,
-            Rectangle::new(Point::new(16.0, 484.0), Size::new(568.0, 500.0))
-        );
-        // Short and narrow: at least SHEET_MIN tall, never off screen.
-        for screen in [
-            Size::new(800.0, 400.0),
-            Size::new(300.0, 200.0),
-            Size::new(899.0, 600.0),
-        ] {
-            let r = place(screen);
-            assert!(inside(r, screen), "{screen:?} -> {r:?}");
-            assert!(
-                r.height >= SHEET_MIN.min(screen.height - 2.0 * GAP),
-                "{r:?}"
-            );
-            assert_eq!(r.y + r.height, screen.height - GAP);
-        }
     }
 }

@@ -147,6 +147,9 @@ enum Message {
     More,
     /// The select-text popup.
     Picked(PickAct),
+    /// While the result card is dragged: the pointer moved / was let go.
+    CardMoved(Point),
+    CardReleased,
 }
 
 /// What the select-text popup does with the picked words.
@@ -313,6 +316,10 @@ struct App {
     text_mode: Option<TextMode>,
     /// The action bar is shown although the selection searched by itself.
     more: bool,
+    /// Where the user moved / sized the result card (this run of the app).
+    card: Option<Rectangle>,
+    /// The card's grip or corner is held, and the pointer's last position.
+    card_drag: Option<(widgets::card::Drag, Option<Point>)>,
 }
 
 /// Translations kept for reuse (each a short text).
@@ -384,6 +391,8 @@ impl App {
             morph: None,
             text_mode: None,
             more: false,
+            card: None,
+            card_drag: None,
         }
     }
 
@@ -508,6 +517,20 @@ impl App {
                 Task::none()
             }
             Message::Picked(act) => self.on_picked(act),
+            Message::CardMoved(p) => {
+                if let Some((how, last)) = self.card_drag {
+                    if let Some(from) = last {
+                        let at = self.card_at();
+                        self.card = Some(widgets::card::drag(at, how, p - from, self.screen));
+                    }
+                    self.card_drag = Some((how, Some(p)));
+                }
+                Task::none()
+            }
+            Message::CardReleased => {
+                self.card_drag = None;
+                Task::none()
+            }
             Message::AskInput(text) => {
                 self.ask = text;
                 Task::none()
@@ -1589,6 +1612,7 @@ impl App {
             return Task::none();
         };
         match msg {
+            panel::Msg::Card(how) => self.card_drag = Some((how, None)),
             panel::Msg::Cancel => self.panel = None,
             panel::Msg::Search => return self.run(&lens::ACTION),
             panel::Msg::CopyText => {
@@ -1893,7 +1917,7 @@ impl App {
         } else if let Some((id, panel)) = &self.panel {
             let id = *id;
             panel
-                .view(self.screen)
+                .view(self.card_at())
                 .map(move |msg| Message::Panel(id, msg))
         } else if let Some((id, session)) = &self.translate {
             let id = *id;
@@ -1929,6 +1953,13 @@ impl App {
             );
         }
         layers.into()
+    }
+
+    /// Where the result card shows: where the user left it, else away from
+    /// the selection (`widgets::card::place`).
+    fn card_at(&self) -> Rectangle {
+        let selection = self.selection.map(|s| self.view.rect_to_screen(s.area));
+        widgets::card::place(self.screen, selection, self.card)
     }
 
     /// What floats around `selection`: the chips under a snapped box ("Select
@@ -2053,7 +2084,20 @@ impl App {
             } else {
                 Subscription::none()
             };
-            Subscription::batch([triggers, escape, alt])
+            // Dragging the result card: the pointer anywhere, until let go.
+            let card = match self.card_drag {
+                Some(_) => iced::event::listen_with(|event, _, _| match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::CardMoved(position))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )) => Some(Message::CardReleased),
+                    _ => None,
+                }),
+                None => Subscription::none(),
+            };
+            Subscription::batch([triggers, escape, alt, card])
         } else if self.hiding != Hiding::No {
             // One stream for both, so a resize is always seen before the frames after it.
             // Every message makes iced redraw, so frames keep coming while this runs.
@@ -3093,6 +3137,47 @@ mod tests {
         assert!(texts.iter().any(|t| t == "Ask AI") && !texts.iter().any(|t| t == "More"));
     }
 
+    #[test]
+    fn the_result_card_opens_away_from_the_selection_and_moves_by_its_grip() {
+        let mut app = open_app(1920, 1080, 1.0);
+        drag(
+            &mut app,
+            Point::new(100.0, 100.0),
+            Point::new(400.0, 300.0),
+            false,
+        );
+        let _ = app.update(Message::Run(&text::ACTION)); // no models: the consent card
+        assert!(app.panel.is_some());
+        let at = app.card_at();
+        assert_eq!(
+            at.x,
+            1920.0 - widgets::card::GAP - widgets::card::WIDTH,
+            "right"
+        );
+        // the grip: the card follows the pointer, and stays there this session
+        let id = app.panel.as_ref().unwrap().0;
+        let grab = panel::Msg::Card(widgets::card::Drag::Move);
+        let _ = app.update(Message::Panel(id, grab));
+        let _ = app.update(Message::CardMoved(Point::new(1700.0, 200.0)));
+        let _ = app.update(Message::CardMoved(Point::new(1100.0, 260.0)));
+        let _ = app.update(Message::CardReleased);
+        assert_eq!(
+            app.card_at().position(),
+            at.position() + Vector::new(-600.0, 60.0)
+        );
+        let _ = app.update(Message::CardMoved(Point::new(0.0, 0.0)));
+        assert_eq!(app.card_at().x, at.x - 600.0, "let go: no more moves");
+        // a selection on the right: a new card would go left, but the user's place wins
+        app.card = None;
+        drag(
+            &mut app,
+            Point::new(1500.0, 100.0),
+            Point::new(1800.0, 300.0),
+            false,
+        );
+        assert_eq!(app.card_at().x, widgets::card::GAP);
+    }
+
     /// `OPENCIRCLE_LOOK_PNG=<dir> cargo test ui::tests::look_shots -- --ignored`:
     /// a snapped selection (mid-morph and settled, with its chips), select-text
     /// mode with the popup, and the bar after More, over a frame with the edge glow.
@@ -3129,6 +3214,8 @@ mod tests {
         shot(&app, "look-2-snapped-chips.png");
         let _ = app.update(Message::More);
         shot(&app, "look-3-more-bar.png");
+        let _ = app.update(Message::Run(&text::ACTION)); // no models here: the consent card
+        shot(&app, "look-6-result-card.png");
         let mut app = select_text_app();
         glowing(&mut app);
         shot(&app, "look-4-select-text.png");
