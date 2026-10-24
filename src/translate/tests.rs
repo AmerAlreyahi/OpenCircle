@@ -531,7 +531,7 @@ fn bench_full_frame() {
 
 /// A synthetic 1920x1080 game frame (dialogue box, quest list, menu, prompt,
 /// outlined subtitle, settings rows) and its OCR-like lines.
-pub(super) fn game_frame() -> (Rgba, Vec<Line>) {
+pub(crate) fn game_frame() -> (Rgba, Vec<Line>) {
     let dims = (1920, 1080);
     let mut img = paint(dims.0, dims.1, |x, y| art(x, y, 1080.0));
     panel(&mut img, 1920, [160, 790, 1600, 240], [8, 10, 20], 0.7);

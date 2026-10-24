@@ -12,7 +12,7 @@ mod erase;
 pub mod live;
 pub mod pipeline;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Rules for the AI prompt. `render` draws `[[...]]` spans in the block's
 /// accent colour (e.g. a gold name) when the original had one, otherwise in

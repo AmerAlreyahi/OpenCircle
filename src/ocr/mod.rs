@@ -13,6 +13,7 @@ use std::fmt;
 use std::path::Path;
 
 use image::RgbImage;
+use image::imageops::FilterType::Triangle;
 use oar_ocr::core::config::OrtSessionConfig;
 use oar_ocr::core::traits::OrtConfigurable;
 use oar_ocr::domain::tasks::TextDetectionConfig;
@@ -22,6 +23,20 @@ use oar_ocr::processors::LimitType;
 /// Longest side the detector sees. 960 px read 35/36 lines at ~100 ms in spike
 /// S4; native 1080p read 36/36 but took 3x as long.
 const DETECT_SIDE: u32 = 960;
+
+/// ...but it never shrinks an image more than this. Screen text is sized in
+/// pixels, not in screen widths (12-22 px at 100 % scale on any monitor), and
+/// below ~10 px the detector ends lines early or drops them: 3440x1440 at
+/// 960 px turned 22 px text into 6 px and read "Speak to the bla".
+const MIN_DETECT_SCALE: f32 = 0.5;
+
+/// The detector's input size: the image shrunk to `DETECT_SIDE` (by no more
+/// than `MIN_DETECT_SCALE`), rounded to the model's multiple of 32.
+fn detect_size(width: u32, height: u32) -> (u32, u32) {
+    let s = (DETECT_SIDE as f32 / width.max(height) as f32).clamp(MIN_DETECT_SCALE, 1.0);
+    let side = |v: u32| (((v as f32 * s) as u32 + 16) / 32 * 32).max(32);
+    (side(width), side(height))
+}
 
 /// Lines read per recognizer run. One run over all 72 lines of a busy 1080p
 /// screen grew RAM to 1.2 GB (ORT keeps its peak); 8 kept it ~250 MB at the
@@ -113,9 +128,11 @@ impl Engine {
                 box_threshold: 0.6,
                 unclip_ratio: 1.5,
                 max_candidates: 1000,
-                limit_side_len: Some(DETECT_SIDE),
+                // `recognize` sizes the input itself (`detect_size`), so
+                // these never resize it.
+                limit_side_len: Some(u32::MAX),
                 limit_type: Some(LimitType::Max),
-                max_side_len: None,
+                max_side_len: Some(u32::MAX),
             })
             .with_ort_config(ort.clone())
             .build(models.join(models::DET.name))
@@ -136,20 +153,31 @@ impl Engine {
         height: u32,
     ) -> Result<Vec<TextBlock>, OcrError> {
         let img = to_rgb(rgba, width, height)?;
-        let det = self.det.predict(vec![img.clone()]).map_err(engine_err)?;
+        let (dw, dh) = detect_size(width, height);
+        let small = if (dw, dh) == (width, height) {
+            img.clone()
+        } else {
+            image::imageops::resize(&img, dw, dh, Triangle)
+        };
+        let det = self.det.predict(vec![small]).map_err(engine_err)?;
         let (w, h) = (width as f32, height as f32);
-        let boxes: Vec<[f32; 4]> = det
+        let (sx, sy) = (w / dw as f32, h / dh as f32);
+        let mut boxes: Vec<[f32; 4]> = det
             .detections
             .first()
             .into_iter()
             .flatten()
             .map(|d| {
                 let (x0, y0, x1, y1) = d.bbox.aabb();
+                let (x0, y0, x1, y1) = (x0 * sx, y0 * sy, x1 * sx, y1 * sy);
                 let (x0, y0) = (x0.clamp(0.0, w), y0.clamp(0.0, h));
                 [x0, y0, x1.min(w) - x0, y1.min(h) - y0]
             })
             .filter(|b| b[2] >= 2.0 && b[3] >= 2.0)
             .collect();
+        // A batch is padded to its widest line: batch alike shapes (as
+        // PaddleOCR does). `reading_order` restores the order.
+        boxes.sort_by(|a, b| (a[2] / a[3]).total_cmp(&(b[2] / b[3])));
         let mut blocks = Vec::with_capacity(boxes.len());
         for chunk in boxes.chunks(REC_BATCH) {
             let crops = chunk
@@ -265,6 +293,16 @@ mod tests {
     }
 
     #[test]
+    fn detector_shrinks_big_screens_at_most_2x() {
+        assert_eq!(detect_size(1920, 1080), (960, 544)); // 960 px, as before
+        assert_eq!(detect_size(3440, 1440), (1728, 736)); // not 960x416
+        assert_eq!(detect_size(3840, 2160), (1920, 1088));
+        assert_eq!(detect_size(1280, 720), (960, 544));
+        assert_eq!(detect_size(640, 160), (640, 160)); // a selection: never grown
+        assert_eq!(detect_size(10, 5), (32, 32));
+    }
+
+    #[test]
     fn bad_input_is_an_error() {
         assert!(matches!(to_rgb(&[], 0, 0), Err(OcrError::BadImage(_))));
         assert!(matches!(to_rgb(&[0; 15], 2, 2), Err(OcrError::BadImage(_))));
@@ -278,6 +316,54 @@ mod tests {
             recognize_in_child(&[0; 15], 2, 2),
             Err(OcrError::BadImage(_))
         ));
+    }
+
+    /// The translate tests' 1920x1080 game frame (quest text 22 px) as the
+    /// owner's 3440x1440 monitor at 100 % scale shows it: same pixels, top
+    /// right, black around. Every line must come back whole and as one block,
+    /// on the 1080p frame, the wide frame and a selection crop of the quest
+    /// panel. In process, models from `models_dir()`:
+    /// `cargo test --release ocr::tests::reads_whole -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn reads_whole_lines_on_a_wide_screen() {
+        let engine = Engine::load(&ensure_models(|_, _| {}).unwrap()).unwrap();
+        let (frame, lines) = crate::translate::tests::game_frame();
+        let frame = image::RgbaImage::from_raw(1920, 1080, frame).unwrap();
+        let mut wide = image::RgbaImage::from_pixel(3440, 1440, image::Rgba([0, 0, 0, 255]));
+        image::imageops::overlay(&mut wide, &frame, 3440 - 1920, 0);
+        let quest = image::imageops::crop_imm(&wide, 2980, 120, 460, 210).to_image();
+        let all: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+        // ponytail: spaces are ignored; the recognizer drops some between
+        // words ("northerngate") at any detector size, a separate issue.
+        let squash = |s: &str| s.split_whitespace().collect::<String>();
+        let mut failed = Vec::new();
+        for (name, img, want) in [
+            ("1920x1080", &frame, &all[..]),
+            ("3440x1440", &wide, &all[..]),
+            ("quest crop", &quest, &all[3..7]),
+        ] {
+            let (w, h) = img.dimensions();
+            let (mut got, mut took) = (Vec::new(), std::time::Duration::MAX);
+            for _ in 0..4 {
+                let t = std::time::Instant::now();
+                got = engine.recognize(img.as_raw(), w, h).unwrap();
+                took = took.min(t.elapsed()); // best of 4 (the first warms up)
+            }
+            let read: Vec<String> = got.iter().map(|b| squash(&b.text)).collect();
+            let whole = want.iter().filter(|l| read.contains(&squash(l))).count();
+            println!(
+                "{name}: {whole}/{} lines whole, {} blocks, {took:?}",
+                want.len(),
+                got.len()
+            );
+            if whole != want.len() || got.len() != want.len() {
+                let texts: Vec<&str> = got.iter().map(|b| b.text.as_str()).collect();
+                println!("  read {texts:?}");
+                failed.push(name);
+            }
+        }
+        assert!(failed.is_empty(), "lines cut or split: {failed:?}");
     }
 
     #[cfg(target_os = "linux")]
