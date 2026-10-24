@@ -7,6 +7,42 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use crate::{Trigger, Triggers};
 
+/// The tray icon's one identity. Windows (a fixed GUID, bound to the exe path) replaces a ghost left by a killed
+/// run instead of stacking a new icon beside it. Never change it.
+const TRAY_GUID: u128 = 0x6f70_656e_6369_7263_6c65_5472_6179_0001;
+
+/// Windows only: removes whatever icon holds `TRAY_GUID` (a ghost of a killed run, or our own on a crash path).
+/// Cheap and safe to call when there is none.
+#[cfg(windows)]
+pub fn remove_icon() {
+    use windows::Win32::UI::Shell::{NIF_GUID, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW};
+    let nid = NOTIFYICONDATAW {
+        cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+        uFlags: NIF_GUID,
+        guidItem: windows::core::GUID::from_u128(TRAY_GUID),
+        ..Default::default()
+    };
+    // SAFETY: plain shell call with a fully initialised struct.
+    let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &nid) };
+}
+
+/// Cleans the icon up when the process dies the hard way: a panic, or Ctrl+C / console close in a terminal.
+#[cfg(windows)]
+fn remove_on_crash() {
+    use windows::Win32::System::Console::SetConsoleCtrlHandler;
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        remove_icon();
+        previous(info);
+    }));
+    unsafe extern "system" fn on_ctrl(_: u32) -> windows::core::BOOL {
+        remove_icon();
+        false.into() // keep default handling (the process ends)
+    }
+    // SAFETY: registers a handler that only calls the shell.
+    let _ = unsafe { SetConsoleCtrlHandler(Some(on_ctrl), true) };
+}
+
 /// Starts the tray. Keep the returned icon alive (Linux keeps it on its GTK thread).
 pub fn start(tx: Triggers) -> Option<TrayIcon> {
     #[cfg(target_os = "linux")]
@@ -25,7 +61,14 @@ pub fn start(tx: Triggers) -> Option<TrayIcon> {
         None
     }
     #[cfg(not(target_os = "linux"))]
-    build(tx)
+    {
+        #[cfg(windows)]
+        {
+            remove_icon(); // a ghost with our GUID would make the add below fail
+            remove_on_crash();
+        }
+        build(tx)
+    }
 }
 
 /// Why a Linux tray cannot start, or `None` when it can. `libappindicator-sys`
@@ -96,13 +139,41 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
         };
         let _ = tx.unbounded_send(trigger);
     }));
-    TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
-        .with_tooltip("OpenCircle")
-        .with_icon(icon())
-        .build()
-        .map_err(|e| eprintln!("[opencircle] tray unavailable: {e}"))
-        .ok()
+    let icon = icon();
+    add_with_fallback(|guid| {
+        let mut builder = TrayIconBuilder::new()
+            .with_menu(Box::new(menu.clone()))
+            .with_tooltip("OpenCircle")
+            .with_icon(icon.clone());
+        if let Some(guid) = guid {
+            builder = builder.with_guid(guid);
+        }
+        let tray = builder.build().map_err(|e| e.to_string())?;
+        // tray-icon ignores a refused add (Windows: GUID bound to another exe path), so ask the shell
+        // whether the icon exists: with a GUID it must have a position.
+        #[cfg(windows)]
+        if guid.is_some() && tray.rect().is_none() {
+            return Err("the shell did not take the icon".to_string());
+        }
+        Ok::<_, String>(tray)
+    })
+    .map_err(|e| eprintln!("[opencircle] tray unavailable: {e}"))
+    .ok()
+}
+
+/// Adds the icon under the fixed identity first; if the shell refuses it (Windows binds a GUID to the exe path,
+/// so a moved or second copy of the exe is refused), adds it without one: the icon shows, and only a force-kill
+/// can leave a ghost. `add` gets the GUID to use.
+fn add_with_fallback<T, E: std::fmt::Display>(
+    mut add: impl FnMut(Option<u128>) -> Result<T, E>,
+) -> Result<T, E> {
+    match add(Some(TRAY_GUID)) {
+        Ok(icon) => Ok(icon),
+        Err(e) => {
+            eprintln!("[opencircle] tray: fixed identity refused ({e}); using a plain icon");
+            add(None)
+        }
+    }
 }
 
 /// The 32 px app icon, embedded in the binary.
@@ -116,4 +187,35 @@ fn icon() -> Icon {
     let info = reader.next_frame(&mut rgba).expect("embedded icon decodes");
     rgba.truncate(info.buffer_size());
     Icon::from_rgba(rgba, info.width, info.height).expect("embedded icon is RGBA")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TRAY_GUID, add_with_fallback};
+
+    #[test]
+    fn the_fixed_identity_is_tried_first_and_used_when_accepted() {
+        let mut tried = Vec::new();
+        let r: Result<(), String> = add_with_fallback(|g| {
+            tried.push(g);
+            Ok(())
+        });
+        assert!(r.is_ok());
+        assert_eq!(tried, [Some(TRAY_GUID)]);
+    }
+
+    #[test]
+    fn a_refused_identity_falls_back_to_a_plain_icon() {
+        let mut tried = Vec::new();
+        let r: Result<&str, String> = add_with_fallback(|g| {
+            tried.push(g);
+            if g.is_some() {
+                Err("refused".to_string())
+            } else {
+                Ok("plain")
+            }
+        });
+        assert_eq!(r, Ok("plain"));
+        assert_eq!(tried, [Some(TRAY_GUID), None]);
+    }
 }

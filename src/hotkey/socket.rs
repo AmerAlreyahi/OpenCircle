@@ -25,6 +25,8 @@ const MAX_ACTION: usize = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Capture,
+    /// Ask the running instance to exit (removes its tray icon cleanly).
+    Quit,
     /// `target: None` = the target the user configured for that action.
     Run {
         action: String,
@@ -37,6 +39,7 @@ impl Command {
     pub fn line(&self) -> String {
         match self {
             Command::Capture => "capture".into(),
+            Command::Quit => "quit".into(),
             Command::Run {
                 action,
                 target: None,
@@ -105,6 +108,7 @@ pub fn parse_command(line: &str) -> Result<Command, String> {
     let words: Vec<&str> = line.split(' ').collect();
     match words.as_slice() {
         ["capture"] => Ok(Command::Capture),
+        ["quit"] => Ok(Command::Quit),
         ["run", action] => run(action, None),
         ["run", action, target] => run(action, Some(target)),
         _ => Err("unknown command".into()),
@@ -301,6 +305,8 @@ mod tests {
     #[test]
     fn parses_the_wire_lines() {
         assert_eq!(parse_command("capture\n"), Ok(Command::Capture));
+        assert_eq!(parse_command("quit\n"), Ok(Command::Quit));
+        assert_eq!(Command::Quit.line(), "quit");
         assert_eq!(
             parse_command("run translate\n"),
             Ok(run_of("translate", None))

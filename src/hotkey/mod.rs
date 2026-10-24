@@ -299,6 +299,7 @@ fn route_id(bindings: &[Binding], id: &str, at: Instant) -> Option<Trigger> {
 pub fn trigger(command: &Command, at: Instant) -> Trigger {
     match command {
         Command::Capture => Trigger::Capture(at),
+        Command::Quit => Trigger::Quit,
         Command::Run { action, target } => {
             let configured = bindings().iter().find_map(|b| match &b.what {
                 What::Quick(qa) if qa.action == *action => Some(qa.clone()),

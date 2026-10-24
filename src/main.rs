@@ -47,8 +47,7 @@ pub enum Trigger {
 /// Where every trigger source (shortcut, tray, CLI socket) sends.
 pub type Triggers = mpsc::UnboundedSender<Trigger>;
 
-const USAGE: &str =
-    "usage: opencircle [capture | run <action> [--target full_screen|circle|last_region|window]]";
+const USAGE: &str = "usage: opencircle [capture | quit | run <action> [--target full_screen|circle|last_region|window]]";
 
 /// A GUI-subsystem exe has no stdout/stderr. When started from a terminal, attach
 /// to its console so `eprintln!` shows; a redirect (file, pipe) is already valid
@@ -152,6 +151,11 @@ fn main() -> ExitCode {
         // hidden: started by an update, once the old process has exited
         Some(update::RELAUNCH_ARG) if update::wait_for_old(|| hotkey::forward("").is_ok()) => None,
         Some(update::RELAUNCH_ARG) => return ExitCode::FAILURE,
+        Some("quit") => {
+            // Never starts the app: with none running there is nothing to quit.
+            let _ = hotkey::forward(&hotkey::Command::Quit.line());
+            return ExitCode::SUCCESS;
+        }
         Some("capture" | "run") => match hotkey::Command::from_args(&args) {
             Ok(command) => Some(command),
             Err(e) => {
