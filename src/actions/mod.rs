@@ -3,7 +3,7 @@
 //! To add an action: see ARCHITECTURE.md ("Add an action").
 pub mod ask;
 pub mod copy;
-mod edit;
+pub mod edit;
 pub mod entities;
 pub mod lens;
 pub mod qr;

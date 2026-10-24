@@ -56,6 +56,10 @@ const PROTECTED: &str = "This window is protected; it can't be captured";
 /// height kept free for it (the action bar stays above it).
 const ASK_INPUT: &str = "overlay-ask";
 const ASK_WIDTH: f32 = 480.0;
+/// The field's width on a narrow screen (the buttons keep theirs).
+const ASK_MIN_WIDTH: f32 = 160.0;
+/// The bottom bar's Live translate icon (lucide "radio").
+const LIVE: char = '\u{e145}';
 const ASK_ZONE: f32 = widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING + 2.0 * ASK_MARGIN;
 const ASK_MARGIN: f32 = 24.0;
 
@@ -155,7 +159,12 @@ enum Message {
     /// The bottom bar: its ask field's text, Enter in it, its Translate button.
     AskInput(String),
     AskSubmit,
+    /// The bottom bar's buttons: Ask AI (Enter, or the presets with an empty
+    /// field), Translate the screen, Live translate, the whole screen in the editor.
+    AskButton,
     TranslateScreen,
+    LiveToggle,
+    EditScreen,
     /// OCR read the whole frame of this opening (main mode, at open).
     ScreenText(u32, Result<Vec<word::Line>, String>),
     /// The "Select text" chip under a snapped box, and the lines OCR read in it.
@@ -176,6 +185,37 @@ enum Message {
     SongKey,
     /// Try the waiting update again (it waits while OpenCircle is in use).
     UpdateTick,
+}
+
+/// The shortcuts of the bottom bar's buttons, as the tooltips show them ("" = none).
+#[derive(Debug, Default, Clone, PartialEq)]
+struct BarKeys {
+    ask: String,
+    translate: String,
+    live: String,
+    song: String,
+    edit: String,
+}
+
+impl BarKeys {
+    fn of(cfg: &config::Config) -> BarKeys {
+        let quick = |id: &str, live: bool| {
+            let bound = (cfg.quick_actions.iter())
+                .find(|q| q.action == id && q.live == live && !q.shortcut.is_empty());
+            bound.map(|q| q.shortcut.clone()).unwrap_or_default()
+        };
+        let key = |a: &Action| match a.key.ctrl {
+            true => format!("Ctrl+{}", a.key.letter.to_ascii_uppercase()),
+            false => a.key.letter.to_ascii_uppercase().to_string(),
+        };
+        BarKeys {
+            ask: key(&actions::ask::ACTION),
+            translate: quick(actions::translate::ACTION.id, false),
+            live: quick(actions::translate::ACTION.id, true),
+            song: quick("song_search", false),
+            edit: key(&actions::edit::ACTION),
+        }
+    }
 }
 
 /// What the select-text popup does with the picked words.
@@ -351,6 +391,8 @@ struct App {
     /// A press that began on text: its stroke so far (image px). It selects
     /// words unless it turns into a loop (`overlay::winds`).
     text_press: Option<Vec<Point>>,
+    /// The shortcuts the bottom bar's tooltips show (read at open).
+    bar_keys: BarKeys,
     /// The last press: when, where (image px), and how many in a row.
     clicks: Option<(Instant, Point, u8)>,
     /// The ask bar's text.
@@ -464,6 +506,7 @@ impl App {
             screen_text: None,
             text_press: None,
             clicks: None,
+            bar_keys: BarKeys::default(),
             ask: String::new(),
             opening: 0,
             first_draw: Cell::new(None),
@@ -566,6 +609,18 @@ impl App {
                 Task::batch([opened, self.check_song_key()])
             }
             Message::SongKey => Task::none(), // remembered by `music::check_key`
+            // Song search is opt-in: without a key the button opens its setup
+            // (Settings > Song search) and nothing is recorded.
+            Message::SongStart if !self.has_song_key() => {
+                let closing = self.close();
+                let settings = self.windows.open(windows::Kind::Settings);
+                let section =
+                    self.windows
+                        .update(windows::Msg::Settings(settings::Message::Section(
+                            settings::Section::Song,
+                        )));
+                closing.chain(settings.chain(section).map(Message::Windows))
+            }
             Message::SongStart => self.start_song(),
             Message::Song(id, msg) => self.on_song(id, msg),
             Message::CaptureTimedOut(n) if self.capturing == Some(n) => {
@@ -664,6 +719,26 @@ impl App {
                     Some(crop) => self.open_panel(actions::Panel::Ask, crop, Some(question)),
                     None => Task::none(),
                 }
+            }
+            Message::AskButton if self.ask.trim().is_empty() => {
+                // no question yet: Ask AI opens with its presets
+                let crop = self.stacked().or_else(|| self.whole());
+                match crop {
+                    Some(crop) => self.open_panel(actions::Panel::Ask, crop, None),
+                    None => Task::none(),
+                }
+            }
+            Message::AskButton => self.update(Message::AskSubmit),
+            // Live translate runs over the live screen: the frozen one goes.
+            Message::LiveToggle => {
+                let closing = self.close();
+                closing.chain(self.toggle_live(Instant::now()))
+            }
+            Message::EditScreen => {
+                self.others.clear();
+                self.word = None;
+                self.select(Rectangle::with_size(self.screen));
+                self.open_editor()
             }
             Message::TranslateScreen => {
                 self.others.clear();
@@ -800,7 +875,9 @@ impl App {
         self.opening = self.opening.wrapping_add(1);
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
-        self.behaviour = config::current().selection;
+        let cfg = config::current();
+        self.behaviour = cfg.selection;
+        self.bar_keys = BarKeys::of(&cfg);
         let mut first = None;
         let mut extras = Task::none();
         if let Some((kind, windows, foreground)) = shot.snip {
@@ -1128,6 +1205,19 @@ impl App {
                 return self.selected();
             }
             overlay::Event::Key { letter, ctrl } if matches!(self.purpose, Purpose::Search) => {
+                // Nothing selected: Ask AI, Translate and Edit take the whole screen
+                // (as the bottom bar's buttons do).
+                let bar = match actions::for_key(letter, ctrl).map(|a| a.id) {
+                    Some(id) if id == actions::ask::ACTION.id => Some(Message::AskButton),
+                    Some(id) if id == actions::translate::ACTION.id => {
+                        Some(Message::TranslateScreen)
+                    }
+                    Some(id) if id == actions::edit::ACTION.id => Some(Message::EditScreen),
+                    _ => None,
+                };
+                if let (None, Some(message)) = (self.selection, bar) {
+                    return self.update(message);
+                }
                 if let Some(action) = actions::for_key(letter, ctrl) {
                     return self.run(action);
                 }
@@ -2808,9 +2898,10 @@ impl App {
     }
 
     /// The bottom bar: "Ask about your screen…" (your selection, once there is
-    /// one; Enter opens Ask AI with it), Translate the screen, and the music
-    /// button once a song key is saved. Its field takes the keys only once
-    /// clicked: until then letters are the action shortcuts.
+    /// one; Enter opens Ask AI with it), then Ask AI, Translate the screen,
+    /// Live translate, Song search and Edit. Its field takes the keys only
+    /// once clicked: until then letters are the action shortcuts. On a narrow
+    /// screen the field gives up width, the buttons stay.
     fn bottom_bar(&self) -> Element<'_, Message> {
         let placeholder = match self.selection {
             Some(_) => "Ask about your selection…",
@@ -2823,22 +2914,59 @@ impl App {
             Message::AskInput,
             Message::AskSubmit,
         );
-        let translate = widgets::hint(
-            widgets::icon_button(
+        let keys = &self.bar_keys;
+        let buttons = [
+            (
+                actions::ask::ACTION.icon,
+                "Ask AI",
+                &keys.ask,
+                false,
+                Message::AskButton,
+            ),
+            (
                 actions::translate::ACTION.icon,
+                "Translate the screen",
+                &keys.translate,
                 false,
                 Message::TranslateScreen,
             ),
-            "Translate the screen",
-            widgets::Why::Icon,
-            iced::widget::tooltip::Position::Top,
-        );
-        let mut bar = iced::widget::row![field.width(ASK_WIDTH), translate]
+            (
+                LIVE,
+                "Live translate",
+                &keys.live,
+                self.live.is_some(),
+                Message::LiveToggle,
+            ),
+            (
+                song::MUSIC,
+                "Search for a song",
+                &keys.song,
+                false,
+                Message::SongStart,
+            ),
+            (
+                actions::edit::ACTION.icon,
+                "Edit the screen",
+                &keys.edit,
+                false,
+                Message::EditScreen,
+            ),
+        ];
+        let n = buttons.len() as f32;
+        let used = n * (widgets::CONTROL + 4.0) + 2.0 * (widgets::SURFACE_PADDING + ASK_MARGIN);
+        let width = (self.screen.width - used).clamp(ASK_MIN_WIDTH, ASK_WIDTH);
+        let buttons = buttons.map(|(glyph, label, keys, active, message)| {
+            let why = match keys.is_empty() {
+                true => widgets::Why::Icon,
+                false => widgets::Why::Keys(keys),
+            };
+            let button = widgets::icon_button(glyph, active, message);
+            widgets::hint(button, label, why, iced::widget::tooltip::Position::Top)
+        });
+        let bar = iced::widget::row![field.width(width)]
+            .extend(buttons)
             .spacing(4)
             .align_y(iced::Center);
-        if let Some(music) = song::button(self.has_song_key(), Message::SongStart) {
-            bar = bar.push(music);
-        }
         // opaque: a press on it doesn't start a new selection.
         let bar = opaque(widgets::surface(bar));
         container(bar)
@@ -3394,6 +3522,7 @@ mod tests {
         app.scale = scale;
         app.screen = Size::new(w as f32 / scale, h as f32 / scale);
         app.view = overlay::View::new(w, h, app.screen);
+        app.bar_keys = BarKeys::of(&config::Config::default());
         app
     }
 
@@ -3993,8 +4122,7 @@ mod tests {
         let _ = app.update(Message::AskInput("what is on my screen?".into()));
         let has_field = |app: &App| overlay_texts(app).contains(&app.ask);
         assert!(has_field(&app), "before any selection");
-        let translate = Point::new(642.0, 600.0 - ASK_ZONE / 2.0);
-        let clicked = widgets::shot::click(app.view(app.overlay), app.screen, translate);
+        let clicked = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, 1));
         assert!(
             clicked
                 .iter()
@@ -4029,6 +4157,106 @@ mod tests {
         let mut app = open_app(800, 600, 1.0);
         let _ = app.update(Message::TranslateScreen);
         assert!(app.translate.is_some() && app.selection.is_none());
+    }
+
+    /// The centre of the bottom bar's button `k` (0 = Ask AI … 4 = Edit), as laid out.
+    fn bar_button(app: &App, k: usize) -> Point {
+        let n = 5.0;
+        let used = n * (widgets::CONTROL + 4.0) + 2.0 * (widgets::SURFACE_PADDING + ASK_MARGIN);
+        let field = (app.screen.width - used).clamp(ASK_MIN_WIDTH, ASK_WIDTH);
+        let bar = field + n * (widgets::CONTROL + 4.0) + 2.0 * widgets::SURFACE_PADDING;
+        let left = (app.screen.width - bar) / 2.0 + widgets::SURFACE_PADDING;
+        let x = left + field + 4.0 + k as f32 * (widgets::CONTROL + 4.0) + widgets::CONTROL / 2.0;
+        Point::new(x, app.screen.height - ASK_ZONE / 2.0)
+    }
+
+    #[test]
+    fn the_bottom_bar_has_every_main_action_on_any_screen() {
+        for (w, h) in [(1280, 800), (800, 600), (480, 400)] {
+            let app = open_app(w, h, 1.0);
+            let _ = widgets::tests_support::shown(); // drop older records
+            let messages: Vec<Vec<Message>> = (0..5)
+                .map(|k| {
+                    widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, k))
+                })
+                .collect();
+            let is = |k: usize, f: fn(&Message) -> bool| messages[k].iter().any(f);
+            assert!(is(0, |m| matches!(m, Message::AskButton)), "{w}: Ask AI");
+            assert!(
+                is(1, |m| matches!(m, Message::TranslateScreen)),
+                "{w}: Translate"
+            );
+            assert!(is(2, |m| matches!(m, Message::LiveToggle)), "{w}: Live");
+            assert!(
+                is(3, |m| matches!(m, Message::SongStart)),
+                "{w}: music, key or not"
+            );
+            assert!(is(4, |m| matches!(m, Message::EditScreen)), "{w}: Edit");
+            // icons only: each names itself and its shortcut in its tooltip
+            let tips = widgets::tests_support::shown();
+            for want in [
+                "Ask AI · A",
+                "Translate the screen · Ctrl+Shift+T",
+                "Live translate · Ctrl+Shift+L",
+                "Search for a song",
+                "Edit the screen · E",
+            ] {
+                assert!(tips.iter().any(|t| t == want), "{want}: {tips:?}");
+            }
+            widgets::tests_support::assert_tips_add_something("bottom bar");
+        }
+    }
+
+    #[test]
+    fn the_bottom_bar_buttons_work_on_the_whole_screen() {
+        // without a song key the music button opens its setup: nothing is recorded
+        let mut app = open_app(800, 600, 1.0);
+        assert!(!app.has_song_key());
+        let _ = app.update(Message::SongStart);
+        assert!(
+            app.song.is_none() && app.frame.is_none(),
+            "closed, not listening"
+        );
+        assert!(app.windows.busy(), "Settings opened (Song search)");
+        // Ask AI with an empty field: the panel with its presets, on the whole screen
+        let mut app = open_app(800, 600, 1.0);
+        let _ = app.update(Message::AskButton);
+        assert_eq!(
+            app.panel.as_ref().map(|(_, p)| p.kind()),
+            Some(actions::Panel::Ask)
+        );
+        // the same keys with nothing selected: A asks, E edits, R translates, all the screen
+        let mut app = open_app(800, 600, 1.0);
+        event(
+            &mut app,
+            overlay::Event::Key {
+                letter: 'e',
+                ctrl: false,
+            },
+        );
+        assert!(app.edit.is_some(), "the whole screen in the editor");
+        assert_eq!(
+            app.selection.map(|s| s.area),
+            Some(Rectangle::with_size(app.screen))
+        );
+        let mut app = open_app(800, 600, 1.0);
+        event(
+            &mut app,
+            overlay::Event::Key {
+                letter: 'r',
+                ctrl: false,
+            },
+        );
+        assert!(app.translate.is_some());
+        let mut app = open_app(800, 600, 1.0);
+        event(
+            &mut app,
+            overlay::Event::Key {
+                letter: 'a',
+                ctrl: false,
+            },
+        );
+        assert!(app.panel.is_some());
     }
 
     /// What one key press (letter `c`) on the overlay produces, after the

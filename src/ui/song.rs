@@ -1,11 +1,10 @@
-//! Song search on the overlay: the music button (only once a key is saved),
+//! Song search on the overlay (its button is in the overlay's bottom bar):
 //! the "Listening… N s" pill with Cancel, then the result card (cover, title,
 //! artist, album · year, links opened only on click). The work is `crate::music`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use iced::widget::tooltip::Position;
 use iced::widget::{column, container, image, opaque, row};
 use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 
@@ -256,19 +255,6 @@ fn status<'a>(label: String) -> Element<'a, Msg> {
     .into()
 }
 
-/// The music button for the overlay's bottom bar: only with a saved key
-/// (song search is opt-in; Settings > Song search says how to add one).
-pub fn button<'a, M: Clone + 'a>(has_key: bool, on_press: M) -> Option<Element<'a, M>> {
-    has_key.then(|| {
-        widgets::hint(
-            widgets::icon_button(MUSIC, false, on_press),
-            "Search for a song",
-            widgets::Why::Icon,
-            Position::Top,
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,17 +288,12 @@ mod tests {
     }
 
     #[test]
-    fn the_music_button_is_hidden_without_a_key() {
-        assert!(button(false, ()).is_none());
-        assert!(button(true, ()).is_some());
+    fn the_music_glyph_is_in_the_font() {
         let script = include_str!("../../assets/lucide/subset.sh");
         assert!(
             script.contains(&format!("U+{:04X}", MUSIC as u32)),
             "glyph in the font"
         );
-        // The bottom bar as the overlay shows it with nothing selected.
-        let bar = container(widgets::surface(button(true, ()).unwrap())).padding(24);
-        widgets::shot::save("song-button", bar.into(), Size::new(120.0, 110.0));
     }
 
     #[test]
