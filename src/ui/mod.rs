@@ -3355,8 +3355,8 @@ fn bar_button<'a>(
 // doesn't push the bar); mixed-DPI monitors map approximately.
 #[cfg(windows)]
 fn taskbar_inset(origin: Point, size: Size, scale: f32) -> f32 {
-    use windows::Win32::Foundation::POINT;
-    use windows::Win32::Graphics::Gdi::{
+    use ::windows::Win32::Foundation::POINT;
+    use ::windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
     };
     let centre = POINT {
