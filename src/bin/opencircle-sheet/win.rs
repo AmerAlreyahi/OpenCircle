@@ -24,8 +24,11 @@ use winit::window::{CursorIcon, ResizeDirection, Window, WindowId, WindowLevel};
 use wry::{Rect, WebContext, WebView, WebViewExtWindows};
 
 use crate::proto::{
-    self, Args, BODY_R, FOOTER, HEADER, Hit, Kind, Line, MIN, Place, RADIUS, Rect4,
+    self, Args, BODY_PAD, BODY_R, FOOTER, HEADER, Hit, Kind, Line, MIN, Place, RADIUS, Rect4,
 };
+
+/// The human-check hint strip's height (logical px).
+const HINT: f64 = 44.0;
 use crate::{
     CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, icon, log, say, slid, slide_off,
 };
@@ -38,7 +41,7 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         eprintln!("[sheet] no WebView2: {e}");
         return NO_RUNTIME;
     }
-    let Ok(el) = winit::event_loop::EventLoop::<()>::with_user_event().build() else {
+    let Ok(el) = winit::event_loop::EventLoop::<Ev>::with_user_event().build() else {
         return 1;
     };
     let mut app = App {
@@ -66,6 +69,7 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         resized: false,
         slide: None,
         shown: false,
+        captcha: false,
         code: 0,
     };
     if el.run_app(&mut app).is_err() {
@@ -85,7 +89,7 @@ struct App {
     colours: [u32; 5],
     page: Option<Page>,
     t0: Instant,
-    proxy: EventLoopProxy<()>,
+    proxy: EventLoopProxy<Ev>,
     ctx: WebContext,
     win: Option<Rc<Window>>,
     view: Option<WebView>,
@@ -107,7 +111,33 @@ struct App {
     resized: bool,
     slide: Option<Instant>,
     shown: bool,
+    /// Google's human check is showing: the hint strip sits above the page.
+    captcha: bool,
     code: u8,
+}
+
+/// What the web view tells the window (from its own callbacks).
+enum Ev {
+    /// The page's "close".
+    Close,
+    /// Google's human check showed (true) or went (false).
+    Captcha(bool),
+}
+
+/// The hint strip above the page (logical, card-relative) and its button.
+fn hint_rects(w: f64) -> (Rect4, Rect4) {
+    let strip = [BODY_PAD, HEADER + BODY_PAD, w - 2.0 * BODY_PAD, HINT];
+    let button = [
+        strip[0] + strip[2] - 6.0 - 132.0,
+        strip[1] + 6.0,
+        132.0,
+        HINT - 12.0,
+    ];
+    (strip, button)
+}
+
+fn inside([x, y, w, h]: Rect4, (px, py): (f64, f64)) -> bool {
+    (x..x + w).contains(&px) && (y..y + h).contains(&py)
 }
 
 fn hwnd(w: &Window) -> Option<HWND> {
@@ -198,7 +228,11 @@ impl App {
 
     fn view_rect(&self, size: PhysicalSize<u32>) -> Rect {
         let k = self.k;
-        let [x, y, w, h] = proto::body(size.width as f64 / k, size.height as f64 / k);
+        let [x, mut y, w, mut h] = proto::body(size.width as f64 / k, size.height as f64 / k);
+        if self.captcha {
+            // the hint strip and a gap above the page
+            (y, h) = (y + HINT + 12.0, (h - HINT - 12.0).max(0.0));
+        }
         Rect {
             position: PhysicalPosition::new((x * k) as i32, (y * k) as i32).into(),
             size: PhysicalSize::new((w * k) as u32, (h * k) as u32).into(),
@@ -263,6 +297,9 @@ impl App {
             Place::Bottom => [fw / 2.0 - 20.0 * k, 2.0 * k, 40.0 * k, 4.0 * k],
         };
         let card = [0.0, 0.0, fw, fh];
+        let scaled = |r: Rect4| r.map(|v| v * k);
+        let (strip, button) = hint_rects(fw / k);
+        let (strip, button, captcha) = (scaled(strip), scaled(button), self.captcha);
         if let Ok(mut buf) = s.buffer_mut() {
             for y in 0..size.height {
                 // the header's and the footer's rules
@@ -278,6 +315,10 @@ impl App {
                     c = mix(c, chip_bg, 0.5 - rounded(cx, cy, chip, 11.0 * k));
                     if hover {
                         c = mix(c, muted, 0.5 - rounded(cx, cy, pill, 2.0 * k));
+                    }
+                    if captcha {
+                        c = mix(c, chip_bg, 0.5 - rounded(cx, cy, strip, 12.0 * k));
+                        c = mix(c, bg, 0.5 - rounded(cx, cy, button, button[3] / 2.0));
                     }
                     buf[(y * size.width + x) as usize] = c;
                 }
@@ -304,6 +345,31 @@ impl App {
             }
             let fy = (fh - (FOOTER * k + 16.0 * k) / 2.0) as i32;
             text(dc, f_small, muted, (20.0 * k) as i32, fy, kind.privacy());
+            if captcha {
+                let (x, y) = ((strip[0] + 14.0 * k) as i32, (strip[1] + 7.0 * k) as i32);
+                text(
+                    dc,
+                    f_small,
+                    ink,
+                    x,
+                    y,
+                    "Google wants to check you're human.",
+                );
+                let y2 = y + (16.0 * k) as i32;
+                text(
+                    dc,
+                    f_small,
+                    ink,
+                    x,
+                    y2,
+                    "Solve it here, or open in your browser.",
+                );
+                let label = "Open in browser";
+                let lw = width_of(dc, f_small, label) as f64;
+                let bx = (button[0] + (button[2] - lw) / 2.0) as i32;
+                let by = (button[1] + (button[3] - 15.0 * k) / 2.0) as i32;
+                text(dc, f_small, ink, bx, by, label);
+            }
             for f in [f_title, f_small] {
                 let _ = DeleteObject(f.into());
             }
@@ -350,7 +416,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<Ev> for App {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         let Some(page) = self.page.take() else {
             return;
@@ -387,20 +453,20 @@ impl ApplicationHandler for App {
         };
         let win = Rc::new(win);
         self.win = Some(win.clone());
-        let proxy = self.proxy.clone();
+        let (proxy, proxy_check) = (self.proxy.clone(), self.proxy.clone());
         let bounds = self.view_rect(size);
         let history = self.history.take();
-        // ponytail: no hint bar on Windows (Lens there showed no check, spike
-        // S9); Open in browser is in the header. Add the bar if it shows up.
         let view = builder(
             &mut self.ctx,
             page,
             history,
             self.t0,
             move || {
-                let _ = proxy.send_event(());
+                let _ = proxy.send_event(Ev::Close);
             },
-            |_| {},
+            move |on| {
+                let _ = proxy_check.send_event(Ev::Captcha(on));
+            },
         )
         .with_bounds(bounds)
         .build_as_child(&*win);
@@ -450,8 +516,28 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn user_event(&mut self, el: &ActiveEventLoop, _: ()) {
-        self.close(el);
+    fn user_event(&mut self, el: &ActiveEventLoop, ev: Ev) {
+        match ev {
+            Ev::Close => self.close(el),
+            Ev::Captcha(on) if on != self.captcha => {
+                self.captcha = on;
+                log(
+                    self.t0,
+                    if on {
+                        "human check shown"
+                    } else {
+                        "human check gone"
+                    },
+                    "",
+                );
+                if let (Some(v), Some(w)) = (&self.view, &self.win) {
+                    let _ = v.set_bounds(self.view_rect(w.inner_size()));
+                }
+                self.round();
+                self.paint();
+            }
+            Ev::Captcha(_) => {}
+        }
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
@@ -499,6 +585,9 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 let (w, h) = self.logical();
+                if self.captcha && inside(hint_rects(w).1, self.cursor) {
+                    return self.open_in_browser(el);
+                }
                 match proto::hit(self.at, self.cursor.0, self.cursor.1, w, h) {
                     Some(Hit::Close) => self.close(el),
                     Some(Hit::Browser) => self.open_in_browser(el),
