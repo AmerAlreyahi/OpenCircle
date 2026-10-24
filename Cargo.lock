@@ -4257,6 +4257,7 @@ version = "0.0.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "clipboard-win",
  "cosmic-text",
  "cpal",
  "dirs",

@@ -136,6 +136,48 @@ pub fn write_png(
     std::fs::write(path, encode_png(width, height, rgba)?).map_err(|e| e.to_string())
 }
 
+/// `crop` scaled down (bicubic, so text stays sharp) until its long edge is at
+/// most `max_edge` px; as it is when it already fits or `max_edge` is 0.
+pub fn fit_long_edge(crop: Crop, max_edge: u32) -> Crop {
+    let long = crop.width.max(crop.height);
+    if max_edge == 0 || long <= max_edge {
+        return crop;
+    }
+    let shrink =
+        |v: u32| ((u64::from(v) * u64::from(max_edge)).div_ceil(u64::from(long)) as u32).max(1);
+    let (width, height) = (shrink(crop.width), shrink(crop.height));
+    let Some(source) = image::RgbaImage::from_raw(crop.width, crop.height, crop.rgba) else {
+        unreachable!("a Crop's buffer is width * height * 4 bytes");
+    };
+    let scaled = image::imageops::resize(&source, width, height, image::imageops::CatmullRom);
+    Crop {
+        width,
+        height,
+        rgba: scaled.into_raw(),
+    }
+}
+
+/// `crop` as file bytes: PNG, or JPEG at quality 85 (no alpha: opaque screenshots).
+pub fn encode(crop: &Crop, format: crate::config::Format) -> Result<Vec<u8>, String> {
+    match format {
+        crate::config::Format::Png => encode_png(crop.width, crop.height, &crop.rgba),
+        crate::config::Format::Jpeg => {
+            let (pixels, _) = crop.rgba.as_chunks::<4>();
+            let rgb: Vec<u8> = pixels.iter().flat_map(|&[r, g, b, _]| [r, g, b]).collect();
+            let mut out = Vec::new();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85)
+                .encode(
+                    &rgb,
+                    crop.width,
+                    crop.height,
+                    image::ExtendedColorType::Rgb8,
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(out)
+        }
+    }
+}
+
 /// An RGBA image as 8-bit PNG bytes.
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
@@ -218,6 +260,58 @@ mod tests {
         let c = crop(&frame(), 4, 3, 1.5, area).unwrap();
         assert_eq!((c.width, c.height), (2, 2));
         assert_eq!(&c.rgba[..4], [1, 0, 0, 255]);
+    }
+
+    fn solid(width: u32, height: u32) -> Crop {
+        Crop {
+            width,
+            height,
+            rgba: (0..width * height)
+                .flat_map(|_| [200, 100, 50, 255])
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn export_scales_the_long_edge_down_only() {
+        // 4K landscape -> 1568 wide, aspect kept (rounded up, never 0).
+        let c = fit_long_edge(solid(3840, 2160), 1568);
+        assert_eq!((c.width, c.height), (1568, 882));
+        assert_eq!(c.rgba.len(), 1568 * 882 * 4);
+        // Flat colour stays that colour (no ringing on a flat area).
+        assert!(
+            c.rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| *p == [200, 100, 50, 255])
+        );
+        // Tall: the height is the long edge.
+        let c = fit_long_edge(solid(500, 3000), 1568);
+        assert_eq!((c.width, c.height), (262, 1568));
+        // Already small, or 0 = original: untouched (never enlarged).
+        let c = fit_long_edge(solid(800, 600), 1568);
+        assert_eq!((c.width, c.height), (800, 600));
+        let c = fit_long_edge(solid(3840, 2160), 0);
+        assert_eq!((c.width, c.height), (3840, 2160));
+        // A sliver keeps at least one pixel.
+        let c = fit_long_edge(solid(5000, 1), 1000);
+        assert_eq!((c.width, c.height), (1000, 1));
+    }
+
+    #[test]
+    fn export_writes_png_or_jpeg() {
+        use crate::config::Format;
+        let c = solid(40, 30);
+        let png = encode(&c, Format::Png).unwrap();
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+        let jpeg = encode(&c, Format::Jpeg).unwrap();
+        assert_eq!(&jpeg[..3], [0xff, 0xd8, 0xff], "JPEG magic");
+        let back = image::load_from_memory(&jpeg).unwrap().into_rgb8();
+        assert_eq!(back.dimensions(), (40, 30));
+        let [r, g, b] = back.get_pixel(20, 15).0;
+        let near = |a: u8, b: u8| a.abs_diff(b) <= 4;
+        assert!(near(r, 200) && near(g, 100) && near(b, 50), "{r} {g} {b}");
     }
 
     #[test]

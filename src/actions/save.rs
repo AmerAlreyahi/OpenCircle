@@ -1,8 +1,10 @@
-//! Save: the crop as a PNG, wherever the user picks in the native save dialog
-//! (which starts in Settings -> General's save folder, if one is set).
+//! Save: the crop as a PNG (or JPEG, `snip.format`), wherever the user picks in
+//! the native save dialog (which starts in Settings -> General's save folder, if
+//! one is set). Scaled to `snip.max_edge` unless `snip.save_original`.
 use std::path::PathBuf;
 
-use super::{Action, Crop, Key, write_png};
+use super::{Action, Crop, Key};
+use crate::config::{Format, SnipConfig};
 
 pub const ACTION: Action = Action {
     id: "save",
@@ -17,8 +19,14 @@ pub const ACTION: Action = Action {
 };
 
 fn run(crop: Crop) -> Result<(), String> {
-    let name = format!("OpenCircle-{}.png", timestamp());
-    let start = start_folder(&crate::config::current().general.save_folder);
+    let config = crate::config::current();
+    let (crop, format) = export(crop, &config.snip);
+    let (kind, ext) = match format {
+        Format::Png => ("PNG image", "png"),
+        Format::Jpeg => ("JPEG image", "jpg"),
+    };
+    let name = format!("OpenCircle-{}.{ext}", timestamp());
+    let start = start_folder(&config.general.save_folder);
     // The dialog blocks until the user answers: keep it off the UI thread.
     std::thread::Builder::new()
         .name("save dialog".into())
@@ -26,20 +34,28 @@ fn run(crop: Crop) -> Result<(), String> {
             let mut dialog = rfd::FileDialog::new()
                 .set_title("Save selection")
                 .set_file_name(name)
-                .add_filter("PNG image", &["png"]);
+                .add_filter(kind, &[ext]);
             if let Some(folder) = start {
                 dialog = dialog.set_directory(folder);
             }
             let Some(path) = dialog.save_file() else {
                 return; // cancelled
             };
-            if let Err(e) = write_png(&path, crop.width, crop.height, &crop.rgba) {
+            let written = super::encode(&crop, format)
+                .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()));
+            if let Err(e) = written {
                 // ponytail: log only; show it in a status pill once one exists.
                 eprintln!("save failed: {e}");
             }
         })
         .map(drop)
         .map_err(|e| e.to_string())
+}
+
+/// What Save writes: the crop at the export size (or original), and its format.
+fn export(crop: Crop, snip: &SnipConfig) -> (Crop, Format) {
+    let max = if snip.save_original { 0 } else { snip.max_edge };
+    (super::fit_long_edge(crop, max), snip.format)
 }
 
 /// The dialog's starting folder: the configured one, if it is set and exists.
@@ -103,6 +119,23 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         assert_eq!(super::start_folder(&file.to_string_lossy()), None);
         let _ = std::fs::remove_file(&file);
+    }
+
+    #[test]
+    fn save_scales_unless_the_original_size_is_asked_for() {
+        use crate::config::{Format, SnipConfig};
+        let crop = || super::Crop {
+            width: 3000,
+            height: 1000,
+            rgba: vec![9; 3000 * 1000 * 4],
+        };
+        let mut snip = SnipConfig::default();
+        let (c, f) = super::export(crop(), &snip);
+        assert_eq!((c.width, c.height, f), (1568, 523, Format::Png));
+        snip.save_original = true;
+        snip.format = Format::Jpeg;
+        let (c, f) = super::export(crop(), &snip);
+        assert_eq!((c.width, c.height, f), (3000, 1000, Format::Jpeg));
     }
 
     #[test]

@@ -35,7 +35,8 @@ tray-icon = "0.26"
 # (ort `load-dynamic`), only inside the short-lived `ocr-worker` process.
 oar-ocr = { version = "0.10.1", default-features = false, features = ["simd"] }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic"] }
-image = { version = "0.25", default-features = false }
+# jpeg: Save as JPEG (already built for arboard / iced: no new crate).
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 # Same version iced_tiny_skia already builds: the editor flattens annotations with it.
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 hmac-sha256 = "1.1"
@@ -59,8 +60,10 @@ xcb = { version = "1.7", features = ["randr", "xtest", "xfixes", "shape"] }
 # Song search's audio (src/music): WASAPI loopback / microphone, only while listening.
 cpal = { version = "0.18", default-features = false }
 widestring = "1"
+# Copy adds the OCR text to the copied image (the version arboard already builds).
+clipboard-win = "5.4"
 xcap = "0.9"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Security", "Win32_System_Console", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_Com", "Win32_System_Console", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 strip = true

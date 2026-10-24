@@ -52,7 +52,7 @@ pub fn read(crop: &Crop, mut progress: impl FnMut(Progress)) -> Result<String, S
 /// OCR lines (already in reading order) as text: boxes on one row joined by
 /// spaces, rows by newlines. A box continues the row when it lies right of the
 /// previous box and its vertical centre is inside that box.
-fn join_lines(blocks: &[TextBlock]) -> String {
+pub(crate) fn join_lines(blocks: &[TextBlock]) -> String {
     let mut out = String::new();
     let mut prev: Option<[f32; 4]> = None;
     for block in blocks {

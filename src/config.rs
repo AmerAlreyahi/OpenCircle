@@ -46,6 +46,13 @@
 //! [song]                            # song search (the service key: OS keyring only)
 //! source = "system"                 # system (what this PC plays) | microphone
 //! history = false                   # keep recent songs on this PC
+//! [snip]
+//! after = "copy"                    # after a capture: copy | editor | both
+//! max_edge = 1568                   # Copy / Save scale the long edge down to this; 0 = original
+//! format = "png"                    # Save writes png | jpeg (quality 85)
+//! save_original = false             # Save ignores max_edge
+//! cursor = false                    # draw the mouse pointer into the capture
+//! history = false                   # keep the last 20 captures (user data dir only)
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
@@ -81,6 +88,10 @@ const AI_OFF: &str = ", but AI is off until you choose a provider in Settings > 
 /// Live translate repeats this often (ms); the allowed range is `LIVE_INTERVAL_MS`.
 pub const DEFAULT_LIVE_INTERVAL_MS: u32 = 1000;
 pub const LIVE_INTERVAL_MS: std::ops::RangeInclusive<u32> = 500..=5000;
+/// Long edge (px) Copy / Save scale a capture down to: what AI chats take
+/// without shrinking it again themselves. `0` = original size.
+pub const DEFAULT_MAX_EDGE: u32 = 1568;
+pub const MAX_EDGE: std::ops::RangeInclusive<u32> = 256..=8192;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -231,6 +242,56 @@ pub struct TranslateConfig {
     /// Live mode's one-time note (games must be borderless) was shown.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub live_note_shown: bool,
+}
+
+/// What a finished snip does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnipAfter {
+    /// To the clipboard at once (a toast offers Edit for a moment).
+    #[default]
+    Copy,
+    /// The editor opens on it.
+    Editor,
+    /// Both.
+    Both,
+}
+
+/// The file Save writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Format {
+    #[default]
+    Png,
+    /// Quality 85.
+    Jpeg,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SnipConfig {
+    pub after: SnipAfter,
+    /// Copy / Save scale the long edge down to this (`MAX_EDGE`); 0 = original size.
+    pub max_edge: u32,
+    pub format: Format,
+    /// Save keeps the original size (Copy still scales).
+    pub save_original: bool,
+    /// Draw the mouse pointer into the capture.
+    pub cursor: bool,
+    /// Keep the last captures in the user's data dir (off = nothing on disk).
+    pub history: bool,
+}
+
+impl Default for SnipConfig {
+    fn default() -> Self {
+        SnipConfig {
+            after: SnipAfter::Copy,
+            max_edge: DEFAULT_MAX_EDGE,
+            format: Format::Png,
+            save_original: false,
+            cursor: false,
+            history: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
@@ -583,6 +644,7 @@ pub struct Config {
     pub look: LookConfig,
     pub ai: AiConfig,
     pub translate: TranslateConfig,
+    pub snip: SnipConfig,
     pub quick_actions: Vec<QuickAction>,
     pub song: SongConfig,
 }
@@ -643,6 +705,7 @@ impl Default for Config {
             look: LookConfig::default(),
             ai: AiConfig::default(),
             translate: TranslateConfig::default(),
+            snip: SnipConfig::default(),
             // DESIGN.md "Quick actions".
             quick_actions: vec![
                 qa("translate", "Ctrl+Shift+T", Target::FullScreen, false),
@@ -842,6 +905,25 @@ impl Config {
         if let Some(t) = section(&root, "song", &mut w) {
             c.song.source = get(t, "song.", "source", d.song.source, &mut w);
             c.song.history = get(t, "song.", "history", d.song.history, &mut w);
+        }
+        if let Some(t) = section(&root, "snip", &mut w) {
+            let p = "snip.";
+            c.snip.after = get(t, p, "after", d.snip.after, &mut w);
+            c.snip.max_edge = get_checked(t, p, "max_edge", d.snip.max_edge, &mut w, |n: &u32| {
+                (*n == 0 || MAX_EDGE.contains(n))
+                    .then_some(())
+                    .ok_or_else(|| {
+                        format!(
+                            "expected 0 (original) or {} to {} px",
+                            MAX_EDGE.start(),
+                            MAX_EDGE.end()
+                        )
+                    })
+            });
+            c.snip.format = get(t, p, "format", d.snip.format, &mut w);
+            c.snip.save_original = get(t, p, "save_original", false, &mut w);
+            c.snip.cursor = get(t, p, "cursor", false, &mut w);
+            c.snip.history = get(t, p, "history", false, &mut w);
         }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
@@ -1279,6 +1361,9 @@ mod tests {
         c.translate.source = "ja".into();
         c.song.source = SongSource::Microphone;
         c.song.history = true;
+        c.snip.after = SnipAfter::Editor;
+        c.snip.history = true;
+        c.snip.max_edge = 0;
         c.quick_actions.pop();
         c.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -1357,6 +1442,45 @@ mod tests {
         let abs = std::env::temp_dir().to_string_lossy().replace('\\', "/");
         let (c, w) = Config::parse(&format!("[general]\nsave_folder = \"{abs}\"\n"));
         assert_eq!((c.general.save_folder.as_str(), w.len()), (abs.as_str(), 0));
+    }
+
+    #[test]
+    fn snip_section_defaults_and_checks() {
+        let d = Config::default().snip;
+        assert_eq!(d.after, SnipAfter::Copy, "copy for the AI chat by default");
+        assert_eq!((d.max_edge, d.format), (1568, Format::Png));
+        assert!(!d.history, "nothing kept on disk unless turned on");
+        assert!(!d.cursor && !d.save_original);
+        let (c, w) = Config::parse(
+            "[snip]\nafter = \"both\"\nmax_edge = 0\nformat = \"jpeg\"\n\
+             save_original = true\ncursor = true\nhistory = true\n",
+        );
+        assert!(w.is_empty(), "{w:?}");
+        let s = &c.snip;
+        assert_eq!(
+            (s.after, s.max_edge, s.format),
+            (SnipAfter::Both, 0, Format::Jpeg)
+        );
+        assert!(s.save_original && s.cursor && s.history);
+        // and back through the writer
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert!(
+            text.contains("[snip]") && text.contains("after = \"both\""),
+            "{text}"
+        );
+        assert_eq!(Config::parse(&text).0, c);
+        for bad in [
+            "max_edge = 100",
+            "max_edge = 9000",
+            "after = \"paste\"",
+            "format = \"gif\"",
+            "history = \"yes\"",
+        ] {
+            let (c, w) = Config::parse(&format!("[snip]\n{bad}\n"));
+            assert_eq!(c.snip, d, "{bad}");
+            assert_eq!(w.len(), 1, "{bad}: {w:?}");
+            assert!(w[0].starts_with("snip."), "{w:?}");
+        }
     }
 
     #[test]
