@@ -29,9 +29,23 @@ pub struct LineStyle {
     pub shadow: Option<([u8; 3], bool)>,
     /// Ink extent x0, y0, x1, y1 (exclusive), fill/accent pixels only.
     pub ink: [i32; 4],
+    /// Height of the ink's dense band: x-height (mixed case) or cap height.
+    /// An icon in the box (a radio button) makes `ink` tall, not this.
+    pub band: f32,
     /// Mean stroke width in px: a weight hint.
     pub stroke: f32,
+    /// How unsure the erase is (0-255): the mean mismatch of the two ends of
+    /// the best direction over the hole, or three times the background's
+    /// grain (fine texture comes back smoothed: a smear), whichever is
+    /// larger. Flat or gradient panels ~6, a photo's fine detail high; 255
+    /// when what it found is no text (none, most of the box, or the
+    /// background's colour).
+    pub residual: f32,
 }
+
+/// The pixels an erase changed, with their old colour (byte index, RGB):
+/// applied in reverse, it puts the line back.
+pub type Undo = Vec<(usize, [u8; 3])>;
 
 const PAD: i32 = 3;
 const RING: i32 = 2;
@@ -40,12 +54,36 @@ const HALO: i32 = 4;
 const REACH: i32 = 40;
 
 /// Erases the glyphs inside `b` (x, y, w, h) of an RGBA image and returns
-/// their style. Alpha is left as is.
-pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> LineStyle {
+/// their style and what it changed. Alpha is left as is.
+pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, Undo) {
     let x0 = (b[0] as i32 - PAD).clamp(0, iw as i32);
     let y0 = (b[1] as i32 - PAD).clamp(0, ih as i32);
     let x1 = ((b[0] + b[2]).ceil() as i32 + PAD).clamp(x0, iw as i32);
     let y1 = ((b[1] + b[3]).ceil() as i32 + PAD).clamp(y0, ih as i32);
+    // The top and bottom ring rows must be background: in tight text a
+    // neighbour line's descenders or ascenders reach into the box, and their
+    // colour (the text's own) would pass for art crossing the box; so would
+    // a picture's edge or a text field's border along the box. An edge
+    // whose two rows are not quiet (nearly all one shade) moves to the first
+    // quiet pair within 40 % of the box inward; over busy art no row is
+    // quiet and nothing moves.
+    let quiet = |y: i32| -> bool {
+        let row = &rgba[(y as usize * iw + x0 as usize) * 4..(y as usize * iw + x1 as usize) * 4];
+        let mut l: Vec<f32> = row.chunks(4).map(|p| luma([p[0], p[1], p[2]])).collect();
+        l.sort_by(f32::total_cmp);
+        let med = l.get(l.len() / 2).copied().unwrap_or(0.0);
+        l.iter().filter(|v| (*v - med).abs() > 24.0).count() * 50 <= l.len()
+    };
+    let reach = (b[3] * 0.4) as i32;
+    let (y0, y1) = if y1 - y0 > 2 * reach + 4 {
+        let top = (y0..=y0 + reach).find(|&y| quiet(y) && quiet(y + 1));
+        let bottom = (y1 - reach..=y1)
+            .rev()
+            .find(|&y| quiet(y - 1) && quiet(y - 2));
+        (top.unwrap_or(y0), bottom.unwrap_or(y1))
+    } else {
+        (y0, y1)
+    };
     let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
     let at = |i: usize| ((i / w + y0 as usize) * iw + i % w + x0 as usize) * 4;
     let win: Vec<[u8; 3]> = (0..w * h)
@@ -58,13 +96,16 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> LineSty
     };
     let ring: Vec<usize> = (0..w * h).filter(|&i| on_ring(i)).collect();
     if w <= 2 * RING as usize || h <= 2 * RING as usize || ring.len() < 8 {
-        return LineStyle {
+        let style = LineStyle {
             color: [255; 3],
             accent: None,
             shadow: None,
             ink: [x0, y0, x1, y1],
+            band: 0.0,
             stroke: 0.0,
+            residual: 0.0,
         };
+        return (style, Vec::new());
     }
 
     // 1. background plane per channel, fitted on the ring
@@ -146,19 +187,78 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> LineSty
     let cl = clusters(&text_cand, w, &px, &|_| false);
     let mut glyph = vec![false; w * h];
     let mut ink_only = vec![false; w * h];
+    // On a plain background every clear candidate is text, also the ones
+    // between cluster colours (ClearType draws thin stems in fringe colours);
+    // on busy art only colours near a glyph cluster are.
+    let plain = sigma * 3.0 < 28.0;
+    // cluster of each glyph pixel (usize::MAX: none)
+    let mut member = vec![usize::MAX; w * h];
     for i in (0..w * h).filter(|&i| text_cand[i]) {
-        if let Some(c) = cl.iter().find(|c| near(px(i), c.color)) {
-            glyph[i] = true;
-            ink_only[i] = c.role != Role::Shadow;
+        match cl.iter().position(|c| near(px(i), c.color)) {
+            Some(k) => {
+                glyph[i] = true;
+                ink_only[i] = cl[k].role != Role::Shadow;
+                member[i] = k;
+            }
+            None if plain && strong[i] => (glyph[i], ink_only[i]) = (true, true),
+            None => {}
         }
     }
-    let bg_luma = luma(bg(w * h / 2 + w / 2).map(|v| v.clamp(0.0, 255.0) as u8));
+    // the background's brightness: the median of the ring
+    let mut ring_l: Vec<f32> = ring.iter().map(|&i| luma(px(i))).collect();
+    ring_l.sort_by(f32::total_cmp);
+    let bg_luma = ring_l[ring_l.len() / 2];
+    // An outline or shadow hugs the fill: most fill pixels have it within
+    // 2 px. Black words between blue links do not, and are text.
+    let hugs_fill = |k: usize| {
+        let near = dilate(&member.iter().map(|&m| m == k).collect::<Vec<_>>(), w, 2);
+        let (n, by) = (0..w * h)
+            .filter(|&i| member[i] == 0)
+            .fold((0, 0), |(n, by), i| (n + 1, by + near[i] as usize));
+        by * 5 >= n * 3
+    };
+    // Dark text on a light page: thin strokes are mostly anti-aliasing
+    // (ClearType fringes are orange, blue or near white), so the biggest
+    // cluster can be a fringe mix. It is the text's colour (a link's blue
+    // among black brackets) only if about as dark as the darkest fifth of
+    // the glyphs; otherwise that darkest fifth is. (Light text on a light
+    // background, white on a bright sky, keeps its cluster.)
+    let color = match (cl.first(), darkest(&glyph, &px)) {
+        (Some(c), Some(core)) if bg_luma > 170.0 && luma(c.color) < bg_luma - 8.0 => {
+            let contrast = |c: [u8; 3]| bg_luma - luma(c);
+            if contrast(c.color) >= 0.7 * contrast(core) {
+                c.color
+            } else {
+                core
+            }
+        }
+        (Some(c), _) => c.color,
+        (None, _) => fill_c,
+    };
+    let contrast = |c: [u8; 3]| (luma(c) - bg_luma).abs();
+    let fill_contrast = contrast(color);
     let (mut accent, mut shadow) = (None, None);
-    for c in cl.iter().skip(1) {
+    for (k, c) in cl.iter().enumerate().skip(1) {
         match c.role {
-            Role::Accent => accent = accent.or(Some(c.color)),
-            Role::Shadow if luma(c.color) < bg_luma - 15.0 => {
+            // (a faint fringe colour is no accent)
+            Role::Accent if contrast(c.color) * 2.0 >= fill_contrast => {
+                accent = accent.or(Some(c.color))
+            }
+            // On a light page only light text has a dark outline (white on a
+            // bright sky); dark text's darker "outline" is its own core
+            // inside ClearType fringes.
+            Role::Shadow
+                if luma(c.color) < bg_luma - 15.0
+                    && (bg_luma <= 170.0 || luma(color) >= bg_luma - 40.0)
+                    && hugs_fill(k) =>
+            {
                 shadow = shadow.or(Some((c.color, c.offset > 1.0)))
+            }
+            Role::Shadow => {
+                // text of its own: its pixels are ink
+                for i in (0..w * h).filter(|&i| member[i] == k) {
+                    ink_only[i] = true;
+                }
             }
             _ => {}
         }
@@ -211,16 +311,36 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> LineSty
     let grain = steps
         .get(steps.len() / 2)
         .map_or(2.0, |&s| (s as f32).max(2.0));
-    for (i, v) in fill(&win, &mask, w, grain, &bg) {
-        rgba[at(i)..at(i) + 3].copy_from_slice(&v);
+    let (filled, unsure) = fill(&win, &mask, w, grain, &bg);
+    // Not text at all: the "glyphs" cover most of the box (a picture or a
+    // dark band crossing it), or their colour is the background's.
+    let inner = (0..w * h).filter(|&i| !on_ring(i)).count().max(1);
+    let ring_mid = [0, 1, 2].map(|k| {
+        let mut v: Vec<u8> = ring.iter().map(|&i| px(i)[k]).collect();
+        v.sort_unstable();
+        v[v.len() / 2]
+    });
+    let like_bg = (0..3).all(|k| color[k].abs_diff(ring_mid[k]) < 30);
+    let lost = filled.is_empty() || filled.len() * 4 > inner * 3 || like_bg;
+    // fine texture (grain) is smoothed away inside the hole: a smear
+    let residual = if lost { 255.0 } else { unsure.max(3.0 * grain) };
+    let mut undo = Vec::with_capacity(filled.len());
+    for (i, v) in filled {
+        let px = &mut rgba[at(i)..at(i) + 3];
+        undo.push((at(i), [px[0], px[1], px[2]]));
+        px.copy_from_slice(&v);
     }
-    LineStyle {
-        color: cl.first().map_or(fill_c, |c| c.color),
+    let (ink, band) = extent(&ink_only, w, x0, y0);
+    let style = LineStyle {
+        color,
         accent,
         shadow,
-        ink: extent(&ink_only, w, x0, y0),
+        ink,
+        band,
         stroke: stroke_width(&ink_only, w),
-    }
+        residual,
+    };
+    (style, undo)
 }
 
 /// 8 directions, 22.5 degrees apart (a line through the pixel is two rays).
@@ -239,7 +359,8 @@ const DIRS: [(f32, f32); 8] = [
 /// background pixel on both sides, interpolate linearly between them and
 /// weight by how well the two ends agree (`noise` = the background's own
 /// noise level) and how short the span is. Returns (index, colour) per hole
-/// pixel; known pixels are only read, so the order does not matter.
+/// pixel (known pixels are only read, so the order does not matter) and the
+/// mean mismatch of the best direction (how unsure the fill is).
 /// The mask must be clear on the window border (the ring), so a ray always
 /// meets background before it leaves the window.
 /// ponytail: interpolation smooths fine grain inside the hole (texture is not
@@ -250,7 +371,7 @@ fn fill(
     w: usize,
     noise: f32,
     fallback: &dyn Fn(usize) -> [f32; 3],
-) -> Vec<(usize, [u8; 3])> {
+) -> (Vec<(usize, [u8; 3])>, f32) {
     // index offset of step t along each ray (8 directions, both ways)
     let rays: Vec<[isize; REACH as usize + 2]> = DIRS
         .iter()
@@ -277,6 +398,7 @@ fn fill(
         ))
     };
     let mut out = Vec::new();
+    let mut unsure = 0.0;
     for i in (0..mask.len()).filter(|&i| mask[i]) {
         // (mismatch of the two ends, span, interpolated colour) per direction
         let mut cands = [(0f32, 0f32, [0f32; 3]); 8];
@@ -293,6 +415,7 @@ fn fill(
         // only directions about as consistent as the best one: along an edge
         // that is one direction, on texture it is most of them
         let best = cands[..n].iter().map(|c| c.0).fold(f32::MAX, f32::min);
+        unsure += if n > 0 { best } else { 255.0 };
         let (mut acc, mut wsum) = ([0f32; 3], 0f32);
         for &(miss, span, v) in cands[..n].iter().filter(|c| c.0 <= best + 3.0 * noise) {
             let wt = 1.0 / ((miss + noise).powi(2) * span * span);
@@ -308,7 +431,8 @@ fn fill(
         };
         out.push((i, v.map(|c| c.round().clamp(0.0, 255.0) as u8)));
     }
-    out
+    let n = out.len().max(1) as f32;
+    (out, unsure / n)
 }
 
 /// Dilation by one pixel up, down, left and right.
@@ -351,16 +475,47 @@ fn dilate(m: &[bool], w: usize, r: usize) -> Vec<bool> {
     pass(&rows, h, &|x, y| y * w + x, w)
 }
 
-fn extent(m: &[bool], w: usize, x0: i32, y0: i32) -> [i32; 4] {
+/// Ink box: the tallest run of inked rows, bridging gaps of up to two rows
+/// (an i's dot), so a neighbour line's descenders or ascenders poking into
+/// the window, or a frame line along it, are cut off by the blank rows in
+/// between; and the columns inked in those rows.
+/// Also the height of the dense band (rows with at least half the busiest
+/// row's ink): the x-height in mixed-case text, the cap height in capitals.
+fn extent(m: &[bool], w: usize, x0: i32, y0: i32) -> ([i32; 4], f32) {
+    // (a row inked across 80 % of the window is a rule or a field border)
+    let rows: Vec<usize> = (m.chunks(w))
+        .map(|r| r.iter().filter(|&&on| on).count())
+        .map(|n| if n * 5 > w * 4 { 0 } else { n })
+        .collect();
+    let (mut best, mut run) = ((0, 0, 0), None::<(usize, usize, usize)>);
+    for (y, &n) in rows.iter().enumerate() {
+        if n == 0 {
+            continue;
+        }
+        run = match run {
+            Some((top, last, ink)) if y - last <= 3 => Some((top, y, ink + n)),
+            _ => Some((y, y, n)),
+        };
+        let (top, last, ink) = run.expect("just set");
+        if (last - top, ink) > (best.1 - best.0, best.2) {
+            best = (top, last, ink);
+        }
+    }
+    let (top, bottom) = (best.0, best.1);
     let mut e = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
-    for i in (0..m.len()).filter(|&i| m[i]) {
+    for i in (top * w..(bottom + 1) * w).filter(|&i| m[i]) {
         let (x, y) = ((i % w) as i32 + x0, (i / w) as i32 + y0);
         e = [e[0].min(x), e[1].min(y), e[2].max(x + 1), e[3].max(y + 1)];
     }
+    let peak = rows[top..=bottom].iter().max().copied().unwrap_or(0);
+    let band = rows[top..=bottom]
+        .iter()
+        .filter(|&&n| n * 2 >= peak)
+        .count() as f32;
     if e[0] == i32::MAX {
-        [x0, y0, x0 + w as i32, y0 + (m.len() / w) as i32]
+        ([x0, y0, x0 + w as i32, y0 + (m.len() / w) as i32], 0.0)
     } else {
-        e
+        (e, band)
     }
 }
 
@@ -442,6 +597,16 @@ fn solve3(m: [[f64; 3]; 3], b: [f64; 3]) -> [f64; 3] {
             mk[r][k] = b[r];
         }
         det(mk) / d
+    })
+}
+
+/// Mean colour of the darkest fifth of the masked pixels.
+fn darkest(m: &[bool], px: &dyn Fn(usize) -> [u8; 3]) -> Option<[u8; 3]> {
+    let mut ink: Vec<[u8; 3]> = (0..m.len()).filter(|&i| m[i]).map(px).collect();
+    ink.sort_by(|a, b| luma(*a).total_cmp(&luma(*b)));
+    let core = &ink[..ink.len().div_ceil(5)];
+    (!core.is_empty()).then(|| {
+        [0, 1, 2].map(|k| (core.iter().map(|c| c[k] as u32).sum::<u32>() / core.len() as u32) as u8)
     })
 }
 

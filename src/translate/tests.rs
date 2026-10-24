@@ -344,7 +344,7 @@ fn erase_error_on_synthetic_panels() {
 fn erase_keeps_a_frame_line_and_reads_the_style() {
     let cs = cases();
     let read =
-        |c: &Case, l: usize| erase::erase_line(&mut c.img.clone(), 640, 160, c.lines[l].bounds);
+        |c: &Case, l: usize| erase::erase_line(&mut c.img.clone(), 640, 160, c.lines[l].bounds).0;
     let out = erased(&cs[0]);
     // the gold divider at x = 330 runs through the line and must survive
     for y in 50..110 {
@@ -812,4 +812,436 @@ fn languages_end_to_end() {
     println!("fr->en {:.0?}: {lines:?} -> {out:?}", t.elapsed());
     assert_eq!(out.len(), 3);
     assert!(out.iter().all(|t| !t.is_empty() && t.is_ascii()), "{out:?}");
+}
+
+/// Real screenshots (not in CI, needs the models in `ocr::models_dir()`):
+/// OCR and offline EN -> AR in process; OCR lines and translations are
+/// cached as JSON in the output folder, so a re-render takes a second.
+/// `OC_REAL=a.png,b.png OC_REAL_OUT=dir cargo test --release real_frames -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn real_frames() {
+    use super::pipeline::{Cache, Deps, translate_frame};
+    use crate::ai::AiError;
+    use crate::ocr::{self, OcrError, TextBlock};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    let out = std::path::PathBuf::from(std::env::var("OC_REAL_OUT").unwrap());
+    std::fs::create_dir_all(&out).unwrap();
+    let mt_path = out.join("mt.json");
+    let mt_cache: RefCell<HashMap<String, String>> = RefCell::new(
+        std::fs::read(&mt_path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default(),
+    );
+    let pair = crate::mt::pair("en", "ar").unwrap();
+    let mt = RefCell::new(None);
+    struct Real<'a> {
+        found: Vec<TextBlock>,
+        cache: &'a RefCell<HashMap<String, String>>,
+        mt: &'a RefCell<Option<crate::mt::Translator>>,
+        pair: &'static crate::mt::Pair,
+    }
+    impl Deps for Real<'_> {
+        fn recognize(&self, _: &[u8], _: u32, _: u32) -> Result<Vec<TextBlock>, OcrError> {
+            Ok(self.found.clone())
+        }
+        fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
+            super::pipeline::by_sentence(texts, |todo| {
+                let missing: Vec<String> = (todo.iter())
+                    .filter(|t| !self.cache.borrow().contains_key(*t))
+                    .cloned()
+                    .collect();
+                if !missing.is_empty() {
+                    let mut mt = self.mt.borrow_mut();
+                    let tr = mt.get_or_insert_with(|| {
+                        crate::mt::Translator::load(self.pair, &ocr::models_dir()).unwrap()
+                    });
+                    for (k, v) in missing.iter().zip(tr.translate(&missing).unwrap()) {
+                        self.cache.borrow_mut().insert(k.clone(), v);
+                    }
+                }
+                Ok(todo
+                    .iter()
+                    .map(|t| self.cache.borrow()[t].clone())
+                    .collect())
+            })
+        }
+    }
+    let mut engine = None;
+    for p in std::env::var("OC_REAL").unwrap().split(',') {
+        let f = crate::capture::from_png(p.as_ref()).unwrap();
+        let name = std::path::Path::new(p)
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let ocr_path = out.join(format!("{name}.ocr.json"));
+        let found: Vec<TextBlock> = match std::fs::read(&ocr_path) {
+            Ok(b) => serde_json::from_slice(&b).unwrap(),
+            Err(_) => {
+                let e =
+                    engine.get_or_insert_with(|| ocr::Engine::load(&ocr::models_dir()).unwrap());
+                let got = e
+                    .recognize(&f.rgba, f.width, f.height, ocr::Read::One(0))
+                    .unwrap();
+                std::fs::write(&ocr_path, serde_json::to_vec_pretty(&got).unwrap()).unwrap();
+                got
+            }
+        };
+        let deps = Real {
+            found,
+            cache: &mt_cache,
+            mt: &mt,
+            pair,
+        };
+        let r =
+            translate_frame(&f.rgba, f.width, f.height, "ar", &Cache::new(4096), &deps).unwrap();
+        eprintln!("{name}: {:?}", r.timings);
+        for b in &r.blocks {
+            eprintln!(
+                "  {:?} {:?} -> {:?}",
+                b.bounds.map(|v| v as i32),
+                b.original,
+                b.translation
+            );
+        }
+        save_png(
+            &out.join(format!("{name}_after.png")),
+            (f.width as usize, f.height as usize),
+            &r.rgba,
+        );
+    }
+    std::fs::write(
+        &mt_path,
+        serde_json::to_vec_pretty(&*mt_cache.borrow()).unwrap(),
+    )
+    .unwrap();
+}
+
+/// Crops of real screenshots (Edge on Wikipedia, Windows at 168 %, ClearType)
+/// with the lines the real OCR found in them, from the full-screen demo that
+/// went wrong: `fixtures/` (cut by a script from the demo's PNGs).
+mod real {
+    use super::*;
+    use crate::translate::pipeline::{by_sentence, cut_off, to_line};
+
+    fn image(png: &[u8]) -> (Rgba, (usize, usize)) {
+        let mut d = png::Decoder::new(std::io::Cursor::new(png));
+        d.set_transformations(png::Transformations::normalize_to_color8());
+        let mut r = d.read_info().unwrap();
+        let mut buf = vec![0; r.output_buffer_size().unwrap()];
+        let info = r.next_frame(&mut buf).unwrap();
+        let rgba = buf[..info.buffer_size()]
+            .chunks(3)
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect();
+        (rgba, (info.width as usize, info.height as usize))
+    }
+
+    /// The OCR lines of fixture `name`: x, y, w, h (OCR box) and text.
+    fn ocr(name: &str) -> Vec<crate::ocr::TextBlock> {
+        let all: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/lines.json")).unwrap();
+        all[name]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| crate::ocr::TextBlock {
+                bounds: [0, 1, 2, 3].map(|k| l[k].as_f64().unwrap() as f32),
+                text: l[4].as_str().unwrap().into(),
+                confidence: 0.9,
+            })
+            .collect()
+    }
+
+    fn lines(name: &str, (w, h): (usize, usize)) -> Vec<Line> {
+        (ocr(name).into_iter())
+            .filter(|b| !cut_off(b, h as u32))
+            .map(|b| to_line(b, w as u32, h as u32))
+            .collect()
+    }
+
+    /// Arabic about as long as `en` (what MT gives back).
+    fn arabic(en: &str) -> String {
+        let words = [
+            "لعبة",
+            "فيديو",
+            "على",
+            "الإنترنت",
+            "وحدة",
+            "التحكم",
+            "الحاسوب",
+        ];
+        let mut s = String::new();
+        for w in words.iter().cycle() {
+            if s.chars().count() + 3 >= en.chars().count() {
+                break;
+            }
+            s = format!("{s} {w}").trim().to_string();
+        }
+        s
+    }
+
+    fn changed(a: &[u8], b: &[u8], w: usize) -> Vec<(usize, usize)> {
+        (a.chunks(4).zip(b.chunks(4)).enumerate())
+            .filter(|(_, (p, q))| p != q)
+            .map(|(i, _)| (i % w, i / w))
+            .collect()
+    }
+
+    fn inside((x, y): (usize, usize), b: [f32; 4], pad: f32) -> bool {
+        let (x, y) = (x as f32, y as f32);
+        x >= b[0] - pad && x < b[0] + b[2] + pad && y >= b[1] - pad && y < b[1] + b[3] + pad
+    }
+
+    /// Each block alone: its redraw never covers another block's text, nor
+    /// anything but plain background outside its own box (the infobox's
+    /// lists, its frame, a picture). Before: Arabic paragraphs were aligned
+    /// to a far "column" edge across the infobox, and a few words came out
+    /// giant over their neighbours.
+    #[test]
+    fn each_redraw_stays_off_its_neighbours() {
+        let (img, (w, h)) = image(include_bytes!("fixtures/page.png"));
+        let boxes: Vec<[f32; 4]> = ocr("page").iter().map(|b| b.bounds).collect();
+        let blocks = group_blocks(&lines("page", (w, h)));
+        let blank = |x: usize, y: usize| {
+            let p = |x: usize, y: usize| &img[(y * w + x) * 4..(y * w + x) * 4 + 3];
+            (x.saturating_sub(2)..(x + 3).min(w)).all(|qx| {
+                (y.saturating_sub(2)..(y + 3).min(h))
+                    .all(|qy| (0..3).all(|k| p(qx, qy)[k].abs_diff(p(x, y)[k]) <= 8))
+            })
+        };
+        let mut drawn = 0;
+        for (i, b) in blocks.iter().enumerate() {
+            let mut tr = vec![String::new(); blocks.len()];
+            tr[i] = arabic(&b.text);
+            let mut out = img.clone();
+            render(&mut out, w as u32, h as u32, &blocks, &tr, true);
+            let px = changed(&img, &out, w);
+            drawn += !px.is_empty() as usize;
+            let bad: Vec<_> = (px.iter())
+                .filter(|&&p| !inside(p, b.bounds, 3.0))
+                .filter(|&&p| {
+                    let other = boxes.iter().any(|&o| inside(p, o, 0.0));
+                    other || !blank(p.0, p.1)
+                })
+                .collect();
+            assert!(
+                bad.len() * 200 <= px.len(),
+                "{:?}: {} of {} changed pixels off its box, e.g. {:?}",
+                b.text,
+                bad.len(),
+                px.len(),
+                bad.first()
+            );
+        }
+        assert!(
+            drawn * 10 >= blocks.len() * 8,
+            "most blocks are translated: {drawn} of {}",
+            blocks.len()
+        );
+    }
+
+    /// The page's columns read interleaved (row by row): a wrapped nav item
+    /// and a wrapped paragraph still group; nothing groups across columns or
+    /// joins a list of items. Before: only the last block could continue,
+    /// so the paragraph came apart line by line.
+    #[test]
+    fn interleaved_columns_still_group() {
+        let blocks = group_blocks(&lines("frame", (1716, 1271)));
+        let find = |start: &str| blocks.iter().find(|b| b.text.starts_with(start)).unwrap();
+        assert_eq!(find("Collecting and").text, "Collecting and preservation");
+        let para = find("A video game,");
+        assert!(
+            para.lines.len() >= 8,
+            "{} lines: {:?}",
+            para.lines.len(),
+            para.text
+        );
+        assert!(para.text.ends_with("livestreaming."), "{:?}", para.text);
+        for b in &blocks {
+            let [x, _, w, _] = b.lines[0].bounds;
+            for l in &b.lines {
+                let [lx, _, lw, _] = l.bounds;
+                assert!(lx < x + w && x < lx + lw, "across columns: {:?}", b.text);
+            }
+            if b.lines.len() > 1 {
+                assert!(!b.text.contains('·'), "a list joined: {:?}", b.text);
+            }
+        }
+    }
+
+    /// Blue links between black words: the black is text of its own, not an
+    /// outline (before: redrawn bold blue with a black outline), and the
+    /// colour is the link's blue; a radio button's label keeps its size.
+    #[test]
+    fn link_lines_are_not_outlined() {
+        let (img, (w, h)) = image(include_bytes!("fixtures/page.png"));
+        let ls = lines("page", (w, h));
+        let style = |start: &str| {
+            let l = ls.iter().find(|l| l.text.starts_with(start)).unwrap();
+            erase::erase_line(&mut img.clone(), w, h, l.bounds).0
+        };
+        for start in [
+            "(which includes LAN",
+            "Arcade games (highest",
+            "Action (Platformer",
+        ] {
+            let s = style(start);
+            assert!(s.shadow.is_none(), "{start}: {s:?}");
+            assert!(s.color[2] > s.color[0] + 100, "{start}: link blue {s:?}");
+        }
+    }
+
+    /// Text right under a photo: the erase stays off the photo and the
+    /// caption is translated in its colour (before: the photo's bottom rows
+    /// were taken for the caption's background and smeared into it).
+    #[test]
+    fn a_caption_under_a_photo_leaves_the_photo_alone() {
+        let (img, (w, h)) = image(include_bytes!("fixtures/caption.png"));
+        let blocks = group_blocks(&lines("caption", (w, h)));
+        let tr: Vec<String> = blocks.iter().map(|b| arabic(&b.text)).collect();
+        let mut out = img.clone();
+        let drawn = render(&mut out, w as u32, h as u32, &blocks, &tr, true);
+        // the photo: rows 0..64 of the crop
+        let px = changed(&img, &out, w);
+        let on_photo = px
+            .iter()
+            .filter(|p| p.1 < 64 && p.0 > 15 && p.0 < 420)
+            .count();
+        assert_eq!(on_photo, 0, "photo pixels changed");
+        assert_eq!(drawn.drawn, blocks.len(), "{drawn:?}");
+        // drawn dark on the light caption panel, not white
+        let dark = px.iter().filter(|&&(x, y)| {
+            let i = (y * w + x) * 4;
+            out[i..i + 3].iter().map(|&v| v as u32).sum::<u32>() < 400
+        });
+        assert!(dark.count() > 200);
+    }
+
+    /// Specks: after the erase no glyph pixel is left in the lines' boxes
+    /// (white page: anything under luma 200 is a remnant). Before: the tops
+    /// of ascenders drawn in ClearType's fringe colours (h, l, f) stayed.
+    #[test]
+    fn erased_body_text_leaves_no_specks() {
+        let (img, (w, h)) = image(include_bytes!("fixtures/specks.png"));
+        let ls = lines("specks", (w, h));
+        assert_eq!(ls.len(), 2);
+        let mut out = img.clone();
+        for l in &ls {
+            erase::erase_line(&mut out, w, h, l.bounds);
+        }
+        let count = |img: &[u8]| {
+            (0..w * h)
+                .filter(|&i| ls.iter().any(|l| inside((i % w, i / w), l.bounds, 0.0)))
+                .filter(|&i| {
+                    let p = &img[i * 4..i * 4 + 3];
+                    (0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32) < 200.0
+                })
+                .count()
+        };
+        let (before, after) = (count(&img), count(&out));
+        eprintln!("glyph pixels: {before} before the erase, {after} after");
+        assert!(before > 1000 && after == 0, "{after} speck pixels left");
+    }
+
+    /// Marian drops or merges sentences of a long input: every sentence goes
+    /// alone and each text gets back exactly its own translation.
+    #[test]
+    fn offline_mt_gets_one_sentence_at_a_time() {
+        let texts = [
+            "The first game was Pong. It came out in 1972! Was it fun? Yes.".to_string(),
+            "No end mark here".to_string(),
+            String::new(),
+        ];
+        // a translator that keeps only the first sentence of what it gets
+        let mut calls = Vec::new();
+        let out = by_sentence(&texts, |t| {
+            calls.push(t.to_vec());
+            Ok(t.iter()
+                .map(|s| format!("<{}>", s.split(". ").next().unwrap()))
+                .collect())
+        })
+        .unwrap();
+        assert_eq!(calls.len(), 1, "one call");
+        assert_eq!(
+            out,
+            [
+                "<The first game was Pong.> <It came out in 1972!> <Was it fun?> <Yes.>",
+                "<No end mark here>",
+                ""
+            ]
+        );
+        let short = by_sentence(&texts, |t| Ok(t[1..].to_vec()));
+        assert!(short.is_err(), "a lost sentence is an error, not a shift");
+    }
+
+    /// A line the frame's edge cuts through is left alone.
+    #[test]
+    fn lines_cut_by_the_frame_edge_are_skipped() {
+        let tb = |y: f32| crate::ocr::TextBlock {
+            bounds: [10.0, y, 100.0, 20.0],
+            text: "x".into(),
+            confidence: 0.9,
+        };
+        assert!(cut_off(&tb(0.0), 200) && cut_off(&tb(180.0), 200));
+        assert!(!cut_off(&tb(5.0), 200) && !cut_off(&tb(170.0), 200));
+    }
+}
+
+/// The busy-background threshold sits between the game panels the erase
+/// handles (flat, gradient, grain, art behind a translucent panel, an
+/// outlined subtitle on art) and text straight on a photo-like busy
+/// background, which `render` leaves as it was (and reports).
+#[test]
+fn busy_background_threshold() {
+    for c in cases() {
+        let worst = (c.lines.iter())
+            .map(|l| erase::erase_line(&mut c.img.clone(), c.dims.0, c.dims.1, l.bounds).0)
+            .map(|s| s.residual)
+            .fold(0.0, f32::max);
+        eprintln!("{}: residual {worst:.1}", c.name);
+        assert!(worst < BUSY, "{}: {worst}", c.name);
+    }
+    let (w, h) = (640, 160);
+    // fine, high-contrast detail (foliage in a photo)
+    let photo = paint(w, h, |x, y| {
+        let n = noise(x, y, 4.0, 11);
+        [
+            40.0 + 200.0 * n,
+            220.0 - 160.0 * n,
+            60.0 + 150.0 * noise(x, y, 3.0, 12),
+        ]
+    });
+    let c = case(
+        "photo",
+        photo,
+        (w, h),
+        &[(
+            40.0,
+            60.0,
+            "Speak to the blacksmith",
+            28.0,
+            500,
+            WHITE,
+            Fx::None,
+        )],
+    );
+    let s = erase::erase_line(&mut c.img.clone(), w, h, c.lines[0].bounds).0;
+    eprintln!("photo: residual {:.1}", s.residual);
+    assert!(s.residual > BUSY);
+    let blocks = group_blocks(&c.lines);
+    let mut out = c.img.clone();
+    let drawn = render(
+        &mut out,
+        w as u32,
+        h as u32,
+        &blocks,
+        &["تحدث".into()],
+        true,
+    );
+    assert_eq!((drawn.drawn, drawn.busy), (0, 1));
+    assert!(out == c.img, "left as it was");
 }

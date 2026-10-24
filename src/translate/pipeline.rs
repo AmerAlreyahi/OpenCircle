@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 pub use super::lang::is_rtl;
 use super::lang::{self, Script};
-use super::{Block, Line, MARKUP, group_blocks, render};
+use super::{Block, Drawn, Line, MARKUP, group_blocks, render};
 use crate::ai::{self, AiError};
 use crate::config::AiConfig;
 use crate::mt;
@@ -100,7 +100,9 @@ impl Real {
                         pair.label()
                     )));
                 }
-                mt::translate(texts, pair).map_err(|e| AiError::Offline(e.to_string()))
+                by_sentence(texts, |t| {
+                    mt::translate(t, pair).map_err(|e| AiError::Offline(e.to_string()))
+                })
             }
         }
     }
@@ -114,6 +116,55 @@ impl Deps for Real {
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
         self.lines(texts, target, MARKUP)
     }
+}
+
+/// Offline MT (Marian) drops or merges sentences of a long input and cuts it
+/// at 200 tokens: each text is split into sentences, all of them go in one
+/// call, and each text's translations are joined back, so every text gets
+/// exactly its own translation, whole.
+pub(crate) fn by_sentence(
+    texts: &[String],
+    translate: impl FnOnce(&[String]) -> Result<Vec<String>, AiError>,
+) -> Result<Vec<String>, AiError> {
+    let parts: Vec<Vec<String>> = texts.iter().map(|t| sentences(t)).collect();
+    let flat: Vec<String> = parts.iter().flatten().cloned().collect();
+    let out = translate(&flat)?;
+    if out.len() != flat.len() {
+        return Err(AiError::BadResponse(format!(
+            "expected {} translated sentences, got {}",
+            flat.len(),
+            out.len()
+        )));
+    }
+    let mut out = out.into_iter();
+    Ok(parts
+        .iter()
+        .map(|p| out.by_ref().take(p.len()).collect::<Vec<_>>().join(" "))
+        .collect())
+}
+
+/// Sentence ends: `.`, `!` or `?`, then a space and a capital, a digit, a
+/// quote or a bracket. ponytail: "Dr. Who" splits too; harmless for MT.
+fn sentences(t: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, c) in t.char_indices() {
+        let next = t[i + c.len_utf8()..]
+            .strip_prefix(' ')
+            .and_then(|r| r.chars().next());
+        if matches!(c, '.' | '!' | '?')
+            && next.is_some_and(|n| n.is_uppercase() || n.is_ascii_digit() || "\"'(“".contains(n))
+        {
+            out.push(t[start..=i].trim().to_string());
+            start = i + 1;
+        }
+    }
+    out.extend(
+        Some(t[start..].trim())
+            .filter(|r| !r.is_empty())
+            .map(String::from),
+    );
+    out
 }
 
 #[derive(Debug)]
@@ -159,6 +210,8 @@ pub struct Translated {
     pub rgba: Vec<u8>,
     pub blocks: Vec<Translation>,
     pub timings: Timings,
+    /// Blocks redrawn, and left as they were (busy background, no room).
+    pub drawn: Drawn,
 }
 
 /// Translates every text block of an RGBA frame in place. An OCR or AI
@@ -175,6 +228,7 @@ pub fn translate_frame(
     check_frame(rgba, width, height)?;
     let found = deps.recognize(rgba, width, height).map_err(Error::Ocr)?;
     let lines: Vec<Line> = (found.into_iter())
+        .filter(|b| !cut_off(b, height))
         .map(|b| to_line(b, width, height))
         .collect();
     let ocr = start.elapsed();
@@ -184,11 +238,15 @@ pub fn translate_frame(
     let translate = t.elapsed();
     let t = Instant::now();
     let mut out = rgba.to_vec();
-    render(&mut out, width, height, &blocks, &tr, is_rtl(target));
+    let drawn = render(&mut out, width, height, &blocks, &tr, is_rtl(target));
     let render = t.elapsed();
     Ok(Translated {
         rgba: out,
         blocks: translations(&blocks, &tr),
+        drawn: Drawn {
+            rooms: Vec::new(),
+            ..drawn
+        },
         timings: Timings {
             ocr,
             translate,
@@ -207,6 +265,13 @@ pub(super) fn check_frame(rgba: &[u8], width: u32, height: u32) -> Result<(), Er
         ))));
     }
     Ok(())
+}
+
+/// A line the frame's top or bottom edge cuts through (a page scrolled
+/// halfway past it): OCR read half of it and the erase finds no background
+/// beyond it, so it is left as it is.
+pub(super) fn cut_off(b: &TextBlock, height: u32) -> bool {
+    b.bounds[1] <= 1.0 || b.bounds[1] + b.bounds[3] >= height as f32 - 1.0
 }
 
 /// An OCR box hugs the ink; `render`'s erase wants the line's box (it reads
@@ -290,12 +355,16 @@ pub(super) fn translate_blocks(
         .collect())
 }
 
-/// False for numbers/punctuation only, and for text already in the target's
-/// script (Latin targets can't be told from English: the model decides).
+/// False for numbers/punctuation only, for lone Latin letters (an icon read
+/// as "X" or "C": no word, and MT makes "tenth" of it), and for text already
+/// in the target's script (Latin targets can't be told from English: the
+/// model decides).
 fn needs_translation(text: &str, target: &str) -> bool {
     let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
+    let word =
+        (text.split(|c: char| !c.is_alphabetic())).any(|w| w.chars().count() > 1 || !w.is_ascii());
     match lang::find(target).map(|l| l.script) {
-        _ if letters.is_empty() => false,
+        _ if !word => false,
         Some(Script::Latin) | None => true,
         Some(script) => letters.iter().filter(|c| script.has(**c)).count() * 2 < letters.len(),
     }

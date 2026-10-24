@@ -1742,8 +1742,11 @@ impl App {
         self.edit = None;
         self.view = self.view.reset(); // the translation is drawn at 1x
         let models = text::models_present();
+        // the monitor's origin in desktop px (the window to translate is found there)
+        let at = |v: f32| (v * self.scale).round() as i32;
+        let monitor = Some((at(self.origin.x), at(self.origin.y), self.scale));
         let (session, task) =
-            translate::Session::start(frame.clone(), area, self.cache.clone(), models);
+            translate::Session::start(frame.clone(), area, self.cache.clone(), models, monitor);
         if session.full() {
             // nothing to outline: the translation is the whole screen
             self.selection = None;
@@ -2328,8 +2331,13 @@ mod tests {
         let mut app = closing_app();
         let frame = image::Handle::from_rgba(40, 20, vec![0; 40 * 20 * 4]);
         // no models: the session waits for consent (no thread starts)
-        let (session, _) =
-            translate::Session::start(frame.clone(), [0, 0, 40, 20], app.cache.clone(), false);
+        let (session, _) = translate::Session::start(
+            frame.clone(),
+            [0, 0, 40, 20],
+            app.cache.clone(),
+            false,
+            None,
+        );
         app.frame = Some(frame);
         app.hiding = Hiding::No;
         app.translate = Some((7, session));
