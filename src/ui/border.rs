@@ -2,8 +2,8 @@
 //! live translate, snip) a soft glow fading inward, a thin line with rounded
 //! inner corners, or nothing, in the active look's colours (`theme::along`).
 //!
-//! Motion: the overlay's activation glow (a wide glow fades in after the first
-//! frame, then draws back to the edge) or, without it, a fade-in (glow) / one
+//! Motion: the overlay's activation glow (a wide glow from the first frame
+//! that draws back to the edge, the overlay's opening `overlay::APPEAR`) or, without it, a fade-in (glow) / one
 //! shimmer sweep (thin); snip the same when its edge animates; live translate a
 //! slow flow of the colours round the edge (glow) or a light circling it (thin).
 //! Off when the look says so or the OS asks for less motion (Windows).
@@ -43,10 +43,11 @@ const FADE: Duration = Duration::from_millis(450);
 const FRAME: Duration = Duration::from_millis(16);
 const SWEEP_GLOW: f32 = 0.85;
 /// The overlay's activation glow: how far it reaches (logical px), how long it
-/// takes (fade in, then draw back to the edge) and its frame time.
+/// takes to draw back to the edge (the overlay's opening, with its dim and
+/// bars) and its frame time.
 const ACT_REACH: f32 = 150.0;
-const ACTIVATION: Duration = Duration::from_millis(900);
-const ACT_FRAME: Duration = Duration::from_millis(25);
+const ACTIVATION: Duration = super::overlay::APPEAR;
+const ACT_FRAME: Duration = Duration::from_millis(16);
 /// Live, thin: one turn of the light, its frame time (20 fps) and brightness.
 /// A light, not a turning gradient: a frame changes only the strips near it.
 const FLOW_LOOP: Duration = Duration::from_secs(5);
@@ -327,17 +328,17 @@ fn plan(
     let mut after = elapsed;
     if mode == Mode::Overlay && look.activation_glow && moving {
         if elapsed < ACTIVATION {
-            // A wide glow fades in (first quarter), then draws back to the
-            // edge's own glow (or away: a thin line / no edge follows).
+            // A wide glow from the first frame draws back to the edge's own
+            // glow (or away: a thin line / no edge follows), eased out.
             let t = secs(elapsed) / secs(ACTIVATION);
             let end = match rest {
                 Some(s) if s.style == EdgeStyle::Glow => s.inset / ACT_REACH,
                 _ => 0.0,
             };
-            let back = ease((t - 0.25) / 0.75);
+            let back = ease(t);
             let frame = Frame {
-                shift: 0.2 * (t - 1.0),
-                alpha: ease(t / 0.25),
+                shift: 0.2 * (back - 1.0),
+                alpha: 1.0,
                 reach: 1.0 + (end - 1.0) * back,
                 ..Frame::REST
             };
@@ -774,21 +775,23 @@ mod tests {
     }
 
     #[test]
-    fn overlay_activation_fades_in_then_draws_back_to_the_edge() {
+    fn overlay_activation_starts_wide_and_eases_back_to_the_edge() {
         let look = spectrum();
         let ms = Duration::from_millis;
         let (spec, first, next) = plan(Mode::Overlay, &look, ms(0), true);
-        assert_eq!(first.alpha, 0.0, "the first frame shows nothing (latency)");
+        assert_eq!((first.alpha, first.reach), (1.0, 1.0), "frame 1 is t = 0");
         assert_eq!((spec.unwrap().inset, next), (ACT_REACH, Some(ACT_FRAME)));
-        let (_, faded_in, _) = plan(Mode::Overlay, &look, ms(225), true);
-        assert!(
-            faded_in.alpha > 0.99 && faded_in.reach > 0.99,
-            "{faded_in:?}"
-        );
-        let (_, back, _) = plan(Mode::Overlay, &look, ms(899), true);
-        assert!((back.reach - 48.0 / ACT_REACH).abs() < 0.01, "{back:?}");
+        // the reach only shrinks, and is the edge's own by the end
+        let reach = |t: u64| plan(Mode::Overlay, &look, ms(t), true).1.reach;
+        let steps: Vec<f32> = (0..=ACTIVATION.as_millis() as u64 - 1)
+            .step_by(10)
+            .map(reach)
+            .collect();
+        assert!(steps.windows(2).all(|w| w[1] <= w[0]), "{steps:?}");
+        let last = reach(ACTIVATION.as_millis() as u64 - 1);
+        assert!((last - 48.0 / ACT_REACH).abs() < 0.01, "{last}");
         // then the edge's own glow, still; the reach matched, so no jump
-        let (spec, rest, next) = plan(Mode::Overlay, &look, ms(950), true);
+        let (spec, rest, next) = plan(Mode::Overlay, &look, ACTIVATION + ms(1), true);
         assert_eq!((spec.unwrap().inset, rest, next), (48.0, Frame::REST, None));
         // no activation glow: the glow grows in, then rests
         let quiet = Look {

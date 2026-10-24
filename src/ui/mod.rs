@@ -70,6 +70,9 @@ const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
 /// Snip reads the controls (UI Automation) of this many topmost windows.
 const UIA_WINDOWS: usize = 4;
 
+/// How far (logical px) the hint and the bottom bar slide in as the overlay opens.
+const SLIDE: f32 = 80.0;
+
 /// Presses this close together are a double (triple) click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
@@ -165,6 +168,8 @@ enum Message {
     TranslateScreen,
     LiveToggle,
     EditScreen,
+    /// A frame of the overlay's opening animation was drawn at this time.
+    Frame(Instant),
     /// OCR read the whole frame of this opening (main mode, at open).
     ScreenText(u32, Result<Vec<word::Line>, String>),
     /// The "Select text" chip under a snapped box, and the lines OCR read in it.
@@ -391,6 +396,9 @@ struct App {
     /// A press that began on text: its stroke so far (image px). It selects
     /// words unless it turns into a loop (`overlay::winds`).
     text_press: Option<Vec<Point>>,
+    /// The opening animation (`overlay::APPEAR`): when its first frame was
+    /// drawn, and the latest frame's time; `None` until the first frame.
+    appear: Option<(Instant, Instant)>,
     /// The shortcuts the bottom bar's tooltips show (read at open).
     bar_keys: BarKeys,
     /// The last press: when, where (image px), and how many in a row.
@@ -506,6 +514,7 @@ impl App {
             screen_text: None,
             text_press: None,
             clicks: None,
+            appear: None,
             bar_keys: BarKeys::default(),
             ask: String::new(),
             opening: 0,
@@ -746,6 +755,11 @@ impl App {
                 self.select(Rectangle::with_size(self.screen));
                 self.start_translate()
             }
+            Message::Frame(now) => {
+                let start = self.appear.map_or(now, |(start, _)| start);
+                self.appear = Some((start, now));
+                Task::none()
+            }
             Message::ScreenText(opening, read)
                 if opening == self.opening && self.frame.is_some() =>
             {
@@ -876,6 +890,7 @@ impl App {
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
         let cfg = config::current();
+        self.appear = None; // its first frame is t = 0
         self.behaviour = cfg.selection;
         self.bar_keys = BarKeys::of(&cfg);
         let mut first = None;
@@ -2710,6 +2725,7 @@ impl App {
             morph: (self.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
             words: (self.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
             picked,
+            appear: self.appeared(),
             text: match self.translate {
                 None if matches!(self.purpose, Purpose::Search) => (self.screen_text.iter())
                     .flatten()
@@ -2724,8 +2740,11 @@ impl App {
             .width(Fill)
             .height(Fill)
             .content_fit(ContentFit::Fill);
-        if let Some(part) = self.view.crop() {
-            shown = shown.crop(part); // zoomed in
+        match self.view.crop() {
+            Some(part) => shown = shown.crop(part), // zoomed in
+            // pixel for pixel: no filtering (a full redraw, e.g. while the dim
+            // fades in, costs a copy, not a resample)
+            None => shown = shown.filter_method(image::FilterMethod::Nearest),
         }
         let mut layers = stack![
             shown,
@@ -2782,14 +2801,20 @@ impl App {
                 _ => space().into(),
             }
         } else {
-            container(widgets::pill(HINT))
-                .center_x(Fill)
-                .padding(24)
+            // slides down into place as the overlay opens
+            let hint = container(widgets::pill(HINT)).center_x(Fill).padding(24);
+            let rise = (1.0 - self.appeared()) * SLIDE;
+            iced::widget::float(hint)
+                .translate(move |_, _| Vector::new(0.0, -rise))
                 .into()
         };
         layers = layers.push(top);
         if self.bottom_bar_shown() {
-            layers = layers.push(self.bottom_bar());
+            // slides up into place as the overlay opens
+            let rise = (1.0 - self.appeared()) * SLIDE;
+            let bar = iced::widget::float(self.bottom_bar())
+                .translate(move |_, _| Vector::new(0.0, rise));
+            layers = layers.push(bar);
         }
         // Beside a panel (an auto-search's): the chips, and the bar after More.
         if let (Some(_), Some(selection), Purpose::Search, false) =
@@ -2884,6 +2909,19 @@ impl App {
             layers = layers.push(bar::view(below, room, chip, Message::Run));
         }
         layers.into()
+    }
+
+    /// How far the opening animation is (0..1, eased out); 0 on its first frame.
+    fn appeared(&self) -> f32 {
+        let Some((start, now)) = self.appear else {
+            return 0.0;
+        };
+        overlay::progress(start, now, overlay::APPEAR)
+    }
+
+    /// The opening animation still runs (a frame drawn and more to come).
+    fn appearing(&self) -> bool {
+        self.frame.is_some() && self.appeared() < 1.0
     }
 
     /// The bottom bar shows in main mode from the first frame, through drawing
@@ -3044,7 +3082,12 @@ impl App {
                 }),
                 _ => Subscription::none(),
             };
-            Subscription::batch([triggers, escape, alt, card, shift])
+            // The opening animation: one message per frame until it is done.
+            let frames = match self.appear.is_none() || self.appearing() {
+                true => window::frames().map(Message::Frame),
+                false => Subscription::none(),
+            };
+            Subscription::batch([triggers, escape, alt, card, shift, frames])
         } else if self.hiding != Hiding::No {
             // One stream for both, so a resize is always seen before the frames after it.
             // Every message makes iced redraw, so frames keep coming while this runs.
@@ -3523,6 +3566,8 @@ mod tests {
         app.screen = Size::new(w as f32 / scale, h as f32 / scale);
         app.view = overlay::View::new(w, h, app.screen);
         app.bar_keys = BarKeys::of(&config::Config::default());
+        let now = Instant::now();
+        app.appear = Some((now, now + overlay::APPEAR)); // opened
         app
     }
 
@@ -4257,6 +4302,100 @@ mod tests {
             },
         );
         assert!(app.panel.is_some());
+    }
+
+    /// The opening as drawn `ms` after its first frame (`None`: the first frame).
+    fn opening_at(ms: Option<u64>) -> App {
+        let mut app = text_app();
+        app.appear = None;
+        if let Some(ms) = ms {
+            let start = Instant::now();
+            let _ = app.update(Message::Frame(start));
+            let _ = app.update(Message::Frame(start + Duration::from_millis(ms)));
+        }
+        app
+    }
+
+    #[test]
+    fn the_opening_is_one_eased_animation_from_its_first_frame() {
+        // frame 1 is t = 0: no dim yet (the frozen frame as it is)
+        let first = opening_at(None);
+        assert_eq!(first.appeared(), 0.0);
+        let shot = |app: &App| widgets::shot::render(app.view(app.overlay), 960, 420);
+        let bright = |rgba: &[u8]| {
+            let at = (300 * 960 + 700) * 4; // an empty part of the page
+            u32::from(rgba[at]) + u32::from(rgba[at + 1]) + u32::from(rgba[at + 2])
+        };
+        let frame = match &first.frame {
+            Some(image::Handle::Rgba { pixels, .. }) => pixels.to_vec(),
+            _ => unreachable!(),
+        };
+        assert_eq!(bright(&shot(&first)), bright(&frame), "undimmed on frame 1");
+        // then it only ever moves one way, to rest by APPEAR
+        let steps: Vec<(f32, u32)> = (0..=300)
+            .step_by(25)
+            .map(|ms| {
+                let app = opening_at(Some(ms));
+                (app.appeared(), bright(&shot(&app)))
+            })
+            .collect();
+        for pair in steps.windows(2) {
+            assert!(
+                pair[1].0 >= pair[0].0 && pair[1].1 <= pair[0].1,
+                "{steps:?}"
+            );
+        }
+        assert!(
+            steps[1].0 > 0.0 && steps[1].0 < 1.0,
+            "eased in steps, no jump"
+        );
+        let done = opening_at(Some(overlay::APPEAR.as_millis() as u64));
+        assert_eq!(done.appeared(), 1.0);
+        assert!(!done.appearing(), "no more frames asked for");
+        assert!(opening_at(Some(10)).appearing());
+        // a new opening starts again at t = 0
+        let mut again = done;
+        let _ = again.open(Instant::now(), a_shot());
+        assert_eq!(again.appeared(), 0.0);
+    }
+
+    /// `OPENCIRCLE_RENDER_DIR=<dir> cargo test opening_frames -- --ignored`:
+    /// the overlay's first 300 ms, a PNG every 25 ms; and the time a full
+    /// frame of the opening takes at 3440x1440 (every pixel changes as the dim
+    /// fades in).
+    #[test]
+    #[ignore = "writes PNGs and prints timings"]
+    fn opening_frames() {
+        for ms in (0..=300).step_by(25) {
+            let app = opening_at(Some(ms));
+            let name = format!("opening-{ms:03}ms");
+            widgets::shot::save(&name, app.view(app.overlay), Size::new(960.0, 420.0));
+        }
+        let mut app = open_app(3440, 1440, 1.0);
+        app.appear = None;
+        let start = Instant::now();
+        let _ = app.update(Message::Frame(start));
+        let _ = app.update(Message::Frame(start + Duration::from_millis(100)));
+        let t = Instant::now();
+        for _ in 0..5 {
+            widgets::shot::render(app.view(app.overlay), 3440, 1440);
+        }
+        println!("3440x1440 opening frame: {:?}", t.elapsed() / 5);
+        let t = Instant::now();
+        for _ in 0..5 {
+            widgets::shot::render(Element::<'_, Message>::from(space()), 3440, 1440);
+        }
+        println!("3440x1440 empty frame (the harness): {:?}", t.elapsed() / 5);
+        let frame = app.frame.clone().unwrap();
+        let t = Instant::now();
+        for _ in 0..5 {
+            let only = image(frame.clone())
+                .width(Fill)
+                .height(Fill)
+                .filter_method(image::FilterMethod::Nearest);
+            widgets::shot::render(Element::<'_, Message>::from(only), 3440, 1440);
+        }
+        println!("3440x1440 the frame alone: {:?}", t.elapsed() / 5);
     }
 
     /// What one key press (letter `c`) on the overlay produces, after the

@@ -48,6 +48,9 @@ const HANDLE_HIT: f32 = 12.0;
 /// line width; screen px).
 const SNAP_RADIUS: f32 = 16.0;
 pub const MORPH: Duration = Duration::from_millis(200);
+/// The overlay's opening: the dim fades in, the edge glow draws back to its
+/// rest and the bars slide in, as one eased animation from the first frame.
+pub const APPEAR: Duration = Duration::from_millis(250);
 const BRACKET_GAP: f32 = 3.0;
 const BRACKET_ARM: (f32, f32) = (14.0, 36.0);
 const BRACKET_WIDTH: f32 = 4.0;
@@ -456,7 +459,13 @@ pub fn snap_radius(r: Rectangle) -> f32 {
 
 /// How far a morph started at `start` is at `now` (0..1, eased out).
 pub fn morph_progress(start: Instant, now: Instant) -> f32 {
-    let t = now.saturating_duration_since(start).as_secs_f32() / MORPH.as_secs_f32();
+    progress(start, now, MORPH)
+}
+
+/// How far an animation of `length` started at `start` is at `now` (0..1,
+/// eased out: fast, then settling).
+pub fn progress(start: Instant, now: Instant, length: Duration) -> f32 {
+    let t = now.saturating_duration_since(start).as_secs_f32() / length.as_secs_f32();
     1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
 }
 
@@ -773,6 +782,8 @@ pub struct Overlay<'a> {
     pub picked: Vec<Rectangle>,
     /// The text lines on the frame (image px): the pointer is an I-beam over them.
     pub text: Vec<Rectangle>,
+    /// How far the opening is (0..1, eased; `APPEAR`): the dim fades in.
+    pub appear: f32,
 }
 
 /// The pointer as the canvas saw it, event by event. Events can arrive in one batch
@@ -904,6 +915,10 @@ impl canvas::Program<Event> for Overlay<'_> {
 
         // A snapped box on its way from the drawn stroke: the outline between.
         let (dim_idle, dim_outside) = theme::dims(&self.look);
+        let (dim_idle, dim_outside) = (
+            dim_idle.scale_alpha(self.appear),
+            dim_outside.scale_alpha(self.appear),
+        );
         let snapped = (self.selection).filter(|s| s.kind == Kind::Snap);
         let box_on_screen = snapped.map(|s| self.view.rect_to_screen(s.area));
         let morph = match (box_on_screen, self.morph) {
@@ -1781,6 +1796,7 @@ mod tests {
             words: &[],
             picked: Vec::new(),
             text: Vec::new(),
+            appear: 1.0,
         };
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
@@ -1820,6 +1836,7 @@ mod tests {
             words: &[],
             picked: Vec::new(),
             text: Vec::new(),
+            appear: 1.0,
         };
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
