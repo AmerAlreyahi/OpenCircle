@@ -216,12 +216,26 @@ pub struct GeneralConfig {
     pub save_folder: String,
 }
 
+/// The annotation editor's remembered options.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EditorConfig {
+    /// The blur brush keeps to the text line it starts on.
+    pub line_assist: bool,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        EditorConfig { line_assist: true }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Config {
     pub version: u32,
     pub theme: Theme,
     pub shortcut: String,
     pub general: GeneralConfig,
+    pub editor: EditorConfig,
     pub ai: AiConfig,
     pub translate: TranslateConfig,
     pub quick_actions: Vec<QuickAction>,
@@ -262,6 +276,7 @@ impl Default for Config {
             theme: Theme::System,
             shortcut: DEFAULT_CAPTURE_SHORTCUT.to_string(),
             general: GeneralConfig::default(),
+            editor: EditorConfig::default(),
             ai: AiConfig::default(),
             translate: TranslateConfig::default(),
             // DESIGN.md "Quick actions".
@@ -392,6 +407,9 @@ impl Config {
                 &mut w,
                 |s: &String| check_folder(s),
             );
+        }
+        if let Some(t) = section(&root, "editor", &mut w) {
+            c.editor.line_assist = get(t, "editor.", "line_assist", d.editor.line_assist, &mut w);
         }
         if root.get("ai").is_some_and(|v| !v.is_table()) {
             w.push(format!("ai: expected a table; using defaults{AI_OFF}"));
@@ -720,6 +738,7 @@ mod tests {
         c.translate.live_interval_ms = 2500;
         c.translate.live_note_shown = true;
         c.translate.source = "ja".into();
+        c.editor.line_assist = false;
         c.quick_actions.pop();
         c.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -732,6 +751,15 @@ mod tests {
         assert_eq!(back, c);
         assert!(!path.with_extension("toml.tmp").exists());
         assert!(text.contains("[general]") && text.contains("default_action = \"copy\""));
+        assert!(text.contains("[editor]\nline_assist = false"), "{text}");
+        // Older files have no [editor]: line assist on, no warning.
+        let (c, w) = Config::parse("version = 1\n");
+        assert!(c.editor.line_assist && w.is_empty(), "{w:?}");
+        let (c, w) = Config::parse("[editor]\nline_assist = \"yes\"\n");
+        assert!(
+            c.editor.line_assist && w[0].starts_with("editor.line_assist"),
+            "{w:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
