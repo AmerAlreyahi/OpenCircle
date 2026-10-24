@@ -2,11 +2,16 @@
 //! first-run Onboarding. At most one of each; asking again focuses the open one.
 //! Also the pinned images (any number): small borderless always-on-top windows.
 //! Closing a window drops its state. Also owns the OS-theme feed.
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use iced::widget::{container, image, mouse_area, row, stack};
 use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
-use super::{onboarding, settings, theme, widgets};
+use super::widgets::chrome;
+use super::{onboarding, settings, shape, theme, widgets};
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::config::{self, Config, Theme};
 
@@ -31,6 +36,12 @@ pub enum Msg {
     Pin(window::Id, PinMsg),
     /// The folder picker answered (`None` = cancelled).
     Folder(Option<std::path::PathBuf>),
+    /// From a normal window's header or edges.
+    Chrome(window::Id, chrome::Event),
+    /// A window was resized (any of ours; the overlay's is `ui::App`'s).
+    Resized(window::Id),
+    /// Whether a normal window is maximised now (asked after every resize).
+    Maximised(window::Id, bool),
     /// Test hook step (see `test_hook`).
     Test(usize, String),
     TestShot(usize, &'static str, window::Screenshot),
@@ -42,6 +53,25 @@ pub struct Windows {
     onboarding: Option<(window::Id, onboarding::State)>,
     permission: Option<(window::Id, onboarding::Access)>,
     pins: Vec<Pin>,
+    /// Small message windows (a pill each) and their text.
+    toasts: Vec<(window::Id, String)>,
+    /// What each normal window's header knows (see `Chrome`).
+    chrome: HashMap<window::Id, Chrome>,
+}
+
+/// A normal window's header state.
+#[derive(Debug, Default, Clone, Copy)]
+struct Chrome {
+    maximised: bool,
+    /// When the header was last pressed (a second press soon after = double-click).
+    last_press: Option<Instant>,
+}
+
+/// Two header presses within this are a double-click (maximise / restore).
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+
+fn is_double_click(last: Option<Instant>, now: Instant) -> bool {
+    last.is_some_and(|t| now.duration_since(t) <= DOUBLE_CLICK)
 }
 
 // ---- pinned images ----
@@ -136,18 +166,19 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
     let mut layers = stack![picture];
     let size = pin.size();
     if pin.hover && size.width >= PIN_BAR_ROOM.width && size.height >= PIN_BAR_ROOM.height {
-        let button = |glyph, message, tip| {
-            widgets::with_tip(
+        let button = |glyph, message, label, keys| {
+            widgets::hint(
                 widgets::icon_button(glyph, false, message),
-                tip,
+                label,
+                widgets::Why::Keys(keys),
                 Side::Bottom,
             )
         };
         let bar = widgets::surface(
             row![
-                button(COPY, PinMsg::Copy, "Copy the image (Ctrl+C)"),
-                button(SAVE, PinMsg::Save, "Save the image (Ctrl+S)"),
-                button(widgets::CLOSE, PinMsg::Close, "Close (Esc or double-click)"),
+                button(COPY, PinMsg::Copy, "Copy", "Ctrl+C"),
+                button(SAVE, PinMsg::Save, "Save", "Ctrl+S"),
+                button(widgets::CLOSE, PinMsg::Close, "Close", "Esc"),
             ]
             .spacing(4),
         );
@@ -218,14 +249,15 @@ impl Windows {
     pub fn pin(&mut self, crop: Crop, at: Option<Point>, scale: f32) -> Task<Msg> {
         let base = Size::new(crop.width as f32, crop.height as f32) * (1.0 / scale.max(0.1));
         let zoom = fit_zoom(base);
-        let (id, open) = window::open(app_window(window::Settings {
-            size: base * zoom,
-            position: at.map_or(Position::Centered, Position::Specific),
-            decorations: false,
-            resizable: false,
-            level: Level::AlwaysOnTop,
-            ..window::Settings::default()
-        }));
+        let (id, open) = floating(
+            window::Settings {
+                size: base * zoom,
+                position: at.map_or(Position::Centered, Position::Specific),
+                resizable: false,
+                ..window::Settings::default()
+            },
+            0.0, // a picture: square
+        );
         eprintln!("[opencircle] pinned {}x{}", crop.width, crop.height);
         self.pins.push(Pin {
             id,
@@ -237,6 +269,23 @@ impl Windows {
         open.discard()
     }
 
+    /// A small message window: a pill holding `text`, floating over everything. The
+    /// window is exactly the pill (see `floating`), so nothing shows around it.
+    pub fn toast(&mut self, text: &str) -> Task<Msg> {
+        let size = Size::new(48.0 + 7.0 * text.chars().count() as f32, 36.0);
+        let (id, open) = floating(
+            window::Settings {
+                size,
+                position: Position::Centered,
+                resizable: false,
+                ..window::Settings::default()
+            },
+            widgets::PILL_RADIUS,
+        );
+        self.toasts.push((id, text.to_string()));
+        open.discard()
+    }
+
     /// Opens the window, or focuses it when it is already open.
     pub fn open(&mut self, kind: Kind) -> Task<Msg> {
         if let Some(id) = self.id(kind) {
@@ -244,12 +293,13 @@ impl Windows {
             return window::minimize(id, false).chain(window::gain_focus(id));
         }
         eprintln!("[opencircle] opening the {kind:?} window");
-        let (id, open) = window::open(window_settings(kind));
+        let (id, open) = normal(kind);
         match kind {
             Kind::Settings => self.settings = Some((id, settings::State::open())),
             Kind::Onboarding => self.onboarding = Some((id, onboarding::State::open())),
             Kind::Permission => self.permission = Some((id, onboarding::Access::Unasked)),
         }
+        self.chrome.insert(id, Chrome::default());
         open.discard().chain(window::gain_focus(id))
     }
 
@@ -299,7 +349,22 @@ impl Windows {
                     }
                 }
             }
+            Msg::Chrome(id, event) => return self.on_chrome(id, event),
+            Msg::Resized(id) => {
+                if self.chrome.contains_key(&id) {
+                    return window::is_maximized(id).map(move |on| Msg::Maximised(id, on));
+                }
+                return reshape(id);
+            }
+            Msg::Maximised(id, on) => {
+                if let Some(c) = self.chrome.get_mut(&id) {
+                    c.maximised = on;
+                }
+            }
             Msg::Closed(id) => {
+                forget_floating(id);
+                self.chrome.remove(&id);
+                self.toasts.retain(|(t, _)| *t != id);
                 self.pins.retain(|p| p.id != id); // the OS closed it: free the pixels
                 if self.id(Kind::Permission) == Some(id) {
                     self.permission = None;
@@ -323,6 +388,37 @@ impl Windows {
             Msg::TestShot(step, name, shot) => save_test_shot(step, name, &shot),
         }
         Task::none()
+    }
+
+    /// The header and edges of a normal window.
+    fn on_chrome(&mut self, id: window::Id, event: chrome::Event) -> Task<Msg> {
+        let resizable = self.mode(id).resizable;
+        let c = self.chrome.entry(id).or_default();
+        match event {
+            chrome::Event::Press => {
+                let now = Instant::now();
+                if resizable && is_double_click(c.last_press, now) {
+                    c.last_press = None;
+                    window::toggle_maximize(id)
+                } else {
+                    c.last_press = Some(now);
+                    window::drag(id)
+                }
+            }
+            chrome::Event::Minimise => window::minimize(id, true),
+            chrome::Event::Maximise => window::toggle_maximize(id),
+            chrome::Event::Close => window::close(id),
+            chrome::Event::Resize(direction) if !c.maximised => window::drag_resize(id, direction),
+            chrome::Event::Resize(_) => Task::none(),
+        }
+    }
+
+    /// What the header offers this window.
+    fn mode(&self, id: window::Id) -> chrome::Mode {
+        chrome::Mode {
+            resizable: self.id(Kind::Settings) == Some(id),
+            maximised: self.chrome.get(&id).is_some_and(|c| c.maximised),
+        }
     }
 
     fn on_pin(&mut self, id: window::Id, msg: PinMsg) -> Task<Msg> {
@@ -363,22 +459,43 @@ impl Windows {
             let id = pin.id;
             return Some(pin_view(pin).map(move |msg| Msg::Pin(id, msg)));
         }
-        if let Some((id, state)) = &self.settings
+        if let Some((_, text)) = self.toasts.iter().find(|(t, _)| *t == window) {
+            return Some(
+                widgets::layer_pill(text.as_str())
+                    .width(Fill)
+                    .height(Fill)
+                    .center(Fill)
+                    .into(),
+            );
+        }
+        let page = if let Some((id, state)) = &self.settings
             && *id == window
         {
-            return Some(settings::view(state).map(Msg::Settings));
-        }
-        if let Some((id, state)) = &self.onboarding
+            settings::view(state).map(Msg::Settings)
+        } else if let Some((id, state)) = &self.onboarding
             && *id == window
         {
-            return Some(onboarding::view(state).map(Msg::Onboarding));
-        }
-        if let Some((id, access)) = &self.permission
+            onboarding::view(state).map(Msg::Onboarding)
+        } else if let Some((id, access)) = &self.permission
             && *id == window
         {
-            return Some(onboarding::prompt_view(access).map(Msg::Permission));
+            onboarding::prompt_view(access).map(Msg::Permission)
+        } else {
+            return None;
+        };
+        let title = self.header_title(window);
+        Some(chrome::frame(title, self.mode(window), page, move |e| {
+            Msg::Chrome(window, e)
+        }))
+    }
+
+    /// The header's title (the OS title, `title`, is the longer name for the taskbar).
+    fn header_title(&self, window: window::Id) -> &'static str {
+        match (self.id(Kind::Settings), self.id(Kind::Onboarding)) {
+            (Some(id), _) if id == window => "Settings",
+            (_, Some(id)) if id == window => "Welcome to OpenCircle",
+            _ => "Screenshot permission",
         }
-        None
     }
 
     pub fn title(&self, window: window::Id) -> &'static str {
@@ -402,6 +519,7 @@ impl Windows {
         };
         Subscription::batch([
             window::close_events().map(Msg::Closed),
+            window::resize_events().map(|(id, _)| Msg::Resized(id)),
             iced::system::theme_changes().map(Msg::OsTheme),
             keys,
             if self.pins.is_empty() {
@@ -413,11 +531,16 @@ impl Windows {
     }
 
     /// Test hook, `OPENCIRCLE_TEST_OPEN=settings,shot,settings,shot`: one step every
-    /// 1.5 s. `settings` = the tray's Settings item, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `shot` = save the open window as
+    /// 1.5 s. `settings` = the tray's Settings item, `permission` / `toast` = those windows, `max` = maximise or restore Settings, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `shot` = save the open window as
     /// `$OPENCIRCLE_TEST_DIR/<kind>-<step>.png`, `quit`.
     fn test_step(&mut self, step: usize, what: &str) -> Task<Msg> {
         match what {
             "settings" => self.open(Kind::Settings),
+            "permission" => self.open(Kind::Permission),
+            "toast" => self.toast("Copied: paste it into your AI chat"),
+            "max" => self
+                .id(Kind::Settings)
+                .map_or_else(Task::none, window::toggle_maximize),
             "shot" => {
                 // The newest pin first, else Settings, else Onboarding.
                 let open = (self.pins.last().map(|p| ("pin", p.id)))
@@ -486,30 +609,130 @@ fn apply(cfg: Config) {
     config::set_current(cfg);
 }
 
-fn window_settings(kind: Kind) -> window::Settings {
+// ---- the three ways to open a window (a test forbids any other) ----
+
+/// A normal window (Settings, Onboarding, the permission prompt): no OS title bar,
+/// our own header (`widgets::chrome`), centred, our logo as its icon.
+fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
     let (size, min_size, resizable) = match kind {
         Kind::Settings => (settings::WINDOW_SIZE, Some(Size::new(720.0, 520.0)), true),
         Kind::Onboarding => (onboarding::WINDOW_SIZE, None, false),
         Kind::Permission => (onboarding::PROMPT_SIZE, None, false),
     };
-    app_window(window::Settings {
+    let settings = window::Settings {
         size,
         min_size,
         resizable,
+        decorations: false,
         position: Position::Centered,
         ..window::Settings::default()
-    })
+    };
+    #[cfg(windows)]
+    let settings = window::Settings {
+        // Windows 11 rounds the corners (10 ignores it) and keeps the shadow.
+        platform_specific: window::settings::PlatformSpecific {
+            corner_preference: window::settings::platform::CornerPreference::Round,
+            undecorated_shadow: true,
+            ..Default::default()
+        },
+        ..settings
+    };
+    window::open(app_window(settings))
 }
 
-/// `settings` with our app id (Linux): the desktop ties the window to
-/// `APP_ID.desktop`, and GNOME asks for screenshot permission only for the app it
-/// sees in front.
-pub fn app_window(settings: window::Settings) -> window::Settings {
+/// A small popup (toast, pin, live controller, any future one): THE way to open one.
+/// Undecorated, always on top, no taskbar entry (Windows), transparent with a
+/// fully clear background (`clear_theme`), and cut to its content's rounded
+/// rectangle of at most `radius` logical px (`shape`): where the window has no
+/// per-pixel alpha (Windows, X11 without a compositor) nothing outside the shape
+/// exists, so no box shows behind a pill. Nothing in a floating window may paint
+/// outside its content (no shadow: use `widgets::solid_surface` / `layer_pill`).
+/// After a `window::resize` nothing is needed: the resize event reshapes it.
+pub fn floating(settings: window::Settings, radius: f32) -> (window::Id, Task<window::Id>) {
+    let settings = window::Settings {
+        decorations: false,
+        transparent: true,
+        level: Level::AlwaysOnTop,
+        exit_on_close_request: false,
+        ..settings
+    };
+    // ponytail: Linux cannot hide a window from the taskbar through iced.
+    #[cfg(windows)]
+    let settings = window::Settings {
+        platform_specific: window::settings::PlatformSpecific {
+            skip_taskbar: true,
+            ..Default::default()
+        },
+        ..settings
+    };
+    let (id, open) = window::open(app_window(settings));
+    FLOATING.lock().unwrap().push((id, radius));
+    (id, open.then(|id| reshape(id).map(move |_| id)))
+}
+
+/// A screen-sized window (the capture overlay, the live layer): no frame, not
+/// cut to a shape; each sets its own transparency and level.
+pub fn screen(settings: window::Settings) -> (window::Id, Task<window::Id>) {
+    window::open(app_window(settings))
+}
+
+/// Floating windows and their corner radius (see `floating`).
+static FLOATING: Mutex<Vec<(window::Id, f32)>> = Mutex::new(Vec::new());
+
+pub fn is_floating(id: window::Id) -> bool {
+    FLOATING.lock().unwrap().iter().any(|(f, _)| *f == id)
+}
+
+fn forget_floating(id: window::Id) {
+    FLOATING.lock().unwrap().retain(|(f, _)| *f != id);
+}
+
+/// The theme of floating windows: a fully clear background.
+pub fn clear_theme() -> iced::Theme {
+    static THEME: std::sync::LazyLock<iced::Theme> = std::sync::LazyLock::new(|| {
+        let mut palette = iced::Theme::Dark.palette();
+        palette.background = iced::Color::TRANSPARENT;
+        iced::Theme::custom("clear", palette)
+    });
+    THEME.clone()
+}
+
+/// Cuts the floating window `id` to its content's shape again (it was resized).
+/// Nothing for any other window.
+pub fn reshape(id: window::Id) -> Task<Msg> {
+    let radius = FLOATING
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(f, _)| *f == id)
+        .map(|(_, r)| *r);
+    let Some(radius) = radius else {
+        return Task::none();
+    };
+    window::run(id, move |w| {
+        if let Ok(handle) = w.window_handle()
+            && let Err(e) = shape::apply(handle.as_raw(), radius)
+        {
+            eprintln!("[opencircle] window shape: {e}");
+        }
+    })
+    .discard()
+}
+
+/// `settings` with our logo as the window icon (taskbar, Alt+Tab) and, on Linux,
+/// our app id: the desktop ties the window to `APP_ID.desktop`, and GNOME asks for
+/// screenshot permission only for the app it sees in front.
+fn app_window(settings: window::Settings) -> window::Settings {
+    let logo = chrome::logo();
+    let settings = window::Settings {
+        icon: window::icon::from_rgba(logo.rgba.clone(), logo.width, logo.height).ok(),
+        ..settings
+    };
     #[cfg(target_os = "linux")]
     return window::Settings {
         platform_specific: window::settings::PlatformSpecific {
             application_id: crate::capture::portal::APP_ID.into(),
-            ..Default::default()
+            ..settings.platform_specific
         },
         ..settings
     };
@@ -808,6 +1031,118 @@ mod tests {
         let _ = windows.update(Msg::Pin(id, PinMsg::Hover(false)));
         let still = shot::render(windows.view(id).unwrap(), 420, 260);
         assert!(calm != still);
+    }
+
+    #[test]
+    fn the_pin_bar_adds_the_shortcuts_to_its_icons() {
+        use crate::ui::widgets::tests_support::{assert_tips_add_something, shown};
+        let mut windows = Windows::default();
+        let _ = windows.pin(picture(300, 200), None, 1.0);
+        let id = windows.pins[0].id;
+        let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
+        let _ = windows.view(id).unwrap();
+        assert_eq!(shown(), ["Copy · Ctrl+C", "Save · Ctrl+S", "Close · Esc"]);
+        assert_tips_add_something("pin bar");
+    }
+
+    #[test]
+    fn normal_windows_draw_their_own_header() {
+        let mut windows = Windows::default();
+        let (id, other) = (window::Id::unique(), window::Id::unique());
+        windows.settings = Some((id, settings_state()));
+        let texts = shot::texts(windows.view(id).unwrap());
+        assert!(texts.iter().any(|t| t == "Settings"), "{texts:?}");
+        assert_eq!(windows.header_title(id), "Settings");
+        assert!(windows.mode(id).resizable && !windows.mode(id).maximised);
+        // Maximised once the OS says so; edges are gone, restore shows.
+        windows.chrome.insert(id, Chrome::default());
+        let _ = windows.update(Msg::Maximised(id, true));
+        assert!(windows.mode(id).maximised);
+        // A fixed-size window cannot be maximised.
+        windows.onboarding = Some((other, onboarding::State::open()));
+        assert!(!windows.mode(other).resizable);
+        assert_eq!(windows.header_title(other), "Welcome to OpenCircle");
+    }
+
+    #[test]
+    fn renders_the_header_in_both_themes() {
+        let mut windows = Windows::default();
+        let (id, other) = (window::Id::unique(), window::Id::unique());
+        windows.settings = Some((id, settings_state()));
+        windows.onboarding = Some((other, onboarding::State::open()));
+        for (name, choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
+            theme::apply(choice);
+            for (what, id, size) in [
+                ("settings", id, settings::WINDOW_SIZE),
+                ("onboarding", other, onboarding::WINDOW_SIZE),
+            ] {
+                let px = shot::save(
+                    &format!("{what}-header-{name}"),
+                    windows.view(id).unwrap(),
+                    size,
+                );
+                // The header is the window's own colour all the way across (no gray strip).
+                let w = size.width as usize;
+                let bg = theme::current().window;
+                let bg = [bg.r, bg.g, bg.b].map(|c| (c * 255.0).round() as u8);
+                let row = &px[(10 * w) * 4..(11 * w) * 4];
+                let plain = row.chunks(4).filter(|p| p[..3] == bg).count();
+                assert!(plain > w * 6 / 10, "{what} {name}: {plain} of {w}");
+            }
+        }
+        theme::apply(Theme::Dark);
+    }
+
+    #[test]
+    fn two_quick_presses_on_the_header_are_a_double_click() {
+        let t = Instant::now();
+        assert!(!is_double_click(None, t));
+        assert!(is_double_click(Some(t), t + Duration::from_millis(200)));
+        assert!(!is_double_click(Some(t), t + Duration::from_millis(900)));
+    }
+
+    #[test]
+    fn floating_windows_are_known_until_they_close() {
+        let (id, _open) = floating(window::Settings::default(), 20.0);
+        assert!(is_floating(id));
+        assert!(!is_floating(window::Id::unique()));
+        let mut windows = Windows::default();
+        let _ = windows.update(Msg::Closed(id));
+        assert!(!is_floating(id));
+    }
+
+    /// Every window is opened by `normal`, `floating` or `screen` here, so none can
+    /// show a box, a gray strip or the OS title bar by forgetting a setting.
+    #[test]
+    fn no_window_is_opened_outside_the_helpers() {
+        let call = concat!("window::", "open(");
+        let mut stray = Vec::new();
+        let mut dirs = vec![std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src"
+        ))];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    // The tests of this very file mention the call.
+                    let code = text.split("#[cfg(test)]").next().unwrap();
+                    let n = code.matches(call).count();
+                    if path.ends_with("ui/windows.rs") {
+                        assert_eq!(n, 3, "normal, floating and screen open one each");
+                    } else if n > 0 {
+                        stray.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+        assert!(
+            stray.is_empty(),
+            "open windows through windows::floating / screen: {stray:?}"
+        );
     }
 
     #[test]

@@ -518,6 +518,7 @@ mod tests {
     use super::super::settings::tests::{MemoryStore, tmp};
     use super::*;
     use crate::secrets::Secret;
+    use crate::ui::widgets::tests_support::assert_tips_add_something;
     use crate::ui::widgets::{TIPS, shot};
 
     const FAKE_KEY: &str = "sk-ant-FAKE-9876543210";
@@ -705,6 +706,7 @@ mod tests {
                     view(&s),
                     WINDOW_SIZE,
                 );
+                assert_tips_add_something(&format!("onboarding {step:?}"));
                 let tips = TIPS.with(|t| t.borrow().clone());
                 let mut unique = tips.clone();
                 unique.sort();

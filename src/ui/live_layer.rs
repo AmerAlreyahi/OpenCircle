@@ -13,7 +13,7 @@ use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Task, Vector, task};
 
 use super::live_controller::{self, Controller, Out};
-use super::{background, border, theme, widgets};
+use super::{background, border, theme, widgets, windows};
 use crate::capture;
 use crate::config;
 use crate::live::{self, LayerError};
@@ -255,16 +255,15 @@ impl Live {
             x + width - size.width - CONTROLLER_MARGIN,
             y + CONTROLLER_MARGIN,
         );
-        let (id, open) = window::open(window::Settings {
-            position: Position::Specific(self.ctl_at),
-            size,
-            decorations: false,
-            resizable: false,
-            transparent: cfg!(not(windows)), // Windows keys out a colour
-            level: Level::AlwaysOnTop,
-            exit_on_close_request: false,
-            ..window::Settings::default()
-        });
+        let (id, open) = windows::floating(
+            window::Settings {
+                position: Position::Specific(self.ctl_at),
+                size,
+                resizable: false,
+                ..window::Settings::default()
+            },
+            widgets::SURFACE_RADIUS,
+        );
         self.controller = Some(id);
         let prepare = window::run(id, |w| match w.window_handle() {
             Ok(handle) => live::prepare_controller(handle.as_raw()),
@@ -340,7 +339,7 @@ impl Live {
     pub fn update(&mut self, msg: Msg) -> Outcome {
         match msg {
             Msg::Monitor(Ok(monitor)) if matches!(self.phase, Phase::Starting) => {
-                let (window, open) = window::open(layer_window(monitor));
+                let (window, open) = windows::screen(layer_window(monitor));
                 self.phase = Phase::Open { window, monitor };
                 let prepare = window::run(window, |w| match w.window_handle() {
                     Ok(handle) => live::prepare_layer(handle.as_raw()),
