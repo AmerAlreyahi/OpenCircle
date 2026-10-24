@@ -128,7 +128,10 @@ production systems.
   lookup (AcoustID/MusicBrainz); audio never leaves the PC; history off by default.
 - Results sheet (owner, 2026-10-24): explore a slide-up sheet showing Google's own
   page (Lens / AI Mode) in the system web view (WebView2 / WebKitGTK), loaded only
-  while open; no scraping, no copying Google's UI.
+  while open; no scraping, no copying Google's UI. Placement (owner, 2026-10-24):
+  on landscape screens it slides in from the side AWAY from the selection (auto;
+  pinnable left/right), full height, resizable; bottom sheet only on portrait or
+  narrow screens. All result panels follow the same rule.
 - Translate default target (owner, 2026-10-23): Arabic, changeable in settings.
 - No-key AI (owner, 2026-10-24): until a key is set, Ask AI opens the question
   (prompt + the selection's text) in Google Search AI Mode in the user's own
