@@ -142,8 +142,10 @@ production systems.
   only button, truncated text, shortcut hint), never repeating the visible text.
 - No boxes behind floating UI (owner, 2026-10-24, "never ever"): every popup
   window (toast, pin, controller, prompt, card) goes through the one shared
-  floating-window helper: clear background where transparency works, else the
-  window is shaped to the rounded content. A test forbids creating windows
+  floating-window helper `windows::floating` (our CPU renderer has no alpha on
+  any OS): Windows SetWindowRgn / X11 SHAPE cut the window to the rounded shape;
+  Wayland can't cut a window, so popups there are square (prefer drawing them
+  inside the overlay on Wayland). A test forbids creating windows
   outside the helpers. Verify popups over white AND dark pages on both VMs.
 - Window capture (owner, 2026-10-24, like iTop): in the default snip mode, hovering
   outlines the window (or UI element) under the cursor live; click captures it,
