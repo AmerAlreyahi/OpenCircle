@@ -1,6 +1,7 @@
-//! The windows on screen, for snip's Window mode: outer rectangles (with the
-//! frame) in physical desktop pixels, topmost first. Read before the overlay
-//! shows, while it is hidden (it would be the topmost window).
+//! The windows on screen, for snip (hover a window, click it; Window mode): outer
+//! rectangles (with the frame) in physical desktop pixels, topmost first, with
+//! their titles; none of our own. Read before the overlay shows, while it is
+//! hidden (it would be the topmost window).
 //!
 //! Windows: `EnumWindows` (z-order) + the DWM extended frame bounds (no invisible
 //! resize border). X11: `_NET_CLIENT_LIST_STACKING` + geometry + `_NET_FRAME_EXTENTS`.
@@ -9,8 +10,17 @@
 /// x, y, width, height: physical desktop px.
 pub type WinRect = (i32, i32, u32, u32);
 
+/// One window on screen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Win {
+    pub rect: WinRect,
+    pub title: String,
+    /// Windows: its handle (for UI Automation); X11: its id.
+    pub handle: isize,
+}
+
 /// Every visible top-level window, topmost first; empty where unknown.
-pub fn list() -> Vec<WinRect> {
+pub fn list() -> Vec<Win> {
     platform().unwrap_or_else(|e| {
         eprintln!("[opencircle] window list unavailable: {e}");
         Vec::new()
@@ -46,7 +56,7 @@ pub fn activate(window: Option<isize>) {
 }
 
 #[cfg(target_os = "linux")]
-fn platform() -> Result<Vec<WinRect>, String> {
+fn platform() -> Result<Vec<Win>, String> {
     use xcb::x;
 
     if super::wayland_session() || std::env::var_os("DISPLAY").is_none() {
@@ -71,6 +81,11 @@ fn platform() -> Result<Vec<WinRect>, String> {
         atom("_NET_CLIENT_LIST_STACKING").map_err(err)?,
         atom("_NET_FRAME_EXTENTS").map_err(err)?,
     );
+    let (name, utf8, pid) = (
+        atom("_NET_WM_NAME").map_err(err)?,
+        atom("UTF8_STRING").map_err(err)?,
+        atom("_NET_WM_PID").map_err(err)?,
+    );
     if stacking == x::ATOM_NONE {
         return Ok(Vec::new()); // no EWMH window manager
     }
@@ -94,6 +109,20 @@ fn platform() -> Result<Vec<WinRect>, String> {
         if !viewable {
             continue; // minimised or another desktop
         }
+        let ours = pid != x::ATOM_NONE
+            && property(window, pid, x::ATOM_CARDINAL, 1)
+                .is_ok_and(|p| p.value::<u32>().first() == Some(&std::process::id()));
+        if ours {
+            continue;
+        }
+        let title = match property(window, name, utf8, 1024) {
+            Ok(t) if name != x::ATOM_NONE && !t.value::<u8>().is_empty() => {
+                String::from_utf8_lossy(t.value::<u8>()).into_owned()
+            }
+            _ => property(window, x::ATOM_WM_NAME, x::ATOM_STRING, 1024)
+                .map(|t| String::from_utf8_lossy(t.value::<u8>()).into_owned())
+                .unwrap_or_default(),
+        };
         let Ok(geometry) = conn.wait_for_reply(conn.send_request(&x::GetGeometry {
             drawable: x::Drawable::Window(window),
         })) else {
@@ -115,36 +144,44 @@ fn platform() -> Result<Vec<WinRect>, String> {
             }
             _ => [0; 4],
         };
-        out.push((
+        let rect = (
             i32::from(at.dst_x()) - l as i32,
             i32::from(at.dst_y()) - t as i32,
             u32::from(geometry.width()) + l + r,
             u32::from(geometry.height()) + t + b,
-        ));
+        );
+        out.push(Win {
+            rect,
+            title,
+            handle: xcb::Xid::resource_id(&window) as isize,
+        });
     }
     Ok(out)
 }
 
 #[cfg(windows)]
-fn platform() -> Result<Vec<WinRect>, String> {
+fn platform() -> Result<Vec<Win>, String> {
     use std::ffi::c_void;
     use windows::Win32::Foundation::{HWND, LPARAM, RECT};
     use windows::Win32::Graphics::Dwm::{
         DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GWL_EXSTYLE, GetWindowLongW, GetWindowRect, IsIconic, IsWindowVisible,
-        WS_EX_TOOLWINDOW,
+        EnumWindows, GWL_EXSTYLE, GetWindowLongW, GetWindowRect, GetWindowTextW,
+        GetWindowThreadProcessId, IsIconic, IsWindowVisible, WS_EX_TOOLWINDOW,
     };
     use windows::core::BOOL;
 
     unsafe extern "system" fn each(hwnd: HWND, out: LPARAM) -> BOOL {
         // SAFETY: `out` is the `&mut Vec` passed to EnumWindows below, alive for the call.
-        let out = unsafe { &mut *(out.0 as *mut Vec<WinRect>) };
+        let out = unsafe { &mut *(out.0 as *mut Vec<Win>) };
         // SAFETY: plain queries on a window handle EnumWindows just gave us.
         unsafe {
             let tool = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0;
-            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || tool {
+            let mut pid = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            let ours = pid == std::process::id();
+            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || tool || ours {
                 return BOOL(1);
             }
             // Cloaked: on another virtual desktop, or a suspended store app.
@@ -166,18 +203,24 @@ fn platform() -> Result<Vec<WinRect>, String> {
             )
             .or_else(|_| GetWindowRect(hwnd, &mut r));
             if !hidden && bounds.is_ok() && r.right > r.left && r.bottom > r.top {
-                out.push((
-                    r.left,
-                    r.top,
-                    (r.right - r.left) as u32,
-                    (r.bottom - r.top) as u32,
-                ));
+                let mut title = [0u16; 256];
+                let n = GetWindowTextW(hwnd, &mut title).max(0) as usize;
+                out.push(Win {
+                    rect: (
+                        r.left,
+                        r.top,
+                        (r.right - r.left) as u32,
+                        (r.bottom - r.top) as u32,
+                    ),
+                    title: String::from_utf16_lossy(&title[..n]),
+                    handle: hwnd.0 as isize,
+                });
             }
         }
         BOOL(1)
     }
 
-    let mut out: Vec<WinRect> = Vec::new();
+    let mut out: Vec<Win> = Vec::new();
     // SAFETY: `each` only uses `out` during this call.
     unsafe { EnumWindows(Some(each), LPARAM((&raw mut out) as isize)) }
         .map_err(|e| e.to_string())?;
@@ -185,6 +228,6 @@ fn platform() -> Result<Vec<WinRect>, String> {
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-fn platform() -> Result<Vec<WinRect>, String> {
+fn platform() -> Result<Vec<Win>, String> {
     Ok(Vec::new())
 }

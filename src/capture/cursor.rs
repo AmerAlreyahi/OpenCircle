@@ -210,6 +210,18 @@ mod tests {
         }
     }
 
+    /// `env -u WAYLAND_DISPLAY xvfb-run -a cargo test x11_pointer -- --ignored`
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "needs an X display (xvfb-run)"]
+    fn x11_pointer_is_drawn_into_a_real_capture() {
+        let mut f = crate::capture::monitor_under_cursor().unwrap();
+        let before = f.rgba.clone();
+        draw(&mut f);
+        let changed = (f.rgba.chunks(4).zip(before.chunks(4))).filter(|(a, b)| a != b);
+        assert!(changed.count() > 20, "no pointer drawn");
+    }
+
     #[test]
     fn the_cursor_is_clipped_to_the_frame() {
         assert_eq!(overlap(10, 10, (2, 3), 4, 4), Some([0, 0, 4, 4]));

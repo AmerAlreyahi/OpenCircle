@@ -84,7 +84,7 @@ impl Kind {
 
     fn hint(self) -> &'static str {
         [
-            "Drag or circle an area · Shift = no snapping · Esc to close",
+            "Click a window or a part of it · scroll = bigger / smaller · or drag an area",
             "Click a window · Esc to close",
             "",
             "Drag over the scrolling area · Esc to close",
@@ -117,8 +117,8 @@ pub enum Msg {
     Edit,
     /// Toast `.0` was shown long enough.
     ToastDone(u32),
-    /// The controls of the app the user was in (logical px), for opening `.0`.
-    Controls(u32, Vec<Rectangle>),
+    /// Controls of one window (logical px), for opening `.0`.
+    Controls(u32, Vec<Pick>),
     /// Shift is held: no snapping.
     Shift(bool),
     /// The Recent strip's pictures, newest first.
@@ -147,6 +147,39 @@ pub fn route(after: SnipAfter) -> (bool, bool) {
     }
 }
 
+/// Something a click can capture: a window, a control in one, or the screen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pick {
+    /// Logical px.
+    pub rect: Rectangle,
+    /// What the outline's label says ("Window: Notepad", "Element: button: Save").
+    pub label: String,
+    /// The window it is, or belongs to (its handle / id).
+    pub window: isize,
+}
+
+impl Pick {
+    pub fn window(rect: Rectangle, title: &str, handle: isize) -> Self {
+        let label = match title.trim() {
+            "" => "Window".to_string(),
+            t => format!("Window: {t}"),
+        };
+        Pick {
+            rect,
+            label,
+            window: handle,
+        }
+    }
+
+    pub fn control(rect: Rectangle, what: &str, window: isize) -> Self {
+        Pick {
+            rect,
+            label: format!("Element: {what}"),
+            window,
+        }
+    }
+}
+
 /// The "Copied" toast: the capture, for its Edit button.
 pub struct Toast {
     id: u32,
@@ -159,9 +192,13 @@ pub struct Toast {
 pub struct Snip {
     pub kind: Kind,
     /// Windows on this monitor (logical px, clipped to it), topmost first.
-    windows: Vec<Rectangle>,
-    /// The controls of the app the user was in (logical px), arriving later.
-    controls: Vec<Rectangle>,
+    windows: Vec<Pick>,
+    /// Controls in those windows (Windows: UI Automation), arriving later.
+    controls: Vec<Pick>,
+    screen: Size,
+    /// The wheel's walk from the smallest target under the pointer (the key)
+    /// up to its window and the screen: how many steps up.
+    walk: (Option<Rectangle>, usize),
     /// Auto-scroll works here (not on Wayland: no synthetic input).
     scrolls: bool,
     /// The running scrolling capture.
@@ -210,20 +247,13 @@ pub const PILL: Size = Size::new(500.0, 68.0);
 
 impl Snip {
     /// `windows`: logical px of this monitor, topmost first (empty = Window mode hidden).
-    pub fn new(
-        windows: Vec<Rectangle>,
-        screen: Size,
-        scrolls: bool,
-        foreground: Option<isize>,
-    ) -> Self {
-        let whole = Rectangle::with_size(screen);
+    pub fn new(windows: Vec<Pick>, screen: Size, scrolls: bool, foreground: Option<isize>) -> Self {
         Snip {
             kind: Kind::Region,
-            windows: windows
-                .iter()
-                .filter_map(|w| w.intersection(&whole))
-                .collect(),
+            windows: clip(windows, screen),
             controls: Vec::new(),
+            screen,
+            walk: (None, 0),
             scrolls,
             scroll: None,
             foreground,
@@ -251,7 +281,86 @@ impl Snip {
 
     /// The topmost window under `p`.
     pub fn window_at(&self, p: Point) -> Option<Rectangle> {
-        self.windows.iter().copied().find(|w| w.contains(p))
+        self.windows
+            .iter()
+            .find(|w| w.rect.contains(p))
+            .map(|w| w.rect)
+    }
+
+    /// The windows a click may pick, topmost first, at most `n`: their
+    /// controls are worth reading.
+    pub fn window_handles(&self, n: usize) -> Vec<isize> {
+        self.windows.iter().take(n).map(|w| w.window).collect()
+    }
+
+    /// What a click at `p` can capture, smallest first: the controls of the
+    /// topmost window there that contain `p`, that window, the screen. Empty
+    /// without a window list (Wayland: free drags only).
+    pub fn chain(&self, p: Point) -> Vec<Pick> {
+        if self.windows.is_empty() {
+            return Vec::new();
+        }
+        let top = self.windows.iter().find(|w| w.rect.contains(p));
+        let mut chain: Vec<Pick> = match top {
+            Some(w) => (self.controls.iter())
+                .filter(|c| c.window == w.window && c.rect.contains(p))
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        let area = |t: &Pick| t.rect.width * t.rect.height;
+        chain.sort_by(|a, b| area(a).total_cmp(&area(b)));
+        chain.extend(top.cloned());
+        chain.push(Pick {
+            rect: Rectangle::with_size(self.screen),
+            label: "Screen".into(),
+            window: 0,
+        });
+        // A control as big as its parent (a window's root pane) is one step, not
+        // two, named as the bigger one ("Window: …").
+        let mut steps: Vec<Pick> = Vec::new();
+        for t in chain {
+            if steps.last().is_some_and(|l| l.rect == t.rect) {
+                steps.pop();
+            }
+            steps.push(t);
+        }
+        steps
+    }
+
+    /// The pointer moved (logical px): the outline starts again from the
+    /// smallest target there when that changed.
+    pub fn hover(&mut self, p: Point) {
+        self.pointer = Some(p);
+        let first = self.chain(p).first().map(|t| t.rect);
+        if first != self.walk.0 {
+            self.walk = (first, 0);
+        }
+    }
+
+    /// The wheel: away from the user (`notches` > 0) = the next bigger target,
+    /// towards = back to a smaller one.
+    pub fn walk(&mut self, notches: f32) {
+        let Some(p) = self.pointer else { return };
+        let last = self.chain(p).len().saturating_sub(1);
+        let level = self.walk.1;
+        self.walk.1 = if notches > 0.0 {
+            (level + 1).min(last)
+        } else if notches < 0.0 {
+            level.saturating_sub(1)
+        } else {
+            level
+        };
+    }
+
+    /// What a click would capture now (Region mode), outlined while hovering.
+    pub fn outlined(&self) -> Option<Pick> {
+        if self.kind != Kind::Region {
+            return None;
+        }
+        let chain = self.chain(self.pointer?);
+        let at = self.walk.1.min(chain.len().checked_sub(1)?);
+        chain.into_iter().nth(at)
     }
 
     /// `p` (logical px) on the nearest window or control edge, per axis, while
@@ -261,19 +370,17 @@ impl Snip {
         if self.shift || !matches!(self.kind, Kind::Region | Kind::Scrolling) {
             return p;
         }
-        snap(p, self.windows.iter().chain(&self.controls), SNAP)
+        let rects = self.windows.iter().chain(&self.controls).map(|t| &t.rect);
+        snap(p, rects, SNAP)
     }
 
     pub fn set_shift(&mut self, held: bool) {
         self.shift = held;
     }
 
-    /// The controls arrived (clipped to this screen, like the windows).
-    pub fn set_controls(&mut self, controls: Vec<Rectangle>, screen: Size) {
-        let whole = Rectangle::with_size(screen);
-        self.controls = (controls.iter())
-            .filter_map(|c| c.intersection(&whole))
-            .collect();
+    /// Controls of a window arrived (clipped to this screen, like the windows).
+    pub fn add_controls(&mut self, controls: Vec<Pick>) {
+        self.controls.extend(clip(controls, self.screen));
     }
 
     /// Starts in `kind` if this screen offers it (else Region, no Window list on
@@ -297,7 +404,8 @@ impl Snip {
     /// click), `at` = where it ended. A drag in Window mode still takes its area.
     pub fn pick(&self, selection: Option<Rectangle>, at: Point, screen: Size) -> Option<Next> {
         match self.kind {
-            Kind::Region => selection.map(Next::Edit),
+            // A click (no drag) takes what is outlined: a control, a window, the screen.
+            Kind::Region => (selection.or_else(|| self.outlined().map(|t| t.rect))).map(Next::Edit),
             Kind::Window => selection.or_else(|| self.window_at(at)).map(Next::Edit),
             Kind::Full => Some(Next::Edit(Rectangle::with_size(screen))),
             Kind::Scrolling => selection.map(Next::Scroll),
@@ -402,7 +510,12 @@ impl Snip {
             .align_y(Center);
             top = top.push(widgets::surface(strip));
         }
-        let hint = self.kind.hint();
+        let hint = match self.kind {
+            Kind::Region if self.windows.is_empty() => {
+                "Drag or circle an area (no window picking here) · Esc to close"
+            }
+            kind => kind.hint(),
+        };
         if !hint.is_empty() {
             top = top.push(widgets::pill(hint));
         }
@@ -437,9 +550,15 @@ impl Snip {
         Some(container(widgets::surface(bar)).center(Fill).into())
     }
 
-    /// The loupe beside the pointer while an area is picked by hand: `frame` is
-    /// the frozen frame, `scale` physical px per logical px.
-    pub fn loupe<'a>(&self, frame: &'a image::Handle, scale: f32) -> Option<Element<'a, Msg>> {
+    /// While an area is picked by hand: the loupe beside the pointer and, unless
+    /// a drag is under way, the outline of what a click would capture, with its
+    /// label and size. `frame` is the frozen frame, `scale` physical px per logical px.
+    pub fn guides<'a>(
+        &self,
+        frame: &'a image::Handle,
+        scale: f32,
+        dragging: bool,
+    ) -> Option<Element<'a, Msg>> {
         let image::Handle::Rgba {
             width,
             height,
@@ -450,12 +569,18 @@ impl Snip {
             return None;
         };
         let at = self.pointer.filter(|_| self.kind.picks())?;
+        let outline = self.outlined().filter(|_| !dragging).map(|t| {
+            let px = |v: f32| (v * scale).round() as u32;
+            let size = format!("{} × {} px", px(t.rect.width), px(t.rect.height));
+            (t.rect, format!("{} · {size}", t.label))
+        });
         let loupe = Loupe {
             pixels,
             width: *width,
             height: *height,
             scale,
             at,
+            outline,
         };
         Some(canvas(loupe).width(Fill).height(Fill).into())
     }
@@ -463,6 +588,19 @@ impl Snip {
 
 /// The editor's glyph (lucide "pencil", as the action bar's Edit).
 const EDIT: char = '\u{e1f8}';
+
+/// `targets` cut to the screen; those off it go.
+fn clip(targets: Vec<Pick>, screen: Size) -> Vec<Pick> {
+    let whole = Rectangle::with_size(screen);
+    (targets.into_iter())
+        .filter_map(|t| {
+            Some(Pick {
+                rect: t.rect.intersection(&whole)?,
+                ..t
+            })
+        })
+        .collect()
+}
 
 /// `p` moved onto the nearest edge of the rectangles it is in or near, per axis,
 /// if one is within `reach`.
@@ -525,6 +663,8 @@ struct Loupe<'a> {
     scale: f32,
     /// The pointer, logical px.
     at: Point,
+    /// What a click would capture, and its label.
+    outline: Option<(Rectangle, String)>,
 }
 
 impl canvas::Program<Msg> for Loupe<'_> {
@@ -539,6 +679,38 @@ impl canvas::Program<Msg> for Loupe<'_> {
         _cursor: Cursor,
     ) -> Vec<Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let palette = theme::current();
+        // ponytail: square corners; Windows 11 rounds its windows by 8 px (DWM
+        // corner preference) and the outline could follow.
+        if let Some((r, label)) = &self.outline {
+            let border = canvas::Path::rectangle(
+                Point::new(r.x + 1.0, r.y + 1.0),
+                Size::new((r.width - 2.0).max(0.0), (r.height - 2.0).max(0.0)),
+            );
+            frame.stroke(
+                &border,
+                Stroke::default()
+                    .with_color(theme::STROKE_START)
+                    .with_width(2.0),
+            );
+            // The label above the outline, or inside it at the top of the screen.
+            let width = 7.2 * label.chars().count() as f32 + 16.0;
+            let y = if r.y >= 30.0 { r.y - 28.0 } else { r.y + 4.0 };
+            let x = r.x.clamp(0.0, (bounds.width - width).max(0.0));
+            let tag = canvas::Path::rounded_rectangle(
+                Point::new(x, y),
+                Size::new(width, 24.0),
+                6.0.into(),
+            );
+            frame.fill(&tag, palette.panel_solid);
+            frame.fill_text(canvas::Text {
+                content: label.clone(),
+                position: Point::new(x + 8.0, y + 5.0),
+                color: palette.text,
+                size: 12.0.into(),
+                ..canvas::Text::default()
+            });
+        }
         let centre = (
             (self.at.x * self.scale).floor() as i32,
             (self.at.y * self.scale).floor() as i32,
@@ -559,7 +731,6 @@ impl canvas::Program<Msg> for Loupe<'_> {
         } else {
             self.at.y - gap - side - label
         };
-        let palette = theme::current();
         let body = canvas::Path::rectangle(
             Point::new(x - 2.0, y - 2.0),
             Size::new(side + 4.0, side + label + 4.0),
@@ -856,19 +1027,28 @@ mod tests {
         Rectangle::new(Point::new(x, y), Size::new(w, h))
     }
 
+    /// Windows `rects`, topmost first, with handles 1, 2, 3…
+    fn wins(rects: &[Rectangle]) -> Vec<Pick> {
+        (rects.iter().zip(1..))
+            .map(|(r, h)| Pick::window(*r, &format!("App {h}"), h))
+            .collect()
+    }
+
     #[test]
     fn each_mode_picks_its_area() {
         let front = rect(100.0, 100.0, 400.0, 300.0);
         let back = rect(0.0, 0.0, 1200.0, 900.0);
         let off = rect(2000.0, 0.0, 500.0, 500.0); // another monitor
-        let mut s = Snip::new(vec![front, back, off], SCREEN, true, None);
+        let mut s = Snip::new(wins(&[front, back, off]), SCREEN, true, None);
         let area = rect(10.0, 10.0, 50.0, 50.0);
         let drag = Some(area);
         let click = Point::new(150.0, 150.0);
 
         assert_eq!(s.kind, Kind::Region);
         assert_eq!(s.pick(drag, click, SCREEN), Some(Next::Edit(area)));
-        assert_eq!(s.pick(None, click, SCREEN), None, "a click selects nothing");
+        // A click takes the window under it (no Window mode needed).
+        s.hover(click);
+        assert_eq!(s.pick(None, click, SCREEN), Some(Next::Edit(front)));
 
         assert_eq!(s.switch(Kind::Window, SCREEN), None);
         // The topmost window under the click; a click on the desktop picks nothing.
@@ -911,7 +1091,7 @@ mod tests {
         assert_eq!(by_key("Alt+PrintScreen"), Kind::Window);
         assert_eq!(by_key("Ctrl+PrintScreen"), Kind::Full);
 
-        let mut s = Snip::new(windows, SCREEN, true, None);
+        let mut s = Snip::new(wins(&windows), SCREEN, true, None);
         assert_eq!(s.start(Kind::Window, SCREEN), None, "waits for a click");
         assert_eq!(s.kind, Kind::Window);
         // Full opens the editor on the whole screen at once.
@@ -926,7 +1106,7 @@ mod tests {
 
     #[test]
     fn modes_without_support_are_hidden() {
-        let all = Snip::new(vec![rect(0.0, 0.0, 10.0, 10.0)], SCREEN, true, None);
+        let all = Snip::new(wins(&[rect(0.0, 0.0, 10.0, 10.0)]), SCREEN, true, None);
         assert_eq!(
             all.kinds(),
             [Kind::Region, Kind::Window, Kind::Full, Kind::Scrolling]
@@ -935,7 +1115,7 @@ mod tests {
         let wayland = Snip::new(Vec::new(), SCREEN, false, None);
         assert_eq!(wayland.kinds(), [Kind::Region, Kind::Full]);
         // Windows only on other monitors count as none.
-        let elsewhere = Snip::new(vec![rect(3000.0, 0.0, 10.0, 10.0)], SCREEN, true, None);
+        let elsewhere = Snip::new(wins(&[rect(3000.0, 0.0, 10.0, 10.0)]), SCREEN, true, None);
         assert!(!elsewhere.kinds().contains(&Kind::Window));
     }
 
@@ -1136,8 +1316,8 @@ mod tests {
         assert_eq!(snap(far, &rects, SNAP), far);
 
         // Shift turns it off; only dragged areas snap (Window mode clicks don't).
-        let mut s = Snip::new(vec![window], SCREEN, true, None);
-        s.set_controls(vec![button], SCREEN);
+        let mut s = Snip::new(wins(&[window]), SCREEN, true, None);
+        s.add_controls(vec![Pick::control(button, "button", 1)]);
         let p = Point::new(204.0, 147.0);
         assert_eq!(s.snap(p), Point::new(200.0, 150.0));
         s.set_shift(true);
@@ -1197,11 +1377,11 @@ mod tests {
         // It shows while picking an area by hand, not in Full.
         let handle = image::Handle::from_rgba(4, 3, frame);
         let mut s = Snip::new(Vec::new(), SCREEN, true, None);
-        assert!(s.loupe(&handle, 1.0).is_none(), "no pointer yet");
+        assert!(s.guides(&handle, 1.0, false).is_none(), "no pointer yet");
         s.pointer = Some(Point::new(2.0, 1.0));
-        assert!(s.loupe(&handle, 1.0).is_some());
+        assert!(s.guides(&handle, 1.0, false).is_some());
         let _ = s.switch(Kind::Full, SCREEN);
-        assert!(s.loupe(&handle, 1.0).is_none());
+        assert!(s.guides(&handle, 1.0, false).is_none());
     }
 
     #[test]
@@ -1241,7 +1421,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(50));
         assert_eq!(history_dir().map(|d| list(&d).len()), before);
         // The strip is empty without history; with pictures it shows them.
-        let mut s = Snip::new(vec![rect(0.0, 0.0, 10.0, 10.0)], SCREEN, true, None);
+        let mut s = Snip::new(wins(&[rect(0.0, 0.0, 10.0, 10.0)]), SCREEN, true, None);
         let texts = widgets::shot::texts(s.view());
         assert!(!texts.iter().any(|t| t == "Recent"), "{texts:?}");
         let picture = image::Handle::from_rgba(2, 1, vec![200; 8]);
@@ -1249,5 +1429,122 @@ mod tests {
         let texts = widgets::shot::texts(s.view());
         assert!(texts.iter().any(|t| t == "Recent"), "{texts:?}");
         widgets::shot::save("snip-switch", s.view(), Size::new(1280.0, 260.0));
+    }
+
+    /// A browser at the back, an editor in front with a toolbar and a button
+    /// in the toolbar; the back window's controls hide behind the front one.
+    fn desk() -> Snip {
+        let editor = rect(100.0, 100.0, 800.0, 600.0);
+        let browser = rect(0.0, 0.0, 1600.0, 1000.0);
+        let mut s = Snip::new(wins(&[editor, browser]), SCREEN, true, None);
+        s.add_controls(vec![
+            Pick::control(rect(100.0, 130.0, 800.0, 40.0), "tool bar", 1),
+            Pick::control(rect(110.0, 135.0, 30.0, 30.0), "button: Save", 1),
+            Pick::control(editor, "pane", 1), // the root pane: as big as the window
+            Pick::control(rect(120.0, 140.0, 300.0, 300.0), "document", 2), // behind
+        ]);
+        s
+    }
+
+    #[test]
+    fn hovering_outlines_the_smallest_thing_under_the_pointer() {
+        let mut s = desk();
+        let labels =
+            |s: &Snip, p| -> Vec<String> { s.chain(p).into_iter().map(|t| t.label).collect() };
+        // Over the button: button, toolbar, the editor window (its root pane is
+        // the same rect: one step), the screen. Not the browser's document behind.
+        assert_eq!(
+            labels(&s, Point::new(120.0, 150.0)),
+            [
+                "Element: button: Save",
+                "Element: tool bar",
+                "Window: App 1",
+                "Screen"
+            ]
+        );
+        // On the browser where nothing covers it: the browser, then the screen.
+        assert_eq!(
+            labels(&s, Point::new(1200.0, 900.0)),
+            ["Window: App 2", "Screen"]
+        );
+        // On the desktop: only the screen.
+        assert_eq!(labels(&s, Point::new(1800.0, 1050.0)), ["Screen"]);
+        s.hover(Point::new(120.0, 150.0));
+        let outlined = s.outlined().unwrap();
+        assert_eq!(outlined.rect, rect(110.0, 135.0, 30.0, 30.0));
+        let frame = image::Handle::from_rgba(4, 4, vec![90; 64]);
+        let guides = s.guides(&frame, 1.0, false).unwrap();
+        widgets::shot::save("snip-outline", guides, SCREEN);
+        // A click there captures the button exactly.
+        let at = Point::new(120.0, 150.0);
+        assert_eq!(s.pick(None, at, SCREEN), Some(Next::Edit(outlined.rect)));
+        // Only Region mode outlines.
+        let _ = s.switch(Kind::Scrolling, SCREEN);
+        assert!(s.outlined().is_none());
+        // Wayland (no window list): nothing to outline, a click takes nothing.
+        let mut w = Snip::new(Vec::new(), SCREEN, false, None);
+        w.hover(at);
+        assert!(w.outlined().is_none() && w.pick(None, at, SCREEN).is_none());
+        let texts = widgets::shot::texts(w.view());
+        assert!(
+            texts.iter().any(|t| t.contains("no window picking")),
+            "{texts:?}"
+        );
+    }
+
+    #[test]
+    fn the_wheel_walks_element_parent_window_screen_and_back() {
+        let mut s = desk();
+        let at = Point::new(120.0, 150.0);
+        s.hover(at);
+        let label = |s: &Snip| s.outlined().unwrap().label;
+        assert_eq!(label(&s), "Element: button: Save");
+        s.walk(1.0);
+        assert_eq!(label(&s), "Element: tool bar");
+        s.walk(1.0);
+        assert_eq!(label(&s), "Window: App 1");
+        s.walk(1.0);
+        assert_eq!(label(&s), "Screen");
+        s.walk(1.0);
+        assert_eq!(label(&s), "Screen", "stops at the screen");
+        assert_eq!(
+            s.pick(None, at, SCREEN),
+            Some(Next::Edit(Rectangle::with_size(SCREEN)))
+        );
+        s.walk(-1.0);
+        s.walk(-1.0);
+        assert_eq!(label(&s), "Element: tool bar");
+        // Moving within the same button keeps the level; onto something else resets it.
+        s.hover(Point::new(125.0, 152.0));
+        assert_eq!(label(&s), "Element: tool bar");
+        s.hover(Point::new(600.0, 500.0));
+        assert_eq!(label(&s), "Window: App 1");
+        s.walk(-5.0);
+        assert_eq!(label(&s), "Window: App 1", "stops at the smallest");
+    }
+
+    #[test]
+    fn outlines_and_their_size_label_hold_at_161_dpi() {
+        // The Windows VM: 161 DPI = 1.677 physical px per logical px. A window
+        // at physical (335, 168) 1342 x 1006 on a monitor at the origin.
+        let scale = 161.0 / 96.0;
+        let r = to_logical((335, 168, 1342, 1006), (0, 0), scale);
+        let mut s = Snip::new(vec![Pick::window(r, "Notepad", 7)], SCREEN, true, None);
+        let inside = Point::new(r.x + 10.0, r.y + 10.0);
+        s.hover(inside);
+        assert_eq!(s.outlined().unwrap().label, "Window: Notepad");
+        // The crop of the outline is the window's own pixels, give or take one.
+        let picked = s.pick(None, inside, SCREEN);
+        let Some(Next::Edit(area)) = picked else {
+            panic!("{picked:?}")
+        };
+        let [x0, y0, x1, y1] = crate::actions::crop_bounds(3220, 1812, scale, area).unwrap();
+        assert!(x0.abs_diff(335) <= 1 && y0.abs_diff(168) <= 1, "{x0} {y0}");
+        assert!((x1 - x0).abs_diff(1342) <= 1 && (y1 - y0).abs_diff(1006) <= 1);
+        // And the label says the physical size.
+        let handle = image::Handle::from_rgba(4, 4, vec![0; 64]);
+        assert!(s.guides(&handle, scale, false).is_some());
+        let px = |v: f32| (v * scale).round() as u32;
+        assert_eq!((px(area.width), px(area.height)), (1342, 1006));
     }
 }

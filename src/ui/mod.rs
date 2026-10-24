@@ -60,6 +60,9 @@ const ASK_MARGIN: f32 = 24.0;
 /// on a dialog; its late answer is dropped).
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Snip reads the controls (UI Automation) of this many topmost windows.
+const UIA_WINDOWS: usize = 4;
+
 /// Between stacked crops (several selections sent as one image).
 const STACK_GAP: u32 = 16;
 
@@ -292,7 +295,7 @@ struct Shot {
     size: Size,
     /// Snip mode: the mode to start in, the windows on this monitor (logical
     /// px, topmost first) and the window the user was in (Windows).
-    snip: Option<(snip::Kind, Vec<Rectangle>, Option<isize>)>,
+    snip: Option<(snip::Kind, Vec<snip::Pick>, Option<isize>)>,
 }
 
 struct App {
@@ -689,8 +692,10 @@ impl App {
                     }
                     let foreground = capture::window_rect::foreground();
                     let list = capture::window_rect::list();
-                    let windows =
-                        (list.into_iter()).map(|r| snip::to_logical(r, (frame.x, frame.y), scale));
+                    let windows = list.into_iter().map(|w| {
+                        let rect = snip::to_logical(w.rect, (frame.x, frame.y), scale);
+                        snip::Pick::window(rect, &w.title, w.handle)
+                    });
                     (kind, windows.collect(), foreground)
                 });
                 Shot {
@@ -747,10 +752,11 @@ impl App {
         if let Some((kind, windows, foreground)) = shot.snip {
             let mut snip = Snip::new(windows, size, snip::can_scroll(), foreground);
             first = snip.start(kind, size); // Full = the whole screen at once
+            let handles = snip.window_handles(UIA_WINDOWS);
             self.purpose = Purpose::Snip(Box::new(snip));
             let px = |v: f32| (v * shot.scale).round() as i32;
             let origin = (px(shot.origin.x), px(shot.origin.y));
-            extras = self.snip_extras(foreground, origin, shot.scale);
+            extras = self.snip_extras(handles, origin, shot.scale);
         }
         let Purpose::Quick(quick, target) = self.purpose else {
             let next = first.map_or_else(Task::none, |next| self.snip_next(Some(next)));
@@ -823,6 +829,8 @@ impl App {
             overlay::Event::Zoom { at, notches } => {
                 if self.can_zoom() {
                     self.view = self.view.zoomed(at, notches);
+                } else if let Purpose::Snip(snip) = &mut self.purpose {
+                    snip.walk(notches); // control -> window -> screen, and back
                 }
                 return Task::none();
             }
@@ -851,18 +859,18 @@ impl App {
         // Snip: the loupe follows the pointer; a drag's ends snap to edges.
         let event = match (&mut self.purpose, event) {
             (Purpose::Snip(snip), overlay::Event::Press { at, shift }) => {
-                snip.pointer = Some(at);
+                snip.hover(at);
                 overlay::Event::Press {
                     at: snip.snap(at),
                     shift,
                 }
             }
             (Purpose::Snip(snip), overlay::Event::Move(at)) => {
-                snip.pointer = Some(at);
+                snip.hover(at);
                 overlay::Event::Move(snip.snap(at))
             }
             (Purpose::Snip(snip), overlay::Event::Hover(at)) => {
-                snip.pointer = Some(at);
+                snip.hover(at);
                 overlay::Event::Hover(at)
             }
             (_, event) => event,
@@ -1697,7 +1705,7 @@ impl App {
             snip::Msg::ToastDone(_) => Task::none(),
             snip::Msg::Controls(opening, controls) => {
                 if opening == self.opening {
-                    snip.set_controls(controls, self.screen);
+                    snip.add_controls(controls);
                 }
                 Task::none()
             }
@@ -1750,26 +1758,28 @@ impl App {
     }
 
     /// Snip's slow extras, on threads: the Recent strip, and (Windows) the
-    /// controls of the app the user was in, for snapping.
-    fn snip_extras(
-        &self,
-        foreground: Option<isize>,
-        origin: (i32, i32),
-        scale: f32,
-    ) -> Task<Message> {
+    /// controls of the topmost windows (`handles`), for outlines and snapping.
+    fn snip_extras(&self, handles: Vec<isize>, origin: (i32, i32), scale: f32) -> Task<Message> {
         let recent = background(|tx| {
             let _ = tx.unbounded_send(snip::load_recent());
         })
         .map(|recent| Message::Snip(snip::Msg::Recent(recent)));
-        let Some(window) = foreground.filter(|_| cfg!(windows)) else {
+        if !cfg!(windows) || handles.is_empty() {
             return recent;
-        };
+        }
         let opening = self.opening;
         let controls = background(move |tx| {
-            let rects = (capture::uia::controls(window).into_iter())
-                .map(|r| snip::to_logical(r, origin, scale))
-                .collect();
-            let _ = tx.unbounded_send(rects);
+            // Topmost first: the window under the pointer is usually ready first.
+            for window in handles {
+                let controls = (capture::uia::controls(window).into_iter())
+                    .map(|(r, what)| {
+                        snip::Pick::control(snip::to_logical(r, origin, scale), &what, window)
+                    })
+                    .collect();
+                if tx.unbounded_send(controls).is_err() {
+                    return;
+                }
+            }
         })
         .map(move |rects| Message::Snip(snip::Msg::Controls(opening, rects)));
         Task::batch([recent, controls])
@@ -2279,7 +2289,7 @@ impl App {
         }
         // Snip: the loupe beside the pointer (under the mode switch).
         if self.edit.is_none()
-            && let Some(loupe) = snip.and_then(|s| s.loupe(frame, self.scale))
+            && let Some(loupe) = snip.and_then(|s| s.guides(frame, self.scale, self.drawing))
         {
             layers = layers.push(loupe.map(Message::Snip));
         }
