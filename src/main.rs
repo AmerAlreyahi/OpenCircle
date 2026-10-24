@@ -74,6 +74,26 @@ fn attach_parent_console() {
     }
 }
 
+/// The app must not keep our stdout / stderr open: a script that captures this
+/// command's output (a pipe) would wait until the app quits. std gives the child
+/// NUL for its stdio, but Windows still hands it every inheritable handle, the
+/// pipe among them; make ours non-inheritable (this process exits right after).
+#[cfg(windows)]
+fn stop_inheriting_std_handles() {
+    use windows::Win32::Foundation::{HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation};
+    use windows::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    for std_handle in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: plain Win32 calls on this process's own standard handles.
+        unsafe {
+            if let Ok(h) = GetStdHandle(std_handle) {
+                let _ = SetHandleInformation(h, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0));
+            }
+        }
+    }
+}
+
 /// Starts this exe with no arguments as the resident app, detached from the
 /// terminal (own process group / no console, no stdio), and returns at once.
 fn start_detached() -> std::io::Result<()> {
@@ -82,6 +102,8 @@ fn start_detached() -> std::io::Result<()> {
     app.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    #[cfg(windows)]
+    stop_inheriting_std_handles();
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut app, 0x0000_0008 | 0x0000_0200); // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     #[cfg(unix)]
