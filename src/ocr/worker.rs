@@ -1,8 +1,13 @@
-//! OCR in a short-lived child process (`opencircle ocr-worker`), so the
-//! resident app never loads ONNX Runtime or keeps its memory.
+//! OCR and offline translation in a short-lived child process (`opencircle
+//! ocr-worker`), so the resident app never loads ONNX Runtime or keeps its
+//! memory.
 //!
-//! Protocol: stdin = width (u32 LE), height (u32 LE), width*height*4 RGBA bytes.
-//! stdout = JSON `{"Ok":[TextBlock...]}` or `{"Err":"message"}`, then exit.
+//! Requests (one per process):
+//! - OCR: `ocr-worker`; stdin = width (u32 LE), height (u32 LE),
+//!   width*height*4 RGBA bytes; stdout = JSON `{"Ok":[TextBlock...]}` or
+//!   `{"Err":"message"}`.
+//! - Translate: `ocr-worker translate <target>`; stdin = JSON array of
+//!   texts; stdout = JSON `{"Ok":[text...]}` (same length) or `{"Err":"..."}`.
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
@@ -12,6 +17,8 @@ use super::{Engine, OcrError, TextBlock, check_image, models_dir};
 
 /// The hidden subcommand that runs the worker.
 pub const WORKER_ARG: &str = "ocr-worker";
+/// `ocr-worker translate <target>`: the offline translation request.
+const TRANSLATE_ARG: &str = "translate";
 
 /// Generous: a cold start (ORT + models from disk) plus a text-dense 4K screen.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -33,24 +40,60 @@ pub(super) fn recognize_with(
     height: u32,
 ) -> Result<Vec<TextBlock>, OcrError> {
     check_image(rgba, width, height)?;
+    let header = [width.to_le_bytes(), height.to_le_bytes()].concat();
+    run_child(exe, &[], &[&header, rgba])
+}
+
+/// Translates `texts` into `target` offline in a child process (`crate::mt`;
+/// its models must already be present).
+pub fn translate_in_child(texts: &[String], target: &str) -> Result<Vec<String>, OcrError> {
+    translate_with(&std::env::current_exe()?, texts, target)
+}
+
+pub(crate) fn translate_with(
+    exe: &Path,
+    texts: &[String],
+    target: &str,
+) -> Result<Vec<String>, OcrError> {
+    let input = serde_json::to_vec(texts).map_err(|e| OcrError::Engine(e.to_string()))?;
+    let out: Vec<String> = run_child(exe, &[TRANSLATE_ARG, target], &[&input])?;
+    if out.len() != texts.len() {
+        return Err(OcrError::Engine(format!(
+            "translation helper returned {} lines for {}",
+            out.len(),
+            texts.len()
+        )));
+    }
+    Ok(out)
+}
+
+/// Runs `exe ocr-worker <args>`, writes `input` to its stdin and reads its
+/// JSON reply, within `TIMEOUT`.
+fn run_child<T: serde::de::DeserializeOwned>(
+    exe: &Path,
+    args: &[&str],
+    input: &[&[u8]],
+) -> Result<T, OcrError> {
     let mut child = Command::new(exe)
         .arg(WORKER_ARG)
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()?;
     let (Some(mut stdin), Some(mut stdout)) = (child.stdin.take(), child.stdout.take()) else {
         let _ = child.kill();
-        return Err(OcrError::Engine("OCR helper has no pipes".into()));
+        return Err(OcrError::Engine("helper has no pipes".into()));
     };
     let deadline = Instant::now() + TIMEOUT;
     let (status, reply) = std::thread::scope(|s| {
         // A dead child makes these fail or end; the exit status says why.
         s.spawn(move || {
-            let _ = stdin
-                .write_all(&width.to_le_bytes())
-                .and_then(|_| stdin.write_all(&height.to_le_bytes()))
-                .and_then(|_| stdin.write_all(rgba));
+            for part in input {
+                if stdin.write_all(part).is_err() {
+                    break;
+                }
+            }
         });
         let reader = s.spawn(move || {
             let mut reply = Vec::new();
@@ -66,7 +109,7 @@ pub(super) fn recognize_with(
                     let _ = child.kill();
                     let _ = child.wait();
                     break Err(OcrError::Engine(format!(
-                        "OCR helper timed out after {TIMEOUT:?}"
+                        "helper timed out after {TIMEOUT:?}"
                     )));
                 }
                 Err(e) => {
@@ -80,26 +123,48 @@ pub(super) fn recognize_with(
     });
     let status = status?;
     if !status.success() {
-        return Err(OcrError::Engine(format!("OCR helper stopped ({status})")));
+        return Err(OcrError::Engine(format!("helper stopped ({status})")));
     }
     let reply = match reply {
         Ok(Ok(reply)) => reply,
-        _ => return Err(OcrError::Engine("OCR helper's reply was lost".into())),
+        _ => return Err(OcrError::Engine("helper's reply was lost".into())),
     };
-    serde_json::from_slice::<Result<Vec<TextBlock>, String>>(&reply)
-        .map_err(|e| OcrError::Engine(format!("OCR helper's reply is unreadable: {e}")))?
+    serde_json::from_slice::<Result<T, String>>(&reply)
+        .map_err(|e| OcrError::Engine(format!("helper's reply is unreadable: {e}")))?
         .map_err(OcrError::Engine)
 }
 
-/// Entry point of `opencircle ocr-worker`: one image in, its lines out.
+/// Entry point of `opencircle ocr-worker`: one request in, its answer out.
 pub fn worker_main() -> ExitCode {
-    let result =
-        read_image().and_then(|(rgba, w, h)| Engine::load(&models_dir())?.recognize(&rgba, w, h));
-    let reply = result.map_err(|e| e.to_string());
-    match serde_json::to_writer(std::io::stdout().lock(), &reply) {
+    let args: Vec<String> = std::env::args().skip(2).collect();
+    let written = match args.as_slice() {
+        [t, target] if t == TRANSLATE_ARG => {
+            let reply = read_texts()
+                .and_then(|texts| crate::mt::translate_here(&texts, target))
+                .map_err(|e| e.to_string());
+            serde_json::to_writer(std::io::stdout().lock(), &reply)
+        }
+        _ => {
+            let reply = read_image()
+                .and_then(|(rgba, w, h)| Engine::load(&models_dir())?.recognize(&rgba, w, h))
+                .map_err(|e| e.to_string());
+            serde_json::to_writer(std::io::stdout().lock(), &reply)
+        }
+    };
+    match written {
         Ok(()) => ExitCode::SUCCESS,
         Err(_) => ExitCode::FAILURE,
     }
+}
+
+fn read_texts() -> Result<Vec<String>, OcrError> {
+    // 1 MB of text is far beyond any screen; refuse before parsing.
+    let mut input = Vec::new();
+    std::io::stdin()
+        .lock()
+        .take(1 << 20)
+        .read_to_end(&mut input)?;
+    serde_json::from_slice(&input).map_err(|e| OcrError::BadImage(format!("bad request: {e}")))
 }
 
 fn read_image() -> Result<(Vec<u8>, u32, u32), OcrError> {

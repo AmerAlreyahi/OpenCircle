@@ -21,7 +21,7 @@ use iced::widget::tooltip::Position;
 use iced::widget::{column, container, row, space};
 use iced::{Element, Length, Size, Subscription, event, keyboard};
 
-use crate::config::{Config, DefaultAction, Provider, Target, Theme, parse_shortcut};
+use crate::config::{Config, DefaultAction, Engine, Provider, Target, Theme, parse_shortcut};
 use crate::secrets::{self, Secret, SecretsError};
 use crate::ui::theme;
 use crate::ui::widgets::{
@@ -484,6 +484,7 @@ pub enum Message {
     Model(String),
     ApiKey(KeyMessage),
     Language(Language),
+    Engine(Engine),
     /// What was typed in the live-interval field.
     LiveInterval(String),
     Save,
@@ -732,6 +733,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             state.key.update(&*state.store, provider, k);
         }
         Message::Language(l) => state.draft.translate.target = l.code.to_string(),
+        Message::Engine(e) => state.draft.translate.engine = e,
         Message::LiveInterval(s) => {
             // Not a number = 0, which the range check reports under the field.
             state.draft.translate.live_interval_ms = s.trim().parse().unwrap_or(0);
@@ -840,6 +842,30 @@ fn content(state: &State) -> Element<'_, Message> {
         Section::Translate => (
             "Translate",
             vec![
+                form_row(
+                    "Engine",
+                    match d.translate.engine {
+                        Engine::Ai => "Your AI provider; offline when it isn't set up",
+                        Engine::Offline => "No key, nothing leaves your PC; more literal than AI",
+                    },
+                    segmented(
+                        &[
+                            (
+                                Engine::Ai,
+                                "AI",
+                                "Translate with your AI provider (Settings > AI)",
+                            ),
+                            (
+                                Engine::Offline,
+                                "Offline",
+                                "Translate on this PC (English to Arabic)",
+                            ),
+                        ],
+                        d.translate.engine,
+                        Message::Engine,
+                    ),
+                    None,
+                ),
                 form_row(
                     "Target language",
                     "What the text is translated into",
@@ -1338,6 +1364,7 @@ pub(super) mod tests {
         update(&mut s, Message::DefaultAction(DefaultAction::Copy));
         update(&mut s, Message::Folder(Some(std::env::temp_dir())));
         update(&mut s, Message::LiveInterval("2500".into()));
+        update(&mut s, Message::Engine(Engine::Offline));
         update(&mut s, Message::Record(Slot::Quick(4)));
         press(&mut s, chord(true, true, "KeyY"));
         assert!(s.problems.is_empty(), "{:?}", s.problems);
@@ -1351,7 +1378,7 @@ pub(super) mod tests {
         assert_eq!(back.ai.base_url, "http://localhost:11434/v1");
         assert_eq!(back.ai.model, "llama3:8b");
         assert_eq!(back.translate.target, "en");
-        assert_eq!(back.translate.engine, crate::config::Engine::Ai);
+        assert_eq!(back.translate.engine, Engine::Offline);
         assert_eq!(back.general.default_action, DefaultAction::Copy);
         assert_eq!(
             back.general.save_folder,
@@ -1634,25 +1661,27 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn offline_is_not_offered_anywhere() {
+    fn engine_choice_says_what_offline_means() {
         let (mut s, _) = state(None);
-        for (section, ..) in SECTIONS {
-            update(&mut s, Message::Section(section));
-            let texts = shot::texts(view(&s));
-            assert!(
-                !texts.iter().any(|t| t.to_lowercase().contains("offline")),
-                "{section:?}: {texts:?}"
-            );
+        update(&mut s, Message::Section(Section::Translate));
+        let texts = shot::texts(view(&s));
+        for want in [
+            "Engine",
+            "AI",
+            "Offline",
+            "Your AI provider; offline when it isn't set up",
+        ] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
         }
-        // A saved "offline" is read as AI with a warning, and Settings shows it.
+        update(&mut s, Message::Engine(Engine::Offline));
+        let texts = shot::texts(view(&s));
+        let honest = "No key, nothing leaves your PC; more literal than AI";
+        assert!(texts.iter().any(|t| t == honest), "{texts:?}");
+        // a saved "offline" is read as is, without a warning
         let (cfg, warnings) = Config::parse("[translate]\nengine = \"offline\"\n");
         let s = State::new(cfg, warnings, None, Box::new(MemoryStore::default()));
-        assert_eq!(s.draft.translate.engine, crate::config::Engine::Ai);
-        assert!(
-            s.notice
-                .as_deref()
-                .is_some_and(|n| n.contains("translate.engine"))
-        );
+        assert_eq!(s.draft.translate.engine, Engine::Offline);
+        assert!(s.notice.is_none(), "{:?}", s.notice);
     }
 
     #[test]

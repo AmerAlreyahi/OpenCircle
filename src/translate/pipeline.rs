@@ -1,7 +1,7 @@
 //! One-shot full-screen translate: OCR -> lines -> [`group_blocks`] -> skip
-//! what needs no translation -> ONE AI call (cache first) -> [`render`] into
-//! a copy of the frame. Live mode (`live.rs`) reuses [`translate_blocks`] and
-//! the [`Cache`].
+//! what needs no translation -> ONE translate call, AI or offline (cache
+//! first) -> [`render`] into a copy of the frame. Live mode (`live.rs`)
+//! reuses [`translate_blocks`] and the [`Cache`].
 
 use std::collections::HashMap;
 use std::fmt;
@@ -11,22 +11,62 @@ use std::time::{Duration, Instant};
 use super::{Block, Line, MARKUP, group_blocks, render};
 use crate::ai::{self, AiError};
 use crate::config::AiConfig;
+use crate::mt;
 use crate::ocr::{self, OcrError, TextBlock};
 use crate::secrets::Secret;
 
-/// OCR and AI, behind a trait so tests inject fakes. [`Real`] is the app's.
+/// OCR and translation, behind a trait so tests inject fakes. [`Real`] is the app's.
 pub trait Deps {
     /// Text lines of an RGBA image, in reading order.
     fn recognize(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError>;
     /// ONE call: exactly `texts.len()` translations, in order, with
-    /// [`MARKUP`] spans.
+    /// [`MARKUP`] spans (the offline engine never marks any).
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError>;
 }
 
-/// OCR in the helper process, AI with the user's config and key.
-pub struct Real {
-    pub ai: AiConfig,
-    pub key: Option<Secret>,
+/// OCR in the helper process; translation by the user's AI provider, or
+/// offline (`crate::mt`, also in the helper process).
+pub enum Real {
+    Ai {
+        ai: AiConfig,
+        key: Option<Secret>,
+    },
+    /// No key, nothing leaves the PC. Its models may still be missing
+    /// (`needs_download`); translating then fails with what to do.
+    Offline(&'static mt::Pair),
+}
+
+impl Real {
+    /// Bytes the offline engine still has to download (0 for AI).
+    pub fn needs_download(&self) -> u64 {
+        match self {
+            Real::Ai { .. } => 0,
+            Real::Offline(pair) => pair.missing_bytes(),
+        }
+    }
+
+    /// `texts` into `target`, one call; `markup` = extra AI instructions.
+    /// Offline, `[[...]]` accent spans can't be placed (no word alignment):
+    /// a line drawn wholly in a highlight colour keeps it (that is its own
+    /// colour), a highlighted name inside a line is drawn in the line's colour.
+    pub fn lines(
+        &self,
+        texts: &[String],
+        target: &str,
+        markup: &str,
+    ) -> Result<Vec<String>, AiError> {
+        match self {
+            Real::Ai { ai, key } => ai::translate_lines(ai, key.as_ref(), texts, target, markup),
+            Real::Offline(pair) if pair.missing_bytes() > 0 => Err(AiError::Offline(
+                "its model isn't downloaded yet. Translate once with Ctrl+Shift+T to \
+                 download it, or set up AI in Settings > AI"
+                    .into(),
+            )),
+            Real::Offline(_) => {
+                mt::translate(texts, target).map_err(|e| AiError::Offline(e.to_string()))
+            }
+        }
+    }
 }
 
 impl Deps for Real {
@@ -35,7 +75,7 @@ impl Deps for Real {
     }
 
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
-        ai::translate_lines(&self.ai, self.key.as_ref(), texts, target, MARKUP)
+        self.lines(texts, target, MARKUP)
     }
 }
 

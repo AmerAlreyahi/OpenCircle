@@ -15,6 +15,7 @@ mod hotkey;
 mod lens;
 #[allow(dead_code)] // live-translate layer (platform calls); the UI wires it
 mod live;
+mod mt;
 #[allow(dead_code, unused_imports)] // library for the Text/Translate actions; not wired in yet
 mod ocr;
 #[allow(dead_code)] // library API, wired into the UI later

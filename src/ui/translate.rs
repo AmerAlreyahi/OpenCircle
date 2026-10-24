@@ -13,7 +13,7 @@ use crate::actions::ask::{self, Chat, Status};
 use crate::actions::{self, Crop};
 use crate::ai::AiError;
 use crate::ocr;
-use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
+use crate::translate::pipeline::{self, Cache, Deps, Error, Real, Translation};
 
 /// The word card's width, and its height for placing it (logical px).
 const CARD: Size = Size::new(360.0, 220.0);
@@ -24,8 +24,10 @@ const CONTEXT: u32 = 8;
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    /// The user agreed to the OCR model download.
+    /// The user agreed to the OCR (or offline translation) download.
     Download,
+    /// Translation will be offline and its models are missing (bytes): ask.
+    Offline(u64),
     /// Declined the download, or closed an error: the overlay closes.
     Close,
     /// Model download, 0..=1.
@@ -62,8 +64,9 @@ pub struct Problem {
 
 #[derive(Debug)]
 enum Phase {
-    /// No OCR models yet: ask first (the Text panel's prompt).
-    Consent,
+    /// No OCR models yet: ask first (the Text panel's prompt). `Some(bytes)`:
+    /// offline translation's models (and OCR's, if missing) instead.
+    Consent(Option<u64>),
     Downloading(f32),
     Translating,
     Shown(Shown),
@@ -81,6 +84,8 @@ pub struct Session {
     cache: Arc<Cache>,
     /// The download / translation; dropping it stops the thread's messages.
     work: Option<task::Handle>,
+    /// The user was asked for (and agreed to) offline translation's download.
+    offline: bool,
 }
 
 /// The card of one clicked block.
@@ -95,23 +100,31 @@ struct Card {
 }
 
 impl Session {
-    /// Translates `area` of `frame` (asks for the OCR models first if missing).
+    /// Translates `area` of `frame`. Asks first for what is missing: the OCR
+    /// models (`models` = present), or, when translation will be offline,
+    /// its models with OCR's in one download.
     pub fn start(
         frame: image::Handle,
         area: [u32; 4],
         cache: Arc<Cache>,
         models: bool,
     ) -> (Session, Task<Msg>) {
+        // A few file sizes: cheap enough here. A missing API key is only
+        // found on the thread (keyring), which then asks (`Msg::Offline`).
+        let offline = actions::translate::surely_offline()
+            .map(|p| p.missing_bytes())
+            .filter(|&b| b > 0);
         let mut session = Session {
             frame,
             area,
-            phase: Phase::Consent,
+            phase: Phase::Consent(offline),
             peek: false,
             card: None,
             cache,
             work: None,
+            offline: false,
         };
-        let task = if models {
+        let task = if models && offline.is_none() {
             session.phase = Phase::Translating;
             session.run(false)
         } else {
@@ -140,9 +153,14 @@ impl Session {
     /// The App handles `Close`, `OpenSettings` and `Ask` first.
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
-            Msg::Download if matches!(self.phase, Phase::Consent) => {
+            Msg::Download if matches!(self.phase, Phase::Consent(_)) => {
+                self.offline = matches!(self.phase, Phase::Consent(Some(_)));
                 self.phase = Phase::Downloading(0.0);
                 return self.run(true);
+            }
+            Msg::Offline(bytes) if matches!(self.phase, Phase::Translating) => {
+                self.work = None;
+                self.phase = Phase::Consent(Some(bytes));
             }
             Msg::Progress(done) if matches!(self.phase, Phase::Downloading(_)) => {
                 self.phase = Phase::Downloading(done);
@@ -250,13 +268,25 @@ impl Session {
     }
 
     /// The download (if `download`) and the translation, on a thread.
+    /// Offline translation's models are fetched only if the user was asked
+    /// for them (`self.offline`); otherwise the thread asks (`Msg::Offline`).
     fn run(&mut self, download: bool) -> Task<Msg> {
         let (frame, area, cache) = (self.frame.clone(), self.area, self.cache.clone());
+        let agreed_offline = self.offline;
         let (task, handle) = background(move |tx| {
+            let deps = actions::translate::deps();
+            let offline = match &deps {
+                Ok((Real::Offline(pair), _)) => Some(*pair),
+                _ => None,
+            };
             if download {
-                let fetched = ocr::ensure_models(|done, total| {
+                let progress = |done: u64, total: u64| {
                     let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
-                });
+                };
+                let fetched = match offline {
+                    Some(pair) if agreed_offline => pair.ensure(progress),
+                    _ => ocr::ensure_models(progress).map(drop),
+                };
                 if let Err(e) = fetched {
                     let problem = Problem {
                         message: e.to_string(),
@@ -268,7 +298,13 @@ impl Session {
                 }
                 let _ = tx.unbounded_send(Msg::Translating);
             }
-            let deps = actions::translate::deps();
+            if let Some(pair) = offline {
+                let missing = pair.missing_bytes();
+                if missing > 0 {
+                    let _ = tx.unbounded_send(Msg::Offline(missing));
+                    return;
+                }
+            }
             let _ = tx.unbounded_send(Msg::Done(translate(&frame, area, &cache, deps)));
         })
         .abortable();
@@ -284,10 +320,15 @@ impl Session {
             container(opaque(surface)).center_x(Fill).padding(24).into()
         };
         match &self.phase {
-            Phase::Consent => note(panel::consent(Msg::Download, Msg::Close)),
+            Phase::Consent(None) => note(panel::consent(Msg::Download, Msg::Close)),
+            Phase::Consent(Some(bytes)) => note(offline_consent(*bytes)),
             Phase::Downloading(done) => note(
                 column![
-                    widgets::body("Downloading the text-recognition model…"),
+                    widgets::body(if self.offline {
+                        "Downloading offline translation…"
+                    } else {
+                        "Downloading the text-recognition model…"
+                    }),
                     widgets::progress(*done),
                 ]
                 .spacing(10)
@@ -391,6 +432,38 @@ fn translate(
 
 fn problem(message: String, setup: bool) -> Problem {
     Problem { message, setup }
+}
+
+/// The offline download question (`panel::consent`'s layout, plus Set up AI
+/// as the other way to translate).
+fn offline_consent(bytes: u64) -> Element<'static, Msg> {
+    let mb = bytes.div_ceil(10_000_000) * 10; // "about 120 MB"
+    column![
+        widgets::body(format!(
+            "Download offline translation (about {mb} MB) from Hugging Face and GitHub? \
+             It needs no key and nothing you translate leaves your PC."
+        )),
+        row![
+            widgets::text_button(
+                '\u{e0b6}', // download
+                "Download",
+                String::new(),
+                true,
+                Msg::Download
+            ),
+            widgets::text_button(
+                actions::ask::ACTION.icon,
+                "Set up AI",
+                String::new(),
+                false,
+                Msg::OpenSettings
+            ),
+            widgets::text_button(widgets::CLOSE, "Cancel", String::new(), false, Msg::Close),
+        ]
+        .spacing(8),
+    ]
+    .spacing(16)
+    .into()
 }
 
 /// Copies `rgba` (the area's size) into `frame` (`width` wide) at `area`.
@@ -502,12 +575,13 @@ mod tests {
             phase: if models {
                 Phase::Translating
             } else {
-                Phase::Consent
+                Phase::Consent(None)
             },
             peek: false,
             card: None,
             cache: Arc::new(Cache::new(8)),
             work: None,
+            offline: false,
         }
     }
 
@@ -550,12 +624,45 @@ mod tests {
     #[test]
     fn missing_models_ask_first() {
         let mut s = session(false);
-        assert!(matches!(&s.phase, Phase::Consent));
+        assert!(matches!(&s.phase, Phase::Consent(None)));
         // nothing runs before the user agrees
         let _ = s.update(shown(vec![]));
-        assert!(matches!(&s.phase, Phase::Consent));
+        assert!(matches!(&s.phase, Phase::Consent(None)));
         let _ = s.update(Msg::Progress(0.5));
-        assert!(matches!(&s.phase, Phase::Consent));
+        assert!(matches!(&s.phase, Phase::Consent(None)));
+        let _ = s.update(Msg::Offline(1));
+        assert!(
+            matches!(&s.phase, Phase::Consent(None)),
+            "only while translating"
+        );
+    }
+
+    #[test]
+    fn offline_models_are_asked_for_with_their_size() {
+        // the thread found translation will be offline, without its models
+        let mut s = session(true);
+        let _ = s.update(Msg::Offline(117_600_822));
+        assert!(matches!(&s.phase, Phase::Consent(Some(117_600_822))));
+        assert!(s.work.is_none(), "the thread is done");
+        let texts = widgets::shot::texts(s.view(1.0, Size::new(1920.0, 1080.0)));
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.starts_with("Download offline translation (about 120 MB)")),
+            "{texts:?}"
+        );
+        for button in ["Download", "Set up AI", "Cancel"] {
+            assert!(texts.iter().any(|t| t == button), "{button}: {texts:?}");
+        }
+        // (Download would start the real download thread: as it leaves it)
+        s.offline = true;
+        s.phase = Phase::Downloading(0.3);
+        let texts = widgets::shot::texts(s.view(1.0, Size::new(1920.0, 1080.0)));
+        assert!(
+            texts
+                .iter()
+                .any(|t| t == "Downloading offline translation…")
+        );
     }
 
     /// OCR finds one line at (20, 10) of what it is given; AI answers or fails.

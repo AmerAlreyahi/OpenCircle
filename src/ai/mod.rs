@@ -94,6 +94,8 @@ pub enum AiError {
     Network(String),
     /// The provider answered, but not in the expected shape.
     BadResponse(String),
+    /// The offline translation engine (`crate::mt`) failed; no AI involved.
+    Offline(String),
 }
 
 impl fmt::Display for AiError {
@@ -108,6 +110,7 @@ impl fmt::Display for AiError {
             AiError::Refused => f.write_str("The AI model declined to answer this request."),
             AiError::Network(why) => write!(f, "Could not reach the AI provider: {why}"),
             AiError::BadResponse(why) => write!(f, "The AI provider sent an unexpected answer: {why}"),
+            AiError::Offline(why) => write!(f, "Offline translation failed: {why}"),
         }
     }
 }

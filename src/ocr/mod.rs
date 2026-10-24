@@ -3,11 +3,11 @@
 //! fetches them on first use (the only network access here). The app calls
 //! `recognize_in_child`, so ORT and its memory live only in a short-lived
 //! `opencircle ocr-worker` process that runs `Engine`.
-mod models;
-mod worker;
+pub(crate) mod models;
+pub(crate) mod worker;
 
 pub use models::{ensure_models, models_dir};
-pub use worker::{WORKER_ARG, recognize_in_child, worker_main};
+pub use worker::{WORKER_ARG, recognize_in_child, translate_in_child, worker_main};
 
 use std::fmt;
 use std::path::Path;
@@ -94,7 +94,7 @@ fn engine_err(e: impl fmt::Display) -> OcrError {
 /// The ORT DLL is checksum-verified, so on Windows a failed `LoadLibraryExW`
 /// means one of its own imports (MSVCP140, VCRUNTIME140_1) is missing. We never
 /// bundle or download the redistributable: we say where to get it.
-fn load_err(e: impl fmt::Display) -> OcrError {
+pub(crate) fn load_err(e: impl fmt::Display) -> OcrError {
     let msg = e.to_string();
     if msg.contains("LoadLibraryExW") {
         OcrError::Engine(format!(

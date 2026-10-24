@@ -18,7 +18,7 @@
 //!
 //! [translate]
 //! target = "ar"                     # language code to translate into
-//! engine = "ai"                     # ai (the only engine; anything else warns and uses ai)
+//! engine = "ai"                     # ai | offline (ai falls back to offline when AI isn't set up)
 //! live_interval_ms = 1000           # live translate repeats every N ms (500-5000)
 //! live_note_shown = false           # the one-time live-mode note was shown
 //!
@@ -129,13 +129,16 @@ impl Serialize for Provider {
     }
 }
 
-/// How text is translated. Only the AI engine exists; an "offline" engine may come
-/// later, and a config that names it (or anything else) is read as `Ai` with a warning.
+/// How text is translated. Anything else in the file is read as `Ai` with a warning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Engine {
+    /// The AI provider (`[ai]`). Without a usable one (the browser provider,
+    /// no key) translation falls back to `Offline` (`actions::translate::deps`).
     #[default]
     Ai,
+    /// On-device model (`crate::mt`): no key, nothing leaves the PC.
+    Offline,
 }
 
 /// What Enter does on the action bar. The serialized names are action-registry ids.
@@ -407,20 +410,7 @@ impl Config {
                 &mut w,
                 |s: &String| check_lang(s),
             );
-            // Read as text so "offline" (or anything else) gets a clear warning;
-            // the engine is Ai either way.
-            let _: String = get_checked(
-                t,
-                "translate.",
-                "engine",
-                "ai".to_string(),
-                &mut w,
-                |s: &String| {
-                    (s == "ai")
-                        .then_some(())
-                        .ok_or_else(|| "only \"ai\" is available in this version".into())
-                },
-            );
+            c.translate.engine = get(t, "translate.", "engine", d.translate.engine, &mut w);
             c.translate.live_interval_ms = get_checked(
                 t,
                 "translate.",
@@ -774,18 +764,24 @@ mod tests {
     }
 
     #[test]
-    fn offline_engine_warns_and_uses_ai() {
-        for value in ["\"offline\"", "\"gemini\"", "3"] {
+    fn engine_is_ai_or_offline() {
+        for value in ["\"gemini\"", "\"Offline\"", "3"] {
             let (c, w) = Config::parse(&format!("[translate]\nengine = {value}\n"));
             assert_eq!(c.translate.engine, Engine::Ai);
             assert_eq!(w.len(), 1, "{value}: {w:?}");
             assert!(w[0].starts_with("translate.engine"), "{w:?}");
         }
-        let (_, w) = Config::parse("[translate]\nengine = \"ai\"\n");
-        assert!(w.is_empty());
-        // A config rewritten by this build never names another engine.
-        let text = toml::to_string_pretty(&Config::default()).unwrap();
-        assert!(text.contains("engine = \"ai\""), "{text}");
+        for (value, engine) in [("ai", Engine::Ai), ("offline", Engine::Offline)] {
+            let (c, w) = Config::parse(&format!("[translate]\nengine = \"{value}\"\n"));
+            assert!(
+                w.is_empty() && c.translate.engine == engine,
+                "{value}: {w:?}"
+            );
+            // and saved the same way
+            let text = toml::to_string_pretty(&c).unwrap();
+            assert!(text.contains(&format!("engine = \"{value}\"")), "{text}");
+        }
+        assert_eq!(Config::default().translate.engine, Engine::Ai);
     }
 
     #[test]

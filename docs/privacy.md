@@ -11,7 +11,9 @@ Every network action is something you start.
 | Press **Send** in Ask AI / Explain, with the default **Google AI Mode (browser)** | Your question and the text read from your selection (text only; the screenshot is not uploaded unless you choose Lens) | Google, from your own browser, which OpenCircle opens at `google.com/search` with the question in the address. If you decline the one-time OCR download, only your prompt is sent. |
 | Ask AI / Explain, with an API provider | The selected area and your questions | The AI provider you configured (or your local server) |
 | Translate with AI | The text read from the screen (text only, not the image) | The AI provider you configured |
+| Translate with the **Offline** engine | Nothing. The model runs on your PC | Nobody |
 | Use **Text** for the first time | Nothing of yours. It downloads the OCR runtime and models (about 20 MB) | GitHub (ONNX Runtime releases and the oar-ocr model release), checked against pinned checksums |
+| Translate offline for the first time, after you agree | Nothing of yours. It downloads the translation model (about 120 MB, plus the OCR files if missing) | Hugging Face (a pinned commit of the OPUS-MT model) and GitHub, checked against pinned checksums |
 | Anything else (circle, copy, save, snip, annotate, read text) | Nothing | Nobody |
 
 Lens and your AI provider have their own privacy policies; OpenCircle cannot
@@ -35,13 +37,14 @@ only to the server you configured. A remote server must use `https://`; plain
   starts.
 - **Wayland.** The screenshot file the desktop portal hands over is deleted
   right after it is read.
-- **OCR files** (runtime and models, no personal data) stay in your user data
-  folder so they are downloaded once.
+- **OCR and offline translation files** (runtime and models, no personal
+  data) stay in your user data folder so they are downloaded once.
 - **Settings** are in `config.toml` in your user config folder; they hold no
   keys.
 
 ## Offline use
 
-Circle, Text (after the one-time download), Copy, Save and Snip work with no
-network. Search, Ask AI and AI translation need one; a local model removes the
-need for the last two (the browser provider always needs the web).
+Circle, Text and offline translation (after their one-time downloads), Copy,
+Save and Snip work with no network. Search, Ask AI and AI translation need
+one; a local model removes the need for the last two (the browser provider
+always needs the web).

@@ -1,0 +1,26 @@
+OpenCircle is MIT-licensed (see LICENSE). It ships no third-party models; the
+files below are downloaded on first use, after you agree, and are covered by
+their own licences.
+
+Offline translation (English to Arabic)
+---------------------------------------
+Model: OPUS-MT eng-ara (Helsinki-NLP/opus-mt-en-ar), by Jörg Tiedemann and
+the Language Technology Research Group at the University of Helsinki.
+Released under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/);
+the Hugging Face model card lists Apache-2.0.
+  - Source: https://huggingface.co/Helsinki-NLP/opus-mt-en-ar
+  - Original weights: https://github.com/Helsinki-NLP/Tatoeba-Challenge/tree/master/models/eng-ara
+  - Paper: Tiedemann and Thottingal, "OPUS-MT - Building open translation
+    services for the World", EAMT 2020.
+ONNX export and int8 quantization: Xenova (Transformers.js),
+https://huggingface.co/Xenova/opus-mt-en-ar (commit 034a684356c1). OpenCircle
+uses the files unmodified.
+
+Text recognition (OCR)
+----------------------
+PaddleOCR PP-OCRv5 models (Apache-2.0), ONNX export by oar-ocr
+(https://github.com/GreatV/oar-ocr, Apache-2.0).
+
+ONNX Runtime
+------------
+ONNX Runtime by Microsoft (MIT), https://github.com/microsoft/onnxruntime.

@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use super::OcrError;
 
-pub(super) struct ModelFile {
+pub(crate) struct ModelFile {
     /// File name on disk.
-    pub(super) name: &'static str,
-    size: u64,
+    pub(crate) name: &'static str,
+    pub(crate) size: u64,
     sha256: &'static str,
     source: Source,
 }
@@ -35,7 +35,7 @@ enum Source {
 /// ONNX Runtime 1.28.0, CPU, from Microsoft's GitHub release (ort 2.0.0-rc.13
 /// targets 1.28; it accepts >= 1.17).
 #[cfg(not(windows))]
-pub(super) const ORT: ModelFile = ModelFile {
+pub(crate) const ORT: ModelFile = ModelFile {
     name: "libonnxruntime.so.1.28.0",
     size: 24_268_848,
     sha256: "1461ef7cc3d9e49982591721683cc3e3a55580aeca9a5254e7aac47b75ee4bab",
@@ -46,7 +46,7 @@ pub(super) const ORT: ModelFile = ModelFile {
     },
 };
 #[cfg(windows)]
-pub(super) const ORT: ModelFile = ModelFile {
+pub(crate) const ORT: ModelFile = ModelFile {
     name: "onnxruntime.dll",
     size: 15_809_848,
     sha256: "18370c375f07357fa5874344a9d9ac17e6b6fe1eb18b1dd209d79483b4470257",
@@ -102,6 +102,38 @@ const EN: Recognizer = Recognizer {
 
 const FILES: [&ModelFile; 4] = [&ORT, &DET, &RECOGNIZER.model, &RECOGNIZER.dict];
 
+impl ModelFile {
+    /// A file downloaded as is from `url`.
+    pub(crate) const fn plain(
+        name: &'static str,
+        size: u64,
+        sha256: &'static str,
+        url: &'static str,
+    ) -> ModelFile {
+        ModelFile {
+            name,
+            size,
+            sha256,
+            source: Source::Plain(url),
+        }
+    }
+}
+
+/// OCR's files (ONNX Runtime first) and where each goes.
+pub(crate) fn ocr_files() -> Vec<(PathBuf, &'static ModelFile)> {
+    let dir = models_dir();
+    FILES.iter().map(|f| (dir.join(f.name), *f)).collect()
+}
+
+/// Bytes still to download: files missing or of the wrong size (a cheap
+/// check; `ensure` verifies the checksum).
+pub(crate) fn missing_bytes(files: &[(PathBuf, &ModelFile)]) -> u64 {
+    (files.iter())
+        .filter(|(path, f)| fs::metadata(path).map_or(true, |m| m.len() != f.size))
+        .map(|(_, f)| f.size)
+        .sum()
+}
+
 /// Per-user folder for ORT and the models (Linux `~/.local/share/OpenCircle/ocr`,
 /// Windows `%LOCALAPPDATA%\OpenCircle\ocr`).
 pub fn models_dir() -> PathBuf {
@@ -114,15 +146,25 @@ pub fn models_dir() -> PathBuf {
 /// Makes sure every file is present and verified, downloading the missing or
 /// damaged ones. `progress(done, total)` counts bytes written to disk. Returns
 /// the folder for `Engine::load`. Verified files are never fetched again.
-pub fn ensure_models(mut progress: impl FnMut(u64, u64)) -> Result<PathBuf, OcrError> {
-    let dir = models_dir();
-    fs::create_dir_all(&dir)?;
-    let total = FILES.iter().map(|f| f.size).sum();
+pub fn ensure_models(progress: impl FnMut(u64, u64)) -> Result<PathBuf, OcrError> {
+    ensure(&ocr_files(), progress)?;
+    Ok(models_dir())
+}
+
+/// `ensure_models` for any list of pinned files (OCR's plus offline
+/// translation's: one download, one progress).
+pub(crate) fn ensure(
+    files: &[(PathBuf, &ModelFile)],
+    mut progress: impl FnMut(u64, u64),
+) -> Result<(), OcrError> {
+    let total = files.iter().map(|(_, f)| f.size).sum();
     let mut done = 0;
     let mut agent = None;
-    for f in FILES {
-        let path = dir.join(f.name);
-        if !is_verified(&path, f)? {
+    for (path, f) in files {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        if !is_verified(path, f)? {
             let agent = agent.get_or_insert_with(|| {
                 ureq::Agent::config_builder()
                     .https_only(true)
@@ -131,12 +173,12 @@ pub fn ensure_models(mut progress: impl FnMut(u64, u64)) -> Result<PathBuf, OcrE
                     .build()
                     .new_agent()
             });
-            fetch(agent, f, &path, |n| progress(done + n, total))?;
+            fetch(agent, f, path, |n| progress(done + n, total))?;
         }
         done += f.size;
         progress(done, total);
     }
-    Ok(dir)
+    Ok(())
 }
 
 fn fetch(
@@ -264,6 +306,34 @@ mod tests {
         fs::write(&dest, b"hellO").unwrap();
         assert!(!is_verified(&dest, &HELLO).unwrap());
         assert!(!is_verified(&dir.join("missing"), &HELLO).unwrap());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ensure_spans_folders_and_fetches_only_what_is_missing() {
+        let dir = temp_dir("ensure");
+        let files = [
+            (dir.join("a/hello.bin"), &HELLO),
+            (dir.join("b/hello.bin"), &HELLO),
+        ];
+        assert_eq!(missing_bytes(&files), 10);
+        for (path, _) in &files {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"hello").unwrap();
+        }
+        assert_eq!(missing_bytes(&files), 0);
+        // both verified: nothing is fetched (HELLO's URL is empty), progress ends at the total
+        let mut last = (0, 0);
+        ensure(&files, |done, total| last = (done, total)).unwrap();
+        assert_eq!(last, (10, 10));
+        // a damaged file of the right size is fetched again (and here, can't be)
+        fs::write(&files[1].0, b"hellO").unwrap();
+        assert_eq!(missing_bytes(&files), 0, "sizes only");
+        assert!(matches!(
+            ensure(&files, |_, _| {}),
+            Err(OcrError::Download(_))
+        ));
+        assert!(!files[1].0.with_extension("part").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 }
