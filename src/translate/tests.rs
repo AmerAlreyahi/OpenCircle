@@ -389,6 +389,50 @@ fn line(text: &str, x: f32, y: f32, w: f32, h: f32) -> Line {
     }
 }
 
+/// A paragraph never joins across a line that did not join it (OCR read it
+/// shorter, so it looked like another size): the block's box would cover
+/// that line and both redraws would overlap (seen on the Windows VM).
+#[test]
+fn a_block_never_jumps_over_a_line() {
+    let l = [
+        line(
+            "manufacturers of Nintendo, Sony, and Microsoft. At this time the",
+            0.0,
+            0.0,
+            500.0,
+            25.0,
+        ),
+        line(
+            "increasingly centered on AAA games, leaving less",
+            0.0,
+            22.0,
+            500.0,
+            16.0,
+        ),
+        line(
+            "lower-budget games. Coupled with increasing",
+            0.0,
+            38.0,
+            500.0,
+            25.0,
+        ),
+    ];
+    let b = group_blocks(&l);
+    for (i, x) in b.iter().enumerate() {
+        for y in &b[i + 1..] {
+            let [ax, ay, aw, ah] = x.bounds;
+            let [bx, by, bw, bh] = y.bounds;
+            let overlap = ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
+            assert!(
+                !overlap || (ay + ah - by).abs() < 4.0,
+                "{:?} covers {:?}",
+                x.text,
+                y.text
+            );
+        }
+    }
+}
+
 #[test]
 fn wrapped_paragraphs_join_list_items_do_not() {
     let l = [
