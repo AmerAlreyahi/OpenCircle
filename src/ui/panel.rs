@@ -87,6 +87,9 @@ pub struct Panel {
     note: Option<Result<&'static str, String>>,
     /// Google's results card (Lens, AI Mode): `crate::sheet`.
     sheet: Sheet,
+    /// Ask AI about the screen (the crop and its text go with the question);
+    /// `false`: a plain question, nothing from the screen is sent.
+    screen: bool,
 }
 
 /// The results card this panel opens: Google's page in the helper's web view.
@@ -155,6 +158,7 @@ impl Panel {
                 wanted,
                 ..Sheet::default()
             },
+            screen: true,
         };
         let task = match kind {
             actions::Panel::Lens => {
@@ -193,6 +197,27 @@ impl Panel {
             }
         };
         (panel, task)
+    }
+
+    /// Ask AI with a plain `question`, not about the screen: no image and no
+    /// text from the screen go with it (to the provider with a key, else to
+    /// Google AI Mode).
+    pub fn open_question(question: String) -> (Panel, Task<Msg>) {
+        // a blank pixel stands in for the crop: never sent, never shown
+        let blank = Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        };
+        let (mut panel, task) = Panel::open(actions::Panel::Ask, blank, Some(question));
+        panel.screen = false;
+        (panel, task)
+    }
+
+    /// The question goes with the screen (`open`), or alone (`open_question`).
+    #[cfg(test)]
+    pub fn about_screen(&self) -> bool {
+        self.screen
     }
 
     /// Ask AI, continuing `chat` (e.g. the translate word card's explanation).
@@ -414,13 +439,17 @@ impl Panel {
             if question.is_empty() || chat.status == Status::Streaming {
                 return Task::none();
             }
+            if !self.screen {
+                return self.browse(question.into(), false);
+            }
             if !text::models_present() {
                 *browse = Browse::Consent(question.into());
                 return Task::none();
             }
             return self.browse(question.into(), true);
         }
-        let Some(messages) = chat.ask(question, &setup.png) else {
+        let png: &[u8] = if self.screen { &setup.png } else { &[] };
+        let Some(messages) = chat.ask(question, png) else {
             return Task::none();
         };
         let setup = setup.clone();
@@ -463,13 +492,17 @@ impl Panel {
         chat.ask(&prompt, &[]); // the turn (and "busy"); nothing is sent by this
         let crop = self.crop.clone();
         let colours = self.sheet.wanted.then(sheet::colours);
+        let screen = self.screen;
         let (task, handle) = background(move |tx| {
-            let read = read_text.then(|| {
+            let read = (read_text && screen).then(|| {
                 text::read(&crop, |progress| {
                     let _ = tx.unbounded_send(Msg::Progress(progress));
                 })
             });
-            let (question, note) = browser_turn(&prompt, read);
+            let (question, note) = match screen {
+                true => browser_turn(&prompt, read),
+                false => question_only(&prompt),
+            };
             // The results card; if it can't open, the panel offers the browser.
             let url = sheet::ai_url(&question);
             if let Some(colours) = colours {
@@ -576,7 +609,7 @@ impl Panel {
     ) -> Part<'a> {
         let thumb = container(
             image(thumb.clone())
-                .height(THUMB_HEIGHT)
+                .height(if self.screen { THUMB_HEIGHT } else { 0.0 })
                 .content_fit(ContentFit::Contain),
         )
         .align_right(Fill);
@@ -610,7 +643,7 @@ impl Panel {
             }
         }
         // Questions about the picture itself: Lens takes the crop (browser provider).
-        if browser && chat.status == Status::Done {
+        if browser && self.screen && chat.status == Status::Done {
             log = log.push(widgets::text_button(
                 actions::lens::ACTION.icon,
                 "Search the image with Lens",
@@ -630,7 +663,7 @@ impl Panel {
         if let Browse::Consent(question) = browse {
             // Waiting for the user's choice: the question is theirs, not yet a turn.
             log = log.push(container(widgets::bubble(widgets::body(question))).align_right(Fill));
-        } else if chat.turns.is_empty() {
+        } else if chat.turns.is_empty() && self.screen {
             let prompts = PRESETS
                 .iter()
                 .enumerate()
@@ -668,7 +701,9 @@ impl Panel {
         } else {
             self.follow_up("Ask a follow-up…", chat.status == Status::Streaming)
         };
-        let privacy = if browser {
+        let privacy = if !self.screen {
+            "Only your question is sent: no image and no text from your screen."
+        } else if browser {
             "When you send, your question and the text read from the selection go to Google \
              AI Mode. The image is not uploaded unless you choose Lens."
         } else {
@@ -818,6 +853,15 @@ fn act_on(entity: &Entity) -> Result<&'static str, String> {
 
 /// Browser provider: the question to open in AI Mode and the line to add to the
 /// answer. `read` is the OCR result (`None` = the user declined to read text).
+/// A plain question (not about the screen) for Google AI Mode: the question
+/// alone, and the note that says so.
+fn question_only(prompt: &str) -> (String, String) {
+    (
+        ai::browser::question(prompt, None),
+        "\nOnly your question was sent.".into(),
+    )
+}
+
 fn browser_turn(prompt: &str, read: Option<Result<String, String>>) -> (String, String) {
     let alone = |why: String| {
         (
@@ -843,6 +887,22 @@ mod tests {
     /// Where a panel shows on a `screen` (no selection).
     fn at(screen: Size) -> Rectangle {
         widgets::card::place(screen, None, None)
+    }
+
+    #[test]
+    fn a_plain_question_goes_alone() {
+        let (q, note) = question_only("How tall is Everest?");
+        assert_eq!(q, "How tall is Everest?", "no text from the screen");
+        assert!(note.contains("Only your question was sent"));
+        let (panel, _) = Panel::open_question("How tall is Everest?".into());
+        assert!(!panel.about_screen());
+        assert_eq!(
+            (panel.crop.width, panel.crop.height),
+            (1, 1),
+            "no screen pixels"
+        );
+        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+        assert!(!texts.iter().any(|t| t.contains("selection")), "{texts:?}");
     }
 
     #[test]
@@ -883,6 +943,7 @@ mod tests {
             entities: Vec::new(),
             note: None,
             sheet: Sheet::default(),
+            screen: true,
         };
         let msg = ask::tests::invalid_provider_error();
         let _ = panel.update(Msg::Ready(Err(msg.clone())));
@@ -922,6 +983,7 @@ mod tests {
             entities: Vec::new(),
             note: None,
             sheet: Sheet::default(),
+            screen: true,
         }
     }
 

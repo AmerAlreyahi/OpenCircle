@@ -58,6 +58,8 @@ const ASK_INPUT: &str = "overlay-ask";
 const ASK_WIDTH: f32 = 480.0;
 /// The field's width on a narrow screen (the buttons keep theirs).
 const ASK_MIN_WIDTH: f32 = 160.0;
+/// The bottom bar's "Include screen" toggle icon (lucide "screen-share").
+const INCLUDE_SCREEN: char = '\u{e152}';
 /// The bottom bar's Live translate icon (lucide "radio").
 const LIVE: char = '\u{e145}';
 const ASK_ZONE: f32 = widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING + 2.0 * ASK_MARGIN;
@@ -165,6 +167,8 @@ enum Message {
     /// The bottom bar's buttons: Ask AI (Enter, or the presets with an empty
     /// field), Translate the screen, Live translate, the whole screen in the editor.
     AskButton,
+    /// The field's "Include screen" toggle.
+    IncludeScreen,
     TranslateScreen,
     LiveToggle,
     EditScreen,
@@ -195,6 +199,8 @@ enum Message {
 /// The shortcuts of the bottom bar's buttons, as the tooltips show them ("" = none).
 #[derive(Debug, Default, Clone, PartialEq)]
 struct BarKeys {
+    /// No shortcut.
+    none: String,
     ask: String,
     translate: String,
     live: String,
@@ -214,6 +220,7 @@ impl BarKeys {
             false => a.key.letter.to_ascii_uppercase().to_string(),
         };
         BarKeys {
+            none: String::new(),
             ask: key(&actions::ask::ACTION),
             translate: quick(actions::translate::ACTION.id, false),
             live: quick(actions::translate::ACTION.id, true),
@@ -399,6 +406,9 @@ struct App {
     /// The opening animation (`overlay::APPEAR`): when its first frame was
     /// drawn, and the latest frame's time; `None` until the first frame.
     appear: Option<(Instant, Instant)>,
+    /// Ask AI from the bottom bar about the screen (on at every opening), or
+    /// a plain question with nothing from the screen.
+    include_screen: bool,
     /// The shortcuts the bottom bar's tooltips show (read at open).
     bar_keys: BarKeys,
     /// The last press: when, where (image px), and how many in a row.
@@ -515,6 +525,7 @@ impl App {
             text_press: None,
             clicks: None,
             appear: None,
+            include_screen: true,
             bar_keys: BarKeys::default(),
             ask: String::new(),
             opening: 0,
@@ -620,17 +631,7 @@ impl App {
             Message::SongKey => Task::none(), // remembered by `music::check_key`
             // Song search is opt-in: without a key the button opens its setup
             // (Settings > Song search) and nothing is recorded.
-            Message::SongStart if !self.has_song_key() => {
-                let closing = self.close();
-                let settings = self.windows.open(windows::Kind::Settings);
-                let section =
-                    self.windows
-                        .update(windows::Msg::Settings(settings::Message::Section(
-                            settings::Section::Song,
-                        )));
-                closing.chain(settings.chain(section).map(Message::Windows))
-            }
-            Message::SongStart => self.start_song(),
+            Message::SongStart => self.song(self.has_song_key()),
             Message::Song(id, msg) => self.on_song(id, msg),
             Message::CaptureTimedOut(n) if self.capturing == Some(n) => {
                 eprintln!(
@@ -720,6 +721,18 @@ impl App {
                 Task::none()
             }
             // Before a selection it asks about the whole screen.
+            // A plain question: nothing from the screen goes with it.
+            Message::AskSubmit | Message::AskButton if !self.include_screen => {
+                let question = std::mem::take(&mut self.ask);
+                if question.trim().is_empty() {
+                    return Task::none();
+                }
+                self.panels = self.panels.wrapping_add(1);
+                let id = self.panels;
+                let (panel, task) = panel::Panel::open_question(question);
+                self.panel = Some((id, panel));
+                task.map(move |msg| Message::Panel(id, msg))
+            }
             Message::AskSubmit => {
                 let question = std::mem::take(&mut self.ask);
                 let crop =
@@ -728,6 +741,10 @@ impl App {
                     Some(crop) => self.open_panel(actions::Panel::Ask, crop, Some(question)),
                     None => Task::none(),
                 }
+            }
+            Message::IncludeScreen => {
+                self.include_screen = !self.include_screen;
+                Task::none()
             }
             Message::AskButton if self.ask.trim().is_empty() => {
                 // no question yet: Ask AI opens with its presets
@@ -891,6 +908,7 @@ impl App {
         self.hiding = Hiding::No;
         let cfg = config::current();
         self.appear = None; // its first frame is t = 0
+        self.include_screen = true;
         self.behaviour = cfg.selection;
         self.bar_keys = BarKeys::of(&cfg);
         let mut first = None;
@@ -2481,6 +2499,22 @@ impl App {
         window::close(self.overlay)
     }
 
+    /// The music button: song search with a key (`has_key`); without one its
+    /// setup (Settings > Song search), and nothing is recorded.
+    fn song(&mut self, has_key: bool) -> Task<Message> {
+        if has_key {
+            return self.start_song();
+        }
+        let closing = self.close();
+        let settings = self.windows.open(windows::Kind::Settings);
+        let section = self
+            .windows
+            .update(windows::Msg::Settings(settings::Message::Section(
+                settings::Section::Song,
+            )));
+        closing.chain(settings.chain(section).map(Message::Windows))
+    }
+
     /// Song search: listens on a thread; its pill, then its card, over the overlay.
     fn start_song(&mut self) -> Task<Message> {
         self.songs = self.songs.wrapping_add(1);
@@ -2941,9 +2975,10 @@ impl App {
     /// once clicked: until then letters are the action shortcuts. On a narrow
     /// screen the field gives up width, the buttons stay.
     fn bottom_bar(&self) -> Element<'_, Message> {
-        let placeholder = match self.selection {
-            Some(_) => "Ask about your selection…",
-            None => "Ask about your screen…",
+        let placeholder = match (self.include_screen, self.selection) {
+            (false, _) => "Ask anything…",
+            (true, Some(_)) => "Ask about your selection…",
+            (true, None) => "Ask about your screen…",
         };
         let field = widgets::input(
             ASK_INPUT,
@@ -2954,6 +2989,13 @@ impl App {
         );
         let keys = &self.bar_keys;
         let buttons = [
+            (
+                INCLUDE_SCREEN,
+                "Include screen",
+                &keys.none,
+                self.include_screen,
+                Message::IncludeScreen,
+            ),
             (
                 actions::ask::ACTION.icon,
                 "Ask AI",
@@ -4206,7 +4248,12 @@ mod tests {
 
     /// The centre of the bottom bar's button `k` (0 = Ask AI … 4 = Edit), as laid out.
     fn bar_button(app: &App, k: usize) -> Point {
-        let n = 5.0;
+        bar_slot(app, k + 1)
+    }
+
+    /// The centre of the bottom bar's icon `k` (0 = Include screen, then the buttons).
+    fn bar_slot(app: &App, k: usize) -> Point {
+        let n = 6.0;
         let used = n * (widgets::CONTROL + 4.0) + 2.0 * (widgets::SURFACE_PADDING + ASK_MARGIN);
         let field = (app.screen.width - used).clamp(ASK_MIN_WIDTH, ASK_WIDTH);
         let bar = field + n * (widgets::CONTROL + 4.0) + 2.0 * widgets::SURFACE_PADDING;
@@ -4253,11 +4300,36 @@ mod tests {
     }
 
     #[test]
+    fn a_plain_question_sends_nothing_from_the_screen() {
+        let mut app = open_app(800, 600, 1.0);
+        let chip = widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(&app, 0));
+        assert!(chip.iter().any(|m| matches!(m, Message::IncludeScreen)));
+        assert!(app.include_screen, "on at first");
+        let _ = app.update(Message::IncludeScreen);
+        let texts = overlay_texts(&app);
+        assert!(texts.iter().any(|t| t == "Ask anything…"), "{texts:?}");
+        let _ = app.update(Message::AskInput("how tall is Everest?".into()));
+        let _ = app.update(Message::AskSubmit);
+        let (_, panel) = app.panel.as_ref().expect("Ask AI opens");
+        assert_eq!(panel.kind(), actions::Panel::Ask);
+        assert!(
+            !panel.about_screen(),
+            "no image and no screen text go with it"
+        );
+        // what goes out for it: the question alone, no image
+        let mut chat = actions::ask::Chat::default();
+        let messages = chat.ask("how tall is Everest?", &[]).unwrap();
+        assert!(messages.iter().all(|m| m.image_png.is_none()));
+        // a new opening asks about the screen again
+        let _ = app.open(Instant::now(), a_shot());
+        assert!(app.include_screen);
+    }
+
+    #[test]
     fn the_bottom_bar_buttons_work_on_the_whole_screen() {
         // without a song key the music button opens its setup: nothing is recorded
         let mut app = open_app(800, 600, 1.0);
-        assert!(!app.has_song_key());
-        let _ = app.update(Message::SongStart);
+        let _ = app.song(false);
         assert!(
             app.song.is_none() && app.frame.is_none(),
             "closed, not listening"

@@ -225,7 +225,7 @@ pub struct Chat {
 }
 
 impl Chat {
-    /// Starts a turn and returns the conversation to send (the crop goes with the
+    /// Starts a turn and returns the conversation to send (the crop `png`, if any, goes with the
     /// first question). `None` while an answer streams, or for a blank question.
     pub fn ask(&mut self, question: &str, png: &[u8]) -> Option<Vec<ai::Message>> {
         let question = question.trim();
@@ -239,7 +239,7 @@ impl Chat {
             messages.push(ai::Message::new(Role::Assistant, &turn.answer));
         }
         messages.push(ai::Message::user(question));
-        messages[1].image_png = Some(png.to_vec());
+        messages[1].image_png = (!png.is_empty()).then(|| png.to_vec()); // none: a plain question
         self.turns.push(Turn {
             question: question.into(),
             answer: String::new(),
