@@ -898,7 +898,7 @@ fn real_frames() {
         };
         let r =
             translate_frame(&f.rgba, f.width, f.height, "ar", &Cache::new(4096), &deps).unwrap();
-        eprintln!("{name}: {:?}", r.timings);
+        eprintln!("{name}: {:?}; drawn {:?}", r.timings, r.drawn);
         for b in &r.blocks {
             eprintln!(
                 "  {:?} {:?} -> {:?}",
@@ -1187,6 +1187,7 @@ mod real {
             confidence: 0.9,
         };
         assert!(cut_off(&tb(0.0), 200) && cut_off(&tb(180.0), 200));
+        assert!(cut_off(&tb(2.0), 200) && cut_off(&tb(178.0), 200));
         assert!(!cut_off(&tb(5.0), 200) && !cut_off(&tb(170.0), 200));
     }
 }
