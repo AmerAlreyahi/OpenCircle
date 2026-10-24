@@ -21,6 +21,9 @@ const MARGIN: f32 = 40.0;
 pub struct Line {
     pub text: String,
     pub bounds: Rectangle,
+    /// Each word's x extent on screen (image px, in text order), measured on
+    /// the frame by `measure`; empty = not measured (an even share by characters).
+    pub cuts: Vec<(f32, f32)>,
 }
 
 /// The part of a `screen`-sized overlay that OCR reads for a tap at `at`.
@@ -45,9 +48,93 @@ pub fn lines(blocks: Vec<TextBlock>, origin: [u32; 2], scale: f32) -> Vec<Line> 
             Line {
                 text: b.text,
                 bounds: frame * (1.0 / scale),
+                cuts: Vec::new(),
             }
         })
         .collect()
+}
+
+/// A pixel this far (largest channel difference) from the background is ink.
+const INK: i32 = 56;
+
+/// Finds where each word of `lines` really is on the frame (`rgba`, `width` x
+/// `height` frame px, `scale` frame px per image px): in the line's box, the
+/// columns without ink (pixels unlike its most common colour) split it, and
+/// the widest `words - 1` of those gaps are the spaces. A line it can't split
+/// that way (fewer gaps than spaces) keeps the even share.
+// ponytail: one background colour per line; text over a gradient or a
+// picture finds ink everywhere and keeps the even share.
+pub fn measure(lines: &mut [Line], rgba: &[u8], width: u32, height: u32, scale: f32) {
+    for line in lines {
+        line.cuts = cuts(line, rgba, width, height, scale).unwrap_or_default();
+    }
+}
+
+fn cuts(line: &Line, rgba: &[u8], width: u32, height: u32, scale: f32) -> Option<Vec<(f32, f32)>> {
+    let b = line.bounds * scale;
+    let px = |v: f32, max: u32| (v.max(0.0) as u32).min(max);
+    let (x0, x1) = (px(b.x.floor(), width), px((b.x + b.width).ceil(), width));
+    let (y0, y1) = (px(b.y.floor(), height), px((b.y + b.height).ceil(), height));
+    if x1 <= x0 || y1 <= y0 || rgba.len() < (width * height * 4) as usize {
+        return None;
+    }
+    let at = |x: u32, y: u32| {
+        let i = ((y * width + x) * 4) as usize;
+        [rgba[i], rgba[i + 1], rgba[i + 2]]
+    };
+    // the background: the most common colour (4 bits a channel)
+    let mut counts = std::collections::HashMap::new();
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let [r, g, b] = at(x, y);
+            *counts.entry([r >> 4, g >> 4, b >> 4]).or_insert(0u32) += 1;
+        }
+    }
+    let (&bg, _) = counts.iter().max_by_key(|(_, n)| **n)?;
+    let bg = bg.map(|c| i32::from(c) * 16 + 8);
+    let ink: Vec<bool> = (x0..x1)
+        .map(|x| {
+            (y0..y1).any(|y| {
+                let p = at(x, y);
+                (0..3).any(|c| (i32::from(p[c]) - bg[c]).abs() > INK)
+            })
+        })
+        .collect();
+    let first = ink.iter().position(|&i| i)?;
+    let last = ink.iter().rposition(|&i| i)?;
+    // gaps between ink: (start, length) in columns
+    let mut gaps: Vec<(usize, usize)> = Vec::new();
+    let mut run = None;
+    for (i, &on) in ink.iter().enumerate().take(last + 1).skip(first) {
+        match (on, run) {
+            (false, None) => run = Some(i),
+            (true, Some(start)) => {
+                gaps.push((start, i - start));
+                run = None;
+            }
+            _ => {}
+        }
+    }
+    let count = line.text.split_whitespace().count();
+    if count == 0 || gaps.len() + 1 < count {
+        return None;
+    }
+    gaps.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let mut spaces: Vec<(usize, usize)> = gaps[..count - 1].to_vec();
+    spaces.sort();
+    let mut edges = vec![first];
+    for (start, len) in spaces {
+        edges.extend([start, start + len]);
+    }
+    edges.push(last + 1);
+    let to_image = |col: usize| (x0 as f32 + col as f32) / scale;
+    let mut out: Vec<(f32, f32)> = (edges.chunks(2))
+        .map(|e| (to_image(e[0]), to_image(e[1])))
+        .collect();
+    if is_rtl(&line.text) {
+        out.reverse(); // the first word is the rightmost
+    }
+    Some(out)
 }
 
 /// More than half of the line's letters are from a right-to-left script
@@ -62,12 +149,22 @@ fn is_rtl(text: &str) -> bool {
 }
 
 /// A line's words (in text order) and their boxes.
-// ponytail: OCR boxes whole lines; a word's box is its share of the line by
-// character count (a monospace guess, off by a few px on proportional fonts),
-// counted from the right edge on an RTL line (OCR text is in logical order; a
-// mixed Latin/Arabic line is approximate). Per-character boxes from the
-// recognizer when that shows.
+// Measured on the frame (`measure`) where it could be; else each word's share
+// of the line by character count (a monospace guess, off by a few px on
+// proportional fonts), counted from the right edge on an RTL line (OCR text is
+// in logical order; a mixed Latin/Arabic line is approximate).
 fn words(line: &Line) -> Vec<(Rectangle, &str)> {
+    let mut out = shares(line);
+    if line.cuts.len() == out.len() {
+        for ((r, _), &(x0, x1)) in out.iter_mut().zip(&line.cuts) {
+            (r.x, r.width) = (x0, x1 - x0);
+        }
+    }
+    out
+}
+
+/// `words` by character count.
+fn shares(line: &Line) -> Vec<(Rectangle, &str)> {
     let count = line.text.chars().count().max(1) as f32;
     let per = line.bounds.width / count;
     let right = line.bounds.x + line.bounds.width;
@@ -218,6 +315,11 @@ impl Picked {
         }
     }
 
+    /// Every text line read around the words (image px).
+    pub fn line_boxes(&self) -> impl Iterator<Item = Rectangle> + '_ {
+        self.lines.iter().map(|l| l.bounds)
+    }
+
     /// `p` (image px) is within the lines already read.
     pub fn covers(&self, p: Point) -> bool {
         self.covered.contains(p)
@@ -315,6 +417,7 @@ mod tests {
         Line {
             text: text.into(),
             bounds: Rectangle::new(Point::new(x, y), Size::new(w, 20.0)),
+            cuts: Vec::new(),
         }
     }
 
@@ -429,6 +532,85 @@ mod tests {
         let mut one = picked(paragraph(), Point::new(155.0, 158.0)).unwrap();
         assert!(one.extend(Point::new(155.0, 158.0)));
         assert_eq!(one.text(), "and");
+    }
+
+    /// A line of `WORDS` in a proportional font (960x60 frame px at `scale`),
+    /// with only word `only` drawn (all of them: `None`); same layout either way.
+    fn proportional(only: Option<usize>, scale: f32) -> Vec<u8> {
+        use iced::widget::{container, rich_text, span};
+        let spans: Vec<_> = (WORDS.iter().enumerate())
+            .flat_map(|(i, w)| {
+                let shown = only.is_none_or(|k| k == i);
+                let colour = if shown {
+                    iced::Color::WHITE
+                } else {
+                    iced::Color::TRANSPARENT
+                };
+                [span::<(), iced::Font>(*w).color(colour), span(" ")]
+            })
+            .collect();
+        let line = rich_text(spans)
+            .size(22.0 * scale)
+            .font(iced::Font::DEFAULT);
+        let page = container(line).padding([12.0 * scale, 30.0 * scale]);
+        let view: iced::Element<'_, ()> = page.into();
+        crate::ui::widgets::shot::render(view, (960.0 * scale) as u32, (60.0 * scale) as u32)
+    }
+
+    const WORDS: [&str; 8] = [
+        "Will", "a", "quick", "Wolf,", "jumping", "lightly,", "mimic", "it?",
+    ];
+
+    /// The columns (frame px) with ink in `rgba` (960 x 60 at `scale`).
+    fn ink(rgba: &[u8], scale: f32) -> (f32, f32) {
+        let w = (960.0 * scale) as usize;
+        let on = |x: usize| (0..rgba.len() / 4 / w).any(|y| rgba[(y * w + x) * 4] > 128);
+        let first = (0..w).find(|&x| on(x)).unwrap();
+        let last = (0..w).rev().find(|&x| on(x)).unwrap();
+        (first as f32, last as f32 + 1.0)
+    }
+
+    #[test]
+    fn words_are_measured_where_they_really_are() {
+        for scale in [1.0, 1.5] {
+            let all = proportional(None, scale);
+            let (x0, x1) = ink(&all, scale);
+            // OCR's box: a few px of margin round the ink
+            let bounds = Rectangle::new(
+                Point::new(x0 / scale - 3.0, 8.0),
+                Size::new((x1 - x0) / scale + 6.0, 40.0),
+            );
+            let mut lines = vec![Line {
+                text: WORDS.join(" "),
+                bounds,
+                cuts: Vec::new(),
+            }];
+            let (w, h) = ((960.0 * scale) as u32, (60.0 * scale) as u32);
+            measure(&mut lines, &all, w, h, scale);
+            let got = words(&lines[0]);
+            assert_eq!(got.len(), WORDS.len());
+            for (k, (r, text)) in got.iter().enumerate() {
+                let (a, b) = ink(&proportional(Some(k), scale), scale);
+                let (a, b) = (a / scale, b / scale);
+                assert_eq!(*text, WORDS[k]);
+                assert!(
+                    (r.x - a).abs() <= 2.0 && (r.x + r.width - b).abs() <= 2.0,
+                    "{scale}x {text}: {:?} vs real {a}..{b}",
+                    (r.x, r.x + r.width)
+                );
+            }
+            // the even share is off by more than that on this line
+            let even = shares(&lines[0]);
+            let off = (even.iter().zip(&got)).any(|((e, _), (m, _))| (e.x - m.x).abs() > 4.0);
+            assert!(off, "the fixture must tell the two apart");
+        }
+        // a busy background (no gaps): the even share stays
+        let mut busy = vec![line("Will a quick", 0.0, 0.0)];
+        let noise: Vec<u8> = (0..100 * 20)
+            .flat_map(|i| [(i * 37 % 256) as u8, 0, 0, 255])
+            .collect();
+        measure(&mut busy, &noise, 100, 20, 1.0);
+        assert!(busy[0].cuts.is_empty());
     }
 
     #[test]

@@ -1441,7 +1441,11 @@ impl App {
             // compete with the first frame; wait for that frame if it still does.
             std::thread::sleep(SCREEN_READ_DELAY);
             let read = ocr::recognize_in_child(&pixels, width, height);
-            let lines = read.map(|blocks| word::lines(blocks, [0, 0], scale));
+            let lines = read.map(|blocks| {
+                let mut lines = word::lines(blocks, [0, 0], scale);
+                word::measure(&mut lines, &pixels, width, height, scale);
+                lines
+            });
             let _ = tx.unbounded_send(lines.map_err(|e| e.to_string()));
         })
         .map(move |read| Message::ScreenText(opening, read))
@@ -1529,7 +1533,16 @@ impl App {
                 return Task::none();
             }
         };
-        let lines = word::lines(blocks, what.origin, self.scale);
+        let mut lines = word::lines(blocks, what.origin, self.scale);
+        if let Some(image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        }) = &self.frame
+        {
+            word::measure(&mut lines, pixels, *width, *height, self.scale);
+        }
         if what.extend {
             let Some(word) = &mut self.word else {
                 return Task::none();
@@ -1632,10 +1645,14 @@ impl App {
             picked: None,
             picking: false,
         });
-        let scale = self.scale;
+        let (scale, frame) = (self.scale, (*width, *height, pixels.clone()));
         background(move |tx| {
             let read = ocr::recognize_in_child(&crop.rgba, crop.width, crop.height);
-            let lines = read.map(|blocks| word::lines(blocks, [x0, y0], scale));
+            let lines = read.map(|blocks| {
+                let mut lines = word::lines(blocks, [x0, y0], scale);
+                word::measure(&mut lines, &frame.2, frame.0, frame.1, scale);
+                lines
+            });
             let _ = tx.unbounded_send(lines.map_err(|e| e.to_string()));
         })
         .map(move |read| Message::TextLines(area, read))
@@ -2751,7 +2768,11 @@ impl App {
             room.height = room.height.min(self.screen.height - ASK_ZONE);
         }
         if let Some(picked) = picked {
-            layers = layers.push(pick_popup(self.view.rect_to_screen(picked.area()), room));
+            let text: Vec<Rectangle> = (picked.line_boxes())
+                .map(|r| self.view.rect_to_screen(r))
+                .collect();
+            let area = self.view.rect_to_screen(picked.area());
+            layers = layers.push(pick_popup(area, room, &text));
         } else if bar_shown && !word {
             let chip = (self.scan.as_ref())
                 .and_then(|s| s.qr.as_deref())
@@ -2921,7 +2942,7 @@ fn chips_at(area: Rectangle, size: Size, room: Rectangle) -> Point {
 }
 
 /// The text actions for the picked words (Copy, Translate, Search, Ask AI), by their box `picked`.
-fn pick_popup<'a>(picked: Rectangle, room: Rectangle) -> Element<'a, Message> {
+fn pick_popup<'a>(picked: Rectangle, room: Rectangle, text: &[Rectangle]) -> Element<'a, Message> {
     let buttons = [
         (copy::ACTION.icon, "Copy", PickAct::Copy),
         (
@@ -2940,14 +2961,53 @@ fn pick_popup<'a>(picked: Rectangle, room: Rectangle) -> Element<'a, Message> {
         n * widgets::TEXT_BUTTON_WIDTH + (n - 1.0) * 4.0 + 2.0 * widgets::SURFACE_PADDING,
         widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING,
     );
-    // above the words (the text below stays readable), else under them
-    let mut at = bar::place_in(picked, size, room);
-    let above = picked.y - bar::GAP - size.height;
-    if above >= room.y + bar::GAP {
-        at.y = above;
-    }
+    let at = popup_at(picked, size, room, text);
     let popup = widgets::surface(iced::widget::row(buttons).spacing(4));
     iced::widget::pin(opaque(popup)).position(at).into()
+}
+
+/// How far (in popup heights) the text actions move to keep clear of text.
+const POPUP_REACH: f32 = 2.0;
+
+/// Where the text actions (`size`) go for the words `picked`: under them if
+/// there is room, else above, moved past other text lines (`text`) where that
+/// still fits, so they cover no text; always inside `room` (all screen px).
+fn popup_at(picked: Rectangle, size: Size, room: Rectangle, text: &[Rectangle]) -> Point {
+    let x = bar::place_in(picked, size, room).x;
+    let (top, bottom) = (room.y + bar::GAP, room.y + room.height - bar::GAP);
+    let fits = |y: f32| top <= y && y + size.height <= bottom;
+    let over = |y: f32| {
+        let r = Rectangle::new(Point::new(x, y), size);
+        let hit: Vec<&Rectangle> = text.iter().filter(|t| t.intersects(&r)).collect();
+        (!hit.is_empty()).then_some(hit)
+    };
+    // step past the lines in the way, downwards (`down`) or upwards, not
+    // further than `POPUP_REACH` popups from the words
+    let clear = |start: f32, down: bool| {
+        let mut y = start;
+        while fits(y) && (y - start).abs() <= POPUP_REACH * size.height {
+            let Some(hit) = over(y) else { return Some(y) };
+            y = match down {
+                true => hit.iter().map(|t| t.y + t.height).fold(y, f32::max) + bar::GAP,
+                false => {
+                    hit.iter().map(|t| t.y).fold(y + size.height, f32::min) - bar::GAP - size.height
+                }
+            };
+        }
+        None
+    };
+    let below = picked.y + picked.height + bar::GAP;
+    let above = picked.y - bar::GAP - size.height;
+    let y = (clear(below, true))
+        .or_else(|| clear(above, false))
+        .unwrap_or(if fits(below) {
+            below
+        } else if fits(above) {
+            above
+        } else {
+            bottom - size.height
+        });
+    Point::new(x, y.max(top))
 }
 
 /// The actions a selection runs by itself under `behaviour`.
@@ -4078,6 +4138,43 @@ mod tests {
         assert!(
             keys.iter()
                 .any(|m| matches!(m, Message::AskInput(t) if t == "a"))
+        );
+    }
+
+    #[test]
+    fn the_text_actions_cover_no_text_and_stay_on_screen() {
+        let room = Rectangle::new(Point::ORIGIN, Size::new(1000.0, 700.0));
+        let size = Size::new(400.0, 56.0);
+        let line = |y: f32| Rectangle::new(Point::new(100.0, y), Size::new(500.0, 22.0));
+        let clear = |at: Point, text: &[Rectangle]| {
+            let r = Rectangle::new(at, size);
+            text.iter().all(|t| !t.intersects(&r))
+                && room.contains(at)
+                && room.contains(at + Vector::from(size))
+        };
+        // a lone word: right under it
+        let word = line(100.0);
+        let at = popup_at(word, size, room, &[word]);
+        assert_eq!(at.y, 122.0 + bar::GAP);
+        assert!(clear(at, &[word]));
+        // in a paragraph: past the next lines, below the paragraph
+        let para: Vec<Rectangle> = (0..4).map(|i| line(100.0 + 30.0 * i as f32)).collect();
+        let at = popup_at(para[0], size, room, &para);
+        assert!(at.y > para[3].y && clear(at, &para), "{at:?}");
+        // a long text below and above: under the words, over the text (no way round)
+        let page: Vec<Rectangle> = (0..20).map(|i| line(30.0 * i as f32 + 10.0)).collect();
+        let at = popup_at(page[10], size, room, &page);
+        assert_eq!(at.y, page[10].y + 22.0 + bar::GAP);
+        // at the bottom of the screen: above the words, clear of the line above
+        let low = [line(560.0), line(640.0)];
+        let at = popup_at(low[1], size, room, &low);
+        assert!(at.y + size.height <= low[1].y && clear(at, &low), "{at:?}");
+        // a word at the very top and bottom of a tiny room: still inside
+        let tiny = Rectangle::new(Point::ORIGIN, Size::new(500.0, 80.0));
+        let at = popup_at(line(30.0), size, tiny, &[]);
+        assert!(
+            at.y >= tiny.y && at.y + size.height <= tiny.height,
+            "{at:?}"
         );
     }
 
