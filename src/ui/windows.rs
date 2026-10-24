@@ -1093,7 +1093,12 @@ mod tests {
         let id = windows.pins[0].id;
         let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
         let _ = windows.view(id).unwrap();
-        assert_eq!(shown(), ["Copy · Ctrl+C", "Save · Ctrl+S", "Close · Esc"]);
+        // Drag-out is Windows-only, so its handle (and hint) is too.
+        let mut expected = vec!["Copy · Ctrl+C", "Save · Ctrl+S", "Close · Esc"];
+        if cfg!(windows) {
+            expected.insert(0, "Drag the image into another app");
+        }
+        assert_eq!(shown(), expected);
         assert_tips_add_something("pin bar");
     }
 
