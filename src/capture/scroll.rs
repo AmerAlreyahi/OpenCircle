@@ -39,18 +39,18 @@ pub fn scroll_once(at: (i32, i32), notches: i32) -> io::Result<()> {
             },
         },
     };
-    // One event per notch: some apps only honour a single notch per event.
-    let inputs = vec![wheel; notches.unsigned_abs().min(100) as usize];
-    if inputs.is_empty() {
-        return Ok(());
+    // One SendInput per notch, a beat apart: in one batch, Notepad applied only
+    // some of the notches (2 of 7) while our window had the focus.
+    for i in 0..notches.unsigned_abs().min(100) {
+        if i > 0 {
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        // SAFETY: a valid one-element slice of INPUT and its matching size.
+        if unsafe { SendInput(&[wheel], size_of::<INPUT>() as i32) } != 1 {
+            return Err(io::Error::last_os_error());
+        }
     }
-    // SAFETY: `inputs` is a valid slice of INPUT and the size matches.
-    let sent = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
-    if sent as usize == inputs.len() {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -110,6 +110,9 @@ pub struct Params {
     pub max_rejects: u32,
     /// Notches for the first scroll; later ones are tuned to half a viewport.
     pub first_notches: i32,
+    /// Settle checks that must pass with the frame still as before the scroll
+    /// before that counts as "did not move": the target may repaint late.
+    pub quiet_tries: u32,
 }
 
 impl Default for Params {
@@ -119,6 +122,7 @@ impl Default for Params {
             settle_tries: 25,
             max_rejects: 4,
             first_notches: 3,
+            quiet_tries: 4,
         }
     }
 }
@@ -138,21 +142,24 @@ pub enum Stop {
 
 /// Captures until two consecutive captures are identical (the page stopped
 /// moving), or `settle_tries` checks passed, then returns the latest capture.
+/// While the frame still equals `before` (the frame before the scroll), it
+/// keeps waiting for `quiet_tries` checks: the target may not have repainted yet.
 fn settle(
     capture: &mut impl FnMut() -> io::Result<Vec<u8>>,
     stop: &AtomicBool,
     p: &Params,
+    before: Option<&[u8]>,
 ) -> io::Result<Vec<u8>> {
     // The first pause lets the scroll start: capturing at once would see the old page twice.
     std::thread::sleep(p.poll);
     let mut prev = capture()?;
-    for _ in 0..p.settle_tries {
+    for i in 0..p.settle_tries {
         if stop.load(Ordering::Relaxed) {
             break;
         }
         std::thread::sleep(p.poll);
         let next = capture()?;
-        if next == prev {
+        if next == prev && (before != Some(&next[..]) || i + 1 >= p.quiet_tries) {
             return Ok(next);
         }
         prev = next;
@@ -173,14 +180,14 @@ pub fn run(
     p: &Params,
     mut progress: impl FnMut(u32),
 ) -> io::Result<Stop> {
-    let first = settle(&mut capture, stop, p)?;
-    if st.push(&first) == Push::Rejected {
+    let mut last = settle(&mut capture, stop, p, None)?;
+    if st.push(&last) == Push::Rejected {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "frame does not match the stitcher size",
         ));
     }
-    let (mut notches, mut tuned, mut still, mut rejects) = (p.first_notches.max(1), false, 0, 0);
+    let (mut notches, mut per_notch, mut still, mut rejects) = (p.first_notches.max(1), 0f32, 0, 0);
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(Stop::Cancelled);
@@ -189,17 +196,16 @@ pub fn run(
             return Ok(Stop::Cap);
         }
         scroll(notches)?;
-        let frame = settle(&mut capture, stop, p)?;
+        let frame = settle(&mut capture, stop, p, Some(&last))?;
         match st.push(&frame) {
             Push::Added(px) => {
                 (still, rejects) = (0, 0);
-                if !tuned {
-                    // The pixels per notch depend on the app and the system: measure once.
-                    tuned = true;
-                    let target = (st.frame_size().1 / 2) as f32;
-                    let per_notch = (px as f32 / notches as f32).max(1.0);
-                    notches = ((target / per_notch).round() as i32).clamp(1, 40);
-                }
+                // Pixels per notch depend on the app and the system, and a notch
+                // can get lost: trust the largest step seen (a short step is safe,
+                // one past the overlap is not).
+                per_notch = per_notch.max(px as f32 / notches as f32);
+                let target = (st.frame_size().1 / 2) as f32;
+                notches = ((target / per_notch).round() as i32).clamp(1, 40);
                 progress(st.height());
             }
             Push::NoMovement => {
@@ -213,8 +219,13 @@ pub fn run(
                 if rejects >= p.max_rejects {
                     return Ok(Stop::Unmatched);
                 }
+                // Most likely scrolled past the overlap: go back, take smaller steps.
+                scroll(-notches)?;
+                notches = (notches / 2).max(1);
+                continue;
             }
         }
+        last = frame;
     }
 }
 
@@ -236,12 +247,14 @@ mod tests {
     }
 
     /// Runs the loop on a fake page of `page_h` rows; returns the stop reason,
-    /// the scroll calls and the stitched image.
+    /// the scroll calls and the stitched image. `lossy`: the first two scrolls
+    /// apply one notch only, as Notepad did on the Windows VM.
     fn drive(
         w: usize,
         page_h: usize,
         stop: &AtomicBool,
         stop_after: Option<usize>,
+        lossy: bool,
     ) -> (Stop, usize, (Vec<u8>, u32, u32), Rig) {
         let rig = Rig::new(w, page_h, 700, 5, 40);
         let pos = Cell::new(0usize);
@@ -252,7 +265,13 @@ mod tests {
             || Ok(rig.frame(pos.get()).px),
             |n| {
                 calls.set(calls.get() + 1);
-                pos.set((pos.get() + n as usize * PX_PER_NOTCH).min(rig.max_scroll()));
+                let n = if lossy && calls.get() <= 2 {
+                    n.signum()
+                } else {
+                    n
+                };
+                let to = pos.get() as i64 + n as i64 * PX_PER_NOTCH as i64;
+                pos.set((to.max(0) as usize).min(rig.max_scroll()));
                 if Some(calls.get()) == stop_after {
                     stop.store(true, Ordering::Relaxed);
                 }
@@ -269,7 +288,7 @@ mod tests {
     #[test]
     fn stops_at_end_of_page_with_exact_result() {
         let stop = AtomicBool::new(false);
-        let (reason, calls, (px, w, h), rig) = drive(780, 6000, &stop, None);
+        let (reason, calls, (px, w, h), rig) = drive(780, 6000, &stop, None, false);
         assert_eq!(reason, Stop::EndOfPage);
         let truth = rig.truth(rig.max_scroll());
         assert_eq!((w as usize, h as usize), (truth.w, truth.h));
@@ -280,9 +299,42 @@ mod tests {
     }
 
     #[test]
+    fn lost_notches_do_not_scroll_past_the_overlap() {
+        // 3 notches measured as 100 px used to tune the next scroll to 11 notches
+        // (1100 px, past the 600 px body): every later frame was rejected.
+        let stop = AtomicBool::new(false);
+        let (reason, _, (px, w, h), rig) = drive(780, 6000, &stop, None, true);
+        assert_eq!(reason, Stop::EndOfPage);
+        let truth = rig.truth(rig.max_scroll());
+        assert_eq!((w as usize, h as usize), (truth.w, truth.h));
+        assert!(px == truth.px);
+    }
+
+    #[test]
+    fn settle_waits_for_a_late_repaint() {
+        // The target repaints only on the 4th capture after the scroll: settling on
+        // the old frame (twice the same) would read as "did not move".
+        let n = Cell::new(0);
+        let mut cap = || {
+            n.set(n.get() + 1);
+            Ok(vec![if n.get() < 4 { 0 } else { 1 }; 4])
+        };
+        let f = settle(&mut cap, &AtomicBool::new(false), &fast(), Some(&[0; 4])).unwrap();
+        assert_eq!(f, vec![1; 4]);
+        // A page that really did not move is let go after `quiet_tries` checks.
+        n.set(0);
+        let mut still = || {
+            n.set(n.get() + 1);
+            Ok(vec![0; 4])
+        };
+        let f = settle(&mut still, &AtomicBool::new(false), &fast(), Some(&[0; 4])).unwrap();
+        assert_eq!((f, n.get()), (vec![0; 4], 1 + fast().quiet_tries));
+    }
+
+    #[test]
     fn stops_at_the_height_cap() {
         let stop = AtomicBool::new(false);
-        let (reason, _, (_, w, h), _) = drive(100, 36_000, &stop, None);
+        let (reason, _, (_, w, h), _) = drive(100, 36_000, &stop, None, false);
         assert_eq!(reason, Stop::Cap);
         assert_eq!((w, h), (100, MAX_HEIGHT));
     }
@@ -290,7 +342,7 @@ mod tests {
     #[test]
     fn stops_on_the_stop_flag_and_keeps_the_partial_result() {
         let stop = AtomicBool::new(false);
-        let (reason, calls, (_, _, h), _) = drive(780, 6000, &stop, Some(4));
+        let (reason, calls, (_, _, h), _) = drive(780, 6000, &stop, Some(4), false);
         assert_eq!(reason, Stop::Cancelled);
         assert_eq!(calls, 4);
         assert!(h > 700);
@@ -299,7 +351,7 @@ mod tests {
     #[test]
     fn stop_flag_set_before_start_scrolls_nothing() {
         let stop = AtomicBool::new(true);
-        let (reason, calls, (_, _, h), _) = drive(780, 6000, &stop, None);
+        let (reason, calls, (_, _, h), _) = drive(780, 6000, &stop, None, false);
         assert_eq!((reason, calls, h), (Stop::Cancelled, 0, 700));
     }
 
@@ -344,7 +396,7 @@ mod tests {
             // frames: 0, 1, 2, 2, ...
             Ok(vec![n.get().min(3) as u8; 4])
         };
-        let f = settle(&mut cap, &AtomicBool::new(false), &fast()).unwrap();
+        let f = settle(&mut cap, &AtomicBool::new(false), &fast(), None).unwrap();
         assert_eq!(f, vec![3; 4]);
         assert_eq!(n.get(), 4);
     }

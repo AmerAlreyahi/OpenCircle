@@ -1,35 +1,48 @@
 //! Scrolling-capture stitcher (spike S5, production port).
 //!
 //! Feed it successive captures of one screen region while the content scrolls
-//! down. Per frame: 64-bin luma signature per row (right-hand scrollbar strip
-//! left out), sticky header/footer = rows fixed in every moving pair, scroll
-//! offset = best row-match score over informative rows. Output pixels are always
+//! down. Per frame: a colour signature per row in 4 px bins (right-hand scrollbar
+//! strip left out), sticky header/footer = rows fixed in every moving pair,
+//! scroll offset = lowest mean row cost over informative rows. Output pixels are always
 //! copied from a real frame, never blended. Pure: no I/O, no platform code.
 #![allow(dead_code)] // wired by the snip UI later; the tests exercise everything
 
 /// Hard cap on the stitched height, in pixels.
 pub const MAX_HEIGHT: u32 = 30_000;
 
-const BINS: usize = 64;
-/// Max summed bin difference (bins within `BIN_BAD`) for two rows to count as the same.
-const ROW_TOL: u32 = 3 * BINS as u32;
-/// A bin differing more than this is an outlier (animation, cursor, scrollbar thumb).
+/// Pixels per signature bin. Fine enough that two text lines differing in one
+/// character differ in a bin (64 bins over the width could not tell them apart).
+const BIN_PX: usize = 4;
+/// A bin whose mean differs more than this in any channel is a mismatch. Per
+/// channel: pastel bands of equal luma (pink vs green) must not match.
 const BIN_BAD: u8 = 24;
-/// Outlier bins tolerated per row (12 % of the width); more means "animated frame".
-const MAX_BAD_BINS: usize = 8;
-/// A row is informative when its luma range reaches this (flat rows match anywhere).
+/// A row is informative when one channel's range reaches this (flat rows match anywhere).
 const FLAT: u8 = 24;
-/// Overlap rows that must match, at minimum, to trust an offset.
+/// Largest mean row cost accepted for an offset, in percent of the row cap: up to
+/// ~40 % of the overlap may be covered by things that do not scroll with the page.
+const ACCEPT_PCT: u64 = 40;
+/// Informative overlap rows needed, at minimum, to trust an offset.
 const MIN_MATCH: usize = 8;
 /// Largest scroll step accepted, in percent of the scrolling body. Bigger steps
 /// leave too little overlap to tell from a blank-row coincidence.
 const MAX_STEP_PCT: usize = 90;
 
-type Sig = [u8; BINS];
-
+/// Per-row signatures: mean R, G, B of every `BIN_PX` bin, row after row.
 struct Rows {
-    sig: Vec<Sig>,
+    /// Bytes per row (3 per bin).
+    n: usize,
+    /// Mismatched bins counted per row (1/8 of them): a row costs at most this,
+    /// so rows spoilt by something that does not scroll (popup, video) weigh
+    /// little, and a small animation inside a row still lets it match.
+    cap: u32,
+    sig: Vec<u8>,
     info: Vec<bool>,
+}
+
+impl Rows {
+    fn row(&self, y: usize) -> &[u8] {
+        &self.sig[y * self.n..(y + 1) * self.n]
+    }
 }
 
 /// Right-hand strip (px) ignored when matching: where a scrollbar thumb moves.
@@ -38,81 +51,116 @@ fn scrollbar_strip(w: usize) -> usize {
 }
 
 fn rows(rgba: &[u8], w: usize, h: usize) -> Rows {
-    let used = w - scrollbar_strip(w);
-    let (mut sig, mut info) = (Vec::with_capacity(h), Vec::with_capacity(h));
-    let mut luma = vec![0u8; used];
+    let bins = ((w - scrollbar_strip(w)) / BIN_PX).max(1).min(w);
+    let px = (bins * BIN_PX).min(w);
+    let n = bins * 3;
+    let (mut sig, mut info) = (Vec::with_capacity(n * h), Vec::with_capacity(h));
     for row in rgba.chunks_exact(w * 4).take(h) {
-        for (l, p) in luma.iter_mut().zip(row.as_chunks::<4>().0.iter()) {
-            *l = ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8;
+        let start = sig.len();
+        for bin in row.as_chunks::<4>().0[..px].chunks(BIN_PX) {
+            let mut sum = [0u32; 3];
+            for p in bin {
+                sum[0] += p[0] as u32;
+                sum[1] += p[1] as u32;
+                sum[2] += p[2] as u32;
+            }
+            sig.extend(sum.map(|v| (v / bin.len() as u32) as u8));
         }
-        let (mn, mx) = luma
-            .iter()
-            .fold((255u8, 0u8), |(a, b), &v| (a.min(v), b.max(v)));
-        let mut s = [0u8; BINS];
-        for (b, out) in s.iter_mut().enumerate() {
-            let (x0, x1) = (b * used / BINS, (b + 1) * used / BINS);
-            let sum: u32 = luma[x0..x1].iter().map(|&v| v as u32).sum();
-            *out = (sum / (x1 - x0).max(1) as u32) as u8;
-        }
-        sig.push(s);
-        info.push(mx - mn >= FLAT);
+        let r = &sig[start..];
+        let range = |c: usize| {
+            let (mn, mx) =
+                (r.iter().skip(c).step_by(3)).fold((255u8, 0u8), |(a, b), &v| (a.min(v), b.max(v)));
+            mx.saturating_sub(mn)
+        };
+        info.push((0..3).any(|c| range(c) >= FLAT));
     }
-    Rows { sig, info }
+    Rows {
+        n,
+        cap: (bins as u32 / 8).max(4),
+        sig,
+        info,
+    }
 }
 
-fn same(a: &Sig, b: &Sig) -> bool {
-    let (mut sum, mut bad) = (0u32, 0usize);
-    for (&x, &y) in a.iter().zip(b) {
-        let d = x.abs_diff(y);
-        if d > BIN_BAD {
-            bad += 1;
-        } else {
-            sum += d as u32;
+fn differ(x: &[u8; 3], y: &[u8; 3]) -> bool {
+    x.iter().zip(y).any(|(p, q)| p.abs_diff(*q) > BIN_BAD)
+}
+
+/// Bins where two rows differ by more than `BIN_BAD` in a channel, counted up
+/// to `cap`. With `still` (b's row in the previous frame at the same screen
+/// spot), bins where b did not change are left out: a popup or chat bubble that
+/// floats over the page stays put while the page scrolls under it.
+fn bad(a: &[u8], b: &[u8], still: Option<&[u8]>, cap: u32) -> u32 {
+    let mut n = 0;
+    let s = still.unwrap_or(a).as_chunks::<3>().0;
+    for ((x, y), z) in a.as_chunks::<3>().0.iter().zip(b.as_chunks::<3>().0).zip(s) {
+        if differ(x, y) && differ(z, y) {
+            n += 1;
+            if n >= cap {
+                break;
+            }
         }
     }
-    bad <= MAX_BAD_BINS && sum <= ROW_TOL
+    n
+}
+
+/// Same row, give or take one spoilt bin (a blinking cursor).
+fn same(a: &[u8], b: &[u8]) -> bool {
+    bad(a, b, None, 2) <= 1
 }
 
 /// Fixed (top, bottom) row counts between two frames, or None when the pair
 /// looks unmoved (everything fixed), which says nothing about sticky bars.
 fn fixed_rows(a: &Rows, b: &Rows) -> Option<(usize, usize)> {
-    let h = a.sig.len();
-    let eq = |y: usize| same(&a.sig[y], &b.sig[y]);
+    let h = a.info.len();
+    let eq = |y: usize| same(a.row(y), b.row(y));
     let top = (0..h).take_while(|&y| eq(y)).count();
     let bot = (0..h).rev().take_while(|&y| eq(y)).count();
     (top + bot < h).then_some((top, bot))
 }
 
-/// Scroll offset d (at most `max_d`) such that b body row y == a body row y+d.
-/// `Some(0)` also means "no informative rows, assume no movement"; None = no
-/// trustworthy match (animated frame, too-large step).
+/// Scroll offset d (at most `max_d`) such that b body row y == a body row y+d:
+/// the lowest mean row cost over b's informative rows. `Some(0)` also means
+/// "no informative rows, assume no movement"; None = no trustworthy match
+/// (animated frame, too-large step).
 fn offset(a: &Rows, b: &Rows, t: usize, h: usize, max_d: usize) -> Option<usize> {
     let info: Vec<usize> = (0..h).filter(|&y| b.info[t + y]).collect();
     if info.is_empty() {
         return Some(0);
     }
     let need = MIN_MATCH.min(info.len());
-    let mut best: Option<(i64, usize)> = None;
-    for d in 0..=max_d.min(h - 1) {
-        let valid = info.partition_point(|&y| y < h - d);
-        let (mut m, mut mm) = (0i64, 0i64);
-        for (i, &y) in info[..valid].iter().enumerate() {
-            if same(&a.sig[t + y + d], &b.sig[t + y]) {
-                m += 1;
-            } else {
-                mm += 1;
-            }
-            // Even if every remaining row matched we could not beat the best: stop.
-            if best.is_some_and(|(s, _)| m - 2 * mm + (valid - i - 1) as i64 <= s) {
-                break;
-            }
-        }
-        let (valid, score) = (valid as i64, m - 2 * mm);
-        if m as usize >= need && m * 10 >= valid * 8 && best.is_none_or(|(s, _)| score > s) {
-            best = Some((score, d));
+    let cost = |d: usize, y: usize| {
+        let still = Some(a.row(t + y));
+        bad(a.row(t + y + d), b.row(t + y), still, b.cap) as u64
+    };
+    // Every 8th row first, to try the offsets best first: the full pass then
+    // cuts the others short. Stable sort: on a tie 0 ("did not move") wins.
+    let mut order: Vec<(u64, usize, usize)> = (0..=max_d.min(h - 1))
+        .filter_map(|d| {
+            let rows = info.partition_point(|&y| y < h - d);
+            (rows >= need).then(|| {
+                let sample = info[..rows].iter().step_by(8);
+                let (c, n) = sample.fold((0, 0), |(c, n), &y| (c + cost(d, y), n + 1));
+                (c * 1000 / n, rows, d)
+            })
+        })
+        .collect();
+    order.sort_by_key(|&(c, ..)| c);
+    // (cost, rows, d): mean cost = cost / rows.
+    let mut best: Option<(u64, u64, usize)> = None;
+    for (_, rows, d) in order {
+        let limit = ACCEPT_PCT * b.cap as u64 * rows as u64;
+        let mut sum = 0u64;
+        let beaten = info[..rows].iter().any(|&y| {
+            sum += cost(d, y);
+            // Past what is accepted, or no better than the best mean: give up on d.
+            sum * 100 > limit || best.is_some_and(|(c, r, _)| sum * r >= c * rows as u64)
+        });
+        if !beaten {
+            best = Some((sum, rows as u64, d));
         }
     }
-    best.map(|(_, d)| d)
+    best.map(|(.., d)| d)
 }
 
 /// Result of [`Stitcher::push`].
@@ -201,7 +249,8 @@ impl Stitcher {
         // Tentative: only kept when the pair turns out to be a real scroll.
         let (top, bot) = self.fixed.map_or((t, b), |(ft, fb)| (ft.min(t), fb.min(b)));
         let body = self.h - top - bot;
-        let d = match offset(prev, &rows, top, body, body * MAX_STEP_PCT / 100) {
+        let max_d = body * MAX_STEP_PCT / 100;
+        let d = match offset(prev, &rows, top, body, max_d) {
             None => return Push::Rejected,
             Some(0) => return Push::NoMovement,
             Some(d) => d,
@@ -592,6 +641,55 @@ mod tests {
         // All rows above the glued-on footer are the page.
         let keep = (MAX_HEIGHT as usize - 40) * w * 4;
         assert!(px[..keep] == rig.truth(rig.max_scroll()).px[..keep]);
+    }
+
+    /// A PNG fixture (grey or RGB) as RGBA, with its size.
+    fn real(png_bytes: &[u8]) -> (Vec<u8>, u32, u32) {
+        let mut reader = png::Decoder::new(std::io::Cursor::new(png_bytes))
+            .read_info()
+            .unwrap();
+        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        let rgba = match info.color_type {
+            png::ColorType::Rgba => buf,
+            png::ColorType::Grayscale => buf.iter().flat_map(|&v| [v, v, v, 255]).collect(),
+            png::ColorType::Rgb => (buf.as_chunks::<3>().0.iter())
+                .flat_map(|&[r, g, b]| [r, g, b, 255])
+                .collect(),
+            other => panic!("fixture colour type {other:?}"),
+        };
+        (rgba, info.width, info.height)
+    }
+
+    /// Two real captures from the Windows VM (161 DPI, cropped), 3 wheel notches apart.
+    fn real_pair(a: &[u8], b: &[u8]) -> (Push, Push) {
+        let ((a, w, h), (b, ..)) = (real(a), real(b));
+        let mut st = Stitcher::new(w, h);
+        assert_eq!(st.push(&a), Push::Added(h));
+        (st.push(&b), st.push(&b))
+    }
+
+    #[test]
+    fn real_notepad_lines_that_differ_in_a_few_digits() {
+        // "OpenCircle QA test document line 001: the quick brown fox ..." x 200:
+        // a 64-bin luma signature saw every line as the same ("no movement").
+        let (moved, again) = real_pair(
+            include_bytes!("testdata/notepad161_0.png"),
+            include_bytes!("testdata/notepad161_1.png"),
+        );
+        assert_eq!((moved, again), (Push::Added(261), Push::NoMovement)); // 9 lines x 29 px
+    }
+
+    #[test]
+    fn real_edge_sticky_header_and_floating_popup() {
+        // Pastel paragraph bands under a sticky header, with Edge's "Restore pages"
+        // popup floating over the top right, scrolled 300 CSS px at 167.7 %
+        // (503 device px): the popup rows never matched, so the frame was rejected.
+        let (moved, again) = real_pair(
+            include_bytes!("testdata/edge161_0.png"),
+            include_bytes!("testdata/edge161_1.png"),
+        );
+        assert_eq!((moved, again), (Push::Added(503), Push::NoMovement));
     }
 
     #[test]
