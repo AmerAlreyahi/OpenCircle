@@ -210,7 +210,18 @@ fn room(rgba: &[u8], dims: (usize, usize), b: &Block, blocks: &[Block], rtl: boo
     };
     let (mut x0, mut x1) = (x, x + w);
     if rtl {
-        x1 = free(rgba, dims, b, x1, column_right(b, blocks));
+        // not when another block shares the row on that side (captions side
+        // by side, a setting and its value): the text stays under its own
+        let right = column_right(b, blocks);
+        let beside = blocks.iter().any(|o| {
+            let [ox, oy, _, oh] = o.bounds;
+            ox >= x1 && ox < right && (oy + oh).min(y + h) - oy.max(y) > 0.5 * h.min(oh)
+        });
+        x1 = if beside {
+            x1
+        } else {
+            free(rgba, dims, b, x1, right)
+        };
         x0 = free(rgba, dims, b, x0, x0 - em);
     } else {
         x1 = free(rgba, dims, b, x1, x1 + em);
