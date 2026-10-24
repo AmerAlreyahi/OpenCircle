@@ -752,20 +752,17 @@ impl Editor {
 
     /// The item a press at `p` moves instead of drawing: every drawing tool moves
     /// what is painted under it (a click on one of its own text items types into
-    /// it). Freehand tools paint over their own strokes (a second pass, the next
-    /// letter); crop always crops.
+    /// it), the pen and highlighter their own strokes too (owner: drag a drawing
+    /// by holding it). The blur brush paints over its own strokes (a second
+    /// pass); crop always crops.
     fn grabbed(&self, p: Point) -> Option<usize> {
         if self.tool == Tool::Crop {
             return None;
         }
         let i = select::grab(&self.doc.items, p, GRAB / self.zoom)?;
-        let freehand = matches!(
-            (self.tool, &self.doc.items[i].shape),
-            (Tool::Pen, Shape::Pen(_))
-                | (Tool::Highlighter, Shape::Highlighter(_))
-                | (Tool::Blur, Shape::Blur { .. })
-        );
-        (!freehand).then_some(i)
+        let second_pass =
+            self.tool == Tool::Blur && matches!(self.doc.items[i].shape, Shape::Blur { .. });
+        (!second_pass).then_some(i)
     }
 
     /// Starts moving item `i` (`edits`: a click without a move types into it).

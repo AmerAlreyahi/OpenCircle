@@ -15,8 +15,12 @@ pub enum Handle {
     Bend,
 }
 
-/// The item's handles and where they are (image px).
+/// The item's handles and where they are (image px). Pen and highlighter
+/// strokes have none (dragged by the stroke, never resized).
 pub fn handles(item: &Item) -> Vec<(Handle, Point)> {
+    if matches!(item.shape, Shape::Pen(_) | Shape::Highlighter(_)) {
+        return Vec::new();
+    }
     let mut all: Vec<_> = corners(item)
         .into_iter()
         .enumerate()

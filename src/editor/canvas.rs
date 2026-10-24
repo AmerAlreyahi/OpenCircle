@@ -111,9 +111,7 @@ impl canvas::Program<Message> for Input<'_> {
             frame.fill_rectangle(r.position(), r.size(), theme::SELECTION.scale_alpha(0.4));
         }
 
-        let item = (e.pending.as_ref().map(|p| &p.item))
-            .or_else(|| e.doc.selected.and_then(|i| e.doc.items.get(i)));
-        if let Some(item) = item {
+        if let Some(item) = e.framed() {
             let f = e.to_display(item.frame());
             frame.stroke(
                 &Path::rectangle(f.position(), f.size()),
@@ -184,6 +182,15 @@ impl canvas::Program<Message> for Input<'_> {
 }
 
 impl Editor {
+    /// The item that shows the selection frame (and handles): the one drawn,
+    /// moved or typed, else the selected one. Pen and highlighter strokes never
+    /// do: they are moved by dragging the stroke itself.
+    pub(super) fn framed(&self) -> Option<&super::Item> {
+        let item = (self.pending.as_ref().map(|p| &p.item))
+            .or_else(|| self.doc.selected.and_then(|i| self.doc.items.get(i)))?;
+        (!matches!(item.shape, Shape::Pen(_) | Shape::Highlighter(_))).then_some(item)
+    }
+
     /// The pointer over `p` (image px): grabbing while something moves; a resize
     /// cursor on the selection's handles; a move cursor on what a press moves.
     pub(super) fn cursor(&self, p: Point) -> mouse::Interaction {

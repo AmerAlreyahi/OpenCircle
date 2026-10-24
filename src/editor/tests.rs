@@ -631,8 +631,7 @@ fn any_tool_moves_what_it_is_pressed_on() {
     assert_eq!(e.doc.items, vec![drawn]);
 }
 
-/// A text tool's click on its own text types into it, a drag moves it; a
-/// freehand tool paints over its own strokes.
+/// A text tool's click on its own text types into it, a drag moves it.
 #[test]
 fn text_moves_on_drag_and_edits_on_click() {
     let mut e = editor(300, 200);
@@ -655,11 +654,75 @@ fn text_moves_on_drag_and_edits_on_click() {
     e.update(Message::Finish);
     assert!(matches!(&e.doc.items[0].shape, Shape::Text { text, .. } if text == "Hi!"));
     assert_eq!(e.doc.items.len(), 1);
+}
 
-    e.update(Message::Tool(Tool::Pen));
-    drag(&mut e, pt(20.0, 150.0), &[], pt(200.0, 150.0));
-    drag(&mut e, pt(100.0, 151.0), &[], pt(120.0, 180.0));
-    assert_eq!(e.doc.items.len(), 3);
+/// Pen and highlighter strokes show no selection frame or handles (drawn,
+/// selected or moved); a drag on the stroke moves it, with their own tool too;
+/// undo puts it back, Delete removes it. Shapes keep their frame.
+#[test]
+fn freehand_strokes_have_no_frame_and_move_by_the_stroke() {
+    let canvas_px = |e: &Editor| crate::ui::widgets::shot::save("", e.canvas(), e.size());
+    let wave = |y: f32| -> Vec<Point> {
+        (0..40)
+            .map(|i| pt(40.0 + 5.0 * i as f32, y + 12.0 * (i as f32 / 3.0).sin()))
+            .collect()
+    };
+    for tool in [Tool::Pen, Tool::Highlighter] {
+        let mut e = editor(300, 200);
+        e.update(Message::Tool(tool));
+        let w = wave(60.0);
+        e.update(Message::Press(w[0]));
+        e.update(Message::Move(w[10]));
+        assert!(e.framed().is_none(), "{tool:?}: no frame while drawn");
+        for &p in &w[11..] {
+            e.update(Message::Move(p));
+        }
+        e.update(Message::Release);
+        assert_eq!(e.doc.selected, Some(0));
+        assert!(e.framed().is_none(), "{tool:?}");
+        let drawn = e.doc.items[0].clone();
+        // The render with it selected is the render without a selection.
+        let selected = canvas_px(&e);
+        e.doc.selected = None;
+        assert_eq!(
+            canvas_px(&e),
+            selected,
+            "{tool:?}: no frame or handles drawn"
+        );
+        assert!(e.cursor(w[20]).eq(&iced::mouse::Interaction::Move));
+
+        // A press on the stroke (2 px off) with its own tool: moved, nothing new.
+        let on = w[20] + iced::Vector::new(0.0, 2.0);
+        drag(
+            &mut e,
+            on,
+            &[on + iced::Vector::new(5.0, 20.0)],
+            on + iced::Vector::new(10.0, 70.0),
+        );
+        assert_eq!(e.doc.items.len(), 1, "{tool:?}");
+        let (now, was) = (e.doc.items[0].frame(), drawn.frame());
+        assert!((now.x - was.x - 10.0).abs() < 0.01 && (now.y - was.y - 70.0).abs() < 0.01);
+        assert!(e.framed().is_none());
+        e.update(Message::Undo);
+        assert_eq!(e.doc.items[0], drawn);
+        // Off the stroke: a new one.
+        let w2 = wave(150.0);
+        drag(&mut e, w2[0], &w2[1..39], w2[39]);
+        assert_eq!(e.doc.items.len(), 2);
+        // Delete removes the last one touched.
+        drag(&mut e, on, &[], on + iced::Vector::new(0.0, 10.0));
+        e.update(Message::Delete);
+        assert_eq!(e.doc.items.len(), 1);
+        assert!(
+            e.doc.items[0].frame().y > 130.0,
+            "the second stroke is left"
+        );
+    }
+    // A box keeps its frame.
+    let mut e = editor(300, 200);
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(40.0, 40.0), &[], pt(140.0, 120.0));
+    assert!(e.framed().is_some());
 }
 
 #[test]
@@ -1796,6 +1859,35 @@ fn shoot(
     let (w, h) = ((size.width * scale) as u32, (size.height * scale) as u32);
     let rgba = renderer.screenshot(Size::new(w, h), scale, background);
     crate::actions::write_png(path, w, h, &rgba).unwrap();
+}
+
+/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test editor::tests::snapshots_move -- --ignored`
+/// writes the editor before and after a box and an arrow are dragged with the
+/// Rect tool active (no Select).
+#[test]
+#[ignore = "writes PNGs to look at"]
+fn snapshots_move() {
+    let dir = png_dir();
+    let mut e = Editor::new(demo_image(), 1.0);
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(72.0, 54.0), &[], pt(300.0, 92.0));
+    e.update(Message::Tool(Tool::Arrow));
+    drag(&mut e, pt(520.0, 250.0), &[], pt(600.0, 372.0));
+    e.update(Message::Tool(Tool::Rect));
+    e.doc.selected = None;
+    let size = e.size() + Size::new(460.0, 90.0);
+    let backdrop = iced::Color::from_rgb8(0x2a, 0x2d, 0x3e);
+    shoot(e.view(), size, backdrop, &dir.join("move-0-before.png"));
+    // The box by its top edge, the arrow by its line: both move, nothing new.
+    drag(
+        &mut e,
+        pt(180.0, 54.0),
+        &[pt(200.0, 90.0)],
+        pt(220.0, 134.0),
+    );
+    drag(&mut e, pt(560.0, 311.0), &[], pt(470.0, 331.0));
+    assert_eq!(e.doc.items.len(), 2);
+    shoot(e.view(), size, backdrop, &dir.join("move-1-after.png"));
 }
 
 /// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test editor::tests::snapshots -- --ignored`
