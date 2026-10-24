@@ -1763,7 +1763,24 @@ impl App {
             return Task::none();
         };
         match msg {
-            translate::Msg::Close => self.close(),
+            translate::Msg::Card(card::Event::Grab(how)) => {
+                self.card_drag = Some((how, None));
+                Task::none()
+            }
+            translate::Msg::Card(card::Event::Hover(on)) => {
+                self.card_hover = on;
+                Task::none()
+            }
+            translate::Msg::Card(card::Event::Reset) => {
+                self.card = None;
+                Task::none()
+            }
+            // the word card's ×: back to the translation; a prompt's: done
+            translate::Msg::Card(card::Event::Close) if session.has_card() => {
+                session.close_card();
+                Task::none()
+            }
+            translate::Msg::Card(card::Event::Close) | translate::Msg::Close => self.close(),
             translate::Msg::OpenSettings => {
                 let closing = self.close();
                 let settings = self.windows.open(windows::Kind::Settings);
@@ -1934,7 +1951,7 @@ impl App {
         } else if let Some((id, session)) = &self.translate {
             let id = *id;
             session
-                .view(self.scale, self.screen)
+                .view(self.screen, self.card_at(), self.card_hover)
                 .map(move |msg| Message::Translate(id, msg))
         } else if let Some(snip) = snip {
             snip.view().map(Message::Snip)

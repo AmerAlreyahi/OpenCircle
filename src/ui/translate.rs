@@ -5,11 +5,11 @@
 //! Explain (an explicit click) asks the AI; `A` continues as an Ask AI chat.
 use std::sync::Arc;
 
-use iced::widget::{column, container, image, opaque, pin, row, text};
+use iced::widget::{column, container, image, opaque, pin, row, stack, text};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, task};
 
 use super::picker::{self, Picker};
-use super::{background, bar, panel, widgets};
+use super::{background, panel, widgets};
 use crate::actions::ask::{self, Chat, Status};
 use crate::actions::{self, Crop};
 use crate::ai::AiError;
@@ -18,10 +18,6 @@ use crate::mt::Pair;
 use crate::ocr::models;
 use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
 
-/// The word card's width, and its height for placing it (logical px).
-const CARD: Size = Size::new(360.0, 220.0);
-/// Notes and prompts (consent, errors) at the top.
-const NOTE_WIDTH: f32 = 420.0;
 /// The language list under the pill (two columns of names).
 const PICKER_LIST: f32 = 360.0;
 /// Context around a block in the image the word card sends (physical px).
@@ -53,6 +49,9 @@ pub enum Msg {
     Ask,
     /// The AI is not set up: open Settings.
     OpenSettings,
+    /// The card's frame (`widgets::card`): the App moves, resizes and
+    /// closes it, as for the other result cards.
+    Card(widgets::card::Event),
 }
 
 /// The translated frame and its blocks (frame pixels).
@@ -280,6 +279,11 @@ impl Session {
         self.card.is_some()
     }
 
+    /// The word card's ×: back to the translation.
+    pub fn close_card(&mut self) {
+        self.card = None;
+    }
+
     /// Hands the card's crop and conversation to an Ask AI panel.
     pub fn take_chat(&mut self) -> Option<(Crop, Chat)> {
         let card = self.card.take()?;
@@ -372,19 +376,28 @@ impl Session {
         task
     }
 
-    /// The layer over the frame: status and the language picker, prompts,
-    /// the word card. `scale` = frame pixels per logical px.
-    pub fn view(&self, scale: f32, screen: Size) -> Element<'_, Msg> {
-        let note = |content: Element<'static, Msg>| -> Element<'_, Msg> {
-            // opaque: over the frozen frame, see-through glass let the page
-            // show through (and a light label vanish on a dark frame)
-            let surface = widgets::docked(content).padding(20).width(NOTE_WIDTH);
-            container(opaque(surface)).center_x(Fill).padding(24).into()
+    /// The layer over the frame: status and the language picker, and the
+    /// floating card (`widgets::card`, at `at`, like every result card) for
+    /// prompts, errors and the word card. `hover`: on the card's resize edge.
+    pub fn view(&self, screen: Size, at: Rectangle, hover: bool) -> Element<'_, Msg> {
+        let card = |body: Element<'static, Msg>, footer: Option<Element<'static, Msg>>| {
+            let header = widgets::card::Header {
+                icon: actions::translate::ACTION.icon,
+                title: actions::translate::ACTION.label,
+                chip: None,
+            };
+            widgets::card::frame(header, body, footer, at, screen, hover, Msg::Card)
+        };
+        // the pill stays beside the card
+        let with_pill = |card: Element<'static, Msg>| -> Element<'_, Msg> {
+            let free = widgets::card::free(screen, Some(at));
+            let pill = container(self.languages(None)).width(free.width);
+            stack![pin(pill).position(free.position()), card].into()
         };
         match &self.phase {
-            Phase::Consent(None) => note(panel::consent(Msg::Download, Msg::Close)),
-            Phase::Consent(Some((pair, bytes))) => note(offline_consent(pair, *bytes)),
-            Phase::Downloading(done) => note(
+            Phase::Consent(None) => card(panel::consent(Msg::Download, Msg::Close), None),
+            Phase::Consent(Some((pair, bytes))) => card(offline_consent(pair, *bytes), None),
+            Phase::Downloading(done) => card(
                 column![
                     widgets::body(if self.offline.is_some() {
                         "Downloading offline translation…"
@@ -395,6 +408,7 @@ impl Session {
                 ]
                 .spacing(10)
                 .into(),
+                None,
             ),
             Phase::Translating => self.languages(Some("Translating…")),
             Phase::Failed(problem) => {
@@ -416,18 +430,14 @@ impl Session {
                     Msg::Close,
                 ));
                 // the picker stays: another pair may work offline
-                column![
-                    self.languages(None),
-                    note(
-                        column![widgets::error(problem.message.clone()), buttons]
-                            .spacing(16)
-                            .into(),
-                    )
-                ]
-                .into()
+                let body = widgets::error(problem.message.clone()).into();
+                with_pill(card(body, Some(buttons.into())))
             }
             Phase::Shown(_) => match &self.card {
-                Some(card) => card_view(card, scale, screen),
+                Some(word) => {
+                    let (body, footer) = card_view(word);
+                    with_pill(card(body, Some(footer)))
+                }
                 None => self.languages(None),
             },
         }
@@ -589,13 +599,8 @@ fn explain_question(block: &Translation, target: &str) -> String {
     )
 }
 
-fn card_view(card: &Card, scale: f32, screen: Size) -> Element<'_, Msg> {
-    let [x, y, w, h] = card.block.bounds.map(|v| v / scale);
-    let at = bar::place(
-        Rectangle::new(Point::new(x, y), Size::new(w, h)),
-        CARD,
-        screen,
-    );
+/// The word card's body (original, translation, explanation) and footer.
+fn card_view(card: &Card) -> (Element<'static, Msg>, Element<'static, Msg>) {
     // Mixed lines ("«name» ...") would each pick their own side.
     let align = if card.rtl {
         text::Alignment::Right
@@ -603,8 +608,8 @@ fn card_view(card: &Card, scale: f32, screen: Size) -> Element<'_, Msg> {
         text::Alignment::Default
     };
     let mut body = column![
-        widgets::caption(&card.block.original).width(Fill),
-        widgets::heading(&card.block.translation)
+        widgets::caption(card.block.original.clone()).width(Fill),
+        widgets::heading(card.block.translation.clone())
             .width(Fill)
             .align_x(align),
     ]
@@ -614,12 +619,14 @@ fn card_view(card: &Card, scale: f32, screen: Size) -> Element<'_, Msg> {
             if turn.answer.is_empty() && card.chat.status == Status::Streaming {
                 widgets::caption("Thinking…").width(Fill)
             } else {
-                widgets::body(&turn.answer).width(Fill).align_x(align)
+                widgets::body(turn.answer.clone())
+                    .width(Fill)
+                    .align_x(align)
             },
         );
     }
     if let Status::Failed(e) = &card.chat.status {
-        body = body.push(widgets::error(e));
+        body = body.push(widgets::error(e.clone()));
     }
     let ask = &actions::ask::ACTION;
     let buttons = row![
@@ -627,11 +634,7 @@ fn card_view(card: &Card, scale: f32, screen: Size) -> Element<'_, Msg> {
         widgets::text_button(ask.icon, ask.label, "A".into(), false, Msg::Ask),
     ]
     .spacing(8);
-    let surface = widgets::docked(body.push(buttons).spacing(12))
-        .padding(16)
-        .width(CARD.width);
-    // opaque: a click on the card is not a click on the frame below.
-    pin(opaque(surface)).position(at).into()
+    (body.spacing(12).into(), buttons.into())
 }
 
 #[cfg(test)]
@@ -741,7 +744,11 @@ mod tests {
         let _ = s.update(Msg::Offline(en_ar(), 117_600_822));
         assert!(matches!(&s.phase, Phase::Consent(Some((_, 117_600_822)))));
         assert!(s.work.is_none(), "the thread is done");
-        let texts = widgets::shot::texts(s.view(1.0, Size::new(1920.0, 1080.0)));
+        let texts = widgets::shot::texts(s.view(
+            Size::new(1920.0, 1080.0),
+            widgets::card::place(Size::new(1920.0, 1080.0), None, None),
+            false,
+        ));
         assert!(
             texts
                 .iter()
@@ -755,7 +762,11 @@ mod tests {
         // Download: that pair is the one fetched
         s.offline = Some(en_ar());
         s.phase = Phase::Downloading(0.3);
-        let texts = widgets::shot::texts(s.view(1.0, Size::new(1920.0, 1080.0)));
+        let texts = widgets::shot::texts(s.view(
+            Size::new(1920.0, 1080.0),
+            widgets::card::place(Size::new(1920.0, 1080.0), None, None),
+            false,
+        ));
         assert!(
             texts
                 .iter()
@@ -775,8 +786,12 @@ mod tests {
         let mut s = session(false);
         for phase in [Phase::Consent(None), Phase::Downloading(0.5)] {
             s.phase = phase;
-            let dark = c(s.view(1.0, Size::new(720.0, 300.0)))
-                .style(|_| c::Style::default().background(iced::Color::from_rgb8(10, 12, 30)));
+            let dark = c(s.view(
+                Size::new(720.0, 300.0),
+                widgets::card::place(Size::new(720.0, 300.0), None, None),
+                false,
+            ))
+            .style(|_| c::Style::default().background(iced::Color::from_rgb8(10, 12, 30)));
             let px = widgets::shot::render(dark.into(), 720, 300);
             let at = |x: usize, y: usize| &px[(y * 720 + x) * 4..][..3];
             let want = solid.into_rgba8();
@@ -797,21 +812,32 @@ mod tests {
         use crate::ui::picker::{Msg as P, Side};
         let mut s = session(true);
         let size = Size::new(720.0, 420.0);
-        let texts = widgets::shot::texts(s.view(1.0, size));
+        let texts =
+            widgets::shot::texts(s.view(size, widgets::card::place(size, None, None), false));
         for t in ["Detect", "Arabic", "Translating…"] {
             assert!(texts.iter().any(|x| x == t), "{t}: {texts:?}");
         }
-        widgets::shot::save("translate-pill", s.view(1.0, size), size);
+        widgets::shot::save(
+            "translate-pill",
+            s.view(size, widgets::card::place(size, None, None), false),
+            size,
+        );
         let _ = s.update(Msg::Picker(P::Open(Side::Target)));
-        widgets::shot::save("translate-pill-picker", s.view(1.0, size), size);
-        let texts = widgets::shot::texts(s.view(1.0, size));
+        widgets::shot::save(
+            "translate-pill-picker",
+            s.view(size, widgets::card::place(size, None, None), false),
+            size,
+        );
+        let texts =
+            widgets::shot::texts(s.view(size, widgets::card::place(size, None, None), false));
         assert!(texts.iter().any(|t| t == "English"), "{texts:?}");
         // the same target again: nothing restarts
         let _ = s.update(Msg::Picker(P::Pick("ar".into())));
         assert!(matches!(s.phase, Phase::Translating));
         // a shown translation keeps the pill; a new target starts over
         let _ = s.update(shown(vec![block("Quit", "خروج", [10.0, 10.0, 50.0, 20.0])]));
-        let texts = widgets::shot::texts(s.view(1.0, size));
+        let texts =
+            widgets::shot::texts(s.view(size, widgets::card::place(size, None, None), false));
         assert!(texts.iter().any(|t| t == "Arabic") && !texts.iter().any(|t| t == "Translating…"));
         let _ = s.update(Msg::Picker(P::Open(Side::Source)));
         let _ = s.update(Msg::Picker(P::Query("kyr".into())));
@@ -921,6 +947,15 @@ mod tests {
         );
         assert!(chat.turns.is_empty(), "nothing is sent before Explain");
         s.click(Point::new(80.0, 30.0));
+        // the word card is the shared floating card, the pill beside it
+        let size = Size::new(1280.0, 720.0);
+        let view = s.view(size, widgets::card::place(size, None, None), false);
+        let texts = widgets::shot::texts(view);
+        for t in ["Translate", "Inventory", "المخزون", "Explain"] {
+            assert!(texts.iter().any(|x| x == t), "{t}: {texts:?}");
+        }
+        let view = s.view(size, widgets::card::place(size, None, None), false);
+        widgets::shot::save("translate-word-card", view, size);
         s.click(Point::new(150.0, 90.0));
         assert!(!s.has_card(), "a click elsewhere closes the card");
     }
