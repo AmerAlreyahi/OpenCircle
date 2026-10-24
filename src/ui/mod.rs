@@ -726,7 +726,6 @@ impl App {
                 Task::none()
             }
             Message::BarGrab => {
-                eprintln!("[opencircle] bar held");
                 self.bar_drag = Some((None, self.bar_at()));
                 Task::none()
             }
