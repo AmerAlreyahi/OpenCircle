@@ -13,7 +13,7 @@ plan.**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
-then this project's items on the Projects HQ board.
+then the private OpenCircle board (https://github.com/users/AmerAlreyahi/projects/7).
 
 ## General rules
 
@@ -116,8 +116,15 @@ production systems.
   owner approves each publish.
 - Merging (owner, 2026-10-23): the lead merges verified work to main itself once
   CI + the local gate are green (and Windows-tested when it touches the UI).
-- Progress tracking (owner, 2026-10-23): no GitHub Projects board for this repo;
-  progress lives in the handover file only.
+- UI motion and polish (owner, 2026-10-24): for motion, transitions, loaders and
+  UI polish in every release, workers use the VectorLab UI/UX skills (plugin);
+  ported to iced, our tokens and shared components.
+- Progress tracking (owner, 2026-10-24, supersedes 2026-10-23): a GitHub Project
+  "OpenCircle" (users/AmerAlreyahi/projects/7), board view. Cards are PUBLIC issues
+  in this repo (public-safe wording, no secrets/hosts/paths), body template: Summary,
+  Why it matters, Current state, What you need to do, Done when, Links. Status:
+  Todo / In Progress / Waiting on owner decision / Done; field Release = v0.1.0 /
+  v0.1.1 / Later. The lead keeps it current and closes issues when done.
 - Selection look (owner, 2026-10-24, supersedes 2026-10-23): like Google by
   default: the drawn circle snaps to a rounded box with corner brackets and the
   search runs automatically; "keep the drawn shape" and "wait for me" are options
@@ -204,7 +211,8 @@ production systems.
   The bottom bar holds: the ask field, Ask AI, Translate screen, Live translate,
   Search music and Edit image (owner, 2026-10-24). Search music is always shown
   (supersedes "hidden until a key is set"): with no key it opens the key setup and
-  sends nothing.
+  sends nothing. Ask AI can also send a plain question without the screen (an
+  "Include screen" toggle in the field, on by default).
 - Themes in v0.1.0 (owner, 2026-10-24, minimum): 2 new widget themes (one is
   the frosted glass below); the 7 existing live-border looks are enough (no new
   ones). A Settings switch turns the glass effect on or off for the widgets.
