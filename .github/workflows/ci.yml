@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:   # build any branch for VM testing without opening a PR
 
 concurrency:
   group: ci-${{ github.ref }}
