@@ -140,6 +140,11 @@ production systems.
   title, styled window buttons) instead of the OS title bar. Every control keeps
   an accessible label, but a VISIBLE tooltip only when it adds something (icon-
   only button, truncated text, shortcut hint), never repeating the visible text.
+- No boxes behind floating UI (owner, 2026-10-24, "never ever"): every popup
+  window (toast, pin, controller, prompt, card) goes through the one shared
+  floating-window helper: clear background where transparency works, else the
+  window is shaped to the rounded content. A test forbids creating windows
+  outside the helpers. Verify popups over white AND dark pages on both VMs.
 - Window capture (owner, 2026-10-24, like iTop): in the default snip mode, hovering
   outlines the window (or UI element) under the cursor live; click captures it,
   drag draws a free region; wheel walks element → window → monitor.
