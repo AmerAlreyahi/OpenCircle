@@ -1,0 +1,530 @@
+//! Windows: a winit window, the web view (WebView2) as its child. The frame
+//! (header, footer, border, grip) is painted with softbuffer, its text with GDI.
+
+use std::num::NonZeroU32;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+use windows::Win32::Foundation::{COLORREF, HWND, SIZE};
+use windows::Win32::Graphics::Gdi::{
+    CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateRoundRectRgn, DEFAULT_CHARSET,
+    DeleteObject, FW_NORMAL, GetDC, GetTextExtentPoint32W, HDC, HFONT, OUT_DEFAULT_PRECIS,
+    ReleaseDC, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT, TextOutW,
+};
+use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+use windows::core::w;
+use winit::application::ApplicationHandler;
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
+use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
+use winit::keyboard::{Key, NamedKey};
+use winit::platform::windows::WindowAttributesExtWindows;
+use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use winit::window::{CursorIcon, ResizeDirection, Window, WindowId, WindowLevel};
+use wry::{Rect, WebContext, WebView, WebViewExtWindows};
+
+use crate::proto::{
+    self, Args, BODY_R, FOOTER, HEADER, Hit, Kind, Line, MIN, Place, RADIUS, Rect4,
+};
+use crate::{
+    CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, icon, log, say, slid, slide_off,
+};
+
+type Surface = softbuffer::Surface<Rc<Window>, Rc<Window>>;
+
+/// `history`: the History page (the user keeps one: its button shows).
+pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 {
+    if let Err(e) = wry::webview_version() {
+        eprintln!("[sheet] no WebView2: {e}");
+        return NO_RUNTIME;
+    }
+    let Ok(el) = winit::event_loop::EventLoop::<()>::with_user_event().build() else {
+        return 1;
+    };
+    let mut app = App {
+        kind: args.kind,
+        has_history: history.is_some(),
+        history,
+        near: args.near,
+        size: args.size,
+        colours: args.colours,
+        page: Some(page),
+        t0,
+        proxy: el.create_proxy(),
+        ctx: WebContext::new(Some(data_dir())),
+        win: None,
+        view: None,
+        surface: None,
+        at: Place::Right,
+        target: [0.0; 4],
+        screen: (0.0, 0.0),
+        mon: (0, 0),
+        k: 1.0,
+        cursor: (0.0, 0.0),
+        hover: false,
+        last_edge_press: None,
+        resized: false,
+        slide: None,
+        shown: false,
+        code: 0,
+    };
+    if el.run_app(&mut app).is_err() {
+        return 1;
+    }
+    app.code
+}
+
+struct App {
+    kind: Kind,
+    /// The History page, until the web view takes it; its button shows.
+    history: Option<String>,
+    has_history: bool,
+    near: Option<f64>,
+    /// The size to open at (the user's last resize), then the one to report.
+    size: Option<(f64, f64)>,
+    colours: [u32; 5],
+    page: Option<Page>,
+    t0: Instant,
+    proxy: EventLoopProxy<()>,
+    ctx: WebContext,
+    win: Option<Rc<Window>>,
+    view: Option<WebView>,
+    surface: Option<Surface>,
+    at: Place,
+    /// Final card rect (logical, monitor-relative).
+    target: Rect4,
+    /// Monitor size (logical).
+    screen: (f64, f64),
+    /// Monitor origin (physical).
+    mon: (i32, i32),
+    k: f64,
+    /// Last cursor position in the card (logical).
+    cursor: (f64, f64),
+    /// The cursor is on the inner edge (the grip shows).
+    hover: bool,
+    last_edge_press: Option<Instant>,
+    /// The user resized it (or reset it): tell the app at the end.
+    resized: bool,
+    slide: Option<Instant>,
+    shown: bool,
+    code: u8,
+}
+
+fn hwnd(w: &Window) -> Option<HWND> {
+    match w.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(h) => Some(HWND(h.hwnd.get() as *mut _)),
+        _ => None,
+    }
+}
+
+/// Distance from (x, y) to the edge of a rounded rect (< 0 inside).
+fn rounded(x: f64, y: f64, [ox, oy, w, h]: Rect4, r: f64) -> f64 {
+    let qx = (x - ox - w / 2.0).abs() - (w / 2.0 - r);
+    let qy = (y - oy - h / 2.0).abs() - (h / 2.0 - r);
+    qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r
+}
+
+fn mix(a: u32, b: u32, t: f64) -> u32 {
+    let ch = |s: u32| {
+        let (x, y) = (((a >> s) & 255) as f64, ((b >> s) & 255) as f64);
+        ((x + (y - x) * t.clamp(0.0, 1.0)).round() as u32) << s
+    };
+    ch(16) | ch(8) | ch(0)
+}
+
+/// A GDI font (Segoe UI) at `px` physical pixels.
+fn font(px: f64) -> HFONT {
+    // SAFETY: plain GDI call; the caller deletes the font.
+    unsafe {
+        CreateFontW(
+            -(px as i32),
+            0,
+            0,
+            0,
+            FW_NORMAL.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            0,
+            w!("Segoe UI"),
+        )
+    }
+}
+
+/// Draws `text` at (x, y) (physical, top-left).
+fn text(dc: HDC, f: HFONT, color: u32, x: i32, y: i32, text: &str) {
+    let t: Vec<u16> = text.encode_utf16().collect();
+    // SAFETY: `dc` is a live DC; `t` outlives the calls.
+    unsafe {
+        let old = SelectObject(dc, f.into());
+        // COLORREF is 0x00BBGGRR.
+        let c = ((color & 0xff) << 16) | (color & 0xff00) | ((color >> 16) & 0xff);
+        SetTextColor(dc, COLORREF(c));
+        let _ = TextOutW(dc, x, y, &t);
+        SelectObject(dc, old);
+    }
+}
+
+fn width_of(dc: HDC, f: HFONT, text: &str) -> i32 {
+    let t: Vec<u16> = text.encode_utf16().collect();
+    let mut size = SIZE::default();
+    // SAFETY: as in `text`.
+    unsafe {
+        let old = SelectObject(dc, f.into());
+        let _ = GetTextExtentPoint32W(dc, &t, &mut size);
+        SelectObject(dc, old);
+    }
+    size.cx
+}
+
+impl App {
+    fn phys(&self, x: f64, y: f64) -> PhysicalPosition<i32> {
+        PhysicalPosition::new(
+            self.mon.0 + (x * self.k) as i32,
+            self.mon.1 + (y * self.k) as i32,
+        )
+    }
+
+    fn logical(&self) -> (f64, f64) {
+        let s = (self.win.as_ref())
+            .map(|w| w.inner_size())
+            .unwrap_or_default();
+        (s.width as f64 / self.k, s.height as f64 / self.k)
+    }
+
+    fn view_rect(&self, size: PhysicalSize<u32>) -> Rect {
+        let k = self.k;
+        let [x, y, w, h] = proto::body(size.width as f64 / k, size.height as f64 / k);
+        Rect {
+            position: PhysicalPosition::new((x * k) as i32, (y * k) as i32).into(),
+            size: PhysicalSize::new((w * k) as u32, (h * k) as u32).into(),
+        }
+    }
+
+    /// Clip the window to the rounded card and the page to its rounded body
+    /// (regions are aliased, and drop the DWM shadow on Windows 10).
+    fn round(&self) {
+        let Some(w) = &self.win else { return };
+        let (Some(h), s, k) = (hwnd(w), w.inner_size(), self.k) else {
+            return;
+        };
+        let r = (2.0 * RADIUS * k) as i32;
+        // SAFETY: plain GDI/user32 calls; each window owns its region afterwards.
+        unsafe {
+            let rgn = CreateRoundRectRgn(0, 0, s.width as i32 + 1, s.height as i32 + 1, r, r);
+            let _ = SetWindowRgn(h, Some(rgn), true);
+            if let Some(v) = &self.view {
+                let b = self.view_rect(s);
+                let bs = b.size.to_physical::<u32>(1.0);
+                let br = (2.0 * BODY_R * k) as i32;
+                let rgn =
+                    CreateRoundRectRgn(0, 0, bs.width as i32 + 1, bs.height as i32 + 1, br, br);
+                let _ = SetWindowRgn(v.hwnd(), Some(rgn), true);
+            }
+        }
+    }
+
+    fn paint(&mut self) {
+        let (k, at, hover, kind) = (self.k, self.at, self.hover, self.kind);
+        let [bg, border, chip_bg, ink, muted] = self.colours;
+        let (Some(w), Some(s)) = (self.win.clone(), &mut self.surface) else {
+            return;
+        };
+        let Some(h) = hwnd(&w) else { return };
+        let size = w.inner_size();
+        let (Some(nw), Some(nh)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+        else {
+            return;
+        };
+        if s.resize(nw, nh).is_err() {
+            return;
+        }
+        // SAFETY: our window's DC, released below.
+        let dc = unsafe { GetDC(Some(h)) };
+        let (f_title, f_small) = (font(16.0 * k), font(12.0 * k));
+        let (fw, fh) = (size.width as f64, size.height as f64);
+        let icon_w = width_of(dc, f_title, icon(kind));
+        let title_w = width_of(dc, f_title, kind.title());
+        let chip_w = width_of(dc, f_small, CHIP) as f64;
+        let x_title = 20.0 * k + icon_w as f64 + 10.0 * k;
+        let chip = [
+            x_title + title_w as f64 + 10.0 * k,
+            ((HEADER - 1.0) * k - 22.0 * k) / 2.0,
+            chip_w + 16.0 * k,
+            22.0 * k,
+        ];
+        let pill = match at {
+            Place::Right => [2.0 * k, fh / 2.0 - 20.0 * k, 4.0 * k, 40.0 * k],
+            Place::Left => [fw - 6.0 * k, fh / 2.0 - 20.0 * k, 4.0 * k, 40.0 * k],
+            Place::Bottom => [fw / 2.0 - 20.0 * k, 2.0 * k, 40.0 * k, 4.0 * k],
+        };
+        let card = [0.0, 0.0, fw, fh];
+        if let Ok(mut buf) = s.buffer_mut() {
+            for y in 0..size.height {
+                // the header's and the footer's rules
+                let rule = y == ((HEADER - 1.0) * k) as u32 || y == (fh - FOOTER * k) as u32;
+                for x in 0..size.width {
+                    let (cx, cy) = (x as f64 + 0.5, y as f64 + 0.5);
+                    // 1 px border just inside the (region-clipped) edge.
+                    let d = rounded(cx, cy, card, RADIUS * k);
+                    let mut c = mix(bg, border, 1.0 - (-d - k).abs().min(1.0));
+                    if rule && d < -k {
+                        c = border;
+                    }
+                    c = mix(c, chip_bg, 0.5 - rounded(cx, cy, chip, 11.0 * k));
+                    if hover {
+                        c = mix(c, muted, 0.5 - rounded(cx, cy, pill, 2.0 * k));
+                    }
+                    buf[(y * size.width + x) as usize] = c;
+                }
+            }
+            let _ = buf.present();
+        }
+        // Text on top (GDI, ClearType; the child web view is clipped out).
+        // SAFETY: `dc` is live until ReleaseDC; the fonts are deleted after use.
+        unsafe {
+            SetBkMode(dc, TRANSPARENT);
+            let ty = ((HEADER - 1.0 - 22.0) / 2.0 * k) as i32;
+            text(dc, f_title, ink, (20.0 * k) as i32, ty, icon(kind));
+            text(dc, f_title, ink, x_title as i32, ty, kind.title());
+            let (cx, cy) = ((chip[0] + 8.0 * k) as i32, (chip[1] + 3.0 * k) as i32);
+            text(dc, f_small, muted, cx, cy, CHIP);
+            let past = if self.has_history { "↺" } else { "" };
+            for ((bx, by), glyph) in [
+                (proto::close_at(fw / k), "✕"),
+                (proto::browser_at(fw / k), "↗"),
+                (proto::history_at(fw / k), past),
+            ] {
+                let (x, y) = (((bx - 6.0) * k) as i32, ((by - 10.0) * k) as i32);
+                text(dc, f_title, ink, x, y, glyph);
+            }
+            let fy = (fh - (FOOTER * k + 16.0 * k) / 2.0) as i32;
+            text(dc, f_small, muted, (20.0 * k) as i32, fy, kind.privacy());
+            for f in [f_title, f_small] {
+                let _ = DeleteObject(f.into());
+            }
+            ReleaseDC(Some(h), dc);
+        }
+    }
+
+    fn is_foreground(&self) -> bool {
+        let ours = self.win.as_deref().and_then(hwnd);
+        // SAFETY: plain Win32 call, no arguments.
+        ours.is_some_and(|h| unsafe { GetForegroundWindow() } == h)
+    }
+
+    /// Ends the event loop; tells the app the size the user left it at.
+    fn close(&mut self, el: &ActiveEventLoop) {
+        if self.resized {
+            let (w, h) = self.logical();
+            let size = self.size.map(|_| (w, h));
+            say(Line::Size(size));
+        }
+        el.exit();
+    }
+
+    /// The current page to the user's browser (through the app), then close.
+    fn open_in_browser(&mut self, el: &ActiveEventLoop) {
+        if let Some(Ok(url)) = self.view.as_ref().map(WebView::url)
+            && url.starts_with("https://")
+        {
+            say(Line::Open(url));
+        }
+        self.close(el);
+    }
+
+    /// Back to the default size (double-click on the inner edge).
+    fn reset(&mut self) {
+        self.size = None;
+        self.resized = true;
+        let [x, y, w, h] = proto::place(self.screen, self.near, None).1;
+        if let Some(win) = &self.win {
+            win.set_outer_position(self.phys(x, y));
+            let _ =
+                win.request_inner_size(PhysicalSize::new((w * self.k) as u32, (h * self.k) as u32));
+        }
+    }
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, el: &ActiveEventLoop) {
+        let Some(page) = self.page.take() else {
+            return;
+        };
+        let Some(mon) = el
+            .primary_monitor()
+            .or_else(|| el.available_monitors().next())
+        else {
+            self.code = 1;
+            el.exit();
+            return;
+        };
+        let (mp, ms, k) = (mon.position(), mon.size(), mon.scale_factor());
+        self.mon = (mp.x, mp.y);
+        self.k = k;
+        self.screen = (ms.width as f64 / k, ms.height as f64 / k);
+        (self.at, self.target) = proto::place(self.screen, self.near, self.size);
+        let [x, y, w, h] = self.target;
+        let size = PhysicalSize::new((w * k) as u32, (h * k) as u32);
+        let (dx, dy) = slide_off(self.at, 0.0);
+        let attrs = Window::default_attributes()
+            .with_title("OpenCircle results")
+            .with_decorations(false)
+            .with_window_level(WindowLevel::AlwaysOnTop)
+            .with_skip_taskbar(true)
+            .with_visible(false)
+            .with_min_inner_size(LogicalSize::new(MIN.0, MIN.1))
+            .with_position(self.phys(x + dx, y + dy))
+            .with_inner_size(size);
+        let Ok(win) = el.create_window(attrs) else {
+            self.code = 1;
+            el.exit();
+            return;
+        };
+        let win = Rc::new(win);
+        self.win = Some(win.clone());
+        let proxy = self.proxy.clone();
+        let bounds = self.view_rect(size);
+        let history = self.history.take();
+        // ponytail: no hint bar on Windows (Lens there showed no check, spike
+        // S9); Open in browser is in the header. Add the bar if it shows up.
+        let view = builder(
+            &mut self.ctx,
+            page,
+            history,
+            self.t0,
+            move || {
+                let _ = proxy.send_event(());
+            },
+            |_| {},
+        )
+        .with_bounds(bounds)
+        .build_as_child(&*win);
+        match view {
+            Ok(v) => self.view = Some(v),
+            Err(e) => {
+                eprintln!("[sheet] web view: {e}");
+                self.code = NO_RUNTIME;
+                el.exit();
+                return;
+            }
+        }
+        self.round();
+        self.surface = softbuffer::Context::new(win.clone())
+            .and_then(|c| softbuffer::Surface::new(&c, win.clone()))
+            .ok();
+        win.set_visible(true);
+        win.focus_window();
+        self.slide = Some(Instant::now());
+        log(self.t0, "shown", "");
+        say(Line::Ready);
+    }
+
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        let Some(began) = self.slide else { return };
+        let s = slid(began.elapsed());
+        let (dx, dy) = slide_off(self.at, s);
+        if let Some(w) = &self.win {
+            w.set_outer_position(self.phys(self.target[0] + dx, self.target[1] + dy));
+        }
+        if s >= 1.0 {
+            self.slide = None;
+            log(self.t0, "slid in", "");
+            el.set_control_flow(ControlFlow::Wait);
+        } else {
+            el.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(8),
+            ));
+        }
+    }
+
+    fn user_event(&mut self, el: &ActiveEventLoop, _: ()) {
+        self.close(el);
+    }
+
+    fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        match event {
+            WindowEvent::CloseRequested => self.close(el),
+            WindowEvent::Resized(size) => {
+                if let Some(v) = &self.view {
+                    let _ = v.set_bounds(self.view_rect(size));
+                }
+                self.round();
+                self.paint();
+            }
+            WindowEvent::RedrawRequested => self.paint(),
+            WindowEvent::Focused(true) => self.shown = true,
+            // A click outside (the overlay or another app took the foreground).
+            // Focus moving into the web view (our child) keeps us foreground.
+            WindowEvent::Focused(false) if self.shown && !self.is_foreground() => self.close(el),
+            // Only the header, footer and frame reach us (the page is a child).
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = (position.x / self.k, position.y / self.k);
+                let (w, h) = self.logical();
+                let at = proto::hit(self.at, self.cursor.0, self.cursor.1, w, h);
+                if let Some(win) = &self.win {
+                    win.set_cursor(match at {
+                        Some(Hit::Edge) if self.at == Place::Bottom => CursorIcon::NsResize,
+                        Some(Hit::Edge) => CursorIcon::EwResize,
+                        Some(Hit::Close | Hit::Browser) => CursorIcon::Pointer,
+                        Some(Hit::History) if self.has_history => CursorIcon::Pointer,
+                        Some(Hit::History) | None => CursorIcon::Default,
+                    });
+                }
+                let edge = at == Some(Hit::Edge);
+                if edge != self.hover {
+                    self.hover = edge;
+                    self.paint();
+                }
+            }
+            WindowEvent::CursorLeft { .. } if self.hover => {
+                self.hover = false;
+                self.paint();
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let (w, h) = self.logical();
+                match proto::hit(self.at, self.cursor.0, self.cursor.1, w, h) {
+                    Some(Hit::Close) => self.close(el),
+                    Some(Hit::Browser) => self.open_in_browser(el),
+                    Some(Hit::History) if self.has_history => {
+                        if let Some(v) = &self.view {
+                            let _ = v.load_url(&history_url());
+                        }
+                    }
+                    Some(Hit::History) => {}
+                    Some(Hit::Edge) => {
+                        let double = (self.last_edge_press)
+                            .is_some_and(|t| t.elapsed() < Duration::from_millis(400));
+                        self.last_edge_press = Some(Instant::now());
+                        if double {
+                            self.reset();
+                        } else if let Some(win) = &self.win {
+                            self.resized = true;
+                            self.size = Some((w, h)); // reported as the size at close
+                            let _ = win.drag_resize_window(match self.at {
+                                Place::Right => ResizeDirection::West,
+                                Place::Left => ResizeDirection::East,
+                                Place::Bottom => ResizeDirection::North,
+                            });
+                        }
+                    }
+                    None => {}
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.logical_key == Key::Named(NamedKey::Escape) =>
+            {
+                self.close(el)
+            }
+            _ => {}
+        }
+    }
+}

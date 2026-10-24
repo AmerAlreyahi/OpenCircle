@@ -25,8 +25,8 @@ use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{
     After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
-    EdgeStyle, Engine, Format, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
-    SnipAfter, SnipConfig, SongSource, Target, Theme, parse_shortcut,
+    EdgeStyle, Engine, Format, GoogleResults, LensLinux, Look, LookConfig, LookTheme, Provider,
+    Rgb, SearchWith, SelectStyle, SnipAfter, SnipConfig, SongSource, Target, Theme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::mt;
@@ -536,6 +536,9 @@ impl fmt::Debug for State {
 pub enum Message {
     Section(Section),
     DefaultAction(DefaultAction),
+    GoogleResults(GoogleResults),
+    SearchHistory(bool),
+    LensLinux(LensLinux),
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
     /// The picker's answer (`None` = cancelled).
@@ -984,6 +987,14 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             state.interval = s;
         }
         Message::DefaultAction(a) => state.draft.general.default_action = a,
+        Message::GoogleResults(g) => state.draft.general.google_results = g,
+        Message::LensLinux(v) => state.draft.results.lens_linux = v,
+        Message::SearchHistory(on) => {
+            state.draft.general.search_history = on;
+            if !on {
+                crate::sheet::history::clear_default(); // turning it off deletes it
+            }
+        }
         Message::SelectStyle(v) => state.draft.selection.style = v,
         Message::After(v) => state.draft.selection.after = v,
         Message::SearchWith(v) => state.draft.selection.search_with = v,
@@ -1275,6 +1286,15 @@ fn shorten(path: &str) -> String {
     format!("…{tail}")
 }
 
+/// The one line under "Show Google results": where they show, or why the card can't.
+fn google_results_hint(choice: GoogleResults) -> &'static str {
+    match (choice, crate::sheet::unavailable()) {
+        (GoogleResults::Browser, _) => "Lens and AI Mode open in your browser",
+        (GoogleResults::App, Some(why)) => why,
+        (GoogleResults::App, None) => "Lens and AI Mode in a card beside your selection",
+    }
+}
+
 fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     let folder = state.draft.general.save_folder.as_str();
     let shown = if folder.is_empty() {
@@ -1309,7 +1329,28 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     .spacing(8)
     .width(FORM_WIDTH);
     let error = issue(&state.problems, "general.save_folder");
-    vec![
+    // Linux: Google may ask WebKitGTK's Lens to prove it's a human (the user
+    // answers in the card), so Lens there has its own choice.
+    let lens_linux = cfg!(target_os = "linux").then(|| {
+        form_row(
+            "Lens on Linux",
+            "Google may ask you to prove you're human in the card",
+            segmented(
+                &[
+                    (LensLinux::InCard, "In the card", "Lens results in the card"),
+                    (
+                        LensLinux::Browser,
+                        "In my browser",
+                        "Lens opens in your browser",
+                    ),
+                ],
+                state.draft.results.lens_linux,
+                Message::LensLinux,
+            ),
+            None,
+        )
+    });
+    let mut rows = vec![
         form_row(
             "Default action",
             "What Enter does after you select something",
@@ -1330,12 +1371,54 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
             None,
         ),
         form_row(
+            "Show Google results",
+            google_results_hint(state.draft.general.google_results),
+            segmented(
+                &[
+                    (
+                        GoogleResults::App,
+                        "In OpenCircle",
+                        "Lens and AI Mode in a card beside your selection",
+                    ),
+                    (
+                        GoogleResults::Browser,
+                        "In my browser",
+                        "Lens and AI Mode open in your browser",
+                    ),
+                ],
+                state.draft.general.google_results,
+                Message::GoogleResults,
+            ),
+            None,
+        ),
+        form_row(
+            "Search history",
+            "Only on this PC: what you searched, a small picture, the time",
+            segmented(
+                &[
+                    (
+                        false,
+                        "Off",
+                        "Keep no searches (turning it off deletes them)",
+                    ),
+                    (true, "On", "The card's History button lists your searches"),
+                ],
+                state.draft.general.search_history,
+                Message::SearchHistory,
+            ),
+            None,
+        ),
+        form_row(
             "Save folder",
             "Where Save starts. Files are OpenCircle-date-time.png",
             folder_control,
             error,
         ),
-    ]
+    ];
+    if let Some(row) = lens_linux {
+        rows.insert(2, row);
+    }
+    rows
 }
 
 fn look_rows(state: &State) -> Vec<Element<'_, Message>> {

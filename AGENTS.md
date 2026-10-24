@@ -56,8 +56,9 @@ the first code):
 
     cargo fmt --check
     cargo clippy --all-targets -- -D warnings
+    cargo clippy --all-targets --features sheet -- -D warnings  # Linux: libwebkit2gtk-4.1-dev
     XDG_DATA_HOME=$(mktemp -d) XDG_CONFIG_HOME=$(mktemp -d) cargo test
-    cargo packager --release
+    cargo packager --release   # builds with --features sheet (the results card's helper)
 
 Run tests with EMPTY app data/config dirs (as above): CI has no downloaded
 models or config, and a machine with them can hide a failure. After every push,
@@ -233,3 +234,12 @@ production systems.
 - Google Lens has no public upload API. Existing clones upload to imgur/uguu
   (privacy leak). Our approach: the browser itself posts the image to Lens
   through a local auto-submitting form (spike S1 in the plan proves it).
+- Results card (`src/sheet.rs`): the web view runs only in the helper binary
+  `opencircle-sheet` (feature `sheet`), never in the app: linking WebKitGTK
+  costs +23 MB idle RSS, and an in-process web view leaves ~230 MB after close
+  (spike S9). Google often shows its "unusual traffic" check to Lens in
+  WebKitGTK (URL `google.com/sorry/…`): the card shows a hint; the user solves
+  it or opens the browser. `results.lens_linux = "browser"` keeps Lens in the
+  browser. Search history: `general.search_history` (`src/sheet/history.rs`).
+  No helper / runtime (WebView2, libwebkit2gtk-4.1: Recommends, not Depends):
+  the browser.

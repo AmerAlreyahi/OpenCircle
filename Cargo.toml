@@ -45,6 +45,20 @@ flate2 = "1"
 ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 rqrr = { version = "0.11.0", default-features = false }
 minisign-verify = "0.3.0"
+# Feature `sheet`: the Google results card's web view (WebView2 / WebKitGTK), only
+# in the helper binary `opencircle-sheet`: the resident app never links it.
+wry = { version = "0.57", default-features = false, features = ["os-webview"], optional = true }
+
+[features]
+# Release and CI builds turn it on (Linux needs libwebkit2gtk-4.1-dev to build).
+# Without it there is no helper and results open in the browser.
+sheet = ["dep:wry", "dep:winit", "dep:softbuffer"]
+
+[[bin]]
+name = "opencircle-sheet"
+path = "src/bin/opencircle-sheet/main.rs"
+required-features = ["sheet"]
+test = false # its shared logic (proto.rs) is tested in the app's tests
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -64,6 +78,9 @@ widestring = "1"
 # Copy adds the OCR text to the copied image (the version arboard already builds).
 clipboard-win = "5.4"
 xcap = "0.9"
+# Feature `sheet` (the helper's window): the versions iced already builds.
+winit = { version = "0.30", optional = true }
+softbuffer = { version = "0.4", default-features = false, optional = true }
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
@@ -78,7 +95,8 @@ identifier = "com.opencircle.app"
 category = "Utility"
 authors = ["OpenCircle contributors"]
 homepage = "https://github.com/AmerAlreyahi/OpenCircle"
-before-packaging-command = "cargo build --release"
+# `sheet`: the results card's helper `opencircle-sheet`, packaged next to the app.
+before-packaging-command = "cargo build --release --features sheet"
 icons = [
     "assets/icons/opencircle.ico",
     "assets/icons/32x32.png",
@@ -116,14 +134,18 @@ desktop-template = "packaging/com.opencircle.app.desktop"
 # The AppImage's entry (same template) names Icon=com.opencircle.app: ship that icon.
 # A raw AppImage writes its own ~/.local/share/applications/com.opencircle.app.desktop
 # on first start under Wayland (capture/portal.rs).
+# WebKitGTK is never bundled: the results card uses the system's (an optional
+# dependency); without it, results open in the browser.
 [package.metadata.packager.appimage]
 files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png" }
+excluded-libraries = ["libwebkit2gtk-4.1*", "libjavascriptcoregtk-4.1*", "libsoup-3.0*"]
 
 # .rpm: `cargo generate-rpm` after `cargo build --release`. Same libraries, Fedora names.
 [package.metadata.generate-rpm]
 auto-req = "disabled"
 assets = [
     { source = "target/release/opencircle", dest = "/usr/bin/opencircle", mode = "755" },
+    { source = "target/release/opencircle-sheet", dest = "/usr/bin/opencircle-sheet", mode = "755" },
     { source = "packaging/com.opencircle.app.desktop", dest = "/usr/share/applications/com.opencircle.app.desktop", mode = "644" },
     { source = "assets/icons/256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", mode = "644" },
     { source = "LICENSE", dest = "/usr/share/licenses/opencircle/LICENSE", mode = "644", doc = true },
@@ -141,6 +163,10 @@ libxkbcommon = "*"
 libxkbcommon-x11 = "*"
 libwayland-client = "*"
 xdg-desktop-portal = "*"
+
+# The results card's web view (opencircle-sheet); without it: the browser.
+[package.metadata.generate-rpm.recommends]
+"webkit2gtk4.1" = "*"
 
 [dev-dependencies]
 # Headless renders of the UI screens in tests (the versions iced already builds).

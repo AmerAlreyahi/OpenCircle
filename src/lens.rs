@@ -61,11 +61,16 @@ impl Drop for LensPage {
 /// Write the page for this PNG crop (`width` x `height`) and open it in the
 /// default browser. Hold the result until the overlay closes, then drop it.
 pub fn open(png: &[u8], width: u32, height: u32) -> io::Result<LensPage> {
-    let (png, w, h) = fit(png, width, height)?;
-    let html = page_html(&png, w, h, &locale(), epoch_ms());
-    let page = write_page(&std::env::temp_dir(), &html)?;
+    let page = write_page(&std::env::temp_dir(), &page(png, width, height)?)?;
     launch(&page.path)?; // on error `page` drops and the file goes
     Ok(page)
+}
+
+/// The auto-submit page for this PNG crop, in memory (the results card serves
+/// it from memory: no file).
+pub fn page(png: &[u8], width: u32, height: u32) -> io::Result<String> {
+    let (png, w, h) = fit(png, width, height)?;
+    Ok(page_html(&png, w, h, &locale(), epoch_ms()))
 }
 
 /// Delete leftover pages from a crash. Call once at app start.
@@ -148,8 +153,8 @@ fn base64(data: &[u8]) -> String {
 
 // ---- locale -------------------------------------------------------------
 
-/// A BCP-47-ish tag from the OS, or "en".
-fn locale() -> String {
+/// A BCP-47-ish tag from the OS, or "en" (only letters, digits and '-').
+pub fn locale() -> String {
     #[cfg(windows)]
     {
         #[link(name = "kernel32")]

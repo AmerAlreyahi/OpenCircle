@@ -10,6 +10,11 @@
 //! [general]
 //! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
+//! google_results = "app"            # Lens / AI Mode pages: app (a card) | browser
+//! search_history = false            # keep the card's searches on this PC (opt-in)
+//!
+//! [results]
+//! lens_linux = "in_card"            # Linux: Lens in the card (in_card) | browser
 //!
 //! [ai]                              # the API key is NOT here: OS keyring only
 //! provider = "browser"              # browser | anthropic | openai_compatible (missing = browser)
@@ -307,6 +312,38 @@ pub struct GeneralConfig {
     pub default_action: DefaultAction,
     /// Where the Save dialog starts; "" = the system's choice.
     pub save_folder: String,
+    pub google_results: GoogleResults,
+    /// Keep the card's searches on this PC (`sheet::history`). Off by default.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub search_history: bool,
+}
+
+/// The results card's per-platform choices (`[results]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+pub struct ResultsConfig {
+    pub lens_linux: LensLinux,
+}
+
+/// Linux: where Lens opens (`[results] lens_linux`). Google may answer
+/// WebKitGTK's Lens with its "unusual traffic" check, which the user solves
+/// in the card (never us) or skips by opening the browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LensLinux {
+    #[default]
+    InCard,
+    Browser,
+}
+
+/// Where Google's Lens and AI Mode pages show (`[general] google_results`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoogleResults {
+    /// The results card in OpenCircle (`crate::sheet`); the browser when it can't.
+    #[default]
+    App,
+    /// The user's own browser.
+    Browser,
 }
 
 /// How a finished stroke shows (`[selection] style`).
@@ -661,6 +698,7 @@ pub struct Config {
     pub theme: Theme,
     pub shortcut: String,
     pub general: GeneralConfig,
+    pub results: ResultsConfig,
     pub selection: SelectionConfig,
     pub look: LookConfig,
     pub editor: EditorConfig,
@@ -733,6 +771,7 @@ impl Default for Config {
             theme: Theme::System,
             shortcut: DEFAULT_CAPTURE_SHORTCUT.to_string(),
             general: GeneralConfig::default(),
+            results: ResultsConfig::default(),
             selection: SelectionConfig::default(),
             look: LookConfig::default(),
             editor: EditorConfig::default(),
@@ -871,6 +910,23 @@ impl Config {
                 &mut w,
                 |s: &String| check_folder(s),
             );
+            c.general.google_results = get(
+                t,
+                "general.",
+                "google_results",
+                d.general.google_results,
+                &mut w,
+            );
+            c.general.search_history = get(
+                t,
+                "general.",
+                "search_history",
+                d.general.search_history,
+                &mut w,
+            );
+        }
+        if let Some(t) = section(&root, "results", &mut w) {
+            c.results.lens_linux = get(t, "results.", "lens_linux", d.results.lens_linux, &mut w);
         }
         if let Some(t) = section(&root, "selection", &mut w) {
             let (p, d) = ("selection.", d.selection);
@@ -1512,6 +1568,25 @@ mod tests {
         let abs = std::env::temp_dir().to_string_lossy().replace('\\', "/");
         let (c, w) = Config::parse(&format!("[general]\nsave_folder = \"{abs}\"\n"));
         assert_eq!((c.general.save_folder.as_str(), w.len()), (abs.as_str(), 0));
+        // Google results: the card by default; a bad value warns and keeps it.
+        let (c, w) = Config::parse("[general]\ngoogle_results = \"browser\"\n");
+        assert_eq!(
+            (c.general.google_results, w.len()),
+            (GoogleResults::Browser, 0)
+        );
+        let (c, w) = Config::parse("[general]\ngoogle_results = \"webview\"\n");
+        assert_eq!(c.general.google_results, GoogleResults::App);
+        assert!(w.iter().any(|m| m.starts_with("general.google_results")));
+        // Search history: opt-in.
+        assert!(!Config::default().general.search_history);
+        let (c, w) = Config::parse("[general]\nsearch_history = true\n");
+        assert!(c.general.search_history && w.is_empty());
+        // Lens on Linux: in the card by default.
+        assert_eq!(Config::default().results.lens_linux, LensLinux::InCard);
+        let (c, w) = Config::parse("[results]\nlens_linux = \"browser\"\n");
+        assert_eq!((c.results.lens_linux, w.len()), (LensLinux::Browser, 0));
+        let (c, w) = Config::parse("[results]\nlens_linux = \"maybe\"\n");
+        assert_eq!((c.results.lens_linux, w.len()), (LensLinux::InCard, 1));
     }
 
     #[test]

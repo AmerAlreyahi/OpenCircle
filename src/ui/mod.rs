@@ -2201,7 +2201,10 @@ impl App {
     ) -> Task<Message> {
         self.panels = self.panels.wrapping_add(1);
         let id = self.panels;
-        let (panel, task) = panel::Panel::open(kind, crop, question);
+        // The results card opens on the side away from the selection.
+        let near = (self.selection)
+            .map(|s| self.view.rect_to_screen(s.area).center_x() / self.screen.width.max(1.0));
+        let (panel, task) = panel::Panel::open(kind, crop, question, near);
         self.panel = Some((id, panel));
         task.map(move |msg| Message::Panel(id, msg))
     }
