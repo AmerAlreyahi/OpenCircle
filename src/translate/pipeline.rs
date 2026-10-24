@@ -232,7 +232,7 @@ pub fn translate_frame(
     check_frame(rgba, width, height)?;
     let found = deps.recognize(rgba, width, height).map_err(Error::Ocr)?;
     let lines: Vec<Line> = (found.into_iter())
-        .filter(|b| !cut_off(b, height))
+        .filter(|b| !cut_off(b, (width, height)))
         .map(|b| to_line(b, width, height))
         .collect();
     let ocr = start.elapsed();
@@ -271,11 +271,13 @@ pub(super) fn check_frame(rgba: &[u8], width: u32, height: u32) -> Result<(), Er
     Ok(())
 }
 
-/// A line the frame's top or bottom edge cuts through (a page scrolled
-/// halfway past it; its OCR box within 3 px of the edge): OCR read half of it
-/// and the erase finds no background beyond it, so it is left as it is.
-pub(super) fn cut_off(b: &TextBlock, height: u32) -> bool {
-    b.bounds[1] <= 3.0 || b.bounds[1] + b.bounds[3] >= height as f32 - 3.0
+/// A line an edge of the frame cuts through (a page scrolled halfway past
+/// it, a panel beside the window's edge; its OCR box within 3 px of the
+/// edge): OCR read part of it and the erase finds no background beyond it,
+/// so it is left as it is.
+pub(super) fn cut_off(b: &TextBlock, (width, height): (u32, u32)) -> bool {
+    let [x, y, w, h] = b.bounds;
+    y <= 3.0 || y + h >= height as f32 - 3.0 || x <= 3.0 || x + w >= width as f32 - 3.0
 }
 
 /// An OCR box hugs the ink; `render`'s erase wants the line's box (it reads
