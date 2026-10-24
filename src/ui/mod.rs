@@ -1,4 +1,5 @@
-//! The iced daemon: owns the (pre-created, hidden) overlay window and its state.
+//! The iced daemon: owns the overlay window (pre-created and hidden between uses
+//! where windows can hide, see `can_hide_windows`) and its state.
 mod bar;
 mod border;
 mod edit;
@@ -235,6 +236,45 @@ enum Hiding {
     Shrunk,
 }
 
+/// Whether a window can be hidden and shown again. Not on Wayland: winit's
+/// `set_visible(false)` is a no-op there, so a "hidden" window stays on the
+/// desktop as an empty gray box. There windows are closed instead, and opened
+/// again when needed.
+pub(crate) fn can_hide_windows() -> bool {
+    #[cfg(target_os = "linux")]
+    return !winit_picks_wayland(
+        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+        std::env::var_os("WAYLAND_SOCKET").as_deref(),
+    );
+    #[cfg(not(target_os = "linux"))]
+    true
+}
+
+/// winit's own rule (0.30): Wayland whenever either variable is set and not empty.
+#[cfg(any(target_os = "linux", test))]
+fn winit_picks_wayland(
+    display: Option<&std::ffi::OsStr>,
+    socket: Option<&std::ffi::OsStr>,
+) -> bool {
+    [display, socket]
+        .into_iter()
+        .any(|v| v.is_some_and(|v| !v.is_empty()))
+}
+
+/// The overlay window: hidden (pre-created), or full-screen at `size`.
+fn overlay_window(shown: Option<Size>) -> window::Settings {
+    windows::app_window(window::Settings {
+        size: shown.unwrap_or(window::Settings::default().size),
+        visible: shown.is_some(),
+        fullscreen: shown.is_some(),
+        decorations: false,
+        resizable: false,
+        level: Level::AlwaysOnTop,
+        exit_on_close_request: false,
+        ..window::Settings::default()
+    })
+}
+
 /// Below this (logical px) the window counts as shrunk.
 const SHRUNK: f32 = 64.0;
 /// Hide anyway after this many frames without the shrink (a WM may refuse it): a
@@ -256,7 +296,13 @@ struct Shot {
 }
 
 struct App {
+    /// The overlay window's id; a closed window's while `overlay_open` is false.
     overlay: window::Id,
+    /// The overlay window exists: always where it is pre-created and hidden
+    /// (`can_hide`), else only while it is shown.
+    overlay_open: bool,
+    /// `can_hide_windows()`, read once at boot.
+    can_hide: bool,
     /// The number of the capture running on its thread. Cleared by Esc or the
     /// timeout: that capture's late answer is then dropped.
     capturing: Option<u32>,
@@ -342,27 +388,32 @@ const CACHE_SIZE: usize = 512;
 
 impl App {
     fn boot() -> (Self, Task<Message>) {
-        // Created once, hidden, so a trigger only has to show it (latency).
-        let (overlay, open) = window::open(windows::app_window(window::Settings {
-            visible: false,
-            decorations: false,
-            resizable: false,
-            level: Level::AlwaysOnTop,
-            exit_on_close_request: false,
-            ..window::Settings::default()
-        }));
+        let can_hide = can_hide_windows();
+        // Where windows can hide: created once, hidden, so a trigger only has to
+        // show it (latency). Elsewhere `show` opens it on each use.
+        let (overlay, open) = match can_hide {
+            true => {
+                let (id, open) = window::open(overlay_window(None));
+                (id, open.discard())
+            }
+            false => (window::Id::unique(), Task::none()),
+        };
         let mut app = App {
             cache: Arc::new(Cache::new(CACHE_SIZE)),
+            can_hide,
+            overlay_open: can_hide,
             ..App::idle(overlay)
         };
         let start = app.windows.start().map(Message::Windows);
-        (app, Task::batch([open.discard(), start]))
+        (app, Task::batch([open, start]))
     }
 
-    /// Nothing open yet (the overlay window `overlay` hidden).
+    /// Nothing open yet (the overlay window `overlay` pre-created, hidden).
     fn idle(overlay: window::Id) -> App {
         App {
             overlay,
+            overlay_open: true,
+            can_hide: true,
             capturing: None,
             captures: 0,
             frame: None,
@@ -717,8 +768,15 @@ impl App {
         self.show().chain(run)
     }
 
-    /// Shows the (hidden or pill-sized) window over the whole monitor.
-    fn show(&self) -> Task<Message> {
+    /// Shows the (hidden or pill-sized) window over the whole monitor, or opens
+    /// it full-screen where it was closed (see `can_hide_windows`).
+    fn show(&mut self) -> Task<Message> {
+        if !self.overlay_open {
+            let (id, open) = window::open(overlay_window(Some(self.screen)));
+            eprintln!("[opencircle] overlay window opened");
+            (self.overlay, self.overlay_open) = (id, true);
+            return open.discard().chain(window::gain_focus(id));
+        }
         // Place and size the window to cover the monitor BEFORE set_mode shows it:
         // iced makes it visible before going full-screen, so whatever is shown
         // first must already cover the monitor (no small black box flash).
@@ -1747,8 +1805,16 @@ impl App {
         self.text_mode = None;
         self.more = false;
         self.song = None; // stops listening
-        self.hiding = Hiding::Empty;
-        Task::none()
+        if self.can_hide {
+            self.hiding = Hiding::Empty;
+            return Task::none();
+        }
+        if !std::mem::take(&mut self.overlay_open) {
+            return Task::none(); // never shown (Copy, Save)
+        }
+        eprintln!("[opencircle] overlay window closed");
+        trim_heap();
+        window::close(self.overlay)
     }
 
     /// Song search: listens on a thread; its pill, then its card, over the overlay.
@@ -2392,6 +2458,64 @@ mod tests {
         let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
         assert!(app.frame.is_none(), "the overlay doesn't open");
         assert_eq!(app.hiding, Hiding::No);
+    }
+
+    #[test]
+    fn windows_hide_except_where_winit_runs_on_wayland() {
+        use std::ffi::OsStr;
+        let set = Some(OsStr::new("wayland-0"));
+        let empty = Some(OsStr::new(""));
+        assert!(winit_picks_wayland(set, None));
+        assert!(winit_picks_wayland(None, set));
+        assert!(winit_picks_wayland(empty, set));
+        assert!(!winit_picks_wayland(None, None));
+        assert!(!winit_picks_wayland(empty, empty));
+    }
+
+    /// Trigger, capture, Esc: the overlay's window id while shown, and after.
+    fn open_and_escape(app: &mut App) -> (window::Id, window::Id) {
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        let n = app.capturing.expect("pending");
+        let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
+        assert!(app.frame.is_some() && app.overlay_open);
+        let shown = app.overlay;
+        let _ = app.update(Message::Escape);
+        assert!(app.frame.is_none());
+        (shown, app.overlay)
+    }
+
+    #[test]
+    fn where_windows_cannot_hide_each_opening_has_its_own_window_closed_after() {
+        let mut app = App {
+            can_hide: false,
+            overlay_open: false,
+            ..App::idle(window::Id::unique())
+        };
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let (shown, _) = open_and_escape(&mut app);
+            assert!(!app.overlay_open, "closed, not hidden");
+            assert_eq!(app.hiding, Hiding::No, "no hide steps on a closed window");
+            assert!(!ids.contains(&shown), "a fresh window each time");
+            ids.push(shown);
+        }
+        // closing again (or a Copy that never showed it) closes nothing
+        let _ = app.close();
+        assert!(!app.overlay_open);
+        assert_eq!(app.hiding, Hiding::No);
+    }
+
+    #[test]
+    fn where_windows_can_hide_the_one_pre_created_window_is_reused() {
+        let first = window::Id::unique();
+        let mut app = App::idle(first);
+        for _ in 0..3 {
+            let (shown, after) = open_and_escape(&mut app);
+            assert_eq!((shown, after), (first, first));
+            assert!(app.overlay_open, "kept, to be hidden");
+            assert_eq!(app.hiding, Hiding::Empty);
+            app.hiding = Hiding::No; // (the hide steps run on frames)
+        }
     }
 
     #[test]

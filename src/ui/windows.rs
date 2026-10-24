@@ -23,7 +23,7 @@ pub enum Msg {
     Settings(settings::Message),
     Onboarding(onboarding::Message),
     Permission(onboarding::Message),
-    /// Any window closed (ours are forgotten, the overlay never closes).
+    /// Any window closed (ours are forgotten; the overlay is `ui::App`'s).
     Closed(window::Id),
     /// The OS light/dark mode, at start and on every change.
     OsTheme(iced::theme::Mode),
