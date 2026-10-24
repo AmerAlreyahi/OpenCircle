@@ -1041,8 +1041,10 @@ impl App {
                 return if grab.moved && grab.text {
                     self.extend_words(grab.to)
                 } else if grab.moved {
-                    let scan = self.selected();
-                    Task::batch([scan, self.auto_search()])
+                    // The search first: a waiting quick action (`selected`)
+                    // turns the purpose back to Search, and must not get it too.
+                    let search = self.auto_search();
+                    Task::batch([self.selected(), search])
                 } else {
                     self.tap(grab.from) // a click on the selection
                 };
@@ -1092,12 +1094,13 @@ impl App {
                 } else if overlay::is_tap(&drawn, zoom) {
                     return self.tap(drawn[0]);
                 }
-                let scan = self.selected();
+                // The search first: a waiting quick action (`selected`) turns
+                // the purpose back to Search, and must not get it too.
                 let search = match self.others.is_empty() {
                     true => self.auto_search(),
                     false => Task::none(), // Shift: more to come
                 };
-                return Task::batch([scan, search]);
+                return Task::batch([self.selected(), search]);
             }
             overlay::Event::Enter if matches!(self.purpose, Purpose::Search) => {
                 return self.run(actions::default_for(&config::current()));
@@ -4331,6 +4334,22 @@ mod tests {
         // and with no card, the whole screen
         app.panel = None;
         assert_eq!(app.room(), Rectangle::with_size(app.screen));
+    }
+
+    #[test]
+    fn a_quick_action_on_a_drawn_area_runs_alone_not_the_auto_search_too() {
+        let mut app = open_app(1920, 1080, 1.0);
+        app.behaviour = SelectionConfig::default(); // auto search: Lens
+        let ask = Quick::Action(&actions::ask::ACTION);
+        app.purpose = Purpose::Quick(ask, config::Target::Circle);
+        drag(
+            &mut app,
+            Point::new(100.0, 100.0),
+            Point::new(400.0, 300.0),
+            false,
+        );
+        let panel = app.panel.as_ref().map(|(_, p)| p.kind());
+        assert_eq!(panel, Some(actions::Panel::Ask), "Ask AI, not Lens over it");
     }
 
     #[test]
