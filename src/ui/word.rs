@@ -436,11 +436,6 @@ impl Picked {
         self.anchor == self.end
     }
 
-    /// Every text line read around the selection (image px).
-    pub fn line_boxes(&self) -> impl Iterator<Item = Rectangle> + '_ {
-        self.lines.iter().map(|l| l.bounds)
-    }
-
     /// `p` (image px) is within the lines already read.
     pub fn covers(&self, p: Point) -> bool {
         self.covered.contains(p)

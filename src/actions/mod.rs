@@ -30,8 +30,6 @@ pub struct Action {
     pub id: &'static str,
     /// Button text.
     pub label: &'static str,
-    /// Tooltip = the control's accessible description. Unique per action.
-    pub tip: &'static str,
     pub key: Key,
     /// Glyph in `assets/lucide/lucide-subset.ttf` (must be listed in its `subset.sh`).
     pub icon: char,
@@ -196,13 +194,12 @@ mod tests {
     use iced::{Point, Size};
 
     #[test]
-    fn registry_keys_labels_and_tips_are_unique() {
+    fn registry_keys_and_labels_are_unique() {
         for (i, a) in ACTIONS.iter().enumerate() {
             for b in &ACTIONS[i + 1..] {
                 assert_ne!(a.id, b.id);
                 assert_ne!(a.key, b.key, "{} and {} share a key", a.id, b.id);
                 assert_ne!(a.label, b.label);
-                assert_ne!(a.tip, b.tip);
             }
             assert!(a.key.letter.is_ascii_lowercase(), "{}", a.id);
             assert_eq!(for_key(a.key.letter, a.key.ctrl).map(|f| f.id), Some(a.id));

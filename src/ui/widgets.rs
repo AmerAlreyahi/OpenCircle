@@ -899,6 +899,45 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     )
 }
 
+/// The round "bubble" buttons' size (the overlay's bottom bar).
+pub const BUBBLE: f32 = 40.0;
+
+/// A round icon button, `BUBBLE` across, with a soft border and a subtle fill
+/// (the overlay's bottom bar); `active` = the accent gradient.
+pub fn round_button<'a, Message: Clone + 'a>(
+    glyph: char,
+    active: bool,
+    on_press: Message,
+) -> Button<'a, Message> {
+    let palette = theme::floating();
+    let fg = if active {
+        theme::ON_ACCENT
+    } else {
+        palette.text
+    };
+    let glyph = text(glyph).font(ICON_FONT).size(17).color(fg);
+    button(container(glyph).center(iced::Fill))
+        .width(BUBBLE)
+        .height(BUBBLE)
+        .padding(0)
+        .on_press(on_press)
+        .style(move |_, status| button::Style {
+            background: Some(match (active, status) {
+                (true, _) => accent(status),
+                (false, button::Status::Hovered) => palette.field_focus.into(),
+                (false, button::Status::Pressed) => palette.pressed.into(),
+                (false, _) => palette.hover.into(),
+            }),
+            text_color: fg,
+            border: Border {
+                color: palette.border,
+                width: 1.0,
+                radius: (BUBBLE / 2.0).into(),
+            },
+            ..button::Style::default()
+        })
+}
+
 /// A 44x44 handle that starts a drag when the button goes down (an icon
 /// button reacts on release, too late for an OS drag): quiet, grab cursor.
 pub fn drag_handle<'a, Message: Clone + 'a>(glyph: char, on_down: Message) -> Element<'a, Message> {

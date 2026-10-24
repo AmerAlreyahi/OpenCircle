@@ -482,6 +482,16 @@ pub fn opening_step(t: f32, dt: Duration) -> f32 {
     (t + step).min(1.0)
 }
 
+/// `value` moved toward `target` (0 or 1) by a frame that took `dt`, for a
+/// motion `length` long; like `opening_step`, never more than a sixth a frame.
+pub fn toward(value: f32, target: f32, dt: Duration, length: Duration) -> f32 {
+    let step = (dt.as_secs_f32() / length.as_secs_f32()).min(1.0 / OPENING_STEPS);
+    match target > value {
+        true => (value + step).min(target),
+        false => (value - step).max(target),
+    }
+}
+
 /// The opening shows at least this many steps.
 const OPENING_STEPS: f32 = 6.0;
 

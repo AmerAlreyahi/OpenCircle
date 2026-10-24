@@ -1,16 +1,28 @@
-//! Floating action bar: the action registry as one row of buttons, under the selection.
-use iced::widget::{column, opaque, pin, row, tooltip};
-use iced::{Center, Element, Fill, Point, Rectangle, Size, Vector};
+//! The overlay's action bar geometry (the one action hub, built in `ui::App`):
+//! its size and its docking spots (anchors) inside the work area: bottom
+//! centre (default), top centre, bottom left, bottom right. A drag ends at the
+//! nearest one; a selection under it sends it to the nearest free one. Also
+//! the QR chip and placing small things beside a selection.
+use iced::widget::row;
+use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
-use super::widgets::{self, CONTROL, SURFACE_PADDING, TEXT_BUTTON_WIDTH};
-use crate::actions::{ACTIONS, Action, Key, qr};
+use super::widgets::{self, CONTROL, SURFACE_PADDING};
+use crate::actions::{Key, qr};
+use crate::config::BarAnchor;
 
-const SPACING: f32 = 4.0;
-/// Between the bar and the selection, and the bar's minimum distance to screen edges.
+/// Between a bar or chip and the selection, and the minimum distance to screen edges.
 pub(super) const GAP: f32 = 16.0;
 
-/// Between the bar and the QR chip.
-const CHIP_GAP: f32 = 8.0;
+/// The bar: its gap to the work area's edges (above the taskbar), its top
+/// spot's distance from the top (clear of the hint pill), the space between
+/// its controls, its drag handle's and field's widths.
+pub(super) const BOTTOM_GAP: f32 = 28.0;
+pub(super) const TOP: f32 = 84.0;
+pub(super) const SPACING: f32 = 6.0;
+pub(super) const HANDLE: f32 = 24.0;
+pub(super) const FIELD: f32 = 420.0;
+const MIN_FIELD: f32 = 100.0;
+
 /// The longest QR text the chip shows, in characters.
 const QR_SHOWN: usize = 36;
 
@@ -45,92 +57,84 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
         .into()
 }
 
-/// The bar for `selection` (logical px), kept inside `room` (the overlay minus
-/// a result card and the ask bar), with the QR `chip` (see [`qr_chip`]) next
-/// to it, on the side away from the selection. Too narrow a room: the buttons
-/// wrap onto more rows.
-pub fn view<'a, Message: Clone + 'a>(
-    selection: Rectangle,
-    room: Rectangle,
-    chip: Option<Element<'a, Message>>,
-    on_press: fn(&'static Action) -> Message,
-) -> Element<'a, Message> {
-    let (per_row, mut total) = fit(ACTIONS.len(), room.width - 2.0 * GAP);
-    let bar_width = total.width;
-    if chip.is_some() {
-        total.height += CONTROL + 2.0 * SURFACE_PADDING + CHIP_GAP;
-    }
-    let at = place_in(selection, total, room);
-    // Tooltips go on the side away from the selection.
-    let tip_side = if at.y < selection.y {
-        tooltip::Position::Top
-    } else {
-        tooltip::Position::Bottom
-    };
-    // The accent button is what Enter runs.
-    let default = crate::actions::default_for(&crate::config::current()).id;
-    let buttons = ACTIONS.chunks(per_row).map(|line| {
-        let line = line.iter().map(|action| {
-            let button = widgets::text_button(
-                action.icon,
-                action.label,
-                key_hint(action.key),
-                action.id == default,
-                on_press(action),
-            );
-            widgets::tip(button, action.tip, tip_side)
-        });
-        row(line).spacing(SPACING).into()
-    });
-    let rows = column(buttons).spacing(SPACING);
-    let bar = Element::from(widgets::surface(rows));
-    let stacked = match chip {
-        None => bar,
-        Some(chip) => {
-            let parts = if at.y < selection.y {
-                [chip, bar]
-            } else {
-                [bar, chip]
-            };
-            column(parts)
-                .spacing(CHIP_GAP)
-                .width(bar_width)
-                .align_x(Center)
-                .into()
-        }
-    };
-    // opaque: a press between two buttons doesn't start a new selection.
-    pin(opaque(stacked)).position(at).into()
-}
-
-/// What the button shows for its key, e.g. "Ctrl C".
-fn key_hint(key: Key) -> String {
+/// A shortcut as a tooltip shows it, e.g. "Ctrl+C".
+pub(super) fn key_hint(key: Key) -> String {
     let letter = key.letter.to_ascii_uppercase();
     if key.ctrl {
-        format!("Ctrl {letter}")
+        format!("Ctrl+{letter}")
     } else {
         letter.to_string()
     }
 }
 
-/// How many of `buttons` text buttons (they share one width) go in a row no
-/// wider than `width` (at least one), and the bar's size in such rows.
-fn fit(buttons: usize, width: f32) -> (usize, Size) {
-    let fits = (width - 2.0 * SURFACE_PADDING + SPACING) / (TEXT_BUTTON_WIDTH + SPACING);
-    let per = (fits.floor().max(1.0) as usize).min(buttons.max(1));
-    let rows = buttons.max(1).div_ceil(per);
-    let (n, r) = (per as f32, rows as f32);
-    let size = Size::new(
-        n * TEXT_BUTTON_WIDTH + (n - 1.0) * SPACING + 2.0 * SURFACE_PADDING,
-        r * CONTROL + (r - 1.0) * SPACING + 2.0 * SURFACE_PADDING,
-    );
-    (per, size)
+/// The bottom bar's field width and whole size on a `screen` that is `width`
+/// wide, with `bubbles` round buttons (a fraction while some slide in): the
+/// field gives up width on a narrow screen, the buttons never do.
+pub(super) fn bottom_size(width: f32, bubbles: f32) -> (f32, Size) {
+    let buttons = bubbles * (widgets::BUBBLE + SPACING);
+    let fixed = HANDLE + SPACING + buttons + 2.0 * SURFACE_PADDING;
+    let field = (width - 2.0 * GAP - fixed).clamp(MIN_FIELD, FIELD);
+    let height = CONTROL.max(widgets::BUBBLE) + 2.0 * SURFACE_PADDING;
+    (field, Size::new(fixed + field, height))
 }
 
-/// `place`, inside `room` instead of the whole screen.
-pub(super) fn place_in(selection: Rectangle, bar: Size, room: Rectangle) -> Point {
-    let offset = Vector::new(room.x, room.y);
-    place(selection - offset, bar, room.size()) + offset
+/// Every spot the bar docks at.
+pub(super) const ANCHORS: [BarAnchor; 4] = [
+    BarAnchor::Bottom,
+    BarAnchor::Top,
+    BarAnchor::BottomLeft,
+    BarAnchor::BottomRight,
+];
+
+/// The bar's top-left at `anchor` on `screen` (`size`), inside the work area
+/// (`inset`: how much of the screen's bottom the taskbar takes).
+pub(super) fn anchor_at(anchor: BarAnchor, screen: Size, size: Size, inset: f32) -> Point {
+    let bottom = screen.height - inset - BOTTOM_GAP - size.height;
+    let centre = (screen.width - size.width) / 2.0;
+    let (x, y) = match anchor {
+        BarAnchor::Bottom => (centre, bottom),
+        BarAnchor::Top => (centre, TOP),
+        BarAnchor::BottomLeft => (BOTTOM_GAP, bottom),
+        BarAnchor::BottomRight => (screen.width - BOTTOM_GAP - size.width, bottom),
+    };
+    Point::new(x.max(GAP), y.max(GAP))
+}
+
+/// The anchor nearest to a bar let go at top-left `at`.
+pub(super) fn nearest(at: Point, screen: Size, size: Size, inset: f32) -> BarAnchor {
+    let off = |a: BarAnchor| anchor_at(a, screen, size, inset).distance(at);
+    let mut all = ANCHORS;
+    all.sort_by(|a, b| off(*a).total_cmp(&off(*b)));
+    all[0]
+}
+
+/// Where the bar goes: `chosen`, unless it would cover something `blocked`
+/// (the selection): then the free anchor nearest to it; none free, `chosen`.
+pub(super) fn free(
+    chosen: BarAnchor,
+    blocked: &[Rectangle],
+    screen: Size,
+    size: Size,
+    inset: f32,
+) -> BarAnchor {
+    let rect = |a| Rectangle::new(anchor_at(a, screen, size, inset), size);
+    let clear = |a| blocked.iter().all(|b| !b.intersects(&rect(a)));
+    let home = anchor_at(chosen, screen, size, inset);
+    let mut all = ANCHORS;
+    all.sort_by(|a, b| {
+        let off = |x: BarAnchor| anchor_at(x, screen, size, inset).distance(home);
+        off(*a).total_cmp(&off(*b))
+    });
+    all.into_iter().find(|a| clear(*a)).unwrap_or(chosen)
+}
+
+/// The bar's place `from` one step (a frame) on its way `to` its spot: eased
+/// out, a third of the way each frame; there once within half a pixel.
+pub(super) fn glide(from: Point, to: Point) -> Point {
+    match from.distance(to) < 0.5 {
+        true => to,
+        false => from + (to - from) * 0.35,
+    }
 }
 
 /// Top-left corner for a `bar`: centred under the selection, else above it, else
@@ -159,46 +163,6 @@ mod tests {
     const SCREEN: Size = Size::new(1920.0, 1080.0);
     const BAR: Size = Size::new(400.0, 56.0);
 
-    #[test]
-    fn the_bar_keeps_out_of_a_result_card_and_wraps_when_narrow() {
-        let full = fit(ACTIONS.len(), 1920.0 - 2.0 * GAP);
-        assert_eq!(full.0, ACTIONS.len(), "one row on a wide screen");
-        // a card on the right (40 % wide): the room is what is left of it
-        let card = Rectangle::new(Point::new(1132.0, 20.0), Size::new(768.0, 1040.0));
-        let room = Rectangle::new(Point::ORIGIN, Size::new(card.x - 20.0, 1080.0));
-        for selection in [
-            sel(100.0, 200.0, 300.0, 200.0),  // well left of the card
-            sel(800.0, 200.0, 300.0, 200.0),  // right up to the card's side
-            sel(1000.0, 900.0, 200.0, 100.0), // low, by the card
-            sel(1300.0, 300.0, 200.0, 100.0), // under the card (it was moved there)
-        ] {
-            let (per, size) = fit(ACTIONS.len(), room.width - 2.0 * GAP);
-            let at = place_in(selection, size, room);
-            let bar = Rectangle::new(at, size);
-            assert!(
-                bar.intersection(&card).is_none(),
-                "{selection:?} -> {bar:?}"
-            );
-            assert!(bar.x >= room.x + GAP - 0.01 && bar.x + bar.width <= room.x + room.width);
-            assert_eq!(per, ACTIONS.len(), "7 buttons fit 1072 px");
-        }
-        // a wider card: the room is 800 px, the buttons wrap onto two rows
-        let room = Rectangle::new(Point::ORIGIN, Size::new(800.0, 1080.0));
-        let (per, size) = fit(ACTIONS.len(), room.width - 2.0 * GAP);
-        assert!(per < ACTIONS.len() && size.width <= room.width - 2.0 * GAP);
-        assert!(size.height > 2.0 * CONTROL);
-        // a card on the left: the room starts right of it
-        let left = Rectangle::new(Point::new(20.0, 20.0), Size::new(768.0, 1040.0));
-        let room = Rectangle::new(Point::new(808.0, 0.0), Size::new(1112.0, 1080.0));
-        let (_, size) = fit(ACTIONS.len(), room.width - 2.0 * GAP);
-        let at = place_in(sel(700.0, 300.0, 300.0, 100.0), size, room);
-        assert!(Rectangle::new(at, size).intersection(&left).is_none());
-        // very narrow: one button a row, never wider than the room
-        let (per, size) = fit(ACTIONS.len(), 150.0);
-        assert_eq!(per, 1);
-        assert!(size.height > 6.0 * CONTROL);
-    }
-
     fn on_screen(p: Point) -> bool {
         p.x >= GAP
             && p.y >= GAP
@@ -208,19 +172,6 @@ mod tests {
 
     fn sel(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
         Rectangle::new(Point::new(x, y), Size::new(w, h))
-    }
-
-    #[test]
-    fn the_bar_buttons_say_it_themselves_so_no_tooltip() {
-        let v = view(
-            sel(800.0, 300.0, 200.0, 100.0),
-            Rectangle::with_size(SCREEN),
-            None,
-            |_| (),
-        );
-        let _ = v;
-        assert_eq!(widgets::tests_support::shown().len(), 0);
-        widgets::tests_support::assert_tips_add_something("action bar");
     }
 
     #[test]
@@ -254,14 +205,71 @@ mod tests {
     }
 
     #[test]
+    fn the_bar_docks_at_anchors_above_the_taskbar() {
+        let (field, size) = bottom_size(1920.0, 6.0);
+        assert_eq!(field, FIELD);
+        // default: centred, BOTTOM_GAP above the work area (a 48 px taskbar)
+        let at = anchor_at(BarAnchor::Bottom, SCREEN, size, 48.0);
+        assert_eq!(at.x, (1920.0 - size.width) / 2.0);
+        assert_eq!(at.y + size.height, 1080.0 - 48.0 - BOTTOM_GAP);
+        for a in ANCHORS {
+            let r = Rectangle::new(anchor_at(a, SCREEN, size, 48.0), size);
+            assert!(r.x >= GAP && r.x + r.width <= 1920.0 - GAP, "{a:?}");
+            assert!(
+                r.y >= GAP && r.y + r.height <= 1080.0 - 48.0,
+                "{a:?} in the work area"
+            );
+        }
+        // let go anywhere: the nearest anchor
+        let near = |x, y| nearest(Point::new(x, y), SCREEN, size, 48.0);
+        assert_eq!(near(700.0, 900.0), BarAnchor::Bottom);
+        assert_eq!(near(800.0, 200.0), BarAnchor::Top);
+        assert_eq!(near(10.0, 700.0), BarAnchor::BottomLeft);
+        assert_eq!(near(1500.0, 1000.0), BarAnchor::BottomRight);
+        // a selection where the bar is: the nearest free anchor; none in the way: home
+        let home = Rectangle::new(anchor_at(BarAnchor::Bottom, SCREEN, size, 48.0), size);
+        let under = Rectangle::new(
+            Point::new(home.center_x() - 50.0, home.y - 30.0),
+            Size::new(100.0, 60.0),
+        );
+        let moved = free(BarAnchor::Bottom, &[under], SCREEN, size, 48.0);
+        assert_ne!(moved, BarAnchor::Bottom);
+        let r = Rectangle::new(anchor_at(moved, SCREEN, size, 48.0), size);
+        assert!(!r.intersects(&under));
+        assert_eq!(
+            free(BarAnchor::Bottom, &[], SCREEN, size, 48.0),
+            BarAnchor::Bottom
+        );
+        // the whole screen selected: nowhere free, it stays
+        let all = Rectangle::with_size(SCREEN);
+        assert_eq!(
+            free(BarAnchor::Top, &[all], SCREEN, size, 48.0),
+            BarAnchor::Top
+        );
+        // gliding: eased steps, then there
+        let (a, b) = (Point::new(0.0, 0.0), Point::new(100.0, 0.0));
+        let steps: Vec<f32> = std::iter::successors(Some(a), |p| (*p != b).then(|| glide(*p, b)))
+            .map(|p| p.x)
+            .collect();
+        assert!(
+            steps.len() > 4 && steps.windows(2).all(|w| w[1] > w[0]),
+            "{steps:?}"
+        );
+        let gaps: Vec<f32> = steps.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(gaps[0] > gaps[2], "eased out");
+        // a narrow screen: the field gives up width, the buttons keep theirs
+        let (field, s) = bottom_size(640.0, 10.0);
+        assert!(
+            field < FIELD && s.width <= 640.0 - 2.0 * GAP,
+            "{field} {s:?}"
+        );
+    }
+
+    #[test]
     fn qr_chip_offers_copy_and_open_only_for_links() {
         let screen = Size::new(1200.0, 420.0);
-        let selection = sel(450.0, 60.0, 300.0, 140.0);
         let link = "https://example.com/a-long-link/that/goes/on/and/on/forever";
-        let with_link = || {
-            let chip = qr_chip(link, (), Some(()));
-            view(selection, Rectangle::with_size(screen), Some(chip), |_| ())
-        };
+        let with_link = || qr_chip(link, (), Some(()));
         let texts = widgets::shot::texts(with_link());
         assert!(
             texts.contains(
@@ -278,53 +286,24 @@ mod tests {
         assert!(px.as_chunks::<4>().0.iter().any(|p| p[..] != px[..4]));
 
         let wifi = qr_chip("WIFI:S:cafe;T:WPA;P:secret;;", (), None);
-        let texts = widgets::shot::texts(view(
-            selection,
-            Rectangle::with_size(screen),
-            Some(wifi),
-            |_| (),
-        ));
+        let texts = widgets::shot::texts(wifi);
         assert!(texts.iter().any(|t| t.starts_with("QR code: WIFI:S:cafe")));
         assert!(!texts.iter().any(|t| t.starts_with("Open link")));
         // Text-direction controls: dropped from the chip, and a warning beside it.
         let rlo = qr_chip("https://evil.com/\u{202e}moc.elgoog", (), None);
-        let texts = widgets::shot::texts(view(
-            selection,
-            Rectangle::with_size(screen),
-            Some(rlo),
-            |_| (),
-        ));
+        let texts = widgets::shot::texts(rlo);
         assert!(
             texts.contains(&"QR code: https://evil.com/moc.elgoog… (copies 28 chars)".to_string()),
             "{texts:?}"
         );
         assert!(texts.contains(&"Hidden text-direction marks".to_string()));
         assert!(!texts.iter().any(|t| t.contains('\u{202e}')));
-        // No QR code: the bar alone.
-        let texts = widgets::shot::texts(view(
-            selection,
-            Rectangle::with_size(screen),
-            None::<Element<()>>,
-            |_| (),
-        ));
-        assert!(!texts.iter().any(|t| t.starts_with("QR code")));
     }
 
     #[test]
     fn key_hints_read_like_shortcuts() {
-        assert_eq!(
-            key_hint(Key {
-                ctrl: true,
-                letter: 's'
-            }),
-            "Ctrl S"
-        );
-        assert_eq!(
-            key_hint(Key {
-                ctrl: false,
-                letter: 'a'
-            }),
-            "A"
-        );
+        let key = |ctrl, letter| Key { ctrl, letter };
+        assert_eq!(key_hint(key(true, 's')), "Ctrl+S");
+        assert_eq!(key_hint(key(false, 'a')), "A");
     }
 }

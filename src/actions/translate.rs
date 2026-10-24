@@ -12,7 +12,6 @@ use crate::translate::pipeline::{Real, Via};
 pub const ACTION: Action = Action {
     id: "translate",
     label: "Translate",
-    tip: "Translate the text in the selection, in place",
     key: Key {
         ctrl: false,
         letter: 'r',

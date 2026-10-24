@@ -6,7 +6,6 @@ use crate::ocr::{self, TextBlock};
 pub const ACTION: Action = Action {
     id: "text",
     label: "Text",
-    tip: "Read the text in the selection",
     key: Key {
         ctrl: false,
         letter: 't',

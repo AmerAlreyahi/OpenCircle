@@ -5,7 +5,6 @@ use super::{Action, Key, Run};
 pub const ACTION: Action = Action {
     id: "edit",
     label: "Edit",
-    tip: "Draw, write or blur on the selection",
     key: Key {
         ctrl: false,
         letter: 'e',

@@ -11,7 +11,6 @@ use crate::secrets::{self, Secret};
 pub const ACTION: Action = Action {
     id: "ai",
     label: "Ask AI",
-    tip: "Ask an AI about the selection",
     key: Key {
         ctrl: false,
         letter: 'a',

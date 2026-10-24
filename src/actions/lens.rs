@@ -9,7 +9,6 @@ use crate::lens::LensPage;
 pub const ACTION: Action = Action {
     id: "lens",
     label: "Search",
-    tip: "Search the selection with Google Lens",
     key: Key {
         ctrl: false,
         letter: 'l',

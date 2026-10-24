@@ -9,7 +9,6 @@ use super::{Action, Crop, Key};
 pub const ACTION: Action = Action {
     id: "copy",
     label: "Copy",
-    tip: "Copy the selection as an image",
     key: Key {
         ctrl: true,
         letter: 'c',

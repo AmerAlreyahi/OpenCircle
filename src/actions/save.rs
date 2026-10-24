@@ -9,7 +9,6 @@ use crate::config::{Format, SnipConfig};
 pub const ACTION: Action = Action {
     id: "save",
     label: "Save",
-    tip: "Save the selection as a PNG file",
     key: Key {
         ctrl: true,
         letter: 's',

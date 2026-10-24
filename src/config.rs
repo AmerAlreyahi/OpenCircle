@@ -19,6 +19,9 @@
 //! width = 0                         # px, as the user resized it; 0 = default
 //! height = 0                        # px, a bottom card (narrow screens); 0 = default
 //!
+//! [bar]                             # the overlay's action bar, where the user docked it
+//! anchor = "bottom"                 # bottom | top | bottom_left | bottom_right
+//!
 //! [ai]                              # the API key is NOT here: OS keyring only
 //! provider = "browser"              # browser | anthropic | openai_compatible (missing = browser)
 //! base_url = ""                     # "" = provider default (Anthropic only)
@@ -342,6 +345,26 @@ pub struct ResultsConfig {
     pub width: u32,
     /// A bottom card's height (narrow or portrait screens); 0 = the default.
     pub height: u32,
+}
+
+/// The overlay's action bar (`[bar]`): the spot the user docked it at. The
+/// app writes it when a drag ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+pub struct BarConfig {
+    pub anchor: BarAnchor,
+}
+
+/// Where the overlay's action bar docks (always inside the work area).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BarAnchor {
+    /// Centred, above the taskbar.
+    #[default]
+    Bottom,
+    /// Centred at the top, under the hint.
+    Top,
+    BottomLeft,
+    BottomRight,
 }
 
 /// The side the results card sits on (`[results] side`).
@@ -709,6 +732,7 @@ pub struct Config {
     pub shortcut: String,
     pub general: GeneralConfig,
     pub results: ResultsConfig,
+    pub bar: BarConfig,
     pub selection: SelectionConfig,
     pub look: LookConfig,
     pub editor: EditorConfig,
@@ -784,6 +808,7 @@ impl Default for Config {
             shortcut: DEFAULT_CAPTURE_SHORTCUT.to_string(),
             general: GeneralConfig::default(),
             results: ResultsConfig::default(),
+            bar: BarConfig::default(),
             selection: SelectionConfig::default(),
             look: LookConfig::default(),
             editor: EditorConfig::default(),
@@ -941,6 +966,9 @@ impl Config {
             c.results.side = get(t, p, "side", d.side, &mut w);
             c.results.width = get_checked(t, p, "width", d.width, &mut w, px);
             c.results.height = get_checked(t, p, "height", d.height, &mut w, px);
+        }
+        if let Some(t) = section(&root, "bar", &mut w) {
+            c.bar.anchor = get(t, "bar.", "anchor", d.bar.anchor, &mut w);
         }
         if let Some(t) = section(&root, "selection", &mut w) {
             let (p, d) = ("selection.", d.selection);
@@ -1460,6 +1488,16 @@ mod tests {
         let (c, w) = Config::load_from(&tmp_dir("missing").join("nope.toml"));
         assert_eq!(c, Config::default());
         assert!(w.is_empty());
+    }
+
+    #[test]
+    fn the_bar_anchor_reads_back_and_bad_values_fall_back() {
+        let (c, w) = Config::parse("[bar]\nanchor = \"bottom_left\"\n");
+        assert_eq!((c.bar.anchor, w.len()), (BarAnchor::BottomLeft, 0));
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert_eq!(Config::parse(&text).0.bar.anchor, BarAnchor::BottomLeft);
+        let (bad, w) = Config::parse("[bar]\nanchor = \"middle\"\n");
+        assert_eq!((bad.bar.anchor, w.len()), (BarAnchor::Bottom, 1));
     }
 
     #[test]

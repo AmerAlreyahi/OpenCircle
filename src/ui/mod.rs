@@ -38,7 +38,9 @@ use iced::window::{self, Level, Mode};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
 use crate::actions::{self, Action, Crop, Run, copy, lens, qr, save, text};
-use crate::config::{self, After, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target};
+use crate::config::{
+    self, After, BarAnchor, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target,
+};
 use crate::editor::{self, Output};
 use crate::ocr::{self, TextBlock};
 use crate::translate::pipeline::Cache;
@@ -55,14 +57,20 @@ const PROTECTED: &str = "This window is protected; it can't be captured";
 /// The ask bar at the bottom of the overlay: its text field, width, and the
 /// height kept free for it (the action bar stays above it).
 const ASK_INPUT: &str = "overlay-ask";
-const ASK_WIDTH: f32 = 480.0;
-/// The field's width on a narrow screen (the buttons keep theirs).
-const ASK_MIN_WIDTH: f32 = 160.0;
+/// The bottom bar's round buttons: always there (Include screen, Ask AI,
+/// Translate, Live translate, Song search, Edit), and the ones that slide in
+/// with a selection (Search, Text, Copy, Save), and how long that takes.
+const BAR_BUTTONS: f32 = 6.0;
+const SLIDING_BUTTONS: f32 = 4.0;
+const BAR_SLIDE: Duration = Duration::from_millis(200);
+/// Ask AI's icon in the bottom bar: the one place to swap in the OpenCircle logo.
+const ASK_AI_ICON: char = actions::ask::ACTION.icon;
+/// A QR code's chip under a selection (its room; the chip is centred in it).
+const QR_WIDTH: f32 = 520.0;
 /// The bottom bar's "Include screen" toggle icon (lucide "screen-share").
 const INCLUDE_SCREEN: char = '\u{e152}';
 /// The bottom bar's Live translate icon (lucide "radio").
 const LIVE: char = '\u{e145}';
-const ASK_ZONE: f32 = widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING + 2.0 * ASK_MARGIN;
 const ASK_MARGIN: f32 = 24.0;
 
 /// A capture still unanswered after this is given up (a Wayland portal may wait
@@ -180,8 +188,10 @@ enum Message {
     /// The "Select text" chip under a snapped box, and the lines OCR read in it.
     SelectText,
     TextLines(Rectangle, Result<Vec<word::Line>, String>),
-    /// The "More" chip: the action bar beside an auto-search.
-    More,
+    /// The bottom bar's handle went down / the pointer moved / it was let go.
+    BarGrab,
+    BarMoved(Point),
+    BarReleased,
     /// The select-text popup.
     Picked(PickAct),
     /// While the result card is dragged: the pointer moved / was let go.
@@ -202,6 +212,10 @@ enum Message {
 struct BarKeys {
     /// No shortcut.
     none: String,
+    lens: String,
+    text: String,
+    copy: String,
+    save: String,
     ask: String,
     translate: String,
     live: String,
@@ -216,12 +230,13 @@ impl BarKeys {
                 .find(|q| q.action == id && q.live == live && !q.shortcut.is_empty());
             bound.map(|q| q.shortcut.clone()).unwrap_or_default()
         };
-        let key = |a: &Action| match a.key.ctrl {
-            true => format!("Ctrl+{}", a.key.letter.to_ascii_uppercase()),
-            false => a.key.letter.to_ascii_uppercase().to_string(),
-        };
+        let key = |a: &Action| bar::key_hint(a.key);
         BarKeys {
             none: String::new(),
+            lens: key(&lens::ACTION),
+            text: key(&text::ACTION),
+            copy: key(&copy::ACTION),
+            save: key(&save::ACTION),
             ask: key(&actions::ask::ACTION),
             translate: quick(actions::translate::ACTION.id, false),
             live: quick(actions::translate::ACTION.id, true),
@@ -249,9 +264,6 @@ struct TextMode {
     picking: bool,
 }
 
-/// Between the chips under a snapped box, and between them and the box
-/// (logical px).
-const CHIP_GAP: f32 = 8.0;
 const CHIP_SPACE: f32 = 12.0;
 
 /// What an OCR read for words was asked for, to place its answer.
@@ -453,8 +465,18 @@ struct App {
     /// A snapped selection's drawn stroke (image px) morphing into its box.
     morph: Option<(Vec<Point>, Instant)>,
     text_mode: Option<TextMode>,
-    /// The action bar is shown although the selection searched by itself.
-    more: bool,
+    /// The bottom bar's selection buttons: how far they are in (0..1, linear)
+    /// and the frame that moved them last (`None`: at rest).
+    slide: f32,
+    slide_at: Option<Instant>,
+    /// The bar's spot (`config::BarConfig`); while its handle is held, the
+    /// pointer's last position and where the bar follows it (top-left);
+    /// where it is drawn now (gliding to its spot); how much of the screen's
+    /// bottom the taskbar takes (logical px).
+    bar_anchor: BarAnchor,
+    bar_drag: Option<(Option<Point>, Point)>,
+    bar_now: Option<Point>,
+    work_inset: f32,
     /// Where the user moved / sized the result card (this run of the app).
     card: Option<Rectangle>,
     /// The card's grip or corner is held, and the pointer's last position.
@@ -555,7 +577,12 @@ impl App {
             },
             morph: None,
             text_mode: None,
-            more: false,
+            slide: 0.0,
+            slide_at: None,
+            bar_anchor: BarAnchor::Bottom,
+            bar_drag: None,
+            bar_now: None,
+            work_inset: 0.0,
             card: None,
             card_drag: None,
             card_hover: false,
@@ -698,10 +725,40 @@ impl App {
                 self.on_text_lines(area, read);
                 Task::none()
             }
-            Message::More => {
-                self.more = true;
+            Message::BarGrab => {
+                self.bar_drag = Some((None, self.bar_at()));
                 Task::none()
             }
+            // While held it follows the pointer (kept on screen).
+            Message::BarMoved(p) => {
+                if let Some((last, at)) = self.bar_drag {
+                    let (_, size) = self.bar_size();
+                    let at = match last {
+                        Some(from) => {
+                            let to = at + (p - from);
+                            let max = |whole: f32, side: f32| (whole - side).max(0.0);
+                            Point::new(
+                                to.x.clamp(0.0, max(self.screen.width, size.width)),
+                                to.y.clamp(0.0, max(self.screen.height, size.height)),
+                            )
+                        }
+                        None => at,
+                    };
+                    self.bar_drag = Some((Some(p), at));
+                    self.bar_now = Some(at);
+                }
+                Task::none()
+            }
+            // Let go: it glides to the nearest spot, remembered.
+            Message::BarReleased => match self.bar_drag.take() {
+                Some((_, at)) => {
+                    let (_, size) = self.bar_size();
+                    self.bar_anchor = bar::nearest(at, self.screen, size, self.work_inset);
+                    self.bar_now = Some(at);
+                    self.remember_bar()
+                }
+                None => Task::none(),
+            },
             Message::Picked(act) => self.on_picked(act),
             Message::CardMoved(p) => {
                 if let Some((how, last)) = self.card_drag {
@@ -778,6 +835,14 @@ impl App {
                     None => (now, 0.0),
                     Some((last, t)) => (now, overlay::opening_step(t, now - last)),
                 });
+                let target = self.slide_target();
+                let dt = self.slide_at.map_or(Duration::ZERO, |last| now - last);
+                self.slide = overlay::toward(self.slide, target, dt, BAR_SLIDE);
+                self.slide_at = (self.slide != target).then_some(now);
+                if self.bar_drag.is_none() {
+                    let to = self.bar_target();
+                    self.bar_now = Some(self.bar_now.map_or(to, |at| bar::glide(at, to)));
+                }
                 Task::none()
             }
             Message::ScreenText(opening, read)
@@ -912,6 +977,9 @@ impl App {
         let cfg = config::current();
         self.appear = None; // its first frame is t = 0
         self.include_screen = true;
+        self.bar_anchor = cfg.bar.anchor;
+        self.bar_now = None;
+        self.work_inset = taskbar_inset(shot.origin, size, shot.scale);
         self.behaviour = cfg.selection;
         self.bar_keys = BarKeys::of(&cfg);
         let mut first = None;
@@ -1101,7 +1169,6 @@ impl App {
                 self.panel = None;
                 self.text_mode = None;
                 self.morph = None;
-                self.more = false;
                 self.edit = None;
                 self.scan = None;
                 self.taps = self.taps.wrapping_add(1); // a tap still reading is stale
@@ -2488,7 +2555,8 @@ impl App {
         self.helper = None;
         self.morph = None;
         self.text_mode = None;
-        self.more = false;
+        self.bar_drag = None;
+        self.slide = 0.0;
         self.song = None; // stops listening
         if self.can_hide {
             self.hiding = Hiding::Empty;
@@ -2846,11 +2914,10 @@ impl App {
         if self.bottom_bar_shown() {
             // slides up into place as the overlay opens
             let rise = (1.0 - self.appeared()) * SLIDE;
-            let bar = iced::widget::float(self.bottom_bar())
-                .translate(move |_, _| Vector::new(0.0, rise));
-            layers = layers.push(bar);
+            let at = self.bar_at() + Vector::new(0.0, rise);
+            layers = layers.push(iced::widget::pin(self.bottom_bar()).position(at));
         }
-        // Beside a panel (an auto-search's): the chips, and the bar after More.
+        // Beside a panel (an auto-search's): the chips.
         if let (Some(_), Some(selection), Purpose::Search, false) =
             (&self.panel, self.selection, &self.purpose, self.drawing)
         {
@@ -2880,67 +2947,32 @@ impl App {
         card::free(self.screen, self.panel.as_ref().map(|_| self.card_at()))
     }
 
-    /// What floats around `selection`: the chips under a snapped box ("Select
-    /// text", "More" while the bar waits behind an auto-search), the
-    /// select-text popup, the action bar and the ask bar (not beside a panel).
+    /// What floats around `selection`: only small chips ("Select text" under a
+    /// snapped box, a QR code's); every action is in the bottom bar.
     fn selection_ui(&self, selection: overlay::Selection) -> Element<'_, Message> {
         let area = self.view.rect_to_screen(selection.area);
-        let panel = self.panel.is_some();
-        let word = selection.kind == overlay::Kind::Word;
-        let waits = self.behaviour.after == After::Wait || word;
-        let bar_shown = self.text_mode.is_none() && ((waits && !panel) || self.more);
-        let mut chips: Vec<Element<'_, Message>> = Vec::new();
+        let room = self.room();
+        let mut layers = stack![];
+        let mut below = area;
         if selection.kind == overlay::Kind::Snap {
             let label = match &self.text_mode {
                 None => "Select text",
                 Some(TextMode { lines: None, .. }) => "Reading text…",
                 Some(_) => "Done",
             };
-            chips.push(widgets::float_chip(label, Message::SelectText).into());
-        }
-        if !word && !waits && !self.more && self.text_mode.is_none() {
-            chips.push(widgets::float_chip("More", Message::More).into());
-        }
-        let room = self.room();
-        let mut layers = stack![];
-        let mut below = area;
-        if !chips.is_empty() {
-            let n = chips.len() as f32;
-            let size = Size::new(
-                n * widgets::TEXT_BUTTON_WIDTH + (n - 1.0) * CHIP_GAP,
-                widgets::CONTROL,
-            );
+            let size = Size::new(widgets::TEXT_BUTTON_WIDTH, widgets::CONTROL);
             let at = chips_at(area, size, room);
-            below = area.union(&Rectangle::new(at, size)); // the bar goes past them
-            let row = iced::widget::row(chips).spacing(CHIP_GAP);
-            layers = layers.push(iced::widget::pin(opaque(row)).position(at));
+            below = area.union(&Rectangle::new(at, size));
+            let chip = widgets::float_chip(label, Message::SelectText);
+            layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
         }
-        // Picked words (select-text mode, or a word selection once let go):
-        // the text actions instead of the bar.
-        let picked = match &self.text_mode {
-            Some(mode) => mode.picked.as_ref().filter(|_| !mode.picking),
-            None => (self.word.as_ref())
-                .filter(|_| word && self.text_press.is_none() && self.grab.is_none()),
-        };
-        // The bar and the popup keep clear of the card and of the bottom bar.
-        let mut room = room;
-        if self.bottom_bar_shown() {
-            room.height = room.height.min(self.screen.height - ASK_ZONE);
-        }
-        if let Some(picked) = picked {
-            let text: Vec<Rectangle> = (picked.line_boxes())
-                .map(|r| self.view.rect_to_screen(r))
-                .collect();
-            let area = self.view.rect_to_screen(picked.area());
-            layers = layers.push(pick_popup(area, room, &text));
-        } else if bar_shown && !word {
-            let chip = (self.scan.as_ref())
-                .and_then(|s| s.qr.as_deref())
-                .map(|text| {
-                    let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
-                    bar::qr_chip(text, Message::Qr(qr::Act::Copy), open)
-                });
-            layers = layers.push(bar::view(below, room, chip, Message::Run));
+        if let Some(text) = self.scan.as_ref().and_then(|s| s.qr.as_deref()) {
+            let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
+            let chip = bar::qr_chip(text, Message::Qr(qr::Act::Copy), open);
+            let size = Size::new(QR_WIDTH, widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING);
+            let at = chips_at(below, size, room);
+            let chip = container(chip).center_x(QR_WIDTH);
+            layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
         }
         layers.into()
     }
@@ -2966,46 +2998,159 @@ impl App {
             && self.toast.is_none()
     }
 
-    /// The bottom bar: "Ask about your screen…" (your selection, once there is
-    /// one; Enter opens Ask AI with it), then Ask AI, Translate the screen,
-    /// Live translate, Song search and Edit. Its field takes the keys only
-    /// once clicked: until then letters are the action shortcuts. On a narrow
-    /// screen the field gives up width, the buttons stay.
+    /// The bottom bar's selection buttons (Search, Text, Copy, Save) slide
+    /// in while there is a selection.
+    fn slide_target(&self) -> f32 {
+        if self.selection.is_some() { 1.0 } else { 0.0 }
+    }
+
+    /// The selection buttons are on their way in or out.
+    fn sliding(&self) -> bool {
+        self.frame.is_some() && self.slide != self.slide_target()
+    }
+
+    /// The bottom bar's field width and size now (with the selection
+    /// buttons as far in as they are).
+    fn bar_size(&self) -> (f32, Size) {
+        let bubbles = BAR_BUTTONS + SLIDING_BUTTONS * overlay::ease_out(self.slide);
+        bar::bottom_size(self.screen.width, bubbles)
+    }
+
+    /// Where the bar is drawn now (top-left): on its way to `bar_target`.
+    fn bar_at(&self) -> Point {
+        self.bar_now.unwrap_or_else(|| self.bar_target())
+    }
+
+    /// Where the bar goes: following the pointer while held, else its spot,
+    /// or the nearest free one while the selection is where it would be.
+    fn bar_target(&self) -> Point {
+        if let Some((_, at)) = self.bar_drag {
+            return at;
+        }
+        let (_, size) = self.bar_size();
+        let blocked: Vec<Rectangle> = (self.selection.iter())
+            .chain(self.others.iter().map(|(s, _)| s))
+            .map(|s| self.view.rect_to_screen(s.area))
+            .collect();
+        let spot = bar::free(
+            self.bar_anchor,
+            &blocked,
+            self.screen,
+            size,
+            self.work_inset,
+        );
+        bar::anchor_at(spot, self.screen, size, self.work_inset)
+    }
+
+    /// The bar is on its way somewhere.
+    fn bar_gliding(&self) -> bool {
+        self.frame.is_some() && self.bar_now.is_some_and(|at| at != self.bar_target())
+    }
+
+    /// The bar was dropped: its place is remembered (config `[bar]`).
+    fn remember_bar(&self) -> Task<Message> {
+        let mut cfg = config::current();
+        cfg.bar.anchor = self.bar_anchor;
+        config::set_current(cfg.clone());
+        if cfg!(test) {
+            return Task::none(); // never the user's file
+        }
+        background(move |_: &UnboundedSender<()>| {
+            if let Err(e) = cfg.save() {
+                eprintln!("[opencircle] the bar's place was not saved: {e}");
+            }
+        })
+        .discard()
+    }
+
+    /// The bottom bar, the one action hub: a handle to drag it, "Ask about your
+    /// screen…" (your selection, once there is one; Enter opens Ask AI with
+    /// it; "Ask anything…" without the screen), "Include screen", then round
+    /// icon buttons. With a selection Search, Text, Copy and Save slide in and
+    /// every action takes the selection (picked words: their text); without,
+    /// the whole screen. Its field takes the keys only once clicked: until
+    /// then letters are the action shortcuts.
     fn bottom_bar(&self) -> Element<'_, Message> {
         let placeholder = match (self.include_screen, self.selection) {
             (false, _) => "Ask anything…",
             (true, Some(_)) => "Ask about your selection…",
             (true, None) => "Ask about your screen…",
         };
+        let (width, _) = self.bar_size();
         let field = widgets::input(
             ASK_INPUT,
             placeholder,
             &self.ask,
             Message::AskInput,
             Message::AskSubmit,
-        );
+        )
+        .width(width);
         let keys = &self.bar_keys;
-        let buttons = [
+        let selected = self.selection.is_some();
+        // picked words (select-text mode): Copy, Translate, Search, Ask AI take their text
+        let picked = (self.text_mode.as_ref()).is_some_and(|m| m.picked.is_some() && !m.picking);
+        let pick = |act: PickAct, other: Message| match picked {
+            true => Message::Picked(act),
+            false => other,
+        };
+        let button = bar_button;
+        let sliding = [
             (
-                INCLUDE_SCREEN,
-                "Include screen",
-                &keys.none,
-                self.include_screen,
-                Message::IncludeScreen,
+                lens::ACTION.icon,
+                "Search",
+                &keys.lens,
+                pick(PickAct::Search, Message::Run(&lens::ACTION)),
             ),
             (
-                actions::ask::ACTION.icon,
+                text::ACTION.icon,
+                "Text",
+                &keys.text,
+                Message::Run(&text::ACTION),
+            ),
+            (
+                copy::ACTION.icon,
+                "Copy",
+                &keys.copy,
+                pick(PickAct::Copy, Message::Run(&copy::ACTION)),
+            ),
+            (
+                save::ACTION.icon,
+                "Save",
+                &keys.save,
+                Message::Run(&save::ACTION),
+            ),
+        ]
+        .map(|(glyph, label, keys, message)| button(glyph, label, keys, false, message));
+        let (translate, edit) = match selected {
+            true => (
+                (
+                    "Translate",
+                    pick(
+                        PickAct::Translate,
+                        Message::Run(&actions::translate::ACTION),
+                    ),
+                ),
+                ("Edit", Message::Run(&actions::edit::ACTION)),
+            ),
+            false => (
+                ("Translate the screen", Message::TranslateScreen),
+                ("Edit the screen", Message::EditScreen),
+            ),
+        };
+        let fixed = [
+            (
+                ASK_AI_ICON,
                 "Ask AI",
                 &keys.ask,
                 false,
-                Message::AskButton,
+                pick(PickAct::Ask, Message::AskButton),
             ),
             (
                 actions::translate::ACTION.icon,
-                "Translate the screen",
+                translate.0,
                 &keys.translate,
                 false,
-                Message::TranslateScreen,
+                translate.1,
             ),
             (
                 LIVE,
@@ -3023,34 +3168,42 @@ impl App {
             ),
             (
                 actions::edit::ACTION.icon,
-                "Edit the screen",
+                edit.0,
                 &keys.edit,
                 false,
-                Message::EditScreen,
+                edit.1,
             ),
-        ];
-        let n = buttons.len() as f32;
-        let used = n * (widgets::CONTROL + 4.0) + 2.0 * (widgets::SURFACE_PADDING + ASK_MARGIN);
-        let width = (self.screen.width - used).clamp(ASK_MIN_WIDTH, ASK_WIDTH);
-        let buttons = buttons.map(|(glyph, label, keys, active, message)| {
-            let why = match keys.is_empty() {
-                true => widgets::Why::Icon,
-                false => widgets::Why::Keys(keys),
-            };
-            let button = widgets::icon_button(glyph, active, message);
-            widgets::hint(button, label, why, iced::widget::tooltip::Position::Top)
+        ]
+        .map(|(glyph, label, keys, active, message)| button(glyph, label, keys, active, message));
+        // the selection buttons slide in: their row is clipped to its share
+        let shown = overlay::ease_out(self.slide);
+        let group = (shown > 0.0).then(|| {
+            let full = SLIDING_BUTTONS * (widgets::BUBBLE + bar::SPACING);
+            container(iced::widget::row(sliding).spacing(bar::SPACING))
+                .width(shown * full - bar::SPACING)
+                .clip(true)
         });
-        let bar = iced::widget::row![field.width(width)]
-            .extend(buttons)
-            .spacing(4)
+        let handle = iced::widget::mouse_area(
+            container(widgets::icon(widgets::DRAG))
+                .center_x(bar::HANDLE)
+                .center_y(widgets::CONTROL),
+        )
+        .on_press(Message::BarGrab)
+        .interaction(iced::mouse::Interaction::Grab);
+        let chip = button(
+            INCLUDE_SCREEN,
+            "Include screen",
+            &keys.none,
+            self.include_screen,
+            Message::IncludeScreen,
+        );
+        let row = iced::widget::row![handle, field, chip]
+            .extend(group.map(Element::from))
+            .extend(fixed)
+            .spacing(bar::SPACING)
             .align_y(iced::Center);
         // opaque: a press on it doesn't start a new selection.
-        let bar = opaque(widgets::surface(bar));
-        container(bar)
-            .center_x(Fill)
-            .align_bottom(Fill)
-            .padding(ASK_MARGIN)
-            .into()
+        opaque(widgets::surface(row))
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -3122,11 +3275,29 @@ impl App {
                 _ => Subscription::none(),
             };
             // The opening animation: one message per frame until it is done.
-            let frames = match self.appear.is_none() || self.appearing() {
+            let moving = self.appear.is_none()
+                || self.appearing()
+                || self.sliding()
+                || self.bar_gliding()
+                || self.bar_now.is_none();
+            let frames = match moving {
                 true => window::frames().map(Message::Frame),
                 false => Subscription::none(),
             };
-            Subscription::batch([triggers, escape, alt, card, shift, frames])
+            // Dragging the bottom bar by its handle: the pointer anywhere, until let go.
+            let bar = match self.bar_drag {
+                Some(_) => iced::event::listen_with(|event, _, _| match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::BarMoved(position))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )) => Some(Message::BarReleased),
+                    _ => None,
+                }),
+                None => Subscription::none(),
+            };
+            Subscription::batch([triggers, escape, alt, card, shift, frames, bar])
         } else if self.hiding != Hiding::No {
             // One stream for both, so a resize is always seen before the frames after it.
             // Every message makes iced redraw, so frames keep coming while this runs.
@@ -3162,73 +3333,55 @@ fn chips_at(area: Rectangle, size: Size, room: Rectangle) -> Point {
     Point::new(x, y)
 }
 
-/// The text actions for the picked words (Copy, Translate, Search, Ask AI), by their box `picked`.
-fn pick_popup<'a>(picked: Rectangle, room: Rectangle, text: &[Rectangle]) -> Element<'a, Message> {
-    let buttons = [
-        (copy::ACTION.icon, "Copy", PickAct::Copy),
-        (
-            actions::translate::ACTION.icon,
-            "Translate",
-            PickAct::Translate,
-        ),
-        (lens::ACTION.icon, "Search", PickAct::Search),
-        (actions::ask::ACTION.icon, "Ask AI", PickAct::Ask),
-    ]
-    .map(|(icon, label, act)| {
-        widgets::text_button(icon, label, String::new(), false, Message::Picked(act)).into()
-    });
-    let n = buttons.len() as f32;
-    let size = Size::new(
-        n * widgets::TEXT_BUTTON_WIDTH + (n - 1.0) * 4.0 + 2.0 * widgets::SURFACE_PADDING,
-        widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING,
-    );
-    let at = popup_at(picked, size, room, text);
-    let popup = widgets::surface(iced::widget::row(buttons).spacing(4));
-    iced::widget::pin(opaque(popup)).position(at).into()
+/// A round button of the bottom bar, named `label` (its tooltip adds `keys`).
+fn bar_button<'a>(
+    glyph: char,
+    label: &'a str,
+    keys: &'a str,
+    active: bool,
+    message: Message,
+) -> Element<'a, Message> {
+    let why = match keys.is_empty() {
+        true => widgets::Why::Icon,
+        false => widgets::Why::Keys(keys),
+    };
+    let button = widgets::round_button(glyph, active, message);
+    widgets::hint(button, label, why, iced::widget::tooltip::Position::Top)
 }
 
-/// How far (in popup heights) the text actions move to keep clear of text.
-const POPUP_REACH: f32 = 2.0;
+/// How much of the bottom of the monitor at `origin` (`size`, logical px at
+/// `scale`) the taskbar takes: the bottom bar keeps above it.
+// ponytail: the bottom edge only (a taskbar on the left, right or top
+// doesn't push the bar); mixed-DPI monitors map approximately.
+#[cfg(windows)]
+fn taskbar_inset(origin: Point, size: Size, scale: f32) -> f32 {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+    };
+    let centre = POINT {
+        x: ((origin.x + size.width / 2.0) * scale) as i32,
+        y: ((origin.y + size.height / 2.0) * scale) as i32,
+    };
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..MONITORINFO::default()
+    };
+    // SAFETY: plain Win32 queries; `info` is sized as cbSize says.
+    let read = unsafe {
+        let monitor = MonitorFromPoint(centre, MONITOR_DEFAULTTONEAREST);
+        GetMonitorInfoW(monitor, &mut info).as_bool()
+    };
+    match read {
+        true => ((info.rcMonitor.bottom - info.rcWork.bottom) as f32 / scale).max(0.0),
+        false => 0.0,
+    }
+}
 
-/// Where the text actions (`size`) go for the words `picked`: under them if
-/// there is room, else above, moved past other text lines (`text`) where that
-/// still fits, so they cover no text; always inside `room` (all screen px).
-fn popup_at(picked: Rectangle, size: Size, room: Rectangle, text: &[Rectangle]) -> Point {
-    let x = bar::place_in(picked, size, room).x;
-    let (top, bottom) = (room.y + bar::GAP, room.y + room.height - bar::GAP);
-    let fits = |y: f32| top <= y && y + size.height <= bottom;
-    let over = |y: f32| {
-        let r = Rectangle::new(Point::new(x, y), size);
-        let hit: Vec<&Rectangle> = text.iter().filter(|t| t.intersects(&r)).collect();
-        (!hit.is_empty()).then_some(hit)
-    };
-    // step past the lines in the way, downwards (`down`) or upwards, not
-    // further than `POPUP_REACH` popups from the words
-    let clear = |start: f32, down: bool| {
-        let mut y = start;
-        while fits(y) && (y - start).abs() <= POPUP_REACH * size.height {
-            let Some(hit) = over(y) else { return Some(y) };
-            y = match down {
-                true => hit.iter().map(|t| t.y + t.height).fold(y, f32::max) + bar::GAP,
-                false => {
-                    hit.iter().map(|t| t.y).fold(y + size.height, f32::min) - bar::GAP - size.height
-                }
-            };
-        }
-        None
-    };
-    let below = picked.y + picked.height + bar::GAP;
-    let above = picked.y - bar::GAP - size.height;
-    let y = (clear(below, true))
-        .or_else(|| clear(above, false))
-        .unwrap_or(if fits(below) {
-            below
-        } else if fits(above) {
-            above
-        } else {
-            bottom - size.height
-        });
-    Point::new(x, y.max(top))
+/// Elsewhere the desktop's panels aren't known: the bar keeps its own gap.
+#[cfg(not(windows))]
+fn taskbar_inset(_: Point, _: Size, _: f32) -> f32 {
+    0.0
 }
 
 /// The actions a selection runs by itself under `behaviour`.
@@ -3581,7 +3734,10 @@ mod tests {
         let _ = app.update(Message::Scanned(area, qr::scan(&app.crop().unwrap())));
         let texts = overlay_texts(&app);
         assert!(texts.contains(&PROTECTED.to_string()), "{texts:?}");
-        assert!(texts.contains(&"Copy".to_string()) && texts.contains(&"Text".to_string()));
+        app.slide = 1.0; // the selection's buttons in the bottom bar
+        let texts = overlay_texts(&app);
+        assert!(texts.contains(&copy::ACTION.icon.to_string()));
+        assert!(texts.contains(&text::ACTION.icon.to_string()));
         widgets::shot::save("overlay-protected", app.view(app.overlay), area.size());
         // An ordinary capture shows no such pill.
         let grey = Crop {
@@ -4167,11 +4323,35 @@ mod tests {
     fn selected_text_gets_the_text_actions_shift_extends_ctrl_a_takes_all() {
         let mut app = read_app();
         stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]); // "while you drag"
+        // the bottom bar's Copy, Translate, Search, Ask AI take the text (no pill)
+        app.slide = 1.0;
         let texts = overlay_texts(&app);
-        for label in ["Copy", "Translate", "Search", "Ask AI"] {
-            assert!(texts.contains(&label.to_string()), "{label}: {texts:?}");
-        }
-        assert!(!texts.contains(&"Edit".to_string()), "not the action bar");
+        assert!(
+            !texts.contains(&"Copy".to_string()),
+            "no floating pill: {texts:?}"
+        );
+        let click = |p| widgets::shot::click(app.view(app.overlay), app.screen, p);
+        let copy = click(bar_slot(&app, 3));
+        assert!(
+            copy.iter()
+                .any(|m| matches!(m, Message::Run(a) if a.id == copy::ACTION.id))
+        );
+        let run = |m: &Message, id: &str| matches!(m, Message::Run(a) if a.id == id);
+        assert!(
+            click(bar_slot(&app, 1))
+                .iter()
+                .any(|m| run(m, lens::ACTION.id))
+        );
+        assert!(
+            click(bar_button(&app, 1))
+                .iter()
+                .any(|m| run(m, actions::translate::ACTION.id))
+        );
+        assert!(
+            click(bar_button(&app, 0))
+                .iter()
+                .any(|m| matches!(m, Message::AskButton))
+        );
         assert!(
             !app.handles() || app.grab_at(caret(1, 21.0)).is_none(),
             "no handles"
@@ -4244,18 +4424,193 @@ mod tests {
 
     /// The centre of the bottom bar's button `k` (0 = Ask AI … 4 = Edit), as laid out.
     fn bar_button(app: &App, k: usize) -> Point {
-        bar_slot(app, k + 1)
+        let slid = if app.slide >= 1.0 {
+            SLIDING_BUTTONS as usize
+        } else {
+            0
+        };
+        bar_slot(app, 1 + slid + k)
     }
 
-    /// The centre of the bottom bar's icon `k` (0 = Include screen, then the buttons).
+    /// The centre of the bottom bar's round button `k` (0 = Include screen,
+    /// then Search, Text, Copy, Save while a selection has them in, then the rest).
     fn bar_slot(app: &App, k: usize) -> Point {
-        let n = 6.0;
-        let used = n * (widgets::CONTROL + 4.0) + 2.0 * (widgets::SURFACE_PADDING + ASK_MARGIN);
-        let field = (app.screen.width - used).clamp(ASK_MIN_WIDTH, ASK_WIDTH);
-        let bar = field + n * (widgets::CONTROL + 4.0) + 2.0 * widgets::SURFACE_PADDING;
-        let left = (app.screen.width - bar) / 2.0 + widgets::SURFACE_PADDING;
-        let x = left + field + 4.0 + k as f32 * (widgets::CONTROL + 4.0) + widgets::CONTROL / 2.0;
-        Point::new(x, app.screen.height - ASK_ZONE / 2.0)
+        let (field, size) = app.bar_size();
+        let at = app.bar_at();
+        let first =
+            at.x + widgets::SURFACE_PADDING + bar::HANDLE + bar::SPACING + field + bar::SPACING;
+        let x = first + k as f32 * (widgets::BUBBLE + bar::SPACING) + widgets::BUBBLE / 2.0;
+        Point::new(x, at.y + size.height / 2.0)
+    }
+
+    /// A point in the bottom bar's field.
+    fn bar_field(app: &App) -> Point {
+        let (_, size) = app.bar_size();
+        let at = app.bar_at();
+        let x = at.x + widgets::SURFACE_PADDING + bar::HANDLE + bar::SPACING + 60.0;
+        Point::new(x, at.y + size.height / 2.0)
+    }
+
+    /// One selection, the old action bar gone: only the bottom bar, whose
+    /// Search, Text, Copy and Save slide in and act on the selection.
+    #[test]
+    fn a_selection_brings_its_actions_into_the_bottom_bar_not_a_second_bar() {
+        let mut app = open_app(1280, 800, 1.0);
+        drag(
+            &mut app,
+            Point::new(200.0, 150.0),
+            Point::new(500.0, 350.0),
+            false,
+        );
+        assert!(app.selection.is_some());
+        let texts = overlay_texts(&app);
+        for label in [
+            "Search",
+            "Ask AI",
+            "Text",
+            "Translate",
+            "Edit",
+            "Copy",
+            "Save",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t == label),
+                "no labelled action bar: {texts:?}"
+            );
+        }
+        // the selection buttons slide in over a few frames (eased), then stay
+        assert!(app.sliding());
+        let start = Instant::now();
+        let widths: Vec<f32> = (0..=30)
+            .map(|i| {
+                let _ = app.update(Message::Frame(start + Duration::from_millis(10 * i)));
+                app.bar_size().1.width
+            })
+            .collect();
+        assert!(widths.windows(2).all(|w| w[1] >= w[0]), "{widths:?}");
+        assert!(widths[0] < widths[30] && !app.sliding());
+        let at = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(&app, k));
+        let runs = |k, id: &str| {
+            at(k)
+                .iter()
+                .any(|m| matches!(m, Message::Run(a) if a.id == id))
+        };
+        assert!(runs(1, lens::ACTION.id), "Search");
+        assert!(runs(2, text::ACTION.id), "Text");
+        assert!(runs(3, copy::ACTION.id), "Copy");
+        assert!(runs(4, save::ACTION.id), "Save");
+        // Translate and Edit take the selection now, not the whole screen
+        let on = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, k));
+        assert!(
+            on(1)
+                .iter()
+                .any(|m| matches!(m, Message::Run(a) if a.id == actions::translate::ACTION.id))
+        );
+        assert!(
+            on(4)
+                .iter()
+                .any(|m| matches!(m, Message::Run(a) if a.id == actions::edit::ACTION.id))
+        );
+        assert!(on(0).iter().any(|m| matches!(m, Message::AskButton)));
+        // picked words in a snapped box: Copy, Search, Translate, Ask AI take their text
+        let mut words = select_text_app();
+        words.slide = 1.0;
+        drag(&mut words, caret(1, 7.0), caret(2, 16.0), false);
+        let at =
+            |k| widgets::shot::click(words.view(words.overlay), words.screen, bar_slot(&words, k));
+        assert!(
+            at(1)
+                .iter()
+                .any(|m| matches!(m, Message::Picked(PickAct::Search)))
+        );
+        assert!(
+            at(3)
+                .iter()
+                .any(|m| matches!(m, Message::Picked(PickAct::Copy)))
+        );
+    }
+
+    /// Frames until the bar is where it goes (it glides there).
+    fn settle_bar(app: &mut App) {
+        let start = Instant::now();
+        for i in 0..100 {
+            let _ = app.update(Message::Frame(start + Duration::from_millis(16 * i)));
+        }
+        assert!(!app.bar_gliding());
+    }
+
+    /// The bar: by default a clear gap above the taskbar; dragged by its
+    /// handle it follows the pointer, and let go it glides to the nearest
+    /// spot, remembered for the next run; a selection under it sends it to a
+    /// free spot until the space is free again.
+    #[test]
+    fn the_bar_drags_by_its_handle_and_docks_at_the_nearest_spot() {
+        let mut app = open_app(1280, 800, 1.0);
+        app.work_inset = 40.0; // a taskbar
+        let (_, size) = app.bar_size();
+        assert_eq!(app.bar_at().y + size.height, 800.0 - 40.0 - bar::BOTTOM_GAP);
+        let handle = app.bar_at()
+            + Vector::new(
+                widgets::SURFACE_PADDING + bar::HANDLE / 2.0,
+                size.height / 2.0,
+            );
+        let grabbed = widgets::shot::click(app.view(app.overlay), app.screen, handle);
+        assert!(grabbed.iter().any(|m| matches!(m, Message::BarGrab)));
+        // the field and the buttons don't drag it
+        let field = widgets::shot::click(app.view(app.overlay), app.screen, bar_field(&app));
+        assert!(!field.iter().any(|m| matches!(m, Message::BarGrab)));
+        // held, it follows the pointer
+        let before = app.bar_at();
+        let _ = app.update(Message::BarGrab);
+        let _ = app.update(Message::BarMoved(handle));
+        let _ = app.update(Message::BarMoved(handle - Vector::new(100.0, 560.0)));
+        assert_eq!(app.bar_at(), before - Vector::new(100.0, 560.0));
+        // let go near the top: it glides to the top spot, remembered
+        let _ = app.update(Message::BarReleased);
+        assert_eq!(app.bar_anchor, BarAnchor::Top);
+        assert_eq!(config::current().bar.anchor, BarAnchor::Top, "remembered");
+        let _ = app.update(Message::Frame(Instant::now()));
+        let step = app.bar_at();
+        assert!(
+            step != before - Vector::new(100.0, 560.0) && app.bar_gliding(),
+            "gliding"
+        );
+        settle_bar(&mut app);
+        assert_eq!(app.bar_at().y, bar::TOP);
+        // the next opening finds it there
+        let mut next = open_app(1280, 800, 1.0);
+        next.bar_anchor = config::current().bar.anchor;
+        assert_eq!(next.bar_at().y, bar::TOP);
+        // a selection where the bar is: it moves to a free spot, and comes back
+        let bar_box = Rectangle::new(next.bar_at(), size);
+        drag(
+            &mut next,
+            bar_box.position() + Vector::new(50.0, -20.0),
+            bar_box.position() + Vector::new(300.0, 120.0),
+            false,
+        );
+        assert!(next.selection.is_some());
+        settle_bar(&mut next);
+        let sel = next.view.rect_to_screen(next.selection.unwrap().area);
+        let (_, size) = next.bar_size();
+        assert!(
+            !Rectangle::new(next.bar_at(), size).intersects(&sel),
+            "never covers it"
+        );
+        let _ = next.update(Message::Escape); // closes the overlay
+        let mut back = open_app(1280, 800, 1.0);
+        back.bar_anchor = BarAnchor::Top;
+        settle_bar(&mut back);
+        assert_eq!(back.bar_at().y, bar::TOP, "free again: home");
+        // dropped far off screen: the nearest spot, inside the work area
+        let _ = back.update(Message::BarGrab);
+        let _ = back.update(Message::BarMoved(Point::new(10.0, 10.0)));
+        let _ = back.update(Message::BarMoved(Point::new(5000.0, 5000.0)));
+        let _ = back.update(Message::BarReleased);
+        assert_eq!(back.bar_anchor, BarAnchor::BottomRight);
+        let mut cfg = config::current();
+        cfg.bar.anchor = BarAnchor::Bottom;
+        config::set_current(cfg);
     }
 
     #[test]
@@ -4559,49 +4914,12 @@ mod tests {
         let keys = key_after(&app, Task::none(), None, 'a');
         assert!(keys.iter().any(|m| is_key(m, 'a')));
         // once clicked, it has them: a typed question, not a shortcut
-        let field = Point::new(300.0, 600.0 - ASK_ZONE / 2.0);
+        let field = bar_field(&app);
         let keys = key_after(&app, Task::none(), Some(field), 'a');
         assert!(!keys.iter().any(|m| is_key(m, 'a')));
         assert!(
             keys.iter()
                 .any(|m| matches!(m, Message::AskInput(t) if t == "a"))
-        );
-    }
-
-    #[test]
-    fn the_text_actions_cover_no_text_and_stay_on_screen() {
-        let room = Rectangle::new(Point::ORIGIN, Size::new(1000.0, 700.0));
-        let size = Size::new(400.0, 56.0);
-        let line = |y: f32| Rectangle::new(Point::new(100.0, y), Size::new(500.0, 22.0));
-        let clear = |at: Point, text: &[Rectangle]| {
-            let r = Rectangle::new(at, size);
-            text.iter().all(|t| !t.intersects(&r))
-                && room.contains(at)
-                && room.contains(at + Vector::from(size))
-        };
-        // a lone word: right under it
-        let word = line(100.0);
-        let at = popup_at(word, size, room, &[word]);
-        assert_eq!(at.y, 122.0 + bar::GAP);
-        assert!(clear(at, &[word]));
-        // in a paragraph: past the next lines, below the paragraph
-        let para: Vec<Rectangle> = (0..4).map(|i| line(100.0 + 30.0 * i as f32)).collect();
-        let at = popup_at(para[0], size, room, &para);
-        assert!(at.y > para[3].y && clear(at, &para), "{at:?}");
-        // a long text below and above: under the words, over the text (no way round)
-        let page: Vec<Rectangle> = (0..20).map(|i| line(30.0 * i as f32 + 10.0)).collect();
-        let at = popup_at(page[10], size, room, &page);
-        assert_eq!(at.y, page[10].y + 22.0 + bar::GAP);
-        // at the bottom of the screen: above the words, clear of the line above
-        let low = [line(560.0), line(640.0)];
-        let at = popup_at(low[1], size, room, &low);
-        assert!(at.y + size.height <= low[1].y && clear(at, &low), "{at:?}");
-        // a word at the very top and bottom of a tiny room: still inside
-        let tiny = Rectangle::new(Point::ORIGIN, Size::new(500.0, 80.0));
-        let at = popup_at(line(30.0), size, tiny, &[]);
-        assert!(
-            at.y >= tiny.y && at.y + size.height <= tiny.height,
-            "{at:?}"
         );
     }
 
@@ -4772,12 +5090,19 @@ mod tests {
         assert_eq!(picked.text(), "while you drag a finger\nacross the words");
         assert!(!mode.picking);
         assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
-        // the popup offers the text actions; the action bar waits
+        // the bottom bar's text actions take the picked words; no pill, no second bar
+        app.slide = 1.0;
         let texts = widgets::shot::texts(app.view(app.overlay));
-        for want in ["Copy", "Translate", "Search", "Ask AI"] {
-            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
-        }
-        assert!(!texts.iter().any(|t| t == "Edit"), "{texts:?}");
+        assert!(
+            !texts.iter().any(|t| t == "Copy" || t == "Edit"),
+            "{texts:?}"
+        );
+        let click = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(&app, k));
+        assert!(
+            click(3)
+                .iter()
+                .any(|m| matches!(m, Message::Picked(PickAct::Copy)))
+        );
         // Done leaves the mode; a press outside the box starts over
         let _ = app.update(Message::SelectText);
         assert!(app.text_mode.is_none());
@@ -4789,34 +5114,6 @@ mod tests {
             false,
         );
         assert!(app.text_mode.is_none());
-    }
-
-    #[test]
-    fn after_an_auto_search_the_bar_is_one_click_away() {
-        let mut app = open_app(800, 600, 1.0);
-        app.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
-        let (sel, stroke) = overlay::snap(Rectangle::new(
-            Point::new(200.0, 150.0),
-            Size::new(300.0, 200.0),
-        ));
-        (app.selection, app.stroke) = (Some(sel), stroke);
-        let texts = widgets::shot::texts(app.view(app.overlay));
-        for want in ["Select text", "More"] {
-            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
-        }
-        assert!(
-            !texts.iter().any(|t| t == "Ask AI"),
-            "no bar yet: {texts:?}"
-        );
-        let _ = app.update(Message::More);
-        let texts = widgets::shot::texts(app.view(app.overlay));
-        assert!(texts.iter().any(|t| t == "Ask AI"), "{texts:?}");
-        assert!(!texts.iter().any(|t| t == "More"));
-        // waiting for an action: the bar at once, no More
-        app.behaviour.after = After::Wait;
-        app.more = false;
-        let texts = widgets::shot::texts(app.view(app.overlay));
-        assert!(texts.iter().any(|t| t == "Ask AI") && !texts.iter().any(|t| t == "More"));
     }
 
     #[test]
@@ -4855,7 +5152,6 @@ mod tests {
             false,
         );
         let _ = app.update(Message::Run(&text::ACTION));
-        app.more = true;
         let card = app.card_at();
         let room = app.room();
         assert!(room.intersection(&card).is_none(), "{room:?} vs {card:?}");
@@ -4990,8 +5286,6 @@ mod tests {
         shot(&app, "look-1-snap-morphing.png");
         app.morph = None;
         shot(&app, "look-2-snapped-chips.png");
-        let _ = app.update(Message::More);
-        shot(&app, "look-3-more-bar.png");
         let _ = app.update(Message::Run(&text::ACTION)); // no models here: the consent card
         shot(&app, "look-6-result-card.png");
         // Ask AI beside a selection at 1440x900, the bar kept out of the card,
@@ -5005,7 +5299,6 @@ mod tests {
             false,
         );
         let _ = wide.update(Message::Run(&actions::ask::ACTION));
-        wide.more = true;
         wide.card_hover = true;
         let rgba = widgets::shot::render(wide.view(wide.overlay), 1440, 900);
         actions::write_png(&dir.join("look-7-ask-card-1440.png"), 1440, 900, &rgba).unwrap();
@@ -5065,7 +5358,6 @@ mod tests {
                 false,
             );
             let _ = app.update(Message::Run(&actions::ask::ACTION));
-            app.more = true;
             let rgba = widgets::shot::render(app.view(app.overlay), w, h);
             actions::write_png(&dir.join(format!("theme-{name}.png")), w, h, &rgba).unwrap();
         }
