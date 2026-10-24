@@ -25,7 +25,6 @@ ICONS=$(printf '%s,' \
   U+E133 `# pen-line (pen)` \
   U+E0F7 `# highlighter` \
   U+E1D0 `# list-ordered (numbered step)` \
-  U+E503 `# grid-2x2 (blur)` \
   U+E29D `# focus (spotlight)` \
   U+E11A `# message-square (callout)` \
   U+E1B5 `# zoom-in (magnifier)` \
@@ -35,6 +34,21 @@ ICONS=$(printf '%s,' \
   U+E04E `# arrow-up` \
   U+E1B1 `# x` \
   U+E258 `# pin (editor: pin to screen)` \
+  U+E521 `# slash (line)` \
+  U+E544 `# signpost (arrow with label)` \
+  U+E182 `# tag (label)` \
+  U+E123 `# mouse-pointer-click (pointer)` \
+  U+E13E `# pipette (eyedropper)` \
+  U+E104 `# layout-grid (board, grid layout)` \
+  U+E1F6 `# image-plus (add capture)` \
+  U+E43D `# rows-2 (stacked)` \
+  U+E09C `# columns-2 (side by side)` \
+  U+E0F2 `# hash (capture numbers)` \
+  U+E10B `# list (legend)` \
+  U+E0EE `# grip-vertical (drag-out)` \
+  U+E0B8 `# droplet (blur brush)` \
+  U+E16B `# square-asterisk (redact)` \
+  U+E2B4 `# magnet (line assist)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

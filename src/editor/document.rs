@@ -6,7 +6,11 @@ use tiny_skia::{
     FillRule, IntRect, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform,
 };
 
-use super::{arrow, blur, callout, highlighter, magnifier, pen, shape, spotlight, step, text};
+use super::board::{self, Board};
+use super::legend::{self, Legend};
+use super::{
+    arrow, blur, callout, highlighter, label, magnifier, pen, pointer, shape, spotlight, step, text,
+};
 use crate::actions::Crop;
 
 /// The captured image: RGBA, straight alpha, `width * height * 4` bytes.
@@ -28,12 +32,14 @@ pub enum Shape {
         b: Point,
     },
     /// Quadratic curve a → b pulled toward `bend` (straight when `bend` is the
-    /// midpoint). `head: false` = a plain line.
+    /// midpoint). `head: false` = a plain line. `text` (if any) is a label on
+    /// its tail `a`.
     Arrow {
         a: Point,
         b: Point,
         bend: Point,
         head: bool,
+        text: String,
     },
     Pen(Vec<Point>),
     Highlighter(Vec<Point>),
@@ -43,17 +49,35 @@ pub enum Shape {
         text: String,
         size: f32,
     },
-    /// A numbered badge; its number is its place among the steps.
+    /// A numbered badge; its number is its place among the steps. Its `note`
+    /// shows in the legend.
     Step {
         at: Point,
         radius: f32,
+        note: String,
     },
-    /// `seed`: OS-random per item, never shown; drives the noise that makes the
-    /// mosaic irreversible (see `blur`).
+    /// Text on a rounded fill of the colour; `at` = top-left, `size` = font px.
+    Label {
+        at: Point,
+        text: String,
+        size: f32,
+    },
+    /// A ring around `at` with a short arrow into it.
+    Pointer {
+        at: Point,
+        radius: f32,
+    },
+    /// A blur brush stroke, `size` px tall. `seed`: OS-random per item, never
+    /// shown; drives the noise that makes the blur irreversible (see `blur`).
     Blur {
+        points: Vec<Point>,
+        size: f32,
+        seed: u64,
+    },
+    /// A solid box of the colour (passwords, keys: nothing left to recover).
+    Redact {
         a: Point,
         b: Point,
-        seed: u64,
     },
     /// Everything outside the union of all spotlights is dimmed.
     Spotlight {
@@ -89,14 +113,22 @@ impl Shape {
         match self {
             Shape::Rect { a, b }
             | Shape::Ellipse { a, b }
-            | Shape::Blur { a, b, .. }
+            | Shape::Redact { a, b }
             | Shape::Spotlight { a, b } => (*a, *b) = (f(*a), f(*b)),
+            Shape::Blur { points, size, .. } => {
+                points.iter_mut().for_each(|p| *p = f(*p));
+                *size = (*size * k).max(4.0);
+            }
             Shape::Arrow { a, b, bend, .. } => (*a, *b, *bend) = (f(*a), f(*b), f(*bend)),
             Shape::Pen(points) | Shape::Highlighter(points) => {
                 points.iter_mut().for_each(|p| *p = f(*p))
             }
-            Shape::Text { at, size, .. } => (*at, *size) = (f(*at), (*size * k).max(6.0)),
-            Shape::Step { at, radius } => (*at, *radius) = (f(*at), (*radius * k).max(4.0)),
+            Shape::Text { at, size, .. } | Shape::Label { at, size, .. } => {
+                (*at, *size) = (f(*at), (*size * k).max(6.0))
+            }
+            Shape::Step { at, radius, .. } | Shape::Pointer { at, radius } => {
+                (*at, *radius) = (f(*at), (*radius * k).max(4.0))
+            }
             Shape::Callout { tip, at, size, .. } => {
                 (*tip, *at, *size) = (f(*tip), f(*at), (*size * k).max(6.0))
             }
@@ -111,12 +143,25 @@ impl Item {
         match &self.shape {
             Shape::Rect { a, b }
             | Shape::Ellipse { a, b }
-            | Shape::Blur { a, b, .. }
+            | Shape::Redact { a, b }
             | Shape::Spotlight { a, b } => span(&[*a, *b]),
-            Shape::Arrow { a, b, bend, .. } => span(&[*a, *b, arrow::middle(*a, *b, *bend)]),
+            Shape::Blur { points, size, .. } => blur::frame(points, *size),
+            Shape::Arrow {
+                a, b, bend, text, ..
+            } => {
+                let line = span(&[*a, *b, arrow::middle(*a, *b, *bend)]);
+                if text.is_empty() {
+                    line
+                } else {
+                    let size = label::arrow_size(self.width);
+                    line.union(&label::bubble(label::centred(*a, text, size), text, size))
+                }
+            }
             Shape::Pen(points) | Shape::Highlighter(points) => span(points),
             Shape::Text { at, text, size } => Rectangle::new(*at, text::measure(text, *size)),
-            Shape::Step { at, radius } | Shape::Magnifier { at, radius } => Rectangle::new(
+            Shape::Label { at, text, size } => label::bubble(*at, text, *size),
+            Shape::Pointer { at, radius } => pointer::frame(*at, *radius),
+            Shape::Step { at, radius, .. } | Shape::Magnifier { at, radius } => Rectangle::new(
                 *at - iced::Vector::new(*radius, *radius),
                 Size::new(2.0 * radius, 2.0 * radius),
             ),
@@ -135,10 +180,15 @@ impl Item {
     /// Everything it paints (stroke, halo, arrow head): the region to repaint.
     pub fn bounds(&self) -> Rectangle {
         let pad = match &self.shape {
-            Shape::Arrow { .. } => arrow::head_length(self.width) + self.width + 4.0,
+            Shape::Arrow { .. } | Shape::Pointer { .. } => {
+                arrow::head_length(self.width) + self.width + 4.0
+            }
             Shape::Highlighter(_) => self.width / 2.0 + 2.0,
-            Shape::Blur { .. } | Shape::Spotlight { .. } => 1.0,
-            Shape::Text { size, .. } | Shape::Callout { size, .. } => size / 6.0 + 3.0,
+            Shape::Redact { .. } | Shape::Spotlight { .. } => 1.0,
+            Shape::Blur { size, .. } => blur::reach(*size),
+            Shape::Text { size, .. } | Shape::Callout { size, .. } | Shape::Label { size, .. } => {
+                size / 6.0 + 3.0
+            }
             _ => self.width + 3.0,
         };
         self.frame().expand(pad)
@@ -168,6 +218,16 @@ pub enum Edit {
     Change(usize, Item, Item),
     /// Crop before, after (`None` = the whole image).
     Crop(Option<Rectangle>, Option<Rectangle>),
+    /// The board (captures, layout) and everything on it, before and after.
+    Board(Box<Sheet>, Box<Sheet>),
+}
+
+/// A board's state: its layout and the items and crop that go with it.
+#[derive(Clone, Debug)]
+pub struct Sheet {
+    pub board: Board,
+    pub crop: Option<Rectangle>,
+    pub items: Vec<Item>,
 }
 
 impl Edit {
@@ -177,6 +237,7 @@ impl Edit {
             Edit::Delete(i, item) => Edit::Insert(i, item),
             Edit::Change(i, before, after) => Edit::Change(i, after, before),
             Edit::Crop(before, after) => Edit::Crop(after, before),
+            Edit::Board(before, after) => Edit::Board(after, before),
         }
     }
 
@@ -195,31 +256,168 @@ impl Edit {
                 doc.selected = Some(*i);
             }
             Edit::Crop(_, after) => doc.crop = *after,
+            Edit::Board(_, after) => {
+                doc.board = after.board;
+                doc.crop = after.crop;
+                doc.items = after.items.clone();
+                doc.selected = None;
+                doc.compose();
+            }
         }
     }
 }
 
 pub struct Document {
+    /// The capture, or the board of captures once there are more.
     pub image: Image,
     /// Bottom to top.
     pub items: Vec<Item>,
     pub selected: Option<usize>,
     /// The part of the image that is kept (non-destructive, undoable).
     pub crop: Option<Rectangle>,
+    /// The steps' notes show in a legend.
+    pub legend: bool,
+    pub board: Board,
+    /// The captures once a second one is added (`board.count` of them are on the
+    /// board; the rest wait for a redo). Empty: `image` is the only capture.
+    sources: Vec<Image>,
+    /// Where each capture is on the board.
+    tiles: Vec<Rectangle>,
     done: Vec<Edit>,
     undone: Vec<Edit>,
 }
 
 impl Document {
     pub fn new(image: Image) -> Self {
+        let whole = Rectangle::new(
+            Point::ORIGIN,
+            Size::new(image.width as f32, image.height as f32),
+        );
         Document {
             image,
             items: Vec::new(),
             selected: None,
             crop: None,
+            legend: true,
+            board: Board::default(),
+            sources: Vec::new(),
+            tiles: vec![whole],
             done: Vec::new(),
             undone: Vec::new(),
         }
+    }
+
+    /// Where each capture is on the board, image px.
+    pub fn tiles(&self) -> &[Rectangle] {
+        &self.tiles
+    }
+
+    /// Adds a capture to the board (one undoable edit).
+    pub fn append(&mut self, image: Image) {
+        if self.sources.is_empty() {
+            let first = std::mem::replace(
+                &mut self.image,
+                Image {
+                    width: 0,
+                    height: 0,
+                    rgba: Vec::new(),
+                },
+            );
+            self.sources.push(first);
+        }
+        self.sources.truncate(self.board.count); // drops captures undone earlier
+        self.sources.push(image);
+        let board = Board {
+            count: self.board.count + 1,
+            ..self.board
+        };
+        self.rearrange(board);
+    }
+
+    /// Lays the board out as `board` says; items move with their capture, the
+    /// crop is reset (one undoable edit).
+    pub fn rearrange(&mut self, board: Board) {
+        let count = board.count.clamp(1, self.sources.len().max(1));
+        let board = Board { count, ..board };
+        if board == self.board || self.sources.is_empty() {
+            return;
+        }
+        let sizes: Vec<_> = (self.sources.iter().take(count))
+            .map(|s| (s.width, s.height))
+            .collect();
+        let (to, _) = board::place(&sizes, board.layout);
+        let before = Sheet {
+            board: self.board,
+            crop: self.crop,
+            items: self.items.clone(),
+        };
+        let after = Sheet {
+            board,
+            crop: None,
+            items: board::remap(&self.items, &self.tiles, &to),
+        };
+        self.exec(Edit::Board(Box::new(before), Box::new(after)));
+    }
+
+    /// Rebuilds the board image from the captures.
+    fn compose(&mut self) {
+        if self.sources.is_empty() {
+            return;
+        }
+        let (image, tiles) = board::compose(&self.sources[..self.board.count], &self.board);
+        self.image = image;
+        self.tiles = tiles;
+    }
+
+    /// The legend as it shows now (`None`: off, or no step has a note).
+    pub fn legend_layout(&self) -> Option<Legend> {
+        self.legend
+            .then(|| legend::layout(self.view(), &self.items))
+            .flatten()
+    }
+
+    /// Paints `region` of the view with `layers`, and the legend where it overlaps.
+    pub fn paint(
+        &self,
+        layers: &[(&Item, bool)],
+        region: IntRect,
+        legend: Option<&Legend>,
+    ) -> Pixmap {
+        let mut pm = paint(&self.image, layers, region);
+        if let Some(legend) = legend.filter(|l| l.band == 0.0) {
+            let mut layer = Layer {
+                pm,
+                origin: Point::new(region.x() as f32, region.y() as f32),
+            };
+            legend::paint(&mut layer, legend, self.view());
+            pm = layer.pm;
+        }
+        pm
+    }
+
+    /// The whole view with `layers`, the legend in its corner or in a band under it.
+    pub fn flatten(&self, layers: &[(&Item, bool)], legend: Option<&Legend>) -> Pixmap {
+        let view = self.view();
+        let pm = self.paint(layers, int_rect(view, view), legend);
+        let Some(legend) = legend.filter(|l| l.band > 0.0) else {
+            return pm;
+        };
+        let mut tall =
+            Pixmap::new(pm.width(), pm.height() + legend.band as u32).expect("non-empty view");
+        tall.draw_pixmap(
+            0,
+            0,
+            pm.as_ref(),
+            &tiny_skia::PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+        let mut layer = Layer {
+            pm: tall,
+            origin: view.position(),
+        };
+        legend::paint(&mut layer, legend, view);
+        layer.pm
     }
 
     /// Applies `edit` and records it (clears the redo list).
@@ -262,8 +460,7 @@ impl Document {
 /// Save get. Pure: no window, no state.
 pub fn render(doc: &Document) -> Crop {
     let layers: Vec<_> = doc.items.iter().map(|item| (item, true)).collect();
-    let region = int_rect(doc.view(), doc.view());
-    let pm = paint(&doc.image, &layers, region);
+    let pm = doc.flatten(&layers, doc.legend_layout().as_ref());
     let rgba = pm
         .pixels()
         .iter()
@@ -429,14 +626,31 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
         match &item.shape {
             Shape::Rect { a, b } => shape::paint_rect(&mut layer, *a, *b, c, w),
             Shape::Ellipse { a, b } => shape::paint_ellipse(&mut layer, *a, *b, c, w),
-            Shape::Arrow { a, b, bend, head } => {
-                arrow::paint(&mut layer, *a, *b, *bend, *head, c, w)
+            Shape::Arrow {
+                a,
+                b,
+                bend,
+                head,
+                text,
+            } => {
+                arrow::paint(&mut layer, *a, *b, *bend, *head, c, w);
+                if !text.is_empty() {
+                    let size = label::arrow_size(w);
+                    label::paint(&mut layer, label::centred(*a, text, size), text, size, c);
+                }
             }
             Shape::Pen(points) => pen::paint(&mut layer, points, c, w),
             Shape::Highlighter(points) => highlighter::paint(&mut layer, points, c, w),
             Shape::Text { at, text, size } => text::paint(&mut layer, *at, text, *size, c, true),
-            Shape::Step { at, radius } => step::paint(&mut layer, *at, *radius, steps, c),
-            Shape::Blur { a, b, seed } => blur::paint(&mut layer, span(&[*a, *b]), *seed),
+            Shape::Step { at, radius, .. } => step::paint(&mut layer, *at, *radius, steps, c),
+            Shape::Label { at, text, size } => label::paint(&mut layer, *at, text, *size, c),
+            Shape::Pointer { at, radius } => pointer::paint(&mut layer, *at, *radius, c, w),
+            Shape::Blur { points, size, seed } => blur::paint(&mut layer, points, *size, *seed),
+            Shape::Redact { a, b } => {
+                if let Some(path) = rounded(span(&[*a, *b]), 0.0) {
+                    layer.fill(&path, [c[0], c[1], c[2], 255]);
+                }
+            }
             Shape::Spotlight { .. } => {}
             Shape::Callout {
                 tip,

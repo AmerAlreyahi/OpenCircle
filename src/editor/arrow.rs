@@ -1,4 +1,4 @@
-//! Arrow (and plain line): straight, or curved by dragging its middle handle.
+//! Arrow (and plain line, and an arrow with a label at its tail): straight, or curved by dragging its middle handle.
 //! Rounded head, white halo so it reads on any background.
 use iced::{Point, Vector};
 use tiny_skia::PathBuilder;
@@ -16,6 +16,15 @@ pub fn middle(a: Point, b: Point, bend: Point) -> Point {
         0.25 * a.x + 0.5 * bend.x + 0.25 * b.x,
         0.25 * a.y + 0.5 * bend.y + 0.25 * b.y,
     )
+}
+
+/// `b` moved onto the nearest 0/45/90° ray from `a`, same length (Shift).
+pub fn snap_angle(a: Point, b: Point) -> Point {
+    let d = b - a;
+    let step = std::f32::consts::FRAC_PI_4;
+    let angle = (d.y.atan2(d.x) / step).round() * step;
+    let len = d.x.hypot(d.y);
+    Point::new(a.x + len * angle.cos(), a.y + len * angle.sin())
 }
 
 /// The control point that makes the curve pass through `handle` halfway.

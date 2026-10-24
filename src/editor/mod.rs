@@ -10,23 +10,32 @@
 //! region is repainted (`live`) and shown over the base.
 mod arrow;
 mod blur;
+pub mod board;
 mod callout;
 mod canvas;
 mod crop;
 mod document;
+pub mod dragout;
 mod highlighter;
+mod label;
+mod legend;
+mod lines;
 mod magnifier;
 mod pen;
+mod pointer;
 mod select;
 mod shape;
 mod spotlight;
 mod step;
+mod style;
 #[cfg(test)]
 mod tests;
 mod text;
 mod toolbar;
 
 pub use document::{Document, Edit, Image, Item, Shape, render};
+pub use style::PRESETS;
+pub use toolbar::size as toolbar_size;
 
 use iced::widget::{column, image, pin, stack};
 use iced::{ContentFit, Element, Point, Rectangle, Size};
@@ -41,12 +50,22 @@ pub enum Tool {
     Rect,
     Ellipse,
     Arrow,
+    Line,
+    /// An arrow with a label on its tail.
+    ArrowLabel,
     Pen,
     Highlighter,
     Text,
+    /// Text on a rounded fill.
+    Label,
     Callout,
     Step,
+    /// A ring with an arrow: a step without a number.
+    Pointer,
+    /// The soft blur brush.
     Blur,
+    /// A solid box.
+    Redact,
     Spotlight,
     Magnifier,
 }
@@ -61,9 +80,12 @@ pub struct ToolInfo {
     pub key: char,
     /// Toolbar group: a divider goes between groups.
     pub group: u8,
+    /// The toolbar button it is under (itself, or the tool whose variant it is:
+    /// the variants show in a strip under that button).
+    pub slot: Tool,
 }
 
-/// Every tool, in toolbar order.
+/// Every tool, in toolbar order (variants right after their button's tool).
 pub const TOOLS: &[ToolInfo] = &[
     tool(Tool::Select, '\u{e1c2}', "Select, move, resize (V)", 'v', 0),
     tool(Tool::Crop, '\u{e0af}', "Crop (X)", 'x', 0),
@@ -72,9 +94,23 @@ pub const TOOLS: &[ToolInfo] = &[
     tool(
         Tool::Arrow,
         '\u{e497}',
-        "Arrow: drag the middle to curve it (A)",
+        "Arrow: drag the middle to curve it; click again for line and labelled arrow (A)",
         'a',
         1,
+    ),
+    variant(
+        Tool::Line,
+        '\u{e521}',
+        "Line: Shift keeps it at 0, 45 or 90° (L)",
+        'l',
+        (Tool::Arrow, 1),
+    ),
+    variant(
+        Tool::ArrowLabel,
+        '\u{e544}',
+        "Arrow with a label: draw, then type (W)",
+        'w',
+        (Tool::Arrow, 1),
     ),
     tool(
         Tool::Pen,
@@ -84,10 +120,49 @@ pub const TOOLS: &[ToolInfo] = &[
         1,
     ),
     tool(Tool::Highlighter, '\u{e0f7}', "Highlighter (H)", 'h', 1),
-    tool(Tool::Text, '\u{e197}', "Text (T)", 't', 2),
+    tool(
+        Tool::Text,
+        '\u{e197}',
+        "Text; click again for a label (T)",
+        't',
+        2,
+    ),
+    variant(
+        Tool::Label,
+        '\u{e182}',
+        "Label: text on a colour (E)",
+        'e',
+        (Tool::Text, 2),
+    ),
     tool(Tool::Callout, '\u{e11a}', "Callout (C)", 'c', 2),
-    tool(Tool::Step, '\u{e1d0}', "Numbered step (N)", 'n', 2),
-    tool(Tool::Blur, '\u{e503}', "Blur (B)", 'b', 3),
+    tool(
+        Tool::Step,
+        '\u{e1d0}',
+        "Numbered step: click, then type its note for the legend; click again for a pointer (N)",
+        'n',
+        2,
+    ),
+    variant(
+        Tool::Pointer,
+        '\u{e123}',
+        "Pointer: a ring and arrow, no number (I)",
+        'i',
+        (Tool::Step, 2),
+    ),
+    tool(
+        Tool::Blur,
+        '\u{e0b8}',
+        "Blur brush: stays on the text line (Shift: free); click again for redact and line assist (B)",
+        'b',
+        3,
+    ),
+    variant(
+        Tool::Redact,
+        '\u{e16b}',
+        "Redact: a solid box (K)",
+        'k',
+        (Tool::Blur, 3),
+    ),
     tool(Tool::Spotlight, '\u{e29d}', "Spotlight (S)", 's', 3),
     tool(Tool::Magnifier, '\u{e1b5}', "Magnifier (M)", 'm', 3),
 ];
@@ -99,7 +174,33 @@ const fn tool(tool: Tool, icon: char, tip: &'static str, key: char, group: u8) -
         tip,
         key,
         group,
+        slot: tool,
     }
+}
+
+/// A tool shown in the strip under `slot`'s button (in `slot`'s `group`).
+const fn variant(
+    tool: Tool,
+    icon: char,
+    tip: &'static str,
+    key: char,
+    (slot, group): (Tool, u8),
+) -> ToolInfo {
+    ToolInfo {
+        tool,
+        icon,
+        tip,
+        key,
+        group,
+        slot,
+    }
+}
+
+pub fn info(tool: Tool) -> &'static ToolInfo {
+    TOOLS
+        .iter()
+        .find(|t| t.tool == tool)
+        .expect("every tool is listed")
 }
 
 /// Stroke weight, in display px (as seen on screen, whatever the zoom).
@@ -121,6 +222,21 @@ impl Width {
     fn badge(self) -> f32 {
         [12.0, 16.0, 22.0][self as usize]
     }
+    /// The blur brush's height where no text line is under it.
+    fn brush(self) -> f32 {
+        [16.0, 28.0, 44.0][self as usize]
+    }
+}
+
+/// The popovers under the toolbar (one at a time).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Menu {
+    /// Colour, weight, eyedropper, presets, copy / paste style.
+    Colour,
+    /// Add capture, board layout, numbers, legend.
+    Board,
+    /// The variants of a tool button (`slot`).
+    Variants(Tool),
 }
 
 #[derive(Debug, Clone)]
@@ -129,22 +245,47 @@ pub enum Message {
     Press(Point),
     Move(Point),
     Release,
-    /// Typing into a text or callout.
+    /// Shift is held (lines snap to 45° steps).
+    Shift(bool),
+    /// Typing into a text, label, callout, arrow label or step note.
     Type(String),
     Backspace,
     /// Ends typing.
     Finish,
     Tool(Tool),
+    /// A toolbar tool button: picks its tool, or opens / closes its variants.
+    Slot(Tool),
     /// Opens/closes the colour picker.
     Picker,
+    /// Opens/closes a popover.
+    Menu(Menu),
     Colour([u8; 4]),
     Width(Width),
     /// The picker's custom colour field.
     Hex(String),
+    /// The next click on the image picks its colour.
+    Eyedropper,
+    /// A style preset (`PRESETS`).
+    Preset(usize),
+    CopyStyle,
+    PasteStyle,
+    /// Shows / hides the steps' legend.
+    Legend,
+    /// Line assist on / off (the blur brush keeps to text lines).
+    Assist,
+    /// Asks the host for another capture (`Output::AddCapture`).
+    AddCapture,
+    Layout(board::Layout),
+    /// Number labels on the board's captures.
+    Numbers,
+    /// Left button down on the drag handle: OS drag of the image.
+    DragOut,
     Undo,
     Redo,
     Delete,
     Copy,
+    /// Copy the image and the annotations' text (Ctrl+Shift+C).
+    CopyAll,
     Save,
     /// Pin the flattened image to the screen.
     Pin,
@@ -157,9 +298,14 @@ pub enum Output {
     Back,
     /// The flattened image, for the Copy / Save actions.
     Copy(Crop),
+    /// The flattened image and its text (step notes as "1. note", then every
+    /// text, label, callout and arrow label), both for the clipboard.
+    CopyWithText(Crop, String),
     Save(Crop),
     /// A floating always-on-top copy of the image.
     Pin(Crop),
+    /// Let the user pick another area; give it to `Editor::append`.
+    AddCapture,
 }
 
 /// An item being drawn, moved, resized or typed: shown live, committed as one edit.
@@ -190,16 +336,31 @@ pub struct Editor {
     pub tool: Tool,
     colour: [u8; 4],
     width: Width,
-    picker: bool,
+    menu: Option<Menu>,
     hex: String,
     /// Display px per image px.
     zoom: f32,
+    shift: bool,
+    /// The next press picks a colour from the image.
+    picking: bool,
+    /// Copied style: colour, weight.
+    style: Option<([u8; 4], Width)>,
     base: image::Handle,
+    /// The legend as the base shows it (placed among the committed items).
+    legend: Option<legend::Legend>,
     /// The pending item's region (image px) painted with it.
     live: Option<(Rectangle, image::Handle)>,
     pending: Option<Pending>,
     /// Crop drag: from, to.
     cropping: Option<(Point, Point)>,
+    /// The PNG of the last drag-out (deleted with the editor).
+    dragged: Option<dragout::DragFile>,
+    /// The blur brush keeps to text lines (config `editor.line_assist`).
+    assist: bool,
+    /// The image's text lines, for the image they were found in.
+    bands: Option<((u32, u32, board::Board), Vec<lines::Band>)>,
+    /// The text line the blur stroke being drawn is held on.
+    lock: Option<lines::Lock>,
 }
 
 impl Editor {
@@ -212,39 +373,67 @@ impl Editor {
             tool: Tool::Arrow,
             colour,
             width: Width::Medium,
-            picker: false,
+            menu: None,
             hex: hex(colour),
             zoom,
+            shift: false,
+            picking: false,
+            style: None,
             base: image::Handle::from_rgba(1, 1, vec![0; 4]),
+            legend: None,
             live: None,
             pending: None,
             cropping: None,
+            dragged: None,
+            assist: crate::config::current().editor.line_assist,
+            bands: None,
+            lock: None,
         };
         editor.refresh();
         editor
     }
 
+    /// Adds `image` (another capture) to the board.
+    pub fn append(&mut self, image: Image) {
+        self.commit();
+        self.doc.append(image);
+        self.refresh();
+    }
+
+    /// Shows the document at `zoom` display px per image px (e.g. after the board
+    /// grew past the screen).
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom;
+    }
+
     pub fn update(&mut self, message: Message) -> Option<Output> {
         match message {
-            Message::Press(p) => self.press(p),
+            Message::Press(p) => {
+                if matches!(self.menu, Some(Menu::Board | Menu::Variants(_))) {
+                    self.menu = None;
+                }
+                self.press(p)
+            }
             Message::Move(p) => self.drag_to(p),
             Message::Release => self.release(),
+            Message::Shift(on) => self.shift = on,
             Message::Type(s) => self.edit_text(|t| t.push_str(&s)),
             Message::Backspace => self.edit_text(|t| {
                 t.pop();
             }),
             Message::Finish => self.commit(),
-            Message::Tool(tool) => {
-                self.commit();
-                self.tool = tool;
-                self.picker = false;
+            Message::Tool(tool) => self.pick_tool(tool),
+            Message::Slot(slot) => {
+                let has_variants = TOOLS.iter().any(|t| t.slot == slot && t.tool != slot);
+                let open = self.menu == Some(Menu::Variants(slot));
+                if info(self.tool).slot != slot {
+                    self.pick_tool(slot);
+                }
+                self.menu = (has_variants && !open).then_some(Menu::Variants(slot));
             }
-            Message::Picker => self.picker = !self.picker,
-            Message::Colour(c) => {
-                self.colour = c;
-                self.hex = hex(c);
-                self.restyle();
-            }
+            Message::Picker => self.toggle(Menu::Colour),
+            Message::Menu(menu) => self.toggle(menu),
+            Message::Colour(c) => self.set_colour(c),
             Message::Width(w) => {
                 self.width = w;
                 self.restyle();
@@ -255,6 +444,61 @@ impl Editor {
                     self.restyle();
                 }
                 self.hex = s;
+            }
+            Message::Eyedropper => {
+                self.picking = !self.picking;
+                self.menu = None;
+            }
+            Message::Preset(i) => self.preset(i),
+            Message::CopyStyle => {
+                let item = (self.pending.as_ref().map(|p| &p.item))
+                    .or_else(|| self.doc.selected.and_then(|i| self.doc.items.get(i)));
+                if let Some(item) = item {
+                    self.style = Some((item.colour, style::level(item, self.zoom)));
+                }
+            }
+            Message::PasteStyle => {
+                if let Some((colour, width)) = self.style {
+                    self.width = width;
+                    self.set_colour(colour);
+                }
+            }
+            Message::Assist => {
+                self.assist = !self.assist;
+                save_assist(self.assist);
+            }
+            Message::Legend => {
+                self.commit();
+                self.doc.legend = !self.doc.legend;
+                self.refresh();
+            }
+            Message::AddCapture => {
+                self.commit();
+                self.menu = None;
+                return Some(Output::AddCapture);
+            }
+            Message::Layout(layout) => self.rearrange(board::Board {
+                layout,
+                ..self.doc.board
+            }),
+            Message::Numbers => self.rearrange(board::Board {
+                numbers: !self.doc.board.numbers,
+                ..self.doc.board
+            }),
+            Message::DragOut => {
+                self.commit();
+                let flat = render(&self.doc);
+                // The previous drag's file goes first (one temp file at a time).
+                self.dragged = None;
+                match dragout::DragFile::write(&flat) {
+                    Ok(file) => {
+                        if let Err(e) = dragout::start(&file, &flat) {
+                            eprintln!("[opencircle] {e}");
+                        }
+                        self.dragged = Some(file);
+                    }
+                    Err(e) => eprintln!("[opencircle] drag-out: {e}"),
+                }
             }
             Message::Undo | Message::Redo => {
                 self.commit();
@@ -275,11 +519,12 @@ impl Editor {
                     self.refresh();
                 }
             }
-            Message::Copy | Message::Save | Message::Pin => {
+            Message::Copy | Message::CopyAll | Message::Save | Message::Pin => {
                 self.commit();
                 let flat = render(&self.doc);
                 return Some(match message {
                     Message::Copy => Output::Copy(flat),
+                    Message::CopyAll => Output::CopyWithText(flat, text_of(&self.doc)),
                     Message::Save => Output::Save(flat),
                     _ => Output::Pin(flat),
                 });
@@ -334,14 +579,16 @@ impl Editor {
         stack(layers).width(size.width).height(size.height).into()
     }
 
-    /// The floating editing toolbar (with the colour picker under it when open).
+    /// The floating editing toolbar (with the open popover under it).
     pub fn toolbar(&self) -> Element<'_, Message> {
         toolbar::view(self)
     }
 
-    /// The canvas size, display px (changes with the crop).
+    /// The canvas size, display px (changes with the crop, the board and the
+    /// legend's band).
     pub fn size(&self) -> Size {
-        self.doc.view().size() * self.zoom
+        let band = self.legend.as_ref().map_or(0.0, |l| l.band);
+        (self.doc.view().size() + Size::new(0.0, band)) * self.zoom
     }
 
     /// Text or a callout is being typed into.
@@ -355,7 +602,93 @@ impl Editor {
         )
     }
 
+    fn toggle(&mut self, menu: Menu) {
+        self.menu = (self.menu != Some(menu)).then_some(menu);
+        self.picking = false;
+    }
+
+    fn pick_tool(&mut self, tool: Tool) {
+        self.commit();
+        self.tool = tool;
+        self.menu = None;
+        self.picking = false;
+    }
+
+    fn set_colour(&mut self, c: [u8; 4]) {
+        self.colour = c;
+        self.hex = hex(c);
+        self.restyle();
+    }
+
+    fn rearrange(&mut self, board: board::Board) {
+        self.commit();
+        self.doc.rearrange(board);
+        self.refresh();
+    }
+
+    /// A style preset: its colour and weight, for its tool (kept when the active
+    /// one is one it suits). Redact on a selected box turns it into a solid box.
+    fn preset(&mut self, i: usize) {
+        let Some(p) = PRESETS.get(i) else {
+            return;
+        };
+        self.menu = None;
+        self.commit();
+        let colour = crate::ui::theme::ANNOTATION[p.colour].into_rgba8();
+        if p.tool == Tool::Redact
+            && let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len())
+            && let Shape::Rect { a, b } | Shape::Ellipse { a, b } | Shape::Spotlight { a, b } =
+                self.doc.items[i].shape
+        {
+            let before = self.doc.items[i].clone();
+            let after = Item {
+                shape: Shape::Redact { a, b },
+                colour,
+                ..before.clone()
+            };
+            self.doc.exec(Edit::Change(i, before, after));
+            self.refresh();
+        }
+        if !p.keeps.contains(&self.tool) {
+            self.pick_tool(p.tool);
+            self.doc.selected = None; // the style is for the next item
+        }
+        self.width = p.width;
+        self.set_colour(colour);
+    }
+
+    /// The image's text lines (detected once per board layout).
+    fn bands(&mut self) -> &[lines::Band] {
+        let key = (self.doc.image.width, self.doc.image.height, self.doc.board);
+        if self.bands.as_ref().is_none_or(|(k, _)| *k != key) {
+            self.bands = Some((key, lines::detect(&self.doc.image)));
+        }
+        self.bands.as_ref().map_or(&[], |(_, b)| b)
+    }
+
+    /// A blur stroke at `p`: as tall as the text line there; with line assist
+    /// (and no Shift) held on that line.
+    fn brush(&mut self, p: Point) -> Item {
+        let band = lines::under(self.bands(), p);
+        let mut item = self.create(p);
+        if let (Some(band), Shape::Blur { points, size, .. }) = (band, &mut item.shape) {
+            *size = band.brush();
+            if self.assist && !self.shift {
+                points[0] = Point::new(p.x, band.centre());
+                self.lock = Some(lines::Lock::new(band));
+            }
+        }
+        item
+    }
+
     fn press(&mut self, p: Point) {
+        if self.picking {
+            self.picking = false;
+            if let Some(c) = sample(&self.doc.image, p) {
+                self.set_colour(c);
+            }
+            return;
+        }
         let reach = REACH / self.zoom;
         self.commit();
         // The selected item's handles work in every tool.
@@ -379,14 +712,13 @@ impl Editor {
                 }
             }
             Tool::Crop => self.cropping = Some((p, p)),
-            Tool::Text | Tool::Callout => {
-                // Clicking a text (callout) edits it.
-                let editable = hit.filter(|&i| {
-                    matches!(
-                        (&self.doc.items[i].shape, self.tool),
-                        (Shape::Text { .. }, Tool::Text) | (Shape::Callout { .. }, Tool::Callout)
-                    )
-                });
+            Tool::Blur => {
+                let item = self.brush(p);
+                self.begin(None, item, Drag::Draw, p);
+            }
+            Tool::Text | Tool::Label | Tool::Callout | Tool::Step | Tool::ArrowLabel => {
+                // Clicking one of the tool's own items edits its text.
+                let editable = hit.filter(|&i| edits(self.tool, &self.doc.items[i], p, reach));
                 if let Some(i) = editable {
                     self.doc.selected = Some(i);
                     self.begin(Some(i), self.doc.items[i].clone(), Drag::Type, p);
@@ -425,16 +757,35 @@ impl Editor {
         }
     }
 
-    fn drag_to(&mut self, p: Point) {
+    fn drag_to(&mut self, mut p: Point) {
         if let Some((from, _)) = self.cropping {
             self.cropping = Some((from, p));
             return;
+        }
+        if let Some(lock) = &mut self.lock
+            && !self.shift
+        {
+            let bands = self.bands.as_ref().map_or(&[][..], |(_, b)| b);
+            match lock.follow(bands, p, std::time::Instant::now()) {
+                lines::Follow::Stay(on_line) => p = on_line,
+                // On to another line: this stroke ends, a new one starts there.
+                lines::Follow::Switch(band) => {
+                    self.commit();
+                    let at = Point::new(p.x, band.centre());
+                    let mut item = self.create(at);
+                    if let Shape::Blur { size, .. } = &mut item.shape {
+                        *size = band.brush();
+                    }
+                    self.begin(None, item, Drag::Draw, at);
+                    return;
+                }
+            }
         }
         let Some(pending) = &mut self.pending else {
             return;
         };
         pending.item = match &pending.drag {
-            Drag::Draw => grow(&pending.item, pending.start, p, self.zoom),
+            Drag::Draw => grow(&pending.item, pending.start, p, self.zoom, self.shift),
             Drag::Move(last) => {
                 let item = select::moved(&pending.item, p - *last);
                 pending.drag = Drag::Move(p);
@@ -452,6 +803,7 @@ impl Editor {
     }
 
     fn release(&mut self) {
+        self.lock = None;
         if let Some((from, to)) = self.cropping.take() {
             if let Some(area) = crop::area(from, to, self.doc.view()) {
                 self.doc.exec(Edit::Crop(self.doc.crop, Some(area)));
@@ -459,23 +811,36 @@ impl Editor {
             }
             return;
         }
+        let labelled = self.tool == Tool::ArrowLabel;
+        let Some(pending) = &self.pending else {
+            return;
+        };
+        let typed = match (&pending.drag, &pending.item.shape) {
+            (Drag::Type, _) => return,
+            (
+                Drag::Draw,
+                Shape::Text { .. }
+                | Shape::Callout { .. }
+                | Shape::Label { .. }
+                | Shape::Step { .. },
+            ) => true,
+            (Drag::Draw, Shape::Arrow { .. }) => labelled && !self.too_small(&pending.item),
+            _ => false,
+        };
         let Some(pending) = &mut self.pending else {
             return;
         };
-        match (&pending.drag, &mut pending.item.shape) {
-            (Drag::Type, _) => {}
-            (Drag::Draw, Shape::Text { .. } | Shape::Callout { .. }) => {
-                pending.drag = Drag::Type;
-                self.update_live();
-            }
-            (Drag::Draw, Shape::Pen(points)) => {
-                if let Some(snapped) = shape::snap(points) {
-                    pending.item.shape = snapped;
-                }
-                self.commit();
-            }
-            _ => self.commit(),
+        if typed {
+            pending.drag = Drag::Type;
+            self.update_live();
+            return;
         }
+        if let (Drag::Draw, Shape::Pen(points)) = (&pending.drag, &pending.item.shape)
+            && let Some(snapped) = shape::snap(points)
+        {
+            pending.item.shape = snapped;
+        }
+        self.commit();
     }
 
     /// Ends the pending change: one undoable edit (or none if nothing changed).
@@ -485,7 +850,8 @@ impl Editor {
         };
         let item = pending.item;
         let empty = matches!(&item.shape,
-            Shape::Text { text, .. } | Shape::Callout { text, .. } if text.trim().is_empty());
+            Shape::Text { text, .. } | Shape::Callout { text, .. } | Shape::Label { text, .. }
+                if text.trim().is_empty());
         let edit = match pending.index {
             None if empty || self.too_small(&item) => None,
             None => Some(Edit::Insert(self.doc.items.len(), item)),
@@ -508,14 +874,18 @@ impl Editor {
 
     /// A drag that is really a click (shapes that need a size).
     fn too_small(&self, item: &Item) -> bool {
-        let f = item.frame();
+        let f = match &item.shape {
+            // A labelled arrow's frame includes its label.
+            Shape::Arrow { a, b, .. } => document::span(&[*a, *b]),
+            _ => item.frame(),
+        };
         let tiny = f.width.hypot(f.height) * self.zoom < 4.0;
         tiny && matches!(
             item.shape,
             Shape::Rect { .. }
                 | Shape::Ellipse { .. }
                 | Shape::Arrow { .. }
-                | Shape::Blur { .. }
+                | Shape::Redact { .. }
                 | Shape::Spotlight { .. }
         )
     }
@@ -526,7 +896,7 @@ impl Editor {
             drag: Drag::Type,
             ..
         }) = &mut self.pending
-            && let Shape::Text { text, .. } | Shape::Callout { text, .. } = &mut item.shape
+            && let Some(text) = text_mut(&mut item.shape)
         {
             f(text);
             self.update_live();
@@ -539,11 +909,12 @@ impl Editor {
         let shape = match self.tool {
             Tool::Rect => Shape::Rect { a: p, b: p },
             Tool::Ellipse => Shape::Ellipse { a: p, b: p },
-            Tool::Arrow => Shape::Arrow {
+            Tool::Arrow | Tool::Line | Tool::ArrowLabel => Shape::Arrow {
                 a: p,
                 b: p,
                 bend: p,
-                head: true,
+                head: self.tool != Tool::Line,
+                text: String::new(),
             },
             Tool::Pen | Tool::Select | Tool::Crop => Shape::Pen(vec![p]),
             Tool::Highlighter => Shape::Highlighter(vec![p]),
@@ -551,6 +922,11 @@ impl Editor {
                 at: p,
                 text: String::new(),
                 size: self.width.font() / z,
+            },
+            Tool::Label => Shape::Label {
+                at: p,
+                text: String::new(),
+                size: self.width.font() * 0.75 / z,
             },
             Tool::Callout => Shape::Callout {
                 tip: p,
@@ -561,12 +937,18 @@ impl Editor {
             Tool::Step => Shape::Step {
                 at: p,
                 radius: self.width.badge() / z,
+                note: String::new(),
+            },
+            Tool::Pointer => Shape::Pointer {
+                at: p,
+                radius: self.width.badge() / z,
             },
             Tool::Blur => Shape::Blur {
-                a: p,
-                b: p,
+                points: vec![p],
+                size: self.width.brush() / z,
                 seed: blur::seed(),
             },
+            Tool::Redact => Shape::Redact { a: p, b: p },
             Tool::Spotlight => Shape::Spotlight { a: p, b: p },
             Tool::Magnifier => Shape::Magnifier {
                 at: p,
@@ -592,9 +974,17 @@ impl Editor {
             let z = editor.zoom;
             match &mut new.shape {
                 Shape::Text { size, .. } => *size = editor.width.font() / z,
-                Shape::Callout { size, .. } => *size = editor.width.font() * 0.75 / z,
+                Shape::Callout { size, .. } | Shape::Label { size, .. } => {
+                    *size = editor.width.font() * 0.75 / z
+                }
                 Shape::Step { radius, .. } => *radius = editor.width.badge() / z,
+                Shape::Pointer { radius, .. } => {
+                    *radius = editor.width.badge() / z;
+                    new.width = editor.width.stroke() / z;
+                }
                 Shape::Highlighter(_) => new.width = editor.width.stroke() * 4.0 / z,
+                // A brush keeps its size (fit to its text line).
+                Shape::Blur { .. } => new.width = item.width,
                 _ => new.width = editor.width.stroke() / z,
             }
             new
@@ -615,7 +1005,8 @@ impl Editor {
         }
     }
 
-    /// Repaints the base (all items but a hidden pending one), then the live layer.
+    /// Repaints the base (all items but a hidden pending one, the legend), then
+    /// the live layer.
     fn refresh(&mut self) {
         let hide = self
             .pending
@@ -624,8 +1015,8 @@ impl Editor {
         let layers: Vec<_> = (self.doc.items.iter().enumerate())
             .map(|(i, item)| (item, Some(i) != hide))
             .collect();
-        let view = self.doc.view();
-        let pm = document::paint(&self.doc.image, &layers, int_rect(view, view));
+        self.legend = self.doc.legend_layout();
+        let pm = self.doc.flatten(&layers, self.legend.as_ref());
         self.base = handle(pm);
         self.update_live();
     }
@@ -651,24 +1042,101 @@ impl Editor {
                 Point::new(r.x() as f32, r.y() as f32),
                 Size::new(r.width() as f32, r.height() as f32),
             );
-            (rect, handle(document::paint(&self.doc.image, &layers, r)))
+            let pm = self.doc.paint(&layers, r, self.legend.as_ref());
+            (rect, handle(pm))
         });
     }
 }
 
-/// The new item `item` (started at `start`) dragged to `p`.
-fn grow(item: &Item, start: Point, p: Point, zoom: f32) -> Item {
+/// Remembers the line assist choice (`editor.line_assist`) for the next editor.
+// ponytail: an open Settings window saves its own copy later and may undo this.
+fn save_assist(on: bool) {
+    if cfg!(test) {
+        return; // never the user's config file
+    }
+    let mut config = crate::config::current();
+    config.editor.line_assist = on;
+    crate::config::set_current(config.clone());
+    std::thread::spawn(move || {
+        if let Err(e) = config.save() {
+            eprintln!("[opencircle] config: {e}");
+        }
+    });
+}
+
+/// A click at `p` with `tool` edits this item's text: one of the tool's own
+/// kind (an arrow: on its label or tail, elsewhere it draws a new one).
+fn edits(tool: Tool, item: &Item, p: Point, reach: f32) -> bool {
+    match (tool, &item.shape) {
+        (Tool::ArrowLabel, Shape::Arrow { a, text, .. }) => {
+            let size = label::arrow_size(item.width);
+            a.distance(p) <= reach.max(size)
+                || (!text.is_empty()
+                    && label::bubble(label::centred(*a, text, size), text, size).contains(p))
+        }
+        (tool, shape) => matches!(
+            (tool, shape),
+            (Tool::Text, Shape::Text { .. })
+                | (Tool::Label, Shape::Label { .. })
+                | (Tool::Callout, Shape::Callout { .. })
+                | (Tool::Step, Shape::Step { .. })
+        ),
+    }
+}
+
+/// The text a shape is typed into, if it has one.
+fn text_mut(shape: &mut Shape) -> Option<&mut String> {
+    match shape {
+        Shape::Text { text, .. }
+        | Shape::Label { text, .. }
+        | Shape::Callout { text, .. }
+        | Shape::Arrow { text, .. } => Some(text),
+        Shape::Step { note, .. } => Some(note),
+        _ => None,
+    }
+}
+
+/// The document's words, for the clipboard beside the image: the steps' notes
+/// ("1. note"), then each text, label, callout and arrow label, bottom to top.
+fn text_of(doc: &Document) -> String {
+    let notes = legend::rows(&doc.items)
+        .into_iter()
+        .map(|r| format!("{}. {}", r.number, r.note));
+    let texts = doc.items.iter().filter_map(|item| match &item.shape {
+        Shape::Text { text, .. }
+        | Shape::Label { text, .. }
+        | Shape::Callout { text, .. }
+        | Shape::Arrow { text, .. } => Some(text.trim().to_string()).filter(|t| !t.is_empty()),
+        _ => None,
+    });
+    notes.chain(texts).collect::<Vec<_>>().join("\n")
+}
+
+/// The image's colour at `p` (opaque), or `None` outside it.
+fn sample(image: &Image, p: Point) -> Option<[u8; 4]> {
+    let (x, y) = (p.x.floor(), p.y.floor());
+    if x < 0.0 || y < 0.0 || x >= image.width as f32 || y >= image.height as f32 {
+        return None;
+    }
+    let i = (y as usize * image.width as usize + x as usize) * 4;
+    let px = image.rgba.get(i..i + 3)?;
+    Some([px[0], px[1], px[2], 255])
+}
+
+/// The new item `item` (started at `start`) dragged to `p`; `shift` keeps lines
+/// and arrows at 0/45/90°.
+fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool) -> Item {
     let mut item = item.clone();
     match &mut item.shape {
         Shape::Rect { b, .. }
         | Shape::Ellipse { b, .. }
-        | Shape::Blur { b, .. }
+        | Shape::Redact { b, .. }
         | Shape::Spotlight { b, .. } => *b = p,
         Shape::Arrow { a, b, bend, .. } => {
-            *b = p;
-            *bend = Point::new((a.x + p.x) / 2.0, (a.y + p.y) / 2.0);
+            *b = if shift { arrow::snap_angle(*a, p) } else { p };
+            *bend = Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
         }
-        Shape::Pen(points) | Shape::Highlighter(points) => {
+        Shape::Pen(points) | Shape::Highlighter(points) | Shape::Blur { points, .. } => {
             if points
                 .last()
                 .is_none_or(|last| last.distance(p) * zoom >= 1.0)
@@ -676,8 +1144,8 @@ fn grow(item: &Item, start: Point, p: Point, zoom: f32) -> Item {
                 points.push(p);
             }
         }
-        Shape::Text { .. } => {}
-        Shape::Step { at, .. } | Shape::Callout { at, .. } => *at = p,
+        Shape::Text { .. } | Shape::Label { .. } => {}
+        Shape::Step { at, .. } | Shape::Callout { at, .. } | Shape::Pointer { at, .. } => *at = p,
         Shape::Magnifier { radius, .. } => *radius = start.distance(p).max(20.0 / zoom),
     }
     item

@@ -41,6 +41,7 @@ pub fn snap(points: &[Point]) -> Option<Shape> {
             b,
             bend: mid(a, b),
             head: false,
+            text: String::new(),
         });
     }
 
@@ -63,6 +64,7 @@ pub fn snap(points: &[Point]) -> Option<Shape> {
             b: tip,
             bend: mid(a, tip),
             head: true,
+            text: String::new(),
         });
     }
 

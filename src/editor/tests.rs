@@ -145,31 +145,42 @@ fn rough_strokes_snap_to_clean_shapes() {
 // ---- render ------------------------------------------------------------------
 
 #[test]
-fn blur_changes_only_its_region() {
+fn blur_changes_only_its_stroke() {
+    let size = 16.0;
+    let stroke = vec![pt(20.0, 40.0), pt(50.0, 40.0), pt(80.0, 40.0)];
     let blur = item(Shape::Blur {
-        a: pt(20.0, 16.0),
-        b: pt(68.0, 52.0),
+        points: stroke.clone(),
+        size,
         seed: 7,
     });
     let plain = render(&doc_with(checker(100, 80), vec![]));
     let blurred = render(&doc_with(checker(100, 80), vec![blur]));
-    let mut changed = 0;
-    for y in 0..80 {
-        for x in 0..100 {
-            let inside = (20..68).contains(&x) && (16..52).contains(&y);
-            if !inside {
+    // Everything beyond the soft edge stays; the core is all new.
+    let edge = size / 2.0 + 2.0 * blur::feather(size) + 2.0;
+    let mut core = 0;
+    for y in 0..80u32 {
+        for x in 0..100u32 {
+            let p = pt(x as f32 + 0.5, y as f32 + 0.5);
+            let d = stroke
+                .iter()
+                .map(|q| q.distance(p))
+                .fold(f32::MAX, f32::min)
+                .min(if (20.0..80.0).contains(&p.x) {
+                    (p.y - 40.0).abs()
+                } else {
+                    f32::MAX
+                });
+            if d > edge {
                 assert_eq!(px(&plain, x, y), px(&blurred, x, y), "({x}, {y})");
-            } else if px(&plain, x, y) != px(&blurred, x, y) {
-                changed += 1;
+            } else if d < size / 2.0 - 1.0 {
+                core += 1;
+                // The checker is gone: the core is a noisy grey, not black or white.
+                let [r, ..] = px(&blurred, x, y);
+                assert!((60..200).contains(&r), "({x}, {y}) {r}");
             }
         }
     }
-    assert!(changed > 48 * 36 / 2, "{changed}");
-    // One cell is one colour.
-    let cell = px(&blurred, 20, 16);
-    for (x, y) in [(31, 16), (20, 27), (31, 27)] {
-        assert_eq!(px(&blurred, x, y), cell);
-    }
+    assert!(core > 60 * 12, "{core}");
 }
 
 /// A password field: `secret` in dark text on an off-white field.
@@ -198,80 +209,88 @@ fn field(secret: &str) -> Image {
     }
 }
 
+fn luma(p: [u8; 4]) -> u32 {
+    (p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8
+}
+
 #[test]
-fn blur_destroys_the_text_it_hides() {
-    let (a, b) = (pt(4.0, 4.0), pt(236.0, 36.0));
+fn blur_brush_destroys_the_text_it_hides() {
+    // The line under the brush, found by line assist; the brush fits it.
+    let bands = lines::detect(&field("hunter2"));
+    assert_eq!(bands.len(), 1, "{bands:?}");
+    let band = bands[0];
+    let size = band.brush();
+    let stroke = vec![pt(8.0, band.centre()), pt(232.0, band.centre())];
     let blurred = |secret: &str, seed| {
-        let blur = item(Shape::Blur { a, b, seed });
+        let blur = item(Shape::Blur {
+            points: stroke.clone(),
+            size,
+            seed,
+        });
         render(&doc_with(field(secret), vec![blur]))
     };
-    let region = |c: &Crop| -> Vec<[u8; 4]> {
-        (4..36)
-            .flat_map(|y| (4..236).map(move |x| (x, y)))
-            .map(|(x, y)| px(c, x, y))
-            .collect()
-    };
-    let original = field("hunter2");
-    let out = blurred("hunter2", 1);
-    let block = blur::block(document::span(&[a, b])) as usize;
-    assert!(
-        block >= 12 && 32 / block <= 3,
-        "a text line is at most ~3 cells"
-    );
+    // The core: the whole line, where the brush is at full strength.
+    let (y0, y1) = (band.y0 as u32, band.y1.ceil() as u32);
+    let core: Vec<(u32, u32)> = (y0..y1)
+        .flat_map(|y| (10..230).map(move |x| (x, y)))
+        .collect();
 
-    // Every pixel is replaced: none keeps its original value.
-    let raw = |x: usize, y: usize| -> [u8; 4] {
-        let i = (y * 240 + x) * 4;
+    // Strong enough to erase glyph shapes: sigma >= 0.6 x the line height.
+    let r = blur::radius(size) as f32;
+    assert!((r * (r + 1.0)).sqrt() >= 0.6 * band.height());
+
+    // No ink survives: every text pixel is replaced, nothing dark is left.
+    let original = field("hunter2");
+    let raw = |x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * 240 + x) * 4) as usize;
         original.rgba[i..i + 4].try_into().unwrap()
     };
-    for y in 4..36 {
-        for x in 4..236 {
-            assert_ne!(
-                px(&out, x as u32, y as u32),
-                raw(x, y),
-                "({x}, {y}) survived"
-            );
+    let out = blurred("hunter2", 1);
+    let mut ink = 0;
+    for &(x, y) in &core {
+        let (before, after) = (raw(x, y), px(&out, x, y));
+        assert!(luma(after) > 140, "({x}, {y}) still dark: {after:?}");
+        if luma(before) < 200 {
+            ink += 1;
+            assert_ne!(after, before, "({x}, {y}) survived");
         }
     }
-
-    // Not the deterministic block mean (what a plain mosaic, and Depix, rely on).
-    let mut means_kept = 0;
-    let mut cells = 0;
-    for cy in (4..36).step_by(block) {
-        for cx in (4..236).step_by(block) {
-            let pixels: Vec<_> = (cy..(cy + block).min(36))
-                .flat_map(|y| (cx..(cx + block).min(236)).map(move |x| (x, y)))
-                .collect();
-            let mean: Vec<u8> = (0..3)
-                .map(|c| {
-                    let sum: usize = pixels.iter().map(|&(x, y)| raw(x, y)[c] as usize).sum();
-                    (sum / pixels.len()) as u8
-                })
-                .collect();
-            cells += 1;
-            means_kept += (px(&out, cx as u32, cy as u32)[..3] == mean[..]) as usize;
-        }
-    }
-    assert_eq!(
-        means_kept, 0,
-        "{means_kept} of {cells} cells are the plain mean"
-    );
+    assert!(ink > 200, "the field has text: {ink}");
 
     // Two different passwords differ less than the same password under two seeds:
     // what is left of the text is drowned by the noise.
     let diff = |p: &Crop, q: &Crop| -> f32 {
-        let (p, q) = (region(p), region(q));
-        let total: u32 = p
+        let total: u32 = core
             .iter()
-            .zip(&q)
-            .map(|(a, b)| (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>())
+            .map(|&(x, y)| {
+                let (a, b) = (px(p, x, y), px(q, x, y));
+                (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>()
+            })
             .sum();
-        total as f32 / (p.len() * 3) as f32
+        total as f32 / (core.len() * 3) as f32
     };
     let noise = diff(&out, &blurred("hunter2", 2));
     let text = diff(&out, &blurred("letmein", 1));
     assert!(noise > 4.0, "noise {noise}");
     assert!(text < noise, "text signal {text} vs noise {noise}");
+}
+
+#[test]
+fn redact_is_a_solid_box() {
+    let redact = Item {
+        shape: Shape::Redact {
+            a: pt(10.0, 10.0),
+            b: pt(60.0, 30.0),
+        },
+        colour: [0, 0, 0, 255],
+        width: 4.0,
+    };
+    let out = render(&doc_with(field("hunter2"), vec![redact]));
+    for y in 10..30 {
+        for x in 10..60 {
+            assert_eq!(px(&out, x, y), [0, 0, 0, 255]);
+        }
+    }
 }
 
 #[test]
@@ -349,7 +368,9 @@ fn magnifier_shows_the_centre_zoomed() {
 // ---- editor: every tool, undo / redo -------------------------------------------
 
 fn editor(w: u32, h: u32) -> Editor {
-    Editor::new(checker(w, h), 1.0)
+    let mut e = Editor::new(checker(w, h), 1.0);
+    e.assist = false; // not the user's config
+    e
 }
 
 /// Press at `from`, drag through `via` to `to`, release.
@@ -370,14 +391,19 @@ fn draw_with_every_tool(e: &mut Editor) -> usize {
         let base = pt(20.0 + 70.0 * made as f32, 30.0 + 25.0 * made as f32);
         match info.tool {
             Tool::Select | Tool::Crop => continue,
-            Tool::Text | Tool::Callout => {
+            // Click, then type (a step's note, a label's text...).
+            Tool::Text | Tool::Label | Tool::Callout | Tool::Step => {
                 drag(e, base, &[], base);
                 e.update(Message::Type("Hi".into()));
                 e.update(Message::Type("!".into()));
                 e.update(Message::Backspace);
                 e.update(Message::Finish);
             }
-            Tool::Step => drag(e, base, &[], base),
+            Tool::ArrowLabel => {
+                drag(e, base, &[], base + iced::Vector::new(60.0, 40.0));
+                e.update(Message::Type("Hi".into()));
+                e.update(Message::Finish);
+            }
             _ => drag(
                 e,
                 base,
@@ -393,18 +419,31 @@ fn draw_with_every_tool(e: &mut Editor) -> usize {
 
 #[test]
 fn every_tool_makes_one_undoable_item() {
-    let mut e = editor(900, 400);
+    let mut e = editor(1300, 500);
     let made = draw_with_every_tool(&mut e);
     assert_eq!(made, TOOLS.len() - 2);
-    let kinds: Vec<_> = e
-        .doc
-        .items
-        .iter()
-        .map(|i| std::mem::discriminant(&i.shape))
+    // Every tool but the variants of an existing shape (line, labelled arrow)
+    // makes its own kind.
+    let kinds: Vec<_> = (e.doc.items.iter().zip(TOOLS.iter().skip(2)))
+        .filter(|(_, t)| !matches!(t.tool, Tool::Line | Tool::ArrowLabel))
+        .map(|(i, _)| std::mem::discriminant(&i.shape))
         .collect();
     for (i, k) in kinds.iter().enumerate() {
         assert!(!kinds[i + 1..].contains(k), "two items of one kind");
     }
+    let at = |tool: Tool| TOOLS.iter().position(|t| t.tool == tool).unwrap() - 2;
+    assert!(matches!(
+        &e.doc.items[at(Tool::Line)].shape,
+        Shape::Arrow { head: false, .. }
+    ));
+    assert!(matches!(
+        &e.doc.items[at(Tool::ArrowLabel)].shape,
+        Shape::Arrow { head: true, text, .. } if text == "Hi"
+    ));
+    assert!(matches!(
+        &e.doc.items[at(Tool::Step)].shape,
+        Shape::Step { note, .. } if note == "Hi"
+    ));
     let Shape::Text { text, .. } =
         &e.doc.items[TOOLS.iter().position(|t| t.tool == Tool::Text).unwrap() - 2].shape
     else {
@@ -480,6 +519,7 @@ fn steps_number_themselves_and_renumber_after_delete() {
         for &x in xs {
             drag(&mut e, pt(x, 30.0), &[], pt(x, 30.0));
         }
+        e.update(Message::Finish); // the last one waits for its note
         e
     };
     // The last badge's pixels.
@@ -622,11 +662,735 @@ fn every_icon_is_in_the_subset_font() {
     let icons = TOOLS
         .iter()
         .map(|t| t.icon)
-        .chain(['\u{e04c}', '\u{e2a0}', '\u{e29f}']);
+        .chain(toolbar::GLYPHS.iter().copied())
+        .chain(['\u{e13e}', crate::ui::widgets::DRAG]);
     for icon in icons {
         let code = format!("U+{:04X}", icon as u32);
         assert!(script.contains(&code), "add {code} to subset.sh");
     }
+}
+
+// ---- steps' legend -------------------------------------------------------------------
+
+/// Places a step at `p` and types its note.
+fn step_with(e: &mut Editor, p: Point, note: &str) {
+    e.update(Message::Tool(Tool::Step));
+    drag(e, p, &[], p);
+    e.update(Message::Type(note.into()));
+    e.update(Message::Finish);
+}
+
+const SLATE: [u8; 4] = [40, 44, 60, 255];
+
+#[test]
+fn legend_lists_the_notes_in_a_free_corner_or_a_band() {
+    let mut e = Editor::new(image_of(400, 300, |_, _| SLATE), 1.0);
+    step_with(&mut e, pt(40.0, 40.0), "Open settings");
+    step_with(&mut e, pt(100.0, 60.0), ""); // numbered, not listed
+    step_with(&mut e, pt(160.0, 80.0), "Click Save");
+    let l = e.doc.legend_layout().expect("a legend");
+    let rows: Vec<_> = l.rows.iter().map(|r| (r.number, r.note.as_str())).collect();
+    assert_eq!(rows, [(1, "Open settings"), (3, "Click Save")]);
+    // Bottom-right is free: the box sits there, inside the image.
+    assert_eq!(l.band, 0.0);
+    assert!(l.at.x > 200.0 && l.at.y > 150.0, "{:?}", l.at);
+    assert!(l.at.x + l.at.width < 400.0 && l.at.y + l.at.height < 300.0);
+
+    // Flattened: the paper shows in the box, nowhere else changes size.
+    let flat = render(&e.doc);
+    assert_eq!((flat.width, flat.height), (400, 300));
+    let inside = (
+        (l.at.x + l.at.width - 4.0) as u32,
+        (l.at.y + l.at.height / 2.0) as u32,
+    );
+    assert!(luma(px(&flat, inside.0, inside.1)) > 200, "paper");
+    // Off: gone.
+    e.update(Message::Legend);
+    assert!(e.doc.legend_layout().is_none());
+    assert_eq!(px(&render(&e.doc), inside.0, inside.1), SLATE);
+    e.update(Message::Legend);
+
+    // A box over every corner: the legend moves to a band under the image.
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(6.0, 6.0), &[], pt(394.0, 294.0));
+    let l = e.doc.legend_layout().unwrap();
+    assert!(l.band > 20.0, "{}", l.band);
+    let flat = render(&e.doc);
+    assert_eq!((flat.width, flat.height), (400, 300 + l.band as u32));
+    assert_eq!(e.size(), Size::new(400.0, 300.0 + l.band));
+    assert_eq!(
+        px(&flat, 395, 300 + l.band as u32 - 3),
+        [255, 255, 255, 255]
+    );
+    // The band's rows: a badge in the first step's colour, then dark text.
+    let badge = (0..flat.width)
+        .flat_map(|x| (300..flat.height).map(move |y| (x, y)))
+        .filter(|&(x, y)| px(&flat, x, y) == RED)
+        .count();
+    assert!(badge > 50, "{badge}");
+}
+
+#[test]
+fn copy_all_gives_the_image_and_its_words() {
+    let mut e = editor(300, 200);
+    step_with(&mut e, pt(30.0, 30.0), "Open settings");
+    step_with(&mut e, pt(90.0, 30.0), "Click Save");
+    e.update(Message::Tool(Tool::Label));
+    drag(&mut e, pt(30.0, 120.0), &[], pt(30.0, 120.0));
+    e.update(Message::Type("Done".into()));
+    e.update(Message::Tool(Tool::ArrowLabel));
+    drag(&mut e, pt(200.0, 150.0), &[], pt(260.0, 100.0));
+    e.update(Message::Type("here".into()));
+    e.update(Message::Finish);
+    let ctrl_shift = Modifiers::CTRL | Modifiers::SHIFT;
+    let key = e.key(&Key::Character("c".into()), Some('c'), ctrl_shift, None);
+    assert!(matches!(key, Some(Message::CopyAll)));
+    let Some(Output::CopyWithText(flat, text)) = e.update(Message::CopyAll) else {
+        panic!("CopyAll gives the image and the text")
+    };
+    assert!(flat.width == 300 && flat.height >= 200, "with the legend");
+    assert_eq!(text, "1. Open settings\n2. Click Save\nDone\nhere");
+}
+
+// ---- new tools ------------------------------------------------------------------------
+
+#[test]
+fn lines_snap_to_45_degrees_with_shift() {
+    let snapped = arrow::snap_angle(pt(0.0, 0.0), pt(100.0, 7.0));
+    assert!(
+        snapped.y.abs() < 1e-3 && (snapped.x - 100.24).abs() < 0.01,
+        "{snapped:?}"
+    );
+    let snapped = arrow::snap_angle(pt(10.0, 10.0), pt(60.0, 57.0));
+    assert!(((snapped.x - 10.0) - (snapped.y - 10.0)).abs() < 1e-3);
+    let snapped = arrow::snap_angle(pt(0.0, 0.0), pt(3.0, -80.0));
+    assert!(snapped.x.abs() < 1e-3 && snapped.y < -79.0);
+
+    let mut e = editor(200, 100);
+    e.update(Message::Tool(Tool::Line));
+    e.update(Message::Shift(true));
+    drag(&mut e, pt(10.0, 10.0), &[pt(60.0, 14.0)], pt(110.0, 17.0));
+    let Shape::Arrow { a, b, head, .. } = &e.doc.items[0].shape else {
+        panic!()
+    };
+    assert!(!head && (b.y - a.y).abs() < 1e-3, "{a:?} {b:?}");
+    // Without Shift it goes where the pointer is.
+    e.update(Message::Shift(false));
+    drag(&mut e, pt(10.0, 60.0), &[], pt(110.0, 67.0));
+    let Shape::Arrow { b, .. } = &e.doc.items[1].shape else {
+        panic!()
+    };
+    assert_eq!(*b, pt(110.0, 67.0));
+}
+
+#[test]
+fn label_text_contrasts_with_its_fill() {
+    use crate::ui::theme::ANNOTATION;
+    for (i, dark_text) in [(2, true), (9, true), (5, false), (11, false), (0, false)] {
+        let colour = ANNOTATION[i].into_rgba8();
+        let at = pt(10.0, 10.0);
+        let label = Item {
+            shape: Shape::Label {
+                at,
+                text: "Hello".into(),
+                size: 24.0,
+            },
+            colour,
+            width: 4.0,
+        };
+        let out = render(&doc_with(image_of(160, 60, |_, _| SLATE), vec![label]));
+        let origin = label::text_origin(at, 24.0);
+        let glyphs: Vec<u32> = (origin.y as u32..origin.y as u32 + 28)
+            .flat_map(|y| (origin.x as u32..origin.x as u32 + 60).map(move |x| (x, y)))
+            .map(|(x, y)| px(&out, x, y))
+            .filter(|p| *p != colour)
+            .map(luma)
+            .collect();
+        assert!(glyphs.len() > 30, "{i}: text drawn");
+        if dark_text {
+            assert!(
+                glyphs.iter().any(|&l| l < 60),
+                "{i}: dark text on a light fill"
+            );
+        } else {
+            assert!(
+                glyphs.iter().any(|&l| l > 220),
+                "{i}: white text on a dark fill"
+            );
+        }
+        assert_eq!(document::on(colour)[0] < 128, dark_text);
+    }
+}
+
+#[test]
+fn pointer_and_label_are_drawn_and_editable() {
+    let mut e = editor(300, 200);
+    e.update(Message::Tool(Tool::Pointer));
+    drag(&mut e, pt(150.0, 120.0), &[], pt(150.0, 120.0));
+    assert!(matches!(e.doc.items[0].shape, Shape::Pointer { .. }));
+    // Its arrow comes from up-left.
+    let f = e.doc.items[0].frame();
+    assert!(f.x < 120.0 && f.y < 90.0, "{f:?}");
+    e.update(Message::Tool(Tool::Label));
+    drag(&mut e, pt(20.0, 20.0), &[], pt(20.0, 20.0));
+    e.update(Message::Type("Tag".into()));
+    e.update(Message::Finish);
+    // Clicking the label with its tool edits it.
+    drag(&mut e, pt(35.0, 30.0), &[], pt(35.0, 30.0));
+    e.update(Message::Type("!".into()));
+    e.update(Message::Finish);
+    assert!(matches!(&e.doc.items[1].shape, Shape::Label { text, .. } if text == "Tag!"));
+    assert_eq!(e.doc.items.len(), 2);
+}
+
+#[test]
+fn tool_buttons_open_their_variants() {
+    let mut e = editor(100, 100);
+    assert_eq!(e.tool, Tool::Arrow);
+    e.update(Message::Slot(Tool::Arrow));
+    assert_eq!(e.menu, Some(Menu::Variants(Tool::Arrow)));
+    e.update(Message::Slot(Tool::Arrow));
+    assert_eq!(e.menu, None);
+    e.update(Message::Slot(Tool::Text));
+    assert_eq!(
+        (e.tool, e.menu),
+        (Tool::Text, Some(Menu::Variants(Tool::Text)))
+    );
+    e.update(Message::Tool(Tool::Label));
+    assert_eq!((e.tool, e.menu), (Tool::Label, None));
+    // A button without variants just picks its tool.
+    e.update(Message::Slot(Tool::Rect));
+    assert_eq!((e.tool, e.menu), (Tool::Rect, None));
+    // Esc closes a popover before it leaves the editor.
+    e.update(Message::Menu(Menu::Board));
+    let esc = |e: &Editor| e.key(&Key::Named(Named::Escape), None, Modifiers::empty(), None);
+    assert!(matches!(esc(&e), Some(Message::Menu(Menu::Board))));
+    e.update(Message::Menu(Menu::Board));
+    assert!(matches!(esc(&e), Some(Message::Back)));
+    // Every tool is reachable from a toolbar button.
+    for t in TOOLS {
+        assert!(TOOLS.iter().any(|s| s.tool == t.slot && s.slot == s.tool));
+    }
+}
+
+/// The laid-out size of `element` (logical px).
+fn laid_out(element: Element<'_, Message>) -> Size {
+    use iced::advanced::layout;
+    use iced::advanced::widget::Tree;
+    let mut element = element;
+    let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0));
+    let mut tree = Tree::new(element.as_widget());
+    let node = element.as_widget_mut().layout(
+        &mut tree,
+        &renderer,
+        &layout::Limits::new(Size::ZERO, Size::new(4000.0, 2000.0)),
+    );
+    node.size()
+}
+
+#[test]
+fn toolbar_size_matches_its_layout() {
+    let e = editor(100, 100);
+    assert_eq!(laid_out(e.toolbar()), toolbar::size());
+    // It still fits a 1366 px laptop screen.
+    assert!(
+        toolbar::size().width < 1366.0 - 48.0,
+        "{:?}",
+        toolbar::size()
+    );
+}
+
+// ---- presets, copy / paste style, eyedropper -------------------------------------------
+
+#[test]
+fn presets_style_the_active_tool() {
+    use crate::ui::theme::ANNOTATION;
+    let colour = |i: usize| ANNOTATION[i].into_rgba8();
+    let mut e = editor(200, 150);
+    let key = |e: &Editor, c: char| {
+        e.key(
+            &Key::Character(c.to_string().into()),
+            Some(c),
+            Modifiers::empty(),
+            None,
+        )
+    };
+    assert!(matches!(key(&e, '3'), Some(Message::Preset(2))));
+    assert!(key(&e, '9').is_none(), "no ninth preset");
+
+    // Blue callout from the arrow: the callout tool, blue.
+    e.update(Message::Preset(2));
+    assert_eq!((e.tool, e.colour), (Tool::Callout, colour(5)));
+    // Red box + arrow keeps the arrow (it suits it), red.
+    e.update(Message::Tool(Tool::Arrow));
+    e.update(Message::Width(Width::Thick));
+    e.update(Message::Preset(0));
+    assert_eq!(
+        (e.tool, e.colour, e.width),
+        (Tool::Arrow, colour(0), Width::Medium)
+    );
+
+    // Redact on a selected box: it becomes a solid black box.
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(20.0, 20.0), &[], pt(80.0, 60.0));
+    e.update(Message::Preset(3));
+    assert!(matches!(e.doc.items[0].shape, Shape::Redact { .. }));
+    assert_eq!(e.doc.items[0].colour, colour(11));
+    assert_eq!(e.tool, Tool::Redact);
+    assert_eq!(px(&render(&e.doc), 50, 40), colour(11));
+    // One undo brings the box back.
+    e.update(Message::Undo);
+    assert!(matches!(e.doc.items[0].shape, Shape::Rect { .. }));
+
+    // Highlight yellow: the highlighter; the selected item is left alone.
+    e.update(Message::Tool(Tool::Select));
+    drag(&mut e, pt(20.0, 40.0), &[], pt(20.0, 40.0));
+    let before = e.doc.items[0].clone();
+    e.update(Message::Preset(1));
+    assert_eq!((e.tool, e.colour), (Tool::Highlighter, colour(2)));
+    assert_eq!(e.doc.items[0], before);
+}
+
+#[test]
+fn copy_style_and_paste_it_on_another_item() {
+    let mut e = editor(300, 200);
+    e.update(Message::Colour([10, 132, 255, 255]));
+    e.update(Message::Width(Width::Thick));
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(10.0, 10.0), &[], pt(60.0, 60.0));
+    e.update(Message::CopyStyle);
+    e.update(Message::Colour(RED));
+    e.update(Message::Width(Width::Thin));
+    e.update(Message::Tool(Tool::Text));
+    drag(&mut e, pt(150.0, 100.0), &[], pt(150.0, 100.0));
+    e.update(Message::Type("note".into()));
+    e.update(Message::Finish);
+    let thin = e.doc.items[1].clone();
+    assert_eq!(style::level(&thin, 1.0), Width::Thin);
+    e.update(Message::PasteStyle);
+    let pasted = &e.doc.items[1];
+    assert_eq!(pasted.colour, [10, 132, 255, 255]);
+    assert_eq!(style::level(pasted, 1.0), Width::Thick);
+    assert!(matches!(&pasted.shape, Shape::Text { size, .. } if *size == Width::Thick.font()));
+}
+
+#[test]
+fn eyedropper_picks_a_colour_from_the_image() {
+    let image = image_of(50, 40, |x, y| [(x * 5) as u8, (y * 6) as u8, 77, 255]);
+    let mut e = Editor::new(image, 1.0);
+    let d = e.key(
+        &Key::Character("d".into()),
+        Some('d'),
+        Modifiers::empty(),
+        None,
+    );
+    assert!(matches!(d, Some(Message::Eyedropper)));
+    e.update(Message::Picker);
+    e.update(Message::Eyedropper);
+    assert!(
+        e.picking && e.menu.is_none(),
+        "the popover closes to show the image"
+    );
+    let esc = e.key(&Key::Named(Named::Escape), None, Modifiers::empty(), None);
+    assert!(matches!(esc, Some(Message::Eyedropper)), "Esc cancels");
+    drag(&mut e, pt(10.5, 20.5), &[], pt(10.5, 20.5));
+    assert_eq!(e.colour, [50, 120, 77, 255]);
+    assert_eq!(e.hex, "#32784D");
+    assert!(!e.picking && e.doc.items.is_empty(), "a pick draws nothing");
+    // Outside the image: nothing picked.
+    e.update(Message::Eyedropper);
+    drag(&mut e, pt(80.0, 20.0), &[], pt(80.0, 20.0));
+    assert_eq!(e.colour, [50, 120, 77, 255]);
+    // The pick styles the selected item, like any colour.
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(5.0, 5.0), &[], pt(30.0, 30.0));
+    e.update(Message::Eyedropper);
+    drag(&mut e, pt(2.5, 1.5), &[], pt(2.5, 1.5));
+    assert_eq!(e.doc.items[0].colour, [10, 6, 77, 255]);
+}
+
+// ---- combine board ----------------------------------------------------------------------
+
+#[test]
+fn board_layouts_place_captures() {
+    use board::{GAP as G, Layout, place};
+    let sizes = [(100, 50), (60, 80), (120, 40)];
+    let at =
+        |tiles: &[Rectangle]| -> Vec<(f32, f32)> { tiles.iter().map(|t| (t.x, t.y)).collect() };
+    let g = G as f32;
+
+    let (tiles, size) = place(&sizes[..1], Layout::Grid);
+    assert_eq!(
+        (at(&tiles), size),
+        (vec![(0.0, 0.0)], Size::new(100.0, 50.0))
+    );
+
+    let (tiles, size) = place(&sizes, Layout::Stack);
+    assert_eq!(
+        at(&tiles),
+        [
+            (g + 10.0, g),
+            (g + 30.0, 2.0 * g + 50.0),
+            (g, 3.0 * g + 130.0)
+        ]
+    );
+    assert_eq!(size, Size::new(120.0 + 2.0 * g, 170.0 + 4.0 * g));
+
+    let (tiles, size) = place(&sizes, Layout::Side);
+    assert_eq!(
+        at(&tiles),
+        [
+            (g, g + 15.0),
+            (2.0 * g + 100.0, g),
+            (3.0 * g + 160.0, g + 20.0)
+        ]
+    );
+    assert_eq!(size, Size::new(280.0 + 4.0 * g, 80.0 + 2.0 * g));
+
+    // Grid: 2 columns of 120x80 cells, each capture centred in its cell.
+    let (tiles, size) = place(&sizes, Layout::Grid);
+    assert_eq!(
+        at(&tiles),
+        [
+            (g + 10.0, g + 15.0),
+            (2.0 * g + 120.0 + 30.0, g),
+            (g, 2.0 * g + 80.0 + 20.0)
+        ]
+    );
+    assert_eq!(size, Size::new(240.0 + 3.0 * g, 160.0 + 3.0 * g));
+    for (t, s) in tiles.iter().zip(sizes) {
+        assert_eq!(t.size(), Size::new(s.0 as f32, s.1 as f32));
+    }
+}
+
+#[test]
+fn the_board_keeps_annotations_on_their_capture() {
+    use board::{BACKGROUND, GAP as G, Layout};
+    let g = G as f32;
+    let blue = [10, 132, 255, 255];
+    let mut e = Editor::new(image_of(100, 50, |_, _| SLATE), 1.0);
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(40.0, 15.0), &[], pt(80.0, 40.0));
+    e.update(Message::Tool(Tool::Crop));
+    drag(&mut e, pt(0.0, 0.0), &[], pt(90.0, 45.0));
+    assert!(matches!(
+        e.update(Message::AddCapture),
+        Some(Output::AddCapture)
+    ));
+
+    e.append(image_of(60, 80, |_, _| blue));
+    assert_eq!(e.doc.crop, None, "the board shows whole");
+    assert_eq!(
+        (e.doc.image.width, e.doc.image.height),
+        (100 + 2 * G, 130 + 3 * G)
+    );
+    let flat = render(&e.doc);
+    assert_eq!(px(&flat, 2, 2), BACKGROUND);
+    assert_eq!(
+        px(&flat, (g + 20.0 + 50.0) as u32, (2.0 * g + 90.0) as u32),
+        blue
+    );
+    // The number label on capture 1 (dark), the rectangle moved with it.
+    assert!(luma(px(&flat, (g + 9.0) as u32, (g + 12.0) as u32)) < 60);
+    let Shape::Rect { a, .. } = e.doc.items[0].shape else {
+        panic!()
+    };
+    assert_eq!(a, pt(40.0 + g, 15.0 + g));
+
+    // An arrow on capture 2, then side by side: each moves with its capture.
+    e.update(Message::Tool(Tool::Arrow));
+    drag(&mut e, pt(60.0, 120.0), &[], pt(80.0, 150.0));
+    e.update(Message::Layout(Layout::Side));
+    let tiles = e.doc.tiles().to_vec();
+    assert_eq!(
+        tiles.iter().map(|t| (t.x, t.y)).collect::<Vec<_>>(),
+        [(g, g + 15.0), (2.0 * g + 100.0, g)]
+    );
+    let Shape::Rect { a, .. } = e.doc.items[0].shape else {
+        panic!()
+    };
+    assert_eq!(a, pt(40.0 + g, 30.0 + g));
+    let Shape::Arrow { a, .. } = e.doc.items[1].shape else {
+        panic!()
+    };
+    // From (60, 120) on capture 2 at (g + 20, 2g + 50) to its new place.
+    assert_eq!(
+        a,
+        pt(
+            60.0 - (g + 20.0) + tiles[1].x,
+            120.0 - (2.0 * g + 50.0) + tiles[1].y
+        )
+    );
+
+    // Numbers off: the label is gone (the capture shows there).
+    e.update(Message::Numbers);
+    assert_eq!(
+        px(&render(&e.doc), (g + 9.0) as u32, (g + 27.0) as u32),
+        SLATE
+    );
+
+    // Undo walks it all back: numbers, layout, arrow, the added capture (and the crop).
+    for _ in 0..4 {
+        e.update(Message::Undo);
+    }
+    assert_eq!((e.doc.image.width, e.doc.image.height), (100, 50));
+    assert!(e.doc.crop.is_some());
+    assert_eq!(e.doc.items.len(), 1);
+    let Shape::Rect { a, .. } = e.doc.items[0].shape else {
+        panic!()
+    };
+    assert_eq!(a, pt(40.0, 15.0));
+    for _ in 0..4 {
+        e.update(Message::Redo);
+    }
+    assert_eq!(e.doc.board.layout, Layout::Side);
+    assert!(!e.doc.board.numbers);
+    assert_eq!(e.doc.items.len(), 2);
+
+    // A third capture in a grid.
+    e.append(image_of(40, 40, |_, _| RED));
+    e.update(Message::Layout(Layout::Grid));
+    assert_eq!(e.doc.board.count, 3);
+    assert_eq!(e.doc.tiles().len(), 3);
+    assert_eq!(e.size(), Size::new(200.0 + 3.0 * g, 160.0 + 3.0 * g));
+}
+
+// ---- drag-out ------------------------------------------------------------------------
+
+#[test]
+fn drag_out_writes_a_temp_png_that_goes_with_the_editor() {
+    let crop = Crop {
+        width: 2,
+        height: 2,
+        rgba: vec![
+            1, 2, 3, 255, 4, 5, 6, 255, //
+            7, 8, 9, 255, 10, 11, 12, 255,
+        ],
+    };
+    let file = dragout::DragFile::write(&crop).unwrap();
+    let path = file.path().to_owned();
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(bytes.starts_with(b"\x89PNG"));
+    assert!(
+        path.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("opencircle-drag-")
+    );
+    drop(file);
+    assert!(!path.exists(), "deleted when dropped");
+
+    // The bitmap: a 40-byte header, then bottom-up BGRA rows.
+    let dib = dragout::dib(&crop);
+    assert_eq!(dib.len(), 40 + 16);
+    assert_eq!(&dib[..12], &[40, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0]);
+    assert_eq!(&dib[14..16], &[32, 0]);
+    assert_eq!(&dib[40..48], &[9, 8, 7, 255, 12, 11, 10, 255]);
+
+    // The editor keeps one file (the next drag replaces it) until it closes.
+    let mut e = editor(30, 20);
+    e.update(Message::DragOut); // off Windows the OS drag reports "not yet"
+    let first = e.dragged.as_ref().unwrap().path().to_owned();
+    assert!(first.exists());
+    e.update(Message::DragOut);
+    let second = e.dragged.as_ref().unwrap().path().to_owned();
+    assert!(!first.exists() && second.exists());
+    drop(e);
+    assert!(!second.exists(), "deleted with the editor");
+}
+
+// ---- line assist -------------------------------------------------------------------
+
+/// Text `lines` (top-left, text) at `size` on `bg`, in `fg`.
+fn page(w: u32, h: u32, bg: [u8; 4], fg: [u8; 4], lines: &[(f32, f32, &str)]) -> Image {
+    let mut layer = document::Layer {
+        pm: tiny_skia::Pixmap::from_vec(
+            image_of(w, h, |_, _| bg).rgba,
+            tiny_skia::IntSize::from_wh(w, h).unwrap(),
+        )
+        .unwrap(),
+        origin: Point::ORIGIN,
+    };
+    for &(x, y, line) in lines {
+        text::paint(&mut layer, pt(x, y), line, 20.0, fg, false);
+    }
+    Image {
+        width: w,
+        height: h,
+        rgba: layer.pm.take(),
+    }
+}
+
+const PAPER: [u8; 4] = [250, 250, 250, 255];
+const INK: [u8; 4] = [20, 20, 30, 255];
+const PARAGRAPH: [(f32, f32, &str); 3] = [
+    (10.0, 10.0, "The first line of the note"),
+    (10.0, 50.0, "a second one, just as long"),
+    (10.0, 90.0, "and a short third"),
+];
+
+#[test]
+fn text_lines_are_found_light_dark_and_in_columns() {
+    for (bg, fg) in [(PAPER, INK), ([28, 28, 36, 255], [235, 235, 240, 255])] {
+        let bands = lines::detect(&page(400, 160, bg, fg, &PARAGRAPH));
+        assert_eq!(bands.len(), 3, "{bands:?}");
+        for (b, (x, top, _)) in bands.iter().zip(PARAGRAPH) {
+            // Each band covers its line: ascenders to descenders, from its start.
+            assert!(b.y0 >= top - 2.0 && b.y0 <= top + 8.0, "{b:?} {top}");
+            assert!(b.y1 >= top + 18.0 && b.y1 <= top + 28.0, "{b:?} {top}");
+            assert!((b.x0 - x).abs() < 4.0 && b.x1 > 150.0, "{b:?}");
+        }
+    }
+    // Two columns whose lines don't line up: bands per column.
+    let page2 = page(
+        620,
+        120,
+        PAPER,
+        INK,
+        &[
+            (10.0, 10.0, "left column text"),
+            (10.0, 50.0, "more on the left"),
+            (360.0, 28.0, "right column text"),
+            (360.0, 70.0, "more on the right"),
+        ],
+    );
+    let bands = lines::detect(&page2);
+    assert_eq!(bands.len(), 4, "{bands:?}");
+    let left: Vec<_> = bands.iter().filter(|b| b.x1 < 300.0).collect();
+    let right: Vec<_> = bands.iter().filter(|b| b.x0 > 340.0).collect();
+    assert_eq!((left.len(), right.len()), (2, 2), "{bands:?}");
+    assert!((right[0].y0 - 28.0).abs() < 8.0 && (left[1].y0 - 50.0).abs() < 8.0);
+    // A panel border down the page (an edge on every row) is not a line.
+    let mut framed = page(400, 160, PAPER, INK, &PARAGRAPH);
+    for y in 0..160 {
+        let i = (y * 400 + 3) * 4;
+        framed.rgba[i..i + 4].copy_from_slice(&INK);
+    }
+    assert_eq!(lines::detect(&framed).len(), 3);
+    // A plain image has none.
+    assert!(lines::detect(&image_of(200, 100, |_, _| SLATE)).is_empty());
+}
+
+#[test]
+fn the_lock_holds_a_line_and_switches_after_a_moment() {
+    use lines::{Band, Follow, Lock, SWITCH_AFTER};
+    use std::time::Duration;
+    let band = |y0: f32| Band {
+        x0: 0.0,
+        x1: 300.0,
+        y0,
+        y1: y0 + 20.0,
+    };
+    let bands = [band(10.0), band(50.0)];
+    let t0 = std::time::Instant::now();
+    let ms = |n: u64| t0 + Duration::from_millis(n);
+    let stay = |f: Follow| match f {
+        Follow::Stay(p) => p,
+        Follow::Switch(b) => panic!("switched to {b:?}"),
+    };
+    let mut lock = Lock::new(bands[0]);
+    assert_eq!(
+        stay(lock.follow(&bands, pt(50.0, 25.0), ms(0))),
+        pt(50.0, 20.0)
+    );
+    // Wobbling near the line: still on it.
+    assert_eq!(
+        stay(lock.follow(&bands, pt(60.0, 36.0), ms(10))),
+        pt(60.0, 20.0)
+    );
+    // Over the next line, but only briefly: stays.
+    stay(lock.follow(&bands, pt(70.0, 60.0), ms(20)));
+    stay(lock.follow(&bands, pt(80.0, 60.0), ms(100)));
+    stay(lock.follow(&bands, pt(85.0, 22.0), ms(120))); // back: the clock resets
+    stay(lock.follow(&bands, pt(90.0, 60.0), ms(130)));
+    stay(lock.follow(&bands, pt(95.0, 60.0), ms(200)));
+    // Held there long enough: on to that line.
+    let at = 130 + SWITCH_AFTER.as_millis() as u64;
+    assert!(
+        matches!(lock.follow(&bands, pt(99.0, 60.0), ms(at)), Follow::Switch(b) if b == bands[1])
+    );
+    assert_eq!(
+        stay(lock.follow(&bands, pt(100.0, 58.0), ms(at + 10))),
+        pt(100.0, 60.0)
+    );
+    // Far away with no line there: held where it is.
+    assert_eq!(
+        stay(lock.follow(&bands, pt(100.0, 150.0), ms(at + 500))),
+        pt(100.0, 60.0)
+    );
+}
+
+#[test]
+fn the_blur_brush_follows_text_lines() {
+    let image = page(400, 160, PAPER, INK, &PARAGRAPH);
+    let bands = lines::detect(&image);
+    let mut e = Editor::new(image, 1.0);
+    e.assist = true;
+    e.update(Message::Tool(Tool::Blur));
+    let b = bands[1];
+    let c = b.centre();
+    // A wobbly stroke along line 2: held on it, as tall as it.
+    drag(
+        &mut e,
+        pt(15.0, c + 3.0),
+        &[pt(80.0, c - 5.0), pt(150.0, c + 6.0)],
+        pt(220.0, c),
+    );
+    let Shape::Blur { points, size, .. } = &e.doc.items[0].shape else {
+        panic!()
+    };
+    assert!(points.iter().all(|p| p.y == c), "{points:?}");
+    assert_eq!(*size, b.brush());
+    // Shift: free.
+    e.update(Message::Shift(true));
+    drag(
+        &mut e,
+        pt(15.0, c + 3.0),
+        &[pt(80.0, c - 5.0)],
+        pt(220.0, c),
+    );
+    let Shape::Blur { points, .. } = &e.doc.items[1].shape else {
+        panic!()
+    };
+    assert!(points.iter().any(|p| p.y != c));
+    e.update(Message::Shift(false));
+
+    // Dragged onto line 3 and held there: the stroke goes on along line 3.
+    e.update(Message::Press(pt(15.0, bands[0].centre())));
+    e.update(Message::Move(pt(60.0, bands[0].centre())));
+    e.update(Message::Move(pt(70.0, bands[2].centre())));
+    std::thread::sleep(lines::SWITCH_AFTER + std::time::Duration::from_millis(20));
+    e.update(Message::Move(pt(80.0, bands[2].centre() + 2.0)));
+    e.update(Message::Move(pt(150.0, bands[2].centre() - 2.0)));
+    e.update(Message::Release);
+    let ys: Vec<f32> = e.doc.items[2..]
+        .iter()
+        .map(|i| match &i.shape {
+            Shape::Blur { points, .. } => points[0].y,
+            _ => panic!(),
+        })
+        .collect();
+    assert_eq!(ys, [bands[0].centre(), bands[2].centre()]);
+
+    // Assist off: the stroke is free but still fits the line it starts on;
+    // off any text it takes the weight's size.
+    e.update(Message::Assist);
+    assert!(!e.assist);
+    drag(
+        &mut e,
+        pt(15.0, c + 3.0),
+        &[pt(80.0, c - 5.0)],
+        pt(220.0, c),
+    );
+    let Shape::Blur { points, size, .. } = &e.doc.items[4].shape else {
+        panic!()
+    };
+    assert!(points.iter().any(|p| p.y != c) && *size == b.brush());
+    drag(&mut e, pt(15.0, 140.0), &[], pt(220.0, 140.0));
+    let Shape::Blur { size, .. } = &e.doc.items[5].shape else {
+        panic!()
+    };
+    assert_eq!(*size, Width::Medium.brush());
 }
 
 // ---- snapshots and timing (run by hand) -------------------------------------------
@@ -711,7 +1475,15 @@ fn demo_editor() -> Editor {
         pt(508.0, 438.0),
     );
     with(&mut e, Tool::Rect, pt(72.0, 54.0), &[], pt(300.0, 92.0));
-    with(&mut e, Tool::Blur, pt(186.0, 292.0), &[], pt(398.0, 334.0));
+    // The password line, brushed with line assist (the wobble is ignored).
+    e.assist = true;
+    with(
+        &mut e,
+        Tool::Blur,
+        pt(186.0, 310.0),
+        &[pt(260.0, 316.0), pt(330.0, 306.0)],
+        pt(398.0, 312.0),
+    );
     e.doc.selected = None;
     colour(&mut e, 2);
     let line: Vec<_> = (0..40).map(|i| pt(90.0 + 8.0 * i as f32, 165.0)).collect();
@@ -864,6 +1636,172 @@ fn snapshots() {
     let flat = render(&e.doc);
     let path = dir.join("flattened.png");
     crate::actions::write_png(&path, flat.width, flat.height, &flat.rgba).unwrap();
+}
+
+/// The PNG folder and the icon font loaded (snapshot tests).
+fn png_dir() -> std::path::PathBuf {
+    let dir = std::path::PathBuf::from(
+        std::env::var("OPENCIRCLE_EDITOR_PNG").expect("OPENCIRCLE_EDITOR_PNG=<dir>"),
+    );
+    std::fs::create_dir_all(&dir).unwrap();
+    iced::advanced::graphics::text::font_system()
+        .write()
+        .unwrap()
+        .load_font(std::borrow::Cow::Borrowed(
+            crate::ui::widgets::ICON_FONT_BYTES,
+        ));
+    dir
+}
+
+fn write(dir: &std::path::Path, name: &str, c: &Crop) {
+    crate::actions::write_png(&dir.join(name), c.width, c.height, &c.rgba).unwrap();
+}
+
+const NIGHT: [u8; 4] = [30, 30, 30, 255];
+const MOON: [u8; 4] = [230, 230, 232, 255];
+
+/// A dark chat answer: five lines of text.
+fn chat_block() -> Image {
+    page(
+        620,
+        230,
+        NIGHT,
+        MOON,
+        &[
+            (
+                20.0,
+                16.0,
+                "The card now floats with a thin border and a grip,",
+            ),
+            (
+                20.0,
+                56.0,
+                "the action bar wraps neatly into the free space.",
+            ),
+            (20.0, 96.0, "API key: sk-live-4f9a8b7c6d5e4f3a2b1c0d9e8f7a"),
+            (20.0, 136.0, "Account: amer@example.com, plan Pro, 3 seats"),
+            (
+                20.0,
+                176.0,
+                "Both commits are squashed; the build is green.",
+            ),
+        ],
+    )
+}
+
+/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test editor::tests::snapshots_board -- --ignored`
+/// writes a 3-capture board (steps + legend, presets, the new tools), the editor
+/// around it, the toolbar with each popover, and a text block blurred line by line.
+#[test]
+#[ignore = "writes PNGs to look at"]
+fn snapshots_board() {
+    use crate::ui::theme;
+    let dir = png_dir();
+
+    // Blur brush with line assist: lines 3 and 4 (a key, an e-mail), wobbly strokes.
+    let mut e = Editor::new(chat_block(), 1.0);
+    e.assist = true;
+    write(&dir, "blur-before.png", &render(&e.doc));
+    let bands = lines::detect(&e.doc.image);
+    e.update(Message::Tool(Tool::Blur));
+    for b in &bands[2..4] {
+        let c = b.centre();
+        drag(
+            &mut e,
+            pt(18.0, c + 4.0),
+            &[pt(150.0, c - 6.0), pt(300.0, c + 7.0), pt(450.0, c - 3.0)],
+            pt(b.x1 + 4.0, c + 2.0),
+        );
+    }
+    write(&dir, "blur-after.png", &render(&e.doc));
+
+    // The board: an app window, a form, the chat block.
+    let mut e = Editor::new(demo_image(), 1.0);
+    e.assist = true;
+    e.append(field("hunter2"));
+    e.append(chat_block());
+    e.update(Message::Layout(board::Layout::Grid));
+    let t = e.doc.tiles().to_vec();
+    let at = |i: usize, x: f32, y: f32| pt(t[i].x + x, t[i].y + y);
+    // 1: red box + arrow on the Save button, steps with notes.
+    e.update(Message::Tool(Tool::Rect));
+    e.update(Message::Preset(0));
+    drag(&mut e, at(0, 552.0, 352.0), &[], at(0, 768.0, 418.0));
+    e.update(Message::Tool(Tool::ArrowLabel));
+    drag(&mut e, at(0, 470.0, 455.0), &[], at(0, 555.0, 400.0));
+    e.update(Message::Type("then this".into()));
+    e.update(Message::Finish);
+    step_with(&mut e, at(0, 40.0, 72.0), "Open Account settings");
+    step_with(&mut e, at(1, 222.0, 20.0), "Type the new password");
+    step_with(&mut e, at(0, 532.0, 386.0), "Save; it renews on the 1st");
+    // 2: highlight yellow over a text line.
+    e.update(Message::Preset(1));
+    let line: Vec<_> = (0..20)
+        .map(|i| at(0, 90.0 + 15.0 * i as f32, 165.0))
+        .collect();
+    drag(&mut e, line[0], &line[1..], at(0, 400.0, 165.0));
+    // 3: blue callout.
+    e.update(Message::Preset(2));
+    drag(&mut e, at(0, 700.0, 85.0), &[], at(0, 660.0, 200.0));
+    e.update(Message::Type("Pro plan".into()));
+    e.update(Message::Finish);
+    // 4: redact the password; a label and a pointer; the key blurred.
+    e.update(Message::Preset(3));
+    drag(&mut e, at(1, 92.0, 10.0), &[], at(1, 200.0, 32.0));
+    e.doc.selected = None;
+    e.update(Message::Colour(theme::ANNOTATION[3].into_rgba8()));
+    e.update(Message::Tool(Tool::Label));
+    drag(&mut e, at(2, 360.0, 200.0), &[], at(2, 360.0, 200.0));
+    e.update(Message::Type("build is green".into()));
+    e.update(Message::Finish);
+    e.doc.selected = None;
+    e.update(Message::Colour(theme::ANNOTATION[0].into_rgba8()));
+    e.update(Message::Tool(Tool::Pointer));
+    drag(&mut e, at(0, 160.0, 312.0), &[], at(0, 160.0, 312.0));
+    let b = lines::detect(&e.doc.image)
+        .into_iter()
+        .find(|b| b.y0 > t[2].y + 90.0 && b.x0 > t[2].x)
+        .unwrap();
+    e.update(Message::Tool(Tool::Blur));
+    drag(
+        &mut e,
+        pt(b.x0, b.centre() + 3.0),
+        &[pt(b.x0 + 200.0, b.centre() - 4.0)],
+        pt(b.x1, b.centre()),
+    );
+    e.doc.selected = None;
+    write(&dir, "board.png", &render(&e.doc));
+
+    let backdrop = iced::Color::from_rgb8(0x2a, 0x2d, 0x3e);
+    e.set_zoom(0.6);
+    e.update(Message::Tool(Tool::Select));
+    let size = e.size() + Size::new(560.0, 90.0);
+    shoot(e.view(), size, backdrop, &dir.join("board-editor.png"));
+
+    // The toolbar with each popover.
+    let bar = Size::new(1300.0, 470.0);
+    for (name, open, light) in [
+        ("toolbar-colour-dark.png", Message::Picker, false),
+        ("toolbar-colour-light.png", Message::Picker, true),
+        ("toolbar-board.png", Message::Menu(Menu::Board), false),
+        ("toolbar-arrows.png", Message::Slot(Tool::Arrow), false),
+        ("toolbar-blur.png", Message::Slot(Tool::Blur), false),
+    ] {
+        let mut e = Editor::new(demo_image(), 1.0);
+        e.append(field("x"));
+        if matches!(open, Message::Slot(Tool::Arrow)) {
+            e.update(Message::Tool(Tool::Line));
+        }
+        e.update(open);
+        theme::set_light(light);
+        let backdrop = if light {
+            iced::Color::from_rgb8(0xdc, 0xe0, 0xe8)
+        } else {
+            backdrop
+        };
+        shoot(e.toolbar(), bar, backdrop, &dir.join(name));
+    }
+    theme::set_light(false);
 }
 
 /// Timings on a 3440x1440 crop:

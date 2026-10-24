@@ -19,6 +19,8 @@ const ICON_FONT: Font = Font::with_name("lucide");
 pub const SEND: char = '\u{e04e}'; // lucide "arrow-up"
 pub const STOP: char = '\u{e16a}'; // lucide "square"
 pub const CLOSE: char = '\u{e1b1}'; // lucide "x"
+pub const DRAG: char = '\u{e0ee}'; // lucide "grip-vertical" (drag-out handle)
+const PIPETTE: char = '\u{e13e}'; // lucide "pipette" (colour popover: eyedropper)
 
 /// Every button is this tall (DESIGN.md: 44 px controls).
 pub const CONTROL: f32 = 44.0;
@@ -180,13 +182,36 @@ pub fn error<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
     text(label).size(14).color(theme::current().danger)
 }
 
+/// A `chip` that fills its row's share, text centred: a row of choices
+/// (presets) with one width.
+pub fn wide_chip<'a, Message: Clone + 'a>(
+    label: impl IntoFragment<'a>,
+    on_press: Message,
+) -> Button<'a, Message> {
+    let palette = theme::current();
+    let label = text(label)
+        .size(13)
+        .color(palette.text)
+        .width(iced::Fill)
+        .align_x(iced::Center);
+    chip_style(button(label).width(iced::Fill), on_press)
+}
+
 /// A suggestion (e.g. a prompt): small, fully rounded, outlined, quiet.
 pub fn chip<'a, Message: Clone + 'a>(
     label: impl IntoFragment<'a>,
     on_press: Message,
 ) -> Button<'a, Message> {
     let palette = theme::current();
-    button(text(label).size(13).color(palette.text))
+    chip_style(button(text(label).size(13).color(palette.text)), on_press)
+}
+
+fn chip_style<'a, Message: Clone + 'a>(
+    button: Button<'a, Message>,
+    on_press: Message,
+) -> Button<'a, Message> {
+    let palette = theme::current();
+    button
         .padding([8, 14])
         .on_press(on_press)
         .style(move |_, status| button::Style {
@@ -343,8 +368,19 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     square_button(
         text(glyph).font(ICON_FONT).size(18).color(fg),
         active,
-        on_press,
+        Some(on_press),
     )
+}
+
+/// A 44x44 handle that starts a drag when the button goes down (an icon
+/// button reacts on release, too late for an OS drag): quiet, grab cursor.
+pub fn drag_handle<'a, Message: Clone + 'a>(glyph: char, on_down: Message) -> Element<'a, Message> {
+    let fg = theme::current().text;
+    let look = square_button(text(glyph).font(ICON_FONT).size(18).color(fg), false, None);
+    iced::widget::mouse_area(look)
+        .on_press(on_down)
+        .interaction(iced::mouse::Interaction::Grab)
+        .into()
 }
 
 /// Thin vertical line between toolbar groups.
@@ -366,11 +402,12 @@ pub fn colour_button<'a, Message: Clone + 'a>(
     open: bool,
     on_press: Message,
 ) -> Button<'a, Message> {
-    square_button(dot(colour, 22.0, true), open, on_press)
+    square_button(dot(colour, 22.0, true), open, Some(on_press))
 }
 
 /// The colour picker popover: the colour swatches, stroke widths (thin/medium/
-/// thick, `width` = the chosen one) and a custom colour as hex.
+/// thick, `width` = the chosen one), a custom colour as hex with an eyedropper
+/// (`on_pick`: pick from the image), then `more` (the editor's presets).
 #[allow(clippy::too_many_arguments)]
 pub fn colour_popover<'a, Message: Clone + 'a>(
     colours: &[Color],
@@ -380,6 +417,8 @@ pub fn colour_popover<'a, Message: Clone + 'a>(
     on_colour: impl Fn(Color) -> Message,
     on_width: impl Fn(usize) -> Message,
     on_hex: impl Fn(String) -> Message + 'a,
+    on_pick: Message,
+    more: Element<'a, Message>,
 ) -> Container<'a, Message> {
     let palette = theme::current();
     let swatch = |&c: &Color| -> Element<'a, Message> {
@@ -407,14 +446,19 @@ pub fn colour_popover<'a, Message: Clone + 'a>(
         .map(|chunk| row(chunk.iter().map(swatch)).spacing(6).into());
     let widths = row((0..3).map(|i| {
         let size = [4.0, 8.0, 12.0][i];
-        square_button(dot(palette.text, size, false), i == width, on_width(i)).into()
+        square_button(
+            dot(palette.text, size, false),
+            i == width,
+            Some(on_width(i)),
+        )
+        .into()
     }))
     .spacing(4);
     use iced::widget::{column, text_input};
     let custom = text_input("#RRGGBB", hex)
         .on_input(on_hex)
         .size(14)
-        .padding([8, 12])
+        .padding([12, 12])
         .style(|_, _| text_input::Style {
             background: palette.hover.into(),
             border: Border {
@@ -427,8 +471,15 @@ pub fn colour_popover<'a, Message: Clone + 'a>(
             value: palette.text,
             selection: theme::ACCENT_START.scale_alpha(0.4),
         });
+    let pick = tooltip(
+        icon_button(PIPETTE, false, on_pick),
+        pill("Pick a colour from the image (D)"),
+        tooltip::Position::Bottom,
+    )
+    .gap(10);
+    let custom = row![custom, pick].spacing(6).align_y(iced::Center);
     surface(
-        column![column(rows).spacing(6), widths, custom]
+        column![column(rows).spacing(6), widths, custom, more]
             .spacing(10)
             .padding(4)
             .width(6.0 * 32.0 + 5.0 * 6.0 + 8.0),
@@ -458,14 +509,14 @@ fn dot<'a, Message: 'a>(colour: Color, size: f32, ring: bool) -> Element<'a, Mes
 fn square_button<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
     active: bool,
-    on_press: Message,
+    on_press: Option<Message>,
 ) -> Button<'a, Message> {
     let palette = theme::current();
     button(container(content).center(iced::Fill))
         .width(CONTROL)
         .height(CONTROL)
         .padding(0)
-        .on_press(on_press)
+        .on_press_maybe(on_press)
         .style(move |_, status| {
             let background = match (active, status) {
                 (true, _) => Some(accent(status)),
