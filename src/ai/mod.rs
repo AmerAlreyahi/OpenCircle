@@ -148,6 +148,9 @@ pub fn ask_stream(
         Provider::Invalid(raw) => Err(AiError::NotConfigured(format!(
             "the AI provider setting \"{raw}\" isn't recognised (Settings, AI)"
         ))),
+        Provider::Unreadable => Err(AiError::NotConfigured(
+            "the settings file couldn't be read, so AI is off (Settings, AI)".into(),
+        )),
         Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, on_delta),
         Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, on_delta),
     }

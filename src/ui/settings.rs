@@ -541,7 +541,8 @@ impl State {
             problems: Vec::new(),
             notice: warnings
                 .first()
-                .map(|w| format!("Some saved settings were invalid and were reset ({w})")),
+                // Not "reset": an unknown or unread provider is kept off, not defaulted.
+                .map(|w| format!("Some saved settings were invalid ({w})")),
         };
         s.revalidate();
         s
@@ -623,6 +624,17 @@ impl State {
 /// Everything wrong with `cfg`, as "key: reason" lines. The shared validator is
 /// `Config::parse`, run over exactly what `save` would write.
 fn problems(cfg: &Config, key_saved: bool) -> Vec<String> {
+    if cfg.ai.provider == Provider::Unreadable {
+        // It cannot be written: report it, and check the rest as if one were picked.
+        let mut rest = cfg.clone();
+        rest.ai.provider = Provider::Browser;
+        let mut out = problems(&rest, key_saved);
+        out.insert(
+            0,
+            "ai.provider: Choose a provider (the settings file couldn't be read)".into(),
+        );
+        return out;
+    }
     let mut out = match toml::to_string_pretty(cfg) {
         Ok(text) => Config::parse(&text)
             .1
@@ -700,7 +712,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
                 }
                 Provider::OpenaiCompatible if ai.model == default_model => ai.model.clear(),
                 Provider::OpenaiCompatible => {}
-                Provider::Invalid(_) => {} // never offered: only a bad file has it
+                Provider::Invalid(_) | Provider::Unreadable => {} // never offered: only a bad file has it
             }
             state.key.refresh(&*state.store, p);
         }
@@ -1051,7 +1063,10 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
         // An unknown value from the file: none is selected, Save waits for a pick.
         issue(&state.problems, "ai.provider"),
     )];
-    if matches!(ai.provider, Provider::Browser | Provider::Invalid(_)) {
+    if matches!(
+        ai.provider,
+        Provider::Browser | Provider::Invalid(_) | Provider::Unreadable
+    ) {
         return rows; // no model, server or key: the browser, or nothing chosen yet
     }
     if compat {
@@ -1444,6 +1459,34 @@ pub(super) mod tests {
         assert!(matches!(update(&mut s, Message::Save), Outcome::Saved(_)));
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("provider = \"anthropic\""), "{text}");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn an_unreadable_file_keeps_ai_off_until_a_provider_is_picked() {
+        let path = tmp("unreadable");
+        let (config, warnings) = Config::parse("theme = = =");
+        let store = Box::new(MemoryStore::default());
+        let mut s = State::new(config, warnings, Some(path.clone()), store);
+        let notice = s.notice.clone().unwrap();
+        assert!(
+            !notice.contains("reset") && notice.contains("AI is off"),
+            "{notice}"
+        );
+        update(&mut s, Message::Section(Section::Ai));
+        let texts = shot::texts(view(&s));
+        assert!(
+            texts.iter().any(|t| t.contains("couldn't be read")),
+            "{texts:?}"
+        );
+        assert_eq!(s.problems.len(), 1, "{:?}", s.problems);
+        update(&mut s, Message::Save);
+        assert!(!path.exists(), "saved a guessed provider");
+        update(&mut s, Message::Provider(Provider::Browser));
+        assert!(s.problems.is_empty(), "{:?}", s.problems);
+        assert!(matches!(update(&mut s, Message::Save), Outcome::Saved(_)));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("provider = \"browser\""), "{text}");
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

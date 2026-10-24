@@ -33,7 +33,8 @@
 //! Rules: an invalid value gives a warning plus that field's default, never a
 //! crash and never a rewrite of the file (only `save` writes). One exception:
 //! an unknown `ai.provider` is kept as `Provider::Invalid` (fail closed: AI is
-//! off until the user picks one, never a fallback to another provider). Unknown
+//! off until the user picks one, never a fallback to another provider); a file
+//! that exists but can't be read or parsed gives `Provider::Unreadable`. Unknown
 //! keys are ignored. Once released, this format is frozen: migrate, never break.
 
 use std::collections::HashSet;
@@ -50,6 +51,8 @@ use toml::{Table, Value};
 pub const VERSION: u32 = 1;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
+/// Ends the warning when `Provider::Unreadable` is set.
+const AI_OFF: &str = ", but AI is off until you choose a provider in Settings > AI";
 /// Live translate repeats this often (ms); the allowed range is `LIVE_INTERVAL_MS`.
 pub const DEFAULT_LIVE_INTERVAL_MS: u32 = 1000;
 pub const LIVE_INTERVAL_MS: std::ops::RangeInclusive<u32> = 500..=5000;
@@ -73,6 +76,9 @@ pub enum Provider {
     /// The config names a provider we don't know (a typo like "antropic"): the
     /// user's value as written. Nothing is sent anywhere until they pick one.
     Invalid(String),
+    /// The config file exists but could not be read or parsed (or `ai` is not a
+    /// table): we can't know what the user chose, so AI is off. Never written.
+    Unreadable,
 }
 
 impl Provider {
@@ -83,6 +89,7 @@ impl Provider {
             Provider::Anthropic => "anthropic",
             Provider::OpenaiCompatible => "openai_compatible",
             Provider::Invalid(_) => "invalid",
+            Provider::Unreadable => "unreadable",
         }
     }
 
@@ -109,10 +116,14 @@ impl Provider {
 }
 
 /// Written as its id; `Invalid` writes the user's own value back, never "browser".
+/// `Unreadable` refuses: saving must not replace an unread choice with a guess.
 impl Serialize for Provider {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             Provider::Invalid(raw) => s.serialize_str(raw),
+            Provider::Unreadable => Err(serde::ser::Error::custom(
+                "ai.provider: choose a provider (the settings file couldn't be read)",
+            )),
             p => s.serialize_str(p.id()),
         }
     }
@@ -305,10 +316,20 @@ impl Config {
             Ok(text) => Self::parse(&text),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Config::default(), vec![]),
             Err(e) => (
-                Config::default(),
-                vec![format!("cannot read the config file ({e}); using defaults")],
+                Self::unreadable(),
+                vec![format!(
+                    "cannot read the config file ({e}); using defaults{AI_OFF}"
+                )],
             ),
         }
+    }
+
+    /// Defaults, but AI off: the file is there, so the user may have chosen a
+    /// provider we can't see. Never guess Browser for them.
+    fn unreadable() -> Config {
+        let mut c = Config::default();
+        c.ai.provider = Provider::Unreadable;
+        c
     }
 
     /// Validate TOML text field by field.
@@ -319,9 +340,9 @@ impl Config {
             Err(e) => {
                 let line = e.to_string().lines().next().unwrap_or_default().to_string();
                 return (
-                    Config::default(),
+                    Self::unreadable(),
                     vec![format!(
-                        "config is not valid TOML ({line}: {}); using defaults",
+                        "config is not valid TOML ({line}: {}); using defaults{AI_OFF}",
                         e.message()
                     )],
                 );
@@ -364,7 +385,10 @@ impl Config {
                 |s: &String| check_folder(s),
             );
         }
-        if let Some(t) = section(&root, "ai", &mut w) {
+        if root.get("ai").is_some_and(|v| !v.is_table()) {
+            w.push(format!("ai: expected a table; using defaults{AI_OFF}"));
+            c.ai.provider = Provider::Unreadable;
+        } else if let Some(t) = section(&root, "ai", &mut w) {
             c.ai.provider = Provider::read(t, &mut w);
             c.ai.base_url =
                 get_checked(t, "ai.", "base_url", d.ai.base_url, &mut w, |s: &String| {
@@ -882,12 +906,30 @@ mod tests {
 
     #[test]
     fn broken_toml_and_wrong_shapes_do_not_crash() {
+        // Defaults everywhere, except AI: off (fail closed), never Browser.
         let (c, w) = Config::parse("theme = = =");
-        assert_eq!(c, Config::default());
+        assert_eq!(c, Config::unreadable());
         assert_eq!(w.len(), 1);
+        assert!(w[0].contains("AI is off"), "{w:?}");
         let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 9\n");
-        assert_eq!(c, Config::default());
+        assert_eq!(c, Config::unreadable());
         assert_eq!(w.len(), 3, "{w:?}");
+        assert!(
+            w.iter()
+                .any(|m| m.starts_with("ai:") && m.contains("AI is off"))
+        );
+        // Nothing can save it: an unread choice is never replaced by a guess.
+        assert!(toml::to_string_pretty(&c).is_err());
+        let dir = tmp_dir("unreadable");
+        assert!(c.save_to(&dir.join("config.toml")).is_err());
+        // A file that exists but can't be read (here: a folder) is the same.
+        std::fs::create_dir_all(&dir).unwrap();
+        let (c, w) = Config::load_from(&dir);
+        assert_eq!((c.ai.provider, w.len()), (Provider::Unreadable, 1));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Only a missing file is a first run: Browser.
+        let (c, _) = Config::load_from(&dir.join("nope.toml"));
+        assert_eq!(c.ai.provider, Provider::Browser);
     }
 
     #[test]

@@ -75,11 +75,17 @@ pub fn credentials() -> Result<(AiConfig, Option<Secret>), String> {
 /// The one gate every AI use passes (Ask AI, Explain, translate): an unknown
 /// provider stops here, before the keyring, the network or the browser.
 fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> {
-    if let Provider::Invalid(raw) = &cfg.provider {
-        return Err(format!(
-            "Your AI provider setting \"{raw}\" isn't recognised. Fix it in Settings > AI.\n\n\
-             Nothing was sent anywhere."
-        ));
+    let why = match &cfg.provider {
+        Provider::Invalid(raw) => {
+            format!("Your AI provider setting \"{raw}\" isn't recognised. Fix it in Settings > AI.")
+        }
+        Provider::Unreadable => "Your settings file couldn't be read; AI is off until you \
+            fix it in Settings > AI."
+            .into(),
+        _ => String::new(),
+    };
+    if !why.is_empty() {
+        return Err(format!("{why}\n\nNothing was sent anywhere."));
     }
     if cfg.provider == Provider::Browser {
         return Err(
@@ -426,25 +432,38 @@ pub(crate) mod tests {
             "the API server was contacted"
         );
 
-        // An unknown provider ("antropic") with the same fake browser and server:
-        // no URL opened, no HTTP request, even if a Setup were built by hand.
+        // An unknown provider ("antropic") or a broken config file, with the same
+        // fake browser and server: no URL opened, no HTTP request, both through
+        // the real gate (setup) and even if a Setup were built by hand.
         std::fs::remove_file(&seen).unwrap();
-        let invalid = Setup {
-            cfg: AiConfig {
-                provider: Provider::Invalid("antropic".into()),
+        let broken = Config::parse("[ai]\nprovider = \"anthropic\"\nmodel = = =\n").0;
+        for (provider, why) in [
+            (Provider::Invalid("antropic".into()), "\"antropic\""),
+            (broken.ai.provider, "couldn't be read"),
+        ] {
+            let cfg = AiConfig {
+                provider,
                 ..setup.cfg.clone()
-            },
-            key: None,
-            png: b"png".to_vec(),
-        };
-        assert!(!invalid.browser());
-        let mut got = Vec::new();
-        let result = stream(&invalid, &[ai::Message::user("hi")], |piece| {
-            got.push(piece.to_string());
-            true
-        });
-        assert!(result.unwrap_err().contains("antropic"));
-        assert!(got.is_empty());
+            };
+            let crop = Crop {
+                width: 1,
+                height: 1,
+                rgba: vec![0; 4],
+            };
+            assert!(setup_for(cfg.clone(), &crop).unwrap_err().contains(why));
+            let invalid = Setup {
+                cfg,
+                key: None,
+                png: b"png".to_vec(),
+            };
+            assert!(!invalid.browser());
+            let mut got = Vec::new();
+            let result = stream(&invalid, &[ai::Message::user("hi")], |piece| {
+                got.push(piece.to_string());
+                true
+            });
+            assert!(result.is_err() && got.is_empty(), "{result:?} {got:?}");
+        }
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert!(!seen.exists(), "the browser was opened");
         assert!(
@@ -493,6 +512,11 @@ pub(crate) mod tests {
             ..AiConfig::default()
         };
         assert_eq!(credentials_for(cfg).unwrap_err(), msg);
+        // A config file that is there but broken: AI off, not Browser.
+        let broken = Config::parse("theme = = =").0.ai;
+        assert!(credentials_for(broken).unwrap_err().starts_with(
+            "Your settings file couldn't be read; AI is off until you fix it in Settings > AI."
+        ));
         // A known provider is unchanged: Browser still needs no key and sends no image.
         let crop = Crop {
             width: 1,
