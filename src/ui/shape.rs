@@ -27,6 +27,7 @@ pub fn corner(max: f32, w: f32, h: f32) -> f32 {
 /// A `w` x `h` rounded rectangle of corner radius `r` (pixels) as `(x, y, w, h)`
 /// bands: one rectangle per corner row, one for the straight middle.
 // ponytail: hard (aliased) edge; X11 without a compositor has no better.
+#[cfg(any(target_os = "linux", test))]
 pub fn round_rect(w: u32, h: u32, r: u32) -> Vec<(i32, i32, u32, u32)> {
     let r = r.min(w / 2).min(h / 2);
     let mut bands = Vec::new();
