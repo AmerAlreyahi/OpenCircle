@@ -1255,6 +1255,83 @@ mod real {
         assert!(dark.count() > 200);
     }
 
+    /// Wikipedia's search field and its button: only the glyphs go (the
+    /// field's frame, its magnifier and the button's frame stay) and each
+    /// translation is drawn inside its own control. Before: the frame and
+    /// the magnifier were erased with the placeholder.
+    #[test]
+    fn form_controls_keep_their_frames() {
+        let (img, (w, h)) = image(include_bytes!("fixtures/form.png"));
+        let blocks = group_blocks(&lines("form", (w, h)));
+        assert_eq!(blocks.len(), 2);
+        let tr = ["ابحث في ويكيبيديا".to_string(), "ابحث".to_string()];
+        let mut out = img.clone();
+        let drawn = render(&mut out, w as u32, h as u32, &blocks, &tr, true);
+        assert_eq!(drawn.drawn, 2, "{drawn:?}");
+        let px = changed(&img, &out, w);
+        // frames: rows 7, 8 and 32, columns 34 (field), 355 and 410 (button);
+        // the magnifier: x 35..48, y 12..28
+        let frame = |&(x, y): &(usize, usize)| {
+            [7, 8, 32].contains(&y)
+                || [34, 355, 410].contains(&x)
+                || ((35..48).contains(&x) && (12..28).contains(&y))
+        };
+        let hit: Vec<_> = px.iter().filter(|p| frame(p)).collect();
+        assert!(hit.is_empty(), "frame pixels changed: {hit:?}");
+        // the placeholder inside the field, the label inside the button
+        let off = (px.iter())
+            .filter(|&&(x, y)| {
+                !(9..32).contains(&y) || !(48..355).contains(&x) && !(356..410).contains(&x)
+            })
+            .count();
+        assert_eq!(off, 0, "drawn outside its control");
+        assert!(px.iter().any(|p| p.0 > 356) && px.iter().any(|p| p.0 < 355));
+    }
+
+    /// Radio buttons before their labels stay, and no label is drawn over
+    /// them; the labels keep their colour. Before: the circles were erased
+    /// with the labels, and labels came back orange or blue.
+    #[test]
+    fn radio_buttons_survive_their_labels() {
+        let (img, (w, h)) = image(include_bytes!("fixtures/radios.png"));
+        let ls = lines("radios", (w, h));
+        let blocks = group_blocks(&ls);
+        let tr: Vec<String> = blocks.iter().map(|b| arabic(&b.text)).collect();
+        let mut out = img.clone();
+        let drawn = render(&mut out, w as u32, h as u32, &blocks, &tr, true);
+        assert_eq!(drawn.drawn, blocks.len(), "{drawn:?}");
+        // the circles: x 20..40 of the crop, on the labels' rows
+        let radio = ["Small", "Standard", "Large", "Wide", "Automatic", "Light"];
+        let rows: Vec<[f32; 4]> = (ls.iter())
+            .filter(|l| radio.contains(&l.text.as_str()))
+            .map(|l| l.bounds)
+            .collect();
+        assert_eq!(rows.len(), 7);
+        // the labels are near black, not a ClearType fringe's orange or the
+        // selected radio's blue
+        for l in ls.iter().filter(|l| radio.contains(&l.text.as_str())) {
+            let c = erase::erase_line(&mut img.clone(), w, h, l.bounds).0.color;
+            let sat = c.iter().max().unwrap() - c.iter().min().unwrap();
+            assert!(sat < 40 && c[0] < 80, "{}: {c:?}", l.text);
+        }
+        let hit = changed(&img, &out, w)
+            .into_iter()
+            .filter(|&(x, y)| x < 41 && rows.iter().any(|b| inside((x, y), *b, 0.0)))
+            .count();
+        assert_eq!(hit, 0, "radio pixels changed");
+        // each label stays by its radio, inside its own box (not pushed to
+        // the panel's far edge)
+        let far = changed(&img, &out, w)
+            .into_iter()
+            .filter(|&(x, y)| {
+                let y = y as f32;
+                let row = rows.iter().find(|b| y >= b[1] && y < b[1] + b[3]);
+                row.is_some_and(|b| x as f32 > b[0] + b[2] + 1.0)
+            })
+            .count();
+        assert_eq!(far, 0, "labels drawn away from their radios");
+    }
+
     /// Specks: after the erase no glyph pixel is left in the lines' boxes
     /// (white page: anything under luma 200 is a remnant). Before: the tops
     /// of ascenders drawn in ClearType's fringe colours (h, l, f) stayed.

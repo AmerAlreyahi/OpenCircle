@@ -327,6 +327,7 @@ mod tests {
             stroke: 3.0,
             residual: 0.0,
             band: 0.0,
+            text_x: [i32::MIN, i32::MAX],
         }
     }
 

@@ -41,6 +41,10 @@ pub struct LineStyle {
     /// when what it found is no text (none, most of the box, or the
     /// background's colour).
     pub residual: f32,
+    /// Where the line's text may be redrawn, x0..x1: an icon at either end
+    /// of the box (a radio button, a magnifier) is no text and stays, so the
+    /// redraw keeps off it. Unbounded when there is none.
+    pub text_x: [i32; 2],
 }
 
 /// The pixels an erase changed, with their old colour (byte index, RGB):
@@ -104,6 +108,7 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
             band: 0.0,
             stroke: 0.0,
             residual: 0.0,
+            text_x: [i32::MIN, i32::MAX],
         };
         return (style, Vec::new());
     }
@@ -133,7 +138,7 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
     // over busy art the ring noise (so `t`) is high and an outline or shadow
     // falls under it: next to strong glyph pixels the base threshold is enough
     let next_to = dilate(&strong, w, HALO as usize);
-    let cand: Vec<bool> = (0..w * h)
+    let mut cand: Vec<bool> = (0..w * h)
         .map(|i| strong[i] || (next_to[i] && dist[i] > 28.0 && !on_ring(i)))
         .collect();
 
@@ -161,6 +166,18 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
             })
         })
     };
+    // A text field's or a button's frame is no text: a thin straight run
+    // longer than any glyph (a column of 90 % of the OCR box's height, a row
+    // as wide as the box or 2.5 heights long), not in an art colour, stays,
+    // with its anti-aliasing.
+    let ocr_h = b[3] / 1.3;
+    let row_len = (0.85 * (w as f32 - 2.0 * RING as f32)).min(2.5 * ocr_h);
+    let lines: Vec<bool> = (0..w * h).map(|i| cand[i] && !art(px(i))).collect();
+    let (frame, frame_cols) = straight(&lines, w, 0.9 * ocr_h, row_len);
+    let near_frame = dilate(&frame, w, 1);
+    for (c, f) in cand.iter_mut().zip(&frame) {
+        *c &= !f;
+    }
     // First pass without art colours finds the fill. A shadow or outline in
     // an art colour (black over dark trees) hugs the fill: art-coloured pixels
     // are then much denser within 3 px of the fill than farther out, and the
@@ -183,7 +200,13 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
     }
     let hugs = n_near * a_far.max(1) > 3 * n_far * a_near.max(1);
     let is_art = |i: usize| art_px(i) && !(hugs && by_fill[i]);
-    let text_cand: Vec<bool> = (0..w * h).map(|i| cand[i] && !is_art(i)).collect();
+    let mut text_cand: Vec<bool> = (0..w * h).map(|i| cand[i] && !is_art(i)).collect();
+    // an icon at either end (a radio button, a magnifier) stays as it is,
+    // and its colour is not the text's
+    let [keep0, keep1] = icons(&text_cand, w);
+    for i in (0..w * h).filter(|&i| i % w < keep0 || i % w >= keep1) {
+        text_cand[i] = false;
+    }
     let cl = clusters(&text_cand, w, &px, &|_| false);
     let mut glyph = vec![false; w * h];
     let mut ink_only = vec![false; w * h];
@@ -204,6 +227,25 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
             None => {}
         }
     }
+    // the redraw keeps off an icon, and off a frame beside the text (a
+    // button's edge)
+    let inked: Vec<usize> = (0..w)
+        .filter(|&x| (0..h).any(|y| glyph[y * w + x]))
+        .collect();
+    let (t0, t1) = (
+        inked.first().copied().unwrap_or(0),
+        inked.last().map_or(w, |x| x + 1),
+    );
+    let left = (frame_cols.iter().filter(|&&c| c < t0).map(|&c| c + 2))
+        .chain((keep0 > 0).then_some(keep0))
+        .max();
+    let right = (frame_cols.iter().filter(|&&c| c >= t1).map(|&c| c - 1))
+        .chain((keep1 < w).then_some(keep1))
+        .min();
+    let text_x = [
+        left.map_or(i32::MIN, |x| x0 + x as i32),
+        right.map_or(i32::MAX, |x| x0 + x as i32),
+    ];
     // the background's brightness: the median of the ring
     let mut ring_l: Vec<f32> = ring.iter().map(|&i| luma(px(i))).collect();
     ring_l.sort_by(f32::total_cmp);
@@ -226,7 +268,21 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
     let color = match (cl.first(), darkest(&glyph, &px)) {
         (Some(c), Some(core)) if bg_luma > 170.0 && luma(c.color) < bg_luma + 8.0 => {
             let contrast = |c: [u8; 3]| bg_luma - luma(c);
-            if contrast(c.color) >= 0.7 * contrast(core) {
+            // Nor is a fringe colour around grey ink: small ClearType text
+            // is warm on one side of a stem and cool on the other, about as
+            // much of each (a link is mostly one hue).
+            let sat = |c: [u8; 3]| c.iter().max().unwrap() - c.iter().min().unwrap();
+            let (mut warm, mut cool) = (0, 0);
+            for p in (0..w * h)
+                .filter(|&i| glyph[i])
+                .map(px)
+                .filter(|&p| sat(p) > 60)
+            {
+                if p[0] > p[2] { warm += 1 } else { cool += 1 }
+            }
+            let fringe =
+                sat(c.color) > 60 && sat(core) < 40 && warm.min(cool) * 5 >= warm.max(cool) * 2;
+            if contrast(c.color) >= 0.7 * contrast(core) && !fringe {
                 c.color
             } else {
                 core
@@ -294,6 +350,7 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
     for (i, m) in mask.iter_mut().enumerate() {
         *m |=
             !on_ring(i) && (d2[i] || (d3[i] && dist[i] > t_lo && toward(i)) || (d4[i] && dark(i)));
+        *m &= !near_frame[i] && i % w >= keep0 && i % w < keep1;
     }
 
     // 5. fill the holes from the background around them
@@ -339,6 +396,7 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
         band,
         stroke: stroke_width(&ink_only, w),
         residual,
+        text_x,
     };
     (style, undo)
 }
@@ -433,6 +491,112 @@ fn fill(
     }
     let n = out.len().max(1) as f32;
     (out, unsure / n)
+}
+
+/// Frame lines in `m`: thin (one or two px side by side) straight runs, a
+/// column run at least `col` long or a row run at least `row` long. Returns
+/// their pixels and the columns of the column runs. A column run through the
+/// whole window (ring to ring) is art crossing the box, not a frame (the
+/// colour test handles it); a thick run is a stem, a trunk, a bar; a column
+/// run must reach past the rest of the ink at both ends.
+fn straight(m: &[bool], w: usize, col: f32, row: f32) -> (Vec<bool>, Vec<usize>) {
+    let h = m.len() / w;
+    let mut out = vec![false; m.len()];
+    // runs (line, start, end) along each line of `lines`, `len` long
+    let runs = |lines: usize, len: usize, idx: &dyn Fn(usize, usize) -> usize, min: f32| {
+        let mut found = Vec::new();
+        for l in 0..lines {
+            let mut k = 0;
+            while k < len {
+                let start = k;
+                while k < len && m[idx(l, k)] {
+                    k += 1;
+                }
+                let through = len == h && start <= RING as usize && k + RING as usize >= len;
+                if (k - start) as f32 >= min && !through {
+                    found.push((l, start, k));
+                }
+                k += 1;
+            }
+        }
+        // thin: no long run two lines away on either side
+        let near = |l: usize, d: isize| found.iter().any(|r| r.0 as isize == l as isize + d);
+        let thick = |l| near(l, -2) || near(l, 2) || (near(l, -1) && near(l, 1));
+        let thin: Vec<_> = found.iter().filter(|r| !thick(r.0)).copied().collect();
+        thin
+    };
+    // a column frame reaches past the rest of the ink, above and below (a
+    // stem of the text's own height does not)
+    for (y, x0, x1) in runs(h, w, &|y, x| y * w + x, row) {
+        (x0..x1).for_each(|x| out[y * w + x] = true);
+    }
+    let cols = runs(w, h, &|x, y| y * w + x, col);
+    let near_col = |x: usize| cols.iter().any(|r| r.0.abs_diff(x) <= 1);
+    let rest: Vec<usize> = (0..h)
+        .filter(|&y| (0..w).any(|x| m[y * w + x] && !out[y * w + x] && !near_col(x)))
+        .collect();
+    let cols: Vec<_> = match (rest.first(), rest.last()) {
+        (Some(&top), Some(&bottom)) => (cols.iter())
+            .filter(|r| r.1 + 2 <= top && r.2 >= bottom + 3)
+            .copied()
+            .collect(),
+        _ => Vec::new(),
+    };
+    for &(x, y0, y1) in &cols {
+        (y0..y1).for_each(|y| out[y * w + x] = true);
+    }
+    (out, cols.into_iter().map(|r| r.0).collect())
+}
+
+/// Icons at the ends of a line (a radio button before its label, a
+/// magnifier in a search field): ink before the first (after the last) gap
+/// of 3+ empty columns that is as wide as about two thirds of its height,
+/// and a third taller than the rest of the line, reaching above it.
+/// Returns the columns the text spans without them, x0..x1 (all: no icon).
+// ponytail: shape-blind (a big round initial would pass); a real icon
+// classifier if that ever happens.
+fn icons(glyph: &[bool], w: usize) -> [usize; 2] {
+    let h = glyph.len() / w;
+    let inked = |x: usize| (0..h).any(|y| glyph[y * w + x]);
+    // runs of inked columns, split at gaps of 3+ empty ones
+    let mut segs: Vec<[usize; 2]> = Vec::new();
+    for x in (0..w).filter(|&x| inked(x)) {
+        match segs.last_mut() {
+            Some(s) if x - s[1] < 3 => s[1] = x + 1,
+            _ => segs.push([x, x + 1]),
+        }
+    }
+    // the longest run of inked rows (one-row gaps bridged) over columns x0..x1
+    let rows = |[x0, x1]: [usize; 2]| {
+        let on: Vec<usize> = (0..h)
+            .filter(|&y| (x0..x1).any(|x| glyph[y * w + x]))
+            .collect();
+        let (mut best, mut start) = ([0, 0], 0);
+        for k in 0..on.len() {
+            if k > 0 && on[k] - on[k - 1] > 2 {
+                start = k;
+            }
+            if on[k] + 1 - on[start] > best[1] - best[0] {
+                best = [on[start], on[k] + 1];
+            }
+        }
+        best
+    };
+    let icon = |seg: [usize; 2], rest: [usize; 2]| {
+        let (r, o) = (rows(seg), rows(rest));
+        let (sh, oh) = ((r[1] - r[0]) as f32, (o[1] - o[0]) as f32);
+        r[0] < o[0] && sh >= 1.3 * oh && (seg[1] - seg[0]) as f32 >= 0.6 * sh
+    };
+    let mut keep = [0, w];
+    if let [first, .., last] = segs[..] {
+        if icon(first, [segs[1][0], last[1]]) {
+            keep[0] = segs[1][0];
+        }
+        if icon(last, [first[0], segs[segs.len() - 2][1]]) {
+            keep[1] = segs[segs.len() - 2][1];
+        }
+    }
+    keep
 }
 
 /// Dilation by one pixel up, down, left and right.

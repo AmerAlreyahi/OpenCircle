@@ -174,6 +174,16 @@ pub fn render(
     let mut restore = Vec::new();
     for (i, t, styles, undo) in todo {
         let b = &blocks[i];
+        // never over an icon or a frame the erase left (a radio button, a
+        // field's edge), and a label after one stays by it, in its own box
+        let [rx, ry, rw, rh] = report.rooms[i];
+        let x0 = (styles.iter()).fold(rx, |x, s| x.max(s.text_x[0] as f32));
+        let x1 = (styles.iter()).fold(rx + rw, |x, s| x.min(s.text_x[1] as f32));
+        let x1 = match styles.iter().any(|s| s.text_x[0] > i32::MIN) {
+            true => x1.min(b.bounds[0] + b.bounds[2]),
+            false => x1,
+        };
+        report.rooms[i] = [x0, ry, (x1 - x0).max(0.0), rh];
         let p = draw::Placement {
             bounds: report.rooms[i],
             line_h: b.lines[0].bounds[3],
