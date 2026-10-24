@@ -256,9 +256,13 @@ pub fn body(w: f64, h: f64) -> Rect4 {
     ]
 }
 
-/// What may load in the card: Google's own pages over https (`google_host`),
-/// and our in-memory pages (`own`). Never file://, data:, javascript:, plain
-/// http or another site: those go to the user's browser on a click, or nowhere.
+/// What may load in the card (a page or a frame: WebKitGTK and WebView2 ask
+/// about navigations only, never about a page's images, scripts or styles):
+/// Google's own Lens / Search pages over https (`google_host`), and our
+/// in-memory pages (`own`). Never file://, data:, javascript:, plain http,
+/// another site, or Google's user-content / static hosts (googleusercontent,
+/// ggpht, gstatic: anyone's files, a phishing page in a trusted card): those
+/// go to the user's browser on a click, or nowhere.
 pub fn allowed(url: &str, own: &str) -> bool {
     if url == own || is_history(url, own) || url == "about:blank" {
         return true;
@@ -270,32 +274,20 @@ pub fn allowed(url: &str, own: &str) -> bool {
     google_host(&rest[..end])
 }
 
-/// Google's hosts Lens and AI Mode need: google.<tld> (google.com, google.de,
-/// google.co.uk, google.com.br), www. / consent. of those, *.google.com,
-/// gstatic.com, googleusercontent.com, ggpht.com (and their subdomains).
-/// Exact ASCII labels only: no port, userinfo, punycode look-alike or
+/// The hosts Lens and AI Mode pages come from (seen on both VMs: the Lens
+/// upload, its redirect to Search, the consent page, the "unusual traffic"
+/// check and its reCAPTCHA frame): lens.google.com, ipv4. / ipv6.google.com
+/// (the check), and google.<tld> (google.com, google.de, google.co.uk,
+/// google.com.br) bare or with www. / consent. Exact ASCII labels only: no
+/// port, userinfo, punycode look-alike, other subdomain or
 /// "google.com.evil.example".
 pub fn google_host(host: &str) -> bool {
-    if host.is_empty()
-        || !host
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
-    {
-        return false;
+    if matches!(
+        host,
+        "lens.google.com" | "ipv4.google.com" | "ipv6.google.com"
+    ) {
+        return true;
     }
-    for base in [
-        "google.com",
-        "gstatic.com",
-        "googleusercontent.com",
-        "ggpht.com",
-    ] {
-        if host == base || host.strip_suffix(base).is_some_and(|s| s.ends_with('.')) {
-            return host
-                .split('.')
-                .all(|l| !l.is_empty() && !l.starts_with("xn--"));
-        }
-    }
-    // google.<cc>, google.co.<cc>, google.com.<cc>, with www. or consent.
     let host = (host
         .strip_prefix("www.")
         .or_else(|| host.strip_prefix("consent.")))
@@ -305,7 +297,7 @@ pub fn google_host(host: &str) -> bool {
     };
     let cc = |l: &str| l.len() == 2 && l.bytes().all(|b| b.is_ascii_lowercase());
     match tld.split_once('.') {
-        None => cc(tld),
+        None => tld == "com" || cc(tld),
         Some((second, cc_)) => matches!(second, "co" | "com") && cc(cc_),
     }
 }
@@ -564,10 +556,11 @@ mod tests {
             "https://google.co.uk/",
             "https://www.google.com.br/x",
             "https://consent.google.fr/ml",
-            "https://www.gstatic.com/recaptcha/x.js",
-            "https://lh3.googleusercontent.com/a",
-            "https://yt3.ggpht.com/a",
-            "https://accounts.google.com/x",
+            "https://consent.google.com/ml",
+            "https://google.com/",
+            "https://www.google.com/sorry/index?continue=x",
+            "https://ipv4.google.com/sorry/index",
+            "https://www.google.com/recaptcha/enterprise/anchor",
             own,
         ] {
             assert!(allowed(ok, own), "{ok}");
@@ -589,6 +582,23 @@ mod tests {
             "https://en.wikipedia.org/wiki/Lighthouse",
             "http://www.google.com/",
             "https://ep2.adtrafficquality.google/sodar",
+            // Google's user-content / static hosts: anyone's files, never a page here.
+            "https://lh3.googleusercontent.com/a",
+            "https://evil-site.googleusercontent.com/login.html",
+            "https://yt3.ggpht.com/a",
+            "https://www.gstatic.com/recaptcha/x.js",
+            "https://gstatic.com/x",
+            // Other Google subdomains: not what Lens or AI Mode need.
+            "https://sites.google.com/view/evil",
+            "https://docs.google.com/forms/d/x",
+            "https://accounts.google.com/x",
+            "https://lens.google.com.evil.com/",
+            "https://www.lens.google.com/",
+            "https://www.www.google.com/",
+            "https://google.comm/",
+            "https://google.c0m/",
+            "https://google.co.ukk/",
+            "https://googIe.com/",
         ] {
             assert!(!allowed(bad, own), "{bad}");
         }
@@ -630,6 +640,12 @@ mod tests {
         // Not the user's doing (a script, an ad, a redirect chain): dropped.
         assert_eq!(go(site, own, false, false, &mut limit, s(0)), Go::Drop);
         assert_eq!(go(site, own, true, false, &mut limit, s(0)), Go::Drop);
+        // Google's user-content hosts never load as a page in the card: a
+        // redirect there is dropped, a click goes to the browser.
+        let user = "https://evil-site.googleusercontent.com/login.html";
+        assert_eq!(go(user, own, false, false, &mut limit, s(0)), Go::Drop);
+        let mut once = Limit::default();
+        assert_eq!(go(user, own, false, true, &mut once, s(0)), Go::Browser);
         // A click: the browser, at most once a second ...
         assert_eq!(go(site, own, true, true, &mut limit, s(0)), Go::Browser);
         assert_eq!(go(site, own, false, true, &mut limit, s(500)), Go::Drop);
