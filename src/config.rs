@@ -10,11 +10,12 @@
 //! [general]
 //! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
-//! google_results = "app"            # Lens / AI Mode pages: app (a card) | browser
 //! search_history = false            # keep the card's searches on this PC (opt-in)
 //!
-//! [results]
-//! lens_linux = "in_card"            # Linux: Lens in the card (in_card) | browser
+//! [results]                         # the Lens / AI Mode results card
+//! side = "right"                    # left | right (the card docks there when dragged)
+//! width = 0                         # px, as the user resized it; 0 = default
+//! height = 0                        # px, a bottom card (narrow screens); 0 = default
 //!
 //! [ai]                              # the API key is NOT here: OS keyring only
 //! provider = "browser"              # browser | anthropic | openai_compatible (missing = browser)
@@ -312,38 +313,29 @@ pub struct GeneralConfig {
     pub default_action: DefaultAction,
     /// Where the Save dialog starts; "" = the system's choice.
     pub save_folder: String,
-    pub google_results: GoogleResults,
     /// Keep the card's searches on this PC (`sheet::history`). Off by default.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub search_history: bool,
 }
 
-/// The results card's per-platform choices (`[results]`).
+/// The Lens / AI Mode results card (`[results]`): where the user put it.
+/// The app writes these when the user docks or resizes the card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct ResultsConfig {
-    pub lens_linux: LensLinux,
+    pub side: CardSide,
+    /// The card's width (px) as the user resized it; 0 = the default.
+    pub width: u32,
+    /// A bottom card's height (narrow or portrait screens); 0 = the default.
+    pub height: u32,
 }
 
-/// Linux: where Lens opens (`[results] lens_linux`). Google may answer
-/// WebKitGTK's Lens with its "unusual traffic" check, which the user solves
-/// in the card (never us) or skips by opening the browser.
+/// The side the results card sits on (`[results] side`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum LensLinux {
+pub enum CardSide {
+    Left,
     #[default]
-    InCard,
-    Browser,
-}
-
-/// Where Google's Lens and AI Mode pages show (`[general] google_results`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GoogleResults {
-    /// The results card in OpenCircle (`crate::sheet`); the browser when it can't.
-    #[default]
-    App,
-    /// The user's own browser.
-    Browser,
+    Right,
 }
 
 /// How a finished stroke shows (`[selection] style`).
@@ -910,13 +902,6 @@ impl Config {
                 &mut w,
                 |s: &String| check_folder(s),
             );
-            c.general.google_results = get(
-                t,
-                "general.",
-                "google_results",
-                d.general.google_results,
-                &mut w,
-            );
             c.general.search_history = get(
                 t,
                 "general.",
@@ -926,7 +911,14 @@ impl Config {
             );
         }
         if let Some(t) = section(&root, "results", &mut w) {
-            c.results.lens_linux = get(t, "results.", "lens_linux", d.results.lens_linux, &mut w);
+            let (p, d) = ("results.", d.results);
+            let px = |v: &u32| match v {
+                0 | 200..=10_000 => Ok(()),
+                _ => Err("0 or 200-10000".to_string()),
+            };
+            c.results.side = get(t, p, "side", d.side, &mut w);
+            c.results.width = get_checked(t, p, "width", d.width, &mut w, px);
+            c.results.height = get_checked(t, p, "height", d.height, &mut w, px);
         }
         if let Some(t) = section(&root, "selection", &mut w) {
             let (p, d) = ("selection.", d.selection);
@@ -1568,25 +1560,31 @@ mod tests {
         let abs = std::env::temp_dir().to_string_lossy().replace('\\', "/");
         let (c, w) = Config::parse(&format!("[general]\nsave_folder = \"{abs}\"\n"));
         assert_eq!((c.general.save_folder.as_str(), w.len()), (abs.as_str(), 0));
-        // Google results: the card by default; a bad value warns and keeps it.
-        let (c, w) = Config::parse("[general]\ngoogle_results = \"browser\"\n");
-        assert_eq!(
-            (c.general.google_results, w.len()),
-            (GoogleResults::Browser, 0)
-        );
-        let (c, w) = Config::parse("[general]\ngoogle_results = \"webview\"\n");
-        assert_eq!(c.general.google_results, GoogleResults::App);
-        assert!(w.iter().any(|m| m.starts_with("general.google_results")));
         // Search history: opt-in.
         assert!(!Config::default().general.search_history);
         let (c, w) = Config::parse("[general]\nsearch_history = true\n");
         assert!(c.general.search_history && w.is_empty());
-        // Lens on Linux: in the card by default.
-        assert_eq!(Config::default().results.lens_linux, LensLinux::InCard);
-        let (c, w) = Config::parse("[results]\nlens_linux = \"browser\"\n");
-        assert_eq!((c.results.lens_linux, w.len()), (LensLinux::Browser, 0));
-        let (c, w) = Config::parse("[results]\nlens_linux = \"maybe\"\n");
-        assert_eq!((c.results.lens_linux, w.len()), (LensLinux::InCard, 1));
+        // The results card: right, default size; the user's side and size kept.
+        let d = Config::default().results;
+        assert_eq!((d.side, d.width, d.height), (CardSide::Right, 0, 0));
+        let (c, w) = Config::parse("[results]\nside = \"left\"\nwidth = 640\nheight = 300\n");
+        assert_eq!(
+            (c.results.side, c.results.width, c.results.height, w.len()),
+            (CardSide::Left, 640, 300, 0)
+        );
+        let (c, w) = Config::parse("[results]\nside = \"top\"\nwidth = 5\nheight = -1\n");
+        assert_eq!((c.results, w.len()), (d, 3));
+        // ... and survive a save.
+        let cfg = Config {
+            results: ResultsConfig {
+                side: CardSide::Left,
+                width: 700,
+                height: 0,
+            },
+            ..Config::default()
+        };
+        let text = toml::to_string_pretty(&cfg).unwrap();
+        assert_eq!(Config::parse(&text).0.results, cfg.results);
     }
 
     #[test]

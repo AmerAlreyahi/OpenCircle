@@ -3,11 +3,13 @@
 //! and the page filter. Plain std only: the helper includes this file, so do
 //! the app's tests.
 //!
-//! App → helper: `opencircle-sheet <lens|ai> [--near X] [--size WxH]
+//! App → helper: `opencircle-sheet <lens|ai> [--side left|right] [--size WxH]
 //! --colours BG,BORDER,HOVER,TEXT,MUTED --shadow A`, then on stdin the page
 //! (Lens: the auto-submit HTML, from memory, never a file) or the AI Mode URL.
 //! Helper → app, one per line on stdout: `ready` (shown), `open <url>` (to the
-//! user's browser), `size W H` / `size default` (what the user resized it to).
+//! user's browser), `leave <url>` (the user took the page to the browser: the
+//! card closed), `size W H` / `size default` (what the user resized it to),
+//! `side left|right` (where the user docked it).
 
 /// The card's geometry: the same numbers as `ui::widgets::card` (a test in
 /// `src/sheet.rs` keeps them equal).
@@ -61,9 +63,9 @@ impl Kind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Args {
     pub kind: Kind,
-    /// The selection's centre, as a share (0..1) of the screen width.
-    pub near: Option<f64>,
-    /// The size the user last resized the card to (this session).
+    /// The side the card sits on (the user's choice: Left or Right).
+    pub side: Place,
+    /// The size the user last resized the card to.
     pub size: Option<(f64, f64)>,
     /// 0xRRGGBB: background, border, hover (chip, buttons), text, muted.
     pub colours: [u32; 5],
@@ -74,9 +76,7 @@ pub struct Args {
 impl Args {
     pub fn to_vec(&self) -> Vec<String> {
         let mut v = vec![self.kind.arg().to_string()];
-        if let Some(x) = self.near {
-            v.extend(["--near".into(), format!("{x:.4}")]);
-        }
+        v.extend(["--side".into(), self.side.arg().into()]);
         if let Some((w, h)) = self.size {
             v.extend(["--size".into(), format!("{}x{}", w.round(), h.round())]);
         }
@@ -94,7 +94,7 @@ impl Args {
         };
         let mut a = Args {
             kind,
-            near: None,
+            side: Place::Right,
             size: None,
             colours: [0x1c1c1e, 0x3a3a3c, 0x2c2c2e, 0xffffff, 0x8e8e93],
             shadow: 0.35,
@@ -104,15 +104,12 @@ impl Args {
             let value = it.next().ok_or(format!("{flag}: no value"))?;
             let bad = || format!("{flag}: bad value {value:?}");
             match flag.as_str() {
-                "--near" => {
-                    let x: f64 = value.parse().map_err(|_| bad())?;
-                    a.near = Some(x).filter(|x| (0.0..=1.0).contains(x));
-                }
+                "--side" => a.side = Place::side(value).ok_or_else(bad)?,
                 "--size" => {
                     let (w, h) = value.split_once('x').ok_or_else(bad)?;
                     let (w, h): (f64, f64) =
                         (w.parse().map_err(|_| bad())?, h.parse().map_err(|_| bad())?);
-                    a.size = Some((w, h)).filter(|&(w, h)| w > 0.0 && h > 0.0 && w.is_finite());
+                    a.size = Some((w, h)).filter(|&s| size_ok(s));
                 }
                 "--colours" => {
                     let c: Vec<u32> = value
@@ -130,6 +127,11 @@ impl Args {
     }
 }
 
+/// A card size the user gave: (width, height), 0 = that one is the default.
+fn size_ok((w, h): (f64, f64)) -> bool {
+    w >= 0.0 && h >= 0.0 && w.is_finite() && h.is_finite() && (w > 0.0 || h > 0.0)
+}
+
 /// The side the card hugs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
@@ -138,33 +140,71 @@ pub enum Place {
     Bottom,
 }
 
-/// The card in an `area` (w, h): `ui::widgets::card::place`'s rule, but only
-/// the size is remembered, never the position. On the side away from the
-/// selection (`near`: its centre, 0..1 of the width; none = the right), full
-/// height, `SHARE` of the width (at least `WIDTH`); narrow or portrait: at
-/// the bottom, centred. `size` (the user's last resize) sets the width of a
-/// side card, the height of a bottom one.
-pub fn place(area: (f64, f64), near: Option<f64>, size: Option<(f64, f64)>) -> (Place, Rect4) {
+impl Place {
+    /// "left" / "right": the sides the user can choose (`--side`, `side …`).
+    pub fn side(s: &str) -> Option<Place> {
+        match s {
+            "left" => Some(Place::Left),
+            "right" => Some(Place::Right),
+            _ => None,
+        }
+    }
+
+    pub fn arg(self) -> &'static str {
+        match self {
+            Place::Left => "left",
+            Place::Right | Place::Bottom => "right",
+        }
+    }
+}
+
+/// The card in an `area` (w, h), as `ui::widgets::card::place` lays a card
+/// out: on the user's `side` (owner, 2026-10-24: left or right by preference,
+/// default right), full height, `SHARE` of the width (at least `WIDTH`);
+/// narrow or portrait: at the bottom, centred. `size` (the user's last
+/// resize, kept across runs) sets the width of a side card, the height of a
+/// bottom one.
+pub fn place(area: (f64, f64), side: Place, size: Option<(f64, f64)>) -> (Place, Rect4) {
     let (w, h) = area;
     let inner = ((w - 2.0 * GAP).max(0.0), (h - 2.0 * GAP).max(0.0));
     let fit = |v: f64, min: f64, max: f64| v.clamp(min.min(max), max);
     if w < NARROW || h > w {
         let width = inner.0.min(BOTTOM_WIDTH);
         let height = match size {
-            Some((_, sh)) => fit(sh, MIN.1, inner.1),
-            None => (h / 2.0).max(BOTTOM_MIN).min(inner.1),
+            Some((_, sh)) if sh > 0.0 => fit(sh, MIN.1, inner.1),
+            _ => (h / 2.0).max(BOTTOM_MIN).min(inner.1),
         };
         let r = [(w - width) / 2.0, h - GAP - height, width, height];
         return (Place::Bottom, r);
     }
     let width = match size {
-        Some((sw, _)) => fit(sw, MIN.0, inner.0),
-        None => (w * SHARE).max(WIDTH).min(inner.0),
+        Some((sw, _)) if sw > 0.0 => fit(sw, MIN.0, inner.0),
+        _ => (w * SHARE).max(WIDTH).min(inner.0),
     };
-    if near.is_some_and(|x| x >= 0.5) {
+    if side == Place::Left {
         (Place::Left, [GAP, GAP, width, inner.1])
     } else {
         (Place::Right, [w - GAP - width, GAP, width, inner.1])
+    }
+}
+
+/// The side a card dropped at `r` docks to: the nearer one (its centre on
+/// the left half: left).
+pub fn dock(area: (f64, f64), r: Rect4) -> Place {
+    if r[0] + r[2] / 2.0 < area.0 / 2.0 {
+        Place::Left
+    } else {
+        Place::Right
+    }
+}
+
+/// What of a resized card's `size` is kept for next time: a side card's
+/// width, a bottom card's height (0 = not that one).
+pub fn kept(p: Place, (w, h): (f64, f64)) -> (f64, f64) {
+    if p == Place::Bottom {
+        (0.0, h)
+    } else {
+        (w, 0.0)
     }
 }
 
@@ -206,6 +246,9 @@ pub enum Hit {
     History,
     /// The inner edge: drag to resize, double-click for the default size.
     Edge,
+    /// The header (not a button): drag to move the card; it docks to the
+    /// nearer side on release. A bottom card doesn't move.
+    Head,
 }
 
 /// The × button's centre in a `w` wide card.
@@ -241,6 +284,8 @@ pub fn hit(p: Place, x: f64, y: f64, w: f64, h: f64) -> Option<Hit> {
         Some(Hit::History)
     } else if edge {
         Some(Hit::Edge)
+    } else if y < HEADER && p != Place::Bottom {
+        Some(Hit::Head)
     } else {
         None
     }
@@ -397,6 +442,11 @@ pub enum Line {
     Ready,
     /// Open this in the user's browser (the app checks it is a plain http(s) link).
     Open(String),
+    /// The user took the page to the browser ("Open in browser"): the card
+    /// closed, the app opens it and gets out of the way.
+    Leave(String),
+    /// The user docked the card on this side (Left or Right).
+    Side(Place),
     /// The user resized the card (`None`: back to the default size).
     Size(Option<(f64, f64)>),
     /// A results page finished loading in the card (the history keeps Lens's).
@@ -422,13 +472,19 @@ impl Line {
         if let Some(url) = line.strip_prefix("at ") {
             return link(url).then(|| Line::At(url.into()));
         }
+        if let Some(url) = line.strip_prefix("leave ") {
+            return link(url).then(|| Line::Leave(url.into()));
+        }
+        if let Some(side) = line.strip_prefix("side ") {
+            return Place::side(side).map(Line::Side);
+        }
         let size = line.strip_prefix("size ")?;
         if size == "default" {
             return Some(Line::Size(None));
         }
         let (w, h) = size.split_once(' ')?;
         let (w, h): (f64, f64) = (w.parse().ok()?, h.parse().ok()?);
-        (w > 0.0 && h > 0.0 && w.is_finite() && h.is_finite()).then_some(Line::Size(Some((w, h))))
+        size_ok((w, h)).then_some(Line::Size(Some((w, h))))
     }
 
     pub fn text(&self) -> String {
@@ -436,6 +492,8 @@ impl Line {
             Line::Ready => "ready".into(),
             Line::Open(url) => format!("open {url}"),
             Line::At(url) => format!("at {url}"),
+            Line::Leave(url) => format!("leave {url}"),
+            Line::Side(p) => format!("side {}", p.arg()),
             Line::ClearHistory => CLEAR.into(),
             Line::Size(None) => "size default".into(),
             Line::Size(Some((w, h))) => format!("size {} {}", w.round(), h.round()),
@@ -451,18 +509,25 @@ mod tests {
     fn args_round_trip_and_reject_junk() {
         let a = Args {
             kind: Kind::Ai,
-            near: Some(0.25),
+            side: Place::Left,
             size: Some((700.0, 900.0)),
             colours: [0x112233, 0x445566, 0x778899, 0xaabbcc, 0xddeeff],
             shadow: 0.5,
         };
         assert_eq!(Args::parse(&a.to_vec()), Ok(a));
         let s = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(Args::parse(&s(&["lens"])).unwrap().kind, Kind::Lens);
+        let lens = Args::parse(&s(&["lens"])).unwrap();
+        assert_eq!(
+            (lens.kind, lens.side),
+            (Kind::Lens, Place::Right),
+            "default right"
+        );
         for bad in [
             &["x"][..],
             &[],
-            &["ai", "--near"],
+            &["ai", "--side"],
+            &["ai", "--side", "bottom"],
+            &["ai", "--side", "Left"],
             &["ai", "--size", "10"],
             &["ai", "--colours", "12345,1,2,3,4"],
             &["ai", "--colours", "112233"],
@@ -471,60 +536,74 @@ mod tests {
             assert!(Args::parse(&s(bad)).is_err(), "{bad:?}");
         }
         // out of range: ignored, not trusted
-        let a = Args::parse(&s(&["ai", "--near", "7", "--size", "-1x5"])).unwrap();
-        assert_eq!((a.near, a.size), (None, None));
+        let a = Args::parse(&s(&["ai", "--size", "-1x5"])).unwrap();
+        assert_eq!(a.size, None);
     }
 
     #[test]
-    fn card_goes_away_from_the_selection_and_keeps_only_its_size() {
+    fn card_sits_on_the_users_side_with_the_remembered_width() {
         let area = (1920.0, 1080.0);
         let right = [1132.0, 20.0, 768.0, 1040.0];
-        assert_eq!(place(area, Some(0.2), None), (Place::Right, right));
-        assert_eq!(place(area, None, None), (Place::Right, right));
+        assert_eq!(place(area, Place::Right, None), (Place::Right, right));
         assert_eq!(
-            place(area, Some(0.8), None),
+            place(area, Place::Left, None),
             (Place::Left, [20.0, 20.0, 768.0, 1040.0])
         );
-        // A remembered size: the width; the side still follows the selection.
+        // A remembered size: the width, on either side.
         let mine = Some((500.0, 300.0));
         assert_eq!(
-            place(area, Some(0.8), mine),
+            place(area, Place::Left, mine),
             (Place::Left, [20.0, 20.0, 500.0, 1040.0])
         );
         assert_eq!(
-            place(area, Some(0.1), mine),
+            place(area, Place::Right, mine),
             (Place::Right, [1400.0, 20.0, 500.0, 1040.0])
         );
         // ... within bounds
-        assert_eq!(place(area, None, Some((10.0, 1.0))).1[2], MIN.0);
-        assert_eq!(place(area, None, Some((5000.0, 1.0))).1[2], 1880.0);
+        assert_eq!(place(area, Place::Right, Some((10.0, 1.0))).1[2], MIN.0);
+        assert_eq!(place(area, Place::Right, Some((5000.0, 1.0))).1[2], 1880.0);
         // Portrait or narrow: bottom, centred; a remembered height.
-        let (p, r) = place((1080.0, 1920.0), Some(0.1), None);
+        let (p, r) = place((1080.0, 1920.0), Place::Left, None);
         assert_eq!((p, r), (Place::Bottom, [220.0, 940.0, 640.0, 960.0]));
-        let (p, r) = place((800.0, 600.0), Some(0.9), Some((999.0, 400.0)));
+        let (p, r) = place((800.0, 600.0), Place::Right, Some((999.0, 400.0)));
         assert_eq!((p, r), (Place::Bottom, [80.0, 180.0, 640.0, 400.0]));
+    }
+
+    #[test]
+    fn a_dropped_card_docks_to_the_nearer_side() {
+        let area = (1920.0, 1080.0);
+        let at = |x: f64| [x, 300.0, 500.0, 700.0];
+        assert_eq!(dock(area, at(20.0)), Place::Left);
+        assert_eq!(dock(area, at(700.0)), Place::Left, "centre 950 < 960");
+        assert_eq!(dock(area, at(711.0)), Place::Right, "centre 961");
+        assert_eq!(dock(area, at(1400.0)), Place::Right);
+        assert_eq!(dock(area, at(-300.0)), Place::Left, "dragged off the left");
+        assert_eq!(dock(area, at(2500.0)), Place::Right);
+        // A resize keeps the side card's width, the bottom card's height.
+        assert_eq!(kept(Place::Left, (500.0, 1040.0)), (500.0, 0.0));
+        assert_eq!(kept(Place::Bottom, (640.0, 400.0)), (0.0, 400.0));
     }
 
     #[test]
     fn the_inner_edge_resizes_within_bounds() {
         let area = (1920.0, 1080.0);
-        let (p, r) = place(area, None, None);
+        let (p, r) = place(area, Place::Right, None);
         assert_eq!(
             resized(p, r, -100.0, 0.0, area),
             [1032.0, 20.0, 868.0, 1040.0]
         );
         assert_eq!(resized(p, r, 900.0, 0.0, area)[2], MIN.0);
         assert_eq!(resized(p, r, -5000.0, 0.0, area)[0], GAP);
-        let (p, r) = place(area, Some(0.9), None);
+        let (p, r) = place(area, Place::Left, None);
         assert_eq!(resized(p, r, 100.0, 0.0, area), [20.0, 20.0, 868.0, 1040.0]);
         assert_eq!(resized(p, r, 5000.0, 0.0, area)[2], 1880.0);
-        let (p, r) = place((800.0, 600.0), None, None);
+        let (p, r) = place((800.0, 600.0), Place::Right, None);
         assert_eq!(resized(p, r, 0.0, -50.0, (800.0, 600.0))[3], 350.0);
         assert_eq!(resized(p, r, 0.0, 500.0, (800.0, 600.0))[3], MIN.1);
     }
 
     #[test]
-    fn buttons_and_the_inner_edge_only_the_header_does_not_move_it() {
+    fn buttons_the_inner_edge_and_the_header_grip() {
         let (w, h) = (500.0, 800.0);
         let (cx, cy) = close_at(w);
         assert_eq!(hit(Place::Right, cx, cy, w, h), Some(Hit::Close));
@@ -532,14 +611,13 @@ mod tests {
         assert_eq!(hit(Place::Right, bx, by, w, h), Some(Hit::Browser));
         let (hx, hy) = history_at(w);
         assert_eq!(hit(Place::Right, hx, hy, w, h), Some(Hit::History));
-        assert_eq!(
-            hit(Place::Right, 200.0, 20.0, w, h),
-            None,
-            "the header: no move"
-        );
+        // The header moves a side card (buttons win); a bottom card stays.
+        assert_eq!(hit(Place::Right, 200.0, 20.0, w, h), Some(Hit::Head));
+        assert_eq!(hit(Place::Left, 200.0, 60.0, w, h), Some(Hit::Head));
+        assert_eq!(hit(Place::Bottom, 200.0, 20.0, w, h), None);
         assert_eq!(hit(Place::Right, 250.0, 400.0, w, h), None); // the page's
         assert_eq!(hit(Place::Right, 3.0, 400.0, w, h), Some(Hit::Edge));
-        assert_eq!(hit(Place::Right, 3.0, 5.0, w, h), None); // a corner: not the edge
+        assert_eq!(hit(Place::Right, 3.0, 790.0, w, h), None); // a corner: not the edge
         assert_eq!(hit(Place::Right, 497.0, 400.0, w, h), None); // outer edge: not a handle
         assert_eq!(hit(Place::Left, 497.0, 400.0, w, h), Some(Hit::Edge));
         assert_eq!(hit(Place::Bottom, 250.0, 3.0, w, h), Some(Hit::Edge));
@@ -693,8 +771,12 @@ mod tests {
         for l in [
             Line::Ready,
             Line::Open("https://a.io/x?y=1".into()),
+            Line::Leave("https://lens.google.com/search?p=1".into()),
+            Line::Side(Place::Left),
+            Line::Side(Place::Right),
             Line::Size(None),
             Line::Size(Some((640.0, 480.0))),
+            Line::Size(Some((640.0, 0.0))),
             Line::At("https://lens.google.com/search?p=1".into()),
             Line::ClearHistory,
         ] {
@@ -708,9 +790,12 @@ mod tests {
             "open a b",
             "size 1",
             "size x 2",
-            "size 0 5",
+            "size 0 0",
             "size -1 5",
             "size inf 5",
+            "side bottom",
+            "side ",
+            "leave ",
             "Gtk-WARNING: whatever",
             "close",
         ] {

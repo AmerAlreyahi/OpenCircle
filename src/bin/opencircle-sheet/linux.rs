@@ -17,11 +17,12 @@ use wry::{WebContext, WebViewBuilderExtUnix};
 
 use crate::proto::{self, Args, BODY_PAD, BODY_R, HEADER, Hit, Line, Place, RADIUS, Rect4};
 use crate::{
-    CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, icon, log, say, slid, slide_off,
+    CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, icon, lerp, log, say, slid, slide_off,
 };
 
-/// A resize in progress: where it began (root), the card then.
-type Drag = ((f64, f64), Rect4);
+/// A drag in progress: where it began (root), the card then, and whether it
+/// moves the card (its header) or resizes it (its inner edge).
+type Drag = ((f64, f64), Rect4, bool);
 
 /// `history`: the History page (the user keeps one: its button shows).
 pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 {
@@ -37,9 +38,12 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
     };
     let wa = mon.workarea();
     let (sw, sh) = (wa.width() as f64, wa.height() as f64);
-    let (near, kind) = (args.near, args.kind);
+    let kind = args.kind;
     let size = Rc::new(Cell::new(args.size));
-    let (at, target) = proto::place((sw, sh), near, size.get());
+    // The user's side; the card's place (a bottom card on narrow screens).
+    let side = Rc::new(Cell::new(args.side));
+    let (place0, target) = proto::place((sw, sh), side.get(), size.get());
+    let at = Rc::new(Cell::new(place0));
 
     // The shared card's palette (the app's look), as CSS.
     let [bg, border, hover, text, muted] = args.colours;
@@ -216,19 +220,25 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
     // The resize grip on the inner edge, shown on hover.
     let pill = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     pill.style_context().add_class("oc-edge");
-    let (ph, pv) = if at == Place::Bottom {
-        (40, 4)
-    } else {
-        (4, 40)
+    let grip = {
+        let pill = pill.clone();
+        move |at: Place| {
+            let (ph, pv) = if at == Place::Bottom {
+                (40, 4)
+            } else {
+                (4, 40)
+            };
+            pill.set_size_request(ph, pv);
+            let (ha, va) = match at {
+                Place::Right => (gtk::Align::Start, gtk::Align::Center),
+                Place::Left => (gtk::Align::End, gtk::Align::Center),
+                Place::Bottom => (gtk::Align::Center, gtk::Align::Start),
+            };
+            pill.set_halign(ha);
+            pill.set_valign(va);
+        }
     };
-    pill.set_size_request(ph, pv);
-    let (ha, va) = match at {
-        Place::Right => (gtk::Align::Start, gtk::Align::Center),
-        Place::Left => (gtk::Align::End, gtk::Align::Center),
-        Place::Bottom => (gtk::Align::Center, gtk::Align::Start),
-    };
-    pill.set_halign(ha);
-    pill.set_valign(va);
+    grip(at.get());
     pill.set_margin_start(2);
     pill.set_margin_end(2);
     pill.set_margin_top(2);
@@ -247,18 +257,23 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
     let shown = Rc::new(Cell::new(target));
     let area = Rc::new(Cell::new((sw, sh)));
     fixed.connect_size_allocate({
-        let (cardw, shown, rect, area, size) = (
+        let (cardw, shown, rect, area, size, side, at, grip) = (
             cardw.clone(),
             shown.clone(),
             rect.clone(),
             area.clone(),
             size.clone(),
+            side.clone(),
+            at.clone(),
+            grip.clone(),
         );
         move |_, a| {
             let got = (a.width() as f64, a.height() as f64);
             if got != area.get() {
                 area.set(got);
-                let t = proto::place(got, near, size.get()).1;
+                let (p, t) = proto::place(got, side.get(), size.get());
+                at.set(p);
+                grip(p);
                 rect.set(t);
                 shown.set(t);
             }
@@ -274,7 +289,7 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
             fixed.queue_resize();
         }
     };
-    let (x0, y0) = slide_off(at, 0.0);
+    let (x0, y0) = slide_off(at.get(), 0.0);
     apply([target[0] + x0, target[1] + y0, target[2], target[3]]);
     cardw.set_opacity(0.0);
 
@@ -282,59 +297,72 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         gtk::main_quit();
         glib::Propagation::Stop
     });
-    // The inner edge resizes (double-click: the default size); the card never moves.
+    // The inner edge resizes (double-click: the default size); the header
+    // moves the card, which docks to the nearer side on release.
     let resized = Rc::new(Cell::new(false));
     let drag: Rc<Cell<Option<Drag>>> = Rc::new(Cell::new(None));
     cardw.connect_button_press_event({
-        let (drag, rect, apply, area, size, resized) = (
+        let (drag, rect, apply, area, size, resized, side, at) = (
             drag.clone(),
             rect.clone(),
             apply.clone(),
             area.clone(),
             size.clone(),
             resized.clone(),
+            side.clone(),
+            at.clone(),
         );
         move |_, e| {
             let (x, y) = e.position();
             let r = rect.get();
-            if proto::hit(at, x, y, r[2], r[3]) == Some(Hit::Edge) {
-                if e.event_type() == gdk::EventType::DoubleButtonPress {
+            match proto::hit(at.get(), x, y, r[2], r[3]) {
+                Some(Hit::Edge) if e.event_type() == gdk::EventType::DoubleButtonPress => {
                     size.set(None);
                     resized.set(true);
-                    let d = proto::place(area.get(), near, None).1;
+                    let d = proto::place(area.get(), side.get(), None).1;
                     rect.set(d);
                     apply(d);
-                } else {
-                    drag.set(Some((e.root(), r)));
                 }
+                Some(Hit::Edge) => drag.set(Some((e.root(), r, false))),
+                Some(Hit::Head) if e.event_type() == gdk::EventType::ButtonPress => {
+                    drag.set(Some((e.root(), r, true)));
+                }
+                _ => {}
             }
             glib::Propagation::Stop // never reaches `outside` (that closes)
         }
     });
     cardw.connect_motion_notify_event({
-        let (drag, rect, apply, win, pill, area) = (
+        let (drag, rect, apply, win, pill, area, at) = (
             drag.clone(),
             rect.clone(),
             apply.clone(),
             win.clone(),
             pill.clone(),
             area.clone(),
+            at.clone(),
         );
         move |_, e| {
             let (rx, ry) = e.root();
-            if let Some(((x0, y0), r0)) = drag.get() {
-                let r = proto::resized(at, r0, rx - x0, ry - y0, area.get());
+            if let Some(((x0, y0), r0, moving)) = drag.get() {
+                let r = if moving {
+                    // The card follows the pointer (it docks on release).
+                    [r0[0] + rx - x0, r0[1] + ry - y0, r0[2], r0[3]]
+                } else {
+                    proto::resized(at.get(), r0, rx - x0, ry - y0, area.get())
+                };
                 rect.set(r);
                 apply(r);
                 return glib::Propagation::Stop;
             }
             let (x, y) = e.position();
             let r = rect.get();
-            let edge = proto::hit(at, x, y, r[2], r[3]) == Some(Hit::Edge);
-            pill.set_visible(edge);
-            let name = match (edge, at) {
-                (true, Place::Bottom) => "ns-resize",
-                (true, _) => "ew-resize",
+            let hit = proto::hit(at.get(), x, y, r[2], r[3]);
+            pill.set_visible(hit == Some(Hit::Edge));
+            let name = match (hit, at.get()) {
+                (Some(Hit::Edge), Place::Bottom) => "ns-resize",
+                (Some(Hit::Edge), _) => "ew-resize",
+                (Some(Hit::Head), _) => "grab",
                 _ => "default",
             };
             if let Some(w) = win.window() {
@@ -351,12 +379,46 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         }
     });
     cardw.connect_button_release_event({
-        let (rect, size, resized) = (rect.clone(), size.clone(), resized.clone());
+        let (rect, size, resized, area, side, at) = (
+            rect.clone(),
+            size.clone(),
+            resized.clone(),
+            area.clone(),
+            side.clone(),
+            at.clone(),
+        );
+        let apply = apply.clone();
         move |_, _| {
-            if drag.take().is_some() {
-                let r = rect.get();
-                size.set(Some((r[2], r[3])));
-                resized.set(true);
+            match drag.take() {
+                // Dropped: it docks to the nearer side (animated), which is kept.
+                Some((_, _, true)) => {
+                    let from = rect.get();
+                    let to = proto::dock(area.get(), from);
+                    let (p, target) = proto::place(area.get(), to, size.get());
+                    if to != side.get() {
+                        side.set(to);
+                        say(Line::Side(to));
+                    }
+                    at.set(p);
+                    grip(p);
+                    rect.set(target);
+                    let (began, apply) = (Instant::now(), apply.clone());
+                    glib::timeout_add_local(std::time::Duration::from_millis(8), move || {
+                        let s = slid(began.elapsed());
+                        apply(lerp(from, target, s));
+                        if s >= 1.0 {
+                            glib::ControlFlow::Break
+                        } else {
+                            glib::ControlFlow::Continue
+                        }
+                    });
+                }
+                Some(_) => {
+                    let r = rect.get();
+                    size.set(Some((r[2], r[3])));
+                    resized.set(true);
+                }
+                None => {}
             }
             glib::Propagation::Stop
         }
@@ -405,10 +467,10 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
     // Slide in and fade: from SLIDE_BY px out to its place.
     let began = Instant::now();
     glib::timeout_add_local(std::time::Duration::from_millis(8), {
-        let (cardw, rect) = (cardw.clone(), rect.clone());
+        let (cardw, rect, at) = (cardw.clone(), rect.clone(), at.clone());
         move || {
             let s = slid(began.elapsed());
-            let (dx, dy) = slide_off(at, s);
+            let (dx, dy) = slide_off(at.get(), s);
             let t = rect.get();
             apply([t[0] + dx, t[1] + dy, t[2], t[3]]);
             cardw.set_opacity(s);
@@ -423,13 +485,13 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
     gtk::main();
     win.hide();
     if resized.get() {
-        say(Line::Size(size.get()));
+        say(Line::Size(size.get().map(|s| proto::kept(at.get(), s))));
     }
     if to_browser.get()
         && let Some(Ok(url)) = view.borrow().as_ref().map(wry::WebView::url)
         && url.starts_with("https://")
     {
-        say(Line::Open(url));
+        say(Line::Leave(url));
     }
     0
 }

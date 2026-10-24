@@ -24,6 +24,8 @@ type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
 
 /// The crop's thumbnail in the Ask AI panel.
 const THUMB_HEIGHT: f32 = 112.0;
+/// "Open in browser" (lucide "move-up-right", as the results card's ↗).
+const OPEN: char = '\u{e497}';
 /// The follow-up input. Never focused by itself: until it is clicked, letters
 /// are the overlay's action shortcuts.
 const INPUT: &str = "panel-input";
@@ -63,8 +65,11 @@ pub enum Msg {
     Chip(usize),
     /// The results card started, showed or was closed.
     Sheet(sheet::Event),
-    /// The results card could not open: the browser shows the results.
-    FellBack,
+    /// The results card could not open (AI Mode: the page it would have
+    /// shown). The panel says so and offers "Open in browser".
+    FellBack(Option<String>),
+    /// The user pressed "Open in browser" (the card couldn't open).
+    OpenInBrowser,
 }
 
 pub struct Panel {
@@ -87,16 +92,16 @@ pub struct Panel {
 /// The results card this panel opens: Google's page in the helper's web view.
 #[derive(Default)]
 struct Sheet {
-    /// The selection's centre (share of the screen width): the card goes away from it.
-    near: Option<f32>,
-    /// Results show in the card (else in the browser), decided when the panel opened.
+    /// Results show in the card (it can open here), decided when the panel opened.
     wanted: bool,
     /// The running helper; dropping it ends it.
     guard: Option<Arc<sheet::Guard>>,
     /// The card is on screen: this panel hides (the card is where it would be).
     shown: bool,
-    /// The card could not open and the browser did instead.
+    /// The card could not open: the panel offers "Open in browser".
     fell_back: bool,
+    /// AI Mode's page, for that button (Lens opens the crop's page).
+    page: Option<String>,
 }
 
 enum State {
@@ -134,21 +139,10 @@ enum Reading {
 
 impl Panel {
     /// Opens `kind` for `crop`. `question` (Ask AI only) is sent once ready:
-    /// the user already pressed Enter on it elsewhere (Lens follow-up). `near`:
-    /// the selection's centre as a share of the screen width (the results card
-    /// opens on the other side).
-    pub fn open(
-        kind: actions::Panel,
-        crop: Crop,
-        question: Option<String>,
-        near: Option<f32>,
-    ) -> (Panel, Task<Msg>) {
+    /// the user already pressed Enter on it elsewhere (Lens follow-up).
+    pub fn open(kind: actions::Panel, crop: Crop, question: Option<String>) -> (Panel, Task<Msg>) {
         let crop = Arc::new(crop);
-        let wanted = match kind {
-            actions::Panel::Lens => sheet::wanted(sheet::Kind::Lens),
-            actions::Panel::Ask => sheet::wanted(sheet::Kind::Ai),
-            actions::Panel::Text => false,
-        };
+        let wanted = kind != actions::Panel::Text && sheet::wanted();
         let mut panel = Panel {
             crop: crop.clone(),
             state: State::Lens(None),
@@ -158,7 +152,6 @@ impl Panel {
             entities: Vec::new(),
             note: None,
             sheet: Sheet {
-                near,
                 wanted,
                 ..Sheet::default()
             },
@@ -167,19 +160,16 @@ impl Panel {
             actions::Panel::Lens => {
                 let colours = wanted.then(sheet::colours);
                 background(move |tx| {
-                    // The card first; the browser if it can't open.
+                    // The card; if it can't open, the panel offers the browser.
                     if let (Some(colours), Ok(page)) = (colours, lens::page(&crop)) {
                         let on = |e| tx.unbounded_send(Msg::Sheet(e)).is_ok();
                         let entry = sheet::history::enabled()
                             .then(|| sheet::history::Entry::new(sheet::Kind::Lens, "", &crop));
-                        if sheet::run(sheet::Kind::Lens, page.into(), near, colours, entry, on)
-                            .is_ok()
-                        {
+                        if sheet::run(sheet::Kind::Lens, page.into(), colours, entry, on).is_ok() {
                             return;
                         }
-                        let _ = tx.unbounded_send(Msg::FellBack);
                     }
-                    let _ = tx.unbounded_send(Msg::LensOpened(lens::open(&crop)));
+                    let _ = tx.unbounded_send(Msg::FellBack(None));
                 })
             }
             actions::Panel::Text if text::models_present() => {
@@ -208,7 +198,7 @@ impl Panel {
     /// Ask AI, continuing `chat` (e.g. the translate word card's explanation).
     pub fn open_chat(crop: Crop, mut chat: Chat) -> (Panel, Task<Msg>) {
         chat.cancel(); // a stream still running belonged to the card; it stopped
-        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None, None);
+        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None);
         if let State::Ask { chat: open, .. } = &mut panel.state {
             *open = chat;
         }
@@ -254,9 +244,24 @@ impl Panel {
                 self.sheet.guard = None;
                 return Task::done(Msg::Cancel);
             }
-            (_, Msg::FellBack) => {
+            (_, Msg::FellBack(page)) => {
                 self.sheet.guard = None;
                 self.sheet.fell_back = true;
+                self.sheet.page = page;
+            }
+            // Only here, on the user's click: nothing opens in the browser by itself.
+            (State::Lens(_), Msg::OpenInBrowser) => {
+                let crop = self.crop.clone();
+                return background(move |tx| {
+                    let _ = tx.unbounded_send(Msg::LensOpened(lens::open(&crop)));
+                });
+            }
+            (_, Msg::OpenInBrowser) => {
+                if let Some(page) = &self.sheet.page
+                    && let Err(e) = crate::lens::open_link(page)
+                {
+                    eprintln!("[panel] AI Mode not opened: {e}");
+                }
             }
             (State::Lens(status), Msg::LensOpened(result)) => *status = Some(result.map(drop)),
             (_, Msg::Input(value)) => self.input = value,
@@ -448,7 +453,7 @@ impl Panel {
     /// to the model), then open `prompt` + that text in Google AI Mode.
     fn browse(&mut self, prompt: String, read_text: bool) -> Task<Msg> {
         let State::Ask {
-            setup: Some(Ok(setup)),
+            setup: Some(Ok(_)),
             chat,
             ..
         } = &mut self.state
@@ -456,8 +461,8 @@ impl Panel {
             return Task::none();
         };
         chat.ask(&prompt, &[]); // the turn (and "busy"); nothing is sent by this
-        let (setup, crop) = (setup.clone(), self.crop.clone());
-        let (near, colours) = (self.sheet.near, self.sheet.wanted.then(sheet::colours));
+        let crop = self.crop.clone();
+        let colours = self.sheet.wanted.then(sheet::colours);
         let (task, handle) = background(move |tx| {
             let read = read_text.then(|| {
                 text::read(&crop, |progress| {
@@ -465,12 +470,13 @@ impl Panel {
                 })
             });
             let (question, note) = browser_turn(&prompt, read);
-            // The results card first; the browser if it can't open.
+            // The results card; if it can't open, the panel offers the browser.
+            let url = sheet::ai_url(&question);
             if let Some(colours) = colours {
-                let url = sheet::ai_url(&question).into_bytes();
                 let entry = sheet::history::enabled()
                     .then(|| sheet::history::Entry::new(sheet::Kind::Ai, &prompt, &crop));
-                let shown = sheet::run(sheet::Kind::Ai, url, near, colours, entry, |e| {
+                let page = url.clone().into_bytes();
+                let shown = sheet::run(sheet::Kind::Ai, page, colours, entry, |e| {
                     if matches!(e, sheet::Event::Shown) {
                         let line = format!("Opened in Google AI Mode.{note}");
                         let _ = tx.unbounded_send(Msg::Delta(line));
@@ -481,16 +487,10 @@ impl Panel {
                     let _ = tx.unbounded_send(Msg::Answered(Ok(())));
                     return;
                 }
-                let _ = tx.unbounded_send(Msg::FellBack);
             }
-            let messages = [ai::Message::user(question)];
-            let result = ask::stream(&setup, &messages, |piece| {
-                tx.unbounded_send(Msg::Delta(piece.into())).is_ok()
-            });
-            if result.is_ok() {
-                let _ = tx.unbounded_send(Msg::Delta(note));
-            }
-            let _ = tx.unbounded_send(Msg::Answered(result));
+            let _ = tx.unbounded_send(Msg::FellBack(Some(url)));
+            let _ = tx.unbounded_send(Msg::Delta(note.trim_start().into()));
+            let _ = tx.unbounded_send(Msg::Answered(Ok(())));
         })
         .abortable();
         self.work = Some(handle.abort_on_drop());
@@ -538,6 +538,7 @@ impl Panel {
     /// Body and footer.
     fn lens_view(&self, status: Option<&Result<(), String>>) -> Part<'_> {
         let status: Element<'_, Msg> = match status {
+            None if self.sheet.fell_back => widgets::body("Google Lens").into(),
             None => widgets::body("Opening Google Lens…").into(),
             Some(Ok(())) => widgets::body("Opened in your browser").into(),
             Some(Err(e)) => widgets::error(format!("Could not open the browser: {e}")).into(),
@@ -545,9 +546,25 @@ impl Panel {
         let note = "Only this selection goes to Google Lens.";
         let mut body = column![status, widgets::caption(note)].spacing(8);
         if self.sheet.fell_back {
-            body = body.push(widgets::caption(sheet::FALLBACK));
+            body = body.push(self.fallback());
         }
         (body.into(), Some(self.follow_up("Ask AI about it…", false)))
+    }
+
+    /// The card couldn't open: why, and the one way to the browser (a click).
+    fn fallback(&self) -> Element<'_, Msg> {
+        column![
+            widgets::caption(sheet::FALLBACK),
+            widgets::text_button(
+                OPEN,
+                "Open in browser",
+                String::new(),
+                true,
+                Msg::OpenInBrowser
+            ),
+        ]
+        .spacing(8)
+        .into()
     }
 
     fn ask_view<'a>(
@@ -587,10 +604,7 @@ impl Panel {
                     ]
                     .spacing(6)
                     .into(),
-                    _ if browser && self.sheet.wanted && !self.sheet.fell_back => {
-                        Element::from(widgets::caption("Opening Google AI Mode…"))
-                    }
-                    _ if browser => Element::from(widgets::caption("Opening your browser…")),
+                    _ if browser => Element::from(widgets::caption("Opening Google AI Mode…")),
                     _ => widgets::caption("Thinking…").into(),
                 });
             }
@@ -611,7 +625,7 @@ impl Panel {
             _ => {}
         }
         if self.sheet.fell_back {
-            log = log.push(widgets::caption(sheet::FALLBACK));
+            log = log.push(self.fallback());
         }
         if let Browse::Consent(question) = browse {
             // Waiting for the user's choice: the question is theirs, not yet a turn.
@@ -654,12 +668,9 @@ impl Panel {
         } else {
             self.follow_up("Ask a follow-up…", chat.status == Status::Streaming)
         };
-        let privacy = if browser && self.sheet.wanted && !self.sheet.fell_back {
+        let privacy = if browser {
             "When you send, your question and the text read from the selection go to Google \
              AI Mode. The image is not uploaded unless you choose Lens."
-        } else if browser {
-            "When you send, your question and the text read from the selection go to Google \
-             through your browser. The image is not uploaded unless you choose Lens."
         } else {
             "Only this selection is sent, and only to the provider you chose."
         };
@@ -927,13 +938,19 @@ mod tests {
         let _ = panel.update(Msg::Sheet(sheet::Event::Closed));
         // (Closed answers with Msg::Cancel: the App drops the panel.)
 
-        // It could not open: the browser did, and the panel says why.
+        // It could not open: the panel says why and offers the browser; only
+        // the user's click opens it (owner, 2026-10-24: never by itself).
         let mut panel = panel_in(State::Lens(None));
         panel.sheet.wanted = true;
-        let _ = panel.update(Msg::FellBack);
-        let _ = panel.update(Msg::LensOpened(Err("x".into())));
+        let opens = panel.update(Msg::FellBack(None));
+        assert_eq!(opens.units(), 0, "nothing runs on its own");
+        assert!(matches!(panel.state, State::Lens(None)));
         let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
         assert!(texts.iter().any(|t| t == sheet::FALLBACK), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Open in browser"), "{texts:?}");
+        assert!(!texts.iter().any(|t| t.contains("Opening")), "{texts:?}");
+        // The click: Lens's page goes to the browser.
+        assert!(panel.update(Msg::OpenInBrowser).units() > 0);
     }
 
     fn not_blank(px: &[u8]) -> bool {

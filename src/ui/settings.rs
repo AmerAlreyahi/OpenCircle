@@ -24,9 +24,9 @@ use iced::widget::{column, container, row, space};
 use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{
-    After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
-    EdgeStyle, Engine, Format, GoogleResults, LensLinux, Look, LookConfig, LookTheme, Provider,
-    Rgb, SearchWith, SelectStyle, SnipAfter, SnipConfig, SongSource, Target, Theme, parse_shortcut,
+    After, BarStyle, BracketColour, BracketStyle, CardSide, ColourSet, Config, DefaultAction,
+    EdgeMode, EdgeStyle, Engine, Format, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith,
+    SelectStyle, SnipAfter, SnipConfig, SongSource, Target, Theme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::mt;
@@ -536,9 +536,8 @@ impl fmt::Debug for State {
 pub enum Message {
     Section(Section),
     DefaultAction(DefaultAction),
-    GoogleResults(GoogleResults),
+    CardSide(CardSide),
     SearchHistory(bool),
-    LensLinux(LensLinux),
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
     /// The picker's answer (`None` = cancelled).
@@ -987,8 +986,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             state.interval = s;
         }
         Message::DefaultAction(a) => state.draft.general.default_action = a,
-        Message::GoogleResults(g) => state.draft.general.google_results = g,
-        Message::LensLinux(v) => state.draft.results.lens_linux = v,
+        Message::CardSide(side) => state.draft.results.side = side,
         Message::SearchHistory(on) => {
             state.draft.general.search_history = on;
             if !on {
@@ -1286,13 +1284,10 @@ fn shorten(path: &str) -> String {
     format!("…{tail}")
 }
 
-/// The one line under "Show Google results": where they show, or why the card can't.
-fn google_results_hint(choice: GoogleResults) -> &'static str {
-    match (choice, crate::sheet::unavailable()) {
-        (GoogleResults::Browser, _) => "Lens and AI Mode open in your browser",
-        (GoogleResults::App, Some(why)) => why,
-        (GoogleResults::App, None) => "Lens and AI Mode in a card beside your selection",
-    }
+/// The one line under "Results card": where it sits, or why it can't open.
+fn results_hint() -> &'static str {
+    crate::sheet::unavailable()
+        .unwrap_or("Lens and AI Mode results. Drag its header to the other side")
 }
 
 fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
@@ -1329,28 +1324,7 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     .spacing(8)
     .width(FORM_WIDTH);
     let error = issue(&state.problems, "general.save_folder");
-    // Linux: Google may ask WebKitGTK's Lens to prove it's a human (the user
-    // answers in the card), so Lens there has its own choice.
-    let lens_linux = cfg!(target_os = "linux").then(|| {
-        form_row(
-            "Lens on Linux",
-            "Google may ask you to prove you're human in the card",
-            segmented(
-                &[
-                    (LensLinux::InCard, "In the card", "Lens results in the card"),
-                    (
-                        LensLinux::Browser,
-                        "In my browser",
-                        "Lens opens in your browser",
-                    ),
-                ],
-                state.draft.results.lens_linux,
-                Message::LensLinux,
-            ),
-            None,
-        )
-    });
-    let mut rows = vec![
+    vec![
         form_row(
             "Default action",
             "What Enter does after you select something",
@@ -1371,23 +1345,15 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
             None,
         ),
         form_row(
-            "Show Google results",
-            google_results_hint(state.draft.general.google_results),
+            "Results card",
+            results_hint(),
             segmented(
                 &[
-                    (
-                        GoogleResults::App,
-                        "In OpenCircle",
-                        "Lens and AI Mode in a card beside your selection",
-                    ),
-                    (
-                        GoogleResults::Browser,
-                        "In my browser",
-                        "Lens and AI Mode open in your browser",
-                    ),
+                    (CardSide::Left, "Left", "The card sits on the left"),
+                    (CardSide::Right, "Right", "The card sits on the right"),
                 ],
-                state.draft.general.google_results,
-                Message::GoogleResults,
+                state.draft.results.side,
+                Message::CardSide,
             ),
             None,
         ),
@@ -1414,11 +1380,7 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
             folder_control,
             error,
         ),
-    ];
-    if let Some(row) = lens_linux {
-        rows.insert(2, row);
-    }
-    rows
+    ]
 }
 
 fn look_rows(state: &State) -> Vec<Element<'_, Message>> {

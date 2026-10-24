@@ -9,9 +9,10 @@
 //! 20 px corners, thin border, soft shadow (Linux; Windows 10 clips it away);
 //! header = icon, "Google · Lens" / "Google · AI Mode", the "google.com" chip,
 //! Open in browser, ×; the page in the body; footer = the privacy line. On the
-//! side away from the selection, full height (portrait or narrow: at the
+//! user's side (left or right), full height (portrait or narrow: at the
 //! bottom). The inner edge resizes it (its grip shows on hover; double-click =
-//! default size); it never moves. Esc, ×, or a click outside closes it.
+//! default size); dragging its header moves it, and on release it docks to
+//! the nearer side (kept for next time). Esc, ×, or a click outside closes it.
 //!
 //! Isolation: only https and our in-memory page load (no file://, no
 //! downloads, every permission denied), new windows go to the user's browser
@@ -245,6 +246,11 @@ pub fn builder<'a>(
 pub fn slid(t: Duration) -> f64 {
     let p = (t.as_secs_f64() / SLIDE.as_secs_f64()).min(1.0);
     1.0 - (1.0 - p).powi(3)
+}
+
+/// The card `t` (0..1) of the way from `a` to `b` (docking).
+pub fn lerp(a: proto::Rect4, b: proto::Rect4, t: f64) -> proto::Rect4 {
+    std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)
 }
 
 /// Offset (dx, dy) of the card `share` (0..1) into its slide.

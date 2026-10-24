@@ -157,17 +157,22 @@ production systems.
   turned off). Solid "Redact" stays as a separate preset.
 - Results sheet (owner, 2026-10-24): explore a slide-up sheet showing Google's own
   page (Lens / AI Mode) in the system web view (WebView2 / WebKitGTK), loaded only
-  while open; no scraping, no copying Google's UI. Placement (owner, 2026-10-24):
-  on landscape screens it slides in from the side AWAY from the selection (auto;
-  pinnable left/right), full height, resizable; bottom sheet only on portrait or
-  narrow screens. Everything happens inside the card where the platform allows
-  (Lens + AI Mode on Windows; on Linux Lens also opens in the card and a HUMAN
-  solves Google's CAPTCHA there if shown; agents never solve/bypass CAPTCHAs;
-  owner is testing how often it returns; fallback setting = browser).
+  while open; no scraping, no copying Google's UI. Placement: see "Results card
+  placement" below (full height, resizable; bottom sheet only on portrait or
+  narrow screens). Everything happens inside the card (Lens + AI Mode on Windows
+  and Linux; on Linux a HUMAN solves Google's CAPTCHA there if shown; agents
+  never solve/bypass CAPTCHAs; owner is testing how often it returns).
   Google sign-in doesn't work in embedded web views, so history = an opt-in LOCAL
   OpenCircle search history + "Open in browser". All result panels follow the same rule, as FLOATING cards
   (owner, 2026-10-24): inset from the screen edges, rounded ~20 px, shadow,
   draggable + resizable, never a flat full-height slab.
+- Results card placement (owner, 2026-10-24, supersedes "away from the
+  selection" and "only the size is remembered"): results (Lens, AI Mode) show
+  directly in the floating card. It sits on the left or right side by the user's
+  preference, its width can be widened, and it moves sides with the common
+  pattern (drag the card's header; on release it docks to the nearer side). Side
+  and width are remembered across runs. Nothing ever opens in the browser
+  automatically: only the card's "Open in browser" button does that.
 - Translate default target (owner, 2026-10-23): Arabic, changeable in settings.
 - No-key AI (owner, 2026-10-24): until a key is set, Ask AI opens the question
   (prompt + the selection's text) in Google Search AI Mode in the user's own
@@ -239,7 +244,8 @@ production systems.
   costs +23 MB idle RSS, and an in-process web view leaves ~230 MB after close
   (spike S9). Google often shows its "unusual traffic" check to Lens in
   WebKitGTK (URL `google.com/sorry/…`): the card shows a hint; the user solves
-  it or opens the browser. `results.lens_linux = "browser"` keeps Lens in the
-  browser. Search history: `general.search_history` (`src/sheet/history.rs`).
-  No helper / runtime (WebView2, libwebkit2gtk-4.1: Recommends, not Depends):
-  the browser.
+  it or opens the browser. Side and width: `[results]` in the config, written
+  when the user docks or resizes the card. Search history:
+  `general.search_history` (`src/sheet/history.rs`). No helper / runtime
+  (WebView2, libwebkit2gtk-4.1: Recommends, not Depends): the panel says so and
+  offers "Open in browser" (never opens it by itself).

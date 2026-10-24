@@ -26,12 +26,12 @@ use wry::{Rect, WebContext, WebView, WebViewExtWindows};
 use crate::proto::{
     self, Args, BODY_PAD, BODY_R, FOOTER, HEADER, Hit, Kind, Line, MIN, Place, RADIUS, Rect4,
 };
+use crate::{
+    CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, icon, lerp, log, say, slid, slide_off,
+};
 
 /// The human-check hint strip's height (logical px).
 const HINT: f64 = 44.0;
-use crate::{
-    CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, icon, log, say, slid, slide_off,
-};
 
 type Surface = softbuffer::Surface<Rc<Window>, Rc<Window>>;
 
@@ -48,7 +48,7 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         kind: args.kind,
         has_history: history.is_some(),
         history,
-        near: args.near,
+        side: args.side,
         size: args.size,
         colours: args.colours,
         page: Some(page),
@@ -68,6 +68,8 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         last_edge_press: None,
         resized: false,
         slide: None,
+        grab: None,
+        dock: None,
         shown: false,
         captcha: false,
         code: 0,
@@ -83,7 +85,8 @@ struct App {
     /// The History page, until the web view takes it; its button shows.
     history: Option<String>,
     has_history: bool,
-    near: Option<f64>,
+    /// The user's side (Left or Right); the card docks there.
+    side: Place,
     /// The size to open at (the user's last resize), then the one to report.
     size: Option<(f64, f64)>,
     colours: [u32; 5],
@@ -110,6 +113,10 @@ struct App {
     /// The user resized it (or reset it): tell the app at the end.
     resized: bool,
     slide: Option<Instant>,
+    /// The header is held: where in the card (logical); the card follows the pointer.
+    grab: Option<(f64, f64)>,
+    /// Docking after a drop: since when, and from where (to `target`).
+    dock: Option<(Instant, Rect4)>,
     shown: bool,
     /// Google's human check is showing: the hint strip sits above the page.
     captcha: bool,
@@ -387,7 +394,7 @@ impl App {
     fn close(&mut self, el: &ActiveEventLoop) {
         if self.resized {
             let (w, h) = self.logical();
-            let size = self.size.map(|_| (w, h));
+            let size = self.size.map(|_| proto::kept(self.at, (w, h)));
             say(Line::Size(size));
         }
         el.exit();
@@ -398,7 +405,7 @@ impl App {
         if let Some(Ok(url)) = self.view.as_ref().map(WebView::url)
             && url.starts_with("https://")
         {
-            say(Line::Open(url));
+            say(Line::Leave(url));
         }
         self.close(el);
     }
@@ -407,7 +414,7 @@ impl App {
     fn reset(&mut self) {
         self.size = None;
         self.resized = true;
-        let [x, y, w, h] = proto::place(self.screen, self.near, None).1;
+        let [x, y, w, h] = proto::place(self.screen, self.side, None).1;
         if let Some(win) = &self.win {
             win.set_outer_position(self.phys(x, y));
             let _ =
@@ -433,7 +440,7 @@ impl ApplicationHandler<Ev> for App {
         self.mon = (mp.x, mp.y);
         self.k = k;
         self.screen = (ms.width as f64 / k, ms.height as f64 / k);
-        (self.at, self.target) = proto::place(self.screen, self.near, self.size);
+        (self.at, self.target) = proto::place(self.screen, self.side, self.size);
         let [x, y, w, h] = self.target;
         let size = PhysicalSize::new((w * k) as u32, (h * k) as u32);
         let (dx, dy) = slide_off(self.at, 0.0);
@@ -499,15 +506,28 @@ impl ApplicationHandler<Ev> for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        let Some(began) = self.slide else { return };
-        let s = slid(began.elapsed());
-        let (dx, dy) = slide_off(self.at, s);
-        if let Some(w) = &self.win {
-            w.set_outer_position(self.phys(self.target[0] + dx, self.target[1] + dy));
+        // Sliding in, or docking after a drop: where the card is now.
+        let (at, done) = match (self.slide, self.dock) {
+            (Some(began), _) => {
+                let s = slid(began.elapsed());
+                let (dx, dy) = slide_off(self.at, s);
+                (Some((self.target[0] + dx, self.target[1] + dy)), s >= 1.0)
+            }
+            (None, Some((began, from))) => {
+                let s = slid(began.elapsed());
+                let r = lerp(from, self.target, s);
+                (Some((r[0], r[1])), s >= 1.0)
+            }
+            (None, None) => (None, true),
+        };
+        if let (Some((x, y)), Some(w)) = (at, &self.win) {
+            w.set_outer_position(self.phys(x, y));
         }
-        if s >= 1.0 {
-            self.slide = None;
-            log(self.t0, "slid in", "");
+        if done {
+            if self.slide.take().is_some() {
+                log(self.t0, "slid in", "");
+            }
+            self.dock = None;
             el.set_control_flow(ControlFlow::Wait);
         } else {
             el.set_control_flow(ControlFlow::WaitUntil(
@@ -559,12 +579,23 @@ impl ApplicationHandler<Ev> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x / self.k, position.y / self.k);
                 let (w, h) = self.logical();
+                if let Some((gx, gy)) = self.grab {
+                    // The card follows the pointer (winit holds the mouse
+                    // capture while the button is down); it docks on release.
+                    let [x, y, ..] = self.target;
+                    self.target = [x + self.cursor.0 - gx, y + self.cursor.1 - gy, w, h];
+                    if let Some(win) = &self.win {
+                        win.set_outer_position(self.phys(self.target[0], self.target[1]));
+                    }
+                    return;
+                }
                 let at = proto::hit(self.at, self.cursor.0, self.cursor.1, w, h);
                 if let Some(win) = &self.win {
                     win.set_cursor(match at {
                         Some(Hit::Edge) if self.at == Place::Bottom => CursorIcon::NsResize,
                         Some(Hit::Edge) => CursorIcon::EwResize,
                         Some(Hit::Close | Hit::Browser) => CursorIcon::Pointer,
+                        Some(Hit::Head) => CursorIcon::Grab,
                         Some(Hit::History) if self.has_history => CursorIcon::Pointer,
                         Some(Hit::History) | None => CursorIcon::Default,
                     });
@@ -597,6 +628,15 @@ impl ApplicationHandler<Ev> for App {
                         }
                     }
                     Some(Hit::History) => {}
+                    Some(Hit::Head) if self.slide.is_none() && self.dock.is_none() => {
+                        // From where the card really is (a resize moved it).
+                        if let Some(Ok(p)) = self.win.as_ref().map(|w| w.outer_position()) {
+                            let (x, y) = (p.x - self.mon.0, p.y - self.mon.1);
+                            self.target = [x as f64 / self.k, y as f64 / self.k, w, h];
+                        }
+                        self.grab = Some(self.cursor);
+                    }
+                    Some(Hit::Head) => {}
                     Some(Hit::Edge) => {
                         let double = (self.last_edge_press)
                             .is_some_and(|t| t.elapsed() < Duration::from_millis(400));
@@ -615,6 +655,23 @@ impl ApplicationHandler<Ev> for App {
                     }
                     None => {}
                 }
+            }
+            // Dropped: it docks to the nearer side (animated), which is kept.
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            } if self.grab.take().is_some() => {
+                let from = self.target;
+                let to = proto::dock(self.screen, from);
+                let size = self.size.is_some().then_some((from[2], from[3]));
+                (self.at, self.target) = proto::place(self.screen, to, size);
+                if to != self.side {
+                    self.side = to;
+                    say(Line::Side(to));
+                }
+                self.dock = Some((Instant::now(), from));
+                self.paint(); // the grip moves to the new inner edge
             }
             WindowEvent::KeyboardInput { event, .. }
                 if event.logical_key == Key::Named(NamedKey::Escape) =>

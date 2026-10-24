@@ -2201,10 +2201,7 @@ impl App {
     ) -> Task<Message> {
         self.panels = self.panels.wrapping_add(1);
         let id = self.panels;
-        // The results card opens on the side away from the selection.
-        let near = (self.selection)
-            .map(|s| self.view.rect_to_screen(s.area).center_x() / self.screen.width.max(1.0));
-        let (panel, task) = panel::Panel::open(kind, crop, question, near);
+        let (panel, task) = panel::Panel::open(kind, crop, question);
         self.panel = Some((id, panel));
         task.map(move |msg| Message::Panel(id, msg))
     }
@@ -2234,6 +2231,9 @@ impl App {
             panel::Msg::Card(card::Event::Reset) => self.card = None,
             panel::Msg::Card(card::Event::Close) => self.panel = None,
             panel::Msg::Cancel => self.panel = None,
+            // The user took the results to the browser: on Linux get out of
+            // its way (see the Lens page above); Windows already went behind.
+            panel::Msg::Sheet(crate::sheet::Event::Left) if !cfg!(windows) => return self.close(),
             panel::Msg::Search => return self.run(&lens::ACTION),
             panel::Msg::CopyText => {
                 let text = panel.text().unwrap_or_default();
@@ -4349,6 +4349,19 @@ mod tests {
         // Windows: behind the browser, back on the shortcut; elsewhere: closed.
         assert_eq!(app.frame.is_some(), cfg!(windows));
         assert_eq!(app.panel.is_some(), cfg!(windows));
+        // The same when the user takes the results card's page to the browser.
+        let mut app = open_app(1920, 1080, 1.0);
+        drag(
+            &mut app,
+            Point::new(100.0, 100.0),
+            Point::new(400.0, 300.0),
+            false,
+        );
+        let _ = app.update(Message::Run(&lens::ACTION));
+        let id = app.panel.as_ref().expect("the Lens panel").0;
+        let left = panel::Msg::Sheet(crate::sheet::Event::Left);
+        let _ = app.update(Message::Panel(id, left));
+        assert_eq!(app.frame.is_some(), cfg!(windows));
     }
 
     #[test]
