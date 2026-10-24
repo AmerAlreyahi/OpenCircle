@@ -418,6 +418,31 @@ fn a_block_never_jumps_over_a_line() {
         ),
     ];
     let b = group_blocks(&l);
+    // nor across a line OCR did not find (a line pitch of 20, then 40)
+    let gap = [
+        line(
+            "successful consoles for the home market: however, loss of",
+            0.0,
+            0.0,
+            500.0,
+            24.0,
+        ),
+        line(
+            "saturation of the console gaming market led to the crash",
+            0.0,
+            20.0,
+            500.0,
+            24.0,
+        ),
+        line(
+            "late 1980s video game consoles became dominated by",
+            0.0,
+            60.0,
+            500.0,
+            24.0,
+        ),
+    ];
+    assert_eq!(group_blocks(&gap).len(), 2);
     for (i, x) in b.iter().enumerate() {
         for y in &b[i + 1..] {
             let [ax, ay, aw, ah] = x.bounds;

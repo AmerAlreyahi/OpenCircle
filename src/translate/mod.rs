@@ -58,9 +58,15 @@ pub fn group_blocks(lines: &[Line]) -> Vec<Block> {
                 my > p.bounds[1] && my < y && mx < x + w && x < mx + mw
             })
         };
+        // nor across a line OCR missed: the step from the last line is about
+        // the paragraph's own line pitch
+        let in_step = |b: &Block| match &b.lines[..] {
+            [.., q, p] => y - p.bounds[1] <= 1.5 * (p.bounds[1] - q.bounds[1]),
+            _ => true,
+        };
         match out.iter().rposition(|b| {
             let p = b.lines.last().expect("never empty");
-            continues(p, l) && !between(p)
+            continues(p, l) && !between(p) && in_step(b)
         }) {
             Some(i) => {
                 let b = &mut out[i];
