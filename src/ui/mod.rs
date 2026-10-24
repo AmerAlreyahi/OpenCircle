@@ -3,6 +3,7 @@
 mod bar;
 mod border;
 mod edit;
+mod glass;
 mod live_controller;
 mod live_layer;
 mod onboarding;
@@ -791,6 +792,7 @@ impl App {
         let px = |v: f32| (v * shot.scale).round() as u32;
         self.view = overlay::View::new(px(size.width), px(size.height), size);
         self.frame = Some(shot.image);
+        glass::set_frame(self.frame.as_ref(), shot.scale);
         self.helper = Some(ocr::hold());
         self.scale = shot.scale;
         self.screen = size;
@@ -2319,6 +2321,7 @@ impl App {
         self.lens_pages.drain(..).for_each(lens::Held::release);
         let _ = crate::lens::take_handed_off();
         self.frame = None;
+        glass::set_frame(None, 1.0);
         self.stroke = Vec::new();
         self.selection = None;
         self.others = Vec::new();
@@ -2551,6 +2554,7 @@ impl App {
     }
 
     fn view(&self, window: window::Id) -> Element<'_, Message> {
+        glass::building_overlay(false);
         if let Some(page) = self.windows.view(window) {
             return page.map(Message::Windows);
         }
@@ -2565,6 +2569,7 @@ impl App {
         let Some(frame) = &self.frame else {
             return space().into();
         };
+        glass::building_overlay(true);
         let snip = match &self.purpose {
             Purpose::Snip(snip) => Some(snip),
             _ => None,
@@ -4485,6 +4490,62 @@ mod tests {
         shot(&app, "look-4-select-text.png");
         drag(&mut app, at_word(1, 7.0), at_word(2, 11.0), false);
         shot(&app, "look-5-select-text-popup.png");
+    }
+
+    /// `OPENCIRCLE_LOOK_PNG=<dir> cargo test ui::tests::widget_theme_shots -- --ignored`:
+    /// the bar and the Ask AI card in every widget theme, glass on and off, over a busy frame.
+    #[test]
+    #[ignore = "writes PNGs to look at"]
+    fn widget_theme_shots() {
+        use crate::config::WidgetTheme::{Default, Frost, Graphite};
+        let dir = std::path::PathBuf::from(
+            std::env::var("OPENCIRCLE_LOOK_PNG").expect("OPENCIRCLE_LOOK_PNG=<dir>"),
+        );
+        let (w, h) = (1100u32, 620u32);
+        let busy: Vec<u8> = (0..h)
+            .flat_map(|y| {
+                (0..w).flat_map(move |x| {
+                    let stripe = ((x + y) / 24) % 2 == 0;
+                    let wave =
+                        ((x as f32 / 37.0).sin() * 40.0 + (y as f32 / 29.0).cos() * 40.0) as i32;
+                    let text = (y / 11) % 3 == 0 && (x / 7) % 5 != 0 && y > 60;
+                    let base = if stripe { [230, 90, 70] } else { [40, 90, 200] };
+                    let c = base.map(|v| (v + wave).clamp(0, 255) as u8);
+                    if text {
+                        [250, 250, 245, 255]
+                    } else {
+                        [c[0], c[1], c[2], 255]
+                    }
+                })
+            })
+            .collect();
+        for (name, theme, glass) in [
+            ("default", Default, true),
+            ("frost-glass", Frost, true),
+            ("frost-solid", Frost, false),
+            ("graphite-glass", Graphite, true),
+            ("graphite-solid", Graphite, false),
+        ] {
+            config::set_current(config::Config {
+                widget_theme: theme,
+                glass_effect: glass,
+                ..config::Config::default()
+            });
+            let mut app = open_app(w, h, 1.0);
+            app.frame = Some(image::Handle::from_rgba(w, h, busy.clone()));
+            glass::set_frame(app.frame.as_ref(), 1.0);
+            drag(
+                &mut app,
+                Point::new(90.0, 160.0),
+                Point::new(420.0, 400.0),
+                false,
+            );
+            let _ = app.update(Message::Run(&actions::ask::ACTION));
+            app.more = true;
+            let rgba = widgets::shot::render(app.view(app.overlay), w, h);
+            actions::write_png(&dir.join(format!("theme-{name}.png")), w, h, &rgba).unwrap();
+        }
+        config::set_current(config::Config::default());
     }
 
     /// Add capture: the editor steps aside, an area dragged on the frozen frame

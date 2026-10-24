@@ -3,7 +3,7 @@ use std::cell::Cell;
 
 use iced::Color;
 
-use crate::config::{self, BarStyle, BracketColour, ColourSet, Look, Rgb, Theme};
+use crate::config::{self, BarStyle, BracketColour, ColourSet, Look, Rgb, Theme, WidgetTheme};
 
 /// One theme's surface colours.
 pub struct Palette {
@@ -75,6 +75,45 @@ const LIGHT: Palette = Palette {
     field_focus: Color::from_rgba8(16, 16, 40, 0.10),
     keycap: Color::from_rgba8(255, 255, 255, 0.95),
     danger: Color::from_rgb8(0xc6, 0x28, 0x28),
+};
+
+// Widget themes (config `widget_theme`): the floating widgets only. Their `panel`
+// is a translucent tint (the blurred screen shows through when the glass effect
+// is on); `panel_solid` is a near-opaque tint over `window` for glass off / popups.
+const FROST_WINDOW: Color = Color::from_rgb8(0xe4, 0xea, 0xf4);
+/// Frosted glass: a pale tint, a bright 1 px edge, dark text.
+const FROST: Palette = Palette {
+    panel: Color::from_rgba8(246, 249, 255, 0.50),
+    panel_solid: solid(Color::from_rgba8(246, 249, 255, 0.86), FROST_WINDOW),
+    border: Color::from_rgba8(255, 255, 255, 0.70),
+    text: Color::from_rgb8(0x14, 0x18, 0x26),
+    muted: Color::from_rgb8(0x3f, 0x46, 0x5a),
+    shadow: Color::from_rgba8(16, 24, 48, 0.18),
+    hover: Color::from_rgba8(255, 255, 255, 0.45),
+    pressed: Color::from_rgba8(255, 255, 255, 0.70),
+    window: FROST_WINDOW,
+    field: Color::from_rgba8(16, 24, 48, 0.06),
+    field_focus: Color::from_rgba8(16, 24, 48, 0.12),
+    keycap: Color::from_rgba8(255, 255, 255, 0.80),
+    danger: Color::from_rgb8(0xb3, 0x26, 0x26),
+};
+
+const GRAPHITE_WINDOW: Color = Color::from_rgb8(0x1f, 0x22, 0x28);
+/// Calm dark graphite: a warm grey tint, a hairline edge.
+const GRAPHITE: Palette = Palette {
+    panel: Color::from_rgba8(38, 41, 48, 0.72),
+    panel_solid: solid(Color::from_rgba8(38, 41, 48, 0.96), GRAPHITE_WINDOW),
+    border: Color::from_rgba8(255, 255, 255, 0.10),
+    text: Color::from_rgb8(0xe6, 0xe8, 0xec),
+    muted: Color::from_rgb8(0x9a, 0xa0, 0xaa),
+    shadow: Color::from_rgba8(0, 0, 0, 0.35),
+    hover: Color::from_rgba8(255, 255, 255, 0.07),
+    pressed: Color::from_rgba8(255, 255, 255, 0.12),
+    window: GRAPHITE_WINDOW,
+    field: Color::from_rgba8(255, 255, 255, 0.05),
+    field_focus: Color::from_rgba8(255, 255, 255, 0.10),
+    keycap: Color::from_rgba8(255, 255, 255, 0.09),
+    danger: Color::from_rgb8(0xf0, 0x8c, 0x8c),
 };
 
 /// Selection stroke and screen border gradient (both themes): violet → cyan.
@@ -243,6 +282,19 @@ pub const WORD_PICKED: Color = Color::from_rgba8(0x5a, 0x8c, 0xff, 0.55);
 /// The palette floating surfaces (bar, pills, panels) use under the active
 /// look's bar style: glass dark / light force one; the rest follow the app.
 pub fn floating() -> &'static Palette {
+    widget_palette(config::widgets().0).unwrap_or_else(app_floating)
+}
+
+/// A widget theme's own palette (`Default` has none: it follows the app).
+fn widget_palette(t: WidgetTheme) -> Option<&'static Palette> {
+    match t {
+        WidgetTheme::Frost => Some(&FROST),
+        WidgetTheme::Graphite => Some(&GRAPHITE),
+        WidgetTheme::Default => None,
+    }
+}
+
+fn app_floating() -> &'static Palette {
     match config::look().bar {
         BarStyle::GlassDark => &DARK,
         BarStyle::GlassLight => &LIGHT,
@@ -337,6 +389,28 @@ mod tests {
         // 0.86 of (22,22,34) over (18,19,31): close to the panel colour
         assert!((DARK.panel_solid.r - (22.0 * 0.86 + 18.0 * 0.14) / 255.0).abs() < 1e-3);
         assert!((LIGHT.panel_solid.r - (255.0 * 0.9 + 246.0 * 0.1) / 255.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn every_widget_theme_resolves_and_has_a_solid_fallback() {
+        let all = [
+            WidgetTheme::Default,
+            WidgetTheme::Frost,
+            WidgetTheme::Graphite,
+        ];
+        let mut texts = Vec::new();
+        for t in all {
+            let p = widget_palette(t).unwrap_or(&DARK);
+            assert_eq!(p.panel_solid.a, 1.0);
+            assert!(p.panel.a < 1.0, "the tint lets the blur through");
+            texts.push(p.text);
+        }
+        assert!(texts[0] != texts[1] && texts[1] != texts[2] && texts[0] != texts[2]);
+        // Readable: text far from the tint in lightness.
+        let l = |c: Color| 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+        for p in [&FROST, &GRAPHITE] {
+            assert!((l(p.text) - l(p.panel_solid)).abs() > 0.6);
+        }
     }
 
     #[test]

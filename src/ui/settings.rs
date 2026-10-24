@@ -26,7 +26,7 @@ use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 use crate::config::{
     After, BarStyle, BracketColour, BracketStyle, CardSide, ColourSet, Config, DefaultAction,
     EdgeMode, EdgeStyle, Engine, Format, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith,
-    SelectStyle, SnipAfter, SnipConfig, SongSource, Target, Theme, parse_shortcut,
+    SelectStyle, SnipAfter, SnipConfig, SongSource, Target, Theme, WidgetTheme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::mt;
@@ -546,6 +546,8 @@ pub enum Message {
     /// The Project button.
     OpenProject,
     Theme(Theme),
+    WidgetTheme(WidgetTheme),
+    GlassEffect(bool),
     Record(Slot),
     Key(Chord),
     Provider(Provider),
@@ -931,6 +933,8 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             state.draft.theme = t;
             theme::apply(t);
         }
+        Message::WidgetTheme(t) => state.draft.widget_theme = t,
+        Message::GlassEffect(on) => state.draft.glass_effect = on,
         Message::Record(slot) => {
             state.recording = (state.recording != Some(slot)).then_some(slot);
             state.shortcut_error = None;
@@ -1146,20 +1150,49 @@ fn content(state: &State) -> Element<'_, Message> {
         Section::About => ("About", about_rows(state)),
         Section::Appearance => (
             "Appearance",
-            vec![form_row(
-                "Theme",
-                "System follows your OS",
-                segmented(
-                    &[
-                        (Theme::System, "System", "Follow the system theme"),
-                        (Theme::Light, "Light", "Use the light theme"),
-                        (Theme::Dark, "Dark", "Use the dark theme"),
-                    ],
-                    d.theme,
-                    Message::Theme,
+            vec![
+                form_row(
+                    "Theme",
+                    "System follows your OS",
+                    segmented(
+                        &[
+                            (Theme::System, "System", "Follow the system theme"),
+                            (Theme::Light, "Light", "Use the light theme"),
+                            (Theme::Dark, "Dark", "Use the dark theme"),
+                        ],
+                        d.theme,
+                        Message::Theme,
+                    ),
+                    None,
                 ),
-                None,
-            )],
+                form_row(
+                    "Floating widgets",
+                    "The bar, cards and toolbar",
+                    segmented(
+                        &[
+                            (WidgetTheme::Default, "Default", "Follow the app theme"),
+                            (WidgetTheme::Frost, "Frost", "Frosted glass over the screen"),
+                            (WidgetTheme::Graphite, "Graphite", "Calm dark graphite"),
+                        ],
+                        d.widget_theme,
+                        Message::WidgetTheme,
+                    ),
+                    None,
+                ),
+                form_row(
+                    "Glass effect",
+                    "Frost and Graphite blur the screen behind them",
+                    segmented(
+                        &[
+                            (true, "On", "Blur the screen behind the widgets"),
+                            (false, "Off", "A plain tinted widget"),
+                        ],
+                        d.glass_effect,
+                        Message::GlassEffect,
+                    ),
+                    None,
+                ),
+            ],
         ),
         Section::Shortcuts => ("Shortcuts", shortcut_rows(state)),
         Section::Snip => ("Snip", snip_rows(&state.draft.snip)),

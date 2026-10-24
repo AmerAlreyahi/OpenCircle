@@ -5,6 +5,8 @@
 //! ```toml
 //! version = 1                       # schema version, written by save()
 //! theme = "system"                  # system | light | dark
+//! widget_theme = "default"          # floating widgets (bar, cards, toolbar): default | frost | graphite
+//! glass_effect = true               # frost / graphite blur the screen behind them (false = solid tint)
 //! shortcut = "Ctrl+Shift+Space"     # global capture shortcut
 //!
 //! [general]
@@ -110,6 +112,19 @@ pub enum Theme {
     System,
     Light,
     Dark,
+}
+
+/// The look of the floating widgets (bar, cards, toolbar), from `ui/theme.rs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WidgetTheme {
+    /// Follows the app theme (and the look's bar style).
+    #[default]
+    Default,
+    /// Frosted glass: a light tint over the blurred screen.
+    Frost,
+    /// Calm dark graphite.
+    Graphite,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -688,6 +703,9 @@ impl Default for EditorConfig {
 pub struct Config {
     pub version: u32,
     pub theme: Theme,
+    pub widget_theme: WidgetTheme,
+    /// Blur the screen behind `Frost` / `Graphite` widgets (off = solid tint).
+    pub glass_effect: bool,
     pub shortcut: String,
     pub general: GeneralConfig,
     pub results: ResultsConfig,
@@ -761,6 +779,8 @@ impl Default for Config {
         Config {
             version: VERSION,
             theme: Theme::System,
+            widget_theme: WidgetTheme::Default,
+            glass_effect: true,
             shortcut: DEFAULT_CAPTURE_SHORTCUT.to_string(),
             general: GeneralConfig::default(),
             results: ResultsConfig::default(),
@@ -882,6 +902,8 @@ impl Config {
             }
         }
         c.theme = get(&root, "", "theme", d.theme, &mut w);
+        c.widget_theme = get(&root, "", "widget_theme", d.widget_theme, &mut w);
+        c.glass_effect = get(&root, "", "glass_effect", d.glass_effect, &mut w);
         c.shortcut = get_checked(&root, "", "shortcut", d.shortcut, &mut w, |s: &String| {
             parse_shortcut(s).map(drop)
         });
@@ -1072,6 +1094,14 @@ pub fn look() -> Look {
         return c.look.active();
     }
     current().look.active()
+}
+
+/// The floating widgets' theme and whether they blur the screen behind them.
+pub fn widgets() -> (WidgetTheme, bool) {
+    let c = CURRENT.read().unwrap_or_else(|e| e.into_inner());
+    c.as_ref().map_or((WidgetTheme::Default, true), |c| {
+        (c.widget_theme, c.glass_effect)
+    })
 }
 
 /// The config the running app uses (any thread). Read from disk on first use;
@@ -1456,6 +1486,8 @@ mod tests {
         c.snip.history = true;
         c.snip.max_edge = 0;
         c.editor.line_assist = false;
+        c.widget_theme = WidgetTheme::Frost;
+        c.glass_effect = false;
         c.quick_actions.pop();
         c.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -1469,6 +1501,14 @@ mod tests {
         assert!(!path.with_extension("toml.tmp").exists());
         assert!(text.contains("[general]") && text.contains("default_action = \"copy\""));
         assert!(text.contains("[editor]\nline_assist = false"), "{text}");
+        assert!(text.contains("widget_theme = \"frost\"") && text.contains("glass_effect = false"));
+        // A typo falls back to the default with a warning.
+        let (bad, w) = Config::parse("widget_theme = \"frosty\"\nglass_effect = 3\n");
+        assert_eq!(
+            (bad.widget_theme, bad.glass_effect),
+            (WidgetTheme::Default, true)
+        );
+        assert_eq!(w.len(), 2, "{w:?}");
         assert!(text.contains("[update]\nauto = false"), "{text}");
         // Not asked yet: no [update] key written, none read.
         let unasked = Config::default();

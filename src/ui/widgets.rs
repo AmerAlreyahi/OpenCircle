@@ -40,9 +40,20 @@ pub const SURFACE_PADDING: f32 = 6.0;
 /// Fully rounded glass pill with one line of text (overlay hint, tooltips).
 pub fn pill<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a, Message> {
     let palette = theme::floating();
-    container(text(label).size(14).color(palette.text))
+    let blurred = super::glass::backdrop().is_some();
+    let inner = container(text(label).size(14).color(palette.text))
         .padding([8, 18])
-        .style(|_| glass(999.0))
+        .style(move |_| glass(999.0, blurred));
+    glassed(inner, 999.0)
+}
+
+/// `inner` (a `glass` container) over the blurred screen when the widget theme
+/// has one for the widgets being built; else `inner` as it is.
+fn glassed<'a, Message: 'a>(inner: Container<'a, Message>, radius: f32) -> Container<'a, Message> {
+    match super::glass::backdrop() {
+        Some(back) => container(super::glass::frosted(inner, back, radius)),
+        None => inner,
+    }
 }
 
 /// The status pill of the live layer: like `pill`, but opaque and without a
@@ -63,16 +74,18 @@ pub fn layer_pill<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a
 pub fn surface<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
-    container(content)
+    let blurred = super::glass::backdrop().is_some();
+    let inner = container(content)
         .padding(SURFACE_PADDING)
-        .style(|_| glass(20.0))
+        .style(move |_| glass(20.0, blurred));
+    glassed(inner, 20.0)
 }
 
 /// A `surface` docked over busy content (the result panel over the frozen
 /// frame): the same glass, but solid, so nothing behind shows through.
 pub fn docked<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
     container(content).padding(SURFACE_PADDING).style(|_| {
-        let glass = glass(20.0);
+        let glass = glass(20.0, false);
         container::Style {
             background: Some(theme::floating().panel_solid.into()),
             ..glass
@@ -301,11 +314,18 @@ pub mod card {
         if let Some(footer) = footer {
             parts = parts.push(rule()).push(container(footer).padding([16, 20]));
         }
+        // Frost / Graphite: the tint over the blurred screen instead of solid.
+        let back = crate::ui::glass::backdrop();
+        let tint = if back.is_some() {
+            palette.panel
+        } else {
+            palette.panel_solid
+        };
         let card = container(parts)
             .width(at.width)
             .height(at.height)
             .style(move |_| container::Style {
-                background: Some(palette.panel_solid.into()),
+                background: Some(tint.into()),
                 border: iced::Border {
                     color: palette.border,
                     width: 1.0,
@@ -355,6 +375,10 @@ pub mod card {
         .on_enter(on(Event::Hover(true)))
         .on_exit(on(Event::Hover(false)))
         .interaction(cursor);
+        let card: Element<'a, Message> = match back {
+            Some(back) => crate::ui::glass::frosted(card, back, RADIUS),
+            None => card.into(),
+        };
         let layered = stack![card, pin(edge).position(place)]
             .width(at.width)
             .height(at.height);
@@ -679,7 +703,7 @@ pub fn float_chip<'a, Message: Clone + 'a>(
         .height(CONTROL)
         .on_press(on_press)
         .style(move |_, status| {
-            let glass = glass(999.0);
+            let glass = glass(999.0, false);
             button::Style {
                 background: match status {
                     button::Status::Hovered | button::Status::Pressed => {
@@ -1123,11 +1147,15 @@ fn accent(status: button::Status) -> Background {
 /// anywhere: tiny-skia draws a shadow whole on every redraw, outside the part
 /// being redrawn too, so it piles up into a black block (and a floating
 /// window can't show one: no alpha there).
-fn glass(radius: f32) -> container::Style {
+fn glass(radius: f32, blurred: bool) -> container::Style {
     let palette = theme::floating();
+    // Frost / Graphite: the translucent tint only over the blurred screen, else
+    // (glass off, a popup window) the solid tint.
+    let themed = crate::config::widgets().0 != crate::config::WidgetTheme::Default;
     let (background, border, width) = match crate::config::look().bar {
         BarStyle::Solid => (palette.panel_solid, palette.border, 1.0),
         BarStyle::Outline => (palette.panel.scale_alpha(0.55), theme::accent().0, 1.5),
+        _ if themed && !blurred => (palette.panel_solid, palette.border, 1.0),
         _ => (palette.panel, palette.border, 1.0),
     };
     container::Style {

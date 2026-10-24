@@ -164,7 +164,13 @@ pub fn paint_with(
 }
 
 /// `passes` box blurs of radius `r` along rows then columns (edges clamped).
-fn blur2d<const N: usize>(buf: &mut [[f32; N]], w: usize, h: usize, r: usize, passes: usize) {
+pub(crate) fn blur2d<const N: usize>(
+    buf: &mut [[f32; N]],
+    w: usize,
+    h: usize,
+    r: usize,
+    passes: usize,
+) {
     if r == 0 || w == 0 || h == 0 {
         return;
     }

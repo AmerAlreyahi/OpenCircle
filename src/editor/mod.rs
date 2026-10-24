@@ -9,7 +9,7 @@
 //! once per change; while something is drawn, moved or typed, only its own
 //! region is repainted (`live`) and shown over the base.
 mod arrow;
-mod blur;
+pub(crate) mod blur;
 pub mod board;
 mod callout;
 mod canvas;
