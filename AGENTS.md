@@ -166,6 +166,8 @@ production systems.
 
 ## Domain quirks
 
+- Wayland can't hide windows (set_visible(false) is a no-op): close them and
+  reopen instead (`ui::can_hide_windows()`); never "hide" a window there.
 - Wayland forbids global key grabs and silent screenshots: use the
   xdg-desktop-portal (Screenshot, GlobalShortcuts). The GlobalShortcuts portal
   is missing on some desktops → fallback: user binds `opencircle capture` in
