@@ -5,20 +5,24 @@
 //! Explain (an explicit click) asks the AI; `A` continues as an Ask AI chat.
 use std::sync::Arc;
 
-use iced::widget::{column, container, image, opaque, pin, row, space, text};
+use iced::widget::{column, container, image, opaque, pin, row, text};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, task};
 
+use super::picker::{self, Picker};
 use super::{background, bar, panel, widgets};
 use crate::actions::ask::{self, Chat, Status};
 use crate::actions::{self, Crop};
 use crate::ai::AiError;
-use crate::ocr;
-use crate::translate::pipeline::{self, Cache, Deps, Error, Real, Translation};
+use crate::mt::Pair;
+use crate::ocr::models;
+use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
 
 /// The word card's width, and its height for placing it (logical px).
 const CARD: Size = Size::new(360.0, 220.0);
 /// Notes and prompts (consent, errors) at the top.
 const NOTE_WIDTH: f32 = 420.0;
+/// The language list under the pill (two columns of names).
+const PICKER_LIST: f32 = 360.0;
 /// Context around a block in the image the word card sends (physical px).
 const CONTEXT: u32 = 8;
 
@@ -26,8 +30,11 @@ const CONTEXT: u32 = 8;
 pub enum Msg {
     /// The user agreed to the OCR (or offline translation) download.
     Download,
-    /// Translation will be offline and its models are missing (bytes): ask.
-    Offline(u64),
+    /// Translation will be offline and this pair's models are missing
+    /// (bytes): ask.
+    Offline(&'static Pair, u64),
+    /// The language picker; a new source or target translates again.
+    Picker(picker::Msg),
     /// Declined the download, or closed an error: the overlay closes.
     Close,
     /// Model download, 0..=1.
@@ -64,9 +71,10 @@ pub struct Problem {
 
 #[derive(Debug)]
 enum Phase {
-    /// No OCR models yet: ask first (the Text panel's prompt). `Some(bytes)`:
-    /// offline translation's models (and OCR's, if missing) instead.
-    Consent(Option<u64>),
+    /// No OCR models for the source yet: ask first (the Text panel's
+    /// prompt). `Some`: an offline pair's models (and OCR's, if missing)
+    /// instead, with the bytes to download.
+    Consent(Option<(&'static Pair, u64)>),
     Downloading(f32),
     Translating,
     Shown(Shown),
@@ -84,8 +92,10 @@ pub struct Session {
     cache: Arc<Cache>,
     /// The download / translation; dropping it stops the thread's messages.
     work: Option<task::Handle>,
-    /// The user was asked for (and agreed to) offline translation's download.
-    offline: bool,
+    /// The offline pair the user was asked for (and agreed to download).
+    offline: Option<&'static Pair>,
+    /// Source → target (the config's at first).
+    picker: Picker,
 }
 
 /// The card of one clicked block.
@@ -100,37 +110,50 @@ struct Card {
 }
 
 impl Session {
-    /// Translates `area` of `frame`. Asks first for what is missing: the OCR
-    /// models (`models` = present), or, when translation will be offline,
-    /// its models with OCR's in one download.
+    /// Translates `area` of `frame` from the configured source into the
+    /// configured target. Asks first for what is missing: the OCR models
+    /// (`models` = present), or, when translation will be offline, its
+    /// models with OCR's in one download.
     pub fn start(
         frame: image::Handle,
         area: [u32; 4],
         cache: Arc<Cache>,
         models: bool,
     ) -> (Session, Task<Msg>) {
-        // A few file sizes: cheap enough here. A missing API key is only
-        // found on the thread (keyring), which then asks (`Msg::Offline`).
-        let offline = actions::translate::surely_offline()
-            .map(|p| p.missing_bytes())
-            .filter(|&b| b > 0);
+        let cfg = crate::config::current().translate;
+        let offline = actions::translate::will_be_offline();
         let mut session = Session {
             frame,
             area,
-            phase: Phase::Consent(offline),
+            phase: Phase::Consent(None),
             peek: false,
             card: None,
             cache,
             work: None,
-            offline: false,
+            offline: None,
+            picker: Picker::new(&cfg.source, &cfg.target, offline),
         };
-        let task = if models && offline.is_none() {
-            session.phase = Phase::Translating;
-            session.run(false)
-        } else {
-            Task::none()
-        };
+        let task = session.begin(models);
         (session, task)
+    }
+
+    /// Asks for missing models, or translates. A few file sizes: cheap
+    /// enough here. A missing API key is only found on the thread
+    /// (keyring), which then asks (`Msg::Offline`).
+    fn begin(&mut self, models: bool) -> Task<Msg> {
+        let (source, target) = (&self.picker.source, &self.picker.target);
+        let offline = actions::translate::surely_offline(source, target)
+            .map(|p| (p, p.missing_bytes()))
+            .filter(|&(_, b)| b > 0);
+        self.card = None;
+        if models && offline.is_none() {
+            self.phase = Phase::Translating;
+            self.run(false)
+        } else {
+            self.work = None;
+            self.phase = Phase::Consent(offline);
+            Task::none()
+        }
     }
 
     /// The whole frame is translated (no selection to show).
@@ -154,13 +177,23 @@ impl Session {
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::Download if matches!(self.phase, Phase::Consent(_)) => {
-                self.offline = matches!(self.phase, Phase::Consent(Some(_)));
+                self.offline = match self.phase {
+                    Phase::Consent(Some((pair, _))) => Some(pair),
+                    _ => None,
+                };
                 self.phase = Phase::Downloading(0.0);
                 return self.run(true);
             }
-            Msg::Offline(bytes) if matches!(self.phase, Phase::Translating) => {
+            Msg::Offline(pair, bytes) if matches!(self.phase, Phase::Translating) => {
                 self.work = None;
-                self.phase = Phase::Consent(Some(bytes));
+                self.phase = Phase::Consent(Some((pair, bytes)));
+            }
+            Msg::Picker(msg) => {
+                if self.picker.update(msg) {
+                    let source = &self.picker.source;
+                    let models = models::installed(models::recognizer_for(source));
+                    return self.begin(models);
+                }
             }
             Msg::Progress(done) if matches!(self.phase, Phase::Downloading(_)) => {
                 self.phase = Phase::Downloading(done);
@@ -223,7 +256,7 @@ impl Session {
                 crop: Arc::new(crop),
                 chat: Chat::default(),
                 work: None,
-                rtl: pipeline::is_rtl(&crate::config::current().translate.target),
+                rtl: pipeline::is_rtl(&self.picker.target),
             });
         }
     }
@@ -246,8 +279,7 @@ impl Session {
         if !matches!(card.chat.status, Status::Idle | Status::Failed(_)) {
             return Task::none(); // streaming, or explained already
         }
-        let target = crate::config::current().translate.target;
-        let question = explain_question(&card.block, &target);
+        let question = explain_question(&card.block, &self.picker.target);
         // The card keeps the turn; the thread sends it with the image.
         card.chat.ask(&question, &[]);
         let crop = card.crop.clone();
@@ -269,23 +301,25 @@ impl Session {
 
     /// The download (if `download`) and the translation, on a thread.
     /// Offline translation's models are fetched only if the user was asked
-    /// for them (`self.offline`); otherwise the thread asks (`Msg::Offline`).
+    /// for them (`self.offline`); otherwise the thread asks (`Msg::Offline`),
+    /// also when the text turned out to need another pair ("auto").
     fn run(&mut self, download: bool) -> Task<Msg> {
         let (frame, area, cache) = (self.frame.clone(), self.area, self.cache.clone());
-        let agreed_offline = self.offline;
+        let (source, target) = (self.picker.source.clone(), self.picker.target.clone());
+        let agreed = self.offline;
         let (task, handle) = background(move |tx| {
-            let deps = actions::translate::deps();
-            let offline = match &deps {
-                Ok((Real::Offline(pair), _)) => Some(*pair),
-                _ => None,
-            };
+            let deps = actions::translate::deps_for(&source, &target);
+            let offline = deps.as_ref().is_ok_and(|(real, _)| real.offline());
             if download {
                 let progress = |done: u64, total: u64| {
                     let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
                 };
-                let fetched = match offline {
-                    Some(pair) if agreed_offline => pair.ensure(progress),
-                    _ => ocr::ensure_models(progress).map(drop),
+                let fetched = match agreed {
+                    Some(pair) => pair.ensure(progress),
+                    None => {
+                        let files = models::ocr_files(models::recognizer_for(&source));
+                        models::ensure(&files, progress)
+                    }
                 };
                 if let Err(e) = fetched {
                     let problem = Problem {
@@ -298,22 +332,33 @@ impl Session {
                 }
                 let _ = tx.unbounded_send(Msg::Translating);
             }
-            if let Some(pair) = offline {
+            let ask = |pair: &'static Pair| {
                 let missing = pair.missing_bytes();
-                if missing > 0 {
-                    let _ = tx.unbounded_send(Msg::Offline(missing));
-                    return;
-                }
+                (missing > 0).then(|| tx.unbounded_send(Msg::Offline(pair, missing)))
+            };
+            let expected = offline
+                .then(|| crate::mt::pair(if source == "auto" { "en" } else { &source }, &target))
+                .flatten();
+            if expected.and_then(ask).is_some() {
+                return;
             }
-            let _ = tx.unbounded_send(Msg::Done(translate(&frame, area, &cache, deps)));
+            let result = translate(&frame, area, &cache, &deps);
+            // "auto" read another language than expected: ask for its pair
+            if result.is_err()
+                && let Ok((real, _)) = &deps
+                && real.missing().and_then(ask).is_some()
+            {
+                return;
+            }
+            let _ = tx.unbounded_send(Msg::Done(result));
         })
         .abortable();
         self.work = Some(handle.abort_on_drop());
         task
     }
 
-    /// The layer over the frame: status, prompts, the word card.
-    /// `scale` = frame pixels per logical px.
+    /// The layer over the frame: status and the language picker, prompts,
+    /// the word card. `scale` = frame pixels per logical px.
     pub fn view(&self, scale: f32, screen: Size) -> Element<'_, Msg> {
         let note = |content: Element<'static, Msg>| -> Element<'_, Msg> {
             let surface = widgets::surface(content).padding(20).width(NOTE_WIDTH);
@@ -321,10 +366,10 @@ impl Session {
         };
         match &self.phase {
             Phase::Consent(None) => note(panel::consent(Msg::Download, Msg::Close)),
-            Phase::Consent(Some(bytes)) => note(offline_consent(*bytes)),
+            Phase::Consent(Some((pair, bytes))) => note(offline_consent(pair, *bytes)),
             Phase::Downloading(done) => note(
                 column![
-                    widgets::body(if self.offline {
+                    widgets::body(if self.offline.is_some() {
                         "Downloading offline translation…"
                     } else {
                         "Downloading the text-recognition model…"
@@ -334,10 +379,7 @@ impl Session {
                 .spacing(10)
                 .into(),
             ),
-            Phase::Translating => container(widgets::pill("Translating…"))
-                .center_x(Fill)
-                .padding(24)
-                .into(),
+            Phase::Translating => self.languages(Some("Translating…")),
             Phase::Failed(problem) => {
                 let mut buttons = row![].spacing(8);
                 if problem.setup {
@@ -356,17 +398,38 @@ impl Session {
                     !problem.setup,
                     Msg::Close,
                 ));
-                note(
-                    column![widgets::error(problem.message.clone()), buttons]
-                        .spacing(16)
-                        .into(),
-                )
+                // the picker stays: another pair may work offline
+                column![
+                    self.languages(None),
+                    note(
+                        column![widgets::error(problem.message.clone()), buttons]
+                            .spacing(16)
+                            .into(),
+                    )
+                ]
+                .into()
             }
             Phase::Shown(_) => match &self.card {
                 Some(card) => card_view(card, scale, screen),
-                None => space().into(),
+                None => self.languages(None),
             },
         }
+    }
+
+    /// The pill at the top: source → target (the picker), and `status`.
+    fn languages(&self, status: Option<&'static str>) -> Element<'_, Msg> {
+        let mut top = row![self.picker.chips(picker::CHIP_HEIGHT).map(Msg::Picker)]
+            .spacing(12)
+            .align_y(iced::Center);
+        if let Some(status) = status {
+            top = top.push(widgets::body(status));
+        }
+        let mut body = column![top].spacing(picker::SPACING);
+        if let Some(list) = self.picker.list(PICKER_LIST) {
+            body = body.push(list.map(Msg::Picker));
+        }
+        let surface = widgets::surface(container(body).padding(iced::Padding::ZERO.right(8)));
+        container(opaque(surface)).center_x(Fill).padding(24).into()
     }
 }
 
@@ -377,7 +440,7 @@ fn translate(
     frame: &image::Handle,
     area: [u32; 4],
     cache: &Cache,
-    deps: Result<(impl Deps, String), String>,
+    deps: &Result<(impl Deps, String), String>,
 ) -> Result<Shown, Problem> {
     let image::Handle::Rgba {
         width,
@@ -388,7 +451,7 @@ fn translate(
     else {
         return Err(problem("the captured frame is not RGBA".into(), false));
     };
-    let (deps, target) = deps.map_err(|e| {
+    let (deps, target) = deps.as_ref().map_err(|e| {
         let first = e.lines().next().unwrap_or_default().to_string();
         problem(first, true)
     })?;
@@ -399,11 +462,15 @@ fn translate(
     );
     let crop = actions::crop(pixels, *width, *height, 1.0, rect)
         .ok_or_else(|| problem("nothing to translate there".into(), false))?;
-    let out = pipeline::translate_frame(&crop.rgba, crop.width, crop.height, &target, cache, &deps)
+    let out = pipeline::translate_frame(&crop.rgba, crop.width, crop.height, target, cache, deps)
         .map_err(|e| {
-            let setup = matches!(e, Error::Ai(AiError::NotConfigured(_) | AiError::Auth(_)));
-            problem(e.to_string(), setup)
-        })?;
+        // Offline can't do it (no model, not downloaded): AI is the other way.
+        let setup = matches!(
+            e,
+            Error::Ai(AiError::NotConfigured(_) | AiError::Auth(_) | AiError::Offline(_))
+        );
+        problem(e.to_string(), setup)
+    })?;
     let t = out.timings;
     eprintln!(
         "[opencircle] translate {}x{}: ocr {} ms, translate {} ms, render {} ms, total {} ms; {} blocks",
@@ -436,12 +503,13 @@ fn problem(message: String, setup: bool) -> Problem {
 
 /// The offline download question (`panel::consent`'s layout, plus Set up AI
 /// as the other way to translate).
-fn offline_consent(bytes: u64) -> Element<'static, Msg> {
+fn offline_consent(pair: &Pair, bytes: u64) -> Element<'static, Msg> {
     let mb = bytes.div_ceil(10_000_000) * 10; // "about 120 MB"
     column![
         widgets::body(format!(
-            "Download offline translation (about {mb} MB) from Hugging Face and GitHub? \
-             It needs no key and nothing you translate leaves your PC."
+            "Download {} (about {mb} MB) from Hugging Face and GitHub? \
+             It needs no key and nothing you translate leaves your PC.",
+            pair.label()
         )),
         row![
             widgets::text_button(
@@ -547,6 +615,7 @@ fn card_view(card: &Card, scale: f32, screen: Size) -> Element<'_, Msg> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ocr;
 
     fn block(text: &str, tr: &str, bounds: [f32; 4]) -> Translation {
         Translation {
@@ -581,7 +650,8 @@ mod tests {
             card: None,
             cache: Arc::new(Cache::new(8)),
             work: None,
-            offline: false,
+            offline: None,
+            picker: Picker::new("auto", "ar", false),
         }
     }
 
@@ -630,32 +700,37 @@ mod tests {
         assert!(matches!(&s.phase, Phase::Consent(None)));
         let _ = s.update(Msg::Progress(0.5));
         assert!(matches!(&s.phase, Phase::Consent(None)));
-        let _ = s.update(Msg::Offline(1));
+        let _ = s.update(Msg::Offline(en_ar(), 1));
         assert!(
             matches!(&s.phase, Phase::Consent(None)),
             "only while translating"
         );
     }
 
+    fn en_ar() -> &'static Pair {
+        crate::mt::pair("en", "ar").unwrap()
+    }
+
     #[test]
     fn offline_models_are_asked_for_with_their_size() {
         // the thread found translation will be offline, without its models
         let mut s = session(true);
-        let _ = s.update(Msg::Offline(117_600_822));
-        assert!(matches!(&s.phase, Phase::Consent(Some(117_600_822))));
+        let _ = s.update(Msg::Offline(en_ar(), 117_600_822));
+        assert!(matches!(&s.phase, Phase::Consent(Some((_, 117_600_822)))));
         assert!(s.work.is_none(), "the thread is done");
         let texts = widgets::shot::texts(s.view(1.0, Size::new(1920.0, 1080.0)));
         assert!(
             texts
                 .iter()
-                .any(|t| t.starts_with("Download offline translation (about 120 MB)")),
+                .any(|t| t
+                    .starts_with("Download English → Arabic offline translation (about 120 MB)")),
             "{texts:?}"
         );
         for button in ["Download", "Set up AI", "Cancel"] {
             assert!(texts.iter().any(|t| t == button), "{button}: {texts:?}");
         }
-        // (Download would start the real download thread: as it leaves it)
-        s.offline = true;
+        // Download: that pair is the one fetched
+        s.offline = Some(en_ar());
         s.phase = Phase::Downloading(0.3);
         let texts = widgets::shot::texts(s.view(1.0, Size::new(1920.0, 1080.0)));
         assert!(
@@ -665,6 +740,41 @@ mod tests {
         );
     }
 
+    /// The "Translating…" pill holds the picker; a new language translates
+    /// again (here: its recognizer is missing, so it asks first). PNGs via
+    /// the headless renderer (`OPENCIRCLE_RENDER_DIR=<dir>`).
+    #[test]
+    fn the_pill_picks_languages_and_translates_again() {
+        use crate::ui::picker::{Msg as P, Side};
+        let mut s = session(true);
+        let size = Size::new(720.0, 420.0);
+        let texts = widgets::shot::texts(s.view(1.0, size));
+        for t in ["Detect", "Arabic", "Translating…"] {
+            assert!(texts.iter().any(|x| x == t), "{t}: {texts:?}");
+        }
+        widgets::shot::save("translate-pill", s.view(1.0, size), size);
+        let _ = s.update(Msg::Picker(P::Open(Side::Target)));
+        widgets::shot::save("translate-pill-picker", s.view(1.0, size), size);
+        let texts = widgets::shot::texts(s.view(1.0, size));
+        assert!(texts.iter().any(|t| t == "English"), "{texts:?}");
+        // the same target again: nothing restarts
+        let _ = s.update(Msg::Picker(P::Pick("ar".into())));
+        assert!(matches!(s.phase, Phase::Translating));
+        // a shown translation keeps the pill; a new target starts over
+        let _ = s.update(shown(vec![block("Quit", "خروج", [10.0, 10.0, 50.0, 20.0])]));
+        let texts = widgets::shot::texts(s.view(1.0, size));
+        assert!(texts.iter().any(|t| t == "Arabic") && !texts.iter().any(|t| t == "Translating…"));
+        let _ = s.update(Msg::Picker(P::Open(Side::Source)));
+        let _ = s.update(Msg::Picker(P::Query("kyr".into())));
+        assert!(!s.picker.update(P::First), "nothing matches: no change");
+        let _ = s.update(Msg::Picker(P::Query("".into())));
+        // a source whose recognizer is (in this sandbox) missing: ask first
+        let _ = s.update(Msg::Picker(P::Pick("zh".into())));
+        assert_eq!(s.picker.label(), "ZH → AR");
+        let ready = models::installed(models::recognizer_for("zh"));
+        assert!(ready || matches!(s.phase, Phase::Consent(None)));
+        assert!(s.image().is_none(), "the old translation is gone");
+    }
     /// OCR finds one line at (20, 10) of what it is given; AI answers or fails.
     struct Fake(Result<&'static str, AiError>);
     impl Deps for Fake {
@@ -703,16 +813,16 @@ mod tests {
         // no key: the steps' first line, Settings offered
         let no_key: Result<(Fake, String), String> =
             Err("AI is not set up yet: no API key is saved.\n\n1. ...".into());
-        let e = translate(&original, area, &cache, no_key).unwrap_err();
+        let e = translate(&original, area, &cache, &no_key).unwrap_err();
         let first = "AI is not set up yet: no API key is saved.";
         assert_eq!(e, problem(first.into(), true));
         // the provider fails: an error, nothing painted; a rejected key: Settings
-        let e = translate(&original, area, &cache, ok(Err(AiError::Server(503)))).unwrap_err();
+        let e = translate(&original, area, &cache, &ok(Err(AiError::Server(503)))).unwrap_err();
         assert!(!e.setup && e.message.contains("503"), "{e:?}");
-        let e = translate(&original, area, &cache, ok(Err(AiError::Auth(401)))).unwrap_err();
+        let e = translate(&original, area, &cache, &ok(Err(AiError::Auth(401)))).unwrap_err();
         assert!(e.setup);
 
-        let shown = translate(&original, area, &cache, ok(Ok("خروج"))).unwrap();
+        let shown = translate(&original, area, &cache, &ok(Ok("خروج"))).unwrap();
         // blocks in frame pixels: OCR saw the crop, offset by the area's corner
         let b = &shown.blocks[0];
         assert_eq!(

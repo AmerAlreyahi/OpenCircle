@@ -9,6 +9,7 @@
 
 mod draw;
 mod erase;
+pub mod lang;
 pub mod live;
 pub mod pipeline;
 #[cfg(test)]

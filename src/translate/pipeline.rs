@@ -8,6 +8,8 @@ use std::fmt;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+pub use super::lang::is_rtl;
+use super::lang::{self, Script};
 use super::{Block, Line, MARKUP, group_blocks, render};
 use crate::ai::{self, AiError};
 use crate::config::AiConfig;
@@ -24,25 +26,54 @@ pub trait Deps {
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError>;
 }
 
-/// OCR in the helper process; translation by the user's AI provider, or
-/// offline (`crate::mt`, also in the helper process).
-pub enum Real {
+/// OCR in the helper process (the recognizer for `source`); translation by
+/// the user's AI provider, or offline (`crate::mt`, also in the helper).
+pub struct Real {
+    /// `translate.source`: "auto" or a language code.
+    pub source: String,
+    pub via: Via,
+    /// Offline: the pair a translation needed whose models are missing (the
+    /// UI then asks to download it).
+    missing: Mutex<Option<&'static mt::Pair>>,
+}
+
+pub enum Via {
     Ai {
         ai: AiConfig,
         key: Option<Secret>,
     },
-    /// No key, nothing leaves the PC. Its models may still be missing
-    /// (`needs_download`); translating then fails with what to do.
-    Offline(&'static mt::Pair),
+    /// No key, nothing leaves the PC. The pair follows the source and the
+    /// target; its models may still be missing (`Real::missing`).
+    Offline,
 }
 
 impl Real {
-    /// Bytes the offline engine still has to download (0 for AI).
-    pub fn needs_download(&self) -> u64 {
-        match self {
-            Real::Ai { .. } => 0,
-            Real::Offline(pair) => pair.missing_bytes(),
+    pub fn new(source: &str, via: Via) -> Real {
+        Real {
+            source: source.into(),
+            via,
+            missing: Mutex::new(None),
         }
+    }
+
+    pub fn offline(&self) -> bool {
+        matches!(self.via, Via::Offline)
+    }
+
+    /// The pair whose download a failed offline translation needs.
+    pub fn missing(&self) -> Option<&'static mt::Pair> {
+        *self.missing.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The offline pair for `texts` into `target`: the set source, or the
+    /// one their script suggests ("auto"). Err = none is available offline
+    /// (the message offers AI; nothing is sent anywhere).
+    fn pair_for(&self, texts: &[String], target: &str) -> Result<&'static mt::Pair, AiError> {
+        let source = match self.source.as_str() {
+            lang::AUTO => lang::guess(texts.iter().map(String::as_str)).unwrap_or("en"),
+            s => s,
+        };
+        mt::pair(source, target).ok_or_else(|| AiError::Offline(mt::unavailable(source, target)))
     }
 
     /// `texts` into `target`, one call; `markup` = extra AI instructions.
@@ -55,15 +86,21 @@ impl Real {
         target: &str,
         markup: &str,
     ) -> Result<Vec<String>, AiError> {
-        match self {
-            Real::Ai { ai, key } => ai::translate_lines(ai, key.as_ref(), texts, target, markup),
-            Real::Offline(pair) if pair.missing_bytes() > 0 => Err(AiError::Offline(
-                "its model isn't downloaded yet. Translate once with Ctrl+Shift+T to \
-                 download it, or set up AI in Settings > AI"
-                    .into(),
-            )),
-            Real::Offline(_) => {
-                mt::translate(texts, target).map_err(|e| AiError::Offline(e.to_string()))
+        match &self.via {
+            Via::Ai { ai, key } => {
+                ai::translate_lines(ai, key.as_ref(), texts, &self.source, target, markup)
+            }
+            Via::Offline => {
+                let pair = self.pair_for(texts, target)?;
+                if pair.missing_bytes() > 0 {
+                    *self.missing.lock().unwrap_or_else(|e| e.into_inner()) = Some(pair);
+                    return Err(AiError::Offline(format!(
+                        "{} isn't downloaded yet. Translate once with Ctrl+Shift+T to \
+                         download it, or set up AI in Settings > AI",
+                        pair.label()
+                    )));
+                }
+                mt::translate(texts, pair).map_err(|e| AiError::Offline(e.to_string()))
             }
         }
     }
@@ -71,7 +108,7 @@ impl Real {
 
 impl Deps for Real {
     fn recognize(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {
-        ocr::recognize_in_child(rgba, width, height)
+        ocr::recognize_as(rgba, width, height, &self.source)
     }
 
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
@@ -257,41 +294,11 @@ pub(super) fn translate_blocks(
 /// script (Latin targets can't be told from English: the model decides).
 fn needs_translation(text: &str, target: &str) -> bool {
     let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
-    match script(target) {
+    match lang::find(target).map(|l| l.script) {
         _ if letters.is_empty() => false,
-        Some(in_script) => letters.iter().filter(|c| in_script(**c)).count() * 2 < letters.len(),
-        None => true,
+        Some(Script::Latin) | None => true,
+        Some(script) => letters.iter().filter(|c| script.has(**c)).count() * 2 < letters.len(),
     }
-}
-
-fn lang(target: &str) -> String {
-    let code = target.split(['-', '_']).next().unwrap_or_default();
-    code.to_ascii_lowercase()
-}
-
-/// The target language's script, for the common non-Latin ones.
-fn script(target: &str) -> Option<fn(char) -> bool> {
-    Some(match lang(target).as_str() {
-        "ar" | "fa" | "ur" | "ps" | "sd" | "ug" | "ckb" => {
-            |c| matches!(c, '\u{0600}'..='\u{08FF}' | '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
-        }
-        "he" | "yi" => |c| matches!(c, '\u{0590}'..='\u{05FF}'),
-        "ru" | "uk" | "bg" | "sr" | "be" | "mk" | "kk" => |c| matches!(c, '\u{0400}'..='\u{04FF}'),
-        "el" => |c| matches!(c, '\u{0370}'..='\u{03FF}'),
-        "zh" | "ja" => |c| matches!(c, '\u{3040}'..='\u{30FF}' | '\u{3400}'..='\u{9FFF}'),
-        "ko" => |c| matches!(c, '\u{1100}'..='\u{11FF}' | '\u{AC00}'..='\u{D7AF}'),
-        "th" => |c| matches!(c, '\u{0E00}'..='\u{0E7F}'),
-        "hi" | "mr" | "ne" => |c| matches!(c, '\u{0900}'..='\u{097F}'),
-        _ => return None,
-    })
-}
-
-/// Right-to-left target: text is right-aligned when drawn.
-pub fn is_rtl(target: &str) -> bool {
-    matches!(
-        lang(target).as_str(),
-        "ar" | "fa" | "ur" | "ps" | "sd" | "ug" | "ckb" | "he" | "yi" | "dv"
-    )
 }
 
 fn normalise(text: &str) -> String {
@@ -483,7 +490,7 @@ pub(super) mod tests {
         );
         assert!(out.rgba == direct, "the [[ ]] spans went to render as is");
         // and the real client asks for them
-        ai::translate_with(&["x".into()], "ar", MARKUP, |m| {
+        ai::translate_with(&["x".into()], "auto", "ar", MARKUP, |m| {
             assert!(m[0].text.ends_with(MARKUP));
             Ok(r#"["y"]"#.into())
         })
@@ -530,6 +537,45 @@ pub(super) mod tests {
         assert!(is_rtl("ar") && is_rtl("he-IL") && !is_rtl("en") && !is_rtl("fr"));
     }
 
+    /// Offline: the pair follows the source (or the script, for auto); one
+    /// that doesn't exist fails before anything runs, and says AI can.
+    #[test]
+    fn offline_pairs_and_the_not_available_path() {
+        let texts = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let auto = Real::new(lang::AUTO, Via::Offline);
+        assert!(auto.offline() && auto.missing().is_none());
+        let pair = |r: &Real, t: &[&str], target| {
+            r.pair_for(&texts(t), target).map(|p| (p.source, p.target))
+        };
+        assert_eq!(pair(&auto, &["Main menu"], "ar").unwrap(), ("en", "ar"));
+        assert_eq!(
+            pair(&auto, &["القائمة الرئيسية"], "en").unwrap(),
+            ("ar", "en")
+        );
+        assert_eq!(pair(&auto, &["メニュー"], "en").unwrap(), ("ja", "en"));
+        assert_eq!(
+            pair(&Real::new("fr", Via::Offline), &["x"], "en").unwrap(),
+            ("fr", "en")
+        );
+        for (real, t, target, from) in [
+            (&auto, &["Главное меню"][..], "en", "Russian"),
+            (
+                &Real::new("fr", Via::Offline),
+                &["Bonjour"][..],
+                "de",
+                "French",
+            ),
+        ] {
+            let err = real.lines(&texts(t), target, "").unwrap_err().to_string();
+            assert!(
+                err.contains(&format!("no offline model from {from}")),
+                "{err}"
+            );
+            assert!(err.contains("Choose AI"), "offers AI: {err}");
+            assert!(real.missing().is_none(), "nothing to download for it");
+        }
+    }
+
     #[test]
     fn cache_hit_miss_and_eviction() {
         let c = Cache::new(2);
@@ -557,10 +603,11 @@ pub(super) mod tests {
         use super::super::live::Live;
         use super::super::tests::{ar, game_frame, save_png};
 
-        struct RealOcr(ocr::Engine);
+        struct RealOcr(Mutex<ocr::Engine>);
         impl Deps for RealOcr {
             fn recognize(&self, rgba: &[u8], w: u32, h: u32) -> Result<Vec<TextBlock>, OcrError> {
-                self.0.recognize(rgba, w, h)
+                let mut engine = self.0.lock().unwrap();
+                engine.recognize(rgba, w, h, ocr::Read::One(0))
             }
             fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
                 Ok(texts
@@ -571,7 +618,7 @@ pub(super) mod tests {
         }
 
         let t = Instant::now();
-        let deps = RealOcr(ocr::Engine::load(&ocr::models_dir()).unwrap());
+        let deps = RealOcr(Mutex::new(ocr::Engine::load(&ocr::models_dir()).unwrap()));
         eprintln!("OCR engine load {:?}", t.elapsed());
         let (img, _) = game_frame();
         let (w, h) = (1920, 1080);

@@ -189,11 +189,12 @@ pub fn translate_lines(
     cfg: &AiConfig,
     key: Option<&Secret>,
     lines: &[String],
+    source: &str,
     target: &str,
     extra_instructions: &str,
 ) -> Result<Vec<String>, AiError> {
     let cap = translate_max_tokens(lines);
-    translate_with(lines, target, extra_instructions, |msgs| {
+    translate_with(lines, source, target, extra_instructions, |msgs| {
         ask_fast(cfg, key, msgs, cap)
     })
 }
@@ -209,6 +210,7 @@ pub(crate) fn translate_max_tokens(lines: &[String]) -> u32 {
 
 pub(crate) fn translate_with(
     lines: &[String],
+    source: &str,
     target: &str,
     extra_instructions: &str,
     ask: impl FnOnce(&[Message]) -> Result<String, AiError>,
@@ -217,7 +219,7 @@ pub(crate) fn translate_with(
         return Ok(Vec::new());
     }
     let input = serde_json::to_string(lines).map_err(|e| AiError::BadResponse(e.to_string()))?;
-    let mut system = translate_system_prompt(target, lines.len());
+    let mut system = translate_system_prompt(source, target, lines.len());
     if !extra_instructions.is_empty() {
         system = format!("{system}\n{extra_instructions}");
     }
@@ -225,9 +227,18 @@ pub(crate) fn translate_with(
     parse_translation(&ask(&msgs)?, lines.len())
 }
 
-fn translate_system_prompt(target: &str, n: usize) -> String {
+/// The languages by their English names (the table's), with the code: any
+/// target works, a code outside the table is sent as is. Source "auto" = the
+/// model detects it.
+fn translate_system_prompt(source: &str, target: &str, n: usize) -> String {
+    use crate::translate::lang;
+    let from = match source {
+        lang::AUTO => String::new(),
+        s => format!(" written in {} (\"{s}\")", lang::name(s)),
+    };
+    let to = lang::name(target);
     format!(
-        "You translate on-screen text from video games and apps into the language with code \"{target}\". \
+        "You translate on-screen text{from} from video games and apps into {to} (language code \"{target}\"). \
 The user message is a JSON array of {n} strings. Each string is one separate text element read from the SAME screen \
 (subtitle, menu label, item name, button, tooltip, ...), in reading order.\n\
 Rules:\n\
@@ -478,19 +489,22 @@ mod tests {
 
     #[test]
     fn translate_rejects_wrong_length() {
-        let err = translate_with(&lines(3), "ar", "", |_| Ok(r#"["a","b"]"#.into())).unwrap_err();
+        let err =
+            translate_with(&lines(3), "auto", "ar", "", |_| Ok(r#"["a","b"]"#.into())).unwrap_err();
         assert!(
             matches!(err, AiError::BadResponse(ref m) if m.contains("expected 3") && m.contains("got 2")),
             "{err}"
         );
-        assert!(translate_with(&lines(1), "ar", "", |_| Ok(r#"["a","b"]"#.into())).is_err());
+        assert!(
+            translate_with(&lines(1), "auto", "ar", "", |_| Ok(r#"["a","b"]"#.into())).is_err()
+        );
     }
 
     #[test]
     fn translate_rejects_non_arrays() {
         for bad in ["I cannot", "[1,2]", r#"{"a":"b"}"#, "[\"a\""] {
             assert!(
-                translate_with(&lines(2), "ar", "", |_| Ok(bad.into())).is_err(),
+                translate_with(&lines(2), "auto", "ar", "", |_| Ok(bad.into())).is_err(),
                 "{bad}"
             );
         }
@@ -498,7 +512,7 @@ mod tests {
 
     #[test]
     fn translate_accepts_fenced_answer_and_keeps_order() {
-        let out = translate_with(&lines(2), "ar", "", |_| {
+        let out = translate_with(&lines(2), "auto", "ar", "", |_| {
             Ok("```json\n[\"واحد\", \"two\"]\n```".into())
         })
         .unwrap();
@@ -509,19 +523,38 @@ mod tests {
     fn translate_request_is_one_call_with_json_input() {
         let mut seen = Vec::new();
         let input = vec!["Start Game".to_string(), "Potion \"X\"".to_string()];
-        translate_with(&input, "ar", "", |m| {
+        translate_with(&input, "fr", "ar", "", |m| {
             seen = m.to_vec();
             Ok(r#"["a","b"]"#.into())
         })
         .unwrap();
         assert_eq!(seen.len(), 2);
         assert_eq!(seen[0].role, Role::System);
-        assert!(seen[0].text.contains("\"ar\"") && seen[0].text.contains("exactly 2 strings"));
+        assert!(
+            seen[0].text.contains("into Arabic (language code \"ar\")"),
+            "{}",
+            seen[0].text
+        );
+        assert!(seen[0].text.contains("written in French (\"fr\")"));
+        assert!(seen[0].text.contains("exactly 2 strings"));
         assert!(seen[0].text.contains("consistent"));
         assert_eq!(
             serde_json::from_str::<Vec<String>>(&seen[1].text).unwrap(),
             input
         );
+    }
+
+    #[test]
+    fn translate_prompt_names_the_languages() {
+        let auto = translate_system_prompt("auto", "ja", 1);
+        assert!(auto.contains("text from video games") && !auto.contains("written in"));
+        assert!(
+            auto.contains("into Japanese (language code \"ja\")"),
+            "{auto}"
+        );
+        // a code outside the table goes as is
+        let other = translate_system_prompt("ar-EG", "sw", 1);
+        assert!(other.contains("written in Arabic (\"ar-EG\")") && other.contains("into sw"));
     }
 
     #[test]
@@ -534,7 +567,7 @@ mod tests {
     #[test]
     fn empty_input_makes_no_call() {
         assert_eq!(
-            translate_with(&[], "ar", "", |_| panic!("no call expected")).unwrap(),
+            translate_with(&[], "auto", "ar", "", |_| panic!("no call expected")).unwrap(),
             Vec::<String>::new()
         );
     }

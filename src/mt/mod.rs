@@ -3,7 +3,8 @@
 //! ONNX, greedy decoding on the ONNX Runtime that OCR already downloads.
 //! Like OCR it runs only in the helper process (`ocr::worker`), so ORT and
 //! the ~600 MB it peaks at never stay in the app: the app calls
-//! [`translate`]. Source text is English (what OCR reads).
+//! [`translate`]. One model per direction (`PAIRS`), downloaded the first
+//! time that direction is used, after the user agreed.
 //!
 //! Spike S7 (20 game lines, en->ar, this machine's CPU): about as good as
 //! Firefox's Bergamot model and opus-mt-tc-big, more literal than an AI model.
@@ -17,11 +18,14 @@ use ort::value::{DynValue, Tensor};
 
 use crate::ocr::models::{self, ModelFile};
 use crate::ocr::{self, OcrError};
+use crate::translate::lang;
 use unigram::Unigram;
 
-/// One direction (English -> `target`): its pinned files and the model's shape.
+/// One direction (`source` -> `target`): its pinned files and the model's shape.
+#[derive(Debug)]
 pub struct Pair {
-    /// Target language code, as in `translate.target`.
+    /// Language codes, as in the language table (`translate::lang`).
+    pub source: &'static str,
     pub target: &'static str,
     /// Folder under `models_root()`.
     dir: &'static str,
@@ -42,16 +46,56 @@ pub struct Pair {
     head_dim: usize,
 }
 
-/// A file of a Hugging Face repo at a pinned commit.
+/// A Helsinki-NLP OPUS-MT pair as Xenova (transformers.js) exported it to
+/// ONNX and int8-quantized it: `Xenova/opus-mt-<pair>` at a pinned commit.
+/// Sizes and SHA-256 from the Hugging Face API; pad from its config.json
+/// (all of them: 6 layers, 8 heads, d_model 512, eos 0).
+macro_rules! pair {
+    ($src:literal, $tgt:literal, $pair:literal, $rev:literal,
+     [$es:literal, $eh:literal], [$ds:literal, $dh:literal],
+     [$ss:literal, $sh:literal], [$vs:literal, $vh:literal], $token:expr, $pad:literal) => {
+        Pair {
+            source: $src,
+            target: $tgt,
+            dir: concat!("opus-mt-", $pair),
+            encoder: hf!(
+                $pair,
+                $rev,
+                "encoder_model_quantized.onnx",
+                "onnx/encoder_model_quantized.onnx",
+                $es,
+                $eh
+            ),
+            decoder: hf!(
+                $pair,
+                $rev,
+                "decoder_model_merged_quantized.onnx",
+                "onnx/decoder_model_merged_quantized.onnx",
+                $ds,
+                $dh
+            ),
+            spm: hf!($pair, $rev, "source.spm", "source.spm", $ss, $sh),
+            vocab: hf!($pair, $rev, "vocab.json", "vocab.json", $vs, $vh),
+            lang_token: $token,
+            pad: $pad,
+            eos: 0,
+            layers: 6,
+            heads: 8,
+            head_dim: 64,
+        }
+    };
+}
+
+/// A file of `Xenova/opus-mt-<pair>` at a pinned commit.
 macro_rules! hf {
-    ($repo:literal, $rev:literal, $name:literal, $path:literal, $size:literal, $sha:literal) => {
+    ($pair:literal, $rev:literal, $name:literal, $path:literal, $size:literal, $sha:literal) => {
         ModelFile::plain(
             $name,
             $size,
             $sha,
             concat!(
-                "https://huggingface.co/",
-                $repo,
+                "https://huggingface.co/Xenova/opus-mt-",
+                $pair,
                 "/resolve/",
                 $rev,
                 "/",
@@ -61,54 +105,261 @@ macro_rules! hf {
     };
 }
 
-/// Helsinki-NLP/opus-mt-en-ar, exported to ONNX and int8-quantized by
-/// Xenova (transformers.js). Another pair is one more const of this shape
-/// (Xenova/opus-mt-en-{fr,es,de,ru,zh,jap}...; sizes and SHA-256 from the
-/// Hugging Face API, shape from its config.json).
-const EN_AR: Pair = Pair {
-    target: "ar",
-    dir: "opus-mt-en-ar",
-    encoder: hf!(
-        "Xenova/opus-mt-en-ar",
+/// Every offline pair. Another one is one more entry (Xenova/opus-mt-*;
+/// `jap` is Bible-only, so Japanese uses `ja`). The Chinese model writes
+/// several Chinese scripts: `>>cmn_Hans<<` asks for Simplified.
+pub static PAIRS: [Pair; 10] = [
+    // Helsinki-NLP/opus-mt-en-ar
+    pair!(
+        "en",
+        "ar",
+        "en-ar",
         "034a684356c19021a187cda4d7f823298b913921",
-        "encoder_model_quantized.onnx",
-        "onnx/encoder_model_quantized.onnx",
-        51_773_854,
-        "53c354d87ced44b39085fe8a46a25f09ea4578d442dbce9663f3977228f8a04e"
+        [
+            51_773_854,
+            "53c354d87ced44b39085fe8a46a25f09ea4578d442dbce9663f3977228f8a04e"
+        ],
+        [
+            59_078_120,
+            "c0e553b0c26611780c70417c9b4c1ca7169e9cdb18ba9e649197efb017af9f02"
+        ],
+        [
+            801_074,
+            "81ac8f4d4ee271f4109eac67560a31f9c2d555463ba5eb95c32c6deee8ae819d"
+        ],
+        [
+            2_243_581,
+            "8b74af9e4c1ec122b8d06362db6c38795e10ca2b0156b2110cf08d4716744b76"
+        ],
+        Some(">>ara<<"),
+        62801
     ),
-    decoder: hf!(
-        "Xenova/opus-mt-en-ar",
-        "034a684356c19021a187cda4d7f823298b913921",
-        "decoder_model_merged_quantized.onnx",
-        "onnx/decoder_model_merged_quantized.onnx",
-        59_078_120,
-        "c0e553b0c26611780c70417c9b4c1ca7169e9cdb18ba9e649197efb017af9f02"
+    // Helsinki-NLP/opus-mt-en-fr
+    pair!(
+        "en",
+        "fr",
+        "en-fr",
+        "28726206f80896b90035bd99cccd5cc1e151f916",
+        [
+            50_090_398,
+            "0a81bdba62f53223740a8c6c6f58e716eba8ea1f92dfa569caf27ed5e3b6a0f7"
+        ],
+        [
+            57_381_512,
+            "333b244bce16023df04541c8cf9fd60aec9b0569da393c4b831d561897b0bda8"
+        ],
+        [
+            778_395,
+            "173e9f493a668fe396d599e28d414a201193094e6ffd7a4678e5aab0f6d3d838"
+        ],
+        [
+            1_458_196,
+            "f2ba9c69ae20f96b8bd821239a9152be422394f980350b77907cffc183db5f2d"
+        ],
+        None,
+        59513
     ),
-    spm: hf!(
-        "Xenova/opus-mt-en-ar",
-        "034a684356c19021a187cda4d7f823298b913921",
-        "source.spm",
-        "source.spm",
-        801_074,
-        "81ac8f4d4ee271f4109eac67560a31f9c2d555463ba5eb95c32c6deee8ae819d"
+    // Helsinki-NLP/opus-mt-en-es
+    pair!(
+        "en",
+        "es",
+        "en-es",
+        "4b002a4c7edd54a7ced58877258b87f7efd3f892",
+        [
+            52_899_742,
+            "03434edd1147e6c49e22066e9dc5888235e99cc35a6711d1c4ea5b06455d5da9"
+        ],
+        [
+            60_212_804,
+            "58ee5ddd6e22d1693d8722b90c1486afb93700a4376cf28fd74175052ad530ae"
+        ],
+        [
+            801_636,
+            "4dd547c24816a335e7b0b2e63376a8f1b3cbfc671eda5ab808dd44fdadaa8791"
+        ],
+        [
+            1_720_044,
+            "b074b4cca0036ade5a39ea97faabd534e1015482c480fc2cb02c6481983eb163"
+        ],
+        None,
+        65000
     ),
-    vocab: hf!(
-        "Xenova/opus-mt-en-ar",
-        "034a684356c19021a187cda4d7f823298b913921",
-        "vocab.json",
-        "vocab.json",
-        2_243_581,
-        "8b74af9e4c1ec122b8d06362db6c38795e10ca2b0156b2110cf08d4716744b76"
+    // Helsinki-NLP/opus-mt-en-de
+    pair!(
+        "en",
+        "de",
+        "en-de",
+        "1ca130c44c4c5441ef16d48aae521a424ab644f7",
+        [
+            49_366_942,
+            "15834b45fabd2dfb8c6c029b3ca3e7289aeefd90ece798ce42bcf548d1bd3b8d"
+        ],
+        [
+            56_652_404,
+            "8b46a825964cdd182fe47cc780f0fb87d357eae1f47cf20aa63c1c09be5b510c"
+        ],
+        [
+            768_489,
+            "678f2a1177d8389f67b66299762dcc4fc567e89b07e212ba91b0c56daecf47ce"
+        ],
+        [
+            1_389_436,
+            "d5acea957b265a78554999144459c5e391e0df525864edc8287bc090290baa44"
+        ],
+        None,
+        58100
     ),
-    lang_token: Some(">>ara<<"),
-    pad: 62801,
-    eos: 0,
-    layers: 6,
-    heads: 8,
-    head_dim: 64,
-};
-
-const PAIRS: [&Pair; 1] = [&EN_AR];
+    // Helsinki-NLP/opus-mt-en-ru
+    pair!(
+        "en",
+        "ru",
+        "en-ru",
+        "e050376e960175e8ddc5cff85025dc8436cddd68",
+        [
+            51_628_446,
+            "97f28d8295d231b7da721ded06fa8c034787df2122cd8f85b904abdc4d15bd53"
+        ],
+        [
+            58_931_576,
+            "7efefcd793a5663bc204224a92a123524f3dfe2ffad59e5f73d6734d1b11ad04"
+        ],
+        [
+            802_781,
+            "16bebef1389a0b8ab452772c4e35b9e605e5713f8ac7baa71ca701394eaa086d"
+        ],
+        [
+            2_726_796,
+            "5cf0d95d930d8d3e783c9e2f46a72f08b43a18060dab4ddefbcb66a733efedcb"
+        ],
+        None,
+        62517
+    ),
+    // Helsinki-NLP/opus-mt-en-zh
+    pair!(
+        "en",
+        "zh",
+        "en-zh",
+        "046f55aec303cdee3e0318604406d4df20f1e8ea",
+        [
+            52_899_742,
+            "d3b7912bf6a9bd27e4c074c2df91d4ff3d5b4bc5f7f6c8d7cc9c805c98fbafee"
+        ],
+        [
+            60_212_804,
+            "023be4f841f4c47cd65fffcbaa81c0d99d7f7e0138f7ba0e03fa220a4e688aff"
+        ],
+        [
+            806_435,
+            "5775ddc9e3ff2fae91554da56468ad35ff56edaba870fea74447bc7234bfdaa8"
+        ],
+        [
+            1_747_795,
+            "22c957348eed495ee925afc40a36da3e387c8a34a734c8486967c2dca271613e"
+        ],
+        Some(">>cmn_Hans<<"),
+        65000
+    ),
+    // Helsinki-NLP/opus-mt-ar-en
+    pair!(
+        "ar",
+        "en",
+        "ar-en",
+        "09c7556866400dcc53562ba8d7035119e7d9a2c1",
+        [
+            51_790_238,
+            "d9b0d612acff86cf87634b49bda566d1ef39b312837de549786ea18fecefc708"
+        ],
+        [
+            59_094_632,
+            "cdb25ae736afe9d48035b0ea311ab4b25f315810fab7f3c6f6cb0d8d87af35fa"
+        ],
+        [
+            917_407,
+            "484f7210e5f4466f7e5b99b660717c6ef2a6f90746196daba507795b69dc02a2"
+        ],
+        [
+            2_257_246,
+            "87b78c097c331672ca22a522c3ba24c5dc2cdff90495dcb52cf742635439a3a0"
+        ],
+        None,
+        62833
+    ),
+    // Helsinki-NLP/opus-mt-fr-en
+    pair!(
+        "fr",
+        "en",
+        "fr-en",
+        "6b166a182780e118c997879d0ad5be4b53671644",
+        [
+            50_090_398,
+            "e727cb26ac6bf816394c49671af69c9ae5798868fed1e40849872415dffc1772"
+        ],
+        [
+            57_381_512,
+            "73bc7ac8e29c42e6f212ebcc29a2991d3646a04aabb642c0036aa54b40e4e1a9"
+        ],
+        [
+            802_397,
+            "78d0e717c77053f1c4b856d8661d9cb87c64f083a35418c087b9146300e4f585"
+        ],
+        [
+            1_458_196,
+            "f2ba9c69ae20f96b8bd821239a9152be422394f980350b77907cffc183db5f2d"
+        ],
+        None,
+        59513
+    ),
+    // Helsinki-NLP/opus-mt-zh-en
+    pair!(
+        "zh",
+        "en",
+        "zh-en",
+        "39d480d52a9ea3065a1f117adfe4dbc55de10e6f",
+        [
+            52_899_742,
+            "84d5e171b626bc8b6b220d022ac58696e9528c25deeacca62b5cbf4364547a99"
+        ],
+        [
+            60_212_804,
+            "c6b7f04ff1ba0fbd1bf6852599b4c0cad6fe512d57cd887f44ef36cf705424cb"
+        ],
+        [
+            804_677,
+            "e27a3a1b539f4959ec72ea60e453f49156289f95d4e6000b29332efc45616203"
+        ],
+        [
+            1_747_906,
+            "08a119a1defd522fa047cb5e3bfe3e89633e96caa38ced0dc9cee7ef1021a011"
+        ],
+        None,
+        65000
+    ),
+    // Helsinki-NLP/opus-mt-ja-en
+    pair!(
+        "ja",
+        "en",
+        "ja-en",
+        "1a906cfaaf7c8f4193f67f5885c082aa6dbd9d16",
+        [
+            50_705_822,
+            "345262b16bcdda1468b0f3380c112b7ce79f731176b4b1d21f6edd5b2ae0d25c"
+        ],
+        [
+            58_001_744,
+            "b304d0014e4e1575437b6af95467b6cb54405d923732d8359113bd6dbbee93c0"
+        ],
+        [
+            781_853,
+            "d0b5c3b10b5959f056ff2c86e2f2356129242ff1fc72d3a4a34d6a8c0eee4e57"
+        ],
+        [
+            1_622_775,
+            "a1667b43d021e09c76f385101bd473f20b5691a12cdca7dda43e4a8daff20021"
+        ],
+        None,
+        60715
+    ),
+];
 
 /// Lines per decoder run (padded to the longest; sorted by length first).
 /// 20 lines: one run of 20 took 0.37 s, one run per line 1.7 s.
@@ -122,12 +373,36 @@ const THREADS: usize = 4;
 /// Source tokens kept per line, and the most tokens a translation gets.
 const MAX_TOKENS: usize = 200;
 
-/// The offline model into `target` ("ar", "ar-SA"), if there is one.
-pub fn pair(target: &str) -> Option<&'static Pair> {
-    let code = target.split(['-', '_']).next().unwrap_or_default();
+/// The offline model from `source` into `target` (codes as the language
+/// table finds them: "ar-SA" is Arabic), if there is one. Not for "auto":
+/// the caller picks the source first.
+pub fn pair(source: &str, target: &str) -> Option<&'static Pair> {
+    let (s, t) = (lang::find(source)?, lang::find(target)?);
     PAIRS
-        .into_iter()
-        .find(|p| p.target.eq_ignore_ascii_case(code))
+        .iter()
+        .find(|p| p.source == s.code && p.target == t.code)
+}
+
+/// Whether text in `source` ("auto" = whatever is detected) can be
+/// translated into `target` offline: for "auto", some pair into `target`.
+pub fn available(source: &str, target: &str) -> bool {
+    match source {
+        lang::AUTO => PAIRS
+            .iter()
+            .any(|p| lang::find(target).is_some_and(|t| t.code == p.target)),
+        s => pair(s, target).is_some(),
+    }
+}
+
+/// What to say when no offline model translates `source` into `target`
+/// (never a silent switch to the AI: the user chooses).
+pub fn unavailable(source: &str, target: &str) -> String {
+    format!(
+        "there is no offline model from {} into {}. Choose AI as the engine in \
+         Settings > Translate (and set it up in Settings > AI) to translate it",
+        lang::name(source),
+        lang::name(target)
+    )
 }
 
 /// Per-user folder (Linux `~/.local/share/OpenCircle/mt`, Windows
@@ -144,10 +419,20 @@ impl Pair {
         models_root().join(self.dir)
     }
 
-    /// Everything offline translate needs: OCR's files, then this pair's.
+    /// "English → French offline translation".
+    pub fn label(&self) -> String {
+        format!(
+            "{} → {} offline translation",
+            lang::name(self.source),
+            lang::name(self.target)
+        )
+    }
+
+    /// Everything translating this pair needs: OCR's files for its source
+    /// language (ONNX Runtime first), then the pair's own.
     fn files(&'static self) -> Vec<(PathBuf, &'static ModelFile)> {
         let dir = self.dir();
-        let mut files = models::ocr_files();
+        let mut files = models::ocr_files(models::recognizer_for(self.source));
         files.extend(
             [&self.encoder, &self.decoder, &self.spm, &self.vocab].map(|f| (dir.join(f.name), f)),
         );
@@ -166,10 +451,10 @@ impl Pair {
     }
 }
 
-/// App side: translates `texts` into `target` in the helper process. The
+/// App side: translates `texts` with `pair` in the helper process. The
 /// models must be present (`Pair::ensure`).
-pub fn translate(texts: &[String], target: &str) -> Result<Vec<String>, OcrError> {
-    ocr::translate_in_child(texts, target)
+pub fn translate(texts: &[String], pair: &Pair) -> Result<Vec<String>, OcrError> {
+    ocr::translate_in_child(texts, pair)
 }
 
 /// glibc: no ORT memory arena (~350 MB less in a warm helper at the same
@@ -438,10 +723,19 @@ mod tests {
 
     #[test]
     fn pairs_by_language_code() {
-        assert_eq!(pair("ar").map(|p| p.target), Some("ar"));
-        assert_eq!(pair("AR-sa").map(|p| p.target), Some("ar"));
-        assert!(pair("fr").is_none() && pair("").is_none());
-        let p = pair("ar").unwrap();
+        let codes = |p: Option<&Pair>| p.map(|p| (p.source, p.target));
+        assert_eq!(codes(pair("en", "ar")), Some(("en", "ar")));
+        assert_eq!(codes(pair("EN-us", "AR-sa")), Some(("en", "ar")));
+        assert_eq!(codes(pair("ja", "en")), Some(("ja", "en")));
+        // not available offline: no pair (the caller says so and offers AI)
+        assert!(pair("fr", "de").is_none() && pair("en", "zh-Hant").is_none());
+        assert!(pair("", "ar").is_none() && pair(lang::AUTO, "ar").is_none());
+        assert!(available(lang::AUTO, "fr") && available(lang::AUTO, "en"));
+        assert!(!available(lang::AUTO, "ko") && !available("fr", "de"));
+        let why = unavailable("fr", "ja");
+        assert!(why.contains("from French into Japanese") && why.contains("Choose AI"));
+        let p = pair("en", "ar").unwrap();
+        assert_eq!(p.label(), "English → Arabic offline translation");
         let files = p.files();
         // OCR's files first (ORT), then the pair's, in its own folder
         assert_eq!(files[0].1.name, models::ORT.name);
@@ -449,14 +743,44 @@ mod tests {
         assert_eq!(own.count(), 4);
         let total: u64 = files.iter().map(|(_, f)| f.size).sum();
         assert!(p.missing_bytes() <= total);
-        // what the consent says: the pair alone is about 120 MB
-        let pair_bytes: u64 = [&p.encoder, &p.decoder, &p.spm, &p.vocab]
+        // the pair reads its source with that language's recognizer
+        let ar = pair("ar", "en").unwrap().files();
+        assert!(
+            ar.iter()
+                .any(|(_, f)| f.name == "arabic_pp-ocrv5_mobile_rec.onnx")
+        );
+    }
+
+    /// One entry per direction, each in its own folder, every language in
+    /// the language table; every file pinned (64 hex digits, a size).
+    #[test]
+    fn the_pair_table_is_consistent() {
+        for (i, p) in PAIRS.iter().enumerate() {
+            for code in [p.source, p.target] {
+                assert_eq!(lang::find(code).map(|l| l.code), Some(code), "{code}");
+            }
+            assert_ne!(p.source, p.target);
+            assert!(
+                PAIRS[..i]
+                    .iter()
+                    .all(|o| (o.source, o.target) != (p.source, p.target))
+            );
+            assert!(PAIRS[..i].iter().all(|o| o.dir != p.dir));
+            assert_eq!(p.dir, format!("opus-mt-{}-{}", p.source, p.target));
+            for f in [&p.encoder, &p.decoder, &p.spm, &p.vocab] {
+                assert!(f.size > 0 && f.sha256.len() == 64, "{}/{}", p.dir, f.name);
+                assert!(f.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
+            }
+            assert_eq!(pair(p.source, p.target).map(|q| q.dir), Some(p.dir));
+        }
+        // what the consents say: en->ar alone is about 120 MB
+        let p = pair("en", "ar").unwrap();
+        let bytes: u64 = [&p.encoder, &p.decoder, &p.spm, &p.vocab]
             .map(|f| f.size)
             .iter()
             .sum();
-        assert_eq!(pair_bytes, 113_896_629);
+        assert_eq!(bytes, 113_896_629);
     }
-
     #[test]
     fn cleaned_output_has_no_markup() {
         assert_eq!(clean("  أحضر [[السيف]] ]] "), "أحضر السيف");
@@ -476,7 +800,7 @@ mod tests {
     #[test]
     #[ignore]
     fn real_model_translates_game_lines() {
-        let p = pair("ar").unwrap();
+        let p = pair("en", "ar").unwrap();
         p.ensure(|_, _| {}).unwrap();
         let lines: Vec<String> = GAME_LINES.iter().map(|(en, _)| en.to_string()).collect();
         let t = std::time::Instant::now();
@@ -511,7 +835,7 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         let exe = exe.parent().unwrap().parent().unwrap().join("opencircle");
         let t = std::time::Instant::now();
-        let child = ocr::worker::translate_with(&exe, &lines, "ar").unwrap();
+        let child = ocr::worker::translate_with(&exe, &lines, p).unwrap();
         println!("helper process, cold: {:?}", t.elapsed());
         assert_eq!(child, out);
     }

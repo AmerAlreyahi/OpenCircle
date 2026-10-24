@@ -7,6 +7,7 @@ mod live_layer;
 mod onboarding;
 mod overlay;
 mod panel;
+mod picker;
 mod quick;
 mod settings;
 mod snip;

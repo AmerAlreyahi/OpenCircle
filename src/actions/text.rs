@@ -23,11 +23,12 @@ pub enum Progress {
     Reading,
 }
 
-/// The models were downloaded before, so the user already agreed to it.
-// ponytail: "the folder has files" stands for "the user agreed once". ensure_models
+/// The models for the configured source language are on disk, so the user
+/// already agreed to their download (another source asks again).
+// ponytail: "the files are there" stands for "the user agreed once". ensure_models
 // still verifies every file and re-fetches only a damaged one.
 pub fn models_present() -> bool {
-    std::fs::read_dir(ocr::models_dir()).is_ok_and(|mut dir| dir.next().is_some())
+    ocr::ready()
 }
 
 /// Blocking (download, helper process): call off the UI thread. Fetches any

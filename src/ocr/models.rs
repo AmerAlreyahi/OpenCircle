@@ -8,15 +8,18 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::OcrError;
+use crate::translate::lang::Script;
 
+#[derive(Debug)]
 pub(crate) struct ModelFile {
     /// File name on disk.
     pub(crate) name: &'static str,
     pub(crate) size: u64,
-    sha256: &'static str,
+    pub(crate) sha256: &'static str,
     source: Source,
 }
 
+#[derive(Debug)]
 enum Source {
     /// The file itself.
     Plain(&'static str),
@@ -76,31 +79,138 @@ pub(super) const DET: ModelFile = ModelFile {
 };
 
 /// A text recognizer: one script's model plus its character list.
-pub(super) struct Recognizer {
-    pub(super) model: ModelFile,
-    pub(super) dict: ModelFile,
+pub(crate) struct Recognizer {
+    /// What `lang::Language::ocr` names it by.
+    pub(crate) id: &'static str,
+    /// For the consent ("the Arabic text-recognition model").
+    pub(crate) script: &'static str,
+    pub(crate) model: ModelFile,
+    pub(crate) dict: ModelFile,
 }
 
-/// The recognizer in use. Another script (latin, arabic, ...) is one more
-/// const of this shape; names, sizes and SHA-256s are in oar-ocr's registry.
-pub(super) const RECOGNIZER: Recognizer = EN;
+/// A recognizer of oar-ocr's v0.3.0 release (sizes and SHA-256 of the files
+/// as published there).
+macro_rules! rec {
+    ($id:literal, $script:literal, $model:literal, $msize:literal, $msha:literal,
+     $dict:literal, $dsize:literal, $dsha:literal) => {
+        Recognizer {
+            id: $id,
+            script: $script,
+            model: ModelFile {
+                name: $model,
+                size: $msize,
+                sha256: $msha,
+                source: oar!($model),
+            },
+            dict: ModelFile {
+                name: $dict,
+                size: $dsize,
+                sha256: $dsha,
+                source: oar!($dict),
+            },
+        }
+    };
+}
 
-const EN: Recognizer = Recognizer {
-    model: ModelFile {
-        name: "en_pp-ocrv5_mobile_rec.onnx",
-        size: 7_876_014,
-        sha256: "8307465d3c9ef2ba4055c3bd0be55aafe11f518630212b7598b70ccb376028ac",
-        source: oar!("en_pp-ocrv5_mobile_rec.onnx"),
-    },
-    dict: ModelFile {
-        name: "ppocrv5_en_dict.txt",
-        size: 1_416,
-        sha256: "e025a66d31f327ba0c232e03f407ae8d105e1e709e7ccb3f408aa778c24e70d6",
-        source: oar!("ppocrv5_en_dict.txt"),
-    },
-};
+impl Recognizer {
+    /// Reads a right-to-left script (its output comes out reversed).
+    pub(crate) fn rtl(&self) -> bool {
+        self.id == "arabic"
+    }
 
-const FILES: [&ModelFile; 4] = [&ORT, &DET, &RECOGNIZER.model, &RECOGNIZER.dict];
+    /// The script it is for (its character list has Latin letters too).
+    pub(crate) fn script(&self) -> Script {
+        match self.id {
+            "arabic" => Script::Arabic,
+            "cyrillic" => Script::Cyrillic,
+            "cjk" => Script::Cjk,
+            _ => Script::Latin,
+        }
+    }
+}
+
+/// English: the default (and "auto"'s first try).
+pub(crate) const EN: Recognizer = rec!(
+    "en",
+    "English",
+    "en_pp-ocrv5_mobile_rec.onnx",
+    7_876_014,
+    "8307465d3c9ef2ba4055c3bd0be55aafe11f518630212b7598b70ccb376028ac",
+    "ppocrv5_en_dict.txt",
+    1_416,
+    "e025a66d31f327ba0c232e03f407ae8d105e1e709e7ccb3f408aa778c24e70d6"
+);
+
+/// Every recognizer, `EN` first. Another script (korean, th, el, ...: in the
+/// same release) is one more entry plus its id on the languages it reads.
+pub(crate) const RECOGNIZERS: [&Recognizer; 5] = [
+    &EN,
+    // French, German, Spanish, Portuguese, Italian, Polish, Turkish, Vietnamese, ...
+    &rec!(
+        "latin",
+        "Latin",
+        "latin_pp-ocrv5_mobile_rec.onnx",
+        8_069_614,
+        "e3a6bfeea1c8a01d6fccfd480a0bd363fd907f8c65931e228bb2736f5c3e142f",
+        "ppocrv5_latin_dict.txt",
+        2_616,
+        "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff"
+    ),
+    // Arabic, Persian, Urdu
+    &rec!(
+        "arabic",
+        "Arabic",
+        "arabic_pp-ocrv5_mobile_rec.onnx",
+        8_026_538,
+        "2768206d9a0ce48eba45b59619184e18161dde8f44115f029920ca17a9dc0384",
+        "ppocrv5_arabic_dict.txt",
+        2_369,
+        "7f92f7dbb9b75a4787a83bfb4f6d14a8ab515525130c9d40a9036f61cf6999e9"
+    ),
+    // Russian, Ukrainian, ...
+    &rec!(
+        "cyrillic",
+        "Cyrillic",
+        "cyrillic_pp-ocrv5_mobile_rec.onnx",
+        8_076_390,
+        "a18d96d7c8d73d90f2ed056549caa1de3a8e6cb744cccba16cd593ea8cd2d569",
+        "ppocrv5_cyrillic_dict.txt",
+        2_781,
+        "db40aa52ceb112055be80c694afdf655d5d2c4f7873704524cc16a447ca913ba"
+    ),
+    // PP-OCRv5's main model: Chinese (simplified and traditional), Japanese, English
+    &rec!(
+        "cjk",
+        "Chinese and Japanese",
+        "pp-ocrv5_mobile_rec.onnx",
+        16_562_373,
+        "243a0f06d826761323e9045e9b113ab2c191c3aa50565585e628300b8eda0224",
+        "ppocrv5_dict.txt",
+        74_012,
+        "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b"
+    ),
+];
+
+/// The recognizer for a source language: the table's, else `EN` ("auto",
+/// unknown codes, languages no recognizer reads yet).
+pub(crate) fn recognizer_for(source: &str) -> &'static Recognizer {
+    let id = crate::translate::lang::find(source).and_then(|l| l.ocr);
+    (RECOGNIZERS.into_iter().find(|r| Some(r.id) == id)).unwrap_or(&EN)
+}
+
+/// OCR's files for one recognizer (ONNX Runtime first) and where each goes.
+pub(crate) fn ocr_files(rec: &'static Recognizer) -> Vec<(PathBuf, &'static ModelFile)> {
+    let dir = models_dir();
+    [&ORT, &DET, &rec.model, &rec.dict]
+        .iter()
+        .map(|f| (dir.join(f.name), *f))
+        .collect()
+}
+
+/// All of `rec`'s files are on disk (sizes only; `ensure` verifies).
+pub(crate) fn installed(rec: &'static Recognizer) -> bool {
+    missing_bytes(&ocr_files(rec)) == 0
+}
 
 impl ModelFile {
     /// A file downloaded as is from `url`.
@@ -117,12 +227,6 @@ impl ModelFile {
             source: Source::Plain(url),
         }
     }
-}
-
-/// OCR's files (ONNX Runtime first) and where each goes.
-pub(crate) fn ocr_files() -> Vec<(PathBuf, &'static ModelFile)> {
-    let dir = models_dir();
-    FILES.iter().map(|f| (dir.join(f.name), *f)).collect()
 }
 
 /// Bytes still to download: files missing or of the wrong size (a cheap
@@ -143,12 +247,24 @@ pub fn models_dir() -> PathBuf {
         .join("ocr")
 }
 
-/// Makes sure every file is present and verified, downloading the missing or
+/// Makes sure every file OCR needs for the configured source language
+/// (`translate.source`) is present and verified, downloading the missing or
 /// damaged ones. `progress(done, total)` counts bytes written to disk. Returns
 /// the folder for `Engine::load`. Verified files are never fetched again.
 pub fn ensure_models(progress: impl FnMut(u64, u64)) -> Result<PathBuf, OcrError> {
-    ensure(&ocr_files(), progress)?;
+    ensure(&ocr_files(current_recognizer()), progress)?;
     Ok(models_dir())
+}
+
+/// The recognizer for the configured source language.
+pub(crate) fn current_recognizer() -> &'static Recognizer {
+    recognizer_for(&crate::config::current().translate.source)
+}
+
+/// What the app's OCR (Text, tap a word) needs is on disk: the user agreed
+/// to its download once (sizes only).
+pub fn ready() -> bool {
+    installed(current_recognizer())
 }
 
 /// `ensure_models` for any list of pinned files (OCR's plus offline
@@ -290,6 +406,49 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("oc-ocr-{name}-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Every language's recognizer exists; ids and files are unique and pinned.
+    #[test]
+    fn recognizer_table_and_choice() {
+        use crate::translate::lang::{AUTO, LANGUAGES};
+        for (i, r) in RECOGNIZERS.iter().enumerate() {
+            assert!(
+                RECOGNIZERS[..i]
+                    .iter()
+                    .all(|o| o.id != r.id && o.model.name != r.model.name)
+            );
+            for f in [&r.model, &r.dict] {
+                assert!(f.size > 0 && f.sha256.len() == 64, "{}", f.name);
+            }
+        }
+        for l in LANGUAGES {
+            if let Some(id) = l.ocr {
+                assert!(RECOGNIZERS.iter().any(|r| r.id == id), "{}: {id}", l.code);
+            }
+        }
+        let id = |source: &str| recognizer_for(source).id;
+        assert_eq!(id("en"), "en");
+        assert_eq!(
+            (id("fr"), id("pt-BR"), id("vi")),
+            ("latin", "latin", "latin")
+        );
+        assert_eq!(
+            (id("ar"), id("fa"), id("ur")),
+            ("arabic", "arabic", "arabic")
+        );
+        assert_eq!((id("ru"), id("uk")), ("cyrillic", "cyrillic"));
+        assert_eq!((id("ja"), id("zh"), id("zh-Hant")), ("cjk", "cjk", "cjk"));
+        // auto, unknown codes and scripts with no recognizer: English
+        assert_eq!((id(AUTO), id("xx"), id("ko")), ("en", "en", "en"));
+        // OCR's files: ORT, the detector, then the recognizer's two
+        let files = ocr_files(recognizer_for("ar"));
+        let names: Vec<&str> = files.iter().map(|(_, f)| f.name).collect();
+        assert_eq!(names[..2], [ORT.name, DET.name]);
+        assert_eq!(
+            names[2..],
+            ["arabic_pp-ocrv5_mobile_rec.onnx", "ppocrv5_arabic_dict.txt"]
+        );
     }
 
     #[test]

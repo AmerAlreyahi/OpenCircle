@@ -152,6 +152,8 @@ pub enum Message {
     Allowed(Result<(), String>),
 }
 
+// One short-lived value per message: a boxed Config would buy nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
     None,

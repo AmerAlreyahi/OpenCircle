@@ -16,6 +16,7 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use iced::widget::tooltip::Position;
 use iced::widget::{column, container, row, space};
@@ -23,7 +24,9 @@ use iced::{Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{Config, DefaultAction, Engine, Provider, Target, Theme, parse_shortcut};
 use crate::hotkey::{DesktopKey, managed};
+use crate::mt;
 use crate::secrets::{self, Secret, SecretsError};
+use crate::translate::lang::{self, LANGUAGES, Language};
 use crate::ui::theme;
 use crate::ui::widgets::{
     self, FORM_WIDTH, FieldState, caption, divider, error_text, form_row, label_button, nav_item,
@@ -233,48 +236,16 @@ pub const PRESETS: &[Preset] = &[
     },
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Language {
-    pub code: &'static str,
-    pub name: &'static str,
-}
-
-impl fmt::Display for Language {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name)
-    }
-}
-
-const fn lang(code: &'static str, name: &'static str) -> Language {
-    Language { code, name }
-}
-
-pub const LANGUAGES: &[Language] = &[
-    lang("ar", "Arabic"),
-    lang("en", "English"),
-    lang("fr", "French"),
-    lang("de", "German"),
-    lang("es", "Spanish"),
-    lang("pt", "Portuguese"),
-    lang("pt-BR", "Portuguese (Brazil)"),
-    lang("it", "Italian"),
-    lang("nl", "Dutch"),
-    lang("ru", "Russian"),
-    lang("uk", "Ukrainian"),
-    lang("pl", "Polish"),
-    lang("tr", "Turkish"),
-    lang("fa", "Persian"),
-    lang("ur", "Urdu"),
-    lang("he", "Hebrew"),
-    lang("hi", "Hindi"),
-    lang("id", "Indonesian"),
-    lang("vi", "Vietnamese"),
-    lang("th", "Thai"),
-    lang("ja", "Japanese"),
-    lang("ko", "Korean"),
-    lang("zh", "Chinese (Simplified)"),
-    lang("zh-Hant", "Chinese (Traditional)"),
-];
+/// The Source dropdown: "Detect automatically", then what OCR can read.
+static SOURCES: LazyLock<Vec<Language>> = LazyLock::new(|| {
+    let auto = Language {
+        code: lang::AUTO,
+        name: "Detect automatically",
+        ..LANGUAGES[1]
+    };
+    let readable = LANGUAGES.iter().filter(|l| l.ocr.is_some()).copied();
+    std::iter::once(auto).chain(readable).collect()
+});
 
 fn action_name(id: &str, live: bool, target: Target) -> String {
     match (id, live) {
@@ -486,13 +457,16 @@ pub enum Message {
     BaseUrl(String),
     Model(String),
     ApiKey(KeyMessage),
-    Language(Language),
+    Source(Language),
+    Target(Language),
     Engine(Engine),
     /// What was typed in the live-interval field.
     LiveInterval(String),
     Save,
 }
 
+// One short-lived value per message: a boxed Config would buy nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
     None,
@@ -753,7 +727,8 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             let provider = state.draft.ai.provider.clone();
             state.key.update(&*state.store, provider, k);
         }
-        Message::Language(l) => state.draft.translate.target = l.code.to_string(),
+        Message::Source(l) => state.draft.translate.source = l.code.to_string(),
+        Message::Target(l) => state.draft.translate.target = l.code.to_string(),
         Message::Engine(e) => state.draft.translate.engine = e,
         Message::LiveInterval(s) => {
             // Not a number = 0, which the range check reports under the field.
@@ -879,7 +854,7 @@ fn content(state: &State) -> Element<'_, Message> {
                             (
                                 Engine::Offline,
                                 "Offline",
-                                "Translate on this PC (English to Arabic)",
+                                "Translate on this PC (English to and from some languages)",
                             ),
                         ],
                         d.translate.engine,
@@ -888,8 +863,33 @@ fn content(state: &State) -> Element<'_, Message> {
                     None,
                 ),
                 form_row(
+                    "Source language",
+                    "What the text on screen is in; picks the text recognizer",
+                    tip(
+                        widgets::dropdown(
+                            &SOURCES,
+                            SOURCES
+                                .iter()
+                                .find(|l| l.code == d.translate.source)
+                                .copied(),
+                            &d.translate.source,
+                            Message::Source,
+                        ),
+                        "Source language",
+                        Position::Top,
+                    ),
+                    issue(&state.problems, "translate.source"),
+                ),
+                form_row(
                     "Target language",
-                    "What the text is translated into",
+                    // Offline can't do every pair: say so (AI is the other way).
+                    if d.translate.engine == Engine::Offline
+                        && !mt::available(&d.translate.source, &d.translate.target)
+                    {
+                        "No offline model for this pair: choose AI to translate it"
+                    } else {
+                        "What the text is translated into"
+                    },
                     tip(
                         widgets::dropdown(
                             LANGUAGES,
@@ -898,7 +898,7 @@ fn content(state: &State) -> Element<'_, Message> {
                                 .find(|l| l.code == d.translate.target)
                                 .copied(),
                             &d.translate.target,
-                            Message::Language,
+                            Message::Target,
                         ),
                         "Target language",
                         Position::Top,
@@ -1384,7 +1384,8 @@ pub(super) mod tests {
         update(&mut s, Message::Provider(Provider::OpenaiCompatible));
         update(&mut s, Message::Preset(PRESETS[3]));
         update(&mut s, Message::Model("llama3:8b".into()));
-        update(&mut s, Message::Language(LANGUAGES[1]));
+        update(&mut s, Message::Target(LANGUAGES[1]));
+        update(&mut s, Message::Source(SOURCES[2]));
         update(&mut s, Message::DefaultAction(DefaultAction::Copy));
         update(&mut s, Message::Folder(Some(std::env::temp_dir())));
         update(&mut s, Message::LiveInterval("2500".into()));
@@ -1402,6 +1403,7 @@ pub(super) mod tests {
         assert_eq!(back.ai.base_url, "http://localhost:11434/v1");
         assert_eq!(back.ai.model, "llama3:8b");
         assert_eq!(back.translate.target, "en");
+        assert_eq!(back.translate.source, SOURCES[2].code);
         assert_eq!(back.translate.engine, Engine::Offline);
         assert_eq!(back.general.default_action, DefaultAction::Copy);
         assert_eq!(
@@ -1701,6 +1703,19 @@ pub(super) mod tests {
         let texts = shot::texts(view(&s));
         let honest = "No key, nothing leaves your PC; more literal than AI";
         assert!(texts.iter().any(|t| t == honest), "{texts:?}");
+        // Source and Target; a pair with no offline model says so
+        for want in ["Source language", "Target language"] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        let gap = "No offline model for this pair: choose AI to translate it";
+        assert!(!texts.iter().any(|t| t == gap));
+        update(&mut s, Message::Source(lang::find("fr").copied().unwrap()));
+        let texts = shot::texts(view(&s));
+        assert!(
+            texts.iter().any(|t| t == gap),
+            "fr -> ar offline: {texts:?}"
+        );
+        shot::save("settings-translate", view(&s), Size::new(860.0, 600.0));
         // a saved "offline" is read as is, without a warning
         let (cfg, warnings) = Config::parse("[translate]\nengine = \"offline\"\n");
         let s = State::new(cfg, warnings, None, Box::new(MemoryStore::default()));

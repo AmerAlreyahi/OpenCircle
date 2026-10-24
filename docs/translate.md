@@ -16,10 +16,36 @@ works on anything you can see.
    Names and items that the game shows in a highlight colour keep that colour
    when the AI marks them.
 
-Pick the target language in **Settings → Translate** (Arabic is the default;
-right-to-left languages are laid out right-aligned).
+## Languages
 
-The OCR step reads English (Latin-script) source text today.
+Pick the languages in **Settings → Translate**: **Source** (what the text on
+screen is in; *Detect automatically* is the default) and **Target** (what it
+is translated into; Arabic is the default). Right-to-left targets (Arabic,
+Persian, Urdu, Hebrew) are laid out right-aligned.
+
+While translating, the pill at the top shows the pair (*Detect → Arabic*);
+click either side to switch for this session, with your recent picks first
+and a search field for the rest. Live translate's controller has the same
+picker.
+
+Reading the text (OCR) needs a model for the source's script. English is
+the default; the first time you pick a source in another script,
+OpenCircle asks before downloading its model (about 8 MB; Chinese and
+Japanese about 17 MB):
+
+| Script | Source languages |
+|---|---|
+| English | English (also *Detect automatically*) |
+| Latin | French, German, Spanish, Portuguese, Italian, Dutch, Polish, Turkish, Indonesian, Vietnamese |
+| Arabic | Arabic, Persian, Urdu |
+| Cyrillic | Russian, Ukrainian |
+| Chinese and Japanese | Chinese (Simplified, Traditional), Japanese |
+
+*Detect automatically* reads with the English model; when the result looks
+wrong (lines it couldn't read, or not in its script), it tries the other
+models you have downloaded and keeps the best. So pick a source in another
+script once (its model is then on your PC) and detection finds it from then
+on. Hebrew, Hindi, Thai and Korean can be targets but not sources yet.
 
 ## Engines
 
@@ -33,10 +59,21 @@ Choose one in **Settings → Translate → Engine**.
   small neural translation model (OPUS-MT, by the University of Helsinki) that
   runs on your CPU: about a third of a second for 20 game lines, fast enough
   for live mode. It is more literal than AI, can miss the game meaning of a
-  word ("Quit" as in leaving, "pelts"), and is English → Arabic only for now.
-  The first time, OpenCircle asks before downloading it (about 120 MB from
-  Hugging Face, plus the text-recognition files if they are missing, checked
-  against pinned checksums). Licences and credits are in `NOTICE`.
+  word ("Quit" as in leaving, "pelts"). One model per direction; the
+  first time you use a direction, OpenCircle asks before downloading it
+  (about 108-116 MB from Hugging Face, plus the text-recognition files if
+  they are missing, checked against pinned checksums). Licences and credits
+  are in `NOTICE`.
+
+  | From | Into |
+  |---|---|
+  | English | Arabic, French, Spanish, German, Russian, Chinese (Simplified) |
+  | Arabic, French, Chinese, Japanese | English |
+
+  Any other pair is not available offline: OpenCircle says so and offers AI
+  (it never sends the text anywhere you didn't choose). With *Detect
+  automatically*, the direction follows the script of the text it read
+  (Latin counts as English).
 
 Offline, a highlighted name inside a line is drawn in the line's colour: the
 model can't say which translated words are the name. A line drawn entirely
@@ -77,5 +114,9 @@ for the translation to appear over it.
 
 - Very large erased areas over busy art can show smudges; translation quality
   depends on the OCR and on the model you use.
+- Drawing a translation in a script OpenCircle doesn't bundle a font for
+  (Cyrillic, Chinese, Japanese, Thai, ...) uses your system's fonts. Windows
+  has them; on Linux install a font for that script (for example Noto Sans
+  CJK).
 - With AI, the text it read is sent to your AI provider. Use the offline
   engine or a local model to keep everything on your PC.

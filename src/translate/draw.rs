@@ -25,6 +25,13 @@ static FONT_DATA: [&[u8]; 2] = [
 pub struct Fonts {
     fs: FontSystem,
     cache: SwashCache,
+    /// The system's fonts are loaded too (for a script we don't bundle).
+    system: bool,
+}
+
+/// What the bundled fonts draw: Latin-1, punctuation, Arabic.
+fn bundled(c: char) -> bool {
+    matches!(c, '\0'..='\u{00FF}' | '\u{2000}'..='\u{206F}' | '\u{0600}'..='\u{08FF}' | '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
 }
 
 /// Loaded on first use only, so idle memory does not pay for it.
@@ -36,6 +43,7 @@ pub static FONTS: LazyLock<Mutex<Fonts>> = LazyLock::new(|| {
     Mutex::new(Fonts {
         fs: FontSystem::new_with_locale_and_db("en-US".into(), db),
         cache: SwashCache::new(),
+        system: false,
     })
 });
 
@@ -80,6 +88,12 @@ impl Fonts {
         width: Option<f32>,
         align: Align,
     ) -> Buffer {
+        // Cyrillic, CJK, Thai, ...: the system's fonts, loaded once, on the
+        // first such text (Windows has them all; Linux needs them installed).
+        if !self.system && spans.iter().any(|(t, _)| !t.chars().all(bundled)) {
+            self.fs.db_mut().load_system_fonts();
+            self.system = true;
+        }
         let fs = &mut self.fs;
         let mut buf = Buffer::new(fs, metrics);
         buf.set_wrap(

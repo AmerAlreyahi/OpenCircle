@@ -17,6 +17,7 @@
 //! model = "claude-sonnet-5-5"       # model id sent to the provider
 //!
 //! [translate]
+//! source = "auto"                   # language code the text is in; auto = detect
 //! target = "ar"                     # language code to translate into
 //! engine = "ai"                     # ai | offline (ai falls back to offline when AI isn't set up)
 //! live_interval_ms = 1000           # live translate repeats every N ms (500-5000)
@@ -196,6 +197,9 @@ pub struct AiConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TranslateConfig {
+    /// "auto" or a language code: what the text is in (picks the OCR
+    /// recognizer and the offline model).
+    pub source: String,
     pub target: String,
     pub engine: Engine,
     /// Live translate repeats every this many ms (`LIVE_INTERVAL_MS`).
@@ -236,6 +240,7 @@ impl Default for AiConfig {
 impl Default for TranslateConfig {
     fn default() -> Self {
         TranslateConfig {
+            source: crate::translate::lang::AUTO.to_string(),
             target: DEFAULT_TRANSLATE_TARGET.to_string(),
             engine: Engine::Ai,
             live_interval_ms: DEFAULT_LIVE_INTERVAL_MS,
@@ -402,6 +407,17 @@ impl Config {
             });
         }
         if let Some(t) = section(&root, "translate", &mut w) {
+            c.translate.source = get_checked(
+                t,
+                "translate.",
+                "source",
+                d.translate.source,
+                &mut w,
+                |s: &String| match s.as_str() {
+                    crate::translate::lang::AUTO => Ok(()),
+                    s => check_lang(s).map_err(|e| format!("{e}, or \"auto\"")),
+                },
+            );
             c.translate.target = get_checked(
                 t,
                 "translate.",
@@ -703,6 +719,7 @@ mod tests {
         c.general.save_folder = std::env::temp_dir().to_string_lossy().into_owned();
         c.translate.live_interval_ms = 2500;
         c.translate.live_note_shown = true;
+        c.translate.source = "ja".into();
         c.quick_actions.pop();
         c.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -716,6 +733,26 @@ mod tests {
         assert!(!path.with_extension("toml.tmp").exists());
         assert!(text.contains("[general]") && text.contains("default_action = \"copy\""));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn translate_source_defaults_to_auto_and_is_checked() {
+        // a config from before `source` existed: auto, no warning
+        let (c, w) = Config::parse("[translate]\ntarget = \"fr\"\n");
+        assert_eq!(
+            (c.translate.source.as_str(), c.translate.target.as_str()),
+            ("auto", "fr")
+        );
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(Config::default().translate.source, "auto");
+        let (c, _) = Config::parse("[translate]\nsource = \"zh-Hant\"\n");
+        assert_eq!(c.translate.source, "zh-Hant");
+        let (c, w) = Config::parse("[translate]\nsource = \"automatic\"\n");
+        assert_eq!(c.translate.source, "auto");
+        assert!(
+            w[0].starts_with("translate.source") && w[0].contains("\"auto\""),
+            "{w:?}"
+        );
     }
 
     #[test]

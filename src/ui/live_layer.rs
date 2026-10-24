@@ -97,10 +97,11 @@ pub struct Live {
     ctl_at: Point,
     /// The controller is invisible to capture (else the step blanks it out).
     excluded: bool,
-    /// What the step thread reads each time: paused, the target, and where the
-    /// controller is in a capture (monitor px; `None` = not in captures).
+    /// What the step thread reads each time: paused, the source and target
+    /// languages, and where the controller is in a capture (monitor px;
+    /// `None` = not in captures).
     paused: Arc<AtomicBool>,
-    target: Arc<Mutex<String>>,
+    langs: Arc<Mutex<(String, String)>>,
     mask: Arc<Mutex<Option<[u32; 4]>>>,
     note: bool,
     error: Option<String>,
@@ -127,7 +128,7 @@ impl Live {
         let cfg = config::current();
         let mut live = Live {
             note: !cfg.translate.live_note_shown,
-            ..Live::new(cache, &cfg.translate.target)
+            ..Live::new(cache, &cfg.translate.source, &cfg.translate.target)
         };
         let (task, handle) = background(|tx| {
             let monitor = capture::monitor_under_cursor().map(|f| Monitor {
@@ -144,15 +145,16 @@ impl Live {
         (live, task)
     }
 
-    fn new(cache: Arc<Cache>, target: &str) -> Live {
+    fn new(cache: Arc<Cache>, source: &str, target: &str) -> Live {
+        let offline = crate::actions::translate::will_be_offline();
         Live {
             phase: Phase::Starting,
             controller: None,
-            ctl: Controller::new(target),
+            ctl: Controller::new(source, target, offline),
             ctl_at: Point::ORIGIN,
             excluded: false,
             paused: Arc::new(AtomicBool::new(false)),
-            target: Arc::new(Mutex::new(target.into())),
+            langs: Arc::new(Mutex::new((source.into(), target.into()))),
             mask: Arc::new(Mutex::new(None)),
             note: false,
             error: None,
@@ -246,9 +248,10 @@ impl Live {
             self.paused.store(self.ctl.paused, Ordering::Relaxed);
             self.patches.clear(); // paused = the screen as it is
         }
-        if self.ctl.target != before.target {
-            if let Ok(mut target) = self.target.lock() {
-                target.clone_from(&self.ctl.target);
+        let langs = |c: &Controller| (c.picker.source.clone(), c.picker.target.clone());
+        if langs(&self.ctl) != langs(&before) {
+            if let Ok(mut now) = self.langs.lock() {
+                *now = langs(&self.ctl);
             }
             self.patches.clear(); // the next step reads everything again
         }
@@ -363,11 +366,12 @@ impl Live {
     /// Captures and steps on a thread until `stop` (or the layer is dropped).
     fn run(&mut self, monitor: Monitor) -> Task<Msg> {
         let (stop, cache) = (self.stop.clone(), self.cache.clone());
-        let (paused, chosen, mask) = (self.paused.clone(), self.target.clone(), self.mask.clone());
+        let (paused, chosen, mask) = (self.paused.clone(), self.langs.clone(), self.mask.clone());
         let (task, handle) = background(move |tx| {
-            // The target is the controller's (it starts as the config's).
-            let (deps, _) = match crate::actions::translate::deps() {
-                Ok(deps) => deps,
+            // The languages are the controller's (they start as the config's).
+            let start = chosen.lock().map(|l| l.clone()).unwrap_or_default();
+            let mut deps = match crate::actions::translate::deps_for(&start.0, &start.1) {
+                Ok((deps, _)) => deps,
                 Err(e) => {
                     let first = e.lines().next().unwrap_or_default().to_string();
                     let _ = tx.unbounded_send(Msg::Failed(first));
@@ -376,16 +380,24 @@ impl Live {
             };
             let mut steps = Steps::new();
             let mut last_error = None;
-            let mut target = String::new();
+            let mut langs = start;
             let tick = || {
                 if paused.load(Ordering::Relaxed) {
                     return None;
                 }
-                let now = chosen.lock().map(|t| t.clone()).unwrap_or_default();
-                if now != target {
+                let now = chosen.lock().map(|l| l.clone()).unwrap_or_default();
+                if now != langs {
                     steps = Steps::new(); // another language: read everything again
-                    target = now;
+                    match crate::actions::translate::deps_for(&now.0, &now.1) {
+                        Ok((d, _)) => deps = d,
+                        Err(e) => {
+                            let first = e.lines().next().unwrap_or_default().to_string();
+                            return report(&mut last_error, first);
+                        }
+                    }
+                    langs = now;
                 }
+                let target = &langs.1;
                 let mut frame = match capture::monitor_under_cursor() {
                     Ok(f) => f,
                     Err(e) => return report(&mut last_error, format!("capture failed: {e}")),
@@ -401,7 +413,7 @@ impl Live {
                 if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
                     live_controller::mask(&mut frame.rgba, w, h, rect);
                 }
-                match steps.step(&frame.rgba, w, h, &target, &cache, &deps) {
+                match steps.step(&frame.rgba, w, h, target, &cache, &deps) {
                     Ok(None) => None,
                     Ok(Some(t)) => {
                         last_error = None;
@@ -589,7 +601,7 @@ mod tests {
     fn live() -> Live {
         Live {
             note: true,
-            ..Live::new(Arc::new(Cache::new(8)), "ar")
+            ..Live::new(Arc::new(Cache::new(8)), "auto", "ar")
         }
     }
 
@@ -671,8 +683,13 @@ mod tests {
         assert!(!l.paused.load(Ordering::Relaxed));
 
         // another language reaches the step thread
-        let _ = l.update(Msg::Controller(C::Pick("ja".into())));
-        assert_eq!(*l.target.lock().unwrap(), "ja");
+        use crate::ui::picker::{Msg as P, Side};
+        let _ = l.update(Msg::Controller(C::Picker(P::Open(Side::Target))));
+        let _ = l.update(Msg::Controller(C::Picker(P::Pick("ja".into()))));
+        assert_eq!(l.langs.lock().unwrap().1, "ja");
+        let _ = l.update(Msg::Controller(C::Picker(P::Open(Side::Source))));
+        let _ = l.update(Msg::Controller(C::Picker(P::Pick("fr".into()))));
+        assert_eq!(*l.langs.lock().unwrap(), ("fr".into(), "ja".into()));
 
         // hiding keeps its right edge; Windows' exclusion drops the mask
         let right = l.ctl_at.x + l.ctl.size().width;

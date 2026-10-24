@@ -8,12 +8,14 @@ pub(crate) mod models;
 pub(crate) mod session;
 pub(crate) mod worker;
 
-pub use models::{ensure_models, models_dir};
+pub use models::{ensure_models, models_dir, ready};
 pub use session::{Hold, hold};
-pub use worker::{WORKER_ARG, recognize_in_child, translate_in_child, worker_main};
+pub use worker::{WORKER_ARG, recognize_as, recognize_in_child, translate_in_child, worker_main};
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use crate::translate::lang::Script;
 
 use image::RgbImage;
 use image::imageops::FilterType::Triangle;
@@ -109,16 +111,126 @@ pub(crate) fn load_err(e: impl fmt::Display) -> OcrError {
     }
 }
 
+/// Which recognizer reads the lines: one (an index into
+/// `models::RECOGNIZERS`), or `Auto`: the last good one (English at first),
+/// and when its lines look wrong, every other one on disk on the same lines;
+/// the best stays loaded and is tried first next time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Read {
+    One(usize),
+    Auto,
+}
+
+impl Read {
+    /// For a source language: its recognizer, or `Auto` for "auto".
+    pub fn for_source(source: &str) -> Read {
+        if source == crate::translate::lang::AUTO {
+            return Read::Auto;
+        }
+        let rec = models::recognizer_for(source);
+        Read::One(index(rec))
+    }
+
+    /// One byte on the wire.
+    fn byte(self) -> u8 {
+        match self {
+            Read::One(i) => i as u8,
+            Read::Auto => u8::MAX,
+        }
+    }
+
+    fn from_byte(b: u8) -> Option<Read> {
+        match b {
+            u8::MAX => Some(Read::Auto),
+            i if (i as usize) < models::RECOGNIZERS.len() => Some(Read::One(i as usize)),
+            _ => None,
+        }
+    }
+}
+
+fn index(rec: &models::Recognizer) -> usize {
+    (models::RECOGNIZERS.iter())
+        .position(|r| r.id == rec.id)
+        .unwrap_or(0)
+}
+
+/// How well a recognizer for `script` read `boxes` lines: the share of
+/// lines it read at all, times their mean confidence (weighted by length),
+/// times the share of its letters in its own script. A model shown a script
+/// it doesn't know reads few lines, or reads them unsure; one whose list
+/// also has Latin letters (all of them) reads Latin text well, but then it
+/// is Latin. Measured (`translate::tests::languages_end_to_end`): the
+/// English model on Arabic lines read none (0.0), on Russian 1 of 2 at 0.88
+/// (0.44); the Arabic model on French at 0.98, but in Latin letters (0.0);
+/// each model on its own script 0.97-1.0.
+// ponytail: a threshold on the model's own confidence; a script classifier
+// if it misfires.
+fn quality(blocks: &[TextBlock], boxes: usize, script: Script) -> f32 {
+    if boxes == 0 {
+        return 1.0; // no text: nothing to read better
+    }
+    let letters = blocks
+        .iter()
+        .flat_map(|b| b.text.chars())
+        .filter(|c| c.is_alphabetic());
+    let (mine, all) = letters.fold((0, 0), |(m, a), c| (m + script.has(c) as usize, a + 1));
+    let own = if all == 0 {
+        1.0
+    } else {
+        mine as f32 / all as f32
+    };
+    let chars = |b: &TextBlock| b.text.chars().count().max(1) as f32;
+    let n: f32 = blocks.iter().map(chars).sum();
+    let mean = blocks.iter().map(|b| b.confidence * chars(b)).sum::<f32>() / n.max(1.0);
+    mean * own * blocks.len() as f32 / boxes as f32
+}
+
+/// Below this `quality`, `Auto` tries the other recognizers.
+const AUTO_QUALITY: f32 = 0.8;
+
+/// The Arabic model reads glyphs left to right; PaddleOCR reverses its
+/// output (`pred_reverse`): runs of Latin letters, digits, `:*./%+-` and
+/// spaces keep their order, the sequence of runs and other characters is
+/// reversed. So "ةيسيئرلا ةمئاقلا" -> "القائمة الرئيسية". Unlike PaddleOCR,
+/// a run's outer spaces stay between it and its neighbours.
+fn reverse_rtl(text: &str) -> String {
+    let keep = |c: char| c.is_ascii_alphanumeric() || " :*./%+-".contains(c);
+    let mut parts: Vec<&str> = Vec::new();
+    let mut rest = text;
+    while let Some(c) = rest.chars().next() {
+        let len = match keep(c) {
+            true => rest.find(|c| !keep(c)).unwrap_or(rest.len()),
+            false => c.len_utf8(),
+        };
+        let (part, tail) = rest.split_at(len);
+        let core = part.trim();
+        if core.is_empty() {
+            parts.push(part);
+        } else {
+            let lead = &part[..part.len() - part.trim_start().len()];
+            let trail = &part[part.trim_end().len()..];
+            parts.extend([lead, core, trail].into_iter().filter(|s| !s.is_empty()));
+        }
+        rest = tail;
+    }
+    parts.into_iter().rev().collect()
+}
+
 /// ORT plus loaded models. Runs in the `ocr-worker` process only.
 pub struct Engine {
+    dir: PathBuf,
     det: TextDetectionPredictor,
-    rec: TextRecognitionPredictor,
+    ort: OrtSessionConfig,
+    /// The loaded recognizer (one at a time: another script replaces it).
+    rec: Option<(usize, TextRecognitionPredictor)>,
+    /// `Auto`'s first try: the last recognizer that read well.
+    auto: usize,
 }
 
 impl Engine {
-    /// Loads ORT and the models from `models` (the folder `ensure_models` returns).
+    /// Loads ORT and the detector from `models` (the folder `ensure_models`
+    /// returns); a recognizer loads on first use.
     pub fn load(models: &Path) -> Result<Engine, OcrError> {
-        let rec_files = &models::RECOGNIZER;
         ort::init_from(models.join(models::ORT.name))
             .map_err(load_err)?
             .commit();
@@ -149,20 +261,44 @@ impl Engine {
             .with_ort_config(ort.clone())
             .build(models.join(models::DET.name))
             .map_err(engine_err)?;
-        let rec = TextRecognitionPredictor::builder()
-            .dict_path(models.join(rec_files.dict.name))
-            .with_ort_config(ort)
-            .build(models.join(rec_files.model.name))
-            .map_err(engine_err)?;
-        Ok(Engine { det, rec })
+        Ok(Engine {
+            dir: models.into(),
+            det,
+            ort,
+            rec: None,
+            auto: 0,
+        })
+    }
+
+    /// Recognizer `i`, loaded (the previous one is freed first).
+    fn recognizer(&mut self, i: usize) -> Result<&TextRecognitionPredictor, OcrError> {
+        if self.rec.as_ref().is_none_or(|(n, _)| *n != i) {
+            self.rec = None;
+            let files = models::RECOGNIZERS[i];
+            if !models::installed(files) {
+                return Err(OcrError::Engine(format!(
+                    "the {} text-recognition model isn't downloaded yet. Translate once \
+                     with Ctrl+Shift+T to download it",
+                    files.script
+                )));
+            }
+            let rec = TextRecognitionPredictor::builder()
+                .dict_path(self.dir.join(files.dict.name))
+                .with_ort_config(self.ort.clone())
+                .build(self.dir.join(files.model.name))
+                .map_err(engine_err)?;
+            self.rec = Some((i, rec));
+        }
+        Ok(&self.rec.as_ref().expect("just loaded").1)
     }
 
     /// Finds and reads the text lines in an RGBA image, in reading order.
     pub fn recognize(
-        &self,
+        &mut self,
         rgba: &[u8],
         width: u32,
         height: u32,
+        read: Read,
     ) -> Result<Vec<TextBlock>, OcrError> {
         let img = to_rgb(rgba, width, height)?;
         let (dw, dh) = detect_size(width, height);
@@ -190,27 +326,60 @@ impl Engine {
         // A batch is padded to its widest line: batch alike shapes (as
         // PaddleOCR does). `reading_order` restores the order.
         boxes.sort_by(|a, b| (a[2] / a[3]).total_cmp(&(b[2] / b[3])));
+        let first = match read {
+            Read::One(i) => i,
+            Read::Auto => self.auto,
+        };
+        let n = boxes.len();
+        let q =
+            |i: usize, blocks: &[TextBlock]| quality(blocks, n, models::RECOGNIZERS[i].script());
+        let mut best = (first, self.read_lines(first, &img, &boxes)?);
+        if read == Read::Auto && q(first, &best.1) < AUTO_QUALITY {
+            for i in 0..models::RECOGNIZERS.len() {
+                if i == first || !models::installed(models::RECOGNIZERS[i]) {
+                    continue;
+                }
+                let other = self.read_lines(i, &img, &boxes)?;
+                if q(i, &other) > q(best.0, &best.1) {
+                    best = (i, other);
+                }
+            }
+            self.auto = best.0;
+        }
+        Ok(reading_order(best.1, models::RECOGNIZERS[best.0].rtl()))
+    }
+
+    /// Recognizer `i` on the `boxes` of `img`.
+    fn read_lines(
+        &mut self,
+        i: usize,
+        img: &RgbImage,
+        boxes: &[[f32; 4]],
+    ) -> Result<Vec<TextBlock>, OcrError> {
+        let rtl = models::RECOGNIZERS[i].rtl();
+        let rec = self.recognizer(i)?;
         let mut blocks = Vec::with_capacity(boxes.len());
         for chunk in boxes.chunks(REC_BATCH) {
             let crops = chunk
                 .iter()
                 .map(|b| {
                     let [x, y, w, h] = b.map(|v| v as u32);
-                    image::imageops::crop_imm(&img, x, y, w, h).to_image()
+                    image::imageops::crop_imm(img, x, y, w, h).to_image()
                 })
                 .collect();
-            let rec = self.rec.predict(crops).map_err(engine_err)?;
+            let rec = rec.predict(crops).map_err(engine_err)?;
             for (bounds, (text, confidence)) in chunk.iter().zip(rec.texts.iter().zip(rec.scores)) {
                 if !text.trim().is_empty() {
+                    let text = text.trim();
                     blocks.push(TextBlock {
-                        text: text.trim().to_string(),
+                        text: if rtl { reverse_rtl(text) } else { text.into() },
                         bounds: *bounds,
                         confidence,
                     });
                 }
             }
         }
-        Ok(reading_order(blocks))
+        Ok(blocks)
     }
 }
 
@@ -241,12 +410,12 @@ fn to_rgb(rgba: &[u8], width: u32, height: u32) -> Result<RgbImage, OcrError> {
         .ok_or_else(|| OcrError::BadImage(format!("{width}x{height} is too large")))
 }
 
-/// Top to bottom, then left to right within a line. A box joins the current
-/// line when its vertical centre lies inside the line's first box.
-// ponytail: one column, left-to-right. Side-by-side columns interleave line by
-// line, and RTL scripts need right-to-left; add when a multi-column or Arabic
-// recognizer lands.
-fn reading_order(mut blocks: Vec<TextBlock>) -> Vec<TextBlock> {
+/// Top to bottom, then left to right within a line (right to left for an
+/// RTL script). A box joins the current line when its vertical centre lies
+/// inside the line's first box.
+// ponytail: one column. Side-by-side columns interleave line by line; add
+// when a multi-column layout needs it.
+fn reading_order(mut blocks: Vec<TextBlock>, rtl: bool) -> Vec<TextBlock> {
     blocks.sort_by(|a, b| a.bounds[1].total_cmp(&b.bounds[1]));
     let mut lines: Vec<Vec<TextBlock>> = Vec::new();
     for b in blocks {
@@ -260,6 +429,9 @@ fn reading_order(mut blocks: Vec<TextBlock>) -> Vec<TextBlock> {
         .into_iter()
         .flat_map(|mut line| {
             line.sort_by(|a, b| a.bounds[0].total_cmp(&b.bounds[0]));
+            if rtl {
+                line.reverse();
+            }
             line
         })
         .collect()
@@ -294,14 +466,64 @@ mod tests {
 
     #[test]
     fn reading_order_is_lines_then_left_to_right() {
-        let got = reading_order(vec![
+        let blocks = vec![
             block("c", 0.0, 40.0),
             block("b", 100.0, 2.0), // same line as "a", a little higher
             block("a", 0.0, 5.0),
             block("d", 100.0, 43.0),
-        ]);
-        let texts: Vec<&str> = got.iter().map(|b| b.text.as_str()).collect();
-        assert_eq!(texts, ["a", "b", "c", "d"]);
+        ];
+        let texts = |got: Vec<TextBlock>| got.into_iter().map(|b| b.text).collect::<Vec<_>>();
+        assert_eq!(
+            texts(reading_order(blocks.clone(), false)),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            texts(reading_order(blocks, true)),
+            ["b", "a", "d", "c"],
+            "RTL"
+        );
+    }
+
+    #[test]
+    fn arabic_output_is_reversed_like_paddleocr() {
+        assert_eq!(reverse_rtl("ةيسيئرلا ةمئاقلا"), "القائمة الرئيسية");
+        // Latin and number runs keep their order
+        assert_eq!(reverse_rtl("ىوتسملا 12 FPS"), "12 FPS المستوى");
+        assert_eq!(reverse_rtl(""), "");
+    }
+
+    #[test]
+    fn auto_quality_counts_unread_lines() {
+        let b = |t: &str, c: f32| TextBlock {
+            text: t.into(),
+            bounds: [0.0; 4],
+            confidence: c,
+        };
+        let latin = Script::Latin;
+        assert_eq!(quality(&[], 0, latin), 1.0, "no text: nothing to improve");
+        assert_eq!(quality(&[], 3, latin), 0.0, "nothing read");
+        assert!(quality(&[b("Hacpoκ", 0.88)], 2, latin) < AUTO_QUALITY);
+        assert!(quality(&[b("Quit", 0.99), b("New game", 0.97)], 2, latin) > AUTO_QUALITY);
+        assert!(
+            quality(&[b("xq", 0.5), b("zz", 0.6)], 2, latin) < AUTO_QUALITY,
+            "unsure"
+        );
+        // the Arabic model reading Latin text: sure, but not Arabic
+        assert!(quality(&[b("Nouvelle partie", 0.98)], 1, Script::Arabic) < AUTO_QUALITY);
+        assert!(quality(&[b("القائمة 2", 0.97)], 1, Script::Arabic) > AUTO_QUALITY);
+        // the wire byte round-trips
+        for r in [
+            Read::Auto,
+            Read::One(0),
+            Read::One(models::RECOGNIZERS.len() - 1),
+        ] {
+            assert_eq!(Read::from_byte(r.byte()), Some(r));
+        }
+        assert_eq!(Read::from_byte(200), None);
+        assert_eq!(Read::for_source("auto"), Read::Auto);
+        assert_eq!(Read::for_source("en"), Read::One(0));
+        let ar = Read::for_source("ar-EG");
+        assert!(matches!(ar, Read::One(i) if models::RECOGNIZERS[i].id == "arabic"));
     }
 
     #[test]
@@ -339,7 +561,7 @@ mod tests {
     #[test]
     #[ignore]
     fn reads_whole_lines_on_a_wide_screen() {
-        let engine = Engine::load(&ensure_models(|_, _| {}).unwrap()).unwrap();
+        let mut engine = Engine::load(&ensure_models(|_, _| {}).unwrap()).unwrap();
         let (frame, lines) = crate::translate::tests::game_frame();
         let frame = image::RgbaImage::from_raw(1920, 1080, frame).unwrap();
         let mut wide = image::RgbaImage::from_pixel(3440, 1440, image::Rgba([0, 0, 0, 255]));
@@ -359,7 +581,7 @@ mod tests {
             let (mut got, mut took) = (Vec::new(), std::time::Duration::MAX);
             for _ in 0..4 {
                 let t = std::time::Instant::now();
-                got = engine.recognize(img.as_raw(), w, h).unwrap();
+                got = engine.recognize(img.as_raw(), w, h, Read::One(0)).unwrap();
                 took = took.min(t.elapsed()); // best of 4 (the first warms up)
             }
             let read: Vec<String> = got.iter().map(|b| squash(&b.text)).collect();
@@ -408,7 +630,8 @@ mod tests {
         let exe = exe.parent().unwrap().parent().unwrap().join("opencircle");
         let recognize = |rgba: &[u8], w: usize, h: usize| {
             let t = std::time::Instant::now();
-            let lines = worker::recognize_with(&exe, rgba, w as u32, h as u32).unwrap();
+            let lines =
+                worker::recognize_with(&exe, rgba, w as u32, h as u32, Read::One(0)).unwrap();
             (lines, t.elapsed())
         };
         println!("app before: {}", rss());

@@ -1,28 +1,17 @@
 //! The live translate mini-controller (Circle to Search's floating controller):
 //! a small, draggable window on the layer's monitor. It takes clicks (the layer
-//! doesn't) and, on Windows, is excluded from capture like the layer. Language
-//! pair chip (opens a short list of targets), Pause / Resume, Hide (collapses to
-//! a dot), Stop. This file is its state and view; `live_layer` owns the window.
-use std::sync::Mutex;
-
+//! doesn't) and, on Windows, is excluded from capture like the layer. The
+//! language picker (source → target, `ui/picker.rs`), Pause / Resume, Hide
+//! (collapses to a dot), Stop. This file is its state and view; `live_layer`
+//! owns the window.
 use iced::widget::{column, container, mouse_area, row};
 use iced::{Center, Element, Size, mouse};
 
+use super::picker::{self, CHIP_HEIGHT, Picker, SPACING};
 use super::widgets;
 
-/// Offered after the recently used targets.
-const COMMON: [&str; 6] = ["ar", "en", "es", "fr", "de", "ja"];
-/// How many targets the list offers.
-const CHOICES: usize = 6;
-/// Targets picked in this run, most recent first (memory only).
-static RECENT: Mutex<Vec<String>> = Mutex::new(Vec::new());
-
 /// Chip sizes (one width per kind, consistency rule) and the drag grip.
-const CHIP_HEIGHT: f32 = 32.0;
-const SPACING: f32 = 4.0;
-const PAIR_WIDTH: f32 = 92.0;
 const CHIP_WIDTH: f32 = 76.0;
-const CHOICE_WIDTH: f32 = 48.0;
 const GRIP_WIDTH: f32 = 20.0;
 /// The minimised controller.
 const DOT: f32 = 28.0;
@@ -31,9 +20,8 @@ const DOT: f32 = 28.0;
 pub enum Msg {
     /// Pressed on the grip: move the window with the pointer.
     Drag,
-    /// The language chip: open / close the list of targets.
-    List,
-    Pick(String),
+    /// The language picker.
+    Picker(picker::Msg),
     Pause,
     Minimise,
     Restore,
@@ -49,24 +37,18 @@ pub enum Out {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Controller {
-    /// The target language code (e.g. "ar").
-    pub target: String,
+    /// The source and target languages (start as the config's).
+    pub picker: Picker,
     pub paused: bool,
     pub minimised: bool,
-    /// The list of targets is open: (code, label).
-    list: Option<Vec<(String, String)>>,
-    /// "EN → AR".
-    pair: String,
 }
 
 impl Controller {
-    pub fn new(target: &str) -> Controller {
+    pub fn new(source: &str, target: &str, offline: bool) -> Controller {
         Controller {
-            target: target.into(),
+            picker: Picker::new(source, target, offline),
             paused: false,
             minimised: false,
-            list: None,
-            pair: pair(target),
         }
     }
 
@@ -74,29 +56,24 @@ impl Controller {
         match msg {
             Msg::Drag => return Some(Out::Drag),
             Msg::Stop => return Some(Out::Stop),
-            Msg::List if self.list.is_some() => self.list = None,
-            Msg::List => self.list = Some(choices(&self.target, &recent())),
-            Msg::Pick(target) => {
-                remember(&target);
-                self.pair = pair(&target);
-                self.target = target;
-                self.list = None;
+            Msg::Picker(msg) => {
+                self.picker.update(msg);
             }
             Msg::Pause => self.paused = !self.paused,
             Msg::Minimise => {
                 self.minimised = true;
-                self.list = None;
+                self.picker.close();
             }
             Msg::Restore => self.minimised = false,
         }
         None
     }
 
-    /// The status line: "EN → AR", or paused.
+    /// The status line: "Auto → AR", or paused.
     pub fn status(&self) -> String {
         match self.paused {
             true => "Live · paused".into(),
-            false => format!("Live · {}", self.pair),
+            false => format!("Live · {}", self.picker.label()),
         }
     }
 
@@ -106,13 +83,13 @@ impl Controller {
             return Size::new(DOT, DOT);
         }
         let pad = 2.0 * widgets::SURFACE_PADDING;
-        let list = if self.list.is_some() {
-            CHIP_HEIGHT + SPACING
+        let list = if self.picker.is_open() {
+            picker::LIST_HEIGHT
         } else {
             0.0
         };
         Size::new(
-            GRIP_WIDTH + PAIR_WIDTH + 3.0 * CHIP_WIDTH + 4.0 * SPACING + pad,
+            GRIP_WIDTH + picker::WIDTH + 3.0 * CHIP_WIDTH + 4.0 * SPACING + pad,
             CHIP_HEIGHT + list + pad,
         )
     }
@@ -135,9 +112,7 @@ impl Controller {
         .interaction(mouse::Interaction::Grab);
         let controls = row![
             grip,
-            widgets::chip(&self.pair, Msg::List)
-                .width(PAIR_WIDTH)
-                .height(CHIP_HEIGHT),
+            self.picker.chips(CHIP_HEIGHT).map(Msg::Picker),
             chip(if self.paused { "Resume" } else { "Pause" }, Msg::Pause),
             chip("Hide", Msg::Minimise),
             chip("Stop", Msg::Stop),
@@ -145,53 +120,14 @@ impl Controller {
         .spacing(SPACING)
         .align_y(Center);
         let mut body = column![controls].spacing(SPACING);
-        if let Some(list) = &self.list {
-            let picks = list.iter().map(|(code, label)| {
-                widgets::chip(label, Msg::Pick(code.clone()))
-                    .width(CHOICE_WIDTH)
-                    .height(CHIP_HEIGHT)
-                    .into()
-            });
-            let picks = row(picks).spacing(SPACING);
-            body = body.push(container(picks).padding([0.0, GRIP_WIDTH + SPACING]));
+        let width = self.size().width - 2.0 * widgets::SURFACE_PADDING - GRIP_WIDTH - SPACING;
+        if let Some(list) = self.picker.list(width) {
+            let list = list.map(Msg::Picker);
+            body =
+                body.push(container(list).padding(iced::Padding::ZERO.left(GRIP_WIDTH + SPACING)));
         }
         widgets::solid_surface(body).into()
     }
-}
-
-fn pair(target: &str) -> String {
-    format!("EN → {}", target.to_uppercase())
-}
-
-fn recent() -> Vec<String> {
-    RECENT.lock().map(|r| r.clone()).unwrap_or_default()
-}
-
-/// Remembers a picked target, most recent first.
-fn remember(target: &str) {
-    if let Ok(mut recent) = RECENT.lock() {
-        recent.retain(|t| t != target);
-        recent.insert(0, target.into());
-        recent.truncate(CHOICES);
-    }
-}
-
-/// The targets to offer: recently used first, then common ones; never the
-/// current one, no repeats. (code, label).
-fn choices(current: &str, recent: &[String]) -> Vec<(String, String)> {
-    let mut out: Vec<String> = Vec::new();
-    for t in recent.iter().cloned().chain(COMMON.map(String::from)) {
-        if t != current && !out.contains(&t) {
-            out.push(t);
-        }
-    }
-    out.truncate(CHOICES);
-    out.into_iter()
-        .map(|code| {
-            let label = code.to_uppercase();
-            (code, label)
-        })
-        .collect()
 }
 
 /// Paints `rect` (x, y, w, h; clipped to the frame) black in an RGBA capture:
@@ -211,11 +147,16 @@ pub fn mask(rgba: &mut [u8], width: u32, height: u32, rect: [u32; 4]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::picker::Side;
+
+    fn open(c: &mut Controller, side: Side) {
+        c.update(Msg::Picker(picker::Msg::Open(side)));
+    }
 
     #[test]
     fn pause_hide_and_stop() {
-        let mut c = Controller::new("ar");
-        assert_eq!(c.status(), "Live · EN → AR");
+        let mut c = Controller::new("auto", "ar", false);
+        assert_eq!(c.status(), "Live · Auto → AR");
         let full = c.size();
         assert_eq!(c.update(Msg::Pause), None);
         assert!(c.paused);
@@ -223,9 +164,9 @@ mod tests {
         assert_eq!(c.update(Msg::Pause), None);
         assert!(!c.paused, "Pause again = Resume");
         // Hide: a dot, and the list closes with it
-        c.update(Msg::List);
+        open(&mut c, Side::Target);
         c.update(Msg::Minimise);
-        assert!(c.minimised && c.list.is_none());
+        assert!(c.minimised && !c.picker.is_open());
         assert_eq!(c.size(), Size::new(DOT, DOT));
         c.update(Msg::Restore);
         assert_eq!(c.size(), full);
@@ -233,37 +174,33 @@ mod tests {
         assert_eq!(c.update(Msg::Stop), Some(Out::Stop));
     }
 
+    /// The picker in the controller; PNGs of it closed and open (headless
+    /// renderer, `OPENCIRCLE_RENDER_DIR=<dir>`).
     #[test]
-    fn the_language_chip_lists_targets_and_a_pick_switches() {
-        let mut c = Controller::new("ar");
+    fn the_language_picker_switches_source_and_target() {
+        let mut c = Controller::new("auto", "ar", false);
         let closed = c.size();
-        c.update(Msg::List);
+        widgets::shot::save("live-controller", c.view(), closed);
+        open(&mut c, Side::Target);
         assert!(c.size().height > closed.height, "the list needs room");
-        let list = c.list.clone().unwrap();
-        assert!(
-            list.iter().all(|(code, _)| code != "ar"),
-            "not the current one"
-        );
-        assert!(list.contains(&("en".into(), "EN".into())));
-        c.update(Msg::List);
-        assert_eq!(c.size(), closed, "the chip closes it again");
-        c.update(Msg::List);
-        c.update(Msg::Pick("ja".into()));
-        assert_eq!((c.target.as_str(), c.list.as_ref()), ("ja", None));
-        assert_eq!(c.status(), "Live · EN → JA");
+        assert_eq!(c.size().width, closed.width, "never wider");
+        let texts = widgets::shot::texts(c.view());
+        assert!(texts.iter().any(|t| t == "English"), "{texts:?}");
+        let arabic = texts.iter().filter(|t| *t == "Arabic").count();
+        assert_eq!(arabic, 1, "the chip only, not in the list: {texts:?}");
+        let size = c.size();
+        let px = widgets::shot::save("live-controller-picker", c.view(), size);
+        assert!(px.chunks(4).any(|p| p != &px[..4]), "something drawn");
+        c.update(Msg::Picker(picker::Msg::Query("fren".into())));
+        widgets::shot::save("live-controller-search", c.view(), size);
+        c.update(Msg::Picker(picker::Msg::First));
+        assert_eq!(c.picker.target, "fr");
+        assert_eq!(c.status(), "Live · Auto → FR");
         assert_eq!(c.size(), closed);
-    }
-
-    #[test]
-    fn recent_targets_come_first_without_repeats() {
-        let recent = ["de".to_string(), "ko".into(), "ar".into()];
-        let got: Vec<_> = choices("ar", &recent).into_iter().map(|(c, _)| c).collect();
-        assert_eq!(got, ["de", "ko", "en", "es", "fr", "ja"]);
+        open(&mut c, Side::Source);
+        c.update(Msg::Picker(picker::Msg::Pick("ja".into())));
+        assert_eq!(c.status(), "Live · JA → FR");
         // the view builds in every state
-        let mut c = Controller::new("ar");
-        let _ = c.view();
-        c.update(Msg::List);
-        let _ = c.view();
         c.update(Msg::Minimise);
         let _ = c.view();
     }

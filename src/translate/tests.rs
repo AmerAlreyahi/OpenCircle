@@ -675,3 +675,141 @@ pub(super) fn ar(en: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// Source languages with the real models: downloads (on first run) the
+/// Latin, Arabic and Cyrillic recognizers and the French → English pair,
+/// reads samples drawn with our fonts (Cyrillic: the system's), checks
+/// "auto" moves off English on Arabic text, translates the French. Sizes,
+/// times and outputs are printed:
+/// `cargo test --release translate::tests::languages_end_to_end -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn languages_end_to_end() {
+    use crate::ocr::{self, Read, models};
+    use std::time::Instant;
+    let index = |id: &str| models::RECOGNIZERS.iter().position(|r| r.id == id).unwrap();
+    for id in ["latin", "arabic", "cyrillic"] {
+        let r = models::RECOGNIZERS[index(id)];
+        let files = models::ocr_files(r);
+        let missing = models::missing_bytes(&files);
+        let t = Instant::now();
+        models::ensure(&files, |_, _| {}).unwrap();
+        println!(
+            "{id} recognizer: {} + dict {} bytes; downloaded {missing} bytes in {:.1?}",
+            r.model.size,
+            r.dict.size,
+            t.elapsed()
+        );
+    }
+    let pair = crate::mt::pair("fr", "en").unwrap();
+    let missing = pair.missing_bytes();
+    let t = Instant::now();
+    pair.ensure(|_, _| {}).unwrap();
+    println!(
+        "{}: downloaded {missing} bytes in {:.1?}",
+        pair.label(),
+        t.elapsed()
+    );
+
+    let sample = |lines: &[&str]| -> (Rgba, (usize, usize)) {
+        let dims = (900, 60 * lines.len() + 40);
+        let mut img = [24u8, 28, 36, 255].repeat(dims.0 * dims.1);
+        for (i, l) in lines.iter().enumerate() {
+            let at = (30.0, 20.0 + 60.0 * i as f32, 0.0);
+            text(&mut img, dims, at, l, 30.0, 500, WHITE, Fx::None);
+        }
+        (img, dims)
+    };
+    let t = Instant::now();
+    let mut engine = ocr::Engine::load(&ocr::models_dir()).unwrap();
+    println!("OCR engine load {:.1?}", t.elapsed());
+    let mut read = |name: &str, img: &Rgba, dims: (usize, usize), how: Read| {
+        let t = Instant::now();
+        let got = engine
+            .recognize(img, dims.0 as u32, dims.1 as u32, how)
+            .unwrap();
+        let took = t.elapsed();
+        let n: usize = got.iter().map(|b| b.text.chars().count()).sum();
+        let mean = got
+            .iter()
+            .map(|b| b.confidence * b.text.chars().count() as f32)
+            .sum::<f32>()
+            / n.max(1) as f32;
+        let texts: Vec<String> = got.into_iter().map(|b| b.text).collect();
+        println!("{name}: {texts:?}, confidence {mean:.2}, {took:.0?}");
+        (texts, mean)
+    };
+    let squash = |s: &str| s.split_whitespace().collect::<String>();
+    // the detector may split a line in two: compare the joined text
+    let same = |got: &[String], want: &[&str]| squash(&got.join(" ")) == squash(&want.join(" "));
+
+    let fr = [
+        "Nouvelle partie",
+        "Paramètres du jeu",
+        "Voulez-vous quitter ?",
+    ];
+    let ar = ["القائمة الرئيسية", "ابدأ لعبة جديدة"];
+    let ru = ["Новая игра", "Настройки"];
+    let (fr_img, fr_dims) = sample(&fr);
+    let (ar_img, ar_dims) = sample(&ar);
+    let (ru_img, ru_dims) = sample(&ru);
+    let (got_fr, _) = read(
+        "latin on French",
+        &fr_img,
+        fr_dims,
+        Read::One(index("latin")),
+    );
+    let (got_en, en_on_fr) = read("en on French", &fr_img, fr_dims, Read::One(0));
+    let (got_ar, _) = read(
+        "arabic on Arabic",
+        &ar_img,
+        ar_dims,
+        Read::One(index("arabic")),
+    );
+    let (_, en_on_ar) = read("en on Arabic", &ar_img, ar_dims, Read::One(0));
+    let (got_ru, _) = read(
+        "cyrillic on Russian",
+        &ru_img,
+        ru_dims,
+        Read::One(index("cyrillic")),
+    );
+    let (_, en_on_ru) = read("en on Russian", &ru_img, ru_dims, Read::One(0));
+    // auto: English first; on Arabic it tries the others and keeps Arabic
+    let (auto_ar, _) = read("auto on Arabic", &ar_img, ar_dims, Read::Auto);
+    let (auto_ar2, _) = read(
+        "auto on Arabic again (Arabic first now)",
+        &ar_img,
+        ar_dims,
+        Read::Auto,
+    );
+    let (auto_fr, _) = read(
+        "auto on French (back off Arabic)",
+        &fr_img,
+        fr_dims,
+        Read::Auto,
+    );
+    assert!(same(&got_fr, &fr), "latin reads French with its accents");
+    assert!(same(&got_ar, &ar), "arabic reads Arabic");
+    assert!(same(&got_ru, &ru), "cyrillic reads Russian");
+    assert!(
+        same(&auto_ar, &ar) && same(&auto_ar2, &ar),
+        "auto found Arabic"
+    );
+    assert!(!auto_fr.is_empty() && auto_fr.iter().all(|t| t.is_ascii() || t.contains('è')));
+    println!("English model, mean confidence: on Arabic {en_on_ar:.2}, on Russian {en_on_ru:.2}");
+    println!("en on French reads {got_en:?} at {en_on_fr:.2}");
+
+    let t = Instant::now();
+    let mut tr = crate::mt::Translator::load(pair, &ocr::models_dir()).unwrap();
+    println!("fr->en load {:.1?}", t.elapsed());
+    let t = Instant::now();
+    let lines = [
+        got_fr[..got_fr.len() - 2].join(" "),
+        got_fr[got_fr.len() - 2].clone(),
+        got_fr[got_fr.len() - 1].clone(),
+    ];
+    let out = tr.translate(&lines).unwrap();
+    println!("fr->en {:.0?}: {lines:?} -> {out:?}", t.elapsed());
+    assert_eq!(out.len(), 3);
+    assert!(out.iter().all(|t| !t.is_empty() && t.is_ascii()), "{out:?}");
+}

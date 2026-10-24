@@ -419,14 +419,15 @@ mod tests {
             w: u32,
             h: u32,
         ) -> Result<Vec<super::super::TextBlock>, OcrError> {
-            super::super::worker::recognize_via(&self.0, rgba, w, h)
+            super::super::worker::recognize_via(&self.0, rgba, w, h, super::super::Read::One(0))
         }
         fn translate(
             &self,
             texts: &[String],
             target: &str,
         ) -> Result<Vec<String>, crate::ai::AiError> {
-            super::super::worker::translate_via(&self.0, texts, target)
+            let pair = crate::mt::pair("en", target).expect("an offline pair");
+            super::super::worker::translate_via(&self.0, texts, pair)
                 .map_err(|e| crate::ai::AiError::Offline(e.to_string()))
         }
     }
@@ -496,7 +497,14 @@ mod tests {
             (0..n)
                 .map(|_| {
                     let t = Instant::now();
-                    let lines = super::super::worker::recognize_via(call, &tap, 720, 160).unwrap();
+                    let lines = super::super::worker::recognize_via(
+                        call,
+                        &tap,
+                        720,
+                        160,
+                        super::super::Read::One(0),
+                    )
+                    .unwrap();
                     assert!(!lines.is_empty());
                     t.elapsed()
                 })
@@ -519,7 +527,8 @@ mod tests {
         };
         rss("after the taps");
         let t = Instant::now();
-        super::super::worker::recognize_via(call, &frame, 1920, 1080).unwrap();
+        super::super::worker::recognize_via(call, &frame, 1920, 1080, super::super::Read::One(0))
+            .unwrap();
         println!("  1080p OCR, warm: {:.0?}", t.elapsed());
         rss("after a 1080p OCR");
         for run in ["MT cold", "all warm", "all warm"] {

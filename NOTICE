@@ -2,24 +2,41 @@ OpenCircle is MIT-licensed (see LICENSE). It ships no third-party models; the
 files below are downloaded on first use, after you agree, and are covered by
 their own licences.
 
-Offline translation (English to Arabic)
----------------------------------------
-Model: OPUS-MT eng-ara (Helsinki-NLP/opus-mt-en-ar), by Jörg Tiedemann and
-the Language Technology Research Group at the University of Helsinki.
-Released under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/);
-the Hugging Face model card lists Apache-2.0.
-  - Source: https://huggingface.co/Helsinki-NLP/opus-mt-en-ar
-  - Original weights: https://github.com/Helsinki-NLP/Tatoeba-Challenge/tree/master/models/eng-ara
-  - Paper: Tiedemann and Thottingal, "OPUS-MT - Building open translation
-    services for the World", EAMT 2020.
-ONNX export and int8 quantization: Xenova (Transformers.js),
-https://huggingface.co/Xenova/opus-mt-en-ar (commit 034a684356c1). OpenCircle
-uses the files unmodified.
+Offline translation
+-------------------
+OPUS-MT models by Jörg Tiedemann and the Language Technology Research Group
+at the University of Helsinki (Helsinki-NLP), one per direction. Paper:
+Tiedemann and Thottingal, "OPUS-MT - Building open translation services for
+the World", EAMT 2020. ONNX export and int8 quantization: Xenova
+(Transformers.js), https://huggingface.co/Xenova/opus-mt-<pair> at the
+commit below. OpenCircle uses the files unmodified.
+
+  Pair   Licence     Model (https://huggingface.co/...)   Xenova commit
+  en-ar  CC BY 4.0   Helsinki-NLP/opus-mt-en-ar           034a684356c1
+  en-fr  Apache-2.0  Helsinki-NLP/opus-mt-en-fr           28726206f808
+  en-es  Apache-2.0  Helsinki-NLP/opus-mt-en-es           4b002a4c7edd
+  en-de  CC BY 4.0   Helsinki-NLP/opus-mt-en-de           1ca130c44c4c
+  en-ru  Apache-2.0  Helsinki-NLP/opus-mt-en-ru           e050376e9601
+  en-zh  Apache-2.0  Helsinki-NLP/opus-mt-en-zh           046f55aec303
+  ar-en  Apache-2.0  Helsinki-NLP/opus-mt-ar-en           09c755686640
+  fr-en  Apache-2.0  Helsinki-NLP/opus-mt-fr-en           6b166a182780
+  zh-en  CC BY 4.0   Helsinki-NLP/opus-mt-zh-en           39d480d52a9e
+  ja-en  Apache-2.0  Helsinki-NLP/opus-mt-ja-en           1a906cfaaf7c
+
+en-ar is the Tatoeba-Challenge eng-ara model, released under CC BY 4.0
+(https://creativecommons.org/licenses/by/4.0/; its Hugging Face card lists
+Apache-2.0); original weights:
+https://github.com/Helsinki-NLP/Tatoeba-Challenge/tree/master/models/eng-ara.
+The others: the licence their Hugging Face model card lists (Apache-2.0,
+https://www.apache.org/licenses/LICENSE-2.0; CC BY 4.0,
+https://creativecommons.org/licenses/by/4.0/).
 
 Text recognition (OCR)
 ----------------------
-PaddleOCR PP-OCRv5 models (Apache-2.0), ONNX export by oar-ocr
-(https://github.com/GreatV/oar-ocr, Apache-2.0).
+PaddleOCR PP-OCRv5 models (Apache-2.0): the text detector and one
+recognizer per script (English, Latin, Arabic, Cyrillic, Chinese/Japanese),
+ONNX export by oar-ocr (https://github.com/GreatV/oar-ocr, Apache-2.0),
+release v0.3.0.
 
 ONNX Runtime
 ------------

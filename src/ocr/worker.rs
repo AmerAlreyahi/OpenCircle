@@ -5,16 +5,17 @@
 //!
 //! Requests (framed by `session`; replies are JSON `{"Ok":...}` or
 //! `{"Err":"message"}`):
-//! - OCR: `o`, width (u32 LE), height (u32 LE), width*height*4 RGBA bytes;
+//! - OCR: `o`, the recognizer (`Read`: one byte), width (u32 LE), height
+//!   (u32 LE), width*height*4 RGBA bytes;
 //!   reply `[TextBlock...]`.
-//! - Translate: `t`, JSON `[target, [text...]]`; reply `[text...]` (same length).
+//! - Translate: `t`, JSON `[source, target, [text...]]`; reply `[text...]` (same length).
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::session::{self, MAX_REQUEST, Session};
-use super::{Engine, OcrError, TextBlock, check_image, models_dir};
+use super::{Engine, OcrError, Read, TextBlock, check_image, models_dir};
 use crate::mt::{self, Pair, Translator};
 
 /// The hidden subcommand that runs the worker.
@@ -26,14 +27,26 @@ const MAX_TEXT: usize = 1 << 20;
 /// Idle this long, the helper gives its freed memory back to the OS.
 const IDLE_TRIM: Duration = Duration::from_secs(2);
 
-/// Reads the text lines of an RGBA image in the helper. The models must
+/// Reads the text lines of an RGBA image in the helper, with the recognizer
+/// for the configured source language (`translate.source`). The models must
 /// already be present (`ensure_models`); the helper never downloads.
 pub fn recognize_in_child(
     rgba: &[u8],
     width: u32,
     height: u32,
 ) -> Result<Vec<TextBlock>, OcrError> {
-    recognize_via(session::call, rgba, width, height)
+    let source = crate::config::current().translate.source;
+    recognize_as(rgba, width, height, &source)
+}
+
+/// `recognize_in_child` for `source` ("auto" or a language code).
+pub fn recognize_as(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    source: &str,
+) -> Result<Vec<TextBlock>, OcrError> {
+    recognize_via(session::call, rgba, width, height, Read::for_source(source))
 }
 
 #[cfg(test)]
@@ -42,8 +55,9 @@ pub(super) fn recognize_with(
     rgba: &[u8],
     width: u32,
     height: u32,
+    read: Read,
 ) -> Result<Vec<TextBlock>, OcrError> {
-    recognize_via(|p| Session::worker(exe).call(p), rgba, width, height)
+    recognize_via(|p| Session::worker(exe).call(p), rgba, width, height, read)
 }
 
 /// OCR through `call` (one helper request).
@@ -52,10 +66,11 @@ pub(crate) fn recognize_via(
     rgba: &[u8],
     width: u32,
     height: u32,
+    read: Read,
 ) -> Result<Vec<TextBlock>, OcrError> {
     check_image(rgba, width, height)?;
     let header = [
-        [OCR].as_slice(),
+        [OCR, read.byte()].as_slice(),
         &width.to_le_bytes(),
         &height.to_le_bytes(),
     ]
@@ -63,29 +78,29 @@ pub(crate) fn recognize_via(
     parse(call(&[&header, rgba])?)
 }
 
-/// Translates `texts` into `target` offline in the helper (`crate::mt`; its
+/// Translates `texts` with `pair` offline in the helper (`crate::mt`; its
 /// models must already be present).
-pub fn translate_in_child(texts: &[String], target: &str) -> Result<Vec<String>, OcrError> {
-    translate_via(session::call, texts, target)
+pub fn translate_in_child(texts: &[String], pair: &Pair) -> Result<Vec<String>, OcrError> {
+    translate_via(session::call, texts, pair)
 }
 
 #[cfg(test)]
 pub(crate) fn translate_with(
     exe: &Path,
     texts: &[String],
-    target: &str,
+    pair: &Pair,
 ) -> Result<Vec<String>, OcrError> {
-    translate_via(|p| Session::worker(exe).call(p), texts, target)
+    translate_via(|p| Session::worker(exe).call(p), texts, pair)
 }
 
 /// Translation through `call` (one helper request).
 pub(crate) fn translate_via(
     call: impl FnOnce(&[&[u8]]) -> Result<Vec<u8>, OcrError>,
     texts: &[String],
-    target: &str,
+    pair: &Pair,
 ) -> Result<Vec<String>, OcrError> {
-    let input =
-        serde_json::to_vec(&(target, texts)).map_err(|e| OcrError::Engine(e.to_string()))?;
+    let input = serde_json::to_vec(&(pair.source, pair.target, texts))
+        .map_err(|e| OcrError::Engine(e.to_string()))?;
     let out: Vec<String> = parse(call(&[&[TRANSLATE], &input])?)?;
     if out.len() != texts.len() {
         return Err(OcrError::Engine(format!(
@@ -167,6 +182,11 @@ fn json<T: serde::Serialize>(reply: Result<T, OcrError>) -> Vec<u8> {
 }
 
 fn recognize_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBlock>, OcrError> {
+    let Some((&byte, body)) = body.split_first() else {
+        return Err(OcrError::BadImage("short request".into()));
+    };
+    let read =
+        Read::from_byte(byte).ok_or_else(|| OcrError::BadImage("unknown recognizer".into()))?;
     let Some((size, rgba)) = body.split_first_chunk::<8>() else {
         return Err(OcrError::BadImage("short request".into()));
     };
@@ -177,7 +197,7 @@ fn recognize_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBl
         Some(e) => e,
         None => engine.insert(Engine::load(&models_dir())?),
     };
-    engine.recognize(rgba, w, h)
+    engine.recognize(rgba, w, h, read)
 }
 
 fn translate_here(
@@ -187,10 +207,10 @@ fn translate_here(
     if body.len() > MAX_TEXT {
         return Err(OcrError::BadImage("too much text".into()));
     }
-    let (target, texts): (String, Vec<String>) = serde_json::from_slice(body)
+    let (source, target, texts): (String, String, Vec<String>) = serde_json::from_slice(body)
         .map_err(|e| OcrError::BadImage(format!("bad request: {e}")))?;
-    let pair = mt::pair(&target)
-        .ok_or_else(|| OcrError::Engine(format!("no offline model translates into {target}")))?;
+    let pair = mt::pair(&source, &target)
+        .ok_or_else(|| OcrError::Engine(mt::unavailable(&source, &target)))?;
     if !loaded.as_ref().is_some_and(|(p, _)| std::ptr::eq(*p, pair)) {
         *loaded = None; // free the other pair first
         *loaded = Some((pair, Translator::load(pair, &models_dir())?));
