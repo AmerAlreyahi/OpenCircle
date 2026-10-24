@@ -630,18 +630,19 @@ mod forms {
 
     /// Pick one of a few options; the selected one is the accent gradient. Each option
     /// is `(value, label, tooltip)`; the whole control is `FORM_WIDTH` wide.
-    pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
+    pub fn segmented<'a, Message: Clone + 'a, T: Clone + PartialEq + 'a>(
         options: &[(T, &'a str, &'a str)],
         selected: T,
         on_select: impl Fn(T) -> Message,
     ) -> Element<'a, Message> {
-        let segments = options.iter().map(|&(value, label, hint)| {
-            let on = value == selected;
+        let segments = options.iter().map(|(value, label, hint)| {
+            let (label, hint) = (*label, *hint);
+            let on = *value == selected;
             let palette = theme::current();
             let b = button(text(label).size(14).center())
                 .width(Length::Fill)
                 .height(CONTROL - 8.0)
-                .on_press(on_select(value))
+                .on_press(on_select(value.clone()))
                 .style(move |_, status| button::Style {
                     background: match (on, status) {
                         (true, _) => Some(accent(status)),

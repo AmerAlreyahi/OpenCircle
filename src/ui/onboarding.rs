@@ -183,7 +183,7 @@ impl State {
         self.choice = choice;
         // The browser needs no key: nothing to look up.
         let keyed = choice.provider().filter(|p| *p != Provider::Browser);
-        if let Some(p) = keyed.filter(|p| Some(*p) != before) {
+        if let Some(p) = keyed.filter(|p| Some(p) != before.as_ref()) {
             self.key.refresh(&*self.store, p);
         }
     }

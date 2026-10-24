@@ -49,7 +49,10 @@ impl Setup {
 /// Reads the config and the key, encodes the crop. Blocking (file, keyring,
 /// PNG): call off the UI thread. `Err` = what to tell the user, with the steps.
 pub fn setup(crop: &Crop) -> Result<Setup, String> {
-    let cfg = crate::config::current().ai;
+    setup_for(crate::config::current().ai, crop)
+}
+
+fn setup_for(cfg: AiConfig, crop: &Crop) -> Result<Setup, String> {
     if cfg.provider == Provider::Browser {
         // No key, and the image never leaves (Lens re-encodes the crop itself).
         return Ok(Setup {
@@ -58,7 +61,7 @@ pub fn setup(crop: &Crop) -> Result<Setup, String> {
             png: Vec::new(),
         });
     }
-    let (cfg, key) = credentials()?;
+    let (cfg, key) = credentials_for(cfg)?;
     let png = super::encode_png(crop.width, crop.height, &crop.rgba)?;
     Ok(Setup { cfg, key, png })
 }
@@ -66,7 +69,18 @@ pub fn setup(crop: &Crop) -> Result<Setup, String> {
 /// The provider settings and the key, checked. Blocking (file, keyring): call
 /// off the UI thread. `Err` = what to tell the user (first line), then the steps.
 pub fn credentials() -> Result<(AiConfig, Option<Secret>), String> {
-    let cfg = crate::config::current().ai;
+    credentials_for(crate::config::current().ai)
+}
+
+/// The one gate every AI use passes (Ask AI, Explain, translate): an unknown
+/// provider stops here, before the keyring, the network or the browser.
+fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> {
+    if let Provider::Invalid(raw) = &cfg.provider {
+        return Err(format!(
+            "Your AI provider setting \"{raw}\" isn't recognised. Fix it in Settings > AI.\n\n\
+             Nothing was sent anywhere."
+        ));
+    }
     if cfg.provider == Provider::Browser {
         return Err(
             "This needs an AI provider with an API key: Google AI Mode in your \
@@ -75,14 +89,14 @@ pub fn credentials() -> Result<(AiConfig, Option<Secret>), String> {
                 .into(),
         );
     }
-    let key = match secrets::get(cfg.provider) {
+    let key = match secrets::get(cfg.provider.clone()) {
         Ok(key) => key.filter(|key| !key.is_empty()),
         // A local OpenAI-compatible server needs no key: go on without the keyring.
         Err(e) if cfg.provider == Provider::OpenaiCompatible => {
             eprintln!("keyring: {e}");
             None
         }
-        Err(e) => return Err(format!("{e}\n\n{}", steps(cfg.provider))),
+        Err(e) => return Err(format!("{e}\n\n{}", steps(&cfg.provider))),
     };
     let missing = match cfg.provider {
         Provider::Anthropic if key.is_none() => Some("no API key is saved"),
@@ -95,14 +109,14 @@ pub fn credentials() -> Result<(AiConfig, Option<Secret>), String> {
     if let Some(missing) = missing {
         return Err(format!(
             "AI is not set up yet: {missing}.\n\n{}",
-            steps(cfg.provider)
+            steps(&cfg.provider)
         ));
     }
     Ok((cfg, key))
 }
 
 /// The exact steps to set the AI up by hand (until the Settings window does it).
-fn steps(provider: Provider) -> String {
+fn steps(provider: &Provider) -> String {
     let path = Config::path().map_or("the OpenCircle config file".into(), |p| {
         p.display().to_string()
     });
@@ -237,7 +251,7 @@ pub fn stream(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
@@ -412,6 +426,32 @@ mod tests {
             "the API server was contacted"
         );
 
+        // An unknown provider ("antropic") with the same fake browser and server:
+        // no URL opened, no HTTP request, even if a Setup were built by hand.
+        std::fs::remove_file(&seen).unwrap();
+        let invalid = Setup {
+            cfg: AiConfig {
+                provider: Provider::Invalid("antropic".into()),
+                ..setup.cfg.clone()
+            },
+            key: None,
+            png: b"png".to_vec(),
+        };
+        assert!(!invalid.browser());
+        let mut got = Vec::new();
+        let result = stream(&invalid, &[ai::Message::user("hi")], |piece| {
+            got.push(piece.to_string());
+            true
+        });
+        assert!(result.unwrap_err().contains("antropic"));
+        assert!(got.is_empty());
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!seen.exists(), "the browser was opened");
+        assert!(
+            matches!(api.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "the API server was contacted"
+        );
+
         // A launcher that cannot start is reported, not swallowed.
         unsafe { std::env::set_var("OPENCIRCLE_TEST_BROWSER", dir.join("missing")) };
         let result = stream(&setup, &[ai::Message::user("hi")], |_| true);
@@ -422,6 +462,45 @@ mod tests {
         );
         unsafe { std::env::remove_var("OPENCIRCLE_TEST_BROWSER") };
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The message Ask AI, Explain and translate show for an unknown provider.
+    pub(crate) fn invalid_provider_error() -> String {
+        let cfg = AiConfig {
+            provider: Provider::Invalid("antropic".into()),
+            ..AiConfig::default()
+        };
+        let crop = Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        };
+        setup_for(cfg, &crop).unwrap_err()
+    }
+
+    #[test]
+    fn unknown_provider_stops_before_keyring_network_or_browser() {
+        let msg = invalid_provider_error();
+        assert!(
+            msg.starts_with(
+                "Your AI provider setting \"antropic\" isn't recognised. Fix it in Settings > AI."
+            ),
+            "{msg}"
+        );
+        // translate (`actions::translate::deps`) goes through the same gate.
+        let cfg = AiConfig {
+            provider: Provider::Invalid("antropic".into()),
+            ..AiConfig::default()
+        };
+        assert_eq!(credentials_for(cfg).unwrap_err(), msg);
+        // A known provider is unchanged: Browser still needs no key and sends no image.
+        let crop = Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        };
+        let browser = setup_for(AiConfig::default(), &crop).unwrap();
+        assert!(browser.browser() && browser.png.is_empty());
     }
 
     #[test]

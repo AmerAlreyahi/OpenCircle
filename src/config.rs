@@ -12,7 +12,7 @@
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
 //!
 //! [ai]                              # the API key is NOT here: OS keyring only
-//! provider = "browser"              # browser | anthropic | openai_compatible
+//! provider = "browser"              # browser | anthropic | openai_compatible (missing = browser)
 //! base_url = ""                     # "" = provider default (Anthropic only)
 //! model = "claude-sonnet-5-5"       # model id sent to the provider
 //!
@@ -31,8 +31,10 @@
 //! ```
 //!
 //! Rules: an invalid value gives a warning plus that field's default, never a
-//! crash and never a rewrite of the file (only `save` writes). Unknown keys
-//! are ignored. Once released, this format is frozen: migrate, never break.
+//! crash and never a rewrite of the file (only `save` writes). One exception:
+//! an unknown `ai.provider` is kept as `Provider::Invalid` (fail closed: AI is
+//! off until the user picks one, never a fallback to another provider). Unknown
+//! keys are ignored. Once released, this format is frozen: migrate, never break.
 
 use std::collections::HashSet;
 use std::io::Write;
@@ -61,23 +63,57 @@ pub enum Theme {
     Dark,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Provider {
     /// No key: the question opens in Google AI Mode in the user's own browser.
     #[default]
     Browser,
     Anthropic,
     OpenaiCompatible,
+    /// The config names a provider we don't know (a typo like "antropic"): the
+    /// user's value as written. Nothing is sent anywhere until they pick one.
+    Invalid(String),
 }
 
 impl Provider {
     /// Stable id, used for the keyring entry name.
-    pub fn id(self) -> &'static str {
+    pub fn id(&self) -> &'static str {
         match self {
             Provider::Browser => "browser",
             Provider::Anthropic => "anthropic",
             Provider::OpenaiCompatible => "openai_compatible",
+            Provider::Invalid(_) => "invalid",
+        }
+    }
+
+    /// Missing = the default (Browser). Present but unknown = `Invalid`, never a
+    /// fallback: that would send the user's screen to someone they didn't choose.
+    fn read(t: &Table, w: &mut Vec<String>) -> Provider {
+        let Some(v) = t.get("provider") else {
+            return Provider::default();
+        };
+        let raw = v.as_str().map_or_else(|| v.to_string(), str::to_string);
+        match raw.as_str() {
+            "browser" => Provider::Browser,
+            "anthropic" => Provider::Anthropic,
+            "openai_compatible" => Provider::OpenaiCompatible,
+            _ => {
+                w.push(format!(
+                    "ai.provider: \"{raw}\" is not browser, anthropic or openai_compatible; \
+                     AI is off until you choose a provider in Settings > AI"
+                ));
+                Provider::Invalid(raw)
+            }
+        }
+    }
+}
+
+/// Written as its id; `Invalid` writes the user's own value back, never "browser".
+impl Serialize for Provider {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Provider::Invalid(raw) => s.serialize_str(raw),
+            p => s.serialize_str(p.id()),
         }
     }
 }
@@ -329,7 +365,7 @@ impl Config {
             );
         }
         if let Some(t) = section(&root, "ai", &mut w) {
-            c.ai.provider = get(t, "ai.", "provider", d.ai.provider, &mut w);
+            c.ai.provider = Provider::read(t, &mut w);
             c.ai.base_url =
                 get_checked(t, "ai.", "base_url", d.ai.base_url, &mut w, |s: &String| {
                     check_base_url(s)
@@ -758,12 +794,50 @@ mod tests {
                 ""
             };
             let (c, w) = Config::parse(&format!("[ai]\nprovider = \"{id}\"\n{url}"));
-            assert_eq!((c.ai.provider, w.len()), (provider, 0), "{w:?}");
+            assert_eq!((c.ai.provider.clone(), w.len()), (provider, 0), "{w:?}");
             // and back through the serializer
             let text = toml::to_string_pretty(&c).unwrap();
             assert!(text.contains(&format!("provider = \"{id}\"")), "{text}");
             assert_eq!(Config::parse(&text).0, c);
         }
+    }
+
+    #[test]
+    fn unknown_provider_fails_closed_and_keeps_the_users_value() {
+        for (value, raw) in [
+            ("\"antropic\"", "antropic"),
+            ("\"Anthropic\"", "Anthropic"),
+            ("\"\"", ""),
+            ("3", "3"),
+        ] {
+            let text = format!("[ai]\nprovider = {value}\nmodel = \"m\"\n");
+            let (c, w) = Config::parse(&text);
+            assert_eq!(c.ai.provider, Provider::Invalid(raw.into()), "{value}");
+            assert_ne!(c.ai.provider, Provider::Browser);
+            assert_eq!(w.len(), 1, "{value}: {w:?}");
+            assert!(
+                w[0].starts_with("ai.provider:") && w[0].contains("off"),
+                "{w:?}"
+            );
+            assert_eq!(c.ai.model, "m", "the rest of [ai] is still read");
+            // Written back as the user wrote it (never "browser"), and still invalid.
+            let out = toml::to_string_pretty(&c).unwrap();
+            assert!(out.contains(&format!("provider = \"{raw}\"")), "{out}");
+            assert!(!out.contains("provider = \"browser\""), "{out}");
+            assert_eq!(Config::parse(&out).0.ai.provider, c.ai.provider);
+        }
+        // Loading never rewrites the file.
+        let dir = tmp_dir("bad-provider");
+        let path = dir.join("config.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "[ai]\nprovider = \"antropic\"\n").unwrap();
+        let (c, _) = Config::load_from(&path);
+        assert_eq!(c.ai.provider, Provider::Invalid("antropic".into()));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[ai]\nprovider = \"antropic\"\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -773,7 +847,6 @@ mod tests {
             theme = "neon"
             shortcut = "Ctrl+"
             [ai]
-            provider = "gemini"
             base_url = "ftp://x"
             model = "has space"
             [translate]
@@ -785,7 +858,6 @@ mod tests {
         for key in [
             "theme",
             "shortcut",
-            "ai.provider",
             "ai.base_url",
             "ai.model",
             "translate.target",

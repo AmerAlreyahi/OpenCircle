@@ -139,12 +139,15 @@ pub fn ask_stream(
     messages: &[Message],
     on_delta: impl FnMut(&str),
 ) -> Result<String, AiError> {
-    match cfg.provider {
+    match &cfg.provider {
         Provider::Browser => Err(AiError::NotConfigured(
             "this needs an AI provider with an API key (Settings, AI); Google AI Mode in your \
              browser cannot send an answer back"
                 .into(),
         )),
+        Provider::Invalid(raw) => Err(AiError::NotConfigured(format!(
+            "the AI provider setting \"{raw}\" isn't recognised (Settings, AI)"
+        ))),
         Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, on_delta),
         Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, on_delta),
     }

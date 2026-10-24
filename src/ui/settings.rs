@@ -513,7 +513,7 @@ impl State {
         store: Box<dyn KeyStore>,
     ) -> Self {
         theme::apply(config.theme);
-        let key = KeyField::new(&*store, config.ai.provider);
+        let key = KeyField::new(&*store, config.ai.provider.clone());
         let quick_text = config
             .quick_actions
             .iter()
@@ -683,7 +683,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         Message::Provider(p) if p != state.draft.ai.provider => {
             let ai = &mut state.draft.ai;
             let default_model = crate::ai::DEFAULT_ANTHROPIC_MODEL;
-            ai.provider = p;
+            ai.provider = p.clone();
             match p {
                 // Hidden fields must stay valid: nothing half-typed blocks Save.
                 Provider::Browser => {
@@ -700,6 +700,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
                 }
                 Provider::OpenaiCompatible if ai.model == default_model => ai.model.clear(),
                 Provider::OpenaiCompatible => {}
+                Provider::Invalid(_) => {} // never offered: only a bad file has it
             }
             state.key.refresh(&*state.store, p);
         }
@@ -713,7 +714,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         Message::BaseUrl(s) => state.draft.ai.base_url = s.trim().to_string(),
         Message::Model(s) => state.draft.ai.model = s.trim().to_string(),
         Message::ApiKey(k) => {
-            let provider = state.draft.ai.provider;
+            let provider = state.draft.ai.provider.clone();
             state.key.update(&*state.store, provider, k);
         }
         Message::Language(l) => state.draft.translate.target = l.code.to_string(),
@@ -1044,13 +1045,14 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
                     "Use an OpenAI-compatible server",
                 ),
             ],
-            ai.provider,
+            ai.provider.clone(),
             Message::Provider,
         ),
-        None,
+        // An unknown value from the file: none is selected, Save waits for a pick.
+        issue(&state.problems, "ai.provider"),
     )];
-    if ai.provider == Provider::Browser {
-        return rows; // no model, server or key: the question opens in the browser
+    if matches!(ai.provider, Provider::Browser | Provider::Invalid(_)) {
+        return rows; // no model, server or key: the browser, or nothing chosen yet
     }
     if compat {
         rows.push(form_row(
@@ -1415,6 +1417,34 @@ pub(super) mod tests {
         update(&mut s, Message::Provider(Provider::Browser));
         assert!(s.problems.is_empty(), "{:?}", s.problems);
         assert!(store.0.borrow().is_empty(), "no keyring entry for it");
+    }
+
+    #[test]
+    fn an_unknown_provider_blocks_save_until_one_is_picked() {
+        let path = tmp("bad-provider");
+        let (config, warnings) = Config::parse("[ai]\nprovider = \"antropic\"\n");
+        let store = Box::new(MemoryStore::default());
+        let mut s = State::new(config, warnings, Some(path.clone()), store);
+        update(&mut s, Message::Section(Section::Ai));
+        let texts = shot::texts(view(&s));
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("\"antropic\" is not browser")),
+            "{texts:?}"
+        );
+        for hidden in ["API key", "Model", "Server URL"] {
+            assert!(!texts.iter().any(|t| t == hidden), "{hidden}: {texts:?}");
+        }
+        // Save never writes "browser" (or anything) over it on its own.
+        update(&mut s, Message::Save);
+        assert!(!path.exists(), "saved with an unknown provider");
+        update(&mut s, Message::Provider(Provider::Anthropic));
+        assert!(s.problems.is_empty(), "{:?}", s.problems);
+        assert!(matches!(update(&mut s, Message::Save), Outcome::Saved(_)));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("provider = \"anthropic\""), "{text}");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

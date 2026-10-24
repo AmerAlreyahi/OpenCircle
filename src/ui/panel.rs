@@ -714,6 +714,38 @@ mod tests {
     }
 
     #[test]
+    fn unknown_provider_shows_the_fix_and_sends_nothing() {
+        let crop = Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        };
+        let mut panel = Panel {
+            state: State::Ask {
+                thumb: image::Handle::from_rgba(1, 1, crop.rgba.clone()),
+                setup: None,
+                chat: Chat::default(),
+                browse: Browse::Idle,
+            },
+            crop: Arc::new(crop),
+            input: "Explain".into(), // e.g. the Lens follow-up, sent once ready
+            work: None,
+            translation: None,
+        };
+        let msg = ask::tests::invalid_provider_error();
+        let _ = panel.update(Msg::Ready(Err(msg.clone())));
+        let _ = panel.update(Msg::Prompt("Explain"));
+        let _ = panel.update(Msg::Submit);
+        let State::Ask { chat, browse, .. } = &panel.state else {
+            unreachable!()
+        };
+        assert!(chat.turns.is_empty() && chat.status == Status::Idle);
+        assert!(matches!(browse, Browse::Idle) && panel.work.is_none());
+        let texts = widgets::shot::texts(panel.view(Size::new(1920.0, 1080.0)));
+        assert!(texts.contains(&msg), "{texts:?}");
+    }
+
+    #[test]
     fn panel_docks_right_at_full_height() {
         let screen = Size::new(1920.0, 1080.0);
         let r = place(screen);
