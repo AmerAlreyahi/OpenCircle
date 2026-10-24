@@ -41,6 +41,7 @@ use crate::{Trigger, capture};
 use edit::Editing;
 use quick::{Quick, Start};
 use snip::Snip;
+use widgets::card;
 
 const HINT: &str = "Circle, drag or tap anything · Esc to close";
 /// Shown over a selection that came out black (DRM / protected windows).
@@ -169,8 +170,10 @@ struct TextMode {
     picking: bool,
 }
 
-/// The chips under a snapped box and the select-text popup (logical px).
+/// Between the chips under a snapped box, and between them and the box
+/// (logical px).
 const CHIP_GAP: f32 = 8.0;
+const CHIP_SPACE: f32 = 12.0;
 
 /// What an OCR read for words was asked for, to place its answer.
 #[derive(Debug, Clone, Copy)]
@@ -320,6 +323,8 @@ struct App {
     card: Option<Rectangle>,
     /// The card's grip or corner is held, and the pointer's last position.
     card_drag: Option<(widgets::card::Drag, Option<Point>)>,
+    /// The pointer is on the card's resize edge (its grip shows).
+    card_hover: bool,
 }
 
 /// Translations kept for reuse (each a short text).
@@ -393,6 +398,7 @@ impl App {
             more: false,
             card: None,
             card_drag: None,
+            card_hover: false,
         }
     }
 
@@ -1612,7 +1618,10 @@ impl App {
             return Task::none();
         };
         match msg {
-            panel::Msg::Card(how) => self.card_drag = Some((how, None)),
+            panel::Msg::Card(card::Event::Grab(how)) => self.card_drag = Some((how, None)),
+            panel::Msg::Card(card::Event::Hover(on)) => self.card_hover = on,
+            panel::Msg::Card(card::Event::Reset) => self.card = None,
+            panel::Msg::Card(card::Event::Close) => self.panel = None,
             panel::Msg::Cancel => self.panel = None,
             panel::Msg::Search => return self.run(&lens::ACTION),
             panel::Msg::CopyText => {
@@ -1917,7 +1926,7 @@ impl App {
         } else if let Some((id, panel)) = &self.panel {
             let id = *id;
             panel
-                .view(self.card_at())
+                .view(self.card_at(), self.screen, self.card_hover)
                 .map(move |msg| Message::Panel(id, msg))
         } else if let Some((id, session)) = &self.translate {
             let id = *id;
@@ -1946,11 +1955,11 @@ impl App {
         }
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
         if self.selection.is_some() && self.scan.as_ref().is_some_and(|s| s.protected) {
-            layers = layers.push(
-                container(widgets::pill(PROTECTED))
-                    .center_x(Fill)
-                    .padding(24),
-            );
+            let room = self.room();
+            let pill = container(widgets::pill(PROTECTED))
+                .center_x(room.width)
+                .padding(24);
+            layers = layers.push(iced::widget::pin(pill).position(room.position()));
         }
         layers.into()
     }
@@ -1960,6 +1969,12 @@ impl App {
     fn card_at(&self) -> Rectangle {
         let selection = self.selection.map(|s| self.view.rect_to_screen(s.area));
         widgets::card::place(self.screen, selection, self.card)
+    }
+
+    /// The part of the overlay a result card leaves free (all of it without
+    /// one): the bar, chips, popup and pills go there.
+    fn room(&self) -> Rectangle {
+        card::free(self.screen, self.panel.as_ref().map(|_| self.card_at()))
     }
 
     /// What floats around `selection`: the chips under a snapped box ("Select
@@ -1983,6 +1998,7 @@ impl App {
         if !word && !waits && !self.more && self.text_mode.is_none() {
             chips.push(widgets::float_chip("More", Message::More).into());
         }
+        let room = self.room();
         let mut layers = stack![];
         let mut below = area;
         if !chips.is_empty() {
@@ -1991,8 +2007,8 @@ impl App {
                 n * widgets::TEXT_BUTTON_WIDTH + (n - 1.0) * CHIP_GAP,
                 widgets::CONTROL,
             );
-            let at = chips_at(area, size, self.screen);
-            below.height = (at.y + size.height - area.y).max(area.height);
+            let at = chips_at(area, size, room);
+            below = area.union(&Rectangle::new(at, size)); // the bar goes past them
             let row = iced::widget::row(chips).spacing(CHIP_GAP);
             layers = layers.push(iced::widget::pin(opaque(row)).position(at));
         }
@@ -2000,10 +2016,7 @@ impl App {
             .filter(|m| !m.picking)
             .and_then(|m| m.picked.as_ref());
         if let Some(picked) = picked {
-            layers = layers.push(pick_popup(
-                self.view.rect_to_screen(picked.area()),
-                self.screen,
-            ));
+            layers = layers.push(pick_popup(self.view.rect_to_screen(picked.area()), room));
         } else if bar_shown {
             let chip = (self.scan.as_ref())
                 .and_then(|s| s.qr.as_deref())
@@ -2011,9 +2024,12 @@ impl App {
                     let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
                     bar::qr_chip(text, Message::Qr(qr::Act::Copy), open)
                 });
-            // The action bar keeps clear of the ask bar at the bottom.
-            let above = Size::new(self.screen.width, self.screen.height - ASK_ZONE);
-            layers = layers.push(bar::view(below, above, chip, Message::Run));
+            // The action bar keeps clear of the card and of the ask bar at the bottom.
+            let mut room = room;
+            if !panel {
+                room.height = room.height.min(self.screen.height - ASK_ZONE);
+            }
+            layers = layers.push(bar::view(below, room, chip, Message::Run));
         }
         if !panel && picked.is_none() {
             layers = layers.push(self.ask_bar());
@@ -2113,20 +2129,28 @@ impl App {
     }
 }
 
-/// Where the chips (`size`) go: centred on the bottom edge of the box `area`
-/// (like a tab on it), kept on the `screen` (logical px).
-fn chips_at(area: Rectangle, size: Size, screen: Size) -> Point {
+/// Where the chips (`size`) go: centred under the box `area`, `CHIP_SPACE`
+/// below it, else above it; inside `room` (logical px), never on the box
+/// unless it fills the screen.
+fn chips_at(area: Rectangle, size: Size, room: Rectangle) -> Point {
     let x = (area.center_x() - size.width / 2.0)
-        .min(screen.width - bar::GAP - size.width)
-        .max(bar::GAP);
-    let y = (area.y + area.height - size.height / 2.0)
-        .min(screen.height - bar::GAP - size.height)
-        .max(bar::GAP);
+        .min(room.x + room.width - bar::GAP - size.width)
+        .max(room.x + bar::GAP);
+    let (top, bottom) = (room.y + bar::GAP, room.y + room.height - bar::GAP);
+    let below = area.y + area.height + CHIP_SPACE;
+    let above = area.y - CHIP_SPACE - size.height;
+    let y = if below + size.height <= bottom {
+        below
+    } else if above >= top {
+        above
+    } else {
+        bottom - size.height // the box fills the screen: on it, at the bottom
+    };
     Point::new(x, y)
 }
 
 /// Copy / Translate / Search for the picked words, by their box `picked`.
-fn pick_popup<'a>(picked: Rectangle, screen: Size) -> Element<'a, Message> {
+fn pick_popup<'a>(picked: Rectangle, room: Rectangle) -> Element<'a, Message> {
     let buttons = [
         (copy::ACTION.icon, "Copy", PickAct::Copy),
         (
@@ -2145,9 +2169,9 @@ fn pick_popup<'a>(picked: Rectangle, screen: Size) -> Element<'a, Message> {
         widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING,
     );
     // above the words (the text below stays readable), else under them
-    let mut at = bar::place(picked, size, screen);
+    let mut at = bar::place_in(picked, size, room);
     let above = picked.y - bar::GAP - size.height;
-    if above >= bar::GAP {
+    if above >= room.y + bar::GAP {
         at.y = above;
     }
     let popup = widgets::surface(iced::widget::row(buttons).spacing(4));
@@ -3138,6 +3162,52 @@ mod tests {
     }
 
     #[test]
+    fn chips_go_under_the_box_else_above_never_on_it() {
+        let screen = Rectangle::with_size(Size::new(1920.0, 1080.0));
+        let size = Size::new(280.0, 44.0);
+        let area = Rectangle::new(Point::new(400.0, 300.0), Size::new(500.0, 200.0));
+        let at = chips_at(area, size, screen);
+        assert_eq!(at, Point::new(510.0, 512.0), "centred, 12 px under the box");
+        // no room below: above
+        let low = Rectangle::new(Point::new(400.0, 900.0), Size::new(500.0, 150.0));
+        let at = chips_at(low, size, screen);
+        assert_eq!(at.y, 900.0 - CHIP_SPACE - 44.0);
+        for a in [area, low] {
+            let chips = Rectangle::new(chips_at(a, size, screen), size);
+            assert!(chips.intersection(&a).is_none(), "{a:?} -> {chips:?}");
+        }
+        // beside a card: kept in the free part
+        let room = Rectangle::new(Point::ORIGIN, Size::new(1112.0, 1080.0));
+        let edge = Rectangle::new(Point::new(950.0, 300.0), Size::new(150.0, 100.0));
+        let at = chips_at(edge, size, room);
+        assert!(at.x + size.width <= room.width - bar::GAP);
+        // the whole screen selected: on it, at the bottom, still on screen
+        let all = chips_at(screen, size, screen);
+        assert_eq!(all.y, 1080.0 - bar::GAP - 44.0);
+    }
+
+    #[test]
+    fn nothing_floats_over_the_result_card() {
+        let mut app = open_app(1920, 1080, 1.0);
+        // a selection right up to where the card goes, bar shown beside it
+        drag(
+            &mut app,
+            Point::new(700.0, 300.0),
+            Point::new(940.0, 500.0),
+            false,
+        );
+        let _ = app.update(Message::Run(&text::ACTION));
+        app.more = true;
+        let card = app.card_at();
+        let room = app.room();
+        assert!(room.intersection(&card).is_none(), "{room:?} vs {card:?}");
+        assert!(room.width > 0.0);
+        // and with no card, the whole screen
+        app.panel = None;
+        assert_eq!(app.room(), Rectangle::with_size(app.screen));
+    }
+
+    #[test]
     fn the_result_card_opens_away_from_the_selection_and_moves_by_its_grip() {
         let mut app = open_app(1920, 1080, 1.0);
         drag(
@@ -3149,21 +3219,17 @@ mod tests {
         let _ = app.update(Message::Run(&text::ACTION)); // no models: the consent card
         assert!(app.panel.is_some());
         let at = app.card_at();
-        assert_eq!(
-            at.x,
-            1920.0 - widgets::card::GAP - widgets::card::WIDTH,
-            "right"
-        );
+        assert_eq!(at.x + at.width, 1920.0 - card::GAP, "right");
         // the grip: the card follows the pointer, and stays there this session
         let id = app.panel.as_ref().unwrap().0;
-        let grab = panel::Msg::Card(widgets::card::Drag::Move);
+        let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Move));
         let _ = app.update(Message::Panel(id, grab));
         let _ = app.update(Message::CardMoved(Point::new(1700.0, 200.0)));
-        let _ = app.update(Message::CardMoved(Point::new(1100.0, 260.0)));
+        let _ = app.update(Message::CardMoved(Point::new(1100.0, 200.0)));
         let _ = app.update(Message::CardReleased);
         assert_eq!(
             app.card_at().position(),
-            at.position() + Vector::new(-600.0, 60.0)
+            at.position() + Vector::new(-600.0, 0.0)
         );
         let _ = app.update(Message::CardMoved(Point::new(0.0, 0.0)));
         assert_eq!(app.card_at().x, at.x - 600.0, "let go: no more moves");
@@ -3191,6 +3257,13 @@ mod tests {
             let rgba = widgets::shot::render(app.view(app.overlay), 960, 420);
             actions::write_png(&dir.join(name), 960, 420, &rgba).unwrap();
         };
+        let glowing_at = |app: &mut App, w: u32, h: u32| {
+            if let Some(image::Handle::Rgba { pixels, .. }) = &app.frame {
+                let mut rgba = pixels.to_vec();
+                border::paint(&mut rgba, w, h, 1.0, &config::look(), border::Mode::Overlay);
+                app.frame = Some(image::Handle::from_rgba(w, h, rgba));
+            }
+        };
         let glowing = |app: &mut App| {
             if let Some(image::Handle::Rgba { pixels, .. }) = &app.frame {
                 let mut rgba = pixels.to_vec();
@@ -3216,6 +3289,21 @@ mod tests {
         shot(&app, "look-3-more-bar.png");
         let _ = app.update(Message::Run(&text::ACTION)); // no models here: the consent card
         shot(&app, "look-6-result-card.png");
+        // Ask AI beside a selection at 1440x900, the bar kept out of the card,
+        // the resize grip showing (hovered)
+        let mut wide = open_app(1440, 900, 1.0);
+        glowing_at(&mut wide, 1440, 900);
+        drag(
+            &mut wide,
+            Point::new(120.0, 140.0),
+            Point::new(640.0, 520.0),
+            false,
+        );
+        let _ = wide.update(Message::Run(&actions::ask::ACTION));
+        wide.more = true;
+        wide.card_hover = true;
+        let rgba = widgets::shot::render(wide.view(wide.overlay), 1440, 900);
+        actions::write_png(&dir.join("look-7-ask-card-1440.png"), 1440, 900, &rgba).unwrap();
         let mut app = select_text_app();
         glowing(&mut app);
         shot(&app, "look-4-select-text.png");

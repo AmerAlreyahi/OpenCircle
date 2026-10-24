@@ -6,8 +6,8 @@
 //! its running work.
 use std::sync::Arc;
 
-use iced::widget::{column, container, image, operation, row, space, text_editor};
-use iced::{Center, ContentFit, Element, Fill, Rectangle, Task, task};
+use iced::widget::{column, container, image, operation, row, text_editor};
+use iced::{Center, ContentFit, Element, Fill, Rectangle, Size, Task, task};
 
 use super::background;
 use super::widgets::{self, SEND, STOP};
@@ -16,6 +16,9 @@ use crate::actions::entities::{self, Entity, Kind};
 use crate::actions::text::{self, Progress};
 use crate::actions::{self, Crop, lens};
 use crate::ai;
+
+/// A card's body and its footer.
+type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
 
 /// The crop's thumbnail in the Ask AI panel.
 const THUMB_HEIGHT: f32 = 112.0;
@@ -27,7 +30,7 @@ const LOG: &str = "panel-log";
 #[derive(Debug, Clone)]
 pub enum Msg {
     /// The card's grip or corner was pressed (the App moves / resizes it).
-    Card(widgets::card::Drag),
+    Card(widgets::card::Event),
     /// The Lens page is written and the browser launched (the App holds the page).
     LensOpened(Result<lens::Held, String>),
     Input(String),
@@ -405,11 +408,12 @@ impl Panel {
         task
     }
 
-    /// The panel as a floating card at `at` (`widgets::card::place`).
-    pub fn view(&self, at: Rectangle) -> Element<'_, Msg> {
-        let (action, body) = match &self.state {
+    /// The panel as a floating card at `at` on a `screen` (`widgets::card`);
+    /// `hover`: the pointer is on its resize edge.
+    pub fn view(&self, at: Rectangle, screen: Size, hover: bool) -> Element<'_, Msg> {
+        let (action, (body, footer)) = match &self.state {
             State::Lens(status) => (&actions::lens::ACTION, self.lens_view(status.as_ref())),
-            State::Text(reading) => (&actions::text::ACTION, self.text_view(reading)),
+            State::Text(reading) => (&actions::text::ACTION, (self.text_view(reading), None)),
             State::Ask {
                 thumb,
                 setup,
@@ -420,39 +424,35 @@ impl Panel {
                 self.ask_view(thumb, setup.as_ref(), chat, browse),
             ),
         };
-        let mut header = row![widgets::icon(action.icon), widgets::heading(action.label)]
-            .spacing(10)
-            .align_y(Center);
-        if let State::Ask {
-            setup: Some(Ok(setup)),
-            ..
-        } = &self.state
-        {
-            let who = if setup.browser() {
-                "Google AI Mode"
-            } else {
-                &setup.cfg.model
-            };
-            header = header.push(space::horizontal()).push(widgets::caption(who));
-        }
-        let content = column![header, body].spacing(16).height(Fill);
-        widgets::card::frame(content, at, Msg::Card)
+        let chip = match &self.state {
+            State::Ask {
+                setup: Some(Ok(setup)),
+                ..
+            } if setup.browser() => Some("Google AI Mode".to_string()),
+            State::Ask {
+                setup: Some(Ok(setup)),
+                ..
+            } => Some(setup.cfg.model.clone()),
+            _ => None,
+        };
+        let header = widgets::card::Header {
+            icon: action.icon,
+            title: action.label,
+            chip,
+        };
+        widgets::card::frame(header, body, footer, at, screen, hover, Msg::Card)
     }
 
-    fn lens_view(&self, status: Option<&Result<(), String>>) -> Element<'_, Msg> {
+    /// Body and footer.
+    fn lens_view(&self, status: Option<&Result<(), String>>) -> Part<'_> {
         let status: Element<'_, Msg> = match status {
             None => widgets::body("Opening Google Lens in your browser…").into(),
             Some(Ok(())) => widgets::body("Opened in your browser").into(),
             Some(Err(e)) => widgets::error(format!("Could not open the browser: {e}")).into(),
         };
-        column![
-            status,
-            widgets::caption("Only this selection goes to Google Lens, from your browser."),
-            space::vertical(),
-            self.follow_up("Ask AI about it…", false),
-        ]
-        .spacing(8)
-        .into()
+        let note = "Only this selection goes to Google Lens, from your browser.";
+        let body = column![status, widgets::caption(note)].spacing(8);
+        (body.into(), Some(self.follow_up("Ask AI about it…", false)))
     }
 
     fn ask_view<'a>(
@@ -461,7 +461,7 @@ impl Panel {
         setup: Option<&'a Result<Arc<Setup>, String>>,
         chat: &'a Chat,
         browse: &'a Browse,
-    ) -> Element<'a, Msg> {
+    ) -> Part<'a> {
         let thumb = container(
             image(thumb.clone())
                 .height(THUMB_HEIGHT)
@@ -473,7 +473,7 @@ impl Panel {
                 Some(Err(steps)) => widgets::scroll(widgets::body(steps)).height(Fill).into(),
                 _ => widgets::caption("Getting ready…").into(),
             };
-            return column![thumb, note].spacing(16).into();
+            return (column![thumb, note].spacing(16).into(), None);
         };
 
         let browser = matches!(setup, Some(Ok(s)) if s.browser());
@@ -559,15 +559,11 @@ impl Panel {
         } else {
             "Only this selection is sent, and only to the provider you chose."
         };
-        column![
-            widgets::scroll(column![thumb, log].spacing(16))
-                .id(LOG)
-                .height(Fill),
-            input,
-            widgets::caption(privacy),
-        ]
-        .spacing(12)
-        .into()
+        let body = widgets::scroll(column![thumb, log].spacing(16))
+            .id(LOG)
+            .height(Fill);
+        let footer = column![input, widgets::caption(privacy)].spacing(10);
+        (body.into(), Some(footer.into()))
     }
 
     /// The input with its send (or, while streaming, stop) button.
@@ -718,7 +714,6 @@ fn browser_turn(prompt: &str, read: Option<Result<String, String>>) -> (String, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iced::Size;
 
     /// Where a panel shows on a `screen` (no selection).
     fn at(screen: Size) -> Rectangle {
@@ -772,7 +767,11 @@ mod tests {
         };
         assert!(chat.turns.is_empty() && chat.status == Status::Idle);
         assert!(matches!(browse, Browse::Idle) && panel.work.is_none());
-        let texts = widgets::shot::texts(panel.view(at(Size::new(1920.0, 1080.0))));
+        let texts = widgets::shot::texts(panel.view(
+            at(Size::new(1920.0, 1080.0)),
+            Size::new(1920.0, 1080.0),
+            false,
+        ));
         assert!(texts.contains(&msg), "{texts:?}");
     }
 
@@ -815,13 +814,13 @@ mod tests {
             browse: Browse::Idle,
         });
         let _ = panel.update(Msg::Ready(Ok(Arc::new(ask::tests::browser_setup()))));
-        let texts = widgets::shot::texts(panel.view(at(SCREEN)));
+        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
         for preset in PRESETS {
             assert!(texts.iter().any(|t| t == preset.label), "{texts:?}");
         }
         assert!(not_blank(&widgets::shot::save(
             "panel-ask-presets",
-            panel.view(at(SCREEN)),
+            panel.view(at(SCREEN), SCREEN, false),
             SCREEN
         )));
         // Once a question was asked the suggestions are gone.
@@ -829,7 +828,7 @@ mod tests {
             unreachable!()
         };
         chat.ask("Explain", &[]);
-        let texts = widgets::shot::texts(panel.view(at(SCREEN)));
+        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
         assert!(!texts.iter().any(|t| t == "Fact-check"), "{texts:?}");
     }
 
@@ -848,7 +847,7 @@ mod tests {
         let mut panel = text_panel(SAMPLE);
         let kinds: Vec<_> = panel.entities.iter().map(|e| e.kind).collect();
         assert_eq!(kinds, [Kind::Link, Kind::Email, Kind::Phone]);
-        let texts = widgets::shot::texts(panel.view(at(SCREEN)));
+        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
         for chip in [
             "Open link · shop.example",
             "Write email · help@shop.example",
@@ -865,7 +864,7 @@ mod tests {
         assert!(panel.note.is_none());
         assert!(not_blank(&widgets::shot::save(
             "panel-text-chips",
-            panel.view(at(SCREEN)),
+            panel.view(at(SCREEN), SCREEN, false),
             SCREEN
         )));
 
@@ -882,7 +881,7 @@ mod tests {
     fn text_without_entities_has_no_chips() {
         let panel = text_panel("Just some words, 3.50 and e.g. a note");
         assert!(panel.entities.is_empty());
-        let texts = widgets::shot::texts(panel.view(at(SCREEN)));
+        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
         assert!(!texts.iter().any(|t| t.starts_with("Open link")));
     }
 }
