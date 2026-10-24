@@ -361,7 +361,9 @@ impl Session {
     /// the word card. `scale` = frame pixels per logical px.
     pub fn view(&self, scale: f32, screen: Size) -> Element<'_, Msg> {
         let note = |content: Element<'static, Msg>| -> Element<'_, Msg> {
-            let surface = widgets::surface(content).padding(20).width(NOTE_WIDTH);
+            // opaque: over the frozen frame, see-through glass let the page
+            // show through (and a light label vanish on a dark frame)
+            let surface = widgets::docked(content).padding(20).width(NOTE_WIDTH);
             container(opaque(surface)).center_x(Fill).padding(24).into()
         };
         match &self.phase {
@@ -428,7 +430,7 @@ impl Session {
         if let Some(list) = self.picker.list(PICKER_LIST) {
             body = body.push(list.map(Msg::Picker));
         }
-        let surface = widgets::surface(container(body).padding(iced::Padding::ZERO.right(8)));
+        let surface = widgets::docked(container(body).padding(iced::Padding::ZERO.right(8)));
         container(opaque(surface)).center_x(Fill).padding(24).into()
     }
 }
@@ -605,7 +607,7 @@ fn card_view(card: &Card, scale: f32, screen: Size) -> Element<'_, Msg> {
         widgets::text_button(ask.icon, ask.label, "A".into(), false, Msg::Ask),
     ]
     .spacing(8);
-    let surface = widgets::surface(body.push(buttons).spacing(12))
+    let surface = widgets::docked(body.push(buttons).spacing(12))
         .padding(16)
         .width(CARD.width);
     // opaque: a click on the card is not a click on the frame below.
@@ -738,6 +740,32 @@ mod tests {
                 .iter()
                 .any(|t| t == "Downloading offline translation…")
         );
+    }
+
+    /// Light theme over a dark frame: the consent and the download progress
+    /// are opaque panels (`panel_solid`), their text the theme's; before,
+    /// the see-through glass turned dark there and hid the label.
+    #[test]
+    fn notes_are_opaque_in_the_light_theme() {
+        use iced::widget::container as c;
+        crate::ui::theme::set_light(true);
+        let palette = crate::ui::theme::current();
+        let (text, solid) = (palette.text, palette.panel_solid);
+        let mut s = session(false);
+        for phase in [Phase::Consent(None), Phase::Downloading(0.5)] {
+            s.phase = phase;
+            let dark = c(s.view(1.0, Size::new(720.0, 300.0)))
+                .style(|_| c::Style::default().background(iced::Color::from_rgb8(10, 12, 30)));
+            let px = widgets::shot::render(dark.into(), 720, 300);
+            let at = |x: usize, y: usize| &px[(y * 720 + x) * 4..][..3];
+            let want = solid.into_rgba8();
+            assert_eq!(at(360, 30), &want[..3], "the panel is solid");
+            // and the label is drawn in the theme's text colour
+            let ink = text.into_rgba8();
+            let near = |p: &[u8]| p.iter().zip(&ink).all(|(a, b)| a.abs_diff(*b) < 40);
+            assert!(px.chunks(4).any(near), "a visible label");
+        }
+        crate::ui::theme::set_light(false);
     }
 
     /// The "Translating…" pill holds the picker; a new language translates

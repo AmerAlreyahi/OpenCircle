@@ -65,7 +65,16 @@ pub(crate) struct Session {
     timeout: Duration,
     helper: Option<Helper>,
     last_id: u64,
+    /// Failed requests in a row, and when the next child may start: a child
+    /// that keeps dying is never restarted in a tight loop.
+    failures: u32,
+    retry_at: Option<Instant>,
 }
+
+/// After the second failure in a row the next child waits this long,
+/// doubling per failure up to `BACKOFF_MAX`.
+const BACKOFF: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(30);
 
 impl Session {
     pub(crate) fn new(program: &Path, args: &[&str], timeout: Duration) -> Session {
@@ -75,6 +84,8 @@ impl Session {
             timeout,
             helper: None,
             last_id: 0,
+            failures: 0,
+            retry_at: None,
         }
     }
 
@@ -90,6 +101,31 @@ impl Session {
         if self.helper.as_mut().is_some_and(|h| !h.alive()) {
             self.helper = None; // died while idle
         }
+        if self.helper.is_none()
+            && let Some(at) = self.retry_at
+            && let Some(wait) = at.checked_duration_since(Instant::now())
+        {
+            return Err(OcrError::Engine(format!(
+                "the helper failed {} times in a row; trying again in {} s",
+                self.failures,
+                wait.as_secs() + 1
+            )));
+        }
+        let reply = self.request(payload);
+        if reply.is_ok() {
+            (self.failures, self.retry_at) = (0, None);
+        } else {
+            self.helper = None;
+            self.failures += 1;
+            if self.failures >= 2 {
+                let wait = BACKOFF.saturating_mul(1 << (self.failures - 2).min(5));
+                self.retry_at = Some(Instant::now() + wait.min(BACKOFF_MAX));
+            }
+        }
+        reply
+    }
+
+    fn request(&mut self, payload: &[&[u8]]) -> Result<Vec<u8>, OcrError> {
         let helper = match &mut self.helper {
             Some(h) => h,
             None => self
@@ -97,11 +133,7 @@ impl Session {
                 .insert(Helper::spawn(&self.program, &self.args)?),
         };
         self.last_id += 1;
-        let reply = helper.request(self.last_id, payload, self.timeout);
-        if reply.is_err() {
-            self.helper = None;
-        }
-        reply
+        helper.request(self.last_id, payload, self.timeout)
     }
 
     /// The running child's process id.
@@ -391,6 +423,39 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         assert_eq!(s.call(&[b"c"]).unwrap(), b"c");
         assert_ne!(s.pid(), Some(pid));
+        let _ = std::fs::remove_file(m);
+    }
+
+    /// A child that dies at once, every time (the Windows helper without
+    /// ONNX Runtime did): retried once at once, then only after a growing
+    /// wait, never in a tight loop.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_keeps_crashing_backs_off() {
+        let m = marker("backoff");
+        let mut s = sh(&format!("echo x >> {}; exit 3", m.display()), 5000);
+        let starts = || std::fs::read_to_string(&m).map_or(0, |t| t.lines().count());
+        for _ in 0..2 {
+            assert!(
+                s.call(&[b"a"])
+                    .unwrap_err()
+                    .to_string()
+                    .contains("helper stopped")
+            );
+        }
+        for _ in 0..20 {
+            let err = s.call(&[b"a"]).unwrap_err().to_string();
+            assert!(
+                err.contains("failed 2 times in a row; trying again in"),
+                "{err}"
+            );
+        }
+        assert_eq!(starts(), 2, "no child started while waiting");
+        std::thread::sleep(BACKOFF + Duration::from_millis(100));
+        assert!(s.call(&[b"a"]).is_err());
+        assert_eq!(starts(), 3, "one more after the wait");
+        let err = s.call(&[b"a"]).unwrap_err().to_string();
+        assert!(err.contains("failed 3 times"), "the wait grows: {err}");
         let _ = std::fs::remove_file(m);
     }
 

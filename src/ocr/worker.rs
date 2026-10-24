@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::session::{self, MAX_REQUEST, Session};
-use super::{Engine, OcrError, Read, TextBlock, check_image, models_dir};
+use super::{Engine, OcrError, Read, TextBlock, check_image, models, models_dir};
 use crate::mt::{self, Pair, Translator};
 
 /// The hidden subcommand that runs the worker.
@@ -46,7 +46,22 @@ pub fn recognize_as(
     height: u32,
     source: &str,
 ) -> Result<Vec<TextBlock>, OcrError> {
-    recognize_via(session::call, rgba, width, height, Read::for_source(source))
+    let read = Read::for_source(source);
+    ready(read)?;
+    recognize_via(session::call, rgba, width, height, read)
+}
+
+/// Its models are on disk: no helper is started for a request that can only
+/// fail (a helper without ONNX Runtime used to crash, again and again).
+fn ready(read: Read) -> Result<(), OcrError> {
+    let installed = match read {
+        Read::One(i) => models::installed(models::RECOGNIZERS[i]),
+        Read::Auto => models::RECOGNIZERS.iter().any(|r| models::installed(r)),
+    };
+    match installed {
+        true => Ok(()),
+        false => Err(OcrError::Missing("the text-recognition model".into())),
+    }
 }
 
 #[cfg(test)]
@@ -80,7 +95,10 @@ pub(crate) fn recognize_via(
 
 /// Translates `texts` with `pair` offline in the helper (`crate::mt`; its
 /// models must already be present).
-pub fn translate_in_child(texts: &[String], pair: &Pair) -> Result<Vec<String>, OcrError> {
+pub fn translate_in_child(texts: &[String], pair: &'static Pair) -> Result<Vec<String>, OcrError> {
+    if pair.missing_bytes() > 0 {
+        return Err(OcrError::Missing(pair.label()));
+    }
     translate_via(session::call, texts, pair)
 }
 

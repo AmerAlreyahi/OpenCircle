@@ -453,7 +453,7 @@ impl Pair {
 
 /// App side: translates `texts` with `pair` in the helper process. The
 /// models must be present (`Pair::ensure`).
-pub fn translate(texts: &[String], pair: &Pair) -> Result<Vec<String>, OcrError> {
+pub fn translate(texts: &[String], pair: &'static Pair) -> Result<Vec<String>, OcrError> {
     ocr::translate_in_child(texts, pair)
 }
 
@@ -485,9 +485,10 @@ pub(crate) struct Translator {
 impl Translator {
     /// `ort_dir` holds ONNX Runtime (OCR's folder).
     pub(crate) fn load(pair: &'static Pair, ort_dir: &Path) -> Result<Translator, OcrError> {
-        ort::init_from(ort_dir.join(models::ORT.name))
-            .map_err(ocr::load_err)?
-            .commit();
+        if pair.missing_bytes() > 0 {
+            return Err(OcrError::Missing(pair.label()));
+        }
+        ocr::init_ort(ort_dir)?;
         let dir = pair.dir();
         // Every batch has a new shape: memory patterns would only add RAM.
         // No spin-waiting threads after a run (they slowed the app, see OCR).

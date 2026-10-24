@@ -68,6 +68,9 @@ pub enum OcrError {
     Checksum(&'static str),
     /// Reading or writing the model files.
     Io(std::io::Error),
+    /// What isn't on disk yet (the user hasn't agreed to its download):
+    /// checked before a helper starts or loads ONNX Runtime.
+    Missing(String),
     /// ONNX Runtime failed to load a model or run it.
     Engine(String),
 }
@@ -79,6 +82,10 @@ impl fmt::Display for OcrError {
             Self::Download(m) => write!(f, "could not download the text models: {m}"),
             Self::Checksum(name) => write!(f, "downloaded model {name} is corrupt (checksum)"),
             Self::Io(e) => write!(f, "text model files: {e}"),
+            Self::Missing(what) => write!(
+                f,
+                "{what} isn't downloaded yet. Translate once with Ctrl+Shift+T to download it"
+            ),
             Self::Engine(m) => write!(f, "text recognition failed: {m}"),
         }
     }
@@ -96,9 +103,23 @@ fn engine_err(e: impl fmt::Display) -> OcrError {
     OcrError::Engine(e.to_string())
 }
 
-/// The ORT DLL is checksum-verified, so on Windows a failed `LoadLibraryExW`
-/// means one of its own imports (MSVCP140, VCRUNTIME140_1) is missing. We never
-/// bundle or download the redistributable: we say where to get it.
+/// Loads ONNX Runtime from `dir` (once per process). A missing file is
+/// `Missing`, never a load attempt: on Windows that failed as
+/// `LoadLibraryExW` (read as a missing VC++ runtime) and a later ORT call
+/// panicked ("OrtGetApiBase must be present"), killing the helper.
+pub(crate) fn init_ort(dir: &Path) -> Result<(), OcrError> {
+    let path = dir.join(models::ORT.name);
+    if !path.is_file() {
+        return Err(OcrError::Missing("the text-recognition model".into()));
+    }
+    ort::init_from(path).map_err(load_err)?.commit();
+    Ok(())
+}
+
+/// The ORT DLL is present and checksum-verified (`init_ort` checks first),
+/// so on Windows a failed `LoadLibraryExW` means one of its own imports
+/// (MSVCP140, VCRUNTIME140_1) is missing. We never bundle or download the
+/// redistributable: we say where to get it.
 pub(crate) fn load_err(e: impl fmt::Display) -> OcrError {
     let msg = e.to_string();
     if msg.contains("LoadLibraryExW") {
@@ -231,9 +252,10 @@ impl Engine {
     /// Loads ORT and the detector from `models` (the folder `ensure_models`
     /// returns); a recognizer loads on first use.
     pub fn load(models: &Path) -> Result<Engine, OcrError> {
-        ort::init_from(models.join(models::ORT.name))
-            .map_err(load_err)?
-            .commit();
+        init_ort(models)?;
+        if !models.join(models::DET.name).is_file() {
+            return Err(OcrError::Missing("the text-recognition model".into()));
+        }
         // Memory patterns cache a plan per input shape; every capture has a new
         // shape, so they only add RAM (~100 MB measured).
         // No spin-waiting threads after a run: in a warm helper they kept
@@ -276,11 +298,8 @@ impl Engine {
             self.rec = None;
             let files = models::RECOGNIZERS[i];
             if !models::installed(files) {
-                return Err(OcrError::Engine(format!(
-                    "the {} text-recognition model isn't downloaded yet. Translate once \
-                     with Ctrl+Shift+T to download it",
-                    files.script
-                )));
+                let what = format!("the {} text-recognition model", files.script);
+                return Err(OcrError::Missing(what));
             }
             let rec = TextRecognitionPredictor::builder()
                 .dict_path(self.dir.join(files.dict.name))
@@ -454,6 +473,24 @@ mod tests {
         // Any other failure keeps its own message.
         let other = load_err("ort 2.0 is not compatible with the ONNX Runtime binary").to_string();
         assert!(!other.contains("Redistributable"), "{other}");
+    }
+
+    /// No ONNX Runtime on disk: a typed "missing" error that says how to get
+    /// it, never a load attempt (on Windows: a VC++ hint, then a panic).
+    #[test]
+    fn missing_runtime_is_a_typed_error_not_a_load() {
+        let dir = std::env::temp_dir().join(format!("oc-no-ort-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let err = Engine::load(&dir)
+            .err()
+            .expect("no engine without its files");
+        assert!(matches!(err, OcrError::Missing(_)), "{err}");
+        let text = err.to_string();
+        assert!(
+            text.contains("isn't downloaded yet") && !text.contains("Redistributable"),
+            "{text}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn block(text: &str, x: f32, y: f32) -> TextBlock {

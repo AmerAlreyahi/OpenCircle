@@ -4,6 +4,7 @@
 use super::{Action, Key, Run, ask};
 use crate::config::{self, AiConfig, Engine, Provider};
 use crate::mt;
+use crate::ocr::models;
 use crate::secrets::Secret;
 use crate::translate::lang;
 use crate::translate::pipeline::{Real, Via};
@@ -50,6 +51,36 @@ pub fn surely_offline(source: &str, target: &str) -> Option<&'static mt::Pair> {
     will_be_offline()
         .then(|| mt::pair(source, target))
         .flatten()
+}
+
+/// What translating `source` -> `target` must download before it can
+/// run (sizes only): the offline pair's files with OCR's when translation
+/// will surely be offline, else OCR's for the source. (bytes, what it is,
+/// the pair to `Pair::ensure` or `None` = OCR's only); `None` = ready.
+pub fn missing(source: &str, target: &str) -> Option<(u64, String, Option<&'static mt::Pair>)> {
+    if let Some(pair) = surely_offline(source, target) {
+        let bytes = pair.missing_bytes();
+        if bytes > 0 {
+            return Some((bytes, pair.label(), Some(pair)));
+        }
+    }
+    let rec = models::recognizer_for(source);
+    let bytes = models::missing_bytes(&models::ocr_files(rec));
+    let what = format!("the {} text-recognition model", rec.script);
+    (bytes > 0).then_some((bytes, what, None))
+}
+
+/// Downloads what `missing` found, after the user agreed. Blocking.
+pub fn download(
+    source: &str,
+    pair: Option<&'static mt::Pair>,
+    progress: impl FnMut(u64, u64),
+) -> Result<(), String> {
+    let done = match pair {
+        Some(pair) => pair.ensure(progress),
+        None => models::ensure(&models::ocr_files(models::recognizer_for(source)), progress),
+    };
+    done.map_err(|e| e.to_string())
 }
 
 /// Offline is chosen, or the provider is the browser (which can't translate).

@@ -17,6 +17,7 @@ use super::{background, border, theme, widgets};
 use crate::capture;
 use crate::config;
 use crate::live::{self, LayerError};
+use crate::mt::Pair;
 use crate::ocr;
 use crate::translate::live::Live as Steps;
 use crate::translate::pipeline::Cache;
@@ -68,7 +69,13 @@ pub enum Msg {
     ControllerReady(Result<bool, LayerError>),
     /// A window moved (logical px); the controller's matters.
     Moved(window::Id, Point),
+    /// The models' download, 0..=1, then its end.
+    Progress(f32),
+    Downloaded(Result<(), String>),
 }
+
+/// What the languages need downloaded first (`actions::translate::missing`).
+type Check = fn(&str, &str) -> Option<(u64, String, Option<&'static Pair>)>;
 
 /// What the App must do after a message.
 pub enum Outcome {
@@ -113,6 +120,13 @@ pub struct Live {
     shot_taken: bool,
     /// One warm OCR / translation helper while live mode is on.
     _helper: ocr::Hold,
+    /// What the languages need downloaded (a test swaps it).
+    check: Check,
+    /// The download asked for: the offline pair, or `Some(None)` = OCR's.
+    pending: Option<Option<&'static Pair>>,
+    /// The step thread runs (it starts only once the models are there).
+    stepping: bool,
+    download: Option<task::Handle>,
 }
 
 /// No click-through layer over other apps: native Wayland.
@@ -164,7 +178,55 @@ impl Live {
             work: None,
             shot_taken: false,
             _helper: ocr::hold(),
+            check: crate::actions::translate::missing,
+            pending: None,
+            stepping: false,
+            download: None,
         }
+    }
+
+    /// Models the languages need are missing: the controller asks, and the
+    /// step thread waits (paused) or isn't started. True if it asks.
+    fn ask_if_missing(&mut self) -> bool {
+        let (source, target) = (&self.ctl.picker.source, &self.ctl.picker.target);
+        let Some((bytes, what, pair)) = (self.check)(source, target) else {
+            return false;
+        };
+        self.ctl.ask(&what, bytes);
+        self.pending = Some(pair);
+        self.paused.store(true, Ordering::Relaxed);
+        self.patches.clear();
+        true
+    }
+
+    /// The user agreed: the download on a thread.
+    fn start_download(&mut self) -> Task<Msg> {
+        let source = self.ctl.picker.source.clone();
+        let pair = self.pending.flatten();
+        let (task, handle) = background(move |tx| {
+            let done = crate::actions::translate::download(&source, pair, |done, total| {
+                let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
+            });
+            let _ = tx.unbounded_send(Msg::Downloaded(done));
+        })
+        .abortable();
+        self.download = Some(handle.abort_on_drop());
+        task
+    }
+
+    /// Fits the controller window to what it shows now (it was `old`
+    /// big); it grows and shrinks from its right edge (it starts at the
+    /// right corner).
+    fn fit_controller(&mut self, old: Size) -> Task<Msg> {
+        let (Some(id), new) = (self.controller, self.ctl.size()) else {
+            return Task::none();
+        };
+        if old == new {
+            return Task::none();
+        }
+        self.ctl_at += Vector::new(old.width - new.width, 0.0);
+        self.update_mask();
+        window::resize(id, new).chain(window::move_to(id, self.ctl_at))
     }
 
     /// The layer window, once open.
@@ -239,12 +301,14 @@ impl Live {
             return Outcome::Task(Task::none());
         };
         let before = self.ctl.clone();
-        match self.ctl.update(msg) {
+        let download = match self.ctl.update(msg) {
             Some(Out::Stop) => return Outcome::Off,
             Some(Out::Drag) => return Outcome::Task(window::drag(id)),
-            None => {}
-        }
-        if self.ctl.paused != before.paused {
+            Some(Out::Download) => self.start_download(),
+            None => Task::none(),
+        };
+        // (while the download question is up, the thread stays paused)
+        if self.ctl.paused != before.paused && self.ctl.ask.is_none() {
             self.paused.store(self.ctl.paused, Ordering::Relaxed);
             self.patches.clear(); // paused = the screen as it is
         }
@@ -254,15 +318,23 @@ impl Live {
                 *now = langs(&self.ctl);
             }
             self.patches.clear(); // the next step reads everything again
+            // the new pair's models may be missing: ask (a download for
+            // the old pair stops)
+            (self.download, self.ctl.ask) = (None, None);
+            if !self.ask_if_missing() {
+                self.pending = None;
+                self.paused.store(self.ctl.paused, Ordering::Relaxed);
+            }
         }
-        let (old, new) = (before.size(), self.ctl.size());
-        if old == new {
-            return Outcome::Task(Task::none());
-        }
-        // Grows / shrinks from its right edge (it starts at the right corner).
-        self.ctl_at += Vector::new(old.width - new.width, 0.0);
-        self.update_mask();
-        Outcome::Task(window::resize(id, new).chain(window::move_to(id, self.ctl_at)))
+        // a pair that is ready, picked while live mode waited for another
+        let steps = match self.phase {
+            Phase::Open { monitor, .. } if !self.stepping && self.ctl.ask.is_none() => {
+                self.run(monitor)
+            }
+            _ => Task::none(),
+        };
+        let fit = self.fit_controller(before.size());
+        Outcome::Task(Task::batch([download, steps, fit]))
     }
 
     pub fn update(&mut self, msg: Msg) -> Outcome {
@@ -288,7 +360,11 @@ impl Live {
                     "[opencircle] live translate on ({}x{}, excluded from capture: {})",
                     monitor.width, monitor.height, layer.excluded_from_capture
                 );
-                let steps = self.run(monitor);
+                // Never a step without the models: ask first (in the controller).
+                let steps = match self.ask_if_missing() {
+                    true => Task::none(),
+                    false => self.run(monitor),
+                };
                 let note = if self.note {
                     background(|tx| {
                         std::thread::sleep(NOTE_TIME);
@@ -338,6 +414,28 @@ impl Live {
                 config::set_current(cfg);
             }
             Msg::TestShot(shot) => save_test_shot(&shot),
+            Msg::Progress(done) => {
+                if let Some(ask) = &mut self.ctl.ask {
+                    ask.progress = Some(done);
+                }
+            }
+            Msg::Downloaded(Err(e)) => {
+                self.download = None;
+                if let Some(ask) = &mut self.ctl.ask {
+                    (ask.progress, ask.error) = (None, Some(e));
+                }
+            }
+            Msg::Downloaded(Ok(())) => {
+                self.download = None;
+                let before = self.ctl.size();
+                (self.ctl.ask, self.pending) = (None, None);
+                self.paused.store(self.ctl.paused, Ordering::Relaxed);
+                let steps = match self.phase {
+                    Phase::Open { monitor, .. } if !self.stepping => self.run(monitor),
+                    _ => Task::none(),
+                };
+                return Outcome::Task(Task::batch([steps, self.fit_controller(before)]));
+            }
             Msg::Monitor(Ok(_)) => {}
         }
         Outcome::Task(Task::none())
@@ -365,6 +463,7 @@ impl Live {
 
     /// Captures and steps on a thread until `stop` (or the layer is dropped).
     fn run(&mut self, monitor: Monitor) -> Task<Msg> {
+        self.stepping = true;
         let (stop, cache) = (self.stop.clone(), self.cache.clone());
         let (paused, chosen, mask) = (self.paused.clone(), self.langs.clone(), self.mask.clone());
         let (task, handle) = background(move |tx| {
@@ -598,11 +697,78 @@ mod tests {
         assert_eq!(sent, 3);
     }
 
+    /// Live mode with every model on disk (`check` finds nothing missing).
     fn live() -> Live {
         Live {
             note: true,
+            check: |_, _| None,
             ..Live::new(Arc::new(Cache::new(8)), "auto", "ar")
         }
+    }
+
+    /// No models: the controller asks (Download / Cancel, with the size),
+    /// and no step runs until the download is done. PNGs via the headless
+    /// renderer (`OPENCIRCLE_RENDER_DIR=<dir>`).
+    #[test]
+    fn missing_models_are_asked_for_and_nothing_steps_without_them() {
+        use live_controller::Msg as C;
+        let mut l = Live {
+            check: |_, _| {
+                Some((
+                    37_000_000,
+                    "the English text-recognition model".into(),
+                    None,
+                ))
+            },
+            ..live()
+        };
+        let _ = l.update(Msg::Monitor(Ok(MONITOR)));
+        let layer = crate::live::Layer {
+            excluded_from_capture: false,
+        };
+        let _ = l.update(Msg::Prepared(Ok(layer)));
+        assert!(l.controller().is_some(), "the controller opens to ask");
+        assert!(
+            !l.stepping && l.paused.load(Ordering::Relaxed),
+            "no step thread"
+        );
+        assert_eq!(l.ctl.status(), "Live · needs a download");
+        let texts = widgets::shot::texts(l.controller_view());
+        let ask = "Live translate needs the English text-recognition model (about 40 MB). \
+                   Download it? Nothing you translate leaves your PC.";
+        for want in [ask, "Download", "Cancel"] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        widgets::shot::save("live-controller-consent", l.controller_view(), l.ctl.size());
+        // Download: progress, still no step
+        let _ = l.update(Msg::Controller(C::Download));
+        assert!(l.download.is_some() && !l.stepping);
+        let _ = l.update(Msg::Progress(0.4));
+        assert_eq!(l.ctl.ask.as_ref().unwrap().progress, Some(0.4));
+        widgets::shot::save(
+            "live-controller-downloading",
+            l.controller_view(),
+            l.ctl.size(),
+        );
+        // it fails: the reason, and Download again
+        let _ = l.update(Msg::Downloaded(Err("no network".into())));
+        let ask = l.ctl.ask.as_ref().unwrap();
+        assert_eq!(
+            (ask.progress, ask.error.as_deref()),
+            (None, Some("no network"))
+        );
+        assert!(!l.stepping);
+        // done: the question goes, the steps start
+        let asked = l.ctl.size();
+        let _ = l.update(Msg::Controller(C::Download));
+        let _ = l.update(Msg::Downloaded(Ok(())));
+        assert!(l.stepping && l.ctl.ask.is_none() && !l.paused.load(Ordering::Relaxed));
+        assert!(
+            l.ctl.size().height < asked.height,
+            "the controller shrinks back"
+        );
+        // Cancel = Stop
+        assert!(matches!(l.update(Msg::Controller(C::Stop)), Outcome::Off));
     }
 
     const MONITOR: Monitor = Monitor {

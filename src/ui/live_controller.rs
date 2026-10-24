@@ -2,10 +2,11 @@
 //! a small, draggable window on the layer's monitor. It takes clicks (the layer
 //! doesn't) and, on Windows, is excluded from capture like the layer. The
 //! language picker (source → target, `ui/picker.rs`), Pause / Resume, Hide
-//! (collapses to a dot), Stop. This file is its state and view; `live_layer`
-//! owns the window.
+//! (collapses to a dot), Stop; and, when the languages' models are missing,
+//! the download question (live mode never steps without them). This file is
+//! its state and view; `live_layer` owns the window.
 use iced::widget::{column, container, mouse_area, row};
-use iced::{Center, Element, Size, mouse};
+use iced::{Center, Element, Fill, Size, mouse};
 
 use super::picker::{self, CHIP_HEIGHT, Picker, SPACING};
 use super::widgets;
@@ -15,6 +16,10 @@ const CHIP_WIDTH: f32 = 76.0;
 const GRIP_WIDTH: f32 = 20.0;
 /// The minimised controller.
 const DOT: f32 = 28.0;
+/// The download question under the controls: two lines, then the buttons.
+const ASK_TEXT: f32 = 40.0;
+const ASK_HEIGHT: f32 = SPACING + ASK_TEXT + SPACING + CHIP_HEIGHT;
+const ASK_BUTTON: f32 = 96.0;
 
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -26,6 +31,8 @@ pub enum Msg {
     Minimise,
     Restore,
     Stop,
+    /// The download question's Download.
+    Download,
 }
 
 /// What the layer must do after a message.
@@ -33,6 +40,19 @@ pub enum Msg {
 pub enum Out {
     Drag,
     Stop,
+    /// The user agreed to the download.
+    Download,
+}
+
+/// Models the languages need are missing: what to download, and how it goes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ask {
+    /// "the text-recognition model (about 40 MB)".
+    pub what: String,
+    /// Downloading, 0..=1.
+    pub progress: Option<f32>,
+    /// The last attempt failed.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +61,8 @@ pub struct Controller {
     pub picker: Picker,
     pub paused: bool,
     pub minimised: bool,
+    /// The download question (live mode doesn't step while it is up).
+    pub ask: Option<Ask>,
 }
 
 impl Controller {
@@ -49,13 +71,35 @@ impl Controller {
             picker: Picker::new(source, target, offline),
             paused: false,
             minimised: false,
+            ask: None,
         }
+    }
+
+    /// Asks before downloading `what` ("English → Arabic offline
+    /// translation") of `bytes`.
+    pub fn ask(&mut self, what: &str, bytes: u64) {
+        let mb = bytes.div_ceil(10_000_000) * 10;
+        self.picker.close();
+        self.minimised = false;
+        self.ask = Some(Ask {
+            what: format!("{what} (about {mb} MB)"),
+            progress: None,
+            error: None,
+        });
     }
 
     pub fn update(&mut self, msg: Msg) -> Option<Out> {
         match msg {
             Msg::Drag => return Some(Out::Drag),
             Msg::Stop => return Some(Out::Stop),
+            Msg::Download => match &mut self.ask {
+                Some(ask) if ask.progress.is_none() => {
+                    ask.progress = Some(0.0);
+                    ask.error = None;
+                    return Some(Out::Download);
+                }
+                _ => {}
+            },
             Msg::Picker(msg) => {
                 self.picker.update(msg);
             }
@@ -69,11 +113,12 @@ impl Controller {
         None
     }
 
-    /// The status line: "Auto → AR", or paused.
+    /// The status line: "Auto → AR", paused, or waiting for the download.
     pub fn status(&self) -> String {
-        match self.paused {
-            true => "Live · paused".into(),
-            false => format!("Live · {}", self.picker.label()),
+        match (&self.ask, self.paused) {
+            (Some(_), _) => "Live · needs a download".into(),
+            (None, true) => "Live · paused".into(),
+            (None, false) => format!("Live · {}", self.picker.label()),
         }
     }
 
@@ -83,14 +128,14 @@ impl Controller {
             return Size::new(DOT, DOT);
         }
         let pad = 2.0 * widgets::SURFACE_PADDING;
-        let list = if self.picker.is_open() {
-            picker::LIST_HEIGHT
-        } else {
-            0.0
+        let below = match (&self.ask, self.picker.is_open()) {
+            (Some(_), _) => ASK_HEIGHT,
+            (None, true) => picker::LIST_HEIGHT,
+            (None, false) => 0.0,
         };
         Size::new(
             GRIP_WIDTH + picker::WIDTH + 3.0 * CHIP_WIDTH + 4.0 * SPACING + pad,
-            CHIP_HEIGHT + list + pad,
+            CHIP_HEIGHT + below + pad,
         )
     }
 
@@ -121,13 +166,49 @@ impl Controller {
         .align_y(Center);
         let mut body = column![controls].spacing(SPACING);
         let width = self.size().width - 2.0 * widgets::SURFACE_PADDING - GRIP_WIDTH - SPACING;
-        if let Some(list) = self.picker.list(width) {
+        let indent = |e: Element<'static, Msg>| {
+            container(e).padding(iced::Padding::ZERO.left(GRIP_WIDTH + SPACING))
+        };
+        if let Some(ask) = &self.ask {
+            body = body.push(indent(ask_view(ask, width)));
+        } else if let Some(list) = self.picker.list(width) {
             let list = list.map(Msg::Picker);
             body =
                 body.push(container(list).padding(iced::Padding::ZERO.left(GRIP_WIDTH + SPACING)));
         }
         widgets::solid_surface(body).into()
     }
+}
+
+/// The download question: what and how big, then Download and Cancel (=
+/// Stop), or the progress.
+fn ask_view(ask: &Ask, width: f32) -> Element<'static, Msg> {
+    let line = match &ask.error {
+        Some(e) => widgets::error(format!("Download failed: {e}")),
+        None => widgets::body(format!(
+            "Live translate needs {}. Download it? Nothing you translate leaves your PC.",
+            ask.what
+        )),
+    };
+    let below: Element<'static, Msg> = match ask.progress {
+        Some(done) => container(widgets::progress(done))
+            .center_y(CHIP_HEIGHT)
+            .into(),
+        None => row![
+            widgets::chip("Download", Msg::Download)
+                .width(ASK_BUTTON)
+                .height(CHIP_HEIGHT),
+            widgets::chip("Cancel", Msg::Stop)
+                .width(ASK_BUTTON)
+                .height(CHIP_HEIGHT),
+        ]
+        .spacing(SPACING)
+        .into(),
+    };
+    column![container(line).height(ASK_TEXT).width(Fill), below]
+        .spacing(SPACING)
+        .width(width)
+        .into()
 }
 
 /// Paints `rect` (x, y, w, h; clipped to the frame) black in an RGBA capture:

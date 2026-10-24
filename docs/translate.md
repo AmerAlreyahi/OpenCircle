@@ -96,7 +96,9 @@ place. `Esc` closes it.
 Press `Ctrl+Shift+L` to turn live translate on or off. A click-through,
 always-on-top layer re-captures about once a second and re-translates only the
 text that changed, so game input is never blocked. A small status pill shows
-the language pair.
+the language pair. If a model the languages need isn't on your PC yet, the
+live controller asks first (with the download size) and live translate
+starts once it is downloaded.
 
 - **Windows:** the layer is excluded from its own captures.
 - **Linux/X11:** supported; the layer is click-through, and OpenCircle guards
