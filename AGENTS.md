@@ -56,8 +56,12 @@ the first code):
 
     cargo fmt --check
     cargo clippy --all-targets -- -D warnings
-    cargo test
+    XDG_DATA_HOME=$(mktemp -d) XDG_CONFIG_HOME=$(mktemp -d) cargo test
     cargo packager --release
+
+Run tests with EMPTY app data/config dirs (as above): CI has no downloaded
+models or config, and a machine with them can hide a failure. After every push,
+check CI on main (`gh run list -b main`) before building on it.
 
 (Exact scripts are created with the scaffold; update this block then.)
 

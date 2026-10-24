@@ -46,6 +46,8 @@ pub fn recognize_as(
     height: u32,
     source: &str,
 ) -> Result<Vec<TextBlock>, OcrError> {
+    // Bad input is a bad image whether or not the models are on disk.
+    check_image(rgba, width, height)?;
     let read = Read::for_source(source);
     ready(read)?;
     recognize_via(session::call, rgba, width, height, read)
