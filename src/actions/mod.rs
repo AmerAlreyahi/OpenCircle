@@ -4,7 +4,9 @@
 pub mod ask;
 pub mod copy;
 mod edit;
+pub mod entities;
 pub mod lens;
+pub mod qr;
 pub mod save;
 pub mod text;
 pub mod translate;

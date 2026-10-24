@@ -1,21 +1,58 @@
 //! Floating action bar: the action registry as one row of buttons, under the selection.
-use iced::widget::{opaque, pin, row, tooltip};
-use iced::{Element, Point, Rectangle, Size};
+use iced::widget::{column, opaque, pin, row, tooltip};
+use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::widgets::{self, CONTROL, SURFACE_PADDING, TEXT_BUTTON_WIDTH};
+use crate::actions::entities::shorten;
 use crate::actions::{ACTIONS, Action, Key};
 
 const SPACING: f32 = 4.0;
 /// Between the bar and the selection, and the bar's minimum distance to screen edges.
 pub(super) const GAP: f32 = 16.0;
 
-/// The bar for `selection` on a `screen`-sized overlay (logical px).
+/// Between the bar and the QR chip.
+const CHIP_GAP: f32 = 8.0;
+/// The longest QR text the chip shows, in characters.
+const QR_SHOWN: usize = 36;
+
+/// The chip for a QR code found in the selection: its text (shortened) copies it,
+/// and "Open link" (only offered for an http(s) link) opens it. Neither happens
+/// by itself.
+pub fn qr_chip<'a, Message: Clone + 'a>(
+    text: &str,
+    copy: Message,
+    open: Option<Message>,
+) -> Element<'a, Message> {
+    let mut chips = row![
+        widgets::icon(crate::actions::copy::ACTION.icon),
+        widgets::chip(format!("QR code: {}", shorten(text.trim(), QR_SHOWN)), copy),
+    ]
+    .spacing(10)
+    .height(Fill)
+    .align_y(Center);
+    if let Some(open) = open {
+        chips = chips.push(widgets::chip("Open link", open));
+    }
+    widgets::surface(chips)
+        .height(CONTROL + 2.0 * SURFACE_PADDING)
+        .padding([0.0, 14.0])
+        .into()
+}
+
+/// The bar for `selection` on a `screen`-sized overlay (logical px), with the QR
+/// `chip` (see [`qr_chip`]) next to it, on the side away from the selection.
 pub fn view<'a, Message: Clone + 'a>(
     selection: Rectangle,
     screen: Size,
+    chip: Option<Element<'a, Message>>,
     on_press: fn(&'static Action) -> Message,
 ) -> Element<'a, Message> {
-    let at = place(selection, size(ACTIONS.len()), screen);
+    let mut total = size(ACTIONS.len());
+    let bar_width = total.width;
+    if chip.is_some() {
+        total.height = 2.0 * total.height + CHIP_GAP;
+    }
+    let at = place(selection, total, screen);
     // Tooltips go on the side away from the selection.
     let tip_side = if at.y < selection.y {
         tooltip::Position::Top
@@ -34,9 +71,24 @@ pub fn view<'a, Message: Clone + 'a>(
         );
         widgets::with_tip(button, action.tip, tip_side).into()
     });
-    let bar = widgets::surface(row(buttons).spacing(SPACING));
+    let bar = Element::from(widgets::surface(row(buttons).spacing(SPACING)));
+    let stacked = match chip {
+        None => bar,
+        Some(chip) => {
+            let parts = if at.y < selection.y {
+                [chip, bar]
+            } else {
+                [bar, chip]
+            };
+            column(parts)
+                .spacing(CHIP_GAP)
+                .width(bar_width)
+                .align_x(Center)
+                .into()
+        }
+    };
     // opaque: a press between two buttons doesn't start a new selection.
-    pin(opaque(bar)).position(at).into()
+    pin(opaque(stacked)).position(at).into()
 }
 
 /// What the button shows for its key, e.g. "Ctrl C".
@@ -123,6 +175,33 @@ mod tests {
             let p = place(s, BAR, SCREEN);
             assert!(on_screen(p), "{s:?} -> {p:?}");
         }
+    }
+
+    #[test]
+    fn qr_chip_offers_copy_and_open_only_for_links() {
+        let screen = Size::new(1200.0, 420.0);
+        let selection = sel(450.0, 60.0, 300.0, 140.0);
+        let link = "https://example.com/a-long-link/that/goes/on/and/on/forever";
+        let with_link = || {
+            let chip = qr_chip(link, (), Some(()));
+            view(selection, screen, Some(chip), |_| ())
+        };
+        let texts = widgets::shot::texts(with_link());
+        assert!(
+            texts.contains(&"QR code: https://example.com/a-long-link/that…".to_string()),
+            "{texts:?}"
+        );
+        assert!(texts.contains(&"Open link".to_string()));
+        let px = widgets::shot::save("bar-qr-chip", with_link(), screen);
+        assert!(px.as_chunks::<4>().0.iter().any(|p| p[..] != px[..4]));
+
+        let wifi = qr_chip("WIFI:S:cafe;T:WPA;P:secret;;", (), None);
+        let texts = widgets::shot::texts(view(selection, screen, Some(wifi), |_| ()));
+        assert!(texts.iter().any(|t| t.starts_with("QR code: WIFI:S:cafe")));
+        assert!(!texts.contains(&"Open link".to_string()));
+        // No QR code: the bar alone.
+        let texts = widgets::shot::texts(view(selection, screen, None::<Element<()>>, |_| ()));
+        assert!(!texts.iter().any(|t| t.starts_with("QR code")));
     }
 
     #[test]

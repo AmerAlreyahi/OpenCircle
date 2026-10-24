@@ -10,7 +10,8 @@ use iced::{Center, ContentFit, Element, Fill, Point, Rectangle, Size, Task, task
 
 use super::background;
 use super::widgets::{self, SEND, STOP};
-use crate::actions::ask::{self, Chat, Setup, Status};
+use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
+use crate::actions::entities::{self, Entity, Kind};
 use crate::actions::text::{self, Progress};
 use crate::actions::{self, Crop, lens};
 use crate::ai;
@@ -29,7 +30,6 @@ const THUMB_HEIGHT: f32 = 112.0;
 const INPUT: &str = "panel-input";
 /// The Ask AI conversation (scrolled to the end as the answer grows).
 const LOG: &str = "panel-log";
-const PROMPTS: [&str; 3] = ["Explain", "Summarize", "What is this?"];
 
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -38,7 +38,8 @@ pub enum Msg {
     Input(String),
     /// Enter / send in the follow-up input.
     Submit,
-    Prompt(&'static str),
+    /// A suggestion chip (index into `PRESETS`).
+    Preset(usize),
     Stop,
     Ready(Result<Arc<Setup>, String>),
     Delta(String),
@@ -57,6 +58,8 @@ pub enum Msg {
     /// Translate the read text (Text panel), shown under it.
     Translate,
     Translated(Result<String, String>),
+    /// A link, email or phone chip under the text (index into `entities`).
+    Chip(usize),
 }
 
 pub struct Panel {
@@ -68,6 +71,10 @@ pub struct Panel {
     work: Option<task::Handle>,
     /// The Text panel's translation of the read text, once asked for.
     translation: Option<Result<String, String>>,
+    /// Links, emails and phone numbers in the Text panel's text; a click acts on one.
+    entities: Vec<Entity>,
+    /// What the last chip click did (or why it could not).
+    note: Option<Result<&'static str, String>>,
 }
 
 enum State {
@@ -114,6 +121,8 @@ impl Panel {
             input: question.unwrap_or_default(),
             work: None,
             translation: None,
+            entities: Vec::new(),
+            note: None,
         };
         let task = match kind {
             actions::Panel::Lens => background(move |tx| {
@@ -193,7 +202,11 @@ impl Panel {
                 let question = self.take_input();
                 return self.send(&question);
             }
-            (State::Ask { .. }, Msg::Prompt(prompt)) => return self.send(prompt),
+            (State::Ask { .. }, Msg::Preset(i)) => {
+                if let Some(preset) = PRESETS.get(i) {
+                    return self.send(&preset.text(&crate::config::current().translate.target));
+                }
+            }
             (
                 State::Ask {
                     browse: Browse::Consent(_),
@@ -259,11 +272,26 @@ impl Panel {
                     Ok(text) if text.trim().is_empty() => {
                         Reading::Failed("No text found in the selection.".into())
                     }
-                    Ok(text) => Reading::Done(text_editor::Content::with_text(&text)),
+                    Ok(text) => {
+                        self.entities = entities::find(&text);
+                        Reading::Done(text_editor::Content::with_text(&text))
+                    }
                     Err(e) => Reading::Failed(e),
                 };
             }
-            (State::Text(Reading::Done(content)), Msg::Edit(action)) => content.perform(action),
+            (State::Text(Reading::Done(content)), Msg::Edit(action)) => {
+                let edits = action.is_edit();
+                content.perform(action);
+                if edits {
+                    self.entities = entities::find(&content.text());
+                }
+            }
+            // Only here, on a click: nothing is ever opened by itself.
+            (State::Text(Reading::Done(_)), Msg::Chip(i)) => {
+                if let Some(entity) = self.entities.get(i) {
+                    self.note = Some(act_on(entity));
+                }
+            }
             (State::Text(Reading::Done(content)), Msg::Translate) if self.work.is_none() => {
                 let text = content.text();
                 self.translation = None;
@@ -497,8 +525,11 @@ impl Panel {
             // Waiting for the user's choice: the question is theirs, not yet a turn.
             log = log.push(container(widgets::bubble(widgets::body(question))).align_right(Fill));
         } else if chat.turns.is_empty() {
-            let prompts = PROMPTS.map(|p| widgets::chip(p, Msg::Prompt(p)).into());
-            log = log.push(row(prompts).spacing(8));
+            let prompts = PRESETS
+                .iter()
+                .enumerate()
+                .map(|(i, p)| widgets::chip(p.label, Msg::Preset(i)).into());
+            log = log.push(row(prompts).spacing(8).wrap());
         }
         let input: Element<'a, Msg> = if matches!(browse, Browse::Consent(_)) {
             column![
@@ -611,6 +642,17 @@ impl Panel {
                     Some(Err(e)) => body.push(widgets::error(e)),
                     None => body,
                 };
+                if !self.entities.is_empty() {
+                    let chips = self.entities.iter().enumerate().map(|(i, e)| {
+                        widgets::chip(format!("{}: {}", e.label(), e.shown()), Msg::Chip(i)).into()
+                    });
+                    body = body.push(row(chips).spacing(8).wrap());
+                }
+                body = match &self.note {
+                    Some(Ok(done)) => body.push(widgets::caption(*done)),
+                    Some(Err(e)) => body.push(widgets::error(e)),
+                    None => body,
+                };
                 body.push(
                     row![
                         widgets::text_button(
@@ -642,6 +684,21 @@ impl Panel {
             }
             Reading::Failed(e) => widgets::error(e).into(),
         }
+    }
+}
+
+/// What a chip click does: open the link or a new message, or copy the number.
+fn act_on(entity: &Entity) -> Result<&'static str, String> {
+    match entity.kind {
+        Kind::Link => crate::lens::open_link(&entity.text)
+            .map(|()| "Opened in your browser.")
+            .map_err(|e| format!("Could not open the link: {e}")),
+        Kind::Email => crate::lens::open_mailto(&entity.text)
+            .map(|()| "Opened your mail app.")
+            .map_err(|e| format!("Could not open the mail app: {e}")),
+        Kind::Phone => actions::copy::text(entity.text.clone())
+            .map(|()| "Number copied.")
+            .map_err(|e| format!("Could not copy: {e}")),
     }
 }
 
@@ -731,10 +788,12 @@ mod tests {
             input: "Explain".into(), // e.g. the Lens follow-up, sent once ready
             work: None,
             translation: None,
+            entities: Vec::new(),
+            note: None,
         };
         let msg = ask::tests::invalid_provider_error();
         let _ = panel.update(Msg::Ready(Err(msg.clone())));
-        let _ = panel.update(Msg::Prompt("Explain"));
+        let _ = panel.update(Msg::Preset(0));
         let _ = panel.update(Msg::Submit);
         let State::Ask { chat, browse, .. } = &panel.state else {
             unreachable!()
@@ -743,6 +802,116 @@ mod tests {
         assert!(matches!(browse, Browse::Idle) && panel.work.is_none());
         let texts = widgets::shot::texts(panel.view(Size::new(1920.0, 1080.0)));
         assert!(texts.contains(&msg), "{texts:?}");
+    }
+
+    fn sample_crop() -> Crop {
+        let rgba = (0..120u32)
+            .flat_map(|y| (0..240u32).flat_map(move |x| [x as u8, (y * 2) as u8, 160, 255]))
+            .collect();
+        Crop {
+            width: 240,
+            height: 120,
+            rgba,
+        }
+    }
+
+    fn panel_in(state: State) -> Panel {
+        Panel {
+            state,
+            crop: Arc::new(sample_crop()),
+            input: String::new(),
+            work: None,
+            translation: None,
+            entities: Vec::new(),
+            note: None,
+        }
+    }
+
+    const SCREEN: Size = Size::new(1000.0, 700.0);
+
+    fn not_blank(px: &[u8]) -> bool {
+        px.as_chunks::<4>().0.iter().any(|p| p[..] != px[..4])
+    }
+
+    #[test]
+    fn ask_panel_offers_the_six_presets() {
+        let crop = sample_crop();
+        let mut panel = panel_in(State::Ask {
+            thumb: image::Handle::from_rgba(crop.width, crop.height, crop.rgba.clone()),
+            setup: None,
+            chat: Chat::default(),
+            browse: Browse::Idle,
+        });
+        let _ = panel.update(Msg::Ready(Ok(Arc::new(ask::tests::browser_setup()))));
+        let texts = widgets::shot::texts(panel.view(SCREEN));
+        for preset in PRESETS {
+            assert!(texts.iter().any(|t| t == preset.label), "{texts:?}");
+        }
+        assert!(not_blank(&widgets::shot::save(
+            "panel-ask-presets",
+            panel.view(SCREEN),
+            SCREEN
+        )));
+        // Once a question was asked the suggestions are gone.
+        let State::Ask { chat, .. } = &mut panel.state else {
+            unreachable!()
+        };
+        chat.ask("Explain", &[]);
+        let texts = widgets::shot::texts(panel.view(SCREEN));
+        assert!(!texts.iter().any(|t| t == "Fact-check"), "{texts:?}");
+    }
+
+    fn text_panel(text: &str) -> Panel {
+        let mut panel = panel_in(State::Text(Reading::Busy));
+        let _ = panel.update(Msg::Read(Ok(text.into())));
+        panel
+    }
+
+    const SAMPLE: &str = "Order #2026102412 shipped\n\
+        Questions? Call +1 (555) 123-4567 or write to help@shop.example.\n\
+        Track it: https://shop.example/track/4412. Total $1,299.99 on 2026-10-24.";
+
+    #[test]
+    fn text_panel_shows_chips_for_links_emails_and_numbers_only() {
+        let mut panel = text_panel(SAMPLE);
+        let kinds: Vec<_> = panel.entities.iter().map(|e| e.kind).collect();
+        assert_eq!(kinds, [Kind::Link, Kind::Email, Kind::Phone]);
+        let texts = widgets::shot::texts(panel.view(SCREEN));
+        for chip in [
+            "Open link: shop.example/track/4412",
+            "Write email: help@shop.example",
+            "Copy number: +1 (555) 123-4567",
+        ] {
+            assert!(texts.iter().any(|t| t == chip), "{chip}: {texts:?}");
+        }
+        assert!(
+            !texts
+                .iter()
+                .any(|t| t.contains("1,299.99") && t.contains(": "))
+        );
+        // Reading the text does nothing with the chips: no click, no action, no note.
+        assert!(panel.note.is_none());
+        assert!(not_blank(&widgets::shot::save(
+            "panel-text-chips",
+            panel.view(SCREEN),
+            SCREEN
+        )));
+
+        // Editing the text updates the chips.
+        let paste = text_editor::Edit::Paste(Arc::new("new@site.io ".into()));
+        let _ = panel.update(Msg::Edit(text_editor::Action::Edit(paste)));
+        assert!(panel.entities.iter().any(|e| e.text == "new@site.io"));
+        // A click outside the list does nothing.
+        let _ = panel.update(Msg::Chip(99));
+        assert!(panel.note.is_none());
+    }
+
+    #[test]
+    fn text_without_entities_has_no_chips() {
+        let panel = text_panel("Just some words, 3.50 and e.g. a note");
+        assert!(panel.entities.is_empty());
+        let texts = widgets::shot::texts(panel.view(SCREEN));
+        assert!(!texts.iter().any(|t| t.starts_with("Open link")));
     }
 
     #[test]

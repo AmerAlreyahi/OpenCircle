@@ -29,7 +29,7 @@ use iced::widget::{canvas, container, image, space, stack};
 use iced::window::{self, Level, Mode};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
-use crate::actions::{self, Action, Crop, Run, copy, lens, save, text};
+use crate::actions::{self, Action, Crop, Run, copy, lens, qr, save, text};
 use crate::config::{self, QuickAction, Target};
 use crate::editor::{self, Output};
 use crate::translate::pipeline::Cache;
@@ -39,6 +39,8 @@ use quick::{Quick, Start};
 use snip::Snip;
 
 const HINT: &str = "Circle, drag or tap anything · Esc to close";
+/// Shown over a selection that came out black (DRM / protected windows).
+const PROTECTED: &str = "This window is protected; it can't be captured";
 
 /// Handed from `run` to the subscription (a subscription builder can't capture).
 static TRIGGERS: Mutex<Option<UnboundedReceiver<Trigger>>> = Mutex::new(None);
@@ -94,6 +96,10 @@ enum Message {
     TextRead(Result<String, String>),
     /// The toast has been shown long enough.
     ToastDone,
+    /// The selection with this area was scanned (a stale area is ignored).
+    Scanned(Rectangle, qr::Scan),
+    /// The QR chip's Copy / Open link.
+    Qr(qr::Act),
     /// From the translate session with this number (stale numbers are ignored).
     Translate(u32, translate::Msg),
     /// Alt went down / up (peek at the original under a translation).
@@ -178,6 +184,8 @@ struct App {
     regions: Vec<(Point, Rectangle)>,
     /// A short status over the frame (copy text).
     toast: Option<&'static str>,
+    /// What the current selection holds (QR code, protected capture); `None` until scanned.
+    scan: Option<qr::Scan>,
     /// Translate in place on this overlay, and its number.
     translate: Option<(u32, translate::Session)>,
     translates: u32,
@@ -222,6 +230,7 @@ impl App {
             origin: Point::ORIGIN,
             regions: Vec::new(),
             toast: None,
+            scan: None,
             translate: None,
             translates: 0,
             cache: Arc::new(Cache::new(CACHE_SIZE)),
@@ -304,6 +313,13 @@ impl App {
                 .map(|()| Message::ToastDone)
             }
             Message::TextRead(_) => Task::none(), // closed meanwhile
+            Message::Scanned(area, scan) => {
+                if self.selection.map(|s| s.area) == Some(area) {
+                    self.scan = Some(scan);
+                }
+                Task::none()
+            }
+            Message::Qr(act) => self.on_qr(act),
             Message::ToastDone if self.toast.is_some() => self.close(),
             Message::ToastDone => Task::none(),
             Message::Panel(id, msg) => self.on_panel(id, msg),
@@ -491,6 +507,7 @@ impl App {
                 // A new selection: the panel and the edits were about the old one.
                 self.panel = None;
                 self.edit = None;
+                self.scan = None;
                 self.stroke = vec![p];
                 self.selection = None;
                 self.drawing = true;
@@ -528,6 +545,7 @@ impl App {
                         let quick = *quick;
                         return self.run_quick(quick);
                     }
+                    Purpose::Search if let Some(area) = area => return self.scan(area),
                     _ if area.is_none() => self.stroke.clear(),
                     _ => {}
                 }
@@ -543,6 +561,53 @@ impl App {
             overlay::Event::Enter | overlay::Event::Key { .. } => {}
         }
         Task::none()
+    }
+
+    /// Scans the new selection for a QR code and a black (protected) capture, on a
+    /// thread; the result comes back as `Scanned` and is dropped if the selection moved on.
+    fn scan(&mut self, area: Rectangle) -> Task<Message> {
+        let Some(crop) = self.crop() else {
+            return Task::none();
+        };
+        background(move |tx| {
+            let _ = tx.unbounded_send(qr::scan(&crop));
+        })
+        .map(move |scan| Message::Scanned(area, scan))
+    }
+
+    /// The QR chip was clicked: copy its text, or open it (a link, on this click only).
+    fn on_qr(&mut self, act: qr::Act) -> Task<Message> {
+        let Some(text) = self.scan.as_ref().and_then(|s| s.qr.clone()) else {
+            return Task::none();
+        };
+        let failed = |e: String| {
+            eprintln!("QR chip failed: {e}");
+            "That didn't work"
+        };
+        match act {
+            qr::Act::Copy => {
+                let message = copy::text(text).map_or_else(failed, |()| "QR text copied");
+                self.toast_then_close(message)
+            }
+            qr::Act::Open => match qr::web_url(&text).map(crate::lens::open_link) {
+                Some(Ok(())) => self.close(), // the browser has the screen now
+                Some(Err(e)) => {
+                    let message = failed(e.to_string());
+                    self.toast_then_close(message)
+                }
+                None => Task::none(),
+            },
+        }
+    }
+
+    /// Shows `message` over the frame for a moment, then closes the overlay.
+    fn toast_then_close(&mut self, message: &'static str) -> Task<Message> {
+        self.toast = Some(message);
+        background(|tx| {
+            std::thread::sleep(Duration::from_millis(900));
+            let _ = tx.unbounded_send(());
+        })
+        .map(|()| Message::ToastDone)
     }
 
     /// Makes `area` the selection, drawn as a dragged rectangle.
@@ -610,7 +675,11 @@ impl App {
                 .map(Message::TextRead)
             }
             Quick::Explain => match self.crop() {
-                Some(crop) => self.open_panel(actions::Panel::Ask, crop, Some("Explain".into())),
+                Some(crop) => self.open_panel(
+                    actions::Panel::Ask,
+                    crop,
+                    Some(actions::ask::PRESETS[0].text(&config::current().translate.target)),
+                ),
                 None => Task::none(),
             },
         }
@@ -884,6 +953,7 @@ impl App {
         self.purpose = Purpose::Search;
         self.edit = None;
         self.toast = None;
+        self.scan = None;
         self.translate = None;
         self.hiding = Hiding::Empty;
         Task::none()
@@ -1075,7 +1145,17 @@ impl App {
             snip.view().map(Message::Snip)
         } else if let Some(selection) = self.selection {
             match self.purpose {
-                Purpose::Search => bar::view(selection.area, self.screen, Message::Run),
+                Purpose::Search => {
+                    let chip = self
+                        .scan
+                        .as_ref()
+                        .and_then(|s| s.qr.as_deref())
+                        .map(|text| {
+                            let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
+                            bar::qr_chip(text, Message::Qr(qr::Act::Copy), open)
+                        });
+                    bar::view(selection.area, self.screen, chip, Message::Run)
+                }
                 _ => space().into(),
             }
         } else {
@@ -1084,7 +1164,16 @@ impl App {
                 .padding(24)
                 .into()
         };
-        layers.push(top).into()
+        layers = layers.push(top);
+        // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
+        if self.selection.is_some() && self.scan.as_ref().is_some_and(|s| s.protected) {
+            layers = layers.push(
+                container(widgets::pill(PROTECTED))
+                    .center_x(Fill)
+                    .padding(24),
+            );
+        }
+        layers.into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -1187,6 +1276,7 @@ mod tests {
             origin: Point::ORIGIN,
             regions: Vec::new(),
             toast: None,
+            scan: None,
             translate: None,
             translates: 0,
             cache: Arc::new(Cache::new(8)),
@@ -1236,5 +1326,97 @@ mod tests {
         let _ = app.update(Message::Translate(7, translate::Msg::Close));
         assert!(app.translate.is_none() && app.frame.is_none());
         assert_eq!(app.hiding, Hiding::Empty);
+    }
+
+    /// An open overlay over `frame` with all of it selected (nothing scanned yet).
+    fn selected_app(frame: &Crop) -> (App, Rectangle) {
+        let mut app = closing_app();
+        let area = Rectangle::with_size(Size::new(frame.width as f32, frame.height as f32));
+        app.frame = Some(image::Handle::from_rgba(
+            frame.width,
+            frame.height,
+            frame.rgba.clone(),
+        ));
+        app.hiding = Hiding::No;
+        app.screen = area.size();
+        app.selection = Some(overlay::Selection { area, drag: true });
+        (app, area)
+    }
+
+    fn overlay_texts(app: &App) -> Vec<String> {
+        widgets::shot::texts(app.view(app.overlay))
+    }
+
+    #[test]
+    fn a_qr_code_in_the_selection_gets_a_chip_and_nothing_opens() {
+        // A code (selected) on the right of a wider grey screen.
+        let code = qr::tests::qr_crop("https://example.com/menu", 5, 0);
+        let mut frame = Crop {
+            width: 1200,
+            height: 600,
+            rgba: [140, 140, 140, 255].repeat(1200 * 600),
+        };
+        for y in 0..code.height as usize {
+            let from = y * code.width as usize * 4;
+            let to = ((y + 20) * 1200 + 700) * 4;
+            let row = code.width as usize * 4;
+            frame.rgba[to..to + row].copy_from_slice(&code.rgba[from..from + row]);
+        }
+        let (mut app, _) = selected_app(&frame);
+        let area = Rectangle::new(
+            Point::new(700.0, 20.0),
+            Size::new(code.width as f32, code.height as f32),
+        );
+        app.selection = Some(overlay::Selection { area, drag: true });
+        // The scan of a selection that has since moved on is dropped.
+        let moved = Rectangle::with_size(area.size() * 0.5);
+        let _ = app.update(Message::Scanned(moved, qr::scan(&frame)));
+        assert!(app.scan.is_none());
+        assert!(!overlay_texts(&app).iter().any(|t| t.starts_with("QR code")));
+
+        let scan = qr::scan(&app.crop().unwrap());
+        let _ = app.update(Message::Scanned(area, scan));
+        let texts = overlay_texts(&app);
+        assert!(
+            texts.contains(&"QR code: https://example.com/menu".into()),
+            "{texts:?}"
+        );
+        assert!(texts.contains(&"Open link".into()));
+        assert!(
+            app.toast.is_none() && app.frame.is_some(),
+            "nothing happened by itself"
+        );
+        let size = app.screen;
+        widgets::shot::save("overlay-qr-chip", app.view(app.overlay), size);
+
+        // A new press forgets the old code.
+        let _ = app.update(Message::Overlay(overlay::Event::Press(Point::new(
+            5.0, 5.0,
+        ))));
+        assert!(app.scan.is_none());
+    }
+
+    #[test]
+    fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
+        let black = Crop {
+            width: 600,
+            height: 360,
+            rgba: [0, 0, 0, 255].repeat(600 * 360),
+        };
+        let (mut app, area) = selected_app(&black);
+        assert!(!overlay_texts(&app).contains(&PROTECTED.to_string()));
+        let _ = app.update(Message::Scanned(area, qr::scan(&app.crop().unwrap())));
+        let texts = overlay_texts(&app);
+        assert!(texts.contains(&PROTECTED.to_string()), "{texts:?}");
+        assert!(texts.contains(&"Copy".to_string()) && texts.contains(&"Text".to_string()));
+        widgets::shot::save("overlay-protected", app.view(app.overlay), area.size());
+        // An ordinary capture shows no such pill.
+        let grey = Crop {
+            rgba: [90, 90, 90, 255].repeat(600 * 360),
+            ..black
+        };
+        let (mut app, area) = selected_app(&grey);
+        let _ = app.update(Message::Scanned(area, qr::scan(&app.crop().unwrap())));
+        assert!(!overlay_texts(&app).contains(&PROTECTED.to_string()));
     }
 }

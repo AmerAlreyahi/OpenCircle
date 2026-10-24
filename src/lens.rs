@@ -291,6 +291,34 @@ pub fn open_url(url: &str) -> io::Result<()> {
     spawn(std::ffi::OsStr::new(url))
 }
 
+/// Whether `url` is one plain http(s) link: ASCII only, no spaces or control
+/// bytes, something after the scheme.
+pub fn is_web_url(url: &str) -> bool {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"));
+    rest.is_some_and(|r| r.starts_with(|c: char| c.is_ascii_alphanumeric()))
+        && url.bytes().all(|b| b.is_ascii_graphic())
+}
+
+/// Open a link the user clicked (Text panel chip, QR chip) in the default
+/// browser. Only http(s): never a file, a script or another app's scheme.
+pub fn open_link(url: &str) -> io::Result<()> {
+    if !is_web_url(url) {
+        return Err(bad("only http(s) links can be opened"));
+    }
+    spawn(std::ffi::OsStr::new(url))
+}
+
+/// Open a new message to `address` (the Text panel's email chip) in the default
+/// mail app. `address` must be a plain address: no `?subject=` or other headers.
+pub fn open_mailto(address: &str) -> io::Result<()> {
+    if !crate::actions::entities::is_email(address) {
+        return Err(bad("not an email address"));
+    }
+    spawn(std::ffi::OsStr::new(&format!("mailto:{address}")))
+}
+
 fn spawn(target: &std::ffi::OsStr) -> io::Result<()> {
     // Debug builds only: tests and manual runs point this at a script that
     // gets the target as its one argument, so no real browser opens.
@@ -301,21 +329,26 @@ fn spawn(target: &std::ffi::OsStr) -> io::Result<()> {
     if let Some(program) = test_browser {
         return reap(Command::new(program).arg(target));
     }
+    reap(&mut launcher(target))
+}
+
+/// The OS command that opens `target` in the default app. `target` is its one
+/// argument: no shell, so nothing in it can be read as an option or a command.
+fn launcher(target: &std::ffi::OsStr) -> Command {
     #[cfg(windows)]
-    let mut cmd = {
+    {
         use std::os::windows::process::CommandExt;
         let mut c = Command::new("rundll32");
         c.arg("url.dll,FileProtocolHandler").arg(target);
         c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         c
-    };
+    }
     #[cfg(not(windows))]
-    let mut cmd = {
+    {
         let mut c = Command::new("xdg-open");
         c.arg(target);
         c
-    };
-    reap(&mut cmd)
+    }
 }
 
 fn reap(cmd: &mut Command) -> io::Result<()> {
@@ -462,6 +495,66 @@ mod tests {
     #[test]
     fn launch_rejects_relative_path() {
         assert!(launch(Path::new("-x.html")).is_err());
+    }
+
+    #[test]
+    fn open_link_takes_only_plain_http_urls() {
+        for ok in [
+            "https://example.com",
+            "http://example.com/a?b=c&d=e#f",
+            "https://192.168.0.1:8080/x",
+        ] {
+            assert!(is_web_url(ok), "{ok:?}");
+        }
+        for bad in [
+            "ftp://example.com",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "mailto:a@b.com",
+            "data:text/html,x",
+            "HTTPS://example.com", // callers pass the normalised, lower-case scheme
+            "https://",
+            "https:// example.com",
+            "https://exa mple.com",
+            "https://example.com/a\nb",
+            "https://example.com/\u{645}",
+            "-x",
+            "--help",
+            "https:///etc",
+            "",
+        ] {
+            assert!(!is_web_url(bad), "{bad:?}");
+            assert!(open_link(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn mailto_takes_only_a_plain_address() {
+        for bad in [
+            "a@b.com?cc=c@d.com",
+            "a b@c.com",
+            "-oProxyCommand=x",
+            "a@b",
+            "",
+        ] {
+            assert!(open_mailto(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_launcher_gets_the_target_as_its_one_argument() {
+        // No shell: a hostile-looking link stays one argv entry.
+        let target = "https://example.com/a b;rm -rf x&y|z$(id)";
+        let cmd = launcher(std::ffi::OsStr::new(target));
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args.last().copied(), Some(std::ffi::OsStr::new(target)));
+        #[cfg(not(windows))]
+        {
+            assert_eq!(cmd.get_program(), "xdg-open");
+            assert_eq!(args.len(), 1);
+        }
+        #[cfg(windows)]
+        assert_eq!(args.len(), 2); // "url.dll,FileProtocolHandler" + target
     }
 
     #[test]

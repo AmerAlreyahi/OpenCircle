@@ -136,7 +136,10 @@ pub fn error<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
 }
 
 /// A suggestion (e.g. a prompt): small, fully rounded, outlined, quiet.
-pub fn chip<'a, Message: Clone + 'a>(label: &'a str, on_press: Message) -> Button<'a, Message> {
+pub fn chip<'a, Message: Clone + 'a>(
+    label: impl IntoFragment<'a>,
+    on_press: Message,
+) -> Button<'a, Message> {
     let palette = theme::current();
     button(text(label).size(13).color(palette.text))
         .padding([8, 14])

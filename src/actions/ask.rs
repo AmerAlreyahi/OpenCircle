@@ -24,6 +24,53 @@ const SYSTEM: &str = "The image is part of the user's screen that they selected.
 Answer their questions about it briefly and plainly, in the language they write in. \
 Use plain text, no Markdown.";
 
+/// A suggested question: a chip in the Ask panel. ONE list for every provider: the
+/// API providers send `prompt` with the picture, the browser provider puts it in
+/// front of the text read from the selection.
+#[derive(Debug, Clone, Copy)]
+pub struct Preset {
+    pub label: &'static str,
+    /// `{lang}` = the translate target's language code (Settings).
+    pub prompt: &'static str,
+}
+
+impl Preset {
+    /// The question to ask, for translate target `lang`.
+    pub fn text(&self, lang: &str) -> String {
+        self.prompt.replace("{lang}", lang)
+    }
+}
+
+/// The first one is what the Explain quick action asks.
+pub const PRESETS: [Preset; 6] = [
+    Preset {
+        label: "Explain",
+        prompt: "Explain what this is and what it means, in simple words.",
+    },
+    Preset {
+        label: "Summarize",
+        prompt: "Summarize this in a few short points.",
+    },
+    Preset {
+        label: "Is this a scam?",
+        prompt: "Could this be a scam or phishing? Point out any warning signs, \
+                 and tell me what to do.",
+    },
+    Preset {
+        label: "Fact-check",
+        prompt: "Fact-check this. Which claims hold up, which do not, \
+                 and how can I verify them?",
+    },
+    Preset {
+        label: "Solve step by step",
+        prompt: "Solve this step by step, then give the final answer.",
+    },
+    Preset {
+        label: "Translate",
+        prompt: "Translate all the text here into the language with the code \"{lang}\".",
+    },
+];
+
 /// What a chat needs: the provider settings, its key and the crop as PNG.
 pub struct Setup {
     pub cfg: AiConfig,
@@ -263,6 +310,33 @@ pub(crate) mod tests {
     use std::net::TcpListener;
 
     #[test]
+    fn presets_are_the_six_suggestions_in_order() {
+        let labels: Vec<_> = PRESETS.iter().map(|p| p.label).collect();
+        assert_eq!(
+            labels,
+            [
+                "Explain",
+                "Summarize",
+                "Is this a scam?",
+                "Fact-check",
+                "Solve step by step",
+                "Translate"
+            ]
+        );
+        for (i, p) in PRESETS.iter().enumerate() {
+            assert!(p.prompt.len() > p.label.len(), "{}", p.label);
+            assert!(!p.text("ar").contains("{lang}"), "{}", p.label);
+            assert!(PRESETS[i + 1..].iter().all(|q| q.label != p.label));
+        }
+        // Only Translate names a language, and it gets the configured one.
+        assert!(PRESETS[5].text("pt-BR").contains("\"pt-BR\""));
+        assert_eq!(PRESETS[0].text("ar"), PRESETS[0].prompt);
+        // The browser provider puts the same text in front of the selection's text.
+        let q = ai::browser::question(&PRESETS[2].text("ar"), Some("You won! Pay now"));
+        assert!(q.starts_with("Could this be a scam") && q.ends_with("Pay now"));
+    }
+
+    #[test]
     fn chat_goes_idle_streaming_done() {
         let mut chat = Chat::default();
         assert_eq!(chat.status, Status::Idle);
@@ -481,6 +555,23 @@ pub(crate) mod tests {
         );
         unsafe { std::env::remove_var("OPENCIRCLE_TEST_BROWSER") };
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A ready Browser-provider setup (no keyring, no config file).
+    pub(crate) fn browser_setup() -> Setup {
+        let cfg = AiConfig {
+            provider: Provider::Browser,
+            ..AiConfig::default()
+        };
+        setup_for(
+            cfg,
+            &Crop {
+                width: 1,
+                height: 1,
+                rgba: vec![0; 4],
+            },
+        )
+        .unwrap()
     }
 
     /// The message Ask AI, Explain and translate show for an unknown provider.
