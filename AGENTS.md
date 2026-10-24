@@ -120,6 +120,12 @@ production systems.
 - Customization (owner, 2026-10-24): a Look & behaviour page: selection style,
   auto-search vs wait, search target, border style per mode (Google-style rainbow
   glow / thin gradient / none, thickness, animation, colours), activation glow, dim.
+- Themes (owner, 2026-10-24): besides the app theme (Light/Dark/System), "active
+  look" themes for when the tool is over the screen (glow, border, dim, brackets,
+  bar style, accent), several presets (Google-like multi-colour default) + custom.
+- Song search (owner, 2026-10-24): add Circle to Search's music button: identify
+  the song playing (system audio or mic) only on press; local fingerprint, free
+  lookup (AcoustID/MusicBrainz); audio never leaves the PC; history off by default.
 - Results sheet (owner, 2026-10-24): explore a slide-up sheet showing Google's own
   page (Lens / AI Mode) in the system web view (WebView2 / WebKitGTK), loaded only
   while open; no scraping, no copying Google's UI.
