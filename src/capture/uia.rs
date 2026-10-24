@@ -14,7 +14,7 @@ const MAX: i32 = 4000;
 /// call it off the UI thread.
 pub fn controls(hwnd: isize) -> Vec<(WinRect, String)> {
     platform(hwnd).unwrap_or_else(|e| {
-        eprintln!("[opencircle] UI Automation unavailable: {e}");
+        eprintln!("[opencircle] no controls read from a window (UI Automation: {e})");
         Vec::new()
     })
 }

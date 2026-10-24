@@ -1751,10 +1751,19 @@ impl App {
     /// Shrinks the overlay to the pill at the top of the monitor (no focus taken).
     fn pill_at_top(&self) -> Task<Message> {
         let x = (self.screen.width - snip::PILL.width) / 2.0;
-        let at = self.origin + Vector::new(x.max(0.0), ASK_MARGIN);
+        self.pill_window(Point::new(x.max(0.0), ASK_MARGIN))
+    }
+
+    /// THE one way Snip's pills (toast, timer, scrolling progress) become a
+    /// window: the overlay shrunk to `snip::PILL` at `at` (logical px on this
+    /// monitor). Switch it to the shared floating-window helper when it lands.
+    fn pill_window(&self, at: Point) -> Task<Message> {
         window::set_mode(self.overlay, Mode::Windowed)
             .chain(window::resize(self.overlay, snip::PILL))
-            .chain(window::move_to(self.overlay, at))
+            .chain(window::move_to(
+                self.overlay,
+                self.origin + Vector::new(at.x, at.y),
+            ))
     }
 
     /// Snip's slow extras, on threads: the Recent strip, and (Windows) the
@@ -1877,10 +1886,7 @@ impl App {
         // ponytail: an area as tall as the screen leaves the pill over its bottom
         // edge (in the frames); the stitcher drops it like a sticky footer.
         let at = bar::place(area, snip::PILL, self.screen);
-        let pill = self.origin + Vector::new(at.x, at.y);
-        window::set_mode(self.overlay, Mode::Windowed)
-            .chain(window::resize(self.overlay, snip::PILL))
-            .chain(window::move_to(self.overlay, pill))
+        self.pill_window(at)
             .chain(window::gain_focus(self.overlay))
             .chain(work)
     }
