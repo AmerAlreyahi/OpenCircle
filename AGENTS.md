@@ -113,8 +113,16 @@ production systems.
   CI + the local gate are green (and Windows-tested when it touches the UI).
 - Progress tracking (owner, 2026-10-23): no GitHub Projects board for this repo;
   progress lives in the handover file only.
-- Selection look (owner, 2026-10-23): the clear area follows the drawn shape
-  (no snap-to-box).
+- Selection look (owner, 2026-10-24, supersedes 2026-10-23): like Google by
+  default: the drawn circle snaps to a rounded box with corner brackets and the
+  search runs automatically; "keep the drawn shape" and "wait for me" are options
+  in Settings > Look & behaviour.
+- Customization (owner, 2026-10-24): a Look & behaviour page: selection style,
+  auto-search vs wait, search target, border style per mode (Google-style rainbow
+  glow / thin gradient / none, thickness, animation, colours), activation glow, dim.
+- Results sheet (owner, 2026-10-24): explore a slide-up sheet showing Google's own
+  page (Lens / AI Mode) in the system web view (WebView2 / WebKitGTK), loaded only
+  while open; no scraping, no copying Google's UI.
 - Translate default target (owner, 2026-10-23): Arabic, changeable in settings.
 - No-key AI (owner, 2026-10-24): until a key is set, Ask AI opens the question
   (prompt + the selection's text) in Google Search AI Mode in the user's own
