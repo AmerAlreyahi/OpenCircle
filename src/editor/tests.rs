@@ -185,23 +185,21 @@ fn blur_changes_only_its_stroke() {
 
 /// A password field: `secret` in dark text on an off-white field.
 fn field(secret: &str) -> Image {
+    field_in(secret, [250, 250, 250, 255], [20, 20, 30, 255])
+}
+
+/// `secret` in `fg` text on a `bg` field.
+fn field_in(secret: &str, bg: [u8; 4], fg: [u8; 4]) -> Image {
     let (w, h) = (240, 40);
     let mut layer = document::Layer {
         pm: tiny_skia::Pixmap::from_vec(
-            image_of(w, h, |_, _| [250, 250, 250, 255]).rgba,
+            image_of(w, h, |_, _| bg).rgba,
             tiny_skia::IntSize::from_wh(w, h).unwrap(),
         )
         .unwrap(),
         origin: Point::ORIGIN,
     };
-    text::paint(
-        &mut layer,
-        pt(8.0, 8.0),
-        secret,
-        20.0,
-        [20, 20, 30, 255],
-        false,
-    );
+    text::paint(&mut layer, pt(8.0, 8.0), secret, 20.0, fg, false);
     Image {
         width: w,
         height: h,
@@ -213,42 +211,49 @@ fn luma(p: [u8; 4]) -> u32 {
     (p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8
 }
 
+fn pxi(i: &Image, x: u32, y: u32) -> [u8; 4] {
+    let k = ((y * i.width + x) * 4) as usize;
+    i.rgba[k..k + 4].try_into().unwrap()
+}
+
+/// `image` with a blur brush over its line `band` (as line assist does).
+fn brushed(image: Image, band: lines::Band, seed: u64) -> Image {
+    let (w, h) = (image.width, image.height);
+    let mut layer = document::Layer {
+        pm: tiny_skia::Pixmap::from_vec(image.rgba, tiny_skia::IntSize::from_wh(w, h).unwrap())
+            .unwrap(),
+        origin: Point::ORIGIN,
+    };
+    let stroke = [pt(8.0, band.centre()), pt(w as f32 - 8.0, band.centre())];
+    blur::paint(&mut layer, &stroke, band.brush(), seed);
+    Image {
+        width: w,
+        height: h,
+        rgba: layer.pm.take(),
+    }
+}
+
+/// The whole line, x 10..230, where the brush is at full strength.
+fn core_of(band: lines::Band) -> Vec<(u32, u32)> {
+    (band.y0 as u32..band.y1.ceil() as u32)
+        .flat_map(|y| (10..230).map(move |x| (x, y)))
+        .collect()
+}
+
 #[test]
 fn blur_brush_destroys_the_text_it_hides() {
-    // The line under the brush, found by line assist; the brush fits it.
-    let bands = lines::detect(&field("hunter2"));
-    assert_eq!(bands.len(), 1, "{bands:?}");
-    let band = bands[0];
-    let size = band.brush();
-    let stroke = vec![pt(8.0, band.centre()), pt(232.0, band.centre())];
-    let blurred = |secret: &str, seed| {
-        let blur = item(Shape::Blur {
-            points: stroke.clone(),
-            size,
-            seed,
-        });
-        render(&doc_with(field(secret), vec![blur]))
-    };
-    // The core: the whole line, where the brush is at full strength.
-    let (y0, y1) = (band.y0 as u32, band.y1.ceil() as u32);
-    let core: Vec<(u32, u32)> = (y0..y1)
-        .flat_map(|y| (10..230).map(move |x| (x, y)))
-        .collect();
-
-    // Strong enough to erase glyph shapes: sigma >= 0.6 x the line height.
-    let r = blur::radius(size) as f32;
-    assert!((r * (r + 1.0)).sqrt() >= 0.6 * band.height());
-
-    // No ink survives: every text pixel is replaced, nothing dark is left.
     let original = field("hunter2");
-    let raw = |x: u32, y: u32| -> [u8; 4] {
-        let i = ((y * 240 + x) * 4) as usize;
-        original.rgba[i..i + 4].try_into().unwrap()
+    let band = lines::detect(&original)[0];
+    let core = core_of(band);
+    let out = brushed(field("hunter2"), band, 1);
+    let at = |i: &Image, x: u32, y: u32| -> [u8; 4] {
+        let k = ((y * 240 + x) * 4) as usize;
+        i.rgba[k..k + 4].try_into().unwrap()
     };
-    let out = blurred("hunter2", 1);
+    // No ink survives: nothing dark is left, every text pixel is replaced.
     let mut ink = 0;
     for &(x, y) in &core {
-        let (before, after) = (raw(x, y), px(&out, x, y));
+        let (before, after) = (at(&original, x, y), pxi(&out, x, y));
         assert!(luma(after) > 140, "({x}, {y}) still dark: {after:?}");
         if luma(before) < 200 {
             ink += 1;
@@ -257,125 +262,309 @@ fn blur_brush_destroys_the_text_it_hides() {
     }
     assert!(ink > 200, "the field has text: {ink}");
 
-    // Two different passwords differ less than the same password under two seeds:
-    // what is left of the text is drowned by the noise.
-    let diff = |p: &Crop, q: &Crop| -> f32 {
-        let total: u32 = core
+    // Detail removed: the glyph contrast (strokes vs gaps) is gone. Horizontal
+    // neighbour differences and the local contrast drop to a faint smear.
+    let lumas = |i: &Image| -> Vec<f32> {
+        core.iter()
+            .map(|&(x, y)| luma(pxi(i, x, y)) as f32)
+            .collect()
+    };
+    let (lo, hi) = lumas(&out)
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(l, h), &v| (l.min(v), h.max(v)));
+    let step: f32 = core
+        .iter()
+        .filter(|&&(x, _)| x < 229)
+        .map(|&(x, y)| (luma(pxi(&out, x, y)) as f32 - luma(pxi(&out, x + 1, y)) as f32).abs())
+        .sum::<f32>()
+        / core.len() as f32;
+    let step_before: f32 = core
+        .iter()
+        .filter(|&&(x, _)| x < 229)
+        .map(|&(x, y)| {
+            (luma(at(&original, x, y)) as f32 - luma(at(&original, x + 1, y)) as f32).abs()
+        })
+        .sum::<f32>()
+        / core.len() as f32;
+    eprintln!(
+        "contrast {} (before {step_before:.1} per px, after {step:.2}); span {lo}..{hi}",
+        hi - lo
+    );
+    assert!(
+        step < 0.05 * step_before && step < 1.0,
+        "detail left: {step} vs {step_before}"
+    );
+    assert!(hi - lo < 60.0, "contrast left inside the line: {lo}..{hi}");
+
+    // Two different passwords stay close to each other (only a smear is left).
+    let other = brushed(field("letmein"), band, 1);
+    let gap = core
+        .iter()
+        .map(|&(x, y)| {
+            let (a, b) = (pxi(&out, x, y), pxi(&other, x, y));
+            (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>()
+        })
+        .sum::<u32>() as f32
+        / (core.len() * 3) as f32;
+    eprintln!("different secrets differ by {gap:.2} levels");
+    assert!(gap < 8.0, "text still tells apart: {gap}");
+
+    // Candidate matching needs the text to be the main difference. It is not:
+    // two secrets under one seed differ less (mean and max) than one secret
+    // under two seeds, whatever the seeds.
+    let gaps = |p: &Image, q: &Image| -> (f32, f32) {
+        let d: Vec<u32> = core
             .iter()
             .map(|&(x, y)| {
-                let (a, b) = (px(p, x, y), px(q, x, y));
+                let (a, b) = (pxi(p, x, y), pxi(q, x, y));
                 (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>()
             })
-            .sum();
-        total as f32 / (core.len() * 3) as f32
+            .collect();
+        (
+            d.iter().sum::<u32>() as f32 / (d.len() * 3) as f32,
+            *d.iter().max().unwrap() as f32 / 3.0,
+        )
     };
-    let noise = diff(&out, &blurred("hunter2", 2));
-    let text = diff(&out, &blurred("letmein", 1));
-    assert!(noise > 4.0, "noise {noise}");
-    assert!(text < noise, "text signal {text} vs noise {noise}");
+    for seed in [1, 2, 3, 99] {
+        let (a, b) = (
+            brushed(field("hunter2"), band, seed),
+            brushed(field("letmein"), band, seed),
+        );
+        let c = brushed(field("hunter2"), band, seed + 1000);
+        let (text_mean, text_max) = gaps(&a, &b);
+        let (seed_mean, seed_max) = gaps(&a, &c);
+        eprintln!(
+            "seed {seed}: text {text_mean:.2}/{text_max:.1} vs seed {seed_mean:.2}/{seed_max:.1}"
+        );
+        assert!(text_mean < seed_mean && text_max < seed_max, "seed {seed}");
+    }
+    // Same seed, same pixels (repaints).
+    let again = brushed(field("hunter2"), band, 1);
+    assert!(again.rgba == out.rgba);
 }
 
-/// `secret` in the field, brushed over its line (as the editor does with line
-/// assist); `grain` = (cell, fine) amplitudes, `None` = the real ones.
-fn brushed(secret: &str, seed: u64, grain: Option<(f32, f32)>) -> (Image, lines::Band) {
+#[test]
+fn blur_brush_has_no_grain_a_flat_colour_stays_flat() {
+    let flat = image_of(240, 40, |_, _| [250, 250, 250, 255]);
     let band = lines::detect(&field("hunter2"))[0];
-    let mut layer = document::Layer {
+    let out = brushed(flat, band, 1);
+    // Only the smooth per-cell tone offset (+-TONE) is left; no pixel noise.
+    let core = core_of(band);
+    for &(x, y) in &core {
+        let p = pxi(&out, x, y);
+        let q = pxi(&out, x + 1, y);
+        for k in 0..3 {
+            let dev = (p[k] as f32 - 250.0).abs();
+            assert!(dev <= 1.5 * blur::TONE + 9.0, "({x}, {y}) {p:?}");
+            assert!(p[k].abs_diff(q[k]) <= 3, "({x}, {y}) {p:?} {q:?}");
+        }
+    }
+}
+
+#[test]
+fn blur_brush_leaves_no_blocks_a_gradient_stays_smooth() {
+    // A horizontal ramp, 0.5 level per px: any grid, banding or noise shows up
+    // as a jump or a changing slope.
+    let ramp = image_of(240, 40, |x, _| {
+        let v = (60.0 + x as f32 * 0.5) as u8;
+        [v, v, v, 255]
+    });
+    let band = lines::detect(&field("hunter2"))[0];
+    let out = brushed(ramp, band, 1);
+    let y = band.centre() as u32;
+    let row: Vec<i32> = (10..230).map(|x| pxi(&out, x, y)[0] as i32).collect();
+    for w in row.windows(2) {
+        assert!((w[1] - w[0]).abs() <= 3, "jump {w:?}");
+    }
+    // The per-cell tone offset is smoothed with the cells: no step, no staircase.
+    for w in row.windows(3) {
+        assert!((w[2] - 2 * w[1] + w[0]).abs() <= 2, "kink {w:?}");
+    }
+    // Vertical neighbours of the ramp are equal too: no rows or cells.
+    for x in 10..230 {
+        let col: Vec<i32> = (band.y0 as u32..band.y1 as u32)
+            .map(|y| pxi(&out, x, y)[0] as i32)
+            .collect();
+        assert!(
+            col.windows(2).all(|p| (p[0] - p[1]).abs() <= 3),
+            "x {x}: {col:?}"
+        );
+    }
+}
+
+#[test]
+fn blur_brush_many_texts_give_one_result() {
+    // Move the ink around inside every cell of the line (mirror each cell
+    // left to right): a different picture, but the same cell means, so the
+    // blur cannot tell them apart (it is many-to-one, not a function of the
+    // glyph shapes).
+    let original = field("hunter2");
+    let band = lines::detect(&original)[0];
+    let c = blur::cell(band.brush()) as u32;
+    let mut mirrored = field("hunter2");
+    for y in 0..40u32 {
+        for x0 in (0..240 - 240 % c).step_by(c as usize) {
+            for k in 0..c {
+                let (a, b) = (
+                    ((y * 240 + x0 + k) * 4) as usize,
+                    ((y * 240 + x0 + c - 1 - k) * 4) as usize,
+                );
+                mirrored.rgba[a..a + 4].copy_from_slice(&original.rgba[b..b + 4]);
+            }
+        }
+    }
+    assert_ne!(mirrored.rgba, original.rgba);
+    let (p, q) = (
+        brushed(field("hunter2"), band, 1),
+        brushed(mirrored, band, 1),
+    );
+    for &(x, y) in &core_of(band) {
+        let (a, b) = (pxi(&p, x, y), pxi(&q, x, y));
+        assert!(
+            (0..3).all(|k| a[k].abs_diff(b[k]) <= 1),
+            "({x}, {y}) {a:?} {b:?}"
+        );
+    }
+    // The far (partial) cells at the right edge are not mirrored: stay clear.
+}
+
+#[test]
+fn blur_brush_repaint_of_a_crop_gives_the_same_pixels() {
+    let full = field("hunter2");
+    let band = lines::detect(&full)[0];
+    let size = band.brush();
+    let stroke = [pt(100.0, band.centre()), pt(140.0, band.centre())];
+    let mut whole = document::Layer {
         pm: tiny_skia::Pixmap::from_vec(
-            field(secret).rgba,
+            full.rgba.clone(),
             tiny_skia::IntSize::from_wh(240, 40).unwrap(),
         )
         .unwrap(),
         origin: Point::ORIGIN,
     };
-    let stroke = [pt(8.0, band.centre()), pt(232.0, band.centre())];
-    match grain {
-        Some((cell, fine)) => blur::paint_with(&mut layer, &stroke, band.brush(), seed, cell, fine),
-        None => blur::paint(&mut layer, &stroke, band.brush(), seed),
+    blur::paint(&mut whole, &stroke, size, 1);
+    // A layer holding only what the stroke can touch (frame + reach).
+    let r = blur::frame(&stroke, size).expand(blur::reach(size));
+    let (x0, y0) = (r.x.floor().max(0.0) as u32, 0u32);
+    let (x1, y1) = (((r.x + r.width).ceil() as u32).min(240), 40u32);
+    let mut data = Vec::new();
+    for y in y0..y1 {
+        let k = ((y * 240 + x0) * 4) as usize;
+        data.extend_from_slice(&full.rgba[k..k + ((x1 - x0) * 4) as usize]);
     }
-    let image = Image {
-        width: 240,
-        height: 40,
-        rgba: layer.pm.take(),
+    let mut crop = document::Layer {
+        pm: tiny_skia::Pixmap::from_vec(
+            data,
+            tiny_skia::IntSize::from_wh(x1 - x0, y1 - y0).unwrap(),
+        )
+        .unwrap(),
+        origin: Point::new(x0 as f32, y0 as f32),
     };
-    (image, band)
+    blur::paint(&mut crop, &stroke, size, 1);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let a = &whole.pm.data()[((y * 240 + x) * 4) as usize..][..4];
+            let b = &crop.pm.data()[(((y - y0) * (x1 - x0) + x - x0) * 4) as usize..][..4];
+            assert_eq!(a, b, "({x}, {y})");
+        }
+    }
 }
 
-/// Mean brightness of each column and each row of the band (x 10..230).
-fn profiles(image: &Image, band: lines::Band) -> (Vec<f32>, Vec<f32>) {
-    let (y0, y1) = (band.y0 as u32, band.y1.ceil() as u32);
-    let at = |x: u32, y: u32| {
-        let i = ((y * 240 + x) * 4) as usize;
-        luma(image.rgba[i..i + 4].try_into().unwrap()) as f32
-    };
-    let columns = (10..230)
-        .map(|x| (y0..y1).map(|y| at(x, y)).sum::<f32>() / (y1 - y0) as f32)
-        .collect();
-    let rows = (y0..y1)
-        .map(|y| (10..230).map(|x| at(x, y)).sum::<f32>() / 220.0)
-        .collect();
-    (columns, rows)
-}
-
-fn mean_gap(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b).map(|(p, q)| (p - q).abs()).sum::<f32>() / a.len() as f32
-}
-
-const SECRETS: [(&str, &str); 3] = [
+const PAIRS: [(&str, &str); 3] = [
     ("hunter2", "letmein"),
     ("4f9a8b7c", "0d9e8f7a"),
     ("password", "qwertyui"),
 ];
+/// (background, text): grey, and two coloured fields.
+const LOOKS: [([u8; 4], [u8; 4]); 3] = [
+    ([250, 250, 250, 255], [20, 20, 30, 255]),
+    ([30, 90, 160, 255], [250, 200, 40, 255]),
+    ([200, 60, 60, 255], [20, 20, 120, 255]),
+];
 
-/// What is left of the text after the Gaussian alone, as brightness per pixel
-/// and per column average: the grain must be larger.
-#[test]
-fn blur_brush_residual_is_below_the_grain() {
-    let mut worst: f32 = 0.0;
-    for (a, b) in SECRETS {
-        let (pa, band) = brushed(a, 1, Some((0.0, 0.0)));
-        let (pb, _) = brushed(b, 1, Some((0.0, 0.0)));
-        let (ca, _) = profiles(&pa, band);
-        let (cb, _) = profiles(&pb, band);
-        let column = ca
-            .iter()
-            .zip(&cb)
-            .map(|(p, q)| (p - q).abs())
-            .fold(0.0, f32::max);
-        worst = worst.max(column);
-    }
-    eprintln!("residual text signal: max column-average gap {worst:.1} levels");
-    assert!(
-        blur::GRAIN >= 2.0 * worst,
-        "grain ±{} vs residual {worst}",
-        blur::GRAIN
-    );
+/// Mean and max (per pixel, per channel average) gap between two blurs, over the
+/// core and per channel (colour counts: a hue leak is a leak).
+fn gaps(core: &[(u32, u32)], p: &Image, q: &Image) -> (f32, f32) {
+    let d: Vec<u32> = core
+        .iter()
+        .map(|&(x, y)| {
+            let (a, b) = (pxi(p, x, y), pxi(q, x, y));
+            (0..3).map(|c| a[c].abs_diff(b[c]) as u32).sum::<u32>()
+        })
+        .collect();
+    (
+        d.iter().sum::<u32>() as f32 / (d.len() * 3) as f32,
+        *d.iter().max().unwrap() as f32 / 3.0,
+    )
 }
 
-/// An attacker averages columns (or rows) to cancel per-pixel noise. With the
-/// cell grain the averaged profiles of two different secrets differ less than
-/// those of one secret under two seeds: the text is below the noise.
+#[test]
+fn blur_brush_text_is_below_the_seed_for_grey_and_coloured_text() {
+    for (bg, fg) in LOOKS {
+        for (a, b) in PAIRS {
+            let band = lines::detect(&field_in(a, bg, fg))[0];
+            let core = core_of(band);
+            // Averaged over seeds (one seed has only a few cells to differ in).
+            let (mut text, mut seed_gap, mut text_max, mut seed_max) = (0.0, 0.0, 0.0f32, 0.0f32);
+            for seed in 1u64..=8 {
+                let pa = brushed(field_in(a, bg, fg), band, seed);
+                let pb = brushed(field_in(b, bg, fg), band, seed);
+                let pc = brushed(field_in(a, bg, fg), band, seed + 1000);
+                let (tm, tx) = gaps(&core, &pa, &pb);
+                let (sm, sx) = gaps(&core, &pa, &pc);
+                (text, seed_gap) = (text + tm / 8.0, seed_gap + sm / 8.0);
+                (text_max, seed_max) = (text_max.max(tx), seed_max.max(sx));
+            }
+            eprintln!(
+                "{a}/{b} {bg:?}: text {text:.2}/{text_max:.1} seed {seed_gap:.2}/{seed_max:.1}"
+            );
+            assert!(
+                2.0 * text < seed_gap && text_max < seed_max,
+                "{a}/{b} {bg:?}"
+            );
+        }
+    }
+}
+
+/// An attacker averages columns (or rows) of the line. The profiles of two
+/// secrets under one seed differ less than those of one secret under two seeds.
 #[test]
 fn blur_brush_column_and_row_averages_hide_the_text() {
-    for (a, b) in SECRETS {
-        let (a1, band) = brushed(a, 1, None);
-        let (b1, _) = brushed(b, 1, None);
-        let (a2, _) = brushed(a, 2, None);
-        let (ca1, ra1) = profiles(&a1, band);
-        let (cb1, rb1) = profiles(&b1, band);
-        let (ca2, ra2) = profiles(&a2, band);
-        let (text_c, noise_c) = (mean_gap(&ca1, &cb1), mean_gap(&ca1, &ca2));
-        let (text_r, noise_r) = (mean_gap(&ra1, &rb1), mean_gap(&ra1, &ra2));
-        eprintln!(
-            "{a}/{b}: columns text {text_c:.1} noise {noise_c:.1}; rows text {text_r:.1} noise {noise_r:.1}"
-        );
-        assert!(
-            2.0 * text_c < noise_c,
-            "{a}/{b} columns: {text_c} vs {noise_c}"
-        );
-        assert!(
-            2.0 * text_r < noise_r,
-            "{a}/{b} rows: {text_r} vs {noise_r}"
-        );
+    for (bg, fg) in LOOKS {
+        for (a, b) in PAIRS {
+            let band = lines::detect(&field_in(a, bg, fg))[0];
+            let (y0, y1) = (band.y0 as u32, band.y1.ceil() as u32);
+            let profiles = |i: &Image, c: usize| -> (Vec<f32>, Vec<f32>) {
+                let at = |x: u32, y: u32| pxi(i, x, y)[c] as f32;
+                (
+                    (10..230)
+                        .map(|x| (y0..y1).map(|y| at(x, y)).sum::<f32>() / (y1 - y0) as f32)
+                        .collect(),
+                    (y0..y1)
+                        .map(|y| (10..230).map(|x| at(x, y)).sum::<f32>() / 220.0)
+                        .collect(),
+                )
+            };
+            let gap = |p: &[f32], q: &[f32]| {
+                p.iter().zip(q).map(|(m, n)| (m - n).abs()).sum::<f32>() / p.len() as f32
+            };
+            for c in 0..3 {
+                let (mut tc, mut sc, mut tr, mut sr) = (0.0, 0.0, 0.0, 0.0);
+                for seed in 1u64..=6 {
+                    let pa = brushed(field_in(a, bg, fg), band, seed);
+                    let pb = brushed(field_in(b, bg, fg), band, seed);
+                    let pc = brushed(field_in(a, bg, fg), band, seed + 1000);
+                    let ((ca, ra), (cb, rb), (cc, rc)) =
+                        (profiles(&pa, c), profiles(&pb, c), profiles(&pc, c));
+                    tc += gap(&ca, &cb);
+                    sc += gap(&ca, &cc);
+                    tr += gap(&ra, &rb);
+                    sr += gap(&ra, &rc);
+                }
+                assert!(tc < sc, "{a}/{b} {bg:?} c{c} columns {tc} vs {sc}");
+                assert!(tr < sr, "{a}/{b} {bg:?} c{c} rows {tr} vs {sr}");
+            }
+        }
     }
 }
 
