@@ -65,6 +65,8 @@ pub enum Msg {
     Chip(usize),
     /// The results card started, showed or was closed.
     Sheet(sheet::Event),
+    /// The results card has drawn over this panel's place: the panel hides.
+    Covered,
     /// The results card could not open (AI Mode: the page it would have
     /// shown). The panel says so and offers "Open in browser".
     FellBack(Option<String>),
@@ -283,7 +285,16 @@ impl Panel {
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match (&mut self.state, msg) {
             (_, Msg::Sheet(sheet::Event::Started(guard))) => self.sheet.guard = Some(guard),
-            (_, Msg::Sheet(sheet::Event::Shown)) => self.sheet.shown = true,
+            // The card's window is up but needs a moment to draw (seen on the
+            // Windows VM: one frame of neither): the panel stays under it until then.
+            // ponytail: a fixed wait; the helper saying "drawn" would be exact.
+            (_, Msg::Sheet(sheet::Event::Shown)) => {
+                return background(|tx| {
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                    let _ = tx.unbounded_send(Msg::Covered);
+                });
+            }
+            (_, Msg::Covered) => self.sheet.shown = true,
             // Lens in the browser instead (Google's human check): the usual page.
             (_, Msg::Sheet(sheet::Event::ToBrowser)) => {
                 let crop = self.crop.clone();
@@ -1095,6 +1106,8 @@ mod tests {
         let shows = |p: &Panel| !widgets::shot::texts(p.view(at(SCREEN), SCREEN, false)).is_empty();
         assert!(shows(&panel), "while the card starts: Opening…");
         let _ = panel.update(Msg::Sheet(sheet::Event::Shown));
+        assert!(shows(&panel), "under the card until it has drawn");
+        let _ = panel.update(Msg::Covered);
         assert!(!shows(&panel), "the card is in the panel's place");
         let _ = panel.update(Msg::Sheet(sheet::Event::Closed));
         // (Closed answers with Msg::Cancel: the App drops the panel.)
@@ -1141,6 +1154,7 @@ mod tests {
         }
         // Shown: Google's card is in that place; the panel draws nothing.
         let _ = ask.update(Msg::Sheet(sheet::Event::Shown));
+        let _ = ask.update(Msg::Covered);
         assert!(texts(&ask).is_empty());
     }
 

@@ -426,7 +426,7 @@ fn ai(state: &State) -> Element<'_, Message> {
     .width(FORM_WIDTH + 40.0);
     if state.choice == Choice::Browser {
         col = col.push(caption(
-            "No key needed. Your question opens in Google AI Mode in your browser, \
+            "No key needed. Your question opens in Google AI Mode in OpenCircle's results card, \
              only when you send it.",
         ));
     } else if state.choice.local() {
@@ -467,7 +467,9 @@ fn done(state: &State) -> Element<'_, Message> {
         Choice::Skip if state.base.ai.provider != Provider::Browser => {
             "AI: not set up yet".to_string()
         }
-        Choice::Skip | Choice::Browser => "AI: Google AI Mode in your browser".to_string(),
+        Choice::Skip | Choice::Browser => {
+            "AI: Google AI Mode in OpenCircle's results card".to_string()
+        }
         c if c.local() => format!("AI: {c}"),
         c if *state.key.status() == KeyStatus::Saved => format!("AI: {c}, key saved"),
         c => format!("AI: {c}, no key yet"),
