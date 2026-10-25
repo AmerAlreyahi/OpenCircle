@@ -258,11 +258,9 @@ production systems.
 - Copy = image only (owner, 2026-10-25, supersedes "image + OCR text"): copying a
   capture puts only the picture on the clipboard; text is copied only via text
   selection / Copy text.
-- Release numbering (owner, 2026-10-25): v0.1.1 = hotfix (snip Ctrl+C + image-only
-  copy). The planned themes move up one: v0.1.2 Linux round + animations/smoothness,
-  v0.1.3 speed/lightness + the snip redesign (editor toolbar replaces the snip
-  controls, timer only in Settings, scrolling capture in the editor and fixed),
-  v0.1.4 maturity.
+- Snip fixes wait (owner, 2026-10-25): no hotfix; snip Ctrl+C, image-only copy and the
+  snip redesign (editor toolbar replaces the snip controls, timer only in Settings,
+  scrolling capture in the editor and fixed) all go with the snip work in v0.1.2.
 - Settings (owner, 2026-10-25, future): changes save automatically (no Save
   button); the widget theme (Frost/Graphite, glass) styles the Settings window too.
 - About page (owner, 2026-10-25): app info, model/library notices, and a developer
