@@ -7,7 +7,7 @@ Every network action is something you start.
 
 | When you... | What is sent | To whom |
 |---|---|---|
-| Search (runs by itself after a selection, or with `Enter` in the question field) | The selected area, as an image | Google Lens, from your own browser. OpenCircle writes a small local web page that holds the image and submits it to Lens when your browser opens it. No image-hosting service is involved. |
+| Search (runs by itself after a selection, or with `Enter` in the question field) | The selected area, as an image | Google Lens, inside OpenCircle's results card (your browser only if you press Open in browser). The image goes straight from your PC to Lens; no image-hosting service is involved. |
 | Press **Send** in Ask AI / Explain, with the default **Google AI Mode (no key)** | Your question and the text read from your selection (text only; the screenshot is not uploaded unless you choose Lens) | Google, from OpenCircle's results card, which loads AI Mode with the question in the address. The browser is used only if you press **Open in browser**. If you decline the one-time text reader download, only your prompt is sent. |
 | Ask AI / Explain, with an API provider | The selected area and your questions | The AI provider you configured (or your local server) |
 | Translate with AI | The text read from the screen (text only, not the image) | The AI provider you configured |
