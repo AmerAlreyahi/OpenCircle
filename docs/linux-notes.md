@@ -6,6 +6,20 @@ works on X11 and Wayland with the limits below.
 OpenCircle runs on X11 and on Wayland. Wayland restricts what any app may do,
 so a few things work differently.
 
+## Install in one command
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AmerAlreyahi/OpenCircle/main/scripts/install.sh | sh
+```
+
+[`scripts/install.sh`](../scripts/install.sh) downloads the latest release's AppImage and
+checks, before anything is installed, the minisign signature over `SHA256SUMS.txt` (the
+key the in-app updater trusts, naming exactly that release) and then the AppImage's
+SHA-256. It installs `~/.local/bin/opencircle` (no `sudo`), the app-menu entry
+`com.opencircle.app.desktop` and its icon, and starts the app. It needs `curl` or `wget`
+and OpenSSL 3, and is safe to run again to upgrade. `sh -s -- --uninstall` removes
+what it installed (your settings stay).
+
 ## X11
 
 Everything works the straightforward way: the screen is captured directly,
@@ -25,6 +39,20 @@ supported.
 The portal paths are verified on GNOME 50 (Ubuntu 26.04); other desktops are not
 yet. If something fails, `opencircle` prints a line explaining it on its
 standard error; run it from a terminal to read it.
+
+### Changing a shortcut
+
+GNOME keeps the key it stored for a shortcut and ignores the one an app asks for
+later. So a key you change in OpenCircle's Settings reaches the desktop as a new
+shortcut, and GNOME shows its "Add Keyboard Shortcuts" dialog once: accept it.
+Keys you leave at OpenCircle's defaults keep their identity, so a key you set in
+GNOME's own settings (Settings → Apps → OpenCircle → Global Shortcuts) stays.
+
+### Print Screen
+
+GNOME's shell takes `Print Screen` and `Alt+Print Screen` before any app's global
+shortcut, so OpenCircle's snip shortcuts there do nothing until you free them
+with `gsettings`: see [Shortcuts](shortcuts.md#defaults).
 
 ### App id and desktop file
 

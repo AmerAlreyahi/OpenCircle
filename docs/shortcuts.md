@@ -23,7 +23,17 @@ key. Free it in Windows Settings → Accessibility → Keyboard → turn off **U
 Print screen key to open screen capture**, then restart OpenCircle. (Or give the
 snip shortcuts other keys in Settings → Shortcuts; the rest keep working.) On
 Linux, a desktop's own screenshot tool may hold the key: unbind it in your
-desktop's keyboard shortcut settings.
+desktop's keyboard shortcut settings. On GNOME (Wayland) the shell keeps
+`Print Screen` and `Alt+Print Screen` for itself even though OpenCircle's
+shortcut shows as bound; free them, then restart OpenCircle:
+
+```bash
+gsettings set org.gnome.shell.keybindings show-screenshot-ui "[]"   # Print Screen
+gsettings set org.gnome.shell.keybindings screenshot-window "[]"    # Alt+Print Screen
+# put GNOME's back: gsettings reset org.gnome.shell.keybindings show-screenshot-ui
+```
+
+OpenCircle prints this when it starts under GNOME. (`Ctrl+Print Screen` is free.)
 
 While the overlay is open: `Esc` closes, `Enter` runs the default action
 (Search unless you changed it in **Settings → General**), and the action keys

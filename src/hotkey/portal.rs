@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use gtk::gio::{Cancellable, DBusCallFlags, DBusConnection, DBusSignalFlags};
 use gtk::glib::{self, ToVariant, Variant, VariantDict, variant::ObjectPath};
 
-use super::{Binding, bindings, desktop_spelling, managed, route_id, set_desktop_keys};
+use super::{
+    Binding, bindings, desktop_spelling, gnome_print_key, managed, route_id, set_desktop_keys,
+};
 use crate::Triggers;
 use crate::capture::portal::{DESKTOP, PATH, handle_path, request, session_bus};
 use crate::config::parse_shortcut;
@@ -157,7 +159,7 @@ fn open_session(conn: &DBusConnection, generation: u32) -> Result<String, String
         |handle| {
             let shortcuts: Vec<(String, VariantDict)> = planned
                 .iter()
-                .map(|b| (b.id.clone(), shortcut_options(b)))
+                .map(|b| (b.portal_id(), shortcut_options(b)))
                 .collect();
             let options = VariantDict::new(None);
             options.insert("handle_token", handle);
@@ -176,7 +178,7 @@ fn open_session(conn: &DBusConnection, generation: u32) -> Result<String, String
 fn record_keys(planned: &[Binding], list: &Variant) {
     let keys: Vec<(String, Option<String>)> = planned
         .iter()
-        .map(|b| (b.id.clone(), trigger_of(list, &b.id)))
+        .map(|b| (b.portal_id(), trigger_of(list, &b.portal_id())))
         .collect();
     for (b, (_, keys)) in planned.iter().zip(&keys) {
         let keys = keys.as_deref().map(desktop_spelling);
@@ -197,6 +199,10 @@ fn record_keys(planned: &[Binding], list: &Variant) {
             ),
         };
         eprintln!("[opencircle] {line}");
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        if let Some(hint) = gnome_print_key(b, &desktop) {
+            eprintln!("[opencircle] {hint}");
+        }
     }
     set_desktop_keys(keys);
 }

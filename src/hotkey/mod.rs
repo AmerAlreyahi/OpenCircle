@@ -60,7 +60,7 @@ enum What {
 /// One shortcut to register.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Binding {
-    /// Stable across runs and reloads: the Wayland portal keys the user's choice on it.
+    /// Stable across runs and reloads (the portal id adds the key: `portal_id`).
     id: String,
     /// Shown by the desktop in its shortcut settings.
     description: String,
@@ -71,6 +71,29 @@ struct Binding {
 }
 
 impl Binding {
+    /// The id the Wayland portal knows this shortcut by. A key that is not our
+    /// default for it rides in the id, so changing the key in Settings is a new
+    /// shortcut for the desktop, which then takes the key we ask for; under the bare
+    /// `id` GNOME keeps the key it stored for it and ignores ours. A default key keeps
+    /// the bare id (the ids of earlier versions, so an update asks nothing again, and
+    /// a key the user set in the desktop's own settings is kept).
+    fn portal_id(&self) -> String {
+        let default = plan(&Config::default()).0;
+        if default
+            .iter()
+            .any(|d| d.id == self.id && d.shortcut == self.shortcut)
+        {
+            return self.id.clone();
+        }
+        let key: String = self
+            .shortcut
+            .to_ascii_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        format!("{}.{key}", self.id)
+    }
+
     fn trigger(&self, at: Instant) -> Trigger {
         match &self.what {
             What::Capture => Trigger::Capture(at),
@@ -219,7 +242,7 @@ fn desktop_key_in(
 ) -> Option<DesktopKey> {
     let hotkey = parse_shortcut(shortcut).ok()?;
     let binding = bindings.iter().find(|b| b.hotkey == hotkey)?;
-    let (_, keys) = desktop.iter().find(|(id, _)| *id == binding.id)?;
+    let (_, keys) = desktop.iter().find(|(id, _)| *id == binding.portal_id())?;
     let Some(keys) = keys else {
         return Some(DesktopKey::Unassigned);
     };
@@ -291,7 +314,10 @@ fn route_hotkey(bindings: &[Binding], id: u32, at: Instant) -> Option<Trigger> {
 /// The trigger for a portal shortcut id.
 #[cfg(target_os = "linux")]
 fn route_id(bindings: &[Binding], id: &str, at: Instant) -> Option<Trigger> {
-    bindings.iter().find(|b| b.id == id).map(|b| b.trigger(at))
+    bindings
+        .iter()
+        .find(|b| b.portal_id() == id)
+        .map(|b| b.trigger(at))
 }
 
 /// The trigger for a command from the socket or the command line. A `run` without a
@@ -418,6 +444,32 @@ fn unavailable(b: &Binding, why: &str) -> String {
         });
     }
     line
+}
+
+/// GNOME's shell grabs Print Screen and Alt+Print Screen for its own screenshot tool
+/// before any portal shortcut: the portal reports the key as bound and it never
+/// fires. The one line that frees it (and puts it back); `None` for any other key
+/// or desktop.
+#[cfg(target_os = "linux")]
+fn gnome_print_key(b: &Binding, desktop: &str) -> Option<String> {
+    use global_hotkey::hotkey::Modifiers;
+    if !desktop.split(':').any(|d| d.eq_ignore_ascii_case("gnome"))
+        || b.hotkey.key != Code::PrintScreen
+    {
+        return None;
+    }
+    let key = match b.hotkey.mods {
+        m if m.is_empty() => "show-screenshot-ui",
+        Modifiers::ALT => "screenshot-window",
+        Modifiers::SHIFT => "screenshot",
+        _ => return None,
+    };
+    Some(format!(
+        "GNOME keeps {} for its own screenshot tool. To use it here: \
+         gsettings set org.gnome.shell.keybindings {key} \"[]\", then restart OpenCircle \
+         (undo: gsettings reset org.gnome.shell.keybindings {key}).",
+        b.shortcut
+    ))
 }
 
 fn log_all(warnings: &[String]) {
@@ -647,6 +699,68 @@ mod tests {
         assert!(unavailable(by("quick-snip-window"), "x").contains("free Print Screen"));
         assert!(!unavailable(by("quick-copy_text-circle"), "x").contains("free Print Screen"));
         assert_eq!(line.lines().count(), 1, "one line");
+    }
+
+    #[test]
+    fn a_changed_key_is_a_new_portal_shortcut_an_unchanged_one_keeps_its_id() {
+        let id = |c: &Config, which: &str| {
+            let (b, _) = plan(c);
+            b.iter().find(|b| b.id == which).unwrap().portal_id()
+        };
+        let before = Config::default();
+        let after = cfg("Ctrl+Shift+K", before.quick_actions.clone());
+        // GNOME keeps the key it stored under an id and ignores ours: a new key must
+        // arrive under a new id (B2), the rest must stay where the user put them.
+        assert_ne!(id(&before, "capture"), id(&after, "capture"));
+        assert_eq!(
+            id(&before, "quick-ai_explain-circle"),
+            id(&after, "quick-ai_explain-circle")
+        );
+        assert_eq!(
+            id(&before, "capture"),
+            "capture",
+            "a default key: the old id"
+        );
+        assert_eq!(id(&after, "capture"), "capture.ctrl-shift-k");
+        // The press the portal reports under the new id still reaches the action.
+        let (b, _) = plan(&after);
+        let at = Instant::now();
+        #[cfg(target_os = "linux")]
+        {
+            assert!(matches!(
+                route_id(&b, "capture.ctrl-shift-k", at),
+                Some(Trigger::Capture(_))
+            ));
+            assert!(route_id(&b, "capture", at).is_none());
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = (b, at);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn names_the_gnome_setting_that_holds_each_print_screen_key() {
+        let (b, _) = plan(&Config::default());
+        let by = |id: &str| b.iter().find(|b| b.id == id).unwrap();
+        let hint = |id: &str, desktop: &str| gnome_print_key(by(id), desktop);
+        let print = hint("quick-snip-circle", "ubuntu:GNOME").unwrap();
+        assert!(print.contains("show-screenshot-ui") && print.contains("gsettings reset"));
+        assert!(
+            hint("quick-snip-window", "GNOME")
+                .unwrap()
+                .contains("screenshot-window")
+        );
+        assert_eq!(
+            hint("quick-snip-circle", "KDE"),
+            None,
+            "only GNOME grabs it"
+        );
+        assert_eq!(
+            hint("quick-snip-full_screen", "GNOME"),
+            None,
+            "Ctrl+Print is free"
+        );
+        assert_eq!(hint("capture", "GNOME"), None, "not a Print key");
     }
 
     #[test]

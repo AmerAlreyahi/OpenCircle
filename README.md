@@ -73,6 +73,16 @@ page.
 | Windows 10 / 11 | `.msi` installer (pick the folder, optional launch at the end), `.exe` installer |
 | Linux (preview) | `.AppImage`, `.deb`, `.rpm` |
 
+On Linux, one command downloads the latest AppImage, checks its signature, installs it
+to `~/.local/bin` (no `sudo`), adds the app-menu entry and starts it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AmerAlreyahi/OpenCircle/main/scripts/install.sh | sh
+```
+
+Remove it again with `... | sh -s -- --uninstall`. Read the script first if you like:
+[scripts/install.sh](scripts/install.sh).
+
 Check a download with `SHA256SUMS.txt` from the same release:
 
 ```bash
