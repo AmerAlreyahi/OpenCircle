@@ -120,8 +120,10 @@ license-file = "assets/installer/license.rtf"
 # Windows MSI: cargo-packager's template is already WixUI_InstallDir (pick the folder),
 # with a "Launch OpenCircle" checkbox (checked) on the finish page, a Start menu
 # shortcut, and a stable UpgradeCode derived from the identifier (upgrades replace).
-# Only the artwork is ours: 493x58 banner, 493x312 welcome/finish image.
+# Ours: the artwork (493x58 banner, 493x312 welcome/finish image) and main.wxs, the
+# default template minus the desktop shortcut and the "Uninstall" shortcut (owner).
 [package.metadata.packager.wix]
+template = "assets/installer/main.wxs"
 banner-path = "assets/installer/banner.bmp"
 dialog-image-path = "assets/installer/dialog.bmp"
 
