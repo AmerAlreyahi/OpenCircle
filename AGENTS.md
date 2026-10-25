@@ -258,9 +258,15 @@ production systems.
 - Copy = image only (owner, 2026-10-25, supersedes "image + OCR text"): copying a
   capture puts only the picture on the clipboard; text is copied only via text
   selection / Copy text.
-- Snip fixes wait (owner, 2026-10-25): no hotfix; snip Ctrl+C, image-only copy and the
-  snip redesign (editor toolbar replaces the snip controls, timer only in Settings,
-  scrolling capture in the editor and fixed) all go with the snip work in v0.1.2.
+- v0.1.1 scope (owner, 2026-10-25): the snip tool fixes WITH tests (#45: Ctrl+C copies
+  the area, copy = image only, the editor toolbar replaces the snip controls, timer
+  only in Settings, scrolling capture in the editor and fixed) + smart automatic
+  window/element selection exactly like iTop Screenshot (hover outlines the window or
+  control under the cursor, click captures it, drag = free region, wheel walks
+  element → window → monitor), plus the Linux round and animations/smoothness.
+  v0.1.2 speed/lightness, v0.1.3 maturity.
+- Other providers (owner, 2026-10-25): Codex and Google Antigravity may be used as
+  workers; from Google use ONLY the "Argon" model, never other Google models.
 - Settings (owner, 2026-10-25, future): changes save automatically (no Save
   button); the widget theme (Frost/Graphite, glass) styles the Settings window too.
 - About page (owner, 2026-10-25): app info, model/library notices, and a developer
