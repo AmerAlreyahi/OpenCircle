@@ -6,7 +6,7 @@
 use std::sync::LazyLock;
 
 use iced::widget::image::Handle;
-use iced::widget::{column, container, image, row, space, text};
+use iced::widget::{column, container, image, row, text};
 use iced::{Border, Center, ContentFit, Element, Length};
 use serde::Deserialize;
 
@@ -118,19 +118,17 @@ fn name<'a>(s: impl text::IntoFragment<'a>, size: f32) -> iced::widget::Text<'a>
     text(s).size(size).color(theme::current().text)
 }
 
+/// A card's buttons: centred, each as wide as `label_button`, even gaps.
+fn centred<'a, M: 'a>(buttons: iced::widget::Row<'a, M>) -> Element<'a, M> {
+    container(buttons.spacing(10)).center_x(Length::Fill).into()
+}
+
 /// The app card: logo, name, version, what it is, and its links.
-/// `status` is the update check's last result; `check` runs it.
-pub fn app<'a, M: Clone + 'a>(
-    open: fn(String) -> M,
-    check: M,
-    status: Option<&'a str>,
-) -> Element<'a, M> {
-    let links = row![
+pub fn app<'a, M: Clone + 'a>(open: fn(String) -> M) -> Element<'a, M> {
+    let links = centred(row![
         label_button("GitHub", false, Some(open(PROJECT.into()))),
         label_button("MIT licence", false, Some(open(LICENSE.into()))),
-        label_button("Check now", true, Some(check)),
-    ]
-    .spacing(10);
+    ]);
     let head = row![
         picture(logo(), 64.0, 14.0),
         column![
@@ -142,40 +140,56 @@ pub fn app<'a, M: Clone + 'a>(
     ]
     .spacing(16)
     .align_y(Center);
-    let mut body = column![head, links].spacing(16);
-    if let Some(status) = status {
-        body = body.push(caption(status));
-    }
-    card(body)
+    card(column![head, links].spacing(16))
 }
 
-/// Who made what we ship, as a short scrollable list, and the link to the full texts.
+/// One licence name in a pill: every pill the same size.
+fn licence_pill<'a, M: 'a>(licence: &'a str) -> Element<'a, M> {
+    container(text(licence).size(12).color(theme::current().text))
+        .width(170)
+        .height(28)
+        .center_x(170)
+        .center_y(28)
+        .style(|_| container::Style {
+            background: Some(theme::current().window.into()),
+            border: Border::default().rounded(14),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// Who made what we ship: one row each (name and maker, then licence), and the
+/// link to the full texts.
 pub fn notices<'a, M: Clone + 'a>(open: fn(String) -> M) -> Element<'a, M> {
-    let mut list = column![].spacing(10).padding(iced::Padding::ZERO.right(12));
-    for (what, by, licence) in NOTICES {
+    let mut list = column![].spacing(0);
+    for (i, (what, by, licence)) in NOTICES.into_iter().enumerate() {
+        if i > 0 {
+            list = list.push(widgets::divider());
+        }
         list = list.push(
             row![
                 column![name(what, 14.0), caption(by)]
-                    .spacing(1)
+                    .spacing(2)
                     .width(Length::Fill),
-                widgets::pill(licence),
+                licence_pill(licence),
             ]
             .align_y(Center)
-            .spacing(12),
+            .height(54),
         );
     }
     card(
         column![
             row![
-                name("Made by others", 16.0),
-                space::horizontal(),
+                column![
+                    name("Made by others", 16.0),
+                    caption("Downloaded on first use, under their own licences"),
+                ]
+                .spacing(2)
+                .width(Length::Fill),
                 label_button("All licences", false, Some(open(NOTICE.into()))),
             ]
             .align_y(Center),
-            caption(
-                "OpenCircle ships no models: they download on first use, under their own licences"
-            ),
-            widgets::scroll(list).height(170),
+            list,
         ]
         .spacing(10),
     )
@@ -195,12 +209,11 @@ pub fn developer<'a, M: Clone + 'a>(open: fn(String) -> M) -> Element<'a, M> {
     ]
     .spacing(16)
     .align_y(Center);
-    let buttons = row![
+    let buttons = centred(row![
         label_button("GitHub profile", false, Some(open(PROFILE_URL.into()))),
         label_button("Star OpenCircle", true, Some(open(PROJECT.into()))),
         label_button("Website", false, Some(open(p.website.clone()))),
-    ]
-    .spacing(10);
+    ]);
     card(column![head, buttons].spacing(16))
 }
 

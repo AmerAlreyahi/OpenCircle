@@ -1145,7 +1145,7 @@ fn content(state: &State) -> Element<'_, Message> {
     let (heading, rows): (&str, Vec<Element<'_, Message>>) = match state.section {
         Section::General => ("General", general_rows(state)),
         Section::Look => ("Look & behaviour", look_rows(state)),
-        Section::About => ("About", about_rows(state)),
+        Section::About => ("About", about_rows()),
         Section::Appearance => (
             "Appearance",
             vec![
@@ -1415,6 +1415,28 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
             "Where Save starts. Files are OpenCircle-date-time.png",
             folder_control,
             error,
+        ),
+        form_row(
+            "Keep OpenCircle up to date",
+            UPDATE_PRIVACY,
+            segmented(
+                &[
+                    (false, "Off", "Don't check for updates"),
+                    (true, "On", "Check for updates and install them"),
+                ],
+                state.draft.update.auto == Some(true),
+                Message::AutoUpdate,
+            ),
+            None,
+        ),
+        form_row(
+            "Updates",
+            state
+                .update_status
+                .as_deref()
+                .unwrap_or("Look for a new version now"),
+            label_button("Check now", false, Some(Message::CheckUpdate)),
+            None,
         ),
     ]
 }
@@ -1882,26 +1904,9 @@ fn snip_rows(d: &SnipConfig) -> Vec<Element<'_, Message>> {
     ]
 }
 
-fn about_rows(state: &State) -> Vec<Element<'_, Message>> {
+fn about_rows<'a>() -> Vec<Element<'a, Message>> {
     vec![
-        about::app(
-            Message::OpenLink,
-            Message::CheckUpdate,
-            state.update_status.as_deref(),
-        ),
-        form_row(
-            "Keep OpenCircle up to date",
-            UPDATE_PRIVACY,
-            segmented(
-                &[
-                    (false, "Off", "Don't check for updates"),
-                    (true, "On", "Check for updates and install them"),
-                ],
-                state.draft.update.auto == Some(true),
-                Message::AutoUpdate,
-            ),
-            None,
-        ),
+        about::app(Message::OpenLink),
         about::developer(Message::OpenLink),
         about::notices(Message::OpenLink),
         form_row(
@@ -2769,10 +2774,10 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn about_switches_updates_and_checks_now() {
+    fn general_switches_updates_and_checks_now() {
         let path = tmp("update");
         let (mut s, _) = state(Some(path.clone()));
-        update(&mut s, Message::Section(Section::About));
+        update(&mut s, Message::Section(Section::General));
         assert_eq!(update(&mut s, Message::CheckUpdate), Outcome::CheckUpdate);
         assert!(shot::texts(view(&s)).iter().any(|t| t == "Checking…"));
         update(
@@ -3002,7 +3007,7 @@ pub(super) mod tests {
                 shot::save(
                     &format!("about-{w}-{name}"),
                     view(&s),
-                    Size::new(820.0, 1100.0),
+                    Size::new(820.0, 1450.0),
                 );
             }
         }
