@@ -34,8 +34,12 @@ where they differ.
   behaviour, not the assets. Name, icon and visuals are our own.
 - Never publish a GitHub release without the owner's OK for that release
   (the release workflow creates **drafts**).
-- Frozen contracts: none yet. Once released, the CLI (`opencircle capture …`)
-  and the config file format become frozen (migrate, never break).
+- Releases: v0.1.0 published 2026-10-25 (owner OK; Windows + Linux preview; signed
+  SHA256SUMS; assets re-downloaded and verified).
+- Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
+  `quit`) and the config file format: migrate, never break. The update channel
+  (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
+  "OpenCircle v<ver>") is frozen too: installed copies depend on it.
 
 ## Architecture
 
