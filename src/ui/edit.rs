@@ -1,13 +1,14 @@
 //! Edit in place and the snip editor: the annotation editor (`crate::editor`) over
-//! the frozen frame, its toolbar where the action bar was (DESIGN.md "Flow" 4).
+//! the frozen frame, its toolbar docked where the bottom bar is (the host
+//! places it: same anchors, same drag).
 //! Add capture (board): the editor steps aside and an area is dragged on the
 //! frozen frame; its crop joins the board.
 use iced::mouse::{self, Cursor};
 use iced::widget::canvas::{self, Action, Frame, Geometry, Path, Stroke, fill};
-use iced::widget::{container, image, pin, stack};
+use iced::widget::{container, image, mouse_area, pin, stack};
 use iced::{Color, ContentFit, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
 
-use super::bar::{self, GAP};
+use super::bar::{BOTTOM_GAP, GAP};
 use super::{theme, widgets};
 use crate::actions::Crop;
 use crate::editor::{self, Editor, Image, Message, Output};
@@ -36,7 +37,8 @@ impl Editing {
         Self::new(crop, on_screen(bounds, scale).position(), 1.0 / scale)
     }
 
-    /// Scaled down to fit the screen, with room for the toolbar (a scrolling capture).
+    /// Scaled down to fit the work area `screen` (the screen above the
+    /// taskbar), with room for the toolbar docked under it (a scrolling capture).
     pub fn fitted(crop: Crop, screen: Size, scale: f32) -> Self {
         let size = Size::new(crop.width as f32, crop.height as f32);
         let (origin, zoom) = fit(size, screen, 1.0 / scale);
@@ -136,31 +138,48 @@ impl Editing {
         )
     }
 
-    /// The canvas over its place and the toolbar beside it (as the action bar is).
-    pub fn view(&self, screen: Size) -> Element<'_, editor::Message> {
+    /// The toolbar's size on a `screen` this wide.
+    pub fn toolbar_size(screen: f32) -> Size {
+        toolbar_size(screen - 2.0 * GAP)
+    }
+
+    /// The canvas over its place and the toolbar with its top-left at
+    /// `toolbar` (`None`: not shown, e.g. while the bar turns into it); a press
+    /// on the toolbar outside its buttons sends `grab` (drags it, as the bar).
+    pub fn view<'a, M: Clone + 'a>(
+        &'a self,
+        screen: Size,
+        toolbar: Option<Point>,
+        map: fn(editor::Message) -> M,
+        grab: M,
+    ) -> Element<'a, M> {
         if let Some(drag) = self.picking {
             let hint = container(widgets::pill(PICK_HINT))
                 .center_x(Fill)
                 .padding(24);
-            return stack![
+            return Element::from(stack![
                 iced::widget::canvas(Picker { drag })
                     .width(Fill)
                     .height(Fill),
                 hint,
-            ]
-            .into();
+            ])
+            .map(map);
         }
         let canvas = self.canvas_rect();
-        let room = screen.width - 2.0 * GAP;
-        let size = toolbar_size(room);
-        let at = bar::place(canvas, size, screen);
-        let (toolbar, popover) = self.editor.toolbar_at(room, Rectangle::new(at, size));
-        stack![
-            pin(self.editor.canvas()).position(canvas.position()),
-            pin(toolbar).position(at),
-        ]
-        .extend(popover)
-        .into()
+        let mut layers =
+            stack![pin(Element::from(self.editor.canvas()).map(map)).position(canvas.position())];
+        if let Some(at) = toolbar {
+            let room = screen.width - 2.0 * GAP;
+            let size = toolbar_size(room);
+            let (toolbar, popover) = self.editor.toolbar_at(room, Rectangle::new(at, size));
+            let toolbar = mouse_area(toolbar.map(map))
+                .on_press(grab)
+                .interaction(mouse::Interaction::Grab);
+            layers = layers
+                .push(pin(toolbar).position(at))
+                .extend(popover.map(|p| p.map(map)));
+        }
+        layers.into()
     }
 
     /// Back at the action bar: the flattened edits at the canvas's place.
@@ -264,12 +283,14 @@ fn on_screen([x0, y0, x1, y1]: [u32; 4], scale: f32) -> Rectangle {
 
 use editor::toolbar_size;
 
-/// Where an image of `size` px goes on `screen` and its zoom (at most `max_zoom`):
-/// centred, scaled down to leave room for the toolbar under it.
+/// Where an image of `size` px goes on the work area `screen` and its zoom (at
+/// most `max_zoom`): centred, scaled down to leave room for the toolbar docked
+/// under it (the bar's bottom spot).
 fn fit(size: Size, screen: Size, max_zoom: f32) -> (Point, f32) {
+    let toolbar = toolbar_size(screen.width - 2.0 * GAP).height;
     let room = Size::new(
         screen.width - 2.0 * GAP,
-        screen.height - 3.0 * GAP - toolbar_size(screen.width - 2.0 * GAP).height,
+        screen.height - 2.0 * GAP - BOTTOM_GAP - toolbar,
     );
     let zoom = max_zoom
         .min(room.width / size.width)
@@ -348,7 +369,8 @@ mod tests {
         assert!(zoom < 0.2, "{zoom}");
         assert!((at.x + 780.0 * zoom / 2.0 - 960.0).abs() < 1e-3);
         assert!(
-            at.y >= GAP && at.y + 6000.0 * zoom + GAP + bar.height <= screen.height - GAP + 1e-3
+            at.y >= GAP
+                && at.y + 6000.0 * zoom + GAP + bar.height <= screen.height - BOTTOM_GAP + 1e-3
         );
         // Small: never enlarged past its on-screen size (150 % → zoom 1 / 1.5).
         let (_, zoom) = fit(Size::new(400.0, 300.0), screen, 1.0 / 1.5);

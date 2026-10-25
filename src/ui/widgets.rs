@@ -903,27 +903,30 @@ pub fn icon_button<'a, Message: Clone + 'a>(
 pub const BUBBLE: f32 = 40.0;
 
 /// A round icon button, `BUBBLE` across, with a soft border and a subtle fill
-/// (the overlay's bottom bar); `active` = the accent gradient.
+/// (the overlay's bottom bar); `active` = the accent gradient; `on_press:
+/// None` = disabled: same size and place, dimmed, no hover.
 pub fn round_button<'a, Message: Clone + 'a>(
     glyph: char,
     active: bool,
-    on_press: Message,
+    on_press: Option<Message>,
 ) -> Button<'a, Message> {
     let palette = theme::floating();
-    let fg = if active {
-        theme::ON_ACCENT
-    } else {
-        palette.text
+    let live = on_press.is_some();
+    let fg = match (active, live) {
+        (true, _) => theme::ON_ACCENT,
+        (false, true) => palette.text,
+        (false, false) => palette.muted.scale_alpha(0.6),
     };
     let glyph = text(glyph).font(ICON_FONT).size(17).color(fg);
     button(container(glyph).center(iced::Fill))
         .width(BUBBLE)
         .height(BUBBLE)
         .padding(0)
-        .on_press(on_press)
+        .on_press_maybe(on_press)
         .style(move |_, status| button::Style {
             background: Some(match (active, status) {
                 (true, _) => accent(status),
+                (false, _) if !live => palette.hover.into(),
                 (false, button::Status::Hovered) => palette.field_focus.into(),
                 (false, button::Status::Pressed) => palette.pressed.into(),
                 (false, _) => palette.hover.into(),

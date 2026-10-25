@@ -68,7 +68,7 @@ pub(super) fn key_hint(key: Key) -> String {
 }
 
 /// The bottom bar's field width and whole size on a `screen` that is `width`
-/// wide, with `bubbles` round buttons (a fraction while some slide in): the
+/// wide, with `bubbles` round buttons (always all of them): the
 /// field gives up width on a narrow screen, the buttons never do.
 pub(super) fn bottom_size(width: f32, bubbles: f32) -> (f32, Size) {
     let buttons = bubbles * (widgets::BUBBLE + SPACING);

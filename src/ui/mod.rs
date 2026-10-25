@@ -58,12 +58,14 @@ const PROTECTED: &str = "This window is protected; it can't be captured";
 /// The ask bar at the bottom of the overlay: its text field, width, and the
 /// height kept free for it (the action bar stays above it).
 const ASK_INPUT: &str = "overlay-ask";
-/// The bottom bar's round buttons: always there (Include screen, Ask AI,
-/// Translate, Live translate, Song search, Edit), and the ones that slide in
-/// with a selection (Search, Text, Copy, Save), and how long that takes.
-const BAR_BUTTONS: f32 = 6.0;
-const SLIDING_BUTTONS: f32 = 4.0;
-const BAR_SLIDE: Duration = Duration::from_millis(200);
+/// The bottom bar's round buttons, always all there so it never changes size
+/// (owner, 2026-10-25): Include screen, Search, Text, Copy, Save (dimmed until
+/// something is selected), Ask AI, Translate, Live translate, Song search, Edit.
+const BAR_BUTTONS: f32 = 10.0;
+/// The bar's selection buttons' tooltip while there is nothing to act on.
+const SELECT_FIRST: &str = "Select something first";
+/// How long the bar takes to turn into the editing toolbar (and back).
+const BAR_MORPH: Duration = Duration::from_millis(150);
 /// Ask AI's icon in the bottom bar: the one place to swap in the OpenCircle logo.
 const ASK_AI_ICON: char = actions::ask::ACTION.icon;
 /// A QR code's chip under a selection (its room; the chip is centred in it).
@@ -466,10 +468,11 @@ struct App {
     /// A snapped selection's drawn stroke (image px) morphing into its box.
     morph: Option<(Vec<Point>, Instant)>,
     text_mode: Option<TextMode>,
-    /// The bottom bar's selection buttons: how far they are in (0..1, linear)
-    /// and the frame that moved them last (`None`: at rest).
-    slide: f32,
-    slide_at: Option<Instant>,
+    /// The bottom bar turning into the editing toolbar in its place: 0 = the
+    /// bar, 1 = the toolbar (linear), and the frame that moved it last
+    /// (`None`: at rest).
+    swap: f32,
+    swap_at: Option<Instant>,
     /// The bar's spot (`config::BarConfig`); while its handle is held, the
     /// pointer's last position and where the bar follows it (top-left);
     /// where it is drawn now (gliding to its spot); how much of the screen's
@@ -578,8 +581,8 @@ impl App {
             },
             morph: None,
             text_mode: None,
-            slide: 0.0,
-            slide_at: None,
+            swap: 0.0,
+            swap_at: None,
             bar_anchor: BarAnchor::Bottom,
             bar_drag: None,
             bar_now: None,
@@ -733,7 +736,7 @@ impl App {
             // While held it follows the pointer (kept on screen).
             Message::BarMoved(p) => {
                 if let Some((last, at)) = self.bar_drag {
-                    let (_, size) = self.bar_size();
+                    let size = self.dock_size();
                     let at = match last {
                         Some(from) => {
                             let to = at + (p - from);
@@ -753,7 +756,7 @@ impl App {
             // Let go: it glides to the nearest spot, remembered.
             Message::BarReleased => match self.bar_drag.take() {
                 Some((_, at)) => {
-                    let (_, size) = self.bar_size();
+                    let size = self.dock_size();
                     self.bar_anchor = bar::nearest(at, self.screen, size, self.work_inset);
                     eprintln!("[opencircle] bar docked: {:?}", self.bar_anchor);
                     self.bar_now = Some(at);
@@ -837,13 +840,23 @@ impl App {
                     None => (now, 0.0),
                     Some((last, t)) => (now, overlay::opening_step(t, now - last)),
                 });
-                let target = self.slide_target();
-                let dt = self.slide_at.map_or(Duration::ZERO, |last| now - last);
-                self.slide = overlay::toward(self.slide, target, dt, BAR_SLIDE);
-                self.slide_at = (self.slide != target).then_some(now);
+                let target = self.swap_target();
+                let (dt, was) = (
+                    self.swap_at.map_or(Duration::ZERO, |last| now - last),
+                    self.swap,
+                );
+                self.swap = match self.purpose {
+                    Purpose::Search => overlay::toward(self.swap, target, dt, BAR_MORPH),
+                    _ => target, // Snip has no bar to turn into the toolbar
+                };
+                self.swap_at = (self.swap != target).then_some(now);
                 if self.bar_drag.is_none() {
+                    // turning into the toolbar (or back): it stays on its spot
                     let to = self.bar_target();
-                    self.bar_now = Some(self.bar_now.map_or(to, |at| bar::glide(at, to)));
+                    self.bar_now = Some(match self.bar_now {
+                        Some(at) if self.swap == was => bar::glide(at, to),
+                        _ => to,
+                    });
                 }
                 Task::none()
             }
@@ -2050,7 +2063,7 @@ impl App {
             }) = &self.frame
             && let Some(crop) = actions::crop(pixels, *width, *height, self.scale, area)
         {
-            edit.add(crop, self.screen);
+            edit.add(crop, work_area(self.screen, self.work_inset));
         }
         match out {
             None => Task::none(),
@@ -2191,7 +2204,11 @@ impl App {
                 if toast.in_place {
                     let _ = self.open_editor();
                 } else {
-                    self.edit = Some(Editing::fitted(toast.crop, self.screen, self.scale));
+                    self.edit = Some(Editing::fitted(
+                        toast.crop,
+                        work_area(self.screen, self.work_inset),
+                        self.scale,
+                    ));
                 }
                 self.show()
             }
@@ -2328,7 +2345,11 @@ impl App {
             if in_place {
                 return self.open_editor();
             }
-            self.edit = Some(Editing::fitted(crop, self.screen, self.scale));
+            self.edit = Some(Editing::fitted(
+                crop,
+                work_area(self.screen, self.work_inset),
+                self.scale,
+            ));
             return Task::none();
         }
         let Purpose::Snip(snip) = &mut self.purpose else {
@@ -2564,7 +2585,7 @@ impl App {
         self.morph = None;
         self.text_mode = None;
         self.bar_drag = None;
-        self.slide = 0.0;
+        self.swap = 0.0;
         self.song = None; // stops listening
         if self.can_hide {
             self.hiding = Hiding::Empty;
@@ -2867,9 +2888,15 @@ impl App {
         ];
         if let Some(edit) = &self.edit {
             if edit.is_open() {
-                return layers
-                    .push(edit.view(self.screen).map(Message::Editor))
-                    .into();
+                // the toolbar once the bar has turned into it, in its place
+                let at = self.bar_at();
+                let toolbar = (self.swapped() >= 1.0).then_some(at);
+                layers =
+                    layers.push(edit.view(self.screen, toolbar, Message::Editor, Message::BarGrab));
+                if toolbar.is_none() {
+                    layers = layers.push(self.morphing_bar(at));
+                }
+                return layers.into();
             }
             layers = layers.extend(edit.flat_view());
         }
@@ -2920,7 +2947,10 @@ impl App {
             // slides up into place as the overlay opens
             let rise = (1.0 - self.appeared()) * SLIDE;
             let at = self.bar_at() + Vector::new(0.0, rise);
-            layers = layers.push(iced::widget::pin(self.bottom_bar()).position(at));
+            layers = layers.push(match self.swapped() > 0.0 {
+                true => self.morphing_bar(at), // the toolbar turning back into it
+                false => iced::widget::pin(self.bottom_bar()).position(at).into(),
+            });
         }
         // Beside a panel (an auto-search's): the chips.
         if let (Some(_), Some(selection), Purpose::Search, false) =
@@ -3003,22 +3033,46 @@ impl App {
             && self.toast.is_none()
     }
 
-    /// The bottom bar's selection buttons (Search, Text, Copy, Save) slide
-    /// in while there is a selection.
-    fn slide_target(&self) -> f32 {
-        if self.selection.is_some() { 1.0 } else { 0.0 }
+    /// The editing toolbar is up (not back at the bar).
+    fn editing(&self) -> bool {
+        self.edit.as_ref().is_some_and(Editing::is_open)
     }
 
-    /// The selection buttons are on their way in or out.
-    fn sliding(&self) -> bool {
-        self.frame.is_some() && self.slide != self.slide_target()
+    /// The bar is the toolbar (1) while editing, else the bar (0).
+    fn swap_target(&self) -> f32 {
+        if self.editing() { 1.0 } else { 0.0 }
     }
 
-    /// The bottom bar's field width and size now (with the selection
-    /// buttons as far in as they are).
+    /// The bar is turning into the toolbar, or back.
+    fn swapping(&self) -> bool {
+        self.frame.is_some() && self.swap != self.swap_target()
+    }
+
+    /// How far the bar has turned into the toolbar (0..1, eased); Snip, which
+    /// has no bar, is always there.
+    fn swapped(&self) -> f32 {
+        match self.purpose {
+            Purpose::Search => overlay::ease_out(self.swap),
+            _ => self.swap_target(),
+        }
+    }
+
+    /// The bottom bar's field width and size: the same in every state (no
+    /// selection, a selection, after a card), so it never jumps.
     fn bar_size(&self) -> (f32, Size) {
-        let bubbles = BAR_BUTTONS + SLIDING_BUTTONS * overlay::ease_out(self.slide);
-        bar::bottom_size(self.screen.width, bubbles)
+        bar::bottom_size(self.screen.width, BAR_BUTTONS)
+    }
+
+    /// The size of what is docked at the bar's spot now: the bar, the editing
+    /// toolbar, or the shape between them while one turns into the other.
+    fn dock_size(&self) -> Size {
+        let (_, bar) = self.bar_size();
+        let tool = Editing::toolbar_size(self.screen.width);
+        let t = self.swapped();
+        Size::new(
+            bar.width + (tool.width - bar.width) * t,
+            bar.height + (tool.height - bar.height) * t,
+        )
     }
 
     /// Where the bar is drawn now (top-left): on its way to `bar_target`.
@@ -3026,16 +3080,19 @@ impl App {
         self.bar_now.unwrap_or_else(|| self.bar_target())
     }
 
-    /// Where the bar goes: following the pointer while held, else its spot,
-    /// or the nearest free one while the selection is where it would be.
+    /// Where the bar (or the toolbar in its place) goes: following the pointer
+    /// while held, else its spot, or the nearest free one while the selection
+    /// (the editor's canvas) is where it would be.
     fn bar_target(&self) -> Point {
         if let Some((_, at)) = self.bar_drag {
             return at;
         }
-        let (_, size) = self.bar_size();
+        let size = self.dock_size();
+        let canvas = self.edit.as_ref().map(Editing::canvas_rect);
         let blocked: Vec<Rectangle> = (self.selection.iter())
             .chain(self.others.iter().map(|(s, _)| s))
             .map(|s| self.view.rect_to_screen(s.area))
+            .chain(canvas)
             .collect();
         let spot = bar::free(
             self.bar_anchor,
@@ -3071,9 +3128,9 @@ impl App {
     /// The bottom bar, the one action hub: a handle to drag it, "Ask about your
     /// screen…" (your selection, once there is one; Enter opens Ask AI with
     /// it; "Ask anything…" without the screen), "Include screen", then round
-    /// icon buttons. With a selection Search, Text, Copy and Save slide in and
-    /// every action takes the selection (picked words: their text); without,
-    /// the whole screen. Its field takes the keys only once clicked: until
+    /// icon buttons. Search, Text, Copy and Save are dimmed until something is
+    /// selected; then every action takes the selection (picked words: their
+    /// text); without, the whole screen. Always the same size (`bar_size`). Its field takes the keys only once clicked: until
     /// then letters are the action shortcuts.
     fn bottom_bar(&self) -> Element<'_, Message> {
         let placeholder = match (self.include_screen, self.selection) {
@@ -3099,7 +3156,7 @@ impl App {
             false => other,
         };
         let button = bar_button;
-        let sliding = [
+        let selection = [
             (
                 lens::ACTION.icon,
                 "Search",
@@ -3125,7 +3182,11 @@ impl App {
                 Message::Run(&save::ACTION),
             ),
         ]
-        .map(|(glyph, label, keys, message)| button(glyph, label, keys, false, message));
+        // nothing selected: still there, in place (the bar never changes size), dimmed
+        .map(|(glyph, label, keys, message)| match selected {
+            true => button(glyph, label, keys, false, Some(message)),
+            false => button(glyph, label, SELECT_FIRST, false, None),
+        });
         let (translate, edit) = match selected {
             true => (
                 (
@@ -3179,14 +3240,8 @@ impl App {
                 edit.1,
             ),
         ]
-        .map(|(glyph, label, keys, active, message)| button(glyph, label, keys, active, message));
-        // the selection buttons slide in: their row is clipped to its share
-        let shown = overlay::ease_out(self.slide);
-        let group = (shown > 0.0).then(|| {
-            let full = SLIDING_BUTTONS * (widgets::BUBBLE + bar::SPACING);
-            container(iced::widget::row(sliding).spacing(bar::SPACING))
-                .width(shown * full - bar::SPACING)
-                .clip(true)
+        .map(|(glyph, label, keys, active, message)| {
+            button(glyph, label, keys, active, Some(message))
         });
         let handle = container(widgets::icon(widgets::DRAG))
             .center_x(bar::HANDLE)
@@ -3196,10 +3251,10 @@ impl App {
             "Include screen",
             &keys.none,
             self.include_screen,
-            Message::IncludeScreen,
+            Some(Message::IncludeScreen),
         );
         let row = iced::widget::row![handle, field, chip]
-            .extend(group.map(Element::from))
+            .extend(selection)
             .extend(fixed)
             .spacing(bar::SPACING)
             .align_y(iced::Center);
@@ -3209,6 +3264,18 @@ impl App {
             .on_press(Message::BarGrab)
             .interaction(iced::mouse::Interaction::Grab);
         opaque(bar)
+    }
+
+    /// The bar turning into the editing toolbar (or back) at `at`: its
+    /// surface only, sized between the two (`dock_size`); opaque, so a press
+    /// on it never starts a selection.
+    // ponytail: a plain size morph; the full motion polish is v0.1.1.
+    fn morphing_bar(&self, at: Point) -> Element<'_, Message> {
+        let size = self.dock_size();
+        let shape = widgets::surface(space())
+            .width(size.width)
+            .height(size.height);
+        iced::widget::pin(opaque(shape)).position(at).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -3282,7 +3349,7 @@ impl App {
             // The opening animation: one message per frame until it is done.
             let moving = self.appear.is_none()
                 || self.appearing()
-                || self.sliding()
+                || self.swapping()
                 || self.bar_gliding()
                 || self.bar_now.is_none();
             let frames = match moving {
@@ -3292,7 +3359,7 @@ impl App {
             // Dragging the bar by its handle: the pointer anywhere, until let go. On
             // whenever the bar shows (not only once held), so no move or release
             // is lost while the grab is still being handled.
-            let bar = match self.bottom_bar_shown() {
+            let bar = match self.bottom_bar_shown() || self.editing() {
                 true => iced::event::listen_with(|event, _, _| match event {
                     iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                         Some(Message::BarMoved(position))
@@ -3340,13 +3407,19 @@ fn chips_at(area: Rectangle, size: Size, room: Rectangle) -> Point {
     Point::new(x, y)
 }
 
-/// A round button of the bottom bar, named `label` (its tooltip adds `keys`).
+/// The part of a `screen` above the taskbar (`inset` px of its bottom).
+fn work_area(screen: Size, inset: f32) -> Size {
+    Size::new(screen.width, screen.height - inset)
+}
+
+/// A round button of the bottom bar, named `label` (its tooltip adds `keys`);
+/// `message: None` = dimmed (nothing to act on yet).
 fn bar_button<'a>(
     glyph: char,
     label: &'a str,
     keys: &'a str,
     active: bool,
-    message: Message,
+    message: Option<Message>,
 ) -> Element<'a, Message> {
     let why = match keys.is_empty() {
         true => widgets::Why::Icon,
@@ -3736,7 +3809,6 @@ mod tests {
         let _ = app.update(Message::Scanned(area, qr::scan(&app.crop().unwrap())));
         let texts = overlay_texts(&app);
         assert!(texts.contains(&PROTECTED.to_string()), "{texts:?}");
-        app.slide = 1.0; // the selection's buttons in the bottom bar
         let texts = overlay_texts(&app);
         assert!(texts.contains(&copy::ACTION.icon.to_string()));
         assert!(texts.contains(&text::ACTION.icon.to_string()));
@@ -4326,7 +4398,6 @@ mod tests {
         let mut app = read_app();
         stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]); // "while you drag"
         // the bottom bar's Copy, Translate, Search, Ask AI take the text (no pill)
-        app.slide = 1.0;
         let texts = overlay_texts(&app);
         assert!(
             !texts.contains(&"Copy".to_string()),
@@ -4426,12 +4497,7 @@ mod tests {
 
     /// The centre of the bottom bar's button `k` (0 = Ask AI … 4 = Edit), as laid out.
     fn bar_button(app: &App, k: usize) -> Point {
-        let slid = if app.slide >= 1.0 {
-            SLIDING_BUTTONS as usize
-        } else {
-            0
-        };
-        bar_slot(app, 1 + slid + k)
+        bar_slot(app, 5 + k) // after Include screen, Search, Text, Copy, Save
     }
 
     /// The centre of the bottom bar's round button `k` (0 = Include screen,
@@ -4454,7 +4520,7 @@ mod tests {
     }
 
     /// One selection, the old action bar gone: only the bottom bar, whose
-    /// Search, Text, Copy and Save slide in and act on the selection.
+    /// Search, Text, Copy and Save act on the selection.
     #[test]
     fn a_selection_brings_its_actions_into_the_bottom_bar_not_a_second_bar() {
         let mut app = open_app(1280, 800, 1.0);
@@ -4480,17 +4546,6 @@ mod tests {
                 "no labelled action bar: {texts:?}"
             );
         }
-        // the selection buttons slide in over a few frames (eased), then stay
-        assert!(app.sliding());
-        let start = Instant::now();
-        let widths: Vec<f32> = (0..=30)
-            .map(|i| {
-                let _ = app.update(Message::Frame(start + Duration::from_millis(10 * i)));
-                app.bar_size().1.width
-            })
-            .collect();
-        assert!(widths.windows(2).all(|w| w[1] >= w[0]), "{widths:?}");
-        assert!(widths[0] < widths[30] && !app.sliding());
         let at = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(&app, k));
         let runs = |k, id: &str| {
             at(k)
@@ -4516,7 +4571,6 @@ mod tests {
         assert!(on(0).iter().any(|m| matches!(m, Message::AskButton)));
         // picked words in a snapped box: Copy, Search, Translate, Ask AI take their text
         let mut words = select_text_app();
-        words.slide = 1.0;
         drag(&mut words, caret(1, 7.0), caret(2, 16.0), false);
         let at =
             |k| widgets::shot::click(words.view(words.overlay), words.screen, bar_slot(&words, k));
@@ -4539,6 +4593,142 @@ mod tests {
             let _ = app.update(Message::Frame(start + Duration::from_millis(16 * i)));
         }
         assert!(!app.bar_gliding());
+    }
+
+    /// The bar's bounds and what its Ask AI slot does, once settled.
+    fn bar_box(app: &mut App) -> (Rectangle, Vec<Message>) {
+        settle_bar(app);
+        let ask = widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(app, 5));
+        (Rectangle::new(app.bar_at(), app.bar_size().1), ask)
+    }
+
+    /// The bottom bar is exactly the same size in every state (owner,
+    /// 2026-10-25): no selection, a selection, after a result card closed.
+    /// The selection's buttons are always there, dimmed until it exists.
+    #[test]
+    fn the_bottom_bar_never_changes_size() {
+        let mut app = open_app(1280, 800, 1.0);
+        let (before, ask) = bar_box(&mut app);
+        assert!(
+            ask.iter().any(|m| matches!(m, Message::AskButton)),
+            "{ask:?}"
+        );
+        // nothing selected: Search, Text, Copy, Save are there but do nothing
+        for k in 1..=4 {
+            let at = bar_slot(&app, k);
+            let got = widgets::shot::click(app.view(app.overlay), app.screen, at);
+            assert!(!got.iter().any(|m| matches!(m, Message::Run(_))), "{k}");
+        }
+        let _ = widgets::tests_support::shown();
+        let _ = app.view(app.overlay);
+        let tips = widgets::tests_support::shown();
+        assert!(
+            tips.iter().any(|t| t == "Search · Select something first"),
+            "{tips:?}"
+        );
+        // a selection (away from the bar): the same box, the same slots
+        drag(
+            &mut app,
+            Point::new(200.0, 150.0),
+            Point::new(500.0, 350.0),
+            false,
+        );
+        let (selected, ask) = bar_box(&mut app);
+        assert_eq!(selected, before);
+        assert!(
+            ask.iter().any(|m| matches!(m, Message::AskButton)),
+            "{ask:?}"
+        );
+        // Ask AI's card opens (the bar steps aside) and closes: the same again
+        let _ = app.update(Message::AskButton);
+        let (id, _) = app.panel.as_ref().expect("Ask AI opens");
+        let id = *id;
+        assert!(!app.bottom_bar_shown());
+        let _ = app.update(Message::Panel(id, panel::Msg::Card(card::Event::Close)));
+        assert!(app.bottom_bar_shown());
+        let (after, ask) = bar_box(&mut app);
+        assert_eq!(after, before);
+        assert!(
+            ask.iter().any(|m| matches!(m, Message::AskButton)),
+            "{ask:?}"
+        );
+    }
+
+    /// Edit turns the bar into the editing toolbar in its place (same anchor,
+    /// a short morph between them); the toolbar drags and docks like the bar,
+    /// remembered; Back turns it into the bar again where the toolbar was.
+    #[test]
+    fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
+        let mut app = open_app(1280, 800, 1.0);
+        app.work_inset = 40.0;
+        drag(
+            &mut app,
+            Point::new(200.0, 150.0),
+            Point::new(500.0, 350.0),
+            false,
+        );
+        let (bar_box, _) = bar_box(&mut app);
+        let spot = |app: &App, size| bar::anchor_at(app.bar_anchor, app.screen, size, 40.0);
+        assert_eq!(bar_box.position(), spot(&app, bar_box.size()));
+        let tool = Editing::toolbar_size(app.screen.width);
+        let _ = app.update(Message::Run(&actions::edit::ACTION));
+        assert!(app.editing());
+        // on its way: one shape between the two sizes, at the same spot
+        let start = Instant::now();
+        let _ = app.update(Message::Frame(start));
+        let _ = app.update(Message::Frame(start + Duration::from_millis(40)));
+        let mid = app.dock_size();
+        assert!(app.swapping(), "a morph, not a jump");
+        assert!(mid.width > bar_box.width.min(tool.width));
+        assert!(mid.width < bar_box.width.max(tool.width));
+        assert_eq!(app.bar_at(), spot(&app, mid));
+        // there: the toolbar at the bar's anchor (bottom edge, centre the same)
+        settle_bar(&mut app);
+        assert!(!app.swapping());
+        let at = app.bar_at();
+        assert_eq!(at, spot(&app, tool));
+        assert_eq!(at.y + tool.height, bar_box.y + bar_box.height);
+        assert_eq!(at.x + tool.width / 2.0, bar_box.center_x());
+        let pad = widgets::SURFACE_PADDING;
+        let back = at + Vector::new(pad + widgets::CONTROL / 2.0, tool.height / 2.0);
+        let hit = |app: &App, p| widgets::shot::click(app.view(app.overlay), app.screen, p);
+        assert!(
+            hit(&app, back)
+                .iter()
+                .any(|m| matches!(m, Message::Editor(editor::Message::Back))),
+            "its Back arrow is there"
+        );
+        // dragged by its edge, it docks at the nearest spot, remembered
+        let edge = at + Vector::new(pad / 2.0, tool.height / 2.0);
+        assert!(
+            hit(&app, edge)
+                .iter()
+                .any(|m| matches!(m, Message::BarGrab))
+        );
+        let _ = app.update(Message::BarGrab);
+        let _ = app.update(Message::BarMoved(edge));
+        let _ = app.update(Message::BarMoved(edge - Vector::new(0.0, 560.0)));
+        let _ = app.update(Message::BarReleased);
+        assert_eq!(app.bar_anchor, BarAnchor::Top);
+        assert_eq!(config::current().bar.anchor, BarAnchor::Top, "remembered");
+        settle_bar(&mut app);
+        assert_eq!(app.bar_at(), spot(&app, tool));
+        assert_eq!(app.bar_at().y, bar::TOP);
+        // Back: the bar again, at the toolbar's spot
+        let _ = app.update(Message::Editor(editor::Message::Back));
+        assert!(!app.editing());
+        settle_bar(&mut app);
+        let (_, size) = app.bar_size();
+        assert_eq!(app.bar_at(), spot(&app, size));
+        assert_eq!(app.bar_at().y, bar::TOP);
+        let ask = hit(&app, bar_slot(&app, 5));
+        assert!(
+            ask.iter().any(|m| matches!(m, Message::AskButton)),
+            "{ask:?}"
+        );
+        let mut cfg = config::current();
+        cfg.bar.anchor = BarAnchor::Bottom;
+        config::set_current(cfg);
     }
 
     /// The bar: by default a clear gap above the taskbar; dragged by its
@@ -4617,7 +4807,7 @@ mod tests {
 
     #[test]
     fn the_bottom_bar_has_every_main_action_on_any_screen() {
-        for (w, h) in [(1280, 800), (800, 600), (480, 400)] {
+        for (w, h) in [(1280, 800), (800, 600), (640, 480)] {
             let app = open_app(w, h, 1.0);
             let _ = widgets::tests_support::shown(); // drop older records
             let messages: Vec<Vec<Message>> = (0..5)
@@ -5093,7 +5283,6 @@ mod tests {
         assert!(!mode.picking);
         assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
         // the bottom bar's text actions take the picked words; no pill, no second bar
-        app.slide = 1.0;
         let texts = widgets::shot::texts(app.view(app.overlay));
         assert!(
             !texts.iter().any(|t| t == "Copy" || t == "Edit"),
