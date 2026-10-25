@@ -271,6 +271,9 @@ production systems.
   v0.1.2 speed/lightness, v0.1.3 maturity.
 - Other providers (owner, 2026-10-25): Codex and Google Antigravity may be used as
   workers; from Google use ONLY the "Argon" model, never other Google models.
+  Exception (owner, 2026-10-25): Gemini Pro or Flash 3.8 may run Linux TEST passes
+  (test only, no code), now and after each release; scope for now: widgets, Circle
+  to Search, OCR, translation (no song search, no snip tool).
 - Settings (owner, 2026-10-25, future): changes save automatically (no Save
   button); the widget theme (Frost/Graphite, glass) styles the Settings window too.
 - About page (owner, 2026-10-25): app info, model/library notices, and a developer
