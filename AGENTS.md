@@ -255,6 +255,14 @@ production systems.
   bar's look, sized to what's visible, never over a window's tab bar.
 - Start with the OS (owner, 2026-10-25): a Settings > General switch, ON by
   default (also in onboarding); the app manages the Run key / autostart entry.
+- Copy = image only (owner, 2026-10-25, supersedes "image + OCR text"): copying a
+  capture puts only the picture on the clipboard; text is copied only via text
+  selection / Copy text.
+- Release numbering (owner, 2026-10-25): v0.1.1 = hotfix (snip Ctrl+C + image-only
+  copy). The planned themes move up one: v0.1.2 Linux round + animations/smoothness,
+  v0.1.3 speed/lightness + the snip redesign (editor toolbar replaces the snip
+  controls, timer only in Settings, scrolling capture in the editor and fixed),
+  v0.1.4 maturity.
 - Settings (owner, 2026-10-25, future): changes save automatically (no Save
   button); the widget theme (Frost/Graphite, glass) styles the Settings window too.
 - About page (owner, 2026-10-25): app info, model/library notices, and a developer
