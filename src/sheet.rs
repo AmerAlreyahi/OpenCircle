@@ -1,10 +1,11 @@
 //! The Google results card (owner, 2026-10-24): Google's own Lens / AI Mode
 //! page in the system web view, as a floating card beside the selection.
 //!
-//! The web view never runs in the resident app: it lives in the short-lived
-//! helper `opencircle-sheet` next to this exe (`src/bin/opencircle-sheet`, the
-//! only binary that links wry / WebView2 / WebKitGTK), so the app's idle memory
-//! is unchanged and everything of the card goes when the helper exits (on ×,
+//! The web view never runs in the resident app: it lives in a short-lived
+//! helper process (`helper/`: on Windows `opencircle.exe sheet-helper`, a hidden
+//! mode of this very exe, one file to ship; on Linux the separate binary
+//! `opencircle-sheet` next to it, the only one that links WebKitGTK), so the
+//! app's idle memory is unchanged and everything of the card goes when the helper exits (on ×,
 //! Esc, an outside click, or when the overlay drops the panel: `Guard`).
 //! Windows and Linux: Lens and AI Mode. On Linux Google often answers
 //! WebKitGTK's Lens with its "unusual traffic" check (spike S9): the card shows
@@ -14,9 +15,11 @@
 //! Nothing opens in the browser by itself (owner, 2026-10-24): only the user's
 //! "Open in browser". No helper or web view runtime (WebView2,
 //! libwebkit2gtk-4.1): the panel says so and offers that button.
+/// Windows: the helper's code, run by `main` for `ARG` (Linux: the separate bin).
+#[cfg(all(windows, feature = "sheet"))]
+pub mod helper;
 pub mod history;
 #[allow(dead_code)] // the helper uses the rest
-#[path = "bin/opencircle-sheet/proto.rs"]
 mod proto;
 
 use std::io::{BufRead, BufReader, Write};
@@ -29,12 +32,12 @@ use crate::config::CardSide;
 pub use proto::Kind;
 use proto::{Args, Line, Place};
 
-/// The helper's file name, next to the app's exe.
-const HELPER: &str = if cfg!(windows) {
-    "opencircle-sheet.exe"
-} else {
-    "opencircle-sheet"
-};
+/// The hidden first argument that runs this exe as the Windows helper.
+#[cfg(windows)]
+pub const ARG: &str = "sheet-helper";
+/// The Linux helper's file name, next to the app's exe.
+#[cfg(not(windows))]
+const HELPER: &str = "opencircle-sheet";
 /// The helper's exit code when the system has no web view runtime.
 const NO_RUNTIME: i32 = 3;
 /// What the panel says when the card could not open (an "Open in browser"
@@ -64,9 +67,21 @@ pub fn unavailable() -> Option<&'static str> {
     None
 }
 
-fn helper() -> Option<PathBuf> {
-    let path = std::env::current_exe().ok()?.with_file_name(HELPER);
-    path.is_file().then_some(path)
+/// What to run for the card: the program and its leading arguments.
+fn helper() -> Option<(PathBuf, &'static [&'static str])> {
+    helper_of(&std::env::current_exe().ok()?)
+}
+
+/// `exe` = the running app. Windows: itself in helper mode (when built with the
+/// web view); elsewhere: the `opencircle-sheet` file beside it, if there.
+fn helper_of(exe: &std::path::Path) -> Option<(PathBuf, &'static [&'static str])> {
+    #[cfg(windows)]
+    return cfg!(feature = "sheet").then(|| (exe.to_path_buf(), &[ARG][..]));
+    #[cfg(not(windows))]
+    {
+        let path = exe.with_file_name(HELPER);
+        path.is_file().then_some((path, &[][..]))
+    }
 }
 
 /// The language Google's page should be in: the app's UI language, which is
@@ -150,7 +165,7 @@ pub fn run(
     avoid: Option<Avoid>,
     mut on: impl FnMut(Event) -> bool,
 ) -> Result<(), String> {
-    let path = helper().ok_or("no helper")?;
+    let (path, lead) = helper().ok_or("no helper")?;
     let ai_url = (kind == Kind::Ai).then(|| String::from_utf8_lossy(&page).into_owned());
     let keep = history::path().filter(|_| history::enabled());
     match &keep {
@@ -172,6 +187,7 @@ pub fn run(
     };
     let args = args(kind, (colours, shadow), avoid);
     let mut command = Command::new(path);
+    command.args(lead);
     // An AppImage bundles an older GLib/GTK than the system's WebKitGTK needs
     // (seen: symbol lookup error on Ubuntu 26.04): the helper takes the
     // system's libraries first.
@@ -462,6 +478,27 @@ mod tests {
     }
 
     #[test]
+    fn the_helper_is_this_exe_on_windows_and_a_sibling_file_elsewhere() {
+        let exe = std::path::Path::new("/nowhere/opencircle");
+        #[cfg(windows)]
+        {
+            let want = cfg!(feature = "sheet").then(|| (exe.to_path_buf(), &[ARG][..]));
+            assert_eq!(helper_of(exe), want);
+        }
+        #[cfg(not(windows))]
+        {
+            assert_eq!(helper_of(exe), None); // no such file beside it
+            let dir = std::env::temp_dir().join(format!("oc-sheet-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("opencircle-sheet"), b"").unwrap();
+            let got = helper_of(&dir.join("opencircle"));
+            std::fs::remove_dir_all(&dir).unwrap();
+            let (path, lead) = got.unwrap();
+            assert!(path.ends_with("opencircle-sheet") && lead.is_empty());
+        }
+    }
+
+    #[test]
     fn no_helper_no_card_and_nothing_opens_by_itself() {
         // Google's human check, and what the browser gets instead.
         assert!(proto::is_captcha(
@@ -477,7 +514,9 @@ mod tests {
         ));
         // No helper next to the test binary: no card, the reason, and an
         // error for the panel (which offers "Open in browser"; `run` opens nothing).
+        #[cfg(not(all(windows, feature = "sheet")))]
         assert!(helper().is_none());
+        #[cfg(not(all(windows, feature = "sheet")))]
         assert!(!wanted() && unavailable().is_some());
         let mut events = 0;
         let r = run(Kind::Ai, Vec::new(), ([0; 5], 0.0), None, None, |_| {

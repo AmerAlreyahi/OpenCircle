@@ -126,15 +126,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($exe in "target\release\opencircle.exe", "target\release\opencircle-sheet.exe") {
+          foreach ($exe in "target\release\opencircle.exe") {
             $b = [IO.File]::ReadAllBytes($exe)
             $pe = [BitConverter]::ToInt32($b, 0x3C)
             $subsystem = [BitConverter]::ToUInt16($b, $pe + 24 + 68)
             "$exe subsystem = $subsystem (2 = GUI, 3 = console)"
             if ($subsystem -ne 2) { throw "$exe is not GUI-subsystem" }
           }
-          # The resident app never links the web view (only the helper does).
-          if (Select-String -Path target\release\opencircle.exe -Pattern "WebView2Loader" -SimpleMatch -Quiet) { throw "opencircle.exe links WebView2" }
           $exe = "target\release\opencircle.exe"
           $info = (Get-Item $exe).VersionInfo
           $info | Format-List FileVersion, ProductVersion, ProductName, FileDescription, OriginalFilename

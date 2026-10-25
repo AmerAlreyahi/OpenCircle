@@ -145,6 +145,9 @@ fn main() -> ExitCode {
     let command = match args.first().map(String::as_str) {
         None => None,
         Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
+        // hidden: the results card (WebView2), spawned by the app; Windows only
+        #[cfg(all(windows, feature = "sheet"))]
+        Some(sheet::ARG) => return sheet::helper::main(args[1..].to_vec()),
         Some(update::VERSION_ARG) => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;

@@ -23,10 +23,10 @@ use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{CursorIcon, ResizeDirection, Window, WindowId, WindowLevel};
 use wry::{Rect, WebContext, WebView, WebViewExtWindows};
 
-use crate::proto::{
+use super::proto::{
     self, Args, BODY_PAD, BODY_R, FOOTER, HEADER, Hit, Kind, Line, MIN, Place, RADIUS, Rect4,
 };
-use crate::{
+use super::{
     CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, icon, lerp, log, say, slid, slide_off,
 };
 
@@ -693,7 +693,7 @@ fn guard_links(view: &WebView, t0: Instant) -> windows::core::Result<()> {
     use windows::core::{BOOL, PWSTR};
 
     let core = view.webview();
-    let links = crate::Links::default();
+    let links = super::Links::default();
     let (links_nav, mut token) = (links.clone(), 0i64);
     let navigation = NavigationStartingEventHandler::create(Box::new(move |_, args| {
         let Some(args) = args else { return Ok(()) };
@@ -703,7 +703,7 @@ fn guard_links(view: &WebView, t0: Instant) -> windows::core::Result<()> {
             args.Uri(&mut uri)?;
             args.IsUserInitiated(&mut gesture)?;
             let url = take_pwstr(uri);
-            if !crate::route(t0, &url, false, gesture.as_bool(), &links_nav) {
+            if !super::route(t0, &url, false, gesture.as_bool(), &links_nav) {
                 args.SetCancel(true)?;
             }
         }
@@ -717,7 +717,7 @@ fn guard_links(view: &WebView, t0: Instant) -> windows::core::Result<()> {
             args.SetHandled(true)?; // never a WebView2 popup window
             args.Uri(&mut uri)?;
             args.IsUserInitiated(&mut gesture)?;
-            crate::route(t0, &take_pwstr(uri), true, gesture.as_bool(), &links);
+            super::route(t0, &take_pwstr(uri), true, gesture.as_bool(), &links);
         }
         Ok(())
     }));

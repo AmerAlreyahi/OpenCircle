@@ -50,7 +50,7 @@ jobs:
         run: cargo test
 
       # Ready-to-run builds for manual testing (no Rust needed on the test PC):
-      # the app and the results card's helper, side by side.
+      # the app (Windows: one exe, the results card inside it; Linux: plus its helper).
       - if: steps.crate.outputs.present == 'true'
         run: cargo build --release --features sheet
       - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
@@ -59,7 +59,6 @@ jobs:
           name: opencircle-windows-exe
           path: |
             target/release/opencircle.exe
-            target/release/opencircle-sheet.exe
           retention-days: 7
       - if: steps.crate.outputs.present == 'true' && runner.os == 'Linux'
         uses: actions/upload-artifact@v4

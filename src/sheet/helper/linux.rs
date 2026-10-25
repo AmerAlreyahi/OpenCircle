@@ -15,8 +15,8 @@ use gtk::prelude::*;
 use gtk::{cairo, gdk, glib};
 use wry::{WebContext, WebViewBuilderExtUnix};
 
-use crate::proto::{self, Args, BODY_PAD, BODY_R, HEADER, Hit, Line, Place, RADIUS, Rect4};
-use crate::{
+use super::proto::{self, Args, BODY_PAD, BODY_R, HEADER, Hit, Line, Place, RADIUS, Rect4};
+use super::{
     CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, icon, lerp, log, say, slid, slide_off,
 };
 
@@ -504,7 +504,7 @@ fn guard_links(view: &wry::WebView, t0: Instant) {
         PolicyDecisionType, URIRequestExt, WebViewExt,
     };
     use wry::WebViewExtUnix;
-    let links = crate::Links::default();
+    let links = super::Links::default();
     view.webview()
         .connect_decide_policy(move |_, decision, kind| {
             let new_window = match kind {
@@ -523,7 +523,7 @@ fn guard_links(view: &wry::WebView, t0: Instant) {
                 .and_then(|r| r.uri())
                 .map(|u| u.to_string())
                 .unwrap_or_default();
-            if crate::route(t0, &url, new_window, action.is_user_gesture(), &links) {
+            if super::route(t0, &url, new_window, action.is_user_gesture(), &links) {
                 decision.use_();
             } else {
                 decision.ignore();

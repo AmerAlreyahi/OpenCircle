@@ -46,7 +46,8 @@ ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 rqrr = { version = "0.11.0", default-features = false }
 minisign-verify = "0.3.0"
 # Feature `sheet`: the Google results card's web view (WebView2 / WebKitGTK), only
-# in the helper binary `opencircle-sheet`: the resident app never links it.
+# in the helper: on Windows a hidden mode of opencircle.exe (src/sheet/helper), on
+# Linux the separate binary `opencircle-sheet`. WebView2/WebKitGTK only start there.
 wry = { version = "0.57", default-features = false, features = ["os-webview"], optional = true }
 
 [features]
@@ -59,6 +60,7 @@ name = "opencircle-sheet"
 path = "src/bin/opencircle-sheet/main.rs"
 required-features = ["sheet"]
 test = false # its shared logic (proto.rs) is tested in the app's tests
+# Linux only: on Windows this is a stub that is never packaged (`binaries` below).
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -99,8 +101,10 @@ identifier = "com.opencircle.app"
 category = "Utility"
 authors = ["OpenCircle contributors"]
 homepage = "https://github.com/AmerAlreyahi/OpenCircle"
-# `sheet`: the results card's helper `opencircle-sheet`, packaged next to the app.
+# `sheet`: the results card's helper. Windows: inside opencircle.exe (one exe); Linux:
+# the separate `opencircle-sheet`, added by [deb]/[appimage] `files` below.
 before-packaging-command = "cargo build --release --features sheet"
+binaries = [{ path = "opencircle", main = true }]
 icons = [
     "assets/icons/opencircle.ico",
     "assets/icons/32x32.png",
@@ -110,6 +114,21 @@ icons = [
 ]
 # cargo-packager has no rpm format: the .rpm comes from cargo-generate-rpm (below).
 formats = ["nsis", "wix", "appimage", "deb"]
+# The installers' licence/notice page (RTF is what WiX needs; NSIS takes it too).
+license-file = "assets/installer/license.rtf"
+
+# Windows MSI: cargo-packager's template is already WixUI_InstallDir (pick the folder),
+# with a "Launch OpenCircle" checkbox (checked) on the finish page, a Start menu
+# shortcut, and a stable UpgradeCode derived from the identifier (upgrades replace).
+# Only the artwork is ours: 493x58 banner, 493x312 welcome/finish image.
+[package.metadata.packager.wix]
+banner-path = "assets/installer/banner.bmp"
+dialog-image-path = "assets/installer/dialog.bmp"
+
+# NSIS (.exe): sidebar on welcome/finish, header on the inner pages.
+[package.metadata.packager.nsis]
+sidebar-image = "assets/installer/nsis-sidebar.bmp"
+header-image = "assets/installer/nsis-header.bmp"
 
 # Linux runtime libraries. `ldd target/release/opencircle` links gtk3, glib and
 # libxcb; winit, iced and tray-icon dlopen the rest (X11, xkbcommon, wayland,
@@ -134,6 +153,8 @@ depends = [
 # it gets our entry as the template, and release.yml renames the .deb's files to
 # com.opencircle.app.desktop / com.opencircle.app.png.
 desktop-template = "packaging/com.opencircle.app.desktop"
+# Linux: the results card is the separate binary (Windows has it inside opencircle.exe).
+files = { "target/release/opencircle-sheet" = "usr/bin/opencircle-sheet" }
 
 # The AppImage's entry (same template) names Icon=com.opencircle.app: ship that icon.
 # A raw AppImage writes its own ~/.local/share/applications/com.opencircle.app.desktop
@@ -141,7 +162,7 @@ desktop-template = "packaging/com.opencircle.app.desktop"
 # WebKitGTK is never bundled: the results card uses the system's (an optional
 # dependency); without it, results open in the browser.
 [package.metadata.packager.appimage]
-files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png" }
+files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", "target/release/opencircle-sheet" = "usr/bin/opencircle-sheet" }
 excluded-libraries = ["libwebkit2gtk-4.1*", "libjavascriptcoregtk-4.1*", "libsoup-3.0*"]
 
 # .rpm: `cargo generate-rpm` after `cargo build --release`. Same libraries, Fedora names.
