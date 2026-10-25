@@ -32,9 +32,13 @@ mod linux;
 mod win;
 
 use super::proto;
-/// The app's widget motion (durations, curves, the OS's "show animations").
+/// The app's widget motion (durations, curves, the OS's "show animations"):
+/// the app's module on Windows, the same file in the Linux helper binary.
+#[cfg(not(windows))]
 #[path = "../../ui/motion.rs"]
 mod motion;
+#[cfg(windows)]
+use crate::ui::motion;
 
 use std::borrow::Cow;
 use std::io::{Read, Write};
