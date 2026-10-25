@@ -178,7 +178,9 @@ production systems.
   directly in the floating card. It sits on the left or right side by the user's
   preference, its width can be widened, and it moves sides with the common
   pattern (drag the card's header; on release it docks to the nearer side). Side
-  and width are remembered across runs. Nothing ever opens in the browser
+  and width are remembered across runs. If the saved side would cover
+  the selection, the card opens on the other side for that search only (owner,
+  2026-10-25). Nothing ever opens in the browser
   automatically: only the card's "Open in browser" button does that.
 - Translate default target (owner, 2026-10-23): Arabic, changeable in settings.
 - No-key AI (owner, 2026-10-24): until a key is set, Ask AI opens the question
@@ -190,6 +192,9 @@ production systems.
   then lightweight, then free (no key, no account, no paid service) by default;
   paid or heavier options only as opt-in extras. E.g. live translate defaults to
   an on-device model, not an AI service.
+- Pre-release installers (owner, 2026-10-25): build test MSI/installers on the
+  Windows test VM (Rust + cargo-packager + WiX may be installed there), not on
+  GitHub, for faster pre-release testing. GitHub builds only the real releases.
 - Test machines (owner, 2026-10-24): two test VMs, agents may do anything on them
   (access details in AGENTS.local.md). Prefer them over the owner's own PC.
 - Windows first (owner, 2026-10-24, to save credits): VM testing and
@@ -232,13 +237,6 @@ production systems.
   changes: at most 3 workers at once, mid model for routine work (strong model
   only for security, hard bugs, design), one contact sheet per visual proof,
   short replies, only key videos.
-- Results card placement (owner, 2026-10-24, supersedes "away from the
-  selection" and "only the size is remembered"): results (Lens, AI Mode) show
-  directly in the floating card. It sits on the left or right side by the user's
-  preference, its width can be widened, and it moves sides with the common
-  pattern (drag the card's header; on release it docks to the nearer side). Side
-  and width are remembered across runs. Nothing ever opens in the browser
-  automatically: only the card's "Open in browser" button does that.
 - Editor moving (owner, 2026-10-24, like iTop): any annotation moves by holding and
   dragging it, with any tool active. Pen and highlighter strokes never show a
   selection box or handles.
