@@ -901,7 +901,8 @@ mod tests {
         let _ = l.open_controller(MONITOR);
         let id = l.controller().expect("the controller opens");
         let bottom = l.ctl_at.y + l.ctl.size().height;
-        assert_eq!(bottom, 1080.0 - CONTROLLER_MARGIN, "bottom-right corner");
+        let taskbar = crate::ui::taskbar_inset(Point::ORIGIN, Size::new(1920.0, 1080.0), 1.0);
+        assert_eq!(bottom, 1080.0 - CONTROLLER_MARGIN - taskbar, "bottom right");
         assert!(
             l.ctl.notice.is_some(),
             "the first-run note is in the controller"
