@@ -4689,8 +4689,10 @@ mod tests {
         assert_eq!(at, spot(&app, tool));
         assert_eq!(at.y + tool.height, bar_box.y + bar_box.height);
         assert_eq!(at.x + tool.width / 2.0, bar_box.center_x());
+        // its first row (two rows where drag-out makes it too wide)
         let pad = widgets::SURFACE_PADDING;
-        let back = at + Vector::new(pad + widgets::CONTROL / 2.0, tool.height / 2.0);
+        let row = pad + widgets::CONTROL / 2.0;
+        let back = at + Vector::new(row, row);
         let hit = |app: &App, p| widgets::shot::click(app.view(app.overlay), app.screen, p);
         assert!(
             hit(&app, back)
@@ -4699,7 +4701,7 @@ mod tests {
             "its Back arrow is there"
         );
         // dragged by its edge, it docks at the nearest spot, remembered
-        let edge = at + Vector::new(pad / 2.0, tool.height / 2.0);
+        let edge = at + Vector::new(pad / 2.0, row);
         assert!(
             hit(&app, edge)
                 .iter()
