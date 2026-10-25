@@ -62,18 +62,6 @@ impl Kind {
         }
     }
 
-    fn label(self) -> &'static str {
-        ["Region", "Window", "Full"][self as usize]
-    }
-
-    fn tip(self) -> &'static str {
-        [
-            "Drag or circle an area",
-            "Click a window",
-            "The whole screen",
-        ][self as usize]
-    }
-
     fn hint(self) -> &'static str {
         [
             "Click a window or a part of it · scroll = bigger / smaller · or drag an area",
@@ -90,7 +78,6 @@ impl Kind {
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    Kind(Kind),
     /// Stop button or Esc while scrolling: keep what was gathered.
     Stop,
     /// The stitched height so far.
@@ -515,15 +502,12 @@ impl Snip {
         self.recent = recent;
     }
 
-    /// The mode switch, the timer and Recent, at the top of the screen.
+    /// The hint and Recent, at the top of the screen.
     pub fn view(&self) -> Element<'_, Msg> {
-        let options: Vec<_> = (self.kinds().into_iter())
-            .map(|k| (k, k.label(), k.tip()))
-            .collect();
-        let switch = widgets::segmented(&options, self.kind, Msg::Kind);
-        let mut top = column![widgets::surface(switch)]
-            .spacing(12)
-            .align_x(Center);
+        // No mode switch: hover + click picks a control or a window, a drag an
+        // area, the wheel walks up to the screen (quick actions still start in
+        // Window or Full mode).
+        let mut top = column![].spacing(12).align_x(Center);
         if !self.recent.is_empty() {
             let shots = (self.recent.iter()).map(|(path, picture)| {
                 let open = widgets::thumbnail(picture.clone(), Msg::OpenRecent(path.clone()));
@@ -1141,6 +1125,35 @@ mod tests {
         let mut wayland = Snip::new(Vec::new(), SCREEN, false, None);
         assert_eq!(wayland.start(Kind::Window, SCREEN), None);
         assert_eq!(wayland.kind, Kind::Region);
+    }
+
+    #[test]
+    fn the_overlay_offers_no_mode_switch_yet_every_target_picks_its_area() {
+        let window = rect(100.0, 100.0, 400.0, 300.0);
+        let inside = Point::new(200.0, 200.0);
+        let whole = Rectangle::with_size(SCREEN);
+        for target in [
+            Target::Circle,
+            Target::LastRegion,
+            Target::Window,
+            Target::FullScreen,
+        ] {
+            let mut s = Snip::new(wins(&[window]), SCREEN, true, None);
+            let first = s.start(Kind::for_target(target), SCREEN);
+            // Hover picks a window or a control, a drag an area, the wheel
+            // the screen: no Region / Window / Full switch.
+            let texts = widgets::shot::texts(s.view());
+            for mode in ["Region", "Window", "Full"] {
+                assert!(!texts.iter().any(|t| t == mode), "{target:?}: {texts:?}");
+            }
+            s.hover(inside);
+            let picked = first.or_else(|| s.pick(None, inside, SCREEN));
+            let want = match target {
+                Target::FullScreen => whole,
+                _ => window, // a click on a window takes it, in any mode
+            };
+            assert_eq!(picked, Some(Next::Edit(want)), "{target:?}");
+        }
     }
 
     #[test]

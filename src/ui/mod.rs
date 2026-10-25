@@ -2319,12 +2319,6 @@ impl App {
             return Task::none();
         };
         match msg {
-            snip::Msg::Kind(kind) => {
-                self.selection = None;
-                self.stroke.clear();
-                let next = snip.switch(kind, self.screen);
-                self.snip_next(next)
-            }
             snip::Msg::Stop => {
                 if let Some(scroll) = &snip.scroll {
                     scroll.stop();
@@ -3127,7 +3121,7 @@ impl App {
             }
             layers = layers.extend(edit.flat_view());
         }
-        // Snip: the loupe beside the pointer (under the mode switch).
+        // Snip: the loupe beside the pointer (under the hint).
         if self.edit.is_none()
             && let Some(loupe) = snip.and_then(|s| s.guides(frame, self.scale, self.drawing))
         {
