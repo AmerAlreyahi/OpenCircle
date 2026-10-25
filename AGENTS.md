@@ -255,6 +255,8 @@ production systems.
   bar's look, sized to what's visible, never over a window's tab bar.
 - Start with the OS (owner, 2026-10-25): a Settings > General switch, ON by
   default (also in onboarding); the app manages the Run key / autostart entry.
+- Settings (owner, 2026-10-25, future): changes save automatically (no Save
+  button); the widget theme (Frost/Graphite, glass) styles the Settings window too.
 - About page (owner, 2026-10-25): app info, model/library notices, and a developer
   card for the owner (avatar bundled, no runtime network; data refreshed from the
   owner's GitHub profile at each release by scripts/refresh-about.sh).
