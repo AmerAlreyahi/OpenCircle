@@ -473,6 +473,9 @@ struct App {
     /// (`None`: at rest).
     swap: f32,
     swap_at: Option<Instant>,
+    /// The editor just went back to the bar (until the next frame): an
+    /// Escape now is the key that did it.
+    esc_back: bool,
     /// The bar's spot (`config::BarConfig`); while its handle is held, the
     /// pointer's last position and where the bar follows it (top-left);
     /// where it is drawn now (gliding to its spot); how much of the screen's
@@ -583,6 +586,7 @@ impl App {
             text_mode: None,
             swap: 0.0,
             swap_at: None,
+            esc_back: false,
             bar_anchor: BarAnchor::Bottom,
             bar_drag: None,
             bar_now: None,
@@ -690,6 +694,12 @@ impl App {
             // The editor has its own Esc (finish typing, close the picker, back).
             Message::Escape if self.edit.as_ref().is_some_and(Editing::is_open) => Task::none(),
             Message::Escape if std::env::var_os(TEST_SHOT).is_some() => self.test_shot(),
+            // The editor's Esc went back to the bar: the same key's Escape
+            // (it may come after) doesn't close the overlay too.
+            Message::Escape if self.esc_back => {
+                self.esc_back = false;
+                Task::none()
+            }
             Message::Escape => self.close(),
             Message::Editor(msg) => self.on_editor(msg),
             Message::Snip(msg) => self.on_snip(msg),
@@ -836,6 +846,7 @@ impl App {
                 self.start_translate()
             }
             Message::Frame(now) => {
+                self.esc_back = false;
                 self.appear = Some(match self.appear {
                     None => (now, 0.0),
                     Some((last, t)) => (now, overlay::opening_step(t, now - last)),
@@ -2076,6 +2087,7 @@ impl App {
             }
             Some(Output::Back) => {
                 edit.back();
+                self.esc_back = true;
                 Task::none()
             }
             Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
@@ -2586,6 +2598,7 @@ impl App {
         self.text_mode = None;
         self.bar_drag = None;
         self.swap = 0.0;
+        self.esc_back = false;
         self.song = None; // stops listening
         if self.can_hide {
             self.hiding = Hiding::Empty;
@@ -3272,9 +3285,9 @@ impl App {
     // ponytail: a plain size morph; the full motion polish is v0.1.1.
     fn morphing_bar(&self, at: Point) -> Element<'_, Message> {
         let size = self.dock_size();
-        let shape = widgets::surface(space())
-            .width(size.width)
-            .height(size.height);
+        // (the surface pads its content: the content takes the rest)
+        let inner = size - Size::new(2.0, 2.0) * widgets::SURFACE_PADDING;
+        let shape = widgets::surface(space().width(inner.width).height(inner.height));
         iced::widget::pin(opaque(shape)).position(at).into()
     }
 
@@ -4683,6 +4696,21 @@ mod tests {
         assert!(mid.width > bar_box.width.min(tool.width));
         assert!(mid.width < bar_box.width.max(tool.width));
         assert_eq!(app.bar_at(), spot(&app, mid));
+        // ...drawn at its whole size (inside it differs from just outside it)
+        // (over a plain frame)
+        app.frame = Some(image::Handle::from_rgba(4, 4, vec![9; 4 * 4 * 4]));
+        let px = widgets::shot::save("bar-morph", app.view(app.overlay), app.screen);
+        let at = app.bar_at();
+        let y = (at.y + mid.height / 2.0) as usize;
+        let pixel = |x: f32| {
+            let i = (y * 1280 + x as usize) * 4;
+            px[i..i + 4].to_vec()
+        };
+        assert_ne!(
+            pixel(at.x + mid.width - 30.0),
+            pixel(at.x + mid.width + 30.0),
+            "the morph's shape is there"
+        );
         // there: the toolbar at the bar's anchor (bottom edge, centre the same)
         settle_bar(&mut app);
         assert!(!app.swapping());
@@ -4720,6 +4748,9 @@ mod tests {
         // Back: the bar again, at the toolbar's spot
         let _ = app.update(Message::Editor(editor::Message::Back));
         assert!(!app.editing());
+        // Esc did it: the same key's Escape doesn't close the overlay too
+        let _ = app.update(Message::Escape);
+        assert!(app.frame.is_some(), "still open, at the bar");
         settle_bar(&mut app);
         let (_, size) = app.bar_size();
         assert_eq!(app.bar_at(), spot(&app, size));
