@@ -59,7 +59,7 @@ Details: [Privacy](docs/privacy.md).
 </p>
 
 <p align="center">
-  <img src="docs/images/results-card.png" alt="The results card docked on the right of the screen, showing Google Lens and then Google AI Mode for a lighthouse picture." width="900"><br>
+  <img src="docs/images/results-card.png" alt="The results card docked beside the selection, showing Google Lens and then Google AI Mode for a lighthouse picture." width="900"><br>
   <sub>The results card: Lens and AI Mode, docked beside the selection.</sub>
 </p>
 

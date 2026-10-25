@@ -81,7 +81,7 @@ After that, reading text works offline. The built-in reader handles English
 may be needed; OpenCircle tells you if it is.
 
 <p align="center">
-  <img src="images/select-text.png" alt="Select text: words are highlighted on a page, and the bottom bar shows the text reader download notice." width="800">
+  <img src="images/select-text.png" alt="Select text: words are highlighted on a page, with the bottom bar under the selection." width="800">
 </p>
 
 <p align="center">
@@ -104,7 +104,7 @@ Google sign-in does not work inside the card. The optional search history
 (off by default) is kept on this PC only.
 
 <p align="center">
-  <img src="images/results-card.png" alt="The results card docked on the right, showing Google Lens results and AI Mode." width="800">
+  <img src="images/results-card.png" alt="The results card docked beside the selection, showing Google Lens results and AI Mode." width="800">
 </p>
 
 ## Translate and live translate
