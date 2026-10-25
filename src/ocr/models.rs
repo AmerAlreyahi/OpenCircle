@@ -267,6 +267,11 @@ pub fn ready() -> bool {
     installed(current_recognizer())
 }
 
+/// Bytes `ensure_models` would still download for the app's OCR (sizes only).
+pub fn download_size() -> u64 {
+    missing_bytes(&ocr_files(current_recognizer()))
+}
+
 /// `ensure_models` for any list of pinned files (OCR's plus offline
 /// translation's: one download, one progress).
 pub(crate) fn ensure(

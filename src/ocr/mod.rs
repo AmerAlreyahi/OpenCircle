@@ -8,7 +8,7 @@ pub(crate) mod models;
 pub(crate) mod session;
 pub(crate) mod worker;
 
-pub use models::{ensure_models, models_dir, ready};
+pub use models::{download_size, ensure_models, models_dir, ready};
 pub use session::{Hold, hold};
 pub use worker::{WORKER_ARG, recognize_as, recognize_in_child, translate_in_child, worker_main};
 

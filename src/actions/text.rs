@@ -33,6 +33,16 @@ pub fn models_present() -> bool {
 /// Blocking (download, helper process): call off the UI thread. Fetches any
 /// missing model, then reads `crop`. `progress` gets whole-percent steps only.
 pub fn read(crop: &Crop, mut progress: impl FnMut(Progress)) -> Result<String, String> {
+    download(&mut progress)?;
+    progress(Progress::Reading);
+    let blocks =
+        ocr::recognize_in_child(&crop.rgba, crop.width, crop.height).map_err(|e| e.to_string())?;
+    Ok(join_lines(&blocks))
+}
+
+/// Blocking: fetches any missing OCR model (only after the user agreed),
+/// reporting whole-percent `Progress::Download` steps.
+pub fn download(mut progress: impl FnMut(Progress)) -> Result<(), String> {
     let mut shown = None;
     ocr::ensure_models(|done, total| {
         let percent = done * 100 / total.max(1);
@@ -41,11 +51,8 @@ pub fn read(crop: &Crop, mut progress: impl FnMut(Progress)) -> Result<String, S
             progress(Progress::Download(percent as f32 / 100.0));
         }
     })
-    .map_err(|e| e.to_string())?;
-    progress(Progress::Reading);
-    let blocks =
-        ocr::recognize_in_child(&crop.rgba, crop.width, crop.height).map_err(|e| e.to_string())?;
-    Ok(join_lines(&blocks))
+    .map(drop)
+    .map_err(|e| e.to_string())
 }
 
 /// OCR lines (already in reading order) as text: boxes on one row joined by

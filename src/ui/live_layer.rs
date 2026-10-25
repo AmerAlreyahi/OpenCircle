@@ -204,6 +204,9 @@ impl Live {
         let source = self.ctl.picker.source.clone();
         let pair = self.pending.flatten();
         let (task, handle) = background(move |tx| {
+            if cfg!(test) {
+                return; // never the network (an aborted task's thread still runs)
+            }
             let done = crate::actions::translate::download(&source, pair, |done, total| {
                 let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
             });

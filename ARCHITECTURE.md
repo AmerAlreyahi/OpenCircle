@@ -55,7 +55,12 @@ capture the screen and show it.
    (redraw); a press on a corner handle resizes, on highlighted words a drag stretches
    them across lines (Shift+click too), elsewhere inside moves; Shift adds a selection (Ask AI / Text get every
    crop stacked in one image, the rest the box around all). The ask bar at the bottom
-   opens Ask AI with its text.
+   opens Ask AI with its text (in "wait" mode, Enter with nothing typed = Search). Its
+   buttons: Include screen, Copy, Save, Translate, Live, Music, Edit (no Search / Ask AI
+   / Text buttons; their keys L / A / T stay). Text selection needs the screen's text,
+   read by OCR at open (`read_screen`): without the OCR models a note over the bar
+   (`App::reader_note`, state `Reader`) offers their download, one click, then reads; a
+   drag that began on text before the words arrived becomes a text selection then.
 5. **Action**: a bar button, Enter (the first action) or the action's key sends
    `Message::Run(&Action)`. `App::run` crops the selection in physical pixels, then:
    `Run::Finish(f)` closes the overlay (so dialogs aren't under it) and calls `f(crop)`;

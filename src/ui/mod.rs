@@ -63,17 +63,17 @@ const PROTECTED: &str = "This window is protected; it can't be captured";
 /// height kept free for it (the action bar stays above it).
 const ASK_INPUT: &str = "overlay-ask";
 /// The bottom bar's round buttons, always all there so it never changes size
-/// (owner, 2026-10-25): Include screen, Search, Text, Copy, Save (dimmed until
-/// something is selected), Ask AI, Translate, Live translate, Song search, Edit.
-const BAR_BUTTONS: f32 = 10.0;
+/// (owner, 2026-10-25): Include screen, Copy, Save (dimmed until something is
+/// selected), Translate, Live translate, Song search, Edit. No Search, Ask AI
+/// or Text (owner, 2026-10-25): a selection searches by itself (or Enter in an
+/// empty field, "wait" mode), Enter in the field asks, text is selected directly.
+const BAR_BUTTONS: f32 = 7.0;
 /// The bar's selection buttons' tooltip while there is nothing to act on.
 const SELECT_FIRST: &str = "Select something first";
 /// How long the bar takes to turn into the editing toolbar (back: `motion::EXIT`),
 /// and to glide to a new spot.
 const BAR_MORPH: Duration = motion::ENTER;
 const GLIDE: Duration = motion::MOVE;
-/// Ask AI's icon in the bottom bar: the one place to swap in the OpenCircle logo.
-const ASK_AI_ICON: char = actions::ask::ACTION.icon;
 /// A QR code's chip under a selection (its room; the chip is centred in it).
 const QR_WIDTH: f32 = 520.0;
 /// The bottom bar's "Include screen" toggle icon (lucide "screen-share").
@@ -194,6 +194,10 @@ enum Message {
     Frame(Instant),
     /// OCR read the whole frame of this opening (main mode, at open).
     ScreenText(u32, Result<Vec<word::Line>, String>),
+    /// The note over the bar's Download (the text reader's models), and how
+    /// that download for this opening goes (`Reading` = done).
+    ReaderDownload,
+    Reader(u32, Result<text::Progress, String>),
     /// The "Select text" chip under a snapped box, and the lines OCR read in it.
     SelectText,
     TextLines(Rectangle, Result<Vec<word::Line>, String>),
@@ -221,11 +225,8 @@ enum Message {
 struct BarKeys {
     /// No shortcut.
     none: String,
-    lens: String,
-    text: String,
     copy: String,
     save: String,
-    ask: String,
     translate: String,
     live: String,
     song: String,
@@ -242,11 +243,8 @@ impl BarKeys {
         let key = |a: &Action| bar::key_hint(a.key);
         BarKeys {
             none: String::new(),
-            lens: key(&lens::ACTION),
-            text: key(&text::ACTION),
             copy: key(&copy::ACTION),
             save: key(&save::ACTION),
-            ask: key(&actions::ask::ACTION),
             translate: quick(actions::translate::ACTION.id, false),
             live: quick(actions::translate::ACTION.id, true),
             song: quick("song_search", false),
@@ -261,7 +259,6 @@ enum PickAct {
     Copy,
     Translate,
     Search,
-    Ask,
 }
 
 /// Select-text mode on a snapped box: its words (`None` while OCR reads them)
@@ -271,6 +268,23 @@ struct TextMode {
     boxes: Vec<Rectangle>,
     picked: Option<word::Picked>,
     picking: bool,
+}
+
+/// The text reader (OCR) behind text selection in main mode, as the note over
+/// the bar tells it: without its models a press on text can only draw.
+#[derive(Debug, Clone, PartialEq)]
+enum Reader {
+    /// Nothing to say: the screen's text is read (or nothing reads it).
+    Idle,
+    /// Its models aren't downloaded (this many bytes to go): the note offers
+    /// the download (one click).
+    Missing(u64),
+    /// Downloading them (0..=1), after that click.
+    Downloading(f32),
+    /// The download failed (why); the note offers it again.
+    Failed(String),
+    /// Reading the screen's text (a drag on text selects it once read).
+    Reading,
 }
 
 const CHIP_SPACE: f32 = 12.0;
@@ -424,6 +438,8 @@ struct App {
     /// Main mode: every text line on the frame (image px), read at open;
     /// `None` until OCR answers (or without its models).
     screen_text: Option<Vec<word::Line>>,
+    /// How that read is going (the note over the bar).
+    reader: Reader,
     /// A press that began on text: its stroke so far (image px). It selects
     /// words unless it turns into a loop (`overlay::winds`).
     text_press: Option<Vec<Point>>,
@@ -563,6 +579,7 @@ impl App {
             word: None,
             taps: 0,
             screen_text: None,
+            reader: Reader::Idle,
             text_press: None,
             clicks: None,
             appear: None,
@@ -818,6 +835,13 @@ impl App {
                 self.panel = Some((id, panel));
                 task.map(move |msg| Message::Panel(id, msg))
             }
+            Message::AskSubmit if self.ask.trim().is_empty() && self.searches_on_enter() => {
+                self.ask.clear();
+                match self.picked_in_box() {
+                    true => self.on_picked(PickAct::Search),
+                    false => self.run(&lens::ACTION),
+                }
+            }
             Message::AskSubmit => {
                 let question = std::mem::take(&mut self.ask);
                 let crop =
@@ -912,13 +936,45 @@ impl App {
             Message::ScreenText(opening, read)
                 if opening == self.opening && self.frame.is_some() =>
             {
+                self.reader = Reader::Idle;
                 match read {
-                    Ok(lines) => self.screen_text = Some(lines),
+                    Ok(lines) => {
+                        self.screen_text = Some(lines);
+                        self.drag_became_text();
+                    }
                     Err(e) => eprintln!("[opencircle] reading the screen's text failed: {e}"),
                 }
                 Task::none()
             }
             Message::ScreenText(..) => Task::none(), // closed or opened again meanwhile
+            // Only on this click: nothing is downloaded without it.
+            Message::ReaderDownload if self.frame.is_some() => {
+                self.reader = Reader::Downloading(0.0);
+                if cfg!(test) {
+                    return Task::none(); // never the network
+                }
+                // ponytail: closed mid-download, the download goes on unseen; a
+                // click on the next opening's note starts a second one (the
+                // checksums catch a clash). Share one download if that shows up.
+                let opening = self.opening;
+                background(|tx| {
+                    let progress = |p| {
+                        let _ = tx.unbounded_send(Ok(p));
+                    };
+                    let done = text::download(progress).map(|()| text::Progress::Reading);
+                    let _ = tx.unbounded_send(done);
+                })
+                .map(move |step| Message::Reader(opening, step))
+            }
+            Message::Reader(opening, step) if opening == self.opening && self.frame.is_some() => {
+                match step {
+                    Ok(text::Progress::Download(done)) => self.reader = Reader::Downloading(done),
+                    Ok(text::Progress::Reading) => return self.read_screen(),
+                    Err(e) => self.reader = Reader::Failed(e),
+                }
+                Task::none()
+            }
+            Message::ReaderDownload | Message::Reader(..) => Task::none(),
             // Leave full-screen while still shown (on Windows, leaving it while hidden
             // restores a placement saved while visible: shows it again), then shrink.
             // open() resizes it back before showing.
@@ -1678,10 +1734,34 @@ impl App {
         }
     }
 
+    /// The screen's text has just been read while a press drew: one that
+    /// began on text becomes a text selection to where the pointer is now
+    /// (a loop stays a circle, `drag_text`).
+    fn drag_became_text(&mut self) {
+        let Some(&start) = self.stroke.first().filter(|_| self.drawing && !self.adding) else {
+            return;
+        };
+        let Some(word) = self.text_at(start, word::Unit::Caret) else {
+            return;
+        };
+        let stroke = std::mem::take(&mut self.stroke);
+        self.drawing = false;
+        self.word = Some(word);
+        self.select_word();
+        self.text_press = Some(vec![start]);
+        for &p in &stroke[1..] {
+            match self.text_press {
+                Some(_) => self.drag_text(p),
+                None => self.stroke.push(p), // it looped: a circle after all
+            }
+        }
+    }
+
     /// Main mode: OCR reads the whole frame on a thread (through the warm
     /// helper) so that a press on text selects words at once. Until it answers,
-    /// gestures behave as without it. Without the OCR models nothing is read.
-    fn read_screen(&self) -> Task<Message> {
+    /// gestures behave as without it. Without the OCR models nothing is read:
+    /// the note over the bar says so and offers them (`Reader::Missing`).
+    fn read_screen(&mut self) -> Task<Message> {
         let Some(image::Handle::Rgba {
             width,
             height,
@@ -1691,9 +1771,14 @@ impl App {
         else {
             return Task::none();
         };
-        if !matches!(self.purpose, Purpose::Search) || !text::models_present() {
+        if !matches!(self.purpose, Purpose::Search) {
             return Task::none();
         }
+        if !text::models_present() {
+            self.reader = Reader::Missing(ocr::download_size());
+            return Task::none();
+        }
+        self.reader = Reader::Reading;
         let (width, height, pixels) = (*width, *height, pixels.clone());
         let (scale, opening) = (self.scale, self.opening);
         background(move |tx| {
@@ -1869,6 +1954,17 @@ impl App {
         auto_targets(self.behaviour)
     }
 
+    /// "Wait" mode (`[selection] after`): with a selection, Enter in the empty
+    /// field runs the search the selection didn't run by itself.
+    fn searches_on_enter(&self) -> bool {
+        self.behaviour.after == After::Wait && self.selection.is_some()
+    }
+
+    /// Words picked in a snapped box (select-text mode), not still being dragged.
+    fn picked_in_box(&self) -> bool {
+        (self.text_mode.as_ref()).is_some_and(|m| m.picked.is_some() && !m.picking)
+    }
+
     /// Runs `auto_actions` (Lens and Ask AI: the Lens page opens in the browser
     /// and stays held whichever panel then shows).
     fn auto_search(&mut self) -> Task<Message> {
@@ -1975,7 +2071,6 @@ impl App {
         }
         match act {
             PickAct::Translate => self.start_translate(),
-            PickAct::Ask => self.run(&actions::ask::ACTION),
             _ => self.run(&lens::ACTION),
         }
     }
@@ -2627,6 +2722,7 @@ impl App {
         self.pan = None;
         self.word = None;
         self.screen_text = None;
+        self.reader = Reader::Idle;
         self.text_press = None;
         self.ask = String::new();
         self.drawing = false;
@@ -3017,6 +3113,9 @@ impl App {
                 true => self.morphing_bar(at), // the toolbar turning back into it
                 false => iced::widget::pin(self.bottom_bar()).position(at).into(),
             });
+            if let Some(note) = self.reader_note() {
+                layers = layers.push(self.beside_bar(note, at));
+            }
         }
         // Beside a panel (an auto-search's): the chips.
         if let (Some(_), Some(selection), Purpose::Search, false) =
@@ -3195,13 +3294,17 @@ impl App {
     /// The bottom bar, the one action hub: a handle to drag it, "Ask about your
     /// screen…" (your selection, once there is one; Enter opens Ask AI with
     /// it; "Ask anything…" without the screen), "Include screen", then round
-    /// icon buttons. Search, Text, Copy and Save are dimmed until something is
-    /// selected; then every action takes the selection (picked words: their
-    /// text); without, the whole screen. Always the same size (`bar_size`). Its field takes the keys only once clicked: until
-    /// then letters are the action shortcuts.
+    /// icon buttons. Copy and Save are dimmed until something is selected;
+    /// then every action takes the selection (picked words: their text);
+    /// without, the whole screen. Always the same size (`bar_size`). Its field
+    /// takes the keys only once clicked: until then letters are the action
+    /// shortcuts (L, A, T still search, ask and read the text).
     fn bottom_bar(&self) -> Element<'_, Message> {
         let placeholder = match (self.include_screen, self.selection) {
             (false, _) => "Ask anything…",
+            (true, Some(_)) if self.searches_on_enter() => {
+                "Ask about your selection… (Enter alone = Search)"
+            }
             (true, Some(_)) => "Ask about your selection…",
             (true, None) => "Ask about your screen…",
         };
@@ -3216,26 +3319,14 @@ impl App {
         .width(width);
         let keys = &self.bar_keys;
         let selected = self.selection.is_some();
-        // picked words (select-text mode): Copy, Translate, Search, Ask AI take their text
-        let picked = (self.text_mode.as_ref()).is_some_and(|m| m.picked.is_some() && !m.picking);
+        // picked words (select-text mode): Copy and Translate take their text
+        let picked = self.picked_in_box();
         let pick = |act: PickAct, other: Message| match picked {
             true => Message::Picked(act),
             false => other,
         };
         let button = bar_button;
         let selection = [
-            (
-                lens::ACTION.icon,
-                "Search",
-                &keys.lens,
-                pick(PickAct::Search, Message::Run(&lens::ACTION)),
-            ),
-            (
-                text::ACTION.icon,
-                "Text",
-                &keys.text,
-                Message::Run(&text::ACTION),
-            ),
             (
                 copy::ACTION.icon,
                 "Copy",
@@ -3271,13 +3362,6 @@ impl App {
             ),
         };
         let fixed = [
-            (
-                ASK_AI_ICON,
-                "Ask AI",
-                &keys.ask,
-                false,
-                pick(PickAct::Ask, Message::AskButton),
-            ),
             (
                 actions::translate::ACTION.icon,
                 translate.0,
@@ -3331,6 +3415,57 @@ impl App {
             .on_press(Message::BarGrab)
             .interaction(iced::mouse::Interaction::Grab);
         opaque(bar)
+    }
+
+    /// The note on the text reader (`Reader`): its download offered with its
+    /// size, its progress, a failure to try again, or "Reading text…".
+    fn reader_note(&self) -> Option<Element<'_, Message>> {
+        // what it says, then its button or progress bar
+        let (say, then): (Element<'_, Message>, Element<'_, Message>) = match &self.reader {
+            Reader::Idle => return None,
+            Reader::Reading => return Some(widgets::pill("Reading text…").into()),
+            Reader::Missing(bytes) => {
+                let mb = bytes.div_ceil(1_000_000).max(1);
+                let say = format!("Text selection needs the text reader (~{mb} MB).");
+                let download = widgets::chip("Download", Message::ReaderDownload);
+                (widgets::body(say).into(), download.into())
+            }
+            Reader::Downloading(done) => {
+                let percent = (done * 100.0).round();
+                let say = widgets::body(format!("Downloading the text reader… {percent}%"));
+                (
+                    say.into(),
+                    container(widgets::progress(*done)).width(120).into(),
+                )
+            }
+            Reader::Failed(e) => {
+                let say = widgets::error(format!("The text reader didn't download: {e}"));
+                let again = widgets::chip("Try again", Message::ReaderDownload);
+                (say.into(), again.into())
+            }
+        };
+        let row = iced::widget::row![say, then]
+            .spacing(12)
+            .padding([0, 10])
+            .height(widgets::CONTROL)
+            .align_y(iced::Center);
+        Some(widgets::surface(row).into())
+    }
+
+    /// `note` centred on the bar at `at`: above it, or below it when the bar
+    /// is at the top; opaque, so a press on it never starts a selection.
+    fn beside_bar<'a>(&self, note: Element<'a, Message>, at: Point) -> Element<'a, Message> {
+        let (_, size) = self.bar_size();
+        let height = widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING;
+        let (y, align) = match at.y > self.screen.height / 2.0 {
+            true => (at.y - bar::SPACING - height, iced::Bottom),
+            false => (at.y + size.height + bar::SPACING, iced::Top),
+        };
+        let note = container(opaque(note))
+            .center_x(size.width)
+            .height(height)
+            .align_y(align);
+        iced::widget::pin(note).position(Point::new(at.x, y)).into()
     }
 
     /// The bar turning into the editing toolbar (or back) at `at`: its
@@ -3878,7 +4013,7 @@ mod tests {
         assert!(texts.contains(&PROTECTED.to_string()), "{texts:?}");
         let texts = overlay_texts(&app);
         assert!(texts.contains(&copy::ACTION.icon.to_string()));
-        assert!(texts.contains(&text::ACTION.icon.to_string()));
+        assert!(texts.contains(&save::ACTION.icon.to_string()));
         widgets::shot::save("overlay-protected", app.view(app.overlay), area.size());
         // An ordinary capture shows no such pill.
         let grey = Crop {
@@ -4357,6 +4492,7 @@ mod tests {
         let _ = app.update(Message::AskInput("what is this?".into()));
         let texts = widgets::shot::texts(app.view(app.overlay));
         assert!(texts.contains(&"what is this?".to_string()), "{texts:?}");
+        app.behaviour.after = After::Search; // ("wait": a blank one searches)
         let _ = app.update(Message::AskInput("   ".into()));
         let _ = app.update(Message::AskSubmit);
         assert!(app.panel.is_none(), "a blank question opens nothing");
@@ -4466,33 +4602,23 @@ mod tests {
     fn selected_text_gets_the_text_actions_shift_extends_ctrl_a_takes_all() {
         let mut app = read_app();
         stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]); // "while you drag"
-        // the bottom bar's Copy, Translate, Search, Ask AI take the text (no pill)
+        // the bottom bar's Copy and Translate take the text (no pill)
         let texts = overlay_texts(&app);
         assert!(
             !texts.contains(&"Copy".to_string()),
             "no floating pill: {texts:?}"
         );
         let click = |p| widgets::shot::click(app.view(app.overlay), app.screen, p);
-        let copy = click(bar_slot(&app, 3));
+        let copy = click(bar_slot(&app, 1));
         assert!(
             copy.iter()
                 .any(|m| matches!(m, Message::Run(a) if a.id == copy::ACTION.id))
         );
         let run = |m: &Message, id: &str| matches!(m, Message::Run(a) if a.id == id);
         assert!(
-            click(bar_slot(&app, 1))
-                .iter()
-                .any(|m| run(m, lens::ACTION.id))
-        );
-        assert!(
-            click(bar_button(&app, 1))
-                .iter()
-                .any(|m| run(m, actions::translate::ACTION.id))
-        );
-        assert!(
             click(bar_button(&app, 0))
                 .iter()
-                .any(|m| matches!(m, Message::AskButton))
+                .any(|m| run(m, actions::translate::ACTION.id))
         );
         assert!(
             !app.handles() || app.grab_at(caret(1, 21.0)).is_none(),
@@ -4514,8 +4640,14 @@ mod tests {
             },
         );
         assert_eq!(picked_text(&app).as_deref(), Some(TEXT.join("\n").as_str()));
-        // Ask AI asks about the text's box, still the selection
-        let _ = app.update(Message::Picked(PickAct::Ask));
+        // A (Ask AI) asks about the text's box, still the selection
+        event(
+            &mut app,
+            overlay::Event::Key {
+                letter: 'a',
+                ctrl: false,
+            },
+        );
         let (_, panel) = app.panel.as_ref().expect("Ask AI opens");
         assert_eq!(panel.kind(), actions::Panel::Ask);
         assert_eq!(app.selection.unwrap().kind, overlay::Kind::Word);
@@ -4527,7 +4659,7 @@ mod tests {
         let _ = app.update(Message::AskInput("what is on my screen?".into()));
         let has_field = |app: &App| overlay_texts(app).contains(&app.ask);
         assert!(has_field(&app), "before any selection");
-        let clicked = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, 1));
+        let clicked = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, 0));
         assert!(
             clicked
                 .iter()
@@ -4564,13 +4696,13 @@ mod tests {
         assert!(app.translate.is_some() && app.selection.is_none());
     }
 
-    /// The centre of the bottom bar's button `k` (0 = Ask AI … 4 = Edit), as laid out.
+    /// The centre of the bottom bar's button `k` (0 = Translate … 3 = Edit), as laid out.
     fn bar_button(app: &App, k: usize) -> Point {
-        bar_slot(app, 5 + k) // after Include screen, Search, Text, Copy, Save
+        bar_slot(app, 3 + k) // after Include screen, Copy, Save
     }
 
     /// The centre of the bottom bar's round button `k` (0 = Include screen,
-    /// then Search, Text, Copy, Save while a selection has them in, then the rest).
+    /// 1 = Copy, 2 = Save, then `bar_button`'s).
     fn bar_slot(app: &App, k: usize) -> Point {
         let (field, size) = app.bar_size();
         let at = app.bar_at();
@@ -4621,24 +4753,21 @@ mod tests {
                 .iter()
                 .any(|m| matches!(m, Message::Run(a) if a.id == id))
         };
-        assert!(runs(1, lens::ACTION.id), "Search");
-        assert!(runs(2, text::ACTION.id), "Text");
-        assert!(runs(3, copy::ACTION.id), "Copy");
-        assert!(runs(4, save::ACTION.id), "Save");
+        assert!(runs(1, copy::ACTION.id), "Copy");
+        assert!(runs(2, save::ACTION.id), "Save");
         // Translate and Edit take the selection now, not the whole screen
         let on = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, k));
         assert!(
-            on(1)
+            on(0)
                 .iter()
                 .any(|m| matches!(m, Message::Run(a) if a.id == actions::translate::ACTION.id))
         );
         assert!(
-            on(4)
+            on(3)
                 .iter()
                 .any(|m| matches!(m, Message::Run(a) if a.id == actions::edit::ACTION.id))
         );
-        assert!(on(0).iter().any(|m| matches!(m, Message::AskButton)));
-        // picked words in a snapped box: Copy, Search, Translate, Ask AI take their text
+        // picked words in a snapped box: Copy and Translate take their text
         let mut words = select_text_app();
         drag(&mut words, caret(1, 7.0), caret(2, 16.0), false);
         let at =
@@ -4646,13 +4775,219 @@ mod tests {
         assert!(
             at(1)
                 .iter()
-                .any(|m| matches!(m, Message::Picked(PickAct::Search)))
-        );
-        assert!(
-            at(3)
-                .iter()
                 .any(|m| matches!(m, Message::Picked(PickAct::Copy)))
         );
+        let on = |k| {
+            let at = bar_button(&words, k);
+            widgets::shot::click(words.view(words.overlay), words.screen, at)
+        };
+        assert!(
+            on(0)
+                .iter()
+                .any(|m| matches!(m, Message::Picked(PickAct::Translate)))
+        );
+    }
+
+    /// What a click on the reader's note (over the bottom bar, on a row across
+    /// its width) sends.
+    fn note_clicks(app: &App) -> Vec<Message> {
+        let (_, size) = app.bar_size();
+        let at = app.bar_at();
+        let height = widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING;
+        let y = at.y - bar::SPACING - height / 2.0;
+        (0..(size.width as usize / 8))
+            .flat_map(|i| {
+                let p = Point::new(at.x + 8.0 * i as f32, y);
+                widgets::shot::click(app.view(app.overlay), app.screen, p)
+            })
+            .collect()
+    }
+
+    /// A fresh install has no text reader (OCR models): a drag on text can only
+    /// draw. The overlay says so over the bar, with the size, and downloads
+    /// only on its button; then its progress, a failure to try again, and
+    /// "Reading text…" while the screen is read.
+    #[test]
+    fn without_the_text_reader_the_bar_offers_its_download() {
+        let mut app = open_app(1280, 800, 1.0);
+        let _ = app.read_screen(); // as at open (the tests have no models)
+        let Reader::Missing(bytes) = app.reader else {
+            panic!("{:?}", app.reader);
+        };
+        assert!(bytes > 1_000_000, "{bytes}");
+        let texts = overlay_texts(&app);
+        let mb = bytes.div_ceil(1_000_000);
+        let say = format!("Text selection needs the text reader (~{mb} MB).");
+        assert!(texts.contains(&say), "{texts:?}");
+        assert!(texts.contains(&"Download".to_string()), "{texts:?}");
+        widgets::shot::save("reader-missing", app.view(app.overlay), app.screen);
+        // nothing fetched by itself: drawing, selecting, frames leave it offered
+        drag(
+            &mut app,
+            Point::new(200.0, 150.0),
+            Point::new(500.0, 350.0),
+            false,
+        );
+        settle_bar(&mut app);
+        assert!(matches!(app.reader, Reader::Missing(_)));
+        // one click on Download
+        let clicks = note_clicks(&app);
+        assert!(
+            clicks.iter().any(|m| matches!(m, Message::ReaderDownload)),
+            "{clicks:?}"
+        );
+        let _ = app.update(Message::ReaderDownload);
+        assert_eq!(app.reader, Reader::Downloading(0.0));
+        let opening = app.opening;
+        let step = move |p| Message::Reader(opening, p);
+        let _ = app.update(step(Ok(text::Progress::Download(0.42))));
+        let texts = overlay_texts(&app);
+        assert!(
+            texts.contains(&"Downloading the text reader… 42%".to_string()),
+            "{texts:?}"
+        );
+        widgets::shot::save("reader-downloading", app.view(app.overlay), app.screen);
+        // another opening's download says nothing here
+        let stale = Message::Reader(app.opening.wrapping_add(1), Err("x".into()));
+        let _ = app.update(stale);
+        assert_eq!(app.reader, Reader::Downloading(0.42));
+        let _ = app.update(step(Err("no network".into())));
+        let texts = overlay_texts(&app);
+        assert!(
+            texts.contains(&"The text reader didn't download: no network".to_string()),
+            "{texts:?}"
+        );
+        assert!(
+            note_clicks(&app)
+                .iter()
+                .any(|m| matches!(m, Message::ReaderDownload))
+        );
+        // done: the screen is read (here, still no models: offered again)
+        let _ = app.update(step(Ok(text::Progress::Reading)));
+        assert!(matches!(app.reader, Reader::Missing(_)), "{:?}", app.reader);
+        app.reader = Reader::Reading;
+        let texts = overlay_texts(&app);
+        assert!(texts.contains(&"Reading text…".to_string()), "{texts:?}");
+        widgets::shot::save("reader-reading", app.view(app.overlay), app.screen);
+        let lines = word::lines(text_blocks(), [0, 0], 1.0);
+        let _ = app.update(Message::ScreenText(app.opening, Ok(lines)));
+        assert_eq!(app.reader, Reader::Idle);
+        assert!(!overlay_texts(&app).contains(&"Reading text…".to_string()));
+    }
+
+    /// A drag on text that began before the screen's text was read becomes a
+    /// text selection as soon as it is (not a stroke snapped to a box).
+    #[test]
+    fn a_drag_on_text_selects_it_once_the_words_arrive() {
+        let mut app = text_app();
+        event(
+            &mut app,
+            overlay::Event::Press {
+                at: caret(1, 7.0),
+                shift: false,
+            },
+        );
+        for i in 1..=8 {
+            let p = caret(1, 7.0) + (caret(1, 15.0) - caret(1, 7.0)) * (i as f32 / 8.0);
+            event(&mut app, overlay::Event::Move(p));
+        }
+        assert!(app.drawing, "a stroke until the words are read");
+        let lines = word::lines(text_blocks(), [0, 0], 1.0);
+        let _ = app.update(Message::ScreenText(app.opening, Ok(lines)));
+        assert!(!app.drawing && app.text_press.is_some());
+        event(&mut app, overlay::Event::Move(caret(1, 21.0)));
+        event(&mut app, overlay::Event::Release);
+        assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
+        // off the text it stays a stroke
+        let mut app = text_app();
+        event(
+            &mut app,
+            overlay::Event::Press {
+                at: Point::new(600.0, 250.0),
+                shift: false,
+            },
+        );
+        event(&mut app, overlay::Event::Move(Point::new(700.0, 300.0)));
+        let lines = word::lines(text_blocks(), [0, 0], 1.0);
+        let _ = app.update(Message::ScreenText(app.opening, Ok(lines)));
+        assert!(app.drawing && app.word.is_none());
+    }
+
+    /// The bottom bar (owner, 2026-10-25): no Search, Ask AI or Text buttons
+    /// (a selection searches by itself, Enter asks, text is selected directly);
+    /// their keys L, A, T still work. In "wait" mode Enter in the empty field
+    /// is the search, and the field says so.
+    #[test]
+    fn the_bar_has_no_search_ask_or_text_and_enter_searches_in_wait_mode() {
+        let mut app = open_app(1280, 800, 1.0);
+        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        drag(
+            &mut app,
+            Point::new(200.0, 150.0),
+            Point::new(500.0, 350.0),
+            false,
+        );
+        let _ = widgets::tests_support::shown();
+        let texts = overlay_texts(&app);
+        let tips = widgets::tests_support::shown();
+        let labels = |t: &String| t.split(" · ").next().unwrap_or_default().to_string();
+        let mut names: Vec<String> = tips.iter().map(labels).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(
+            names,
+            [
+                "Copy",
+                "Edit",
+                "Include screen",
+                "Live translate",
+                "Save",
+                "Search for a song",
+                "Translate",
+            ],
+            "{tips:?}"
+        );
+        assert!(
+            texts.contains(&"Ask about your selection… (Enter alone = Search)".to_string()),
+            "{texts:?}"
+        );
+        // Enter with nothing typed: the search the selection didn't run
+        let _ = app.update(Message::AskInput("  ".into()));
+        let _ = app.update(Message::AskSubmit);
+        assert_eq!(
+            app.panel.as_ref().map(|(_, p)| p.kind()),
+            Some(actions::Panel::Lens)
+        );
+        // auto-search: the field asks only, Enter on nothing does nothing
+        let mut app = open_app(1280, 800, 1.0);
+        app.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+        drag(
+            &mut app,
+            Point::new(200.0, 150.0),
+            Point::new(500.0, 350.0),
+            false,
+        );
+        app.panel = None;
+        let texts = overlay_texts(&app);
+        assert!(texts.contains(&"Ask about your selection…".to_string()));
+        let _ = app.update(Message::AskSubmit);
+        assert!(app.panel.is_none());
+        // the keys still work: T reads the text, A asks, L searches
+        for (letter, kind) in [
+            ('t', actions::Panel::Text),
+            ('a', actions::Panel::Ask),
+            ('l', actions::Panel::Lens),
+        ] {
+            app.panel = None;
+            event(
+                &mut app,
+                overlay::Event::Key {
+                    letter,
+                    ctrl: false,
+                },
+            );
+            assert_eq!(app.panel.as_ref().map(|(_, p)| p.kind()), Some(kind));
+        }
     }
 
     /// Frames until the bar is where it goes (it glides there).
@@ -4664,11 +4999,17 @@ mod tests {
         assert!(!app.bar_gliding());
     }
 
-    /// The bar's bounds and what its Ask AI slot does, once settled.
-    fn bar_box(app: &mut App) -> (Rectangle, Vec<Message>) {
+    /// The bar's bounds, and whether its Edit slot (the last) is Edit, once settled.
+    fn bar_box(app: &mut App) -> (Rectangle, bool) {
         settle_bar(app);
-        let ask = widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(app, 5));
-        (Rectangle::new(app.bar_at(), app.bar_size().1), ask)
+        let edit = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(app, 3));
+        let is_edit = |m: &Message| match m {
+            Message::EditScreen => true,
+            Message::Run(a) => a.id == actions::edit::ACTION.id,
+            _ => false,
+        };
+        let edits = edit.iter().any(is_edit);
+        (Rectangle::new(app.bar_at(), app.bar_size().1), edits)
     }
 
     /// The bottom bar is exactly the same size in every state (owner,
@@ -4677,13 +5018,10 @@ mod tests {
     #[test]
     fn the_bottom_bar_never_changes_size() {
         let mut app = open_app(1280, 800, 1.0);
-        let (before, ask) = bar_box(&mut app);
-        assert!(
-            ask.iter().any(|m| matches!(m, Message::AskButton)),
-            "{ask:?}"
-        );
-        // nothing selected: Search, Text, Copy, Save are there but do nothing
-        for k in 1..=4 {
+        let (before, edits) = bar_box(&mut app);
+        assert!(edits);
+        // nothing selected: Copy and Save are there but do nothing
+        for k in 1..=2 {
             let at = bar_slot(&app, k);
             let got = widgets::shot::click(app.view(app.overlay), app.screen, at);
             assert!(!got.iter().any(|m| matches!(m, Message::Run(_))), "{k}");
@@ -4692,7 +5030,7 @@ mod tests {
         let _ = app.view(app.overlay);
         let tips = widgets::tests_support::shown();
         assert!(
-            tips.iter().any(|t| t == "Search · Select something first"),
+            tips.iter().any(|t| t == "Copy · Select something first"),
             "{tips:?}"
         );
         // a selection (away from the bar): the same box, the same slots
@@ -4702,12 +5040,10 @@ mod tests {
             Point::new(500.0, 350.0),
             false,
         );
-        let (selected, ask) = bar_box(&mut app);
+        app.panel = None; // the auto-search's card
+        let (selected, edits) = bar_box(&mut app);
         assert_eq!(selected, before);
-        assert!(
-            ask.iter().any(|m| matches!(m, Message::AskButton)),
-            "{ask:?}"
-        );
+        assert!(edits);
         // Ask AI's card opens (the bar steps aside) and closes: the same again
         let _ = app.update(Message::AskButton);
         let (id, _) = app.panel.as_ref().expect("Ask AI opens");
@@ -4715,12 +5051,9 @@ mod tests {
         assert!(!app.bottom_bar_shown());
         let _ = app.update(Message::Panel(id, panel::Msg::Card(card::Event::Close)));
         assert!(app.bottom_bar_shown());
-        let (after, ask) = bar_box(&mut app);
+        let (after, edits) = bar_box(&mut app);
         assert_eq!(after, before);
-        assert!(
-            ask.iter().any(|m| matches!(m, Message::AskButton)),
-            "{ask:?}"
-        );
+        assert!(edits);
     }
 
     /// Edit turns the bar into the editing toolbar in its place (same anchor,
@@ -4811,10 +5144,11 @@ mod tests {
         let (_, size) = app.bar_size();
         assert_eq!(app.bar_at(), spot(&app, size));
         assert_eq!(app.bar_at().y, bar::TOP);
-        let ask = hit(&app, bar_slot(&app, 5));
+        let edit = hit(&app, bar_button(&app, 3));
         assert!(
-            ask.iter().any(|m| matches!(m, Message::AskButton)),
-            "{ask:?}"
+            edit.iter()
+                .any(|m| matches!(m, Message::Run(a) if a.id == actions::edit::ACTION.id)),
+            "{edit:?}"
         );
         let mut cfg = config::current();
         cfg.bar.anchor = BarAnchor::Bottom;
@@ -4902,27 +5236,25 @@ mod tests {
         for (w, h) in [(1280, 800), (800, 600), (640, 480)] {
             let app = open_app(w, h, 1.0);
             let _ = widgets::tests_support::shown(); // drop older records
-            let messages: Vec<Vec<Message>> = (0..5)
+            let messages: Vec<Vec<Message>> = (0..4)
                 .map(|k| {
                     widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, k))
                 })
                 .collect();
             let is = |k: usize, f: fn(&Message) -> bool| messages[k].iter().any(f);
-            assert!(is(0, |m| matches!(m, Message::AskButton)), "{w}: Ask AI");
             assert!(
-                is(1, |m| matches!(m, Message::TranslateScreen)),
+                is(0, |m| matches!(m, Message::TranslateScreen)),
                 "{w}: Translate"
             );
-            assert!(is(2, |m| matches!(m, Message::LiveToggle)), "{w}: Live");
+            assert!(is(1, |m| matches!(m, Message::LiveToggle)), "{w}: Live");
             assert!(
-                is(3, |m| matches!(m, Message::SongStart)),
+                is(2, |m| matches!(m, Message::SongStart)),
                 "{w}: music, key or not"
             );
-            assert!(is(4, |m| matches!(m, Message::EditScreen)), "{w}: Edit");
+            assert!(is(3, |m| matches!(m, Message::EditScreen)), "{w}: Edit");
             // icons only: each names itself and its shortcut in its tooltip
             let tips = widgets::tests_support::shown();
             for want in [
-                "Ask AI · A",
                 "Translate the screen · Ctrl+Shift+T",
                 "Live translate · Ctrl+Shift+L",
                 "Search for a song",
@@ -5386,7 +5718,7 @@ mod tests {
         );
         let click = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(&app, k));
         assert!(
-            click(3)
+            click(1)
                 .iter()
                 .any(|m| matches!(m, Message::Picked(PickAct::Copy)))
         );
