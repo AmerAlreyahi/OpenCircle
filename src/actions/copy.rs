@@ -69,6 +69,10 @@ pub fn text(text: String) -> Result<(), String> {
 fn with_clipboard(
     set: impl FnOnce(&mut arboard::Clipboard) -> Result<(), arboard::Error>,
 ) -> Result<(), String> {
+    // Tests never touch the machine's clipboard (on WSL it is the Windows one).
+    if cfg!(test) {
+        return Ok(());
+    }
     CLIPBOARD.with_borrow_mut(|slot| {
         let clipboard = match slot {
             Some(clipboard) => clipboard,
