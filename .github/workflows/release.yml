@@ -261,7 +261,7 @@ jobs:
           trap 'rm -f "$key"' EXIT
           comment="OpenCircle v${GITHUB_REF_NAME#v}"
           rsign sign -s "$key" -W -t "$comment" -x SHA256SUMS.txt.minisig SHA256SUMS.txt
-          rsign verify -P "$pub" -x SHA256SUMS.txt.minisig SHA256SUMS.txt | tee verify.out
+          rsign verify -P "$pub" -x SHA256SUMS.txt.minisig SHA256SUMS.txt 2>&1 | tee verify.out
           grep -qx "Trusted comment: $comment" verify.out
           rm verify.out
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
