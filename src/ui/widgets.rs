@@ -1667,6 +1667,13 @@ mod forms {
         row(buttons).spacing(8).width(FORM_WIDTH).into()
     }
 
+    /// `button_row` for a wider container (a card): the same equal split, filling it.
+    pub fn button_group<'a, Message: 'a>(
+        buttons: impl IntoIterator<Item = Element<'a, Message>>,
+    ) -> Element<'a, Message> {
+        row(buttons).spacing(8).width(Length::Fill).into()
+    }
+
     /// Sidebar entry (Settings sections).
     pub fn nav_item<'a, Message: Clone + 'a>(
         label: &'a str,
@@ -1707,7 +1714,7 @@ mod forms {
         error: Option<String>,
     ) -> Element<'a, Message> {
         let palette = theme::current();
-        let mut right = column![control.into()].spacing(6).width(FORM_WIDTH);
+        let mut right = column![control.into()].spacing(8).width(FORM_WIDTH);
         if let Some(e) = error {
             right = right.push(error_text(e));
         }

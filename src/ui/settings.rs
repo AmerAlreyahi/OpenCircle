@@ -190,7 +190,9 @@ impl KeyField {
                 self.replacing = false;
                 self.input = Secret::new("");
             }
-            KeyMessage::Save if self.input.is_empty() => {}
+            KeyMessage::Save if self.input.is_empty() => {
+                self.error = Some("Paste your key first".into())
+            }
             KeyMessage::Save => match store.set(provider, &self.input) {
                 Ok(()) => {
                     self.status = KeyStatus::Saved;
@@ -226,11 +228,7 @@ impl KeyField {
                 })
                 .secure(true)
                 .on_submit(KeyMessage::Save);
-                let save = form_button(
-                    "Save key",
-                    true,
-                    (!self.input.is_empty()).then_some(KeyMessage::Save),
-                );
+                let save = form_button("Save key", true, Some(KeyMessage::Save));
                 let mut buttons = vec![tip(save, l.save, Position::Bottom)];
                 if self.replacing {
                     let cancel = form_button("Cancel", false, Some(KeyMessage::Cancel));
@@ -1082,6 +1080,11 @@ fn save(state: &mut State) -> Outcome {
         state.notice = Some("Fix the problems above first".into());
         return Outcome::None;
     }
+    // Never a dead button: with nothing to save it says so.
+    if !state.dirty() {
+        state.notice = Some("Nothing to save".into());
+        return Outcome::None;
+    }
     let result = match &state.path {
         Some(p) => state.draft.save_to(p),
         None => state.draft.save(),
@@ -1291,7 +1294,7 @@ fn content(state: &State) -> Element<'_, Message> {
     // About is a stack of cards; the other pages are rows split by rules.
     let cards = state.section == Section::About;
     if cards {
-        list = list.spacing(14);
+        list = list.spacing(16);
     }
     for (i, r) in rows.into_iter().enumerate() {
         if i > 0 && !cards {
@@ -2149,15 +2152,14 @@ fn footer(state: &State) -> Element<'_, Message> {
     } else {
         space::horizontal().into()
     };
-    let can_save = n == 0 && state.dirty();
-    let save = label_button("Save", true, can_save.then_some(Message::Save));
+    let save = label_button("Save", true, Some(Message::Save));
     row![
         status,
         space::horizontal(),
         tip(save, "Save settings", Position::Top)
     ]
     .align_y(iced::Center)
-    .padding([14, 32])
+    .padding([16, 32])
     .into()
 }
 
@@ -3043,6 +3045,13 @@ pub(super) mod tests {
         let src = include_str!("settings.rs");
         let body = &src[..src.find("\n#[cfg(test)]").unwrap()];
         assert_eq!(body.matches("label_button(").count(), 1);
+    }
+
+    #[test]
+    fn save_is_never_a_dead_button() {
+        let (mut s, _) = state(None);
+        assert_eq!(update(&mut s, Message::Save), Outcome::None);
+        assert_eq!(s.notice.as_deref(), Some("Nothing to save"));
     }
 
     #[test]

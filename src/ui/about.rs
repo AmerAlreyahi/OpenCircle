@@ -11,7 +11,7 @@ use iced::{Border, Center, ContentFit, Element, Length};
 use serde::Deserialize;
 
 use crate::ui::theme;
-use crate::ui::widgets::{self, caption, label_button};
+use crate::ui::widgets::{self, button_group, caption, form_button, label_button};
 
 pub const PROJECT: &str = "https://github.com/AmerAlreyahi/OpenCircle";
 pub const LICENSE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSE";
@@ -88,7 +88,7 @@ fn logo() -> Handle {
 /// A rounded panel, the same fill as the form controls.
 fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
     container(content)
-        .padding(18)
+        .padding(16)
         .width(Length::Fill)
         .style(|_| {
             let p = theme::current();
@@ -118,16 +118,11 @@ fn name<'a>(s: impl text::IntoFragment<'a>, size: f32) -> iced::widget::Text<'a>
     text(s).size(size).color(theme::current().text)
 }
 
-/// A card's buttons: centred, each as wide as `label_button`, even gaps.
-fn centred<'a, M: 'a>(buttons: iced::widget::Row<'a, M>) -> Element<'a, M> {
-    container(buttons.spacing(10)).center_x(Length::Fill).into()
-}
-
 /// The app card: logo, name, version, what it is, and its links.
 pub fn app<'a, M: Clone + 'a>(open: fn(String) -> M) -> Element<'a, M> {
-    let links = centred(row![
-        label_button("GitHub", false, Some(open(PROJECT.into()))),
-        label_button("MIT licence", false, Some(open(LICENSE.into()))),
+    let links = button_group([
+        form_button("GitHub", false, Some(open(PROJECT.into()))).into(),
+        form_button("MIT licence", false, Some(open(LICENSE.into()))).into(),
     ]);
     let head = row![
         picture(logo(), 64.0, 14.0),
@@ -209,10 +204,10 @@ pub fn developer<'a, M: Clone + 'a>(open: fn(String) -> M) -> Element<'a, M> {
     ]
     .spacing(16)
     .align_y(Center);
-    let buttons = centred(row![
-        label_button("GitHub profile", false, Some(open(PROFILE_URL.into()))),
-        label_button("Star OpenCircle", true, Some(open(PROJECT.into()))),
-        label_button("Website", false, Some(open(p.website.clone()))),
+    let buttons = button_group([
+        form_button("GitHub profile", false, Some(open(PROFILE_URL.into()))).into(),
+        form_button("Star OpenCircle", true, Some(open(PROJECT.into()))).into(),
+        form_button("Website", false, Some(open(p.website.clone()))).into(),
     ]);
     card(column![head, buttons].spacing(16))
 }
