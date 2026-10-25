@@ -170,6 +170,10 @@ production systems.
   still irreversible (strong radius + noise), with line assist (the brush stays on
   the text line it started on unless the user clearly moves; Shift = free; can be
   turned off). Solid "Redact" stays as a separate preset.
+- Multiple screens (owner, 2026-10-25): Circle to Search opens on the screen of the
+  ACTIVE window (keyboard focus), falling back to the mouse's screen when there is no
+  active window (desktop); snip can capture from any screen (the picker spans all
+  screens, like iTop). Test on the Windows VM with a virtual second display.
 - Softer blur (owner, 2026-10-25, supersedes "strong radius + noise" in Blur): the blur
   must look pretty: smooth like a background fade, no visible squares or blocks, no
   noise/grain, weaker-looking, yet text stays unrecognisable (it reads as "no text
