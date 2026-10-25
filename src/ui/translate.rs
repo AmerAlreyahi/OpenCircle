@@ -13,7 +13,6 @@ use super::{background, panel, widgets};
 use crate::actions::ask::{self, Chat, Status};
 use crate::actions::{self, Crop};
 use crate::ai::AiError;
-use crate::capture::window_rect;
 use crate::mt::Pair;
 use crate::ocr::models;
 use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
@@ -86,8 +85,7 @@ pub struct Session {
     frame: image::Handle,
     /// What is translated, frame pixels: x0, y0, x1, y1 (ends exclusive).
     area: [u32; 4],
-    /// The whole frame was asked for (no selection to outline), even when
-    /// `area` is only the foreground window's page.
+    /// The whole frame was asked for (no selection to outline).
     whole: bool,
     phase: Phase,
     peek: bool,
@@ -116,16 +114,13 @@ impl Session {
     /// Translates `area` of `frame` from the configured source into the
     /// configured target. Asks first for what is missing: the OCR models
     /// (`models` = present), or, when translation will be offline, its
-    /// models with OCR's in one download. The whole frame means the
-    /// foreground window's page (no taskbar, title bar or browser bars),
-    /// unless `translate.whole_screen`; `monitor` = the frame's origin in
-    /// desktop px and its scale (`None`: the whole frame as is).
+    /// models with OCR's in one download. The whole frame is all of it
+    /// (full screen means the full screen; only live reads the window).
     pub fn start(
         frame: image::Handle,
         area: [u32; 4],
         cache: Arc<Cache>,
         models: bool,
-        monitor: Option<(i32, i32, f32)>,
     ) -> (Session, Task<Msg>) {
         let cfg = crate::config::current().translate;
         let offline = actions::translate::will_be_offline();
@@ -134,12 +129,9 @@ impl Session {
             _ => (0, 0),
         };
         let whole = area == [0, 0, size.0, size.1];
-        let window = monitor
-            .filter(|_| whole && !cfg.whole_screen)
-            .and_then(|(x, y, scale)| window_rect::region((x, y), size, scale));
         let mut session = Session {
             frame,
-            area: window.unwrap_or(area),
+            area,
             whole,
             phase: Phase::Consent(None),
             peek: false,
@@ -172,7 +164,7 @@ impl Session {
         }
     }
 
-    /// The whole frame (or the window in it) is translated: no selection
+    /// The whole frame is translated: no selection
     /// to show.
     pub fn full(&self) -> bool {
         self.whole

@@ -188,6 +188,36 @@ pub fn place(area: (f64, f64), side: Place, size: Option<(f64, f64)>) -> (Place,
     }
 }
 
+/// How far (logical px) a card may overlap the selection before it moves.
+const COVER_SLACK: f64 = 8.0;
+
+/// The side this search's card opens on (owner, 2026-10-25): the user's
+/// `side`, unless there it would cover the selection's left and right edges
+/// `sel` by more than a few px and the other side would not; then the other
+/// side, for this search only (the saved side stays). Neither side free (a
+/// huge selection), narrow screens (bottom card) or no selection: `side`.
+pub fn side_for(
+    area: (f64, f64),
+    side: Place,
+    size: Option<(f64, f64)>,
+    sel: Option<(f64, f64)>,
+) -> Place {
+    let Some((x0, x1)) = sel else { return side };
+    let covers = |p: Place| match place(area, p, size) {
+        (Place::Bottom, _) => false,
+        (_, [x, _, w, _]) => x1.min(x + w) - x0.max(x) > COVER_SLACK,
+    };
+    let other = match side {
+        Place::Left => Place::Right,
+        _ => Place::Left,
+    };
+    if covers(side) && !covers(other) {
+        other
+    } else {
+        side
+    }
+}
+
 /// The side a card dropped at `r` docks to: the nearer one (its centre on
 /// the left half: left).
 pub fn dock(area: (f64, f64), r: Rect4) -> Place {
@@ -504,6 +534,31 @@ impl Line {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_card_opens_off_the_selection_for_this_search_only() {
+        let area = (1716.0, 1271.0); // the Windows VM; a right card spans 1010..1696
+        let on = |side, sel| side_for(area, side, None, Some(sel));
+        // the right-hand picture circled, saved right: left this time
+        assert_eq!(on(Place::Right, (1015.0, 1235.0)), Place::Left);
+        // middle-left text, saved right: right (a touch of overlap is fine)
+        assert_eq!(on(Place::Right, (470.0, 1015.0)), Place::Right);
+        // saved left, selection on the left: right
+        assert_eq!(on(Place::Left, (100.0, 400.0)), Place::Right);
+        // huge selection (neither side free), no selection, narrow screen: saved side
+        assert_eq!(on(Place::Right, (100.0, 1600.0)), Place::Right);
+        assert_eq!(side_for(area, Place::Right, None, None), Place::Right);
+        assert_eq!(
+            side_for((800.0, 600.0), Place::Right, None, Some((500.0, 700.0))),
+            Place::Right
+        );
+        // the user's width counts
+        let wide = Some((1200.0, 0.0));
+        assert_eq!(
+            side_for(area, Place::Right, wide, Some((600.0, 700.0))),
+            Place::Right
+        );
+    }
 
     #[test]
     fn args_round_trip_and_reject_junk() {

@@ -507,12 +507,15 @@ impl Live {
                     return None;
                 }
                 let (w, h) = (frame.width, frame.height);
-                border::mask(&mut frame.rgba, w, h, monitor.scale);
+                // what is blanked out of the frame (black) is never shown as a patch
+                let mut blanked = border::mask(&mut frame.rgba, w, h, monitor.scale);
                 if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
                     live_controller::mask(&mut frame.rgba, w, h, rect);
+                    blanked.push(rect);
                 }
                 // our own UI is never read (a menu, a card, a toast)
-                blank_own(&mut frame.rgba, (frame.x, frame.y, w, h), &live::own_windows());
+                let own = live::own_windows();
+                blanked.extend(blank_own(&mut frame.rgba, (frame.x, frame.y, w, h), &own));
                 // the foreground window's page (a full-screen game: all of
                 // it), unless the whole screen is asked for
                 let area = (!config::current().translate.whole_screen)
@@ -553,10 +556,13 @@ impl Live {
                         let shown = (steps.patches().iter())
                             .map(|p| {
                                 let [px, py, pw, ph] = p.bounds;
-                                Shown {
-                                    bounds: [px + area[0], py + area[1], pw, ph],
-                                    image: image::Handle::from_rgba(pw, ph, p.rgba.clone()),
-                                }
+                                ([px + area[0], py + area[1], pw, ph], p)
+                            })
+                            // its erase saw black there: it would draw a black box
+                            .filter(|(bounds, _)| !over_blanked(*bounds, &blanked))
+                            .map(|(bounds, p)| Shown {
+                                bounds,
+                                image: image::Handle::from_rgba(bounds[2], bounds[3], p.rgba.clone()),
                             })
                             .collect();
                         Some(Msg::Patches(shown))
@@ -620,13 +626,29 @@ pub fn theme() -> iced::Theme {
 
 /// Blanks `rects` (desktop px, x0, y0, x1, y1) out of a capture of the
 /// monitor at `(x, y)`, `w` x `h` px: the parts on it, as the controller's.
-fn blank_own(rgba: &mut [u8], (x, y, w, h): (i32, i32, u32, u32), rects: &[[i32; 4]]) {
+/// Returns them (frame px, x, y, w, h; empty ones left out).
+fn blank_own(
+    rgba: &mut [u8],
+    (x, y, w, h): (i32, i32, u32, u32),
+    rects: &[[i32; 4]],
+) -> Vec<[u32; 4]> {
+    let mut blanked = Vec::new();
     for r in rects {
         let clip = |v: i32, o: i32, max: u32| (v - o).clamp(0, max as i32) as u32;
         let (x0, y0) = (clip(r[0], x, w), clip(r[1], y, h));
         let (x1, y1) = (clip(r[2], x, w), clip(r[3], y, h));
-        live_controller::mask(rgba, w, h, [x0, y0, x1 - x0, y1 - y0]);
+        if x1 > x0 && y1 > y0 {
+            live_controller::mask(rgba, w, h, [x0, y0, x1 - x0, y1 - y0]);
+            blanked.push([x0, y0, x1 - x0, y1 - y0]);
+        }
     }
+    blanked
+}
+
+/// A patch at `bounds` (x, y, w, h) touches a part of the frame that was
+/// blanked out (black), so its erase and redraw would show black there.
+fn over_blanked([x, y, w, h]: [u32; 4], blanked: &[[u32; 4]]) -> bool {
+    (blanked.iter()).any(|&[bx, by, bw, bh]| x < bx + bw && bx < x + w && y < by + bh && by < y + h)
 }
 
 /// A step error once (not every second), then nothing until it changes.
@@ -932,7 +954,13 @@ mod tests {
         let mut rgba = vec![255u8; (w * h * 4) as usize];
         // a menu half off the monitor's left edge, a card past its bottom
         let rects = [[90, 52, 110, 60], [130, 65, 200, 90]];
-        blank_own(&mut rgba, (100, 50, w, h), &rects);
+        let blanked = blank_own(&mut rgba, (100, 50, w, h), &rects);
+        assert_eq!(blanked, [[0, 2, 10, 8], [30, 15, 10, 5]]);
+        // a patch over a blanked part is never shown (it would be a black
+        // box); one beside it is
+        assert!(over_blanked([5, 0, 10, 3], &blanked));
+        assert!(over_blanked([35, 18, 2, 2], &blanked));
+        assert!(!over_blanked([10, 2, 20, 13], &blanked));
         let black = |x: u32, y: u32| rgba[((y * w + x) * 4) as usize] == 0;
         let blanked: Vec<(u32, u32)> = (0..h)
             .flat_map(|y| (0..w).map(move |x| (x, y)))

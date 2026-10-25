@@ -97,6 +97,8 @@ pub struct Panel {
 struct Sheet {
     /// Results show in the card (it can open here), decided when the panel opened.
     wanted: bool,
+    /// The selection the card stays off (`sheet::Avoid`).
+    avoid: Option<sheet::Avoid>,
     /// The running helper; dropping it ends it.
     guard: Option<Arc<sheet::Guard>>,
     /// The card is on screen: this panel hides (the card is where it would be).
@@ -143,7 +145,13 @@ enum Reading {
 impl Panel {
     /// Opens `kind` for `crop`. `question` (Ask AI only) is sent once ready:
     /// the user already pressed Enter on it elsewhere (Lens follow-up).
-    pub fn open(kind: actions::Panel, crop: Crop, question: Option<String>) -> (Panel, Task<Msg>) {
+    /// `avoid`: the selection the results card stays off.
+    pub fn open(
+        kind: actions::Panel,
+        crop: Crop,
+        question: Option<String>,
+        avoid: Option<sheet::Avoid>,
+    ) -> (Panel, Task<Msg>) {
         let crop = Arc::new(crop);
         let wanted = kind != actions::Panel::Text && sheet::wanted();
         let mut panel = Panel {
@@ -156,6 +164,7 @@ impl Panel {
             note: None,
             sheet: Sheet {
                 wanted,
+                avoid,
                 ..Sheet::default()
             },
             screen: true,
@@ -169,7 +178,8 @@ impl Panel {
                         let on = |e| tx.unbounded_send(Msg::Sheet(e)).is_ok();
                         let entry = sheet::history::enabled()
                             .then(|| sheet::history::Entry::new(sheet::Kind::Lens, "", &crop));
-                        if sheet::run(sheet::Kind::Lens, page.into(), colours, entry, on).is_ok() {
+                        let lens = sheet::Kind::Lens;
+                        if sheet::run(lens, page.into(), colours, entry, avoid, on).is_ok() {
                             return;
                         }
                     }
@@ -209,7 +219,7 @@ impl Panel {
             height: 1,
             rgba: vec![0; 4],
         };
-        let (mut panel, task) = Panel::open(actions::Panel::Ask, blank, Some(question));
+        let (mut panel, task) = Panel::open(actions::Panel::Ask, blank, Some(question), None);
         panel.screen = false;
         (panel, task)
     }
@@ -223,7 +233,7 @@ impl Panel {
     /// Ask AI, continuing `chat` (e.g. the translate word card's explanation).
     pub fn open_chat(crop: Crop, mut chat: Chat) -> (Panel, Task<Msg>) {
         chat.cancel(); // a stream still running belonged to the card; it stopped
-        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None);
+        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None, None);
         if let State::Ask { chat: open, .. } = &mut panel.state {
             *open = chat;
         }
@@ -492,7 +502,7 @@ impl Panel {
         chat.ask(&prompt, &[]); // the turn (and "busy"); nothing is sent by this
         let crop = self.crop.clone();
         let colours = self.sheet.wanted.then(sheet::colours);
-        let screen = self.screen;
+        let (screen, avoid) = (self.screen, self.sheet.avoid);
         let (task, handle) = background(move |tx| {
             let read = (read_text && screen).then(|| {
                 text::read(&crop, |progress| {
@@ -509,7 +519,7 @@ impl Panel {
                 let entry = sheet::history::enabled()
                     .then(|| sheet::history::Entry::new(sheet::Kind::Ai, &prompt, &crop));
                 let page = url.clone().into_bytes();
-                let shown = sheet::run(sheet::Kind::Ai, page, colours, entry, |e| {
+                let shown = sheet::run(sheet::Kind::Ai, page, colours, entry, avoid, |e| {
                     if matches!(e, sheet::Event::Shown) {
                         let line = format!("Opened in Google AI Mode.{note}");
                         let _ = tx.unbounded_send(Msg::Delta(line));

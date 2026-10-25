@@ -22,6 +22,12 @@ thread_local! {
     // clipboard, so keep one open for the app's life (actions run on the UI thread).
     static CLIPBOARD: RefCell<Option<arboard::Clipboard>> = const { RefCell::new(None) };
 }
+#[cfg(test)]
+thread_local! {
+    /// The last text `text` put on the clipboard on this thread (tests read it back).
+    pub static COPIED: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
 fn run(crop: Crop) -> Result<(), String> {
     with_text(crop, String::new())
 }
@@ -55,6 +61,8 @@ pub fn with_text(crop: Crop, words: String) -> Result<(), String> {
 
 /// Puts `text` on the clipboard (the Text panel's Copy).
 pub fn text(text: String) -> Result<(), String> {
+    #[cfg(test)]
+    COPIED.set(Some(text.clone()));
     with_clipboard(|clipboard| clipboard.set_text(text))
 }
 

@@ -1930,15 +1930,15 @@ impl App {
         match action.run {
             Run::Edit => return self.open_editor(),
             Run::Translate => return self.start_translate(),
-            // A tapped word: Copy copies its text.
-            Run::Finish(_) if action.id == copy::ACTION.id && self.edit.is_none() => {
-                if let Some(text) = self.word.as_ref().map(word::Picked::text) {
-                    let closing = self.close();
-                    if let Err(e) = copy::text(text) {
-                        eprintln!("copy text failed: {e}");
-                    }
-                    return closing;
-                }
+            // Picked words (a word selection, or select-text mode's picks): Copy
+            // (the bar's or Ctrl+C) copies exactly their text.
+            Run::Finish(_)
+                if action.id == copy::ACTION.id
+                    && self.edit.is_none()
+                    && (self.word.is_some()
+                        || (self.text_mode.as_ref()).is_some_and(|m| m.picked.is_some())) =>
+            {
+                return self.on_picked(PickAct::Copy);
             }
             _ => {}
         }
@@ -2421,7 +2421,13 @@ impl App {
     ) -> Task<Message> {
         self.panels = self.panels.wrapping_add(1);
         let id = self.panels;
-        let (panel, task) = panel::Panel::open(kind, crop, question);
+        // the results card stays off the selection
+        let avoid = self.selection.map(|s| {
+            let r = self.view.rect_to_screen(s.area);
+            let size = (f64::from(self.screen.width), f64::from(self.screen.height));
+            (size, (f64::from(r.x), f64::from(r.x + r.width)))
+        });
+        let (panel, task) = panel::Panel::open(kind, crop, question, avoid);
         self.panel = Some((id, panel));
         task.map(move |msg| Message::Panel(id, msg))
     }
@@ -2656,11 +2662,8 @@ impl App {
         self.edit = None;
         self.view = self.view.reset(); // the translation is drawn at 1x
         let models = text::models_present();
-        // the monitor's origin in desktop px (the window to translate is found there)
-        let at = |v: f32| (v * self.scale).round() as i32;
-        let monitor = Some((at(self.origin.x), at(self.origin.y), self.scale));
         let (session, task) =
-            translate::Session::start(frame.clone(), area, self.cache.clone(), models, monitor);
+            translate::Session::start(frame.clone(), area, self.cache.clone(), models);
         if session.full() {
             // nothing to outline: the translation is the whole screen
             self.selection = None;
@@ -3630,13 +3633,8 @@ mod tests {
         let mut app = closing_app();
         let frame = image::Handle::from_rgba(40, 20, vec![0; 40 * 20 * 4]);
         // no models: the session waits for consent (no thread starts)
-        let (session, _) = translate::Session::start(
-            frame.clone(),
-            [0, 0, 40, 20],
-            app.cache.clone(),
-            false,
-            None,
-        );
+        let (session, _) =
+            translate::Session::start(frame.clone(), [0, 0, 40, 20], app.cache.clone(), false);
         app.frame = Some(frame);
         app.hiding = Hiding::No;
         app.translate = Some((7, session));
@@ -5105,6 +5103,19 @@ mod tests {
             click(3)
                 .iter()
                 .any(|m| matches!(m, Message::Picked(PickAct::Copy)))
+        );
+        // Ctrl+C copies the same picked characters, not the whole box's text
+        let mut keyed = select_text_app();
+        drag(&mut keyed, caret(1, 9.4), caret(2, 16.0), false);
+        copy::COPIED.set(None);
+        let ctrl_c = overlay::Event::Key {
+            letter: 'c',
+            ctrl: true,
+        };
+        let _ = keyed.update(Message::Overlay(ctrl_c));
+        assert_eq!(
+            copy::COPIED.take().as_deref(),
+            Some("ile you drag a finger\nacross the words")
         );
         // Done leaves the mode; a press outside the box starts over
         let _ = app.update(Message::SelectText);

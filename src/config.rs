@@ -33,7 +33,7 @@
 //! engine = "ai"                     # ai | offline (ai falls back to offline when AI isn't set up)
 //! live_interval_ms = 1000           # live translate repeats every N ms (500-5000)
 //! live_note_shown = false           # the one-time live-mode note was shown
-//! whole_screen = false              # full-screen and live translate read the whole screen,
+//! whole_screen = false              # live translate reads the whole screen,
 //!                                   # not just the foreground window (no taskbar, no browser bars)
 //!
 //! [selection]
@@ -270,7 +270,7 @@ pub struct TranslateConfig {
     /// Live mode's one-time note (games must be borderless) was shown.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub live_note_shown: bool,
-    /// Full-screen and live translate read the whole screen instead of the
+    /// Live translate reads the whole screen instead of the
     /// foreground window's page (`capture::window_rect::region`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub whole_screen: bool,
@@ -857,8 +857,12 @@ fn may_stand_alone(key: Code) -> bool {
 }
 
 impl Config {
-    /// `<user config dir>/opencircle/config.toml`; `None` if the OS has no config dir.
+    /// `<user config dir>/opencircle/config.toml`; `None` if the OS has no config dir,
+    /// and in tests (hermetic: the machine's config, e.g. a widget theme, never leaks in).
     pub fn path() -> Option<PathBuf> {
+        if cfg!(test) {
+            return None;
+        }
         dirs::config_dir().map(|d| d.join("opencircle").join("config.toml"))
     }
 
@@ -1335,6 +1339,12 @@ mod tests {
         let d = std::env::temp_dir().join(format!("oc-config-test-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn tests_never_read_or_write_the_machines_config() {
+        assert_eq!(Config::path(), None);
+        assert!(Config::default().save().is_err());
     }
 
     #[test]

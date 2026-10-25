@@ -147,6 +147,7 @@ pub fn run(
     mut page: Vec<u8>,
     (colours, shadow): ([u32; 5], f64),
     mut entry: Option<history::Entry>,
+    avoid: Option<Avoid>,
     mut on: impl FnMut(Event) -> bool,
 ) -> Result<(), String> {
     let path = helper().ok_or("no helper")?;
@@ -169,18 +170,7 @@ pub fn run(
             history::record(p, true, e);
         }
     };
-    let results = crate::config::current().results;
-    let args = Args {
-        kind,
-        side: match results.side {
-            CardSide::Left => Place::Left,
-            CardSide::Right => Place::Right,
-        },
-        size: (results.width > 0 || results.height > 0)
-            .then_some((f64::from(results.width), f64::from(results.height))),
-        colours,
-        shadow,
-    };
+    let args = args(kind, (colours, shadow), avoid);
     let mut command = Command::new(path);
     // An AppImage bundles an older GLib/GTK than the system's WebKitGTK needs
     // (seen: symbol lookup error on Ubuntu 26.04): the helper takes the
@@ -267,6 +257,33 @@ pub fn run(
         BROKEN.store(true, Ordering::Relaxed);
     }
     Err(format!("the results card did not open (exit {code:?})"))
+}
+
+/// The selection a search is about, for its card to stay off it: the screen
+/// (w, h) and the selection's left and right edges, logical px.
+pub type Avoid = ((f64, f64), (f64, f64));
+
+/// The helper's command line: the user's side and size (`[results]`), the
+/// side flipped for this search when the card would cover the selection.
+fn args(kind: Kind, (colours, shadow): ([u32; 5], f64), avoid: Option<Avoid>) -> Args {
+    let results = crate::config::current().results;
+    let saved = match results.side {
+        CardSide::Left => Place::Left,
+        CardSide::Right => Place::Right,
+    };
+    let size = (results.width > 0 || results.height > 0)
+        .then_some((f64::from(results.width), f64::from(results.height)));
+    let side = match avoid {
+        Some((screen, sel)) => proto::side_for(screen, saved, size, Some(sel)),
+        None => saved,
+    };
+    Args {
+        kind,
+        side,
+        size,
+        colours,
+        shadow,
+    }
 }
 
 /// What the browser gets when the user takes the card's page `url` there:
@@ -386,6 +403,23 @@ mod tests {
     }
 
     #[test]
+    fn a_card_over_the_selection_opens_on_the_other_side_the_saved_side_stays() {
+        let saved = || crate::config::current().results.side;
+        assert_eq!(saved(), CardSide::Right, "the default");
+        let look = ([0; 5], 0.3);
+        let screen = (1716.0, 1271.0);
+        let side = |sel| args(Kind::Lens, look, Some((screen, sel))).side;
+        assert_eq!(
+            side((1015.0, 1235.0)),
+            Place::Left,
+            "the right-hand picture"
+        );
+        assert_eq!(side((470.0, 1000.0)), Place::Right, "middle-left text");
+        assert_eq!(args(Kind::Ai, look, None).side, Place::Right);
+        assert_eq!(saved(), CardSide::Right, "unchanged");
+    }
+
+    #[test]
     fn open_in_browser_takes_the_search_not_the_cards_session() {
         let ai = "https://www.google.com/search?udm=50&q=x";
         let lens = "https://www.google.com/search?vsrid=abc&lns_mode=un";
@@ -446,7 +480,7 @@ mod tests {
         assert!(helper().is_none());
         assert!(!wanted() && unavailable().is_some());
         let mut events = 0;
-        let r = run(Kind::Ai, Vec::new(), ([0; 5], 0.0), None, |_| {
+        let r = run(Kind::Ai, Vec::new(), ([0; 5], 0.0), None, None, |_| {
             events += 1;
             true
         });

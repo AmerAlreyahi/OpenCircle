@@ -99,12 +99,14 @@ pub fn opening<'a, M: 'a>(scale: f32, opening: f32) -> Element<'a, M> {
 /// Puts a fixed colour where the live edge is, in a capture (`rgba`, `w` x `h`)
 /// of the monitor it frames: a capture that shows the layer (X11) then never
 /// changes there while the edge moves, so live mode doesn't re-read the edges.
-pub fn mask(rgba: &mut [u8], w: u32, h: u32, scale: f32) {
+/// Returns the strips (x, y, w, h) it may have blanked.
+pub fn mask(rgba: &mut [u8], w: u32, h: u32, scale: f32) -> Vec<[u32; 4]> {
     let Some(spec) = Spec::of(config::look().live) else {
-        return;
+        return Vec::new();
     };
     let geo = Geo::new(w, h, scale, spec);
-    for [x0, y0, sw, sh] in geo.strips() {
+    let strips = geo.strips();
+    for &[x0, y0, sw, sh] in &strips {
         for y in y0..y0 + sh {
             for x in x0..x0 + sw {
                 let i = ((y * w + x) * 4) as usize;
@@ -116,6 +118,7 @@ pub fn mask(rgba: &mut [u8], w: u32, h: u32, scale: f32) {
             }
         }
     }
+    strips
 }
 
 /// `mode`'s edge in `look` at rest, laid over `rgba` (`w` x `h`, straight
@@ -189,6 +192,7 @@ impl<M> canvas::Program<M> for Border {
         };
         let look = self.look.unwrap_or_else(config::look);
         let (spec, frame, next) = plan(self.mode, &look, elapsed, state.motion);
+        let spec = spec.map(|s| s.on_window(self.keyed, look.edge(self.mode)));
         let redraw = next.map(|d| Action::request_redraw_at(*now + d));
         let Some(spec) = spec.filter(|_| frame.alpha > 0.0) else {
             state.strips.clear();
@@ -295,6 +299,20 @@ impl Spec {
                 rad: RADIUS,
             }),
             EdgeStyle::Glow => Some(Spec::glow(t * GLOW_REACH)),
+        }
+    }
+
+    /// What a window shows of `self` (`edge`'s): a colour-keyed window has no
+    /// partial alpha, so a glow there would be a coarse dither (blotchy, thick):
+    /// it gets the thin line at the edge's thickness instead, still animated.
+    fn on_window(self, keyed: bool, edge: config::Edge) -> Spec {
+        match self.style {
+            EdgeStyle::Glow if keyed => Spec::of(config::Edge {
+                style: EdgeStyle::Thin,
+                ..edge
+            })
+            .unwrap_or(self),
+            _ => self,
         }
     }
 
@@ -920,6 +938,43 @@ mod tests {
         assert!(lum(lit[i(0.375)]) > lum(still[i(0.375)]) + 60);
         assert!(lum(lit[i(0.625)]) > lum(still[i(0.625)]) + 60);
         assert_eq!(lit[0], still[0]);
+    }
+
+    /// The live layer (colour-keyed on Windows) draws every look's edge as the
+    /// thin line at the overlay's resting thickness: solid, never a dithered glow.
+    #[test]
+    fn the_keyed_live_edge_is_a_thin_solid_line_at_the_overlays_thickness() {
+        let (w, h, scale) = (1366u32, 768u32, 1.25f32);
+        for (theme, look) in PRESETS {
+            let Some(spec) = Spec::of(look.live) else {
+                continue;
+            };
+            let spec = spec.on_window(true, look.live);
+            let want = f32::from(look.overlay.thickness);
+            assert_eq!(
+                (spec.style, spec.inset),
+                (EdgeStyle::Thin, want),
+                "{theme:?}"
+            );
+            let cache = Cache::build(Geo::new(w, h, scale, spec));
+            let frame = plan(Mode::Live, &look, Duration::from_millis(700), true).1;
+            let strips = render(&cache, &Paint::of(&look, spec.style), frame, true);
+            // the top strip's middle column: solid from the edge, then clear
+            let ([_, _, sw, sh], top) = &strips[0];
+            let column: Vec<u8> = (0..*sh)
+                .map(|y| top[((y * sw + sw / 2) * 4 + 3) as usize])
+                .collect();
+            let lit = column.iter().take_while(|&&a| a == 255).count();
+            assert_eq!(
+                lit,
+                (want * scale).round() as usize,
+                "{theme:?}: {column:?}"
+            );
+            assert!(
+                column[lit..].iter().all(|&a| a == 0),
+                "{theme:?}: {column:?}"
+            );
+        }
     }
 
     #[test]
