@@ -57,10 +57,25 @@ fn export(crop: Crop, snip: &SnipConfig) -> (Crop, Format) {
     (super::fit_long_edge(crop, max), snip.format)
 }
 
-/// The dialog's starting folder: the configured one, if it is set and exists.
+/// Where saves go when no folder is set: the Pictures folder + `OpenCircle`.
+pub fn default_folder() -> Option<PathBuf> {
+    dirs::picture_dir().map(|p| p.join("OpenCircle"))
+}
+
+/// The dialog's starting folder: the configured one if set and existing, else the
+/// default folder, created on first use.
 fn start_folder(configured: &str) -> Option<PathBuf> {
+    start_in(configured, default_folder())
+}
+
+fn start_in(configured: &str, default: Option<PathBuf>) -> Option<PathBuf> {
     let folder = PathBuf::from(configured);
-    (!configured.is_empty() && folder.is_dir()).then_some(folder)
+    if !configured.is_empty() && folder.is_dir() {
+        return Some(folder);
+    }
+    let folder = default?;
+    std::fs::create_dir_all(&folder).ok()?;
+    Some(folder)
 }
 
 /// Local time as `YYYY-MM-DD_HH-MM-SS` (sorts by name, valid on every filesystem).
@@ -110,14 +125,31 @@ mod tests {
         let dir = std::env::temp_dir();
         let configured = dir.to_string_lossy();
         assert_eq!(super::start_folder(&configured), Some(dir.clone()));
-        assert_eq!(super::start_folder(""), None, "unset = the system's choice");
+        // Not set, missing, or a file: the default folder, created on first save.
+        let want = dir
+            .join(format!("oc-pictures-{}", std::process::id()))
+            .join("OpenCircle");
         let gone = dir.join(format!("oc-no-such-folder-{}", std::process::id()));
-        assert_eq!(super::start_folder(&gone.to_string_lossy()), None);
-        // A file is not a folder.
         let file = dir.join(format!("oc-save-test-{}", std::process::id()));
         std::fs::write(&file, b"x").unwrap();
-        assert_eq!(super::start_folder(&file.to_string_lossy()), None);
+        assert!(!want.exists());
+        for unset in ["", &*gone.to_string_lossy(), &*file.to_string_lossy()] {
+            assert_eq!(
+                super::start_in(unset, Some(want.clone())),
+                Some(want.clone())
+            );
+        }
+        assert!(want.is_dir());
         let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir_all(want.parent().unwrap());
+    }
+
+    #[test]
+    fn the_default_folder_is_pictures_opencircle() {
+        if let Some(p) = super::default_folder() {
+            assert!(p.ends_with("OpenCircle"));
+            assert_eq!(p.parent(), dirs::picture_dir().as_deref());
+        }
     }
 
     #[test]

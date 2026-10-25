@@ -1361,7 +1361,11 @@ pub const START_LABEL: &str = if cfg!(windows) {
 fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     let folder = state.draft.general.save_folder.as_str();
     let shown = if folder.is_empty() {
-        value_field("Chosen by your system", true)
+        let default = crate::actions::save::default_folder().map_or_else(
+            || "Chosen by your system".into(),
+            |p| p.to_string_lossy().into_owned(),
+        );
+        value_field(default, false)
     } else {
         value_field(shorten(folder), false)
     };

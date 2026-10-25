@@ -15,6 +15,7 @@ use crate::ui::widgets::{self, button_group, caption, form_button, label_button}
 
 pub const PROJECT: &str = "https://github.com/AmerAlreyahi/OpenCircle";
 pub const LICENSE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSE";
+pub const WEBSITE: &str = "https://ameralreyahi.com/projects/opencircle";
 pub const NOTICE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/NOTICE";
 pub const PROFILE_URL: &str = "https://github.com/AmerAlreyahi";
 
@@ -122,6 +123,7 @@ fn name<'a>(s: impl text::IntoFragment<'a>, size: f32) -> iced::widget::Text<'a>
 pub fn app<'a, M: Clone + 'a>(open: fn(String) -> M) -> Element<'a, M> {
     let links = button_group([
         form_button("GitHub", false, Some(open(PROJECT.into()))).into(),
+        form_button("Website", false, Some(open(WEBSITE.into()))).into(),
         form_button("MIT licence", false, Some(open(LICENSE.into()))).into(),
     ]);
     let head = row![
@@ -226,7 +228,7 @@ mod tests {
         assert_eq!(p.login, "AmerAlreyahi");
         assert!(!p.name.is_empty() && !p.bio.is_empty());
         assert!(https(&p.website), "{}", p.website);
-        for url in [PROJECT, LICENSE, NOTICE, PROFILE_URL] {
+        for url in [PROJECT, WEBSITE, LICENSE, NOTICE, PROFILE_URL] {
             assert!(https(url), "{url}");
         }
         assert!(include_bytes!("../../assets/about/avatar.png").starts_with(b"\x89PNG"));
