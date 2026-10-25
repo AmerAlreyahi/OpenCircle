@@ -1,0 +1,5 @@
+# Written by scripts/refresh-about.sh from https://github.com/AmerAlreyahi (the bio is hand-written and kept).
+name = "Amer Alreyahi"
+login = "AmerAlreyahi"
+website = "https://ameralreyahi.com"
+bio = "AI and PPM solution architect building fast, private desktop tools."

@@ -33,6 +33,7 @@ use crate::mt;
 use crate::music::{self, SERVICE, Service};
 use crate::secrets::{self, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES, Language};
+use crate::ui::about;
 use crate::ui::theme;
 use crate::ui::widgets::{
     self, FORM_WIDTH, FieldState, caption, divider, error_text, form_row, label_button, look_tile,
@@ -472,9 +473,6 @@ const SECTIONS: [(Section, &str, &str); 9] = [
 pub const UPDATE_PRIVACY: &str = "Asks GitHub for the latest version twice a day and installs it when \
      OpenCircle is idle. Sends only that request: nothing about you or your screen";
 
-/// The project page the About section links to.
-pub const PROJECT_URL: &str = "https://github.com/AmerAlreyahi/OpenCircle";
-
 /// A shortcut field: the capture shortcut or quick action `n`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
@@ -544,7 +542,7 @@ pub enum Message {
     Folder(Option<PathBuf>),
     ClearFolder,
     /// The Project button.
-    OpenProject,
+    OpenLink(String),
     Theme(Theme),
     WidgetTheme(WidgetTheme),
     GlassEffect(bool),
@@ -689,8 +687,8 @@ pub enum Outcome {
     Saved(Config),
     /// Show the folder picker; the answer comes back as `Message::Folder`.
     Browse,
-    /// Open `PROJECT_URL` in the browser.
-    OpenProject,
+    /// Open this link in the browser (the user clicked it on the About page).
+    OpenLink(String),
     /// Check for an update now; the answer comes back as `Message::UpdateStatus`.
     CheckUpdate,
 }
@@ -1067,7 +1065,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         }
         Message::Folder(None) => {}
         Message::ClearFolder => state.draft.general.save_folder.clear(),
-        Message::OpenProject => return Outcome::OpenProject,
+        Message::OpenLink(url) => return Outcome::OpenLink(url),
         Message::AutoUpdate(on) => state.draft.update.auto = Some(on),
         Message::CheckUpdate => {
             state.update_status = Some("Checking…".into());
@@ -1291,8 +1289,13 @@ fn content(state: &State) -> Element<'_, Message> {
     };
     // The rows scroll under the title: the Shortcuts list outgrows the window.
     let mut list = column![].padding(iced::Padding::ZERO.right(12));
+    // About is a stack of cards; the other pages are rows split by rules.
+    let cards = state.section == Section::About;
+    if cards {
+        list = list.spacing(14);
+    }
     for (i, r) in rows.into_iter().enumerate() {
-        if i > 0 {
+        if i > 0 && !cards {
             list = list.push(divider());
         }
         list = list.push(r);
@@ -1880,9 +1883,12 @@ fn snip_rows(d: &SnipConfig) -> Vec<Element<'_, Message>> {
 }
 
 fn about_rows(state: &State) -> Vec<Element<'_, Message>> {
-    let project = label_button("Open GitHub", false, Some(Message::OpenProject));
-    let check = label_button("Check now", false, Some(Message::CheckUpdate));
     vec![
+        about::app(
+            Message::OpenLink,
+            Message::CheckUpdate,
+            state.update_status.as_deref(),
+        ),
         form_row(
             "Keep OpenCircle up to date",
             UPDATE_PRIVACY,
@@ -1896,33 +1902,8 @@ fn about_rows(state: &State) -> Vec<Element<'_, Message>> {
             ),
             None,
         ),
-        form_row(
-            "Updates",
-            state
-                .update_status
-                .as_deref()
-                .unwrap_or("Look for a new version now"),
-            check,
-            None,
-        ),
-        form_row(
-            "Version",
-            "OpenCircle",
-            value_field(env!("CARGO_PKG_VERSION"), false),
-            None,
-        ),
-        form_row(
-            "License",
-            "Free and open source",
-            value_field("MIT", false),
-            None,
-        ),
-        form_row(
-            "Project",
-            "Source code and issue tracker",
-            tip(project, "Open the project page", Position::Top),
-            None,
-        ),
+        about::developer(Message::OpenLink),
+        about::notices(Message::OpenLink),
         form_row(
             "Telemetry",
             "A capture leaves this PC only when you choose an action",
@@ -2816,11 +2797,17 @@ pub(super) mod tests {
         let (mut s, _) = state(None);
         update(&mut s, Message::Section(Section::About));
         let texts = shot::texts(view(&s));
-        for want in [env!("CARGO_PKG_VERSION"), "MIT", "Telemetry", "None"] {
+        for want in ["MIT licence", "Telemetry", "None", "Amer Alreyahi"] {
             assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
         }
-        assert_eq!(update(&mut s, Message::OpenProject), Outcome::OpenProject);
-        assert!(PROJECT_URL.starts_with("https://github.com/"));
+        let version = format!("Version {}", env!("CARGO_PKG_VERSION"));
+        assert!(texts.contains(&version), "{texts:?}");
+        // Nothing opens until a link is clicked; the click asks the shell to open it.
+        let url = about::PROJECT.to_string();
+        assert_eq!(
+            update(&mut s, Message::OpenLink(url.clone())),
+            Outcome::OpenLink(url)
+        );
         assert!(!s.dirty(), "About changes nothing");
     }
 
@@ -3001,6 +2988,25 @@ pub(super) mod tests {
         }
         theme::apply(Theme::Dark);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn renders_about_in_default_and_frost() {
+        for widgets_theme in [WidgetTheme::Default, WidgetTheme::Frost] {
+            for (name, theme_choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
+                let (mut s, _) = state(None);
+                update(&mut s, Message::Theme(theme_choice));
+                update(&mut s, Message::WidgetTheme(widgets_theme));
+                update(&mut s, Message::Section(Section::About));
+                let w = format!("{widgets_theme:?}").to_lowercase();
+                shot::save(
+                    &format!("about-{w}-{name}"),
+                    view(&s),
+                    Size::new(820.0, 1100.0),
+                );
+            }
+        }
+        theme::apply(Theme::Dark);
     }
 
     #[test]

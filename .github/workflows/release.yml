@@ -73,6 +73,12 @@ jobs:
           grep -m1 '^version = ' Cargo.toml
           grep -qx "version = \"$version\"" Cargo.toml
 
+      - name: Refresh the About page's developer card (public GitHub profile)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/refresh-about.sh
+
       - name: Linux build deps
         if: runner.os == 'Linux'
         run: |

@@ -366,7 +366,7 @@ impl Windows {
                     match settings::update(state, msg) {
                         settings::Outcome::Saved(cfg) => apply(cfg),
                         settings::Outcome::Browse => return pick_folder(),
-                        settings::Outcome::OpenProject => open_url(settings::PROJECT_URL),
+                        settings::Outcome::OpenLink(url) => open_url(&url),
                         settings::Outcome::CheckUpdate => crate::update::check_now(),
                         settings::Outcome::None => {}
                     }
