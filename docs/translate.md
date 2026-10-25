@@ -5,6 +5,17 @@ original glyphs are erased from the picture and the translation is drawn where
 they were, with matching colour, size and alignment. It is built for games, but
 works on anything you can see.
 
+<p align="center">
+  <img src="images/translate-before-after.png" alt="A page in English before translation, and after: the text is erased and redrawn in Arabic in the same place, with the same layout." width="900"><br>
+  <sub>Before and after. The translation takes the original's place.</sub>
+</p>
+
+Three ways in, all from the same bar or keys:
+
+- **Translate** on a selection (the bar, or `Ctrl+Shift+T` for the whole screen).
+- **Live translate** (`Ctrl+Shift+L`, or the bar's button) keeps going as the screen changes.
+- **Select text**, then Translate, for only the words you picked.
+
 ## How it works
 
 1. OpenCircle captures the screen.

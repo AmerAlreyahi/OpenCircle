@@ -7,14 +7,15 @@ Every network action is something you start.
 
 | When you... | What is sent | To whom |
 |---|---|---|
-| Press **Search** | The selected area, as an image | Google Lens, from your own browser. OpenCircle writes a small local web page that holds the image and submits it to Lens when your browser opens it. No image-hosting service is involved. |
-| Press **Send** in Ask AI / Explain, with the default **Google AI Mode (browser)** | Your question and the text read from your selection (text only; the screenshot is not uploaded unless you choose Lens) | Google, from your own browser, which OpenCircle opens at `google.com/search` with the question in the address. If you decline the one-time OCR download, only your prompt is sent. |
+| Search (runs by itself after a selection, or with `Enter` in the question field) | The selected area, as an image | Google Lens, from your own browser. OpenCircle writes a small local web page that holds the image and submits it to Lens when your browser opens it. No image-hosting service is involved. |
+| Press **Send** in Ask AI / Explain, with the default **Google AI Mode (no key)** | Your question and the text read from your selection (text only; the screenshot is not uploaded unless you choose Lens) | Google, from OpenCircle's results card, which loads AI Mode with the question in the address. The browser is used only if you press **Open in browser**. If you decline the one-time text reader download, only your prompt is sent. |
 | Ask AI / Explain, with an API provider | The selected area and your questions | The AI provider you configured (or your local server) |
 | Translate with AI | The text read from the screen (text only, not the image) | The AI provider you configured |
 | Translate with the **Offline** engine | Nothing. The model runs on your PC | Nobody |
-| Use **Text** for the first time | Nothing of yours. It downloads the OCR runtime and models (about 20 MB) | GitHub (ONNX Runtime releases and the oar-ocr model release), checked against pinned checksums |
+| Select text for the first time, after you agree | Nothing of yours. It downloads the text reader (about 30 MB) | GitHub (ONNX Runtime releases and the oar-ocr model release), checked against pinned checksums |
 | Translate offline for the first time, after you agree | Nothing of yours. It downloads the translation model (about 120 MB, plus the OCR files if missing) | Hugging Face (a pinned commit of the OPUS-MT model) and GitHub, checked against pinned checksums |
 | Press the **music button** (song search, only after you add your own key) | A ~10-second clip of the audio you choose (what this PC plays, or the microphone), plus your key. Then the song's cover image is downloaded | AudD (`api.audd.io`); the cover from Apple's image server (`mzstatic.com`) |
+| Update check (only if you turned it on; off until you say yes on first run) | Only the request for the latest release: no account, no ID, no screen data | GitHub (the release files and `SHA256SUMS.txt` with its signature) |
 | Anything else (circle, copy, save, snip, annotate, read text) | Nothing | Nobody |
 
 Lens and your AI provider have their own privacy policies; OpenCircle cannot
@@ -49,7 +50,7 @@ only to the server you configured. A remote server must use `https://`; plain
 
 ## Offline use
 
-Circle, Text and offline translation (after their one-time downloads), Copy,
-Save and Snip work with no network. Search, Ask AI and AI translation need
+Circle, select text and offline translation (after their one-time downloads),
+Copy, Save and Snip work with no network. Search, Ask AI and AI translation need
 one; a local model removes the need for the last two (the browser provider
 always needs the web).

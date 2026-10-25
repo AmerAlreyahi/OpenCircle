@@ -1,5 +1,8 @@
 # Linux notes
 
+Status: **preview.** Windows is the main target and has every feature; Linux
+works on X11 and Wayland with the limits below.
+
 OpenCircle runs on X11 and on Wayland. Wayland restricts what any app may do,
 so a few things work differently.
 

@@ -48,6 +48,11 @@ and Full are offered.
 
 ## Annotate
 
+<p align="center">
+  <img src="images/editor-toolbar.png" alt="The editor toolbar at the bottom of a screenshot of an account page: tools in a row, a colour popover with presets, and Copy and Save buttons." width="900"><br>
+  <sub>The editor: tools, colour presets, and Copy and Save at the bottom.</sub>
+</p>
+
 Every tool has a key while the editor is open:
 
 | Tool | Key |

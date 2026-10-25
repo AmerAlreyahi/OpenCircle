@@ -5,126 +5,119 @@
 <h1 align="center">OpenCircle</h1>
 
 <p align="center">
-  <b>The open-source alternative to Circle to Search for Windows and Linux.</b><br>
-  Circle anything on your screen to search it, read it, translate it in place, ask an AI about it, or snip and annotate it.<br>
-  Fast, private and lightweight.
+  <b>Circle to Search for Windows and Linux. Free and open source.</b><br>
+  Circle anything on your screen to search it, read it, translate it in place,<br>
+  or ask an AI about it. Fast, private and light.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7a6cf0"></a>
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-4fc9e0">
+  <img alt="Platforms: Windows and Linux (preview)" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20(preview)-4fc9e0">
 </p>
 
 <p align="center">
-  <img src="gallery/00-translate-before-after.png" alt="Full-screen translate: before and after" width="900"><br>
-  <sub>Design concept of in-place translation. More in the <a href="gallery/README.md">gallery</a>.</sub>
+  <img src="docs/images/translate-before-after.png" alt="Full-screen translate: the Arabic page before, and after OpenCircle erased the English text and drew the translation in its place." width="900"><br>
+  <sub>Translate in place: the text is erased and redrawn where it stood.</sub>
 </p>
 
 ## What it does
 
-Android has Circle to Search; the PC never got it. Press a shortcut and the
-screen freezes. Circle, drag or tap anything (text, images, video frames,
-games) and choose what to do with it.
-
-- **Translate in place, built for games.** Every piece of text is erased and
-  redrawn in your language where it stood, with matching colour and size, not
-  a box laid on top. Arabic and many more target languages. A live mode keeps
-  translating while you play (Windows and X11). Hold `Alt` to peek at the
-  original; click a block for its meaning in context.
-  See [Translate](docs/translate.md).
-- **Search with Google Lens in your own browser.** The picture goes from your
-  browser straight to Lens. No image-hosting service in between.
-- **Read text from anything.** Copy text out of images, videos and games. OCR
-  runs on your PC, offline, after a one-time download of about 20 MB.
-- **Ask AI about what you circled.** By default your question opens in Google
-  AI Mode in your own browser: no key, no account. Or bring your own key for
-  answers in the app, with follow-up questions: Claude, or any
-  OpenAI-compatible service, including a local model with Ollama or LM Studio,
-  or OpenRouter. See [AI setup](docs/ai-setup.md).
-- **Snip and annotate.** Region, window, full-screen and scrolling captures.
-  Smart shapes, curved arrows, callouts, numbered steps, text, highlighter,
-  spotlight, magnifier and blur that cannot be reversed. Copy or save.
-  See [Snip and annotate](docs/snip-and-annotate.md).
-- **Quick-action shortcuts.** Give an action its own global shortcut and skip
-  the menu. See [Shortcuts](docs/shortcuts.md).
-- **Light, dark and system themes.**
+- **Translate in place, built for games.** Press `Ctrl+Shift+T` to translate
+  the whole screen. The original text is erased and the translation is drawn in
+  its place, with matching colour and size. Live mode keeps going while you play.
+  Runs offline by default. Arabic is the default target.
+- **Circle to search.** Press `Ctrl+Shift+Space`, draw a circle or a box around
+  anything, and it is searched at once. The stroke snaps to a clean box.
+- **Select text like on a desktop.** Drag over words to copy them, translate
+  them, or search them. Text reading is a one-time download of about 30 MB.
+- **Results in a card, not a new tab.** Google Lens and AI Mode open in a
+  floating card beside your selection. Dock it left or right, drag it, resize
+  it. Open in your browser only when you click.
+- **One bottom bar.** Your question, then Copy, Save, Translate, Live translate,
+  Music and Edit. Drag it to any edge.
+- **Snip and annotate.** Region, window, full screen or scrolling capture.
+  Arrows, shapes, text, numbered steps, blur, spotlight. Copy the image and its
+  text in one go, ready for an AI chat.
+- **Ask AI about your selection.** No key needed: the question opens in Google
+  AI Mode. Or add your own key for answers inside OpenCircle: Claude, OpenAI, or
+  any OpenAI-compatible server, including a local model.
+- **Shortcuts for everything.** Give any action its own key and skip the bar.
+- **Themes.** Default, Frost and Graphite, in light, dark or system colours.
+  Seven live looks for the screen while OpenCircle is active.
+- **Updates that check a signature.** Quiet, opt-in on first run, with release
+  notes after each update.
 
 ## Private by design
 
-- Nothing leaves your computer until you choose an action.
-- No accounts, no telemetry, no image-hosting services.
-- API keys live in your operating system's keyring, never in a file.
-- Temporary files are deleted when you are done.
+- Nothing leaves your computer unless you choose an action.
+- No account, no telemetry, no image-hosting service.
+- AI and song-search keys live in your system's keyring, never in a file.
 
 Details: [Privacy](docs/privacy.md).
 
-## Lightweight
+<p align="center">
+  <img src="docs/images/select-text.png" alt="Desktop-style text selection: words are highlighted on a Wikipedia page, and the bottom bar sits under the selection." width="900"><br>
+  <sub>Select text: drag over words, then copy, translate or search them.</sub>
+</p>
 
-One native program written in Rust, with no browser engine inside. It uses
-about 20–30 MB of RAM while it waits in the tray in our tests (Windows and
-Linux). Reading text starts a short-lived helper process that uses more memory
-while it works and exits afterwards.
+<p align="center">
+  <img src="docs/images/results-card.png" alt="The results card docked on the right of the screen, showing Google Lens and then Google AI Mode for a lighthouse picture." width="900"><br>
+  <sub>The results card: Lens and AI Mode, docked beside the selection.</sub>
+</p>
 
 ## Install
 
 Download from the [Releases](https://github.com/AmerAlreyahi/OpenCircle/releases)
-page:
+page.
 
 | System | Files |
 |---|---|
-| Windows 10 / 11 | `.exe` installer (NSIS) or `.msi` |
-| Linux | `.AppImage`, `.deb`, `.rpm` |
+| Windows 10 / 11 | `.msi` installer (pick the folder, optional launch at the end), `.exe` installer |
+| Linux (preview) | `.AppImage`, `.deb`, `.rpm` |
 
-Verify a download with `SHA256SUMS.txt` from the same release:
+Check a download with `SHA256SUMS.txt` from the same release:
 
 ```bash
 sha256sum -c SHA256SUMS.txt --ignore-missing
 ```
 
-**Windows SmartScreen.** Binaries are not code-signed (a certificate costs
-money and the project is free), so Windows may show "Windows protected your
-PC". Click **More info**, then **Run anyway**. You or your organisation can
-sign the installer with your own certificate: see [Signing](docs/signing.md).
+**Windows SmartScreen** may say "Windows protected your PC" because the
+installers are not code-signed (the project is free). Click **More info**, then
+**Run anyway**. See [Signing](docs/signing.md) to sign your own build.
 
-**Linux runtime libraries.** The `.deb` and `.rpm` pull in what is needed
-(GTK 3, AppIndicator, X11/xcb, xkbcommon, Wayland client libraries and
-`xdg-desktop-portal`). The AppImage needs the same libraries on the host.
-Without AppIndicator the tray icon is missing but the app still runs from its
-shortcuts and the command line. See [Linux notes](docs/linux-notes.md).
+OpenCircle starts with Windows by default (tray only, no window). Turn that off
+in Settings.
 
-## First run
+The [Getting started](docs/getting-started.md) guide walks through the first run.
 
-OpenCircle starts in the tray and shows a short welcome: your shortcut, an
-optional AI provider, and a theme. Press `Ctrl+Shift+Space`, circle something,
-and pick an action. [Getting started](docs/getting-started.md) walks through it.
-
-## Default shortcuts
+## Shortcuts
 
 | Action | Shortcut |
 |---|---|
 | Circle to search | `Ctrl+Shift+Space` |
-| Translate the full screen | `Ctrl+Shift+T` |
+| Translate the whole screen | `Ctrl+Shift+T` |
 | Live translate on / off | `Ctrl+Shift+L` |
 | Circle, then explain with AI | `Ctrl+Shift+E` |
-| Circle, then copy text | `Ctrl+Shift+X` |
-| Snip a region / window / full screen | `Print Screen` / `Alt+Print Screen` / `Ctrl+Print Screen` |
+| Circle, then copy its text | `Ctrl+Shift+X` |
+| Snip a region / a window / the full screen | `Print Screen` / `Alt+Print Screen` / `Ctrl+Print Screen` |
 
-All of them can be changed in Settings. Snip mode also opens from the tray menu
-or with `opencircle run snip`. On Windows, `Print Screen` may belong to the
-system; [Shortcuts](docs/shortcuts.md) says how to free it. On Wayland, the
-desktop asks once to allow shortcuts; where it cannot, bind the commands in
-your desktop's keyboard settings. Full list: [Shortcuts](docs/shortcuts.md).
+All of them change in Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
 
 ## Platforms
 
-- **Windows** 10 and 11.
-- **Linux** on X11 and Wayland. On Wayland, global shortcuts need a desktop
-  with the GlobalShortcuts portal (GNOME 48+, KDE Plasma 6); elsewhere you bind
-  `opencircle capture` yourself. Some features depend on what the compositor
-  allows. See [Linux notes](docs/linux-notes.md).
+- **Windows 10 and 11:** the full feature set.
+- **Linux (preview):** X11 and Wayland. On Wayland the desktop owns the keys and
+  the screen capture; live translate runs once per press, and window and
+  scrolling snips are not offered. See [Linux notes](docs/linux-notes.md).
 
-Games must run in borderless or windowed mode for live translate: no app can
-draw over exclusive fullscreen.
+Games must run in borderless or windowed mode for live translate.
+
+## Lightweight
+
+One native program written in Rust, with no browser engine inside. The interface
+is drawn by [iced](https://iced.rs). The goal is under 40 MB of RAM while idle.
+Reading text, translating and Lens start short helper processes that exit when
+they finish.
 
 ## Build from source
 
@@ -146,17 +139,23 @@ sudo apt-get install libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev l
 
 [Getting started](docs/getting-started.md) ·
 [Shortcuts](docs/shortcuts.md) ·
-[AI setup](docs/ai-setup.md) ·
 [Translate](docs/translate.md) ·
 [Snip and annotate](docs/snip-and-annotate.md) ·
+[AI setup](docs/ai-setup.md) ·
+[Song search](docs/song-search.md) ·
 [Privacy](docs/privacy.md) ·
 [Linux notes](docs/linux-notes.md) ·
 [Signing](docs/signing.md)
 
+## About and credits
+
+Settings > About lists the project, the licence, and every component OpenCircle
+uses that is made by others, with its licence. Text-reading and translation
+models are downloaded on first use under their own licences; see `NOTICE`.
+
 ## Contributing
 
-Issues and pull requests are welcome. Please run the checks before sending a
-pull request:
+Issues and pull requests are welcome. Run the checks before sending one:
 
 ```bash
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
@@ -168,5 +167,5 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
 OpenCircle is an independent project and is not affiliated with or endorsed
 by Google. "Google", "Google Lens" and "Circle to Search" are trademarks of
-Google LLC, used here only to describe the feature OpenCircle offers an
-alternative to and the service it can open for you.
+Google LLC, used here only to describe the feature OpenCircle is an alternative
+to and the services it can open for you.
