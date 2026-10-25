@@ -139,7 +139,10 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, seed: u64) {
             let mut mean = [0.0f32; 3];
             for k in 0..3 {
                 let own = 0.5 * TONE * unit(mix(cell_key ^ ((k as u64 + 1) * 0x9e37_79b9)));
-                mean[k] = reflect(quantise(sum[k] / n) + shared + own);
+                // And one offset for the whole stroke: averaging a row or column of
+                // cells cancels the per-cell ones, not this (it hides the total ink).
+                let whole = TONE * unit(mix(seed ^ ((k as u64 + 7) * 0x5bd1_e995)));
+                mean[k] = reflect(quantise(sum[k] / n) + shared + own + whole);
             }
             for y in cy..y1 {
                 buf[(y - sy0) as usize * sw + (cx - sx0) as usize..][..(x1 - cx) as usize]
