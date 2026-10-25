@@ -289,8 +289,8 @@ pub enum Message {
     Redo,
     Delete,
     Copy,
-    /// Copy the image and the annotations' text (Ctrl+Shift+C).
-    CopyAll,
+    /// The toolbar's Scrolling capture button.
+    Scroll,
     Save,
     /// Pin the flattened image to the screen.
     Pin,
@@ -303,10 +303,9 @@ pub enum Output {
     Back,
     /// The flattened image, for the Copy / Save actions.
     Copy(Crop),
-    /// The flattened image and its text (step notes as "1. note", then every
-    /// text, label, callout and arrow label), both for the clipboard.
-    CopyWithText(Crop, String),
     Save(Crop),
+    /// Scroll and stitch the area under the editor (Snip, in place only).
+    Scroll,
     /// A floating always-on-top copy of the image.
     Pin(Crop),
     /// Let the user pick another area; give it to `Editor::append`.
@@ -375,6 +374,9 @@ pub struct Editor {
     dragged: Option<dragout::DragFile>,
     /// The blur brush keeps to text lines (config `editor.line_assist`).
     assist: bool,
+    /// Scrolling capture can run for this editor (the host sets it; the
+    /// toolbar button is dimmed without).
+    pub scroll: bool,
     /// The image's text lines, for the image they were found in.
     bands: Option<((u32, u32, board::Board), Vec<lines::Band>)>,
     /// The text line the blur stroke being drawn is held on.
@@ -406,6 +408,7 @@ impl Editor {
             cropping: None,
             dragged: None,
             assist: crate::config::current().editor.line_assist,
+            scroll: false,
             bands: None,
             lock: None,
         };
@@ -551,12 +554,17 @@ impl Editor {
                     self.refresh();
                 }
             }
-            Message::Copy | Message::CopyAll | Message::Save | Message::Pin => {
+            Message::Scroll => {
+                if self.scroll {
+                    self.commit();
+                    return Some(Output::Scroll);
+                }
+            }
+            Message::Copy | Message::Save | Message::Pin => {
                 self.commit();
                 let flat = render(&self.doc);
                 return Some(match message {
                     Message::Copy => Output::Copy(flat),
-                    Message::CopyAll => Output::CopyWithText(flat, text_of(&self.doc)),
                     Message::Save => Output::Save(flat),
                     _ => Output::Pin(flat),
                 });
@@ -1168,22 +1176,6 @@ fn text_mut(shape: &mut Shape) -> Option<&mut String> {
         Shape::Step { note, .. } => Some(note),
         _ => None,
     }
-}
-
-/// The document's words, for the clipboard beside the image: the steps' notes
-/// ("1. note"), then each text, label, callout and arrow label, bottom to top.
-fn text_of(doc: &Document) -> String {
-    let notes = legend::rows(&doc.items)
-        .into_iter()
-        .map(|r| format!("{}. {}", r.number, r.note));
-    let texts = doc.items.iter().filter_map(|item| match &item.shape {
-        Shape::Text { text, .. }
-        | Shape::Label { text, .. }
-        | Shape::Callout { text, .. }
-        | Shape::Arrow { text, .. } => Some(text.trim().to_string()).filter(|t| !t.is_empty()),
-        _ => None,
-    });
-    notes.chain(texts).collect::<Vec<_>>().join("\n")
 }
 
 /// The image's colour at `p` (opaque), or `None` outside it.

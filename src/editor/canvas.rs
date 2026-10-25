@@ -325,7 +325,6 @@ impl Editor {
             ) {
                 (true, false, 'z') => Some(Message::Undo),
                 (true, true, 'z') | (true, _, 'y') => Some(Message::Redo),
-                (true, true, 'c') => Some(Message::CopyAll),
                 (true, _, 'c') => Some(Message::Copy),
                 (true, _, 's') => Some(Message::Save),
                 // Ctrl: plain P is the Pen tool.

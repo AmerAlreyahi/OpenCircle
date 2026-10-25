@@ -500,6 +500,8 @@ struct App {
     /// The editor just went back to the bar (until the next frame): an
     /// Escape now is the key that did it.
     esc_back: bool,
+    /// The next snip capture is the one a timer waited for: no timer again.
+    timed: bool,
     /// The bar's spot (`config::BarConfig`); while its handle is held, the
     /// pointer's last position and where the bar follows it (top-left);
     /// where it is drawn now (gliding to its spot); how much of the screen's
@@ -615,6 +617,7 @@ impl App {
             swap: 0.0,
             swap_at: None,
             esc_back: false,
+            timed: false,
             bar_anchor: BarAnchor::Bottom,
             bar_drag: None,
             bar_now: None,
@@ -1116,9 +1119,14 @@ impl App {
         self.bar_keys = BarKeys::of(&cfg);
         let mut first = None;
         let mut extras = Task::none();
+        let mut timer = None;
         if let Some((kind, windows, foreground)) = shot.snip {
             let mut snip = Snip::new(windows, size, snip::can_scroll(), foreground);
             first = snip.start(kind, size); // Full = the whole screen at once
+            let wait = config::current().snip.delay;
+            if !std::mem::take(&mut self.timed) && wait > 0 && first.is_none() {
+                timer = Some(wait); // Settings > Snip > Timer: hide, count down, capture again
+            }
             let handles = snip.window_handles(UIA_WINDOWS);
             self.purpose = Purpose::Snip(Box::new(snip));
             let px = |v: f32| (v * shot.scale).round() as i32;
@@ -1126,7 +1134,11 @@ impl App {
             extras = self.snip_extras(handles, origin, shot.scale);
         }
         let Purpose::Quick(quick, target) = self.purpose else {
-            let next = first.map_or_else(Task::none, |next| self.snip_next(Some(next)));
+            let next = match (first, timer) {
+                (Some(next), _) => self.snip_next(Some(next)),
+                (None, Some(secs)) => self.on_snip(snip::Msg::Delay(secs)),
+                (None, None) => Task::none(),
+            };
             if self.snip_pill() {
                 return Task::batch([next, extras]); // the toast is the window
             }
@@ -1456,6 +1468,27 @@ impl App {
                 if let Some(action) = actions::for_key(letter, ctrl) {
                     return self.run(action);
                 }
+            }
+            // Snip: Ctrl+C copies what a click would capture here (the picked area,
+            // else the window or control outlined under the pointer), whatever
+            // `snip.after` says.
+            overlay::Event::Key {
+                letter: 'c',
+                ctrl: true,
+            } if matches!(self.purpose, Purpose::Snip(_)) => {
+                let Purpose::Snip(snip) = &self.purpose else {
+                    return Task::none();
+                };
+                let at = snip.pointer.unwrap_or(Point::ORIGIN);
+                let area = self.selection.map(|s| s.area);
+                let Some(snip::Next::Edit(area)) = snip.pick(area, at, self.screen) else {
+                    return Task::none();
+                };
+                self.select(area);
+                let Some(crop) = self.crop() else {
+                    return Task::none();
+                };
+                return self.snip_routed(crop, true, (true, false));
             }
             overlay::Event::Enter | overlay::Event::Key { .. } => {}
             // mapped above
@@ -2133,7 +2166,6 @@ impl App {
         let Run::Finish(finish) = action.run else {
             return Task::none();
         };
-        // Before close: Copy's text read keeps the overlay's warm OCR helper.
         if let Err(e) = finish(crop) {
             eprintln!("{} failed: {e}", action.id);
         }
@@ -2195,7 +2227,10 @@ impl App {
         let bounds = actions::crop_bounds(*width, *height, self.scale, selection.area);
         let crop = actions::crop(pixels, *width, *height, self.scale, selection.area);
         if let (Some(bounds), Some(crop)) = (bounds, crop) {
-            self.edit = Some(Editing::in_place(crop, bounds, self.scale));
+            let mut edit = Editing::in_place(crop, bounds, self.scale);
+            // Scrolling capture needs the page under the area: Snip, in place.
+            edit.editor.scroll = matches!(&self.purpose, Purpose::Snip(s) if s.can_scroll());
+            self.edit = Some(edit);
         }
         Task::none()
     }
@@ -2238,13 +2273,14 @@ impl App {
             Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
             Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
             Some(Output::Pin(crop)) => self.pin(crop),
-            Some(Output::CopyWithText(crop, words)) => {
-                // Before close: the text read keeps the overlay's warm OCR helper.
-                if let Err(e) = copy::with_text(crop, words) {
-                    eprintln!("copy failed: {e}");
+            // Scrolling capture of the area under the editor.
+            Some(Output::Scroll) => match self.selection {
+                Some(selection) => {
+                    self.edit = None;
+                    self.start_scroll(selection.area)
                 }
-                self.close()
-            }
+                None => Task::none(),
+            },
             Some(Output::AddCapture) => Task::none(), // `edit` picks the area now
             Some(Output::Dragged) => self.close(),
         }
@@ -2272,6 +2308,7 @@ impl App {
             if self.frame.is_some() || self.capturing.is_some() {
                 return Task::none();
             }
+            self.timed = true;
             return self.capture(Instant::now(), Some(kind));
         }
         let Purpose::Snip(snip) = &mut self.purpose else {
@@ -2298,6 +2335,7 @@ impl App {
             }
             snip::Msg::Done(stitched) => {
                 snip.scroll = None;
+                let visible = windows::hide_from_capture(self.overlay, false).map(Message::Windows);
                 self.selection = None;
                 self.stroke.clear();
                 let next = match stitched {
@@ -2309,9 +2347,9 @@ impl App {
                     }
                 };
                 if self.snip_pill() {
-                    return next; // the toast keeps the window small
+                    return visible.chain(next); // the toast keeps the window small
                 }
-                next.chain(self.show())
+                visible.chain(next).chain(self.show())
             }
             snip::Msg::Delay(secs) => {
                 let Some(id) = snip.delay(secs) else {
@@ -2489,7 +2527,12 @@ impl App {
         if remember {
             snip::remember(&crop);
         }
-        let (copy, edit) = snip::route(config::current().snip.after);
+        self.snip_routed(crop, in_place, snip::route(config::current().snip.after))
+    }
+
+    /// Copies and / or edits a snip's `crop` as `route` says; Copy gets the toast.
+    fn snip_routed(&mut self, crop: Crop, in_place: bool, route: (bool, bool)) -> Task<Message> {
+        let (copy, edit) = route;
         let copied = copy
             && match copy::ACTION.run {
                 Run::Finish(copy) => copy(crop.clone())
@@ -2537,7 +2580,6 @@ impl App {
                 self.select(area);
                 self.snip_captured(None, true)
             }
-            Some(snip::Next::Scroll(area)) => self.start_scroll(area),
         }
     }
 
@@ -2571,10 +2613,11 @@ impl App {
             let _ = tx.unbounded_send(snip::Msg::Done(stitched));
         })
         .map(Message::Snip);
-        // ponytail: an area as tall as the screen leaves the pill over its bottom
-        // edge (in the frames); the stitcher drops it like a sticky footer.
+        // An area as tall as the screen leaves the pill over it: it is kept out of
+        // the frames (`hide_from_capture`, Windows; elsewhere it stays beside the area).
         let at = bar::place(area, snip::PILL, self.screen);
         self.pill_window(at)
+            .chain(windows::hide_from_capture(self.overlay, true).map(Message::Windows))
             .chain(window::gain_focus(self.overlay))
             .chain(work)
     }
@@ -4104,6 +4147,105 @@ mod tests {
         ]
         .iter()
         .all(|(p, q)| (p - q).abs() < 0.01)
+    }
+
+    /// A snip over a 800x600 screen with one window (`area`) the pointer is on.
+    fn snipping(area: Rectangle) -> App {
+        let mut app = open_app(800, 600, 1.0);
+        let window = snip::Pick::window(area, "App", 1);
+        app.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.screen, true, None)));
+        event(&mut app, overlay::Event::Hover(area.center()));
+        app
+    }
+
+    #[test]
+    fn snip_ctrl_c_copies_the_area_under_the_pointer_as_an_image() {
+        let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+        let mut app = snipping(area);
+        copy::COPIED_IMAGE.set(None);
+        event(
+            &mut app,
+            overlay::Event::Key {
+                letter: 'c',
+                ctrl: true,
+            },
+        );
+        assert_eq!(copy::COPIED_IMAGE.take(), Some((300, 200)), "that area");
+        assert!(copy::COPIED.take().is_none(), "the picture only, no text");
+        assert!(app.snip_toast(), "and the toast says so");
+        // off every window it is what a click takes there: the whole screen
+        let mut app = snipping(area);
+        event(&mut app, overlay::Event::Hover(Point::new(700.0, 500.0)));
+        event(
+            &mut app,
+            overlay::Event::Key {
+                letter: 'c',
+                ctrl: true,
+            },
+        );
+        assert_eq!(copy::COPIED_IMAGE.take(), Some((800, 600)));
+    }
+
+    #[test]
+    fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
+        let shot = || {
+            let mut shot = a_shot().unwrap();
+            shot.snip = Some((snip::Kind::Region, Vec::new(), None));
+            Ok(shot)
+        };
+        // (only the timer changes: other tests share the config)
+        let with_delay = |secs| {
+            let mut cfg = config::current();
+            cfg.snip.delay = secs;
+            config::set_current(cfg);
+        };
+        with_delay(3);
+        let mut app = App::idle(window::Id::unique());
+        let _ = app.open(Instant::now(), shot());
+        assert!(app.snip_pill(), "counting down, the overlay is only a pill");
+        // the capture the timer waited for opens plain
+        app.timed = true;
+        let _ = app.open(Instant::now(), shot());
+        assert!(!app.snip_pill() && !app.timed);
+        // no timer in Settings: no pill
+        with_delay(0);
+        let mut app = App::idle(window::Id::unique());
+        let _ = app.open(Instant::now(), shot());
+        assert!(!app.snip_pill());
+    }
+
+    #[test]
+    fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
+        let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+        let mut app = snipping(area);
+        app.select(area);
+        let _ = app.open_editor();
+        let _ = app.update(Message::Editor(editor::Message::Scroll));
+        assert!(app.edit.is_none(), "the editor steps aside");
+        assert!(app.scroll().is_some(), "scrolling and stitching has begun");
+        // no auto-scroll here (Wayland) or no snip (Edit in place): the button is dimmed
+        let mut app = open_app(800, 600, 1.0);
+        app.select(area);
+        let _ = app.open_editor();
+        let _ = app.update(Message::Editor(editor::Message::Scroll));
+        assert!(app.edit.is_some() && app.scroll().is_none());
+    }
+
+    #[test]
+    fn after_a_drag_out_the_editor_is_still_there_or_the_overlay_closes_whole() {
+        let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+        // nothing took the drop: the overlay is back, toolbar and all
+        let mut app = snipping(area);
+        app.select(area);
+        let _ = app.open_editor();
+        editor::dragout::TEST_DROP.set(Some(false));
+        let _ = app.update(Message::Editor(editor::Message::DragOut));
+        assert!(app.editing() && app.frame.is_some());
+        // an app took it: closed like Copy, nothing of the editor or the frame left
+        editor::dragout::TEST_DROP.set(Some(true));
+        let _ = app.update(Message::Editor(editor::Message::DragOut));
+        assert!(app.edit.is_none() && app.frame.is_none() && !app.editing());
+        assert_eq!(app.hiding, Hiding::Empty, "hides by the usual steps");
     }
 
     #[test]

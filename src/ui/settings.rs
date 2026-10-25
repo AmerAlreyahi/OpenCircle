@@ -1936,6 +1936,21 @@ fn snip_rows(d: &SnipConfig) -> Vec<Element<'_, Message>> {
             None,
         ),
         form_row(
+            "Timer",
+            "Wait before a snip captures, so you can open a menu first",
+            segmented(
+                &[
+                    (0, "Off", "Capture at once"),
+                    (3, "3 s", "Hide, wait 3 seconds, then capture"),
+                    (5, "5 s", "Hide, wait 5 seconds, then capture"),
+                    (10, "10 s", "Hide, wait 10 seconds, then capture"),
+                ],
+                d.delay,
+                move |delay| edit(&|s| s.delay = delay),
+            ),
+            None,
+        ),
+        form_row(
             "Recent captures",
             "The last 20, on this PC only. Off deletes them",
             segmented(
@@ -2839,6 +2854,7 @@ pub(super) mod tests {
         snip.max_edge = 0;
         snip.format = Format::Jpeg;
         snip.history = true;
+        snip.delay = 5;
         update(&mut s, Message::Snip(snip.clone()));
         assert_eq!(s.draft.snip, snip);
         assert!(matches!(update(&mut s, Message::Save), Outcome::Saved(_)));

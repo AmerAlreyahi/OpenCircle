@@ -80,8 +80,6 @@ xcb = { version = "1.7", features = ["randr", "xtest", "xfixes", "shape"] }
 # Song search's audio (src/music): WASAPI loopback / microphone, only while listening.
 cpal = { version = "0.18", default-features = false }
 widestring = "1"
-# Copy adds the OCR text to the copied image (the version arboard already builds).
-clipboard-win = "5.4"
 xcap = "0.9"
 # Feature `sheet` (the helper's window): the versions iced already builds.
 winit = { version = "0.30", optional = true }

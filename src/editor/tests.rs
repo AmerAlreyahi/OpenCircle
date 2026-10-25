@@ -1261,25 +1261,25 @@ fn legend_lists_the_notes_in_a_free_corner_or_a_band() {
 }
 
 #[test]
-fn copy_all_gives_the_image_and_its_words() {
+fn copy_is_the_image_only_with_or_without_shift() {
     let mut e = editor(300, 200);
     step_with(&mut e, pt(30.0, 30.0), "Open settings");
-    step_with(&mut e, pt(90.0, 30.0), "Click Save");
-    e.update(Message::Tool(Tool::Label));
-    drag(&mut e, pt(30.0, 120.0), &[], pt(30.0, 120.0));
-    e.update(Message::Type("Done".into()));
-    e.update(Message::Tool(Tool::ArrowLabel));
-    drag(&mut e, pt(200.0, 150.0), &[], pt(260.0, 100.0));
-    e.update(Message::Type("here".into()));
-    e.update(Message::Finish);
-    let ctrl_shift = Modifiers::CTRL | Modifiers::SHIFT;
-    let key = e.key(&Key::Character("c".into()), Some('c'), ctrl_shift, None);
-    assert!(matches!(key, Some(Message::CopyAll)));
-    let Some(Output::CopyWithText(flat, text)) = e.update(Message::CopyAll) else {
-        panic!("CopyAll gives the image and the text")
+    for mods in [Modifiers::CTRL, Modifiers::CTRL | Modifiers::SHIFT] {
+        let key = e.key(&Key::Character("c".into()), Some('c'), mods, None);
+        assert!(matches!(key, Some(Message::Copy)), "{mods:?}");
+    }
+    let Some(Output::Copy(flat)) = e.update(Message::Copy) else {
+        panic!("Copy gives the picture and nothing else")
     };
     assert!(flat.width == 300 && flat.height >= 200, "with the legend");
-    assert_eq!(text, "1. Open settings\n2. Click Save\nDone\nhere");
+}
+
+#[test]
+fn the_scroll_button_asks_only_when_scrolling_can_run() {
+    let mut e = editor(300, 200);
+    assert!(e.update(Message::Scroll).is_none(), "dimmed: nothing");
+    e.scroll = true;
+    assert!(matches!(e.update(Message::Scroll), Some(Output::Scroll)));
 }
 
 // ---- new tools ------------------------------------------------------------------------

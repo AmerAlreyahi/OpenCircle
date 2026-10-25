@@ -69,6 +69,7 @@
 //! save_original = false             # Save ignores max_edge
 //! cursor = false                    # draw the mouse pointer into the capture
 //! history = false                   # keep the last 20 captures (user data dir only)
+//! delay = 0                         # timer before a snip: 0 (off) | 3 | 5 | 10 seconds
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
@@ -312,6 +313,8 @@ pub struct SnipConfig {
     pub cursor: bool,
     /// Keep the last captures in the user's data dir (off = nothing on disk).
     pub history: bool,
+    /// Seconds to wait (the overlay hidden) before a snip captures; 0 = off.
+    pub delay: u8,
 }
 
 impl Default for SnipConfig {
@@ -323,6 +326,7 @@ impl Default for SnipConfig {
             save_original: false,
             cursor: false,
             history: false,
+            delay: 0,
         }
     }
 }
@@ -1082,6 +1086,12 @@ impl Config {
             c.snip.save_original = get(t, p, "save_original", false, &mut w);
             c.snip.cursor = get(t, p, "cursor", false, &mut w);
             c.snip.history = get(t, p, "history", false, &mut w);
+            c.snip.delay = get_checked(t, p, "delay", 0, &mut w, |n: &u8| {
+                [0, 3, 5, 10]
+                    .contains(n)
+                    .then_some(())
+                    .ok_or_else(|| "expected 0 (off), 3, 5 or 10 seconds".to_string())
+            });
         }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
@@ -1559,6 +1569,7 @@ mod tests {
         c.snip.after = SnipAfter::Editor;
         c.snip.history = true;
         c.snip.max_edge = 0;
+        c.snip.delay = 3;
         c.editor.line_assist = false;
         c.widget_theme = WidgetTheme::Frost;
         c.glass_effect = false;
@@ -1708,12 +1719,28 @@ mod tests {
     }
 
     #[test]
+    fn a_config_from_before_the_timer_setting_still_loads() {
+        // v0.1.0 wrote no `delay`: it loads with the default, nothing else changes.
+        let (c, w) = Config::parse("[snip]\nafter = \"both\"\nmax_edge = 1024\nhistory = true\n");
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(
+            (c.snip.delay, c.snip.after, c.snip.max_edge),
+            (0, SnipAfter::Both, 1024)
+        );
+        let (c, w) = Config::parse("[snip]\ndelay = 5\n");
+        assert!(w.is_empty() && c.snip.delay == 5, "{w:?}");
+        let (c, w) = Config::parse("[snip]\ndelay = 7\n");
+        assert!(c.snip.delay == 0 && w.len() == 1, "{w:?}");
+    }
+
+    #[test]
     fn snip_section_defaults_and_checks() {
         let d = Config::default().snip;
         assert_eq!(d.after, SnipAfter::Copy, "copy for the AI chat by default");
         assert_eq!((d.max_edge, d.format), (1568, Format::Png));
         assert!(!d.history, "nothing kept on disk unless turned on");
         assert!(!d.cursor && !d.save_original);
+        assert_eq!(d.delay, 0, "no timer unless set");
         let (c, w) = Config::parse(
             "[snip]\nafter = \"both\"\nmax_edge = 0\nformat = \"jpeg\"\n\
              save_original = true\ncursor = true\nhistory = true\n",

@@ -915,15 +915,24 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     active: bool,
     on_press: Message,
 ) -> Button<'a, Message> {
-    let fg = if active {
-        theme::ON_ACCENT
-    } else {
-        theme::floating().text
+    icon_button_maybe(glyph, active, Some(on_press))
+}
+
+/// `icon_button`; `None` = dimmed and dead, same size and place.
+pub fn icon_button_maybe<'a, Message: Clone + 'a>(
+    glyph: char,
+    active: bool,
+    on_press: Option<Message>,
+) -> Button<'a, Message> {
+    let fg = match (active, on_press.is_some()) {
+        (true, _) => theme::ON_ACCENT,
+        (false, true) => theme::floating().text,
+        (false, false) => theme::floating().muted.scale_alpha(0.6),
     };
     square_button(
         text(glyph).font(ICON_FONT).size(18).color(fg),
         active,
-        Some(on_press),
+        on_press,
     )
 }
 

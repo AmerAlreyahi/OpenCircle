@@ -23,12 +23,13 @@ const STACK: char = '\u{e43d}'; // lucide "rows-2"
 const SIDE: char = '\u{e09c}'; // lucide "columns-2"
 const NUMBERS: char = '\u{e0f2}'; // lucide "hash"
 const LEGEND: char = '\u{e10b}'; // lucide "list"
+const SCROLL: char = '\u{e4d6}'; // lucide "gallery-vertical-end"
 const ASSIST: char = '\u{e2b4}'; // lucide "magnet"
 
 /// The glyphs used here (the font test checks them).
 #[cfg(test)]
 pub const GLYPHS: &[char] = &[
-    BACK, UNDO, REDO, COPY, SAVE, PIN, BOARD, ADD, STACK, SIDE, NUMBERS, LEGEND, ASSIST,
+    BACK, UNDO, REDO, COPY, SAVE, PIN, BOARD, ADD, STACK, SIDE, NUMBERS, LEGEND, ASSIST, SCROLL,
 ];
 
 /// The tool buttons: one per slot (variants live in its strip).
@@ -47,7 +48,7 @@ fn parts() -> (f32, f32) {
         .count();
     let tools = (1 + buttons) as f32 * CONTROL + groups as f32;
     let tools = tools + (buttons + groups) as f32 * SPACING;
-    let icons = 5 + usize::from(dragout::SUPPORTED);
+    let icons = 6 + usize::from(dragout::SUPPORTED);
     let rest = icons as f32 * CONTROL + 3.0 + 2.0 * TEXT_BUTTON_WIDTH;
     let rest = rest + (icons + 3 + 2 - 1) as f32 * SPACING;
     (tools, rest)
@@ -178,6 +179,16 @@ fn build(
         Message::Menu(Menu::Board),
         "Board: add captures, layout, legend",
     ));
+    rest.push(widgets::hint(
+        widgets::icon_button_maybe(SCROLL, false, e.scroll.then_some(Message::Scroll)),
+        if e.scroll {
+            "Scrolling capture: scrolls the page under this area and stitches it"
+        } else {
+            "Scrolling capture: only when snipping a window"
+        },
+        widgets::Why::Icon,
+        side,
+    ));
     rest.push(widgets::toolbar_divider());
     rest.push(icon(UNDO, false, Message::Undo, "Undo (Ctrl+Z)"));
     rest.push(icon(REDO, false, Message::Redo, "Redo (Ctrl+Shift+Z)"));
@@ -196,12 +207,7 @@ fn build(
         Message::Pin,
         "Pin to screen: a floating copy (Ctrl+P)",
     ));
-    rest.push(widgets::hint(
-        widgets::text_button(COPY, "Copy", "Ctrl C".into(), true, Message::Copy),
-        "Copy with its text",
-        widgets::Why::Keys("Ctrl+Shift+C"),
-        side,
-    ));
+    rest.push(widgets::text_button(COPY, "Copy", "Ctrl C".into(), true, Message::Copy).into());
     rest.push(widgets::text_button(SAVE, "Save", "Ctrl S".into(), false, Message::Save).into());
 
     fn line(items: Vec<Element<'_, Message>>) -> iced::widget::Row<'_, Message> {

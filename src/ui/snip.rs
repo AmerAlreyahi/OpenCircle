@@ -35,13 +35,6 @@ const SNAP: f32 = 8.0;
 /// The toast offers Edit this long, then the overlay closes.
 pub const TOAST_SECS: u64 = 4;
 pub const COPIED: &str = "Copied: paste it into your AI chat";
-/// The timer's choices, seconds (0 = off).
-const DELAYS: [(u8, &str, &str); 4] = [
-    (0, "Off", "No timer"),
-    (3, "3 s", "Hide, wait 3 seconds, then capture"),
-    (5, "5 s", "Hide, wait 5 seconds, then capture"),
-    (10, "10 s", "Hide, wait 10 seconds, then capture"),
-];
 /// Recent: captures kept on disk, and shown in the strip.
 const HISTORY: usize = 20;
 const STRIP: usize = 8;
@@ -55,7 +48,6 @@ pub enum Kind {
     Region,
     Window,
     Full,
-    Scrolling,
 }
 
 impl Kind {
@@ -70,7 +62,7 @@ impl Kind {
     }
 
     fn label(self) -> &'static str {
-        ["Region", "Window", "Full", "Scrolling"][self as usize]
+        ["Region", "Window", "Full"][self as usize]
     }
 
     fn tip(self) -> &'static str {
@@ -78,7 +70,6 @@ impl Kind {
             "Drag or circle an area",
             "Click a window",
             "The whole screen",
-            "Select the scrolling area; it scrolls and stitches by itself",
         ][self as usize]
     }
 
@@ -87,7 +78,6 @@ impl Kind {
             "Click a window or a part of it · scroll = bigger / smaller · or drag an area",
             "Click a window · Esc to close",
             "",
-            "Drag over the scrolling area · Esc to close",
         ][self as usize]
     }
 
@@ -134,8 +124,6 @@ pub enum Msg {
 pub enum Next {
     /// The capture is this area (logical px): copy and / or edit it.
     Edit(Rectangle),
-    /// Auto-scroll and stitch this area.
-    Scroll(Rectangle),
 }
 
 /// What a finished capture does (config `snip.after`): (copy it, open the editor).
@@ -269,11 +257,10 @@ impl Snip {
 
     /// The modes offered, in switch order.
     pub fn kinds(&self) -> Vec<Kind> {
-        [Kind::Region, Kind::Window, Kind::Full, Kind::Scrolling]
+        [Kind::Region, Kind::Window, Kind::Full]
             .into_iter()
             .filter(|k| match k {
                 Kind::Window => !self.windows.is_empty(),
-                Kind::Scrolling => self.scrolls,
                 _ => true,
             })
             .collect()
@@ -364,10 +351,10 @@ impl Snip {
     }
 
     /// `p` (logical px) on the nearest window or control edge, per axis, while
-    /// an area is dragged (Region, Scrolling) and Shift isn't held. Not in
+    /// an area is dragged (Region) and Shift isn't held. Not in
     /// Window mode: a click near a window's edge would land on the edge.
     pub fn snap(&self, p: Point) -> Point {
-        if self.shift || !matches!(self.kind, Kind::Region | Kind::Scrolling) {
+        if self.shift || self.kind != Kind::Region {
             return p;
         }
         let rects = self.windows.iter().chain(&self.controls).map(|t| &t.rect);
@@ -408,7 +395,6 @@ impl Snip {
             Kind::Region => (selection.or_else(|| self.outlined().map(|t| t.rect))).map(Next::Edit),
             Kind::Window => selection.or_else(|| self.window_at(at)).map(Next::Edit),
             Kind::Full => Some(Next::Edit(Rectangle::with_size(screen))),
-            Kind::Scrolling => selection.map(Next::Scroll),
         }
     }
 
@@ -437,6 +423,11 @@ impl Snip {
             self.countdown = None;
         }
         due
+    }
+
+    /// Auto-scroll works here (the editor's Scrolling button).
+    pub fn can_scroll(&self) -> bool {
+        self.scrolls
     }
 
     /// The window is only a pill now (scrolling, the timer, the toast).
@@ -478,11 +469,7 @@ impl Snip {
         let options: Vec<_> = (self.kinds().into_iter())
             .map(|k| (k, k.label(), k.tip()))
             .collect();
-        let switch = row![
-            widgets::segmented(&options, self.kind, Msg::Kind),
-            widgets::segmented(&DELAYS, 0, Msg::Delay),
-        ]
-        .spacing(8);
+        let switch = widgets::segmented(&options, self.kind, Msg::Kind);
         let mut top = column![widgets::surface(switch)]
             .spacing(12)
             .align_x(Center);
@@ -1067,10 +1054,6 @@ mod tests {
 
         let whole = Rectangle::with_size(SCREEN);
         assert_eq!(s.switch(Kind::Full, SCREEN), Some(Next::Edit(whole)));
-
-        assert_eq!(s.switch(Kind::Scrolling, SCREEN), None);
-        assert_eq!(s.pick(drag, click, SCREEN), Some(Next::Scroll(area)));
-        assert_eq!(s.pick(None, click, SCREEN), None);
     }
 
     #[test]
@@ -1112,10 +1095,7 @@ mod tests {
     #[test]
     fn modes_without_support_are_hidden() {
         let all = Snip::new(wins(&[rect(0.0, 0.0, 10.0, 10.0)]), SCREEN, true, None);
-        assert_eq!(
-            all.kinds(),
-            [Kind::Region, Kind::Window, Kind::Full, Kind::Scrolling]
-        );
+        assert_eq!(all.kinds(), [Kind::Region, Kind::Window, Kind::Full]);
         // Wayland: no window list, no synthetic scrolling.
         let wayland = Snip::new(Vec::new(), SCREEN, false, None);
         assert_eq!(wayland.kinds(), [Kind::Region, Kind::Full]);
@@ -1328,7 +1308,6 @@ mod tests {
         s.set_shift(true);
         assert_eq!(s.snap(p), p);
         s.set_shift(false);
-        let _ = s.switch(Kind::Scrolling, SCREEN);
         assert_eq!(s.snap(p), Point::new(200.0, 150.0));
         for kind in [Kind::Window, Kind::Full] {
             let _ = s.switch(kind, SCREEN);
@@ -1502,7 +1481,7 @@ mod tests {
         let at = Point::new(120.0, 150.0);
         assert_eq!(s.pick(None, at, SCREEN), Some(Next::Edit(outlined.rect)));
         // Only Region mode outlines.
-        let _ = s.switch(Kind::Scrolling, SCREEN);
+        let _ = s.switch(Kind::Full, SCREEN);
         assert!(s.outlined().is_none());
         // Wayland (no window list): nothing to outline, a click takes nothing.
         let mut w = Snip::new(Vec::new(), SCREEN, false, None);

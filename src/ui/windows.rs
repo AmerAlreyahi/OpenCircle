@@ -812,6 +812,34 @@ pub fn cut(id: window::Id, radius: f32) -> Task<Msg> {
     reshape(id)
 }
 
+/// Windows: keeps the window out of every screen capture (`on`), or back in. The
+/// scrolling capture's pill sits over the area it grabs: in the frames its
+/// changing text would keep the page from ever settling, and end up in the
+/// stitched image. Needs Windows 10 2004+; elsewhere nothing.
+pub fn hide_from_capture(id: window::Id, on: bool) -> Task<Msg> {
+    window::run(id, move |w| {
+        #[cfg(windows)]
+        if let Ok(handle) = w.window_handle()
+            && let iced::window::raw_window_handle::RawWindowHandle::Win32(h) = handle.as_raw()
+        {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::{
+                SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+            };
+            let affinity = if on { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
+            // SAFETY: `h` is this window's live handle (an iced window of ours).
+            if let Err(e) =
+                unsafe { SetWindowDisplayAffinity(HWND(h.hwnd.get() as *mut _), affinity) }
+            {
+                eprintln!("[opencircle] window affinity: {e}");
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = (w, on);
+    })
+    .discard()
+}
+
 /// Whole again (and not floating): the overlay is going full-screen.
 pub fn uncut(id: window::Id) -> Task<Msg> {
     forget_floating(id);

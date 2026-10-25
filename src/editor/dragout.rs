@@ -11,7 +11,8 @@
 //!
 //! The editor sits on the full-screen overlay, which would be the only window
 //! under the pointer: `start(.., hide_source)` hides the window the drag starts
-//! in (the overlay) for the drag, and shows it again if nothing took the drop.
+//! in (the overlay) for the drag and shows it again after it; the host then keeps
+//! the editor (nothing took the drop) or closes the overlay the normal way.
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -87,12 +88,27 @@ pub fn dib(crop: &Crop) -> Vec<u8> {
     out
 }
 
+#[cfg(test)]
+thread_local! {
+    /// What the next `start` answers in a test (the OS drag needs a real mouse).
+    pub static TEST_DROP: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
 /// Runs the OS drag of `file` (and `crop` as a bitmap) until the drop. Call it
 /// on the UI thread while the left button is down; it returns after the drop:
 /// `true` = an app took it (`file` is marked dropped). `hide_source`: the active
-/// window hides for the drag (the overlay), and comes back if nothing took it.
-#[cfg(windows)]
+/// window hides for the drag (the overlay) and comes back after it.
 pub fn start(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool, String> {
+    #[cfg(test)]
+    if let Some(dropped) = TEST_DROP.take() {
+        file.dropped = dropped;
+        return Ok(dropped);
+    }
+    drag(file, crop, hide_source)
+}
+
+#[cfg(windows)]
+fn drag(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool, String> {
     use std::mem::ManuallyDrop;
     use windows::Win32::Foundation::HGLOBAL;
     use windows::Win32::System::Com::{
@@ -158,7 +174,11 @@ pub fn start(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool
         let effect =
             SHDoDragDrop(window, &data, None::<&IDropSource>, DROPEFFECT_COPY).map_err(e("drag"));
         let dropped = effect.as_ref().is_ok_and(|e| *e != DROPEFFECT_NONE);
-        if let Some(w) = hidden.filter(|_| !dropped) {
+        // Always back: iced and winit still count the window as shown, and the host
+        // decides what happens next (the overlay stays up, or closes by its own
+        // steps, which assume a visible window; a window hidden behind their back
+        // was left half-hidden with its toolbar on screen).
+        if let Some(w) = hidden {
             let _ = ShowWindow(w, SW_SHOW);
         }
         effect.map(|_| dropped)
@@ -173,6 +193,6 @@ pub fn start(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool
 }
 
 #[cfg(not(windows))]
-pub fn start(_file: &mut DragFile, _crop: &Crop, _hide_source: bool) -> Result<bool, String> {
+fn drag(_file: &mut DragFile, _crop: &Crop, _hide_source: bool) -> Result<bool, String> {
     Err("drag-out is Windows-only for now".into())
 }

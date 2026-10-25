@@ -15,22 +15,26 @@ Press `Print Screen` (region), `Alt+Print Screen` (window) or
 | Region | Point at a window: it is outlined, with its name and size; click to take it. Point at a part of it (a toolbar, a panel, a button; Windows) to outline just that part, and scroll the wheel to step out to the bigger part, the window, the whole screen (and back). Or drag a rectangle, or circle an area. |
 | Window | Click a window |
 | Full | The whole screen |
-| Scrolling | Drag over the scrolling area; OpenCircle scrolls it and stitches the pieces into one tall image. `Esc` or Stop keeps what was gathered. |
 
 While you drag, the edges snap to windows and, on Windows, to their buttons,
 fields and panels; hold `Shift` to place them freely. On Wayland there is no
 window list: drag or circle the area. A loupe beside
 the pointer shows the pixels under it at 8x, with their position and colour.
 
-**Timer** (Off / 3 s / 5 s / 10 s, next to the modes): the overlay hides and
+**Scrolling capture**: pick an area, then press the scrolling button in the
+editor toolbar. OpenCircle scrolls the page under the area and stitches the
+pieces into one tall image (the progress pill is kept out of it). `Esc` or Stop
+keeps what was gathered.
+
+**Timer** (Settings → Snip: Off / 3 s / 5 s / 10 s): the overlay hides and
 counts down in a small pill, so you can open a menu or a tooltip; then it
-captures again.
+captures again. `Ctrl+C` while pointing at an area copies it at once.
 
 **After a capture** (Settings → Snip): by default the snip goes straight to the
 clipboard, ready to paste into an AI chat, and a toast offers **Edit** for 4
-seconds. Choose *Editor* to open the editor instead, or *Both*. On Windows the
-copy also carries the text OCR reads in it (once the text models are
-downloaded), so a chat app pastes the image and a text editor the text.
+seconds. Choose *Editor* to open the editor instead, or *Both*. Copy is the
+picture only, so a browser or chat always pastes the image; text is copied by
+selecting it (or the Text panel).
 
 **Size for AI**: Copy and Save scale the long edge down to 1568 px (Settings →
 Snip: 1024, 1568, 2048 or Original); AI chats shrink bigger images anyway. Save
@@ -44,7 +48,7 @@ click one to copy or edit it again, × clears them. Turning it off deletes them.
 capture (Windows and X11).
 
 On Wayland there is no window list and no synthetic scrolling, so only Region
-and Full are offered.
+and Full are offered and the scrolling button is dimmed.
 
 ## Annotate
 
