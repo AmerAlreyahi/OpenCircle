@@ -384,6 +384,7 @@ pub mod card {
             .height(at.height);
         // its shadow: rings of quads under it (see `glass` for why no
         // `iced::Shadow`), a little lower than the card
+        let out = 2.0 * SHADOW_STEP; // the widest ring
         let ring = |d: f32, alpha: f32| {
             let size = Size::new(at.width + 2.0 * d, at.height + 2.0 * d);
             let ring = container(space::horizontal())
@@ -394,14 +395,24 @@ pub mod card {
                     border: iced::Border::default().rounded(RADIUS + d),
                     ..container::Style::default()
                 });
-            pin(ring).position(at.position() + Vector::new(-d, SHADOW_DROP - d))
+            pin(ring).position(Point::new(out - d, out + SHADOW_DROP - d))
         };
-        stack![
+        // In layers of its own bounds (an empty first child: a stack draws
+        // the rest in layers clipped to its container): dragged, the card
+        // redraws as its old and new place, not as each of its parts.
+        let whole = Size::new(at.width + 2.0 * out, at.height + 2.0 * out + SHADOW_DROP);
+        let layers = stack![
+            space(),
             ring(2.0 * SHADOW_STEP, 0.25),
             ring(SHADOW_STEP, 0.5),
-            pin(opaque(layered)).position(at.position())
+            pin(opaque(layered)).position(Point::new(out, out))
         ]
-        .into()
+        .width(whole.width)
+        .height(whole.height);
+        let layers = container(layers).width(whole.width).height(whole.height);
+        pin(layers.clip(true))
+            .position(at.position() - Vector::new(out, out))
+            .into()
     }
 
     #[cfg(test)]

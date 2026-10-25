@@ -128,15 +128,6 @@ pub(super) fn free(
     all.into_iter().find(|a| clear(*a)).unwrap_or(chosen)
 }
 
-/// The bar's place `from` one step (a frame) on its way `to` its spot: eased
-/// out, a third of the way each frame; there once within half a pixel.
-pub(super) fn glide(from: Point, to: Point) -> Point {
-    match from.distance(to) < 0.5 {
-        true => to,
-        false => from + (to - from) * 0.35,
-    }
-}
-
 /// Top-left corner for a `bar`: centred under the selection, else above it, else
 /// over its bottom edge (selection fills the screen). Always inside the screen,
 /// `GAP` from its edges, unless the bar is bigger than the screen.
@@ -246,17 +237,6 @@ mod tests {
             free(BarAnchor::Top, &[all], SCREEN, size, 48.0),
             BarAnchor::Top
         );
-        // gliding: eased steps, then there
-        let (a, b) = (Point::new(0.0, 0.0), Point::new(100.0, 0.0));
-        let steps: Vec<f32> = std::iter::successors(Some(a), |p| (*p != b).then(|| glide(*p, b)))
-            .map(|p| p.x)
-            .collect();
-        assert!(
-            steps.len() > 4 && steps.windows(2).all(|w| w[1] > w[0]),
-            "{steps:?}"
-        );
-        let gaps: Vec<f32> = steps.windows(2).map(|w| w[1] - w[0]).collect();
-        assert!(gaps[0] > gaps[2], "eased out");
         // a narrow screen: the field gives up width, the buttons keep theirs
         let (field, s) = bottom_size(640.0, 10.0);
         assert!(

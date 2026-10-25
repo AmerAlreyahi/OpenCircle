@@ -4,9 +4,13 @@ mod about;
 mod bar;
 mod border;
 mod edit;
+/// Frames as the window draws them (damage), and the animations' timing.
+#[cfg(test)]
+mod frame_times;
 mod glass;
 mod live_controller;
 mod live_layer;
+pub(crate) mod motion;
 mod onboarding;
 mod overlay;
 mod panel;
@@ -64,8 +68,10 @@ const ASK_INPUT: &str = "overlay-ask";
 const BAR_BUTTONS: f32 = 10.0;
 /// The bar's selection buttons' tooltip while there is nothing to act on.
 const SELECT_FIRST: &str = "Select something first";
-/// How long the bar takes to turn into the editing toolbar (and back).
-const BAR_MORPH: Duration = Duration::from_millis(150);
+/// How long the bar takes to turn into the editing toolbar (back: `motion::EXIT`),
+/// and to glide to a new spot.
+const BAR_MORPH: Duration = motion::ENTER;
+const GLIDE: Duration = motion::MOVE;
 /// Ask AI's icon in the bottom bar: the one place to swap in the OpenCircle logo.
 const ASK_AI_ICON: char = actions::ask::ACTION.icon;
 /// A QR code's chip under a selection (its room; the chip is centred in it).
@@ -393,6 +399,8 @@ struct App {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
     /// Its RGBA bytes are also what actions crop (shared, never copied whole).
     frame: Option<image::Handle>,
+    /// The frame cut into tiles for drawing (`overlay::tiles`), and its id.
+    tiles: Option<(iced::advanced::image::Id, Vec<(Point, image::Handle)>)>,
     /// Physical px per logical px of `frame`.
     scale: f32,
     /// The overlay's logical size (the monitor's).
@@ -469,10 +477,10 @@ struct App {
     morph: Option<(Vec<Point>, Instant)>,
     text_mode: Option<TextMode>,
     /// The bottom bar turning into the editing toolbar in its place: 0 = the
-    /// bar, 1 = the toolbar (linear), and the frame that moved it last
-    /// (`None`: at rest).
+    /// bar, 1 = the toolbar (linear), and while it turns: since when, from
+    /// and to where (`None`: at rest).
     swap: f32,
-    swap_at: Option<Instant>,
+    swap_at: Option<(Instant, f32, f32)>,
     /// The editor just went back to the bar (until the next frame): an
     /// Escape now is the key that did it.
     esc_back: bool,
@@ -483,6 +491,8 @@ struct App {
     bar_anchor: BarAnchor,
     bar_drag: Option<(Option<Point>, Point)>,
     bar_now: Option<Point>,
+    /// Its glide to a new spot: since when, from and to where.
+    bar_glide: Option<(Instant, Point, Point)>,
     work_inset: f32,
     /// Where the user moved / sized the result card (this run of the app).
     card: Option<Rectangle>,
@@ -539,6 +549,7 @@ impl App {
             capturing: None,
             captures: 0,
             frame: None,
+            tiles: None,
             scale: 1.0,
             screen: Size::ZERO,
             stroke: Vec::new(),
@@ -590,6 +601,7 @@ impl App {
             bar_anchor: BarAnchor::Bottom,
             bar_drag: None,
             bar_now: None,
+            bar_glide: None,
             work_inset: 0.0,
             card: None,
             card_drag: None,
@@ -847,27 +859,53 @@ impl App {
             }
             Message::Frame(now) => {
                 self.esc_back = false;
-                self.appear = Some(match self.appear {
-                    None => (now, 0.0),
-                    Some((last, t)) => (now, overlay::opening_step(t, now - last)),
-                });
-                let target = self.swap_target();
-                let (dt, was) = (
-                    self.swap_at.map_or(Duration::ZERO, |last| now - last),
-                    self.swap,
-                );
-                self.swap = match self.purpose {
-                    Purpose::Search => overlay::toward(self.swap, target, dt, BAR_MORPH),
-                    _ => target, // Snip has no bar to turn into the toolbar
+                // every motion by the clock since it began (`motion`)
+                self.appear = match self.appear {
+                    Some((start, t)) if t < 1.0 => {
+                        Some((start, motion::done(start, now, overlay::APPEAR)))
+                    }
+                    None => Some((now, motion::done(now, now, overlay::APPEAR))),
+                    done => done,
                 };
-                self.swap_at = (self.swap != target).then_some(now);
+                let (target, was) = (self.swap_target(), self.swap);
+                // to the toolbar (enter) or back to the bar (exit), from where it is
+                self.swap_at = match self.swap_at {
+                    Some(m @ (_, _, to)) if to == target => Some(m),
+                    _ if self.swap == target => None,
+                    _ => Some((now, self.swap, target)),
+                };
+                if let Some((began, from, to)) = self.swap_at {
+                    let length = if to > from { BAR_MORPH } else { motion::EXIT };
+                    let t = match self.purpose {
+                        Purpose::Search => motion::done(began, now, length),
+                        _ => 1.0, // Snip has no bar to turn into the toolbar
+                    };
+                    self.swap = from + (to - from) * t;
+                    if t >= 1.0 {
+                        self.swap_at = None;
+                    }
+                }
                 if self.bar_drag.is_none() {
-                    // turning into the toolbar (or back): it stays on its spot
                     let to = self.bar_target();
-                    self.bar_now = Some(match self.bar_now {
-                        Some(at) if self.swap == was => bar::glide(at, to),
-                        _ => to,
+                    self.bar_now = Some(match (self.bar_now, self.bar_glide) {
+                        // turning into the toolbar (or back): it stays on its spot
+                        _ if self.swap != was => to,
+                        (Some(at), _) if at == to => to,
+                        // on its way there already
+                        (Some(_), Some((began, from, end))) if end == to => {
+                            let t = motion::progress(began, now, GLIDE, motion::Curve::Out);
+                            from + (to - from) * t
+                        }
+                        // a new place: it glides there from where it is
+                        (Some(at), _) => {
+                            self.bar_glide = Some((now, at, to));
+                            at
+                        }
+                        (None, _) => to,
                     });
+                    if self.bar_now == Some(to) {
+                        self.bar_glide = None;
+                    }
                 }
                 Task::none()
             }
@@ -991,6 +1029,7 @@ impl App {
         let size = shot.size;
         let px = |v: f32| (v * shot.scale).round() as u32;
         self.view = overlay::View::new(px(size.width), px(size.height), size);
+        self.tiles = overlay::tiles(&shot.image).map(|t| (shot.image.id(), t));
         self.frame = Some(shot.image);
         glass::set_frame(self.frame.as_ref(), shot.scale);
         self.helper = Some(ocr::hold());
@@ -1005,6 +1044,8 @@ impl App {
         self.include_screen = true;
         self.bar_anchor = cfg.bar.anchor;
         self.bar_now = None;
+        self.bar_glide = None;
+        motion::refresh();
         self.work_inset = taskbar_inset(shot.origin, size, shot.scale);
         self.behaviour = cfg.selection;
         self.bar_keys = BarKeys::of(&cfg);
@@ -2576,6 +2617,7 @@ impl App {
         self.lens_pages.drain(..).for_each(lens::Held::release);
         let _ = crate::lens::take_handed_off();
         self.frame = None;
+        self.tiles = None;
         glass::set_frame(None, 1.0);
         self.stroke = Vec::new();
         self.selection = None;
@@ -2890,6 +2932,17 @@ impl App {
             // fades in, costs a copy, not a resample)
             None => shown = shown.filter_method(image::FilterMethod::Nearest),
         }
+        // At rest (not zoomed, no translation): drawn as tiles (`overlay::tiles`).
+        let shown: Element<'_, Message> = match &self.tiles {
+            Some((id, tiles))
+                if *id == frame.id() && translation.is_none() && self.view.crop().is_none() =>
+            {
+                let scale = self.scale;
+                let frozen = overlay::Frozen { tiles, scale };
+                canvas(frozen).width(Fill).height(Fill).into()
+            }
+            _ => shown.into(),
+        };
         let mut layers = stack![
             shown,
             Element::from(canvas(overlay).width(Fill).height(Fill)).map(Message::Overlay),
@@ -3027,7 +3080,7 @@ impl App {
 
     /// How far the opening animation is (0..1, eased out); 0 on its first frame.
     fn appeared(&self) -> f32 {
-        self.appear.map_or(0.0, |(_, t)| overlay::ease_out(t))
+        self.appear.map_or(0.0, |(_, t)| motion::Curve::Out.ease(t))
     }
 
     /// The opening animation still runs (a frame drawn and more to come).
@@ -3065,7 +3118,8 @@ impl App {
     /// has no bar, is always there.
     fn swapped(&self) -> f32 {
         match self.purpose {
-            Purpose::Search => overlay::ease_out(self.swap),
+            // back to the bar: the same curve run backwards, an ease-in
+            Purpose::Search => motion::Curve::Out.ease(self.swap),
             _ => self.swap_target(),
         }
     }
@@ -3838,12 +3892,14 @@ mod tests {
 
     /// An open overlay on a `w` x `h` frame at `scale`; pixel (x, y) is
     /// [x % 256, y % 256, x / 256, 255].
-    fn open_app(w: u32, h: u32, scale: f32) -> App {
+    pub(super) fn open_app(w: u32, h: u32, scale: f32) -> App {
         let mut app = App::idle(window::Id::unique());
         let rgba: Vec<u8> = (0..h)
             .flat_map(|y| (0..w).flat_map(move |x| [x as u8, y as u8, (x >> 8) as u8, 255]))
             .collect();
-        app.frame = Some(image::Handle::from_rgba(w, h, rgba));
+        let frame = image::Handle::from_rgba(w, h, rgba);
+        app.tiles = overlay::tiles(&frame).map(|t| (frame.id(), t));
+        app.frame = Some(frame);
         app.scale = scale;
         app.screen = Size::new(w as f32 / scale, h as f32 / scale);
         app.view = overlay::View::new(w, h, app.screen);
@@ -3857,7 +3913,7 @@ mod tests {
     }
 
     /// A press-drag-release on screen from `a` to `b`.
-    fn drag(app: &mut App, a: Point, b: Point, shift: bool) {
+    pub(super) fn drag(app: &mut App, a: Point, b: Point, shift: bool) {
         event(app, overlay::Event::Press { at: a, shift });
         for i in 1..=10 {
             event(app, overlay::Event::Move(a + (b - a) * (i as f32 / 10.0)));
@@ -4600,7 +4656,7 @@ mod tests {
     }
 
     /// Frames until the bar is where it goes (it glides there).
-    fn settle_bar(app: &mut App) {
+    pub(super) fn settle_bar(app: &mut App) {
         let start = Instant::now();
         for i in 0..100 {
             let _ = app.update(Message::Frame(start + Duration::from_millis(16 * i)));
@@ -4795,7 +4851,9 @@ mod tests {
         let _ = app.update(Message::BarReleased);
         assert_eq!(app.bar_anchor, BarAnchor::Top);
         assert_eq!(config::current().bar.anchor, BarAnchor::Top, "remembered");
-        let _ = app.update(Message::Frame(Instant::now()));
+        let now = Instant::now();
+        let _ = app.update(Message::Frame(now));
+        let _ = app.update(Message::Frame(now + Duration::from_millis(16)));
         let step = app.bar_at();
         assert!(
             step != before - Vector::new(100.0, 560.0) && app.bar_gliding(),
@@ -5004,11 +5062,15 @@ mod tests {
         assert_eq!(done.appeared(), 1.0);
         assert!(!done.appearing(), "no more frames asked for");
         assert!(opening_at(Some(10)).appearing());
-        // a slow frame (a busy machine) is one step, not a jump to the end
+        // by the clock from the first frame: one slow frame (a busy machine)
+        // lands where 60 fps would be, neither ahead nor behind
         let mut slow = opening_at(Some(0));
-        let _ = slow.update(Message::Frame(Instant::now() + Duration::from_millis(400)));
+        let start = slow.appear.unwrap().0;
+        let _ = slow.update(Message::Frame(start + Duration::from_millis(100)));
+        let smooth = opening_at(Some(100));
+        assert_eq!(slow.appeared(), smooth.appeared());
         assert!(
-            slow.appeared() < 1.0 && slow.appearing(),
+            slow.appeared() > 0.5 && slow.appearing(),
             "{}",
             slow.appeared()
         );

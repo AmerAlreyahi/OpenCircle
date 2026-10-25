@@ -32,6 +32,9 @@ mod linux;
 mod win;
 
 use super::proto;
+/// The app's widget motion (durations, curves, the OS's "show animations").
+#[path = "../../ui/motion.rs"]
+mod motion;
 
 use std::borrow::Cow;
 use std::io::{Read, Write};
@@ -74,7 +77,8 @@ pub fn route(t0: Instant, url: &str, new_window: bool, gesture: bool, links: &Li
 /// Exit code: no web view runtime on this system (the app turns the card off).
 const NO_RUNTIME: u8 = 3;
 const SCHEME: &str = "ocsheet";
-const SLIDE: Duration = Duration::from_millis(200);
+/// The slide-in and the dock after a drop (`motion`: the app's one motion scale).
+const SLIDE: Duration = motion::ENTER;
 /// How far the card travels while sliding in (logical px).
 const SLIDE_BY: f64 = 48.0;
 const CHIP: &str = "google.com";
@@ -92,6 +96,7 @@ pub enum Page {
 /// The helper's whole run; `raw` = the arguments after the program (and mode word).
 pub fn main(raw: Vec<String>) -> ExitCode {
     let t0 = Instant::now();
+    motion::refresh();
     let args = match Args::parse(&raw) {
         Ok(a) => a,
         Err(e) => {
@@ -249,8 +254,9 @@ pub fn builder<'a>(
 
 /// Ease-out share of the slide done at `t` since it began.
 pub fn slid(t: Duration) -> f64 {
-    let p = (t.as_secs_f64() / SLIDE.as_secs_f64()).min(1.0);
-    1.0 - (1.0 - p).powi(3)
+    let start = Instant::now();
+    let done = motion::progress(start, start + t, SLIDE, motion::Curve::Out);
+    f64::from(done)
 }
 
 /// The card `t` (0..1) of the way from `a` to `b` (docking).

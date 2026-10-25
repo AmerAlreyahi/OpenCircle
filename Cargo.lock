@@ -4525,6 +4525,7 @@ dependencies = [
  "hmac-sha256",
  "iced",
  "iced_runtime",
+ "iced_tiny_skia",
  "image",
  "interprocess",
  "keyring",

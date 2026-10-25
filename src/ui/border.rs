@@ -81,7 +81,7 @@ pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool) -> Element<'a, M> {
 }
 
 /// The overlay's edge, its activation glow `opening` of the way through
-/// (0..1, linear; the overlay's opening steps, `overlay::opening_step`)
+/// (0..1, linear; the time share of the overlay's opening)
 /// rather than by the clock, so it keeps step with the dim and the bars.
 pub fn opening<'a, M: 'a>(scale: f32, opening: f32) -> Element<'a, M> {
     canvas::Canvas::new(Border {
@@ -182,7 +182,7 @@ impl<M> canvas::Program<M> for Border {
         };
         if state.start.is_none() {
             state.start = Some(*now);
-            state.motion = motion_allowed();
+            state.motion = !super::motion::reduced();
         }
         let clock = now.saturating_duration_since(state.start?);
         let elapsed = match self.opening {
@@ -252,30 +252,6 @@ impl<M> canvas::Program<M> for Border {
         }
         vec![frame.into_geometry()]
     }
-}
-
-/// The OS's "show animations" setting (Windows); elsewhere motion is on.
-#[cfg(windows)]
-fn motion_allowed() -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
-    };
-    let mut on = windows::core::BOOL(1);
-    // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL into `on`.
-    let read = unsafe {
-        SystemParametersInfoW(
-            SPI_GETCLIENTAREAANIMATION,
-            0,
-            Some(&mut on as *mut windows::core::BOOL as *mut std::ffi::c_void),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        )
-    };
-    read.is_err() || on.as_bool()
-}
-
-#[cfg(not(windows))]
-fn motion_allowed() -> bool {
-    true
 }
 
 /// The edge's shape in logical px: a glow `inset` deep, or a line `inset`

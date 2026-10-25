@@ -199,5 +199,7 @@ xdg-desktop-portal = "*"
 # Headless renders of the UI screens in tests (the versions iced already builds).
 iced = { version = "0.14", default-features = false, features = ["advanced"] }
 iced_runtime = "0.14"
+# The window compositor's damage (frame-time tests): the version iced already builds.
+iced_tiny_skia = "0.14"
 qrcode = { version = "0.14.1", default-features = false }
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }

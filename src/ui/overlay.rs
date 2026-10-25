@@ -5,17 +5,18 @@
 //! (they resize it); in select-text mode every word in it is highlighted. Also `View`: the zoomed / panned part of
 //! the frame on screen. Selections live in image coordinates (the overlay's
 //! logical px at 1x); events arrive in screen px and the App maps them.
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
 use iced::alignment::Vertical;
 use iced::keyboard::{self, key::Named};
 use iced::mouse::{self, Cursor, ScrollDelta};
 use iced::widget::canvas::{self, Action, Fill, Geometry, Path, Stroke, fill, gradient, stroke};
+use iced::widget::image::{FilterMethod, Handle};
 use iced::widget::text::Alignment;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, Vector};
 
-use super::theme;
+use super::{motion, theme};
 use crate::config::{BracketStyle, Look};
 
 /// A selection smaller than this (screen px, either side) is a tap, not a circle.
@@ -47,10 +48,10 @@ const HANDLE_HIT: f32 = 12.0;
 /// become it, and its corner brackets (gap outside the box, arm length range,
 /// line width; screen px).
 const SNAP_RADIUS: f32 = 16.0;
-pub const MORPH: Duration = Duration::from_millis(200);
+pub const MORPH: Duration = motion::MOVE;
 /// The overlay's opening: the dim fades in, the edge glow draws back to its
 /// rest and the bars slide in, as one eased animation from the first frame.
-pub const APPEAR: Duration = Duration::from_millis(250);
+pub const APPEAR: Duration = motion::ENTER;
 const BRACKET_GAP: f32 = 3.0;
 const BRACKET_ARM: (f32, f32) = (14.0, 36.0);
 const BRACKET_WIDTH: f32 = 4.0;
@@ -459,41 +460,8 @@ pub fn snap_radius(r: Rectangle) -> f32 {
 
 /// How far a morph started at `start` is at `now` (0..1, eased out).
 pub fn morph_progress(start: Instant, now: Instant) -> f32 {
-    progress(start, now, MORPH)
+    motion::progress(start, now, MORPH, motion::Curve::Out)
 }
-
-/// How far an animation of `length` started at `start` is at `now` (0..1, eased
-/// out: fast, then settling).
-pub fn progress(start: Instant, now: Instant, length: Duration) -> f32 {
-    let t = now.saturating_duration_since(start).as_secs_f32() / length.as_secs_f32();
-    ease_out(t)
-}
-
-/// `t` (0..1) eased out: fast, then settling.
-pub fn ease_out(t: f32) -> f32 {
-    1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
-}
-
-/// The opening's next step from `t` (0..1, linear) after a frame that took
-/// `dt`: by the time it took, but at most `1 / OPENING_STEPS` of it, so a slow
-/// machine still shows the motion (slower) instead of jumping to the end.
-pub fn opening_step(t: f32, dt: Duration) -> f32 {
-    let step = (dt.as_secs_f32() / APPEAR.as_secs_f32()).min(1.0 / OPENING_STEPS);
-    (t + step).min(1.0)
-}
-
-/// `value` moved toward `target` (0 or 1) by a frame that took `dt`, for a
-/// motion `length` long; like `opening_step`, never more than a sixth a frame.
-pub fn toward(value: f32, target: f32, dt: Duration, length: Duration) -> f32 {
-    let step = (dt.as_secs_f32() / length.as_secs_f32()).min(1.0 / OPENING_STEPS);
-    match target > value {
-        true => (value + step).min(target),
-        false => (value - step).max(target),
-    }
-}
-
-/// The opening shows at least this many steps.
-const OPENING_STEPS: f32 = 6.0;
 
 /// `n` points round the outline of `r` with corners rounded by `radius`,
 /// clockwise on screen from the top edge's left end.
@@ -824,6 +792,29 @@ pub struct Pointer {
     /// The last right press that did not reset the zoom.
     right: Option<Instant>,
     shift: bool,
+    /// The last drawing and what it shows: drawn again only when that
+    /// changes, so a frame where only a widget above it moves redraws only
+    /// round that widget (the window redraws what changed).
+    drawn: canvas::Cache,
+    shown: RefCell<Option<Shown>>,
+}
+
+/// Everything the overlay's drawing depends on (`Pointer::drawn`).
+#[derive(PartialEq)]
+struct Shown {
+    size: Size,
+    stroke: Vec<Point>,
+    selection: Option<Selection>,
+    others: Vec<(Selection, Vec<Point>)>,
+    view: View,
+    handles: bool,
+    dim: bool,
+    live_drag: bool,
+    look: Look,
+    morph: Option<f32>,
+    words: Vec<Rectangle>,
+    picked: Vec<Rectangle>,
+    appear: f32,
 }
 
 impl canvas::Program<Event> for Overlay<'_> {
@@ -923,128 +914,12 @@ impl canvas::Program<Event> for Overlay<'_> {
 
     fn draw(
         &self,
-        _pointer: &Pointer,
+        pointer: &Pointer,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: Cursor,
     ) -> Vec<Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let screen = Rectangle::with_size(bounds.size());
-        let on_screen =
-            |s: &[Point]| -> Vec<Point> { s.iter().map(|&p| self.view.to_screen(p)).collect() };
-        let current = on_screen(self.stroke);
-        let kind = shown_kind(&current, self.selection, self.live_drag);
-        let others: Vec<(Kind, Vec<Point>)> = (self.others.iter())
-            .map(|(s, stroke)| (s.kind, on_screen(stroke)))
-            .collect();
-
-        // A snapped box on its way from the drawn stroke: the outline between.
-        let (dim_idle, dim_outside) = theme::dims(&self.look);
-        let (dim_idle, dim_outside) = (
-            dim_idle.scale_alpha(self.appear),
-            dim_outside.scale_alpha(self.appear),
-        );
-        let snapped = (self.selection).filter(|s| s.kind == Kind::Snap);
-        let box_on_screen = snapped.map(|s| self.view.rect_to_screen(s.area));
-        let morph = match (box_on_screen, self.morph) {
-            (Some(r), Some((from, start))) => {
-                let t = morph_progress(start, Instant::now());
-                (t < 1.0).then(|| (t, morph(&on_screen(from), r, t)))
-            }
-            _ => None,
-        };
-
-        // After release, the clear region is the drawn shape itself (closed), not its
-        // bounding box.
-        // ponytail: even-odd re-dims areas circled twice (or two overlapping
-        // selections); trim the stroke at its first self-crossing if users mind.
-        let closed = self.selection.is_some();
-        if closed || !others.is_empty() {
-            let outside = Path::new(|p| {
-                p.rectangle(Point::ORIGIN, screen.size());
-                for (kind, s) in &others {
-                    shape(p, *kind, s, true);
-                }
-                match &morph {
-                    Some((_, outline)) => shape(p, Kind::Scribble, outline, true),
-                    None if closed => shape(p, kind, &current, true),
-                    None => {}
-                }
-            });
-            frame.fill(
-                &outside,
-                Fill {
-                    style: canvas::Style::Solid(dim_outside),
-                    rule: fill::Rule::EvenOdd,
-                },
-            );
-        } else if self.dim {
-            frame.fill_rectangle(Point::ORIGIN, screen.size(), dim_idle);
-        }
-
-        let accent = theme::accent_of(&self.look);
-        for (kind, s) in &others {
-            glow(&mut frame, *kind, s, true, screen, accent, 1.0);
-        }
-        match (&morph, box_on_screen) {
-            (Some((t, outline)), Some(r)) => {
-                glow(
-                    &mut frame,
-                    Kind::Scribble,
-                    outline,
-                    true,
-                    screen,
-                    accent,
-                    1.0 - t,
-                );
-                brackets(&mut frame, r, &self.look, *t);
-            }
-            (None, Some(r)) => brackets(&mut frame, r, &self.look, 1.0),
-            // A press that hasn't moved yet may be a tap: nothing until it moves.
-            _ if !closed && is_tap(&current, 1.0) => {}
-            _ => glow(&mut frame, kind, &current, closed, screen, accent, 1.0),
-        }
-
-        // Select-text mode: every word, the picked ones stronger.
-        for (rects, colour) in [
-            (self.words, theme::WORD),
-            (&self.picked[..], theme::WORD_PICKED),
-        ] {
-            for r in rects {
-                let r = self.view.rect_to_screen(*r);
-                let radius = (r.height / 4.0).min(6.0);
-                let path = Path::rounded_rectangle(r.position(), r.size(), radius.into());
-                frame.fill(&path, colour);
-            }
-        }
-
-        if let Some(sel) = self.selection {
-            let r = self.view.rect_to_screen(sel.area);
-            if self.handles && !matches!(sel.kind, Kind::Snap | Kind::Word) {
-                for c in corners(r) {
-                    let dot = Path::circle(c, HANDLE);
-                    frame.fill(&dot, Color::WHITE);
-                    let ring = Stroke::default().with_color(accent.0);
-                    frame.stroke(&dot, ring.with_width(2.0));
-                }
-            }
-            // How many selections the actions get.
-            if !self.others.is_empty() {
-                let at = Point::new(r.x + r.width + 14.0, r.y - 14.0);
-                frame.fill(&Path::circle(at, 11.0), accent.0);
-                frame.fill_text(canvas::Text {
-                    content: (self.others.len() + 1).to_string(),
-                    position: at,
-                    color: theme::ON_ACCENT,
-                    size: 13.0.into(),
-                    align_x: Alignment::Center,
-                    align_y: Vertical::Center,
-                    ..canvas::Text::default()
-                });
-            }
-        }
-
         // Logged once the window is really full-screen (WSLg maps it windowed first).
         if let Some((at, size)) = self.first_draw.get()
             && (bounds.width - size.width).abs() < 1.0
@@ -1056,7 +931,140 @@ impl canvas::Program<Event> for Overlay<'_> {
                 at.elapsed().as_millis()
             );
         }
-        vec![frame.into_geometry()]
+        let morph_t = (self.morph)
+            .map(|(_, start)| morph_progress(start, Instant::now()))
+            .filter(|t| *t < 1.0);
+        let shown = Shown {
+            size: bounds.size(),
+            stroke: self.stroke.to_vec(),
+            selection: self.selection,
+            others: self.others.to_vec(),
+            view: self.view,
+            handles: self.handles,
+            dim: self.dim,
+            live_drag: self.live_drag,
+            look: self.look,
+            morph: morph_t,
+            words: self.words.to_vec(),
+            picked: self.picked.clone(),
+            appear: self.appear,
+        };
+        if pointer.shown.borrow().as_ref() != Some(&shown) {
+            pointer.drawn.clear();
+            *pointer.shown.borrow_mut() = Some(shown);
+        }
+        vec![pointer.drawn.draw(renderer, bounds.size(), |frame| {
+            let screen = Rectangle::with_size(bounds.size());
+            let on_screen =
+                |s: &[Point]| -> Vec<Point> { s.iter().map(|&p| self.view.to_screen(p)).collect() };
+            let current = on_screen(self.stroke);
+            let kind = shown_kind(&current, self.selection, self.live_drag);
+            let others: Vec<(Kind, Vec<Point>)> = (self.others.iter())
+                .map(|(s, stroke)| (s.kind, on_screen(stroke)))
+                .collect();
+
+            // A snapped box on its way from the drawn stroke: the outline between.
+            let (dim_idle, dim_outside) = theme::dims(&self.look);
+            let (dim_idle, dim_outside) = (
+                dim_idle.scale_alpha(self.appear),
+                dim_outside.scale_alpha(self.appear),
+            );
+            let snapped = (self.selection).filter(|s| s.kind == Kind::Snap);
+            let box_on_screen = snapped.map(|s| self.view.rect_to_screen(s.area));
+            let morph = match (box_on_screen, self.morph, morph_t) {
+                (Some(r), Some((from, _)), Some(t)) => Some((t, morph(&on_screen(from), r, t))),
+                _ => None,
+            };
+
+            // After release, the clear region is the drawn shape itself (closed), not its
+            // bounding box.
+            // ponytail: even-odd re-dims areas circled twice (or two overlapping
+            // selections); trim the stroke at its first self-crossing if users mind.
+            let closed = self.selection.is_some();
+            if closed || !others.is_empty() {
+                let mut holes: Vec<&[Point]> = others.iter().map(|(_, s)| &s[..]).collect();
+                match &morph {
+                    Some((_, outline)) => holes.push(outline),
+                    None if closed => holes.push(&current),
+                    None => {}
+                }
+                let holes: Vec<Rectangle> = holes.into_iter().filter_map(self::bounds).collect();
+                dim(frame, screen, &holes, dim_outside, |p| {
+                    for (kind, s) in &others {
+                        shape(p, *kind, s, true);
+                    }
+                    match &morph {
+                        Some((_, outline)) => shape(p, Kind::Scribble, outline, true),
+                        None if closed => shape(p, kind, &current, true),
+                        None => {}
+                    }
+                });
+            } else if self.dim {
+                dim(frame, screen, &[], dim_idle, |_| {});
+            }
+
+            let accent = theme::accent_of(&self.look);
+            for (kind, s) in &others {
+                glow(frame, *kind, s, true, screen, accent, 1.0);
+            }
+            match (&morph, box_on_screen) {
+                (Some((t, outline)), Some(r)) => {
+                    glow(
+                        frame,
+                        Kind::Scribble,
+                        outline,
+                        true,
+                        screen,
+                        accent,
+                        1.0 - t,
+                    );
+                    brackets(frame, r, &self.look, *t);
+                }
+                (None, Some(r)) => brackets(frame, r, &self.look, 1.0),
+                // A press that hasn't moved yet may be a tap: nothing until it moves.
+                _ if !closed && is_tap(&current, 1.0) => {}
+                _ => glow(frame, kind, &current, closed, screen, accent, 1.0),
+            }
+
+            // Select-text mode: every word, the picked ones stronger.
+            for (rects, colour) in [
+                (self.words, theme::WORD),
+                (&self.picked[..], theme::WORD_PICKED),
+            ] {
+                for r in rects {
+                    let r = self.view.rect_to_screen(*r);
+                    let radius = (r.height / 4.0).min(6.0);
+                    let path = Path::rounded_rectangle(r.position(), r.size(), radius.into());
+                    frame.fill(&path, colour);
+                }
+            }
+
+            if let Some(sel) = self.selection {
+                let r = self.view.rect_to_screen(sel.area);
+                if self.handles && !matches!(sel.kind, Kind::Snap | Kind::Word) {
+                    for c in corners(r) {
+                        let dot = Path::circle(c, HANDLE);
+                        frame.fill(&dot, Color::WHITE);
+                        let ring = Stroke::default().with_color(accent.0);
+                        frame.stroke(&dot, ring.with_width(2.0));
+                    }
+                }
+                // How many selections the actions get.
+                if !self.others.is_empty() {
+                    let at = Point::new(r.x + r.width + 14.0, r.y - 14.0);
+                    frame.fill(&Path::circle(at, 11.0), accent.0);
+                    frame.fill_text(canvas::Text {
+                        content: (self.others.len() + 1).to_string(),
+                        position: at,
+                        color: theme::ON_ACCENT,
+                        size: 13.0.into(),
+                        align_x: Alignment::Center,
+                        align_y: Vertical::Center,
+                        ..canvas::Text::default()
+                    });
+                }
+            }
+        })]
     }
 
     fn mouse_interaction(
@@ -1129,6 +1137,119 @@ fn gradient_style(span: Rectangle, alpha: f32, (start, end): (Color, Color)) -> 
         .add_stop(0.0, tint(start))
         .add_stop(1.0, tint(end));
     canvas::Style::Gradient(linear.into())
+}
+
+/// The frozen frame's tile side (device px); the dim's (logical px).
+const TILE: u32 = 256;
+
+/// Dims `screen` in `colour` but for the `cut` shapes (even-odd), which lie
+/// within `holes` (their bounds). As one rectangle per `TILE`, and one path
+/// for the tiles the holes touch: like the frame (`tiles`), a small redraw
+/// then fills only the dim under it (tiny-skia fills a clipped path over its
+/// whole size).
+fn dim(
+    frame: &mut canvas::Frame,
+    screen: Rectangle,
+    holes: &[Rectangle],
+    colour: Color,
+    cut: impl Fn(&mut canvas::path::Builder),
+) {
+    // a smoothed loop may bulge a little past its points
+    let holes: Vec<Rectangle> = holes.iter().map(|h| h.expand(16.0)).collect();
+    let side = TILE as f32;
+    let mut touched = Vec::new();
+    let mut y = 0.0;
+    while y < screen.height {
+        let mut x = 0.0;
+        while x < screen.width {
+            let size = Size::new(side.min(screen.width - x), side.min(screen.height - y));
+            let tile = Rectangle::new(Point::new(x, y), size);
+            match holes.iter().any(|h| h.intersects(&tile)) {
+                true => touched.push(tile),
+                false => frame.fill_rectangle(tile.position(), size, colour),
+            }
+            x += side;
+        }
+        y += side;
+    }
+    if !touched.is_empty() {
+        let path = Path::new(|p| {
+            touched
+                .iter()
+                .for_each(|t| p.rectangle(t.position(), t.size()));
+            cut(p);
+        });
+        let style = canvas::Style::Solid(colour);
+        let rule = fill::Rule::EvenOdd;
+        frame.fill(&path, Fill { style, rule });
+    }
+}
+
+/// The frozen frame cut into `TILE`-sized tiles (device px x, y and its
+/// image). tiny-skia copies a clipped image over its whole size, so a frame
+/// drawn whole makes every small redraw (a bar gliding, a card dragged) cost a
+/// full-screen copy; drawn as tiles, a redraw copies only the tiles under it.
+/// `None`: not an RGBA frame.
+pub fn tiles(frame: &Handle) -> Option<Vec<(Point, Handle)>> {
+    let Handle::Rgba {
+        width,
+        height,
+        pixels,
+        ..
+    } = frame
+    else {
+        return None;
+    };
+    let (w, h) = (*width, *height);
+    let mut out = Vec::new();
+    for y0 in (0..h).step_by(TILE as usize) {
+        for x0 in (0..w).step_by(TILE as usize) {
+            let (tw, th) = (TILE.min(w - x0), TILE.min(h - y0));
+            let mut px = Vec::with_capacity((tw * th * 4) as usize);
+            for y in y0..y0 + th {
+                let row = ((y * w + x0) * 4) as usize;
+                px.extend_from_slice(pixels.get(row..row + (tw * 4) as usize)?);
+            }
+            let at = Point::new(x0 as f32, y0 as f32);
+            out.push((at, Handle::from_rgba(tw, th, px)));
+        }
+    }
+    Some(out)
+}
+
+/// The frozen frame as its tiles (`tiles`), filling the canvas pixel for
+/// pixel: `scale` device px per logical px.
+pub struct Frozen<'a> {
+    pub tiles: &'a [(Point, Handle)],
+    pub scale: f32,
+}
+
+impl<M> canvas::Program<M> for Frozen<'_> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let k = 1.0 / self.scale;
+        for (at, handle) in self.tiles {
+            let Handle::Rgba { width, height, .. } = handle else {
+                continue;
+            };
+            // + a quarter pixel: tiny-skia truncates image bounds to whole
+            // device pixels, and float error would leave a seam.
+            let at = Point::new((at.x + 0.25) * k, (at.y + 0.25) * k);
+            let size = Size::new(*width as f32 * k, *height as f32 * k);
+            let image = canvas::Image::new(handle.clone()).filter_method(FilterMethod::Nearest);
+            frame.draw_image(Rectangle::new(at, size), image);
+        }
+        vec![frame.into_geometry()]
+    }
 }
 
 #[cfg(test)]
