@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="assets/icons/256x256.png" width="128" alt="OpenCircle logo">
-</p>
+<p align="center"><img src="docs/images/cover.png" alt="OpenCircle: circle anything on your screen to search, read, translate or ask AI" width="100%"></p>
 
 <h1 align="center">OpenCircle</h1>
 
