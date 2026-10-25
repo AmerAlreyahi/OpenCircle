@@ -204,7 +204,7 @@ production systems.
   and busy (RAM, CPU, GPU, disk, download), not just a low idle footprint.
 - v0.1.0 scope (owner, 2026-10-24): release when Windows is fully tested; the
   Linux builds are attached and labelled "preview, known Wayland limits" in the
-  release notes. The Linux tweak round comes in v0.1.x.
+  release notes. The Linux checks and tweak round come in v0.1.1 (owner, 2026-10-25).
 - Main mode like Circle to Search (owner, 2026-10-24): when the overlay opens, a
   bottom floating widget shows the main actions at once ("Ask about your screen"
   field, translate the screen, song search when a key is set). Text on screen can
@@ -220,6 +220,9 @@ production systems.
   taskbar) holds everything as round icon buttons (no labels, tooltips), and
   selection actions (Search, Text, Copy, Save) slide in when something is
   selected. The Ask AI icon will become an OpenCircle-logo SVG later.
+  The bar keeps exactly the same size in every state (selection actions shown
+  dimmed until something is selected), and Edit turns it into the editor toolbar
+  in place, same anchor and drag (owner, 2026-10-25).
   The bottom bar holds: the ask field, Ask AI, Translate screen, Live translate,
   Search music and Edit image (owner, 2026-10-24). Search music is always shown
   (supersedes "hidden until a key is set"): with no key it opens the key setup and
@@ -233,6 +236,14 @@ production systems.
   elegant themes, as options for the floating widgets (bar, cards, popups). The
   current theme stays the default. All of them come from the one token set in
   theme.rs.
+- One exe on Windows (owner, 2026-10-25): the results-card helper runs as a hidden
+  mode of opencircle.exe (like the OCR worker), not a second file; Linux keeps the
+  separate opencircle-sheet binary (WebKitGTK must stay optional).
+- About page (owner, 2026-10-25): app info, model/library notices, and a developer
+  card for the owner (avatar bundled, no runtime network; data refreshed from the
+  owner's GitHub profile at each release by scripts/refresh-about.sh).
+- Release themes (owner, 2026-10-25): v0.1.1 animations and smoothness, v0.1.2
+  speed and lightness, v0.1.3 maturity and reliability.
 - Credits (owner, 2026-10-24): choose the cheaper way whenever quality barely
   changes: at most 3 workers at once, mid model for routine work (strong model
   only for security, hard bugs, design), one contact sheet per visual proof,
@@ -261,8 +272,9 @@ production systems.
 - Google Lens has no public upload API. Existing clones upload to imgur/uguu
   (privacy leak). Our approach: the browser itself posts the image to Lens
   through a local auto-submitting form (spike S1 in the plan proves it).
-- Results card (`src/sheet.rs`): the web view runs only in the helper binary
-  `opencircle-sheet` (feature `sheet`), never in the app: linking WebKitGTK
+- Results card (`src/sheet.rs`): the web view runs only in a short-lived helper
+  process (Windows: `opencircle.exe sheet-helper`; Linux: the `opencircle-sheet`
+  binary; feature `sheet`), never in the resident app: linking WebKitGTK
   costs +23 MB idle RSS, and an in-process web view leaves ~230 MB after close
   (spike S9). Google often shows its "unusual traffic" check to Lens in
   WebKitGTK (URL `google.com/sorry/…`): the card shows a hint; the user solves
