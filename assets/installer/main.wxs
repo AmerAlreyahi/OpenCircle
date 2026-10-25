@@ -106,6 +106,8 @@
                 <RegistryKey Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}">
                     <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
                 </RegistryKey>
+                <!-- Uninstall: the app's "Start with Windows" entry goes too -->
+                <RemoveRegistryValue Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="OpenCircle" />
                 <!-- Change the Root to HKCU for perUser installations -->
                 {{#each deep_link_protocols as |protocol| ~}}
                 <RegistryKey Root="HKLM" Key="Software\Classes\\{{protocol}}">

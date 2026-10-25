@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use iced::widget::{container, image, pin, space, stack};
+use iced::widget::{image, pin, space, stack};
 use iced::window::{self, Level, Position};
-use iced::{ContentFit, Element, Fill, Point, Size, Task, Vector, task};
+use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 
 use super::live_controller::{self, Controller, Out};
 use super::{background, border, theme, widgets, windows};
@@ -33,7 +33,8 @@ const NOTE: &str = "Games must run borderless or windowed";
 const NOTE_TIME: Duration = Duration::from_secs(6);
 /// Test hook: after the first patches (or error), the layer is saved here (PNG).
 const TEST_SHOT: &str = "OPENCIRCLE_TEST_LIVE_SHOT";
-/// The controller starts at the monitor's top-right corner, this far in.
+/// The controller starts at the monitor's bottom-right corner (above the
+/// taskbar, clear of a maximised window's tab and title bars), this far in.
 const CONTROLLER_MARGIN: f32 = 24.0;
 
 /// The monitor the layer covers (physical px).
@@ -218,8 +219,8 @@ impl Live {
     }
 
     /// Fits the controller window to what it shows now (it was `old`
-    /// big); it grows and shrinks from its right edge (it starts at the
-    /// right corner).
+    /// big); it grows and shrinks from its right and bottom edges (it starts
+    /// at the bottom right corner).
     fn fit_controller(&mut self, old: Size) -> Task<Msg> {
         let (Some(id), new) = (self.controller, self.ctl.size()) else {
             return Task::none();
@@ -227,7 +228,7 @@ impl Live {
         if old == new {
             return Task::none();
         }
-        self.ctl_at += Vector::new(old.width - new.width, 0.0);
+        self.ctl_at += Vector::new(old.width - new.width, old.height - new.height);
         self.update_mask();
         window::resize(id, new).chain(window::move_to(id, self.ctl_at))
     }
@@ -249,14 +250,26 @@ impl Live {
         self.ctl.view().map(Msg::Controller)
     }
 
-    /// Opens the mini-controller at the monitor's top-right corner.
+    /// The notice line: the last step's error, else the first-run note.
+    fn notice(&self) -> Option<String> {
+        match (&self.error, self.note) {
+            (Some(e), _) => Some(e.clone()),
+            (None, true) => Some(NOTE.into()),
+            (None, false) => None,
+        }
+    }
+
+    /// Opens the mini-controller at the monitor's bottom-right corner, above
+    /// the taskbar.
     fn open_controller(&mut self, m: Monitor) -> Task<Msg> {
+        self.ctl.set_notice(self.notice());
         let size = self.ctl.size();
         let (x, y) = (m.x as f32 / m.scale, m.y as f32 / m.scale);
-        let width = m.width as f32 / m.scale;
+        let screen = Size::new(m.width as f32 / m.scale, m.height as f32 / m.scale);
+        let taskbar = super::taskbar_inset(Point::new(x, y), screen, m.scale);
         self.ctl_at = Point::new(
-            x + width - size.width - CONTROLLER_MARGIN,
-            y + CONTROLLER_MARGIN,
+            x + screen.width - size.width - CONTROLLER_MARGIN,
+            y + screen.height - size.height - CONTROLLER_MARGIN - taskbar,
         );
         let (id, open) = windows::floating(
             window::Settings {
@@ -340,6 +353,17 @@ impl Live {
     }
 
     pub fn update(&mut self, msg: Msg) -> Outcome {
+        let out = self.update_inner(msg);
+        // the notice follows the layer's error / note: the window fits it
+        let before = self.ctl.size();
+        self.ctl.set_notice(self.notice());
+        match out {
+            Outcome::Task(task) => Outcome::Task(Task::batch([task, self.fit_controller(before)])),
+            out => out,
+        }
+    }
+
+    fn update_inner(&mut self, msg: Msg) -> Outcome {
         match msg {
             Msg::Monitor(Ok(monitor)) if matches!(self.phase, Phase::Starting) => {
                 let (window, open) = windows::screen(layer_window(monitor));
@@ -605,15 +629,7 @@ impl Live {
                 .content_fit(ContentFit::Fill);
             layers = layers.push(pin(patch).position(Point::new(x, y)));
         }
-        let status = self.ctl.status();
-        let status = widgets::layer_pill(match (&self.error, self.note) {
-            (Some(e), _) => format!("{status} · {e}"),
-            (None, true) => format!("{status} · {NOTE}"),
-            (None, false) => status,
-        });
-        layers
-            .push(container(status).center_x(Fill).padding(12))
-            .into()
+        layers.into()
     }
 }
 
@@ -794,7 +810,6 @@ mod tests {
             !l.stepping && l.paused.load(Ordering::Relaxed),
             "no step thread"
         );
-        assert_eq!(l.ctl.status(), "Live · needs a download");
         let texts = widgets::shot::texts(l.controller_view());
         let ask = "Live translate needs the English text-recognition model (about 40 MB). \
                    Download it? Nothing you translate leaves your PC.";
@@ -885,14 +900,48 @@ mod tests {
         let _ = l.update(Msg::Monitor(Ok(MONITOR)));
         let _ = l.open_controller(MONITOR);
         let id = l.controller().expect("the controller opens");
-        assert_eq!(l.ctl_at.y, CONTROLLER_MARGIN, "top-right corner");
+        let bottom = l.ctl_at.y + l.ctl.size().height;
+        assert_eq!(bottom, 1080.0 - CONTROLLER_MARGIN, "bottom-right corner");
+        assert!(
+            l.ctl.notice.is_some(),
+            "the first-run note is in the controller"
+        );
+        let _ = l.update(Msg::NoteDone);
+        assert!(
+            l.ctl.notice.is_none(),
+            "and goes with it, the window shrinks"
+        );
+        assert_eq!(
+            l.ctl_at.y + l.ctl.size().height,
+            bottom,
+            "bottom edge fixed"
+        );
+        let _ = l.update(Msg::Failed("no key".into()));
+        assert_eq!(l.ctl.notice.as_deref(), Some("no key"));
+        let _ = l.update(Msg::Patches(vec![]));
+        assert!(
+            l.ctl.notice.is_none(),
+            "an error clears with the next good step"
+        );
+        assert_eq!(l.ctl_at.y + l.ctl.size().height, bottom);
+        // the language list opens upward and closes back
+        let closed = l.ctl.size();
+        {
+            use crate::ui::picker::{Msg as P, Side};
+            let _ = l.update(Msg::Controller(C::Picker(P::Open(Side::Target))));
+            assert!(l.ctl.size().height > closed.height);
+            assert_eq!(l.ctl_at.y + l.ctl.size().height, bottom, "grows upward");
+            let _ = l.update(Msg::Controller(C::Picker(P::Open(Side::Target))));
+            assert_eq!(l.ctl.size(), closed);
+            assert_eq!(l.ctl_at.y + closed.height, bottom);
+        }
         let right = l.ctl_at.x + l.ctl.size().width;
         assert_eq!(right, 1920.0 - CONTROLLER_MARGIN);
 
         // X11: captures show it, so the step blanks its spot
         let _ = l.update(Msg::ControllerReady(Ok(false)));
         let [x, y, w, h] = l.mask.lock().unwrap().unwrap();
-        assert_eq!((x, y), (right as u32 - w, 24));
+        assert_eq!((x, y), (right as u32 - w, bottom as u32 - h));
         assert_eq!(h as f32, l.ctl.size().height);
         let _ = l.update(Msg::Moved(id, Point::new(100.0, 200.0)));
         assert_eq!(l.mask.lock().unwrap().unwrap()[..2], [100, 200]);

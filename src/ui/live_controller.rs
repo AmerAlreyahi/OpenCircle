@@ -1,5 +1,7 @@
 //! The live translate mini-controller (Circle to Search's floating controller):
-//! a small, draggable window on the layer's monitor. It takes clicks (the layer
+//! the one small, draggable widget of live mode, at the bottom right of the
+//! layer's monitor (the layer shows nothing else; errors and the first-run
+//! note are its notice line). It takes clicks (the layer
 //! doesn't) and, on Windows, is excluded from capture like the layer. The
 //! language picker (source → target, `ui/picker.rs`), Pause / Resume, Hide
 //! (collapses to a dot), Stop; and, when the languages' models are missing,
@@ -20,6 +22,10 @@ const DOT: f32 = 28.0;
 const ASK_TEXT: f32 = 40.0;
 const ASK_HEIGHT: f32 = SPACING + ASK_TEXT + SPACING + CHIP_HEIGHT;
 const ASK_BUTTON: f32 = 96.0;
+/// The one-line notice (an error, the first-run note) above the controls.
+const NOTICE_HEIGHT: f32 = 24.0;
+/// Longest notice shown (one line).
+const NOTICE_CHARS: usize = 64;
 
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -63,6 +69,8 @@ pub struct Controller {
     pub minimised: bool,
     /// The download question (live mode doesn't step while it is up).
     pub ask: Option<Ask>,
+    /// One line about the layer: the last step's error, or the first-run note.
+    pub notice: Option<String>,
 }
 
 impl Controller {
@@ -72,7 +80,16 @@ impl Controller {
             paused: false,
             minimised: false,
             ask: None,
+            notice: None,
         }
+    }
+
+    /// Sets the notice, cut to one line.
+    pub fn set_notice(&mut self, text: Option<String>) {
+        self.notice = text.map(|t| match t.chars().count() > NOTICE_CHARS {
+            true => t.chars().take(NOTICE_CHARS - 1).chain(['…']).collect(),
+            false => t,
+        });
     }
 
     /// Asks before downloading `what` ("English → Arabic offline
@@ -113,33 +130,27 @@ impl Controller {
         None
     }
 
-    /// The status line: "Auto → AR", paused, or waiting for the download.
-    pub fn status(&self) -> String {
-        match (&self.ask, self.paused) {
-            (Some(_), _) => "Live · needs a download".into(),
-            (None, true) => "Live · paused".into(),
-            (None, false) => format!("Live · {}", self.picker.label()),
-        }
-    }
-
     /// The window's size for what it shows now (logical px).
     pub fn size(&self) -> Size {
         if self.minimised {
             return Size::new(DOT, DOT);
         }
         let pad = 2.0 * widgets::SURFACE_PADDING;
-        let below = match (&self.ask, self.picker.is_open()) {
+        let mut below = match (&self.ask, self.picker.is_open()) {
             (Some(_), _) => ASK_HEIGHT,
             (None, true) => picker::LIST_HEIGHT,
             (None, false) => 0.0,
         };
+        if self.notice.is_some() {
+            below += SPACING + NOTICE_HEIGHT;
+        }
         Size::new(
             GRIP_WIDTH + picker::WIDTH + 3.0 * CHIP_WIDTH + 4.0 * SPACING + pad,
             CHIP_HEIGHT + below + pad,
         )
     }
 
-    pub fn view(&self) -> Element<'_, Msg> {
+    pub fn view<'a>(&'a self) -> Element<'a, Msg> {
         if self.minimised {
             return widgets::accent_dot(DOT, Msg::Restore).into();
         }
@@ -164,18 +175,26 @@ impl Controller {
         ]
         .spacing(SPACING)
         .align_y(Center);
-        let mut body = column![controls].spacing(SPACING);
+        // The window grows upward from the controls (it sits at the bottom of
+        // the screen), so what opens goes above them.
+        let mut body = column![].spacing(SPACING);
         let width = self.size().width - 2.0 * widgets::SURFACE_PADDING - GRIP_WIDTH - SPACING;
-        let indent = |e: Element<'static, Msg>| {
+        let indent = |e: Element<'a, Msg>| {
             container(e).padding(iced::Padding::ZERO.left(GRIP_WIDTH + SPACING))
         };
         if let Some(ask) = &self.ask {
             body = body.push(indent(ask_view(ask, width)));
         } else if let Some(list) = self.picker.list(width) {
-            let list = list.map(Msg::Picker);
-            body =
-                body.push(container(list).padding(iced::Padding::ZERO.left(GRIP_WIDTH + SPACING)));
+            body = body.push(indent(list.map(Msg::Picker)));
         }
+        if let Some(notice) = &self.notice {
+            let line = container(widgets::caption(notice.clone()))
+                .center_y(NOTICE_HEIGHT)
+                .width(width)
+                .clip(true);
+            body = body.push(indent(line.into()));
+        }
+        let body = body.push(controls);
         widgets::solid_surface(body).into()
     }
 }
@@ -237,11 +256,10 @@ mod tests {
     #[test]
     fn pause_hide_and_stop() {
         let mut c = Controller::new("auto", "ar", false);
-        assert_eq!(c.status(), "Live · Auto → AR");
+        assert_eq!(c.picker.label(), "Auto → AR");
         let full = c.size();
         assert_eq!(c.update(Msg::Pause), None);
         assert!(c.paused);
-        assert_eq!(c.status(), "Live · paused");
         assert_eq!(c.update(Msg::Pause), None);
         assert!(!c.paused, "Pause again = Resume");
         // Hide: a dot, and the list closes with it
@@ -276,14 +294,53 @@ mod tests {
         widgets::shot::save("live-controller-search", c.view(), size);
         c.update(Msg::Picker(picker::Msg::First));
         assert_eq!(c.picker.target, "fr");
-        assert_eq!(c.status(), "Live · Auto → FR");
+        assert_eq!(c.picker.label(), "Auto → FR");
         assert_eq!(c.size(), closed);
         open(&mut c, Side::Source);
         c.update(Msg::Picker(picker::Msg::Pick("ja".into())));
-        assert_eq!(c.status(), "Live · JA → FR");
+        assert_eq!(c.picker.label(), "JA → FR");
         // the view builds in every state
         c.update(Msg::Minimise);
         let _ = c.view();
+    }
+
+    /// The window is exactly what it shows: drawn in a bigger canvas, the
+    /// surface's border is the last row / column of `size()`, and nothing
+    /// is drawn past it (closed, list open, notice, download question, dot).
+    #[test]
+    fn the_window_is_exactly_the_size_of_what_is_visible() {
+        let mut c = Controller::new("auto", "ar", false);
+        let mut states = vec![("closed", c.clone())];
+        c.update(Msg::Picker(picker::Msg::Open(Side::Target)));
+        states.push(("list", c.clone()));
+        c.set_notice(Some("x".repeat(500)));
+        assert!(c.notice.as_ref().unwrap().chars().count() <= NOTICE_CHARS);
+        states.push(("list+notice", c.clone()));
+        c.picker.close();
+        states.push(("notice", c.clone()));
+        c.ask("the model", 40_000_000);
+        states.push(("ask", c.clone()));
+        c.minimised = true;
+        c.notice = None;
+        states.push(("dot", c.clone()));
+        let bg = crate::ui::theme::current().window;
+        let bg = [bg.r, bg.g, bg.b, bg.a].map(|v| (v * 255.0).round() as u8);
+        for (name, c) in states {
+            let size = c.size();
+            let (w, h) = (size.width as u32 + 40, size.height as u32 + 40);
+            let px = widgets::shot::render(c.view(), w, h);
+            let at = |x: u32, y: u32| px[((y * w + x) * 4) as usize..][..4].to_vec();
+            let (sw, sh) = (size.width as u32, size.height as u32);
+            let (mx, my) = (sw / 2, sh / 2);
+            if name != "dot" {
+                assert_ne!(at(sw - 1, my), bg, "{name}: right edge");
+                assert_ne!(at(mx, sh - 1), bg, "{name}: bottom edge");
+            }
+            for d in 2..20 {
+                assert_eq!(at(sw - 1 + d, my), bg, "{name}: empty box right");
+                assert_eq!(at(mx, sh - 1 + d), bg, "{name}: empty box below");
+            }
+        }
     }
 
     #[test]

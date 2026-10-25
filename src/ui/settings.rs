@@ -533,6 +533,7 @@ pub enum Message {
     DefaultAction(DefaultAction),
     CardSide(CardSide),
     SearchHistory(bool),
+    Autostart(bool),
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
     /// The picker's answer (`None` = cancelled).
@@ -992,6 +993,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
                 crate::sheet::history::clear_default(); // turning it off deletes it
             }
         }
+        Message::Autostart(on) => state.draft.general.autostart = on,
         Message::SelectStyle(v) => state.draft.selection.style = v,
         Message::After(v) => state.draft.selection.after = v,
         Message::SearchWith(v) => state.draft.selection.search_with = v,
@@ -1328,6 +1330,13 @@ fn results_hint() -> &'static str {
         .unwrap_or("Lens and AI Mode results. Drag its header to the other side")
 }
 
+/// The Start-with-the-OS switch's label (Settings and onboarding).
+pub const START_LABEL: &str = if cfg!(windows) {
+    "Start OpenCircle when Windows starts"
+} else {
+    "Start OpenCircle when you log in"
+};
+
 fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     let folder = state.draft.general.save_folder.as_str();
     let shown = if folder.is_empty() {
@@ -1391,6 +1400,19 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
                 ],
                 state.draft.results.side,
                 Message::CardSide,
+            ),
+            None,
+        ),
+        form_row(
+            START_LABEL,
+            "OpenCircle waits in the tray, with no window",
+            segmented(
+                &[
+                    (false, "Off", "Don't start OpenCircle by itself"),
+                    (true, "On", "Start OpenCircle by itself"),
+                ],
+                state.draft.general.autostart,
+                Message::Autostart,
             ),
             None,
         ),
@@ -1972,7 +1994,7 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
     let mut rows = vec![form_row(
         "Provider",
         if ai.provider == Provider::Browser {
-            "Opens Google AI Mode in your browser. No key"
+            "Google AI Mode in OpenCircle's results card. No key"
         } else {
             "Who answers your questions"
         },
@@ -1981,7 +2003,7 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
                 (
                     Provider::Browser,
                     "Browser",
-                    "Google AI Mode in your browser, no key",
+                    "Google AI Mode in the results card, no key",
                 ),
                 (Provider::Anthropic, "Anthropic", "Use Anthropic (Claude)"),
                 (
@@ -2204,6 +2226,35 @@ pub(super) mod tests {
             self.0.borrow_mut().remove(s.key_entry());
             Ok(())
         }
+    }
+
+    #[test]
+    fn general_has_the_start_with_the_os_switch_on_by_default() {
+        let path = tmp("autostart");
+        let (mut s, _) = state(Some(path.clone()));
+        assert!(s.draft.general.autostart);
+        let texts = shot::texts(view(&s));
+        assert!(texts.iter().any(|t| t == START_LABEL), "{texts:?}");
+        update(&mut s, Message::Autostart(false));
+        let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+            panic!("not saved: {:?}", s.problems);
+        };
+        assert!(!cfg.general.autostart);
+        assert!(!Config::load_from(&path).0.general.autostart);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn the_browser_provider_says_it_opens_in_the_results_card() {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::Section(Section::Ai));
+        update(&mut s, Message::Provider(Provider::Browser));
+        let texts = shot::texts(view(&s));
+        assert!(
+            texts.iter().any(|t| t.contains("results card")),
+            "{texts:?}"
+        );
+        assert!(!texts.iter().any(|t| t.contains("in your browser")));
     }
 
     #[test]

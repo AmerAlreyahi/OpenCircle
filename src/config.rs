@@ -13,6 +13,7 @@
 //! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
 //! search_history = false            # keep the card's searches on this PC (opt-in)
+//! autostart = true                  # start with Windows / at login (tray only, no window)
 //!
 //! [results]                         # the Lens / AI Mode results card
 //! side = "right"                    # left | right (the card docks there when dragged)
@@ -326,7 +327,7 @@ impl Default for SnipConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GeneralConfig {
     pub default_action: DefaultAction,
     /// Where the Save dialog starts; "" = the system's choice.
@@ -334,6 +335,19 @@ pub struct GeneralConfig {
     /// Keep the card's searches on this PC (`sheet::history`). Off by default.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub search_history: bool,
+    /// Start OpenCircle with the OS (`autostart`). On by default.
+    pub autostart: bool,
+}
+
+impl Default for GeneralConfig {
+    fn default() -> Self {
+        GeneralConfig {
+            default_action: DefaultAction::default(),
+            save_folder: String::new(),
+            search_history: false,
+            autostart: true,
+        }
+    }
 }
 
 /// The Lens / AI Mode results card (`[results]`): where the user put it.
@@ -960,6 +974,7 @@ impl Config {
                 d.general.search_history,
                 &mut w,
             );
+            c.general.autostart = get(t, "general.", "autostart", d.general.autostart, &mut w);
         }
         if let Some(t) = section(&root, "results", &mut w) {
             let (p, d) = ("results.", d.results);
@@ -1652,6 +1667,12 @@ mod tests {
         assert!(!Config::default().general.search_history);
         let (c, w) = Config::parse("[general]\nsearch_history = true\n");
         assert!(c.general.search_history && w.is_empty());
+        // Start with the OS: on unless turned off; a non-bool is reported.
+        assert!(Config::default().general.autostart);
+        let (c, w) = Config::parse("[general]\nautostart = false\n");
+        assert!(!c.general.autostart && w.is_empty());
+        let (c, w) = Config::parse("[general]\nautostart = \"yes\"\n");
+        assert!(c.general.autostart && w.len() == 1, "{w:?}");
         // The results card: right, default size; the user's side and size kept.
         let d = Config::default().results;
         assert_eq!((d.side, d.width, d.height), (CardSide::Right, 0, 0));

@@ -6,6 +6,7 @@
 mod actions;
 #[allow(dead_code)] // library API, wired into the UI later
 mod ai;
+mod autostart;
 mod capture;
 #[allow(dead_code)] // library API, wired into the UI later
 mod config;
@@ -201,6 +202,7 @@ fn main() -> ExitCode {
         eprintln!("[opencircle] config: {warning}");
     }
     hotkey::start(tx.clone(), &config);
+    autostart::apply(&config);
     config::set_current(config);
     let _tray = ui::start_tray(tx.clone());
     update::start(tx.clone());

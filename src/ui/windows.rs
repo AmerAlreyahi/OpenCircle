@@ -711,6 +711,7 @@ fn apply(cfg: Config) {
     if old.shortcut != cfg.shortcut || old.quick_actions != cfg.quick_actions {
         crate::hotkey::reload(&cfg);
     }
+    crate::autostart::apply(&cfg);
     config::set_current(cfg);
 }
 

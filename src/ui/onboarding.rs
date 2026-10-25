@@ -126,6 +126,8 @@ pub struct State {
     access: Access,
     /// "Keep OpenCircle up to date": on unless the user turns it off.
     updates: bool,
+    /// "Start with the OS": on unless the user turns it off.
+    autostart: bool,
 }
 
 impl fmt::Debug for State {
@@ -153,6 +155,7 @@ pub enum Message {
     /// The desktop's answer to the screenshot request.
     Allowed(Result<(), String>),
     Updates(bool),
+    Autostart(bool),
 }
 
 // One short-lived value per message: a boxed Config would buy nothing.
@@ -200,6 +203,7 @@ impl State {
             wayland: false,
             access: Access::Unasked,
             updates: true,
+            autostart: true,
         }
     }
 
@@ -213,6 +217,7 @@ impl State {
         let mut c = self.base.clone();
         c.theme = self.theme;
         c.update.auto = Some(self.updates);
+        c.general.autostart = self.autostart;
         match self.choice {
             Choice::Browser => c.ai.provider = Provider::Browser,
             Choice::Claude => {
@@ -284,6 +289,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             }
         }
         Message::Updates(on) => state.updates = on,
+        Message::Autostart(on) => state.autostart = on,
         Message::Theme(t) => {
             state.theme = t;
             theme::apply(t);
@@ -494,6 +500,20 @@ fn done(state: &State) -> Element<'_, Message> {
         .align_y(iced::Center)
         .width(FORM_WIDTH + 140.0),
         caption(super::settings::UPDATE_PRIVACY),
+        row![
+            body(super::settings::START_LABEL),
+            space::horizontal(),
+            segmented(
+                &[
+                    (false, "Off", "Don't start OpenCircle by itself"),
+                    (true, "On", "Start OpenCircle by itself"),
+                ],
+                state.autostart,
+                Message::Autostart,
+            ),
+        ]
+        .align_y(iced::Center)
+        .width(FORM_WIDTH + 140.0),
         caption("Everything can be changed in Settings, from the tray icon."),
     ]
     .spacing(14)
@@ -659,6 +679,18 @@ mod tests {
         assert!(!text.contains("FAKE"), "the key stays out of the file");
         theme::apply(Theme::Dark);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn start_with_the_os_is_preset_on_and_the_switch_is_kept() {
+        let mut s = state(Some(tmp("onboarding-autostart")));
+        assert!(s.config().general.autostart, "pre-set on");
+        update(&mut s, Message::Autostart(false));
+        assert!(!s.config().general.autostart);
+        next(&mut s, 3);
+        assert_eq!(s.step(), Step::Done);
+        let texts = shot::texts(view(&s));
+        assert!(texts.iter().any(|t| t == crate::ui::settings::START_LABEL));
     }
 
     #[test]

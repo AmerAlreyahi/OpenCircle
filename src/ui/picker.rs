@@ -116,6 +116,7 @@ impl Picker {
     }
 
     /// "Auto → AR", for status lines.
+    #[cfg(test)]
     pub fn label(&self) -> String {
         let code = |c: &str| match c {
             AUTO => "Auto".to_string(),
