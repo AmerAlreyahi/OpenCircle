@@ -51,7 +51,12 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
     let mut fonts = 0u32;
     // SAFETY: the bytes are static; the font stays this process's until it exits.
     let _ = unsafe {
-        AddFontMemResourceEx(icons.as_ptr().cast(), icons.len() as u32, None, &mut fonts)
+        AddFontMemResourceEx(
+            icons.as_ptr().cast(),
+            icons.len() as u32,
+            None,
+            &raw mut fonts,
+        )
     };
     let Ok(el) = winit::event_loop::EventLoop::<Ev>::with_user_event().build() else {
         return 1;

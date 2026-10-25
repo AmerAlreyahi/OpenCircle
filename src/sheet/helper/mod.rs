@@ -46,7 +46,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use proto::{Args, CHIP, Kind, Line, Place};
+use proto::{Args, CHIP, Kind, Line};
 use wry::http::{Request, Response, header::CONTENT_TYPE};
 use wry::{PageLoadEvent, PermissionResponse, WebContext, WebViewBuilder};
 
@@ -280,12 +280,12 @@ pub fn lerp(a: proto::Rect4, b: proto::Rect4, t: f64) -> proto::Rect4 {
 
 /// Offset (dx, dy) of the card `share` (0..1) into its slide.
 #[cfg(target_os = "linux")]
-pub fn slide_off(p: Place, share: f64) -> (f64, f64) {
+pub fn slide_off(p: proto::Place, share: f64) -> (f64, f64) {
     let d = SLIDE_BY * (1.0 - share);
     match p {
-        Place::Right => (d, 0.0),
-        Place::Left => (-d, 0.0),
-        Place::Bottom => (0.0, d),
+        proto::Place::Right => (d, 0.0),
+        proto::Place::Left => (-d, 0.0),
+        proto::Place::Bottom => (0.0, d),
     }
 }
 
