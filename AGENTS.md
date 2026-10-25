@@ -170,6 +170,10 @@ production systems.
   still irreversible (strong radius + noise), with line assist (the brush stays on
   the text line it started on unless the user clearly moves; Shift = free; can be
   turned off). Solid "Redact" stays as a separate preset.
+- Softer blur (owner, 2026-10-25, supersedes "strong radius + noise" in Blur): the blur
+  must look pretty: smooth like a background fade, no visible squares or blocks, no
+  noise/grain, weaker-looking, yet text stays unrecognisable (it reads as "no text
+  there", not as a smear).
 - Results sheet (owner, 2026-10-24): explore a slide-up sheet showing Google's own
   page (Lens / AI Mode) in the system web view (WebView2 / WebKitGTK), loaded only
   while open; no scraping, no copying Google's UI. Placement: see "Results card
