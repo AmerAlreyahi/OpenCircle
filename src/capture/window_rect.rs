@@ -321,8 +321,9 @@ fn active() -> Option<(WinRect, String, bool)> {
         };
         let taskbar = |c: &str| c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd";
         let mut hwnd = GetForegroundWindow();
-        if hwnd.is_invalid() || pid(hwnd) == me {
-            // ours has the focus (the overlay): the next window down
+        if hwnd.is_invalid() || pid(hwnd) == me || !usable(hwnd) {
+            // ours has the focus (the overlay), or a hidden window (a console
+            // app run from a script): the next window down
             // ponytail: another app's always-on-top window wins over the
             // focused one here
             let mut next = GetTopWindow(None).ok();
