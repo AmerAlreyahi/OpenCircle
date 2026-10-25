@@ -227,6 +227,10 @@ production systems.
   The bar keeps exactly the same size in every state (selection actions shown
   dimmed until something is selected), and Edit turns it into the editor toolbar
   in place, same anchor and drag (owner, 2026-10-25).
+  No Search / Ask AI / Text buttons in the bar (owner, 2026-10-25: Enter asks AI,
+  Ctrl+C / direct selection copies text, search runs on its own; in "wait" mode
+  Enter with an empty field searches). Ask AI and Lens use ONE card: no interim
+  panel, same side and remembered size from the first frame.
   The bottom bar holds: the ask field, Ask AI, Translate screen, Live translate,
   Search music and Edit image (owner, 2026-10-24). Search music is always shown
   (supersedes "hidden until a key is set"): with no key it opens the key setup and
@@ -243,6 +247,10 @@ production systems.
 - One exe on Windows (owner, 2026-10-25): the results-card helper runs as a hidden
   mode of opencircle.exe (like the OCR worker), not a second file; Linux keeps the
   separate opencircle-sheet binary (WebKitGTK must stay optional).
+- Live translate controller (owner, 2026-10-25): ONE compact controller in the
+  bar's look, sized to what's visible, never over a window's tab bar.
+- Start with the OS (owner, 2026-10-25): a Settings > General switch, ON by
+  default (also in onboarding); the app manages the Run key / autostart entry.
 - About page (owner, 2026-10-25): app info, model/library notices, and a developer
   card for the owner (avatar bundled, no runtime network; data refreshed from the
   owner's GitHub profile at each release by scripts/refresh-about.sh).
