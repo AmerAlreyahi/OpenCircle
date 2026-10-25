@@ -393,10 +393,18 @@ struct Shot {
     /// Logical px: the monitor's origin and size.
     origin: Point,
     size: Size,
-    /// Snip mode: the mode to start in, the windows on this monitor (logical
-    /// px, topmost first) and the window the user was in (Windows).
-    snip: Option<(snip::Kind, Vec<snip::Pick>, Option<isize>)>,
+    /// Snip mode: the mode to start in, every window (physical desktop px,
+    /// topmost first), the window the user was in (Windows), and every monitor
+    /// with its frame (this one too).
+    snip: Option<SnipShot>,
 }
+
+type SnipShot = (
+    snip::Kind,
+    Vec<snip::Pick>,
+    Option<isize>,
+    Vec<(snip::Place, image::Handle)>,
+);
 
 struct App {
     /// The overlay window's id; a closed window's while `overlay_open` is false.
@@ -1044,32 +1052,46 @@ impl App {
         })
         .map(move |()| Message::CaptureTimedOut(n));
         let shot = background(move |tx| {
-            let shot = capture::monitor_under_cursor().map(|mut frame| {
-                let scale = frame.scale;
-                let snip = snip.map(|kind| {
-                    if config::current().snip.cursor {
-                        capture::cursor::draw(&mut frame);
+            let shot = match snip {
+                Some(kind) => Self::snip_shot(kind),
+                // The monitor of the window the user is in (else the pointer's).
+                None => capture::active_monitor().map(|frame| {
+                    let (place, image) = snip::screen_of(frame);
+                    Shot {
+                        origin: place.logical_origin(),
+                        size: place.size(),
+                        image,
+                        scale: place.scale,
+                        snip: None,
                     }
-                    let foreground = capture::window_rect::foreground();
-                    let list = capture::window_rect::list();
-                    let windows = list.into_iter().map(|w| {
-                        let rect = snip::to_logical(w.rect, (frame.x, frame.y), scale);
-                        snip::Pick::window(rect, &w.title, w.handle)
-                    });
-                    (kind, windows.collect(), foreground)
-                });
-                Shot {
-                    origin: Point::new(frame.x as f32 / scale, frame.y as f32 / scale),
-                    size: Size::new(frame.width as f32, frame.height as f32) * (1.0 / scale),
-                    image: image::Handle::from_rgba(frame.width, frame.height, frame.rgba),
-                    scale,
-                    snip,
-                }
-            });
+                }),
+            };
             let _ = tx.unbounded_send(shot);
         })
         .map(move |shot| Message::Captured(n, at, shot));
         Task::batch([shot, timeout])
+    }
+
+    /// Snip: every monitor at once (the overlay shows the pointer's, then follows
+    /// the pointer) and every window, while the overlay is still hidden.
+    fn snip_shot(kind: snip::Kind) -> Result<Shot, String> {
+        let (mut frames, on) = capture::every_monitor()?;
+        if config::current().snip.cursor {
+            frames.iter_mut().for_each(capture::cursor::draw);
+        }
+        let foreground = capture::window_rect::foreground();
+        let windows = (capture::window_rect::list().into_iter())
+            .map(|w| snip::Pick::window(snip::desktop_rect(w.rect), &w.title, w.handle))
+            .collect();
+        let screens: Vec<_> = frames.into_iter().map(snip::screen_of).collect();
+        let (place, image) = screens.get(on).cloned().ok_or("no monitor found")?;
+        Ok(Shot {
+            origin: place.logical_origin(),
+            size: place.size(),
+            image,
+            scale: place.scale,
+            snip: Some((kind, windows, foreground, screens)),
+        })
     }
 
     fn open(&mut self, at: Instant, shot: Result<Shot, String>) -> Task<Message> {
@@ -1096,15 +1118,8 @@ impl App {
             at.elapsed().as_millis()
         );
         let size = shot.size;
-        let px = |v: f32| (v * shot.scale).round() as u32;
-        self.view = overlay::View::new(px(size.width), px(size.height), size);
-        self.tiles = overlay::tiles(&shot.image).map(|t| (shot.image.id(), t));
-        self.frame = Some(shot.image);
-        glass::set_frame(self.frame.as_ref(), shot.scale);
+        self.set_frame(shot.image, shot.scale, shot.origin, size);
         self.helper = Some(ocr::hold());
-        self.scale = shot.scale;
-        self.screen = size;
-        self.origin = shot.origin;
         self.opening = self.opening.wrapping_add(1);
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
@@ -1115,14 +1130,14 @@ impl App {
         self.bar_now = None;
         self.bar_glide = None;
         motion::refresh();
-        self.work_inset = taskbar_inset(shot.origin, size, shot.scale);
         self.behaviour = cfg.selection;
         self.bar_keys = BarKeys::of(&cfg);
         let mut first = None;
         let mut extras = Task::none();
         let mut timer = None;
-        if let Some((kind, windows, foreground)) = shot.snip {
-            let mut snip = Snip::new(windows, size, snip::can_scroll(), foreground);
+        if let Some((kind, windows, foreground, screens)) = shot.snip {
+            let mut snip = Snip::new(windows, self.place(), snip::can_scroll(), foreground);
+            snip.set_screens(screens);
             first = snip.start(kind, size); // Full = the whole screen at once
             let wait = config::current().snip.delay;
             if !std::mem::take(&mut self.timed) && wait > 0 && first.is_none() {
@@ -1133,9 +1148,7 @@ impl App {
                 snip.set_reader(reader, UIA_WINDOWS); // else dropped: no controls
             }
             self.purpose = Purpose::Snip(Box::new(snip));
-            let px = |v: f32| (v * shot.scale).round() as i32;
-            let origin = (px(shot.origin.x), px(shot.origin.y));
-            extras = self.snip_extras(read, origin, shot.scale);
+            extras = self.snip_extras(read);
         }
         let Purpose::Quick(quick, target) = self.purpose else {
             let next = match (first, timer) {
@@ -1172,6 +1185,30 @@ impl App {
         self.show().chain(run)
     }
 
+    /// The frozen frame of the monitor at `origin` (logical px, `size`) becomes
+    /// what the overlay shows.
+    fn set_frame(&mut self, image: image::Handle, scale: f32, origin: Point, size: Size) {
+        let px = |v: f32| (v * scale).round() as u32;
+        self.view = overlay::View::new(px(size.width), px(size.height), size);
+        self.tiles = overlay::tiles(&image).map(|t| (image.id(), t));
+        self.frame = Some(image);
+        glass::set_frame(self.frame.as_ref(), scale);
+        self.scale = scale;
+        self.screen = size;
+        self.origin = origin;
+        self.work_inset = taskbar_inset(origin, size, scale);
+    }
+
+    /// The shown monitor in physical desktop px.
+    fn place(&self) -> snip::Place {
+        let px = |v: f32| (v * self.scale).round();
+        snip::Place {
+            origin: (px(self.origin.x) as i32, px(self.origin.y) as i32),
+            px: (px(self.screen.width) as u32, px(self.screen.height) as u32),
+            scale: self.scale,
+        }
+    }
+
     /// Shows the (hidden or pill-sized) window over the whole monitor, or opens
     /// it full-screen where it was closed (see `can_hide_windows`).
     fn show(&mut self) -> Task<Message> {
@@ -1184,11 +1221,9 @@ impl App {
         // Place and size the window to cover the monitor BEFORE set_mode shows it:
         // iced makes it visible before going full-screen, so whatever is shown
         // first must already cover the monitor (no small black box flash).
-        // ponytail: mixed-DPI multi-monitor placement untested (needs real hardware).
         let show = windows::uncut(self.overlay)
             .map(Message::Windows)
-            .chain(window::move_to(self.overlay, self.origin))
-            .chain(window::resize(self.overlay, self.screen))
+            .chain(place_window(self.overlay, self.place()))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
             .chain(window::gain_focus(self.overlay));
         // A Lens / Ask hand-off to the browser drops the overlay out of the topmost
@@ -2413,6 +2448,22 @@ impl App {
                 }
                 Task::none()
             }
+            // The pointer went to another monitor: the overlay goes with it (that
+            // monitor's frame was frozen with this one), unless a drag, the
+            // editor or a pill holds this one.
+            snip::Msg::Left => {
+                if self.drawing || self.edit.is_some() {
+                    return Task::none();
+                }
+                let Some((place, image)) = capture::pointer().and_then(|p| snip.follow(p)) else {
+                    return Task::none();
+                };
+                self.selection = None;
+                self.stroke.clear();
+                self.set_frame(image, place.scale, place.logical_origin(), place.size());
+                // Full-screen stays on its monitor: windowed first.
+                window::set_mode(self.overlay, Mode::Windowed).chain(self.show())
+            }
             snip::Msg::Shift(held) => {
                 snip.set_shift(held);
                 Task::none()
@@ -2489,12 +2540,7 @@ impl App {
     /// Snip's slow extras, on threads: the Recent strip, and (Windows) the
     /// controls of each window the snip asks for (`read`, see
     /// `Snip::set_reader`), for outlines and snapping.
-    fn snip_extras(
-        &self,
-        read: std::sync::mpsc::Receiver<isize>,
-        origin: (i32, i32),
-        scale: f32,
-    ) -> Task<Message> {
+    fn snip_extras(&self, read: std::sync::mpsc::Receiver<isize>) -> Task<Message> {
         let recent = background(|tx| {
             let _ = tx.unbounded_send(snip::load_recent());
         })
@@ -2511,9 +2557,7 @@ impl App {
                 let tx = tx.clone();
                 std::thread::spawn(move || {
                     let controls = (capture::uia::controls(window).into_iter())
-                        .map(|(r, what)| {
-                            snip::Pick::control(snip::to_logical(r, origin, scale), &what, window)
-                        })
+                        .map(|(r, what)| snip::Pick::control(snip::desktop_rect(r), &what, window))
                         .collect();
                     let _ = tx.unbounded_send(controls);
                 });
@@ -3597,11 +3641,15 @@ impl App {
                 }),
                 None => Subscription::none(),
             };
-            // Snip: Shift held = no snapping.
+            // Snip: Shift held = no snapping; the pointer leaving may be for
+            // another monitor.
             let shift = match self.purpose {
                 Purpose::Snip(_) => iced::event::listen_with(|event, _, _| match event {
                     iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                         Some(Message::Snip(snip::Msg::Shift(m.shift())))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
+                        Some(Message::Snip(snip::Msg::Left))
                     }
                     _ => None,
                 }),
@@ -3688,6 +3736,50 @@ fn bar_button<'a>(
     };
     let button = widgets::round_button(glyph, active, message);
     widgets::hint(button, label, why, iced::widget::tooltip::Position::Top)
+}
+
+/// Puts the overlay window over the monitor at `place`, so full-screen (which
+/// covers the window's own monitor) lands there. Windows: in physical px; iced
+/// moves in logical px at the window's current scale, another monitor's when
+/// their scales differ.
+fn place_window(id: window::Id, place: snip::Place) -> Task<Message> {
+    #[cfg(windows)]
+    return window::run(id, move |w| {
+        use ::windows::Win32::Foundation::HWND;
+        use ::windows::Win32::UI::WindowsAndMessaging::{
+            SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
+        };
+        use iced::window::raw_window_handle::RawWindowHandle;
+        let Ok(handle) = w.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(h) = handle.as_raw() else {
+            return;
+        };
+        let ((x, y), (width, height)) = (place.origin, place.px);
+        // Twice: a move onto a monitor of another scale makes winit resize the
+        // window for it (WM_DPICHANGED); the second move, at the new scale, sticks.
+        for _ in 0..2 {
+            // SAFETY: `h` is this window's live handle (an iced window of ours).
+            let moved = unsafe {
+                SetWindowPos(
+                    HWND(h.hwnd.get() as *mut _),
+                    None,
+                    x,
+                    y,
+                    width as i32,
+                    height as i32,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            };
+            if let Err(e) = moved {
+                eprintln!("[opencircle] overlay not moved: {e}");
+            }
+        }
+    })
+    .discard();
+    #[cfg(not(windows))]
+    window::move_to(id, place.logical_origin()).chain(window::resize(id, place.size()))
 }
 
 /// How much of the bottom of the monitor at `origin` (`size`, logical px at
@@ -4160,7 +4252,7 @@ mod tests {
     fn snipping(area: Rectangle) -> App {
         let mut app = open_app(800, 600, 1.0);
         let window = snip::Pick::window(area, "App", 1);
-        app.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.screen, true, None)));
+        app.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.place(), true, None)));
         event(&mut app, overlay::Event::Hover(area.center()));
         app
     }
@@ -4197,7 +4289,7 @@ mod tests {
     fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
         let shot = || {
             let mut shot = a_shot().unwrap();
-            shot.snip = Some((snip::Kind::Region, Vec::new(), None));
+            shot.snip = Some((snip::Kind::Region, Vec::new(), None, Vec::new()));
             Ok(shot)
         };
         // (only the timer changes: other tests share the config)
@@ -5774,7 +5866,7 @@ mod tests {
         app.selection.as_mut().unwrap().kind = overlay::Kind::Word;
         assert!(app.auto_actions().is_empty(), "a tapped word waits");
         app.selection.as_mut().unwrap().kind = overlay::Kind::Snap;
-        app.purpose = Purpose::Snip(Box::new(Snip::new(Vec::new(), app.screen, false, None)));
+        app.purpose = Purpose::Snip(Box::new(Snip::new(Vec::new(), app.place(), false, None)));
         assert!(app.auto_actions().is_empty(), "Snip has no search");
         // an App opened before the setting existed behaves as before
         assert!(auto_targets(App::idle(window::Id::unique()).behaviour).is_empty());

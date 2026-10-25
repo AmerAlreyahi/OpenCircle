@@ -1,4 +1,5 @@
-//! Screen capture: one frozen frame of the monitor under the cursor.
+//! Screen capture: one frozen frame of a monitor (`choose`: the active window's,
+//! else the pointer's), or of every monitor at once (snip).
 //! One file per platform: `x11.rs` (Linux X11/XWayland), `portal.rs` (Linux Wayland),
 //! `win.rs` (Windows, xcap). Scrolling capture: `stitch.rs` + `scroll.rs`.
 pub mod cursor;
@@ -8,6 +9,8 @@ pub mod scroll;
 pub mod stitch;
 pub mod uia;
 pub mod window_rect;
+
+use window_rect::WinRect;
 
 #[cfg(target_os = "linux")]
 mod x11;
@@ -30,18 +33,116 @@ pub struct Frame {
     pub scale: f32,
 }
 
+/// A monitor: where it sits on the desktop (physical px), physical px per
+/// logical px, and whether it is the primary one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Monitor {
+    pub rect: WinRect,
+    pub scale: f32,
+    pub primary: bool,
+}
+
 /// Captures the monitor under the cursor (the primary one if the cursor is unknown).
 pub fn monitor_under_cursor() -> Result<Frame, String> {
+    monitor_of(None)
+}
+
+/// Captures the monitor of the active window (most of it), for Circle to Search,
+/// translate and the quick actions; the pointer's monitor when no real window is
+/// active (the desktop, the taskbar, one of ours).
+pub fn active_monitor() -> Result<Frame, String> {
+    monitor_of(window_rect::active_rect())
+}
+
+/// Snip: every monitor at once (frozen together), and which one the pointer is on.
+pub fn every_monitor() -> Result<(Vec<Frame>, usize), String> {
+    if let Some(frame) = whole_desktop() {
+        return Ok((vec![frame?], 0));
+    }
+    let monitors = platform::monitors()?;
+    let on = choose(&monitors, None, platform::pointer()).ok_or("no monitor found")?;
+    // A thread each: one capture takes tens of ms.
+    let frames = std::thread::scope(|s| {
+        let grabs: Vec<_> = (monitors.iter())
+            .map(|m| s.spawn(move || platform::grab(m)))
+            .collect();
+        (grabs.into_iter())
+            .map(|g| g.join().unwrap_or_else(|_| Err("capture failed".into())))
+            .collect::<Result<Vec<_>, _>>()
+    })?;
+    Ok((frames, on))
+}
+
+/// The pointer in physical desktop px (`None`: unknown, e.g. on Wayland).
+pub fn pointer() -> Option<(i32, i32)> {
+    if whole_desktop_only() {
+        return None;
+    }
+    platform::pointer()
+}
+
+/// The test frame, or (Wayland) the portal's whole desktop: no monitor to choose.
+fn whole_desktop_only() -> bool {
+    #[cfg(target_os = "linux")]
+    if wayland_session() {
+        return true;
+    }
+    std::env::var_os("OPENCIRCLE_TEST_FRAME").is_some()
+}
+
+fn whole_desktop() -> Option<Result<Frame, String>> {
     // ponytail: test hook. WSLg and headless CI can't capture the screen, so a PNG
     // stands in; keep it for UI snapshot tests, never document it for users.
     if let Some(path) = std::env::var_os("OPENCIRCLE_TEST_FRAME") {
-        return from_png(&path);
+        return Some(from_png(&path));
     }
     #[cfg(target_os = "linux")]
     if wayland_session() {
-        return portal::capture();
+        return Some(portal::capture());
     }
-    platform::capture()
+    None
+}
+
+/// The monitor holding most of `area` (physical desktop px), else the pointer's, captured.
+pub fn monitor_of(area: Option<WinRect>) -> Result<Frame, String> {
+    if let Some(frame) = whole_desktop() {
+        return frame;
+    }
+    let monitors = platform::monitors()?;
+    let at = choose(&monitors, area, platform::pointer()).ok_or("no monitor found")?;
+    platform::grab(&monitors[at])
+}
+
+/// The monitor holding most of the `active` window, else the one under the
+/// `pointer`, else the primary one, else the first.
+pub fn choose(
+    monitors: &[Monitor],
+    active: Option<WinRect>,
+    pointer: Option<(i32, i32)>,
+) -> Option<usize> {
+    let span = |a: i32, al: u32, b: i32, bl: u32| {
+        let (a, b) = (i64::from(a), i64::from(b));
+        ((a + i64::from(al)).min(b + i64::from(bl)) - a.max(b)).max(0)
+    };
+    let shared = |m: &Monitor, (x, y, w, h): WinRect| {
+        let (mx, my, mw, mh) = m.rect;
+        span(x, w, mx, mw) * span(y, h, my, mh)
+    };
+    let by_window = active.and_then(|r| {
+        // the first of equals
+        let (at, area) = (monitors.iter().map(|m| shared(m, r)).enumerate())
+            .rev()
+            .max_by_key(|&(_, area)| area)?;
+        (area > 0).then_some(at)
+    });
+    let by_pointer = || {
+        let (x, y) = pointer?;
+        monitors.iter().position(|m| shared(m, (x, y, 1, 1)) > 0)
+    };
+    by_window
+        .or_else(by_pointer)
+        .or_else(|| monitors.iter().position(|m| m.primary))
+        .or((!monitors.is_empty()).then_some(0))
 }
 
 /// The desktop refused the capture (`monitor_under_cursor`'s error): on Wayland it
@@ -122,6 +223,41 @@ mod tests {
             Some(OsStr::new("")),
             Some(OsStr::new("wayland"))
         ));
+    }
+
+    #[test]
+    fn the_active_windows_monitor_wins_then_the_pointers_then_the_primary() {
+        let m = |rect, primary| Monitor {
+            rect,
+            scale: 1.0,
+            primary,
+        };
+        // A laptop (primary, 150 %) and, LEFT of it, a 1080p screen.
+        let monitors = [
+            m((0, 0, 2880, 1800), true),
+            m((-1920, 200, 1920, 1080), false),
+        ];
+        let on_left = Some((-1000, 700));
+        assert_eq!(choose(&monitors, None, on_left), Some(1));
+        assert_eq!(choose(&monitors, None, Some((100, 100))), Some(0));
+        // Focus in a window on screen 2, the pointer on screen 1: screen 2.
+        let window = (-1800, 300, 1200, 800);
+        assert_eq!(choose(&monitors, Some(window), Some((100, 100))), Some(1));
+        // Across both: the one holding most of it.
+        assert_eq!(
+            choose(&monitors, Some((-300, 300, 1000, 500)), on_left),
+            Some(0)
+        );
+        // No active window (the desktop), or one off every screen: the pointer.
+        assert_eq!(choose(&monitors, Some((9000, 0, 10, 10)), on_left), Some(1));
+        // Pointer unknown or in a gap (above screen 2): the primary.
+        assert_eq!(choose(&monitors, None, Some((-1000, 0))), Some(0));
+        assert_eq!(choose(&monitors, None, None), Some(0));
+        let no_primary = [m((0, 0, 10, 10), false), m((10, 0, 10, 10), false)];
+        assert_eq!(choose(&no_primary, None, None), Some(0));
+        // Equal shares: the first.
+        assert_eq!(choose(&no_primary, Some((5, 0, 10, 10)), None), Some(0));
+        assert_eq!(choose(&[], None, None), None);
     }
 
     #[test]

@@ -251,7 +251,7 @@ const BROWSERS: [&str; 7] = [
 /// x0, y0, x1, y1 (ends exclusive); `None`: unknown (Wayland), the desktop,
 /// or under 64 px of it on this monitor. `scale` = the monitor's.
 pub fn region(origin: (i32, i32), size: (u32, u32), scale: f32) -> Option<[u32; 4]> {
-    let (client, app, maximized) = active()?;
+    let (client, app, maximized) = active(true)?;
     let full = client == (origin.0, origin.1, size.0, size.1);
     let browser = !full && BROWSERS.iter().any(|b| app.to_lowercase().contains(b));
     let (x, y, w, h) = page(client, browser, maximized, scale)?;
@@ -275,9 +275,16 @@ fn page((x, y, w, h): WinRect, browser: bool, maximized: bool, scale: f32) -> Op
     (w > 32 && h > bars + 32).then(|| (x, y + bars as i32, w, h - bars))
 }
 
-/// The active window not ours: its client rect, app name, maximised.
+/// The client rect of the window the user is in, to open on its monitor;
+/// `None` when it is the desktop, the taskbar, one of ours or unknown.
+pub fn active_rect() -> Option<WinRect> {
+    active(false).map(|(rect, _, _)| rect)
+}
+
+/// The active window not ours: its client rect, app name, maximised. When ours
+/// (or none usable) is active: the next window down if `next_down`, else none.
 #[cfg(windows)]
-fn active() -> Option<(WinRect, String, bool)> {
+fn active(next_down: bool) -> Option<(WinRect, String, bool)> {
     use std::ffi::c_void;
     use windows::Win32::Foundation::{CloseHandle, HWND};
     use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
@@ -322,6 +329,9 @@ fn active() -> Option<(WinRect, String, bool)> {
         let taskbar = |c: &str| c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd";
         let mut hwnd = GetForegroundWindow();
         if hwnd.is_invalid() || pid(hwnd) == me || !usable(hwnd) {
+            if !next_down {
+                return None;
+            }
             // ours has the focus (the overlay), or a hidden window (a console
             // app run from a script): the next window down
             // ponytail: another app's always-on-top window wins over the
@@ -385,7 +395,7 @@ fn active() -> Option<(WinRect, String, bool)> {
 }
 
 #[cfg(target_os = "linux")]
-fn active() -> Option<(WinRect, String, bool)> {
+fn active(next_down: bool) -> Option<(WinRect, String, bool)> {
     use xcb::{Xid, XidNew, x};
 
     if super::wayland_session() || std::env::var_os("DISPLAY").is_none() {
@@ -437,7 +447,8 @@ fn active() -> Option<(WinRect, String, bool)> {
         .and_then(|a| property(root, a, x::ATOM_WINDOW))
         .map(|r| r.value::<u32>().to_vec())
         .unwrap_or_default();
-    let window = (active.into_iter().chain(stacking.into_iter().rev()))
+    let stacking = stacking.into_iter().rev().filter(|_| next_down);
+    let window = (active.into_iter().chain(stacking))
         .filter(|&id| id != 0)
         // (ids the window manager lists as client windows)
         .map(x::Window::new)
@@ -475,7 +486,7 @@ fn active() -> Option<(WinRect, String, bool)> {
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-fn active() -> Option<(WinRect, String, bool)> {
+fn active(_: bool) -> Option<(WinRect, String, bool)> {
     None
 }
 
