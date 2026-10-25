@@ -4661,10 +4661,11 @@ mod tests {
     fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
         let mut app = open_app(1280, 800, 1.0);
         app.work_inset = 40.0;
+        // clear of both spots, even for a two-row toolbar
         drag(
             &mut app,
-            Point::new(200.0, 150.0),
-            Point::new(500.0, 350.0),
+            Point::new(200.0, 300.0),
+            Point::new(500.0, 450.0),
             false,
         );
         let (bar_box, _) = bar_box(&mut app);
