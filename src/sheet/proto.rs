@@ -57,7 +57,9 @@ impl Kind {
     pub fn privacy(self) -> &'static str {
         match self {
             Kind::Lens => "Only this selection is sent, and only to Google.",
-            Kind::Ai => "Only your question and the text read from the selection go to Google.",
+            Kind::Ai => {
+                "Only your question goes to Google, plus the screen's text if you included it."
+            }
         }
     }
 }
