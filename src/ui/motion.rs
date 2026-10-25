@@ -64,8 +64,9 @@ impl Curve {
 static REDUCED: AtomicBool = AtomicBool::new(false);
 
 /// Reads the OS's animation setting again (when the overlay or a card opens).
+/// (Tests always animate: CI runners turn animations off.)
 pub fn refresh() {
-    REDUCED.store(!os_animates(), Ordering::Relaxed);
+    REDUCED.store(!cfg!(test) && !os_animates(), Ordering::Relaxed);
 }
 
 /// The OS asks for no animations: motions are instant.
