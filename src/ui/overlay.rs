@@ -27,7 +27,7 @@ pub const MIN_SIDE: f32 = 12.0;
 const DRAG_STRAY: f32 = 0.2;
 
 /// A press that stays within this (screen px, either side) is a tap.
-const TAP: f32 = 4.0;
+pub const TAP: f32 = 4.0;
 
 /// Scribble: the path is sampled every `TURN_STEP` px (screen), a corner is a
 /// heading change over two samples of more than `TURN_ANGLE` degrees, and a

@@ -1,13 +1,18 @@
 //! Windows UI Automation: the controls of one window (buttons, fields, panes…)
-//! as rectangles, so a snip's edges can snap to them. The overlay covers the
-//! screen, so `ElementFromPoint` would only find it: the controls of the window
-//! the user was in are read once instead, on a thread, while Snip is open.
+//! as rectangles, so a snip can outline them and its edges snap to them. The
+//! overlay covers the screen, so `ElementFromPoint` would only find it: the
+//! controls of each window under the pointer are read once instead, on a
+//! thread, while Snip is open.
 //! Elsewhere (X11, Wayland): none; snapping uses the window rectangles.
 use super::window_rect::WinRect;
 
 /// At most this many controls (a browser page can have thousands).
 #[cfg_attr(not(windows), allow(dead_code))]
 const MAX: i32 = 4000;
+/// A window that hasn't answered in this long gives none (a hung app, a huge
+/// page): its outline stops at the window. UIA's own default is 20 s.
+#[cfg_attr(not(windows), allow(dead_code))]
+const TIMEOUT_MS: u32 = 3000;
 
 /// The controls of window `hwnd` in physical desktop px, each with what it is
 /// ("button: Save"); empty on failure. Blocking (a busy app answers slowly):
@@ -27,10 +32,12 @@ fn platform(hwnd: isize) -> Result<Vec<(WinRect, String)>, String> {
         CoUninitialize,
     };
     use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, TreeScope_Descendants, UIA_BoundingRectanglePropertyId,
+        CUIAutomation, IUIAutomation, IUIAutomation2, TreeScope_Descendants,
+        UIA_BoundingRectanglePropertyId, UIA_IsOffscreenPropertyId,
         UIA_LocalizedControlTypePropertyId, UIA_NamePropertyId,
     };
     use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    use windows::core::Interface;
 
     let os = |e: windows::core::Error| e.to_string();
     let hwnd = HWND(hwnd as *mut _);
@@ -48,11 +55,16 @@ fn platform(hwnd: isize) -> Result<Vec<(WinRect, String)>, String> {
             .map_err(os)?;
         let read = || -> windows::core::Result<Vec<(WinRect, String)>> {
             let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+            if let Ok(uia2) = uia.cast::<IUIAutomation2>() {
+                uia2.SetConnectionTimeout(TIMEOUT_MS)?;
+                uia2.SetTransactionTimeout(TIMEOUT_MS)?;
+            }
             let root = uia.ElementFromHandle(hwnd)?;
             let cache = uia.CreateCacheRequest()?;
             cache.AddProperty(UIA_BoundingRectanglePropertyId)?;
             cache.AddProperty(UIA_NamePropertyId)?;
             cache.AddProperty(UIA_LocalizedControlTypePropertyId)?;
+            cache.AddProperty(UIA_IsOffscreenPropertyId)?;
             let found = root.FindAllBuildCache(
                 TreeScope_Descendants,
                 &uia.ControlViewCondition()?,
@@ -62,7 +74,9 @@ fn platform(hwnd: isize) -> Result<Vec<(WinRect, String)>, String> {
             for i in 0..found.Length()?.min(MAX) {
                 let element = found.GetElement(i)?;
                 let r = element.CachedBoundingRectangle()?;
-                if r.right > r.left && r.bottom > r.top {
+                // scrolled out of view, a closed menu's items: not on screen
+                let offscreen = element.CachedIsOffscreen().is_ok_and(|b| b.as_bool());
+                if r.right > r.left && r.bottom > r.top && !offscreen {
                     let kind = element.CachedLocalizedControlType().map(|b| b.to_string());
                     let name = element.CachedName().map(|b| b.to_string());
                     let rect = (
@@ -89,15 +103,20 @@ fn platform(_hwnd: isize) -> Result<Vec<(WinRect, String)>, String> {
 }
 
 /// What a control is, for the outline's label: "button: Save", "tool bar",
-/// a long name cut short.
+/// a long name cut short; only the name when the kind is unknown (the outline
+/// already says "Element: ").
 #[cfg_attr(not(windows), allow(dead_code))]
 fn label(kind: &str, name: &str) -> String {
-    let kind = if kind.is_empty() { "element" } else { kind };
     let name = name.lines().next().unwrap_or_default().trim();
-    match name.chars().count() {
-        0 => kind.to_string(),
-        n if n > 32 => format!("{kind}: {}…", name.chars().take(31).collect::<String>()),
-        _ => format!("{kind}: {name}"),
+    let name = match name.chars().count() {
+        n if n > 32 => format!("{}…", name.chars().take(31).collect::<String>()),
+        _ => name.to_string(),
+    };
+    match (kind, name.is_empty()) {
+        ("", true) => "element".to_string(),
+        ("", false) => name,
+        (kind, true) => kind.to_string(),
+        (kind, false) => format!("{kind}: {name}"),
     }
 }
 
@@ -108,6 +127,7 @@ mod tests {
         assert_eq!(super::label("button", "Save"), "button: Save");
         assert_eq!(super::label("tool bar", ""), "tool bar");
         assert_eq!(super::label("", ""), "element");
+        assert_eq!(super::label("", "Home"), "Home", "not 'element: Home'");
         let long = super::label("document", &"x".repeat(50));
         assert_eq!(long.chars().count(), "document: ".len() + 32);
         assert_eq!(super::label("edit", "first\nsecond"), "edit: first");

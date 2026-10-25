@@ -86,7 +86,8 @@ const ASK_MARGIN: f32 = 24.0;
 /// on a dialog; its late answer is dropped).
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Snip reads the controls (UI Automation) of this many topmost windows.
+/// Snip reads the controls (UI Automation) of this many topmost windows at
+/// once, of any other when the pointer first goes over it.
 const UIA_WINDOWS: usize = 4;
 
 /// How far (logical px) the hint and the bottom bar slide in as the overlay opens.
@@ -1127,11 +1128,14 @@ impl App {
             if !std::mem::take(&mut self.timed) && wait > 0 && first.is_none() {
                 timer = Some(wait); // Settings > Snip > Timer: hide, count down, capture again
             }
-            let handles = snip.window_handles(UIA_WINDOWS);
+            let (reader, read) = std::sync::mpsc::channel();
+            if cfg!(windows) {
+                snip.set_reader(reader, UIA_WINDOWS); // else dropped: no controls
+            }
             self.purpose = Purpose::Snip(Box::new(snip));
             let px = |v: f32| (v * shot.scale).round() as i32;
             let origin = (px(shot.origin.x), px(shot.origin.y));
-            extras = self.snip_extras(handles, origin, shot.scale);
+            extras = self.snip_extras(read, origin, shot.scale);
         }
         let Purpose::Quick(quick, target) = self.purpose else {
             let next = match (first, timer) {
@@ -1242,7 +1246,7 @@ impl App {
             (Purpose::Snip(snip), overlay::Event::Press { at, shift }) => {
                 snip.hover(at);
                 overlay::Event::Press {
-                    at: snip.snap(at),
+                    at: snip.press(at),
                     shift,
                 }
             }
@@ -2489,27 +2493,36 @@ impl App {
     }
 
     /// Snip's slow extras, on threads: the Recent strip, and (Windows) the
-    /// controls of the topmost windows (`handles`), for outlines and snapping.
-    fn snip_extras(&self, handles: Vec<isize>, origin: (i32, i32), scale: f32) -> Task<Message> {
+    /// controls of each window the snip asks for (`read`, see
+    /// `Snip::set_reader`), for outlines and snapping.
+    fn snip_extras(
+        &self,
+        read: std::sync::mpsc::Receiver<isize>,
+        origin: (i32, i32),
+        scale: f32,
+    ) -> Task<Message> {
         let recent = background(|tx| {
             let _ = tx.unbounded_send(snip::load_recent());
         })
         .map(|recent| Message::Snip(snip::Msg::Recent(recent)));
-        if !cfg!(windows) || handles.is_empty() {
+        if !cfg!(windows) {
             return recent;
         }
         let opening = self.opening;
+        // Ends when the snip (the sender) is gone and every read is in.
         let controls = background(move |tx| {
-            // Topmost first: the window under the pointer is usually ready first.
-            for window in handles {
-                let controls = (capture::uia::controls(window).into_iter())
-                    .map(|(r, what)| {
-                        snip::Pick::control(snip::to_logical(r, origin, scale), &what, window)
-                    })
-                    .collect();
-                if tx.unbounded_send(controls).is_err() {
-                    return;
-                }
+            // A thread per window: a slow one (a huge page) holds up no other.
+            // ponytail: a hung app's thread lives until UIA's timeout (uia.rs).
+            for window in read {
+                let tx = tx.clone();
+                std::thread::spawn(move || {
+                    let controls = (capture::uia::controls(window).into_iter())
+                        .map(|(r, what)| {
+                            snip::Pick::control(snip::to_logical(r, origin, scale), &what, window)
+                        })
+                        .collect();
+                    let _ = tx.unbounded_send(controls);
+                });
             }
         })
         .map(move |rects| Message::Snip(snip::Msg::Controls(opening, rects)));

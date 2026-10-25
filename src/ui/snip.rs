@@ -13,14 +13,15 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
 
 use iced::mouse::Cursor;
 use iced::widget::canvas::{Geometry, Stroke};
 use iced::widget::{canvas, column, container, image, row};
 use iced::{Center, Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
 
-use super::theme;
 use super::widgets::{self, CLOSE, STOP};
+use super::{overlay, theme};
 use crate::actions::Crop;
 use crate::capture::scroll::{self, Params};
 use crate::capture::stitch::Stitcher;
@@ -195,6 +196,12 @@ pub struct Snip {
     /// overlay is only a pill.
     pub foreground: Option<isize>,
     shift: bool,
+    /// Asks the reader thread for a window's controls (Windows; see
+    /// `set_reader`), and the windows already asked for.
+    reader: Option<Sender<isize>>,
+    asked: Vec<isize>,
+    /// Where the button went down: as pressed, and as snapped.
+    press: Option<(Point, Point)>,
     /// The pointer (logical px), for the loupe.
     pub pointer: Option<Point>,
     /// The timer pill: countdown number, seconds left.
@@ -246,6 +253,9 @@ impl Snip {
             scroll: None,
             foreground,
             shift: false,
+            reader: None,
+            asked: Vec::new(),
+            press: None,
             pointer: None,
             countdown: None,
             countdowns: 0,
@@ -274,10 +284,23 @@ impl Snip {
             .map(|w| w.rect)
     }
 
-    /// The windows a click may pick, topmost first, at most `n`: their
-    /// controls are worth reading.
-    pub fn window_handles(&self, n: usize) -> Vec<isize> {
-        self.windows.iter().take(n).map(|w| w.window).collect()
+    /// Controls are read through `reader` (a window's handle in; its controls
+    /// come back as `Msg::Controls`): now for the topmost `first` windows, the
+    /// rest when the pointer first goes over them.
+    pub fn set_reader(&mut self, reader: Sender<isize>, first: usize) {
+        self.reader = Some(reader);
+        let top: Vec<isize> = self.windows.iter().take(first).map(|w| w.window).collect();
+        top.into_iter().for_each(|w| self.ask(w));
+    }
+
+    /// Asks once for the controls of `window`.
+    fn ask(&mut self, window: isize) {
+        if let Some(reader) = &self.reader
+            && !self.asked.contains(&window)
+        {
+            self.asked.push(window);
+            let _ = reader.send(window); // the reader is gone: the snip is closing
+        }
     }
 
     /// What a click at `p` can capture, smallest first: the controls of the
@@ -317,8 +340,12 @@ impl Snip {
 
     /// The pointer moved (logical px): the outline starts again from the
     /// smallest target there when that changed.
+    /// A window not read yet has its controls asked for.
     pub fn hover(&mut self, p: Point) {
         self.pointer = Some(p);
+        if let Some(w) = self.windows.iter().find(|w| w.rect.contains(p)) {
+            self.ask(w.window);
+        }
         let first = self.chain(p).first().map(|t| t.rect);
         if first != self.walk.0 {
             self.walk = (first, 0);
@@ -353,9 +380,16 @@ impl Snip {
     /// `p` (logical px) on the nearest window or control edge, per axis, while
     /// an area is dragged (Region) and Shift isn't held. Not in
     /// Window mode: a click near a window's edge would land on the edge.
+    /// Until the pointer leaves the press by more than a tap's jitter, it stays
+    /// where the press was put: two nearby edges can't turn a click into a drag.
     pub fn snap(&self, p: Point) -> Point {
         if self.shift || self.kind != Kind::Region {
             return p;
+        }
+        if let Some((down, at)) = self.press
+            && down.distance(p) <= overlay::TAP
+        {
+            return at;
         }
         let rects = self.windows.iter().chain(&self.controls).map(|t| &t.rect);
         snap(p, rects, SNAP)
@@ -365,9 +399,26 @@ impl Snip {
         self.shift = held;
     }
 
-    /// Controls of a window arrived (clipped to this screen, like the windows).
+    /// The button went down at `p`: where the stroke starts (snapped).
+    pub fn press(&mut self, p: Point) -> Point {
+        self.press = None;
+        let at = self.snap(p);
+        self.press = Some((p, at));
+        at
+    }
+
+    /// Controls of a window arrived: cut to their window (a page's content
+    /// runs on below a window's bottom edge; the window is already cut to this
+    /// screen).
     pub fn add_controls(&mut self, controls: Vec<Pick>) {
-        self.controls.extend(clip(controls, self.screen));
+        let within = controls.into_iter().filter_map(|c| {
+            let window = self.windows.iter().find(|w| w.window == c.window)?;
+            Some(Pick {
+                rect: c.rect.intersection(&window.rect)?,
+                ..c
+            })
+        });
+        self.controls.extend(within);
     }
 
     /// Starts in `kind` if this screen offers it (else Region, no Window list on
@@ -1548,5 +1599,69 @@ mod tests {
         assert!(s.guides(&handle, scale, false).is_some());
         let px = |v: f32| (v * scale).round() as u32;
         assert_eq!((px(area.width), px(area.height)), (1342, 1006));
+    }
+
+    #[test]
+    fn any_window_under_the_pointer_gets_its_controls_read_once() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let front = rect(100.0, 100.0, 400.0, 300.0);
+        let back = [1, 2, 3, 4, 5].map(|i| rect(0.0, 0.0, 1000.0 + 100.0 * i as f32, 1000.0));
+        let mut all = vec![front];
+        all.extend(back);
+        let mut s = Snip::new(wins(&all), SCREEN, true, None);
+        s.set_reader(tx, 1);
+        assert_eq!(
+            rx.try_iter().collect::<Vec<_>>(),
+            [1],
+            "the topmost at once"
+        );
+        // The 6th window down, where only it is: read when first hovered, once.
+        s.hover(Point::new(1450.0, 500.0));
+        s.hover(Point::new(1460.0, 510.0));
+        s.hover(Point::new(200.0, 200.0)); // the front one: already read
+        assert_eq!(rx.try_iter().collect::<Vec<_>>(), [6]);
+        // Without a reader (X11, Wayland) nothing is asked and nothing breaks.
+        let mut w = Snip::new(wins(&all), SCREEN, true, None);
+        w.hover(Point::new(1450.0, 500.0));
+        assert!(w.asked.is_empty());
+    }
+
+    #[test]
+    fn controls_are_cut_to_their_window() {
+        let window = rect(100.0, 100.0, 400.0, 300.0);
+        let mut s = Snip::new(wins(&[window]), SCREEN, true, None);
+        s.add_controls(vec![
+            // a page running on below the window's bottom edge
+            Pick::control(rect(100.0, 150.0, 400.0, 2000.0), "document", 1),
+            // scrolled away entirely, and one of a window not on this screen
+            Pick::control(rect(100.0, 900.0, 50.0, 20.0), "link", 1),
+            Pick::control(rect(10.0, 10.0, 50.0, 20.0), "button", 9),
+        ]);
+        let rects: Vec<Rectangle> = s.controls.iter().map(|c| c.rect).collect();
+        assert_eq!(rects, [rect(100.0, 150.0, 400.0, 250.0)]);
+        // Below the window the outline is never the page's.
+        s.hover(Point::new(300.0, 600.0));
+        assert_eq!(s.outlined().unwrap().label, "Screen");
+    }
+
+    #[test]
+    fn a_click_with_a_little_jitter_between_two_edges_stays_a_click() {
+        // A 16 px icon in a toolbar; the user walked up to the window and clicks.
+        let window = rect(0.0, 0.0, 800.0, 600.0);
+        let icon = rect(100.0, 100.0, 16.0, 16.0);
+        let mut s = Snip::new(wins(&[window]), SCREEN, true, None);
+        s.add_controls(vec![Pick::control(icon, "button", 1)]);
+        s.hover(Point::new(107.0, 107.0));
+        s.walk(1.0);
+        assert_eq!(s.outlined().unwrap().rect, window);
+        // Down near the icon's top-left, up 3 px further: nearer its other edges.
+        let down = s.press(Point::new(107.0, 107.0));
+        let up = s.snap(Point::new(110.0, 109.0));
+        let stroke = [down, up];
+        let selection = overlay::settle(&stroke, 1.0, SCREEN).map(|(sel, _)| sel.area);
+        assert_eq!(selection, None, "a click, not a {selection:?} drag");
+        assert_eq!(s.pick(selection, up, SCREEN), Some(Next::Edit(window)));
+        // A real drag still snaps its end.
+        assert_eq!(s.snap(Point::new(118.0, 113.0)), Point::new(116.0, 116.0));
     }
 }
