@@ -116,6 +116,10 @@ production systems.
   owner approves each publish.
 - Merging (owner, 2026-10-23): the lead merges verified work to main itself once
   CI + the local gate are green (and Windows-tested when it touches the UI).
+- Skills first (owner, 2026-10-25): every task uses the fitting skills/plugins;
+  if an important one is missing, the lead asks the owner to install it BEFORE the
+  work starts (plugins load only in a new session) and says plainly when it
+  can't do something itself.
 - UI motion and polish (owner, 2026-10-24): for motion, transitions, loaders and
   UI polish in every release, workers use the VectorLab UI/UX skills (plugin);
   ported to iced, our tokens and shared components.
