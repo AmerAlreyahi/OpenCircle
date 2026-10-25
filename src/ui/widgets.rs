@@ -1625,6 +1625,48 @@ mod forms {
             })
     }
 
+    /// A button for a `button_row`: `label_button`'s look, filling its share of the
+    /// control column instead of a fixed width.
+    pub fn form_button<'a, Message: Clone + 'a>(
+        label: &'a str,
+        primary: bool,
+        on_press: Option<Message>,
+    ) -> Button<'a, Message> {
+        label_button(label, primary, on_press).width(Length::Fill)
+    }
+
+    /// A colour swatch for a `button_row`: the colour in a field-looking button.
+    pub fn colour_swatch<'a, Message: Clone + 'a>(
+        colour: Color,
+        open: bool,
+        on_press: Message,
+    ) -> Button<'a, Message> {
+        let palette = theme::current();
+        button(container(super::dot(colour, 22.0, true)).center(Length::Fill))
+            .width(Length::Fill)
+            .height(CONTROL)
+            .padding(0)
+            .on_press(on_press)
+            .style(move |_, status| button::Style {
+                background: Some(match (open, status) {
+                    (true, _) => accent(status),
+                    (false, button::Status::Hovered) => palette.field_focus.into(),
+                    (false, button::Status::Pressed) => palette.pressed.into(),
+                    (false, _) => palette.field.into(),
+                }),
+                border: Border::default().rounded(FIELD_RADIUS),
+                ..button::Style::default()
+            })
+    }
+
+    /// The ONE button group of a form: the buttons (`form_button` / `colour_swatch`)
+    /// split the control column (`FORM_WIDTH`) into equal parts, as tall as any control.
+    pub fn button_row<'a, Message: 'a>(
+        buttons: impl IntoIterator<Item = Element<'a, Message>>,
+    ) -> Element<'a, Message> {
+        row(buttons).spacing(8).width(FORM_WIDTH).into()
+    }
+
     /// Sidebar entry (Settings sections).
     pub fn nav_item<'a, Message: Clone + 'a>(
         label: &'a str,

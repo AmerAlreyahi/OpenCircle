@@ -36,9 +36,9 @@ use crate::translate::lang::{self, LANGUAGES, Language};
 use crate::ui::about;
 use crate::ui::theme;
 use crate::ui::widgets::{
-    self, FORM_WIDTH, FieldState, caption, divider, error_text, form_row, label_button, look_tile,
-    nav_item, segmented, shortcut_field, slider, text_field, tip, title, value_field,
-    vertical_divider,
+    self, FORM_WIDTH, FieldState, button_row, caption, colour_swatch, divider, error_text,
+    form_button, form_row, label_button, look_tile, nav_item, segmented, shortcut_field, slider,
+    text_field, tip, title, value_field, vertical_divider,
 };
 
 /// Logical size of the Settings window.
@@ -213,15 +213,12 @@ impl KeyField {
             (KeyStatus::Unavailable(why), _) => col = col.push(error_text(why.as_str())),
             (KeyStatus::Saved, false) => {
                 let saved = value_field("Saved in your keyring", true);
-                let replace = label_button("Replace", false, Some(KeyMessage::Replace));
-                let remove = label_button("Remove", false, Some(KeyMessage::Remove));
-                col = col.push(saved).push(
-                    row![
-                        tip(replace, l.replace, Position::Bottom),
-                        tip(remove, l.remove, Position::Bottom),
-                    ]
-                    .spacing(8),
-                );
+                let replace = form_button("Replace", false, Some(KeyMessage::Replace));
+                let remove = form_button("Remove", false, Some(KeyMessage::Remove));
+                col = col.push(saved).push(button_row([
+                    tip(replace, l.replace, Position::Bottom),
+                    tip(remove, l.remove, Position::Bottom),
+                ]));
             }
             _ => {
                 let field = text_field(l.placeholder, self.input.expose(), false, |s| {
@@ -229,17 +226,19 @@ impl KeyField {
                 })
                 .secure(true)
                 .on_submit(KeyMessage::Save);
-                let save = label_button(
+                let save = form_button(
                     "Save key",
                     true,
                     (!self.input.is_empty()).then_some(KeyMessage::Save),
                 );
-                let mut buttons = row![tip(save, l.save, Position::Bottom)].spacing(8);
+                let mut buttons = vec![tip(save, l.save, Position::Bottom)];
                 if self.replacing {
-                    let cancel = label_button("Cancel", false, Some(KeyMessage::Cancel));
-                    buttons = buttons.push(tip(cancel, l.keep, Position::Bottom));
+                    let cancel = form_button("Cancel", false, Some(KeyMessage::Cancel));
+                    buttons.push(tip(cancel, l.keep, Position::Bottom));
                 }
-                col = col.push(tip(field, l.field, Position::Top)).push(buttons);
+                col = col
+                    .push(tip(field, l.field, Position::Top))
+                    .push(button_row(buttons));
             }
         }
         if let Some(e) = &self.error {
@@ -1333,8 +1332,8 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     } else {
         value_field(shorten(folder), false)
     };
-    let browse = label_button("Browse…", false, Some(Message::BrowseFolder));
-    let reset = label_button(
+    let browse = form_button("Browse…", false, Some(Message::BrowseFolder));
+    let reset = form_button(
         "Reset",
         false,
         (!folder.is_empty()).then_some(Message::ClearFolder),
@@ -1351,11 +1350,10 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
                 Position::Top,
             )
         },
-        row![
+        button_row([
             tip(browse, "Choose the save folder", Position::Bottom),
             tip(reset, "Use the system's folder", Position::Bottom),
-        ]
-        .spacing(8),
+        ]),
     ]
     .spacing(8)
     .width(FORM_WIDTH);
@@ -1435,7 +1433,7 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
                 .update_status
                 .as_deref()
                 .unwrap_or("Look for a new version now"),
-            label_button("Check now", false, Some(Message::CheckUpdate)),
+            button_row([form_button("Check now", false, Some(Message::CheckUpdate)).into()]),
             None,
         ),
     ]
@@ -1571,21 +1569,20 @@ fn custom_rows(state: &State) -> Vec<Element<'_, Message>> {
             let [r, g, b] = c.colours[i].0;
             Color::from_rgb8(r, g, b)
         };
-        let buttons = row![
+        let buttons = button_row([
             widgets::hint(
-                widgets::colour_button(rgb(0), state.picker == Some(0), Message::Picker(0)),
+                colour_swatch(rgb(0), state.picker == Some(0), Message::Picker(0)),
                 "First colour",
                 widgets::Why::Icon,
                 Position::Top,
             ),
             widgets::hint(
-                widgets::colour_button(rgb(1), state.picker == Some(1), Message::Picker(1)),
+                colour_swatch(rgb(1), state.picker == Some(1), Message::Picker(1)),
                 "Second colour",
                 widgets::Why::Icon,
                 Position::Top,
             ),
-        ]
-        .spacing(8);
+        ]);
         let mut control = column![buttons].spacing(8);
         if let Some(i) = state.picker {
             control = control.push(widgets::colour_picker(
@@ -3014,6 +3011,40 @@ pub(super) mod tests {
         theme::apply(Theme::Dark);
     }
 
+    /// Every control is FORM_WIDTH wide and every button in a group fills an equal
+    /// share, so no row can drift from the column (owner, 2026-10-25).
+    #[test]
+    fn controls_and_button_rows_share_the_one_column_width() {
+        use crate::ui::widgets::{button_row, colour_swatch, form_button};
+        let width = |e: &Element<'_, Message>| e.as_widget().size().width;
+        let col = Length::Fixed(FORM_WIDTH);
+        let b = |l| form_button(l, false, Some(Message::Save)).into();
+        let two = button_row([b("Browse…"), b("Reset")]);
+        let one = button_row([b("Check now")]);
+        assert_eq!(width(&two), col);
+        assert_eq!(width(&one), col);
+        for e in [
+            b("x"),
+            colour_swatch(Color::WHITE, false, Message::Save).into(),
+        ] {
+            assert_eq!(width(&e), Length::Fill, "a group button fills its share");
+        }
+        let seg: Element<'_, Message> = segmented(&[(1, "a", "a")], 1, |_| Message::Save);
+        assert_eq!(width(&seg), col);
+        let val: Element<'_, Message> = value_field("v", false).into();
+        assert_eq!(width(&val), col);
+        let txt: Element<'_, Message> = text_field("p", "", false, |_| Message::Save).into();
+        assert_eq!(width(&txt), col);
+        let sl: Element<'_, Message> = slider(0..=10, 1, "", |_| Message::Save);
+        assert_eq!(width(&sl), col);
+        let (s, _) = state(None);
+        assert_eq!(width(&s.key.view().map(Message::ApiKey)), col);
+        // No page builds its own fixed-width button: only the footer's Save.
+        let src = include_str!("settings.rs");
+        let body = &src[..src.find("\n#[cfg(test)]").unwrap()];
+        assert_eq!(body.matches("label_button(").count(), 1);
+    }
+
     #[test]
     fn renders_every_section_in_both_themes() {
         for (name, theme_choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
@@ -3046,6 +3077,13 @@ pub(super) mod tests {
                     .count();
                 assert!(other > 5_000, "{file} looks empty ({other})");
             }
+            // General in full: Save folder and Check now sit below the fold.
+            update(&mut s, Message::Section(Section::General));
+            shot::save(
+                &format!("settings-general-tall-{name}"),
+                view(&s),
+                Size::new(820.0, 900.0),
+            );
             // The error state of the shortcut field (conflict) and an invalid URL.
             update(&mut s, Message::Section(Section::Ai));
             update(&mut s, Message::BaseUrl("ftp://nope".into()));
