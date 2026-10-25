@@ -217,9 +217,9 @@ production systems.
   bottom bar (drag snaps to the nearest anchor: bottom-centre default, top-centre,
   bottom-left, bottom-right; anchor remembered; moves aside so it never covers the
   selection; default a clear gap above the
-  taskbar) holds everything as round icon buttons (no labels, tooltips), and
-  selection actions (Search, Text, Copy, Save) slide in when something is
-  selected. The Ask AI icon will become an OpenCircle-logo SVG later.
+  taskbar) holds everything as round icon buttons (no labels, tooltips);
+  selection actions (Search, Text, Copy, Save) are always there, dimmed until
+  something is selected. The Ask AI icon will become an OpenCircle-logo SVG later.
   The bar keeps exactly the same size in every state (selection actions shown
   dimmed until something is selected), and Edit turns it into the editor toolbar
   in place, same anchor and drag (owner, 2026-10-25).
