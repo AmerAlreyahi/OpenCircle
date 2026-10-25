@@ -262,6 +262,37 @@ pub mod card {
         hover: bool,
         on: impl Fn(Event) -> Message,
     ) -> Element<'a, Message> {
+        let back = crate::ui::glass::backdrop();
+        framed(header, body, footer, at, screen, hover, on, back)
+    }
+
+    /// `frame`, always solid (never Frost / Graphite glass): Google's results
+    /// card while it loads, as the helper (which can't blur) draws it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn solid<'a, Message: Clone + 'a>(
+        header: Header<'a>,
+        body: impl Into<Element<'a, Message>>,
+        footer: Option<Element<'a, Message>>,
+        at: Rectangle,
+        screen: Size,
+        hover: bool,
+        on: impl Fn(Event) -> Message,
+    ) -> Element<'a, Message> {
+        framed(header, body, footer, at, screen, hover, on, None)
+    }
+
+    /// `back`: the blurred screen behind a glass card, `None` = solid.
+    #[allow(clippy::too_many_arguments)]
+    fn framed<'a, Message: Clone + 'a>(
+        header: Header<'a>,
+        body: impl Into<Element<'a, Message>>,
+        footer: Option<Element<'a, Message>>,
+        at: Rectangle,
+        screen: Size,
+        hover: bool,
+        on: impl Fn(Event) -> Message,
+        back: Option<std::rc::Rc<crate::ui::glass::Backdrop>>,
+    ) -> Element<'a, Message> {
         let palette = theme::floating();
         let mut top = row![icon(header.icon), heading(header.title)]
             .spacing(10)
@@ -304,7 +335,6 @@ pub mod card {
             parts = parts.push(rule()).push(container(footer).padding([16, 20]));
         }
         // Frost / Graphite: the tint over the blurred screen instead of solid.
-        let back = crate::ui::glass::backdrop();
         let tint = if back.is_some() {
             palette.panel
         } else {

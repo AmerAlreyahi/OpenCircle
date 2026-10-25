@@ -934,6 +934,7 @@ fn browser_turn(prompt: &str, read: Option<Result<String, String>>) -> (String, 
 /// chip), its footer (the privacy line), and a still skeleton of text lines
 /// where the page will be (a wait over a second: a skeleton, no spinner;
 /// still, so the overlay redraws nothing and reduced motion needs nothing).
+/// Solid, as the helper draws it (it can't blur the screen).
 fn loading<'a>(kind: sheet::Kind, at: Rectangle, screen: Size, hover: bool) -> Element<'a, Msg> {
     let icon = match kind {
         sheet::Kind::Lens => actions::lens::ACTION.icon,
@@ -975,7 +976,7 @@ fn loading<'a>(kind: sheet::Kind, at: Rectangle, screen: Size, hover: bool) -> E
     .spacing(12)
     .width(Fill);
     let footer = widgets::caption(kind.privacy()).into();
-    widgets::card::frame(header, body, Some(footer), at, screen, hover, Msg::Card)
+    widgets::card::solid(header, body, Some(footer), at, screen, hover, Msg::Card)
 }
 
 #[cfg(test)]
