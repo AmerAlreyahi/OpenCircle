@@ -814,8 +814,17 @@ impl App {
                 }
                 Task::none()
             }
+            // Let go: the card docks where Google's card opens, and its side and
+            // size are kept for every next card (as the results card keeps them).
             Message::CardReleased => {
-                self.card_drag = None;
+                if let (Some((how, _)), Some(r)) = (self.card_drag.take(), self.card.take()) {
+                    let f = f64::from;
+                    let r = [f(r.x), f(r.y), f(r.width), f(r.height)];
+                    let screen = (f(self.screen.width), f(self.screen.height));
+                    let moved = how == widgets::card::Drag::Move;
+                    let results = crate::sheet::let_go(config::results(), moved, r, screen);
+                    crate::sheet::keep(results);
+                }
                 Task::none()
             }
             Message::AskInput(text) => {
@@ -2624,7 +2633,7 @@ impl App {
         match msg {
             panel::Msg::Card(card::Event::Grab(how)) => self.card_drag = Some((how, None)),
             panel::Msg::Card(card::Event::Hover(on)) => self.card_hover = on,
-            panel::Msg::Card(card::Event::Reset) => self.card = None,
+            panel::Msg::Card(card::Event::Reset) => reset_card(&mut self.card),
             panel::Msg::Card(card::Event::Close) => self.panel = None,
             panel::Msg::Cancel => self.panel = None,
             // The user took the results to the browser: on Linux get out of
@@ -2862,7 +2871,7 @@ impl App {
                 Task::none()
             }
             translate::Msg::Card(card::Event::Reset) => {
-                self.card = None;
+                reset_card(&mut self.card);
                 Task::none()
             }
             // the word card's ×: back to the translation; a prompt's: done
@@ -3729,6 +3738,18 @@ fn background<T: Send + 'static>(
 
 fn triggers() -> impl Stream<Item = Trigger> {
     stream::iter(TRIGGERS.lock().unwrap().take()).flatten()
+}
+
+/// Double-click on a card's inner edge: back to the default size, for every
+/// next card too (as the results card does).
+fn reset_card(card: &mut Option<Rectangle>) {
+    *card = None;
+    let results = config::results();
+    crate::sheet::keep(config::ResultsConfig {
+        width: 0,
+        height: 0,
+        ..results
+    });
 }
 
 #[cfg(test)]
@@ -5841,7 +5862,7 @@ mod tests {
     }
 
     #[test]
-    fn the_result_card_opens_away_from_the_selection_and_moves_by_its_grip() {
+    fn the_result_card_opens_off_the_selection_and_moves_by_its_grip() {
         let mut app = open_app(1920, 1080, 1.0);
         drag(
             &mut app,
@@ -5853,21 +5874,22 @@ mod tests {
         assert!(app.panel.is_some());
         let at = app.card_at();
         assert_eq!(at.x + at.width, 1920.0 - card::GAP, "right");
-        // the grip: the card follows the pointer, and stays there this session
+        // the grip: the card follows the pointer while held
         let id = app.panel.as_ref().unwrap().0;
         let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Move));
         let _ = app.update(Message::Panel(id, grab));
         let _ = app.update(Message::CardMoved(Point::new(1700.0, 200.0)));
         let _ = app.update(Message::CardMoved(Point::new(1100.0, 200.0)));
-        let _ = app.update(Message::CardReleased);
         assert_eq!(
             app.card_at().position(),
             at.position() + Vector::new(-600.0, 0.0)
         );
+        // let go: it docks where Google's card opens (the side it was dropped
+        // on is kept: `sheet::let_go`; tests keep no config), no more moves
+        let _ = app.update(Message::CardReleased);
         let _ = app.update(Message::CardMoved(Point::new(0.0, 0.0)));
-        assert_eq!(app.card_at().x, at.x - 600.0, "let go: no more moves");
-        // a selection on the right: a new card would go left, but the user's place wins
-        app.card = None;
+        assert_eq!(app.card_at(), at);
+        // a selection under the card: this one goes left
         drag(
             &mut app,
             Point::new(1500.0, 100.0),

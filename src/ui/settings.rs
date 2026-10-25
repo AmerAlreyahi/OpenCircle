@@ -1077,6 +1077,22 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
     Outcome::None
 }
 
+/// The results card's place to save: its size is the app's (the card keeps it
+/// while Settings is open), its side the user's choice here if they changed it
+/// (`draft` vs `opened`), else the app's `now`.
+fn kept_card(
+    draft: crate::config::ResultsConfig,
+    opened: crate::config::ResultsConfig,
+    now: crate::config::ResultsConfig,
+) -> crate::config::ResultsConfig {
+    let side = if draft.side != opened.side {
+        draft.side
+    } else {
+        now.side
+    };
+    crate::config::ResultsConfig { side, ..now }
+}
+
 fn save(state: &mut State) -> Outcome {
     if !state.problems.is_empty() {
         state.notice = Some("Fix the problems above first".into());
@@ -1087,6 +1103,11 @@ fn save(state: &mut State) -> Outcome {
         state.notice = Some("Nothing to save".into());
         return Outcome::None;
     }
+    state.draft.results = kept_card(
+        state.draft.results,
+        state.saved.results,
+        crate::config::results(),
+    );
     let result = match &state.path {
         Some(p) => state.draft.save_to(p),
         None => state.draft.save(),
@@ -3160,4 +3181,28 @@ pub(super) mod tests {
         }
         theme::apply(Theme::Dark);
     }
+}
+
+/// Saving Settings never undoes the card size the user gave the results
+/// card while Settings was open; a side chosen here wins.
+#[test]
+fn saving_settings_keeps_the_cards_remembered_size() {
+    use crate::config::ResultsConfig;
+    let opened = ResultsConfig::default();
+    let now = ResultsConfig {
+        side: CardSide::Left,
+        width: 700,
+        height: 0,
+    };
+    assert_eq!(kept_card(opened, opened, now), now, "the app's place");
+    let picked = ResultsConfig {
+        side: CardSide::Left,
+        ..opened
+    };
+    let app = ResultsConfig {
+        side: CardSide::Right,
+        ..now
+    };
+    let mine = kept_card(picked, opened, app);
+    assert_eq!((mine.side, mine.width), (CardSide::Left, 700));
 }

@@ -46,7 +46,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use proto::{Args, Kind, Line, Place};
+use proto::{Args, CHIP, Kind, Line, Place};
 use wry::http::{Request, Response, header::CONTENT_TYPE};
 use wry::{PageLoadEvent, PermissionResponse, WebContext, WebViewBuilder};
 
@@ -83,9 +83,10 @@ const NO_RUNTIME: u8 = 3;
 const SCHEME: &str = "ocsheet";
 /// The slide-in and the dock after a drop (`motion`: the app's one motion scale).
 const SLIDE: Duration = motion::ENTER;
-/// How far the card travels while sliding in (logical px).
+/// How far the card travels while sliding in (logical px; Linux: Windows shows
+/// it in place, over the app's loading card).
+#[cfg(target_os = "linux")]
 const SLIDE_BY: f64 = 48.0;
-const CHIP: &str = "google.com";
 /// Esc inside the page (the web view has the keyboard) closes the card.
 const ESC_JS: &str =
     "addEventListener('keydown',e=>{if(e.key==='Escape')window.ipc.postMessage('close')},true)";
@@ -197,7 +198,9 @@ pub fn history_url() -> String {
 /// The web view with every limit of the card (module docs); `close` runs on
 /// the page's "close". `history`: the History page (the user keeps one); its
 /// Clear is the only other message, and only from that page. `captcha` hears
-/// whether each page is Google's human check.
+/// whether each page is Google's human check; `drawing` that a Google page
+/// started to draw. `bg` (0xRRGGBB) shows until it does.
+#[allow(clippy::too_many_arguments)]
 pub fn builder<'a>(
     ctx: &'a mut WebContext,
     page: Page,
@@ -205,10 +208,14 @@ pub fn builder<'a>(
     t0: Instant,
     close: impl Fn() + 'static,
     captcha: impl Fn(bool) + 'static,
+    drawing: impl Fn() + 'static,
+    bg: u32,
 ) -> WebViewBuilder<'a> {
     let own_ipc = page_url();
+    let [_, red, green, blue] = bg.to_be_bytes();
     let b = WebViewBuilder::new_with_web_context(ctx)
         .with_devtools(false)
+        .with_background_color((red, green, blue, 255))
         .with_initialization_script(ESC_JS)
         .with_ipc_handler(move |req: Request<String>| {
             let from_history = proto::is_history(&req.uri().to_string(), &own_ipc);
@@ -225,6 +232,9 @@ pub fn builder<'a>(
         .with_on_page_load_handler(move |e, url| {
             // Google's human check shows a hint (the user answers it, never us).
             captcha(proto::is_captcha(&url));
+            if let (PageLoadEvent::Started, true) = (&e, url.starts_with("https://")) {
+                drawing();
+            }
             if let PageLoadEvent::Finished = e {
                 log(t0, "loaded", &url);
                 if url.starts_with("https://") {
@@ -269,6 +279,7 @@ pub fn lerp(a: proto::Rect4, b: proto::Rect4, t: f64) -> proto::Rect4 {
 }
 
 /// Offset (dx, dy) of the card `share` (0..1) into its slide.
+#[cfg(target_os = "linux")]
 pub fn slide_off(p: Place, share: f64) -> (f64, f64) {
     let d = SLIDE_BY * (1.0 - share);
     match p {
@@ -278,7 +289,9 @@ pub fn slide_off(p: Place, share: f64) -> (f64, f64) {
     }
 }
 
-/// The header's icon: a plain glyph (the app's icon font isn't here).
+/// The header's icon: a plain glyph (the app's icon font isn't here; Windows
+/// draws the app's own).
+#[cfg(target_os = "linux")]
 pub fn icon(kind: Kind) -> &'static str {
     match kind {
         Kind::Lens => "⌕",

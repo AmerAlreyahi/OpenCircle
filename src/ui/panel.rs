@@ -152,6 +152,17 @@ impl Panel {
         question: Option<String>,
         avoid: Option<sheet::Avoid>,
     ) -> (Panel, Task<Msg>) {
+        Panel::start(kind, crop, question, avoid, true)
+    }
+
+    /// `open`; `screen` = the question goes with the crop and its text.
+    fn start(
+        kind: actions::Panel,
+        crop: Crop,
+        question: Option<String>,
+        avoid: Option<sheet::Avoid>,
+        screen: bool,
+    ) -> (Panel, Task<Msg>) {
         let crop = Arc::new(crop);
         let wanted = kind != actions::Panel::Text && sheet::wanted();
         let mut panel = Panel {
@@ -167,7 +178,7 @@ impl Panel {
                 avoid,
                 ..Sheet::default()
             },
-            screen: true,
+            screen,
         };
         let task = match kind {
             actions::Panel::Lens => {
@@ -201,6 +212,14 @@ impl Panel {
                     chat: Chat::default(),
                     browse: Browse::Idle,
                 };
+                // No key (Google AI Mode): nothing to load (no keyring, no PNG), so
+                // the question goes at once and the card shows Google's loading
+                // card from the first frame, never "Getting ready…" before it.
+                if crate::config::current().ai.provider == crate::config::Provider::Browser {
+                    let ready = ask::setup(&crop).map(Arc::new);
+                    let task = panel.update(Msg::Ready(ready));
+                    return (panel, task);
+                }
                 background(move |tx| {
                     let _ = tx.unbounded_send(Msg::Ready(ask::setup(&crop).map(Arc::new)));
                 })
@@ -219,9 +238,7 @@ impl Panel {
             height: 1,
             rgba: vec![0; 4],
         };
-        let (mut panel, task) = Panel::open(actions::Panel::Ask, blank, Some(question), None);
-        panel.screen = false;
-        (panel, task)
+        Panel::start(actions::Panel::Ask, blank, Some(question), None, false)
     }
 
     /// The question goes with the screen (`open`), or alone (`open_question`).
@@ -546,6 +563,9 @@ impl Panel {
         if self.sheet.shown {
             return space().into(); // the results card is in its place
         }
+        if let Some(kind) = self.starting() {
+            return loading(kind, at, screen, hover);
+        }
         let (action, (body, footer)) = match &self.state {
             State::Lens(status) => (&actions::lens::ACTION, self.lens_view(status.as_ref())),
             State::Text(reading) => (&actions::text::ACTION, (self.text_view(reading), None)),
@@ -576,6 +596,26 @@ impl Panel {
             chip,
         };
         widgets::card::frame(header, body, footer, at, screen, hover, Msg::Card)
+    }
+
+    /// Google's card is on its way (its helper starts, then the page): this
+    /// panel is that card meanwhile, at its place (`sheet::card_rect`), so the
+    /// two are one widget (owner, 2026-10-25).
+    fn starting(&self) -> Option<sheet::Kind> {
+        let card = &self.sheet;
+        if !card.wanted || card.shown || card.fell_back {
+            return None;
+        }
+        match &self.state {
+            State::Lens(None) => Some(sheet::Kind::Lens),
+            State::Ask {
+                setup: Some(Ok(setup)),
+                chat,
+                browse: Browse::Idle,
+                ..
+            } if setup.browser() && chat.status == Status::Streaming => Some(sheet::Kind::Ai),
+            _ => None,
+        }
     }
 
     /// Body and footer.
@@ -890,6 +930,54 @@ fn browser_turn(prompt: &str, read: Option<Result<String, String>>) -> (String, 
     }
 }
 
+/// Google's results card while it loads: its header (icon, "Google · …", the
+/// chip), its footer (the privacy line), and a still skeleton of text lines
+/// where the page will be (a wait over a second: a skeleton, no spinner;
+/// still, so the overlay redraws nothing and reduced motion needs nothing).
+fn loading<'a>(kind: sheet::Kind, at: Rectangle, screen: Size, hover: bool) -> Element<'a, Msg> {
+    let icon = match kind {
+        sheet::Kind::Lens => actions::lens::ACTION.icon,
+        sheet::Kind::Ai => actions::ask::ACTION.icon,
+    };
+    let header = widgets::card::Header {
+        icon,
+        title: kind.title(),
+        chip: Some(sheet::CHIP.into()),
+    };
+    let fill = super::theme::floating().hover;
+    let line = |share: f32, height: f32| {
+        container(space())
+            .width(iced::Length::FillPortion((share * 100.0) as u16))
+            .height(height)
+            .style(move |_| container::Style {
+                background: Some(fill.into()),
+                border: iced::Border::default().rounded(height / 2.0),
+                ..container::Style::default()
+            })
+    };
+    let bar = |share: f32, height: f32| {
+        let rest = ((1.0 - share) * 100.0) as u16;
+        row![
+            line(share, height),
+            space().width(iced::Length::FillPortion(rest.max(1)))
+        ]
+    };
+    let body = column![
+        bar(0.55, 20.0),
+        space().height(8),
+        bar(0.95, 12.0),
+        bar(0.9, 12.0),
+        bar(0.7, 12.0),
+        space().height(8),
+        bar(0.92, 12.0),
+        bar(0.6, 12.0),
+    ]
+    .spacing(12)
+    .width(Fill);
+    let footer = widgets::caption(kind.privacy()).into();
+    widgets::card::frame(header, body, Some(footer), at, screen, hover, Msg::Card)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1023,6 +1111,36 @@ mod tests {
         assert!(!texts.iter().any(|t| t.contains("Opening")), "{texts:?}");
         // The click: Lens's page goes to the browser.
         assert!(panel.update(Msg::OpenInBrowser).units() > 0);
+    }
+
+    /// While Google's card starts, the panel is that card (its header, chip
+    /// and footer) from the first frame: no "Getting ready…", no "Opening…"
+    /// panel that a different card then replaces.
+    #[test]
+    fn while_googles_card_starts_the_panel_is_that_card() {
+        let texts = |p: &Panel| widgets::shot::texts(p.view(at(SCREEN), SCREEN, false));
+        let (mut ask, _) = Panel::open_question("How tall is Everest?".into());
+        ask.sheet.wanted = true; // (tests have no helper)
+        assert_eq!(
+            ask.starting(),
+            Some(sheet::Kind::Ai),
+            "at once, no key to load"
+        );
+        let mut lens = panel_in(State::Lens(None));
+        lens.sheet.wanted = true;
+        for (panel, kind) in [(&ask, sheet::Kind::Ai), (&lens, sheet::Kind::Lens)] {
+            let t = texts(panel);
+            for want in [kind.title(), sheet::CHIP, kind.privacy()] {
+                assert!(t.iter().any(|x| x == want), "{want}: {t:?}");
+            }
+            assert!(
+                !t.iter()
+                    .any(|x| x.contains("Getting ready") || x.contains("Opening"))
+            );
+        }
+        // Shown: Google's card is in that place; the panel draws nothing.
+        let _ = ask.update(Msg::Sheet(sheet::Event::Shown));
+        assert!(texts(&ask).is_empty());
     }
 
     fn not_blank(px: &[u8]) -> bool {

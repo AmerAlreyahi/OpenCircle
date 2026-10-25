@@ -451,7 +451,19 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
             );
         }
     };
-    match builder(&mut ctx, page, history, t0, gtk::main_quit, captcha).build_gtk(&content) {
+    // ponytail: Linux shows the card at once (sliding in over the app's loading
+    // card); wait for `drawing` as Windows does if that shows a blank body.
+    let built = builder(
+        &mut ctx,
+        page,
+        history,
+        t0,
+        gtk::main_quit,
+        captcha,
+        || {},
+        bg,
+    );
+    match built.build_gtk(&content) {
         Ok(v) => {
             guard_links(&v, t0);
             *view.borrow_mut() = Some(v);

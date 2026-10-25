@@ -24,6 +24,9 @@ pub const BOTTOM_MIN: f64 = 260.0;
 /// x, y, w, h (logical px).
 pub type Rect4 = [f64; 4];
 
+/// The header's chip: whose page this is (the app's loading card shows it too).
+pub const CHIP: &str = "google.com";
+
 /// The one message the page may send the helper (Esc inside the page).
 pub const CLOSE: &str = "close";
 /// Where AI Mode questions go (the app builds the URL; the helper checks it).

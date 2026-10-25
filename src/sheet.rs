@@ -28,9 +28,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::config::CardSide;
-pub use proto::Kind;
-use proto::{Args, Line, Place};
+use crate::config::{CardSide, ResultsConfig};
+use proto::{Args, Line, Place, Rect4};
+pub use proto::{CHIP, Kind};
 
 /// The hidden first argument that runs this exe as the Windows helper.
 #[cfg(windows)]
@@ -185,7 +185,7 @@ pub fn run(
             history::record(p, true, e);
         }
     };
-    let args = args(kind, (colours, shadow), avoid);
+    let args = args(kind, (colours, shadow), avoid, crate::config::results());
     let mut command = Command::new(path);
     command.args(lead);
     // An AppImage bundles an older GLib/GTK than the system's WebKitGTK needs
@@ -281,14 +281,13 @@ pub type Avoid = ((f64, f64), (f64, f64));
 
 /// The helper's command line: the user's side and size (`[results]`), the
 /// side flipped for this search when the card would cover the selection.
-fn args(kind: Kind, (colours, shadow): ([u32; 5], f64), avoid: Option<Avoid>) -> Args {
-    let results = crate::config::current().results;
-    let saved = match results.side {
-        CardSide::Left => Place::Left,
-        CardSide::Right => Place::Right,
-    };
-    let size = (results.width > 0 || results.height > 0)
-        .then_some((f64::from(results.width), f64::from(results.height)));
+fn args(
+    kind: Kind,
+    (colours, shadow): ([u32; 5], f64),
+    avoid: Option<Avoid>,
+    results: ResultsConfig,
+) -> Args {
+    let (saved, size) = saved(results);
     let side = match avoid {
         Some((screen, sel)) => proto::side_for(screen, saved, size, Some(sel)),
         None => saved,
@@ -300,6 +299,66 @@ fn args(kind: Kind, (colours, shadow): ([u32; 5], f64), avoid: Option<Avoid>) ->
         colours,
         shadow,
     }
+}
+
+/// The user's side and size (`[results]`, 0 = the default) as the helper takes them.
+fn saved(results: ResultsConfig) -> (Place, Option<(f64, f64)>) {
+    let side = match results.side {
+        CardSide::Left => Place::Left,
+        CardSide::Right => Place::Right,
+    };
+    let size = (results.width > 0 || results.height > 0)
+        .then_some((f64::from(results.width), f64::from(results.height)));
+    (side, size)
+}
+
+/// Where a result card opens on a `screen` (w, h; logical px), for a selection
+/// whose left and right edges are `sel`: exactly where the helper's card will
+/// (`args` + `proto::place`), so the app's card and Google's card are one
+/// widget in one place (owner, 2026-10-25). Every result card opens here.
+pub fn card_rect(results: ResultsConfig, screen: (f64, f64), sel: Option<(f64, f64)>) -> Rect4 {
+    let (side, size) = saved(results);
+    let side = proto::side_for(screen, side, size, sel);
+    proto::place(screen, side, size).1
+}
+
+/// `results` after the user let go of an app card at `r` on a `screen`, as the
+/// helper keeps its own: `moved` = docked to the nearer side; else resized =
+/// its width (a side card) or height (a bottom card).
+pub fn let_go(
+    mut results: ResultsConfig,
+    moved: bool,
+    r: Rect4,
+    screen: (f64, f64),
+) -> ResultsConfig {
+    let (side, size) = saved(results);
+    let at = proto::place(screen, side, size).0;
+    if !moved {
+        sized(&mut results, Some(proto::kept(at, (r[2], r[3]))));
+    } else if at != Place::Bottom {
+        results.side = match proto::dock(screen, r) {
+            Place::Left => CardSide::Left,
+            _ => CardSide::Right,
+        };
+    }
+    results
+}
+
+/// Keeps `results` (the card's side and size) for every next card: at once
+/// for this run (the card is placed from it on the next frame), saved to the
+/// file off the UI thread.
+pub fn keep(results: ResultsConfig) {
+    let mut config = crate::config::current();
+    if cfg!(test) || config.results == results {
+        return; // tests: never the user's file, nor the config other tests read
+    }
+    config.results = results;
+    crate::config::set_current(config.clone());
+    std::thread::spawn(move || {
+        if let Err(e) = config.save() {
+            eprintln!("[sheet] could not keep the card's place: {e}");
+        }
+    });
 }
 
 /// What the browser gets when the user takes the card's page `url` there:
@@ -335,6 +394,9 @@ fn sized(results: &mut crate::config::ResultsConfig, size: Option<(f64, f64)>) {
 // ponytail: writes the whole config from this thread; a Settings page open
 // at the same time saves its own copy over it (the card's place reverts).
 fn remember(change: impl FnOnce(&mut crate::config::ResultsConfig)) {
+    if cfg!(test) {
+        return; // never the user's file, nor the config other tests read
+    }
     let mut config = crate::config::current();
     let before = config.results;
     change(&mut config.results);
@@ -387,35 +449,88 @@ mod tests {
     #[test]
     fn helper_card_is_the_shared_cards_place() {
         assert_eq!(proto::GAP as f32, card::GAP);
-        assert_eq!(proto::SHARE as f32, card::SHARE);
         assert_eq!(proto::WIDTH as f32, card::WIDTH);
         assert_eq!(
             (proto::MIN.0 as f32, proto::MIN.1 as f32),
             (card::MIN.width, card::MIN.height)
         );
         assert_eq!(proto::NARROW as f32, card::NARROW);
+    }
+
+    /// The app's card (shown while the helper starts, and every in-app card)
+    /// is exactly Google's card: same side, same size, one widget.
+    #[test]
+    fn one_card_rect_for_the_interim_and_the_final_card() {
+        let look = ([0; 5], 0.3);
+        let results = crate::config::results(); // the default: right, default size
         for (w, h) in [
             (1920.0, 1080.0),
-            (1280.0, 800.0),
+            (1366.0, 768.0),
+            (1280.0, 720.0),
             (1080.0, 1920.0),
             (800.0, 600.0),
         ] {
-            // The shared card goes away from a selection: put one on the other side.
-            for (side, sel_x) in [(Place::Right, 0.2), (Place::Left, 0.8)] {
-                let screen = Size::new(w as f32, h as f32);
-                let sel = Rectangle::new(
-                    Point::new((sel_x * w) as f32 - 1.0, 0.0),
-                    Size::new(2.0, 2.0),
-                );
-                let shared = card::place(screen, Some(sel), None);
-                let [x, y, cw, ch] = proto::place((w, h), side, None).1;
+            // left, right of the middle but clear of a right card (was: left), under it
+            for sel_x in [0.2, 0.52, 0.8] {
+                let (x0, x1) = ((sel_x * w) - 50.0, (sel_x * w) + 50.0);
+                let sel = Rectangle::new(Point::new(x0 as f32, 0.0), Size::new(100.0, 2.0));
+                let interim = card::place(Size::new(w as f32, h as f32), Some(sel), None);
+                let a = args(Kind::Ai, look, Some(((w, h), (x0, x1))), results);
+                let [x, y, cw, ch] = proto::place((w, h), a.side, a.size).1;
                 assert_eq!(
+                    [interim.x, interim.y, interim.width, interim.height],
                     [x as f32, y as f32, cw as f32, ch as f32],
-                    [shared.x, shared.y, shared.width, shared.height],
-                    "{w}x{h} {side:?}"
+                    "{w}x{h} selection at {sel_x}"
                 );
             }
         }
+    }
+
+    /// Saved side left, remembered width: both cards open left at that width
+    /// (and only a card that would cover the selection goes right).
+    #[test]
+    fn saved_side_and_size_open_both_cards_there() {
+        let look = ([0; 5], 0.3);
+        let left = crate::config::ResultsConfig {
+            side: CardSide::Left,
+            width: 600,
+            height: 0,
+        };
+        let screen = (1366.0, 768.0);
+        for (sel, want) in [
+            ((900.0, 1100.0), Place::Left),
+            ((700.0, 760.0), Place::Left),
+            ((100.0, 300.0), Place::Right), // the left card would cover it
+        ] {
+            let a = args(Kind::Ai, look, Some((screen, sel)), left);
+            let interim = card_rect(left, screen, Some(sel));
+            assert_eq!(interim, proto::place(screen, a.side, a.size).1, "{sel:?}");
+            assert_eq!(a.side, want, "{sel:?}");
+            assert_eq!(interim[2], 600.0, "the remembered width");
+        }
+        assert_eq!(card_rect(left, screen, None)[0], proto::GAP);
+    }
+
+    /// The user's let-go of an app card keeps what the helper keeps.
+    #[test]
+    fn letting_go_of_an_app_card_keeps_its_side_and_size() {
+        let screen = (1366.0, 768.0);
+        let d = crate::config::ResultsConfig::default();
+        let right = card_rect(d, screen, None);
+        let wider = [1366.0 - 20.0 - 650.0, right[1], 650.0, right[3]];
+        let r = let_go(d, false, wider, screen);
+        assert_eq!((r.side, r.width, r.height), (CardSide::Right, 650, 0));
+        assert_eq!(
+            card_rect(r, screen, None),
+            wider,
+            "the next card opens at it"
+        );
+        let r = let_go(r, true, [100.0, 20.0, 650.0, 728.0], screen);
+        assert_eq!(r.side, CardSide::Left, "dropped on the left half");
+        assert_eq!(
+            card_rect(r, screen, None)[..3],
+            [proto::GAP, proto::GAP, 650.0]
+        );
     }
 
     #[test]
@@ -424,14 +539,15 @@ mod tests {
         assert_eq!(saved(), CardSide::Right, "the default");
         let look = ([0; 5], 0.3);
         let screen = (1716.0, 1271.0);
-        let side = |sel| args(Kind::Lens, look, Some((screen, sel))).side;
+        let results = crate::config::results();
+        let side = |sel| args(Kind::Lens, look, Some((screen, sel)), results).side;
         assert_eq!(
             side((1015.0, 1235.0)),
             Place::Left,
             "the right-hand picture"
         );
         assert_eq!(side((470.0, 1000.0)), Place::Right, "middle-left text");
-        assert_eq!(args(Kind::Ai, look, None).side, Place::Right);
+        assert_eq!(args(Kind::Ai, look, None, results).side, Place::Right);
         assert_eq!(saved(), CardSide::Right, "unchanged");
     }
 

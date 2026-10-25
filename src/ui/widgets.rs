@@ -104,17 +104,13 @@ pub mod card {
 
     use super::{CLOSE, CONTROL, heading, icon, icon_button, theme};
 
-    /// Distance to the screen edges, the side card's share of the screen width
-    /// (and least width), the smallest a resize makes it, and below which
-    /// width (or on a portrait screen) it floats at the bottom instead.
+    /// Distance to the screen edges, the side card's least width, the smallest
+    /// a resize makes it, and below which width (or on a portrait screen) it
+    /// floats at the bottom instead (`sheet::proto` has the same numbers).
     pub const GAP: f32 = 20.0;
-    pub const SHARE: f32 = 0.4;
     pub const WIDTH: f32 = 420.0;
     pub const MIN: Size = Size::new(320.0, 220.0);
     pub const NARROW: f32 = 900.0;
-    /// The bottom card's widest and its least height.
-    const BOTTOM_WIDTH: f32 = 640.0;
-    const BOTTOM_MIN: f32 = 260.0;
     /// The resize strip along the inner edge, and its grip pill.
     const EDGE: f32 = 10.0;
     const PILL: f32 = 40.0;
@@ -157,9 +153,9 @@ pub mod card {
     }
 
     /// Where the card goes on a `screen`-sized overlay (logical px): where the
-    /// user left it this session (`user`, kept on screen), else on the side away
-    /// from the `selection` (its centre in the left half: the right side), `SHARE`
-    /// of the screen wide, or on a narrow / portrait screen at the bottom.
+    /// user holds it (`user`, kept on screen), else where Google's results card
+    /// opens (`sheet::card_rect`: the user's side and size, the other side when
+    /// it would cover the `selection`; on a narrow / portrait screen at the bottom).
     pub fn place(screen: Size, selection: Option<Rectangle>, user: Option<Rectangle>) -> Rectangle {
         let inner = Size::new(
             (screen.width - 2.0 * GAP).max(0.0),
@@ -172,21 +168,14 @@ pub mod card {
             );
             return keep_on(Rectangle::new(r.position(), size), screen);
         }
-        if bottom(screen) {
-            let width = inner.width.min(BOTTOM_WIDTH);
-            let height = (screen.height / 2.0).max(BOTTOM_MIN).min(inner.height);
-            return Rectangle::new(
-                Point::new((screen.width - width) / 2.0, screen.height - GAP - height),
-                Size::new(width, height),
-            );
-        }
-        let width = (screen.width * SHARE).max(WIDTH).min(inner.width);
-        let left_half = selection.is_some_and(|s| s.center_x() < screen.width / 2.0);
-        let x = match selection {
-            Some(_) if !left_half => GAP,
-            _ => screen.width - GAP - width,
-        };
-        Rectangle::new(Point::new(x, GAP), Size::new(width, inner.height))
+        let f = f64::from;
+        let sel = selection.map(|s| (f(s.x), f(s.x + s.width)));
+        let screen = (f(screen.width), f(screen.height));
+        let [x, y, w, h] = crate::sheet::card_rect(crate::config::results(), screen, sel);
+        Rectangle::new(
+            Point::new(x as f32, y as f32),
+            Size::new(w as f32, h as f32),
+        )
     }
 
     /// Which edge of the card `at` resizes it: the one facing the screen's middle.
@@ -436,22 +425,20 @@ pub mod card {
         }
 
         #[test]
-        fn it_floats_on_the_side_away_from_the_selection() {
-            // selection on the left: the card on the right, 40 % wide, inset all round
+        fn it_floats_on_the_users_side_unless_it_would_cover_the_selection() {
+            // the default side (right), 40 % wide, inset all round
             let r = place(SCREEN, sel(200.0), None);
             assert_eq!(r.width, 768.0);
             assert_eq!(r.x, SCREEN.width - GAP - 768.0);
             assert_eq!((r.y, r.height), (GAP, SCREEN.height - 2.0 * GAP));
             assert!(inside(r, SCREEN));
             assert_eq!(side(r, SCREEN), Side::Left, "it resizes by its inner edge");
-            // on the right: the left side; the middle line counts as right
+            // right of the middle but clear of the card: still right (as Google's card)
+            assert_eq!(place(SCREEN, sel(860.0), None).x, r.x);
+            // under the card: the other side, for this one only
+            assert_eq!(place(SCREEN, sel(1100.0), None).x, GAP);
             assert_eq!(place(SCREEN, sel(1500.0), None).x, GAP);
-            assert_eq!(place(SCREEN, sel(860.0), None).x, GAP);
-            assert_eq!(side(place(SCREEN, sel(860.0), None), SCREEN), Side::Right);
-            assert_eq!(
-                place(SCREEN, sel(850.0), None).x,
-                SCREEN.width - GAP - 768.0
-            );
+            assert_eq!(side(place(SCREEN, sel(1500.0), None), SCREEN), Side::Right);
             // a small screen: at least WIDTH wide
             let small = Size::new(1000.0, 700.0);
             assert_eq!(place(small, None, None).width, WIDTH);
@@ -469,7 +456,7 @@ pub mod card {
                 assert!(inside(r, screen), "{screen:?} -> {r:?}");
                 assert!((r.y + r.height - (screen.height - GAP)).abs() < 0.01);
                 assert!((r.center_x() - screen.width / 2.0).abs() < 0.01, "centred");
-                assert!(r.width <= BOTTOM_WIDTH);
+                assert!(r.width <= 640.0);
                 assert_eq!(side(r, screen), Side::Top);
             }
         }

@@ -1151,6 +1151,17 @@ pub fn widgets() -> (WidgetTheme, bool) {
     })
 }
 
+/// The results card's side and size (`[results]`), without cloning the config
+/// (every frame places the card with it).
+pub fn results() -> ResultsConfig {
+    let kept = CURRENT
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|c| c.results);
+    kept.unwrap_or_else(|| current().results)
+}
+
 /// The config the running app uses (any thread). Read from disk on first use;
 /// after that only `set_current` changes it (Settings saved, onboarding finished).
 pub fn current() -> Config {

@@ -7,12 +7,13 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{COLORREF, HWND, SIZE};
 use windows::Win32::Graphics::Gdi::{
-    CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateRoundRectRgn, DEFAULT_CHARSET,
-    DeleteObject, FW_NORMAL, GetDC, GetTextExtentPoint32W, HDC, HFONT, OUT_DEFAULT_PRECIS,
-    ReleaseDC, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT, TextOutW,
+    AddFontMemResourceEx, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateRoundRectRgn,
+    DEFAULT_CHARSET, DeleteObject, FW_NORMAL, GetDC, GetTextExtentPoint32W, HDC, HFONT,
+    OUT_DEFAULT_PRECIS, ReleaseDC, SelectObject, SetBkMode, SetTextColor, SetWindowRgn,
+    TRANSPARENT, TextOutW,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-use windows::core::w;
+use windows::core::{PCWSTR, w};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, WindowEvent};
@@ -26,12 +27,16 @@ use wry::{Rect, WebContext, WebView, WebViewExtWindows};
 use super::proto::{
     self, Args, BODY_PAD, BODY_R, FOOTER, HEADER, Hit, Kind, Line, MIN, Place, RADIUS, Rect4,
 };
-use super::{
-    CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, icon, lerp, log, say, slid, slide_off,
-};
+use super::{CHIP, NO_RUNTIME, Page, builder, data_dir, history_url, lerp, log, say, slid};
 
 /// The human-check hint strip's height (logical px).
 const HINT: f64 = 44.0;
+/// The longest the card waits hidden for Google's page to start drawing
+/// (the app shows its loading card in this very place meanwhile).
+const SHOW_CAP: Duration = Duration::from_secs(4);
+/// A resize is kept this long after the card stops changing size (the app
+/// can end the helper any time after: an outside click, Esc in the overlay).
+const KEEP_AFTER: Duration = Duration::from_millis(300);
 
 type Surface = softbuffer::Surface<Rc<Window>, Rc<Window>>;
 
@@ -41,6 +46,13 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         eprintln!("[sheet] no WebView2: {e}");
         return NO_RUNTIME;
     }
+    // The app's icon font, for the header's icon (the same glyph as the app's card).
+    let icons = crate::ui::widgets::ICON_FONT_BYTES;
+    let mut fonts = 0u32;
+    // SAFETY: the bytes are static; the font stays this process's until it exits.
+    let _ = unsafe {
+        AddFontMemResourceEx(icons.as_ptr().cast(), icons.len() as u32, None, &mut fonts)
+    };
     let Ok(el) = winit::event_loop::EventLoop::<Ev>::with_user_event().build() else {
         return 1;
     };
@@ -67,7 +79,8 @@ pub fn run(args: &Args, page: Page, history: Option<String>, t0: Instant) -> u8 
         hover: false,
         last_edge_press: None,
         resized: false,
-        slide: None,
+        keep: None,
+        pending: None,
         grab: None,
         dock: None,
         shown: false,
@@ -110,9 +123,12 @@ struct App {
     /// The cursor is on the inner edge (the grip shows).
     hover: bool,
     last_edge_press: Option<Instant>,
-    /// The user resized it (or reset it): tell the app at the end.
+    /// The user resized it (or reset it): tell the app (`keep`, and at the end).
     resized: bool,
-    slide: Option<Instant>,
+    /// The size last changed then: told to the app `KEEP_AFTER` later.
+    keep: Option<Instant>,
+    /// Built, hidden until Google's page starts drawing (or `SHOW_CAP`).
+    pending: Option<Instant>,
     /// The header is held: where in the card (logical); the card follows the pointer.
     grab: Option<(f64, f64)>,
     /// Docking after a drop: since when, and from where (to `target`).
@@ -127,6 +143,8 @@ struct App {
 enum Ev {
     /// The page's "close".
     Close,
+    /// Google's page started drawing: the card shows.
+    Content,
     /// Google's human check showed (true) or went (false).
     Captcha(bool),
 }
@@ -171,6 +189,19 @@ fn mix(a: u32, b: u32, t: f64) -> u32 {
 
 /// A GDI font (Segoe UI) at `px` physical pixels.
 fn font(px: f64) -> HFONT {
+    font_of(px, w!("Segoe UI"))
+}
+
+/// The header's icon: the app's own (lucide, as on the app's card).
+fn glyph(kind: Kind) -> String {
+    match kind {
+        Kind::Lens => crate::actions::lens::ACTION.icon,
+        Kind::Ai => crate::actions::ask::ACTION.icon,
+    }
+    .to_string()
+}
+
+fn font_of(px: f64, face: PCWSTR) -> HFONT {
     // SAFETY: plain GDI call; the caller deletes the font.
     unsafe {
         CreateFontW(
@@ -187,7 +218,7 @@ fn font(px: f64) -> HFONT {
             CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,
             0,
-            w!("Segoe UI"),
+            face,
         )
     }
 }
@@ -287,8 +318,10 @@ impl App {
         // SAFETY: our window's DC, released below.
         let dc = unsafe { GetDC(Some(h)) };
         let (f_title, f_small) = (font(16.0 * k), font(12.0 * k));
+        let f_icon = font_of(16.0 * k, w!("lucide"));
         let (fw, fh) = (size.width as f64, size.height as f64);
-        let icon_w = width_of(dc, f_title, icon(kind));
+        let glyph = glyph(kind);
+        let icon_w = width_of(dc, f_icon, &glyph);
         let title_w = width_of(dc, f_title, kind.title());
         let chip_w = width_of(dc, f_small, CHIP) as f64;
         let x_title = 20.0 * k + icon_w as f64 + 10.0 * k;
@@ -337,7 +370,7 @@ impl App {
         unsafe {
             SetBkMode(dc, TRANSPARENT);
             let ty = ((HEADER - 1.0 - 22.0) / 2.0 * k) as i32;
-            text(dc, f_title, ink, (20.0 * k) as i32, ty, icon(kind));
+            text(dc, f_icon, ink, (20.0 * k) as i32, ty, &glyph);
             text(dc, f_title, ink, x_title as i32, ty, kind.title());
             let (cx, cy) = ((chip[0] + 8.0 * k) as i32, (chip[1] + 3.0 * k) as i32);
             text(dc, f_small, muted, cx, cy, CHIP);
@@ -377,7 +410,7 @@ impl App {
                 let by = (button[1] + (button[3] - 15.0 * k) / 2.0) as i32;
                 text(dc, f_small, ink, bx, by, label);
             }
-            for f in [f_title, f_small] {
+            for f in [f_title, f_small, f_icon] {
                 let _ = DeleteObject(f.into());
             }
             ReleaseDC(Some(h), dc);
@@ -393,11 +426,29 @@ impl App {
     /// Ends the event loop; tells the app the size the user left it at.
     fn close(&mut self, el: &ActiveEventLoop) {
         if self.resized {
-            let (w, h) = self.logical();
-            let size = self.size.map(|_| proto::kept(self.at, (w, h)));
-            say(Line::Size(size));
+            self.say_size();
         }
         el.exit();
+    }
+
+    /// Tells the app the size the user gave the card (`None` = the default).
+    fn say_size(&self) {
+        let (w, h) = self.logical();
+        say(Line::Size(self.size.map(|_| proto::kept(self.at, (w, h)))));
+    }
+
+    /// Google's page started drawing (or `SHOW_CAP` passed): the card shows,
+    /// exactly over the app's loading card (no slide: it is already in place).
+    fn show(&mut self) {
+        if self.pending.take().is_none() {
+            return;
+        }
+        if let Some(w) = &self.win {
+            w.set_visible(true);
+            w.focus_window();
+        }
+        log(self.t0, "shown", "");
+        say(Line::Ready);
     }
 
     /// The current page to the user's browser (through the app), then close.
@@ -443,7 +494,6 @@ impl ApplicationHandler<Ev> for App {
         (self.at, self.target) = proto::place(self.screen, self.side, self.size);
         let [x, y, w, h] = self.target;
         let size = PhysicalSize::new((w * k) as u32, (h * k) as u32);
-        let (dx, dy) = slide_off(self.at, 0.0);
         let attrs = Window::default_attributes()
             .with_title("OpenCircle results")
             .with_decorations(false)
@@ -451,7 +501,7 @@ impl ApplicationHandler<Ev> for App {
             .with_skip_taskbar(true)
             .with_visible(false)
             .with_min_inner_size(LogicalSize::new(MIN.0, MIN.1))
-            .with_position(self.phys(x + dx, y + dy))
+            .with_position(self.phys(x, y))
             .with_inner_size(size);
         let Ok(win) = el.create_window(attrs) else {
             self.code = 1;
@@ -461,6 +511,7 @@ impl ApplicationHandler<Ev> for App {
         let win = Rc::new(win);
         self.win = Some(win.clone());
         let (proxy, proxy_check) = (self.proxy.clone(), self.proxy.clone());
+        let proxy_content = self.proxy.clone();
         let bounds = self.view_rect(size);
         let history = self.history.take();
         let view = builder(
@@ -474,6 +525,10 @@ impl ApplicationHandler<Ev> for App {
             move |on| {
                 let _ = proxy_check.send_event(Ev::Captcha(on));
             },
+            move || {
+                let _ = proxy_content.send_event(Ev::Content);
+            },
+            self.colours[0],
         )
         .with_bounds(bounds)
         .build_as_child(&*win);
@@ -498,47 +553,47 @@ impl ApplicationHandler<Ev> for App {
         self.surface = softbuffer::Context::new(win.clone())
             .and_then(|c| softbuffer::Surface::new(&c, win.clone()))
             .ok();
-        win.set_visible(true);
-        win.focus_window();
-        self.slide = Some(Instant::now());
-        log(self.t0, "shown", "");
-        say(Line::Ready);
+        // Hidden until Google's page draws: the app's loading card is there meanwhile.
+        self.pending = Some(Instant::now());
+        log(self.t0, "built", "");
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        // Sliding in, or docking after a drop: where the card is now.
-        let (at, done) = match (self.slide, self.dock) {
-            (Some(began), _) => {
-                let s = slid(began.elapsed());
-                let (dx, dy) = slide_off(self.at, s);
-                (Some((self.target[0] + dx, self.target[1] + dy)), s >= 1.0)
+        if self.pending.is_some_and(|t| t.elapsed() >= SHOW_CAP) {
+            self.show();
+        }
+        if self.keep.is_some_and(|t| t.elapsed() >= KEEP_AFTER) {
+            self.keep = None;
+            self.say_size();
+        }
+        // Docking after a drop: where the card is now.
+        if let Some((began, from)) = self.dock {
+            let s = slid(began.elapsed());
+            let r = lerp(from, self.target, s);
+            if let Some(w) = &self.win {
+                w.set_outer_position(self.phys(r[0], r[1]));
             }
-            (None, Some((began, from))) => {
-                let s = slid(began.elapsed());
-                let r = lerp(from, self.target, s);
-                (Some((r[0], r[1])), s >= 1.0)
+            if s >= 1.0 {
+                self.dock = None;
             }
-            (None, None) => (None, true),
+        }
+        let next = match self.dock {
+            Some(_) => Some(Instant::now() + Duration::from_millis(8)),
+            None => [
+                self.pending.map(|t| t + SHOW_CAP),
+                self.keep.map(|t| t + KEEP_AFTER),
+            ]
+            .into_iter()
+            .flatten()
+            .min(),
         };
-        if let (Some((x, y)), Some(w)) = (at, &self.win) {
-            w.set_outer_position(self.phys(x, y));
-        }
-        if done {
-            if self.slide.take().is_some() {
-                log(self.t0, "slid in", "");
-            }
-            self.dock = None;
-            el.set_control_flow(ControlFlow::Wait);
-        } else {
-            el.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(8),
-            ));
-        }
+        el.set_control_flow(next.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 
     fn user_event(&mut self, el: &ActiveEventLoop, ev: Ev) {
         match ev {
             Ev::Close => self.close(el),
+            Ev::Content => self.show(),
             Ev::Captcha(on) if on != self.captcha => {
                 self.captcha = on;
                 log(
@@ -564,6 +619,9 @@ impl ApplicationHandler<Ev> for App {
         match event {
             WindowEvent::CloseRequested => self.close(el),
             WindowEvent::Resized(size) => {
+                if self.resized {
+                    self.keep = Some(Instant::now());
+                }
                 if let Some(v) = &self.view {
                     let _ = v.set_bounds(self.view_rect(size));
                 }
@@ -628,7 +686,7 @@ impl ApplicationHandler<Ev> for App {
                         }
                     }
                     Some(Hit::History) => {}
-                    Some(Hit::Head) if self.slide.is_none() && self.dock.is_none() => {
+                    Some(Hit::Head) if self.dock.is_none() => {
                         // From where the card really is (a resize moved it).
                         if let Some(Ok(p)) = self.win.as_ref().map(|w| w.outer_position()) {
                             let (x, y) = (p.x - self.mon.0, p.y - self.mon.1);
