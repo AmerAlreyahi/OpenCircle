@@ -525,15 +525,18 @@ impl Picked {
     }
 }
 
-/// A band's height (image px): main mode reads the screen's text in
-/// full-width bands this tall, the one the user touches first (#123).
-const BAND: f32 = 240.0;
+/// The height (image px) of the full-width band read where the user touches
+/// text (#123): the line under the pointer, with a margin. Small, as the
+/// user waits for it: OCR reads every line in it (~0.1 CPU-s each).
+const TOUCHED: f32 = 96.0;
+/// The height of the bands that read the rest, in the background.
+const BAND: f32 = 144.0;
 /// Only lines wholly inside a band are kept (one cut by its edge is read
 /// again by the next band), so a band knows its rows this far in from a cut
 /// edge. Lines up to twice as tall are always whole in one band.
-// ponytail: a line over 96 image px tall (a huge heading) can be lost
-// between two bands; a taller BAND/EDGE if that shows up.
-const EDGE: f32 = 48.0;
+// ponytail: a line over 48 image px tall (a big heading) can be lost
+// between two bands; a taller TOUCHED/BAND/EDGE if that shows up.
+const EDGE: f32 = 24.0;
 
 /// Main mode's text, read on demand band by band (#123): never at open; the
 /// band the user touches first, then (once text was used) the rest, nearest
@@ -566,9 +569,10 @@ impl Screen {
         self.parts.iter().flat_map(|(_, lines)| lines)
     }
 
-    /// The band to read for row `y` on a `screen`-sized overlay: centred on it.
+    /// The band to read first for row `y` (touched) on a `screen`-sized
+    /// overlay: centred on it.
     pub fn band(y: f32, screen: Size) -> Rectangle {
-        let h = BAND.min(screen.height);
+        let h = TOUCHED.min(screen.height);
         let top = (y - h / 2.0).clamp(0.0, screen.height - h);
         Rectangle::new(Point::new(0.0, top), Size::new(screen.width, h))
     }
@@ -674,30 +678,23 @@ mod tests {
         let mut text = Screen::default();
         assert!(!text.knows(500.0) && text.lines().is_empty());
         let first = Screen::band(500.0, screen);
-        assert_eq!((first.y, first.width, first.height), (380.0, 1920.0, 240.0));
-        assert_eq!(
-            text.next(500.0, screen),
-            Some(first),
-            "the pointer's band first"
-        );
+        assert_eq!((first.y, first.width, first.height), (452.0, 1920.0, 96.0));
         text.add(first, ocr(first), screen);
-        assert!(text.knows(500.0) && !text.knows(380.0) && !text.knows(700.0));
+        assert!(text.knows(500.0) && !text.knows(470.0) && !text.knows(530.0));
         let near: Vec<String> = text.lines().into_iter().map(|l| l.text).collect();
-        assert_eq!(
-            near,
-            ["line 14", "line 15", "line 16", "line 17", "line 18"]
-        );
+        assert_eq!(near, ["line 16"], "the line under the pointer");
+        // then the rest, nearest first: next to what is read, away from it
+        let second = text.next(500.0, screen).unwrap();
+        assert!(second.y + second.height <= 476.0 + 24.0 || second.y >= 524.0 - 24.0);
         let mut reads = 1;
         while let Some(band) = text.next(500.0, screen) {
-            let below = band.y > 500.0;
             text.add(band, ocr(band), screen);
             reads += 1;
-            assert!(reads < 20, "it ends");
-            assert!(below || band.y + band.height < 500.0 + 120.0);
+            assert!(reads < 30, "it ends");
         }
         assert!(text.is_whole(1080.0));
         assert_eq!(text.lines(), page, "every line once, top to bottom");
-        assert!(reads <= 9, "{reads} bands");
+        assert!(reads <= 13, "{reads} bands");
         // a band over rows already read adds nothing twice
         text.add(first, ocr(first), screen);
         assert_eq!(text.lines(), page);

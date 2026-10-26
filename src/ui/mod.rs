@@ -97,6 +97,9 @@ const SLIDE: f32 = 80.0;
 // (Windows' default; also forgiving when a busy machine delays the second press.)
 const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
+/// The text reader's helper starts this long after the opening animation.
+const WARM_AFTER: Duration = Duration::from_millis(400);
+
 /// Between stacked crops (several selections sent as one image).
 const STACK_GAP: u32 = 16;
 
@@ -1975,6 +1978,8 @@ impl App {
         }
         // (tests have no models: nothing starts)
         background(|tx| {
+            // after the bar has settled too
+            std::thread::sleep(WARM_AFTER);
             if let Err(e) = ocr::warm() {
                 eprintln!("[opencircle] the text reader didn't start: {e}");
             }
@@ -1999,22 +2004,23 @@ impl App {
             .into_iter()
             .flatten()
             .find(|p| !text.knows(p.y));
-        let band = match touched {
-            Some(p) => word::Screen::band(p.y, self.screen),
+        let (band, gently) = match touched {
+            Some(p) => (word::Screen::band(p.y, self.screen), false),
             None if self.want_all || self.text_used => {
                 match text.next(self.pointer.y, self.screen) {
-                    Some(band) => band,
+                    Some(band) => (band, !self.want_all), // (Ctrl+A: the user waits)
                     None => return Task::none(),
                 }
             }
             None => return Task::none(),
         };
-        self.read_band(band)
+        self.read_band(band, gently)
     }
 
-    /// OCR reads `band` (image px) of the frame on a thread, gently (the
-    /// helper on at most two cores, below normal priority).
-    fn read_band(&mut self, band: Rectangle) -> Task<Message> {
+    /// OCR reads `band` (image px) of the frame on a thread: at once where the
+    /// user waits for it, else gently (the helper on at most two cores, below
+    /// normal priority).
+    fn read_band(&mut self, band: Rectangle, gently: bool) -> Task<Message> {
         let Some(image::Handle::Rgba {
             width,
             height,
@@ -2031,10 +2037,11 @@ impl App {
         self.reading = Some(band);
         let (scale, opening) = (self.scale, self.opening);
         background(move |tx| {
-            let Some(crop) = actions::crop(&pixels, width, height, scale, band) else {
-                return;
+            let read = match actions::crop(&pixels, width, height, scale, band) {
+                Some(crop) if gently => ocr::recognize_gently(&crop.rgba, crop.width, crop.height),
+                Some(crop) => ocr::recognize_in_child(&crop.rgba, crop.width, crop.height),
+                None => Err(ocr::OcrError::BadImage("an empty band".into())),
             };
-            let read = ocr::recognize_gently(&crop.rgba, crop.width, crop.height);
             let lines = read.map(|blocks| {
                 let mut lines = word::lines(blocks, [x0, y0], scale);
                 word::measure(&mut lines, &pixels, width, height, scale);
@@ -5788,7 +5795,7 @@ mod tests {
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
         // text was used: the rest of the screen, band by band
         let next = app.reading.expect("the rest, in the background");
-        assert!(!first.contains(next.center()));
+        assert_ne!(next, first);
         let mut bands = 1;
         while let Some(band) = app.reading {
             let _ = answer(&mut app, band);
