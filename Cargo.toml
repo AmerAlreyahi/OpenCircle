@@ -166,3 +166,10 @@ iced_runtime = "0.14"
 iced_tiny_skia = "0.14"
 qrcode = { version = "0.14.1", default-features = false }
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
+
+[patch.crates-io]
+# iced 0.14's CPU renderer with one fix (#53, `drawn_bounds` in its src/layer.rs):
+# a changed centred or right-aligned text (every dropdown's value) was redrawn
+# in the wrong place and left ghost glyphs. The damage is computed inside the
+# renderer, out of reach of app code. Drop this when iced fixes it upstream.
+iced_tiny_skia = { path = "vendor/iced_tiny_skia" }

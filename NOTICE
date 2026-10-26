@@ -41,3 +41,14 @@ release v0.3.0.
 ONNX Runtime
 ------------
 ONNX Runtime by Microsoft (MIT), https://github.com/microsoft/onnxruntime.
+
+Bundled fonts
+-------------
+Inter by Rasmus Andersson and Noto Sans Arabic by Google, both under the SIL
+Open Font License 1.1 (assets/fonts/OFL-Inter.txt, OFL-NotoSansArabic.txt),
+subset. Lucide icons (ISC, assets/lucide/LICENSE), subset.
+
+Renderer
+--------
+iced_tiny_skia (MIT, Copyright 2019 Hector Ramon, Iced contributors) is built
+from vendor/iced_tiny_skia with one small fix; its licence is beside it.

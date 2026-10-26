@@ -132,11 +132,12 @@ pub(crate) fn trim_heap() {
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     *TRIGGERS.lock().unwrap() = Some(triggers);
     crate::lens::sweep_stale(); // pages left by a crash
-    iced::daemon(App::boot, App::update, App::view)
+    let mut app = iced::daemon(App::boot, App::update, App::view);
+    for font in widgets::FONTS {
+        app = app.font(font);
+    }
+    app.default_font(widgets::ui_font())
         .title(App::title)
-        .font(widgets::ICON_FONT_BYTES)
-        // Arabic for the word card and the Text panel's translation
-        .font(include_bytes!("../../assets/fonts/NotoSansArabic.ttf").as_slice())
         .theme(App::theme)
         .subscription(App::subscription)
         .run()

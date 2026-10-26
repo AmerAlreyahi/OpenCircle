@@ -29,6 +29,8 @@ use crate::ui::widgets::{
 
 /// Logical size of the onboarding window.
 pub const WINDOW_SIZE: Size = Size::new(620.0, 520.0);
+/// It can be made this small (the page scrolls, the footer stays).
+pub const MIN_SIZE: Size = Size::new(520.0, 320.0);
 
 /// Logical size of the prompt shown after a refused capture.
 pub const PROMPT_SIZE: Size = Size::new(500.0, 270.0);
@@ -318,11 +320,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
         Step::Look => look(state),
         Step::Done => done(state),
     };
+    // A short window (a small screen at 125 %) scrolls the page; the footer's
+    // buttons stay in view.
     widgets::window(column![
-        container(page)
-            .padding([40, 48])
-            .width(Length::Fill)
-            .height(Length::Fill),
+        widgets::scroll(container(page).padding([40, 48]).width(Length::Fill)).height(Length::Fill),
         divider(),
         footer(state),
     ])
@@ -754,6 +755,20 @@ mod tests {
                 "{step:?}: {texts:?}"
             );
             assert!(!format!("{s:?}").contains("FAKE"));
+        }
+    }
+
+    /// At its smallest (a short screen at 125 %) every step's page scrolls and
+    /// the footer's buttons stay in the window (#53).
+    #[test]
+    fn a_small_window_scrolls_and_keeps_every_button() {
+        let mut s = state(None);
+        update(&mut s, Message::Choose(Choice::Claude)); // the tallest AI step
+        let page = Size::new(MIN_SIZE.width, MIN_SIZE.height - widgets::chrome::HEADER);
+        for step in WAYLAND_STEPS {
+            s.step = step;
+            let lost = shot::out_of_reach(view(&s), page);
+            assert!(lost.is_empty(), "{step:?}: out of reach {lost:?}");
         }
     }
 

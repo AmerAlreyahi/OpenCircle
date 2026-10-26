@@ -16,6 +16,40 @@ use crate::config::BarStyle;
 /// The icon font (Lucide subset, see `assets/lucide/`); load it once at start.
 pub const ICON_FONT_BYTES: &[u8] = include_bytes!("../../assets/lucide/lucide-subset.ttf");
 const ICON_FONT: Font = Font::with_name("lucide");
+/// Every font the UI registers at start (`ui::run`; the headless renders too):
+/// the icons, Inter (the UI font where Segoe UI is missing) and Noto Sans
+/// Arabic (Arabic where the UI font has none). OFL licences in `assets/fonts/`.
+pub const FONTS: [&[u8]; 3] = [
+    ICON_FONT_BYTES,
+    include_bytes!("../../assets/fonts/Inter.ttf"),
+    include_bytes!("../../assets/fonts/NotoSansArabic.ttf"),
+];
+
+/// The UI font, the design's stack: Segoe UI Variable Text, else Segoe UI
+/// (Windows), else the bundled Inter. Picked once, from the fonts on this PC.
+pub fn ui_font() -> Font {
+    static FONT: std::sync::OnceLock<Font> = std::sync::OnceLock::new();
+    *FONT.get_or_init(|| {
+        let mut fonts = iced::advanced::graphics::text::font_system()
+            .write()
+            .expect("font system");
+        let db = fonts.raw().db();
+        let found = |name: &&str| {
+            db.faces()
+                .any(|f| f.families.iter().any(|(family, _)| family == name))
+        };
+        let name = ["Segoe UI Variable Text", "Segoe UI"]
+            .into_iter()
+            .find(found)
+            .unwrap_or("Inter");
+        Font::with_name(name)
+    })
+}
+
+/// A line of text is this many times its font size tall wherever its box
+/// clips it (text fields): Arabic with every vowel mark stays inside
+/// (Noto Sans Arabic inks about 1.6 times its size).
+pub const LINE: f32 = 1.7;
 /// Glyphs of the icon font used outside the action registry.
 pub const SEND: char = '\u{e04e}'; // lucide "arrow-up"
 pub const STOP: char = '\u{e16a}'; // lucide "square"
@@ -784,7 +818,8 @@ pub fn input<'a, Message: Clone + 'a>(
         .on_input(on_input)
         .on_submit(on_submit)
         .size(14)
-        .padding([13, 14])
+        .line_height(LINE)
+        .padding([(CONTROL - 14.0 * LINE) / 2.0, 14.0])
         .style(move |_, status| text_input::Style {
             background: palette.hover.into(),
             border: field_border(matches!(status, text_input::Status::Focused { .. })),
@@ -1413,16 +1448,22 @@ mod forms {
     };
     use iced::{Border, Color, Element, Length, Shadow};
 
-    use super::{CONTROL, TEXT_BUTTON_WIDTH, accent, theme};
+    use super::{CONTROL, LINE, TEXT_BUTTON_WIDTH, accent, theme};
 
     // ---- Forms: Settings and Onboarding. Every form control is CONTROL tall and
     // FORM_WIDTH wide (segmented, text field, dropdown, shortcut field), so rows align. ----
 
     pub const FORM_WIDTH: f32 = 320.0;
     const FIELD_RADIUS: f32 = 14.0;
-    /// One line of text inside a field; padding (CONTROL - this) / 2 makes the field CONTROL tall.
-    const FIELD_LINE: f32 = 18.0;
-    const FIELD_PAD: f32 = (CONTROL - FIELD_LINE) / 2.0;
+    /// The text size inside a field; its line is `LINE` times this, and padding
+    /// (CONTROL - line) / 2 makes the field CONTROL tall.
+    const FIELD_TEXT: f32 = 14.0;
+    const FIELD_PAD: f32 = (CONTROL - FIELD_TEXT * LINE) / 2.0;
+    /// A dropdown's line: iced's default, the one its open list always uses
+    /// (it can't be given another), so the field and each list row share the
+    /// padding and are both CONTROL tall. Neither clips its text.
+    const LIST_LINE: f32 = 1.3;
+    const LIST_PAD: f32 = (CONTROL - FIELD_TEXT * LIST_LINE) / 2.0;
 
     /// Screen title text.
     pub fn title<'a>(label: impl text::IntoFragment<'a>) -> Text<'a> {
@@ -1705,8 +1746,8 @@ mod forms {
     ) -> TextInput<'a, Message> {
         text_input(placeholder, value)
             .on_input(on_input)
-            .size(14)
-            .line_height(text::LineHeight::Absolute(FIELD_LINE.into()))
+            .size(FIELD_TEXT)
+            .line_height(LINE)
             .padding([FIELD_PAD, 14.0])
             .width(FORM_WIDTH)
             .style(move |_, status| {
@@ -1751,9 +1792,9 @@ mod forms {
     ) -> PickList<'a, T, &'a [T], T, Message> {
         pick_list(options, selected, on_select)
             .placeholder(placeholder)
-            .text_size(14)
-            .text_line_height(text::LineHeight::Absolute(FIELD_LINE.into()))
-            .padding([FIELD_PAD, 14.0])
+            .text_size(FIELD_TEXT)
+            .text_line_height(LIST_LINE)
+            .padding([LIST_PAD, 14.0])
             .width(FORM_WIDTH)
             .style(|_, status| {
                 let palette = theme::current();
@@ -1771,21 +1812,25 @@ mod forms {
                     border: Border::default().rounded(FIELD_RADIUS),
                 }
             })
-            .menu_style(|_| {
-                let palette = theme::current();
-                iced::overlay::menu::Style {
-                    background: palette.panel_solid.into(),
-                    border: Border {
-                        color: palette.border,
-                        width: 1.0,
-                        radius: FIELD_RADIUS.into(),
-                    },
-                    text_color: palette.text,
-                    selected_text_color: theme::ON_ACCENT,
-                    selected_background: accent(button::Status::Active),
-                    shadow: Shadow::default(),
-                }
-            })
+            .menu_style(|_| menu_style())
+    }
+
+    /// A dropdown's open list: opaque, and so is the hovered item's highlight
+    /// (nothing drawn before shows through).
+    pub(super) fn menu_style() -> iced::overlay::menu::Style {
+        let palette = theme::current();
+        iced::overlay::menu::Style {
+            background: palette.panel_solid.into(),
+            border: Border {
+                color: palette.border,
+                width: 1.0,
+                radius: FIELD_RADIUS.into(),
+            },
+            text_color: palette.text,
+            selected_text_color: theme::ON_ACCENT,
+            selected_background: accent(button::Status::Active),
+            shadow: Shadow::default(),
+        }
     }
 
     /// Text-only button, as big as `text_button`. `on_press: None` = disabled (quiet, dimmed).
@@ -2365,8 +2410,20 @@ pub mod tests_support {
 #[cfg(test)]
 pub mod shot {
     use iced::advanced::{graphics::Viewport, mouse, renderer};
-    use iced::{Color, Element, Font, Pixels, Rectangle, Size, Theme};
+    use iced::{Color, Element, Pixels, Rectangle, Size, Theme};
     use iced_runtime::user_interface::{Cache, UserInterface};
+
+    /// A renderer as the app's: its fonts loaded, the UI font by default.
+    pub fn renderer() -> iced::Renderer {
+        let mut fonts = iced::advanced::graphics::text::font_system()
+            .write()
+            .unwrap();
+        for f in super::FONTS {
+            fonts.load_font(f.into());
+        }
+        drop(fonts);
+        iced::Renderer::new(super::ui_font(), Pixels(16.0))
+    }
 
     pub fn render<Message>(view: Element<'_, Message>, width: u32, height: u32) -> Vec<u8> {
         render_twice(view, width, height, None).0
@@ -2380,11 +2437,7 @@ pub mod shot {
         height: u32,
         damage: Option<Rectangle>,
     ) -> (Vec<u8>, Vec<u8>) {
-        iced::advanced::graphics::text::font_system()
-            .write()
-            .unwrap()
-            .load_font(super::ICON_FONT_BYTES.into());
-        let mut renderer = iced::Renderer::new(Font::DEFAULT, Pixels(16.0));
+        let mut renderer = renderer();
         let size = Size::new(width as f32, height as f32);
         let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
         let style = renderer::Style {
@@ -2428,11 +2481,85 @@ pub mod shot {
         (first, rgba(&pixmap))
     }
 
+    /// `views` drawn one after another into one window at `scale` (logical
+    /// `size`), each frame redrawn only where its layers differ from the frame
+    /// before, as the window compositor does (`iced_tiny_skia::window::compositor`).
+    /// Returns (the last frame's pixels, the last view drawn whole).
+    pub fn redrawn<'a, Message: 'a>(
+        mut views: impl FnMut(usize) -> Option<Element<'a, Message>>,
+        size: Size,
+        scale: f32,
+    ) -> (Vec<u8>, Vec<u8>) {
+        use iced::advanced::graphics::damage;
+        let mut renderer = renderer();
+        let (w, h) = (
+            (size.width * scale).round() as u32,
+            (size.height * scale).round() as u32,
+        );
+        let viewport = Viewport::with_physical_size(Size::new(w, h), scale);
+        let mut mask = tiny_skia::Mask::new(w, h).unwrap();
+        let background = super::theme::current().window;
+        let all = Rectangle::with_size(size);
+        let style = renderer::Style {
+            text_color: Color::WHITE,
+        };
+        let rgba = |p: &tiny_skia::Pixmap| -> Vec<u8> {
+            (p.data().as_chunks::<4>().0.iter())
+                .flat_map(|p| [p[2], p[1], p[0], p[3]])
+                .collect()
+        };
+        let (mut window, mut fresh) = (tiny_skia::Pixmap::new(w, h).unwrap(), None);
+        let mut last: Option<Vec<iced_tiny_skia::Layer>> = None;
+        let mut i = 0;
+        while let Some(view) = views(i) {
+            let ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+            let mut ui = ui;
+            ui.draw(
+                &mut renderer,
+                &Theme::Dark,
+                &style,
+                mouse::Cursor::Unavailable,
+            );
+            let layers = renderer.layers().to_vec();
+            let changed = match &last {
+                Some(last) => damage::diff(
+                    last,
+                    &layers,
+                    |l| vec![l.bounds],
+                    iced_tiny_skia::Layer::damage,
+                ),
+                None => vec![all],
+            };
+            let changed = damage::group(changed, all);
+            if !changed.is_empty() {
+                renderer.draw(
+                    &mut window.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &changed,
+                    background,
+                );
+            }
+            let mut whole = tiny_skia::Pixmap::new(w, h).unwrap();
+            renderer.draw(
+                &mut whole.as_mut(),
+                &mut mask,
+                &viewport,
+                &[all],
+                background,
+            );
+            fresh = Some(rgba(&whole));
+            last = Some(layers);
+            i += 1;
+        }
+        (rgba(&window), fresh.unwrap_or_default())
+    }
+
     /// The messages one left click at `at` produces (press then release) in `view`.
     pub fn click<Message>(view: Element<'_, Message>, size: Size, at: iced::Point) -> Vec<Message> {
         use iced::advanced::clipboard;
         use iced::{Event, mouse::Button, mouse::Event as Mouse};
-        let mut renderer = iced::Renderer::new(Font::DEFAULT, Pixels(16.0));
+        let mut renderer = renderer();
         let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
         let mut messages = Vec::new();
         let events = [
@@ -2572,7 +2699,7 @@ pub mod shot {
                 self.0.get_or_insert(bounds);
             }
         }
-        let mut renderer = iced::Renderer::new(Font::DEFAULT, Pixels(16.0));
+        let mut renderer = renderer();
         let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
         let mut all = Vec::new();
         let mut cursor = mouse::Cursor::Unavailable;
@@ -2612,12 +2739,63 @@ pub mod shot {
                 self.0.push(state.text().to_string());
             }
         }
-        let mut renderer = iced::Renderer::new(Font::DEFAULT, Pixels(16.0));
+        let mut renderer = renderer();
         let size = Size::new(900.0, 700.0);
         let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
         let mut collect = Collect(Vec::new());
         ui.operate(&renderer, &mut collect);
         collect.0
+    }
+
+    /// The texts of `view` laid out in `size` that the user can't bring into
+    /// view: squeezed to nothing, or outside the window and not in a scroll area.
+    pub fn out_of_reach<Message>(view: Element<'_, Message>, size: Size) -> Vec<String> {
+        use iced::advanced::widget::{Id, Operation, operation::Scrollable};
+        struct Reach {
+            window: Rectangle,
+            /// One entry per traversal level: inside a scroll area there.
+            scrolled: Vec<bool>,
+            next_scrolls: bool,
+            lost: Vec<String>,
+        }
+        impl Operation for Reach {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+                let inside = std::mem::take(&mut self.next_scrolls)
+                    || self.scrolled.last().copied().unwrap_or(false);
+                self.scrolled.push(inside);
+                operate(self);
+                self.scrolled.pop();
+            }
+            fn scrollable(
+                &mut self,
+                _: Option<&Id>,
+                _: Rectangle,
+                _: Rectangle,
+                _: iced::Vector,
+                _: &mut dyn Scrollable,
+            ) {
+                self.next_scrolls = true;
+            }
+            fn text(&mut self, _: Option<&Id>, bounds: Rectangle, text: &str) {
+                let scrolled = self.scrolled.last().copied().unwrap_or(false);
+                // A column out of room squeezes its texts to nothing.
+                let squeezed = bounds.height < 1.0 && !text.trim().is_empty();
+                let shown = bounds.shrink(0.5).is_within(&self.window);
+                if squeezed || !scrolled && !shown {
+                    self.lost.push(text.to_string());
+                }
+            }
+        }
+        let mut renderer = renderer();
+        let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+        let mut reach = Reach {
+            window: Rectangle::with_size(size),
+            scrolled: Vec::new(),
+            next_scrolls: false,
+            lost: Vec::new(),
+        };
+        ui.operate(&renderer, &mut reach);
+        reach.lost
     }
 
     /// Render and, when `OPENCIRCLE_RENDER_DIR` is set, save `<dir>/<name>.png`.
@@ -2657,6 +2835,95 @@ mod tests {
         let mut found = Vec::new();
         scan(std::path::Path::new("src"), &mut found);
         assert!(found.is_empty(), "drawn shadows in {found:?}");
+    }
+
+    /// Changing a dropdown's value leaves no part of the old text on screen
+    /// (#53): each change redrawn only where it differs, as the window does,
+    /// equals the same view drawn whole, at 100 % and 150 %.
+    #[test]
+    fn a_changed_dropdown_leaves_no_ghost_text() {
+        const LANGS: [&str; 6] = ["Arabic", "English", "Japanese", "العربية", "Hindi", "Wolof"];
+        for scale in [1.0, 1.5] {
+            let view = |i: usize| {
+                (i <= 20).then(|| {
+                    let field =
+                        super::dropdown(&LANGS[..], Some(LANGS[i % LANGS.len()]), "", |_| ());
+                    iced::widget::container(field).padding(20).into()
+                })
+            };
+            let (window, fresh) = super::shot::redrawn(view, iced::Size::new(360.0, 80.0), scale);
+            let differ = window.iter().zip(&fresh).filter(|(a, b)| a != b).count();
+            assert_eq!(differ, 0, "{differ} stale bytes at {scale}x");
+        }
+    }
+
+    /// A dropdown's list and its highlight are opaque in every theme (#53).
+    #[test]
+    fn the_dropdown_list_and_highlight_are_opaque() {
+        use crate::config::Theme;
+        use iced::Background;
+        let opaque = |b: Background| match b {
+            Background::Color(c) => c.a >= 1.0,
+            Background::Gradient(iced::Gradient::Linear(l)) => {
+                l.stops.iter().flatten().all(|s| s.color.a >= 1.0)
+            }
+        };
+        for choice in [Theme::Dark, Theme::Light] {
+            super::theme::apply(choice);
+            let style = super::forms::menu_style();
+            assert!(opaque(style.background), "{choice:?} list");
+            assert!(opaque(style.selected_background), "{choice:?} highlight");
+        }
+        super::theme::apply(Theme::Dark);
+    }
+
+    /// The ink of `sample` in `family` at `size` px laid out in one `LINE` line:
+    /// (top, bottom) in px from the line's top.
+    fn ink(sample: &str, family: &str, size: f32) -> (f32, f32) {
+        use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache};
+        let mut db = cosmic_text::fontdb::Database::new();
+        for f in super::FONTS {
+            db.load_font_data(f.to_vec());
+        }
+        let mut fs = FontSystem::new_with_locale_and_db("en-US".into(), db);
+        let mut buf = Buffer::new(&mut fs, Metrics::new(size, size * super::LINE));
+        let attrs = Attrs::new().family(Family::Name(family));
+        buf.set_text(&mut fs, sample, &attrs, Shaping::Advanced, None);
+        buf.shape_until_scroll(&mut fs, false);
+        let mut cache = SwashCache::new();
+        let (mut top, mut bottom) = (f32::MAX, f32::MIN);
+        for run in buf.layout_runs() {
+            for glyph in run.glyphs {
+                let p = glyph.physical((0.0, 0.0), 1.0);
+                let Some(img) = cache.get_image(&mut fs, p.cache_key) else {
+                    continue;
+                };
+                if img.placement.height == 0 {
+                    continue;
+                }
+                let y = run.line_y + p.y as f32 - img.placement.top as f32;
+                top = top.min(y);
+                bottom = bottom.max(y + img.placement.height as f32);
+            }
+        }
+        (top, bottom)
+    }
+
+    /// A field's line holds the tallest Latin and Arabic text (accents, Arabic
+    /// marks above and below): a text field clips to its line (#53).
+    #[test]
+    fn a_line_holds_latin_and_arabic_marks() {
+        let line = 14.0 * super::LINE;
+        for (sample, family) in [
+            ("ÅÉÎÕÛ jgpqy ÇŞ", "Inter"),
+            ("إِنَّ الْعِلْمَ نُورٌ ضِّ", "Noto Sans Arabic"),
+        ] {
+            let (top, bottom) = ink(sample, family, 14.0);
+            assert!(
+                top >= 0.0 && bottom <= line,
+                "{family}: ink {top}..{bottom} outside the {line} px line"
+            );
+        }
     }
 
     #[test]

@@ -510,7 +510,9 @@ impl Windows {
     /// What the header offers this window.
     fn mode(&self, id: window::Id) -> chrome::Mode {
         chrome::Mode {
-            resizable: self.id(Kind::Settings) == Some(id),
+            resizable: [Kind::Settings, Kind::Onboarding]
+                .into_iter()
+                .any(|kind| self.id(kind) == Some(id)),
             maximised: self.chrome.get(&id).is_some_and(|c| c.maximised),
         }
     }
@@ -739,7 +741,7 @@ fn apply(cfg: Config) {
 fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
     let (size, min_size, resizable) = match kind {
         Kind::Settings => (settings::WINDOW_SIZE, Some(Size::new(720.0, 520.0)), true),
-        Kind::Onboarding => (onboarding::WINDOW_SIZE, None, false),
+        Kind::Onboarding => (onboarding::WINDOW_SIZE, Some(onboarding::MIN_SIZE), true),
         Kind::Permission => (onboarding::PROMPT_SIZE, None, false),
     };
     let settings = window::Settings {
@@ -1269,10 +1271,14 @@ mod tests {
         windows.chrome.insert(id, Chrome::default());
         let _ = windows.update(Msg::Maximised(id, true));
         assert!(windows.mode(id).maximised);
-        // A fixed-size window cannot be maximised.
+        // Onboarding resizes too (#53: a short screen); the fixed-size
+        // permission prompt cannot be maximised.
         windows.onboarding = Some((other, onboarding::State::open()));
-        assert!(!windows.mode(other).resizable);
+        assert!(windows.mode(other).resizable);
         assert_eq!(windows.header_title(other), "Welcome to OpenCircle");
+        let prompt = window::Id::unique();
+        windows.permission = Some((prompt, onboarding::Access::Unasked));
+        assert!(!windows.mode(prompt).resizable);
     }
 
     #[test]
