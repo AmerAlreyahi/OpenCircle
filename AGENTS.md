@@ -85,6 +85,22 @@ production systems.
   owner OK) before the next (owner, 2026-10-26). A phase is done only when its
   Windows VM test gate passes; until the owner creates a Windows 11 VM, gates run on
   the Windows 10 VM with the Windows 11 part marked pending.
+- UI questions (owner, 2026-10-26): the new design answers them
+  (.claude/artifacts/design/newdesing*): build exactly what it shows. Bar: drag grip,
+  AI field (replaces an Ask AI button), pills Search in browser (default) / Copy text /
+  Translate, Live translate (Beta) icon, Song / Edit image only when on in Labs;
+  Copy image = Ctrl+C, Save = Ctrl+S with a pill (#51, #52).
+- Exact design behaviour (owner, 2026-10-26): copy the new design's widgets EXACTLY:
+  behaviour, states, keyboard, drag/dock, styles and animations, not only the look.
+  Reference pack for every UI brief: docs/internal/design-ref/ (screenshots per
+  widget/state/theme, motion frame strips with timings, DESIGN_BEHAVIOR.md with
+  source lines). Pass its shots and sections to the UI worker.
+- Overnight / owner away (2026-10-26): continue item by item in Order with the
+  recommended defaults; leave each verified item in "Needs your check"; no releases.
+- Board statuses (owner, 2026-10-26): Todo / In Progress / Needs your check / Done.
+  "Needs your check" = built, gated and VM-verified by agents; the owner tries it on
+  the test VM. "Done" only for what is really verified (owner-checked when it is
+  something to try). Only the one active feature is In Progress.
 - Superseded 2026-10-26 (removed from this file; see the roadmap): the Google results
   card / sheet / web view, Lens and AI Mode inside the app, auto-search after a
   selection, Frost/Graphite widget themes and in-app frosted glass (now the Liquid
