@@ -525,6 +525,123 @@ impl Picked {
     }
 }
 
+/// A band's height (image px): main mode reads the screen's text in
+/// full-width bands this tall, the one the user touches first (#123).
+const BAND: f32 = 240.0;
+/// Only lines wholly inside a band are kept (one cut by its edge is read
+/// again by the next band), so a band knows its rows this far in from a cut
+/// edge. Lines up to twice as tall are always whole in one band.
+// ponytail: a line over 96 image px tall (a huge heading) can be lost
+// between two bands; a taller BAND/EDGE if that shows up.
+const EDGE: f32 = 48.0;
+
+/// Main mode's text, read on demand band by band (#123): never at open; the
+/// band the user touches first, then (once text was used) the rest, nearest
+/// the pointer first. Only the rows a band knows for sure count as read.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Screen {
+    /// The lines of each read stretch of rows, by its first row: top to bottom.
+    parts: Vec<(f32, Vec<Line>)>,
+    /// The rows read (image px), as sorted, separate (top, bottom) ranges.
+    known: Vec<(f32, f32)>,
+}
+
+impl Screen {
+    /// Row `y` (image px) was read: the lines there (or none) are known.
+    pub fn knows(&self, y: f32) -> bool {
+        self.known.iter().any(|&(a, b)| a <= y && y < b)
+    }
+
+    /// Every row of a screen `height` tall was read.
+    pub fn is_whole(&self, height: f32) -> bool {
+        matches!(self.known[..], [(a, b)] if a <= 0.0 && b >= height)
+    }
+
+    /// The lines read so far, in reading order.
+    pub fn lines(&self) -> Vec<Line> {
+        self.iter().cloned().collect()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Line> {
+        self.parts.iter().flat_map(|(_, lines)| lines)
+    }
+
+    /// The band to read for row `y` on a `screen`-sized overlay: centred on it.
+    pub fn band(y: f32, screen: Size) -> Rectangle {
+        let h = BAND.min(screen.height);
+        let top = (y - h / 2.0).clamp(0.0, screen.height - h);
+        Rectangle::new(Point::new(0.0, top), Size::new(screen.width, h))
+    }
+
+    /// The next band to read, the unread row nearest `y` first; `None` once
+    /// all is read. Next to rows already read it overlaps them by `EDGE` (a
+    /// line cut there is read whole) and reaches away from them.
+    pub fn next(&self, y: f32, screen: Size) -> Option<Rectangle> {
+        let mut gaps = Vec::new();
+        let mut from = 0.0;
+        for &(a, b) in &self.known {
+            if a > from {
+                gaps.push((from, a));
+            }
+            from = b;
+        }
+        if from < screen.height {
+            gaps.push((from, screen.height));
+        }
+        let off = |&(a, b): &(f32, f32)| (a - y).max(y - b).max(0.0);
+        let (a, b) = gaps.into_iter().min_by(|p, q| off(p).total_cmp(&off(q)))?;
+        let h = BAND.min(screen.height);
+        let top = match () {
+            _ if a <= y && y < b => y - h / 2.0,
+            _ if a >= y => a - EDGE, // below: down from its top
+            _ => b + EDGE - h,       // above: up from its bottom
+        };
+        let top = top.clamp(0.0, screen.height - h);
+        Some(Rectangle::new(
+            Point::new(0.0, top),
+            Size::new(screen.width, h),
+        ))
+    }
+
+    /// OCR read `lines` (image px) in `band`: the rows it knows for sure that
+    /// weren't read yet take their lines from it.
+    pub fn add(&mut self, band: Rectangle, lines: Vec<Line>, screen: Size) {
+        let bottom = band.y + band.height;
+        let top = if band.y <= 0.5 { 0.0 } else { band.y + EDGE };
+        let bottom = match bottom >= screen.height - 0.5 {
+            true => screen.height,
+            false => bottom - EDGE,
+        };
+        if top >= bottom {
+            return;
+        }
+        // the new rows: [top, bottom) less what is known
+        let mut new = vec![(top, bottom)];
+        for &(a, b) in &self.known {
+            new = (new.into_iter())
+                .flat_map(|(x, y)| [(x, y.min(a)), (x.max(b), y)])
+                .filter(|(x, y)| x < y)
+                .collect();
+        }
+        for (a, b) in new {
+            let centre = |l: &&Line| (a..b).contains(&l.bounds.center_y());
+            self.parts
+                .push((a, lines.iter().filter(centre).cloned().collect()));
+        }
+        self.parts.sort_by(|p, q| p.0.total_cmp(&q.0));
+        self.known.push((top, bottom));
+        self.known.sort_by(|p, q| p.0.total_cmp(&q.0));
+        let mut merged: Vec<(f32, f32)> = Vec::new();
+        for (a, b) in self.known.drain(..) {
+            match merged.last_mut() {
+                Some(last) if a <= last.1 => last.1 = last.1.max(b),
+                _ => merged.push((a, b)),
+            }
+        }
+        self.known = merged;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,6 +654,53 @@ mod tests {
             bounds: Rectangle::new(Point::new(x, y), Size::new(w, 20.0)),
             carets: Vec::new(),
         }
+    }
+
+    /// The screen read band by band from the pointer out ends with every line
+    /// exactly once, in reading order, the band under the pointer first.
+    #[test]
+    fn the_screen_is_read_band_by_band_from_the_pointer_out() {
+        let screen = Size::new(1920.0, 1080.0);
+        // a line every 30 px (20 px tall), as OCR would find them on the page
+        let page: Vec<Line> = (0..35)
+            .map(|i| line(&format!("line {i}"), 50.0, 10.0 + 30.0 * i as f32))
+            .collect();
+        // OCR of a band finds the lines wholly inside it
+        let ocr = |band: Rectangle| -> Vec<Line> {
+            let inside =
+                |l: &&Line| band.y <= l.bounds.y && l.bounds.y + 20.0 <= band.y + band.height;
+            page.iter().filter(inside).cloned().collect()
+        };
+        let mut text = Screen::default();
+        assert!(!text.knows(500.0) && text.lines().is_empty());
+        let first = Screen::band(500.0, screen);
+        assert_eq!((first.y, first.width, first.height), (380.0, 1920.0, 240.0));
+        assert_eq!(
+            text.next(500.0, screen),
+            Some(first),
+            "the pointer's band first"
+        );
+        text.add(first, ocr(first), screen);
+        assert!(text.knows(500.0) && !text.knows(380.0) && !text.knows(700.0));
+        let near: Vec<String> = text.lines().into_iter().map(|l| l.text).collect();
+        assert_eq!(
+            near,
+            ["line 14", "line 15", "line 16", "line 17", "line 18"]
+        );
+        let mut reads = 1;
+        while let Some(band) = text.next(500.0, screen) {
+            let below = band.y > 500.0;
+            text.add(band, ocr(band), screen);
+            reads += 1;
+            assert!(reads < 20, "it ends");
+            assert!(below || band.y + band.height < 500.0 + 120.0);
+        }
+        assert!(text.is_whole(1080.0));
+        assert_eq!(text.lines(), page, "every line once, top to bottom");
+        assert!(reads <= 9, "{reads} bands");
+        // a band over rows already read adds nothing twice
+        text.add(first, ocr(first), screen);
+        assert_eq!(text.lines(), page);
     }
 
     const ALL: Rectangle = Rectangle {

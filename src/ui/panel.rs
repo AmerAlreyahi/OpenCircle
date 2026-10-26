@@ -61,6 +61,8 @@ pub enum Msg {
     Translated(Result<String, String>),
     /// A link, email or phone chip under the text (index into `entities`).
     Chip(usize),
+    /// What that chip's click did (its note).
+    Acted(Result<&'static str, String>),
     /// A focused field gave a key back (`keys`); the App handles it.
     Key(keys::Keyed),
 }
@@ -296,10 +298,14 @@ impl Panel {
             }
             // Only here, on a click: nothing is ever opened by itself.
             (State::Text(Reading::Done(_)), Msg::Chip(i)) => {
-                if let Some(entity) = self.entities.get(i) {
-                    self.note = Some(act_on(entity));
+                // (on a thread: launching the browser or mail app takes a while)
+                if let Some(entity) = self.entities.get(i).cloned() {
+                    return background(move |tx| {
+                        let _ = tx.unbounded_send(Msg::Acted(act_on(&entity)));
+                    });
                 }
             }
+            (_, Msg::Acted(note)) => self.note = Some(note),
             (State::Text(Reading::Done(content)), Msg::Translate) if self.work.is_none() => {
                 let text = content.text();
                 self.translation = None;

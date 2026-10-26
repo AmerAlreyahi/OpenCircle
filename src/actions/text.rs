@@ -27,7 +27,17 @@ pub enum Progress {
 // ponytail: "the files are there" stands for "the user agreed once". ensure_models
 // still verifies every file and re-fetches only a damaged one.
 pub fn models_present() -> bool {
+    #[cfg(test)]
+    if let Some(here) = MODELS_HERE.get() {
+        return here;
+    }
     ocr::ready()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: whether `models_present` says the models are here (else the disk).
+    pub static MODELS_HERE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
 }
 
 /// Blocking (download, helper process): call off the UI thread. Fetches any

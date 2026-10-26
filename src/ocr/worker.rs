@@ -21,6 +21,10 @@ use crate::mt::{self, Pair, Translator};
 /// The hidden subcommand that runs the worker.
 pub const WORKER_ARG: &str = "ocr-worker";
 const OCR: u8 = b'o';
+/// OCR as `OCR`, gently (`Gentle`): main mode's screen text (#123).
+const GENTLE: u8 = b'g';
+/// Load the engine and a recognizer (one byte, as `OCR`'s), gently; reply `null`.
+const WARM: u8 = b'w';
 const TRANSLATE: u8 = b't';
 /// 1 MB of text is far beyond any screen.
 const MAX_TEXT: usize = 1 << 20;
@@ -61,6 +65,25 @@ pub fn recognize_as(
     recognize_via(session::call, rgba, width, height, read)
 }
 
+/// `recognize_in_child` for main mode's screen text (#123): the helper reads it
+/// on at most two of its cores at below-normal priority (`Gentle`), so the
+/// overlay and the rest of the PC keep the others.
+pub fn recognize_gently(rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {
+    check_image(rgba, width, height)?;
+    let read = Read::for_source(&crate::config::current().translate.source);
+    ready(read)?;
+    recognize_kind(GENTLE, session::call, rgba, width, height, read)
+}
+
+/// Starts the helper (held: it stays warm) and loads the engine and the
+/// recognizer for the configured source, gently, so the first read is quick.
+/// Nothing is started without the models.
+pub fn warm() -> Result<(), OcrError> {
+    let read = Read::for_source(&crate::config::current().translate.source);
+    ready(read)?;
+    parse(session::call(&[&[WARM, read.byte()]])?)
+}
+
 /// Its models are on disk: no helper is started for a request that can only
 /// fail (a helper without ONNX Runtime used to crash, again and again).
 fn ready(read: Read) -> Result<(), OcrError> {
@@ -93,9 +116,21 @@ pub(crate) fn recognize_via(
     height: u32,
     read: Read,
 ) -> Result<Vec<TextBlock>, OcrError> {
+    recognize_kind(OCR, call, rgba, width, height, read)
+}
+
+/// `recognize_via` as request `kind` (`OCR` or `GENTLE`).
+fn recognize_kind(
+    kind: u8,
+    call: impl FnOnce(&[&[u8]]) -> Result<Vec<u8>, OcrError>,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    read: Read,
+) -> Result<Vec<TextBlock>, OcrError> {
     check_image(rgba, width, height)?;
     let header = [
-        [OCR, read.byte()].as_slice(),
+        [kind, read.byte()].as_slice(),
         &width.to_le_bytes(),
         &height.to_le_bytes(),
     ]
@@ -162,6 +197,14 @@ pub fn worker_main() -> ExitCode {
         *idle.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let reply = match request.split_first() {
             Some((&OCR, body)) => json(recognize_here(body, &mut engine)),
+            Some((&GENTLE, body)) => {
+                let _gentle = Gentle::begin();
+                json(recognize_here(body, &mut engine))
+            }
+            Some((&WARM, body)) => {
+                let _gentle = Gentle::begin();
+                json(warm_here(body, &mut engine))
+            }
             Some((&TRANSLATE, body)) => json(translate_here(body, &mut translator)),
             _ => json::<()>(Err(OcrError::BadImage("unknown request".into()))),
         };
@@ -221,7 +264,12 @@ fn recognize_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBl
     let w = u32::from_le_bytes([size[0], size[1], size[2], size[3]]);
     let h = u32::from_le_bytes([size[4], size[5], size[6], size[7]]);
     check_image(rgba, w, h)?;
-    let engine = match engine {
+    loaded(engine)?.recognize(rgba, w, h, read)
+}
+
+/// The engine, loaded on first use.
+fn loaded(engine: &mut Option<Engine>) -> Result<&mut Engine, OcrError> {
+    Ok(match engine {
         Some(e) => e,
         None => {
             let t = Instant::now();
@@ -232,8 +280,113 @@ fn recognize_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBl
             );
             e
         }
-    };
-    engine.recognize(rgba, w, h, read)
+    })
+}
+
+fn warm_here(body: &[u8], engine: &mut Option<Engine>) -> Result<(), OcrError> {
+    let read = (body.first().copied().and_then(Read::from_byte))
+        .ok_or_else(|| OcrError::BadImage("unknown recognizer".into()))?;
+    loaded(engine)?.warm(read)
+}
+
+/// While it lives, this process runs on at most two of its cores (the
+/// highest ones it may use), at below-normal priority on Windows; dropped, as
+/// before. Threads started meanwhile (ORT's, on a first load) are covered.
+struct Gentle(Option<Box<dyn FnOnce()>>);
+
+impl Drop for Gentle {
+    fn drop(&mut self) {
+        if let Some(restore) = self.0.take() {
+            restore();
+        }
+    }
+}
+
+/// The two highest cores of an affinity `mask`.
+#[cfg(windows)]
+fn two_of(mask: u64) -> u64 {
+    let top = |m: u64| m.checked_ilog2().map_or(0, |b| 1 << b);
+    let first = top(mask);
+    first | top(mask & !first)
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn gentle_reads_take_the_two_highest_cores() {
+    assert_eq!(two_of(0b1111), 0b1100);
+    assert_eq!(two_of(0b0011), 0b0011, "two cores: both");
+    assert_eq!(two_of(0b0001), 0b0001);
+    assert_eq!(two_of(0b1010_0100), 0b1010_0000);
+}
+
+impl Gentle {
+    #[cfg(windows)]
+    fn begin() -> Gentle {
+        use windows::Win32::System::Threading::{
+            BELOW_NORMAL_PRIORITY_CLASS, GetCurrentProcess, GetPriorityClass,
+            GetProcessAffinityMask, PROCESS_CREATION_FLAGS, SetPriorityClass,
+            SetProcessAffinityMask,
+        };
+        // SAFETY: plain calls on this process's own pseudo handle.
+        unsafe {
+            let me = GetCurrentProcess();
+            let (mut mask, mut system) = (0usize, 0usize);
+            if GetProcessAffinityMask(me, &mut mask, &mut system).is_err() {
+                return Gentle(None);
+            }
+            let class = GetPriorityClass(me);
+            let _ = SetProcessAffinityMask(me, two_of(mask as u64) as usize);
+            let _ = SetPriorityClass(me, BELOW_NORMAL_PRIORITY_CLASS);
+            Gentle(Some(Box::new(move || {
+                let me = GetCurrentProcess();
+                let _ = SetProcessAffinityMask(me, mask);
+                if class != 0 {
+                    let _ = SetPriorityClass(me, PROCESS_CREATION_FLAGS(class));
+                }
+            })))
+        }
+    }
+
+    /// Linux: the cores only. An unprivileged process can lower its threads'
+    /// priority but never raise it back (RLIMIT_NICE), and this helper also
+    /// translates, at full speed.
+    #[cfg(target_os = "linux")]
+    fn begin() -> Gentle {
+        let size = std::mem::size_of::<libc::cpu_set_t>();
+        // SAFETY: a zeroed cpu_set_t is a valid empty set.
+        let mut mine: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+        // SAFETY: reads this thread's set into a buffer of the given size.
+        if unsafe { libc::sched_getaffinity(0, size, &mut mine) } != 0 {
+            return Gentle(None);
+        }
+        let cpus: Vec<usize> = (0..libc::CPU_SETSIZE as usize)
+            // SAFETY: c < CPU_SETSIZE.
+            .filter(|&c| unsafe { libc::CPU_ISSET(c, &mine) })
+            .collect();
+        // SAFETY: as above.
+        let mut two: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+        for &c in cpus.iter().rev().take(2) {
+            // SAFETY: c < CPU_SETSIZE.
+            unsafe { libc::CPU_SET(c, &mut two) };
+        }
+        let every_thread = move |set: libc::cpu_set_t| {
+            let tasks = std::fs::read_dir("/proc/self/task").into_iter().flatten();
+            for tid in tasks
+                .flatten()
+                .filter_map(|t| t.file_name().to_str()?.parse().ok())
+            {
+                // SAFETY: a valid set for one of this process's threads.
+                unsafe { libc::sched_setaffinity(tid, size, &set) };
+            }
+        };
+        every_thread(two);
+        Gentle(Some(Box::new(move || every_thread(mine))))
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    fn begin() -> Gentle {
+        Gentle(None)
+    }
 }
 
 fn translate_here(

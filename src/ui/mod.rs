@@ -97,9 +97,6 @@ const SLIDE: f32 = 80.0;
 // (Windows' default; also forgiving when a busy machine delays the second press.)
 const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
-/// How long the screen's text read waits after the overlay opens.
-const SCREEN_READ_DELAY: Duration = Duration::from_millis(150);
-
 /// Between stacked crops (several selections sent as one image).
 const STACK_GAP: u32 = 16;
 
@@ -171,8 +168,14 @@ enum Message {
     /// From the annotation editor (Edit in place, Snip).
     Editor(editor::Message),
     Snip(snip::Msg),
-    /// The copy-text quick action read this.
-    TextRead(Result<String, String>),
+    /// The copy-text quick action read the text and copied it (or why not).
+    TextRead(Result<(), String>),
+    /// A Copy / Save run off the UI thread is done: its pill, where the
+    /// overlay was (its origin, size and scale).
+    Confirm((Point, Size, f32), Result<String, String>),
+    /// A link opened (or text copied) off the UI thread: the overlay closes,
+    /// after this pill if any.
+    ThenClose(Option<&'static str>),
     /// The toast has been shown long enough.
     ToastDone,
     /// The selection with this area was scanned (a stale area is ignored).
@@ -199,8 +202,10 @@ enum Message {
     EditScreen,
     /// A frame of the overlay's opening animation was drawn at this time.
     Frame(Instant),
-    /// OCR read the whole frame of this opening (main mode, at open).
-    ScreenText(u32, Result<Vec<word::Line>, String>),
+    /// OCR read this band of this opening's frame (main mode, on demand).
+    ScreenText(u32, Rectangle, Result<Vec<word::Line>, String>),
+    /// The opening animation is over: the text reader's helper may start.
+    Warmed,
     /// The note over the bar's Download (the text reader's models), and how
     /// that download for this opening goes (`Reading` = done).
     ReaderDownload,
@@ -287,8 +292,15 @@ enum Reader {
     Downloading(f32),
     /// The download failed (why); the note offers it again.
     Failed(String),
-    /// Reading the screen's text (a drag on text selects it once read).
-    Reading,
+}
+
+/// What waits for the band under it to be read (main mode).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Await {
+    /// A tap: the word there (a triple tap: the line) becomes the selection.
+    Tap(word::Unit),
+    /// A Shift+click: the text selection stretches there.
+    Extend,
 }
 
 const CHIP_SPACE: f32 = 12.0;
@@ -450,9 +462,25 @@ struct App {
     /// The tapped word(s) the selection is, and the latest tap's number.
     word: Option<word::Picked>,
     taps: u32,
-    /// Main mode: every text line on the frame (image px), read at open;
-    /// `None` until OCR answers (or without its models).
-    screen_text: Option<Vec<word::Line>>,
+    /// Main mode: the frame's text lines (image px), read on demand band by
+    /// band (#123): never at open, the band the user touches first.
+    screen_text: word::Screen,
+    /// The band OCR reads now (one at a time: the helper serves one request
+    /// at a time anyway).
+    reading: Option<Rectangle>,
+    /// A tap or Shift+click waiting for the band under it.
+    awaits: Option<(Point, Await)>,
+    /// Ctrl+A waits for the whole screen to be read.
+    want_all: bool,
+    /// Text was selected in this opening: the rest of the screen is read in
+    /// the background (gently), nearest the pointer first.
+    text_used: bool,
+    /// Where the pointer was last seen (image px).
+    pointer: Point,
+    /// The text reader's models are here (checked at open).
+    ocr_ready: bool,
+    /// When each frame of the opening animation came (the log's frame times).
+    frame_times: Vec<Instant>,
     /// How that read is going (the note over the bar).
     reader: Reader,
     /// A press that began on text: its stroke so far (image px). It selects
@@ -600,7 +628,14 @@ impl App {
             pan: None,
             word: None,
             taps: 0,
-            screen_text: None,
+            screen_text: word::Screen::default(),
+            reading: None,
+            awaits: None,
+            want_all: false,
+            text_used: false,
+            pointer: Point::ORIGIN,
+            ocr_ready: false,
+            frame_times: Vec::new(),
             reader: Reader::Idle,
             text_press: None,
             clicks: None,
@@ -784,11 +819,10 @@ impl App {
             }),
             Message::Editor(msg) => self.on_editor(msg),
             Message::Snip(msg) => self.on_snip(msg),
-            Message::TextRead(read) if self.toast.is_some() => {
-                let copied = read.and_then(|t| match t.trim() {
-                    "" => Err("no text found".into()),
-                    _ => copy::text(t),
-                });
+            Message::Confirm(place, result) => self.toast_for(place, result),
+            Message::ThenClose(Some(pill)) => self.toast_then_close(pill),
+            Message::ThenClose(None) => self.close(),
+            Message::TextRead(copied) if self.toast.is_some() => {
                 self.toast = Some(match copied {
                     Ok(()) => "Text copied",
                     Err(e) => {
@@ -908,6 +942,7 @@ impl App {
             }
             Message::Frame(now) => {
                 self.esc_back = false;
+                let opening = self.appearing() || self.appear.is_none();
                 // every motion by the clock since it began (`motion`)
                 self.appear = match self.appear {
                     Some((start, t)) if t < 1.0 => {
@@ -956,22 +991,48 @@ impl App {
                         self.bar_glide = None;
                     }
                 }
-                Task::none()
+                if !opening {
+                    return Task::none();
+                }
+                self.frame_times.push(now);
+                if self.appearing() {
+                    return Task::none();
+                }
+                // The opening animation is over: its frame times to the log
+                // (the VM's budget, #123), then the text reader's helper starts.
+                let mut gaps: Vec<u128> = (self.frame_times.windows(2))
+                    .map(|w| (w[1] - w[0]).as_millis())
+                    .collect();
+                self.frame_times.clear();
+                gaps.sort_unstable();
+                if let Some(&max) = gaps.last() {
+                    let p95 = gaps[(gaps.len() * 95).div_ceil(100) - 1];
+                    eprintln!(
+                        "[opencircle] opening animation: {} frames, p95 {p95} ms, max {max} ms apart",
+                        gaps.len() + 1
+                    );
+                }
+                self.warm()
             }
-            Message::ScreenText(opening, read)
+            Message::ScreenText(opening, band, read)
                 if opening == self.opening && self.frame.is_some() =>
             {
-                self.reader = Reader::Idle;
+                self.reading = None;
                 match read {
                     Ok(lines) => {
-                        self.screen_text = Some(lines);
-                        self.drag_became_text();
+                        self.screen_text.add(band, lines, self.screen);
+                        let done = self.more_text();
+                        Task::batch([done, self.read_more()])
                     }
-                    Err(e) => eprintln!("[opencircle] reading the screen's text failed: {e}"),
+                    // (the next press tries again; the helper backs off by itself)
+                    Err(e) => {
+                        eprintln!("[opencircle] reading the screen's text failed: {e}");
+                        Task::none()
+                    }
                 }
-                Task::none()
             }
             Message::ScreenText(..) => Task::none(), // closed or opened again meanwhile
+            Message::Warmed => Task::none(),
             // Only on this click: nothing is downloaded without it.
             Message::ReaderDownload if self.frame.is_some() => {
                 self.reader = Reader::Downloading(0.0);
@@ -994,7 +1055,11 @@ impl App {
             Message::Reader(opening, step) if opening == self.opening && self.frame.is_some() => {
                 match step {
                     Ok(text::Progress::Download(done)) => self.reader = Reader::Downloading(done),
-                    Ok(text::Progress::Reading) => return self.read_screen(),
+                    Ok(text::Progress::Reading) => {
+                        (self.ocr_ready, self.reader) = (text::models_present(), Reader::Idle);
+                        self.note_reader();
+                        return self.warm();
+                    }
                     Err(e) => self.reader = Reader::Failed(e),
                 }
                 Task::none()
@@ -1124,6 +1189,8 @@ impl App {
         let size = shot.size;
         self.set_frame(shot.image, shot.scale, shot.origin, size);
         self.helper = Some(ocr::hold());
+        self.ocr_ready = text::models_present();
+        self.frame_times.clear();
         self.opening = self.opening.wrapping_add(1);
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
@@ -1164,7 +1231,8 @@ impl App {
             if self.snip_pill() {
                 return Task::batch([next, extras]); // the toast is the window
             }
-            return Task::batch([next.chain(self.show()), extras, self.read_screen()]);
+            self.note_reader();
+            return Task::batch([next.chain(self.show()), extras]);
         };
         if let Quick::Song = quick {
             let song = self.run_quick(quick); // listens at once, no area
@@ -1358,6 +1426,7 @@ impl App {
                 }
             }
             overlay::Event::Press { at: p, shift } => {
+                self.pointer = p;
                 // A new selection: the panel and the edits were about the old one.
                 self.panel = None;
                 self.text_mode = None;
@@ -1383,6 +1452,7 @@ impl App {
                 }
                 if !shift && let Some(word) = self.text_at(p, unit) {
                     self.word = Some(word);
+                    self.text_used = true;
                     self.select_word();
                     self.text_press = Some(vec![p]);
                     return Task::none();
@@ -1397,12 +1467,15 @@ impl App {
                 }
                 self.stroke = vec![p];
                 self.drawing = true;
+                // perhaps on text not read yet: its band now
+                return self.read_more();
             }
-            overlay::Event::Move(p) if self.text_press.is_some() => self.drag_text(p),
+            overlay::Event::Move(p) if self.text_press.is_some() => return self.drag_text(p),
             overlay::Event::Move(p) if self.grab.is_some() => self.drag_grab(p),
             overlay::Event::Move(p) if self.drawing => self.stroke.push(p),
             overlay::Event::Move(_) => {}
             overlay::Event::Hover(p) => {
+                self.pointer = p;
                 // Snip's Window mode: the window under the pointer lights up.
                 if let Purpose::Snip(snip) = &self.purpose
                     && snip.kind == snip::Kind::Window
@@ -1507,12 +1580,12 @@ impl App {
             overlay::Event::Key {
                 letter: 'a',
                 ctrl: true,
-            } if self.screen_text.is_some() => {
-                let all = Rectangle::with_size(self.screen);
-                self.word =
-                    (self.screen_text.clone()).and_then(|lines| word::Picked::all(lines, all));
-                self.select_word();
-                return self.selected();
+            } if self.reads_text() => {
+                // all of it once read (the rest is read now, nearest the pointer first)
+                self.want_all = true;
+                self.text_used = true;
+                let done = self.more_text();
+                return Task::batch([done, self.read_more()]);
             }
             overlay::Event::Key { letter, ctrl } if matches!(self.purpose, Purpose::Search) => {
                 // Nothing selected: Ask AI, Translate and Edit take the whole screen
@@ -1588,16 +1661,17 @@ impl App {
             "That didn't work"
         };
         match act {
-            qr::Act::Copy => {
-                let message = copy::text(text).map_or_else(failed, |()| "QR text copied");
-                self.toast_then_close(message)
-            }
-            qr::Act::Open => match qr::web_url(&text).map(crate::lens::open_link) {
-                Some(Ok(())) => self.close(), // the browser has the screen now
-                Some(Err(e)) => {
-                    let message = failed(e.to_string());
-                    self.toast_then_close(message)
-                }
+            qr::Act::Copy => background(move |tx| {
+                let pill = copy::text(text).map_or_else(failed, |()| "QR text copied");
+                let _ = tx.unbounded_send(Message::ThenClose(Some(pill)));
+            }),
+            qr::Act::Open => match qr::web_url(&text).map(str::to_string) {
+                // the browser has the screen now
+                Some(url) => background(move |tx| {
+                    let opened = crate::lens::open_link(&url);
+                    let pill = opened.err().map(|e| failed(e.to_string()));
+                    let _ = tx.unbounded_send(Message::ThenClose(pill));
+                }),
                 None => Task::none(),
             },
         }
@@ -1788,20 +1862,29 @@ impl App {
         if self.selection.is_none() {
             self.stroke.clear(); // the tap's own dot
         }
-        if self.screen_text.is_some() {
-            return Task::none(); // the screen is read: no text here
+        if self.reads_text() {
+            if self.screen_text.knows(at.y) {
+                return Task::none(); // read: no text here
+            }
+            // the word there once its band is read (a triple tap: the line)
+            let unit = match self.clicks {
+                Some((_, _, n)) if n >= 3 => word::Unit::Line,
+                _ => word::Unit::Word,
+            };
+            self.awaits = Some((at, Await::Tap(unit)));
+            return self.read_more();
         }
         // A click on a selection keeps it unless a word is found there.
         self.read_words(word::region(at, self.screen), at, false)
     }
 
-    /// A press at `p` (image px) on the screen's text, read at open (main mode
+    /// A press at `p` (image px) on the screen's text read there (main mode
     /// only): the caret there, or its word or line (`unit`).
     fn text_at(&self, p: Point, unit: word::Unit) -> Option<word::Picked> {
-        let lines = self.screen_text.as_ref()?;
         let main = matches!(self.purpose, Purpose::Search) && self.translate.is_none();
         let all = Rectangle::with_size(self.screen);
-        main.then(|| word::Picked::new(lines.clone(), all, p, unit))?
+        let read = main && self.screen_text.knows(p.y);
+        read.then(|| word::Picked::new(self.screen_text.lines(), all, p, unit))?
     }
 
     /// Counts a press at `p` (image px) as the first, second or third click in
@@ -1823,9 +1906,10 @@ impl App {
 
     /// A press that began on text moved to `p` (image px): the words stretch
     /// there, unless the stroke loops, which makes it a circle after all.
-    fn drag_text(&mut self, p: Point) {
+    /// Into rows not read yet: they are read first (`read_more`).
+    fn drag_text(&mut self, p: Point) -> Task<Message> {
         let Some(stroke) = &mut self.text_press else {
-            return;
+            return Task::none();
         };
         stroke.push(p);
         if overlay::winds(stroke, self.view.zoom()) {
@@ -1833,13 +1917,14 @@ impl App {
             self.drawing = true;
             self.word = None;
             self.selection = None;
-            return;
+            return Task::none();
         }
         if let Some(word) = &mut self.word
             && word.extend(p)
         {
             self.select_word();
         }
+        self.read_more()
     }
 
     /// The screen's text has just been read while a press drew: one that
@@ -1855,21 +1940,81 @@ impl App {
         let stroke = std::mem::take(&mut self.stroke);
         self.drawing = false;
         self.word = Some(word);
+        self.text_used = true;
         self.select_word();
         self.text_press = Some(vec![start]);
         for &p in &stroke[1..] {
             match self.text_press {
-                Some(_) => self.drag_text(p),
-                None => self.stroke.push(p), // it looped: a circle after all
+                Some(_) => _ = self.drag_text(p), // (the caller reads on)
+                None => self.stroke.push(p),      // it looped: a circle after all
             }
         }
     }
 
-    /// Main mode: OCR reads the whole frame on a thread (through the warm
-    /// helper) so that a press on text selects words at once. Until it answers,
-    /// gestures behave as without it. Without the OCR models nothing is read:
-    /// the note over the bar says so and offers them (`Reader::Missing`).
-    fn read_screen(&mut self) -> Task<Message> {
+    /// Main mode without the OCR models: the note over the bar says so and
+    /// offers them (`Reader::Missing`). Nothing is read at open (#123).
+    fn note_reader(&mut self) {
+        if matches!(self.purpose, Purpose::Search) && !self.ocr_ready {
+            self.reader = Reader::Missing(ocr::download_size());
+        }
+    }
+
+    /// Main mode's text can be read: OCR models here, no translation shown.
+    fn reads_text(&self) -> bool {
+        self.ocr_ready
+            && self.frame.is_some()
+            && matches!(self.purpose, Purpose::Search)
+            && self.translate.is_none()
+    }
+
+    /// After the opening animation: the held helper starts and loads its
+    /// models (gently), so the first text read is quick. Nothing during it.
+    fn warm(&mut self) -> Task<Message> {
+        if !self.reads_text() {
+            return Task::none();
+        }
+        // (tests have no models: nothing starts)
+        background(|tx| {
+            if let Err(e) = ocr::warm() {
+                eprintln!("[opencircle] the text reader didn't start: {e}");
+            }
+            let _ = tx.unbounded_send(Message::Warmed);
+        })
+    }
+
+    /// Main mode: reads the next band of the screen's text, if none is being
+    /// read: where the user touches text (a press, a drag going on into
+    /// unread rows, a tap, a Shift+click) first; then, once text was used
+    /// (or Ctrl+A waits), the rest, nearest the pointer first.
+    fn read_more(&mut self) -> Task<Message> {
+        if self.reading.is_some() || !self.reads_text() {
+            return Task::none();
+        }
+        let text = &self.screen_text;
+        let pressed = (self.drawing && !self.adding)
+            .then(|| self.stroke.first().copied())
+            .flatten();
+        let dragged = self.text_press.as_ref().and_then(|s| s.last().copied());
+        let touched = [dragged, pressed, self.awaits.map(|(p, _)| p)]
+            .into_iter()
+            .flatten()
+            .find(|p| !text.knows(p.y));
+        let band = match touched {
+            Some(p) => word::Screen::band(p.y, self.screen),
+            None if self.want_all || self.text_used => {
+                match text.next(self.pointer.y, self.screen) {
+                    Some(band) => band,
+                    None => return Task::none(),
+                }
+            }
+            None => return Task::none(),
+        };
+        self.read_band(band)
+    }
+
+    /// OCR reads `band` (image px) of the frame on a thread, gently (the
+    /// helper on at most two cores, below normal priority).
+    fn read_band(&mut self, band: Rectangle) -> Task<Message> {
         let Some(image::Handle::Rgba {
             width,
             height,
@@ -1879,29 +2024,72 @@ impl App {
         else {
             return Task::none();
         };
-        if !matches!(self.purpose, Purpose::Search) {
-            return Task::none();
-        }
-        if !text::models_present() {
-            self.reader = Reader::Missing(ocr::download_size());
-            return Task::none();
-        }
-        self.reader = Reader::Reading;
         let (width, height, pixels) = (*width, *height, pixels.clone());
+        let Some([x0, y0, ..]) = actions::crop_bounds(width, height, self.scale, band) else {
+            return Task::none();
+        };
+        self.reading = Some(band);
         let (scale, opening) = (self.scale, self.opening);
         background(move |tx| {
-            // ponytail: a fixed head start so the helper's start-up doesn't
-            // compete with the first frame; wait for that frame if it still does.
-            std::thread::sleep(SCREEN_READ_DELAY);
-            let read = ocr::recognize_in_child(&pixels, width, height);
+            let Some(crop) = actions::crop(&pixels, width, height, scale, band) else {
+                return;
+            };
+            let read = ocr::recognize_gently(&crop.rgba, crop.width, crop.height);
             let lines = read.map(|blocks| {
-                let mut lines = word::lines(blocks, [0, 0], scale);
+                let mut lines = word::lines(blocks, [x0, y0], scale);
                 word::measure(&mut lines, &pixels, width, height, scale);
                 lines
             });
             let _ = tx.unbounded_send(lines.map_err(|e| e.to_string()));
         })
-        .map(move |read| Message::ScreenText(opening, read))
+        .map(move |read| Message::ScreenText(opening, band, read))
+    }
+
+    /// More of the screen's text was read: a text selection takes in the new
+    /// lines (a drag can go on into them), a press that began on text becomes
+    /// a text selection, and a tap, Shift+click or Ctrl+A waiting for it is
+    /// done.
+    fn more_text(&mut self) -> Task<Message> {
+        let all = Rectangle::with_size(self.screen);
+        if let Some(word) = &mut self.word {
+            word.reread(self.screen_text.lines(), all);
+            if let Some(&p) = self.text_press.as_ref().and_then(|s| s.last()) {
+                word.extend(p);
+            }
+            self.select_word();
+        }
+        self.drag_became_text();
+        let mut done = Task::none();
+        if let Some((at, wait)) = self.awaits
+            && self.screen_text.knows(at.y)
+        {
+            self.awaits = None;
+            match wait {
+                Await::Tap(unit) => {
+                    if let Some(word) = self.text_at(at, unit) {
+                        self.word = Some(word);
+                        self.text_used = true;
+                        self.select_word();
+                        done = self.selected();
+                    }
+                }
+                Await::Extend => {
+                    if let Some(word) = &mut self.word
+                        && word.extend(at)
+                    {
+                        self.select_word();
+                        done = self.selected();
+                    }
+                }
+            }
+        }
+        if self.want_all && self.screen_text.is_whole(self.screen.height) {
+            self.want_all = false;
+            self.word = word::Picked::all(self.screen_text.lines(), all);
+            self.select_word();
+            done = self.selected();
+        }
+        done
     }
 
     /// The whole frozen frame (Ask before a selection).
@@ -1923,6 +2111,10 @@ impl App {
     /// click landed. Past the lines already read, OCR reads a band across the
     /// screen first (on a thread, through the warm helper).
     fn extend_words(&mut self, at: Point) -> Task<Message> {
+        if self.word.is_some() && self.reads_text() && !self.screen_text.knows(at.y) {
+            self.awaits = Some((at, Await::Extend));
+            return self.read_more();
+        }
         let Some(word) = &mut self.word else {
             return Task::none();
         };
@@ -2160,13 +2352,15 @@ impl App {
             return Task::none();
         };
         if act == PickAct::Copy {
-            let copied = (copy::text(picked.text()))
-                .map(|()| copy::COPIED_PILL.to_string())
-                .map_err(|e| {
-                    eprintln!("copy text failed: {e}");
-                    "Couldn't copy. Close what holds the clipboard and try again.".to_string()
-                });
-            return self.confirm(copied);
+            let text = picked.text();
+            return self.confirm_after(move || {
+                (copy::text(text))
+                    .map(|()| copy::COPIED_PILL.to_string())
+                    .map_err(|e| {
+                        eprintln!("copy text failed: {e}");
+                        "Couldn't copy. Close what holds the clipboard and try again.".to_string()
+                    })
+            });
         }
         if act == PickAct::Search {
             return self.search_text(picked.text());
@@ -2199,12 +2393,20 @@ impl App {
             return Task::none();
         }
         let url = crate::ai::browser::search_url(text);
-        if let Err(e) = crate::lens::open_link(&url) {
-            eprintln!("[opencircle] text search not opened: {e}");
-            return self.toast_then_close("Couldn't open your browser");
-        }
-        crate::search_history::keep("text", text, &url, self.crop().as_ref());
-        self.close()
+        let (text, crop) = (text.to_string(), self.crop());
+        background(move |tx| {
+            let pill = match crate::lens::open_link(&url) {
+                Ok(()) => {
+                    crate::search_history::keep("text", &text, &url, crop.as_ref());
+                    None
+                }
+                Err(e) => {
+                    eprintln!("[opencircle] text search not opened: {e}");
+                    Some("Couldn't open your browser")
+                }
+            };
+            let _ = tx.unbounded_send(Message::ThenClose(pill));
+        })
     }
 
     /// A pill of the bottom bar: Search in browser and Copy text act on the
@@ -2280,33 +2482,52 @@ impl App {
         let Run::Finish(finish) = action.run else {
             return Task::none();
         };
-        let result = finish(crop);
-        if let Err(e) = &result {
-            eprintln!("{} failed: {e}", action.id);
-        }
-        self.confirm(result)
+        let id = action.id;
+        self.confirm_after(move || {
+            let result = finish(crop);
+            if let Err(e) = &result {
+                eprintln!("{id} failed: {e}");
+            }
+            result
+        })
     }
 
     /// Closes the overlay and tells the user how Copy / Save went: the toast pill
     /// in its own window (bottom right, above the taskbar), so the screen is the
-    /// user's again at once and the pill outlives the overlay.
-    fn confirm(&mut self, result: Result<String, String>) -> Task<Message> {
+    /// user's again at once and the pill outlives the overlay. `work`
+    /// (encoding, the clipboard, a file) runs on a thread: the pill comes when
+    /// it is done (#123).
+    fn confirm_after(
+        &mut self,
+        work: impl FnOnce() -> Result<String, String> + Send + 'static,
+    ) -> Task<Message> {
+        let place = (self.origin, self.screen, self.scale);
+        let done = background(move |tx| {
+            let _ = tx.unbounded_send(work());
+        })
+        .map(move |result| Message::Confirm(place, result));
+        Task::batch([self.close(), done])
+    }
+
+    /// The Copy / Save pill for an overlay at `place` (origin, size, scale).
+    fn toast_for(
+        &mut self,
+        (origin, screen, scale): (Point, Size, f32),
+        result: Result<String, String>,
+    ) -> Task<Message> {
         let (text, ok) = match result {
             Ok(text) => (text, true),
             Err(text) => (text, false),
         };
         let size = windows::toast_size(&text, ok);
-        let (origin, screen) = (self.origin, self.screen);
-        let inset = taskbar_inset(origin, screen, self.scale);
+        let inset = taskbar_inset(origin, screen, scale);
         let at = Point::new(
             origin.x + screen.width - size.width - TOAST_MARGIN,
             origin.y + screen.height - size.height - TOAST_MARGIN - inset,
         );
-        let toast = self
-            .windows
+        self.windows
             .toast(&text, ok, Some(at), windows::TOAST_MS)
-            .map(Message::Windows);
-        Task::batch([self.close(), toast])
+            .map(Message::Windows)
     }
 
     /// Runs a quick action on the selection (no action bar). Only once: a new
@@ -2323,7 +2544,12 @@ impl App {
                 };
                 self.toast = Some("Reading text…");
                 background(move |tx| {
-                    let _ = tx.unbounded_send(text::read(&crop, |_| {}));
+                    let read = text::read(&crop, |_| {});
+                    let copied = read.and_then(|t| match t.trim() {
+                        "" => Err("no text found".into()),
+                        _ => copy::text(t),
+                    });
+                    let _ = tx.unbounded_send(copied);
                 })
                 .map(Message::TextRead)
             }
@@ -2543,6 +2769,8 @@ impl App {
                 self.show()
             }
             snip::Msg::ToastDone(id) if snip.toast_showing(id) => self.close(),
+            snip::Msg::CopyFailed(id) if snip.toast_showing(id) => self.on_snip(snip::Msg::Edit),
+            snip::Msg::CopyFailed(_) => Task::none(),
             snip::Msg::ToastDone(_) => Task::none(),
             snip::Msg::Controls(opening, controls) => {
                 if opening == self.opening {
@@ -2691,15 +2919,7 @@ impl App {
     /// Copies and / or edits a snip's `crop` as `route` says; Copy gets the toast.
     fn snip_routed(&mut self, crop: Crop, in_place: bool, route: (bool, bool)) -> Task<Message> {
         let (copy, edit) = route;
-        let copied = copy
-            && match copy::ACTION.run {
-                Run::Finish(copy) => copy(crop.clone())
-                    .inspect_err(|e| eprintln!("copy failed: {e}"))
-                    .is_ok(),
-                _ => false,
-            };
-        if edit || !copied {
-            // Copy failed: the editor, so the capture isn't lost.
+        if edit || !copy {
             if in_place {
                 return self.open_editor();
             }
@@ -2713,8 +2933,18 @@ impl App {
         let Purpose::Snip(snip) = &mut self.purpose else {
             return Task::none();
         };
-        let id = snip.toast(crop, in_place);
+        let id = snip.toast(crop.clone(), in_place);
         let foreground = snip.foreground;
+        // The copy runs on a thread (encoding a big capture takes a while);
+        // if it fails, the editor opens, so the capture isn't lost.
+        let copied = background(move |tx| {
+            if let Run::Finish(copy) = copy::ACTION.run
+                && let Err(e) = copy(crop)
+            {
+                eprintln!("copy failed: {e}");
+                let _ = tx.unbounded_send(Message::Snip(snip::Msg::CopyFailed(id)));
+            }
+        });
         let done = background(move |tx| {
             // Once the pill is up, the user's app (their AI chat) gets the focus back.
             std::thread::sleep(Duration::from_millis(150));
@@ -2723,7 +2953,7 @@ impl App {
             let _ = tx.unbounded_send(());
         })
         .map(move |()| Message::Snip(snip::Msg::ToastDone(id)));
-        self.pill_at_top().chain(done)
+        Task::batch([copied, self.pill_at_top().chain(done)])
     }
 
     /// Where a snip pick leads: the editor on the area, or a scrolling capture.
@@ -2835,11 +3065,12 @@ impl App {
             panel::Msg::Key(_) => {}
             panel::Msg::CopyText => {
                 let text = panel.text().unwrap_or_default();
-                let closing = self.close();
-                if let Err(e) = actions::copy::text(text) {
-                    eprintln!("copy text failed: {e}");
-                }
-                return closing;
+                let copy = background(move |_: &UnboundedSender<()>| {
+                    if let Err(e) = actions::copy::text(text) {
+                        eprintln!("copy text failed: {e}");
+                    }
+                });
+                return Task::batch([self.close(), copy.discard()]);
             }
             // Lens follow-up: hand the question over to Ask AI.
             panel::Msg::Submit if panel.kind() == actions::Panel::Lens => {
@@ -2922,7 +3153,11 @@ impl App {
         self.grab = None;
         self.pan = None;
         self.word = None;
-        self.screen_text = None;
+        self.screen_text = word::Screen::default();
+        self.reading = None;
+        self.awaits = None;
+        self.want_all = false;
+        self.text_used = false;
         self.reader = Reader::Idle;
         self.text_press = None;
         self.ask = String::new();
@@ -3210,10 +3445,9 @@ impl App {
             picked,
             appear: self.appeared(),
             text: match self.translate {
-                None if matches!(self.purpose, Purpose::Search) => (self.screen_text.iter())
-                    .flatten()
-                    .map(|l| l.bounds)
-                    .collect(),
+                None if matches!(self.purpose, Purpose::Search) => {
+                    self.screen_text.iter().map(|l| l.bounds).collect()
+                }
                 _ => Vec::new(),
             },
         };
@@ -3691,7 +3925,6 @@ impl App {
         // what it says, then its button or progress bar
         let (say, then): (Element<'_, Message>, Element<'_, Message>) = match &self.reader {
             Reader::Idle => return None,
-            Reader::Reading => return Some(widgets::pill("Reading text…").into()),
             Reader::Missing(bytes) => {
                 let mb = bytes.div_ceil(1_000_000).max(1);
                 let say = format!("Text selection needs the text reader (~{mb} MB).");
@@ -4039,8 +4272,13 @@ fn background<T: Send + 'static>(
     work: impl FnOnce(&UnboundedSender<T>) + Send + 'static,
 ) -> Task<T> {
     let (tx, rx) = mpsc::unbounded();
+    // (tests: the test's name, so what it copies is its own, `copy::copied`)
+    let name = match cfg!(test) {
+        true => std::thread::current().name().unwrap_or_default().into(),
+        false => "background".into(),
+    };
     let spawned = std::thread::Builder::new()
-        .name("background".into())
+        .name(name)
         .spawn(move || work(&tx));
     if let Err(e) = spawned {
         eprintln!("cannot start a thread: {e}");
@@ -4423,6 +4661,32 @@ mod tests {
         let _ = app.on_overlay(e);
     }
 
+    /// Runs `task` to its end (its threads' work done) and hands its messages
+    /// to the app (their own tasks are dropped).
+    fn run_task(app: &mut App, task: Task<Message>) {
+        let actions = iced_runtime::task::into_stream(task)
+            .map(iced::futures::executor::block_on_stream)
+            .into_iter()
+            .flatten();
+        for action in actions {
+            if let iced_runtime::Action::Output(message) = action {
+                let _ = app.update(message);
+            }
+        }
+    }
+
+    /// What this test's background work copied, once it has (within 10 s).
+    fn copied_image() -> Option<(u32, u32)> {
+        let until = Instant::now() + Duration::from_secs(10);
+        loop {
+            match copy::copied::image() {
+                Some(size) => return Some(size),
+                None if Instant::now() > until => return None,
+                None => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+    }
+
     /// A press-drag-release on screen from `a` to `b`.
     pub(super) fn drag(app: &mut App, a: Point, b: Point, shift: bool) {
         event(app, overlay::Event::Press { at: a, shift });
@@ -4474,7 +4738,7 @@ mod tests {
     fn snip_ctrl_c_copies_the_area_under_the_pointer_as_an_image() {
         let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
         let mut app = snipping(area);
-        copy::COPIED_IMAGE.set(None);
+        let _ = copy::copied::image();
         event(
             &mut app,
             overlay::Event::Key {
@@ -4482,8 +4746,8 @@ mod tests {
                 ctrl: true,
             },
         );
-        assert_eq!(copy::COPIED_IMAGE.take(), Some((300, 200)), "that area");
-        assert!(copy::COPIED.take().is_none(), "the picture only, no text");
+        assert_eq!(copied_image(), Some((300, 200)), "that area");
+        assert!(copy::copied::text().is_none(), "the picture only, no text");
         assert!(app.snip_toast(), "and the toast says so");
         // off every window it is what a click takes there: the whole screen
         let mut app = snipping(area);
@@ -4495,7 +4759,7 @@ mod tests {
                 ctrl: true,
             },
         );
-        assert_eq!(copy::COPIED_IMAGE.take(), Some((800, 600)));
+        assert_eq!(copied_image(), Some((800, 600)));
     }
 
     /// The two shortcuts of #52: Ctrl+C copies the selection's picture, Ctrl+S saves
@@ -4518,14 +4782,20 @@ mod tests {
             app
         };
         // Ctrl+C: the picture on the clipboard and the "Copied" pill
+        // (#123: the encoding and the clipboard off the UI thread: the overlay
+        // closes at once, the pill comes once the copy is done)
         let mut app = selected();
-        copy::COPIED_IMAGE.set(None);
-        event(&mut app, key('c'));
-        assert_eq!(copy::COPIED_IMAGE.take(), Some((300, 200)));
+        let _ = copy::copied::image();
+        let task = app.on_overlay(key('c'));
+        assert!(app.frame.is_none() && app.windows.toasts().is_empty());
+        run_task(&mut app, task);
+        assert_eq!(copy::copied::image(), Some((300, 200)));
         assert_eq!(app.windows.toasts(), [("Copied".to_string(), true)]);
         // Ctrl+S: a file in the save folder and "Saved to <folder>"
         let mut app = selected();
-        event(&mut app, key('s'));
+        let task = app.on_overlay(key('s'));
+        assert!(std::fs::read_dir(&dir).unwrap().next().is_none(), "not yet");
+        run_task(&mut app, task);
         let toasts = app.windows.toasts();
         assert_eq!(toasts.len(), 1, "{toasts:?}");
         assert!(
@@ -4542,7 +4812,9 @@ mod tests {
         );
         // an error: the same pill, the error text, no dot
         let mut app = selected();
-        let _ = app.confirm(Err("Couldn't save. Pick a folder you can write to.".into()));
+        let place = (app.origin, app.screen, app.scale);
+        let failed = Err("Couldn't save. Pick a folder you can write to.".into());
+        let _ = app.update(Message::Confirm(place, failed));
         assert_eq!(
             app.windows.toasts(),
             [(
@@ -5041,12 +5313,29 @@ mod tests {
         assert!(app.ask.is_empty());
     }
 
-    /// `text_app` with its screen read (as the read at open answers).
-    fn read_app() -> App {
+    /// `text_app` with its text reader (the OCR models) here: main mode reads
+    /// the screen's text on demand.
+    fn reader_app() -> App {
         let mut app = text_app();
-        let lines = word::lines(text_blocks(), [0, 0], 1.0);
-        let _ = app.update(Message::ScreenText(app.opening, Ok(lines)));
-        assert!(app.screen_text.is_some());
+        app.ocr_ready = true;
+        app
+    }
+
+    /// OCR answers the band being read (`band`) of `text_app`'s page.
+    fn answer(app: &mut App, band: Rectangle) -> Task<Message> {
+        let inside = |b: &TextBlock| {
+            band.y <= b.bounds[1] && b.bounds[1] + b.bounds[3] <= band.y + band.height
+        };
+        let blocks = text_blocks().into_iter().filter(inside).collect();
+        let lines = word::lines(blocks, [0, 0], 1.0);
+        app.update(Message::ScreenText(app.opening, band, Ok(lines)))
+    }
+
+    /// `reader_app` with all its screen read.
+    fn read_app() -> App {
+        let mut app = reader_app();
+        let _ = answer(&mut app, page());
+        assert!(app.screen_text.is_whole(420.0));
         app
     }
 
@@ -5352,7 +5641,7 @@ mod tests {
     #[test]
     fn without_the_text_reader_the_bar_offers_its_download() {
         let mut app = open_app(1280, 800, 1.0);
-        let _ = app.read_screen(); // as at open (the tests have no models)
+        app.note_reader(); // as at open (the tests have no models)
         let Reader::Missing(bytes) = app.reader else {
             panic!("{:?}", app.reader);
         };
@@ -5407,21 +5696,13 @@ mod tests {
         // done: the screen is read (here, still no models: offered again)
         let _ = app.update(step(Ok(text::Progress::Reading)));
         assert!(matches!(app.reader, Reader::Missing(_)), "{:?}", app.reader);
-        app.reader = Reader::Reading;
-        let texts = overlay_texts(&app);
-        assert!(texts.contains(&"Reading text…".to_string()), "{texts:?}");
-        widgets::shot::save("reader-reading", app.view(app.overlay), app.screen);
-        let lines = word::lines(text_blocks(), [0, 0], 1.0);
-        let _ = app.update(Message::ScreenText(app.opening, Ok(lines)));
-        assert_eq!(app.reader, Reader::Idle);
-        assert!(!overlay_texts(&app).contains(&"Reading text…".to_string()));
     }
 
     /// A drag on text that began before the screen's text was read becomes a
     /// text selection as soon as it is (not a stroke snapped to a box).
     #[test]
     fn a_drag_on_text_selects_it_once_the_words_arrive() {
-        let mut app = text_app();
+        let mut app = reader_app();
         event(
             &mut app,
             overlay::Event::Press {
@@ -5434,14 +5715,14 @@ mod tests {
             event(&mut app, overlay::Event::Move(p));
         }
         assert!(app.drawing, "a stroke until the words are read");
-        let lines = word::lines(text_blocks(), [0, 0], 1.0);
-        let _ = app.update(Message::ScreenText(app.opening, Ok(lines)));
+        let band = app.reading.expect("the band under the press is read");
+        let _ = answer(&mut app, band);
         assert!(!app.drawing && app.text_press.is_some());
         event(&mut app, overlay::Event::Move(caret(1, 21.0)));
         event(&mut app, overlay::Event::Release);
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
         // off the text it stays a stroke
-        let mut app = text_app();
+        let mut app = reader_app();
         event(
             &mut app,
             overlay::Event::Press {
@@ -5450,9 +5731,119 @@ mod tests {
             },
         );
         event(&mut app, overlay::Event::Move(Point::new(700.0, 300.0)));
-        let lines = word::lines(text_blocks(), [0, 0], 1.0);
-        let _ = app.update(Message::ScreenText(app.opening, Ok(lines)));
+        let band = app.reading.expect("a press may be on text");
+        let _ = answer(&mut app, band);
         assert!(app.drawing && app.word.is_none());
+        assert!(
+            !app.text_used && app.reading.is_none(),
+            "no text: no more is read"
+        );
+    }
+
+    /// #123: opening the overlay reads no text and starts no helper while the
+    /// opening animation runs (it was a full-screen OCR read 150 ms in, every
+    /// core busy); the helper starts once it ends. A press reads the band
+    /// under it first; once text is used, the rest follows, nearest first.
+    #[test]
+    fn the_screen_is_read_on_demand_the_touched_band_first() {
+        text::MODELS_HERE.set(Some(true));
+        let page = text_app();
+        let mut app = App::idle(window::Id::unique());
+        app.labs = Labs::all_on();
+        let shot = Shot {
+            image: page.frame.clone().unwrap(),
+            scale: 1.0,
+            origin: Point::ORIGIN,
+            size: page.screen,
+            snip: None,
+        };
+        let _ = app.open(Instant::now(), Ok(shot));
+        assert!(app.ocr_ready && app.reader == Reader::Idle);
+        assert_eq!(app.reading, None, "nothing read at open");
+        // the opening animation: nothing read, no helper started
+        let start = Instant::now();
+        let mut ms = 0;
+        let mut last = Task::none();
+        while app.appear.is_none() || app.appearing() {
+            last = app.update(Message::Frame(start + Duration::from_millis(ms)));
+            ms += 16;
+            if app.appearing() {
+                assert_eq!(last.units(), 0, "work at {ms} ms of the opening");
+            }
+            assert_eq!(app.reading, None);
+        }
+        assert!(last.units() > 0, "its end starts the helper");
+        // a press on text: the band under it is read first, not the screen
+        let at = caret(1, 7.0);
+        event(&mut app, overlay::Event::Press { at, shift: false });
+        let first = app.reading.expect("the touched band");
+        assert_eq!(first, word::Screen::band(at.y, app.screen));
+        assert!(first.height < app.screen.height / 1.5 && first.contains(at));
+        for i in 1..=8 {
+            let p = at + (caret(1, 21.0) - at) * (i as f32 / 8.0);
+            event(&mut app, overlay::Event::Move(p));
+        }
+        let _ = answer(&mut app, first);
+        event(&mut app, overlay::Event::Release);
+        assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
+        // text was used: the rest of the screen, band by band
+        let next = app.reading.expect("the rest, in the background");
+        assert!(!first.contains(next.center()));
+        let mut bands = 1;
+        while let Some(band) = app.reading {
+            let _ = answer(&mut app, band);
+            bands += 1;
+            assert!(bands < 10);
+        }
+        assert!(app.screen_text.is_whole(app.screen.height));
+        assert_eq!(app.screen_text.lines().len(), TEXT.len());
+        assert_eq!(picked_text(&app).as_deref(), Some("while you drag"), "kept");
+        text::MODELS_HERE.set(None);
+    }
+
+    /// A tap, a Shift+click and Ctrl+A before their text is read wait for it.
+    #[test]
+    fn taps_shift_clicks_and_ctrl_a_wait_for_their_band() {
+        // a tap: the word there once its band is read
+        let mut app = reader_app();
+        let tap = at_word(4, 6.0); // "Shift"
+        click_at(&mut app, tap, false);
+        let band = app.reading.expect("the tapped band");
+        assert!(band.contains(tap) && band.height < 420.0);
+        let _ = answer(&mut app, band);
+        assert_eq!(picked_text(&app).as_deref(), Some("Shift"));
+        // Shift+click past the rows read: that band, then the words stretch there
+        let mut app = reader_app();
+        let band = word::Screen::band(caret(0, 0.0).y, app.screen);
+        let _ = answer(&mut app, band);
+        stroke(&mut app, &[caret(0, 7.0), caret(0, 16.0)]);
+        assert_eq!(picked_text(&app).as_deref(), Some("to Search"));
+        let end = caret(5, 9.0);
+        assert!(!app.screen_text.knows(end.y));
+        click_at(&mut app, end, true);
+        while let Some(band) = app.reading {
+            let _ = answer(&mut app, band); // the background band, then the clicked one
+        }
+        let text = picked_text(&app).unwrap();
+        assert!(
+            text.starts_with("to Search") && text.ends_with("selection"),
+            "{text}"
+        );
+        // Ctrl+A: everything, once all is read
+        let mut app = reader_app();
+        event(&mut app, overlay::Event::Hover(caret(3, 0.0)));
+        let ctrl_a = overlay::Event::Key {
+            letter: 'a',
+            ctrl: true,
+        };
+        event(&mut app, ctrl_a);
+        let first = app.reading.expect("from the pointer");
+        assert!(first.contains(caret(3, 0.0)));
+        while let Some(band) = app.reading {
+            assert!(app.selection.is_none(), "not before all is read");
+            let _ = answer(&mut app, band);
+        }
+        assert_eq!(picked_text(&app).unwrap(), TEXT.join("\n"));
     }
 
     /// The bottom bar (owner, 2026-10-25): no Search, Ask AI or Text buttons
@@ -6387,12 +6778,10 @@ mod tests {
             .into_iter()
             .find(copy)
             .expect("the capture is copied");
-        copy::COPIED_IMAGE.set(None);
-        let _ = app.update(copy_message);
-        assert!(
-            copy::COPIED_IMAGE.take().is_some(),
-            "the capture was copied"
-        );
+        let _ = copy::copied::image();
+        let task = app.update(copy_message);
+        run_task(&mut app, task);
+        assert!(copy::copied::image().is_some(), "the capture was copied");
         // Ctrl+S saves even with the field focused (and text selected)
         // (the copy closed that overlay: a fresh one)
         let mut app = open_app(800, 600, 1.0);
@@ -6693,15 +7082,16 @@ mod tests {
         // Ctrl+C copies the same picked characters, not the whole box's text
         let mut keyed = select_text_app();
         drag(&mut keyed, caret(1, 9.4), caret(2, 16.0), false);
-        copy::COPIED.set(None);
+        let _ = copy::copied::text();
         let ctrl_c = overlay::Event::Key {
             letter: 'c',
             ctrl: true,
         };
-        let _ = keyed.update(Message::Overlay(ctrl_c));
+        let task = keyed.update(Message::Overlay(ctrl_c));
+        run_task(&mut keyed, task);
         assert_eq!(keyed.windows.toasts(), [("Copied".to_string(), true)]);
         assert_eq!(
-            copy::COPIED.take().as_deref(),
+            copy::copied::text().as_deref(),
             Some("ile you drag a finger\nacross the words")
         );
         // Done leaves the mode; a press outside the box starts over

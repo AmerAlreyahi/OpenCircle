@@ -10,7 +10,10 @@ pub(crate) mod worker;
 
 pub use models::{download_size, ensure_models, models_dir, ready};
 pub use session::{Hold, hold};
-pub use worker::{WORKER_ARG, recognize_as, recognize_in_child, translate_in_child, worker_main};
+pub use worker::{
+    WORKER_ARG, recognize_as, recognize_gently, recognize_in_child, translate_in_child, warm,
+    worker_main,
+};
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -312,6 +315,16 @@ impl Engine {
             self.rec = Some((i, rec));
         }
         Ok(&self.rec.as_ref().expect("just loaded").1)
+    }
+
+    /// Loads the recognizer `read` starts with (the engine is loaded): the
+    /// first read after it is quick.
+    pub fn warm(&mut self, read: Read) -> Result<(), OcrError> {
+        let first = match read {
+            Read::One(i) => i,
+            Read::Auto => self.auto,
+        };
+        self.recognizer(first).map(drop)
     }
 
     /// Finds and reads the text lines in an RGBA image, in reading order.

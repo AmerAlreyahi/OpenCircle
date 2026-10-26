@@ -95,6 +95,8 @@ pub enum Msg {
     Edit,
     /// Toast `.0` was shown long enough.
     ToastDone(u32),
+    /// Toast `.0`'s capture could not be copied: the editor opens on it.
+    CopyFailed(u32),
     /// Controls of one window (logical px), for opening `.0`.
     Controls(u32, Vec<Pick>),
     /// The pointer left the overlay (maybe for another monitor: `Snip::follow`).
