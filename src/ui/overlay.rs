@@ -79,6 +79,12 @@ pub enum Event {
     Release,
     /// Enter: the default action.
     Enter,
+    /// Space: activates the bar's focused control (nothing else).
+    Space,
+    /// Tab / Shift+Tab (`back`): moves focus through the bar.
+    Tab {
+        back: bool,
+    },
     /// A letter key (Latin, lower-case, keyboard-layout independent), with Ctrl or not.
     Key {
         letter: char,
@@ -850,6 +856,10 @@ impl canvas::Program<Event> for Overlay<'_> {
                 ..
             }) => match key {
                 keyboard::Key::Named(Named::Enter) => Event::Enter,
+                keyboard::Key::Named(Named::Space) => Event::Space,
+                keyboard::Key::Named(Named::Tab) => Event::Tab {
+                    back: modifiers.shift(),
+                },
                 _ => Event::Key {
                     letter: key.to_latin(*physical_key)?.to_ascii_lowercase(),
                     ctrl: modifiers.command(),

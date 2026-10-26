@@ -40,10 +40,23 @@ OpenCircle prints this when it starts under GNOME. (`Ctrl+Print Screen` is free.
 
 While the overlay is open: `Esc` closes, `Enter` runs the default action
 (Search unless you changed it in **Settings → General**), and the action keys
-are `L` Search, `A` Ask AI, `T` Text, `E` Edit.
+are `L` Search, `A` Ask AI, `T` Text, `E` Edit, `R` Translate.
 
-`Ctrl+C` copies the selection (its picture, or its text when you selected text) and
-`Ctrl+S` saves the picture in your save folder (Settings → General; the default is
+**Typing always wins.** While a text box has the focus (the bar's AI field, a
+card's question box or text), every key you press is typed into it: the letter
+keys above do nothing then. They work again as soon as no text box has the
+focus: press `Esc` once to leave the box (the overlay stays), and `Esc` again
+closes it.
+
+**Keyboard path.** `Tab` / `Shift+Tab` move the focus through the bar in the
+order you see it: the logo, the AI field, the `AI ↵` badge, Search in browser,
+Copy text, Translate, Live translate, then the other round buttons (a dimmed
+button is skipped). `Enter` or `Space` presses the focused button; a click puts
+the focus back on the screen.
+
+`Ctrl+C` copies the selection (its picture, or its text when you selected text; in a
+text box with text selected it copies that text instead) and
+`Ctrl+S` (also from a text box) saves the picture in your save folder (Settings → General; the default is
 Pictures/OpenCircle) as `OpenCircle-<date>-<time>.png`. There are no Copy or Save
 buttons: a pill at the bottom right says "Copied" or "Saved to <folder>" for about two
 seconds, or what went wrong (no green dot) if the clipboard was busy or the folder

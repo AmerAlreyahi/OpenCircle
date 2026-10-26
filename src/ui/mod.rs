@@ -8,6 +8,7 @@ mod edit;
 #[cfg(test)]
 mod frame_times;
 mod glass;
+mod keys;
 mod live_controller;
 mod live_layer;
 pub(crate) mod motion;
@@ -38,7 +39,7 @@ use std::time::{Duration, Instant};
 use iced::futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use iced::futures::stream::{self, Stream, StreamExt};
 use iced::keyboard::{self, key::Named};
-use iced::widget::{canvas, container, image, opaque, space, stack};
+use iced::widget::{canvas, container, image, opaque, operation, space, stack};
 use iced::window::{self, Level, Mode};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
@@ -151,6 +152,11 @@ enum Message {
     Overlay(overlay::Event),
     /// Esc, wherever the focus is.
     Escape,
+    /// Esc that a widget took (a field let go of the focus; the editor): it
+    /// only closes what the widget does not own.
+    EscapeTaken,
+    /// A focused field gave a key back (`keys`).
+    Field(keys::Keyed),
     /// From the panel with this number (stale numbers are ignored).
     Panel(u32, panel::Msg),
     /// Run an action on the selection (action bar button or its key).
@@ -510,6 +516,9 @@ struct App {
     /// The editor just went back to the bar (until the next frame): an
     /// Escape now is the key that did it.
     esc_back: bool,
+    /// Where Tab put the focus in the bottom bar (the field's own focus is the
+    /// text input's); none = the overlay has it, so the letters are shortcuts.
+    bar_focus: Option<bar::Stop>,
     /// The next snip capture is the one a timer waited for: no timer again.
     timed: bool,
     /// The bar's spot (`config::BarConfig`); while its handle is held, the
@@ -628,6 +637,7 @@ impl App {
             swap: 0.0,
             swap_at: None,
             esc_back: false,
+            bar_focus: None,
             timed: false,
             bar_anchor: BarAnchor::Bottom,
             bar_drag: None,
@@ -748,6 +758,29 @@ impl App {
                 Task::none()
             }
             Message::Escape => self.close(),
+            Message::EscapeTaken
+                if self.edit.is_some()
+                    || self.esc_back
+                    || self.capturing.is_some()
+                    || self.scroll().is_some() =>
+            {
+                self.update(Message::Escape)
+            }
+            // A field took it: it was that field's Esc (a second one closes).
+            Message::EscapeTaken => Task::none(),
+            Message::Field(keys::Keyed::Left) => {
+                self.bar_focus = None;
+                Task::none()
+            }
+            // (a click put the focus in the bar's field: Tab goes on from there)
+            Message::Field(keys::Keyed::Focus) => {
+                self.bar_focus = Some(bar::Stop::Field);
+                Task::none()
+            }
+            Message::Field(keys::Keyed::Copy) => self.on_overlay(overlay::Event::Key {
+                letter: 'c',
+                ctrl: true,
+            }),
             Message::Editor(msg) => self.on_editor(msg),
             Message::Snip(msg) => self.on_snip(msg),
             Message::TextRead(read) if self.toast.is_some() => {
@@ -1239,10 +1272,13 @@ impl App {
                 self.view = self.view.reset();
                 return Task::none();
             }
-            overlay::Event::Press { at, shift } => overlay::Event::Press {
-                at: self.view.to_image(at),
-                shift,
-            },
+            overlay::Event::Press { at, shift } => {
+                self.bar_focus = None; // a click puts the focus back on the overlay
+                overlay::Event::Press {
+                    at: self.view.to_image(at),
+                    shift,
+                }
+            }
             overlay::Event::Move(at) => overlay::Event::Move(self.view.to_image(at)),
             overlay::Event::Hover(at) => overlay::Event::Hover(self.view.to_image(at)),
             event => event,
@@ -1283,7 +1319,9 @@ impl App {
                 } if session.has_card() => {
                     return self.on_translate(id, translate::Msg::Ask);
                 }
-                overlay::Event::Key { .. } | overlay::Event::Enter => return Task::none(),
+                overlay::Event::Key { .. } | overlay::Event::Enter | overlay::Event::Space => {
+                    return Task::none();
+                }
                 overlay::Event::Release if overlay::select(&self.stroke, 1.0).is_none() => {
                     let at = self.stroke.last().copied().unwrap_or(Point::ORIGIN);
                     session.click(Point::new(at.x * self.scale, at.y * self.scale));
@@ -1453,6 +1491,14 @@ impl App {
                 };
                 return Task::batch([self.selected(), search, settle]);
             }
+            // Tab moved the focus onto a bar button: Enter / Space press it.
+            overlay::Event::Enter | overlay::Event::Space
+                if let Some(stop) = self.bar_focus
+                    && self.bottom_bar_shown() =>
+            {
+                return self.activate(stop);
+            }
+            overlay::Event::Tab { back } if self.bottom_bar_shown() => return self.tab_bar(back),
             overlay::Event::Enter if matches!(self.purpose, Purpose::Search) => {
                 return self.run(actions::default_for(&config::current()));
             }
@@ -1506,7 +1552,10 @@ impl App {
                 };
                 return self.snip_routed(crop, true, (true, false));
             }
-            overlay::Event::Enter | overlay::Event::Key { .. } => {}
+            overlay::Event::Enter
+            | overlay::Event::Space
+            | overlay::Event::Tab { .. }
+            | overlay::Event::Key { .. } => {}
             // mapped above
             overlay::Event::Zoom { .. }
             | overlay::Event::PanStart(_)
@@ -2778,6 +2827,11 @@ impl App {
             panel::Msg::Card(card::Event::Close) => self.panel = None,
             panel::Msg::Cancel => self.panel = None,
             panel::Msg::Search => return self.run(&lens::ACTION),
+            // A card's focused field gave Ctrl+C back (nothing selected in it).
+            panel::Msg::Key(keys::Keyed::Copy) => {
+                return self.update(Message::Field(keys::Keyed::Copy));
+            }
+            panel::Msg::Key(_) => {}
             panel::Msg::CopyText => {
                 let text = panel.text().unwrap_or_default();
                 let closing = self.close();
@@ -3453,6 +3507,50 @@ impl App {
         .discard()
     }
 
+    /// Something is selected for the bar's pills to act on.
+    fn selected_for_bar(&self) -> bool {
+        self.selection.is_some() && !self.settling()
+    }
+
+    /// What a bar button does (also what Enter / Space do on it once Tab
+    /// focused it); none = dimmed: Search in browser and Copy text need a
+    /// selection, Translate takes the whole screen without one.
+    fn bar_message(&self, which: BarButton) -> Option<Message> {
+        let selected = self.selected_for_bar();
+        match which {
+            BarButton::Search | BarButton::CopyText => selected.then_some(Message::Pill(which)),
+            BarButton::Translate => Some(Message::Pill(which)),
+            BarButton::Live => Some(Message::LiveToggle),
+            BarButton::Song => Some(Message::SongStart),
+            BarButton::Edit if selected => Some(Message::Run(&actions::edit::ACTION)),
+            BarButton::Edit => Some(Message::EditScreen),
+        }
+    }
+
+    /// Tab / Shift+Tab: the focus moves on through the bar (`bar::stops`).
+    /// The AI field takes the text input's focus, any other stop lets go of it.
+    fn tab_bar(&mut self, back: bool) -> Task<Message> {
+        let stops = bar::stops(self.selected_for_bar(), &labs::bar(&self.labs));
+        self.bar_focus = bar::tab(&stops, self.bar_focus, back);
+        match self.bar_focus {
+            Some(bar::Stop::Field) => operation::focus(ASK_INPUT),
+            _ => operation::focus("overlay-none"), // focusing nothing unfocuses the field
+        }
+    }
+
+    /// Enter / Space on the stop Tab focused.
+    fn activate(&mut self, stop: bar::Stop) -> Task<Message> {
+        match stop {
+            bar::Stop::Logo => self.update(Message::AskButton),
+            bar::Stop::Badge => self.update(Message::AskSubmit),
+            bar::Stop::Button(which) => match self.bar_message(which) {
+                Some(message) => self.update(message),
+                None => Task::none(),
+            },
+            bar::Stop::Field => Task::none(), // the field's own Enter submits
+        }
+    }
+
     /// The bottom bar, the one action hub, as the new design's search bar: a
     /// handle to drag it, the AI field ("Ask OpenCircle AI about your
     /// screen…": Enter, the logo or the "AI ↵" badge ask about the selection,
@@ -3472,9 +3570,16 @@ impl App {
             Message::AskInput,
             Message::AskSubmit,
         );
-        let field = widgets::ai_field(input, width, Message::AskButton, Message::AskSubmit);
+        let kbd = |stop| self.bar_focus == Some(stop);
+        let field = widgets::ai_field(
+            input,
+            width,
+            (Message::AskButton, kbd(bar::Stop::Logo)),
+            (Message::AskSubmit, kbd(bar::Stop::Badge)),
+        );
+        let field = keys::guard(field, Message::Field);
         let keys = &self.bar_keys;
-        let selected = self.selection.is_some() && !self.settling();
+        let selected = self.selected_for_bar();
         let shown = labs::bar(&self.labs);
         let icons = shown.iter().filter(|b| !b.is_pill()).count() as f32;
         let widths = bar::pill_widths(self.screen.width, icons);
@@ -3501,13 +3606,13 @@ impl App {
         .into_iter()
         .zip(widths)
         .map(|((which, glyph, label, keys), width)| {
-            let live = selected || which == BarButton::Translate;
             let pill = widgets::bar_pill(
                 glyph,
                 label,
                 width,
                 self.pill == which,
-                live.then_some(Message::Pill(which)),
+                self.bar_message(which),
+                kbd(bar::Stop::Button(which)),
             );
             // Its label is written on it; an icon-only pill (narrow screens)
             // names itself and its shortcut in a tooltip.
@@ -3527,7 +3632,6 @@ impl App {
                 "Live translate (Beta)",
                 &keys.live,
                 self.live.is_some(),
-                Message::LiveToggle,
             ),
             (
                 BarButton::Song,
@@ -3535,7 +3639,6 @@ impl App {
                 "Song search",
                 &keys.song,
                 false,
-                Message::SongStart,
             ),
             (
                 BarButton::Edit,
@@ -3547,17 +3650,20 @@ impl App {
                 },
                 &keys.edit,
                 false,
-                if selected {
-                    Message::Run(&actions::edit::ACTION)
-                } else {
-                    Message::EditScreen
-                },
             ),
         ]
         .into_iter()
         .filter(|(which, ..)| shown.contains(which))
-        .map(|(_, glyph, label, keys, active, message)| {
-            bar_button(glyph, label, keys, active, Some(message))
+        .map(|(which, glyph, label, keys, active)| {
+            let message = self.bar_message(which);
+            bar_button(
+                glyph,
+                label,
+                keys,
+                active,
+                message,
+                kbd(bar::Stop::Button(which)),
+            )
         });
         let handle = container(widgets::icon(widgets::DRAG))
             .center_x(bar::HANDLE)
@@ -3657,13 +3763,17 @@ impl App {
             self.windows.subscription().map(Message::Windows),
             moved,
         ]);
-        // Also when a text field took the key (it only unfocuses on Esc).
+        // Also when a widget took the key: a text field only lets go of the
+        // focus on Esc, and the overlay stays (`EscapeTaken`).
         let escape = || {
-            iced::event::listen_with(|event, _, _| match event {
+            iced::event::listen_with(|event, status, _| match event {
                 iced::Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(Named::Escape),
                     ..
-                }) => Some(Message::Escape),
+                }) => Some(match status {
+                    iced::event::Status::Captured => Message::EscapeTaken,
+                    iced::event::Status::Ignored => Message::Escape,
+                }),
                 _ => None,
             })
         };
@@ -3787,12 +3897,13 @@ fn bar_button<'a>(
     keys: &'a str,
     active: bool,
     message: Option<Message>,
+    kbd: bool,
 ) -> Element<'a, Message> {
     let why = match keys.is_empty() {
         true => widgets::Why::Icon,
         false => widgets::Why::Keys(keys),
     };
-    let button = widgets::round_button(glyph, active, message);
+    let button = widgets::round_button(glyph, active, message, kbd);
     widgets::hint(button, label, why, iced::widget::tooltip::Position::Top)
 }
 
@@ -6055,6 +6166,312 @@ mod tests {
             keys.iter()
                 .any(|m| matches!(m, Message::AskInput(t) if t == "a"))
         );
+    }
+
+    // --- #101: one focus rule. A focused text field takes the typed letters; the
+    // single-letter shortcuts run only when none has focus. ---
+
+    use widgets::shot::{self, Clip, Focus};
+
+    /// The shortcut letters that reached the overlay.
+    fn shortcuts(messages: &[Message]) -> String {
+        (messages.iter())
+            .filter_map(|m| match m {
+                Message::Overlay(overlay::Event::Key {
+                    letter,
+                    ctrl: false,
+                }) => Some(*letter),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An open overlay with a selection and a ready Ask AI panel (browser provider).
+    fn app_with_ask_panel() -> (App, u32) {
+        let mut app = open_app(800, 600, 1.0);
+        drag(
+            &mut app,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 120.0),
+            false,
+        );
+        let crop = app.crop().unwrap();
+        let _ = app.open_panel(actions::Panel::Ask, crop.clone(), None);
+        let (id, _) = app.panel.as_ref().map(|(id, p)| (*id, p.kind())).unwrap();
+        let setup = actions::ask::setup(&crop).map(Arc::new);
+        let _ = app.update(Message::Panel(id, panel::Msg::Ready(setup)));
+        (app, id)
+    }
+
+    /// An open overlay with a selection and a Text panel that has read `text`.
+    fn app_with_text_panel(text: &str) -> App {
+        let mut app = open_app(800, 600, 1.0);
+        drag(
+            &mut app,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 120.0),
+            false,
+        );
+        let crop = app.crop().unwrap();
+        let _ = app.open_panel(actions::Panel::Text, crop, None);
+        let id = app.panel.as_ref().map(|(id, _)| *id).unwrap();
+        let _ = app.update(Message::Panel(id, panel::Msg::Read(Ok(text.into()))));
+        app
+    }
+
+    fn feed(
+        app: &App,
+        focus: Focus,
+        events: &[iced::Event],
+    ) -> (Vec<Message>, Vec<iced::event::Status>) {
+        shot::feed(
+            app.view(app.overlay),
+            app.screen,
+            focus,
+            events,
+            &mut Clip::default(),
+        )
+    }
+
+    #[test]
+    fn typing_in_the_bars_field_runs_no_shortcut() {
+        let app = open_app(800, 600, 1.0);
+        let (messages, _) = feed(&app, Focus::Id(ASK_INPUT), &shot::typing("real estate"));
+        assert_eq!(shortcuts(&messages), "", "{messages:?}");
+        let typed = (messages.iter()).filter(|m| matches!(m, Message::AskInput(_)));
+        assert_eq!(typed.count(), "real estate".len());
+        assert!(!messages.iter().any(|m| matches!(
+            m,
+            Message::Overlay(overlay::Event::Space | overlay::Event::Enter) | Message::AskSubmit
+        )));
+        // The same letters with no field focused are the shortcuts.
+        let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("aterl"));
+        assert_eq!(shortcuts(&messages), "aterl");
+    }
+
+    #[test]
+    fn typing_in_the_ask_panels_input_runs_no_shortcut() {
+        let (app, _) = app_with_ask_panel();
+        let (messages, _) = feed(&app, Focus::Id(panel::INPUT), &shot::typing("real estate"));
+        assert_eq!(shortcuts(&messages), "", "{messages:?}");
+        let typed =
+            (messages.iter()).filter(|m| matches!(m, Message::Panel(_, panel::Msg::Input(_))));
+        assert_eq!(typed.count(), "real estate".len());
+        let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("aterl"));
+        assert_eq!(
+            shortcuts(&messages),
+            "aterl",
+            "the panel doesn't take keys by itself"
+        );
+    }
+
+    #[test]
+    fn typing_in_the_text_panels_editor_runs_no_shortcut() {
+        let app = app_with_text_panel("hello");
+        let (messages, _) = feed(&app, Focus::First, &shot::typing("real estate"));
+        assert_eq!(shortcuts(&messages), "", "{messages:?}");
+        let edits = (messages.iter())
+            .filter(|m| matches!(m, Message::Panel(_, panel::Msg::Edit(_))))
+            .count();
+        assert!(edits >= "real estate".len(), "{messages:?}");
+        let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("aterl"));
+        assert_eq!(shortcuts(&messages), "aterl");
+    }
+
+    #[test]
+    fn a_translation_has_no_field_to_take_the_letters() {
+        let mut app = open_app(800, 600, 1.0);
+        let frame = app.frame.clone().unwrap();
+        let (session, _) =
+            translate::Session::start(frame, [0, 0, 800, 600], app.cache.clone(), false);
+        app.translate = Some((7, session));
+        assert!(!app.bottom_bar_shown(), "no bar, so no ask field");
+        // Tab has no bar to move through; the card's E / A stay the card's.
+        let _ = app.on_overlay(overlay::Event::Tab { back: false });
+        assert_eq!(app.bar_focus, None);
+        let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("ea"));
+        assert_eq!(shortcuts(&messages), "ea");
+    }
+
+    #[test]
+    fn esc_leaves_a_focused_field_and_the_second_closes() {
+        let mut app = open_app(800, 600, 1.0);
+        let esc = shot::named(iced::keyboard::key::Named::Escape, false);
+        // bar field
+        let (messages, status) = feed(&app, Focus::Id(ASK_INPUT), &esc);
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::Field(keys::Keyed::Left)))
+        );
+        assert_eq!(
+            status[1],
+            iced::event::Status::Captured,
+            "the overlay is told a widget took it"
+        );
+        // the subscription turns that into EscapeTaken: nothing closes
+        let _ = app.update(Message::EscapeTaken);
+        assert!(app.frame.is_some() && app.hiding == Hiding::No);
+        // with the field let go, letters are shortcuts again
+        let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("t"));
+        assert_eq!(shortcuts(&messages), "t");
+        // the second Esc reaches nobody: it closes as today
+        let (_, status) = feed(&app, Focus::Nothing, &esc);
+        assert_eq!(status[1], iced::event::Status::Ignored);
+        let _ = app.update(Message::Escape);
+        assert!(app.frame.is_none());
+        // the Ask panel's input and the Text panel's editor (which lets Esc through)
+        let (app, _) = app_with_ask_panel();
+        let (messages, status) = feed(&app, Focus::Id(panel::INPUT), &esc);
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::Panel(_, panel::Msg::Key(keys::Keyed::Left))))
+        );
+        assert_eq!(status[1], iced::event::Status::Captured);
+        let app = app_with_text_panel("hello");
+        let (messages, status) = feed(&app, Focus::First, &esc);
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::Panel(_, panel::Msg::Key(keys::Keyed::Left))))
+        );
+        assert_eq!(
+            status[1],
+            iced::event::Status::Captured,
+            "Esc must not also close the overlay"
+        );
+    }
+
+    #[test]
+    fn ctrl_c_in_a_field_copies_its_selection_else_the_capture() {
+        let mut app = open_app(800, 600, 1.0);
+        drag(
+            &mut app,
+            Point::new(100.0, 80.0),
+            Point::new(400.0, 280.0),
+            false,
+        );
+        app.ask = "hello".into();
+        let run = |app: &App, events: Vec<iced::Event>| {
+            let mut clip = Clip::default();
+            let (messages, _) = shot::feed(
+                app.view(app.overlay),
+                app.screen,
+                Focus::Id(ASK_INPUT),
+                &events,
+                &mut clip,
+            );
+            (messages, clip.0)
+        };
+        let copy = |m: &Message| {
+            matches!(m, Message::Field(keys::Keyed::Copy))
+                || matches!(
+                    m,
+                    Message::Overlay(overlay::Event::Key {
+                        letter: 'c',
+                        ctrl: true
+                    })
+                )
+        };
+        // text selected (Ctrl+A): the field's own copy, the capture is not copied
+        let select_all = [shot::chord('a'), shot::chord('c')].concat();
+        let (messages, clip) = run(&app, select_all);
+        assert_eq!(clip, ["hello"]);
+        assert!(!messages.iter().any(copy), "{messages:?}");
+        // nothing selected: the overlay's copy of the capture
+        let (messages, clip) = run(&app, shot::chord('c'));
+        assert!(clip.is_empty());
+        let copy_message = messages
+            .into_iter()
+            .find(copy)
+            .expect("the capture is copied");
+        copy::COPIED_IMAGE.set(None);
+        let _ = app.update(copy_message);
+        assert!(
+            copy::COPIED_IMAGE.take().is_some(),
+            "the capture was copied"
+        );
+        // Ctrl+S saves even with the field focused (and text selected)
+        // (the copy closed that overlay: a fresh one)
+        let mut app = open_app(800, 600, 1.0);
+        drag(
+            &mut app,
+            Point::new(100.0, 80.0),
+            Point::new(400.0, 280.0),
+            false,
+        );
+        app.ask = "hello".into();
+        let (messages, _) = run(&app, shot::chord('s'));
+        assert!(messages.iter().any(|m| matches!(
+            m,
+            Message::Overlay(overlay::Event::Key {
+                letter: 's',
+                ctrl: true
+            })
+        )));
+    }
+
+    #[test]
+    fn tab_walks_the_bar_in_the_designs_order_and_enter_or_space_press() {
+        let mut app = open_app(800, 600, 1.0);
+        let tab = |app: &mut App, back| {
+            let _ = app.on_overlay(overlay::Event::Tab { back });
+            app.bar_focus
+        };
+        use bar::Stop::{Badge, Button, Field, Logo};
+        let forward: Vec<_> = (0..8).map(|_| tab(&mut app, false)).collect();
+        let order = [
+            Logo,
+            Field,
+            Badge,
+            Button(BarButton::Translate), // Search in browser and Copy text are dimmed
+            Button(BarButton::Live),
+            Button(BarButton::Song),
+            Button(BarButton::Edit),
+            Logo, // and round again
+        ];
+        assert_eq!(forward, order.map(Some));
+        assert_eq!(tab(&mut app, true), Some(Button(BarButton::Edit)));
+        // Tab events come from the key itself, Shift+Tab goes back
+        let (messages, _) = feed(
+            &app,
+            Focus::Nothing,
+            &shot::named(iced::keyboard::key::Named::Tab, true),
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::Overlay(overlay::Event::Tab { back: true })))
+        );
+        // a selection brings the two pills into the order, after the badge
+        app.select(Rectangle::new(
+            Point::new(100.0, 80.0),
+            Size::new(300.0, 200.0),
+        ));
+        app.bar_focus = Some(Badge);
+        assert_eq!(tab(&mut app, false), Some(Button(BarButton::Search)));
+        assert_eq!(tab(&mut app, false), Some(Button(BarButton::CopyText)));
+        // Enter and Space press the focused control
+        let mut app = open_app(800, 600, 1.0);
+        app.bar_focus = Some(Button(BarButton::Translate));
+        let _ = app.on_overlay(overlay::Event::Space);
+        assert_eq!(app.pill, BarButton::Translate);
+        let mut app = open_app(800, 600, 1.0);
+        app.bar_focus = Some(Logo);
+        let _ = app.on_overlay(overlay::Event::Enter);
+        assert!(app.panel.is_some(), "the logo opens the AI chat");
+        // Space with nothing focused does nothing
+        let mut app = open_app(800, 600, 1.0);
+        let _ = app.on_overlay(overlay::Event::Space);
+        assert!(app.panel.is_none() && app.bar_focus.is_none());
+        // a click puts the focus back on the overlay
+        app.bar_focus = Some(Badge);
+        let _ = app.on_overlay(overlay::Event::Press {
+            at: Point::new(5.0, 5.0),
+            shift: false,
+        });
+        assert_eq!(app.bar_focus, None);
     }
 
     #[test]

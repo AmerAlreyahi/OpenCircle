@@ -9,6 +9,7 @@ use iced::{Center, Element, Fill, Point, Rectangle, Size};
 use super::widgets::{self, CONTROL, SURFACE_PADDING};
 use crate::actions::{Key, qr};
 use crate::config::BarAnchor;
+use crate::labs::BarButton;
 
 /// Between a bar or chip and the selection, and the minimum distance to screen edges.
 pub(super) const GAP: f32 = 16.0;
@@ -60,6 +61,45 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
         .height(CONTROL + 2.0 * SURFACE_PADDING)
         .padding([0.0, 14.0])
         .into()
+}
+
+/// What Tab can land on in the bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stop {
+    /// The logo button (opens the AI chat).
+    Logo,
+    /// The AI field.
+    Field,
+    /// The "AI ↵" badge.
+    Badge,
+    Button(BarButton),
+}
+
+/// The Tab order, as the design's DOM: logo, AI field, AI badge, the pills,
+/// then the icon buttons (`shown`, in bar order). A dimmed pill (Search in
+/// browser and Copy text before a selection) is skipped, as a disabled
+/// control is.
+pub fn stops(selected: bool, shown: &[BarButton]) -> Vec<Stop> {
+    let live = |b: &BarButton| selected || !matches!(b, BarButton::Search | BarButton::CopyText);
+    let pills = shown.iter().filter(|b| b.is_pill() && live(b));
+    let icons = shown.iter().filter(|b| !b.is_pill());
+    [Stop::Logo, Stop::Field, Stop::Badge]
+        .into_iter()
+        .chain(pills.chain(icons).map(|b| Stop::Button(*b)))
+        .collect()
+}
+
+/// Where Tab (or Shift+Tab, `back`) goes from `at` (none yet: the first stop
+/// going forward, the last going back); it wraps.
+pub fn tab(stops: &[Stop], at: Option<Stop>, back: bool) -> Option<Stop> {
+    let n = stops.len();
+    let i = match at.and_then(|a| stops.iter().position(|s| *s == a)) {
+        Some(i) if back => (i + n - 1) % n,
+        Some(i) => (i + 1) % n,
+        None if back => n.checked_sub(1)?,
+        None => 0,
+    };
+    stops.get(i).copied()
 }
 
 /// A shortcut as a tooltip shows it, e.g. "Ctrl+C".
@@ -301,6 +341,41 @@ mod tests {
         );
         assert!(texts.contains(&"Hidden text-direction marks".to_string()));
         assert!(!texts.iter().any(|t| t.contains('\u{202e}')));
+    }
+
+    #[test]
+    fn tab_order_is_the_designs_and_skips_dimmed_pills() {
+        let all = crate::labs::bar(&crate::labs::Labs::all_on());
+        let order = |selected| stops(selected, &all);
+        let b = Stop::Button;
+        assert_eq!(
+            order(false),
+            [
+                Stop::Logo,
+                Stop::Field,
+                Stop::Badge,
+                b(BarButton::Translate),
+                b(BarButton::Live),
+                b(BarButton::Song),
+                b(BarButton::Edit),
+            ]
+        );
+        assert_eq!(
+            order(true)[3..6],
+            [
+                b(BarButton::Search),
+                b(BarButton::CopyText),
+                b(BarButton::Translate),
+            ]
+        );
+        // forward and back wrap; with no focus yet, first / last
+        let s = order(false);
+        assert_eq!(tab(&s, None, false), Some(Stop::Logo));
+        assert_eq!(tab(&s, None, true), Some(b(BarButton::Edit)));
+        assert_eq!(tab(&s, Some(b(BarButton::Edit)), false), Some(Stop::Logo));
+        assert_eq!(tab(&s, Some(Stop::Logo), true), Some(b(BarButton::Edit)));
+        // a stop that is gone (a pill dimmed meanwhile) starts over
+        assert_eq!(tab(&s, Some(b(BarButton::Search)), false), Some(Stop::Logo));
     }
 
     #[test]

@@ -11,6 +11,7 @@ use iced::widget::{column, container, image, operation, row, text_editor};
 use iced::{Center, ContentFit, Element, Fill, Rectangle, Size, Task, task};
 
 use super::background;
+use super::keys;
 use super::widgets::{self, SEND, STOP};
 use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::actions::entities::{self, Entity, Kind};
@@ -25,7 +26,7 @@ type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
 const THUMB_HEIGHT: f32 = 112.0;
 /// The follow-up input. Never focused by itself: until it is clicked, letters
 /// are the overlay's action shortcuts.
-const INPUT: &str = "panel-input";
+pub(super) const INPUT: &str = "panel-input";
 /// The Ask AI conversation (scrolled to the end as the answer grows).
 const LOG: &str = "panel-log";
 
@@ -60,6 +61,8 @@ pub enum Msg {
     Translated(Result<String, String>),
     /// A link, email or phone chip under the text (index into `entities`).
     Chip(usize),
+    /// A focused field gave a key back (`keys`); the App handles it.
+    Key(keys::Keyed),
 }
 
 pub struct Panel {
@@ -594,13 +597,11 @@ impl Panel {
                 Position::Top,
             )
         };
-        row![
-            widgets::input(INPUT, placeholder, &self.input, Msg::Input, Msg::Submit).width(Fill),
-            button,
-        ]
-        .spacing(8)
-        .align_y(Center)
-        .into()
+        let input = widgets::input(INPUT, placeholder, &self.input, Msg::Input, Msg::Submit);
+        row![keys::guard(input.width(Fill), Msg::Key), button]
+            .spacing(8)
+            .align_y(Center)
+            .into()
     }
 }
 
@@ -641,7 +642,8 @@ impl Panel {
             Reading::Busy => widgets::caption("Reading the text…").into(),
             Reading::Done(content) => {
                 let translate = &actions::translate::ACTION;
-                let mut body = column![widgets::editor(content, Msg::Edit)].spacing(12);
+                let mut body =
+                    column![keys::guard(widgets::editor(content, Msg::Edit), Msg::Key)].spacing(12);
                 body = match &self.translation {
                     _ if self.work.is_some() => body.push(widgets::caption("Translating…")),
                     Some(Ok(text)) => {

@@ -968,6 +968,7 @@ pub fn round_button<'a, Message: Clone + 'a>(
     glyph: char,
     active: bool,
     on_press: Option<Message>,
+    kbd: bool,
 ) -> Button<'a, Message> {
     let palette = theme::floating();
     let live = on_press.is_some();
@@ -988,16 +989,23 @@ pub fn round_button<'a, Message: Clone + 'a>(
                 (false, _) if !live => palette.hover.into(),
                 (false, button::Status::Hovered) => palette.field_focus.into(),
                 (false, button::Status::Pressed) => palette.pressed.into(),
+                (false, _) if kbd => palette.field_focus.into(),
                 (false, _) => palette.hover.into(),
             }),
             text_color: fg,
             border: Border {
-                color: palette.border,
+                color: kbd_border(kbd, palette.border),
                 width: 1.0,
                 radius: (BUBBLE / 2.0).into(),
             },
             ..button::Style::default()
         })
+}
+
+/// A button's border while Tab has the keyboard focus on it: the accent (a
+/// soft fill goes with it), never a white ring.
+fn kbd_border(kbd: bool, rest: Color) -> Color {
+    if kbd { theme::accent().0 } else { rest }
 }
 
 /// A labelled pill of the bottom bar (the new design's "Search in browser",
@@ -1011,6 +1019,7 @@ pub fn bar_pill<'a, Message: Clone + 'a>(
     width: f32,
     active: bool,
     on_press: Option<Message>,
+    kbd: bool,
 ) -> Button<'a, Message> {
     let palette = theme::floating();
     let live = on_press.is_some();
@@ -1036,11 +1045,12 @@ pub fn bar_pill<'a, Message: Clone + 'a>(
                 (true, _, _) => theme::accent().0.scale_alpha(0.18).into(),
                 (false, _, button::Status::Hovered) => palette.field_focus.into(),
                 (false, _, button::Status::Pressed) => palette.pressed.into(),
+                (false, _, _) if kbd => palette.field_focus.into(),
                 (false, _, _) => palette.hover.into(),
             }),
             text_color: fg,
             border: Border {
-                color: palette.border,
+                color: kbd_border(kbd, palette.border),
                 width: 1.0,
                 radius: 14.0.into(),
             },
@@ -1054,15 +1064,16 @@ pub fn bar_pill<'a, Message: Clone + 'a>(
 pub fn ai_field<'a, Message: Clone + 'a>(
     input: TextInput<'a, Message>,
     width: f32,
-    on_logo: Message,
-    on_badge: Message,
+    (on_logo, logo_kbd): (Message, bool),
+    (on_badge, badge_kbd): (Message, bool),
 ) -> Element<'a, Message> {
     let palette = theme::floating();
     let accent = theme::accent().0;
-    let quiet = move |hover: Color| {
+    let quiet = move |hover: Color, kbd: bool| {
         move |_: &iced::Theme, status: button::Status| button::Style {
             background: match status {
                 button::Status::Hovered | button::Status::Pressed => Some(hover.into()),
+                _ if kbd => Some(hover.into()),
                 _ => None,
             },
             border: Border::default().rounded(8),
@@ -1075,7 +1086,7 @@ pub fn ai_field<'a, Message: Clone + 'a>(
     let logo = button(logo)
         .padding(4)
         .on_press(on_logo)
-        .style(quiet(palette.pressed));
+        .style(quiet(palette.pressed, logo_kbd));
     let badge = row![
         text("AI").size(11).color(accent),
         text("↵").size(11).color(accent.scale_alpha(0.75)),
@@ -1089,6 +1100,7 @@ pub fn ai_field<'a, Message: Clone + 'a>(
                 accent
                     .scale_alpha(match status {
                         button::Status::Hovered | button::Status::Pressed => 0.28,
+                        _ if badge_kbd => 0.28,
                         _ => 0.16,
                     })
                     .into(),
@@ -2428,6 +2440,153 @@ pub mod shot {
             &mut messages,
         );
         messages
+    }
+
+    /// A clipboard that remembers what was written to it.
+    #[derive(Default)]
+    pub struct Clip(pub Vec<String>);
+
+    impl iced::advanced::Clipboard for Clip {
+        fn read(&self, _: iced::advanced::clipboard::Kind) -> Option<String> {
+            None
+        }
+        fn write(&mut self, _: iced::advanced::clipboard::Kind, text: String) {
+            self.0.push(text);
+        }
+    }
+
+    /// The events of typing `text` (each character is a key press with its text).
+    pub fn typing(text: &str) -> Vec<iced::Event> {
+        use iced::keyboard::{Key, key::Named};
+        text.chars()
+            .map(|c| match c {
+                ' ' => press(Key::Named(Named::Space), c, false),
+                c => press(Key::Character(c.to_string().into()), c, false),
+            })
+            .collect()
+    }
+
+    /// Ctrl+`c` (the modifier change, the press as the OS sends it - the control
+    /// character as its text - and the release of the modifier).
+    pub fn chord(c: char) -> Vec<iced::Event> {
+        use iced::keyboard::{Event, Modifiers};
+        let control = char::from(c as u8 & 0x1f);
+        vec![
+            iced::Event::Keyboard(Event::ModifiersChanged(Modifiers::CTRL)),
+            press(
+                iced::keyboard::Key::Character(c.to_string().into()),
+                control,
+                true,
+            ),
+            iced::Event::Keyboard(Event::ModifiersChanged(Modifiers::empty())),
+        ]
+    }
+
+    /// A named key (Esc, Tab, Enter, Space); Space also types its character.
+    pub fn named(key: iced::keyboard::key::Named, shift: bool) -> Vec<iced::Event> {
+        use iced::keyboard::{Event, Key, Location, Modifiers, key::Named};
+        let mods = if shift {
+            Modifiers::SHIFT
+        } else {
+            Modifiers::empty()
+        };
+        vec![
+            iced::Event::Keyboard(Event::ModifiersChanged(mods)),
+            iced::Event::Keyboard(Event::KeyPressed {
+                key: Key::Named(key),
+                modified_key: Key::Named(key),
+                physical_key: iced::keyboard::key::Physical::Unidentified(
+                    iced::keyboard::key::NativeCode::Unidentified,
+                ),
+                location: Location::Standard,
+                modifiers: mods,
+                text: (key == Named::Space).then(|| " ".into()),
+                repeat: false,
+            }),
+            iced::Event::Keyboard(Event::ModifiersChanged(Modifiers::empty())),
+        ]
+    }
+
+    fn press(key: iced::keyboard::Key, text: char, ctrl: bool) -> iced::Event {
+        use iced::keyboard::{Event, Location, Modifiers, key};
+        let code = match key.as_ref() {
+            iced::keyboard::Key::Character(s) => match s {
+                "c" => key::Code::KeyC,
+                "s" => key::Code::KeyS,
+                "a" => key::Code::KeyA,
+                _ => key::Code::KeyT,
+            },
+            _ => key::Code::KeyT,
+        };
+        iced::Event::Keyboard(Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: key::Physical::Code(code),
+            location: Location::Standard,
+            modifiers: if ctrl {
+                Modifiers::CTRL
+            } else {
+                Modifiers::empty()
+            },
+            text: Some(text.to_string().into()),
+            repeat: false,
+        })
+    }
+
+    /// A text field or editor of `view` to give the focus first.
+    pub enum Focus {
+        /// None: nothing is focused.
+        Nothing,
+        /// The field with this id.
+        Id(&'static str),
+        /// The first focusable widget (by a click on it, as a user would).
+        First,
+    }
+
+    /// Feeds key/mouse `events` to `view` (after `focus`) and returns the messages
+    /// and what each event did (captured by a widget or not); the clipboard is
+    /// `clipboard`.
+    pub fn feed<Message>(
+        view: Element<'_, Message>,
+        size: Size,
+        focus: Focus,
+        events: &[iced::Event],
+        clipboard: &mut dyn iced::advanced::Clipboard,
+    ) -> (Vec<Message>, Vec<iced::event::Status>) {
+        use iced::advanced::widget::{Id, Operation, operation::Focusable, operation::focusable};
+        use iced::{Event, mouse::Button, mouse::Event as Mouse};
+        struct First(Option<Rectangle>);
+        impl Operation for First {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+                operate(self);
+            }
+            fn focusable(&mut self, _: Option<&Id>, bounds: Rectangle, _: &mut dyn Focusable) {
+                self.0.get_or_insert(bounds);
+            }
+        }
+        let mut renderer = iced::Renderer::new(Font::DEFAULT, Pixels(16.0));
+        let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+        let mut all = Vec::new();
+        let mut cursor = mouse::Cursor::Unavailable;
+        match focus {
+            Focus::Nothing => {}
+            Focus::Id(id) => ui.operate(&renderer, &mut focusable::focus::<()>(Id::new(id))),
+            Focus::First => {
+                let mut first = First(None);
+                ui.operate(&renderer, &mut first);
+                let at = first.0.expect("a field").center();
+                cursor = mouse::Cursor::Available(at);
+                all.extend([
+                    Event::Mouse(Mouse::CursorMoved { position: at }),
+                    Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+                    Event::Mouse(Mouse::ButtonReleased(Button::Left)),
+                ]);
+            }
+        }
+        all.extend_from_slice(events);
+        let mut messages = Vec::new();
+        let (_, statuses) = ui.update(&all, cursor, &mut renderer, clipboard, &mut messages);
+        (messages, statuses)
     }
 
     /// Every text a view holds: labels, and what each text field shows or has typed.
