@@ -381,6 +381,9 @@ const SHRUNK: f32 = 64.0;
 // ponytail: fixed frame count, not a timer; frames come back to back while closing.
 const SHRINK_FRAMES: u8 = 10;
 
+/// The toast pill's gap to the screen's right edge and to the taskbar (design: 16).
+const TOAST_MARGIN: f32 = 16.0;
+
 /// A captured monitor, ready to show.
 #[derive(Debug, Clone)]
 struct Shot {
@@ -1569,7 +1572,7 @@ impl App {
             Event::Ready(staged) => {
                 let toast = self
                     .windows
-                    .toast(&update_card::ready_toast(&staged.version))
+                    .toast(&update_card::ready_toast(&staged.version), true, None, 5000)
                     .map(Message::Windows);
                 self.update = Some(staged);
                 // the notice stays readable before this process exits to update
@@ -2107,11 +2110,13 @@ impl App {
             return Task::none();
         };
         if act == PickAct::Copy {
-            let closing = self.close();
-            if let Err(e) = copy::text(picked.text()) {
-                eprintln!("copy text failed: {e}");
-            }
-            return closing;
+            let copied = (copy::text(picked.text()))
+                .map(|()| copy::COPIED_PILL.to_string())
+                .map_err(|e| {
+                    eprintln!("copy text failed: {e}");
+                    "Couldn't copy. Close what holds the clipboard and try again.".to_string()
+                });
+            return self.confirm(copied);
         }
         if act == PickAct::Search {
             return self.search_text(picked.text());
@@ -2225,10 +2230,33 @@ impl App {
         let Run::Finish(finish) = action.run else {
             return Task::none();
         };
-        if let Err(e) = finish(crop) {
+        let result = finish(crop);
+        if let Err(e) = &result {
             eprintln!("{} failed: {e}", action.id);
         }
-        self.close()
+        self.confirm(result)
+    }
+
+    /// Closes the overlay and tells the user how Copy / Save went: the toast pill
+    /// in its own window (bottom right, above the taskbar), so the screen is the
+    /// user's again at once and the pill outlives the overlay.
+    fn confirm(&mut self, result: Result<String, String>) -> Task<Message> {
+        let (text, ok) = match result {
+            Ok(text) => (text, true),
+            Err(text) => (text, false),
+        };
+        let size = windows::toast_size(&text, ok);
+        let (origin, screen) = (self.origin, self.screen);
+        let inset = taskbar_inset(origin, screen, self.scale);
+        let at = Point::new(
+            origin.x + screen.width - size.width - TOAST_MARGIN,
+            origin.y + screen.height - size.height - TOAST_MARGIN - inset,
+        );
+        let toast = self
+            .windows
+            .toast(&text, ok, Some(at), windows::TOAST_MS)
+            .map(Message::Windows);
+        Task::batch([self.close(), toast])
     }
 
     /// Runs a quick action on the selection (no action bar). Only once: a new
@@ -4358,6 +4386,64 @@ mod tests {
         assert_eq!(copy::COPIED_IMAGE.take(), Some((800, 600)));
     }
 
+    /// The two shortcuts of #52: Ctrl+C copies the selection's picture, Ctrl+S saves
+    /// it in the save folder, each with a pill; a failure shows the pill without a dot.
+    #[test]
+    fn ctrl_c_and_ctrl_s_confirm_with_a_pill_and_failures_say_so() {
+        let dir = std::env::temp_dir().join(format!("oc-pill-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let before = config::current();
+        let mut cfg = before.clone();
+        cfg.general.save_folder = dir.to_string_lossy().into_owned();
+        config::set_current(cfg);
+        let key = |letter| overlay::Event::Key { letter, ctrl: true };
+        let selected = || {
+            let mut app = open_app(800, 600, 1.0);
+            app.select(Rectangle::new(
+                Point::new(100.0, 80.0),
+                Size::new(300.0, 200.0),
+            ));
+            app
+        };
+        // Ctrl+C: the picture on the clipboard and the "Copied" pill
+        let mut app = selected();
+        copy::COPIED_IMAGE.set(None);
+        event(&mut app, key('c'));
+        assert_eq!(copy::COPIED_IMAGE.take(), Some((300, 200)));
+        assert_eq!(app.windows.toasts(), [("Copied".to_string(), true)]);
+        // Ctrl+S: a file in the save folder and "Saved to <folder>"
+        let mut app = selected();
+        event(&mut app, key('s'));
+        let toasts = app.windows.toasts();
+        assert_eq!(toasts.len(), 1, "{toasts:?}");
+        assert!(
+            toasts[0].1 && toasts[0].0.starts_with("Saved to "),
+            "{toasts:?}"
+        );
+        let files: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
+        assert_eq!(files.len(), 1);
+        assert!(
+            files[0]
+                .file_name()
+                .to_string_lossy()
+                .starts_with("OpenCircle-")
+        );
+        // an error: the same pill, the error text, no dot
+        let mut app = selected();
+        let _ = app.confirm(Err("Couldn't save. Pick a folder you can write to.".into()));
+        assert_eq!(
+            app.windows.toasts(),
+            [(
+                "Couldn't save. Pick a folder you can write to.".to_string(),
+                false
+            )]
+        );
+        // it goes after the design's 1800 ms
+        assert_eq!(windows::TOAST_MS, 1800);
+        config::set_current(before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
         let shot = || {
@@ -6195,6 +6281,7 @@ mod tests {
             ctrl: true,
         };
         let _ = keyed.update(Message::Overlay(ctrl_c));
+        assert_eq!(keyed.windows.toasts(), [("Copied".to_string(), true)]);
         assert_eq!(
             copy::COPIED.take().as_deref(),
             Some("ile you drag a finger\nacross the words")

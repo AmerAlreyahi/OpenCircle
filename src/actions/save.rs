@@ -1,7 +1,6 @@
-//! Save: the crop as a PNG (or JPEG, `snip.format`), wherever the user picks in
-//! the native save dialog (which starts in Settings -> General's save folder, if
-//! one is set). Scaled to `snip.max_edge` unless `snip.save_original`.
-use std::path::PathBuf;
+//! Save: the crop as a PNG (or JPEG, `snip.format`) in Settings -> General's save
+//! folder (else Pictures/OpenCircle), named OpenCircle-date-time. Scaled to `snip.max_edge` unless `snip.save_original`.
+use std::path::{Path, PathBuf};
 
 use super::{Action, Crop, Key};
 use crate::config::{Format, SnipConfig};
@@ -17,38 +16,65 @@ pub const ACTION: Action = Action {
     run: super::Run::Finish(run),
 };
 
-fn run(crop: Crop) -> Result<(), String> {
+/// Ctrl+S: straight into the save folder (no dialog); Ok = the pill's text.
+fn run(crop: Crop) -> Result<String, String> {
     let config = crate::config::current();
     let (crop, format) = export(crop, &config.snip);
-    let (kind, ext) = match format {
-        Format::Png => ("PNG image", "png"),
-        Format::Jpeg => ("JPEG image", "jpg"),
+    let folder = start_folder(&config.general.save_folder).ok_or(NOT_SAVED)?;
+    write_into(&folder, &crop, format)
+}
+
+fn write_into(folder: &Path, crop: &Crop, format: Format) -> Result<String, String> {
+    let ext = match format {
+        Format::Png => "png",
+        Format::Jpeg => "jpg",
     };
-    let name = format!("OpenCircle-{}.{ext}", timestamp());
-    let start = start_folder(&config.general.save_folder);
-    // The dialog blocks until the user answers: keep it off the UI thread.
-    std::thread::Builder::new()
-        .name("save dialog".into())
-        .spawn(move || {
-            let mut dialog = rfd::FileDialog::new()
-                .set_title("Save selection")
-                .set_file_name(name)
-                .add_filter(kind, &[ext]);
-            if let Some(folder) = start {
-                dialog = dialog.set_directory(folder);
-            }
-            let Some(path) = dialog.save_file() else {
-                return; // cancelled
-            };
-            let written = super::encode(&crop, format)
-                .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()));
-            if let Err(e) = written {
-                // ponytail: log only; show it in a status pill once one exists.
-                eprintln!("save failed: {e}");
-            }
-        })
-        .map(drop)
-        .map_err(|e| e.to_string())
+    let stamp = timestamp();
+    super::encode(crop, format)
+        .and_then(|bytes| write_new(folder, &stamp, ext, &bytes).map_err(|e| e.to_string()))
+        .map_err(|e| {
+            eprintln!("save failed: {e}");
+            NOT_SAVED.to_string()
+        })?;
+    Ok(format!("Saved to {}", short_path(folder)))
+}
+
+/// Writes `OpenCircle-<stamp>.<ext>`, or `-2`, `-3`, ... if that name is taken:
+/// a second save in the same second never overwrites the first.
+fn write_new(folder: &Path, stamp: &str, ext: &str, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    for n in 1.. {
+        let suffix = if n == 1 {
+            String::new()
+        } else {
+            format!("-{n}")
+        };
+        let path = folder.join(format!("OpenCircle-{stamp}{suffix}.{ext}"));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => return file.write_all(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!()
+}
+
+/// The error pill's text (the cause goes to the log).
+const NOT_SAVED: &str = "Couldn't save. Pick a folder you can write to in Settings.";
+
+/// `folder` for a pill: all of it, or its tail after an ellipsis.
+fn short_path(folder: &Path) -> String {
+    const MAX: usize = 36;
+    let full = folder.display().to_string();
+    let n = full.chars().count();
+    match n > MAX {
+        true => format!("…{}", full.chars().skip(n - (MAX - 1)).collect::<String>()),
+        false => full,
+    }
 }
 
 /// What Save writes: the crop at the export size (or original), and its format.
@@ -62,7 +88,7 @@ pub fn default_folder() -> Option<PathBuf> {
     dirs::picture_dir().map(|p| p.join("OpenCircle"))
 }
 
-/// The dialog's starting folder: the configured one if set and existing, else the
+/// The folder saves go to: the configured one if set and existing, else the
 /// default folder, created on first use.
 fn start_folder(configured: &str) -> Option<PathBuf> {
     start_in(configured, default_folder())
@@ -142,6 +168,44 @@ mod tests {
         assert!(want.is_dir());
         let _ = std::fs::remove_file(&file);
         let _ = std::fs::remove_dir_all(want.parent().unwrap());
+    }
+
+    #[test]
+    fn save_writes_into_the_folder_and_a_bad_folder_is_an_error_not_a_panic() {
+        let crop = || super::Crop {
+            width: 4,
+            height: 4,
+            rgba: vec![200; 64],
+        };
+        let dir = std::env::temp_dir().join(format!("oc-save-into-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let said = super::write_into(&dir, &crop(), crate::config::Format::Png).unwrap();
+        assert!(said.starts_with("Saved to "), "{said}");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+        let said = super::write_into(&dir, &crop(), crate::config::Format::Png);
+        assert_eq!(said.unwrap_err(), super::NOT_SAVED, "folder is gone");
+    }
+
+    #[test]
+    fn two_saves_in_one_second_keep_both_files() {
+        let dir = std::env::temp_dir().join(format!("oc-save-twice-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        super::write_new(&dir, "2026-01-01_00-00-00", "png", b"first").unwrap();
+        super::write_new(&dir, "2026-01-01_00-00-00", "png", b"second").unwrap();
+        let read = |n: &str| std::fs::read(dir.join(n)).unwrap();
+        assert_eq!(read("OpenCircle-2026-01-01_00-00-00.png"), b"first");
+        assert_eq!(read("OpenCircle-2026-01-01_00-00-00-2.png"), b"second");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_long_folder_is_cut_to_its_tail_for_the_pill() {
+        let long = std::path::Path::new("/home/someone/a/very/long/path/to/Pictures/OpenCircle");
+        let short = super::short_path(long);
+        assert_eq!(short.chars().count(), 36);
+        assert!(short.starts_with('…') && short.ends_with("Pictures/OpenCircle"));
+        assert_eq!(super::short_path(std::path::Path::new("/tmp/x")), "/tmp/x");
     }
 
     #[test]

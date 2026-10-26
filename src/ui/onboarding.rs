@@ -343,7 +343,7 @@ fn welcome(state: &State) -> Element<'_, Message> {
              want, then search it, read it, translate it or ask an AI about it."
         ),
         keys(&state.base.shortcut),
-        caption("Nothing leaves your PC until you pick an action. You can change the shortcut in Settings."),
+        caption("Ctrl+C copies what you selected, Ctrl+S saves it. Nothing leaves your PC until you pick an action. You can change the shortcut in Settings."),
     ]
     .spacing(20)
     .into()

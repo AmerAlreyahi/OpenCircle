@@ -59,7 +59,7 @@ pub struct Windows {
     permission: Option<(window::Id, onboarding::Access)>,
     pins: Vec<Pin>,
     /// Small message windows (a pill each) and their text.
-    toasts: Vec<(window::Id, String)>,
+    toasts: Vec<(window::Id, String, bool)>,
     /// The update card (release notes), at most one.
     update_card: Option<(window::Id, update_card::Card)>,
     /// What each normal window's header knows (see `Chrome`).
@@ -290,28 +290,38 @@ impl Windows {
         open.discard()
     }
 
-    /// A small message window: a pill holding `text`, floating over everything. The
-    /// window is exactly the pill (see `floating`), so nothing shows around it.
-    pub fn toast(&mut self, text: &str) -> Task<Msg> {
-        let size = Size::new(48.0 + 7.0 * text.chars().count() as f32, 36.0);
+    /// A small message window: the toast pill (`widgets::toast_pill`) with `text`,
+    /// floating over everything for `ms`, at `at` (logical desktop px) or centred.
+    /// `ok` = the green dot; an error has none. The window is exactly the pill (see
+    /// `floating`), so nothing shows around it.
+    pub fn toast(&mut self, text: &str, ok: bool, at: Option<Point>, ms: u64) -> Task<Msg> {
+        let size = toast_size(text, ok);
         let (id, open) = floating(
             window::Settings {
                 size,
-                position: Position::Centered,
+                position: at.map_or(Position::Centered, Position::Specific),
                 resizable: false,
                 ..window::Settings::default()
             },
-            widgets::PILL_RADIUS,
+            widgets::TOAST_RADIUS,
         );
-        self.toasts.push((id, text.to_string()));
-        // gone after a few seconds (a thread sleeps, the UI never waits)
+        self.toasts.push((id, text.to_string(), ok));
+        // gone after `ms` (a thread sleeps, the UI never waits)
         let (done, wait) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(5));
+            std::thread::sleep(Duration::from_millis(ms));
             let _ = done.send(());
         });
         open.discard()
             .chain(Task::future(wait).then(move |_| window::close(id)))
+    }
+
+    /// The open toasts' text and dot (tests).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn toasts(&self) -> Vec<(String, bool)> {
+        (self.toasts.iter())
+            .map(|(_, text, ok)| (text.clone(), *ok))
+            .collect()
     }
 
     /// The update card (release notes) with `card`; replaces an open one's content.
@@ -445,7 +455,7 @@ impl Windows {
             Msg::Closed(id) => {
                 forget_floating(id);
                 self.chrome.remove(&id);
-                self.toasts.retain(|(t, _)| *t != id);
+                self.toasts.retain(|(t, ..)| *t != id);
                 if self.update_card.as_ref().is_some_and(|(c, _)| *c == id) {
                     self.update_card = None;
                 }
@@ -561,9 +571,9 @@ impl Windows {
         if let Some((_, card)) = self.update_card.as_ref().filter(|(c, _)| *c == window) {
             return Some(update_card::view(card).map(Msg::UpdateCard));
         }
-        if let Some((_, text)) = self.toasts.iter().find(|(t, _)| *t == window) {
+        if let Some((_, text, ok)) = self.toasts.iter().find(|(t, ..)| *t == window) {
             return Some(
-                widgets::layer_pill(text.as_str())
+                widgets::toast_pill(text.as_str(), *ok)
                     .width(Fill)
                     .height(Fill)
                     .center(Fill)
@@ -642,7 +652,7 @@ impl Windows {
         match what {
             "settings" => self.open(Kind::Settings),
             "permission" => self.open(Kind::Permission),
-            "toast" => self.toast("Copied: paste it into your AI chat"),
+            "toast" => self.toast("Copied", true, None, TOAST_MS),
             "max" => self
                 .id(Kind::Settings)
                 .map_or_else(Task::none, window::toggle_maximize),
@@ -753,13 +763,22 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
     window::open(app_window(settings))
 }
 
+/// How long a confirmation toast shows (the design's 1800 ms).
+pub const TOAST_MS: u64 = 1800;
+
+/// A toast's window size (logical px): padding 14x8, a 12 px line, the dot.
+pub fn toast_size(text: &str, ok: bool) -> Size {
+    let dot = if ok { 16.0 } else { 0.0 };
+    Size::new(30.0 + dot + 6.6 * text.chars().count() as f32, 34.0)
+}
+
 /// A small popup (toast, pin, live controller, any future one): THE way to open one.
 /// Undecorated, always on top, no taskbar entry (Windows), transparent with a
 /// fully clear background (`clear_theme`), and cut to its content's rounded
 /// rectangle of at most `radius` logical px (`shape`): where the window has no
 /// per-pixel alpha (Windows, X11 without a compositor) nothing outside the shape
 /// exists, so no box shows behind a pill. Nothing in a floating window may paint
-/// outside its content (no shadow: use `widgets::solid_surface` / `layer_pill`).
+/// outside its content (no shadow: use `widgets::solid_surface` / `toast_pill`).
 /// After a `window::resize` nothing is needed: the resize event reshapes it.
 pub fn floating(settings: window::Settings, radius: f32) -> (window::Id, Task<window::Id>) {
     let settings = window::Settings {

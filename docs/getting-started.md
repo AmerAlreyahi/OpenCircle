@@ -53,8 +53,9 @@ then the rest:
 | Music | Finds a song from a short clip (Settings > Labs; see [Song search](song-search.md)) | |
 | Edit | Turns the bar into the annotation toolbar (Settings > Labs). A back arrow returns | `E` |
 
-`Ctrl+C` copies the selection as an image and `Ctrl+S` saves it as a PNG or
-JPEG, where you choose.
+`Ctrl+C` copies the selection as an image (selected text is copied as text) and
+`Ctrl+S` saves it as a PNG or JPEG in your save folder (Settings > General).
+A small pill at the bottom right says "Copied" or "Saved to ..." for a moment.
 
 The bar snaps to the bottom centre, the top, or a bottom corner. Drag its
 handle to move it; it stays where you put it.

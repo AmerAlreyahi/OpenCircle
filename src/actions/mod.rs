@@ -39,8 +39,9 @@ pub struct Action {
 /// What running an action does.
 #[derive(Debug, Clone, Copy)]
 pub enum Run {
-    /// Close the overlay, then do this with the crop (Copy, Save).
-    Finish(fn(Crop) -> Result<(), String>),
+    /// Close the overlay, then do this with the crop (Copy, Save). Ok = the
+    /// confirmation pill's text ("Copied", "Saved to ..."); Err = its error text.
+    Finish(fn(Crop) -> Result<String, String>),
     /// Open this result panel beside the selection; the overlay stays.
     Panel(Panel),
     /// Turn the action bar into the editing toolbar over the selection.

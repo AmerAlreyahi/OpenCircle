@@ -56,16 +56,34 @@ fn glassed<'a, Message: 'a>(inner: Container<'a, Message>, radius: f32) -> Conta
     }
 }
 
-/// The status pill of the live layer: like `pill`, but opaque and without a
-/// shadow (Windows keys the layer by colour: a see-through pill would be tinted).
-// ponytail: its anti-aliased round ends still blend a few key-coloured pixels.
-pub fn layer_pill<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a, Message> {
+/// The confirmation toast (design `.oc-toast`): radius 12, padding 14x8, 12 px
+/// text, an 8 px green dot before it (none for an error). Opaque, no shadow: it
+/// lives in a floating window (Windows keys the live layer by colour).
+pub const TOAST_RADIUS: f32 = 12.0;
+pub fn toast_pill<'a, Message: 'a>(label: &'a str, ok: bool) -> Container<'a, Message> {
     let palette = theme::floating();
-    container(text(label).size(13).color(palette.text))
-        .padding([6, 16])
+    let dot = container(space().width(8).height(8)).style(move |_| container::Style {
+        background: Some(theme::ANNOTATION[3].into()),
+        border: Border::default().rounded(4),
+        ..container::Style::default()
+    });
+    let content = row![text(label).size(12).color(palette.text)]
+        .spacing(8)
+        .align_y(iced::Center);
+    let content = if ok {
+        row![dot, content].spacing(8).align_y(iced::Center)
+    } else {
+        content
+    };
+    container(content)
+        .padding([8, 14])
         .style(move |_| container::Style {
             background: Some(palette.window.into()),
-            border: Border::default().rounded(super::shape::radius(PILL_RADIUS)),
+            border: Border {
+                color: palette.border,
+                width: 1.0,
+                radius: super::shape::radius(TOAST_RADIUS).into(),
+            },
             ..container::Style::default()
         })
 }
@@ -546,7 +564,7 @@ pub mod card {
 }
 
 /// A `surface` for a colour-keyed window (the live controller): opaque and
-/// without a shadow, like `layer_pill`.
+/// without a shadow, like `toast_pill`.
 pub fn solid_surface<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {

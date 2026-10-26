@@ -40,7 +40,14 @@ OpenCircle prints this when it starts under GNOME. (`Ctrl+Print Screen` is free.
 
 While the overlay is open: `Esc` closes, `Enter` runs the default action
 (Search unless you changed it in **Settings → General**), and the action keys
-are `L` Search, `A` Ask AI, `T` Text, `E` Edit, `Ctrl+C` Copy, `Ctrl+S` Save.
+are `L` Search, `A` Ask AI, `T` Text, `E` Edit.
+
+`Ctrl+C` copies the selection (its picture, or its text when you selected text) and
+`Ctrl+S` saves the picture in your save folder (Settings → General; the default is
+Pictures/OpenCircle) as `OpenCircle-<date>-<time>.png`. There are no Copy or Save
+buttons: a pill at the bottom right says "Copied" or "Saved to <folder>" for about two
+seconds, or what went wrong (no green dot) if the clipboard was busy or the folder
+could not be written.
 In the editor, `Ctrl+P` pins the image to the screen (`P` alone is the Pen).
 
 ## Change a shortcut

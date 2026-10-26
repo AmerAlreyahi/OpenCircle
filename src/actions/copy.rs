@@ -31,7 +31,7 @@ thread_local! {
 
 /// The one copy path: the picture alone. No text rides along (a browser or chat
 /// would paste the text instead of the image); text is copied only by `text`.
-fn run(crop: Crop) -> Result<(), String> {
+fn run(crop: Crop) -> Result<String, String> {
     let max_edge = crate::config::current().snip.max_edge;
     let shown = super::fit_long_edge(crop, max_edge);
     #[cfg(test)]
@@ -43,7 +43,15 @@ fn run(crop: Crop) -> Result<(), String> {
             bytes: Cow::Owned(shown.rgba),
         })
     })
+    .map(|()| COPIED_PILL.into())
+    .map_err(|e| {
+        eprintln!("copy failed: {e}");
+        "Couldn't copy. Close what holds the clipboard and try again.".into()
+    })
 }
+
+/// The confirmation pill's text, for the image and for text alike.
+pub const COPIED_PILL: &str = "Copied";
 
 /// Puts `text` on the clipboard (the Text panel's Copy).
 pub fn text(text: String) -> Result<(), String> {
