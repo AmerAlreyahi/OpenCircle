@@ -96,6 +96,10 @@ production systems.
 - Ask AI without a key (owner, 2026-10-26): until the AI chat (N-05) and OpenRouter
   sign-in (#39) land in 0.2.0, Ask AI with no key keeps opening Google AI Mode in the
   user's own browser (no web view); `ai/browser.rs` is deleted then.
+- Installer (owner, 2026-10-26, #55): our own OpenCircle-Setup.exe in the new design
+  (main theme Sapphire) installs the MSI underneath (Windows Installer external UI);
+  the MSI stays a full installer (folder choice, re-skinned WiX wizard, silent
+  install); NSIS is dropped; the portable exe stays.
 - Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
   is on hold until the owner resumes it.
 
