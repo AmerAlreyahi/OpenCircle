@@ -137,6 +137,7 @@ impl Live {
             patches,
             drawn: Drawn {
                 rooms: Vec::new(),
+                ink: Vec::new(),
                 ..drawn
             },
         };

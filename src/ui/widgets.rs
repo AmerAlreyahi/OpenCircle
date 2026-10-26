@@ -249,6 +249,26 @@ pub mod card {
         }
     }
 
+    /// A short prompt's card (a download question, a progress bar, an
+    /// error): `at`'s width and place, but only as tall as `chars` of body
+    /// text wrapped to it plus `below` px (buttons, a bar) need, never a
+    /// slab of empty panel. A card at the bottom keeps its bottom edge.
+    // ponytail: estimated (7.2 px per character at the 14 px body size),
+    // not measured; generous by a line. A measured height if prompts grow.
+    pub fn short(at: Rectangle, screen: Size, chars: usize, below: f32) -> Rectangle {
+        const CHROME: f32 = 61.0 + 40.0; // header and rule, body padding
+        let lines = (chars as f32 * 7.2 / (at.width - 40.0).max(1.0))
+            .ceil()
+            .max(1.0)
+            + 1.0;
+        let height = (CHROME + lines * 18.5 + below).min(at.height);
+        let y = match side(at, screen) {
+            Side::Top => at.y + at.height - height,
+            _ => at.y,
+        };
+        Rectangle::new(Point::new(at.x, y), Size::new(at.width, height))
+    }
+
     /// Which edge of the card `at` resizes it: the one facing the screen's middle.
     pub fn side(at: Rectangle, screen: Size) -> Side {
         if bottom(screen) {

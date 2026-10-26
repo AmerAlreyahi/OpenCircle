@@ -276,6 +276,24 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
     Some((buf, (bx.round() as i32, top.round() as i32), size))
 }
 
+/// The box the fitted glyphs span (x, y, w, h): the runs' horizontal
+/// extent, their line boxes vertically.
+pub fn ink_rect((buf, (x, y), _): &Fit) -> [f32; 4] {
+    let (mut x0, mut x1, mut y0, mut y1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+    for run in buf.layout_runs() {
+        for g in run.glyphs {
+            x0 = x0.min(g.x);
+            x1 = x1.max(g.x + g.w);
+        }
+        y0 = y0.min(run.line_top);
+        y1 = y1.max(run.line_top + run.line_height);
+    }
+    if x0 > x1 {
+        return [0.0; 4];
+    }
+    [*x as f32 + x0, *y as f32 + y0, x1 - x0, y1 - y0]
+}
+
 /// Draws the fitted translation (shadow or outline first, if the original had one).
 pub fn draw_block(
     fonts: &mut Fonts,

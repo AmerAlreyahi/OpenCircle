@@ -58,8 +58,40 @@ const HALO: i32 = 4;
 const REACH: i32 = 40;
 
 /// Erases the glyphs inside `b` (x, y, w, h) of an RGBA image and returns
-/// their style and what it changed. Alpha is left as is.
+/// their style and what it changed. Alpha is left as is. A line on a bar
+/// that is no taller than the box (a heading on a coloured band) has the
+/// outside of the bar on its ring, so its "background" is the bar and the
+/// text is lost (so does a neighbour's edge under a tall box: busy); the box
+/// is tried again a little smaller, its ring inside.
 pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, Undo) {
+    let (style, undo) = erase_box(rgba, iw, ih, b);
+    if style.residual <= super::BUSY || b[3] < 16.0 {
+        return (style, undo);
+    }
+    let put_back = |rgba: &mut [u8], undo: &Undo| {
+        for (at, old) in undo.iter().rev() {
+            rgba[*at..at + 3].copy_from_slice(old);
+        }
+    };
+    put_back(rgba, &undo);
+    for inset in [0.35, 0.28, 0.2, 0.12] {
+        let k = inset * b[3];
+        let nb = [b[0], b[1] + k, b[2], b[3] - 2.0 * k];
+        let (again, undo2) = erase_box(rgba, iw, ih, nb);
+        // and the text must still be whole inside it
+        let (top, bottom) = (nb[1] as i32 - PAD, (nb[1] + nb[3]).ceil() as i32 + PAD);
+        if again.residual <= super::BUSY
+            && again.ink[1] > top + RING
+            && again.ink[3] < bottom - RING
+        {
+            return (again, undo2);
+        }
+        put_back(rgba, &undo2);
+    }
+    erase_box(rgba, iw, ih, b)
+}
+
+fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, Undo) {
     let x0 = (b[0] as i32 - PAD).clamp(0, iw as i32);
     let y0 = (b[1] as i32 - PAD).clamp(0, ih as i32);
     let x1 = ((b[0] + b[2]).ceil() as i32 + PAD).clamp(x0, iw as i32);
@@ -236,6 +268,19 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
         inked.first().copied().unwrap_or(0),
         inked.last().map_or(w, |x| x + 1),
     );
+    // a thin line through the whole box (a panel's border behind a label)
+    // is art for the erase, which leaves it, but the redraw keeps off it too
+    let through = |c: usize| {
+        c < w
+            && (0..h).filter(|&y| cand[y * w + c]).count() * 10
+                >= h.saturating_sub(2 * RING as usize) * 9
+    };
+    let frame_cols: Vec<usize> = (frame_cols.into_iter())
+        .chain(
+            (RING as usize..w)
+                .filter(|&c| through(c) && !through(c + 2) && !(c >= 2 && through(c - 2))),
+        )
+        .collect();
     let left = (frame_cols.iter().filter(|&&c| c < t0).map(|&c| c + 2))
         .chain((keep0 > 0).then_some(keep0))
         .max();
@@ -704,6 +749,25 @@ fn stroke_width(m: &[bool], w: usize) -> f32 {
 /// Least-squares plane a + b*x + c*y per channel; one outlier-rejection pass
 /// so a frame line or a stray glyph on the ring does not tilt it.
 fn fit_plane_robust(pts: &[usize], w: usize, px: &dyn Fn(usize) -> [u8; 3]) -> [[f32; 3]; 3] {
+    // A neighbour's panel along a tenth of the ring (a popup's edge beside a
+    // link) tilts a plain least-squares plane through the text: first drop
+    // what is far from the ring's median colour (a gradient's ends stay: the
+    // cut follows the ring's own spread).
+    let med = [0, 1, 2].map(|c| {
+        let mut v: Vec<u8> = pts.iter().map(|&i| px(i)[c]).collect();
+        v.sort_unstable();
+        v[v.len() / 2] as f32
+    });
+    let off = |i: usize| {
+        (0..3)
+            .map(|c| (px(i)[c] as f32 - med[c]).abs())
+            .fold(0.0, f32::max)
+    };
+    let mut offs: Vec<f32> = pts.iter().map(|&i| off(i)).collect();
+    offs.sort_by(f32::total_cmp);
+    let cut = offs[offs.len() * 7 / 10].max(4.0) * 2.0;
+    let near: Vec<usize> = pts.iter().copied().filter(|&i| off(i) <= cut).collect();
+    let pts = if near.len() >= 8 { &near[..] } else { pts };
     let plane = fit_plane(pts.iter().copied(), w, px);
     let err = |i: usize| {
         let (p, (x, y)) = (px(i), ((i % w) as f32, (i / w) as f32));

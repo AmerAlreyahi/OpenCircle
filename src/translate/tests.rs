@@ -1404,6 +1404,114 @@ mod real {
         assert!(!cut_off(&tb(5.0), f) && !cut_off(&tb(170.0), f));
         assert!(cut_off(&tb(50.0), (108, 200)), "the right edge too");
     }
+
+    /// Real offline MT output (`fixtures/mt.json`: sentence -> Arabic) for
+    /// the Moon article's fixtures.
+    struct Mt;
+    impl crate::translate::pipeline::Deps for Mt {
+        fn recognize(
+            &self,
+            _: &[u8],
+            _: u32,
+            _: u32,
+        ) -> Result<Vec<crate::ocr::TextBlock>, crate::ocr::OcrError> {
+            unreachable!("the fixture's lines are given")
+        }
+        fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, crate::ai::AiError> {
+            let all: std::collections::HashMap<String, String> =
+                serde_json::from_str(include_str!("fixtures/mt.json")).unwrap();
+            by_sentence(texts, |s| {
+                Ok(s.iter()
+                    .map(|t| {
+                        all.get(t)
+                            .cloned()
+                            .unwrap_or_else(|| panic!("no MT for {t:?}"))
+                    })
+                    .collect())
+            })
+        }
+    }
+
+    /// Fixture `name` (image + OCR lines) -> its blocks and their Arabic.
+    fn arabic_blocks(name: &str, (w, h): (usize, usize)) -> (Vec<Block>, Vec<String>) {
+        let blocks = group_blocks(&lines(name, (w, h)));
+        let cache = crate::translate::pipeline::Cache::new(64);
+        let tr = crate::translate::pipeline::translate_blocks(&blocks, "ar", &cache, &Mt).unwrap();
+        (blocks, tr)
+    }
+
+    fn moon(name: &str) -> (Rgba, (usize, usize), Vec<Block>, Vec<String>) {
+        let png = match name {
+            "popup" => &include_bytes!("fixtures/popup.png")[..],
+            "infobox" => &include_bytes!("fixtures/infobox.png")[..],
+            _ => &include_bytes!("fixtures/caption2.png")[..],
+        };
+        let (img, dims) = image(png);
+        let (blocks, tr) = arabic_blocks(name, dims);
+        (img, dims, blocks, tr)
+    }
+
+    /// A link line that ends at a popup's edge (a cut-off "Create accou"):
+    /// the popup's dark columns on the box's ring must not tilt the
+    /// background fit, or the line's right half passes for background and
+    /// stays under the Arabic. Before: only "Donate" was erased.
+    #[test]
+    fn a_line_beside_a_popup_is_erased_whole() {
+        let (img, (w, h), blocks, _) = moon("popup");
+        let b = &blocks[0];
+        assert_eq!(b.text, "Donate Create accou");
+        let mut out = img.clone();
+        erase::erase_line(&mut out, w, h, b.lines[0].bounds);
+        // the popup starts at x = 171; nothing of the text is left before it
+        let left: Vec<_> = (56..171)
+            .flat_map(|x| (26..44).map(move |y| (x, y)))
+            .filter(|&(x, y)| out[(y * w + x) * 4..][..3].iter().any(|&v| v < 235))
+            .collect();
+        assert!(
+            left.is_empty(),
+            "{} pixels of the line left, e.g. {:?}",
+            left.len(),
+            left.first()
+        );
+    }
+
+    /// The infobox, popup and caption of the Moon article, all translated
+    /// at once (real offline MT output): no two translations' glyphs
+    /// overlap (a label beside its value, rows whose boxes overlap), none
+    /// is drawn past the infobox's frame lines (x = 24 and 271), and every
+    /// block that has a translation gets it: a heading on a coloured band
+    /// and a caption under a photo were "busy" and stayed English. Before:
+    /// three collisions, labels over the frame, 4 blocks left untranslated.
+    #[test]
+    fn translations_never_overlap_and_none_is_skipped_for_a_neighbour() {
+        let mut busy = 0;
+        for name in ["popup", "infobox", "caption2"] {
+            let (img, (w, h), blocks, tr) = moon(name);
+            let mut out = img.clone();
+            let d = render(&mut out, w as u32, h as u32, &blocks, &tr, true);
+            busy += d.busy;
+            for (i, a) in d.ink.iter().enumerate() {
+                for (j, b) in d.ink.iter().enumerate().skip(i + 1) {
+                    let ox = (a[0] + a[2]).min(b[0] + b[2]) - a[0].max(b[0]);
+                    let oy = (a[1] + a[3]).min(b[1] + b[3]) - a[1].max(b[1]);
+                    assert!(
+                        ox <= 1.0 || oy <= 1.0,
+                        "{name}: {:?} and {:?} overlap by {ox:.0}x{oy:.0}",
+                        blocks[i].text,
+                        blocks[j].text
+                    );
+                }
+                if name == "infobox" && a[2] > 0.0 {
+                    assert!(
+                        a[0] >= 25.0 && a[0] + a[2] <= 271.0,
+                        "{:?} drawn over the frame: {a:?}",
+                        blocks[i].text
+                    );
+                }
+            }
+        }
+        assert_eq!(busy, 0, "blocks left English as 'busy'");
+    }
 }
 
 /// The busy-background threshold sits between the game panels the erase

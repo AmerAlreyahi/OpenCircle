@@ -249,6 +249,7 @@ pub fn translate_frame(
         blocks: translations(&blocks, &tr),
         drawn: Drawn {
             rooms: Vec::new(),
+            ink: Vec::new(),
             ..drawn
         },
         timings: Timings {

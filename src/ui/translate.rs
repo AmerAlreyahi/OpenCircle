@@ -372,7 +372,13 @@ impl Session {
     /// floating card (`widgets::card`, at `at`, like every result card) for
     /// prompts, errors and the word card. `hover`: on the card's resize edge.
     pub fn view(&self, screen: Size, at: Rectangle, hover: bool) -> Element<'_, Msg> {
-        let card = |body: Element<'static, Msg>, footer: Option<Element<'static, Msg>>| {
+        // a prompt is as tall as its text and buttons, not a full-height slab
+        let card = |body: Element<'static, Msg>,
+                    footer: Option<Element<'static, Msg>>,
+                    fit: Option<(usize, f32)>| {
+            let at = fit.map_or(at, |(chars, below)| {
+                widgets::card::short(at, screen, chars, below)
+            });
             let header = widgets::card::Header {
                 icon: actions::translate::ACTION.icon,
                 title: actions::translate::ACTION.label,
@@ -387,8 +393,14 @@ impl Session {
             stack![pin(pill).position(free.position()), card].into()
         };
         match &self.phase {
-            Phase::Consent(None) => card(panel::consent(Msg::Download, Msg::Close), None),
-            Phase::Consent(Some((pair, bytes))) => card(offline_consent(pair, *bytes), None),
+            Phase::Consent(None) => card(
+                panel::consent(Msg::Download, Msg::Close),
+                None,
+                Some((90, 60.0)),
+            ),
+            Phase::Consent(Some((pair, bytes))) => {
+                card(offline_consent(pair, *bytes), None, Some((175, 60.0)))
+            }
             Phase::Downloading(done) => card(
                 column![
                     widgets::body(if self.offline.is_some() {
@@ -401,6 +413,7 @@ impl Session {
                 .spacing(10)
                 .into(),
                 None,
+                Some((45, 16.0)),
             ),
             Phase::Translating => self.languages(Some("Translating…")),
             Phase::Failed(problem) => {
@@ -423,12 +436,16 @@ impl Session {
                 ));
                 // the picker stays: another pair may work offline
                 let body = widgets::error(problem.message.clone()).into();
-                with_pill(card(body, Some(buttons.into())))
+                with_pill(card(
+                    body,
+                    Some(buttons.into()),
+                    Some((problem.message.chars().count(), 77.0)),
+                ))
             }
             Phase::Shown(_) => match &self.card {
                 Some(word) => {
                     let (body, footer) = card_view(word);
-                    with_pill(card(body, Some(footer)))
+                    with_pill(card(body, Some(footer), None))
                 }
                 None => self.languages(None),
             },
@@ -633,6 +650,7 @@ fn card_view(card: &Card) -> (Element<'static, Msg>, Element<'static, Msg>) {
 mod tests {
     use super::*;
     use crate::ocr;
+    use iced::widget::container as c;
 
     fn block(text: &str, tr: &str, bounds: [f32; 4]) -> Translation {
         Translation {
@@ -701,6 +719,93 @@ mod tests {
                 .filter(|&(i, (a, b))| a != b && outside(i))
                 .count();
             assert_eq!(changed, 0, "{w}x{h}: {changed} pixels changed outside");
+        }
+    }
+
+    /// The download question, its progress and an error are short cards:
+    /// as tall as their text and buttons, on any screen down to 1125x575 (a
+    /// narrow one too), every text and button inside the window, nothing
+    /// painted outside the card but its shadow. Before: a full-height slab
+    /// of empty dark panel with a few lines at its top (the "black block").
+    #[test]
+    fn the_prompts_are_short_cards_on_small_screens() {
+        let mut s = session(false);
+        let phases = [
+            ("consent", Phase::Consent(None)),
+            (
+                "offline consent",
+                Phase::Consent(Some((crate::mt::pair("en", "ar").unwrap(), 160_000_000))),
+            ),
+            ("downloading", Phase::Downloading(0.4)),
+            (
+                "failed",
+                Phase::Failed(problem(
+                    "The AI provider has a problem right now (HTTP 503). Try again in a minute, \
+                     or pick another provider in Settings."
+                        .into(),
+                    true,
+                )),
+            ),
+        ];
+        let backdrop = iced::Color::from_rgb8(240, 240, 240);
+        for (name, phase) in phases {
+            s.phase = phase;
+            for (w, h) in [
+                (1125.0, 575.0),
+                (1280.0, 800.0),
+                (1920.0, 1080.0),
+                (700.0, 500.0),
+                (600.0, 1000.0),
+            ] {
+                let size = Size::new(w, h);
+                let at = widgets::card::place(size, None, None);
+                let lost = widgets::shot::out_of_reach(s.view(size, at, false), size);
+                assert!(lost.is_empty(), "{name} at {w}x{h}: out of reach {lost:?}");
+                let view = c(s.view(size, at, false))
+                    .style(move |_| c::Style::default().background(backdrop));
+                let px = widgets::shot::save(
+                    &format!("prompt-{}-{w}x{h}", name.replace(' ', "-")),
+                    view.into(),
+                    size,
+                );
+                let at_px =
+                    |x: f32, y: f32| &px[((y as usize * w as usize) + x as usize) * 4..][..3];
+                let dark = |p: &[u8]| p.iter().all(|&v| v < 100);
+                // the card's rows: dark panel at a point right of its middle
+                let x = at.x + at.width * 0.9;
+                let rows: Vec<f32> = (0..h as usize)
+                    .map(|y| y as f32)
+                    .filter(|&y| dark(at_px(x, y)))
+                    .collect();
+                assert!(!rows.is_empty(), "{name} at {w}x{h}: no card");
+                let (top, bottom) = (rows[0], rows[rows.len() - 1]);
+                assert!(
+                    bottom - top < 330.0 && bottom - top < 0.7 * h,
+                    "{name} at {w}x{h}: a slab {}px tall",
+                    bottom - top
+                );
+                // ink down to its last quarter at least: no big empty panel
+                let panel = at_px(x, top + 40.0).to_vec();
+                let last = (top as usize..=bottom as usize - 6)
+                    .filter(|&y| {
+                        (at.x as usize + 24..(at.x + at.width) as usize - 24)
+                            .any(|px_x| at_px(px_x as f32, y as f32) != &panel[..])
+                    })
+                    .max()
+                    .unwrap();
+                assert!(
+                    bottom - last as f32 <= 80.0,
+                    "{name} at {w}x{h}: {}px of empty panel under the content",
+                    bottom - last as f32
+                );
+                // nothing outside the card, 14 px for its shadow, but the backdrop
+                let b = backdrop.into_rgba8();
+                for (qx, qy) in [(at.x - 20.0, top + 30.0), (x, bottom + 20.0)] {
+                    if qx >= 0.0 && qy < h {
+                        assert_eq!(at_px(qx, qy), &b[..3], "{name} at {w}x{h}: ({qx}, {qy})");
+                    }
+                }
+            }
         }
     }
 
@@ -818,7 +923,7 @@ mod tests {
             let px = widgets::shot::render(dark.into(), 720, 300);
             let at = |x: usize, y: usize| &px[(y * 720 + x) * 4..][..3];
             let want = solid.into_rgba8();
-            assert_eq!(at(360, 30), &want[..3], "the panel is solid");
+            assert_eq!(at(360, 262), &want[..3], "the panel is solid");
             // and the label is drawn in the theme's text colour
             let ink = text.into_rgba8();
             let near = |p: &[u8]| p.iter().zip(&ink).all(|(a, b)| a.abs_diff(*b) < 40);

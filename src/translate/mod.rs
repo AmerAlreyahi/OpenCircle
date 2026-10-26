@@ -117,6 +117,9 @@ pub struct Drawn {
     pub no_room: usize,
     /// Per block (in order): where its translation may be drawn, x, y, w, h.
     pub rooms: Vec<[f32; 4]>,
+    /// Per block (in order): the box its drawn translation's glyphs span,
+    /// x, y, w, h (zeros when the block was left as it was).
+    pub ink: Vec<[f32; 4]>,
 }
 
 /// Erase uncertainty (`erase::LineStyle::residual`) above which a line's
@@ -194,26 +197,96 @@ pub fn render(
         };
         let busy = p.styles.iter().any(|s| s.residual > BUSY);
         match (!busy).then(|| draw::fit(&mut fonts, t, &p)).flatten() {
-            Some(fit) => fits.push((p, fit)),
+            Some(fit) => fits.push((i, t, p, fit, undo)),
             None => {
                 if busy {
                     report.busy += 1;
                 } else {
                     report.no_room += 1;
                 }
-                restore.push(undo);
+                restore.push((i, undo));
             }
         }
     }
+    separate(&mut fonts, &mut fits, &mut restore, &mut report);
     // put the skipped blocks back, last erased first
-    for (at, old) in restore.iter().rev().flat_map(|b| b.iter().rev()).flatten() {
+    restore.sort_by_key(|(i, _)| std::cmp::Reverse(*i));
+    for (at, old) in restore.iter().flat_map(|(_, b)| b.iter().rev()).flatten() {
         rgba[*at..at + 3].copy_from_slice(old);
     }
     report.drawn = fits.len();
-    for (p, fit) in fits {
+    report.ink = vec![[0.0; 4]; blocks.len()];
+    for (i, _, p, fit, _) in fits {
+        report.ink[i] = draw::ink_rect(&fit);
         draw::draw_block(&mut fonts, rgba, dims, &p, fit);
     }
     report
+}
+
+type Fitted<'a> = (
+    usize,
+    &'a String,
+    draw::Placement,
+    draw::Fit,
+    Vec<erase::Undo>,
+);
+
+/// Two translations whose glyphs collide (rows whose boxes overlap, a label
+/// beside its value, both widened into the gap between them) each give up
+/// half the overlap on the side that faces the other and are fitted again; one
+/// that no longer fits is left as it was.
+fn separate(
+    fonts: &mut draw::Fonts,
+    fits: &mut Vec<Fitted>,
+    restore: &mut Vec<(usize, Vec<erase::Undo>)>,
+    report: &mut Drawn,
+) {
+    // ponytail: pairwise, a few rounds; a page has hundreds of blocks at most
+    for _ in 0..3 {
+        let mut hit = None;
+        'find: for a in 0..fits.len() {
+            for b in a + 1..fits.len() {
+                let (ra, rb) = (draw::ink_rect(&fits[a].3), draw::ink_rect(&fits[b].3));
+                let ox = (ra[0] + ra[2]).min(rb[0] + rb[2]) - ra[0].max(rb[0]);
+                let oy = (ra[1] + ra[3]).min(rb[1] + rb[3]) - ra[1].max(rb[1]);
+                if ox > 1.0 && oy > 1.0 {
+                    hit = Some((a, b, ra, rb, ox < oy));
+                    break 'find;
+                }
+            }
+        }
+        let Some((a, b, ra, rb, sideways)) = hit else {
+            return;
+        };
+        let axis = if sideways { 0 } else { 1 };
+        let (lo, hi) = if ra[axis] <= rb[axis] { (a, b) } else { (b, a) };
+        let (rl, rh) = if lo == a { (ra, rb) } else { (rb, ra) };
+        let mid = (rl[axis] + rl[axis + 2] + rh[axis]) / 2.0;
+        let mut gone = Vec::new();
+        for (k, keep_far) in [(lo, false), (hi, true)] {
+            let f = &mut fits[k];
+            let r = &mut f.2.bounds;
+            let (from, to) = (r[axis], r[axis] + r[axis + 2]);
+            let (from, to) = if keep_far {
+                (from.max(mid), to)
+            } else {
+                (from, to.min(mid))
+            };
+            r[axis] = from;
+            r[axis + 2] = (to - from).max(0.0);
+            report.rooms[f.0] = *r;
+            match draw::fit(fonts, f.1, &f.2) {
+                Some(fit) => f.3 = fit,
+                None => gone.push(k),
+            }
+        }
+        gone.sort_unstable_by_key(|&k| std::cmp::Reverse(k));
+        for k in gone {
+            let (i, _, _, _, undo) = fits.remove(k);
+            report.no_room += 1;
+            restore.push((i, undo));
+        }
+    }
 }
 
 /// Where `b`'s translation may go: its box, widened through free space only
