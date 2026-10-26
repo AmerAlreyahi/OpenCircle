@@ -100,6 +100,12 @@ production systems.
   (main theme Sapphire) installs the MSI underneath (Windows Installer external UI);
   the MSI stays a full installer (folder choice, re-skinned WiX wizard, silent
   install); NSIS is dropped; the portable exe stays.
+- New design everywhere (owner, 2026-10-26): every visual is replaced by the new
+  design (.claude/artifacts/design/newdesing*), with the LOGIC unchanged: all
+  animations (core/motion.js), the live effect and every border ("Active Look",
+  core/theme-context.js), the selection line colour (the stroke logic stays).
+  Installer screens: widgets/installer.js. Lands with N-18/N-19 (#79/#80); #23 already
+  uses the design's motion timings.
 - Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
   is on hold until the owner resumes it.
 
