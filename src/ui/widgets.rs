@@ -1076,7 +1076,11 @@ pub fn ai_field<'a, Message: Clone + 'a>(
                 _ if kbd => Some(hover.into()),
                 _ => None,
             },
-            border: Border::default().rounded(8),
+            border: Border {
+                color: kbd_border(kbd, Color::TRANSPARENT),
+                width: 1.0,
+                radius: 8.0.into(),
+            },
             ..button::Style::default()
         }
     };
@@ -1105,7 +1109,11 @@ pub fn ai_field<'a, Message: Clone + 'a>(
                     })
                     .into(),
             ),
-            border: Border::default().rounded(8),
+            border: Border {
+                color: kbd_border(badge_kbd, Color::TRANSPARENT),
+                width: 1.0,
+                radius: 8.0.into(),
+            },
             ..button::Style::default()
         });
     let input = input.padding(iced::Padding::new(13.0).left(40.0).right(52.0));
