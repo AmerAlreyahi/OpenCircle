@@ -674,13 +674,6 @@ impl App {
                 }
                 Task::none()
             }
-            // Lens / Ask handed off to the browser (Windows): the shortcut brings
-            // the overlay, with its panel, back to the front.
-            Message::Trigger(Trigger::Capture(_))
-                if self.frame.is_some() && crate::lens::take_handed_off() =>
-            {
-                self.show()
-            }
             // The snip toast is only a pill: a new shot replaces it.
             Message::Trigger(trigger @ (Trigger::Capture(_) | Trigger::Quick(..)))
                 if self.snip_toast() =>
@@ -1201,8 +1194,8 @@ impl App {
             .chain(place_window(self.overlay, self.place()))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
             .chain(window::gain_focus(self.overlay));
-        // A Lens / Ask hand-off to the browser drops the overlay out of the topmost
-        // band behind iced's back (`lens::hand_off_foreground`): Normal then
+        // A hand-off to the browser drops the overlay out of the topmost band
+        // behind iced's back (`lens::hand_off_foreground`): Normal then
         // AlwaysOnTop makes it apply again.
         #[cfg(windows)]
         let show = window::set_level(self.overlay, Level::Normal)
@@ -2144,7 +2137,7 @@ impl App {
 
     /// Search in browser on a text selection: the text, as a Google search in
     /// the user's own browser (the user picked it; no web view). Like Lens,
-    /// the overlay goes behind the browser on Windows and closes elsewhere.
+    /// the overlay closes.
     fn search_text(&mut self, text: String) -> Task<Message> {
         let text = text.trim();
         if text.is_empty() {
@@ -2156,10 +2149,7 @@ impl App {
             return self.toast_then_close("Couldn't open your browser");
         }
         crate::search_history::keep("text", text, &url, self.crop().as_ref());
-        match cfg!(windows) {
-            true => Task::none(),
-            false => self.close(),
-        }
+        self.close()
     }
 
     /// A pill of the bottom bar: Search in browser and Copy text act on the
@@ -2743,13 +2733,9 @@ impl App {
         if let panel::Msg::LensOpened(Ok(page)) = &msg {
             if self.frame.is_some() {
                 self.lens_pages.push(page.clone());
-                // The search is in the browser now. Windows put the overlay
-                // behind it (`lens::take_handed_off`); Linux can't (Wayland
-                // has no z-order and can't hide a window), so the overlay,
-                // its panel and pills would stay over the browser: close.
-                if !cfg!(windows) {
-                    return self.close();
-                }
+                // The search is in the browser now: the overlay, its panel and
+                // pills must not stay on screen behind or over it. Close.
+                return self.close();
             } else {
                 page.clone().release(); // the overlay closed meanwhile
             }
@@ -2843,7 +2829,6 @@ impl App {
         }
         self.panel = None;
         self.lens_pages.drain(..).for_each(lens::Held::release);
-        let _ = crate::lens::take_handed_off();
         self.frame = None;
         self.tiles = None;
         glass::set_frame(None, 1.0);
@@ -6289,7 +6274,7 @@ mod tests {
     }
 
     #[test]
-    fn lens_in_the_browser_closes_the_overlay_where_it_cannot_go_behind() {
+    fn lens_in_the_browser_closes_the_overlay() {
         let mut app = open_app(1920, 1080, 1.0);
         drag(
             &mut app,
@@ -6301,9 +6286,9 @@ mod tests {
         let id = app.panel.as_ref().expect("the Lens panel").0;
         let opened = panel::Msg::LensOpened(Ok(lens::Held::for_test()));
         let _ = app.update(Message::Panel(id, opened));
-        // Windows: behind the browser, back on the shortcut; elsewhere: closed.
-        assert_eq!(app.frame.is_some(), cfg!(windows));
-        assert_eq!(app.panel.is_some(), cfg!(windows));
+        // Closed on every OS: nothing of ours stays on screen after the hand-off.
+        assert!(app.frame.is_none());
+        assert!(app.panel.is_none());
     }
 
     #[test]

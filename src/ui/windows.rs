@@ -882,12 +882,15 @@ pub fn reshape(id: window::Id) -> Task<Msg> {
     .discard()
 }
 
-/// `settings` with our logo as the window icon (taskbar, Alt+Tab) and, on Linux,
+/// `settings` with no OS title bar (every window of ours draws its own header or
+/// none, whatever the caller asked for), our logo as the window icon (taskbar,
+/// Alt+Tab) and, on Linux,
 /// our app id: the desktop ties the window to `APP_ID.desktop`, and GNOME asks for
 /// screenshot permission only for the app it sees in front.
 fn app_window(settings: window::Settings) -> window::Settings {
     let logo = chrome::logo();
     let settings = window::Settings {
+        decorations: false,
         icon: window::icon::from_rgba(logo.rgba.clone(), logo.width, logo.height).ok(),
         ..settings
     };
@@ -1282,6 +1285,15 @@ mod tests {
         let mut windows = Windows::default();
         let _ = windows.update(Msg::Closed(id));
         assert!(!is_floating(id));
+    }
+
+    #[test]
+    fn no_window_ever_gets_the_os_title_bar() {
+        let asked = window::Settings {
+            decorations: true,
+            ..window::Settings::default()
+        };
+        assert!(!app_window(asked).decorations);
     }
 
     /// Every window is opened by `normal`, `floating` or `screen` here, so none can
