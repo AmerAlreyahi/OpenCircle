@@ -732,7 +732,7 @@ fn apply(cfg: Config) {
     }
 }
 
-// ---- the three ways to open a window (a test forbids any other) ----
+// ---- the three ways to open a window, all through `open` (a test forbids any other) ----
 
 /// A normal window (Settings, Onboarding, the permission prompt): no OS title bar,
 /// our own header (`widgets::chrome`), centred, our logo as its icon.
@@ -760,7 +760,7 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
         },
         ..settings
     };
-    window::open(app_window(settings))
+    open(settings)
 }
 
 /// How long a confirmation toast shows (the design's 1800 ms).
@@ -797,7 +797,7 @@ pub fn floating(settings: window::Settings, radius: f32) -> (window::Id, Task<wi
         },
         ..settings
     };
-    let (id, open) = window::open(app_window(settings));
+    let (id, open) = open(settings);
     FLOATING.lock().unwrap().push((id, radius));
     (id, open.then(|id| reshape(id).map(move |_| id)))
 }
@@ -805,7 +805,23 @@ pub fn floating(settings: window::Settings, radius: f32) -> (window::Id, Task<wi
 /// A screen-sized window (the capture overlay, the live layer): no frame, not
 /// cut to a shape; each sets its own transparency and level.
 pub fn screen(settings: window::Settings) -> (window::Id, Task<window::Id>) {
-    window::open(app_window(settings))
+    open(settings)
+}
+
+/// What the three above share: `app_window`'s settings, and on Windows no classic
+/// title bar painted over the window at (de)activation (`shape::no_caption`).
+fn open(settings: window::Settings) -> (window::Id, Task<window::Id>) {
+    let (id, opened) = window::open(app_window(settings));
+    let caption_off = move |id| {
+        window::run(id, |w| {
+            if let Ok(handle) = w.window_handle() {
+                shape::no_caption(handle.as_raw());
+            }
+        })
+        .discard()
+        .chain(Task::done(id))
+    };
+    (id, opened.then(caption_off))
 }
 
 /// Floating windows and their corner radius (see `floating`).
@@ -1315,8 +1331,9 @@ mod tests {
         assert!(!app_window(asked).decorations);
     }
 
-    /// Every window is opened by `normal`, `floating` or `screen` here, so none can
-    /// show a box, a gray strip or the OS title bar by forgetting a setting.
+    /// Every window is opened by `normal`, `floating` or `screen` here, all through
+    /// `open`, so none can show a box, a gray strip or the OS title bar by forgetting
+    /// a setting.
     #[test]
     fn no_window_is_opened_outside_the_helpers() {
         let call = concat!("window::", "open(");
@@ -1336,7 +1353,7 @@ mod tests {
                     let code = text.split("#[cfg(test)]").next().unwrap();
                     let n = code.matches(call).count();
                     if path.ends_with("ui/windows.rs") {
-                        assert_eq!(n, 3, "normal, floating and screen open one each");
+                        assert_eq!(n, 1, "normal, floating and screen all go through open");
                     } else if n > 0 {
                         stray.push(path.display().to_string());
                     }

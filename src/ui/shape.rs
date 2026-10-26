@@ -5,6 +5,8 @@
 //! compositor). Wayland has no way to cut a window, so there floating contents
 //! are drawn square (`radius`) and fill the window: no stray pixel either.
 //! Called by `windows.rs` after a floating window opens and on every resize.
+//! Also `no_caption`: on Windows no window of ours ever gets the system's
+//! classic title bar painted over its top (#126).
 use iced::window::raw_window_handle::RawWindowHandle;
 
 /// Whether a floating window can be cut to a rounded shape here (not on Wayland).
@@ -76,13 +78,67 @@ pub fn apply(handle: RawWindowHandle, max_radius: f32) -> Result<(), String> {
     }
 }
 
+/// Windows: the system never paints its classic title bar over the window behind
+/// `handle` (`win::no_caption`). Called once by `windows.rs` for every window it
+/// opens. Elsewhere nothing.
+pub fn no_caption(handle: RawWindowHandle) {
+    #[cfg(windows)]
+    if let RawWindowHandle::Win32(h) = handle {
+        win::no_caption(h.hwnd.get());
+    }
+    #[cfg(not(windows))]
+    let _ = handle;
+}
+
 #[cfg(windows)]
 mod win {
     use super::corner;
-    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows::Win32::Graphics::Gdi::{CreateRectRgn, CreateRoundRectRgn, SetWindowRgn};
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
-    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, GWLP_WNDPROC, GetPropW, GetWindowLongPtrW, GetWindowRect, RemovePropW,
+        SetPropW, SetWindowLongPtrW, WM_NCACTIVATE, WM_NCDESTROY, WNDPROC,
+    };
+    use windows::core::{PCWSTR, w};
+
+    /// The window's own procedure (winit's), kept while ours sits in front of it.
+    const NEXT: PCWSTR = w!("OpenCircle.next_wndproc");
+
+    /// winit keeps an undecorated window's style overlapped (it hides the caption
+    /// with its WM_NCCALCSIZE) and hands WM_NCACTIVATE on to DefWindowProc. Where
+    /// DWM does not draw the frame (the full-screen overlay, windows cut by a
+    /// region) DefWindowProc then paints the classic caption, "OpenCircle", over
+    /// the top 22 px of our content at every (de)activation (the Start menu, a
+    /// click on another app), and nothing paints over it: only damage is redrawn.
+    /// lParam -1 tells DefWindowProc not to repaint the non-client area; winit
+    /// still sees every activation.
+    pub fn no_caption(hwnd: isize) {
+        let hwnd = HWND(hwnd as *mut _);
+        let ours = wndproc as *const () as isize;
+        // SAFETY: `hwnd` is a live window of this thread. The next procedure is
+        // stored before ours is installed, so `wndproc` always finds it.
+        unsafe {
+            let next = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
+            if next == ours || SetPropW(hwnd, NEXT, Some(HANDLE(next as *mut _))).is_err() {
+                return;
+            }
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, ours);
+        }
+    }
+
+    unsafe extern "system" fn wndproc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+        // SAFETY: the property holds the procedure `no_caption` replaced, a valid
+        // WNDPROC of this window (never null: it is set before ours goes in).
+        unsafe {
+            let next: WNDPROC = std::mem::transmute(GetPropW(h, NEXT).0);
+            if msg == WM_NCDESTROY {
+                let _ = RemovePropW(h, NEXT);
+            }
+            let l = if msg == WM_NCACTIVATE { LPARAM(-1) } else { l };
+            CallWindowProcW(next, h, msg, w, l)
+        }
+    }
 
     pub fn clear(hwnd: isize) -> Result<(), String> {
         // SAFETY: `hwnd` is a live window of this process; no region = the whole window.
@@ -192,6 +248,69 @@ mod tests {
 
     fn area(bands: &[(i32, i32, u32, u32)]) -> u32 {
         bands.iter().map(|b| b.2 * b.3).sum()
+    }
+
+    /// #126: DefWindowProc must get WM_NCACTIVATE with lParam -1 (no caption
+    /// painted); every other message reaches the window's own procedure unchanged,
+    /// and installing twice changes nothing.
+    #[cfg(windows)]
+    #[test]
+    fn activation_never_paints_the_caption() {
+        use std::sync::atomic::{AtomicIsize, Ordering};
+        use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, GWLP_WNDPROC, HWND_MESSAGE, SendMessageW,
+            SetWindowLongPtrW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_NCACTIVATE, WM_USER,
+        };
+        use windows::core::w;
+
+        static SEEN: [AtomicIsize; 2] = [AtomicIsize::new(0), AtomicIsize::new(0)];
+        unsafe extern "system" fn own(_: HWND, msg: u32, _: WPARAM, l: LPARAM) -> LRESULT {
+            match msg {
+                WM_NCACTIVATE => SEEN[0].store(l.0, Ordering::SeqCst),
+                WM_USER => SEEN[1].store(l.0, Ordering::SeqCst),
+                _ => {}
+            }
+            LRESULT(1)
+        }
+        // SAFETY: a message-only window of this thread, destroyed at the end.
+        unsafe {
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                w!("caption test"),
+                WINDOW_STYLE(0),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, own as *const () as isize);
+            no_caption(RawWindowHandle::Win32(
+                iced::window::raw_window_handle::Win32WindowHandle::new(
+                    std::num::NonZeroIsize::new(hwnd.0 as isize).unwrap(),
+                ),
+            ));
+            win::no_caption(hwnd.0 as isize); // twice: no loop, no second hop
+            SendMessageW(hwnd, WM_NCACTIVATE, Some(WPARAM(0)), Some(LPARAM(0)));
+            SendMessageW(hwnd, WM_USER, Some(WPARAM(0)), Some(LPARAM(7)));
+            let _ = DestroyWindow(hwnd);
+        }
+        assert_eq!(
+            SEEN[0].load(Ordering::SeqCst),
+            -1,
+            "caption repaint not skipped"
+        );
+        assert_eq!(
+            SEEN[1].load(Ordering::SeqCst),
+            7,
+            "other messages unchanged"
+        );
     }
 
     #[test]
