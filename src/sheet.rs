@@ -177,7 +177,9 @@ pub fn run(
             page.push(0);
             page.extend(history::page(&history::read(p), colours, now).into_bytes());
         }
-        None => history::clear_default(),
+        // History turned off deletes the old list; hidden by Labs keeps it.
+        None if !crate::config::current().general.search_history => history::clear_default(),
+        None => {}
     }
     let mut keep_url = |url: &str| {
         if let (Some(p), Some(mut e)) = (&keep, entry.take()) {

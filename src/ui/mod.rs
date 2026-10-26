@@ -28,7 +28,7 @@ pub(crate) mod widgets;
 mod windows;
 mod word;
 
-pub use tray::start as start_tray;
+pub use tray::{refresh as refresh_tray, start as start_tray};
 
 use std::cell::Cell;
 use std::sync::atomic::AtomicBool;
@@ -47,6 +47,7 @@ use crate::config::{
     self, After, BarAnchor, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target,
 };
 use crate::editor::{self, Output};
+use crate::labs::{self, BarButton, Labs};
 use crate::ocr::{self, TextBlock};
 use crate::translate::pipeline::Cache;
 use crate::{Trigger, capture};
@@ -62,12 +63,12 @@ const PROTECTED: &str = "This window is protected; it can't be captured";
 /// The ask bar at the bottom of the overlay: its text field, width, and the
 /// height kept free for it (the action bar stays above it).
 const ASK_INPUT: &str = "overlay-ask";
-/// The bottom bar's round buttons, always all there so it never changes size
-/// (owner, 2026-10-25): Include screen, Copy, Save (dimmed until something is
-/// selected), Translate, Live translate, Song search, Edit. No Search, Ask AI
-/// or Text (owner, 2026-10-25): a selection searches by itself (or Enter in an
-/// empty field, "wait" mode), Enter in the field asks, text is selected directly.
-const BAR_BUTTONS: f32 = 7.0;
+/// The bottom bar's round buttons (`labs::bar`), all there in every state so it
+/// never changes size (owner, 2026-10-25): Include screen, Copy, Save (dimmed
+/// until something is selected), Translate, Live translate, and, while their Labs
+/// switch is on, Song search and Edit. No Search, Ask AI or Text (owner,
+/// 2026-10-25): a selection searches by itself (or Enter in an empty field,
+/// "wait" mode), Enter in the field asks, text is selected directly.
 /// The bar's selection buttons' tooltip while there is nothing to act on.
 const SELECT_FIRST: &str = "Select something first";
 /// How long the bar takes to turn into the editing toolbar (back: `motion::EXIT`),
@@ -460,6 +461,8 @@ struct App {
     include_screen: bool,
     /// The shortcuts the bottom bar's tooltips show (read at open).
     bar_keys: BarKeys,
+    /// Which unfinished features are on (read at open; Settings changes apply to the next one).
+    labs: Labs,
     /// The last press: when, where (image px), and how many in a row.
     clicks: Option<(Instant, Point, u8)>,
     /// The ask bar's text.
@@ -596,6 +599,7 @@ impl App {
             appear: None,
             include_screen: true,
             bar_keys: BarKeys::default(),
+            labs: Labs::default(),
             ask: String::new(),
             opening: 0,
             first_draw: Cell::new(None),
@@ -649,6 +653,14 @@ impl App {
                 .open(windows::Kind::Settings)
                 .map(Message::Windows),
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
+            // A hidden (Labs) feature does nothing, whoever asks (no shortcut or tray
+            // item reaches here; this is the one place that also covers a late trigger).
+            Message::Trigger(Trigger::Quick(_, qa))
+                if !labs::action_on(&config::current().labs, &qa.action) =>
+            {
+                eprintln!("[opencircle] \"{}\" is off (Settings > Labs)", qa.action);
+                Task::none()
+            }
             Message::Trigger(Trigger::Update(event)) => self.on_update(event),
             Message::UpdateTick => self.try_update(),
             Message::Trigger(Trigger::Quick(at, qa))
@@ -1132,6 +1144,7 @@ impl App {
         motion::refresh();
         self.behaviour = cfg.selection;
         self.bar_keys = BarKeys::of(&cfg);
+        self.labs = cfg.labs;
         let mut first = None;
         let mut extras = Task::none();
         let mut timer = None;
@@ -1493,7 +1506,7 @@ impl App {
             overlay::Event::Key { letter, ctrl } if matches!(self.purpose, Purpose::Search) => {
                 // Nothing selected: Ask AI, Translate and Edit take the whole screen
                 // (as the bottom bar's buttons do).
-                let bar = match actions::for_key(letter, ctrl).map(|a| a.id) {
+                let bar = match actions::for_key(&self.labs, letter, ctrl).map(|a| a.id) {
                     Some(id) if id == actions::ask::ACTION.id => Some(Message::AskButton),
                     Some(id) if id == actions::translate::ACTION.id => {
                         Some(Message::TranslateScreen)
@@ -1504,7 +1517,7 @@ impl App {
                 if let (None, Some(message)) = (self.selection, bar) {
                     return self.update(message);
                 }
-                if let Some(action) = actions::for_key(letter, ctrl) {
+                if let Some(action) = actions::for_key(&self.labs, letter, ctrl) {
                     return self.run(action);
                 }
             }
@@ -2245,6 +2258,9 @@ impl App {
     /// place on screen; the toolbar takes the bar's place. Edits made before
     /// (then Back) are still there.
     fn open_editor(&mut self) -> Task<Message> {
+        if !self.labs.has(labs::Feature::Editor) {
+            return Task::none();
+        }
         self.panel = None;
         self.view = self.view.reset(); // the editor works at 1x
         if let Some(edit) = &mut self.edit {
@@ -2311,6 +2327,7 @@ impl App {
             }
             Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
             Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
+            Some(Output::Pin(_)) if !self.labs.has(labs::Feature::Pins) => Task::none(),
             Some(Output::Pin(crop)) => self.pin(crop),
             // Scrolling capture of the area under the editor.
             Some(Output::Scroll) => match self.selection {
@@ -2578,7 +2595,12 @@ impl App {
         if remember {
             snip::remember(&crop);
         }
-        self.snip_routed(crop, in_place, snip::route(config::current().snip.after))
+        // No editor (Labs): a snip is only copied.
+        let route = match self.labs.has(labs::Feature::Editor) {
+            true => snip::route(config::current().snip.after),
+            false => (true, false),
+        };
+        self.snip_routed(crop, in_place, route)
     }
 
     /// Copies and / or edits a snip's `crop` as `route` says; Copy gets the toast.
@@ -3329,7 +3351,7 @@ impl App {
     /// The bottom bar's field width and size: the same in every state (no
     /// selection, a selection, after a card), so it never jumps.
     fn bar_size(&self) -> (f32, Size) {
-        bar::bottom_size(self.screen.width, BAR_BUTTONS)
+        bar::bottom_size(self.screen.width, labs::bar(&self.labs).len() as f32)
     }
 
     /// The size of what is docked at the bar's spot now: the bar, the editing
@@ -3464,8 +3486,10 @@ impl App {
                 ("Edit the screen", Message::EditScreen),
             ),
         };
+        let shown = labs::bar(&self.labs);
         let fixed = [
             (
+                BarButton::Translate,
                 actions::translate::ACTION.icon,
                 translate.0,
                 &keys.translate,
@@ -3473,13 +3497,15 @@ impl App {
                 translate.1,
             ),
             (
+                BarButton::Live,
                 LIVE,
-                "Live translate",
+                "Live translate (Beta)",
                 &keys.live,
                 self.live.is_some(),
                 Message::LiveToggle,
             ),
             (
+                BarButton::Song,
                 song::MUSIC,
                 "Search for a song",
                 &keys.song,
@@ -3487,6 +3513,7 @@ impl App {
                 Message::SongStart,
             ),
             (
+                BarButton::Edit,
                 actions::edit::ACTION.icon,
                 edit.0,
                 &keys.edit,
@@ -3494,7 +3521,9 @@ impl App {
                 edit.1,
             ),
         ]
-        .map(|(glyph, label, keys, active, message)| {
+        .into_iter()
+        .filter(|(which, ..)| shown.contains(which))
+        .map(|(_, glyph, label, keys, active, message)| {
             button(glyph, label, keys, active, Some(message))
         });
         let handle = container(widgets::icon(widgets::DRAG))
@@ -3900,6 +3929,7 @@ mod tests {
 
     fn closing_app() -> App {
         let mut app = App::idle(window::Id::unique());
+        app.labs = Labs::all_on();
         let _ = app.close();
         app
     }
@@ -3927,6 +3957,7 @@ mod tests {
             url: String::new(),
         };
         let mut app = App::idle(window::Id::unique());
+        app.labs = Labs::all_on();
         assert!(app.is_idle());
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         assert!(!app.is_idle(), "a capture is out");
@@ -3952,6 +3983,7 @@ mod tests {
     #[test]
     fn a_timed_out_capture_frees_the_trigger_and_its_late_answer_is_dropped() {
         let mut app = App::idle(window::Id::unique());
+        app.labs = Labs::all_on();
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let first = app.capturing.expect("pending");
         // A second press while it is out does nothing.
@@ -3977,6 +4009,7 @@ mod tests {
     #[test]
     fn esc_cancels_a_pending_capture() {
         let mut app = App::idle(window::Id::unique());
+        app.labs = Labs::all_on();
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let n = app.capturing.expect("pending");
         let _ = app.update(Message::Escape);
@@ -4192,6 +4225,7 @@ mod tests {
     /// [x % 256, y % 256, x / 256, 255].
     pub(super) fn open_app(w: u32, h: u32, scale: f32) -> App {
         let mut app = App::idle(window::Id::unique());
+        app.labs = Labs::all_on();
         let rgba: Vec<u8> = (0..h)
             .flat_map(|y| (0..w).flat_map(move |x| [x as u8, y as u8, (x >> 8) as u8, 255]))
             .collect();
@@ -4300,6 +4334,7 @@ mod tests {
         };
         with_delay(3);
         let mut app = App::idle(window::Id::unique());
+        app.labs = Labs::all_on();
         let _ = app.open(Instant::now(), shot());
         assert!(app.snip_pill(), "counting down, the overlay is only a pill");
         // the capture the timer waited for opens plain
@@ -4309,6 +4344,7 @@ mod tests {
         // no timer in Settings: no pill
         with_delay(0);
         let mut app = App::idle(window::Id::unique());
+        app.labs = Labs::all_on();
         let _ = app.open(Instant::now(), shot());
         assert!(!app.snip_pill());
     }
@@ -5179,6 +5215,120 @@ mod tests {
     /// (a selection searches by itself, Enter asks, text is selected directly);
     /// their keys L, A, T still work. In "wait" mode Enter in the empty field
     /// is the search, and the field says so.
+    /// The names of the bottom bar's buttons (their tooltips' first words).
+    fn bar_names(app: &App) -> Vec<String> {
+        let _ = widgets::tests_support::shown();
+        let _ = overlay_texts(app);
+        let mut names: Vec<String> = widgets::tests_support::shown()
+            .iter()
+            .map(|t| t.split(" · ").next().unwrap_or_default().to_string())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    #[test]
+    fn hidden_features_have_no_bar_button_key_or_editor_and_turning_them_on_brings_them_back() {
+        let mut app = open_app(1280, 800, 1.0);
+        let (_, full) = app.bar_size();
+        app.labs = Labs::default();
+        let (_, small) = app.bar_size();
+        assert!(
+            small.width < full.width,
+            "two buttons fewer: {small:?} < {full:?}"
+        );
+        let names = bar_names(&app);
+        assert_eq!(
+            names,
+            [
+                "Copy",
+                "Include screen",
+                "Live translate (Beta)",
+                "Save",
+                "Translate the screen"
+            ],
+            "no Song search, no Edit"
+        );
+        // E does nothing without a selection and with one (no editor, no whole-screen editor).
+        event(
+            &mut app,
+            overlay::Event::Key {
+                letter: 'e',
+                ctrl: false,
+            },
+        );
+        assert!(app.edit.is_none() && !app.editing());
+        drag(
+            &mut app,
+            Point::new(200.0, 150.0),
+            Point::new(500.0, 350.0),
+            false,
+        );
+        event(
+            &mut app,
+            overlay::Event::Key {
+                letter: 'e',
+                ctrl: false,
+            },
+        );
+        let _ = app.update(Message::Run(&actions::edit::ACTION));
+        let _ = app.update(Message::EditScreen);
+        assert!(app.edit.is_none(), "the editor never opens");
+        // Pins and a snip's editor are off too.
+        assert!(!app.labs.has(labs::Feature::Pins));
+        // Song search on: its button is back (one more), the editor still off.
+        app.labs.set(labs::Feature::Song, true);
+        assert!(bar_names(&app).iter().any(|n| n == "Search for a song"));
+        assert_eq!(
+            app.bar_size().1.width,
+            small.width + widgets::BUBBLE + bar::SPACING
+        );
+        // Editor on: Edit is back, and E opens it.
+        app.labs.set(labs::Feature::Editor, true);
+        assert!(bar_names(&app).iter().any(|n| n.starts_with("Edit")));
+        let _ = app.update(Message::Run(&actions::edit::ACTION));
+        assert!(app.editing());
+    }
+
+    #[test]
+    fn a_pin_needs_its_labs_switch() {
+        let mut app = open_app(1280, 800, 1.0);
+        drag(
+            &mut app,
+            Point::new(200.0, 150.0),
+            Point::new(500.0, 350.0),
+            false,
+        );
+        let _ = app.open_editor();
+        app.labs.set(labs::Feature::Pins, false);
+        let _ = app.update(Message::Editor(editor::Message::Pin));
+        assert!(
+            app.frame.is_some() && app.edit.is_some(),
+            "the overlay stays: nothing was pinned"
+        );
+        app.labs.set(labs::Feature::Pins, true);
+        let _ = app.update(Message::Editor(editor::Message::Pin));
+        assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
+    }
+
+    #[test]
+    fn a_hidden_features_trigger_does_nothing() {
+        // The shared config is the defaults here: Snip and Song are off.
+        let mut app = open_app(1280, 800, 1.0);
+        app.frame = None;
+        let qa = |action: &str| QuickAction {
+            action: action.into(),
+            shortcut: String::new(),
+            target: Target::Circle,
+            live: false,
+        };
+        for id in ["snip", "song_search"] {
+            let _ = app.update(Message::Trigger(Trigger::Quick(Instant::now(), qa(id))));
+            assert!(app.capturing.is_none(), "{id} did not start a capture");
+        }
+    }
+
     #[test]
     fn the_bar_has_no_search_ask_or_text_and_enter_searches_in_wait_mode() {
         let mut app = open_app(1280, 800, 1.0);
@@ -5202,7 +5352,7 @@ mod tests {
                 "Copy",
                 "Edit",
                 "Include screen",
-                "Live translate",
+                "Live translate (Beta)",
                 "Save",
                 "Search for a song",
                 "Translate",
@@ -5518,7 +5668,7 @@ mod tests {
             let tips = widgets::tests_support::shown();
             for want in [
                 "Translate the screen · Ctrl+Shift+T",
-                "Live translate · Ctrl+Shift+L",
+                "Live translate (Beta) · Ctrl+Shift+L",
                 "Search for a song",
                 "Edit the screen · E",
             ] {

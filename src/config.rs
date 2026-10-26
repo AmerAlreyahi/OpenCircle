@@ -1,9 +1,9 @@
 //! The one config reader/validator: `<user config dir>/opencircle/config.toml`.
 //!
-//! Schema (version 1). Every key is optional; a missing file means defaults.
+//! Schema (version 2). Every key is optional; a missing file means defaults.
 //!
 //! ```toml
-//! version = 1                       # schema version, written by save()
+//! version = 2                       # schema version, written by save()
 //! theme = "system"                  # system | light | dark
 //! widget_theme = "default"          # floating widgets (bar, cards, toolbar): default | frost | graphite
 //! glass_effect = true               # frost / graphite blur the screen behind them (false = solid tint)
@@ -71,6 +71,13 @@
 //! history = false                   # keep the last 20 captures (user data dir only)
 //! delay = 0                         # timer before a snip: 0 (off) | 3 | 5 | 10 seconds
 //!
+//! [labs]                            # unfinished features: off = hidden everywhere, settings kept
+//! snip = false                      # Snip mode, its shortcuts and tray item
+//! editor = false                    # the image editor (Edit image)
+//! song = false                      # song search
+//! history = false                   # the local search history
+//! pins = false                      # pinning a capture to the screen
+//!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
 //! shortcut = "Ctrl+Shift+T"         # "" = not bound
@@ -85,6 +92,10 @@
 //! off until the user picks one, never a fallback to another provider); a file
 //! that exists but can't be read or parsed gives `Provider::Unreadable`. Unknown
 //! keys are ignored. Once released, this format is frozen: migrate, never break.
+//!
+//! Versions: 1 = v0.1.0; 2 adds `[labs]`. A file older than `VERSION` is copied to
+//! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
+//! current version, by `migrate` (add one step there per schema change).
 
 use std::collections::HashSet;
 use std::io::Write;
@@ -96,8 +107,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use toml::{Table, Value};
 
+use crate::labs::Labs;
+
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
@@ -760,6 +773,7 @@ pub struct Config {
     pub quick_actions: Vec<QuickAction>,
     pub song: SongConfig,
     pub update: UpdateConfig,
+    pub labs: Labs,
 }
 
 /// `[update]`: automatic updates from GitHub Releases (`crate::update`).
@@ -849,6 +863,7 @@ impl Default for Config {
             ],
             song: SongConfig::default(),
             update: UpdateConfig::default(),
+            labs: Labs::default(),
         }
     }
 }
@@ -898,7 +913,13 @@ impl Config {
 
     pub fn load_from(path: &Path) -> (Config, Vec<String>) {
         match std::fs::read_to_string(path) {
-            Ok(text) => Self::parse(&text),
+            Ok(text) => {
+                let (config, warnings) = Self::parse(&text);
+                if warnings.is_empty() {
+                    migrate(path, &text, &config);
+                }
+                (config, warnings)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Config::default(), vec![]),
             Err(e) => (
                 Self::unreadable(),
@@ -941,11 +962,13 @@ impl Config {
 
         if let Some(v) = root.get("version") {
             match v.as_integer() {
-                Some(n) if n == VERSION as i64 => {}
+                Some(n) if (1..=VERSION as i64).contains(&n) => {}
                 Some(n) if n > VERSION as i64 => w.push(format!(
                     "version: written by a newer OpenCircle (schema {n}); unknown keys are ignored and lost on save"
                 )),
-                _ => w.push("version: expected 1; reading it as version 1".into()),
+                _ => w.push(format!(
+                    "version: expected 1 to {VERSION}; reading it as version {VERSION}"
+                )),
             }
         }
         c.theme = get(&root, "", "theme", d.theme, &mut w);
@@ -1093,6 +1116,14 @@ impl Config {
                     .ok_or_else(|| "expected 0 (off), 3, 5 or 10 seconds".to_string())
             });
         }
+        if let Some(t) = section(&root, "labs", &mut w) {
+            let (p, d) = ("labs.", d.labs);
+            c.labs.snip = get(t, p, "snip", d.snip, &mut w);
+            c.labs.editor = get(t, p, "editor", d.editor, &mut w);
+            c.labs.song = get(t, p, "song", d.song, &mut w);
+            c.labs.history = get(t, p, "history", d.history, &mut w);
+            c.labs.pins = get(t, p, "pins", d.pins, &mut w);
+        }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
         }
@@ -1138,6 +1169,66 @@ impl Config {
                 let _ = std::fs::remove_file(&tmp);
             })
     }
+}
+
+// ---- schema migration ----
+
+/// The schema version a file says it has (missing = 1, the first release), or
+/// `None` when it is not a table or says something else than a number.
+fn file_version(text: &str) -> Option<i64> {
+    let root: Table = text.parse().ok()?;
+    match root.get("version") {
+        None => Some(1),
+        Some(v) => v.as_integer(),
+    }
+}
+
+/// A file written by an older schema is copied to `config.toml.bak-v<old>` and then
+/// rewritten as `config` (read from that file without warnings, new keys at their
+/// defaults). A failed copy leaves the file as it is: no backup, no rewrite. Every
+/// later schema step adds its defaults in `parse`; this only has to carry them to disk.
+fn migrate(path: &Path, text: &str, config: &Config) {
+    let Some(old) = file_version(text).filter(|v| (1..VERSION as i64).contains(v)) else {
+        return;
+    };
+    let Some(backup) = backup_old(path, text, old) else {
+        eprintln!("[opencircle] config: could not back up the v{old} file; leaving it as it is");
+        return;
+    };
+    match config.save_to(path) {
+        Ok(()) => eprintln!(
+            "[opencircle] config: updated from schema {old} to {VERSION} (old file: {})",
+            backup.display()
+        ),
+        Err(e) => eprintln!("[opencircle] config: could not write the updated file ({e})"),
+    }
+}
+
+/// Writes `text` next to `path` as `<name>.bak-v<old>` (`-2`, `-3` ... if taken: an
+/// existing backup is never overwritten). `None` if it cannot be written.
+fn backup_old(path: &Path, text: &str, old: i64) -> Option<PathBuf> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    for n in 1..100 {
+        let tag = if n == 1 {
+            String::new()
+        } else {
+            format!("-{n}")
+        };
+        let backup = path.with_file_name(format!("{name}.bak-v{old}{tag}"));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&backup)
+        {
+            Ok(mut f) => {
+                let written = f.write_all(text.as_bytes()).and_then(|()| f.sync_all());
+                return written.is_ok().then_some(backup);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return None,
+        }
+    }
+    None
 }
 
 // ---- the running app's config: one source of truth ----
@@ -1377,6 +1468,145 @@ mod tests {
         d
     }
 
+    const V010_DEFAULT: &str = include_str!("../tests/fixtures/config/v0.1.0-default.toml");
+    const V010_USED: &str = include_str!("../tests/fixtures/config/v0.1.0-used.toml");
+
+    /// A config folder holding `text` as config.toml.
+    fn config_with(tag: &str, text: &str) -> (PathBuf, PathBuf) {
+        let dir = tmp_dir(tag);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn a_v0_1_0_file_loads_without_warnings_and_gets_labs_defaults() {
+        for (name, text) in [("default", V010_DEFAULT), ("used", V010_USED)] {
+            let (c, w) = Config::parse(text);
+            assert!(w.is_empty(), "{name}: {w:?}");
+            assert_eq!(c.labs, Labs::default(), "{name}: Labs off");
+            assert_eq!(c.version, VERSION);
+        }
+        // What the user had set is read as before, snip / song / history included.
+        let (c, _) = Config::parse(V010_USED);
+        assert_eq!(c.theme, Theme::Dark);
+        assert!(c.general.search_history && c.snip.history && c.song.history);
+        assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Both, 2048));
+        assert_eq!(c.song.source, SongSource::Microphone);
+        let quick: Vec<_> = c
+            .quick_actions
+            .iter()
+            .map(|q| (q.action.as_str(), q.shortcut.as_str()))
+            .collect();
+        assert_eq!(
+            quick,
+            [
+                ("translate", "Ctrl+Shift+T"),
+                ("snip", "PrintScreen"),
+                ("snip", "Ctrl+Shift+S"),
+                ("song_search", "Ctrl+Shift+M"),
+            ]
+        );
+    }
+
+    #[test]
+    fn migrating_backs_the_old_file_up_once_then_rewrites_it_as_the_new_schema() {
+        let (dir, path) = config_with("migrate", V010_USED);
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        // The old file, byte for byte, next to the new one.
+        let backup = dir.join("config.toml.bak-v1");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), V010_USED);
+        // The file is the new schema now, with every old value and the Labs switches.
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("version = 2") && text.contains("[labs]"),
+            "{text}"
+        );
+        let (again, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(again, c, "nothing lost in the rewrite");
+        assert_eq!(
+            again.quick_actions,
+            Config::parse(V010_USED).0.quick_actions
+        );
+        // Loading again changes nothing and writes no second backup.
+        let after = std::fs::read_to_string(&path).unwrap();
+        Config::load_from(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+        let backups = std::fs::read_dir(&dir).unwrap().count();
+        assert_eq!(backups, 2, "config.toml and one backup");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_backup_is_never_overwritten() {
+        let (dir, path) = config_with("keep-backup", V010_DEFAULT);
+        std::fs::write(dir.join("config.toml.bak-v1"), "an older copy").unwrap();
+        Config::load_from(&path);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.toml.bak-v1")).unwrap(),
+            "an older copy"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.toml.bak-v1-2")).unwrap(),
+            V010_DEFAULT
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
+        let (dir, path) = config_with("current", "version = 2\n[labs]\nsong = true\n");
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty() && c.labs.song && !c.labs.snip, "{w:?}");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "version = 2\n[labs]\nsong = true\n"
+        );
+        let gone = dir.join("none.toml");
+        Config::load_from(&gone);
+        assert!(!gone.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_with_a_problem_is_not_rewritten() {
+        let bad = "version = 1\nshortcut = \"nonsense\"\n";
+        let (dir, path) = config_with("bad", bad);
+        let (_, w) = Config::load_from(&path);
+        assert!(!w.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            bad,
+            "kept as the user wrote it"
+        );
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn labs_switches_round_trip_and_keep_the_hidden_features_settings() {
+        let (mut c, _) = Config::parse(V010_USED);
+        c.labs.snip = true;
+        c.labs.pins = true;
+        let dir = tmp_dir("labs-roundtrip");
+        let path = dir.join("config.toml");
+        c.save_to(&path).unwrap();
+        let (back, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back, c);
+        assert!(back.labs.snip && back.labs.pins && !back.labs.song);
+        let _ = std::fs::remove_dir_all(dir);
+        let (c, w) = Config::parse("version = 2\n[labs]\nsnip = \"yes\"\n");
+        assert!(
+            !c.labs.snip && w.iter().any(|w| w.starts_with("labs.snip")),
+            "{w:?}"
+        );
+    }
+
     #[test]
     fn tests_never_read_or_write_the_machines_config() {
         assert_eq!(Config::path(), None);
@@ -1398,7 +1628,8 @@ mod tests {
     #[test]
     fn defaults_match_design() {
         let c = Config::default();
-        assert_eq!(c.version, 1);
+        assert_eq!(c.version, 2);
+        assert_eq!(c.labs, Labs::default(), "Labs: everything off");
         assert_eq!(c.theme, Theme::System);
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
         assert_eq!(c.translate.target, "ar");

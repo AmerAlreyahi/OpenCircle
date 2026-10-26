@@ -76,6 +76,8 @@ fn run(action: &str, target: Option<&str>) -> Result<Command, String> {
     if !well_formed || !super::known_action(action) {
         return Err(format!("unknown action \"{}\"", printable(action)));
     }
+    // A Labs feature that is off: the CLI says how to turn it on (`main`: exit status 2).
+    crate::labs::command_allowed(&crate::config::current().labs, action)?;
     let target = match target {
         None => None,
         Some(t) => Some(super::parse_target(t).ok_or_else(|| {
@@ -300,6 +302,33 @@ mod tests {
             action: action.into(),
             target,
         }
+    }
+
+    /// The CLI is frozen, but a feature that is off answers with why, and the
+    /// usual refusal: `main` prints it with the usage and exits with status 2.
+    #[test]
+    fn the_cli_refuses_a_hidden_features_target_with_a_clear_message() {
+        for (action, title) in [
+            ("snip", "Snip"),
+            ("song_search", "Song search"),
+            ("edit", "Image editor"),
+        ] {
+            let msg = Command::from_args(&args(&["run", action])).unwrap_err();
+            assert_eq!(
+                msg,
+                format!("\"{action}\" is off: turn on {title} in Settings > Labs")
+            );
+            // Also with a target, and on the wire (the running app's own check).
+            assert!(Command::from_args(&args(&["run", action, "--target", "window"])).is_err());
+            assert!(parse_command(&format!("run {action}\n")).is_err());
+        }
+        // Everything else is as before; an unknown action keeps its own message.
+        assert!(Command::from_args(&args(&["run", "translate"])).is_ok());
+        assert!(parse_command("run translate full_screen\n").is_ok());
+        assert_eq!(
+            Command::from_args(&args(&["run", "nope"])).unwrap_err(),
+            "unknown action \"nope\""
+        );
     }
 
     #[test]

@@ -78,7 +78,12 @@ impl Binding {
     /// the bare id (the ids of earlier versions, so an update asks nothing again, and
     /// a key the user set in the desktop's own settings is kept).
     fn portal_id(&self) -> String {
-        let default = plan(&Config::default()).0;
+        // Labs on: the ids of the shortcuts that can be hidden stay the same.
+        let default = plan(&Config {
+            labs: crate::labs::Labs::all_on(),
+            ..Config::default()
+        })
+        .0;
         if default
             .iter()
             .any(|d| d.id == self.id && d.shortcut == self.shortcut)
@@ -129,7 +134,8 @@ fn plan(cfg: &Config) -> (Vec<Binding>, Vec<String>) {
     });
 
     for qa in &cfg.quick_actions {
-        if qa.shortcut.is_empty() {
+        // A hidden (Labs) feature has no shortcut; its entry stays in the config.
+        if qa.shortcut.is_empty() || !crate::labs::action_on(&cfg.labs, &qa.action) {
             continue;
         }
         let hotkey = match parse_shortcut(&qa.shortcut) {
@@ -499,9 +505,70 @@ mod tests {
         }
     }
 
+    fn all_labs() -> Config {
+        Config {
+            labs: crate::labs::Labs::all_on(),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn a_hidden_feature_has_no_shortcut_and_turning_it_on_brings_it_back() {
+        use crate::labs::Feature;
+        let ids = |c: &Config| -> Vec<String> { plan(c).0.into_iter().map(|b| b.id).collect() };
+        let off = ids(&Config::default());
+        assert!(
+            !off.iter().any(|i| i.contains("snip") || i.contains("song")),
+            "{off:?}"
+        );
+        assert!(
+            off.contains(&"capture".to_string())
+                && off.contains(&"quick-translate-full_screen".to_string())
+        );
+        // Print Screen belongs to no binding: nothing is registered for it.
+        assert!(
+            plan(&Config::default())
+                .0
+                .iter()
+                .all(|b| b.hotkey.key != Code::PrintScreen)
+        );
+        let with = |f: Feature| {
+            let mut c = Config::default();
+            c.labs.set(f, true);
+            // a song shortcut is unbound by default: bind one to see it come back
+            for q in &mut c.quick_actions {
+                if q.action == "song_search" {
+                    q.shortcut = "Ctrl+Shift+M".into();
+                }
+            }
+            ids(&c)
+        };
+        let snip = with(Feature::Snip);
+        assert_eq!(
+            snip.iter().filter(|i| i.starts_with("quick-snip-")).count(),
+            3,
+            "{snip:?}"
+        );
+        assert!(!with(Feature::Snip).iter().any(|i| i.contains("song")));
+        assert!(
+            with(Feature::Song)
+                .iter()
+                .any(|i| i.contains("song_search"))
+        );
+        // The entries stay in the config while hidden.
+        assert!(
+            Config::default()
+                .quick_actions
+                .iter()
+                .any(|q| q.action == "snip")
+        );
+        // Ids a shortcut had before it could be hidden are unchanged (the portal keeps them).
+        assert_eq!(plan(&all_labs()).0[5].portal_id(), "quick-snip-circle");
+    }
+
     #[test]
     fn defaults_give_capture_plus_every_bound_quick_action() {
-        let (b, w) = plan(&Config::default());
+        let (b, w) = plan(&all_labs());
         assert!(w.is_empty(), "{w:?}");
         let ids: Vec<_> = b.iter().map(|b| b.id.as_str()).collect();
         // `lens` has no shortcut by default, so it gets no binding.
@@ -687,7 +754,7 @@ mod tests {
 
     #[test]
     fn a_refused_print_screen_says_how_to_free_it() {
-        let (b, _) = plan(&Config::default());
+        let (b, _) = plan(&all_labs());
         let by = |id: &str| b.iter().find(|b| b.id == id).unwrap();
         let line = unavailable(by("quick-snip-circle"), "already registered");
         assert!(line.contains("PrintScreen") && line.contains("already registered"));
@@ -740,7 +807,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn names_the_gnome_setting_that_holds_each_print_screen_key() {
-        let (b, _) = plan(&Config::default());
+        let (b, _) = plan(&all_labs());
         let by = |id: &str| b.iter().find(|b| b.id == id).unwrap();
         let hint = |id: &str, desktop: &str| gnome_print_key(by(id), desktop);
         let print = hint("quick-snip-circle", "ubuntu:GNOME").unwrap();

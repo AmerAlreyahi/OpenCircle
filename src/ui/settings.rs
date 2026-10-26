@@ -29,6 +29,7 @@ use crate::config::{
     SelectStyle, SnipAfter, SnipConfig, SongSource, Target, Theme, WidgetTheme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
+use crate::labs::{Feature, Labs};
 use crate::mt;
 use crate::music::{self, SERVICE, Service};
 use crate::secrets::{self, Secret, SecretsError};
@@ -319,7 +320,7 @@ fn action_name(id: &str, live: bool, target: Target) -> String {
             _ => "Snip a region".into(),
         },
         ("translate", false) => "Translate".into(),
-        ("translate", true) => "Translate (live)".into(),
+        ("translate", true) => "Translate (live, Beta)".into(),
         ("ai_explain", _) => "Explain with AI".into(),
         ("copy_text", _) => "Copy text".into(),
         ("lens", _) => "Search with Lens".into(),
@@ -447,10 +448,11 @@ pub enum Section {
     Ai,
     Translate,
     Song,
+    Labs,
     About,
 }
 
-const SECTIONS: [(Section, &str, &str); 9] = [
+const SECTIONS: [(Section, &str, &str); 10] = [
     (Section::General, "General", "General settings"),
     (Section::Appearance, "Appearance", "Appearance settings"),
     (
@@ -463,8 +465,19 @@ const SECTIONS: [(Section, &str, &str); 9] = [
     (Section::Ai, "AI", "AI settings"),
     (Section::Translate, "Translate", "Translate settings"),
     (Section::Song, "Song search", "Song search settings"),
+    (Section::Labs, "Labs", "Labs: unfinished features"),
     (Section::About, "About", "About OpenCircle"),
 ];
+
+/// The pages the sidebar lists: Snip and Song search only while their Labs switch is on.
+fn sections(labs: &Labs) -> impl Iterator<Item = (Section, &'static str, &'static str)> {
+    let labs = *labs;
+    SECTIONS.into_iter().filter(move |(s, ..)| match s {
+        Section::Snip => labs.has(Feature::Snip),
+        Section::Song => labs.has(Feature::Song),
+        _ => true,
+    })
+}
 
 /// What the update switch says it does (Settings and onboarding).
 pub const UPDATE_PRIVACY: &str = "Asks GitHub for the latest version twice a day and installs it when \
@@ -554,6 +567,8 @@ pub enum Message {
     SongKey(KeyMessage),
     SongSource(SongSource),
     SongHistory(bool),
+    /// A Labs switch: saved and applied at once.
+    Labs(Feature, bool),
     Source(Language),
     Target(Language),
     Engine(Engine),
@@ -809,8 +824,15 @@ impl State {
         }
     }
 
-    fn slots(&self) -> impl Iterator<Item = Slot> + use<> {
-        std::iter::once(Slot::Capture).chain((0..self.draft.quick_actions.len()).map(Slot::Quick))
+    /// The shortcut fields: Open OpenCircle, then every quick action whose Labs
+    /// feature is on (the others keep their entry in the file, unseen).
+    fn slots(&self) -> std::vec::IntoIter<Slot> {
+        let labs = &self.draft.labs;
+        let quick = self.draft.quick_actions.iter().enumerate();
+        let shown = quick.filter(|(_, q)| crate::labs::action_on(labs, &q.action));
+        let mut all = vec![Slot::Capture];
+        all.extend(shown.map(|(i, _)| Slot::Quick(i)));
+        all.into_iter()
     }
 
     /// Why `chord` cannot be `slot`'s shortcut, or the shortcut string to store.
@@ -925,6 +947,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         }
         Message::SongSource(source) => state.draft.song.source = source,
         Message::SongHistory(on) => state.draft.song.history = on,
+        Message::Labs(feature, on) => return set_lab(state, feature, on),
         Message::Theme(t) => {
             state.draft.theme = t;
             theme::apply(t);
@@ -1093,6 +1116,28 @@ fn kept_card(
     crate::config::ResultsConfig { side, ..now }
 }
 
+/// A Labs switch writes at once, and only itself: the saved config with this one
+/// switch changed (other edits in the draft stay unsaved). A failed write changes nothing.
+fn set_lab(state: &mut State, feature: Feature, on: bool) -> Outcome {
+    let mut cfg = state.saved.clone();
+    cfg.labs.set(feature, on);
+    cfg.results = crate::config::results(); // the card's side and size are kept live
+    let written = match &state.path {
+        Some(p) => cfg.save_to(p),
+        None => cfg.save(),
+    };
+    if let Err(e) = written {
+        state.notice = Some(format!("Could not save: {e}"));
+        return Outcome::None;
+    }
+    state.draft.labs = cfg.labs;
+    state.saved = cfg.clone();
+    if state.section == Section::Snip && !cfg.labs.has(Feature::Snip) {
+        state.section = Section::Labs;
+    }
+    Outcome::Saved(cfg)
+}
+
 fn save(state: &mut State) -> Outcome {
     if !state.problems.is_empty() {
         state.notice = Some("Fix the problems above first".into());
@@ -1143,7 +1188,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 // ---- view ----
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    let sidebar = column(SECTIONS.iter().map(|&(section, label, hint)| {
+    let sidebar = column(sections(&state.draft.labs).map(|(section, label, hint)| {
         tip(
             nav_item(label, section == state.section, Message::Section(section)),
             hint,
@@ -1221,6 +1266,7 @@ fn content(state: &State) -> Element<'_, Message> {
         Section::Snip => ("Snip", snip_rows(&state.draft.snip)),
         Section::Ai => ("AI", ai_rows(state)),
         Section::Song => ("Song search", song_rows(state)),
+        Section::Labs => ("Labs", labs_rows(&state.draft.labs)),
         Section::Translate => (
             "Translate",
             vec![
@@ -1358,6 +1404,26 @@ pub const START_LABEL: &str = if cfg!(windows) {
     "Start OpenCircle when you log in"
 };
 
+/// Settings > Labs: one switch per unfinished feature.
+fn labs_rows(labs: &Labs) -> Vec<Element<'_, Message>> {
+    Feature::ALL
+        .into_iter()
+        .map(|f| {
+            let (off, on) = f.switch_tips();
+            form_row(
+                f.title(),
+                f.blurb(),
+                segmented(
+                    &[(false, "Off", off), (true, "On", on)],
+                    labs.has(f),
+                    move |on| Message::Labs(f, on),
+                ),
+                None,
+            )
+        })
+        .collect()
+}
+
 fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     let folder = state.draft.general.save_folder.as_str();
     let shown = if folder.is_empty() {
@@ -1395,7 +1461,7 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     .spacing(8)
     .width(FORM_WIDTH);
     let error = issue(&state.problems, "general.save_folder");
-    vec![
+    let mut rows = vec![
         form_row(
             "Default action",
             "What Enter does after you select something",
@@ -1441,23 +1507,31 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
             ),
             None,
         ),
-        form_row(
-            "Search history",
-            "Only on this PC: what you searched, a small picture, the time",
-            segmented(
-                &[
-                    (
-                        false,
-                        "Off",
-                        "Keep no searches (turning it off deletes them)",
-                    ),
-                    (true, "On", "The card's History button lists your searches"),
-                ],
-                state.draft.general.search_history,
-                Message::SearchHistory,
+    ];
+    // Search history is a Labs feature: its row exists only while it is on.
+    if state.draft.labs.has(Feature::History) {
+        rows.insert(
+            3,
+            form_row(
+                "Search history",
+                "Only on this PC: what you searched, a small picture, the time",
+                segmented(
+                    &[
+                        (
+                            false,
+                            "Off",
+                            "Keep no searches (turning it off deletes them)",
+                        ),
+                        (true, "On", "The card's History button lists your searches"),
+                    ],
+                    state.draft.general.search_history,
+                    Message::SearchHistory,
+                ),
+                None,
             ),
-            None,
-        ),
+        );
+    }
+    rows.extend([
         form_row(
             "Save folder",
             "Where Save starts. Files are OpenCircle-date-time.png",
@@ -1486,7 +1560,8 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
             button_row([form_button("Check now", false, Some(Message::CheckUpdate)).into()]),
             None,
         ),
-    ]
+    ]);
+    rows
 }
 
 fn look_rows(state: &State) -> Vec<Element<'_, Message>> {
@@ -2432,11 +2507,11 @@ pub(super) mod tests {
             Some((Slot::Quick(0), "Already used by Open OpenCircle".into()))
         );
         assert_eq!(s.draft.quick_actions[0].shortcut, "Ctrl+Shift+T");
-        // Quick vs quick: "Translate (live)" owns Ctrl+Shift+L.
+        // Quick vs quick: "Translate (live, Beta)" owns Ctrl+Shift+L.
         press(&mut s, chord(true, true, "KeyL"));
         assert_eq!(
             s.shortcut_error.as_ref().unwrap().1,
-            "Already used by Translate (live)"
+            "Already used by Translate (live, Beta)"
         );
         // Re-pressing its own combination is fine.
         press(&mut s, chord(true, true, "KeyT"));
@@ -2463,6 +2538,102 @@ pub(super) mod tests {
         assert_eq!(key_labels("Alt+PrintScreen"), ["Alt", "PrtSc"]);
         assert_eq!(key_labels("Super+KeyA"), ["Super", "A"]);
         assert!(key_labels("").is_empty());
+    }
+
+    fn page(s: &mut State, section: Section) -> Vec<String> {
+        update(s, Message::Section(section));
+        shot::texts(view(s))
+    }
+
+    fn sidebar(s: &State) -> Vec<&'static str> {
+        sections(&s.draft.labs).map(|(_, label, _)| label).collect()
+    }
+
+    #[test]
+    fn hidden_features_have_no_settings_page_row_or_shortcut() {
+        let (mut s, _) = state(None);
+        let side = sidebar(&s);
+        assert!(
+            !side.contains(&"Snip") && !side.contains(&"Song search"),
+            "{side:?}"
+        );
+        assert!(side.contains(&"Labs"));
+        // No snip shortcut fields, no search-history row.
+        let shortcuts = page(&mut s, Section::Shortcuts);
+        assert!(
+            !shortcuts
+                .iter()
+                .any(|t| t.contains("Snip") || t.contains("song")),
+            "{shortcuts:?}"
+        );
+        let general = page(&mut s, Section::General);
+        assert!(
+            !general.iter().any(|t| t == "Search history"),
+            "{general:?}"
+        );
+        // The labs page: one row per feature, all off.
+        let labs = page(&mut s, Section::Labs);
+        for f in Feature::ALL {
+            assert!(labs.iter().any(|t| t == f.title()), "{labs:?}");
+            assert!(labs.iter().any(|t| t == f.blurb()), "{labs:?}");
+        }
+        // The entries are still in the draft (and so in the file): hidden, not deleted.
+        assert!(s.draft.quick_actions.iter().any(|q| q.action == "snip"));
+    }
+
+    #[test]
+    fn a_labs_switch_saves_and_applies_at_once_and_brings_its_rows_back() {
+        let path = tmp("labs-switch");
+        let (mut s, _) = state(Some(path.clone()));
+        // An unsaved edit elsewhere is not saved by a Labs switch.
+        update(&mut s, Message::Theme(Theme::Light));
+        let Outcome::Saved(cfg) = update(&mut s, Message::Labs(Feature::Snip, true)) else {
+            panic!("not saved: {:?}", s.notice)
+        };
+        assert!(cfg.labs.snip && !cfg.labs.song && cfg.theme == Theme::System);
+        let (back, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back.labs, cfg.labs);
+        assert_eq!(back.theme, Theme::System, "other draft edits stay unsaved");
+        assert_eq!(s.draft.theme, Theme::Light);
+        // Snip's page and its three shortcuts are back.
+        assert!(sidebar(&s).contains(&"Snip"));
+        let shortcuts = page(&mut s, Section::Shortcuts);
+        for want in ["Snip a region", "Snip a window", "Snip the full screen"] {
+            assert!(shortcuts.iter().any(|t| t == want), "{want}: {shortcuts:?}");
+        }
+        // History and Song likewise.
+        update(&mut s, Message::Labs(Feature::History, true));
+        update(&mut s, Message::Labs(Feature::Song, true));
+        assert!(
+            page(&mut s, Section::General)
+                .iter()
+                .any(|t| t == "Search history")
+        );
+        assert!(sidebar(&s).contains(&"Song search"));
+        // Off again: gone again, and the page it was on is left.
+        update(&mut s, Message::Section(Section::Snip));
+        update(&mut s, Message::Labs(Feature::Snip, false));
+        assert_eq!(s.section, Section::Labs);
+        assert!(!sidebar(&s).contains(&"Snip"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_failed_labs_write_changes_nothing() {
+        let blocker = std::env::temp_dir().join(format!("oc-labs-blocker-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&blocker);
+        std::fs::write(&blocker, "a file where the folder should be").unwrap();
+        let (mut s, _) = state(Some(blocker.join("c.toml")));
+        let out = update(&mut s, Message::Labs(Feature::Pins, true));
+        assert!(matches!(out, Outcome::None));
+        assert!(!s.draft.labs.pins);
+        assert!(
+            s.notice
+                .as_deref()
+                .is_some_and(|n| n.starts_with("Could not save"))
+        );
+        let _ = std::fs::remove_file(blocker);
     }
 
     #[test]
@@ -2690,6 +2861,7 @@ pub(super) mod tests {
     #[test]
     fn every_control_has_its_own_label() {
         let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
         update(&mut s, Message::Provider(Provider::OpenaiCompatible));
         let mut all = Vec::new();
         for (section, ..) in SECTIONS {
@@ -2718,6 +2890,7 @@ pub(super) mod tests {
     #[test]
     fn no_visible_tooltip_repeats_its_control() {
         let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
         update(&mut s, Message::Provider(Provider::OpenaiCompatible));
         for (section, name, _) in SECTIONS {
             update(&mut s, Message::Section(section));
@@ -2944,6 +3117,7 @@ pub(super) mod tests {
     #[test]
     fn snip_shortcuts_are_listed_and_editable() {
         let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
         update(&mut s, Message::Section(Section::Shortcuts));
         let texts = shot::texts(view(&s));
         for want in ["Snip a region", "Snip a window", "Snip the full screen"] {
@@ -3150,6 +3324,7 @@ pub(super) mod tests {
     fn renders_every_section_in_both_themes() {
         for (name, theme_choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
             let (mut s, _) = state(None);
+            s.draft.labs = Labs::all_on();
             update(&mut s, Message::Theme(theme_choice));
             update(&mut s, Message::Provider(Provider::OpenaiCompatible));
             update(&mut s, Message::Preset(PRESETS[0]));

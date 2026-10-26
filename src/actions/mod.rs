@@ -65,10 +65,13 @@ pub struct Key {
     pub letter: char,
 }
 
-/// The action bound to `letter` (lower-case Latin) with/without Ctrl.
-pub fn for_key(letter: char, ctrl: bool) -> Option<&'static Action> {
+/// The action bound to `letter` (lower-case Latin) with/without Ctrl; none for an
+/// action whose Labs feature is off.
+pub fn for_key(labs: &crate::labs::Labs, letter: char, ctrl: bool) -> Option<&'static Action> {
     let key = Key { ctrl, letter };
-    ACTIONS.iter().find(|action| action.key == key)
+    (ACTIONS.iter())
+        .find(|action| action.key == key)
+        .filter(|action| crate::labs::action_on(labs, action.id))
 }
 
 /// The action Enter runs: the config's `general.default_action` (the first
@@ -202,8 +205,25 @@ mod tests {
                 assert_ne!(a.label, b.label);
             }
             assert!(a.key.letter.is_ascii_lowercase(), "{}", a.id);
-            assert_eq!(for_key(a.key.letter, a.key.ctrl).map(|f| f.id), Some(a.id));
+            let on = crate::labs::Labs::all_on();
+            assert_eq!(
+                for_key(&on, a.key.letter, a.key.ctrl).map(|f| f.id),
+                Some(a.id)
+            );
         }
+    }
+
+    #[test]
+    fn a_hidden_feature_has_no_key() {
+        let (off, on) = (crate::labs::Labs::default(), crate::labs::Labs::all_on());
+        let e = edit::ACTION.key;
+        assert!(
+            for_key(&off, e.letter, e.ctrl).is_none(),
+            "E with the editor off"
+        );
+        assert_eq!(for_key(&on, e.letter, e.ctrl).map(|a| a.id), Some("edit"));
+        let l = lens::ACTION.key;
+        assert!(for_key(&off, l.letter, l.ctrl).is_some());
     }
 
     #[test]

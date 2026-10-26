@@ -1,0 +1,81 @@
+# OpenCircle settings. Invalid values fall back to defaults.
+# API keys are never stored here (OS keyring only).
+
+version = 1
+theme = "dark"
+widget_theme = "frost"
+glass_effect = true
+shortcut = "Ctrl+Alt+Space"
+
+[general]
+default_action = "ai"
+save_folder = ""
+search_history = true
+autostart = false
+
+[results]
+side = "left"
+width = 640
+height = 0
+
+[bar]
+anchor = "top"
+
+[selection]
+style = "shape"
+after = "wait"
+search_with = "both"
+
+[look]
+theme = "aurora"
+
+[editor]
+line_assist = false
+
+[ai]
+provider = "anthropic"
+base_url = ""
+model = "claude-sonnet-5-5"
+
+[translate]
+source = "en"
+target = "fr"
+engine = "offline"
+live_interval_ms = 2000
+live_note_shown = true
+whole_screen = true
+
+[snip]
+after = "both"
+max_edge = 2048
+format = "jpeg"
+save_original = true
+cursor = true
+history = true
+
+[song]
+source = "microphone"
+history = true
+
+[update]
+auto = false
+
+[[quick_actions]]
+action = "translate"
+shortcut = "Ctrl+Shift+T"
+target = "full_screen"
+
+[[quick_actions]]
+action = "snip"
+shortcut = "PrintScreen"
+target = "circle"
+
+[[quick_actions]]
+action = "snip"
+shortcut = "Ctrl+Shift+S"
+target = "window"
+
+[[quick_actions]]
+action = "song_search"
+shortcut = "Ctrl+Shift+M"
+target = "full_screen"

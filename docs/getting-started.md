@@ -119,6 +119,9 @@ Translation runs on your PC by default. See [Translate](translate.md).
 
 ## Snip and annotate
 
+Snip, the editor, song search, search history and pins are in **Settings > Labs**: off by default,
+unfinished, and hidden everywhere until you turn them on.
+
 - `Print Screen` snips a region, `Alt+Print Screen` a window,
   `Ctrl+Print Screen` the full screen.
 - Copy puts the image on the clipboard, ready to paste into an AI chat. On

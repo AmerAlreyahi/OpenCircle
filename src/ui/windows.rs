@@ -708,11 +708,18 @@ impl Windows {
 fn apply(cfg: Config) {
     let old = config::current();
     theme::apply(cfg.theme);
-    if old.shortcut != cfg.shortcut || old.quick_actions != cfg.quick_actions {
+    if old.shortcut != cfg.shortcut
+        || old.quick_actions != cfg.quick_actions
+        || old.labs != cfg.labs
+    {
         crate::hotkey::reload(&cfg);
     }
     crate::autostart::apply(&cfg);
+    let labs_changed = old.labs != cfg.labs;
     config::set_current(cfg);
+    if labs_changed {
+        super::refresh_tray(); // reads the config just set
+    }
 }
 
 // ---- the three ways to open a window (a test forbids any other) ----

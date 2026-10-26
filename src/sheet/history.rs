@@ -53,9 +53,11 @@ pub fn path() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join("OpenCircle").join("search_history.json"))
 }
 
-/// The user turned history on.
+/// The user turned history on, and its Labs switch is on (hidden: nothing is
+/// recorded or shown, and the saved list is left alone).
 pub fn enabled() -> bool {
-    crate::config::current().general.search_history
+    let c = crate::config::current();
+    c.general.search_history && c.labs.has(crate::labs::Feature::History)
 }
 
 /// Newest first; nothing when the file is missing or unreadable.

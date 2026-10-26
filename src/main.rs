@@ -13,6 +13,7 @@ mod config;
 #[allow(dead_code)] // the annotation editor; the UI wires it (Edit in place, Snip mode)
 mod editor;
 mod hotkey;
+mod labs;
 mod lens;
 #[allow(dead_code)] // live-translate layer (platform calls); the UI wires it
 mod live;

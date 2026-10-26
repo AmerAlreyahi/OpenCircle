@@ -3,10 +3,68 @@
 //! menu is off the screen, so it is never captured.
 use std::time::{Duration, Instant};
 
-use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+use tray_icon::menu::{IsMenuItem, Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
+use crate::labs::{self, Feature, Labs};
 use crate::{Trigger, Triggers};
+
+/// The tray menu's entries, in order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Entry {
+    Circle,
+    Snip,
+    Live,
+    Settings,
+    Quit,
+}
+
+/// The entries shown with these Labs switches: Snip only when it is on.
+fn entries(labs: &Labs) -> Vec<Entry> {
+    [
+        Entry::Circle,
+        Entry::Snip,
+        Entry::Live,
+        Entry::Settings,
+        Entry::Quit,
+    ]
+    .into_iter()
+    .filter(|e| *e != Entry::Snip || labs.has(Feature::Snip))
+    .collect()
+}
+
+/// The menu and its items, on the thread that owns the icon (they are not `Send`).
+struct Built {
+    menu: Menu,
+    items: [(Entry, MenuItem); 5],
+}
+
+thread_local! {
+    static BUILT: std::cell::RefCell<Option<Built>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Shows exactly `entries(labs)` in the menu.
+fn fill(built: &Built, labs: &Labs) {
+    for (_, item) in &built.items {
+        let _ = built.menu.remove(item);
+    }
+    let shown = entries(labs);
+    for (entry, item) in &built.items {
+        if shown.contains(entry) {
+            let _ = built.menu.append(item as &dyn IsMenuItem);
+        }
+    }
+}
+
+/// Labs changed: rebuild the menu now (on the tray's own thread: the GTK one on Linux).
+pub fn refresh() {
+    let labs = crate::config::current().labs;
+    let apply = move || BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs)));
+    #[cfg(target_os = "linux")]
+    gtk::glib::idle_add_once(apply);
+    #[cfg(not(target_os = "linux"))]
+    apply();
+}
 
 /// The tray icon's one identity. Windows (a fixed GUID, bound to the exe path) replaces a ghost left by a killed
 /// run instead of stacking a new icon beside it. Never change it.
@@ -99,25 +157,38 @@ fn linux_tray_missing() -> Option<&'static str> {
 }
 
 fn build(tx: Triggers) -> Option<TrayIcon> {
-    let circle = MenuItem::new("Circle to search", true, None);
-    let snip = MenuItem::new("Snip", true, None);
-    let live = MenuItem::new("Live translate on/off", true, None);
-    let settings = MenuItem::new("Settings…", true, None);
-    let quit = MenuItem::new("Quit", true, None);
-    let menu = Menu::with_items(&[&circle, &snip, &live, &settings, &quit])
-        .map_err(|e| eprintln!("[opencircle] tray unavailable: {e}"))
-        .ok()?;
+    let item = |label| MenuItem::new(label, true, None);
+    let items = [
+        (Entry::Circle, item("Circle to search")),
+        (Entry::Snip, item("Snip")),
+        (Entry::Live, item("Live translate on/off (Beta)")),
+        (Entry::Settings, item("Settings…")),
+        (Entry::Quit, item("Quit")),
+    ];
+    let id = |entry| {
+        items
+            .iter()
+            .find(|(e, _)| *e == entry)
+            .map(|(_, i)| i.id().clone())
+    };
     let (circle, snip, live, settings, quit) = (
-        circle.id().clone(),
-        snip.id().clone(),
-        live.id().clone(),
-        settings.id().clone(),
-        quit.id().clone(),
+        id(Entry::Circle)?,
+        id(Entry::Snip)?,
+        id(Entry::Live)?,
+        id(Entry::Settings)?,
+        id(Entry::Quit)?,
     );
+    let built = Built {
+        menu: Menu::new(),
+        items,
+    };
+    fill(&built, &crate::config::current().labs);
+    let menu = built.menu.clone();
+    BUILT.set(Some(built));
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let trigger = if event.id == circle {
             Trigger::Capture(Instant::now())
-        } else if event.id == snip {
+        } else if event.id == snip && labs::has(Feature::Snip) {
             let run = crate::hotkey::Command::Run {
                 action: "snip".into(),
                 target: None,
@@ -265,6 +336,24 @@ mod tests {
         let start = Instant::now();
         after_menu(|| true, Duration::from_millis(50), || {});
         assert!(start.elapsed() < Duration::from_millis(50) + SETTLE + Duration::from_millis(100));
+    }
+
+    #[test]
+    fn a_hidden_feature_has_no_tray_item() {
+        use super::{Entry, entries};
+        use crate::labs::{Feature, Labs};
+        let off = entries(&Labs::default());
+        assert_eq!(
+            off,
+            [Entry::Circle, Entry::Live, Entry::Settings, Entry::Quit]
+        );
+        let mut on = Labs::default();
+        on.set(Feature::Song, true);
+        on.set(Feature::Editor, true);
+        assert_eq!(entries(&on), off, "only Snip has a tray item");
+        on.set(Feature::Snip, true);
+        assert_eq!(entries(&on).len(), 5);
+        assert_eq!(entries(&on)[1], Entry::Snip);
     }
 
     #[test]

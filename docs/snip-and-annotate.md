@@ -1,5 +1,8 @@
 # Snip and annotate
 
+> **Labs.** Snip and the image editor are unfinished and hidden until you turn them on in
+> **Settings > Labs** (Pins, in the editor, has its own switch there).
+
 Take a screenshot and mark it up. The same editor is also available on any
 circled selection: press `E` in the action bar.
 

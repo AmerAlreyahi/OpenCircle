@@ -32,8 +32,8 @@
   floating card beside your selection. Dock it left or right, drag it, resize
   it. Open in your browser only when you click.
 - **One bottom bar.** Your question, then Copy, Save, Translate, Live translate,
-  Music and Edit. Drag it to any edge.
-- **Snip and annotate.** Region, window, full screen or scrolling capture.
+  Music and Edit (those two appear once you turn them on in Settings > Labs). Drag it to any edge.
+- **Snip and annotate** (in Settings > Labs, off by default). Region, window, full screen or scrolling capture.
   Arrows, shapes, text, numbered steps, blur, spotlight. Copy the image and its
   text in one go, ready for an AI chat.
 - **Ask AI about your selection.** No key needed: the question opens in Google

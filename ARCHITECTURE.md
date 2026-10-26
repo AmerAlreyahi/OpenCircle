@@ -76,6 +76,13 @@ capture the screen and show it.
 
 ## Change recipes
 
+**Hide or show an unfinished feature (Labs):** `src/labs.rs` is the one place: a `Feature`, its `[labs]` switch
+(`Labs`, parsed in `config.rs`, all off by default), and the data the rest reads: `action_feature` (which action id
+belongs to it: shortcuts in `hotkey::plan`, `opencircle run`, `actions::for_key`), `bar()` (the bottom bar's buttons),
+`tray::entries`, `settings::sections` / `slots`. Never an `if` on a feature elsewhere: add it to that data. A hidden
+feature keeps its settings in the file. Schema changes: bump `config::VERSION` and add the step to `config::migrate`
+(old file copied to `config.toml.bak-v<old>` first).
+
 **Add an action** that finishes at once (like Copy):
 1. Create `src/actions/<name>.rs` with `pub const ACTION: Action = Action { id, label,
    tip, key, icon, run: Run::Finish(run) }` and its `fn run(crop: Crop) -> Result<(), String>`

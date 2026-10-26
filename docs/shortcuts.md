@@ -2,6 +2,9 @@
 
 ## Defaults
 
+The Snip rows and the Song search shortcut are hidden (not registered) until you turn Snip or
+Song search on in **Settings > Labs**. Live translate stays on and is marked Beta.
+
 | Action | Default | What it does |
 |---|---|---|
 | Circle to search | `Ctrl+Shift+Space` | Freeze the screen, then select and act |

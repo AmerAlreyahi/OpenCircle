@@ -1,5 +1,7 @@
 # Song search
 
+> **Labs.** Unfinished: hidden until you turn it on in **Settings > Labs**.
+
 Name the song that's playing: in a video, a game, a stream, or (with the
 microphone) in the room. Song search is **off until you add your own key** for
 a recognition service. Without one, the music button doesn't appear.

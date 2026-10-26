@@ -48,10 +48,15 @@ fn parts() -> (f32, f32) {
         .count();
     let tools = (1 + buttons) as f32 * CONTROL + groups as f32;
     let tools = tools + (buttons + groups) as f32 * SPACING;
-    let icons = 6 + usize::from(dragout::SUPPORTED);
+    let icons = 5 + usize::from(pins()) + usize::from(dragout::SUPPORTED);
     let rest = icons as f32 * CONTROL + 3.0 + 2.0 * TEXT_BUTTON_WIDTH;
     let rest = rest + (icons + 3 + 2 - 1) as f32 * SPACING;
     (tools, rest)
+}
+
+/// Pins are a Labs feature: the toolbar has the pin button only while it is on.
+fn pins() -> bool {
+    crate::labs::has(crate::labs::Feature::Pins)
 }
 
 /// The toolbar's size within `max_width` (as `view` lays it out without a
@@ -201,12 +206,14 @@ fn build(
             side,
         ));
     }
-    rest.push(icon(
-        PIN,
-        false,
-        Message::Pin,
-        "Pin to screen: a floating copy (Ctrl+P)",
-    ));
+    if pins() {
+        rest.push(icon(
+            PIN,
+            false,
+            Message::Pin,
+            "Pin to screen: a floating copy (Ctrl+P)",
+        ));
+    }
     rest.push(widgets::text_button(COPY, "Copy", "Ctrl C".into(), true, Message::Copy).into());
     rest.push(widgets::text_button(SAVE, "Save", "Ctrl S".into(), false, Message::Save).into());
 

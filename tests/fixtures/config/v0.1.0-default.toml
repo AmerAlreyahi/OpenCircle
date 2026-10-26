@@ -1,0 +1,107 @@
+# OpenCircle settings. Invalid values fall back to defaults.
+# API keys are never stored here (OS keyring only).
+
+version = 1
+theme = "system"
+widget_theme = "default"
+glass_effect = true
+shortcut = "Ctrl+Shift+Space"
+
+[general]
+default_action = "lens"
+save_folder = ""
+search_history = false
+autostart = true
+
+[results]
+side = "right"
+width = 0
+height = 0
+
+[bar]
+anchor = "bottom"
+
+[selection]
+style = "snap"
+after = "search"
+search_with = "lens"
+
+[look]
+theme = "spectrum"
+
+[editor]
+line_assist = true
+
+[ai]
+provider = "browser"
+base_url = ""
+model = "claude-sonnet-5-5"
+
+[translate]
+source = "auto"
+target = "ar"
+engine = "ai"
+live_interval_ms = 1000
+live_note_shown = false
+whole_screen = false
+
+[snip]
+after = "copy"
+max_edge = 1568
+format = "png"
+save_original = false
+cursor = false
+history = false
+
+[song]
+source = "system"
+history = false
+
+[update]
+auto = true
+
+[[quick_actions]]
+action = "translate"
+shortcut = "Ctrl+Shift+T"
+target = "full_screen"
+
+[[quick_actions]]
+action = "translate"
+shortcut = "Ctrl+Shift+L"
+target = "full_screen"
+live = true
+
+[[quick_actions]]
+action = "ai_explain"
+shortcut = "Ctrl+Shift+E"
+target = "circle"
+
+[[quick_actions]]
+action = "copy_text"
+shortcut = "Ctrl+Shift+X"
+target = "circle"
+
+[[quick_actions]]
+action = "lens"
+shortcut = ""
+target = "circle"
+
+[[quick_actions]]
+action = "snip"
+shortcut = "PrintScreen"
+target = "circle"
+
+[[quick_actions]]
+action = "snip"
+shortcut = "Alt+PrintScreen"
+target = "window"
+
+[[quick_actions]]
+action = "snip"
+shortcut = "Ctrl+PrintScreen"
+target = "full_screen"
+
+[[quick_actions]]
+action = "song_search"
+shortcut = ""
+target = "full_screen"
