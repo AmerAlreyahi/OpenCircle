@@ -95,6 +95,9 @@ production systems.
   Reference pack for every UI brief: docs/internal/design-ref/ (screenshots per
   widget/state/theme, motion frame strips with timings, DESIGN_BEHAVIOR.md with
   source lines). Pass its shots and sections to the UI worker.
+  Where the design is silent or buggy (DESIGN_BEHAVIOR.md section 13, e.g. no bar snap
+  anchors, no Esc, no focus ring), keep today's behaviour. Owner decisions beat the
+  design (e.g. Live translate (Beta) stays visible with Labs off).
 - Overnight / owner away (2026-10-26): continue item by item in Order with the
   recommended defaults; leave each verified item in "Needs your check"; no releases.
 - Board statuses (owner, 2026-10-26): Todo / In Progress / Needs your check / Done.
