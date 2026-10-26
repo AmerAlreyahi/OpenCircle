@@ -537,7 +537,9 @@ struct App {
     live: Option<live_layer::Live>,
     /// One warm OCR / translation helper while the overlay is open (tap a
     /// word, Text, Translate), started by the first of them.
-    helper: Option<ocr::Hold>,
+    /// (shared with the screen's text reads: one that starts after the
+    /// overlay closed reads nothing, `read_band`)
+    helper: Option<Arc<ocr::Hold>>,
     /// How selections behave (`[selection]`), read when the overlay opens.
     behaviour: SelectionConfig,
     /// A snapped selection's drawn stroke (image px) morphing into its box.
@@ -1196,7 +1198,7 @@ impl App {
         );
         let size = shot.size;
         self.set_frame(shot.image, shot.scale, shot.origin, size);
-        self.helper = Some(ocr::hold());
+        self.helper = Some(Arc::new(ocr::hold()));
         self.ocr_ready = text::models_present();
         self.frame_times.clear();
         self.opening = self.opening.wrapping_add(1);
@@ -2007,11 +2009,13 @@ impl App {
         if !self.reads_text() {
             return Task::none();
         }
-        // (tests have no models: nothing starts)
-        background(|tx| {
-            // after the bar has settled too
+        let held = self.helper.as_ref().map(Arc::downgrade).unwrap_or_default();
+        background(move |tx| {
+            // after the bar has settled too; closed meanwhile: nothing starts
             std::thread::sleep(WARM_AFTER);
-            if let Err(e) = ocr::warm() {
+            if let Some(_held) = held.upgrade()
+                && let Err(e) = ocr::warm()
+            {
                 eprintln!("[opencircle] the text reader didn't start: {e}");
             }
             let _ = tx.unbounded_send(Message::Warmed);
@@ -2073,7 +2077,12 @@ impl App {
         let rows = (at(top), at(bottom));
         self.reading = Some(band);
         let (scale, opening) = (self.scale, self.opening);
+        let held = self.helper.as_ref().map(Arc::downgrade).unwrap_or_default();
         background(move |tx| {
+            // closed meanwhile: nothing to read for (and no helper started)
+            let Some(_held) = held.upgrade() else {
+                return;
+            };
             let read = match actions::crop(&pixels, width, height, scale, band) {
                 Some(c) => ocr::recognize_band(&c.rgba, c.width, c.height, rows, gently),
                 None => Err(ocr::OcrError::BadImage("an empty band".into())),
