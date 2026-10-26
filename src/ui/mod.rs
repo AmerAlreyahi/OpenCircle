@@ -658,7 +658,9 @@ impl App {
             }
             Message::Trigger(Trigger::Update(event)) => self.on_update(event),
             Message::UpdateTick => self.try_update(),
-            Message::Settled => Task::none(), // the rebuilt view shows the actions
+            // the rebuilt view shows the actions; the opt-in auto action runs now
+            Message::Settled if self.others.is_empty() => self.auto_search(),
+            Message::Settled => Task::none(),
             Message::Trigger(Trigger::Quick(at, qa))
                 if qa.live && qa.action == actions::translate::ACTION.id =>
             {
@@ -2008,7 +2010,12 @@ impl App {
         let word = self
             .selection
             .is_some_and(|s| s.kind == overlay::Kind::Word);
-        if !matches!(self.purpose, Purpose::Search) || word || self.selection.is_none() {
+        // (after the snap: the Settled message runs them)
+        if !matches!(self.purpose, Purpose::Search)
+            || word
+            || self.selection.is_none()
+            || self.settling()
+        {
             return &[];
         }
         auto_targets(self.behaviour)
@@ -6136,6 +6143,9 @@ mod tests {
         event(&mut app, overlay::Event::Release);
         assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
         assert!(app.morph.is_some(), "the stroke morphs into the box");
+        assert!(app.auto_actions().is_empty(), "not while it snaps");
+        let (from, _) = app.morph.take().unwrap();
+        app.morph = Some((from, Instant::now() - overlay::MORPH * 2));
         assert!(!app.auto_actions().is_empty(), "then the search runs");
     }
 
