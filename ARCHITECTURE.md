@@ -36,7 +36,7 @@ capture the screen and show it.
 | `ui/tray.rs` | Tray icon and menu (Circle to search, Settings…, Quit). Without libayatana-appindicator (Linux) it logs one line and the app runs on shortcut / CLI. |
 | `ui/windows.rs` | The normal windows beside the overlay: Settings and first-run Onboarding (one of each, a second request focuses it), their close handling, the OS-theme feed, and `apply(cfg)` after a save. Also the pinned images (editor Pin / `Ctrl+P`): any number of borderless always-on-top windows, each owning its image (drag, scroll = zoom, hover bar Drag (Windows) / Copy / Save / Close, `Esc` or double-click closes), and the Settings side effects (folder picker, project link). Every window opens through `normal` / `floating` / `screen`, all via `open` (a test forbids `window::open` elsewhere): no OS title bar, our icon, and on Windows `shape::no_caption` (winit leaves its undecorated windows a hidden caption that DefWindowProc paints, the classic "OpenCircle" strip, at every (de)activation where DWM doesn't draw the frame; WM_NCACTIVATE gets lParam -1). |
 | `ui/settings.rs`, `ui/onboarding.rs` | The two screens as self-contained components (`State`, `update` returning an `Outcome`, `view`). Settings > Look & behaviour: the selection rows, the looks as preview tiles (`preview` draws each over a sample screen) and, for Custom, every part of the look. |
-| `actions/mod.rs` | The action registry (`ACTIONS`), `Run` (finish or open a panel), `crop`, `encode_png`, `write_png`. One file per action: `lens.rs` (page + its minimum life), `ask.rs` (setup, `Chat`, streaming, `PRESETS` = the suggested questions for every provider), `text.rs` (consent check, OCR, line joining), `translate.rs` (the pipeline's deps from config + keyring; the Text panel's Translate), `copy.rs` (scaled to `snip.max_edge`; Windows adds the OCR text to the same clipboard entry if nothing was copied meanwhile), `save.rs` (`fit_long_edge` + `encode`: PNG / JPEG). Not actions: `entities.rs` (links, emails, phone numbers as chips in the Text panel; click only) and `qr.rs` (QR decode + black-capture check, run off the UI thread when a selection is made; feeds the bar's QR chip and the "protected" pill). |
+| `actions/mod.rs` | The action registry (`ACTIONS`), `Run` (finish or open a panel), `crop`, `encode_png`, `write_png`. One file per action: `lens.rs` (page + its minimum life), `ask.rs` (setup, `Chat`, streaming, `PRESETS` = the suggested questions for every provider), `text.rs` (consent check, OCR, line joining), `translate.rs` (the pipeline's deps from config + keyring; the Text panel's Translate), `copy.rs` (scaled to `snip.max_edge`, the picture only; one clipboard for the app's life, used off the UI thread), `save.rs` (`fit_long_edge` + `encode`: PNG / JPEG). Not actions: `entities.rs` (links, emails, phone numbers as chips in the Text panel; click only) and `qr.rs` (QR decode + black-capture check, run off the UI thread when a selection is made; feeds the bar's QR chip and the "protected" pill). |
 | `update/` | Auto-update (`[update] auto`; unset = not asked, off). `mod.rs`: the thread (first check 45 s after start, then every 12 h, or Settings' Check now), `install` (only when `App::is_idle`: swap, `--version` smoke test, marker, relaunch with `updated`, exit), `confirm` at the new process's boot (notes card) / `roll_back` if it can't start. `release.rs`: latest release JSON (ETag, rate limit), `is_newer`, `pick` = the asset per install kind (Windows `*_x64-portable.exe`, AppImage; deb / rpm / source = `Event::Manual`, notes card + release page), `stage` = download + verify into a fresh private dir (`<local data>/opencircle/update`, never shared temp; the install re-hashes its copy). `verify.rs`: minisign over `SHA256SUMS.txt` with `RELEASE_PUBLIC_KEY` (empty = refuse all), then SHA-256 (`scripts/install.sh`, the Linux one-command install, repeats this check in shell with the same key; `tests/install_script.rs` keeps the two keys equal). `swap.rs`: replace keeping `<file>.old`, restore, the marker (`update.json` in the local data dir). `notes.rs`: release notes → headings / bullets / text with links. `ui/update_card.rs` = the notes card (shared `widgets::card` frame, a floating window in `ui/windows.rs`). |
 | `vendor/iced_tiny_skia/` | iced's CPU renderer 0.14.1 with one patch (`[patch.crates-io]`): `drawn_bounds` in `src/layer.rs` damages where a centred / right-aligned text is really drawn (upstream damaged a box below / right of it: ghost text in every dropdown, #53). Drop it once iced fixes it upstream; re-apply on an iced upgrade if not. |
 | `assets/lucide/` | Icon font: a subset of Lucide (ISC, see its LICENSE) with only the glyphs we use. |
@@ -60,12 +60,21 @@ capture the screen and show it.
    opens Ask AI with its text (in "wait" mode, Enter with nothing typed = Search). Its
    buttons: Include screen, Copy, Save, Translate, Live, Music, Edit (no Search / Ask AI
    / Text buttons; their keys L / A / T stay). Text selection needs the screen's text,
-   read by OCR at open (`read_screen`): without the OCR models a note over the bar
-   (`App::reader_note`, state `Reader`) offers their download, one click, then reads; a
-   drag that began on text before the words arrived becomes a text selection then.
+   read on demand, never at open (#123; `word::Screen`, `App::read_more`): nothing is
+   read while the opening animation runs; after it the held helper starts (`App::warm`).
+   A press, tap, Shift+click or Ctrl+A reads the full-width band under it first (at
+   once, `ocr::recognize_band` with only the band's new rows); once text was used, the
+   rest follows band by band, nearest the pointer first, gently (the helper on at most
+   two cores, below normal priority: `ocr/worker.rs` `Gentle`). One band at a time. A
+   drag that began on text before its band arrived becomes a text selection then; one
+   let go before it is held (with the keys after it, e.g. Ctrl+C) until it arrives
+   (`App::held`). Without the OCR models a note over the bar (`App::reader_note`, state
+   `Reader`) offers their download, one click.
 5. **Action**: a bar button, Enter (the first action) or the action's key sends
    `Message::Run(&Action)`. `App::run` crops the selection in physical pixels, then:
-   `Run::Finish(f)` closes the overlay (so dialogs aren't under it) and calls `f(crop)`;
+   `Run::Finish(f)` closes the overlay (so dialogs aren't under it) and calls `f(crop)`
+   on a thread (`App::confirm_after`: encoding, clipboard, file; its pill comes back as
+   `Message::Confirm`). Clipboard writes and link launches never run on the UI thread;
    `Run::Panel(kind)` opens that result panel over the frozen frame (the bar hides,
    the selection stays). Slow work (PNG, browser launch, keyring, HTTP stream, model
    download, OCR) runs on a thread via `background`; results come back as
