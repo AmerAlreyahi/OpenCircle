@@ -1,9 +1,9 @@
-//! OpenCircle search history (owner, 2026-10-24): Google refuses sign-in inside
-//! an embedded web view, so the card keeps its own list of past searches. Opt-in
+//! OpenCircle search history (a Labs feature): the searches the user handed to
+//! their browser (Search in browser, Ask AI without a key). Opt-in
 //! (`general.search_history`, off by default), only in the user's data dir:
 //! the query text, a small thumbnail of the crop, the time and the kind.
-//! Turning it off deletes it. The card's History button shows the list as our
-//! own in-memory page; a click reopens that search in the card.
+//! Turning it off deletes it.
+// ponytail: recorded only; a list to browse lands with the AI chat (N-05).
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,7 +11,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-use super::Kind;
 use crate::actions::Crop;
 
 /// Searches kept (newest first).
@@ -23,27 +22,27 @@ const THUMB: u32 = 96;
 pub struct Entry {
     /// Unix seconds.
     pub time: u64,
-    /// "lens" | "ai".
+    /// "lens" (an image) | "text" (a text search) | "ai".
     pub kind: String,
-    /// The question (AI Mode); empty for Lens.
+    /// The question or searched text; empty for an image.
     pub query: String,
-    /// Where the search reopens: the AI Mode or Lens results page (https only).
+    /// The page the browser got (https; "" for Lens, which is a form post).
     pub url: String,
     /// A small PNG of the crop, base64 ("" = none).
     pub thumb: String,
 }
 
 impl Entry {
-    /// A search of `kind` for `query` on `crop`; `url` once known.
-    pub fn new(kind: Kind, query: &str, crop: &Crop) -> Entry {
+    /// A search of `kind` for `query` on `crop` that opened `url`.
+    pub fn new(kind: &str, query: &str, url: &str, crop: Option<&Crop>) -> Entry {
         Entry {
             time: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs()),
-            kind: kind.arg().into(),
+            kind: kind.into(),
             query: query.into(),
-            url: String::new(),
-            thumb: thumb(crop).unwrap_or_default(),
+            url: url.into(),
+            thumb: crop.and_then(thumb).unwrap_or_default(),
         }
     }
 }
@@ -71,7 +70,7 @@ pub fn read(path: &Path) -> Vec<Entry> {
 /// Adds `entry` at the front (a repeat of the same page moves up), keeps `KEEP`.
 pub fn add(path: &Path, entry: Entry) -> std::io::Result<()> {
     let mut list = read(path);
-    list.retain(|e| e.url != entry.url);
+    list.retain(|e| entry.url.is_empty() || e.url != entry.url);
     list.insert(0, entry);
     list.truncate(KEEP);
     if let Some(dir) = path.parent() {
@@ -92,6 +91,19 @@ pub fn record(path: &Path, enabled: bool, entry: Entry) {
     }
     if let Err(e) = add(path, entry) {
         eprintln!("[opencircle] search history not saved: {e}");
+    }
+}
+
+/// Keeps this search when the user turned history on (`enabled`); turned off
+/// deletes the old list; hidden by Labs leaves it alone.
+pub fn keep(kind: &str, query: &str, url: &str, crop: Option<&Crop>) {
+    let Some(path) = path().filter(|_| !cfg!(test)) else {
+        return; // tests: never the user's file
+    };
+    if enabled() {
+        record(&path, true, Entry::new(kind, query, url, crop));
+    } else if !crate::config::current().general.search_history {
+        clear(&path);
     }
 }
 
@@ -123,82 +135,6 @@ fn thumb(crop: &Crop) -> Option<String> {
     }
     let png = crate::actions::encode_png(tw, th, &px).ok()?;
     Some(base64::engine::general_purpose::STANDARD.encode(png))
-}
-
-fn esc(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
-/// "just now", "5 min ago", "3 h ago", "2 d ago".
-fn ago(then: u64, now: u64) -> String {
-    match now.saturating_sub(then) {
-        s if s < 60 => "just now".into(),
-        s if s < 3600 => format!("{} min ago", s / 60),
-        s if s < 86_400 => format!("{} h ago", s / 3600),
-        s => format!("{} d ago", s / 86_400),
-    }
-}
-
-/// The History page the card shows (our in-memory page): one link per search,
-/// newest first, and Clear. `colours`: the card's (`sheet::colours`). Only
-/// plain https links: an entry with anything else is left out.
-pub fn page(list: &[Entry], [bg, border, hover, text, muted]: [u32; 5], now: u64) -> String {
-    let mut items = String::new();
-    for e in list {
-        if !e.url.starts_with("https://") || crate::lens::web_host(&e.url).is_none() {
-            continue;
-        }
-        let img = match e
-            .thumb
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b))
-        {
-            true if !e.thumb.is_empty() => {
-                format!("<img src=\"data:image/png;base64,{}\">", e.thumb)
-            }
-            _ => "<span class=\"noimg\"></span>".into(),
-        };
-        let (what, title) = if e.kind == "lens" {
-            ("Lens", "Image search".to_string())
-        } else {
-            ("AI Mode", e.query.clone())
-        };
-        items.push_str(&format!(
-            "<a href=\"{}\">{img}<span class=\"t\"><b>{}</b><i>{what} · {}</i></span></a>",
-            esc(&e.url),
-            esc(&title),
-            ago(e.time, now)
-        ));
-    }
-    if items.is_empty() {
-        items = "<p>No searches yet.</p>".into();
-    }
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\">\
-         <meta name=\"referrer\" content=\"no-referrer\"><title>History</title><style>\
-         body{{margin:0;padding:16px;font:14px system-ui,sans-serif;background:#{bg:06x};color:#{text:06x}}}\
-         h1{{font-size:16px;font-weight:600;margin:0 0 4px}}\
-         .top{{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}}\
-         button{{font:inherit;color:#{text:06x};background:#{hover:06x};border:1px solid #{border:06x};\
-         border-radius:999px;padding:4px 12px;cursor:pointer}}\
-         a{{display:flex;gap:12px;align-items:center;padding:8px;border-radius:12px;\
-         color:inherit;text-decoration:none}}a:hover{{background:#{hover:06x}}}\
-         img,.noimg{{width:48px;height:48px;object-fit:cover;border-radius:8px;\
-         background:#{hover:06x};flex:none}}\
-         .t{{display:flex;flex-direction:column;min-width:0}}\
-         b{{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}\
-         i{{font-style:normal;font-size:12px;color:#{muted:06x}}}p,.note{{color:#{muted:06x}}}\
-         .note{{font-size:12px;margin:0 0 12px}}\
-         </style></head><body><div class=\"top\"><h1>Your searches</h1>\
-         <button onclick=\"window.ipc.postMessage('clear-history');\
-         document.getElementById('l').innerHTML='<p>No searches yet.</p>'\">Clear</button></div>\
-         <p class=\"note\">Kept only on this PC. Turn it off in Settings › General.</p>\
-         <div id=\"l\">{items}</div></body></html>"
-    )
 }
 
 #[cfg(test)]
@@ -255,30 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn the_page_escapes_and_lists_only_https_links() {
-        let mut evil = entry("https://www.google.com/search?q=x");
-        evil.query = "<script>alert(1)</script>".into();
-        evil.thumb = "\"><script>".into();
-        let list = [
-            evil,
-            entry("javascript:alert(1)"),
-            entry("http://plain.example/"),
-            Entry {
-                kind: "lens".into(),
-                ..entry("https://lens.google.com/search?p=1")
-            },
-        ];
-        let html = page(&list, [0; 5], 100 + 7200);
-        assert!(!html.contains("<script>alert"));
-        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
-        assert!(!html.contains("javascript:") && !html.contains("plain.example"));
-        assert!(html.contains("href=\"https://lens.google.com/search?p=1\""));
-        assert!(html.contains("Image search") && html.contains("2 h ago"));
-        assert!(html.contains("clear-history"));
-        assert!(page(&[], [0; 5], 0).contains("No searches yet."));
-    }
-
-    #[test]
     fn thumbnails_are_small_pngs() {
         let crop = Crop {
             width: 400,
@@ -298,8 +210,5 @@ mod tests {
             rgba: vec![],
         };
         assert!(thumb(&empty).is_none());
-        assert_eq!(ago(0, 30), "just now");
-        assert_eq!(ago(0, 300), "5 min ago");
-        assert_eq!(ago(0, 3 * 86_400), "3 d ago");
     }
 }

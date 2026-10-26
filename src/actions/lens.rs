@@ -1,5 +1,5 @@
-//! Search: the crop in Google Lens, in the results card (`crate::sheet`) or the
-//! user's own browser (see `crate::lens`).
+//! Search in browser: the crop in Google Lens in the user's own browser (see
+//! `crate::lens`; a text selection searches its text instead: `ui::App::run`).
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,7 +8,7 @@ use crate::lens::LensPage;
 
 pub const ACTION: Action = Action {
     id: "lens",
-    label: "Search",
+    label: "Search in browser",
     key: Key {
         ctrl: false,
         letter: 'l',
@@ -21,29 +21,33 @@ pub const ACTION: Action = Action {
 /// can take seconds): never delete a page younger than this.
 const MIN_LIFE: Duration = Duration::from_secs(10);
 
-/// The Lens page for `crop`, in memory, for the results card (`crate::sheet`).
-/// Blocking (PNG encode): call off the UI thread.
-pub fn page(crop: &Crop) -> Result<String, String> {
-    let png = opaque_png(crop)?;
-    crate::lens::page(&png, crop.width, crop.height).map_err(|e| e.to_string())
-}
+/// What the user reads when the selection is one flat colour (nothing is sent).
+pub const BLANK: &str =
+    "Nothing was sent: this area is one plain colour. Select an area with a picture or text in it.";
 
-/// `crop` as PNG with every pixel opaque: a screen has no see-through pixels,
-/// and a zero alpha from any capture path would reach Lens as blank white.
-fn opaque_png(crop: &Crop) -> Result<Vec<u8>, String> {
+/// `crop` as the PNG Lens gets, every pixel opaque (a screen has no
+/// see-through pixels, and a zero alpha from any capture path would reach Lens
+/// as blank white). `Err(BLANK)` for a crop of one flat colour: never sent.
+pub fn lens_png(crop: &Crop) -> Result<Vec<u8>, String> {
     let mut rgba = crop.rgba.clone();
-    rgba.as_chunks_mut::<4>()
-        .0
-        .iter_mut()
-        .for_each(|p| p[3] = 255);
+    let (pixels, _) = rgba.as_chunks_mut::<4>();
+    pixels.iter_mut().for_each(|p| p[3] = 255);
+    if pixels.windows(2).all(|w| w[0] == w[1]) {
+        return Err(BLANK.into());
+    }
     super::encode_png(crop.width, crop.height, &rgba)
 }
 
 /// Writes the Lens page for `crop` and opens it in the default browser.
 /// Blocking (PNG encode, file write, process spawn): call off the UI thread.
 pub fn open(crop: &Crop) -> Result<Held, String> {
-    let png = opaque_png(crop)?;
-    let page = crate::lens::open(&png, crop.width, crop.height).map_err(|e| e.to_string())?;
+    let png = lens_png(crop)?;
+    let page = crate::lens::open(&png, crop.width, crop.height).map_err(|e| {
+        eprintln!("[lens] browser not opened: {e}");
+        "Couldn't open your browser. Check that a default browser is set, then try again."
+            .to_string()
+    })?;
+    crate::search_history::keep("lens", "", "", Some(crop));
     Ok(Held {
         _page: Arc::new(page),
         opened: Instant::now(),
@@ -112,19 +116,8 @@ mod tests {
         let area = iced::Rectangle::new(iced::Point::new(2.0, 1.0), iced::Size::new(3.0, 2.0));
         let crop = super::super::crop(&frame, fw, fh, 2.0, area).unwrap();
         assert_eq!((crop.width, crop.height), (6, 4));
-        // What the card's page sends: the PNG inside the auto-submit form.
-        let html = page(&crop).unwrap();
-        let b64 = html
-            .split("atob(\"")
-            .nth(1)
-            .unwrap()
-            .split('"')
-            .next()
-            .unwrap();
-        use base64::Engine as _;
-        let png = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .unwrap();
+        // What the browser's page sends: the PNG inside the auto-submit form.
+        let png = lens_png(&crop).unwrap();
         let mut dec = png::Decoder::new(std::io::Cursor::new(png))
             .read_info()
             .unwrap();
@@ -139,6 +132,32 @@ mod tests {
             assert_eq!(p[..3], px(x, y)[..3], "pixel ({x}, {y})");
             assert_eq!(p[3], 255, "never see-through");
         }
+    }
+
+    #[test]
+    fn a_flat_crop_is_refused_and_any_detail_goes() {
+        let flat = |rgba: [u8; 4]| Crop {
+            width: 30,
+            height: 20,
+            rgba: rgba.repeat(600),
+        };
+        for colour in [
+            [255; 4],
+            [255, 255, 255, 0],
+            [0, 0, 0, 255],
+            [40, 90, 200, 255],
+        ] {
+            assert_eq!(lens_png(&flat(colour)), Err(BLANK.into()), "{colour:?}");
+            assert_eq!(
+                open(&flat(colour)).map(drop),
+                Err(BLANK.into()),
+                "never handed off"
+            );
+        }
+        // One pixel of something else is a picture.
+        let mut dot = flat([255; 4]);
+        dot.rgba[4 * 77..4 * 78].copy_from_slice(&[0, 0, 0, 255]);
+        assert!(lens_png(&dot).is_ok());
     }
 
     #[test]

@@ -83,7 +83,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libgtk-3-dev
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -98,8 +98,7 @@ jobs:
             cargo install cargo-generate-rpm --version "$CARGO_GENERATE_RPM_VERSION" --locked
           fi
 
-      # cargo-packager runs `cargo build --release --features sheet` itself
-      # (before-packaging-command): the app and the results card's helper.
+      # cargo-packager runs `cargo build --release` itself (before-packaging-command).
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: cargo packager --release --formats nsis,wix --out-dir dist
@@ -155,25 +154,22 @@ jobs:
           done
           echo "== dlopened libraries =="
           strings "$bin" | grep -oE 'lib[A-Za-z0-9_+-]+\.so\.[0-9]+' | sort -u
-          # The resident app never links WebKitGTK (+23 MB idle, spike S9): only
-          # the results card's helper does, and the packages only recommend it.
+          # No web view anywhere (N-02): nothing links or ships WebKitGTK.
           if grep -qE 'webkit|javascriptcore|soup' ldd.txt; then echo "::error::opencircle links WebKitGTK"; exit 1; fi
-          echo "== helper (opencircle-sheet) NEEDED =="
-          readelf -d target/release/opencircle-sheet | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'
           echo "== deb =="; dpkg-deb -I dist/*.deb
           dpkg-deb -c dist/*.deb | grep -E 'applications/|apps/|bin/'
-          dpkg-deb -c dist/*.deb | grep -q 'usr/bin/opencircle-sheet$'
+          if dpkg-deb -c dist/*.deb | grep -q 'opencircle-sheet'; then echo "::error::the .deb ships the old results-card helper"; exit 1; fi
+          if dpkg-deb -I dist/*.deb | grep -qi webkit; then echo "::error::the .deb asks for WebKitGTK"; exit 1; fi
           if command -v rpm >/dev/null; then
             echo "== rpm =="; rpm -qlp dist/*.rpm | grep -x /usr/share/applications/com.opencircle.app.desktop
-            rpm -qlp dist/*.rpm | grep -x /usr/bin/opencircle-sheet
-            rpm -qp --recommends dist/*.rpm
+            if rpm -qlp dist/*.rpm | grep -q opencircle-sheet; then echo "::error::the .rpm ships the old helper"; exit 1; fi
           fi
           echo "== AppImage =="
           appimage=$(ls dist/*.AppImage)
           chmod +x "$appimage"
           (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
           ls -la "$RUNNER_TEMP/squashfs-root/usr/bin"
-          test -x "$RUNNER_TEMP/squashfs-root/usr/bin/opencircle-sheet"
+          test -x "$RUNNER_TEMP/squashfs-root/usr/bin/opencircle"
           if find "$RUNNER_TEMP/squashfs-root" -name 'libwebkit2gtk*' | grep -q .; then echo "::error::the AppImage bundles WebKitGTK"; exit 1; fi
           echo "bundled libraries: $(find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' | wc -l)"
           find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' -printf '%f\n' | sort | head -100

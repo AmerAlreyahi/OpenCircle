@@ -60,9 +60,8 @@ the first code):
 
     cargo fmt --check
     cargo clippy --all-targets -- -D warnings
-    cargo clippy --all-targets --features sheet -- -D warnings  # until N-02 removes `sheet`
     XDG_DATA_HOME=$(mktemp -d) XDG_CONFIG_HOME=$(mktemp -d) cargo test
-    cargo packager --release   # --features sheet until N-02 removes it
+    cargo packager --release
 
 Run tests with EMPTY app data/config dirs (as above): CI has no downloaded
 models or config, and a machine with them can hide a failure. After every push,

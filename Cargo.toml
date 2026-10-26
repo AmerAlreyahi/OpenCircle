@@ -45,31 +45,12 @@ flate2 = "1"
 ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 rqrr = { version = "0.11.0", default-features = false }
 minisign-verify = "0.3.0"
-# Feature `sheet`: the Google results card's web view (WebView2 / WebKitGTK), only
-# in the helper: on Windows a hidden mode of opencircle.exe (src/sheet/helper), on
-# Linux the separate binary `opencircle-sheet`. WebView2/WebKitGTK only start there.
-wry = { version = "0.57", default-features = false, features = ["os-webview"], optional = true }
-
-[features]
-# Release and CI builds turn it on (Linux needs libwebkit2gtk-4.1-dev to build).
-# Without it there is no helper and results open in the browser.
-sheet = ["dep:wry", "dep:winit", "dep:softbuffer", "dep:webkit2gtk", "dep:webview2-com"]
-
-[[bin]]
-name = "opencircle-sheet"
-path = "src/bin/opencircle-sheet/main.rs"
-required-features = ["sheet"]
-test = false # its shared logic (proto.rs) is tested in the app's tests
-# Linux only: on Windows this is a stub that is never packaged (`binaries` below).
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
-# Feature `sheet`: the helper reads whether the user started a navigation (the
-# version wry already builds).
-webkit2gtk = { version = "2.0", optional = true }
 # Song search's audio (src/music): the PulseAudio protocol in pure Rust (no libpulse;
 # PipeWire's pulse server speaks it). Opened only while listening.
 pulseaudio = "0.3"
@@ -81,10 +62,6 @@ xcb = { version = "1.7", features = ["randr", "xtest", "xfixes", "shape"] }
 cpal = { version = "0.18", default-features = false }
 widestring = "1"
 xcap = "0.9"
-# Feature `sheet` (the helper's window): the versions iced already builds.
-winit = { version = "0.30", optional = true }
-webview2-com = { version = "0.39", optional = true }
-softbuffer = { version = "0.4", default-features = false, optional = true }
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_SystemInformation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
@@ -99,9 +76,7 @@ identifier = "com.opencircle.app"
 category = "Utility"
 authors = ["OpenCircle contributors"]
 homepage = "https://github.com/AmerAlreyahi/OpenCircle"
-# `sheet`: the results card's helper. Windows: inside opencircle.exe (one exe); Linux:
-# the separate `opencircle-sheet`, added by [deb]/[appimage] `files` below.
-before-packaging-command = "cargo build --release --features sheet"
+before-packaging-command = "cargo build --release"
 binaries = [{ path = "opencircle", main = true }]
 icons = [
     "assets/icons/opencircle.ico",
@@ -153,24 +128,18 @@ depends = [
 # it gets our entry as the template, and release.yml renames the .deb's files to
 # com.opencircle.app.desktop / com.opencircle.app.png.
 desktop-template = "packaging/com.opencircle.app.desktop"
-# Linux: the results card is the separate binary (Windows has it inside opencircle.exe).
-files = { "target/release/opencircle-sheet" = "usr/bin/opencircle-sheet" }
 
 # The AppImage's entry (same template) names Icon=com.opencircle.app: ship that icon.
 # A raw AppImage writes its own ~/.local/share/applications/com.opencircle.app.desktop
 # on first start under Wayland (capture/portal.rs).
-# WebKitGTK is never bundled: the results card uses the system's (an optional
-# dependency); without it, results open in the browser.
 [package.metadata.packager.appimage]
-files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", "target/release/opencircle-sheet" = "usr/bin/opencircle-sheet" }
-excluded-libraries = ["libwebkit2gtk-4.1*", "libjavascriptcoregtk-4.1*", "libsoup-3.0*"]
+files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png" }
 
 # .rpm: `cargo generate-rpm` after `cargo build --release`. Same libraries, Fedora names.
 [package.metadata.generate-rpm]
 auto-req = "disabled"
 assets = [
     { source = "target/release/opencircle", dest = "/usr/bin/opencircle", mode = "755" },
-    { source = "target/release/opencircle-sheet", dest = "/usr/bin/opencircle-sheet", mode = "755" },
     { source = "packaging/com.opencircle.app.desktop", dest = "/usr/share/applications/com.opencircle.app.desktop", mode = "644" },
     { source = "assets/icons/256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", mode = "644" },
     { source = "LICENSE", dest = "/usr/share/licenses/opencircle/LICENSE", mode = "644", doc = true },
@@ -188,10 +157,6 @@ libxkbcommon = "*"
 libxkbcommon-x11 = "*"
 libwayland-client = "*"
 xdg-desktop-portal = "*"
-
-# The results card's web view (opencircle-sheet); without it: the browser.
-[package.metadata.generate-rpm.recommends]
-"webkit2gtk4.1" = "*"
 
 [dev-dependencies]
 # Headless renders of the UI screens in tests (the versions iced already builds).

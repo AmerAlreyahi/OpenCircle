@@ -15,13 +15,18 @@ pub(super) const GAP: f32 = 16.0;
 
 /// The bar: its gap to the work area's edges (above the taskbar), its top
 /// spot's distance from the top (clear of the hint pill), the space between
-/// its controls, its drag handle's and field's widths.
+/// its controls, its drag handle's and AI field's widths, and its three pills'
+/// widths (Search in browser, Copy text, Translate: fixed, so the bar never
+/// changes size).
 pub(super) const BOTTOM_GAP: f32 = 28.0;
 pub(super) const TOP: f32 = 84.0;
 pub(super) const SPACING: f32 = 6.0;
 pub(super) const HANDLE: f32 = 24.0;
-pub(super) const FIELD: f32 = 420.0;
-const MIN_FIELD: f32 = 100.0;
+pub(super) const FIELD: f32 = 320.0;
+const MIN_FIELD: f32 = 160.0;
+pub(super) const PILLS: [f32; 3] = [160.0, 106.0, 106.0];
+/// The thin line between the field, the pills and the icon buttons.
+const DIVIDER: f32 = 1.0;
 
 /// The longest QR text the chip shows, in characters.
 const QR_SHOWN: usize = 36;
@@ -67,12 +72,30 @@ pub(super) fn key_hint(key: Key) -> String {
     }
 }
 
-/// The bottom bar's field width and whole size on a `screen` that is `width`
-/// wide, with `bubbles` round buttons (always all of them): the
-/// field gives up width on a narrow screen, the buttons never do.
-pub(super) fn bottom_size(width: f32, bubbles: f32) -> (f32, Size) {
+/// The bar without its field: handle, dividers, `pills` and `bubbles` round buttons.
+fn fixed(pills: [f32; 3], bubbles: f32) -> f32 {
+    let pills: f32 = pills.iter().map(|w| w + SPACING).sum();
     let buttons = bubbles * (widgets::BUBBLE + SPACING);
-    let fixed = HANDLE + SPACING + buttons + 2.0 * SURFACE_PADDING;
+    let dividers = (1.0 + f32::from(bubbles > 0.0)) * (DIVIDER + SPACING);
+    HANDLE + SPACING + dividers + pills + buttons + 2.0 * SURFACE_PADDING
+}
+
+/// The pills' widths on a screen `width` wide: labelled (`PILLS`), or icons
+/// only (`BUBBLE` each) where the labelled bar would not fit (the design hides
+/// their labels on narrow screens).
+pub(super) fn pill_widths(width: f32, bubbles: f32) -> [f32; 3] {
+    match fixed(PILLS, bubbles) + MIN_FIELD <= width - 2.0 * GAP {
+        true => PILLS,
+        false => [widgets::BUBBLE; 3],
+    }
+}
+
+/// The bottom bar's field width and whole size on a `screen` that is `width`
+/// wide, with the three pills (`pill_widths`) and `bubbles` round buttons
+/// after them: the field gives up width on a narrow screen, then the pills
+/// their labels; the buttons never shrink.
+pub(super) fn bottom_size(width: f32, bubbles: f32) -> (f32, Size) {
+    let fixed = fixed(pill_widths(width, bubbles), bubbles);
     let field = (width - 2.0 * GAP - fixed).clamp(MIN_FIELD, FIELD);
     let height = CONTROL.max(widgets::BUBBLE) + 2.0 * SURFACE_PADDING;
     (field, Size::new(fixed + field, height))
@@ -197,7 +220,7 @@ mod tests {
 
     #[test]
     fn the_bar_docks_at_anchors_above_the_taskbar() {
-        let (field, size) = bottom_size(1920.0, 6.0);
+        let (field, size) = bottom_size(1920.0, 3.0);
         assert_eq!(field, FIELD);
         // default: centred, BOTTOM_GAP above the work area (a 48 px taskbar)
         let at = anchor_at(BarAnchor::Bottom, SCREEN, size, 48.0);
@@ -238,9 +261,9 @@ mod tests {
             BarAnchor::Top
         );
         // a narrow screen: the field gives up width, the buttons keep theirs
-        let (field, s) = bottom_size(640.0, 10.0);
+        let (field, s) = bottom_size(900.0, 3.0);
         assert!(
-            field < FIELD && s.width <= 640.0 - 2.0 * GAP,
+            field < FIELD && s.width <= 900.0 - 2.0 * GAP,
             "{field} {s:?}"
         );
     }

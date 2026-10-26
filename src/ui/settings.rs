@@ -24,9 +24,9 @@ use iced::widget::{column, container, row, space};
 use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{
-    After, BarStyle, BracketColour, BracketStyle, CardSide, ColourSet, Config, DefaultAction,
-    EdgeMode, EdgeStyle, Engine, Format, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith,
-    SelectStyle, SnipAfter, SnipConfig, SongSource, Target, Theme, WidgetTheme, parse_shortcut,
+    After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
+    EdgeStyle, Engine, Format, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
+    SnipAfter, SnipConfig, SongSource, Target, Theme, WidgetTheme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::labs::{Feature, Labs};
@@ -544,7 +544,6 @@ impl fmt::Debug for State {
 pub enum Message {
     Section(Section),
     DefaultAction(DefaultAction),
-    CardSide(CardSide),
     SearchHistory(bool),
     Autostart(bool),
     /// The Browse button: the shell opens the folder picker.
@@ -1009,11 +1008,10 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             state.interval = s;
         }
         Message::DefaultAction(a) => state.draft.general.default_action = a,
-        Message::CardSide(side) => state.draft.results.side = side,
         Message::SearchHistory(on) => {
             state.draft.general.search_history = on;
             if !on {
-                crate::sheet::history::clear_default(); // turning it off deletes it
+                crate::search_history::clear_default(); // turning it off deletes it
             }
         }
         Message::Autostart(on) => state.draft.general.autostart = on,
@@ -1100,28 +1098,11 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
     Outcome::None
 }
 
-/// The results card's place to save: its size is the app's (the card keeps it
-/// while Settings is open), its side the user's choice here if they changed it
-/// (`draft` vs `opened`), else the app's `now`.
-fn kept_card(
-    draft: crate::config::ResultsConfig,
-    opened: crate::config::ResultsConfig,
-    now: crate::config::ResultsConfig,
-) -> crate::config::ResultsConfig {
-    let side = if draft.side != opened.side {
-        draft.side
-    } else {
-        now.side
-    };
-    crate::config::ResultsConfig { side, ..now }
-}
-
 /// A Labs switch writes at once, and only itself: the saved config with this one
 /// switch changed (other edits in the draft stay unsaved). A failed write changes nothing.
 fn set_lab(state: &mut State, feature: Feature, on: bool) -> Outcome {
     let mut cfg = state.saved.clone();
     cfg.labs.set(feature, on);
-    cfg.results = crate::config::results(); // the card's side and size are kept live
     let written = match &state.path {
         Some(p) => cfg.save_to(p),
         None => cfg.save(),
@@ -1148,11 +1129,6 @@ fn save(state: &mut State) -> Outcome {
         state.notice = Some("Nothing to save".into());
         return Outcome::None;
     }
-    state.draft.results = kept_card(
-        state.draft.results,
-        state.saved.results,
-        crate::config::results(),
-    );
     let result = match &state.path {
         Some(p) => state.draft.save_to(p),
         None => state.draft.save(),
@@ -1391,12 +1367,6 @@ fn shorten(path: &str) -> String {
     format!("…{tail}")
 }
 
-/// The one line under "Results card": where it sits, or why it can't open.
-fn results_hint() -> &'static str {
-    crate::sheet::unavailable()
-        .unwrap_or("Lens and AI Mode results. Drag its header to the other side")
-}
-
 /// The Start-with-the-OS switch's label (Settings and onboarding).
 pub const START_LABEL: &str = if cfg!(windows) {
     "Start OpenCircle when Windows starts"
@@ -1470,7 +1440,7 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
                     (
                         DefaultAction::Lens,
                         "Search",
-                        "Enter searches with Google Lens",
+                        "Enter searches it in your browser",
                     ),
                     (DefaultAction::Ai, "Ask AI", "Enter asks the AI about it"),
                     (DefaultAction::Text, "Text", "Enter reads the text"),
@@ -1478,19 +1448,6 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
                 ],
                 state.draft.general.default_action,
                 Message::DefaultAction,
-            ),
-            None,
-        ),
-        form_row(
-            "Results card",
-            results_hint(),
-            segmented(
-                &[
-                    (CardSide::Left, "Left", "The card sits on the left"),
-                    (CardSide::Right, "Right", "The card sits on the right"),
-                ],
-                state.draft.results.side,
-                Message::CardSide,
             ),
             None,
         ),
@@ -1511,7 +1468,7 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
     // Search history is a Labs feature: its row exists only while it is on.
     if state.draft.labs.has(Feature::History) {
         rows.insert(
-            3,
+            2,
             form_row(
                 "Search history",
                 "Only on this PC: what you searched, a small picture, the time",
@@ -1522,7 +1479,7 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
                             "Off",
                             "Keep no searches (turning it off deletes them)",
                         ),
-                        (true, "On", "The card's History button lists your searches"),
+                        (true, "On", "Keep the searches you open in your browser"),
                     ],
                     state.draft.general.search_history,
                     Message::SearchHistory,
@@ -1590,15 +1547,19 @@ fn look_rows(state: &State) -> Vec<Element<'_, Message>> {
             None,
         ),
         form_row(
-            "After selecting",
+            "Auto action",
             match sel.after {
-                After::Search => "Searches at once; More shows every action",
-                After::Wait => "Shows the action bar",
+                After::Wait => "Nothing is sent until you pick an action",
+                After::Search => "Sends each selection at once, as Search with says",
             },
             segmented(
                 &[
-                    (After::Search, "Search", "Search the selection at once"),
-                    (After::Wait, "Show actions", "Show the action bar and wait"),
+                    (After::Wait, "Wait for me", "Wait until you pick an action"),
+                    (
+                        After::Search,
+                        "Run at once",
+                        "Run Search with as soon as you select",
+                    ),
                 ],
                 sel.after,
                 Message::After,
@@ -2109,7 +2070,7 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
     let mut rows = vec![form_row(
         "Provider",
         if ai.provider == Provider::Browser {
-            "Google AI Mode in OpenCircle's results card. No key"
+            "Google AI Mode in your browser. No key"
         } else {
             "Who answers your questions"
         },
@@ -2118,7 +2079,7 @@ fn ai_rows(state: &State) -> Vec<Element<'_, Message>> {
                 (
                     Provider::Browser,
                     "Browser",
-                    "Google AI Mode in the results card, no key",
+                    "Google AI Mode in your browser, no key",
                 ),
                 (Provider::Anthropic, "Anthropic", "Use Anthropic (Claude)"),
                 (
@@ -2360,16 +2321,16 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn the_browser_provider_says_it_opens_in_the_results_card() {
+    fn the_browser_provider_says_it_opens_in_the_browser() {
         let (mut s, _) = state(None);
         update(&mut s, Message::Section(Section::Ai));
         update(&mut s, Message::Provider(Provider::Browser));
         let texts = shot::texts(view(&s));
         assert!(
-            texts.iter().any(|t| t.contains("results card")),
+            texts.iter().any(|t| t.contains("in your browser")),
             "{texts:?}"
         );
-        assert!(!texts.iter().any(|t| t.contains("in your browser")));
+        assert!(!texts.iter().any(|t| t.contains("results card")));
     }
 
     #[test]
@@ -3376,28 +3337,4 @@ pub(super) mod tests {
         }
         theme::apply(Theme::Dark);
     }
-}
-
-/// Saving Settings never undoes the card size the user gave the results
-/// card while Settings was open; a side chosen here wins.
-#[test]
-fn saving_settings_keeps_the_cards_remembered_size() {
-    use crate::config::ResultsConfig;
-    let opened = ResultsConfig::default();
-    let now = ResultsConfig {
-        side: CardSide::Left,
-        width: 700,
-        height: 0,
-    };
-    assert_eq!(kept_card(opened, opened, now), now, "the app's place");
-    let picked = ResultsConfig {
-        side: CardSide::Left,
-        ..opened
-    };
-    let app = ResultsConfig {
-        side: CardSide::Right,
-        ..now
-    };
-    let mine = kept_card(picked, opened, app);
-    assert_eq!((mine.side, mine.width), (CardSide::Left, 700));
 }

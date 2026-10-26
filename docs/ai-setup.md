@@ -1,8 +1,7 @@
 # AI setup
 
 OpenCircle has no AI of its own and no account. By default, Ask AI and Explain
-open your question in Google AI Mode, inside OpenCircle's results card, with no
-key. If you want answers from an AI provider (with follow-up questions) and AI
+open your question in Google AI Mode in your own browser, with no key. If you want answers from an AI provider (with follow-up questions) and AI
 translation, choose a provider with your own key. Nothing is sent until you ask
 a question.
 
@@ -10,24 +9,22 @@ a question.
 
 Nothing to set up. When you press Send in the Ask AI panel (or Explain on a
 word card, or the **Explain with AI** quick action), OpenCircle shows Google
-Search's AI Mode with your question already typed in, in the results card. If
-the card cannot load, the panel says why and offers **Open in browser**. Nothing
-opens in your browser by itself.
+Search's AI Mode with your question already typed in, in your default browser.
+Nothing opens in your browser by itself: only Send does it.
 
 - The question is your prompt plus the text read from your selection. Reading
   the text uses the same offline text reader as **Select text**; the first time,
   OpenCircle asks before downloading it (about 30 MB). If you say no, only
   your prompt is sent, and the panel tells you the image could not be passed.
-- The answer appears in the results card, where you can ask follow-ups on
-  Google's page. Press **Search the image with Lens** for questions about the
-  picture itself. Google sign-in does not work inside the card; use **Open in
-  browser** for that.
+- The answer appears in your browser, where you can ask follow-ups on Google's
+  page. Press **Search the image with Lens** for questions about the picture
+  itself.
 - Long questions are shortened at a word boundary (about 1,800 characters) and
   the panel says so.
 - **Translate in place needs a provider with a key** (below): the browser cannot
   send text back.
-- Only the question text goes to Google, from the results card, when you
-  press Send. The screenshot is not uploaded unless you choose Lens. See
+- Only the question text goes to Google, from your browser, when you press
+  Send. The screenshot is not uploaded unless you choose Lens. See
   [Privacy](privacy.md).
 
 ## Providers with your own key
@@ -76,7 +73,7 @@ Circle something and press `A` (or use the **Explain with AI** quick action,
 `Ctrl+Shift+E`). With a key, the answer streams in a side panel and you can ask
 follow-up questions. Only the selected area and your questions are sent, with
 the conversation so far. Closing the panel stops a running answer. With the
-browser provider, Send shows Google AI Mode in the results card instead (see above).
+browser provider, Send opens Google AI Mode in your browser instead (see above).
 
 ## Config
 

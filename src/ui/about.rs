@@ -21,7 +21,7 @@ pub const PROFILE_URL: &str = "https://github.com/AmerAlreyahi";
 
 /// Who made what we ship or download: (what, made by, licence). The full texts
 /// are in the repository's NOTICE file.
-pub const NOTICES: [(&str, &str, &str); 11] = [
+pub const NOTICES: [(&str, &str, &str); 10] = [
     (
         "Text recognition",
         "PaddleOCR PP-OCRv5, Baidu",
@@ -37,11 +37,6 @@ pub const NOTICES: [(&str, &str, &str); 11] = [
     ("iced", "The iced contributors", "MIT"),
     ("tiny-skia", "Yevhenii Reizner", "BSD-3-Clause"),
     ("cosmic-text", "System76", "MIT / Apache-2.0"),
-    (
-        "wry (results card)",
-        "Tauri contributors",
-        "MIT / Apache-2.0",
-    ),
     ("Lucide icons", "Lucide contributors", "ISC"),
     ("Inter font", "Rasmus Andersson", "OFL-1.1"),
     ("Noto Sans Arabic", "Google", "OFL-1.1"),

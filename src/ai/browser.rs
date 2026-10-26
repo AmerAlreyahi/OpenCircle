@@ -31,12 +31,23 @@ pub fn question(prompt: &str, text: Option<&str>) -> String {
 /// The AI Mode URL for `question`, and whether the question was cut to fit.
 /// Cuts at a word boundary (a hard cut only inside one very long word).
 pub fn url(question: &str) -> (String, bool) {
+    link(BASE, question)
+}
+
+/// A plain Google search for `text` (Search in browser on a text selection),
+/// cut like [`url`].
+// ponytail: lives here with the URL builder; moves when this file goes (N-05).
+pub fn search_url(text: &str) -> String {
+    link("https://www.google.com/search?q=", text).0
+}
+
+fn link(base: &str, question: &str) -> (String, bool) {
     let mut max = MAX_CHARS;
     loop {
         let (q, cut) = cut_words(question.trim(), max);
         let enc = encode(q);
         if enc.len() <= MAX_ENCODED || max <= 1 {
-            return (format!("{BASE}{enc}"), cut);
+            return (format!("{base}{enc}"), cut);
         }
         // Too many bytes once encoded (Arabic, CJK, ...): shorten and retry.
         let used = q.chars().count();
@@ -119,6 +130,18 @@ mod tests {
                 .all(|b| b.is_ascii_alphanumeric() || b == b'%' || b"-._~".contains(&b))
         );
         assert!(u.starts_with("https://www.google.com/search?udm=50&q="));
+    }
+
+    #[test]
+    fn a_text_search_is_one_plain_google_link() {
+        let u = search_url("  Roter Sand & lighthouse #1?  ");
+        assert_eq!(
+            u,
+            "https://www.google.com/search?q=Roter%20Sand%20%26%20lighthouse%20%231%3F"
+        );
+        // what lens::open_link accepts: one plain link on Google's host
+        assert_eq!(crate::lens::web_host(&u).as_deref(), Some("www.google.com"));
+        assert!(!search_url("x&udm=50").contains("&udm"));
     }
 
     #[test]

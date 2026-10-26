@@ -143,28 +143,40 @@ pub fn command_allowed(labs: &Labs, action: &str) -> Result<(), String> {
     }
 }
 
-/// The overlay's bottom bar, in order. A button of a hidden feature is not there.
+/// The overlay's bottom bar after its AI field, in order (the new design's
+/// search bar, owner 2026-10-26): three labelled pills, then icon buttons. A
+/// button of a hidden feature is not there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarButton {
-    IncludeScreen,
-    Copy,
-    Save,
+    /// Pill: the selection to Google Lens (or its text to a search) in the browser.
+    Search,
+    /// Pill: the selection's text to the clipboard.
+    CopyText,
+    /// Pill: translate the selection (or the screen) in place.
     Translate,
+    /// Icon: live translate (Beta).
     Live,
     Song,
     Edit,
 }
 
 impl BarButton {
-    const ALL: [BarButton; 7] = [
-        BarButton::IncludeScreen,
-        BarButton::Copy,
-        BarButton::Save,
+    const ALL: [BarButton; 6] = [
+        BarButton::Search,
+        BarButton::CopyText,
         BarButton::Translate,
         BarButton::Live,
         BarButton::Song,
         BarButton::Edit,
     ];
+
+    /// A labelled pill (else a round icon button).
+    pub fn is_pill(self) -> bool {
+        matches!(
+            self,
+            BarButton::Search | BarButton::CopyText | BarButton::Translate
+        )
+    }
 
     fn feature(self) -> Option<Feature> {
         match self {
@@ -205,22 +217,18 @@ mod tests {
 
     #[test]
     fn hidden_features_have_no_bar_button() {
-        let off = bar(&Labs::default());
+        use BarButton::*;
         assert_eq!(
-            off,
-            [
-                BarButton::IncludeScreen,
-                BarButton::Copy,
-                BarButton::Save,
-                BarButton::Translate,
-                BarButton::Live
-            ]
+            bar(&Labs::default()),
+            [Search, CopyText, Translate, Live],
+            "the design's bar with Labs off"
         );
         let mut on = Labs::default();
         on.set(Feature::Song, true);
-        assert!(bar(&on).contains(&BarButton::Song) && !bar(&on).contains(&BarButton::Edit));
+        assert_eq!(bar(&on), [Search, CopyText, Translate, Live, Song]);
         on.set(Feature::Editor, true);
-        assert_eq!(bar(&on).len(), 7);
+        assert_eq!(bar(&on), [Search, CopyText, Translate, Live, Song, Edit]);
+        assert_eq!(bar(&on).iter().filter(|b| b.is_pill()).count(), 3);
     }
 
     #[test]

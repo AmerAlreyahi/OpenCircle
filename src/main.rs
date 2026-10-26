@@ -21,9 +21,9 @@ mod mt;
 mod music;
 #[allow(dead_code, unused_imports)] // library for the Text/Translate actions; not wired in yet
 mod ocr;
+mod search_history;
 #[allow(dead_code)] // library API, wired into the UI later
 mod secrets;
-mod sheet;
 #[allow(dead_code)] // library for full-screen translate; the UI wires it
 mod translate;
 mod ui;
@@ -147,9 +147,6 @@ fn main() -> ExitCode {
     let command = match args.first().map(String::as_str) {
         None => None,
         Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
-        // hidden: the results card (WebView2), spawned by the app; Windows only
-        #[cfg(all(windows, feature = "sheet"))]
-        Some(sheet::ARG) => return sheet::helper::main(args[1..].to_vec()),
         Some(update::VERSION_ARG) => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;

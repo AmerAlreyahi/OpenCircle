@@ -30,12 +30,13 @@ Auto-update is asked about once, on first run. It is off until you say yes. See
 1. Press `Ctrl+Shift+Space`, or choose **Circle to search** in the tray menu.
    The screen freezes under a light dim.
 2. Draw a circle, or drag a box, around what you want. The stroke snaps to a
-   rounded box with corner brackets, and the search starts at once in the
-   results card (Google Lens). Drawing again starts over.
-3. Use the bottom bar for the rest. `Esc` closes everything.
+   rounded box with corner brackets. Nothing is sent yet. Drawing again starts
+   over.
+3. Choose in the bottom bar: **Search in browser**, **Copy text**,
+   **Translate**, or ask OpenCircle AI. `Esc` closes everything.
 
-Settings > Look & behaviour can change this: keep the drawn shape, or wait for
-you to press an action.
+Settings > Look & behaviour can change this: keep the drawn shape, or run a
+search as soon as you select (**Auto action**).
 
 ## The bottom bar
 
@@ -44,20 +45,22 @@ then the rest:
 
 | Control | What it does | Key |
 |---|---|---|
-| Question field | Asks AI about the selection (or the screen). `Enter` sends it | Click it first |
-| Include screen | Turns the selection into "about my screen" on or off | |
-| Copy | Copies the selection as an image | `Ctrl+C` |
-| Save | Saves it as a PNG or JPEG, where you choose | `Ctrl+S` |
-| Translate | Translates the selection in place | |
-| Live translate | Keeps translating the screen while you play | `Ctrl+Shift+L` |
-| Music | Finds a song from a short clip (only after you add a key; see [Song search](song-search.md)) | |
-| Edit | Turns the bar into the annotation toolbar. A back arrow returns | `E` |
+| Ask OpenCircle AI field | Asks AI about the selection (or the screen). `Enter` or the **AI ↵** badge sends it; with nothing typed, the logo or `Enter` opens Ask AI | Click it first |
+| Search in browser | Opens the selection in your default browser: a picture goes to Google Lens, selected text to a Google search | `L` |
+| Copy text | Copies the selection's text | |
+| Translate | Translates the selection in place (no selection: the whole screen) | |
+| Live translate (Beta) | Keeps translating the screen while you play | `Ctrl+Shift+L` |
+| Music | Finds a song from a short clip (Settings > Labs; see [Song search](song-search.md)) | |
+| Edit | Turns the bar into the annotation toolbar (Settings > Labs). A back arrow returns | `E` |
+
+`Ctrl+C` copies the selection as an image and `Ctrl+S` saves it as a PNG or
+JPEG, where you choose.
 
 The bar snaps to the bottom centre, the top, or a bottom corner. Drag its
 handle to move it; it stays where you put it.
 
-Copy and Save are dimmed until something is selected. Without a selection, the
-whole screen is used.
+Search in browser and Copy text are dimmed until something is selected. A
+selection of one plain colour is never sent: OpenCircle says so instead.
 
 ## Select text
 
@@ -66,7 +69,7 @@ highlight. Then:
 
 - **Copy** copies the picked words.
 - **Translate** translates them.
-- Search sends them to the results card.
+- **Search in browser** searches them in your default browser.
 
 The first time you select text, OpenCircle asks before downloading the
 text reader. It is about 30 MB (the app shows the exact size), checked against
@@ -85,26 +88,8 @@ may be needed; OpenCircle tells you if it is.
 </p>
 
 <p align="center">
-  <img src="images/copy-text-and-translate.png" alt="Copy the picked words and they paste exactly into Notepad. Full-screen translate of a page. A results card on the left of a selected picture. Live translate over a browser." width="900"><br>
-  <sub>Copy gives exactly the picked words. Translate, the results card and live translate work from the same selection.</sub>
-</p>
-
-## Results card
-
-Lens and AI Mode open in a floating card beside the selection:
-
-- It is inset from the screen edges, with rounded corners and a shadow.
-- Drag it to a side to dock it left or right. Resize it; OpenCircle remembers
-  the size.
-- If the card would cover the selection, it opens on the other side.
-- **Open in browser** is there, but nothing opens in your browser until you
-  click it.
-
-Google sign-in does not work inside the card. The optional search history
-(off by default) is kept on this PC only.
-
-<p align="center">
-  <img src="images/results-card.png" alt="The results card docked beside the selection, showing Google Lens results and AI Mode." width="800">
+  <img src="images/copy-text-and-translate.png" alt="Copy the picked words and they paste exactly into Notepad. Full-screen translate of a page. Live translate over a browser." width="900"><br>
+  <sub>Copy gives exactly the picked words. Translate and live translate work from the same selection.</sub>
 </p>
 
 ## Translate and live translate
@@ -140,7 +125,8 @@ Details: [Snip and annotate](snip-and-annotate.md).
 **Settings > Look & behaviour**:
 
 - **Selection**: snap to a box, or keep the shape you drew.
-- **After selecting**: search at once, or show the bar and wait.
+- **Auto action**: wait for you to choose (the default: nothing is sent), or
+  run **Search with** as soon as you select.
 - **Search with**: Lens, Ask AI or both.
 - **Active look**: how the screen looks while OpenCircle is open. Spectrum (the
   default), Aurora, Sunset, Ocean, Neon, Mono and Calm, or Custom: your own
@@ -192,7 +178,5 @@ crashes the app. API keys are never in this file.
 - **No tray icon on Linux.** Install AppIndicator support (Debian/Ubuntu:
   `libayatana-appindicator3-1`, Fedora: `libayatana-appindicator-gtk3`). The
   shortcuts and `opencircle capture` still work.
-- **Results card does not open.** Settings > General says why. Without the
-  system web view, results open in your browser when you click.
 - **Logs.** OpenCircle prints warnings to standard error. Start it from a
   terminal to see them.

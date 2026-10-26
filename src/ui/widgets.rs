@@ -94,7 +94,7 @@ pub fn docked<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Cont
 }
 
 pub mod card {
-    //! The floating result card (Search, Text, Ask AI; later the results sheet):
+    //! The floating result card (Search, Text, Ask AI):
     //! where it goes, how a drag moves or resizes it, the space it leaves free,
     //! and its frame (header with icon, title, chip and close; body; footer).
     //! One place for all of them, so every card floats, opens and moves the
@@ -106,9 +106,15 @@ pub mod card {
 
     /// Distance to the screen edges, the side card's least width, the smallest
     /// a resize makes it, and below which width (or on a portrait screen) it
-    /// floats at the bottom instead (`sheet::proto` has the same numbers).
+    /// floats at the bottom instead; the side card's share of the screen width,
+    /// and the bottom card's width and least height.
     pub const GAP: f32 = 20.0;
     pub const WIDTH: f32 = 420.0;
+    const SHARE: f32 = 0.4;
+    const BOTTOM_WIDTH: f32 = 640.0;
+    const BOTTOM_MIN: f32 = 260.0;
+    /// How far a card may overlap the selection before it opens on the other side.
+    const COVER_SLACK: f32 = 8.0;
     pub const MIN: Size = Size::new(320.0, 220.0);
     pub const NARROW: f32 = 900.0;
     /// The resize strip along the inner edge, and its grip pill.
@@ -153,9 +159,9 @@ pub mod card {
     }
 
     /// Where the card goes on a `screen`-sized overlay (logical px): where the
-    /// user holds it (`user`, kept on screen), else where Google's results card
-    /// opens (`sheet::card_rect`: the user's side and size, the other side when
-    /// it would cover the `selection`; on a narrow / portrait screen at the bottom).
+    /// user holds it (`user`, kept on screen), else full height on the right, on
+    /// the left when the right would cover the `selection` and the left would
+    /// not; on a narrow / portrait screen at the bottom.
     pub fn place(screen: Size, selection: Option<Rectangle>, user: Option<Rectangle>) -> Rectangle {
         let inner = Size::new(
             (screen.width - 2.0 * GAP).max(0.0),
@@ -168,14 +174,27 @@ pub mod card {
             );
             return keep_on(Rectangle::new(r.position(), size), screen);
         }
-        let f = f64::from;
-        let sel = selection.map(|s| (f(s.x), f(s.x + s.width)));
-        let screen = (f(screen.width), f(screen.height));
-        let [x, y, w, h] = crate::sheet::card_rect(crate::config::results(), screen, sel);
-        Rectangle::new(
-            Point::new(x as f32, y as f32),
-            Size::new(w as f32, h as f32),
-        )
+        if bottom(screen) {
+            let width = inner.width.min(BOTTOM_WIDTH);
+            let height = (screen.height / 2.0).max(BOTTOM_MIN).min(inner.height);
+            let at = Point::new((screen.width - width) / 2.0, screen.height - GAP - height);
+            return Rectangle::new(at, Size::new(width, height));
+        }
+        let width = (screen.width * SHARE).max(WIDTH).min(inner.width);
+        let size = Size::new(width, inner.height);
+        let right = Rectangle::new(Point::new(screen.width - GAP - width, GAP), size);
+        let left = Rectangle::new(Point::new(GAP, GAP), size);
+        let covers = |card: Rectangle| {
+            selection.is_some_and(|s| {
+                let overlap = (card.x + card.width).min(s.x + s.width) - card.x.max(s.x);
+                overlap > COVER_SLACK
+            })
+        };
+        if covers(right) && !covers(left) {
+            left
+        } else {
+            right
+        }
     }
 
     /// Which edge of the card `at` resizes it: the one facing the screen's middle.
@@ -264,21 +283,6 @@ pub mod card {
     ) -> Element<'a, Message> {
         let back = crate::ui::glass::backdrop();
         framed(header, body, footer, at, screen, hover, on, back)
-    }
-
-    /// `frame`, always solid (never Frost / Graphite glass): Google's results
-    /// card while it loads, as the helper (which can't blur) draws it.
-    #[allow(clippy::too_many_arguments)]
-    pub fn solid<'a, Message: Clone + 'a>(
-        header: Header<'a>,
-        body: impl Into<Element<'a, Message>>,
-        footer: Option<Element<'a, Message>>,
-        at: Rectangle,
-        screen: Size,
-        hover: bool,
-        on: impl Fn(Event) -> Message,
-    ) -> Element<'a, Message> {
-        framed(header, body, footer, at, screen, hover, on, None)
     }
 
     /// `back`: the blurred screen behind a glass card, `None` = solid.
@@ -976,6 +980,121 @@ pub fn round_button<'a, Message: Clone + 'a>(
             },
             ..button::Style::default()
         })
+}
+
+/// A labelled pill of the bottom bar (the new design's "Search in browser",
+/// "Copy text", "Translate"): icon + label, `width` wide, `BUBBLE` tall; the
+/// icon alone when `width` is `BUBBLE` (narrow screens).
+/// `active` = the current choice (soft accent fill, accent text); `on_press:
+/// None` = nothing to act on yet: same size and place, dimmed.
+pub fn bar_pill<'a, Message: Clone + 'a>(
+    glyph: char,
+    label: &'a str,
+    width: f32,
+    active: bool,
+    on_press: Option<Message>,
+) -> Button<'a, Message> {
+    let palette = theme::floating();
+    let live = on_press.is_some();
+    let fg = match (active, live) {
+        (_, false) => palette.muted.scale_alpha(0.6),
+        (true, true) => theme::accent().0,
+        (false, true) => palette.text,
+    };
+    let mut content = row![text(glyph).font(ICON_FONT).size(15).color(fg)]
+        .spacing(6)
+        .align_y(iced::Center);
+    if width > BUBBLE {
+        content = content.push(text(label).size(13).color(fg));
+    }
+    button(container(content).center(iced::Fill))
+        .width(width)
+        .height(BUBBLE)
+        .padding(0)
+        .on_press_maybe(on_press)
+        .style(move |_, status| button::Style {
+            background: Some(match (active, live, status) {
+                (_, false, _) => palette.hover.into(),
+                (true, _, _) => theme::accent().0.scale_alpha(0.18).into(),
+                (false, _, button::Status::Hovered) => palette.field_focus.into(),
+                (false, _, button::Status::Pressed) => palette.pressed.into(),
+                (false, _, _) => palette.hover.into(),
+            }),
+            text_color: fg,
+            border: Border {
+                color: palette.border,
+                width: 1.0,
+                radius: 14.0.into(),
+            },
+            ..button::Style::default()
+        })
+}
+
+/// The bottom bar's AI field (the new design's search bar): `width` wide, our
+/// logo inside on the left (`on_logo`: opens the AI), the "AI ↵" badge on the
+/// right (`on_badge`: asks, like Enter).
+pub fn ai_field<'a, Message: Clone + 'a>(
+    input: TextInput<'a, Message>,
+    width: f32,
+    on_logo: Message,
+    on_badge: Message,
+) -> Element<'a, Message> {
+    let palette = theme::floating();
+    let accent = theme::accent().0;
+    let quiet = move |hover: Color| {
+        move |_: &iced::Theme, status: button::Status| button::Style {
+            background: match status {
+                button::Status::Hovered | button::Status::Pressed => Some(hover.into()),
+                _ => None,
+            },
+            border: Border::default().rounded(8),
+            ..button::Style::default()
+        }
+    };
+    let logo = iced::widget::image(chrome::logo_handle())
+        .width(18)
+        .height(18);
+    let logo = button(logo)
+        .padding(4)
+        .on_press(on_logo)
+        .style(quiet(palette.pressed));
+    let badge = row![
+        text("AI").size(11).color(accent),
+        text("↵").size(11).color(accent.scale_alpha(0.75)),
+    ]
+    .spacing(4);
+    let badge = button(badge)
+        .padding([3, 7])
+        .on_press(on_badge)
+        .style(move |_, status| button::Style {
+            background: Some(
+                accent
+                    .scale_alpha(match status {
+                        button::Status::Hovered | button::Status::Pressed => 0.28,
+                        _ => 0.16,
+                    })
+                    .into(),
+            ),
+            border: Border::default().rounded(8),
+            ..button::Style::default()
+        });
+    let input = input.padding(iced::Padding::new(13.0).left(40.0).right(52.0));
+    let over = row![
+        hint(
+            logo,
+            "Open OpenCircle AI chat",
+            Why::Icon,
+            tooltip::Position::Top
+        ),
+        space::horizontal(),
+        hint(badge, "Ask AI", Why::Keys("Enter"), tooltip::Position::Top),
+    ]
+    .padding([0, 8])
+    .height(CONTROL)
+    .align_y(iced::Center);
+    iced::widget::stack![input.width(width), over]
+        .width(width)
+        .into()
 }
 
 /// A 44x44 handle that starts a drag when the button goes down (an icon
@@ -1864,7 +1983,7 @@ pub mod chrome {
         &LOGO
     }
 
-    fn logo_handle() -> image::Handle {
+    pub(crate) fn logo_handle() -> image::Handle {
         // One handle, so the renderer's image cache keeps its pixels between frames.
         static HANDLE: LazyLock<image::Handle> = LazyLock::new(|| {
             let l = logo();

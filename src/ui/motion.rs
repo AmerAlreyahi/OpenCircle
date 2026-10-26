@@ -1,14 +1,10 @@
 //! Widget motion, one place for every animation (the overlay's opening, the
 //! bar's glide and its turn into the editing toolbar, a snapped selection's
-//! morph, the results card's slide and dock): durations on one scale, enter
+//! morph, the result card's slide and dock): durations on one scale, enter
 //! eased out and exit eased in, always by the time since the motion began
 //! (never a step per frame, so a slow frame shows the motion further on, it
 //! never jumps nor slows it down). With the OS's animations off (Windows
 //! "Show animations"), every motion is instant.
-//!
-//! Std only: the results card's helper (`src/sheet/helper`) includes this
-//! file too.
-#![allow(dead_code)] // each includer uses its part
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -24,6 +20,8 @@ pub const MOVE: Duration = Duration::from_millis(200);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Curve {
     Out,
+    #[cfg_attr(not(test), allow(dead_code))]
+    // the exit curve, kept for the new design's motion (#79)
     In,
 }
 

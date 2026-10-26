@@ -24,20 +24,22 @@
   the whole screen. The original text is erased and the translation is drawn in
   its place, with matching colour and size. Live mode keeps going while you play.
   Runs offline by default. Arabic is the default target.
-- **Circle to search.** Press `Ctrl+Shift+Space`, draw a circle or a box around
-  anything, and it is searched at once. The stroke snaps to a clean box.
+- **Circle, then choose.** Press `Ctrl+Shift+Space`, draw a circle or a box
+  around anything, then pick what to do: search it in your browser (the picture
+  goes to Google Lens, selected text to a Google search), copy its text,
+  translate it or ask AI. Nothing is sent until you pick. The stroke snaps to a
+  clean box.
 - **Select text like on a desktop.** Drag over words to copy them, translate
   them, or search them. Text reading is a one-time download of about 30 MB.
-- **Results in a card, not a new tab.** Google Lens and AI Mode open in a
-  floating card beside your selection. Dock it left or right, drag it, resize
-  it. Open in your browser only when you click.
-- **One bottom bar.** Your question, then Copy, Save, Translate, Live translate,
-  Music and Edit (those two appear once you turn them on in Settings > Labs). Drag it to any edge.
+- **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
+  browser, Copy text, Translate and Live translate (Beta); Music and Edit appear
+  once you turn them on in Settings > Labs. `Ctrl+C` copies the selection as an
+  image, `Ctrl+S` saves it. Drag the bar to any edge.
 - **Snip and annotate** (in Settings > Labs, off by default). Region, window, full screen or scrolling capture.
   Arrows, shapes, text, numbered steps, blur, spotlight. Copy the image and its
   text in one go, ready for an AI chat.
 - **Ask AI about your selection.** No key needed: the question opens in Google
-  AI Mode. Or add your own key for answers inside OpenCircle: Claude, OpenAI, or
+  AI Mode in your browser. Or add your own key for answers inside OpenCircle: Claude, OpenAI, or
   any OpenAI-compatible server, including a local model.
 - **Shortcuts for everything.** Give any action its own key and skip the bar.
 - **Themes.** Default, Frost and Graphite, in light, dark or system colours.
@@ -56,11 +58,6 @@ Details: [Privacy](docs/privacy.md).
 <p align="center">
   <img src="docs/images/select-text.png" alt="Desktop-style text selection: words are highlighted on a Wikipedia page, and the bottom bar sits under the selection." width="900"><br>
   <sub>Select text: drag over words, then copy, translate or search them.</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/results-card.png" alt="The results card docked beside the selection, showing Google Lens and then Google AI Mode for a lighthouse picture." width="900"><br>
-  <sub>The results card: Lens and AI Mode, docked beside the selection.</sub>
 </p>
 
 ## Install

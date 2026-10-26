@@ -1,9 +1,9 @@
 //! The one config reader/validator: `<user config dir>/opencircle/config.toml`.
 //!
-//! Schema (version 2). Every key is optional; a missing file means defaults.
+//! Schema (version 3). Every key is optional; a missing file means defaults.
 //!
 //! ```toml
-//! version = 2                       # schema version, written by save()
+//! version = 3                       # schema version, written by save()
 //! theme = "system"                  # system | light | dark
 //! widget_theme = "default"          # floating widgets (bar, cards, toolbar): default | frost | graphite
 //! glass_effect = true               # frost / graphite blur the screen behind them (false = solid tint)
@@ -12,13 +12,8 @@
 //! [general]
 //! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
-//! search_history = false            # keep the card's searches on this PC (opt-in)
+//! search_history = false            # keep the searches handed to the browser on this PC (opt-in)
 //! autostart = true                  # start with Windows / at login (tray only, no window)
-//!
-//! [results]                         # the Lens / AI Mode results card
-//! side = "right"                    # left | right (the card docks there when dragged)
-//! width = 0                         # px, as the user resized it; 0 = default
-//! height = 0                        # px, a bottom card (narrow screens); 0 = default
 //!
 //! [bar]                             # the overlay's action bar, where the user docked it
 //! anchor = "bottom"                 # bottom | top | bottom_left | bottom_right
@@ -39,7 +34,7 @@
 //!
 //! [selection]
 //! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
-//! after = "search"                  # search (run search_with at once) | wait (show the action bar)
+//! after = "wait"                    # wait (nothing is sent until the user picks an action) | search (run search_with at once)
 //! search_with = "lens"              # lens | ai | both
 //!
 //! [look]                            # how the screen looks while OpenCircle is active
@@ -93,7 +88,9 @@
 //! that exists but can't be read or parsed gives `Provider::Unreadable`. Unknown
 //! keys are ignored. Once released, this format is frozen: migrate, never break.
 //!
-//! Versions: 1 = v0.1.0; 2 adds `[labs]`. A file older than `VERSION` is copied to
+//! Versions: 1 = v0.1.0; 2 adds `[labs]`; 3 sets `selection.after` to "wait" (nothing
+//! is sent before the user picks an action) and drops `[results]` (the web view card
+//! is gone: its keys are ignored). A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -110,7 +107,7 @@ use toml::{Table, Value};
 use crate::labs::Labs;
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
@@ -349,7 +346,7 @@ pub struct GeneralConfig {
     pub default_action: DefaultAction,
     /// Where the Save dialog starts; "" = the system's choice.
     pub save_folder: String,
-    /// Keep the card's searches on this PC (`sheet::history`). Off by default.
+    /// Keep the searches handed to the browser on this PC (`search_history`). Off by default.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub search_history: bool,
     /// Start OpenCircle with the OS (`autostart`). On by default.
@@ -365,17 +362,6 @@ impl Default for GeneralConfig {
             autostart: true,
         }
     }
-}
-
-/// The Lens / AI Mode results card (`[results]`): where the user put it.
-/// The app writes these when the user docks or resizes the card.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
-pub struct ResultsConfig {
-    pub side: CardSide,
-    /// The card's width (px) as the user resized it; 0 = the default.
-    pub width: u32,
-    /// A bottom card's height (narrow or portrait screens); 0 = the default.
-    pub height: u32,
 }
 
 /// The overlay's action bar (`[bar]`): the spot the user docked it at. The
@@ -398,15 +384,6 @@ pub enum BarAnchor {
     BottomRight,
 }
 
-/// The side the results card sits on (`[results] side`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CardSide {
-    Left,
-    #[default]
-    Right,
-}
-
 /// How a finished stroke shows (`[selection] style`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -422,10 +399,10 @@ pub enum SelectStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum After {
-    /// Run `search_with` at once (the action bar stays one click away).
-    #[default]
+    /// Run `search_with` at once (the user opted in: "Auto action").
     Search,
-    /// Show the action bar and wait.
+    /// Show the action bar and wait: nothing is sent until the user picks.
+    #[default]
     Wait,
 }
 
@@ -762,7 +739,6 @@ pub struct Config {
     pub glass_effect: bool,
     pub shortcut: String,
     pub general: GeneralConfig,
-    pub results: ResultsConfig,
     pub bar: BarConfig,
     pub selection: SelectionConfig,
     pub look: LookConfig,
@@ -839,7 +815,6 @@ impl Default for Config {
             glass_effect: true,
             shortcut: DEFAULT_CAPTURE_SHORTCUT.to_string(),
             general: GeneralConfig::default(),
-            results: ResultsConfig::default(),
             bar: BarConfig::default(),
             selection: SelectionConfig::default(),
             look: LookConfig::default(),
@@ -1003,16 +978,7 @@ impl Config {
             );
             c.general.autostart = get(t, "general.", "autostart", d.general.autostart, &mut w);
         }
-        if let Some(t) = section(&root, "results", &mut w) {
-            let (p, d) = ("results.", d.results);
-            let px = |v: &u32| match v {
-                0 | 200..=10_000 => Ok(()),
-                _ => Err("0 or 200-10000".to_string()),
-            };
-            c.results.side = get(t, p, "side", d.side, &mut w);
-            c.results.width = get_checked(t, p, "width", d.width, &mut w, px);
-            c.results.height = get_checked(t, p, "height", d.height, &mut w, px);
-        }
+        // `[results]` (schema 1-2: the web view card's side and size) is ignored.
         if let Some(t) = section(&root, "bar", &mut w) {
             c.bar.anchor = get(t, "bar.", "anchor", d.bar.anchor, &mut w);
         }
@@ -1020,6 +986,11 @@ impl Config {
             let (p, d) = ("selection.", d.selection);
             c.selection.style = get(t, p, "style", d.style, &mut w);
             c.selection.after = get(t, p, "after", d.after, &mut w);
+            // Schema 3: nothing is sent before the user picks (owner, 2026-10-26).
+            // An older file's "search" becomes "wait"; Settings opts back in.
+            if root.get("version").map_or(Some(1), Value::as_integer) < Some(3) {
+                c.selection.after = After::Wait;
+            }
             c.selection.search_with = get(t, p, "search_with", d.search_with, &mut w);
         }
         if let Some(t) = section(&root, "look", &mut w) {
@@ -1250,17 +1221,6 @@ pub fn widgets() -> (WidgetTheme, bool) {
     c.as_ref().map_or((WidgetTheme::Default, true), |c| {
         (c.widget_theme, c.glass_effect)
     })
-}
-
-/// The results card's side and size (`[results]`), without cloning the config
-/// (every frame places the card with it).
-pub fn results() -> ResultsConfig {
-    let kept = CURRENT
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .map(|c| c.results);
-    kept.unwrap_or_else(|| current().results)
 }
 
 /// The config the running app uses (any thread). Read from disk on first use;
@@ -1521,7 +1481,7 @@ mod tests {
         // The file is the new schema now, with every old value and the Labs switches.
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 2") && text.contains("[labs]"),
+            text.contains("version = 3") && text.contains("[labs]"),
             "{text}"
         );
         let (again, w) = Config::load_from(&path);
@@ -1558,13 +1518,13 @@ mod tests {
 
     #[test]
     fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-        let (dir, path) = config_with("current", "version = 2\n[labs]\nsong = true\n");
+        let (dir, path) = config_with("current", "version = 3\n[labs]\nsong = true\n");
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty() && c.labs.song && !c.labs.snip, "{w:?}");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "version = 2\n[labs]\nsong = true\n"
+            "version = 3\n[labs]\nsong = true\n"
         );
         let gone = dir.join("none.toml");
         Config::load_from(&gone);
@@ -1628,7 +1588,7 @@ mod tests {
     #[test]
     fn defaults_match_design() {
         let c = Config::default();
-        assert_eq!(c.version, 2);
+        assert_eq!(c.version, 3);
         assert_eq!(c.labs, Labs::default(), "Labs: everything off");
         assert_eq!(c.theme, Theme::System);
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
@@ -1673,7 +1633,11 @@ mod tests {
     fn look_and_selection_defaults_round_trip_and_old_files_keep_working() {
         let d = Config::default();
         assert_eq!(d.selection.style, SelectStyle::Snap);
-        assert_eq!(d.selection.after, After::Search);
+        assert_eq!(
+            d.selection.after,
+            After::Wait,
+            "nothing is sent before a choice"
+        );
         assert_eq!(d.selection.search_with, SearchWith::Lens);
         assert_eq!(d.look.theme, LookTheme::Spectrum);
         let look = d.look.active();
@@ -1926,27 +1890,51 @@ mod tests {
         assert!(!c.general.autostart && w.is_empty());
         let (c, w) = Config::parse("[general]\nautostart = \"yes\"\n");
         assert!(c.general.autostart && w.len() == 1, "{w:?}");
-        // The results card: right, default size; the user's side and size kept.
-        let d = Config::default().results;
-        assert_eq!((d.side, d.width, d.height), (CardSide::Right, 0, 0));
-        let (c, w) = Config::parse("[results]\nside = \"left\"\nwidth = 640\nheight = 300\n");
-        assert_eq!(
-            (c.results.side, c.results.width, c.results.height, w.len()),
-            (CardSide::Left, 640, 300, 0)
-        );
-        let (c, w) = Config::parse("[results]\nside = \"top\"\nwidth = 5\nheight = -1\n");
-        assert_eq!((c.results, w.len()), (d, 3));
-        // ... and survive a save.
-        let cfg = Config {
-            results: ResultsConfig {
-                side: CardSide::Left,
-                width: 700,
-                height: 0,
-            },
-            ..Config::default()
-        };
-        let text = toml::to_string_pretty(&cfg).unwrap();
-        assert_eq!(Config::parse(&text).0.results, cfg.results);
+    }
+
+    /// The web view card is gone (N-02): its `[results]` keys, good or bad, load
+    /// silently and are not written back.
+    #[test]
+    fn old_results_keys_load_with_no_warning_and_are_dropped() {
+        for text in [
+            "[results]\nside = \"left\"\nwidth = 640\nheight = 300\n",
+            "version = 2\n[results]\nside = \"top\"\nwidth = 5\nheight = -1\n",
+            "version = 3\nresults = 7\n",
+        ] {
+            let (c, w) = Config::parse(text);
+            assert!(w.is_empty(), "{text}: {w:?}");
+            let saved = toml::to_string_pretty(&c).unwrap();
+            assert!(!saved.contains("results"), "{saved}");
+        }
+    }
+
+    /// Schema 3 (N-03): a file from before it that searched by itself waits for the
+    /// user's choice now, with the old file backed up; a schema-3 file that opted
+    /// back in ("Auto action") keeps "search".
+    #[test]
+    fn an_old_auto_search_migrates_to_wait_with_a_backup() {
+        for (tag, old) in [
+            ("v1", V010_DEFAULT.to_string()),
+            ("v2", V010_DEFAULT.replace("version = 1", "version = 2")),
+        ] {
+            assert!(old.contains("after = \"search\""), "the fixture searched");
+            let (dir, path) = config_with(&format!("wait-{tag}"), &old);
+            let (c, w) = Config::load_from(&path);
+            assert!(w.is_empty(), "{w:?}");
+            assert_eq!(c.selection.after, After::Wait, "{tag}");
+            let v = if tag == "v1" { 1 } else { 2 };
+            let backup = dir.join(format!("config.toml.bak-v{v}"));
+            assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                text.contains("version = 3") && text.contains("after = \"wait\""),
+                "{text}"
+            );
+            assert!(!text.contains("[results]"), "{text}");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        let (c, w) = Config::parse("version = 3\n[selection]\nafter = \"search\"\n");
+        assert!(w.is_empty() && c.selection.after == After::Search, "{w:?}");
     }
 
     #[test]

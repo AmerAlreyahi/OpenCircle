@@ -63,22 +63,20 @@ const PROTECTED: &str = "This window is protected; it can't be captured";
 /// The ask bar at the bottom of the overlay: its text field, width, and the
 /// height kept free for it (the action bar stays above it).
 const ASK_INPUT: &str = "overlay-ask";
-/// The bottom bar's round buttons (`labs::bar`), all there in every state so it
-/// never changes size (owner, 2026-10-25): Include screen, Copy, Save (dimmed
-/// until something is selected), Translate, Live translate, and, while their Labs
-/// switch is on, Song search and Edit. No Search, Ask AI or Text (owner,
-/// 2026-10-25): a selection searches by itself (or Enter in an empty field,
-/// "wait" mode), Enter in the field asks, text is selected directly.
-/// The bar's selection buttons' tooltip while there is nothing to act on.
-const SELECT_FIRST: &str = "Select something first";
+/// The bottom bar (the new design's search bar, owner 2026-10-26: "circle, then
+/// choose"): grip, the AI field, the pills Search in browser · Copy text ·
+/// Translate (`labs::bar`), then Live translate (Beta) and, while their Labs
+/// switch is on, Song search and Edit. All there in every state, so it never
+/// changes size; Search in browser and Copy text are dimmed until something is
+/// selected. Nothing is sent until the user picks one (`[selection] after`).
+/// The field's placeholder.
+const ASK_PLACEHOLDER: &str = "Ask OpenCircle AI about your screen…";
 /// How long the bar takes to turn into the editing toolbar (back: `motion::EXIT`),
 /// and to glide to a new spot.
 const BAR_MORPH: Duration = motion::ENTER;
 const GLIDE: Duration = motion::MOVE;
 /// A QR code's chip under a selection (its room; the chip is centred in it).
 const QR_WIDTH: f32 = 520.0;
-/// The bottom bar's "Include screen" toggle icon (lucide "screen-share").
-const INCLUDE_SCREEN: char = '\u{e152}';
 /// The bottom bar's Live translate icon (lucide "radio").
 const LIVE: char = '\u{e145}';
 const ASK_MARGIN: f32 = 24.0;
@@ -187,8 +185,8 @@ enum Message {
     /// The bottom bar's buttons: Ask AI (Enter, or the presets with an empty
     /// field), Translate the screen, Live translate, the whole screen in the editor.
     AskButton,
-    /// The field's "Include screen" toggle.
-    IncludeScreen,
+    /// One of the bar's labelled pills (Search in browser, Copy text, Translate).
+    Pill(BarButton),
     TranslateScreen,
     LiveToggle,
     EditScreen,
@@ -207,8 +205,6 @@ enum Message {
     BarGrab,
     BarMoved(Point),
     BarReleased,
-    /// The select-text popup.
-    Picked(PickAct),
     /// While the result card is dragged: the pointer moved / was let go.
     CardMoved(Point),
     CardReleased,
@@ -225,10 +221,8 @@ enum Message {
 /// The shortcuts of the bottom bar's buttons, as the tooltips show them ("" = none).
 #[derive(Debug, Default, Clone, PartialEq)]
 struct BarKeys {
-    /// No shortcut.
-    none: String,
-    copy: String,
-    save: String,
+    search: String,
+    copy_text: String,
     translate: String,
     live: String,
     song: String,
@@ -244,9 +238,8 @@ impl BarKeys {
         };
         let key = |a: &Action| bar::key_hint(a.key);
         BarKeys {
-            none: String::new(),
-            copy: key(&copy::ACTION),
-            save: key(&save::ACTION),
+            search: key(&lens::ACTION),
+            copy_text: quick("copy_text", false),
             translate: quick(actions::translate::ACTION.id, false),
             live: quick(actions::translate::ACTION.id, true),
             song: quick("song_search", false),
@@ -456,9 +449,9 @@ struct App {
     /// The opening animation (`overlay::APPEAR`): the latest frame's time and
     /// how far it is (0..1, linear); `None` until the first frame (t = 0).
     appear: Option<(Instant, f32)>,
-    /// Ask AI from the bottom bar about the screen (on at every opening), or
-    /// a plain question with nothing from the screen.
-    include_screen: bool,
+    /// The bar's highlighted pill: Search in browser at every opening, then the
+    /// one last pressed (the new design's active pill).
+    pill: BarButton,
     /// The shortcuts the bottom bar's tooltips show (read at open).
     bar_keys: BarKeys,
     /// Which unfinished features are on (read at open; Settings changes apply to the next one).
@@ -597,7 +590,7 @@ impl App {
             text_press: None,
             clicks: None,
             appear: None,
-            include_screen: true,
+            pill: BarButton::Search,
             bar_keys: BarKeys::default(),
             labs: Labs::default(),
             ask: String::new(),
@@ -827,7 +820,6 @@ impl App {
                 }
                 None => Task::none(),
             },
-            Message::Picked(act) => self.on_picked(act),
             Message::CardMoved(p) => {
                 if let Some((how, last)) = self.card_drag {
                     if let Some(from) = last {
@@ -838,65 +830,30 @@ impl App {
                 }
                 Task::none()
             }
-            // Let go: the card docks where Google's card opens, and its side and
-            // size are kept for every next card (as the results card keeps them).
+            // Let go: the card stays where the user put it, until the overlay closes.
             Message::CardReleased => {
-                if let (Some((how, _)), Some(r)) = (self.card_drag.take(), self.card.take()) {
-                    let f = f64::from;
-                    let r = [f(r.x), f(r.y), f(r.width), f(r.height)];
-                    let screen = (f(self.screen.width), f(self.screen.height));
-                    let moved = how == widgets::card::Drag::Move;
-                    let results = crate::sheet::let_go(config::results(), moved, r, screen);
-                    crate::sheet::keep(results);
-                }
+                self.card_drag = None;
                 Task::none()
             }
             Message::AskInput(text) => {
                 self.ask = text;
                 Task::none()
             }
-            // Before a selection it asks about the whole screen.
-            // A plain question: nothing from the screen goes with it.
-            Message::AskSubmit | Message::AskButton if !self.include_screen => {
+            // The AI field (the new design): Enter, its logo or its "AI ↵" badge.
+            // A question asks about the selection (before one: the whole
+            // screen); an empty field opens Ask AI with its presets.
+            Message::AskSubmit | Message::AskButton => {
                 let question = std::mem::take(&mut self.ask);
-                if question.trim().is_empty() {
-                    return Task::none();
-                }
-                self.panels = self.panels.wrapping_add(1);
-                let id = self.panels;
-                let (panel, task) = panel::Panel::open_question(question);
-                self.panel = Some((id, panel));
-                task.map(move |msg| Message::Panel(id, msg))
-            }
-            Message::AskSubmit if self.ask.trim().is_empty() && self.searches_on_enter() => {
-                self.ask.clear();
-                match self.picked_in_box() {
-                    true => self.on_picked(PickAct::Search),
-                    false => self.run(&lens::ACTION),
-                }
-            }
-            Message::AskSubmit => {
-                let question = std::mem::take(&mut self.ask);
-                let crop =
-                    (!question.trim().is_empty()).then(|| self.stacked().or_else(|| self.whole()));
-                match crop.flatten() {
-                    Some(crop) => self.open_panel(actions::Panel::Ask, crop, Some(question)),
+                let question = (!question.trim().is_empty()).then_some(question);
+                match self.stacked().or_else(|| self.whole()) {
+                    Some(crop) => self.open_panel(actions::Panel::Ask, crop, question),
                     None => Task::none(),
                 }
             }
-            Message::IncludeScreen => {
-                self.include_screen = !self.include_screen;
-                Task::none()
+            Message::Pill(pill) => {
+                self.pill = pill;
+                self.on_pill(pill)
             }
-            Message::AskButton if self.ask.trim().is_empty() => {
-                // no question yet: Ask AI opens with its presets
-                let crop = self.stacked().or_else(|| self.whole());
-                match crop {
-                    Some(crop) => self.open_panel(actions::Panel::Ask, crop, None),
-                    None => Task::none(),
-                }
-            }
-            Message::AskButton => self.update(Message::AskSubmit),
             // Live translate runs over the live screen: the frozen one goes.
             Message::LiveToggle => {
                 let closing = self.close();
@@ -1137,7 +1094,7 @@ impl App {
         self.hiding = Hiding::No;
         let cfg = config::current();
         self.appear = None; // its first frame is t = 0
-        self.include_screen = true;
+        self.pill = BarButton::Search;
         self.bar_anchor = cfg.bar.anchor;
         self.bar_now = None;
         self.bar_glide = None;
@@ -2048,12 +2005,6 @@ impl App {
         auto_targets(self.behaviour)
     }
 
-    /// "Wait" mode (`[selection] after`): with a selection, Enter in the empty
-    /// field runs the search the selection didn't run by itself.
-    fn searches_on_enter(&self) -> bool {
-        self.behaviour.after == After::Wait && self.selection.is_some()
-    }
-
     /// Words picked in a snapped box (select-text mode), not still being dragged.
     fn picked_in_box(&self) -> bool {
         (self.text_mode.as_ref()).is_some_and(|m| m.picked.is_some() && !m.picking)
@@ -2153,6 +2104,9 @@ impl App {
             }
             return closing;
         }
+        if act == PickAct::Search {
+            return self.search_text(picked.text());
+        }
         // Words picked in a snapped box: their box becomes the selection (a
         // word selection already is it).
         if self.text_mode.take().is_some() {
@@ -2163,9 +2117,49 @@ impl App {
             };
             self.remember_region();
         }
-        match act {
-            PickAct::Translate => self.start_translate(),
-            _ => self.run(&lens::ACTION),
+        self.start_translate()
+    }
+
+    /// Picked words (a word selection, or select-text mode's picks): their text.
+    fn picked_text(&self) -> Option<String> {
+        let picked = (self.text_mode.as_ref()).and_then(|m| m.picked.as_ref());
+        picked.or(self.word.as_ref()).map(word::Picked::text)
+    }
+
+    /// Search in browser on a text selection: the text, as a Google search in
+    /// the user's own browser (the user picked it; no web view). Like Lens,
+    /// the overlay goes behind the browser on Windows and closes elsewhere.
+    fn search_text(&mut self, text: String) -> Task<Message> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Task::none();
+        }
+        let url = crate::ai::browser::search_url(text);
+        if let Err(e) = crate::lens::open_link(&url) {
+            eprintln!("[opencircle] text search not opened: {e}");
+            return self.toast_then_close("Couldn't open your browser");
+        }
+        crate::search_history::keep("text", text, &url, self.crop().as_ref());
+        match cfg!(windows) {
+            true => Task::none(),
+            false => self.close(),
+        }
+    }
+
+    /// A pill of the bottom bar: Search in browser and Copy text act on the
+    /// selection (dimmed without one); Translate on it, else the whole screen.
+    fn on_pill(&mut self, pill: BarButton) -> Task<Message> {
+        let picked = self.picked_in_box();
+        match pill {
+            BarButton::Search => self.run(&lens::ACTION),
+            BarButton::CopyText if picked || self.word.is_some() => self.on_picked(PickAct::Copy),
+            BarButton::CopyText => self.run_quick(Quick::CopyText),
+            BarButton::Translate if self.selection.is_none() => {
+                self.update(Message::TranslateScreen)
+            }
+            BarButton::Translate if picked => self.on_picked(PickAct::Translate),
+            BarButton::Translate => self.run(&actions::translate::ACTION),
+            _ => Task::none(),
         }
     }
 
@@ -2182,6 +2176,13 @@ impl App {
     /// (so dialogs aren't hidden under it); a panel action opens its panel; Edit
     /// turns the bar into the editing toolbar. No selection yet = nothing to do.
     fn run(&mut self, action: &'static Action) -> Task<Message> {
+        // Search in browser on picked words: their text, not a picture of them.
+        if action.id == lens::ACTION.id
+            && self.edit.is_none()
+            && let Some(text) = self.picked_text()
+        {
+            return self.search_text(text);
+        }
         match action.run {
             Run::Edit => return self.open_editor(),
             Run::Translate => return self.start_translate(),
@@ -2716,13 +2717,7 @@ impl App {
     ) -> Task<Message> {
         self.panels = self.panels.wrapping_add(1);
         let id = self.panels;
-        // the results card stays off the selection
-        let avoid = self.selection.map(|s| {
-            let r = self.view.rect_to_screen(s.area);
-            let size = (f64::from(self.screen.width), f64::from(self.screen.height));
-            (size, (f64::from(r.x), f64::from(r.x + r.width)))
-        });
-        let (panel, task) = panel::Panel::open(kind, crop, question, avoid);
+        let (panel, task) = panel::Panel::open(kind, crop, question);
         self.panel = Some((id, panel));
         task.map(move |msg| Message::Panel(id, msg))
     }
@@ -2749,12 +2744,9 @@ impl App {
         match msg {
             panel::Msg::Card(card::Event::Grab(how)) => self.card_drag = Some((how, None)),
             panel::Msg::Card(card::Event::Hover(on)) => self.card_hover = on,
-            panel::Msg::Card(card::Event::Reset) => reset_card(&mut self.card),
+            panel::Msg::Card(card::Event::Reset) => self.card = None,
             panel::Msg::Card(card::Event::Close) => self.panel = None,
             panel::Msg::Cancel => self.panel = None,
-            // The user took the results to the browser: on Linux get out of
-            // its way (see the Lens page above); Windows already went behind.
-            panel::Msg::Sheet(crate::sheet::Event::Left) if !cfg!(windows) => return self.close(),
             panel::Msg::Search => return self.run(&lens::ACTION),
             panel::Msg::CopyText => {
                 let text = panel.text().unwrap_or_default();
@@ -2987,7 +2979,7 @@ impl App {
                 Task::none()
             }
             translate::Msg::Card(card::Event::Reset) => {
-                reset_card(&mut self.card);
+                self.card = None;
                 Task::none()
             }
             // the word card's ×: back to the translation; a prompt's: done
@@ -3351,7 +3343,11 @@ impl App {
     /// The bottom bar's field width and size: the same in every state (no
     /// selection, a selection, after a card), so it never jumps.
     fn bar_size(&self) -> (f32, Size) {
-        bar::bottom_size(self.screen.width, labs::bar(&self.labs).len() as f32)
+        let icons = labs::bar(&self.labs)
+            .iter()
+            .filter(|b| !b.is_pill())
+            .count();
+        bar::bottom_size(self.screen.width, icons as f32)
     }
 
     /// The size of what is docked at the bar's spot now: the bar, the editing
@@ -3416,86 +3412,74 @@ impl App {
         .discard()
     }
 
-    /// The bottom bar, the one action hub: a handle to drag it, "Ask about your
-    /// screen…" (your selection, once there is one; Enter opens Ask AI with
-    /// it; "Ask anything…" without the screen), "Include screen", then round
-    /// icon buttons. Copy and Save are dimmed until something is selected;
-    /// then every action takes the selection (picked words: their text);
-    /// without, the whole screen. Always the same size (`bar_size`). Its field
+    /// The bottom bar, the one action hub, as the new design's search bar: a
+    /// handle to drag it, the AI field ("Ask OpenCircle AI about your
+    /// screen…": Enter, the logo or the "AI ↵" badge ask about the selection,
+    /// else the whole screen; empty, they open Ask AI), the pills Search in
+    /// browser (highlighted until another is pressed), Copy text and
+    /// Translate, then the round icon buttons. Search in browser and Copy text
+    /// are dimmed until something is selected; Translate without a selection
+    /// takes the whole screen. Always the same size (`bar_size`). Its field
     /// takes the keys only once clicked: until then letters are the action
-    /// shortcuts (L, A, T still search, ask and read the text).
+    /// shortcuts (L, A, T still search, ask and translate).
     fn bottom_bar(&self) -> Element<'_, Message> {
-        let placeholder = match (self.include_screen, self.selection) {
-            (false, _) => "Ask anything…",
-            (true, Some(_)) if self.searches_on_enter() => {
-                "Ask about your selection… (Enter alone = Search)"
-            }
-            (true, Some(_)) => "Ask about your selection…",
-            (true, None) => "Ask about your screen…",
-        };
         let (width, _) = self.bar_size();
-        let field = widgets::input(
+        let input = widgets::input(
             ASK_INPUT,
-            placeholder,
+            ASK_PLACEHOLDER,
             &self.ask,
             Message::AskInput,
             Message::AskSubmit,
-        )
-        .width(width);
+        );
+        let field = widgets::ai_field(input, width, Message::AskButton, Message::AskSubmit);
         let keys = &self.bar_keys;
         let selected = self.selection.is_some();
-        // picked words (select-text mode): Copy and Translate take their text
-        let picked = self.picked_in_box();
-        let pick = |act: PickAct, other: Message| match picked {
-            true => Message::Picked(act),
-            false => other,
-        };
-        let button = bar_button;
-        let selection = [
-            (
-                copy::ACTION.icon,
-                "Copy",
-                &keys.copy,
-                pick(PickAct::Copy, Message::Run(&copy::ACTION)),
-            ),
-            (
-                save::ACTION.icon,
-                "Save",
-                &keys.save,
-                Message::Run(&save::ACTION),
-            ),
-        ]
-        // nothing selected: still there, in place (the bar never changes size), dimmed
-        .map(|(glyph, label, keys, message)| match selected {
-            true => button(glyph, label, keys, false, Some(message)),
-            false => button(glyph, label, SELECT_FIRST, false, None),
-        });
-        let (translate, edit) = match selected {
-            true => (
-                (
-                    "Translate",
-                    pick(
-                        PickAct::Translate,
-                        Message::Run(&actions::translate::ACTION),
-                    ),
-                ),
-                ("Edit", Message::Run(&actions::edit::ACTION)),
-            ),
-            false => (
-                ("Translate the screen", Message::TranslateScreen),
-                ("Edit the screen", Message::EditScreen),
-            ),
-        };
         let shown = labs::bar(&self.labs);
-        let fixed = [
+        let icons = shown.iter().filter(|b| !b.is_pill()).count() as f32;
+        let widths = bar::pill_widths(self.screen.width, icons);
+        let pills = [
+            (
+                BarButton::Search,
+                lens::ACTION.icon,
+                lens::ACTION.label,
+                &keys.search,
+            ),
+            (
+                BarButton::CopyText,
+                text::ACTION.icon,
+                "Copy text",
+                &keys.copy_text,
+            ),
             (
                 BarButton::Translate,
                 actions::translate::ACTION.icon,
-                translate.0,
+                actions::translate::ACTION.label,
                 &keys.translate,
-                false,
-                translate.1,
             ),
+        ]
+        .into_iter()
+        .zip(widths)
+        .map(|((which, glyph, label, keys), width)| {
+            let live = selected || which == BarButton::Translate;
+            let pill = widgets::bar_pill(
+                glyph,
+                label,
+                width,
+                self.pill == which,
+                live.then_some(Message::Pill(which)),
+            );
+            // Its label is written on it; an icon-only pill (narrow screens)
+            // names itself and its shortcut in a tooltip.
+            if width > widgets::BUBBLE {
+                return pill.into();
+            }
+            let why = match keys.is_empty() {
+                true => widgets::Why::Icon,
+                false => widgets::Why::Keys(keys),
+            };
+            widgets::hint(pill, label, why, iced::widget::tooltip::Position::Top)
+        });
+        let icons = [
             (
                 BarButton::Live,
                 LIVE,
@@ -3507,7 +3491,7 @@ impl App {
             (
                 BarButton::Song,
                 song::MUSIC,
-                "Search for a song",
+                "Song search",
                 &keys.song,
                 false,
                 Message::SongStart,
@@ -3515,32 +3499,36 @@ impl App {
             (
                 BarButton::Edit,
                 actions::edit::ACTION.icon,
-                edit.0,
+                if selected {
+                    "Edit image"
+                } else {
+                    "Edit the screen"
+                },
                 &keys.edit,
                 false,
-                edit.1,
+                if selected {
+                    Message::Run(&actions::edit::ACTION)
+                } else {
+                    Message::EditScreen
+                },
             ),
         ]
         .into_iter()
         .filter(|(which, ..)| shown.contains(which))
         .map(|(_, glyph, label, keys, active, message)| {
-            button(glyph, label, keys, active, Some(message))
+            bar_button(glyph, label, keys, active, Some(message))
         });
         let handle = container(widgets::icon(widgets::DRAG))
             .center_x(bar::HANDLE)
             .center_y(widgets::CONTROL);
-        let chip = button(
-            INCLUDE_SCREEN,
-            "Include screen",
-            &keys.none,
-            self.include_screen,
-            Some(Message::IncludeScreen),
-        );
-        let row = iced::widget::row![handle, field, chip]
-            .extend(selection)
-            .extend(fixed)
+        let mut row = iced::widget::row![handle, field, widgets::toolbar_divider()]
+            .extend(pills)
             .spacing(bar::SPACING)
             .align_y(iced::Center);
+        let icons: Vec<_> = icons.collect();
+        if !icons.is_empty() {
+            row = row.push(widgets::toolbar_divider()).extend(icons);
+        }
         // A press on the handle or the padding (not taken by the field or a
         // button) drags the bar; opaque: a press on it never starts a selection.
         let bar = iced::widget::mouse_area(widgets::surface(row))
@@ -3911,18 +3899,6 @@ fn triggers() -> impl Stream<Item = Trigger> {
     stream::iter(TRIGGERS.lock().unwrap().take()).flatten()
 }
 
-/// Double-click on a card's inner edge: back to the default size, for every
-/// next card too (as the results card does).
-fn reset_card(card: &mut Option<Rectangle>) {
-    *card = None;
-    let results = config::results();
-    crate::sheet::keep(config::ResultsConfig {
-        width: 0,
-        height: 0,
-        ..results
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4195,6 +4171,57 @@ mod tests {
         assert!(app.scan.is_none());
     }
 
+    /// What Search in browser hands to Lens is exactly the selected pixels, never
+    /// blank: through the real opening (`open`), at 100 % on the primary screen,
+    /// at 150 % on a monitor left of (and above) it, and at 125 % on its right.
+    #[test]
+    fn the_crop_lens_gets_is_the_selection_at_any_scale_and_monitor() {
+        // pixel (x, y) of the frame = [x, y, x >> 8 | (y >> 8) << 4, 255]
+        let px = |x: u32, y: u32| [x as u8, y as u8, (x >> 8 | (y >> 8) << 4) as u8, 255];
+        for (scale, origin) in [
+            (1.0, Point::ORIGIN),
+            (1.5, Point::new(-1280.0, -100.0)),
+            (1.25, Point::new(1920.0, 0.0)),
+        ] {
+            let (w, h) = ((1280.0 * scale) as u32, (720.0 * scale) as u32);
+            let rgba: Vec<u8> = (0..h)
+                .flat_map(|y| (0..w).flat_map(move |x| px(x, y)))
+                .collect();
+            let mut app = App::idle(window::Id::unique());
+            let shot = Shot {
+                image: image::Handle::from_rgba(w, h, rgba),
+                scale,
+                origin,
+                size: Size::new(1280.0, 720.0),
+                snip: None,
+            };
+            let _ = app.open(Instant::now(), Ok(shot));
+            app.behaviour = config::Config::default().selection;
+            drag(
+                &mut app,
+                Point::new(100.0, 120.0),
+                Point::new(300.0, 220.0),
+                false,
+            );
+            assert!(app.panel.is_none(), "{scale}: nothing sent before a choice");
+            let crop = app.crop().expect("a crop");
+            let (x0, y0) = ((100.0 * scale) as u32, (120.0 * scale) as u32);
+            assert_eq!(
+                (crop.width, crop.height),
+                ((200.0 * scale) as u32, (100.0 * scale) as u32),
+                "{scale}"
+            );
+            for (i, p) in crop.rgba.as_chunks::<4>().0.iter().enumerate() {
+                let (x, y) = (x0 + i as u32 % crop.width, y0 + i as u32 / crop.width);
+                assert_eq!(*p, px(x, y), "{scale}: pixel ({x}, {y})");
+            }
+            assert!(
+                lens::lens_png(&crop).is_ok(),
+                "{scale}: never refused as blank"
+            );
+        }
+    }
+
     #[test]
     fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
         let black = Crop {
@@ -4208,8 +4235,7 @@ mod tests {
         let texts = overlay_texts(&app);
         assert!(texts.contains(&PROTECTED.to_string()), "{texts:?}");
         let texts = overlay_texts(&app);
-        assert!(texts.contains(&copy::ACTION.icon.to_string()));
-        assert!(texts.contains(&save::ACTION.icon.to_string()));
+        assert!(texts.contains(&lens::ACTION.icon.to_string()), "{texts:?}");
         widgets::shot::save("overlay-protected", app.view(app.overlay), area.size());
         // An ordinary capture shows no such pill.
         let grey = Crop {
@@ -4790,10 +4816,13 @@ mod tests {
         let _ = app.update(Message::AskInput("what is this?".into()));
         let texts = widgets::shot::texts(app.view(app.overlay));
         assert!(texts.contains(&"what is this?".to_string()), "{texts:?}");
-        app.behaviour.after = After::Search; // ("wait": a blank one searches)
+        // The design: an empty field opens Ask AI (its presets), asking nothing.
         let _ = app.update(Message::AskInput("   ".into()));
         let _ = app.update(Message::AskSubmit);
-        assert!(app.panel.is_none(), "a blank question opens nothing");
+        let (_, panel) = app.panel.as_mut().expect("Ask AI opens");
+        assert_eq!(panel.kind(), actions::Panel::Ask);
+        assert!(panel.take_input().is_empty(), "no question");
+        app.panel = None;
         let _ = app.update(Message::AskInput("what is this?".into()));
         let _ = app.update(Message::AskSubmit);
         let (_, panel) = app.panel.as_ref().expect("Ask AI opens");
@@ -4907,17 +4936,17 @@ mod tests {
             "no floating pill: {texts:?}"
         );
         let click = |p| widgets::shot::click(app.view(app.overlay), app.screen, p);
-        let copy = click(bar_slot(&app, 1));
+        let copy = click(bar_pill(&app, 1));
         assert!(
             copy.iter()
-                .any(|m| matches!(m, Message::Run(a) if a.id == copy::ACTION.id))
+                .any(|m| matches!(m, Message::Pill(BarButton::CopyText)))
         );
-        let run = |m: &Message, id: &str| matches!(m, Message::Run(a) if a.id == id);
         assert!(
-            click(bar_button(&app, 0))
+            click(bar_pill(&app, 2))
                 .iter()
-                .any(|m| run(m, actions::translate::ACTION.id))
+                .any(|m| matches!(m, Message::Pill(BarButton::Translate)))
         );
+        assert!(app.picked_text().is_some(), "the pills take the text");
         assert!(
             !app.handles() || app.grab_at(caret(1, 21.0)).is_none(),
             "no handles"
@@ -4957,11 +4986,11 @@ mod tests {
         let _ = app.update(Message::AskInput("what is on my screen?".into()));
         let has_field = |app: &App| overlay_texts(app).contains(&app.ask);
         assert!(has_field(&app), "before any selection");
-        let clicked = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, 0));
+        let clicked = widgets::shot::click(app.view(app.overlay), app.screen, bar_pill(&app, 2));
         assert!(
             clicked
                 .iter()
-                .any(|m| matches!(m, Message::TranslateScreen))
+                .any(|m| matches!(m, Message::Pill(BarButton::Translate)))
         );
         // while drawing, and with a selection
         event(
@@ -4983,31 +5012,51 @@ mod tests {
             app.panel.as_ref().map(|(_, p)| p.kind()),
             Some(actions::Panel::Ask)
         );
-        let bottom = |t: &String| t.starts_with("Ask about your");
+        let bottom = |t: &String| t == ASK_PLACEHOLDER;
         assert!(
             !overlay_texts(&app).iter().any(bottom),
             "the card's own field takes over"
         );
         // Translate translates the whole screen
         let mut app = open_app(800, 600, 1.0);
-        let _ = app.update(Message::TranslateScreen);
+        let _ = app.update(Message::Pill(BarButton::Translate));
         assert!(app.translate.is_some() && app.selection.is_none());
     }
 
-    /// The centre of the bottom bar's button `k` (0 = Translate … 3 = Edit), as laid out.
-    fn bar_button(app: &App, k: usize) -> Point {
-        bar_slot(app, 3 + k) // after Include screen, Copy, Save
-    }
-
-    /// The centre of the bottom bar's round button `k` (0 = Include screen,
-    /// 1 = Copy, 2 = Save, then `bar_button`'s).
-    fn bar_slot(app: &App, k: usize) -> Point {
+    /// Where the bottom bar's pills start (x), and its middle (y), as laid out.
+    fn bar_row(app: &App) -> (f32, f32) {
         let (field, size) = app.bar_size();
         let at = app.bar_at();
-        let first =
-            at.x + widgets::SURFACE_PADDING + bar::HANDLE + bar::SPACING + field + bar::SPACING;
+        let x = at.x + widgets::SURFACE_PADDING + bar::HANDLE + bar::SPACING + field;
+        (
+            x + bar::SPACING + 1.0 + bar::SPACING,
+            at.y + size.height / 2.0,
+        )
+    }
+
+    /// The bar's pills' widths as laid out.
+    fn pill_widths(app: &App) -> [f32; 3] {
+        let icons = labs::bar(&app.labs).iter().filter(|b| !b.is_pill()).count();
+        bar::pill_widths(app.screen.width, icons as f32)
+    }
+
+    /// The centre of the bottom bar's pill `k` (0 = Search in browser, 1 = Copy
+    /// text, 2 = Translate).
+    fn bar_pill(app: &App, k: usize) -> Point {
+        let (x, y) = bar_row(app);
+        let widths = pill_widths(app);
+        let before: f32 = widths[..k].iter().map(|w| w + bar::SPACING).sum();
+        Point::new(x + before + widths[k] / 2.0, y)
+    }
+
+    /// The centre of the bottom bar's round button `k` (0 = Live translate,
+    /// then Song search and Edit when on), after the pills and their divider.
+    fn bar_button(app: &App, k: usize) -> Point {
+        let (x, y) = bar_row(app);
+        let pills: f32 = pill_widths(app).iter().map(|w| w + bar::SPACING).sum();
+        let first = x + pills + 1.0 + bar::SPACING;
         let x = first + k as f32 * (widgets::BUBBLE + bar::SPACING) + widgets::BUBBLE / 2.0;
-        Point::new(x, at.y + size.height / 2.0)
+        Point::new(x, y)
     }
 
     /// A point in the bottom bar's field.
@@ -5018,11 +5067,17 @@ mod tests {
         Point::new(x, at.y + size.height / 2.0)
     }
 
-    /// One selection, the old action bar gone: only the bottom bar, whose
-    /// Search, Text, Copy and Save act on the selection.
+    /// One selection, the old action bar gone: only the bottom bar, whose pills
+    /// act on the selection.
     #[test]
     fn a_selection_brings_its_actions_into_the_bottom_bar_not_a_second_bar() {
         let mut app = open_app(1280, 800, 1.0);
+        let pill = |app: &App, k| {
+            widgets::shot::click(app.view(app.overlay), app.screen, bar_pill(app, k))
+        };
+        // before a selection: Search in browser and Copy text are dimmed
+        let pressed = |got: Vec<Message>| got.iter().any(|m| matches!(m, Message::Pill(_)));
+        assert!(!pressed(pill(&app, 0)) && !pressed(pill(&app, 1)));
         drag(
             &mut app,
             Point::new(200.0, 150.0),
@@ -5031,59 +5086,37 @@ mod tests {
         );
         assert!(app.selection.is_some());
         let texts = overlay_texts(&app);
-        for label in [
-            "Search",
-            "Ask AI",
-            "Text",
-            "Translate",
-            "Edit",
-            "Copy",
-            "Save",
-        ] {
+        for label in ["Search in browser", "Copy text", "Translate"] {
+            assert!(texts.iter().any(|t| t == label), "{label}: {texts:?}");
+        }
+        for label in ["Search", "Ask AI", "Text", "Edit", "Copy", "Save"] {
             assert!(
                 !texts.iter().any(|t| t == label),
                 "no labelled action bar: {texts:?}"
             );
         }
-        let at = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(&app, k));
-        let runs = |k, id: &str| {
-            at(k)
-                .iter()
-                .any(|m| matches!(m, Message::Run(a) if a.id == id))
-        };
-        assert!(runs(1, copy::ACTION.id), "Copy");
-        assert!(runs(2, save::ACTION.id), "Save");
-        // Translate and Edit take the selection now, not the whole screen
-        let on = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, k));
-        assert!(
-            on(0)
-                .iter()
-                .any(|m| matches!(m, Message::Run(a) if a.id == actions::translate::ACTION.id))
-        );
-        assert!(
-            on(3)
-                .iter()
-                .any(|m| matches!(m, Message::Run(a) if a.id == actions::edit::ACTION.id))
-        );
-        // picked words in a snapped box: Copy and Translate take their text
+        for (k, which) in [
+            (0, BarButton::Search),
+            (1, BarButton::CopyText),
+            (2, BarButton::Translate),
+        ] {
+            let sent = pill(&app, k);
+            assert!(
+                sent.iter()
+                    .any(|m| matches!(m, Message::Pill(b) if *b == which)),
+                "{which:?}: {sent:?}"
+            );
+        }
+        let live = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, 0));
+        assert!(live.iter().any(|m| matches!(m, Message::LiveToggle)));
+        // the pressed pill is the highlighted one; Translate takes the selection
+        let _ = app.update(Message::Pill(BarButton::Translate));
+        assert_eq!(app.pill, BarButton::Translate);
+        assert!(app.translate.is_some() && app.selection.is_some());
+        // picked words in a snapped box: the pills take their text
         let mut words = select_text_app();
         drag(&mut words, caret(1, 7.0), caret(2, 16.0), false);
-        let at =
-            |k| widgets::shot::click(words.view(words.overlay), words.screen, bar_slot(&words, k));
-        assert!(
-            at(1)
-                .iter()
-                .any(|m| matches!(m, Message::Picked(PickAct::Copy)))
-        );
-        let on = |k| {
-            let at = bar_button(&words, k);
-            widgets::shot::click(words.view(words.overlay), words.screen, at)
-        };
-        assert!(
-            on(0)
-                .iter()
-                .any(|m| matches!(m, Message::Picked(PickAct::Translate)))
-        );
+        assert!(words.picked_text().is_some_and(|t| !t.trim().is_empty()));
     }
 
     /// What a click on the reader's note (over the bottom bar, on a row across
@@ -5241,15 +5274,13 @@ mod tests {
         let names = bar_names(&app);
         assert_eq!(
             names,
-            [
-                "Copy",
-                "Include screen",
-                "Live translate (Beta)",
-                "Save",
-                "Translate the screen"
-            ],
-            "no Song search, no Edit"
+            ["Ask AI", "Live translate (Beta)", "Open OpenCircle AI chat"],
+            "the design's bar, no Song search, no Edit"
         );
+        let texts = overlay_texts(&app);
+        for pill in ["Search in browser", "Copy text", "Translate"] {
+            assert!(texts.iter().any(|t| t == pill), "{pill}: {texts:?}");
+        }
         // E does nothing without a selection and with one (no editor, no whole-screen editor).
         event(
             &mut app,
@@ -5279,7 +5310,7 @@ mod tests {
         assert!(!app.labs.has(labs::Feature::Pins));
         // Song search on: its button is back (one more), the editor still off.
         app.labs.set(labs::Feature::Song, true);
-        assert!(bar_names(&app).iter().any(|n| n == "Search for a song"));
+        assert!(bar_names(&app).iter().any(|n| n == "Song search"));
         assert_eq!(
             app.bar_size().1.width,
             small.width + widgets::BUBBLE + bar::SPACING
@@ -5330,15 +5361,21 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_has_no_search_ask_or_text_and_enter_searches_in_wait_mode() {
+    fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
+        // The default (and every migrated) config: nothing runs after a selection.
         let mut app = open_app(1280, 800, 1.0);
-        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        app.labs = Labs::all_on();
+        app.behaviour = config::Config::default().selection;
         drag(
             &mut app,
             Point::new(200.0, 150.0),
             Point::new(500.0, 350.0),
             false,
         );
+        assert!(app.selection.is_some());
+        assert!(app.auto_actions().is_empty(), "nothing runs by itself");
+        assert!(app.panel.is_none(), "no Lens, no Ask AI before a choice");
+        assert!(app.lens_pages.is_empty(), "nothing handed to the browser");
         let _ = widgets::tests_support::shown();
         let texts = overlay_texts(&app);
         let tips = widgets::tests_support::shown();
@@ -5349,28 +5386,28 @@ mod tests {
         assert_eq!(
             names,
             [
-                "Copy",
-                "Edit",
-                "Include screen",
+                "Ask AI",
+                "Edit image",
                 "Live translate (Beta)",
-                "Save",
-                "Search for a song",
-                "Translate",
+                "Open OpenCircle AI chat",
+                "Song search",
             ],
             "{tips:?}"
         );
-        assert!(
-            texts.contains(&"Ask about your selection… (Enter alone = Search)".to_string()),
-            "{texts:?}"
-        );
-        // Enter with nothing typed: the search the selection didn't run
+        assert!(texts.iter().any(|t| t == ASK_PLACEHOLDER), "{texts:?}");
+        // the three labelled pills, in the design's order
+        let pills: Vec<&String> = (texts.iter())
+            .filter(|t| ["Search in browser", "Copy text", "Translate"].contains(&t.as_str()))
+            .collect();
+        assert_eq!(pills, ["Search in browser", "Copy text", "Translate"]);
+        // Enter with nothing typed: Ask AI opens (the design), nothing is searched
         let _ = app.update(Message::AskInput("  ".into()));
         let _ = app.update(Message::AskSubmit);
         assert_eq!(
             app.panel.as_ref().map(|(_, p)| p.kind()),
-            Some(actions::Panel::Lens)
+            Some(actions::Panel::Ask)
         );
-        // auto-search: the field asks only, Enter on nothing does nothing
+        // "Auto action" opted back in: the selection searches by itself
         let mut app = open_app(1280, 800, 1.0);
         app.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
         drag(
@@ -5379,11 +5416,10 @@ mod tests {
             Point::new(500.0, 350.0),
             false,
         );
-        app.panel = None;
-        let texts = overlay_texts(&app);
-        assert!(texts.contains(&"Ask about your selection…".to_string()));
-        let _ = app.update(Message::AskSubmit);
-        assert!(app.panel.is_none());
+        assert_eq!(
+            app.panel.as_ref().map(|(_, p)| p.kind()),
+            Some(actions::Panel::Lens)
+        );
         // the keys still work: T reads the text, A asks, L searches
         for (letter, kind) in [
             ('t', actions::Panel::Text),
@@ -5414,7 +5450,7 @@ mod tests {
     /// The bar's bounds, and whether its Edit slot (the last) is Edit, once settled.
     fn bar_box(app: &mut App) -> (Rectangle, bool) {
         settle_bar(app);
-        let edit = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(app, 3));
+        let edit = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(app, 2));
         let is_edit = |m: &Message| match m {
             Message::EditScreen => true,
             Message::Run(a) => a.id == actions::edit::ACTION.id,
@@ -5432,19 +5468,15 @@ mod tests {
         let mut app = open_app(1280, 800, 1.0);
         let (before, edits) = bar_box(&mut app);
         assert!(edits);
-        // nothing selected: Copy and Save are there but do nothing
-        for k in 1..=2 {
-            let at = bar_slot(&app, k);
+        // nothing selected: Search in browser and Copy text are there but do nothing
+        for k in 0..=1 {
+            let at = bar_pill(&app, k);
             let got = widgets::shot::click(app.view(app.overlay), app.screen, at);
-            assert!(!got.iter().any(|m| matches!(m, Message::Run(_))), "{k}");
+            assert!(
+                !got.iter().any(|m| matches!(m, Message::Pill(_))),
+                "{k}: {got:?}"
+            );
         }
-        let _ = widgets::tests_support::shown();
-        let _ = app.view(app.overlay);
-        let tips = widgets::tests_support::shown();
-        assert!(
-            tips.iter().any(|t| t == "Copy · Select something first"),
-            "{tips:?}"
-        );
         // a selection (away from the bar): the same box, the same slots
         drag(
             &mut app,
@@ -5556,7 +5588,7 @@ mod tests {
         let (_, size) = app.bar_size();
         assert_eq!(app.bar_at(), spot(&app, size));
         assert_eq!(app.bar_at().y, bar::TOP);
-        let edit = hit(&app, bar_button(&app, 3));
+        let edit = hit(&app, bar_button(&app, 2));
         assert!(
             edit.iter()
                 .any(|m| matches!(m, Message::Run(a) if a.id == actions::edit::ACTION.id)),
@@ -5648,60 +5680,31 @@ mod tests {
         for (w, h) in [(1280, 800), (800, 600), (640, 480)] {
             let app = open_app(w, h, 1.0);
             let _ = widgets::tests_support::shown(); // drop older records
-            let messages: Vec<Vec<Message>> = (0..4)
-                .map(|k| {
-                    widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, k))
-                })
-                .collect();
+            let click = |at| widgets::shot::click(app.view(app.overlay), app.screen, at);
+            let translate = click(bar_pill(&app, 2));
+            let messages: Vec<Vec<Message>> = (0..3).map(|k| click(bar_button(&app, k))).collect();
             let is = |k: usize, f: fn(&Message) -> bool| messages[k].iter().any(f);
             assert!(
-                is(0, |m| matches!(m, Message::TranslateScreen)),
+                (translate.iter()).any(|m| matches!(m, Message::Pill(BarButton::Translate))),
                 "{w}: Translate"
             );
-            assert!(is(1, |m| matches!(m, Message::LiveToggle)), "{w}: Live");
+            assert!(is(0, |m| matches!(m, Message::LiveToggle)), "{w}: Live");
             assert!(
-                is(2, |m| matches!(m, Message::SongStart)),
+                is(1, |m| matches!(m, Message::SongStart)),
                 "{w}: music, key or not"
             );
-            assert!(is(3, |m| matches!(m, Message::EditScreen)), "{w}: Edit");
-            // icons only: each names itself and its shortcut in its tooltip
+            assert!(is(2, |m| matches!(m, Message::EditScreen)), "{w}: Edit");
+            // each names itself (icons) and its shortcut in its tooltip
             let tips = widgets::tests_support::shown();
             for want in [
-                "Translate the screen · Ctrl+Shift+T",
                 "Live translate (Beta) · Ctrl+Shift+L",
-                "Search for a song",
+                "Song search",
                 "Edit the screen · E",
             ] {
                 assert!(tips.iter().any(|t| t == want), "{want}: {tips:?}");
             }
             widgets::tests_support::assert_tips_add_something("bottom bar");
         }
-    }
-
-    #[test]
-    fn a_plain_question_sends_nothing_from_the_screen() {
-        let mut app = open_app(800, 600, 1.0);
-        let chip = widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(&app, 0));
-        assert!(chip.iter().any(|m| matches!(m, Message::IncludeScreen)));
-        assert!(app.include_screen, "on at first");
-        let _ = app.update(Message::IncludeScreen);
-        let texts = overlay_texts(&app);
-        assert!(texts.iter().any(|t| t == "Ask anything…"), "{texts:?}");
-        let _ = app.update(Message::AskInput("how tall is Everest?".into()));
-        let _ = app.update(Message::AskSubmit);
-        let (_, panel) = app.panel.as_ref().expect("Ask AI opens");
-        assert_eq!(panel.kind(), actions::Panel::Ask);
-        assert!(
-            !panel.about_screen(),
-            "no image and no screen text go with it"
-        );
-        // what goes out for it: the question alone, no image
-        let mut chat = actions::ask::Chat::default();
-        let messages = chat.ask("how tall is Everest?", &[]).unwrap();
-        assert!(messages.iter().all(|m| m.image_png.is_none()));
-        // a new opening asks about the screen again
-        let _ = app.open(Instant::now(), a_shot());
-        assert!(app.include_screen);
     }
 
     #[test]
@@ -5999,10 +6002,10 @@ mod tests {
             ids(behaviour(snap, After::Search, SearchWith::Both)),
             ["lens", "ai"]
         );
-        // the defaults: snap, then Lens at once
+        // the defaults: snap, then wait for the user's choice (N-03)
         assert_eq!(
             config::Config::default().selection,
-            behaviour(snap, After::Search, SearchWith::Lens)
+            behaviour(snap, After::Wait, SearchWith::Lens)
         );
         // an App: a drawn selection searches; a tapped word, Snip or nothing doesn't
         let mut app = open_app(400, 300, 1.0);
@@ -6128,11 +6131,11 @@ mod tests {
             !texts.iter().any(|t| t == "Copy" || t == "Edit"),
             "{texts:?}"
         );
-        let click = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_slot(&app, k));
+        let click = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_pill(&app, k));
         assert!(
             click(1)
                 .iter()
-                .any(|m| matches!(m, Message::Picked(PickAct::Copy)))
+                .any(|m| matches!(m, Message::Pill(BarButton::CopyText)))
         );
         // Ctrl+C copies the same picked characters, not the whole box's text
         let mut keyed = select_text_app();
@@ -6237,19 +6240,6 @@ mod tests {
         // Windows: behind the browser, back on the shortcut; elsewhere: closed.
         assert_eq!(app.frame.is_some(), cfg!(windows));
         assert_eq!(app.panel.is_some(), cfg!(windows));
-        // The same when the user takes the results card's page to the browser.
-        let mut app = open_app(1920, 1080, 1.0);
-        drag(
-            &mut app,
-            Point::new(100.0, 100.0),
-            Point::new(400.0, 300.0),
-            false,
-        );
-        let _ = app.update(Message::Run(&lens::ACTION));
-        let id = app.panel.as_ref().expect("the Lens panel").0;
-        let left = panel::Msg::Sheet(crate::sheet::Event::Left);
-        let _ = app.update(Message::Panel(id, left));
-        assert_eq!(app.frame.is_some(), cfg!(windows));
     }
 
     #[test]
@@ -6275,12 +6265,16 @@ mod tests {
             app.card_at().position(),
             at.position() + Vector::new(-600.0, 0.0)
         );
-        // let go: it docks where Google's card opens (the side it was dropped
-        // on is kept: `sheet::let_go`; tests keep no config), no more moves
+        // let go: it stays there (nothing is saved), no more moves
         let _ = app.update(Message::CardReleased);
         let _ = app.update(Message::CardMoved(Point::new(0.0, 0.0)));
+        assert_eq!(
+            app.card_at().position(),
+            at.position() + Vector::new(-600.0, 0.0)
+        );
+        // the default place again; a selection under it: this one goes left
+        let _ = app.update(Message::Panel(id, panel::Msg::Card(card::Event::Reset)));
         assert_eq!(app.card_at(), at);
-        // a selection under the card: this one goes left
         drag(
             &mut app,
             Point::new(1500.0, 100.0),

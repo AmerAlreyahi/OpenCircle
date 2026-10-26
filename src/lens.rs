@@ -76,9 +76,8 @@ pub fn open(png: &[u8], width: u32, height: u32) -> io::Result<LensPage> {
     Ok(page)
 }
 
-/// The auto-submit page for this PNG crop, in memory (the results card serves
-/// it from memory: no file).
-pub fn page(png: &[u8], width: u32, height: u32) -> io::Result<String> {
+/// The auto-submit page for this PNG crop, in memory.
+fn page(png: &[u8], width: u32, height: u32) -> io::Result<String> {
     let (png, w, h) = fit(png, width, height)?;
     Ok(page_html(&png, w, h, &locale(), epoch_ms()))
 }
