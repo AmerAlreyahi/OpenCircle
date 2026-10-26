@@ -6,14 +6,14 @@ and search it (Google Lens), read it (OCR), translate it, or ask an AI about
 it. A second mode snips and annotates screenshots (region, window, full,
 scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
-requirement). Spikes live in `spikes/` (throwaway). The plan lives
-in `docs/internal/PLAN.md`, the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **planning — no code until the owner approves the
-plan.**
+requirement). Spikes live in `spikes/` (throwaway). The plan is the private
+master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
+(both local only). Status: **v0.1.0 published; work follows the master roadmap.**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
-then the private OpenCircle board (https://github.com/users/AmerAlreyahi/projects/7).
+then the master roadmap (CLAUDE.local.md) and the board
+"OpenCircle Roadmap" (https://github.com/users/AmerAlreyahi/projects/8).
 
 ## General rules
 
@@ -60,9 +60,9 @@ the first code):
 
     cargo fmt --check
     cargo clippy --all-targets -- -D warnings
-    cargo clippy --all-targets --features sheet -- -D warnings  # Linux: libwebkit2gtk-4.1-dev
+    cargo clippy --all-targets --features sheet -- -D warnings  # until N-02 removes `sheet`
     XDG_DATA_HOME=$(mktemp -d) XDG_CONFIG_HOME=$(mktemp -d) cargo test
-    cargo packager --release   # builds with --features sheet (the results card's helper)
+    cargo packager --release   # --features sheet until N-02 removes it
 
 Run tests with EMPTY app data/config dirs (as above): CI has no downloaded
 models or config, and a machine with them can hide a failure. After every push,
@@ -77,6 +77,27 @@ Windows runs. CI runners: `ubuntu-22.04`, `windows-latest`. No servers, no
 production systems.
 
 ## Owner decisions
+
+- MASTER ROADMAP (owner, 2026-10-26): the private roadmap (link in the gitignored
+  CLAUDE.local.md; local copy docs/internal/roadmap.md) overrides every older plan
+  and any entry below that disagrees with it. Never follow its "Superseded" section.
+  Work in the board's Order, ONE FEATURE AT A TIME, each made mature (tests, VM proof,
+  owner OK) before the next (owner, 2026-10-26). A phase is done only when its
+  Windows VM test gate passes; until the owner creates a Windows 11 VM, gates run on
+  the Windows 10 VM with the Windows 11 part marked pending.
+- Superseded 2026-10-26 (removed from this file; see the roadmap): the Google results
+  card / sheet / web view, Lens and AI Mode inside the app, auto-search after a
+  selection, Frost/Graphite widget themes and in-app frosted glass (now the Liquid
+  Glass design from the OS compositor, N-17/N-18), song search needing your own key
+  (now AudD with no key first, N-34), the AI trial and any owner-paid service, the
+  v0.1.x release themes and scopes, the one-exe sheet helper.
+- Ground rule (owner, 2026-10-26): the owner pays nothing and makes no profit; nothing
+  may depend on a paid owner service.
+- Ask AI without a key (owner, 2026-10-26): until the AI chat (N-05) and OpenRouter
+  sign-in (#39) land in 0.2.0, Ask AI with no key keeps opening Google AI Mode in the
+  user's own browser (no web view); `ai/browser.rs` is deleted then.
+- Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
+  is on hold until the owner resumes it.
 
 - Repository (owner, 2026-10-23): public GitHub repo, created by the owner.
   Internal docs stay in gitignored docs/internal/.
@@ -116,8 +137,10 @@ production systems.
 - Themes (owner, 2026-10-23): Light, Dark and System, from one token set.
 - Workflow (owner, 2026-10-23): planning first; execution starts only after
   the owner reviews the plan and adds rules.
-- Releases (owner rules): unsigned binaries, GitHub Releases via Actions,
-  owner approves each publish.
+- Releases (owner, 2026-10-26, supersedes "unsigned binaries"): GitHub Releases via
+  Actions, owner approves each publish; free code signing only (SignPath Foundation,
+  #122 then #76); if refused, stay unsigned and explain SmartScreen; minisign keeps
+  protecting updates.
 - Merging (owner, 2026-10-23): the lead merges verified work to main itself once
   CI + the local gate are green (and Windows-tested when it touches the UI).
 - Skills first (owner, 2026-10-25): every task uses the fitting skills/plugins;
@@ -127,27 +150,11 @@ production systems.
 - UI motion and polish (owner, 2026-10-24): for motion, transitions, loaders and
   UI polish in every release, workers use the VectorLab UI/UX skills (plugin);
   ported to iced, our tokens and shared components.
-- Progress tracking (owner, 2026-10-24, supersedes 2026-10-23): a GitHub Project
-  "OpenCircle" (users/AmerAlreyahi/projects/7), board view. Cards are PUBLIC issues
-  in this repo (public-safe wording, no secrets/hosts/paths), body template: Summary,
-  Why it matters, Current state, What you need to do, Done when, Links. Status:
-  Todo / In Progress / Waiting on owner decision / Done; field Release = v0.1.0 /
-  v0.1.1 / Later. The lead keeps it current and closes issues when done.
-- Selection look (owner, 2026-10-24, supersedes 2026-10-23): like Google by
-  default: the drawn circle snaps to a rounded box with corner brackets and the
-  search runs automatically; "keep the drawn shape" and "wait for me" are options
-  in Settings > Look & behaviour.
-- Customization (owner, 2026-10-24): a Look & behaviour page: selection style,
-  auto-search vs wait, search target, border style per mode (Google-style rainbow
-  glow / thin gradient / none, thickness, animation, colours), activation glow, dim.
-- Themes (owner, 2026-10-24): besides the app theme (Light/Dark/System), "active
-  look" themes for when the tool is over the screen (glow, border, dim, brackets,
-  bar style, accent), several presets (Google-like multi-colour default) + custom.
-- Song search (owner, 2026-10-24): free fingerprint lookup (AcoustID) can't match
-  clips (spike: 1/28), so song search is OPT-IN, bring your own key for a clip
-  recognition service (AudD first); the button stays hidden until a key is set;
-  a ~10 s clip of the chosen audio is sent to that service only on press (say so
-  plainly); key in the OS keyring; history off by default.
+- Progress tracking (owner, 2026-10-26, supersedes 2026-10-24): the GitHub Project
+  "OpenCircle Roadmap" (users/AmerAlreyahi/projects/8): fields Phase, Priority, Area,
+  Kind, Order (the work sequence). Cards are PUBLIC issues (public-safe wording, no
+  secrets/hosts/paths), footer "Roadmap: master roadmap (private)". The lead keeps
+  it and the roadmap current and closes issues when done.
 - Snip's main use (owner, 2026-10-24): explaining things to an AI with images.
   Optimise for capture → annotate → paste into an AI chat in seconds: copy after
   capture, AI-friendly size, image + OCR text, delay timer, snapping + loupe,
@@ -178,30 +185,7 @@ production systems.
   must look pretty: smooth like a background fade, no visible squares or blocks, no
   noise/grain, weaker-looking, yet text stays unrecognisable (it reads as "no text
   there", not as a smear).
-- Results sheet (owner, 2026-10-24): explore a slide-up sheet showing Google's own
-  page (Lens / AI Mode) in the system web view (WebView2 / WebKitGTK), loaded only
-  while open; no scraping, no copying Google's UI. Placement: see "Results card
-  placement" below (full height, resizable; bottom sheet only on portrait or
-  narrow screens). Everything happens inside the card (Lens + AI Mode on Windows
-  and Linux; on Linux a HUMAN solves Google's CAPTCHA there if shown; agents
-  never solve/bypass CAPTCHAs; owner is testing how often it returns).
-  Google sign-in doesn't work in embedded web views, so history = an opt-in LOCAL
-  OpenCircle search history + "Open in browser". All result panels follow the same rule, as FLOATING cards
-  (owner, 2026-10-24): inset from the screen edges, rounded ~20 px, shadow,
-  draggable + resizable, never a flat full-height slab.
-- Results card placement (owner, 2026-10-24, supersedes "away from the
-  selection" and "only the size is remembered"): results (Lens, AI Mode) show
-  directly in the floating card. It sits on the left or right side by the user's
-  preference, its width can be widened, and it moves sides with the common
-  pattern (drag the card's header; on release it docks to the nearer side). Side
-  and width are remembered across runs. If the saved side would cover
-  the selection, the card opens on the other side for that search only (owner,
-  2026-10-25). Nothing ever opens in the browser
-  automatically: only the card's "Open in browser" button does that.
 - Translate default target (owner, 2026-10-23): Arabic, changeable in settings.
-- No-key AI (owner, 2026-10-24): until a key is set, Ask AI opens the question
-  (prompt + the selection's text) in Google Search AI Mode in the user's own
-  browser; the image goes only via Lens. API providers stay as options.
 - Screen border (owner, 2026-10-24): a thin gradient border around the captured
   screen; live translate animates it subtly; snip shows it static.
 - Priorities (owner, 2026-10-24): when choosing between options, speed first,
@@ -218,10 +202,8 @@ production systems.
   pass CI. Linux VM testing resumes later, on the owner's word.
 - Lightweight means (owner, 2026-10-24): the least resources at ALL times, idle
   and busy (RAM, CPU, GPU, disk, download), not just a low idle footprint.
-- v0.1.0 scope (owner, 2026-10-24): release when Windows is fully tested; the
-  Linux builds are attached and labelled "preview, known Wayland limits" in the
-  release notes. The Linux checks and tweak round come in v0.1.1 (owner, 2026-10-25).
-- Main mode like Circle to Search (owner, 2026-10-24): when the overlay opens, a
+- Main mode like Circle to Search (owner, 2026-10-24; bar contents, auto-search and
+  the Lens/AI card are SUPERSEDED 2026-10-26 by N-03/N-04: circle, then choose): when the overlay opens, a
   bottom floating widget shows the main actions at once ("Ask about your screen"
   field, translate the screen, song search when a key is set). Text on screen can
   be selected directly: drag along text selects words, tap selects a word;
@@ -248,17 +230,6 @@ production systems.
   (supersedes "hidden until a key is set"): with no key it opens the key setup and
   sends nothing. Ask AI can also send a plain question without the screen (an
   "Include screen" toggle in the field, on by default).
-- Themes in v0.1.0 (owner, 2026-10-24, minimum): 2 new widget themes (one is
-  the frosted glass below); the 7 existing live-border looks are enough (no new
-  ones). A Settings switch turns the glass effect on or off for the widgets.
-- Widget themes (owner, 2026-10-24): add a frosted-glass theme in the spirit
-  of Apple's glass look (own name and visuals, nothing copied) plus several more
-  elegant themes, as options for the floating widgets (bar, cards, popups). The
-  current theme stays the default. All of them come from the one token set in
-  theme.rs.
-- One exe on Windows (owner, 2026-10-25): the results-card helper runs as a hidden
-  mode of opencircle.exe (like the OCR worker), not a second file; Linux keeps the
-  separate opencircle-sheet binary (WebKitGTK must stay optional).
 - Live translate controller (owner, 2026-10-25): ONE compact controller in the
   bar's look, sized to what's visible, never over a window's tab bar.
 - Start with the OS (owner, 2026-10-25): a Settings > General switch, ON by
@@ -266,13 +237,6 @@ production systems.
 - Copy = image only (owner, 2026-10-25, supersedes "image + OCR text"): copying a
   capture puts only the picture on the clipboard; text is copied only via text
   selection / Copy text.
-- v0.1.1 scope (owner, 2026-10-25): the snip tool fixes WITH tests (#45: Ctrl+C copies
-  the area, copy = image only, the editor toolbar replaces the snip controls, timer
-  only in Settings, scrolling capture in the editor and fixed) + smart automatic
-  window/element selection exactly like iTop Screenshot (hover outlines the window or
-  control under the cursor, click captures it, drag = free region, wheel walks
-  element → window → monitor), plus the Linux round and animations/smoothness.
-  v0.1.2 speed/lightness, v0.1.3 maturity.
 - Other providers (owner, 2026-10-25): Codex and Google Antigravity may be used as
   workers; from Google use ONLY the "Argon" model, never other Google models.
   Exception (owner, 2026-10-25): Gemini Pro or Flash 3.8 may run Linux TEST passes
@@ -286,8 +250,6 @@ production systems.
 - About page (owner, 2026-10-25): app info, model/library notices, and a developer
   card for the owner (avatar bundled, no runtime network; data refreshed from the
   owner's GitHub profile at each release by scripts/refresh-about.sh).
-- Release themes (owner, 2026-10-25): v0.1.1 animations and smoothness, v0.1.2
-  speed and lightness, v0.1.3 maturity and reliability.
 - Credits (owner, 2026-10-24): choose the cheaper way whenever quality barely
   changes: at most 3 workers at once, mid model for routine work (strong model
   only for security, hard bugs, design), one contact sheet per visual proof,
@@ -311,19 +273,9 @@ production systems.
   xdg-desktop-portal (Screenshot, GlobalShortcuts). The GlobalShortcuts portal
   is missing on some desktops → fallback: user binds `opencircle capture` in
   their desktop's shortcut settings.
-- `Windows.Media.Ocr` officially needs package identity (MSIX) → we use the
-  cross-platform PaddleOCR (ONNX Runtime) engine instead.
+- `Windows.Media.Ocr` works unpackaged (no MSIX needed; benchmarked 2026-10-26: 90-335 ms
+  per screen). It is the fast engine on Windows (N-12, #62); PP-OCRv5 stays for selections,
+  Arabic and games. It reads only languages installed in Windows (#63).
 - Google Lens has no public upload API. Existing clones upload to imgur/uguu
   (privacy leak). Our approach: the browser itself posts the image to Lens
   through a local auto-submitting form (spike S1 in the plan proves it).
-- Results card (`src/sheet.rs`): the web view runs only in a short-lived helper
-  process (Windows: `opencircle.exe sheet-helper`; Linux: the `opencircle-sheet`
-  binary; feature `sheet`), never in the resident app: linking WebKitGTK
-  costs +23 MB idle RSS, and an in-process web view leaves ~230 MB after close
-  (spike S9). Google often shows its "unusual traffic" check to Lens in
-  WebKitGTK (URL `google.com/sorry/…`): the card shows a hint; the user solves
-  it or opens the browser. Side and width: `[results]` in the config, written
-  when the user docks or resizes the card. Search history:
-  `general.search_history` (`src/sheet/history.rs`). No helper / runtime
-  (WebView2, libwebkit2gtk-4.1: Recommends, not Depends): the panel says so and
-  offers "Open in browser" (never opens it by itself).
