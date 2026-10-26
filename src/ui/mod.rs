@@ -216,6 +216,8 @@ enum Message {
     SongKey,
     /// Try the waiting update again (it waits while OpenCircle is in use).
     UpdateTick,
+    /// A snapped stroke finished morphing into its box: the selection's actions show.
+    Settled,
 }
 
 /// The shortcuts of the bottom bar's buttons, as the tooltips show them ("" = none).
@@ -656,6 +658,7 @@ impl App {
             }
             Message::Trigger(Trigger::Update(event)) => self.on_update(event),
             Message::UpdateTick => self.try_update(),
+            Message::Settled => Task::none(), // the rebuilt view shows the actions
             Message::Trigger(Trigger::Quick(at, qa))
                 if qa.live && qa.action == actions::translate::ACTION.id =>
             {
@@ -1395,6 +1398,7 @@ impl App {
             }
             overlay::Event::Release => {
                 self.drawing = false;
+                let mut settle = Task::none();
                 let zoom = self.view.zoom();
                 let mut settled = overlay::settle(&self.stroke, zoom, self.screen);
                 // Snap: the stroke becomes a rounded box (it morphs there).
@@ -1403,6 +1407,11 @@ impl App {
                 {
                     if sel.kind != overlay::Kind::Drag {
                         self.morph = Some((kept.clone(), Instant::now()));
+                        settle = background(|tx| {
+                            std::thread::sleep(overlay::MORPH + Duration::from_millis(20));
+                            let _ = tx.unbounded_send(());
+                        })
+                        .map(|()| Message::Settled);
                     }
                     (*sel, *kept) = overlay::snap(sel.area);
                 }
@@ -1444,7 +1453,7 @@ impl App {
                     true => self.auto_search(),
                     false => Task::none(), // Shift: more to come
                 };
-                return Task::batch([self.selected(), search]);
+                return Task::batch([self.selected(), search, settle]);
             }
             overlay::Event::Enter if matches!(self.purpose, Purpose::Search) => {
                 return self.run(actions::default_for(&config::current()));
@@ -3210,7 +3219,9 @@ impl App {
             snip.view().map(Message::Snip)
         } else if let Some(selection) = self.selection {
             match self.purpose {
-                Purpose::Search if !self.drawing => self.selection_ui(selection),
+                Purpose::Search if !self.drawing && !self.settling() => {
+                    self.selection_ui(selection)
+                }
                 _ => space().into(),
             }
         } else {
@@ -3235,9 +3246,12 @@ impl App {
             }
         }
         // Beside a panel (an auto-search's): the chips.
-        if let (Some(_), Some(selection), Purpose::Search, false) =
-            (&self.panel, self.selection, &self.purpose, self.drawing)
-        {
+        if let (Some(_), Some(selection), Purpose::Search, false) = (
+            &self.panel,
+            self.selection,
+            &self.purpose,
+            self.drawing || self.settling(),
+        ) {
             layers = layers.push(self.selection_ui(selection));
         }
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
@@ -3297,6 +3311,13 @@ impl App {
     /// How far the opening animation is (0..1, eased out); 0 on its first frame.
     fn appeared(&self) -> f32 {
         self.appear.map_or(0.0, |(_, t)| motion::Curve::Out.ease(t))
+    }
+
+    /// A drawn stroke is still morphing into its box: the selection's actions
+    /// wait for it (draw, release, snap, then the user acts).
+    fn settling(&self) -> bool {
+        (self.morph.as_ref())
+            .is_some_and(|(_, at)| overlay::morph_progress(*at, Instant::now()) < 1.0)
     }
 
     /// The opening animation still runs (a frame drawn and more to come).
@@ -3433,7 +3454,7 @@ impl App {
         );
         let field = widgets::ai_field(input, width, Message::AskButton, Message::AskSubmit);
         let keys = &self.bar_keys;
-        let selected = self.selection.is_some();
+        let selected = self.selection.is_some() && !self.settling();
         let shown = labs::bar(&self.labs);
         let icons = shown.iter().filter(|b| !b.is_pill()).count() as f32;
         let widths = bar::pill_widths(self.screen.width, icons);
@@ -6062,6 +6083,39 @@ mod tests {
         circle(&mut app, Point::new(500.0, 300.0), 60.0, false);
         assert_eq!(app.selection.unwrap().kind, overlay::Kind::Loop);
         assert!(app.morph.is_none());
+    }
+
+    /// Draw, release, snap, then act: during the press only the stroke is there,
+    /// after the release the actions wait for the morph to end.
+    #[test]
+    fn the_selections_actions_wait_for_the_snap_to_finish() {
+        let mut app = open_app(1280, 800, 1.0);
+        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        let pill = |app: &App| {
+            let got = widgets::shot::click(app.view(app.overlay), app.screen, bar_pill(app, 0));
+            got.iter().any(|m| matches!(m, Message::Pill(_)))
+        };
+        let ring = ring(300.0, 250.0, 80.0);
+        event(
+            &mut app,
+            overlay::Event::Press {
+                at: ring[0],
+                shift: false,
+            },
+        );
+        for &p in &ring[1..] {
+            event(&mut app, overlay::Event::Move(p));
+            // the press: the stroke and nothing else (no box, no snap, no actions)
+            assert!(app.selection.is_none() && app.morph.is_none() && !app.settling());
+            assert!(app.drawing && !pill(&app));
+        }
+        event(&mut app, overlay::Event::Release);
+        assert!(app.selection.is_some() && app.settling(), "morphing");
+        assert!(!pill(&app), "no actions mid-morph");
+        // the morph ends: the actions are there
+        let (from, _) = app.morph.take().unwrap();
+        app.morph = Some((from, Instant::now() - overlay::MORPH * 2));
+        assert!(!app.settling() && pill(&app));
     }
 
     #[test]
