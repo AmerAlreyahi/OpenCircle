@@ -475,6 +475,9 @@ struct App {
     awaits: Option<(Point, Await)>,
     /// Ctrl+A waits for the whole screen to be read.
     want_all: bool,
+    /// A drag let go before the band under its press was read, and the
+    /// overlay events after it: replayed once it is.
+    held: Option<Vec<overlay::Event>>,
     /// Text was selected in this opening: the rest of the screen is read in
     /// the background (gently), nearest the pointer first.
     text_used: bool,
@@ -635,6 +638,7 @@ impl App {
             reading: None,
             awaits: None,
             want_all: false,
+            held: None,
             text_used: false,
             pointer: Point::ORIGIN,
             ocr_ready: false,
@@ -1025,12 +1029,13 @@ impl App {
                     Ok(lines) => {
                         self.screen_text.add(band, lines, self.screen);
                         let done = self.more_text();
-                        Task::batch([done, self.read_more()])
+                        let released = self.release_held();
+                        Task::batch([done, released, self.read_more()])
                     }
                     // (the next press tries again; the helper backs off by itself)
                     Err(e) => {
                         eprintln!("[opencircle] reading the screen's text failed: {e}");
-                        Task::none()
+                        self.release_held()
                     }
                 }
             }
@@ -1313,6 +1318,21 @@ impl App {
     }
 
     fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {
+        // A drag let go before the band under its press was read waits for
+        // it, with the keys after it (Ctrl+C); a new press goes on without.
+        if let Some(held) = &mut self.held {
+            match event {
+                overlay::Event::Press { .. } => {
+                    let released = self.release_held();
+                    return Task::batch([released, self.on_overlay(event)]);
+                }
+                overlay::Event::Hover(_) | overlay::Event::Move(_) => {}
+                _ => {
+                    held.push(event);
+                    return Task::none();
+                }
+            }
+        }
         // The editor, a toast or a scrolling capture has the screen.
         if self.edit.as_ref().is_some_and(Editing::is_open)
             || self.toast.is_some()
@@ -1508,6 +1528,17 @@ impl App {
                 } else {
                     self.tap(grab.from) // a click on the selection
                 };
+            }
+            // A drag that may have begun on text not read yet: the band under
+            // its press decides (text or a stroke) once read (`release_held`).
+            overlay::Event::Release
+                if !self.adding
+                    && let Some(&start) = self.stroke.first()
+                    && self.reading.is_some_and(|band| band.contains(start))
+                    && !self.screen_text.knows(start.y)
+                    && !overlay::is_tap(&self.stroke, self.view.zoom()) =>
+            {
+                self.held = Some(Vec::new());
             }
             overlay::Event::Release => {
                 self.drawing = false;
@@ -2034,12 +2065,17 @@ impl App {
         let Some([x0, y0, ..]) = actions::crop_bounds(width, height, self.scale, band) else {
             return Task::none();
         };
+        // only the lines it is read for (frame px in the crop)
+        let Some((top, bottom)) = self.screen_text.unread(band, self.screen) else {
+            return Task::none();
+        };
+        let at = |y: f32| ((y * self.scale) as u32).saturating_sub(y0);
+        let rows = (at(top), at(bottom));
         self.reading = Some(band);
         let (scale, opening) = (self.scale, self.opening);
         background(move |tx| {
             let read = match actions::crop(&pixels, width, height, scale, band) {
-                Some(crop) if gently => ocr::recognize_gently(&crop.rgba, crop.width, crop.height),
-                Some(crop) => ocr::recognize_in_child(&crop.rgba, crop.width, crop.height),
+                Some(c) => ocr::recognize_band(&c.rgba, c.width, c.height, rows, gently),
                 None => Err(ocr::OcrError::BadImage("an empty band".into())),
             };
             let lines = read.map(|blocks| {
@@ -2050,6 +2086,17 @@ impl App {
             let _ = tx.unbounded_send(lines.map_err(|e| e.to_string()));
         })
         .map(move |read| Message::ScreenText(opening, band, read))
+    }
+
+    /// The held release (and the events after it) go on, now that the band
+    /// under the press is read (or failed): a text selection or a stroke.
+    fn release_held(&mut self) -> Task<Message> {
+        let Some(events) = self.held.take() else {
+            return Task::none();
+        };
+        let mut tasks = vec![self.on_overlay(overlay::Event::Release)];
+        tasks.extend(events.into_iter().map(|e| self.on_overlay(e)));
+        Task::batch(tasks)
     }
 
     /// More of the screen's text was read: a text selection takes in the new
@@ -3164,6 +3211,7 @@ impl App {
         self.reading = None;
         self.awaits = None;
         self.want_all = false;
+        self.held = None;
         self.text_used = false;
         self.reader = Reader::Idle;
         self.text_press = None;
@@ -5806,6 +5854,37 @@ mod tests {
         assert_eq!(app.screen_text.lines().len(), TEXT.len());
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"), "kept");
         text::MODELS_HERE.set(None);
+    }
+
+    /// A quick drag on text let go (and Ctrl+C pressed) before the band under
+    /// its press is read: both wait for it, and the text is what is copied.
+    /// Off text, the held drag is a stroke as before.
+    #[test]
+    fn a_drag_let_go_before_its_band_is_read_waits_for_it() {
+        let mut app = reader_app();
+        stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
+        let band = app.reading.expect("the band under the press");
+        assert!(app.held.is_some() && app.selection.is_none(), "held");
+        let ctrl_c = overlay::Event::Key {
+            letter: 'c',
+            ctrl: true,
+        };
+        event(&mut app, ctrl_c);
+        let _ = copy::copied::text();
+        let task = answer(&mut app, band);
+        run_task(&mut app, task);
+        assert_eq!(copy::copied::text().as_deref(), Some("while you drag"));
+        assert!(app.held.is_none());
+        // off text: a stroke, snapped to a box as before
+        let mut app = reader_app();
+        stroke(
+            &mut app,
+            &[Point::new(600.0, 250.0), Point::new(800.0, 400.0)],
+        );
+        let band = app.reading.expect("the band under the press");
+        let _ = answer(&mut app, band);
+        assert!(app.held.is_none() && app.word.is_none());
+        assert_eq!(app.selection.map(|s| s.kind), Some(overlay::Kind::Drag));
     }
 
     /// A tap, a Shift+click and Ctrl+A before their text is read wait for it.

@@ -11,7 +11,7 @@ pub(crate) mod worker;
 pub use models::{download_size, ensure_models, models_dir, ready};
 pub use session::{Hold, hold};
 pub use worker::{
-    WORKER_ARG, recognize_as, recognize_gently, recognize_in_child, translate_in_child, warm,
+    WORKER_ARG, recognize_as, recognize_band, recognize_in_child, translate_in_child, warm,
     worker_main,
 };
 
@@ -335,6 +335,19 @@ impl Engine {
         height: u32,
         read: Read,
     ) -> Result<Vec<TextBlock>, OcrError> {
+        self.recognize_rows(rgba, width, height, read, None)
+    }
+
+    /// `recognize`, reading only the lines whose middle is in `rows` (top,
+    /// bottom; all of them for `None`): recognition is the costly part.
+    pub fn recognize_rows(
+        &mut self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+        read: Read,
+        rows: Option<(u32, u32)>,
+    ) -> Result<Vec<TextBlock>, OcrError> {
         let start = std::time::Instant::now();
         let img = to_rgb(rgba, width, height)?;
         let (dw, dh) = detect_size(width, height);
@@ -358,6 +371,10 @@ impl Engine {
                 [x0, y0, x1.min(w) - x0, y1.min(h) - y0]
             })
             .filter(|b| b[2] >= 2.0 && b[3] >= 2.0)
+            .filter(|b| {
+                let middle = b[1] + b[3] / 2.0;
+                rows.is_none_or(|(top, bottom)| (top as f32..bottom as f32).contains(&middle))
+            })
             .collect();
         // A batch is padded to its widest line: batch alike shapes (as
         // PaddleOCR does). `reading_order` restores the order.

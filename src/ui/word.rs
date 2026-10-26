@@ -607,19 +607,15 @@ impl Screen {
         ))
     }
 
-    /// OCR read `lines` (image px) in `band`: the rows it knows for sure that
-    /// weren't read yet take their lines from it.
-    pub fn add(&mut self, band: Rectangle, lines: Vec<Line>, screen: Size) {
+    /// The rows of `band` it knows for sure and that weren't read yet, as
+    /// separate (top, bottom) ranges (image px).
+    fn new_rows(&self, band: Rectangle, screen: Size) -> Vec<(f32, f32)> {
         let bottom = band.y + band.height;
         let top = if band.y <= 0.5 { 0.0 } else { band.y + EDGE };
         let bottom = match bottom >= screen.height - 0.5 {
             true => screen.height,
             false => bottom - EDGE,
         };
-        if top >= bottom {
-            return;
-        }
-        // the new rows: [top, bottom) less what is known
         let mut new = vec![(top, bottom)];
         for &(a, b) in &self.known {
             new = (new.into_iter())
@@ -627,6 +623,24 @@ impl Screen {
                 .filter(|(x, y)| x < y)
                 .collect();
         }
+        new.retain(|(x, y)| x < y);
+        new
+    }
+
+    /// The rows OCR needs to read in `band` (top, bottom; image px): only
+    /// lines with their middle in them are kept (`add`). `None`: nothing new.
+    pub fn unread(&self, band: Rectangle, screen: Size) -> Option<(f32, f32)> {
+        let new = self.new_rows(band, screen);
+        Some((new.first()?.0, new.last()?.1))
+    }
+
+    /// OCR read `lines` (image px) in `band`: the rows it knows for sure that
+    /// weren't read yet take their lines from it.
+    pub fn add(&mut self, band: Rectangle, lines: Vec<Line>, screen: Size) {
+        let new = self.new_rows(band, screen);
+        let Some((&(top, _), &(_, bottom))) = new.first().zip(new.last()) else {
+            return;
+        };
         for (a, b) in new {
             let centre = |l: &&Line| (a..b).contains(&l.bounds.center_y());
             self.parts
@@ -679,7 +693,10 @@ mod tests {
         assert!(!text.knows(500.0) && text.lines().is_empty());
         let first = Screen::band(500.0, screen);
         assert_eq!((first.y, first.width, first.height), (452.0, 1920.0, 96.0));
+        // OCR reads only the lines with their middle in the rows it knows for sure
+        assert_eq!(text.unread(first, screen), Some((476.0, 524.0)));
         text.add(first, ocr(first), screen);
+        assert_eq!(text.unread(first, screen), None, "nothing new");
         assert!(text.knows(500.0) && !text.knows(470.0) && !text.knows(530.0));
         let near: Vec<String> = text.lines().into_iter().map(|l| l.text).collect();
         assert_eq!(near, ["line 16"], "the line under the pointer");
