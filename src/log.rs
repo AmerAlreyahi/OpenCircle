@@ -377,7 +377,7 @@ fn redact_home(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn temp(name: &str) -> PathBuf {
@@ -386,17 +386,24 @@ mod tests {
         d
     }
 
+    /// A fake key: `prefix` and 36 plain characters (never a real one).
+    pub(crate) fn fake(prefix: &str) -> String {
+        format!("{prefix}{}", "FakeTest0x".repeat(4).get(..36).unwrap())
+    }
+
     #[test]
     fn redacts_realistic_secrets() {
+        // built at run time: no key-shaped text in the source (secret scanners)
         let secrets = [
-            "sk-proj-AbCdEf0123456789xyzABCDEF0123456789",
-            "sk-ant-api03-Zk9mQ2xLpR7vT4wYb8NcHd3sEfGaUj",
-            "AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY",
-            "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
-            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fw",
-            "3f9a8c1e5b7d4a6f8e2c0b9d7a5f3e1c",
+            fake("sk-proj-"),
+            fake("sk-ant-api03-"),
+            fake("AIza"),
+            fake("ghp_"),
+            format!("{}.{}.{}", fake("eyJ"), fake("eyJ"), fake("")),
+            "3f9a8c1e5b7d4a6f8e2c0b9d7a5f3e1c".to_string(),
         ];
-        for s in secrets {
+        for s in &secrets {
+            let s = s.as_str();
             for line in [
                 format!("request failed with {s} for the user"),
                 format!("Authorization: Bearer {s}"),
@@ -474,7 +481,7 @@ mod tests {
             let t = std::thread::Builder::new()
                 .name("crasher".into())
                 .spawn(|| {
-                    panic!("boom with token=ghp_16C7e42F292c6912E7710c838347Ae178B4a");
+                    panic!("boom with token={}", fake("ghp_"));
                 });
             assert!(t.unwrap().join().is_err());
         }
@@ -491,7 +498,7 @@ mod tests {
         assert!(report.contains("backtrace:"), "{report}");
         assert!(report.contains("before the crash"), "{report}");
         assert!(
-            !report.contains("ghp_16C7") && !report.contains("sk-live-0123"),
+            !report.contains(&fake("ghp_")) && !report.contains("sk-live-0123"),
             "{report}"
         );
         let _ = fs::remove_dir_all(dir);

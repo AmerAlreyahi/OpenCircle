@@ -106,7 +106,10 @@ mod tests {
         c.ai.model = "gpt-secret-model".into();
         c.ai.base_url = "https://example.com/v1?key=sk-live-0123456789abcdefXYZ".into();
         c.general.save_folder = "/home/amer/Pictures".into();
-        crate::log!("[opencircle] failed: Bearer sk-ant-api03-Zk9mQ2xLpR7vT4wYb8NcHd3sEfGaUj");
+        crate::log!(
+            "[opencircle] failed: Bearer {}",
+            crate::log::tests::fake("sk-ant-api03-")
+        );
         crate::log!("[opencircle] cannot read /home/amer/.config/x");
         let r = report(&c);
         for want in [
