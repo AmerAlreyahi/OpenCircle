@@ -166,6 +166,7 @@ pub struct State {
 
 /// The setup's whole program: the window until it closes.
 pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
+    let started = std::time::Instant::now();
     let package = match Package::write(msi_bytes) {
         Ok(p) => Arc::new(p),
         Err(e) => {
@@ -174,7 +175,13 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
         }
     };
     let installed = msi::installed(&package);
+    let read = started.elapsed();
     let size = msi::installed_size(&package);
+    eprintln!(
+        "[opencircle] setup: unpacked + read the installed copy in {} ms, sized in {} ms",
+        read.as_millis(),
+        (started.elapsed() - read).as_millis()
+    );
     let file_name = std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
@@ -194,7 +201,11 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
         );
         let (id, open) = windows::setup_window(Size::new(WIDTH, state.height()), RADIUS);
         state.window = Some(id);
-        (state, open.discard())
+        // A setup is what the user just started: in front, with the focus (a window
+        // opened behind another, e.g. from a script, was not drawn until activated).
+        let front = window::gain_focus(id);
+        let drawn = Task::perform(async {}, |()| Message::Frame(Instant::now()));
+        (state, open.discard().chain(front).chain(drawn))
     };
     let mut app = iced::daemon(boot, State::update, State::view);
     for font in widgets::FONTS {
