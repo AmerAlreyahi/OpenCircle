@@ -203,13 +203,21 @@ const START_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 /// to quit) quits first, or the new one would hand itself to it and exit, and
 /// then the old one goes too: nothing left running. Then the installed app
 /// starts (`start`) and is waited for until it answers. `Err` = why not.
-pub fn launch(exe: &Path) -> Result<(), String> {
+/// After an update or repair (`settings`) the app has nothing new to show on its
+/// own, so Launch opens its Settings, as a second launch does (a fresh install
+/// has its first-run onboarding). Done through the running app's socket, not an
+/// argument: an elevated setup starts the app through Explorer, which passes none.
+pub fn launch(exe: &Path, settings: bool) -> Result<(), String> {
+    let show = || {
+        let _ = crate::hotkey::forward(&crate::hotkey::Command::OpenSettings.line());
+    };
     launch_with(
         exe,
         quit_running_app,
         start,
         crate::hotkey::running,
         START_WAIT,
+        settings.then_some(&show as &dyn Fn()),
     )
 }
 
@@ -219,6 +227,7 @@ fn launch_with(
     start: impl FnOnce(&Path) -> std::io::Result<()>,
     running: impl Fn() -> bool,
     wait: std::time::Duration,
+    show_settings: Option<&dyn Fn()>,
 ) -> Result<(), String> {
     if !quit() {
         crate::log!("[opencircle] setup: the running OpenCircle did not quit");
@@ -234,6 +243,9 @@ fn launch_with(
             return Err("OpenCircle did not start. Start it from the Start menu.".into());
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if let Some(show) = show_settings {
+        show();
     }
     Ok(())
 }
@@ -414,6 +426,7 @@ mod tests {
                 *polls.borrow() > 2 // answers on the third look
             },
             Duration::from_secs(5),
+            None,
         );
         assert_eq!(result, Ok(()));
         assert_eq!(*steps.borrow(), ["quit", "start"]);
@@ -425,6 +438,7 @@ mod tests {
             |_| Ok(()),
             || false,
             Duration::from_millis(250),
+            None,
         );
         assert!(silent.unwrap_err().contains("did not start"));
         let refused = launch_with(
@@ -433,8 +447,37 @@ mod tests {
             |_| Err(std::io::Error::other("blocked")),
             || true,
             Duration::from_secs(1),
+            None,
         );
         assert!(refused.unwrap_err().contains("blocked"));
+    }
+
+    /// After an update or repair Launch opens Settings once the app answers (and
+    /// not before); after a fresh install it asks for nothing (onboarding shows).
+    #[test]
+    fn launch_opens_settings_after_an_update_only() {
+        use std::cell::Cell;
+        use std::time::Duration;
+        for (settings, shown) in [(true, 1), (false, 0)] {
+            let (up, opened) = (Cell::new(false), Cell::new(0));
+            let show = || {
+                assert!(up.get(), "Settings is asked for once the app answers");
+                opened.set(opened.get() + 1);
+            };
+            let result = launch_with(
+                Path::new("app.exe"),
+                || true,
+                |_| {
+                    up.set(true);
+                    Ok(())
+                },
+                || up.get(),
+                Duration::from_secs(1),
+                settings.then_some(&show as &dyn Fn()),
+            );
+            assert_eq!(result, Ok(()));
+            assert_eq!(opened.get(), shown);
+        }
     }
 
     #[test]

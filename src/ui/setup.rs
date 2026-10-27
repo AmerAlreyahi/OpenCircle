@@ -204,7 +204,7 @@ pub struct State {
     /// Why Launch did not start the app (shown in place of the finish text).
     launch_error: Option<String>,
     /// The last step's work (`finish`; tests put a stand-in here).
-    finish: fn(&str, bool, bool) -> Result<(), String>,
+    finish: fn(&str, bool, bool, bool) -> Result<(), String>,
     /// The uninstall window: the product code it removes.
     uninstall: Option<String>,
     /// The uninstall removes the user's data too (the Keep / Remove switch),
@@ -573,10 +573,11 @@ impl State {
         }
         self.leaving = true;
         let (folder, autostart) = (self.folder.clone(), self.autostart);
+        let updating = self.installed.is_some();
         self.launch_error = None;
         let work = self.finish;
         super::background(move |tx| {
-            let _ = tx.unbounded_send(work(&folder, autostart, launch));
+            let _ = tx.unbounded_send(work(&folder, autostart, launch, updating));
         })
         .map(Message::Left)
     }
@@ -983,10 +984,10 @@ impl State {
 }
 
 /// The last step's work: the choice kept, and (`launch`) the app started.
-fn finish(folder: &str, autostart: bool, launch: bool) -> Result<(), String> {
+fn finish(folder: &str, autostart: bool, launch: bool, updating: bool) -> Result<(), String> {
     keep_choice(folder, autostart);
     match launch {
-        true => setup_core::launch(&setup_core::app_in(folder)),
+        true => setup_core::launch(&setup_core::app_in(folder), updating),
         false => Ok(()),
     }
 }
@@ -1216,7 +1217,7 @@ mod tests {
     fn launch_never_blocks_the_window() {
         let mut s = state(None);
         s.step = Step::Finish;
-        s.finish = |_, _, _| {
+        s.finish = |_, _, _, _| {
             std::thread::sleep(std::time::Duration::from_secs(2));
             Ok(())
         };
@@ -1231,13 +1232,43 @@ mod tests {
         assert_eq!(s.step, Step::Finish);
     }
 
+    /// Launch after an update or repair asks for Settings; after a fresh install it
+    /// does not (the first run's onboarding shows).
+    #[test]
+    fn launch_asks_for_settings_only_when_updating() {
+        use std::sync::atomic::{AtomicU8, Ordering::SeqCst};
+        static SEEN: AtomicU8 = AtomicU8::new(0); // 1 = fresh, 2 = updating
+        let old = Installed {
+            version: "0.1.0".into(),
+            folder: None,
+            same: false,
+        };
+        for (installed, want) in [(None, 1), (Some(old), 2)] {
+            SEEN.store(0, SeqCst);
+            let mut s = state(installed);
+            s.step = Step::Finish;
+            s.finish = |_, _, _, updating| {
+                SEEN.store(if updating { 2 } else { 1 }, SeqCst);
+                Ok(())
+            };
+            let _ = s.update(Message::Launch);
+            for _ in 0..50 {
+                if SEEN.load(SeqCst) != 0 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            assert_eq!(SEEN.load(SeqCst), want);
+        }
+    }
+
     /// The uninstall window: Keep / Remove, then removing, then removed; it
     /// never touches "Start with Windows" or starts the app on its way out.
     #[test]
     fn the_uninstall_asks_removes_and_closes() {
         let mut s = state(None);
         s.uninstall = Some("{046BC980-BD0C-45D2-B990-202898DD0BAD}".into());
-        s.finish = |_, _, _| panic!("the uninstall keeps no choice and starts nothing");
+        s.finish = |_, _, _, _| panic!("the uninstall keeps no choice and starts nothing");
         assert!(!s.remove_data, "keeps the data unless asked");
         let _ = s.update(Message::RemoveData(true));
         assert!(
