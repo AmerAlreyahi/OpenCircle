@@ -138,7 +138,12 @@ pub fn outcome(code: u32, last: Option<&str>) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-pub use win::{ask_yes_no, install, installed};
+pub use win::{ask_yes_no, install, installed, installed_size};
+
+#[cfg(not(windows))]
+pub fn installed_size(_: &Package) -> Option<u64> {
+    None
+}
 
 #[cfg(not(windows))]
 pub fn installed(_: &Package) -> Option<Installed> {
@@ -216,6 +221,37 @@ mod win {
         // SAFETY: the handle opened above.
         unsafe { MsiCloseHandle(handle) };
         codes
+    }
+
+    /// What the package puts on disk: its `File` table's sizes added up.
+    pub fn installed_size(package: &Package) -> Option<u64> {
+        let path = HSTRING::from(package.path.as_os_str());
+        let (mut db, mut view) = (MSIHANDLE::default(), MSIHANDLE::default());
+        // SAFETY: plain MSI database calls on handles opened here and closed below.
+        unsafe {
+            if MsiOpenDatabaseW(&path, MSIDBOPEN_READONLY, &mut db) != 0 {
+                return None;
+            }
+            let mut total = None;
+            if MsiDatabaseOpenViewW(
+                db,
+                windows::core::w!("SELECT `FileSize` FROM `File`"),
+                &mut view,
+            ) == 0
+                && MsiViewExecute(view, MSIHANDLE::default()) == 0
+            {
+                let mut sum = 0u64;
+                let mut record = MSIHANDLE::default();
+                while MsiViewFetch(view, &mut record) == 0 {
+                    sum += MsiRecordGetInteger(record, 1).max(0) as u64;
+                    MsiCloseHandle(record);
+                }
+                total = Some(sum);
+                MsiCloseHandle(view);
+            }
+            MsiCloseHandle(db);
+            total
+        }
     }
 
     pub fn installed(package: &Package) -> Option<Installed> {

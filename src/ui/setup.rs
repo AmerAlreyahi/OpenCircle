@@ -174,10 +174,7 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
         }
     };
     let installed = msi::installed(&package);
-    let size = std::env::current_exe()
-        .and_then(std::fs::metadata)
-        .map(|m| m.len().saturating_sub(msi_bytes.len() as u64))
-        .ok();
+    let size = msi::installed_size(&package);
     let file_name = std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
