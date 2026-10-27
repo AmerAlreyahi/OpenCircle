@@ -17,6 +17,7 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 
 use iced::widget::image::Handle;
 use iced::widget::tooltip::Position;
@@ -531,7 +532,20 @@ pub struct State {
     /// the window opens (#63; empty off Windows).
     recognizers: Vec<String>,
     profile: Option<String>,
+    /// The window was asked to close with unsaved changes: the footer asks
+    /// Save / Discard / Keep editing (#136).
+    asking_close: bool,
+    /// Save or Discard answered: the shell closes the window now.
+    leaving: bool,
+    /// Every valid change is written at once (the real window; `State::new`
+    /// keeps it off so tests drive `Message::Save` themselves).
+    auto: bool,
+    /// When the last auto-save happened: the pill says "Saved" for `SAVED_FOR`.
+    saved_at: Option<Instant>,
 }
+
+/// How long the footer pill says "Saved" after a change (the design's 1.8 s).
+const SAVED_FOR: Duration = Duration::from_millis(1800);
 
 impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -610,6 +624,12 @@ pub enum Message {
     CheckUpdate,
     UpdateStatus(String),
     Save,
+    /// The "Saved" pill's clock.
+    Tick,
+    /// The footer's question when the window is closed with unsaved changes (#136).
+    CloseSave,
+    CloseDiscard,
+    CloseKeep,
 }
 
 /// A colour set in the custom look's dropdown.
@@ -721,7 +741,9 @@ impl State {
     /// The real config file and the real keyring.
     pub fn open() -> Self {
         let (config, warnings) = Config::load();
-        Self::new(config, warnings, None, Box::new(Keyring))
+        let mut s = Self::new(config, warnings, None, Box::new(Keyring));
+        s.auto = true;
+        s
     }
 
     /// `path: None` = `Config::path()`. `warnings` come from `Config::load`.
@@ -773,6 +795,10 @@ impl State {
             update_status: None,
             recognizers,
             profile,
+            asking_close: false,
+            leaving: false,
+            auto: false,
+            saved_at: None,
         };
         s.previews = LOOKS.iter().map(|(t, ..)| preview(&s.look(*t))).collect();
         s.revalidate();
@@ -786,6 +812,18 @@ impl State {
 
     fn dirty(&self) -> bool {
         self.draft != self.saved
+    }
+
+    /// The window is being closed: `true` = nothing is lost, close it. With
+    /// unsaved changes it asks in the footer instead and returns `false`.
+    pub fn close_requested(&mut self) -> bool {
+        self.asking_close = self.dirty();
+        !self.asking_close
+    }
+
+    /// The footer's question was answered with Save (done) or Discard.
+    pub fn leaving(&self) -> bool {
+        self.leaving
     }
 
     /// The custom look changed: its preview again.
@@ -939,8 +977,32 @@ fn issue(problems: &[String], key: &str) -> Option<String> {
         })
 }
 
+/// Applies `message`; in the real window (`auto`) a change that leaves the draft
+/// valid is written at once, so nothing is lost on close (#136). A draft with
+/// problems is held back (the footer says why) and closing asks about it.
+/// ponytail: the write runs on the UI thread like the Labs switches do (a tiny
+/// TOML file); move both off it if a slow disk ever shows.
 pub fn update(state: &mut State, message: Message) -> Outcome {
+    let change = !matches!(
+        message,
+        Message::Save
+            | Message::Tick
+            | Message::CloseSave
+            | Message::CloseDiscard
+            | Message::CloseKeep
+    );
+    let out = apply(state, message);
+    if state.auto && change && out == Outcome::None && state.dirty() && state.problems.is_empty() {
+        return save(state);
+    }
+    out
+}
+
+fn apply(state: &mut State, message: Message) -> Outcome {
     state.notice = None;
+    if !matches!(message, Message::CloseSave | Message::CloseDiscard) {
+        state.asking_close = false; // any other action is "keep editing"
+    }
     match message {
         Message::Section(s) => {
             state.section = s;
@@ -1112,6 +1174,18 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         }
         Message::UpdateStatus(status) => state.update_status = Some(status),
         Message::Save => return save(state),
+        Message::Tick => {
+            if state.saved_at.is_some_and(|t| t.elapsed() >= SAVED_FOR) {
+                state.saved_at = None;
+            }
+        }
+        Message::CloseSave => {
+            let saved = save(state);
+            state.leaving = !state.dirty(); // a refused save (problems) stays open
+            return saved;
+        }
+        Message::CloseDiscard => state.leaving = true,
+        Message::CloseKeep => {}
     }
     state.revalidate();
     Outcome::None
@@ -1155,7 +1229,7 @@ fn save(state: &mut State) -> Outcome {
     match result {
         Ok(()) => {
             state.saved = state.draft.clone();
-            state.notice = Some("Saved".into());
+            state.saved_at = Some(Instant::now());
             Outcome::Saved(state.saved.clone())
         }
         Err(e) => {
@@ -1167,17 +1241,22 @@ fn save(state: &mut State) -> Outcome {
 
 /// Key presses, only while a shortcut field is recording.
 pub fn subscription(state: &State) -> Subscription<Message> {
+    let clock = match state.saved_at {
+        Some(_) => crate::ui::motion::frames().map(|_| Message::Tick),
+        None => Subscription::none(),
+    };
     if state.recording.is_none() {
-        return Subscription::none();
+        return clock;
     }
-    event::listen_with(|event, _status, _window| match event {
+    let keys = event::listen_with(|event, _status, _window| match event {
         iced::Event::Keyboard(keyboard::Event::KeyPressed {
             physical_key,
             modifiers,
             ..
         }) => Chord::from_iced(physical_key, modifiers).map(Message::Key),
         _ => None,
-    })
+    });
+    Subscription::batch([keys, clock])
 }
 
 // ---- view ----
@@ -2358,20 +2437,39 @@ fn footer(state: &State) -> Element<'_, Message> {
         .into()
     } else if let Some(notice) = &state.notice {
         caption(notice.as_str()).size(13).into()
-    } else if state.dirty() {
-        caption("Unsaved changes").size(13).into()
+    } else if state.asking_close {
+        caption("Save your changes before closing?").size(13).into()
     } else {
-        space::horizontal().into()
+        // The design's auto-save pill: a green dot, "Saved" for a moment after a change.
+        let word = if state.saved_at.is_some() {
+            "Saved"
+        } else {
+            "Auto-save active"
+        };
+        let dot = container(space().width(6).height(6)).style(|_| container::Style {
+            background: Some(theme::ANNOTATION[3].into()),
+            border: iced::Border::default().rounded(3),
+            ..container::Style::default()
+        });
+        row![dot, caption(word).size(13)]
+            .spacing(8)
+            .align_y(iced::Center)
+            .into()
     };
-    let save = label_button("Save", true, Some(Message::Save));
-    row![
-        status,
-        space::horizontal(),
-        tip(save, "Save settings", Position::Top)
-    ]
-    .align_y(iced::Center)
-    .padding([16, 32])
-    .into()
+    let mut buttons = row![status, space::horizontal()]
+        .spacing(8)
+        .align_y(iced::Center)
+        .padding([16, 32]);
+    if state.asking_close {
+        for (label, primary, message) in [
+            ("Discard", false, Message::CloseDiscard),
+            ("Keep editing", false, Message::CloseKeep),
+            ("Save", true, Message::CloseSave),
+        ] {
+            buttons = buttons.push(label_button(label, primary, Some(message)));
+        }
+    }
+    buttons.into()
 }
 
 #[cfg(test)]
@@ -2708,6 +2806,87 @@ pub(super) mod tests {
                 .is_some_and(|n| n.starts_with("Could not save"))
         );
         let _ = std::fs::remove_file(blocker);
+    }
+
+    /// #136: closing with unsaved changes asks; Save writes then leaves, Discard
+    /// leaves without writing, Keep editing stays; a clean window just closes.
+    #[test]
+    fn closing_with_unsaved_changes_asks_first() {
+        let path = tmp("close-ask");
+        let (mut s, _) = state(Some(path.clone()));
+        assert!(s.close_requested(), "nothing changed: close");
+
+        update(&mut s, Message::Theme(Theme::Light));
+        assert!(!s.close_requested(), "unsaved changes: ask, don't close");
+        assert!(s.asking_close && !s.leaving());
+        update(&mut s, Message::CloseKeep);
+        assert!(!s.asking_close && !s.leaving() && s.dirty());
+
+        s.close_requested();
+        update(&mut s, Message::Section(Section::About));
+        assert!(!s.asking_close, "any other action is keep editing");
+
+        s.close_requested();
+        update(&mut s, Message::CloseDiscard);
+        assert!(s.leaving() && !path.exists(), "discard writes nothing");
+
+        let (mut s, _) = state(Some(path.clone()));
+        update(&mut s, Message::Theme(Theme::Light));
+        s.close_requested();
+        assert!(matches!(
+            update(&mut s, Message::CloseSave),
+            Outcome::Saved(_)
+        ));
+        assert!(s.leaving());
+        assert_eq!(Config::load_from(&path).0.theme, Theme::Light);
+
+        // A save refused for a problem stays open, still asking.
+        let (mut s, _) = state(Some(path.clone()));
+        update(&mut s, Message::Provider(Provider::OpenaiCompatible));
+        s.close_requested();
+        assert_eq!(update(&mut s, Message::CloseSave), Outcome::None);
+        assert!(!s.leaving() && s.asking_close);
+        theme::apply(Theme::Dark);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// #136: in the real window a valid change is on disk at once; one with a
+    /// problem is held back until it is fixed, and the pill's "Saved" fades.
+    #[test]
+    fn a_valid_change_saves_itself() {
+        let path = tmp("autosave");
+        let (mut s, _) = state(Some(path.clone()));
+        s.auto = true;
+        let Outcome::Saved(cfg) = update(&mut s, Message::Theme(Theme::Light)) else {
+            panic!("not saved: {:?}", s.notice)
+        };
+        assert_eq!(cfg.theme, Theme::Light);
+        assert_eq!(Config::load_from(&path).0.theme, Theme::Light);
+        assert!(!s.dirty() && s.saved_at.is_some());
+        assert!(
+            s.close_requested(),
+            "nothing unsaved: closes without asking"
+        );
+
+        // A change with a problem waits (and closing asks); fixing it saves.
+        update(&mut s, Message::Provider(Provider::OpenaiCompatible));
+        assert!(s.dirty() && !s.problems.is_empty());
+        assert_ne!(
+            Config::load_from(&path).0.ai.provider,
+            Provider::OpenaiCompatible
+        );
+        assert!(!s.close_requested());
+        update(&mut s, Message::Preset(PRESETS[3]));
+        update(&mut s, Message::Model("llama3:8b".into()));
+        assert!(!s.dirty(), "{:?}", s.problems);
+        assert_eq!(Config::load_from(&path).0.ai.model, "llama3:8b");
+
+        // The pill's "Saved" ends after its moment.
+        s.saved_at = Some(Instant::now() - SAVED_FOR);
+        update(&mut s, Message::Tick);
+        assert!(s.saved_at.is_none());
+        theme::apply(Theme::Dark);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -3434,7 +3613,7 @@ pub(super) mod tests {
         assert_eq!(width(&sl), col);
         let (s, _) = state(None);
         assert_eq!(width(&s.key.view().map(Message::ApiKey)), col);
-        // No page builds its own fixed-width button: only the footer's Save.
+        // No page builds its own fixed-width button: only the footer's close question.
         let src = include_str!("settings.rs");
         let body = &src[..src.find("\n#[cfg(test)]").unwrap()];
         assert_eq!(body.matches("label_button(").count(), 1);

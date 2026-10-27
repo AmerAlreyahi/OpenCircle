@@ -178,10 +178,15 @@ mod win {
     use std::path::Path;
 
     use windows::Win32::System::ApplicationInstallationAndServicing::*;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        IDYES, MB_ICONQUESTION, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO, MessageBoxW,
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_MENU, keybd_event,
     };
-    use windows::core::{HSTRING, PCWSTR, PWSTR};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, IDYES, MB_ICONQUESTION, MB_SETFOREGROUND, MB_TOPMOST,
+        MB_YESNO, MessageBoxW, SetForegroundWindow, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        WS_VISIBLE,
+    };
+    use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
     use super::*;
 
@@ -361,15 +366,47 @@ mod win {
     }
 
     /// A plain Yes / No question in front of everything (the uninstall's).
+    /// An ownerless MessageBox from this custom action opened BEHIND Windows
+    /// Installer's "Please wait while Windows configures" window (the flags
+    /// alone did not make it topmost there, #135). It is owned by our own
+    /// topmost 0x0 window instead: a topmost owner makes the box topmost, so
+    /// the installer's non-topmost window can never cover it.
     pub fn ask_yes_no(title: &str, text: &str) -> bool {
-        // SAFETY: two NUL-terminated wide strings; no owner window.
+        // SAFETY: a predefined "STATIC" class window, destroyed before return;
+        // two NUL-terminated wide strings.
         let answer = unsafe {
-            MessageBoxW(
+            let owner = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                w!(""),
+                WS_POPUP | WS_VISIBLE,
+                0,
+                0,
+                0,
+                0,
                 None,
+                None,
+                None,
+                None,
+            )
+            .ok();
+            if let Some(owner) = owner {
+                // A tap of Alt lets this process take the foreground (the
+                // keyboard goes to the question, not to the window behind it).
+                keybd_event(VK_MENU.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+                keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+                let _ = SetForegroundWindow(owner);
+            }
+            let answer = MessageBoxW(
+                owner,
                 &HSTRING::from(text),
                 &HSTRING::from(title),
                 MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND,
-            )
+            );
+            if let Some(owner) = owner {
+                let _ = DestroyWindow(owner);
+            }
+            answer
         };
         answer == IDYES
     }

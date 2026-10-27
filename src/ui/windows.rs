@@ -31,6 +31,9 @@ pub enum Msg {
     Permission(onboarding::Message),
     /// Any window closed (ours are forgotten; the overlay is `ui::App`'s).
     Closed(window::Id),
+    /// The OS asked a window to close (Alt+F4, the taskbar). Only Settings
+    /// listens: it asks first when it has unsaved changes (#136).
+    CloseRequest(window::Id),
     /// The OS light/dark mode, at start and on every change.
     OsTheme(iced::theme::Mode),
     /// From a pinned image's window.
@@ -375,8 +378,11 @@ impl Windows {
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::Settings(msg) => {
-                if let Some((_, state)) = &mut self.settings {
-                    match settings::update(state, msg) {
+                if let Some((id, state)) = &mut self.settings {
+                    let id = *id;
+                    let outcome = settings::update(state, msg);
+                    let leaving = state.leaving();
+                    match outcome {
                         settings::Outcome::Saved(cfg) => apply(cfg),
                         settings::Outcome::Browse => return pick_folder(),
                         settings::Outcome::OpenLink(url) => open_url(&url),
@@ -392,6 +398,9 @@ impl Windows {
                         }
                         settings::Outcome::CheckUpdate => crate::update::check_now(),
                         settings::Outcome::None => {}
+                    }
+                    if leaving {
+                        return window::close(id);
                     }
                 }
             }
@@ -469,6 +478,11 @@ impl Windows {
                     c.maximised = on;
                 }
             }
+            Msg::CloseRequest(id) => {
+                if self.id(Kind::Settings) == Some(id) {
+                    return self.close_window(id);
+                }
+            }
             Msg::Closed(id) => {
                 forget_floating(id);
                 self.chrome.remove(&id);
@@ -501,6 +515,17 @@ impl Windows {
         Task::none()
     }
 
+    /// Closes `id`, except Settings with unsaved changes: it asks first (its footer).
+    fn close_window(&mut self, id: window::Id) -> Task<Msg> {
+        if let Some((sid, state)) = &mut self.settings
+            && *sid == id
+            && !state.close_requested()
+        {
+            return window::gain_focus(id);
+        }
+        window::close(id)
+    }
+
     /// The header and edges of a normal window.
     fn on_chrome(&mut self, id: window::Id, event: chrome::Event) -> Task<Msg> {
         let resizable = self.mode(id).resizable;
@@ -518,7 +543,7 @@ impl Windows {
             }
             chrome::Event::Minimise => window::minimize(id, true),
             chrome::Event::Maximise => window::toggle_maximize(id),
-            chrome::Event::Close => window::close(id),
+            chrome::Event::Close => self.close_window(id),
             chrome::Event::Resize(direction) if !c.maximised => window::drag_resize(id, direction),
             chrome::Event::Resize(_) => Task::none(),
         }
@@ -653,6 +678,7 @@ impl Windows {
         };
         Subscription::batch([
             window::close_events().map(Msg::Closed),
+            window::close_requests().map(Msg::CloseRequest),
             window::resize_events().map(|(id, _)| Msg::Resized(id)),
             iced::system::theme_changes().map(Msg::OsTheme),
             keys,
@@ -665,7 +691,7 @@ impl Windows {
     }
 
     /// Test hook, `OPENCIRCLE_TEST_OPEN=settings,shot,settings,shot`: one step every
-    /// 1.5 s. `settings` = the tray's Settings item, `permission` / `toast` = those windows, `max` = maximise or restore Settings, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `shot` = save the open window as
+    /// 1.5 s. `settings` = the tray's Settings item, `permission` / `toast` = those windows, `max` = maximise or restore Settings, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `problem` = an unsaveable edit, `shot` = save the open window as
     /// `$OPENCIRCLE_TEST_DIR/<kind>-<step>.png`, `quit`.
     fn test_step(&mut self, step: usize, what: &str) -> Task<Msg> {
         match what {
@@ -720,9 +746,14 @@ impl Windows {
                 self.update(Msg::Settings(settings::Message::Theme(theme)))
             }
             "save" => self.update(Msg::Settings(settings::Message::Save)),
-            "close" => self
-                .id(Kind::Settings)
-                .map_or_else(Task::none, window::close),
+            // A draft Settings cannot save yet (no model for a custom server): closing asks.
+            "problem" => self.update(Msg::Settings(settings::Message::Provider(
+                crate::config::Provider::OpenaiCompatible,
+            ))),
+            "close" => match self.id(Kind::Settings) {
+                Some(id) => self.close_window(id),
+                None => Task::none(),
+            },
             "next" => self.update(Msg::Onboarding(onboarding::Message::Next)),
             "finish" => self.update(Msg::Onboarding(onboarding::Message::Finish)),
             "quit" => iced::exit(),
@@ -767,6 +798,8 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
         resizable,
         decorations: false,
         position: Position::Centered,
+        // Settings asks about unsaved changes first (`Msg::CloseRequest`).
+        exit_on_close_request: kind != Kind::Settings,
         ..window::Settings::default()
     };
     #[cfg(windows)]
