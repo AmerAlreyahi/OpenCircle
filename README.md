@@ -128,10 +128,10 @@ The [Getting started](docs/getting-started.md) guide walks through the first run
 
 ## Code signing policy
 
-Windows releases will be signed for free: code signing provided by
-[SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org). Until that is in place, the
-installers are unsigned and SmartScreen may warn.
+We have applied to [SignPath Foundation](https://signpath.org) for free code
+signing (code signing by [SignPath.io](https://about.signpath.io), certificate by
+SignPath Foundation). Until it is approved, the installers are unsigned and
+SmartScreen may warn.
 
 - Committers and reviewers: [AmerAlreyahi](https://github.com/AmerAlreyahi)
 - Approvers: [AmerAlreyahi](https://github.com/AmerAlreyahi)
