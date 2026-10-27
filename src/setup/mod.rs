@@ -7,8 +7,11 @@
 //! the MSI's own. The MSI's uninstall runs `opencircle.exe --forget-user-data`
 //! (`FORGET_ARG`): the question whether the user's data goes too.
 //!
-//! Why embedded and not beside it: one file to download and run; the MSI stays a
-//! separate release asset for IT. Why this program and not a second one: the
+//! Silent mode (`silent`: IT, winget): `/quiet` installs or updates with no UI,
+//! `/dir="C:\path"` for a fresh install, `/uninstall /quiet` removes; the exit
+//! code is Windows Installer's. The MSI is no release asset: this exe is the one
+//! installer. Why embedded and not beside it: one file to download and run.
+//! Why this program and not a second one: the
 //! setup's window reuses the app's renderer, fonts and theme (no new toolkit);
 //! the price is the app's size once more in the setup exe.
 
@@ -103,6 +106,84 @@ fn delete_when_gone(dir: &Path) {
     }
     #[cfg(not(windows))]
     let _ = dir;
+}
+
+/// What the setup build was asked to do without a window.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Silent {
+    /// Install or update (a repair when the same version is there); `dir` = a
+    /// fresh install's folder, checked and tidied.
+    Install {
+        dir: Option<String>,
+    },
+    Uninstall,
+}
+
+/// Windows Installer's "invalid command line", for a bad `/dir`.
+const ERROR_INVALID_COMMAND_LINE: u32 = 1639;
+
+/// The setup build's arguments: `None` = show the window. Only `/quiet` (or
+/// `/qn`, `/silent`) asks for silence; `/uninstall`, `/dir=...` and `/norestart`
+/// (nothing here restarts) matter only with it. Flags are case-insensitive and
+/// may start with `/`, `-` or `--`. `Err` = the exit code for a bad `/dir`.
+pub fn parse_silent(args: &[String]) -> Result<Option<Silent>, u32> {
+    let (mut quiet, mut uninstall, mut dir) = (false, false, None);
+    for arg in args {
+        let flag = arg.trim_start_matches(['/', '-']);
+        let (name, value) = flag.split_once('=').unwrap_or((flag, ""));
+        match name.to_ascii_lowercase().as_str() {
+            "quiet" | "qn" | "silent" => quiet = true,
+            "uninstall" => uninstall = true,
+            "dir" => dir = Some(value.trim_matches('"')),
+            _ => {}
+        }
+    }
+    if !quiet {
+        return Ok(None);
+    }
+    if uninstall {
+        return Ok(Some(Silent::Uninstall));
+    }
+    let dir = dir
+        .map(|d| check_folder(d).map_err(|_| ERROR_INVALID_COMMAND_LINE))
+        .transpose()?;
+    Ok(Some(Silent::Install { dir }))
+}
+
+/// Where a silent install goes: an update or repair stays where the app is
+/// (like the window's), a fresh install takes `/dir`, else the default.
+fn silent_folder(installed: Option<&Installed>, dir: Option<String>) -> String {
+    installed
+        .and_then(|i| i.folder.as_deref())
+        .and_then(|f| check_folder(f).ok())
+        .or(dir)
+        .unwrap_or_else(default_folder)
+}
+
+/// Runs a silent request against the embedded MSI; returns the process exit
+/// code: 0 = done, else Windows Installer's error code (3010 = done, restart wanted).
+pub fn silent(msi_bytes: &'static [u8], what: Silent) -> u32 {
+    let package = match msi::Package::write(msi_bytes) {
+        Ok(p) => p,
+        Err(e) => {
+            crate::log!("[opencircle] setup: cannot unpack the installer: {e}");
+            return 1; // ERROR_INVALID_FUNCTION: nothing better fits
+        }
+    };
+    quit_running_app();
+    let code = match what {
+        Silent::Uninstall => msi::uninstall_quiet(&package),
+        Silent::Install { dir } => {
+            let installed = msi::installed(&package);
+            let folder = silent_folder(installed.as_ref(), dir);
+            let repair = installed.as_ref().is_some_and(|i| i.same);
+            msi::install_quiet(&package, &folder, repair)
+        }
+    };
+    if code != 0 {
+        crate::log!("[opencircle] setup: Windows Installer error {code}");
+    }
+    code
 }
 
 /// The MSI this exe carries: only the setup build has one.
@@ -494,6 +575,55 @@ mod tests {
         ] {
             assert!(!is_product_code(bad), "{bad:?}");
         }
+    }
+
+    fn args(line: &str) -> Vec<String> {
+        line.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn silent_flags_are_read_and_only_quiet_hides_the_window() {
+        assert_eq!(parse_silent(&[]), Ok(None));
+        assert_eq!(parse_silent(&args(r"/uninstall /dir=C:\x")), Ok(None));
+        assert_eq!(
+            parse_silent(&args("/quiet")),
+            Ok(Some(Silent::Install { dir: None }))
+        );
+        assert_eq!(
+            parse_silent(&args("/QUIET /norestart")),
+            Ok(Some(Silent::Install { dir: None }))
+        );
+        assert_eq!(
+            parse_silent(&args(r#"--silent /dir="d:/Apps/OC""#)),
+            Ok(Some(Silent::Install {
+                dir: Some(r"D:\Apps\OC\".into())
+            }))
+        );
+        assert_eq!(
+            parse_silent(&args("/uninstall /quiet")),
+            Ok(Some(Silent::Uninstall))
+        );
+        assert_eq!(
+            parse_silent(&args("/quiet /dir=relative")),
+            Err(ERROR_INVALID_COMMAND_LINE)
+        );
+    }
+
+    #[test]
+    fn a_silent_update_stays_where_the_app_is() {
+        let at = |f: Option<&str>| Installed {
+            version: "0.1.0".into(),
+            folder: f.map(String::from),
+            same: false,
+        };
+        let dir = || Some(r"D:\New\".to_string());
+        assert_eq!(
+            silent_folder(Some(&at(Some(r"C:\Old\"))), dir()),
+            r"C:\Old\"
+        );
+        assert_eq!(silent_folder(Some(&at(None)), dir()), r"D:\New\");
+        assert_eq!(silent_folder(None, dir()), r"D:\New\");
+        assert_eq!(silent_folder(None, None), default_folder());
     }
 
     #[test]

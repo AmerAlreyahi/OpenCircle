@@ -4,7 +4,7 @@
 - 
 
 ## Install
-- **Windows:** `OpenCircle-Setup-<version>-x64.exe` (setup), `OpenCircle-<version>-x64.msi` (silent install for IT), or `OpenCircle-<version>-x64-portable.exe` (no install).
+- **Windows:** `OpenCircle-Setup-<version>-x64.exe` (setup; `/quiet` installs silently for IT), or `OpenCircle-<version>-x64-portable.exe` (no install).
 - **Linux (preview):** AppImage, .deb and .rpm.
 - Verify your download against `SHA256SUMS.txt` (signed: `SHA256SUMS.txt.minisig`).
 - Code signing: see the README's [Code signing policy](https://github.com/AmerAlreyahi/OpenCircle#code-signing-policy).

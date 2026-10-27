@@ -12,11 +12,13 @@ page (see the [README](../README.md#install)).
   keeps your settings and downloaded models; running the same one again repairs it.
   Uninstall it in **Settings > Apps**: it asks whether your settings, downloaded
   models and saved keys go too.
-- **Windows, managed PCs:** the `.msi` is a full installer on its own (it shows a
-  wizard with the folder choice). Silent install, as administrator:
-  `msiexec /i OpenCircle-<version>-x64.msi /qn INSTALLDIR="C:\Apps\OpenCircle"`
-  (silent uninstall: `msiexec /x OpenCircle-<version>-x64.msi /qn`, which keeps
-  every user's data).
+- **Windows, managed PCs:** the same setup runs silently, as administrator:
+  `OpenCircle-Setup-<version>-x64.exe /quiet /dir="C:\Apps\OpenCircle"` (`/dir`
+  is for a fresh install; an update stays where OpenCircle is; `/norestart` is
+  accepted). Silent uninstall: `OpenCircle-Setup-<version>-x64.exe /uninstall /quiet`,
+  which keeps every user's data. The exit code is 0, or Windows Installer's error
+  code (for example 1925: not run as administrator). In a script, wait for it:
+  `Start-Process .\OpenCircle-Setup-<version>-x64.exe -Wait -PassThru -ArgumentList "/quiet"`.
 - **Windows, no install:** `OpenCircle-<version>-x64-portable.exe` runs as it is.
 - **Linux (preview):** install the `.deb` or `.rpm`, or run the `.AppImage`.
 

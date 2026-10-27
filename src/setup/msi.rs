@@ -140,7 +140,9 @@ pub fn outcome(code: u32, last: Option<&str>) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-pub use win::{ask_yes_no, install, installed, installed_size, uninstall};
+pub use win::{
+    ask_yes_no, install, install_quiet, installed, installed_size, uninstall, uninstall_quiet,
+};
 
 #[cfg(not(windows))]
 pub fn installed_size(_: &Package) -> Option<u64> {
@@ -161,6 +163,20 @@ pub fn install(_: &Package, _: &str, _: bool, report: &dyn Fn(Event)) {
 pub fn uninstall(_: &str, report: &dyn Fn(Event)) {
     report(Event::Done(Err("The setup runs on Windows only.".into())));
 }
+
+#[cfg(not(windows))]
+pub fn install_quiet(_: &Package, _: &str, _: bool) -> u32 {
+    ERROR_CALL_NOT_IMPLEMENTED
+}
+
+#[cfg(not(windows))]
+pub fn uninstall_quiet(_: &Package) -> u32 {
+    ERROR_CALL_NOT_IMPLEMENTED
+}
+
+/// Windows' "not implemented": what the quiet setup answers off Windows.
+#[cfg(not(windows))]
+const ERROR_CALL_NOT_IMPLEMENTED: u32 = 120;
 
 #[cfg(not(windows))]
 pub fn ask_yes_no(_: &str, _: &str) -> bool {
@@ -266,7 +282,9 @@ mod win {
         }
     }
 
-    pub fn installed(package: &Package) -> Option<Installed> {
+    /// The installed product of the package's upgrade family: its code
+    /// (`{GUID}` + NUL) and the code as text.
+    fn related(package: &Package) -> Option<([u16; 39], String, String)> {
         let (upgrade, product) = codes(&package.path)?;
         let upgrade = wide(&upgrade);
         let mut code = [0u16; 39];
@@ -274,10 +292,11 @@ mod win {
         let found = unsafe {
             MsiEnumRelatedProductsW(PCWSTR(upgrade.as_ptr()), None, 0, PWSTR(code.as_mut_ptr()))
         };
-        if found != 0 {
-            return None;
-        }
-        let installed = String::from_utf16_lossy(&code[..38]);
+        (found == 0).then(|| (code, String::from_utf16_lossy(&code[..38]), product))
+    }
+
+    pub fn installed(package: &Package) -> Option<Installed> {
+        let (code, installed, product) = related(package)?;
         let info = |attribute: PCWSTR| {
             // SAFETY: `code` is NUL-terminated; buffer and length from `read`.
             read(|buf, len| unsafe {
@@ -333,6 +352,38 @@ mod win {
         let line = HSTRING::from(command_line(folder, repair));
         // SAFETY: two NUL-terminated wide strings that outlive the call.
         with_our_ui(report, || unsafe { MsiInstallProductW(&path, &line) });
+    }
+
+    /// The silent setup (`/quiet`): the same install with Windows Installer's UI
+    /// level NONE (no window, no UAC prompt: needs an elevated caller, else 1925).
+    /// Windows Installer's own result code.
+    pub fn install_quiet(package: &Package, folder: &str, repair: bool) -> u32 {
+        let path = HSTRING::from(package.path.as_os_str());
+        let line = HSTRING::from(command_line(folder, repair));
+        // SAFETY: two NUL-terminated wide strings that outlive the call.
+        unsafe {
+            MsiSetInternalUI(INSTALLUILEVEL_NONE, None);
+            MsiInstallProductW(&path, &line)
+        }
+    }
+
+    /// `/uninstall /quiet`: removes the installed copy of the package's family
+    /// (1605 = none is installed). The user's data stays (the MSI's quiet path).
+    pub fn uninstall_quiet(package: &Package) -> u32 {
+        const ERROR_UNKNOWN_PRODUCT: u32 = 1605;
+        let Some((code, ..)) = related(package) else {
+            return ERROR_UNKNOWN_PRODUCT;
+        };
+        // SAFETY: `code` is a NUL-terminated GUID string.
+        unsafe {
+            MsiSetInternalUI(INSTALLUILEVEL_NONE, None);
+            MsiConfigureProductExW(
+                PCWSTR(code.as_ptr()),
+                INSTALLLEVEL_DEFAULT,
+                INSTALLSTATE_ABSENT,
+                &HSTRING::new(),
+            )
+        }
     }
 
     /// Removes the installed product `code` (`{GUID}`) the way Apps & features

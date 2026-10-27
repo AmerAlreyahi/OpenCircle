@@ -76,10 +76,10 @@ jobs:
             target/release/opencircle
           retention-days: 7
 
-  # Installer smoke test (#59): the MSI installs silently, runs, uninstalls and
-  # leaves nothing; the setup exe carries the MSI. Not on pull requests: it builds
-  # the release twice and packages (about 10 min), so it runs on main and on demand
-  # (workflow_dispatch, any branch).
+  # Installer smoke test (#59): the setup exe (the one Windows installer; it carries
+  # the MSI) installs silently, runs, uninstalls silently and leaves nothing. Not on
+  # pull requests: it builds the release twice and packages (about 10 min), so it
+  # runs on main and on demand (workflow_dispatch, any branch).
   installer:
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
@@ -91,26 +91,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-packager --version "$env:CARGO_PACKAGER_VERSION" --locked
       - run: cargo packager --release --formats wix --out-dir dist
-      - name: Install, run, uninstall the MSI silently
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
-          $msi = Get-Item dist\*.msi
-          if (@($msi).Count -ne 1) { throw "expected one MSI: $msi" }
-          $dir = Join-Path $env:RUNNER_TEMP 'oc-install'
-          $log = Join-Path $env:RUNNER_TEMP 'oc-msi.log'
-          $p = Start-Process msiexec -Wait -PassThru -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v `"$log`" INSTALLDIR=`"$dir\`""
-          if ($p.ExitCode -ne 0) { Get-Content $log -Tail 40; throw "install failed: $($p.ExitCode)" }
-          $exe = Join-Path $dir 'opencircle.exe'
-          if (-not (Test-Path $exe)) { Get-ChildItem $dir -Recurse; throw "no $exe" }
-          $said = (& $exe --version | Out-String).Trim()
-          "installed exe says: $said"
-          if ($said -ne $version) { throw "version '$said' is not '$version'" }
-          $p = Start-Process msiexec -Wait -PassThru -ArgumentList "/x `"$($msi.FullName)`" /qn /l*v `"$log`""
-          if ($p.ExitCode -ne 0) { Get-Content $log -Tail 40; throw "uninstall failed: $($p.ExitCode)" }
-          $left = if (Test-Path $dir) { Get-ChildItem $dir -Recurse -Force } else { @() }
-          if ($left) { $left | Format-Table FullName; throw "the uninstall left files behind" }
       - name: The setup exe carries the MSI (as release.yml builds it)
         shell: bash
         run: |
@@ -119,6 +99,24 @@ jobs:
           setup=$(stat -c %s target/release/opencircle.exe)
           echo "msi $msi, setup $setup"
           [ "$setup" -gt "$msi" ] || { echo "::error::the setup does not carry the MSI"; exit 1; }
+      - name: Install, run, uninstall with the setup exe, silently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $setup = (Resolve-Path target\release\opencircle.exe).Path
+          $dir = Join-Path $env:RUNNER_TEMP 'oc-install'
+          $p = Start-Process $setup -Wait -PassThru -ArgumentList "/quiet /norestart /dir=`"$dir`""
+          if ($p.ExitCode -ne 0) { throw "install failed: $($p.ExitCode)" }
+          $exe = Join-Path $dir 'opencircle.exe'
+          if (-not (Test-Path $exe)) { Get-ChildItem $dir -Recurse; throw "no $exe" }
+          $said = (& $exe --version | Out-String).Trim()
+          "installed exe says: $said"
+          if ($said -ne $version) { throw "version '$said' is not '$version'" }
+          $p = Start-Process $setup -Wait -PassThru -ArgumentList "/uninstall /quiet"
+          if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
+          $left = if (Test-Path $dir) { Get-ChildItem $dir -Recurse -Force } else { @() }
+          if ($left) { $left | Format-Table FullName; throw "the uninstall left files behind" }
 
   audit:
     runs-on: ubuntu-22.04

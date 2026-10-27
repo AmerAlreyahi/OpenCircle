@@ -17,7 +17,7 @@ and signs everything and creates a **draft**; it never publishes.
 5. **Tag.** `git tag v<ver>` and push the tag (for example `v0.2.0`). A manual
    "Run workflow" is a dry run: it builds and uploads workflow artifacts and
    creates no release.
-6. **The workflow** builds Windows (setup exe, MSI, portable exe) and Linux
+6. **The workflow** builds Windows (setup exe, portable exe; the MSI is built only to sit inside the setup and is not uploaded) and Linux
    (AppImage, deb, rpm), writes `SHA256SUMS.txt`, signs it with minisign
    (`SHA256SUMS.txt.minisig`, trusted comment `OpenCircle v<ver>`, checked by
    the app; this format is frozen), and creates a draft release.

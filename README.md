@@ -117,7 +117,7 @@ page.
 
 | System | Files |
 |---|---|
-| Windows 10 / 11 | `OpenCircle-Setup-<version>-x64.exe` (the setup: one click, or pick the folder), `OpenCircle-<version>-x64.msi` (for IT: `msiexec /i OpenCircle-<version>-x64.msi /qn INSTALLDIR="C:\Apps\OpenCircle"`), `OpenCircle-<version>-x64-portable.exe` (no install) |
+| Windows 10 / 11 | `OpenCircle-Setup-<version>-x64.exe` (the setup: one click, or pick the folder; for IT: `OpenCircle-Setup-<version>-x64.exe /quiet /dir="C:\Apps\OpenCircle"`, uninstall with `/uninstall /quiet`), `OpenCircle-<version>-x64-portable.exe` (no install) |
 | Linux (preview) | `.AppImage`, `.deb`, `.rpm` |
 
 On Linux, one command downloads the latest AppImage, checks its signature, installs it

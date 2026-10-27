@@ -151,6 +151,12 @@ fn main() -> ExitCode {
     ui::limit_malloc_arenas();
     // The setup build (OpenCircle-Setup-*.exe) is the setup, whatever it is asked.
     if let Some(msi) = setup::payload() {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        match setup::parse_silent(&args) {
+            Ok(Some(what)) => std::process::exit(setup::silent(msi, what) as i32),
+            Err(code) => std::process::exit(code as i32),
+            Ok(None) => {}
+        }
         return match ui::setup::run(msi) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
