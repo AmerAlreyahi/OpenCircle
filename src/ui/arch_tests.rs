@@ -1,6 +1,6 @@
 //! The UI's dependency and style rules as source scans (ARCHITECTURE.md, the
 //! UI plan's "How to enforce them"): screens compose kit parts and never style;
-//! the kit depends only on itself.
+//! the kit depends only on itself; platform (the OS) imports none of the UI.
 
 use std::path::{Path, PathBuf};
 
@@ -67,16 +67,14 @@ fn styles(line: &str) -> bool {
 
 /// Not screens: the kit, the palettes and components the kit replaces (step
 /// 5 / 23), OS glue (platform/), state and logic (app/), and tests.
-const NOT_SCREENS: [&str; 12] = [
+const NOT_SCREENS: [&str; 10] = [
     "arch_tests.rs",
     "frame_times.rs",
     "glass.rs",
     "keys.rs",
     "quick.rs",
     "sapphire.rs",
-    "shape.rs",
     "theme.rs",
-    "tray.rs",
     "widgets.rs",
     "windows.rs",
     "word.rs",
@@ -106,7 +104,8 @@ const LEGACY: &[&str] = &[
 fn screens_never_style() {
     let styled: Vec<String> = sources("")
         .into_iter()
-        .filter(|(name, _)| !name.starts_with("kit/") && !NOT_SCREENS.contains(&name.as_str()))
+        .filter(|(name, _)| !name.starts_with("kit/") && !name.starts_with("platform/"))
+        .filter(|(name, _)| !NOT_SCREENS.contains(&name.as_str()))
         .filter(|(_, src)| code(src).any(styles))
         .map(|(name, _)| name)
         .collect();
@@ -136,6 +135,25 @@ fn kit_depends_only_on_tokens() {
                 .match_indices("crate::")
                 .any(|(i, _)| !line[i..].starts_with("crate::ui::kit"));
             assert!(!outside, "{name} reaches outside the kit: {}", line.trim());
+        }
+    }
+}
+
+/// The OS layer imports no kit part, no screen and nothing of the app: a colour
+/// or a label comes in as a parameter. The one exception is `kit::motion`, the
+/// fade's clock and pace (no colours, no widgets), which every fade is timed by.
+#[test]
+fn platform_is_isolated() {
+    for (name, src) in sources("platform") {
+        for line in code(&src) {
+            let ui = line
+                .match_indices("crate::ui::")
+                .any(|(i, _)| !line[i..].starts_with("crate::ui::kit::motion"));
+            assert!(
+                !ui && !line.contains("super::super"),
+                "{name} reaches into the UI (take it as a parameter): {}",
+                line.trim()
+            );
         }
     }
 }

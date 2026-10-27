@@ -18,22 +18,23 @@ mod onboarding;
 mod overlay;
 mod panel;
 mod picker;
+mod platform;
 mod quick;
 mod sapphire;
 mod settings;
 pub(crate) mod setup;
-mod shape;
 mod snip;
 mod song;
 pub mod theme;
 mod translate;
-mod tray;
 mod update_card;
 pub(crate) mod widgets;
 mod windows;
 mod word;
 
-pub use tray::{refresh as refresh_tray, start as start_tray};
+use platform::monitor::{can_hide_windows, place_window, taskbar_inset};
+use platform::shape;
+pub use platform::tray::{refresh as refresh_tray, start as start_tray};
 
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::AtomicBool;
@@ -156,6 +157,8 @@ pub(crate) fn trim_heap() {
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     *TRIGGERS.lock().unwrap() = Some(triggers);
     crate::lens::sweep_stale(); // pages left by a crash
+    let logo = widgets::chrome::logo();
+    platform::windows::set_icon(logo.rgba.clone(), logo.width, logo.height);
     let mut app = iced::daemon(App::boot, App::update, App::view);
     for font in widgets::FONTS {
         app = app.font(font);
@@ -380,31 +383,6 @@ enum Hiding {
     Shrinking(u8),
     /// Wait for one frame at the small size (shrinks the buffers), then hide.
     Shrunk,
-}
-
-/// Whether a window can be hidden and shown again. Not on Wayland: winit's
-/// `set_visible(false)` is a no-op there, so a "hidden" window stays on the
-/// desktop as an empty gray box. There windows are closed instead, and opened
-/// again when needed.
-pub(crate) fn can_hide_windows() -> bool {
-    #[cfg(target_os = "linux")]
-    return !winit_picks_wayland(
-        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
-        std::env::var_os("WAYLAND_SOCKET").as_deref(),
-    );
-    #[cfg(not(target_os = "linux"))]
-    true
-}
-
-/// winit's own rule (0.30): Wayland whenever either variable is set and not empty.
-#[cfg(any(target_os = "linux", test))]
-fn winit_picks_wayland(
-    display: Option<&std::ffi::OsStr>,
-    socket: Option<&std::ffi::OsStr>,
-) -> bool {
-    [display, socket]
-        .into_iter()
-        .any(|v| v.is_some_and(|v| !v.is_empty()))
 }
 
 /// The overlay window: hidden (pre-created), or full-screen at `size`. Never on
@@ -4544,85 +4522,6 @@ fn bar_button<'a>(
     widgets::hint(button, label, why, iced::widget::tooltip::Position::Top)
 }
 
-/// Puts the overlay window over the monitor at `place`, so full-screen (which
-/// covers the window's own monitor) lands there. Windows: in physical px; iced
-/// moves in logical px at the window's current scale, another monitor's when
-/// their scales differ.
-fn place_window(id: window::Id, place: snip::Place) -> Task<Message> {
-    #[cfg(windows)]
-    return window::run(id, move |w| {
-        use ::windows::Win32::Foundation::HWND;
-        use ::windows::Win32::UI::WindowsAndMessaging::{
-            SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
-        };
-        use iced::window::raw_window_handle::RawWindowHandle;
-        let Ok(handle) = w.window_handle() else {
-            return;
-        };
-        let RawWindowHandle::Win32(h) = handle.as_raw() else {
-            return;
-        };
-        let ((x, y), (width, height)) = (place.origin, place.px);
-        // Twice: a move onto a monitor of another scale makes winit resize the
-        // window for it (WM_DPICHANGED); the second move, at the new scale, sticks.
-        for _ in 0..2 {
-            // SAFETY: `h` is this window's live handle (an iced window of ours).
-            let moved = unsafe {
-                SetWindowPos(
-                    HWND(h.hwnd.get() as *mut _),
-                    None,
-                    x,
-                    y,
-                    width as i32,
-                    height as i32,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                )
-            };
-            if let Err(e) = moved {
-                crate::log!("[opencircle] overlay not moved: {e}");
-            }
-        }
-    })
-    .discard();
-    #[cfg(not(windows))]
-    window::move_to(id, place.logical_origin()).chain(window::resize(id, place.size()))
-}
-
-/// How much of the bottom of the monitor at `origin` (`size`, logical px at
-/// `scale`) the taskbar takes: the bottom bar keeps above it.
-// ponytail: the bottom edge only (a taskbar on the left, right or top
-// doesn't push the bar); mixed-DPI monitors map approximately.
-#[cfg(windows)]
-fn taskbar_inset(origin: Point, size: Size, scale: f32) -> f32 {
-    use ::windows::Win32::Foundation::POINT;
-    use ::windows::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
-    };
-    let centre = POINT {
-        x: ((origin.x + size.width / 2.0) * scale) as i32,
-        y: ((origin.y + size.height / 2.0) * scale) as i32,
-    };
-    let mut info = MONITORINFO {
-        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-        ..MONITORINFO::default()
-    };
-    // SAFETY: plain Win32 queries; `info` is sized as cbSize says.
-    let read = unsafe {
-        let monitor = MonitorFromPoint(centre, MONITOR_DEFAULTTONEAREST);
-        GetMonitorInfoW(monitor, &mut info).as_bool()
-    };
-    match read {
-        true => ((info.rcMonitor.bottom - info.rcWork.bottom) as f32 / scale).max(0.0),
-        false => 0.0,
-    }
-}
-
-/// Elsewhere the desktop's panels aren't known: the bar keeps its own gap.
-#[cfg(not(windows))]
-fn taskbar_inset(_: Point, _: Size, _: f32) -> f32 {
-    0.0
-}
-
 /// The actions a selection runs by itself under `behaviour`.
 fn auto_targets(behaviour: SelectionConfig) -> &'static [&'static Action] {
     match (behaviour.after, behaviour.search_with) {
@@ -4806,18 +4705,6 @@ mod tests {
         let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
         assert!(app.frame.is_none(), "the overlay doesn't open");
         assert_eq!(app.hiding, Hiding::No);
-    }
-
-    #[test]
-    fn windows_hide_except_where_winit_runs_on_wayland() {
-        use std::ffi::OsStr;
-        let set = Some(OsStr::new("wayland-0"));
-        let empty = Some(OsStr::new(""));
-        assert!(winit_picks_wayland(set, None));
-        assert!(winit_picks_wayland(None, set));
-        assert!(winit_picks_wayland(empty, set));
-        assert!(!winit_picks_wayland(None, None));
-        assert!(!winit_picks_wayland(empty, empty));
     }
 
     /// Trigger, capture, Esc: the overlay's window id while shown, and after.

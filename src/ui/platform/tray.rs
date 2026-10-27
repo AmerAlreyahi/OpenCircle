@@ -350,7 +350,7 @@ fn add_with_fallback<T, E: std::fmt::Display>(
 // ponytail: one size; pick 16/24/32 by tray DPI if it looks soft on scaled displays.
 fn icon() -> Icon {
     let decoder = png::Decoder::new(std::io::Cursor::new(include_bytes!(
-        "../../assets/icons/32x32.png"
+        "../../../assets/icons/32x32.png"
     )));
     let mut reader = decoder.read_info().expect("embedded icon is a valid PNG");
     let mut rgba = vec![0; reader.output_buffer_size().expect("small icon")];

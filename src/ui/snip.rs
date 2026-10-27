@@ -169,35 +169,7 @@ pub struct Toast {
     pub in_place: bool,
 }
 
-/// A monitor as the overlay shows it: its origin and size in physical desktop
-/// px, and physical px per logical px.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Place {
-    pub origin: (i32, i32),
-    pub px: (u32, u32),
-    pub scale: f32,
-}
-
-impl Place {
-    /// Its logical size (the overlay's).
-    pub fn size(&self) -> Size {
-        Size::new(self.px.0 as f32, self.px.1 as f32) * (1.0 / self.scale)
-    }
-
-    /// Its origin in logical px (the overlay window's position).
-    pub fn logical_origin(&self) -> Point {
-        Point::new(
-            self.origin.0 as f32 / self.scale,
-            self.origin.1 as f32 / self.scale,
-        )
-    }
-
-    fn contains(&self, (x, y): (i32, i32)) -> bool {
-        let (ox, oy) = (i64::from(self.origin.0), i64::from(self.origin.1));
-        (ox..ox + i64::from(self.px.0)).contains(&i64::from(x))
-            && (oy..oy + i64::from(self.px.1)).contains(&i64::from(y))
-    }
-}
+pub use super::platform::monitor::Place;
 
 /// A captured monitor as the overlay shows it: where, and its frame.
 pub fn screen_of(frame: crate::capture::Frame) -> (Place, image::Handle) {

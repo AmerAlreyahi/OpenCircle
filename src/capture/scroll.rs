@@ -61,7 +61,7 @@ pub fn scroll_once(at: (i32, i32), notches: i32) -> io::Result<()> {
     const MOTION_NOTIFY: u8 = 6;
 
     // XTest into XWayland never reaches native Wayland windows.
-    if std::env::var_os("DISPLAY").is_none() || std::env::var_os("WAYLAND_DISPLAY").is_some() {
+    if !crate::sys::session::x11_only() {
         return Err(io::Error::from(io::ErrorKind::Unsupported));
     }
     let (conn, screen) =

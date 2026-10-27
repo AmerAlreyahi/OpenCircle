@@ -4,7 +4,7 @@
 //! cut: Windows `SetWindowRgn`, X11 the SHAPE extension (with or without a
 //! compositor). Wayland has no way to cut a window, so there floating contents
 //! are drawn square (`radius`) and fill the window: no stray pixel either.
-//! Called by `windows.rs` after a floating window opens and on every resize.
+//! Called by `platform/windows.rs` after a floating window opens and on every resize.
 //! Also `opacity`: a whole window faded by the OS (Windows), for every open
 //! and close (`motion`), so the CPU never redraws a fade.
 //! Also `no_caption`: on Windows no window of ours ever gets the system's
@@ -13,7 +13,7 @@ use iced::window::raw_window_handle::RawWindowHandle;
 
 /// Whether a floating window can be cut to a rounded shape here (not on Wayland).
 pub fn available() -> bool {
-    super::can_hide_windows()
+    super::monitor::can_hide_windows()
 }
 
 /// The corner radius a floating window's content should draw: `r` where the window
@@ -117,7 +117,11 @@ pub fn fadeable(handle: RawWindowHandle) -> Option<isize> {
 /// closes). The fade is the window's latest from this call (an older one
 /// stops; a later `clear_now` stops this one); the returned run blocks: call
 /// it on a thread of its own (`windows::fade`).
-pub fn fade(window: isize, shown: super::kit::motion::Shown, rise: f32) -> impl FnOnce() + Send {
+pub fn fade(
+    window: isize,
+    shown: crate::ui::kit::motion::Shown,
+    rise: f32,
+) -> impl FnOnce() + Send {
     #[cfg(windows)]
     return win::fade(window, shown, rise);
     #[cfg(not(windows))]
@@ -127,7 +131,7 @@ pub fn fade(window: isize, shown: super::kit::motion::Shown, rise: f32) -> impl 
 }
 
 /// Windows: the system never paints its classic title bar over the window behind
-/// `handle` (`win::no_caption`). Called once by `windows.rs` for every window it
+/// `handle` (`win::no_caption`). Called once by `platform/windows.rs` for every window it
 /// opens. Elsewhere nothing.
 pub fn no_caption(handle: RawWindowHandle) {
     #[cfg(windows)]
@@ -700,7 +704,7 @@ mod tests {
         let now = std::time::Instant::now();
         let fade_in = fade(
             raw,
-            super::super::kit::motion::Shown::opening(super::super::kit::motion::WIDGET, now),
+            crate::ui::kit::motion::Shown::opening(crate::ui::kit::motion::WIDGET, now),
             0.0,
         );
         clear_now(raw);

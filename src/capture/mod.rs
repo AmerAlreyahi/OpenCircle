@@ -162,33 +162,8 @@ pub fn refused(error: &str) -> bool {
     }
 }
 
-/// A native Wayland session: X11 calls there only see XWayland windows.
 #[cfg(target_os = "linux")]
-pub fn wayland_session() -> bool {
-    is_wayland(
-        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
-        std::env::var_os("XDG_SESSION_TYPE").as_deref(),
-        std::env::var_os("DISPLAY").as_deref(),
-    )
-}
-
-/// Wayland: a Wayland socket and a session type of `wayland`, or `tty` (an ssh login
-/// into a Wayland desktop), or none and no X11 display. XDG_SESSION_TYPE=x11 wins.
-/// WSLg sets both displays and no session type: not Wayland for us.
-#[cfg(target_os = "linux")]
-fn is_wayland(
-    wayland: Option<&std::ffi::OsStr>,
-    session_type: Option<&std::ffi::OsStr>,
-    x11: Option<&std::ffi::OsStr>,
-) -> bool {
-    let set = |v: Option<&std::ffi::OsStr>| v.is_some_and(|d| !d.is_empty());
-    set(wayland)
-        && match session_type.and_then(|t| t.to_str()) {
-            Some("wayland" | "tty") => true,
-            Some("x11") => false,
-            _ => !set(x11),
-        }
-}
+pub use crate::sys::session::wayland_session;
 
 pub(crate) fn from_png(path: &std::ffi::OsStr) -> Result<Frame, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
@@ -228,29 +203,6 @@ pub(crate) fn decode_png(png: impl std::io::BufRead + std::io::Seek) -> Result<F
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn detects_a_wayland_session() {
-        use std::ffi::OsStr;
-        let w = Some(OsStr::new("wayland-0"));
-        let x = Some(OsStr::new(":0"));
-        let t = |s| Some(OsStr::new(s));
-        assert!(is_wayland(w, t("wayland"), x));
-        assert!(!is_wayland(w, t("x11"), None));
-        assert!(!is_wayland(w, None, x)); // WSLg: no session type, both displays
-        assert!(!is_wayland(None, t("wayland"), x));
-        assert!(!is_wayland(Some(OsStr::new("")), t("wayland"), x));
-        // Started from ssh or systemd-run: type tty or unset, only the Wayland socket.
-        assert!(is_wayland(w, t("tty"), None));
-        assert!(is_wayland(w, None, None));
-        assert!(is_wayland(w, t("tty"), Some(OsStr::new(""))));
-        assert!(
-            is_wayland(w, t("tty"), x),
-            "ssh keeps DISPLAY=:0 of XWayland"
-        );
-        assert!(!is_wayland(None, t("tty"), x));
-    }
 
     #[test]
     fn the_active_windows_monitor_wins_then_the_pointers_then_the_primary() {
