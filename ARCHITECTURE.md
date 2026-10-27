@@ -63,11 +63,11 @@ capture the screen and show it.
    buttons: Include screen, Copy, Save, Translate, Live, Music, Edit (no Search / Ask AI
    / Text buttons; their keys L / A / T stay). Text selection needs the screen's text.
    Who reads it is `ocr::route` (`App::system_text`, decided per opening in `App::text_by`):
-   on Windows, Windows OCR (`ocr::system`) reads the whole screen in one go right after
-   the opening animation (`App::warm` -> `read_more` -> `read_band` of the whole screen;
-   or at a press during it), ~0.2-0.5 s, so every word is selectable once the pointer
-   moves; a failed read (no recognizer, an RTL language) falls back to the helper for
-   that opening. Otherwise (Linux, `pp_ocr`, Arabic) the helper reads on demand, never at
+   on Windows, Windows OCR (`ocr::system`) reads the whole screen from the capture on
+   (`App::open` -> `read_more` -> `read_band` of the whole screen, a below-normal thread),
+   first as it is (selectable ~0.14 s after the first frame), then under 150 % doubled,
+   which replaces it (`system::passes`); a failed read (no recognizer, an RTL language)
+   falls back to the helper for that opening. The engine is freed after 60 s unused. Otherwise (Linux, `pp_ocr`, Arabic) the helper reads on demand, never at
    open (#123; `word::Screen`, `App::read_more`): nothing is
    read while the opening animation runs; after it the held helper starts (`App::warm`).
    A press, tap, Shift+click or Ctrl+A reads the full-width band under it first (at

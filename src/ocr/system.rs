@@ -4,7 +4,9 @@
 //! uses (the first of the user's languages with a recognizer), `None` when
 //! there is none (logged once; PP-OCR reads instead, `super::route`). Linux:
 //! never there.
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use super::{OcrError, TextBlock};
 
@@ -65,19 +67,29 @@ fn cjk(c: char) -> bool {
     matches!(c as u32, 0x3000..=0x30FF | 0x3400..=0x9FFF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF)
 }
 
-/// The engine and its language tag, made once (`None`: no recognizer).
 #[cfg(windows)]
-type Made = Option<(windows::Media::Ocr::OcrEngine, String)>;
+type Engine = windows::Media::Ocr::OcrEngine;
 #[cfg(not(windows))]
-type Made = Option<((), String)>;
+type Engine = ();
 
-static ENGINE: OnceLock<Made> = OnceLock::new();
+/// The language Windows OCR reads, asked once (`None`: no recognizer).
+static LANGUAGE: OnceLock<Option<String>> = OnceLock::new();
+/// The engine while it is used, and when it last was (`IDLE`).
+static ENGINE: Mutex<Option<(Engine, Instant)>> = Mutex::new(None);
+/// The engine is freed after this long unused (the warm helper's rule), so
+/// its memory doesn't stay with an idle app. It is made again in a few ms.
+const IDLE: Duration = match cfg!(test) {
+    true => Duration::from_millis(300), // (tests)
+    false => Duration::from_secs(60),
+};
+/// A thread waits to free it.
+static FREEING: AtomicBool = AtomicBool::new(false);
 
 /// The language Windows OCR reads (a BCP-47 tag such as "en-US"), or `None`
 /// when none of the user's Windows languages has a recognizer installed
 /// (#63: logged once). The first call makes the engine (off the UI thread).
 pub fn language() -> Option<&'static str> {
-    let made = ENGINE.get_or_init(|| {
+    let tag = LANGUAGE.get_or_init(|| {
         let made = imp::make();
         match &made {
             Some((_, tag)) => eprintln!("[opencircle] Windows OCR reads {tag}"),
@@ -87,9 +99,43 @@ pub fn language() -> Option<&'static str> {
             ),
             None => {}
         }
-        made
+        let tag = made.as_ref().map(|(_, tag)| tag.clone());
+        if let Some((engine, _)) = made {
+            *lock() = Some((engine, Instant::now()));
+            free_when_idle();
+        }
+        tag
     });
-    made.as_ref().map(|(_, tag)| tag.as_str())
+    tag.as_deref()
+}
+
+fn lock() -> std::sync::MutexGuard<'static, Option<(Engine, Instant)>> {
+    ENGINE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Frees the engine once it was unused for `IDLE` (one thread at a time).
+fn free_when_idle() {
+    if FREEING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        loop {
+            let wait = {
+                let mut engine = lock();
+                match &*engine {
+                    Some((_, used)) if used.elapsed() < IDLE => IDLE - used.elapsed(),
+                    _ => {
+                        if engine.take().is_some() {
+                            eprintln!("[opencircle] Windows OCR freed (unused for 60 s)");
+                        }
+                        FREEING.store(false, Ordering::SeqCst);
+                        return;
+                    }
+                }
+            };
+            std::thread::sleep(wait);
+        }
+    });
 }
 
 /// `language`, if it is known yet (never blocks): `None` = not asked yet.
@@ -97,9 +143,7 @@ pub fn known() -> Option<Option<&'static str>> {
     #[cfg(test)]
     return LANGUAGE_HERE.get().or(Some(None)); // never this PC's Windows OCR
     #[cfg(not(test))]
-    ENGINE
-        .get()
-        .map(|m| m.as_ref().map(|(_, tag)| tag.as_str()))
+    LANGUAGE.get().map(Option::as_deref)
 }
 
 #[cfg(test)]
@@ -112,16 +156,17 @@ thread_local! {
 /// The longest side Windows OCR takes (`OcrEngine::MaxImageDimension`).
 const MAX_SIDE: u32 = 10_000;
 
-/// How many times bigger Windows OCR sees a `width` x `height` frame drawn
-/// at `scale`. It misses short words in small text: at 100 % it read
-/// Wikipedia's 14 px body text as "needed to trained" ("be" lost); the frame
-/// doubled read it whole (VM: 1080p in ~0.22 s instead of ~0.08 s). Text at
-/// 150 % and up is big enough as it is.
-pub fn zoom(scale: f32, width: u32, height: u32) -> u32 {
+/// The reads of a `width` x `height` frame drawn at `scale`, as how many
+/// times bigger Windows OCR sees it: first as it is (~0.08 s for 1080p on the
+/// VM: text selectable right away), then, under 150 %, doubled (~0.24 s),
+/// which replaces it: at 1x Windows misses short words in small text (it read
+/// Wikipedia's 14 px body text as "needed to trained"). Text at 150 % and up
+/// is big enough as it is.
+pub fn passes(scale: f32, width: u32, height: u32) -> &'static [u32] {
     if scale < 1.5 && width.max(height) * 2 <= MAX_SIDE {
-        2
+        &[1, 2]
     } else {
-        1
+        &[1]
     }
 }
 
@@ -143,24 +188,29 @@ fn grey(rgba: &[u8], width: u32, k: u32) -> Vec<u8> {
     out
 }
 
-/// Reads the text lines in an RGBA image (frame px; text drawn at `scale`,
-/// the display's), in reading order. Blocking: call off the UI thread.
-pub fn recognize(
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-    scale: f32,
-) -> Result<Vec<TextBlock>, OcrError> {
+/// Reads the text lines in an RGBA image (frame px), seen `k` times bigger
+/// (`passes`), in reading order. Blocking: call off the UI thread.
+pub fn recognize(rgba: &[u8], width: u32, height: u32, k: u32) -> Result<Vec<TextBlock>, OcrError> {
     super::check_image(rgba, width, height)?;
     language().ok_or_else(|| {
         OcrError::Engine("Windows OCR has no recognizer for your languages".into())
     })?;
-    let engine = ENGINE.get().and_then(Option::as_ref).map(|(e, _)| e);
-    let start = std::time::Instant::now();
-    let k = zoom(scale, width, height);
+    let _gently = imp::below_normal(); // the overlay's frames come first
+    let start = Instant::now();
     let image = grey(rgba, width, k);
     let (w, h) = (width * k, height * k);
-    let mut lines = imp::read(engine.expect("made by `language`"), &image, w, h)?;
+    let mut engine = lock();
+    if engine.is_none() {
+        *engine = imp::make().map(|(e, _)| (e, Instant::now())); // freed when idle
+    }
+    let Some((made, used)) = engine.as_mut() else {
+        return Err(OcrError::Engine("Windows OCR didn't start".into()));
+    };
+    let read = imp::read(made, &image, w, h);
+    *used = Instant::now();
+    drop(engine);
+    free_when_idle();
+    let mut lines = read?;
     let n = lines.len();
     for (_, b) in lines.iter_mut().flatten() {
         *b = b.map(|v| v / k as f32);
@@ -185,6 +235,26 @@ mod imp {
     fn com() {
         // SAFETY: no pointers; a thread already in an apartment just says so.
         let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    }
+
+    /// This thread at below-normal priority until the guard drops.
+    pub(super) fn below_normal() -> impl Drop {
+        use windows::Win32::System::Threading::{
+            GetCurrentThread, GetThreadPriority, SetThreadPriority, THREAD_PRIORITY,
+            THREAD_PRIORITY_BELOW_NORMAL,
+        };
+        struct Restore(i32);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                // SAFETY: the pseudo handle of this thread.
+                let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY(self.0)) };
+            }
+        }
+        // SAFETY: as above.
+        let before = unsafe { GetThreadPriority(GetCurrentThread()) };
+        // SAFETY: as above.
+        let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) };
+        Restore(before)
     }
 
     pub(super) fn make() -> Option<(OcrEngine, String)> {
@@ -239,6 +309,8 @@ mod imp {
         None
     }
 
+    pub(super) fn below_normal() -> impl Sized {}
+
     pub(super) fn read(_: &(), _: &[u8], _: u32, _: u32) -> Result<Vec<Vec<Word>>, OcrError> {
         unreachable!("no engine is made on this OS")
     }
@@ -288,11 +360,15 @@ mod tests {
     /// Windows; each pixel becomes k x k grey ones, rows in order.
     #[test]
     fn small_text_is_read_doubled_in_grey() {
-        assert_eq!(zoom(1.0, 1920, 1080), 2);
-        assert_eq!(zoom(1.25, 3840, 2160), 2);
-        assert_eq!(zoom(1.5, 2880, 1620), 1);
-        assert_eq!(zoom(1.75, 1920, 1080), 1);
-        assert_eq!(zoom(1.0, 5120, 1440), 1, "10240 px is over Windows' limit");
+        assert_eq!(passes(1.0, 1920, 1080), [1, 2], "fast first, then doubled");
+        assert_eq!(passes(1.25, 3840, 2160), [1, 2]);
+        assert_eq!(passes(1.5, 2880, 1620), [1]);
+        assert_eq!(passes(1.75, 1920, 1080), [1]);
+        assert_eq!(
+            passes(1.0, 5120, 1440),
+            [1],
+            "10240 px is over Windows' limit"
+        );
         // 2 x 1: white, then pure red, green and blue weigh in as luma
         let rgba = [255, 255, 255, 255, 255, 0, 0, 255];
         assert_eq!(grey(&rgba, 2, 1), [255, 76]);
@@ -301,13 +377,30 @@ mod tests {
         assert_eq!(grey(&column, 1, 2), [87, 87, 87, 87, 28, 28, 28, 28]);
     }
 
+    /// The engine is freed once unused for `IDLE` (60 s; 300 ms in tests),
+    /// not while it is used. Linux: a stand-in engine in `ENGINE`.
+    #[test]
+    #[cfg(not(windows))]
+    fn the_engine_is_freed_once_unused_for_a_while() {
+        *lock() = Some(((), Instant::now()));
+        free_when_idle();
+        for _ in 0..5 {
+            std::thread::sleep(IDLE / 2);
+            assert!(lock().is_some(), "in use: kept");
+            lock().as_mut().unwrap().1 = Instant::now(); // used again
+        }
+        std::thread::sleep(IDLE * 2);
+        assert!(lock().is_none(), "unused: freed");
+        assert!(!FREEING.load(Ordering::SeqCst), "and its thread ended");
+    }
+
     /// Off Windows (and in tests) there is no Windows OCR: PP-OCR reads.
     #[test]
     #[cfg(not(windows))]
     fn there_is_no_windows_ocr_elsewhere() {
         assert_eq!(language(), None);
         assert!(matches!(
-            recognize(&[0; 16], 2, 2, 1.0),
+            recognize(&[0; 16], 2, 2, 1),
             Err(OcrError::Engine(_))
         ));
     }
@@ -326,7 +419,7 @@ mod tests {
         let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
         let info = reader.next_frame(&mut rgba).unwrap();
         assert_eq!(info.color_type, png::ColorType::Rgba);
-        let got = recognize(&rgba, info.width, info.height, 1.0).unwrap();
+        let got = recognize(&rgba, info.width, info.height, 2).unwrap();
         let texts: Vec<&str> = got.iter().map(|b| b.text.as_str()).collect();
         println!("Windows OCR ({tag}): {got:?}");
         if !tag.starts_with("en") {
