@@ -1699,12 +1699,12 @@ fn text_reader_row(state: &State) -> Option<Element<'_, Message>> {
             ),
             (
                 TextReader::Windows,
-                "Windows OCR",
+                "Windows",
                 "Read with Windows' own text recognition",
             ),
             (
                 TextReader::PpOcr,
-                "Downloaded reader",
+                "Downloaded",
                 "Always read with the downloaded text reader",
             ),
         ],
