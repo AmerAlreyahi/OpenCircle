@@ -201,6 +201,7 @@ fn main() -> ExitCode {
     }
     hotkey::start(tx.clone(), &config);
     autostart::apply(&config);
+    std::thread::spawn(|| remove_old_webview(&app_data_dir()));
     config::set_current(config);
     let _tray = ui::start_tray(tx.clone());
     update::start(tx.clone());
@@ -214,5 +215,39 @@ fn main() -> ExitCode {
             }
             ExitCode::FAILURE
         }
+    }
+}
+
+fn app_data_dir() -> std::path::PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("OpenCircle")
+}
+
+/// v0.1.0's web view left its profile (cache, cookies) in `<data>/webview`; the
+/// web view is gone (#50, #130). Removes only that folder (a symlink is unlinked,
+/// never followed); a failure is logged and retried next start.
+fn remove_old_webview(data: &std::path::Path) {
+    match std::fs::remove_dir_all(data.join("webview")) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            eprintln!("[opencircle] cannot remove the old web view data: {e}");
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn old_webview_data_is_removed_and_nothing_else() {
+        let d = std::env::temp_dir().join(format!("oc-wv-{}", std::process::id()));
+        for sub in ["webview/EBWebView", "ocr", "mt"] {
+            std::fs::create_dir_all(d.join(sub)).unwrap();
+        }
+        super::remove_old_webview(&d);
+        assert!(!d.join("webview").exists());
+        assert!(d.join("ocr").is_dir() && d.join("mt").is_dir());
+        super::remove_old_webview(&d); // no folder: no error
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }
