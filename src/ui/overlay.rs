@@ -593,13 +593,62 @@ pub fn bracket_at(area: Rectangle, p: Point) -> Option<usize> {
     })
 }
 
-/// The grip (index into `corners`) of a selection of `kind` at `area` (screen
-/// px) under `p`: a snapped box's brackets, otherwise its corner handles.
-pub fn grip_at(kind: Kind, area: Rectangle, p: Point) -> Option<usize> {
-    match kind {
+/// What a press on a selection's border grabs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Grip {
+    /// A corner (index into `corners`).
+    Corner(usize),
+    /// An edge: 0 top, 1 right, 2 bottom, 3 left.
+    Edge(usize),
+}
+
+/// The edge of `area` (screen px) under `p`: within `HANDLE_HIT` of it, but
+/// never more than a third of the side in, so a small box keeps a middle to move.
+pub fn edge_at(area: Rectangle, p: Point) -> Option<usize> {
+    let [a, b, c, d] = corners(area);
+    let reach = |side: f32| HANDLE_HIT.min(side / 3.0);
+    let (rx, ry) = (reach(area.width), reach(area.height));
+    [(a, b, ry), (b, c, rx), (d, c, ry), (a, d, rx)]
+        .iter()
+        .position(|&(from, to, reach)| to_segment(p, from, to) <= reach)
+}
+
+/// `area` with its edge `edge` dragged to `to` (the other three stay), at
+/// least `min` thick.
+pub fn resize_edge(area: Rectangle, edge: usize, to: Point, min: f32) -> Rectangle {
+    let (mut x0, mut y0) = (area.x, area.y);
+    let (mut x1, mut y1) = (area.x + area.width, area.y + area.height);
+    match edge {
+        0 => y0 = to.y.min(y1 - min),
+        1 => x1 = to.x.max(x0 + min),
+        2 => y1 = to.y.max(y0 + min),
+        _ => x0 = to.x.min(x1 - min),
+    }
+    Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0))
+}
+
+/// `area` slid back inside the `screen` box (a bigger one just fits its origin).
+pub fn keep_inside(area: Rectangle, screen: Size) -> Rectangle {
+    let slide = |at: f32, len: f32, max: f32| at.min(max - len).max(0.0);
+    Rectangle::new(
+        Point::new(
+            slide(area.x, area.width, screen.width),
+            slide(area.y, area.height, screen.height),
+        ),
+        area.size(),
+    )
+}
+
+/// The grip of a selection of `kind` at `area` (screen px) under `p`: a snapped
+/// box's brackets, otherwise its corner handles, then the edges.
+pub fn grip_at(kind: Kind, area: Rectangle, p: Point) -> Option<Grip> {
+    let corner = match kind {
         Kind::Snap => bracket_at(area, p),
         _ => handle_at(area, p),
-    }
+    };
+    corner
+        .map(Grip::Corner)
+        .or_else(|| edge_at(area, p).map(Grip::Edge))
 }
 
 /// The four corner brackets of the snapped box `r` (screen px), `alpha` shown.
@@ -822,6 +871,13 @@ struct Shown {
     morph: Option<f32>,
     words: Vec<Rectangle>,
     picked: Vec<Rectangle>,
+}
+
+impl Overlay<'_> {
+    /// `p` (screen px) is over a line of the screen's text.
+    fn over_text(&self, p: Point) -> bool {
+        (self.text.iter()).any(|l| self.view.rect_to_screen(*l).contains(p))
+    }
 }
 
 impl canvas::Program<Event> for Overlay<'_> {
@@ -1094,17 +1150,21 @@ impl canvas::Program<Event> for Overlay<'_> {
             (self.handles, self.selection, cursor.position_in(bounds))
         {
             let r = self.view.rect_to_screen(sel.area);
+            let over_text = self.over_text(p);
             match grip_at(sel.kind, r, p).filter(|_| sel.kind != Kind::Word) {
-                Some(0 | 2) => return mouse::Interaction::ResizingDiagonallyDown,
-                Some(_) => return mouse::Interaction::ResizingDiagonallyUp,
-                None if r.contains(p) && sel.kind != Kind::Word => {
-                    return mouse::Interaction::Grab;
+                Some(Grip::Corner(0 | 2)) => return mouse::Interaction::ResizingDiagonallyDown,
+                Some(Grip::Corner(_)) => return mouse::Interaction::ResizingDiagonallyUp,
+                Some(Grip::Edge(0 | 2)) => return mouse::Interaction::ResizingVertically,
+                Some(Grip::Edge(_)) => return mouse::Interaction::ResizingHorizontally,
+                // inside, off the text (on it the press selects text)
+                None if r.contains(p) && sel.kind != Kind::Word && !over_text => {
+                    return mouse::Interaction::Move;
                 }
                 None => {}
             }
         }
         // Over text: it is selected like in a document.
-        let over = |p: Point| (self.text.iter()).any(|l| self.view.rect_to_screen(*l).contains(p));
+        let over = |p: Point| self.over_text(p);
         match cursor.position_in(bounds) {
             Some(p) if over(p) => mouse::Interaction::Text,
             _ => mouse::Interaction::Crosshair,
@@ -1812,12 +1872,68 @@ mod tests {
         assert_eq!(bracket_at(r, Point::new(60.0, 60.0)), None);
         // a snapped box's grip is its brackets (an arm), others their corner dots
         let arm = Point::new(125.0, 97.0);
-        assert_eq!(grip_at(Kind::Snap, r, arm), Some(0));
-        assert_eq!(grip_at(Kind::Drag, r, arm), None);
-        assert_eq!(grip_at(Kind::Drag, r, Point::new(101.0, 99.0)), Some(0));
+        assert_eq!(grip_at(Kind::Snap, r, arm), Some(Grip::Corner(0)));
+        assert_eq!(grip_at(Kind::Drag, r, arm), Some(Grip::Edge(0)));
+        let dot = Point::new(101.0, 99.0);
+        assert_eq!(grip_at(Kind::Drag, r, dot), Some(Grip::Corner(0)));
         // a tiny box: the arms keep their minimum length
         let tiny = rect(100.0, 100.0, 20.0, 20.0);
         assert_eq!(bracket_at(tiny, Point::new(97.0 + 14.0, 97.0)), Some(0));
+    }
+
+    #[test]
+    fn edges_grab_within_reach_and_keep_a_middle_to_move() {
+        let r = rect(100.0, 100.0, 200.0, 100.0);
+        assert_eq!(edge_at(r, Point::new(200.0, 92.0)), Some(0));
+        assert_eq!(edge_at(r, Point::new(308.0, 150.0)), Some(1));
+        assert_eq!(edge_at(r, Point::new(200.0, 208.0)), Some(2));
+        assert_eq!(edge_at(r, Point::new(90.0, 150.0)), Some(3));
+        assert_eq!(edge_at(r, Point::new(200.0, 150.0)), None, "inside = move");
+        assert_eq!(edge_at(r, Point::new(200.0, 80.0)), None, "too far out");
+        // a corner wins over the edges that meet there
+        assert_eq!(
+            grip_at(Kind::Drag, r, Point::new(101.0, 101.0)),
+            Some(Grip::Corner(0))
+        );
+        // a small box: the bands stop at a third of its side
+        let small = rect(100.0, 100.0, 30.0, 30.0);
+        assert_eq!(edge_at(small, Point::new(115.0, 115.0)), None);
+    }
+
+    #[test]
+    fn an_edge_moves_alone_and_never_flips() {
+        let r = rect(100.0, 100.0, 200.0, 100.0);
+        assert_eq!(
+            resize_edge(r, 1, Point::new(350.0, 999.0), 12.0),
+            rect(100.0, 100.0, 250.0, 100.0)
+        );
+        assert_eq!(
+            resize_edge(r, 3, Point::new(150.0, 0.0), 12.0),
+            rect(150.0, 100.0, 150.0, 100.0)
+        );
+        assert_eq!(
+            resize_edge(r, 0, Point::new(0.0, 500.0), 12.0),
+            rect(100.0, 188.0, 200.0, 12.0)
+        );
+        assert_eq!(
+            resize_edge(r, 2, Point::new(0.0, 0.0), 12.0),
+            rect(100.0, 100.0, 200.0, 12.0)
+        );
+    }
+
+    #[test]
+    fn a_moved_box_stays_on_the_screen() {
+        let screen = Size::new(800.0, 600.0);
+        let r = rect(100.0, 100.0, 200.0, 100.0);
+        assert_eq!(keep_inside(r, screen), r);
+        assert_eq!(
+            keep_inside(rect(-50.0, 590.0, 200.0, 100.0), screen),
+            rect(0.0, 500.0, 200.0, 100.0)
+        );
+        assert_eq!(
+            keep_inside(rect(700.0, -9.0, 200.0, 100.0), screen),
+            rect(600.0, 0.0, 200.0, 100.0)
+        );
     }
 
     /// 2x scale: the frame is 3840x2160, the overlay 1920x1080.

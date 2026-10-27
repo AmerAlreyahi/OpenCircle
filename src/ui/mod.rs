@@ -329,10 +329,10 @@ struct WordRead {
     extend: bool,
 }
 
-/// A press on the selection: resizing it by a corner handle, or moving it.
+/// A press on the selection: resizing it by a corner or an edge, or moving it.
 struct Grab {
-    /// The corner (index into the handles), or `None` = move.
-    corner: Option<usize>,
+    /// The corner or edge, or `None` = move.
+    grip: Option<overlay::Grip>,
     /// Where the press was (image px).
     from: Point,
     /// The selection and its stroke when the press began.
@@ -1898,28 +1898,31 @@ impl App {
         matches!(self.purpose, Purpose::Search)
             && !self.drawing
             && (self.panel.is_none() || snapped)
-            && self.text_mode.is_none()
             && self.edit.is_none()
             && self.translate.is_none()
     }
 
-    /// A press at `p` (image px) on the selection: a corner handle resizes it,
-    /// anywhere inside moves it.
+    /// A press at `p` (image px) on the selection: a corner or an edge resizes
+    /// it; inside moves it, unless the press is on text (that selects text).
     fn grab_at(&self, p: Point) -> Option<Grab> {
         // Selected text is not a box: a press on it starts a new selection.
         let sel = (self.selection).filter(|s| self.handles() && s.kind != overlay::Kind::Word)?;
         let on_screen = self.view.rect_to_screen(sel.area);
-        let corner = overlay::grip_at(sel.kind, on_screen, self.view.to_screen(p));
-        (corner.is_some() || sel.area.contains(p)).then(|| Grab {
-            corner,
+        let grip = overlay::grip_at(sel.kind, on_screen, self.view.to_screen(p));
+        let inside = sel.area.contains(p)
+            && self.text_mode.is_none()
+            && self.text_at(p, word::Unit::Caret).is_none();
+        (grip.is_some() || inside).then(|| Grab {
+            grip,
             from: p,
             start: (sel, self.stroke.clone()),
             moved: false,
         })
     }
 
-    /// Resizes / moves the grabbed selection to the pointer at `p` (image px). A
-    /// freehand loop scales with its box; anything else becomes that box.
+    /// Resizes / moves the grabbed selection to the pointer at `p` (image px),
+    /// never off the screen. A freehand loop scales with its box; anything
+    /// else becomes that box.
     fn drag_grab(&mut self, p: Point) {
         let Some(grab) = &mut self.grab else { return };
         let zoom = self.view.zoom();
@@ -1928,13 +1931,30 @@ impl App {
             return;
         }
         let (start, stroke) = &grab.start;
-        let area = match grab.corner {
-            Some(corner) => {
-                // the corner follows the pointer from where it was grabbed (a bracket arm is off it)
-                let to = overlay::corner(start.area, corner) + (p - grab.from);
-                overlay::resize(start.area, corner, to, overlay::MIN_SIDE / zoom)
-            }
-            None => start.area + (p - grab.from),
+        let min = overlay::MIN_SIDE / zoom;
+        let delta = p - grab.from;
+        let on = |to: Point| {
+            Point::new(
+                to.x.clamp(0.0, self.screen.width),
+                to.y.clamp(0.0, self.screen.height),
+            )
+        };
+        let area = match grab.grip {
+            // the corner follows the pointer from where it was grabbed (a bracket arm is off it)
+            Some(overlay::Grip::Corner(c)) => overlay::resize(
+                start.area,
+                c,
+                on(overlay::corner(start.area, c) + delta),
+                min,
+            ),
+            // (an edge's coordinate is its first corner's)
+            Some(overlay::Grip::Edge(e)) => overlay::resize_edge(
+                start.area,
+                e,
+                on(overlay::corner(start.area, e) + delta),
+                min,
+            ),
+            None => overlay::keep_inside(start.area + delta, self.screen),
         };
         let kind = match start.kind {
             overlay::Kind::Loop | overlay::Kind::Scribble | overlay::Kind::Snap => start.kind,
@@ -2530,7 +2550,9 @@ impl App {
     /// A press at `p` (image px) picks words: select-text mode is on, read, and
     /// `p` is in the box.
     fn picks_text_at(&self, p: Point) -> bool {
-        self.text_mode.as_ref().is_some_and(|m| m.lines.is_some()) && self.area().contains(p)
+        self.text_mode.as_ref().is_some_and(|m| m.lines.is_some())
+            && self.area().contains(p)
+            && self.grab_at(p).is_none() // (a bracket or edge adjusts the box)
     }
 
     /// The select-text popup: Copy closes with the words copied; Translate and
@@ -7369,6 +7391,91 @@ mod tests {
         circle(&mut app, Point::new(500.0, 300.0), 60.0, false);
         assert_eq!(app.selection.unwrap().kind, overlay::Kind::Loop);
         assert!(app.morph.is_none());
+    }
+
+    /// A snapped box on `text_app`'s page, the screen's text read.
+    fn boxed_text(area: Rectangle) -> App {
+        let mut app = read_app();
+        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        let (sel, stroke) = overlay::snap(area);
+        (app.selection, app.stroke) = (Some(sel), stroke);
+        app
+    }
+
+    fn rect4(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
+        Rectangle::new(Point::new(x, y), Size::new(w, h))
+    }
+
+    #[test]
+    fn a_snapped_box_resizes_by_its_edges_and_corners() {
+        let mut app = boxed_text(rect4(20.0, 20.0, 520.0, 170.0));
+        // the top edge, up 10: only that side moves (grabbed 1 px off it)
+        drag(
+            &mut app,
+            Point::new(300.0, 21.0),
+            Point::new(300.0, 11.0),
+            false,
+        );
+        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        assert_eq!(app.area(), rect4(20.0, 10.0, 520.0, 180.0));
+        // the right edge, in 100; the bottom-left bracket, out
+        drag(
+            &mut app,
+            Point::new(541.0, 100.0),
+            Point::new(441.0, 100.0),
+            false,
+        );
+        assert_eq!(app.area(), rect4(20.0, 10.0, 420.0, 180.0));
+        drag(
+            &mut app,
+            Point::new(17.0, 193.0),
+            Point::new(7.0, 203.0),
+            false,
+        );
+        assert_eq!(app.area(), rect4(10.0, 10.0, 430.0, 190.0));
+        // the actions take the adjusted box, and it is remembered for the next time
+        assert_eq!(app.regions.last().map(|r| r.1), Some(app.area()));
+        // never off the screen (960x420), never under the minimum
+        drag(
+            &mut app,
+            Point::new(441.0, 100.0),
+            Point::new(5000.0, 100.0),
+            false,
+        );
+        assert_eq!(app.area().x + app.area().width, 960.0);
+        drag(
+            &mut app,
+            Point::new(961.0, 100.0),
+            Point::new(-900.0, 100.0),
+            false,
+        );
+        assert_eq!(app.area().width, overlay::MIN_SIDE);
+    }
+
+    #[test]
+    fn a_snapped_box_moves_from_inside_but_text_inside_still_selects() {
+        let mut app = boxed_text(rect4(20.0, 20.0, 520.0, 170.0));
+        // the empty margin left of the text: move, stopped at the screen's edge
+        drag(
+            &mut app,
+            Point::new(40.0, 100.0),
+            Point::new(60.0, 110.0),
+            false,
+        );
+        assert_eq!(app.area(), rect4(40.0, 30.0, 520.0, 170.0));
+        let boxed = rect4(20.0, 20.0, 520.0, 170.0);
+        app.selection = Some(overlay::snap(boxed).0);
+        drag(
+            &mut app,
+            Point::new(40.0, 100.0),
+            Point::new(-900.0, 900.0),
+            false,
+        );
+        assert_eq!(app.area(), rect4(0.0, 250.0, 520.0, 170.0));
+        // on a word: text is selected, the box stays where it was
+        app.selection = Some(overlay::snap(rect4(20.0, 20.0, 520.0, 170.0)).0);
+        stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
+        assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
     }
 
     /// Draw, release, snap, then act: during the press only the stroke is there,
