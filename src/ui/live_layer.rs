@@ -578,6 +578,7 @@ impl Live {
                 };
                 // new text under a patch: it goes now, not after the re-read
                 let hide = |left: &[Patch]| {
+                    eprintln!("[opencircle] live: stale patches hidden, {} left", left.len());
                     let _ = tx.unbounded_send(Msg::Patches(shown(left, area, &blanked)));
                 };
                 match steps.step_hiding(&page, cw, ch, target, &cache, &deps, hide) {
