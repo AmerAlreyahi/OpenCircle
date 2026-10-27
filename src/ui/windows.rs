@@ -788,8 +788,13 @@ fn apply(cfg: Config) {
 /// A normal window (Settings, Onboarding, the permission prompt): no OS title bar,
 /// our own header (`widgets::chrome`), centred, our logo as its icon.
 fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
+    let mut position = Position::Centered;
     let (size, min_size, resizable) = match kind {
-        Kind::Settings => (settings::WINDOW_SIZE, Some(Size::new(720.0, 520.0)), true),
+        Kind::Settings => {
+            let (size, min, at) = settings_placement();
+            position = at.map_or(position, Position::Specific);
+            (size, Some(min), true)
+        }
         Kind::Onboarding => (onboarding::WINDOW_SIZE, Some(onboarding::MIN_SIZE), true),
         Kind::Permission => (onboarding::PROMPT_SIZE, None, false),
     };
@@ -798,7 +803,7 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
         min_size,
         resizable,
         decorations: false,
-        position: Position::Centered,
+        position,
         // Settings asks about unsaved changes first (`Msg::CloseRequest`).
         exit_on_close_request: kind != Kind::Settings,
         ..window::Settings::default()
@@ -814,6 +819,32 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
         ..settings
     };
     open(settings)
+}
+
+/// Settings' opening size, smallest size and centred origin (logical px) on the screen
+/// under the pointer (primary when unknown), kept inside its usable area. The origin is
+/// `None` where screens can't be listed (the OS then centres it).
+fn settings_placement() -> (Size, Size, Option<Point>) {
+    let monitors = crate::capture::monitor_list();
+    let chosen = crate::capture::choose(&monitors, None, crate::capture::pointer());
+    let Some(m) = chosen.map(|i| monitors[i]) else {
+        let (size, min) = settings::window_limits(settings::WINDOW_SIZE * 1.2);
+        return (size, min, None);
+    };
+    let (x, y, w, h) = m.rect;
+    let s = m.scale.max(0.1);
+    let origin = Point::new(x as f32 / s, y as f32 / s);
+    let full = Size::new(w as f32 / s, h as f32 / s);
+    let work = Size::new(
+        full.width,
+        full.height - super::taskbar_inset(origin, full, s),
+    );
+    let (size, min) = settings::window_limits(work);
+    let at = Point::new(
+        origin.x + (work.width - size.width) / 2.0,
+        origin.y + (work.height - size.height) / 2.0,
+    );
+    (size, min, Some(at))
 }
 
 /// The setup's window (`ui::setup`): a fixed-size normal window (taskbar entry,

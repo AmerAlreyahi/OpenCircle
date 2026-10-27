@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use iced::widget::image::Handle;
 use iced::widget::tooltip::Position;
-use iced::widget::{column, container, row, space};
+use iced::widget::{column, container, row, scrollable, space};
 use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{
@@ -43,8 +43,40 @@ use crate::ui::widgets::{
     text_field, tip, title, value_field, vertical_divider,
 };
 
-/// Logical size of the Settings window.
-pub const WINDOW_SIZE: Size = Size::new(820.0, 600.0);
+/// The size the Settings window prefers (logical px): wide enough for a row's label +
+/// caption beside its 320 px control without wrapping, tall enough for every page of
+/// the sidebar. Screenshots and tests render at this size.
+pub const WINDOW_SIZE: Size = Size::new(1000.0, 720.0);
+
+/// Sidebar width and the padding / gap of its list (`view`).
+const SIDEBAR_WIDTH: f32 = 200.0;
+const SIDEBAR_PAD: f32 = 16.0;
+const SIDEBAR_GAP: f32 = 4.0;
+/// The footer row (auto-save note, buttons): padding 16 + a control.
+const FOOTER_HEIGHT: f32 = 32.0 + widgets::CONTROL;
+
+/// The height that shows the header, every sidebar page (Labs on) and the footer.
+pub const FIT_HEIGHT: f32 = widgets::chrome::HEADER
+    + 2.0 * SIDEBAR_PAD
+    + SECTIONS.len() as f32 * (widgets::CONTROL + SIDEBAR_GAP)
+    - SIDEBAR_GAP
+    + FOOTER_HEIGHT;
+/// The narrowest layout that keeps the label column readable beside a control.
+const MIN_WIDTH: f32 = 760.0;
+
+/// The opening size and the smallest size for a screen whose usable area is `work`
+/// (logical px): the preferred size, kept clear of the screen's edges and the taskbar,
+/// never below what fits the sidebar unless the screen itself is smaller (the sidebar
+/// then scrolls).
+pub fn window_limits(work: Size) -> (Size, Size) {
+    let room = Size::new(work.width * 0.92, work.height * 0.96);
+    let size = Size::new(
+        WINDOW_SIZE.width.min(room.width),
+        WINDOW_SIZE.height.min(room.height),
+    );
+    let min = Size::new(MIN_WIDTH.min(size.width), FIT_HEIGHT.min(size.height));
+    (size, min)
+}
 
 // ---- the OS keyring, behind a trait so tests never touch the real one ----
 
@@ -1258,9 +1290,11 @@ pub fn view(state: &State) -> Element<'_, Message> {
             Position::Right,
         )
     }))
-    .spacing(4)
-    .padding(16)
-    .width(200);
+    .spacing(SIDEBAR_GAP)
+    .padding(SIDEBAR_PAD)
+    .width(SIDEBAR_WIDTH);
+    // Scrolls only when the screen is too short for the whole list.
+    let sidebar = scrollable(sidebar).height(Length::Fill);
 
     let main = column![
         container(content(state))
@@ -2665,6 +2699,34 @@ pub(super) mod tests {
 
     fn sidebar(s: &State) -> Vec<&'static str> {
         sections(&s.draft.labs).map(|(_, label, _)| label).collect()
+    }
+
+    #[test]
+    fn opens_at_a_size_that_fits_the_sidebar_and_the_content() {
+        // Work area in logical px: the screen / scale, minus a 40 px taskbar.
+        let work = |w: f32, h: f32, scale: f32| Size::new(w / scale, h / scale - 40.0);
+        for (screen, scale) in [
+            ((1920.0, 1080.0), 1.0),
+            ((1920.0, 1080.0), 1.5),
+            ((1280.0, 720.0), 1.0),
+        ] {
+            let w = work(screen.0, screen.1, scale);
+            let (size, min) = window_limits(w);
+            assert!(
+                size.width <= w.width && size.height <= w.height,
+                "{screen:?} {scale}: {size:?}"
+            );
+            assert!(min.width <= size.width && min.height <= size.height);
+            assert!(
+                size.height >= FIT_HEIGHT,
+                "{screen:?} {scale}: {size:?} < {FIT_HEIGHT}"
+            );
+            assert!(size.width >= 900.0, "{screen:?} {scale}: {size:?}");
+        }
+        // A huge screen does not make a huge window.
+        assert_eq!(window_limits(work(3440.0, 1440.0, 1.0)).0, WINDOW_SIZE);
+        // The ten sidebar rows + header + footer are what FIT_HEIGHT counts.
+        const { assert!(FIT_HEIGHT > 600.0 && FIT_HEIGHT <= WINDOW_SIZE.height) };
     }
 
     #[test]
