@@ -63,3 +63,26 @@ Asset names, `SHA256SUMS.txt`, `SHA256SUMS.txt.minisig` and the trusted comment
    from the issue on the new build. Comment on the issue: fixed, or still
    broken with what you saw (and "Copy diagnostics" from Settings if useful).
 4. Fixed and confirmed: the issue is closed at the next stable release.
+
+## The update signing key
+
+- The private minisign key exists only in the `release` environment's secret
+  (usable by `v*` tag runs only) and in the maintainer's offline backup. There is
+  no repository-level copy. The public key is built into the app
+  (`src/update/verify.rs`).
+- Every installed copy checks that `SHA256SUMS.txt.minisig` verifies with that key
+  and that its trusted comment is exactly `OpenCircle v<version>` of the release it
+  downloads. A replayed signature from another version, a missing comment or an
+  older version is refused.
+- **Backup:** keep an offline copy of the private key (for example in a password
+  manager and on an encrypted USB stick). Losing it means installed copies can no
+  longer auto-update.
+- **Rotation** (key lost or exposed, or planned):
+  1. Make a new key pair.
+  2. Release N, still signed with the OLD key, ships the NEW public key.
+     Installed copies verify N with the old key, update, and from then on trust
+     the new key.
+  3. From release N+1 on, sign with the new key: replace the `release`
+     environment secret, then delete the old private key.
+  4. If the old key was exposed, say so in N's release notes. Copies that skip
+     release N must update by hand once.
