@@ -6,13 +6,7 @@ use iced_runtime::user_interface::{Cache, UserInterface};
 
 /// A renderer as the app's: its fonts loaded, the UI font by default.
 pub fn renderer() -> iced::Renderer {
-    let mut fonts = iced::advanced::graphics::text::font_system()
-        .write()
-        .unwrap();
-    for f in super::super::text::FONTS {
-        fonts.load_font(f.into());
-    }
-    drop(fonts);
+    super::super::text::load();
     iced::Renderer::new(super::super::text::ui_font(), Pixels(16.0))
 }
 

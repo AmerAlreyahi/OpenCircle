@@ -29,9 +29,50 @@ pub fn ui_font() -> Font {
     Font::with_name(ui_font_name())
 }
 
+/// The bundled Arabic face (`FONTS`), the fallback for Arabic in every font.
+const ARABIC: &str = "Noto Sans Arabic";
+
+/// Loads `FONTS` into the UI's font system (once; iced's own load of the same
+/// bytes is then a no-op) and registers the Arabic face at every weight.
+///
+/// The text engine (cosmic-text) falls back for another script only to faces
+/// of exactly the asked weight, and a variable font is registered once, at
+/// its default (400). So Arabic in a 500 or 600 role (or in `MONO`) fell to
+/// whatever face had some Arabic (DejaVu on Linux): unjoined, spaced letters.
+/// The extra entries share the font's bytes; each is drawn at its weight
+/// (the variable font's `wght` axis).
+pub fn load() {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| {
+        use iced::advanced::graphics::text::cosmic_text::fontdb;
+        let mut fonts = iced::advanced::graphics::text::font_system()
+            .write()
+            .expect("font system");
+        for f in FONTS {
+            fonts.load_font(f.into());
+        }
+        let db = fonts.raw().db_mut();
+        let arabic: Vec<fontdb::FaceInfo> = (db.faces())
+            .filter(|f| f.families.iter().any(|(name, _)| name == ARABIC))
+            .cloned()
+            .collect();
+        for face in arabic {
+            for weight in (100..=900).step_by(100) {
+                if weight != face.weight.0 {
+                    db.push_face_info(fontdb::FaceInfo {
+                        weight: fontdb::Weight(weight),
+                        ..face.clone()
+                    });
+                }
+            }
+        }
+    });
+}
+
 pub fn ui_font_name() -> &'static str {
     static FONT: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
     FONT.get_or_init(|| {
+        load();
         let mut fonts = iced::advanced::graphics::text::font_system()
             .write()
             .expect("font system");
@@ -60,6 +101,39 @@ pub fn mono(weight: Weight) -> Font {
     Font { weight, ..MONO }
 }
 
+/// How wide `s` is on one line at `size` px in `font`.
+pub fn width(s: &str, size: f32, font: Font) -> f32 {
+    use iced::advanced::graphics::text::cosmic_text::{
+        Attrs, Buffer, Family, Metrics, Shaping, Weight as W,
+    };
+    let ui = ui_font_name(); // (loads the fonts, takes the same lock: before ours)
+    let family = match font.family {
+        iced::font::Family::Name(name) => Family::Name(name),
+        _ => Family::Name(ui),
+    };
+    let weight = match font.weight {
+        Weight::Thin => 100,
+        Weight::ExtraLight => 200,
+        Weight::Light => 300,
+        Weight::Normal => 400,
+        Weight::Medium => 500,
+        Weight::Semibold => 600,
+        Weight::Bold => 700,
+        Weight::ExtraBold => 800,
+        Weight::Black => 900,
+    };
+    let mut fonts = iced::advanced::graphics::text::font_system()
+        .write()
+        .expect("font system");
+    let fs = fonts.raw();
+    let mut buf = Buffer::new(fs, Metrics::new(size, size * 1.5));
+    buf.set_size(fs, None, None);
+    let attrs = Attrs::new().family(family).weight(W(weight));
+    buf.set_text(fs, s, &attrs, Shaping::Advanced, None);
+    buf.shape_until_scroll(fs, false);
+    buf.layout_runs().map(|r| r.line_w).fold(0.0, f32::max)
+}
+
 /// The font of `role`.
 pub fn font(role: Role) -> Font {
     match role.mono {
@@ -80,4 +154,48 @@ pub fn text<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
         .size(role.size)
         .font(font(role))
         .color(colour)
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::advanced::graphics::text::cosmic_text::{
+        Attrs, Buffer, Family, Metrics, Shaping, Weight as W,
+    };
+
+    /// Arabic is drawn by the bundled Arabic face at every weight a role uses,
+    /// in the UI font and in `MONO` (it fell to another face at 500 and in
+    /// mono: unjoined, spaced letters).
+    #[test]
+    fn arabic_comes_from_the_arabic_face_at_every_weight() {
+        const WORDS: &str = "بحث في المتصفح";
+        let ui = super::ui_font_name();
+        let mut wrong = Vec::new();
+        let mut fonts = iced::advanced::graphics::text::font_system()
+            .write()
+            .unwrap();
+        let fs = fonts.raw();
+        for family in [ui, "JetBrains Mono"] {
+            for weight in [400, 500, 600, 700] {
+                let mut buf = Buffer::new(fs, Metrics::new(12.0, 18.0));
+                let attrs = Attrs::new().family(Family::Name(family)).weight(W(weight));
+                buf.set_text(fs, WORDS, &attrs, Shaping::Advanced, None);
+                buf.shape_until_scroll(fs, false);
+                let glyphs: Vec<_> = (buf.layout_runs())
+                    .flat_map(|r| r.glyphs.iter())
+                    .filter(|g| !WORDS[g.start..g.end].trim().is_empty())
+                    .map(|g| g.font_id)
+                    .collect();
+                assert!(!glyphs.is_empty());
+                for id in glyphs {
+                    let name = fs.db().face(id).unwrap().families[0].0.clone();
+                    if name != super::ARABIC {
+                        wrong.push(format!("{family} at {weight}: {name}"));
+                    }
+                }
+            }
+        }
+        drop(fonts);
+        wrong.dedup();
+        assert!(wrong.is_empty(), "{wrong:?}");
+    }
 }

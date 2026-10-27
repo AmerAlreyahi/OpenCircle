@@ -1,15 +1,17 @@
 //! `.oc-track` with `.oc-pills` and the gliding thumb: one choice of a few.
 //! `boolean` (Off / On) is the only on/off control (the design has no switch).
 use iced::widget::{Space, button, container, row, stack, text};
-use iced::{Border, Center, Element, Fill};
+use iced::{Border, Element, Fill};
 
 use super::themes::c;
 use super::tokens::{Role, radius, space};
 
 /// A pill's width: its label (12 px / 500) and 12 px each side, at least 42 px
-/// (the design's Off / On are 45 / 42 px).
+/// (the design's Off / On are 45 / 42 px) and 7 px a letter (the design's
+/// pills, measured for Latin), never narrower than the label as drawn.
 fn pill_width(label: &str) -> f32 {
-    (24.0 + 7.0 * label.chars().count() as f32).max(42.0)
+    let drawn = super::text::width(label, Role::CONTROL.size, super::text::font(Role::CONTROL));
+    (24.0 + (7.0 * label.chars().count() as f32).max(drawn.ceil())).max(42.0)
 }
 
 /// Radius 10 track (`track`, divider edge, 3 px inside), 7.5 px pills; the
@@ -58,13 +60,15 @@ pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     );
     let pills = options.iter().map(|&(value, label)| {
         let active = value == chosen;
+        // centred by its box: a centred Arabic line is drawn off to the right
         button(
-            text(label)
-                .size(Role::CONTROL.size)
-                .font(super::text::font(Role::CONTROL))
-                .line_height(1.25)
-                .align_x(Center)
-                .width(Fill),
+            container(
+                text(label)
+                    .size(Role::CONTROL.size)
+                    .font(super::text::font(Role::CONTROL))
+                    .line_height(1.25),
+            )
+            .center_x(Fill),
         )
         .width(pill_width(label))
         .padding([6, 0])
@@ -114,4 +118,29 @@ pub fn boolean<'a, Message: Clone + 'a>(
         glide,
         pick,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every pill holds its label as drawn, Arabic too (7 px a letter was
+    /// too narrow for Arabic: the labels ran into each other).
+    #[test]
+    fn every_pill_holds_its_label() {
+        use super::super::text::{font, width};
+        use super::super::tokens::Role;
+        for label in [
+            "Off",
+            "On",
+            "Keep",
+            "Remove",
+            "إيقاف",
+            "تشغيل",
+            "النظام",
+            "داكن",
+        ] {
+            let drawn = width(label, Role::CONTROL.size, font(Role::CONTROL));
+            assert!(drawn > 0.0, "{label}");
+            assert!(super::pill_width(label) >= drawn + 24.0, "{label}: {drawn}");
+        }
+    }
 }

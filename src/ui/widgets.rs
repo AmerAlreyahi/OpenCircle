@@ -17,23 +17,11 @@ use crate::config::BarStyle;
 pub use super::kit::icon::FONT as ICON_FONT;
 #[cfg(test)]
 pub use super::kit::icon::FONT_BYTES as ICON_FONT_BYTES;
-use super::kit::text::ui_font_name;
 pub use super::kit::text::{FONTS, ui_font};
 
 /// How wide `text` is on one line at `size` in the UI font.
 pub fn text_width(text: &str, size: f32) -> f32 {
-    use iced::advanced::graphics::text::cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping};
-    let name = ui_font_name(); // (takes the same lock: before ours)
-    let mut fonts = iced::advanced::graphics::text::font_system()
-        .write()
-        .expect("font system");
-    let fs = fonts.raw();
-    let mut buf = Buffer::new(fs, Metrics::new(size, size * LINE));
-    buf.set_size(fs, None, None);
-    let attrs = Attrs::new().family(Family::Name(name));
-    buf.set_text(fs, text, &attrs, Shaping::Advanced, None);
-    buf.shape_until_scroll(fs, false);
-    buf.layout_runs().map(|r| r.line_w).fold(0.0, f32::max)
+    super::kit::text::width(text, size, ui_font())
 }
 
 /// The first of `texts` (longest first) that fits `room` px on one line at
