@@ -6124,6 +6124,7 @@ mod tests {
     /// here: no Windows at all): the helper reads instead, band by band, and
     /// without its models the bar offers their download, as before.
     #[test]
+    #[cfg(not(windows))] // Windows' real OCR would read
     fn without_windows_ocr_the_helper_reads() {
         ocr::system::LANGUAGE_HERE.set(Some(Some("en-US"))); // as if it were there
         let mut app = text_app();

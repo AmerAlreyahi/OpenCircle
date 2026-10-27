@@ -229,12 +229,24 @@ mod imp {
     use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
     use windows::Media::Ocr::OcrEngine;
     use windows::Storage::Streams::DataWriter;
-    use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+    use windows::Win32::System::Com::CoIncrementMTAUsage;
 
-    /// WinRT on this thread (a background one: the multithreaded apartment).
+    /// WinRT for the whole process, for good: the engine (`ENGINE`) and the
+    /// `windows` crate's cached `OcrEngine` statics outlive the thread that
+    /// made them (made on one read's thread, used by the next, freed by
+    /// `free_when_idle`'s), so the apartment must outlive them all. A thread's
+    /// own `CoInitializeEx` ended with the thread: once the last such thread
+    /// was gone COM unloaded the OCR DLLs, and the next read crashed in
+    /// `MaxImageDimension` (0xc0000005; CI's tests, VM). Every thread not in
+    /// an apartment of its own is then in this multithreaded one.
     fn com() {
-        // SAFETY: no pointers; a thread already in an apartment just says so.
-        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        static MTA: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        MTA.get_or_init(|| {
+            // SAFETY: no pointers; the cookie is kept (never decremented).
+            if let Err(e) = unsafe { CoIncrementMTAUsage() } {
+                eprintln!("[opencircle] Windows OCR: no apartment: {e}");
+            }
+        });
     }
 
     /// This thread at below-normal priority until the guard drops.
@@ -433,6 +445,38 @@ mod tests {
                 x + w <= info.width as f32 && y + h <= info.height as f32,
                 "{b:?}"
             );
+        }
+    }
+
+    /// The engine outlives the threads that use it: reads overlap, each on a
+    /// thread that then ends, the engine is freed by yet another (as
+    /// `free_when_idle` does) and made again. Before: COM ended with the last
+    /// reading thread and the next free or read of the kept engine crashed the
+    /// process (CI, 0xc0000005).
+    #[test]
+    #[cfg(windows)]
+    fn the_engine_outlives_the_threads_that_read() {
+        if std::thread::spawn(language).join().unwrap().is_none() {
+            println!("SKIPPED: this Windows has no OCR recognizer for its languages");
+            return;
+        }
+        let png = png::Decoder::new(std::io::Cursor::new(include_bytes!("fixture.png")));
+        let mut reader = png.read_info().unwrap();
+        let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut rgba).unwrap();
+        let (rgba, w, h) = (std::sync::Arc::new(rgba), info.width, info.height);
+        for _ in 0..4 {
+            let reads: Vec<_> = (1..=3)
+                .map(|k| {
+                    let rgba = rgba.clone();
+                    std::thread::spawn(move || recognize(&rgba, w, h, k).map(|b| b.len()))
+                })
+                .collect();
+            for read in reads {
+                assert!(read.join().unwrap().unwrap() > 0, "read");
+            }
+            std::thread::sleep(Duration::from_millis(100)); // the readers are gone
+            std::thread::spawn(|| drop(lock().take())).join().unwrap();
         }
     }
 }
