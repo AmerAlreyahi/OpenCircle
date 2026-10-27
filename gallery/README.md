@@ -1,5 +1,19 @@
 # Gallery
 
+## OpenCircle 0.1.1 in action
+
+Real recordings of OpenCircle 0.1.1 on a Windows test machine. The pages are
+local demo pages with a NASA photo; nothing in the app is mocked up. Each clip is
+also available as an MP4.
+
+| | |
+|---|---|
+| ![Circle anything, then choose Search](clips/clip-1-circle.webp)<br>Circle anything, then choose Search ([MP4](clips/clip-1-circle.mp4)) | ![Select text. Copy. Paste.](clips/clip-2-text.webp)<br>Select text. Copy. Paste. ([MP4](clips/clip-2-text.mp4)) |
+| ![Read the page in Arabic](clips/clip-3-translate.webp)<br>Read the page in Arabic ([MP4](clips/clip-3-translate.mp4)) | ![Tip: Alt+drag moves the box](clips/clip-4-adjust.webp)<br>Tip: Alt+drag moves the box ([MP4](clips/clip-4-adjust.mp4)) |
+| ![Keep it with Ctrl+S](clips/clip-5-save.webp)<br>Keep it with Ctrl+S ([MP4](clips/clip-5-save.mp4)) | ![Install. Launch. Ready.](clips/clip-6-install.webp)<br>Install. Launch. Ready. ([MP4](clips/clip-6-install.mp4)) |
+
+## Screenshots of 0.1.0 (older look)
+
 Real screenshots of OpenCircle 0.1.0 on Windows 10, with the Frost widget
 theme and the default live look. The pages are ordinary Wikipedia and GitHub
 pages; nothing is mocked up.

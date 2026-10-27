@@ -19,6 +19,25 @@ licensed, and has no account and no telemetry.
   <img alt="Platforms: Windows and Linux (preview)" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20(preview)-4fc9e0">
 </p>
 
+## See it in action
+
+<table>
+  <tr>
+    <td width="50%"><img src="gallery/clips/clip-1-circle.webp" alt="Circle a photo, then Search in browser: Google Lens opens with the crop."><br><sub><b>Circle anything, then choose Search.</b> Lens opens in your own browser.</sub></td>
+    <td width="50%"><img src="gallery/clips/clip-2-text.webp" alt="Select a line of text on screen, copy it and paste it into Notepad."><br><sub><b>Select text. Copy. Paste.</b> Text on screen is selectable at once.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="gallery/clips/clip-3-translate.webp" alt="An English article is translated to Arabic in place, block by block."><br><sub><b>Read the page in Arabic.</b> Offline, drawn where the text stood.</sub></td>
+    <td><img src="gallery/clips/clip-4-adjust.webp" alt="Resize the selection box, move it with Alt+drag and copy the image."><br><sub><b>Adjust the box.</b> Resize, Alt+drag or arrows; Ctrl+C copies the image.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="gallery/clips/clip-5-save.webp" alt="Ctrl+S saves the selection and a pill shows where."><br><sub><b>Keep it with Ctrl+S.</b> Saved straight to your folder.</sub></td>
+    <td><img src="gallery/clips/clip-6-install.webp" alt="The setup installs OpenCircle, launches it, and it waits in the tray."><br><sub><b>Install. Launch. Ready.</b> One small setup, then one shortcut.</sub></td>
+  </tr>
+</table>
+
+More screenshots and the full-size videos: [gallery](gallery/README.md).
+
 <p align="center">
   <img src="docs/images/translate-before-after.png" alt="Full-screen translate: the Arabic page before, and after OpenCircle erased the English text and drew the translation in its place." width="900"><br>
   <sub>Translate in place: the text is erased and redrawn where it stood.</sub>
