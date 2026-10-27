@@ -22,7 +22,7 @@ pub fn apply(config: &Config) {
         sync_when_onboarded(&Store::real(), &exe, config.general.autostart, onboarded)
     });
     if let Err(e) = result {
-        eprintln!("[opencircle] start with the OS: {e}");
+        crate::log!("[opencircle] start with the OS: {e}");
     }
 }
 

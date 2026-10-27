@@ -162,7 +162,7 @@ fn drag(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool, Str
             // fRelease: the data object owns the memory from here. Without the
             // bitmap the file alone still drags.
             if let Err(err) = data.SetData(&format, &medium, true) {
-                eprintln!("[opencircle] drag-out: no bitmap ({err})");
+                crate::log!("[opencircle] drag-out: no bitmap ({err})");
             }
         }
         let window = GetActiveWindow();

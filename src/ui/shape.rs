@@ -266,7 +266,7 @@ mod win {
                 (steps, worst, last) = (steps + 1, worst.max(step - last), step);
                 let a = shown.at(step);
                 if let Err(e) = opacity(hwnd, a) {
-                    eprintln!("[opencircle] window fade: {e}");
+                    crate::log!("[opencircle] window fade: {e}");
                     break;
                 }
                 if px != 0.0 {
@@ -284,7 +284,7 @@ mod win {
             }
         }
         LATEST.lock().unwrap().retain(|e| *e != (hwnd, me));
-        eprintln!(
+        crate::log!(
             "[opencircle] window fade: {steps} steps, max {} ms apart",
             worst.as_millis()
         );
@@ -507,7 +507,7 @@ mod tests {
     fn x11_window_gets_the_shape() {
         use xcb::{Xid, x};
         if std::env::var_os("DISPLAY").is_none() {
-            eprintln!("no X11 display: skipped");
+            crate::log!("no X11 display: skipped");
             return;
         }
         let (conn, screen) = xcb::Connection::connect(None).unwrap();

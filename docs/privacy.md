@@ -31,6 +31,22 @@ only to the server you configured. A remote server must use `https://`; plain
 
 ## What stays on disk
 
+- **Log and crash files.** OpenCircle writes what it prints (start-up, errors,
+  timings, never your text) to `logs/opencircle.log` in your local data folder
+  (`%LOCALAPPDATA%\OpenCircle\logs` on Windows), up to 3 files of 1 MB. If it
+  crashes, it writes `logs/crash-<time>.txt` (version, OS, the error, the last
+  200 log lines; the newest 5 are kept). Keys, tokens and your home folder
+  (shown as `~`) are removed from every line before it is written. Your
+  captures, clipboard, recognised text, translations and prompts are not
+  logged. **Nothing is sent**: the files stay on your PC until you delete them.
+- **Copy diagnostics / Report a problem** (Settings > About). *Copy
+  diagnostics* puts a report on your clipboard (version, Windows build,
+  screens, a settings summary without keys or folders, which experiments are
+  on, and the last 50 log lines) for you to paste where you choose. *Report a
+  problem* opens a pre-filled GitHub issue in your browser with only the
+  version and Windows build; nothing is submitted until you press the button
+  on GitHub.
+
 - **Captures** are kept in memory. A screenshot is written to disk only when
   you press Save and choose a place.
 - **Lens page.** The temporary web page that carries the image to Lens is

@@ -74,7 +74,7 @@ pub fn start(tx: Triggers) {
         .name("update".into())
         .spawn(move || run(&now_rx, &tx));
     if let Err(e) = spawned {
-        eprintln!("[opencircle] update: cannot start a thread: {e}");
+        crate::log!("[opencircle] update: cannot start a thread: {e}");
     }
 }
 
@@ -101,7 +101,7 @@ fn run(now: &mpsc::Receiver<()>, tx: &Triggers) {
                 Some(setup) => check(&release::Net, &setup, &mut memo, &mut handled, tx),
                 None => "this is a development build: it does not update itself".into(),
             };
-            eprintln!("[opencircle] update: {status}");
+            crate::log!("[opencircle] update: {status}");
             if asked {
                 let _ = tx.unbounded_send(Trigger::Update(Event::Status(status)));
             }
@@ -155,7 +155,7 @@ fn check(
             return format!("GitHub asks to wait: try again in {} min", s.div_ceil(60));
         }
         Err(CheckError::Failed(e)) => {
-            eprintln!("[opencircle] update check failed: {}", release::scrub(&e));
+            crate::log!("[opencircle] update check failed: {}", release::scrub(&e));
             return "could not reach GitHub: try again later".into();
         }
     };
@@ -199,7 +199,7 @@ fn check(
         }
         Err(e) if e == "no download for this system" => manual(handled),
         Err(e) => {
-            eprintln!(
+            crate::log!(
                 "[opencircle] update {version} refused: {}",
                 release::scrub(&e)
             );
@@ -256,7 +256,7 @@ fn install_at(staged: &Staged, marker_path: &Path) -> Result<(), String> {
         let _ = std::fs::remove_file(marker_path);
         return Err(undo(format!("cannot start the new version: {e}")));
     }
-    eprintln!(
+    crate::log!(
         "[opencircle] update {}: installed, restarting",
         staged.version
     );
@@ -335,7 +335,7 @@ pub fn wait_for_old(running: impl Fn() -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(30);
     while running() {
         if Instant::now() > deadline {
-            eprintln!("[opencircle] update: the old version did not exit");
+            crate::log!("[opencircle] update: the old version did not exit");
             roll_back();
             return false;
         }
@@ -348,7 +348,7 @@ pub fn wait_for_old(running: impl Fn() -> bool) -> bool {
 /// program goes). Returns its notes card: version, notes, release page.
 pub fn confirm() -> Option<(String, String, String)> {
     let marker = swap::confirm(&swap::Marker::path()?)?;
-    eprintln!("[opencircle] update {}: running", marker.version);
+    crate::log!("[opencircle] update {}: running", marker.version);
     // The old process may still be exiting (Windows locks a running exe).
     let backup = marker.backup.clone();
     std::thread::spawn(move || {
@@ -367,7 +367,7 @@ pub fn roll_back() {
     if let Some(marker) = swap::Marker::path().and_then(|p| swap::roll_back(&p))
         && let Err(e) = spawn(&marker.target, None)
     {
-        eprintln!("[opencircle] update: cannot start the old version again: {e}");
+        crate::log!("[opencircle] update: cannot start the old version again: {e}");
     }
 }
 

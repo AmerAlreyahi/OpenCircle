@@ -178,14 +178,14 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
     let package = match Package::write(msi_bytes) {
         Ok(p) => Arc::new(p),
         Err(e) => {
-            eprintln!("[opencircle] setup: cannot unpack the installer: {e}");
+            crate::log!("[opencircle] setup: cannot unpack the installer: {e}");
             return Ok(());
         }
     };
     let installed = msi::installed(&package);
     let read = started.elapsed();
     let size = msi::installed_size(&package);
-    eprintln!(
+    crate::log!(
         "[opencircle] setup: unpacked + read the installed copy in {} ms, sized in {} ms",
         read.as_millis(),
         (started.elapsed() - read).as_millis()
@@ -447,7 +447,7 @@ impl State {
                 self.keep_choice();
                 if let Err(e) = std::process::Command::new(setup_core::app_in(&self.folder)).spawn()
                 {
-                    eprintln!("[opencircle] setup: launch: {e}");
+                    crate::log!("[opencircle] setup: launch: {e}");
                 }
                 self.close()
             }
@@ -475,14 +475,14 @@ impl State {
     fn keep_choice(&self) {
         let exe = setup_core::app_in(&self.folder);
         if let Err(e) = crate::autostart::choose(&exe, self.autostart) {
-            eprintln!("[opencircle] setup: start with Windows: {e}");
+            crate::log!("[opencircle] setup: start with Windows: {e}");
         }
         if crate::config::Config::path().is_some_and(|p| p.exists()) {
             let (mut config, warnings) = crate::config::Config::load();
             if warnings.is_empty() && config.general.autostart != self.autostart {
                 config.general.autostart = self.autostart;
                 if let Err(e) = config.save() {
-                    eprintln!("[opencircle] setup: save the setting: {e}");
+                    crate::log!("[opencircle] setup: save the setting: {e}");
                 }
             }
         }
@@ -922,7 +922,7 @@ mod tests {
     #[test]
     fn every_screen_matches_its_golden_image() {
         if widgets::ui_font() != iced::Font::with_name("Inter") {
-            eprintln!("golden images are drawn with Inter; this machine has Segoe UI");
+            crate::log!("golden images are drawn with Inter; this machine has Segoe UI");
             return;
         }
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/setup");

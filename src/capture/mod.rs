@@ -42,6 +42,11 @@ pub struct Monitor {
     pub primary: bool,
 }
 
+/// Every monitor (diagnostics); empty where the platform can't list them.
+pub fn monitor_list() -> Vec<Monitor> {
+    platform::monitors().unwrap_or_default()
+}
+
 /// Captures the monitor under the cursor (the primary one if the cursor is unknown).
 pub fn monitor_under_cursor() -> Result<Frame, String> {
     monitor_of(None)

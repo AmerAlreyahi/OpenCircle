@@ -508,7 +508,7 @@ fn translate(
         problem(e.to_string(), setup)
     })?;
     let t = out.timings;
-    eprintln!(
+    crate::log!(
         "[opencircle] translate {}x{} at {x0},{y0}: ocr {} ms, translate {} ms, render {} ms, \
          total {} ms; {} blocks, {} drawn, {} left (busy background {}, no room {})",
         crop.width,

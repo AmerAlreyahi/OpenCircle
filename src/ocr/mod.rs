@@ -426,7 +426,7 @@ impl Engine {
             }
             self.auto = best.0;
         }
-        eprintln!(
+        crate::log!(
             "[opencircle] ocr {width}x{height}: detect at {dw}x{dh} {} ms, {n} lines read in {} ms",
             detected.as_millis(),
             (start.elapsed() - detected).as_millis()

@@ -162,7 +162,7 @@ fn finish(action: &Action, crop: Crop) {
     if let Run::Finish(run) = action.run
         && let Err(e) = run(crop)
     {
-        eprintln!("{} failed: {e}", action.id);
+        crate::log!("{} failed: {e}", action.id);
     }
 }
 
@@ -279,7 +279,7 @@ impl Windows {
             0.0, // a picture: square
             POPUP,
         );
-        eprintln!("[opencircle] pinned {}x{}", crop.width, crop.height);
+        crate::log!("[opencircle] pinned {}x{}", crop.width, crop.height);
         self.pins.push(Pin {
             id,
             image: image::Handle::from_rgba(crop.width, crop.height, crop.rgba),
@@ -358,10 +358,10 @@ impl Windows {
     /// Opens the window, or focuses it when it is already open.
     pub fn open(&mut self, kind: Kind) -> Task<Msg> {
         if let Some(id) = self.id(kind) {
-            eprintln!("[opencircle] {kind:?} window is open: focusing it");
+            crate::log!("[opencircle] {kind:?} window is open: focusing it");
             return window::minimize(id, false).chain(window::gain_focus(id));
         }
-        eprintln!("[opencircle] opening the {kind:?} window");
+        crate::log!("[opencircle] opening the {kind:?} window");
         let (id, open) = normal(kind);
         match kind {
             Kind::Settings => self.settings = Some((id, settings::State::open())),
@@ -380,6 +380,16 @@ impl Windows {
                         settings::Outcome::Saved(cfg) => apply(cfg),
                         settings::Outcome::Browse => return pick_folder(),
                         settings::Outcome::OpenLink(url) => open_url(&url),
+                        settings::Outcome::CopyDiagnostics => {
+                            let report = crate::diagnostics::report(&crate::config::current());
+                            return match crate::actions::copy::text(report) {
+                                Ok(()) => self.toast("Diagnostics copied", true, None, TOAST_MS),
+                                Err(e) => {
+                                    crate::log!("[opencircle] copy diagnostics failed: {e}");
+                                    self.toast("Couldn't copy", false, None, TOAST_MS)
+                                }
+                            };
+                        }
                         settings::Outcome::CheckUpdate => crate::update::check_now(),
                         settings::Outcome::None => {}
                     }
@@ -545,11 +555,11 @@ impl Windows {
                     match DragFile::write(&crop) {
                         Ok(mut file) => {
                             if let Err(e) = dragout::start(&mut file, &crop, false) {
-                                eprintln!("[opencircle] {e}");
+                                crate::log!("[opencircle] {e}");
                             }
                             pin.dragged = Some(file);
                         }
-                        Err(e) => eprintln!("[opencircle] drag-out: {e}"),
+                        Err(e) => crate::log!("[opencircle] drag-out: {e}"),
                     }
                 }
                 Task::none()
@@ -693,7 +703,7 @@ impl Windows {
                     self.pin(crop, Some(Point::new(200.0, 150.0)), 1.0)
                 }
                 Err(e) => {
-                    eprintln!("test pin failed: {e}");
+                    crate::log!("test pin failed: {e}");
                     Task::none()
                 }
             },
@@ -907,7 +917,7 @@ pub fn opacity<T: Send + 'static>(id: window::Id, alpha: f32) -> Task<T> {
         if let Ok(handle) = w.window_handle()
             && let Err(e) = shape::opacity(handle.as_raw(), alpha)
         {
-            eprintln!("[opencircle] window opacity: {e}");
+            crate::log!("[opencircle] window opacity: {e}");
         }
     })
     .discard()
@@ -1018,7 +1028,7 @@ pub fn hide_from_capture(id: window::Id, on: bool) -> Task<Msg> {
             if let Err(e) =
                 unsafe { SetWindowDisplayAffinity(HWND(h.hwnd.get() as *mut _), affinity) }
             {
-                eprintln!("[opencircle] window affinity: {e}");
+                crate::log!("[opencircle] window affinity: {e}");
             }
         }
         #[cfg(not(windows))]
@@ -1034,7 +1044,7 @@ pub fn uncut(id: window::Id) -> Task<Msg> {
         if let Ok(handle) = w.window_handle()
             && let Err(e) = shape::clear(handle.as_raw())
         {
-            eprintln!("[opencircle] window shape: {e}");
+            crate::log!("[opencircle] window shape: {e}");
         }
     })
     .discard()
@@ -1056,7 +1066,7 @@ pub fn reshape(id: window::Id) -> Task<Msg> {
         if let Ok(handle) = w.window_handle()
             && let Err(e) = shape::apply(handle.as_raw(), radius)
         {
-            eprintln!("[opencircle] window shape: {e}");
+            crate::log!("[opencircle] window shape: {e}");
         }
     })
     .discard()
@@ -1127,7 +1137,7 @@ fn pick_folder() -> Task<Msg> {
 /// Opens `url` in the browser if it is one plain web link (`lens::web_host`).
 fn open_url(url: &str) {
     if crate::lens::web_host(url).is_none() {
-        eprintln!("[opencircle] not a web link: not opened");
+        crate::log!("[opencircle] not a web link: not opened");
         return;
     }
     #[cfg(windows)]
@@ -1153,7 +1163,7 @@ fn open_url(url: &str) {
     {
         // Reaped off the UI thread: xdg-open can outlive the click.
         Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
-        Err(e) => eprintln!("cannot open {url}: {e}"),
+        Err(e) => crate::log!("cannot open {url}: {e}"),
     }
 }
 
@@ -1165,7 +1175,7 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
     let path = std::path::Path::new(&dir).join(name);
     let result = crate::actions::write_png(&path, shot.size.width, shot.size.height, &shot.rgba);
     if let Err(e) = result {
-        eprintln!("test shot failed: {e}");
+        crate::log!("test shot failed: {e}");
     }
 }
 

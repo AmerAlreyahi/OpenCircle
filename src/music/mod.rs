@@ -414,7 +414,7 @@ mod tests {
         let t = Instant::now();
         let clip = listen(SongSource::System, &cancel, &mut |s| ticks.push(s)).unwrap();
         let peak = clip.0.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);
-        eprintln!(
+        crate::log!(
             "heard {:.2} s in {} ms, peak {peak}, ticks {ticks:?}",
             clip.0.len() as f32 / RATE as f32,
             t.elapsed().as_millis()

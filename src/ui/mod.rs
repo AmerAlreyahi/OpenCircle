@@ -735,7 +735,7 @@ impl App {
             Message::Trigger(Trigger::Quick(_, qa))
                 if !labs::action_on(&config::current().labs, &qa.action) =>
             {
-                eprintln!("[opencircle] \"{}\" is off (Settings > Labs)", qa.action);
+                crate::log!("[opencircle] \"{}\" is off (Settings > Labs)", qa.action);
                 Task::none()
             }
             Message::Trigger(Trigger::Update(event)) => self.on_update(event),
@@ -779,7 +779,7 @@ impl App {
                 }
                 match Quick::for_id(&qa.action) {
                     Some(q) => self.purpose = Purpose::Quick(q, qa.target),
-                    None => eprintln!("unknown action {}; opening the overlay", qa.action),
+                    None => crate::log!("unknown action {}; opening the overlay", qa.action),
                 }
                 self.capture(at, None)
             }
@@ -796,7 +796,7 @@ impl App {
             Message::SongStart => self.song(self.has_song_key()),
             Message::Song(id, msg) => self.on_song(id, msg),
             Message::CaptureTimedOut(n) if self.capturing == Some(n) => {
-                eprintln!(
+                crate::log!(
                     "capture failed: no screenshot after {} s; try again",
                     CAPTURE_TIMEOUT.as_secs()
                 );
@@ -806,7 +806,7 @@ impl App {
             }
             Message::CaptureTimedOut(_) => Task::none(),
             Message::Escape if self.capturing.is_some() => {
-                eprintln!("[opencircle] capture cancelled");
+                crate::log!("[opencircle] capture cancelled");
                 self.capturing = None;
                 self.purpose = Purpose::Search;
                 Task::none()
@@ -859,7 +859,7 @@ impl App {
                 self.toast = Some(match copied {
                     Ok(()) => "Text copied",
                     Err(e) => {
-                        eprintln!("copy text failed: {e}");
+                        crate::log!("copy text failed: {e}");
                         "No text copied"
                     }
                 });
@@ -917,7 +917,7 @@ impl App {
                 Some((_, at)) => {
                     let size = self.dock_size();
                     self.bar_anchor = bar::nearest(at, self.screen, size, self.work_inset);
-                    eprintln!("[opencircle] bar docked: {:?}", self.bar_anchor);
+                    crate::log!("[opencircle] bar docked: {:?}", self.bar_anchor);
                     self.log_frames("bar drag");
                     self.bar_now = Some(at);
                     self.remember_bar()
@@ -1075,11 +1075,11 @@ impl App {
                     Ok(lines) => {
                         if self.text_by == Some(ocr::Source::System) {
                             match self.appear {
-                                Some((first, _)) => eprintln!(
+                                Some((first, _)) => crate::log!(
                                     "[opencircle] screen text ready {} ms after the first frame",
                                     first.elapsed().as_millis()
                                 ),
-                                None => eprintln!(
+                                None => crate::log!(
                                     "[opencircle] screen text ready before the first frame"
                                 ),
                             }
@@ -1095,7 +1095,7 @@ impl App {
                     }
                     // Windows OCR couldn't (no recognizer, #63): the helper reads
                     Err(e) if self.text_by == Some(ocr::Source::System) => {
-                        eprintln!("[opencircle] Windows OCR didn't read the screen: {e}");
+                        crate::log!("[opencircle] Windows OCR didn't read the screen: {e}");
                         self.text_by = Some(ocr::Source::Helper);
                         self.note_reader();
                         let released = self.release_held();
@@ -1103,7 +1103,7 @@ impl App {
                     }
                     // (the next press tries again; the helper backs off by itself)
                     Err(e) => {
-                        eprintln!("[opencircle] reading the screen's text failed: {e}");
+                        crate::log!("[opencircle] reading the screen's text failed: {e}");
                         self.release_held()
                     }
                 }
@@ -1245,7 +1245,7 @@ impl App {
         let shot = match shot {
             Ok(shot) => shot,
             Err(e) => {
-                eprintln!("capture failed: {e}");
+                crate::log!("capture failed: {e}");
                 self.purpose = Purpose::Search;
                 if !capture::refused(&e) {
                     return Task::none();
@@ -1257,7 +1257,7 @@ impl App {
                     .map(Message::Windows);
             }
         };
-        eprintln!(
+        crate::log!(
             "[opencircle] capture {}x{} took {} ms",
             shot.size.width * shot.scale,
             shot.size.height * shot.scale,
@@ -1370,7 +1370,7 @@ impl App {
     fn show(&mut self) -> Task<Message> {
         if !self.overlay_open {
             let (id, open) = windows::screen(overlay_window(Some(self.screen)));
-            eprintln!("[opencircle] overlay window opened");
+            crate::log!("[opencircle] overlay window opened");
             (self.overlay, self.overlay_open) = (id, true);
             return open.discard().chain(window::gain_focus(id));
         }
@@ -1790,7 +1790,7 @@ impl App {
             return Task::none();
         };
         let failed = |e: String| {
-            eprintln!("QR chip failed: {e}");
+            crate::log!("QR chip failed: {e}");
             "That didn't work"
         };
         match act {
@@ -1872,7 +1872,7 @@ impl App {
         match crate::update::install(&staged) {
             Ok(()) => iced::exit(),
             Err(e) => {
-                eprintln!("[opencircle] update {}: {e}", staged.version);
+                crate::log!("[opencircle] update {}: {e}", staged.version);
                 // can't replace itself (e.g. installed for all users): the page instead
                 self.windows
                     .update_card(update_card::Card::available(
@@ -2180,7 +2180,7 @@ impl App {
             if let Some(_held) = held.upgrade()
                 && let Err(e) = ocr::warm()
             {
-                eprintln!("[opencircle] the text reader didn't start: {e}");
+                crate::log!("[opencircle] the text reader didn't start: {e}");
             }
             let _ = tx.unbounded_send(Message::Warmed);
         })
@@ -2286,7 +2286,7 @@ impl App {
                 .enumerate()
             {
                 match ocr::system::recognize(&c.rgba, c.width, c.height, k) {
-                    Err(e) if i > 0 => eprintln!("[opencircle] Windows OCR's second read: {e}"),
+                    Err(e) if i > 0 => crate::log!("[opencircle] Windows OCR's second read: {e}"),
                     read => send(read),
                 }
             }
@@ -2434,7 +2434,7 @@ impl App {
         let blocks = match read {
             Ok(blocks) => blocks,
             Err(e) => {
-                eprintln!("[opencircle] reading the tapped word failed: {e}");
+                crate::log!("[opencircle] reading the tapped word failed: {e}");
                 return Task::none();
             }
         };
@@ -2590,7 +2590,7 @@ impl App {
                 mode.lines = Some(lines);
             }
             Err(e) => {
-                eprintln!("[opencircle] select text failed: {e}");
+                crate::log!("[opencircle] select text failed: {e}");
                 self.text_mode = None;
             }
         }
@@ -2619,7 +2619,7 @@ impl App {
                 (copy::text(text))
                     .map(|()| copy::COPIED_PILL.to_string())
                     .map_err(|e| {
-                        eprintln!("copy text failed: {e}");
+                        crate::log!("copy text failed: {e}");
                         "Couldn't copy. Close what holds the clipboard and try again.".to_string()
                     })
             });
@@ -2663,7 +2663,7 @@ impl App {
                     None
                 }
                 Err(e) => {
-                    eprintln!("[opencircle] text search not opened: {e}");
+                    crate::log!("[opencircle] text search not opened: {e}");
                     Some("Couldn't open your browser")
                 }
             };
@@ -2748,7 +2748,7 @@ impl App {
         self.confirm_after(move || {
             let result = finish(crop);
             if let Err(e) = &result {
-                eprintln!("{id} failed: {e}");
+                crate::log!("{id} failed: {e}");
             }
             result
         })
@@ -2965,7 +2965,7 @@ impl App {
                     Ok(crop) if crop.height > 0 => self.snip_captured(Some(crop), true),
                     Ok(_) => Task::none(),
                     Err(e) => {
-                        eprintln!("scrolling capture failed: {e}");
+                        crate::log!("scrolling capture failed: {e}");
                         Task::none()
                     }
                 };
@@ -3074,7 +3074,7 @@ impl App {
                 self.snip_captured(Some(crop), false)
             }
             snip::Msg::Loaded(Err(e)) => {
-                eprintln!("[opencircle] recent capture unreadable: {e}");
+                crate::log!("[opencircle] recent capture unreadable: {e}");
                 Task::none()
             }
             snip::Msg::ClearRecent => {
@@ -3205,7 +3205,7 @@ impl App {
             if let Run::Finish(copy) = copy::ACTION.run
                 && let Err(e) = copy(crop)
             {
-                eprintln!("copy failed: {e}");
+                crate::log!("copy failed: {e}");
                 let _ = tx.unbounded_send(Message::Snip(snip::Msg::CopyFailed(id)));
             }
         });
@@ -3334,7 +3334,7 @@ impl App {
                 let text = panel.text().unwrap_or_default();
                 let copy = background(move |_: &UnboundedSender<()>| {
                     if let Err(e) = actions::copy::text(text) {
-                        eprintln!("copy text failed: {e}");
+                        crate::log!("copy text failed: {e}");
                     }
                 });
                 return Task::batch([self.close(), copy.discard()]);
@@ -3451,7 +3451,7 @@ impl App {
         if !std::mem::take(&mut self.overlay_open) {
             return Task::none(); // never shown (Copy, Save)
         }
-        eprintln!("[opencircle] overlay window closed");
+        crate::log!("[opencircle] overlay window closed");
         trim_heap();
         window::close(self.overlay)
     }
@@ -3501,7 +3501,7 @@ impl App {
             song::Outcome::Open(url) => {
                 let open = background(move |_: &UnboundedSender<()>| {
                     if let Err(e) = crate::lens::open_link(&url) {
-                        eprintln!("[opencircle] can't open the link: {e}");
+                        crate::log!("[opencircle] can't open the link: {e}");
                     }
                 })
                 .discard();
@@ -3603,11 +3603,11 @@ impl App {
     /// Ctrl+Shift+L (or the tray): live translate on, or off again.
     fn toggle_live(&mut self, at: Instant) -> Task<Message> {
         if let Some(live) = self.live.take() {
-            eprintln!("[opencircle] live translate off");
+            crate::log!("[opencircle] live translate off");
             return live.stop().map(Message::Live);
         }
         if live_layer::unsupported() {
-            eprintln!(
+            crate::log!(
                 "[opencircle] live translate: Wayland has no layer over other apps; translating once"
             );
             return self.translate_once(at);
@@ -3928,7 +3928,7 @@ impl App {
         gaps.sort_unstable();
         if let Some(&max) = gaps.last() {
             let p95 = gaps[(gaps.len() * 95).div_ceil(100) - 1];
-            eprintln!(
+            crate::log!(
                 "[opencircle] {what}: {} frames, p95 {p95} ms, max {max} ms apart",
                 gaps.len() + 1
             );
@@ -4054,7 +4054,7 @@ impl App {
         }
         background(move |_: &UnboundedSender<()>| {
             if let Err(e) = cfg.save() {
-                eprintln!("[opencircle] the bar's place was not saved: {e}");
+                crate::log!("[opencircle] the bar's place was not saved: {e}");
             }
         })
         .discard()
@@ -4504,7 +4504,7 @@ fn place_window(id: window::Id, place: snip::Place) -> Task<Message> {
                 )
             };
             if let Err(e) = moved {
-                eprintln!("[opencircle] overlay not moved: {e}");
+                crate::log!("[opencircle] overlay not moved: {e}");
             }
         }
     })
@@ -4567,7 +4567,7 @@ fn save_test_shot(shot: &window::Screenshot) {
     };
     let result = actions::write_png(path.as_ref(), shot.size.width, shot.size.height, &shot.rgba);
     if let Err(e) = result {
-        eprintln!("test shot failed: {e}");
+        crate::log!("test shot failed: {e}");
     }
 }
 
@@ -4609,7 +4609,7 @@ fn background<T: Send + 'static>(
         .name(name)
         .spawn(move || work(&tx));
     if let Err(e) = spawned {
-        eprintln!("cannot start a thread: {e}");
+        crate::log!("cannot start a thread: {e}");
     }
     Task::stream(rx)
 }

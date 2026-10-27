@@ -155,7 +155,7 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
     if let Ok(exe) = std::env::current_exe()
         && let Err(e) = crate::autostart::forget(&exe)
     {
-        eprintln!("[opencircle] start with Windows: {e}");
+        crate::log!("[opencircle] start with Windows: {e}");
     }
     if quiet
         || !msi::ask_yes_no(
@@ -169,7 +169,7 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
         if dir.exists()
             && let Err(e) = std::fs::remove_dir_all(&dir)
         {
-            eprintln!("[opencircle] remove {}: {e}", dir.display());
+            crate::log!("[opencircle] remove {}: {e}", dir.display());
         }
     }
     use crate::config::Provider;

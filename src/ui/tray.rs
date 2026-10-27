@@ -125,7 +125,7 @@ pub fn start(tx: Triggers) -> Option<TrayIcon> {
         // tray-icon on Linux needs a GTK main loop on the thread that owns the icon.
         std::thread::spawn(move || {
             if let Some(why) = linux_tray_missing() {
-                eprintln!(
+                crate::log!(
                     "[opencircle] tray unavailable: {why}; use the shortcut or `opencircle capture`"
                 );
                 return;
@@ -257,7 +257,7 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
         }
         Ok::<_, String>(tray)
     })
-    .map_err(|e| eprintln!("[opencircle] tray unavailable: {e}"))
+    .map_err(|e| crate::log!("[opencircle] tray unavailable: {e}"))
     .ok()?;
     #[cfg(windows)]
     #[cfg(windows)]
@@ -312,7 +312,7 @@ fn add_with_fallback<T, E: std::fmt::Display>(
     match add(Some(guid)) {
         Ok(icon) => Ok((icon, Some(guid))),
         Err(e) => {
-            eprintln!("[opencircle] tray: icon identity refused ({e}); using a plain icon");
+            crate::log!("[opencircle] tray: icon identity refused ({e}); using a plain icon");
             add(None).map(|icon| (icon, None))
         }
     }

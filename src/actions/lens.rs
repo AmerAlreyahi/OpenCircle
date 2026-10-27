@@ -43,7 +43,7 @@ pub fn lens_png(crop: &Crop) -> Result<Vec<u8>, String> {
 pub fn open(crop: &Crop) -> Result<Held, String> {
     let png = lens_png(crop)?;
     let page = crate::lens::open(&png, crop.width, crop.height).map_err(|e| {
-        eprintln!("[lens] browser not opened: {e}");
+        crate::log!("[lens] browser not opened: {e}");
         "Couldn't open your browser. Check that a default browser is set, then try again."
             .to_string()
     })?;

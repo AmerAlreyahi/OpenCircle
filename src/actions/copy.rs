@@ -37,7 +37,7 @@ fn run(crop: Crop) -> Result<String, String> {
     })
     .map(|()| COPIED_PILL.into())
     .map_err(|e| {
-        eprintln!("copy failed: {e}");
+        crate::log!("copy failed: {e}");
         "Couldn't copy. Close what holds the clipboard and try again.".into()
     })
 }

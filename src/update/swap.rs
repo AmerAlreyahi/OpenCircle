@@ -111,8 +111,8 @@ pub fn roll_back(path: &Path) -> Option<Marker> {
     let marker = Marker::read(path)?;
     let _ = std::fs::remove_file(path);
     match restore(&marker.target, &marker.backup) {
-        Ok(()) => eprintln!("[opencircle] update {}: rolled back", marker.version),
-        Err(e) => eprintln!(
+        Ok(()) => crate::log!("[opencircle] update {}: rolled back", marker.version),
+        Err(e) => crate::log!(
             "[opencircle] update {}: roll back failed: {e}",
             marker.version
         ),

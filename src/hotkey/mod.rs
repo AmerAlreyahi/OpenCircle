@@ -395,7 +395,7 @@ pub fn start(tx: Triggers, cfg: &Config) {
             });
             regrab(grab, &bindings());
         }),
-        Err(e) => eprintln!(
+        Err(e) => crate::log!(
             "[opencircle] global shortcuts unavailable ({e}); bind `opencircle capture` and \
              `opencircle run <action>` in your desktop's shortcut settings instead"
         ),
@@ -417,7 +417,7 @@ pub fn reload(cfg: &Config) {
     }
     GRAB.with_borrow_mut(|slot| match slot {
         Some(grab) => regrab(grab, &bindings()),
-        None => eprintln!("[opencircle] shortcuts were not started here; reload skipped"),
+        None => crate::log!("[opencircle] shortcuts were not started here; reload skipped"),
     });
 }
 
@@ -429,7 +429,7 @@ fn regrab(grab: &mut Grab, planned: &[Binding]) {
     for b in planned {
         match grab.manager.register(b.hotkey) {
             Ok(()) => grab.held.push(b.hotkey),
-            Err(e) => eprintln!("[opencircle] {}", unavailable(b, &e.to_string())),
+            Err(e) => crate::log!("[opencircle] {}", unavailable(b, &e.to_string())),
         }
     }
 }
@@ -481,7 +481,7 @@ fn gnome_print_key(b: &Binding, desktop: &str) -> Option<String> {
 
 fn log_all(warnings: &[String]) {
     for w in warnings {
-        eprintln!("[opencircle] {w}");
+        crate::log!("[opencircle] {w}");
     }
 }
 

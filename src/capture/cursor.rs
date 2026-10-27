@@ -7,7 +7,7 @@ use super::Frame;
 /// Draws the pointer into `frame` if it is on it; a failure only logs.
 pub fn draw(frame: &mut Frame) {
     if let Err(e) = platform(frame) {
-        eprintln!("[opencircle] cursor not captured: {e}");
+        crate::log!("[opencircle] cursor not captured: {e}");
     }
 }
 

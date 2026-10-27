@@ -231,7 +231,7 @@ mod tests {
             .map(|c| i16::from_le_bytes(*c))
             .collect();
         let song = identify(&Secret::new(key), &Clip(samples)).unwrap();
-        eprintln!("{song:?}");
+        crate::log!("{song:?}");
         assert!(!song.title.is_empty());
     }
 }

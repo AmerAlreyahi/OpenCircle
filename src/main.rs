@@ -10,6 +10,7 @@ mod autostart;
 mod capture;
 #[allow(dead_code)] // library API, wired into the UI later
 mod config;
+mod diagnostics;
 #[allow(dead_code)] // the annotation editor; the UI wires it (Edit in place, Snip mode)
 mod editor;
 mod hotkey;
@@ -17,6 +18,7 @@ mod labs;
 mod lens;
 #[allow(dead_code)] // live-translate layer (platform calls); the UI wires it
 mod live;
+mod log;
 mod mt;
 mod music;
 #[allow(dead_code, unused_imports)] // library for the Text/Translate actions; not wired in yet
@@ -148,7 +150,7 @@ fn main() -> ExitCode {
         return match ui::setup::run(msi) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("{e}");
+                crate::log!("{e}");
                 ExitCode::FAILURE
             }
         };
@@ -177,12 +179,12 @@ fn main() -> ExitCode {
         Some("capture" | "run") => match hotkey::Command::from_args(&args) {
             Ok(command) => Some(command),
             Err(e) => {
-                eprintln!("{e}\n{USAGE}");
+                crate::log!("{e}\n{USAGE}");
                 return ExitCode::from(2);
             }
         },
         Some(_) => {
-            eprintln!("{USAGE}");
+            crate::log!("{USAGE}");
             return ExitCode::from(2);
         }
     };
@@ -195,24 +197,30 @@ fn main() -> ExitCode {
         return match hotkey::forward_or_start(line, start_detached) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("OpenCircle did not start: {e}");
+                crate::log!("OpenCircle did not start: {e}");
                 ExitCode::FAILURE
             }
         };
     }
     if hotkey::forward(&hotkey::Command::OpenSettings.line()).is_ok() {
-        eprintln!("OpenCircle is already running; opened its Settings");
+        crate::log!("OpenCircle is already running; opened its Settings");
         return ExitCode::SUCCESS;
     }
 
+    log::install_panic_hook(log::dir());
+    crate::log!("[opencircle] {} starting", env!("CARGO_PKG_VERSION"));
+    // Hidden test hook (the CLI is frozen, so an env var): a thread panics, the crash file appears.
+    if std::env::var_os("OPENCIRCLE_TEST_CRASH").is_some() {
+        let _ = std::thread::spawn(|| panic!("OPENCIRCLE_TEST_CRASH")).join();
+    }
     let (tx, rx) = mpsc::unbounded();
     if let Err(e) = hotkey::listen(tx.clone()) {
-        eprintln!("cannot open the command socket: {e}");
+        crate::log!("cannot open the command socket: {e}");
         return ExitCode::FAILURE;
     }
     let (config, warnings) = config::Config::load();
     for warning in &warnings {
-        eprintln!("[opencircle] config: {warning}");
+        crate::log!("[opencircle] config: {warning}");
     }
     hotkey::start(tx.clone(), &config);
     autostart::apply(&config);
@@ -224,7 +232,7 @@ fn main() -> ExitCode {
     match ui::run(rx) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("{e}");
+            crate::log!("{e}");
             if relaunched {
                 update::roll_back(); // a new version that can't start: the old one again
             }
@@ -245,7 +253,7 @@ fn app_data_dir() -> std::path::PathBuf {
 fn remove_old_webview(data: &std::path::Path) {
     match std::fs::remove_dir_all(data.join("webview")) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            eprintln!("[opencircle] cannot remove the old web view data: {e}");
+            crate::log!("[opencircle] cannot remove the old web view data: {e}");
         }
         _ => {}
     }

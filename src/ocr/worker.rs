@@ -293,7 +293,7 @@ fn loaded(engine: &mut Option<Engine>) -> Result<&mut Engine, OcrError> {
         None => {
             let t = Instant::now();
             let e = engine.insert(Engine::load(&models_dir())?);
-            eprintln!(
+            crate::log!(
                 "[opencircle] ocr engine loaded in {} ms",
                 t.elapsed().as_millis()
             );
@@ -427,7 +427,7 @@ fn translate_here(
     let load = t.elapsed();
     let (_, translator) = loaded.as_mut().expect("just loaded");
     let out = translator.translate(&texts);
-    eprintln!(
+    crate::log!(
         "[opencircle] mt {} texts: load {} ms, translate {} ms",
         texts.len(),
         load.as_millis(),

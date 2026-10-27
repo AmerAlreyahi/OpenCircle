@@ -92,8 +92,8 @@ pub fn language() -> Option<&'static str> {
     let tag = LANGUAGE.get_or_init(|| {
         let made = imp::make();
         match &made {
-            Some((_, tag)) => eprintln!("[opencircle] Windows OCR reads {tag}"),
-            None if cfg!(windows) => eprintln!(
+            Some((_, tag)) => crate::log!("[opencircle] Windows OCR reads {tag}"),
+            None if cfg!(windows) => crate::log!(
                 "[opencircle] Windows OCR has no recognizer for your Windows languages: \
                  the text reader (PP-OCR) reads instead"
             ),
@@ -126,7 +126,7 @@ fn free_when_idle() {
                     Some((_, used)) if used.elapsed() < IDLE => IDLE - used.elapsed(),
                     _ => {
                         if engine.take().is_some() {
-                            eprintln!("[opencircle] Windows OCR freed (unused for 60 s)");
+                            crate::log!("[opencircle] Windows OCR freed (unused for 60 s)");
                         }
                         FREEING.store(false, Ordering::SeqCst);
                         return;
@@ -243,7 +243,7 @@ pub fn recognize(rgba: &[u8], width: u32, height: u32, k: u32) -> Result<Vec<Tex
         *b = b.map(|v| v / k as f32);
     }
     let out = blocks(lines);
-    eprintln!(
+    crate::log!(
         "[opencircle] windows ocr {width}x{height} (x{k}): {n} lines in {} ms",
         start.elapsed().as_millis()
     );
@@ -271,7 +271,7 @@ mod imp {
         MTA.get_or_init(|| {
             // SAFETY: no pointers; the cookie is kept (never decremented).
             if let Err(e) = unsafe { CoIncrementMTAUsage() } {
-                eprintln!("[opencircle] Windows OCR: no apartment: {e}");
+                crate::log!("[opencircle] Windows OCR: no apartment: {e}");
             }
         });
     }

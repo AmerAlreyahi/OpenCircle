@@ -145,7 +145,7 @@ fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> 
         Ok(key) => key.filter(|key| !key.is_empty()),
         // A local OpenAI-compatible server needs no key: go on without the keyring.
         Err(e) if cfg.provider == Provider::OpenaiCompatible => {
-            eprintln!("keyring: {e}");
+            crate::log!("keyring: {e}");
             None
         }
         Err(e) => return Err(format!("{e}\n\n{}", steps(&cfg.provider))),

@@ -956,11 +956,11 @@ pub fn remember(crop: &Crop) {
         .name("recent".into())
         .spawn(move || {
             if let Err(e) = keep(&dir, &crop, HISTORY) {
-                eprintln!("[opencircle] recent capture not kept: {e}");
+                crate::log!("[opencircle] recent capture not kept: {e}");
             }
         });
     if let Err(e) = spawned {
-        eprintln!("[opencircle] recent capture not kept: {e}");
+        crate::log!("[opencircle] recent capture not kept: {e}");
     }
 }
 
@@ -1044,7 +1044,7 @@ fn clear_dir(dir: &Path) {
     if dir.exists()
         && let Err(e) = std::fs::remove_dir_all(dir)
     {
-        eprintln!("[opencircle] recent captures not cleared: {e}");
+        crate::log!("[opencircle] recent captures not cleared: {e}");
     }
 }
 
@@ -1105,9 +1105,9 @@ fn stitch(
 ) -> Result<Crop, String> {
     let mut st = Stitcher::new(w, h);
     match scroll::run(&mut st, grab, scroll, stop, params, progress) {
-        Ok(reason) => eprintln!("[opencircle] scrolling capture: {reason:?}"),
+        Ok(reason) => crate::log!("[opencircle] scrolling capture: {reason:?}"),
         Err(e) if st.height() == 0 => return Err(e.to_string()),
-        Err(e) => eprintln!("[opencircle] scrolling capture stopped early: {e}"),
+        Err(e) => crate::log!("[opencircle] scrolling capture stopped early: {e}"),
     }
     let (rgba, width, height) = st.finish();
     Ok(Crop {

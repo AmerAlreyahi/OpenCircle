@@ -33,7 +33,7 @@ fn write_into(folder: &Path, crop: &Crop, format: Format) -> Result<String, Stri
     super::encode(crop, format)
         .and_then(|bytes| write_new(folder, &stamp, ext, &bytes).map_err(|e| e.to_string()))
         .map_err(|e| {
-            eprintln!("save failed: {e}");
+            crate::log!("save failed: {e}");
             NOT_SAVED.to_string()
         })?;
     Ok(format!("Saved to {}", short_path(folder)))

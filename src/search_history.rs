@@ -90,7 +90,7 @@ pub fn record(path: &Path, enabled: bool, entry: Entry) {
         return clear(path);
     }
     if let Err(e) = add(path, entry) {
-        eprintln!("[opencircle] search history not saved: {e}");
+        crate::log!("[opencircle] search history not saved: {e}");
     }
 }
 

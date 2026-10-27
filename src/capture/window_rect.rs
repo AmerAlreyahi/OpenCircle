@@ -22,7 +22,7 @@ pub struct Win {
 /// Every visible top-level window, topmost first; empty where unknown.
 pub fn list() -> Vec<Win> {
     platform().unwrap_or_else(|e| {
-        eprintln!("[opencircle] window list unavailable: {e}");
+        crate::log!("[opencircle] window list unavailable: {e}");
         Vec::new()
     })
 }

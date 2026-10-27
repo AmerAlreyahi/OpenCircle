@@ -55,7 +55,7 @@ pub fn after_search(path: &Path, enabled: bool, song: Option<&Song>) -> Vec<Entr
     if let Some(song) = song
         && let Err(e) = add(path, song)
     {
-        eprintln!("[opencircle] song history not saved: {e}");
+        crate::log!("[opencircle] song history not saved: {e}");
     }
     read(path)
 }

@@ -44,7 +44,7 @@ pub fn record(
     // A dropped buffer now and then (xrun) doesn't hurt recognition: not logged.
     let error = |e: cpal::Error| {
         if e.kind() != cpal::ErrorKind::Xrun {
-            eprintln!("[opencircle] song search audio: {e}");
+            crate::log!("[opencircle] song search audio: {e}");
         }
     };
     let m = mix.clone();

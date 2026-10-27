@@ -557,6 +557,9 @@ pub enum Message {
     ClearFolder,
     /// The Project button.
     OpenLink(String),
+    /// About: put the diagnostics on the clipboard / open the pre-filled issue.
+    CopyDiagnostics,
+    ReportProblem,
     Theme(Theme),
     WidgetTheme(WidgetTheme),
     GlassEffect(bool),
@@ -708,6 +711,8 @@ pub enum Outcome {
     Browse,
     /// Open this link in the browser (the user clicked it on the About page).
     OpenLink(String),
+    /// Copy the diagnostics report (the shell does it and shows the pill).
+    CopyDiagnostics,
     /// Check for an update now; the answer comes back as `Message::UpdateStatus`.
     CheckUpdate,
 }
@@ -1098,6 +1103,8 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         Message::Folder(None) => {}
         Message::ClearFolder => state.draft.general.save_folder.clear(),
         Message::OpenLink(url) => return Outcome::OpenLink(url),
+        Message::CopyDiagnostics => return Outcome::CopyDiagnostics,
+        Message::ReportProblem => return Outcome::OpenLink(crate::diagnostics::issue_url()),
         Message::AutoUpdate(on) => state.draft.update.auto = Some(on),
         Message::CheckUpdate => {
             state.update_status = Some("Checking…".into());
@@ -1654,7 +1661,7 @@ fn open_language_settings() {
             .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
             .spawn();
         if let Err(e) = run {
-            eprintln!("[opencircle] could not open Windows' language settings: {e}");
+            crate::log!("[opencircle] could not open Windows' language settings: {e}");
         }
     }
 }
@@ -2104,6 +2111,15 @@ fn about_rows<'a>() -> Vec<Element<'a, Message>> {
         about::app(Message::OpenLink),
         about::developer(Message::OpenLink),
         about::notices(Message::OpenLink),
+        form_row(
+            "Problems",
+            "Copy a report to paste into an issue. Nothing is sent",
+            button_row([
+                form_button("Copy diagnostics", false, Some(Message::CopyDiagnostics)).into(),
+                form_button("Report a problem", false, Some(Message::ReportProblem)).into(),
+            ]),
+            None,
+        ),
         form_row(
             "Telemetry",
             "A capture leaves this PC only when you choose an action",
@@ -3136,6 +3152,17 @@ pub(super) mod tests {
             Outcome::OpenLink(url)
         );
         assert!(!s.dirty(), "About changes nothing");
+        for want in ["Copy diagnostics", "Report a problem"] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        assert_eq!(
+            update(&mut s, Message::CopyDiagnostics),
+            Outcome::CopyDiagnostics
+        );
+        let Outcome::OpenLink(url) = update(&mut s, Message::ReportProblem) else {
+            panic!("Report a problem opens a link");
+        };
+        assert!(url.starts_with("https://github.com/AmerAlreyahi/OpenCircle/issues/new?"));
     }
 
     #[test]

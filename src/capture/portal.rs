@@ -109,7 +109,7 @@ fn screenshot() -> Result<PathBuf, String> {
 fn read_and_delete(path: &Path) -> Result<Frame, String> {
     let frame = super::from_png(path.as_os_str());
     if let Err(e) = std::fs::remove_file(path) {
-        eprintln!(
+        crate::log!(
             "could not delete the portal screenshot {}: {e}",
             path.display()
         );
@@ -133,7 +133,7 @@ pub fn session_bus() -> Result<DBusConnection, String> {
 fn register(conn: &DBusConnection) {
     let wrote = match ensure_desktop_file() {
         Ok(Some(path)) => {
-            eprintln!(
+            crate::log!(
                 "[opencircle] wrote {} so the desktop knows OpenCircle as {APP_ID}; \
                  delete it to remove that",
                 path.display()
@@ -142,7 +142,7 @@ fn register(conn: &DBusConnection) {
         }
         Ok(None) => false,
         Err(e) => {
-            eprintln!("[opencircle] could not write {APP_ID}.desktop: {e}");
+            crate::log!("[opencircle] could not write {APP_ID}.desktop: {e}");
             false
         }
     };
@@ -162,9 +162,11 @@ fn register(conn: &DBusConnection) {
         );
         tries -= 1;
         match called {
-            Ok(_) => return eprintln!("[opencircle] registered {APP_ID} with the desktop portal"),
+            Ok(_) => {
+                return crate::log!("[opencircle] registered {APP_ID} with the desktop portal");
+            }
             Err(e) if tries == 0 => {
-                return eprintln!(
+                return crate::log!(
                     "[opencircle] could not register {APP_ID} with the desktop portal ({e}). \
                      Global shortcuts and screenshots may be refused: install the package, \
                      or check ~/.local/share/applications/{APP_ID}.desktop"

@@ -51,6 +51,7 @@
 
 - Nothing leaves your computer unless you choose an action.
 - No account, no telemetry, no image-hosting service.
+- A small log stays on your PC (`logs/` in your local data folder) to help fix problems; nothing is sent. Settings > About has *Copy diagnostics* and *Report a problem*.
 - AI and song-search keys live in your system's keyring, never in a file.
 
 Details: [Privacy](docs/privacy.md).

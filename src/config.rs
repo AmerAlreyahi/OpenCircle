@@ -1179,15 +1179,15 @@ fn migrate(path: &Path, text: &str, config: &Config) {
         return;
     };
     let Some(backup) = backup_old(path, text, old) else {
-        eprintln!("[opencircle] config: could not back up the v{old} file; leaving it as it is");
+        crate::log!("[opencircle] config: could not back up the v{old} file; leaving it as it is");
         return;
     };
     match config.save_to(path) {
-        Ok(()) => eprintln!(
+        Ok(()) => crate::log!(
             "[opencircle] config: updated from schema {old} to {VERSION} (old file: {})",
             backup.display()
         ),
-        Err(e) => eprintln!("[opencircle] config: could not write the updated file ({e})"),
+        Err(e) => crate::log!("[opencircle] config: could not write the updated file ({e})"),
     }
 }
 
@@ -1247,7 +1247,7 @@ pub fn current() -> Config {
     }
     let (config, warnings) = Config::load();
     for warning in warnings {
-        eprintln!("[opencircle] config: {warning}");
+        crate::log!("[opencircle] config: {warning}");
     }
     CURRENT
         .write()

@@ -127,7 +127,7 @@ fn update_away(change: impl Fn(u8) -> u8) {
     let now = change(was);
     if (was == 0) != (now == 0) {
         let what = if now == 0 { "back" } else { "away" };
-        eprintln!("[opencircle] session {what} (locked / switched / screen off: {now:03b})");
+        crate::log!("[opencircle] session {what} (locked / switched / screen off: {now:03b})");
     }
 }
 
@@ -225,13 +225,13 @@ mod win {
                     None,
                     None,
                 ) else {
-                    eprintln!("[opencircle] live translate: no session watch window");
+                    crate::log!("[opencircle] live translate: no session watch window");
                     return;
                 };
                 let old = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, proc as *const () as isize);
                 OLD.store(old, Ordering::SeqCst);
                 if let Err(e) = WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) {
-                    eprintln!("[opencircle] live translate: no session notifications: {e}");
+                    crate::log!("[opencircle] live translate: no session notifications: {e}");
                 }
                 // (it sends the display's state at once)
                 if let Err(e) = RegisterPowerSettingNotification(
@@ -239,7 +239,7 @@ mod win {
                     &DISPLAY,
                     DEVICE_NOTIFY_WINDOW_HANDLE,
                 ) {
-                    eprintln!("[opencircle] live translate: no display notifications: {e}");
+                    crate::log!("[opencircle] live translate: no display notifications: {e}");
                 }
                 let mut msg = MSG::default();
                 while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -328,7 +328,7 @@ mod win {
             // captures, and a monitor-sized layer would black out the frame.
             let excluded = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).is_ok();
             if !excluded {
-                eprintln!(
+                crate::log!(
                     "[opencircle] live layer: no capture exclusion (needs Windows 10 2004+); \
                      relying on the read-back guard"
                 );
@@ -384,7 +384,7 @@ mod x11 {
     fn empty_input_shape_on_a_real_window() {
         use xcb::Xid;
         if std::env::var_os("DISPLAY").is_none() {
-            eprintln!("no X11 display: skipped");
+            crate::log!("no X11 display: skipped");
             return;
         }
         let (conn, screen) =

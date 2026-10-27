@@ -1026,7 +1026,7 @@ impl canvas::Program<Event> for Overlay<'_> {
             && (bounds.height - size.height).abs() < 1.0
         {
             self.first_draw.set(None);
-            eprintln!(
+            crate::log!(
                 "[opencircle] trigger -> first full-screen overlay frame drawn: {} ms",
                 at.elapsed().as_millis()
             );

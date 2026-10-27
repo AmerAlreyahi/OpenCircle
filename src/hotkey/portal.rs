@@ -40,7 +40,7 @@ thread_local! {
 pub fn bind(tx: Triggers) {
     std::thread::spawn(move || {
         if let Err(e) = serve(tx) {
-            eprintln!("{}", manual_hint(&e));
+            crate::log!("{}", manual_hint(&e));
         }
     });
 }
@@ -62,7 +62,7 @@ pub fn rebind() {
                 close(&p.conn, &old);
                 match open_session(&p.conn, p.generation) {
                     Ok(path) => *p.session.borrow_mut() = path,
-                    Err(e) => eprintln!("[opencircle] could not rebind shortcuts: {e}"),
+                    Err(e) => crate::log!("[opencircle] could not rebind shortcuts: {e}"),
                 }
             });
         });
@@ -198,10 +198,10 @@ fn record_keys(planned: &[Binding], list: &Variant) {
                 managed()
             ),
         };
-        eprintln!("[opencircle] {line}");
+        crate::log!("[opencircle] {line}");
         let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
         if let Some(hint) = gnome_print_key(b, &desktop) {
-            eprintln!("[opencircle] {hint}");
+            crate::log!("[opencircle] {hint}");
         }
     }
     set_desktop_keys(keys);

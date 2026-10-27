@@ -529,10 +529,10 @@ impl Editor {
                         match dropped {
                             Ok(true) => return Some(Output::Dragged),
                             Ok(false) => {}
-                            Err(e) => eprintln!("[opencircle] {e}"),
+                            Err(e) => crate::log!("[opencircle] {e}"),
                         }
                     }
-                    Err(e) => eprintln!("[opencircle] drag-out: {e}"),
+                    Err(e) => crate::log!("[opencircle] drag-out: {e}"),
                 }
             }
             Message::Undo | Message::Redo => {
@@ -1141,7 +1141,7 @@ fn save_assist(on: bool) {
     crate::config::set_current(config.clone());
     std::thread::spawn(move || {
         if let Err(e) = config.save() {
-            eprintln!("[opencircle] config: {e}");
+            crate::log!("[opencircle] config: {e}");
         }
     });
 }

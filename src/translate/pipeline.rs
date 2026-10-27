@@ -695,17 +695,17 @@ pub(super) mod tests {
 
         let t = Instant::now();
         let deps = RealOcr(Mutex::new(ocr::Engine::load(&ocr::models_dir()).unwrap()));
-        eprintln!("OCR engine load {:?}", t.elapsed());
+        crate::log!("OCR engine load {:?}", t.elapsed());
         let (img, _) = game_frame();
         let (w, h) = (1920, 1080);
         let cache = Cache::new(256);
         for run in 1..=2 {
             let out = translate_frame(&img, w, h, "ar", &Cache::new(256), &deps).unwrap();
-            eprintln!("one-shot run {run}: {:?}", out.timings);
+            crate::log!("one-shot run {run}: {:?}", out.timings);
         }
         let out = translate_frame(&img, w, h, "ar", &cache, &deps).unwrap();
         for b in &out.blocks {
-            eprintln!("{:?} {:?} -> {:?}", b.bounds, b.original, b.translation);
+            crate::log!("{:?} {:?} -> {:?}", b.bounds, b.original, b.translation);
         }
         let dir = std::env::temp_dir().join("opencircle-pipeline");
         std::fs::create_dir_all(&dir).unwrap();
@@ -717,14 +717,14 @@ pub(super) mod tests {
         // live: first frame reads everything (translations from the cache)
         let mut live = Live::new();
         let t = live.step(&img, w, h, "ar", &cache, &deps).unwrap().unwrap();
-        eprintln!("live first frame: {t:?}, {} patches", live.patches().len());
+        crate::log!("live first frame: {t:?}, {} patches", live.patches().len());
         let t = Instant::now();
         assert!(
             live.step(&img, w, h, "ar", &cache, &deps)
                 .unwrap()
                 .is_none()
         );
-        eprintln!("live unchanged frame: {:?}", t.elapsed());
+        crate::log!("live unchanged frame: {:?}", t.elapsed());
         // X11: the capture shows our layer -> still nothing to do
         let mut shown = img.clone();
         let mut layer = img.clone();
@@ -756,7 +756,7 @@ pub(super) mod tests {
             .step(&next, w, h, "ar", &cache, &deps)
             .unwrap()
             .unwrap();
-        eprintln!(
+        crate::log!(
             "live, one block gone: {t:?}; blocks {n} -> {}",
             live.blocks().len()
         );
@@ -765,6 +765,6 @@ pub(super) mod tests {
                 .iter()
                 .all(|b| !b.original.starts_with("Press"))
         );
-        eprintln!("PNGs in {}", dir.display());
+        crate::log!("PNGs in {}", dir.display());
     }
 }

@@ -378,16 +378,18 @@ impl Live {
                 return Outcome::Task(open.discard().chain(prepare).map(Msg::Prepared));
             }
             Msg::Monitor(Err(e)) => {
-                eprintln!("[opencircle] live translate: capture failed: {e}");
+                crate::log!("[opencircle] live translate: capture failed: {e}");
                 return Outcome::Off;
             }
             Msg::Prepared(Ok(layer)) => {
                 let Phase::Open { monitor, .. } = self.phase else {
                     return Outcome::Off;
                 };
-                eprintln!(
+                crate::log!(
                     "[opencircle] live translate on ({}x{}, excluded from capture: {})",
-                    monitor.width, monitor.height, layer.excluded_from_capture
+                    monitor.width,
+                    monitor.height,
+                    layer.excluded_from_capture
                 );
                 // Never a step without the models: ask first (in the controller).
                 let steps = match self.ask_if_missing() {
@@ -408,7 +410,7 @@ impl Live {
             Msg::Controller(msg) => return self.on_controller(msg),
             Msg::ControllerReady(ready) => {
                 self.excluded = ready.unwrap_or_else(|e| {
-                    eprintln!("[opencircle] live controller: {e}");
+                    crate::log!("[opencircle] live controller: {e}");
                     false
                 });
                 self.update_mask();
@@ -421,7 +423,7 @@ impl Live {
             // A step that was running when Pause was pressed.
             Msg::Patches(_) if self.ctl.paused => {}
             Msg::Prepared(Err(e)) => {
-                eprintln!("[opencircle] {e}; translating once instead");
+                crate::log!("[opencircle] {e}; translating once instead");
                 return Outcome::OneShot;
             }
             Msg::Patches(patches) => {
@@ -438,7 +440,7 @@ impl Live {
                 let mut cfg = config::current();
                 cfg.translate.live_note_shown = true;
                 if let Err(e) = cfg.save() {
-                    eprintln!("[opencircle] could not save the config: {e}");
+                    crate::log!("[opencircle] could not save the config: {e}");
                 }
                 config::set_current(cfg);
             }
@@ -578,7 +580,7 @@ impl Live {
                 };
                 // new text under a patch: it goes now, not after the re-read
                 let hide = |left: &[Patch]| {
-                    eprintln!("[opencircle] live: stale patches hidden, {} left", left.len());
+                    crate::log!("[opencircle] live: stale patches hidden, {} left", left.len());
                     let _ = tx.unbounded_send(Msg::Patches(shown(left, area, &blanked)));
                 };
                 match steps.step_hiding(&page, cw, ch, target, &cache, &deps, hide) {
@@ -586,7 +588,7 @@ impl Live {
                     Ok(Some(t)) => {
                         last_error = None;
                         let d = steps.drawn();
-                        eprintln!(
+                        crate::log!(
                             "[opencircle] live step {cw}x{ch} at {},{}: ocr {} ms, translate {} ms, \
                              render {} ms, total {} ms; {} patches, {} left (busy background {}, no room {})",
                             area[0],
@@ -720,7 +722,7 @@ impl Deps for Reader {
             let k = *ocr::system::passes(self.scale, w, h).last().unwrap_or(&1);
             match ocr::system::recognize(rgba, w, h, k) {
                 Ok(lines) => return Ok(lines),
-                Err(e) => eprintln!("[opencircle] live: Windows OCR failed ({e}); PP-OCR reads"),
+                Err(e) => crate::log!("[opencircle] live: Windows OCR failed ({e}); PP-OCR reads"),
             }
         }
         self.real.recognize(rgba, w, h)
@@ -745,7 +747,7 @@ fn away_gate(away: bool, was: &mut bool, steps: &mut Steps) -> Option<Option<Msg
     let changed = std::mem::replace(was, away) != away;
     if changed {
         *steps = Steps::new();
-        eprintln!(
+        crate::log!(
             "[opencircle] live translate {}",
             if away {
                 "stopped: the session is away"
@@ -762,7 +764,7 @@ fn report(last: &mut Option<String>, e: String) -> Option<Msg> {
     if last.as_ref() == Some(&e) {
         return None;
     }
-    eprintln!("[opencircle] live translate: {e}");
+    crate::log!("[opencircle] live translate: {e}");
     *last = Some(e.clone());
     Some(Msg::Failed(e))
 }
@@ -825,7 +827,7 @@ fn save_test_shot(shot: &window::Screenshot) {
     };
     let (w, h) = (shot.size.width, shot.size.height);
     if let Err(e) = crate::actions::write_png(path.as_ref(), w, h, &shot.rgba) {
-        eprintln!("test shot failed: {e}");
+        crate::log!("test shot failed: {e}");
     }
 }
 
