@@ -134,6 +134,9 @@ production systems.
 - Beta release OK (owner, 2026-10-27): the lead may publish v0.1.1-beta.1 as a GitHub
   PRE-release (never auto-installed) without waiting; the owner reviews it later. The
   stable v0.1.1 still needs the gate and the owner's OK.
+- Screen edge (owner, 2026-10-27, firm): the old moving multi-colour edge animation
+  never ships again. The edge is the design's Active Look inset glow (two colours per
+  look), STATIC: it only fades in with the overlay; no pulse, no moving colours.
 - Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
   is on hold until the owner resumes it.
 
