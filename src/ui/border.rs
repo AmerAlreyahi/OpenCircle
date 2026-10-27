@@ -13,7 +13,8 @@
 //! blurs going 22/54 px -> 38/85 px -> 22/54 px, redrawn as the edge strips
 //! ONLY (never the screen), `STEP` apart (12.5 fps), from a cached depth map so
 //! a step is a table lookup per pixel. Live translate and snip stay still, and
-//! so does the overlay when the OS asks for reduced motion.
+//! so does the overlay when the OS asks for reduced motion, and on Linux
+//! (`breathes`).
 //! On the colour-keyed live layer (Windows) there is no partial alpha: a thin
 //! solid line in c1 stands in for the glow.
 use std::time::{Duration, Instant};
@@ -54,6 +55,15 @@ pub enum Breathe {
     /// the edge keeps what it shows and draws nothing meanwhile.
     Paused,
     On,
+}
+
+/// Whether the overlay's glow may breathe at all: not when the OS asks for
+/// reduced motion, and not off Windows (#142): there the 12.5 fps redraw goes
+/// through our CPU renderer and a whole-window present each step (~9 % of a
+/// core on the Linux VM); the owner's rule is near 0 % while the overlay is
+/// still. Windows measured 0.10 %. Linux keeps the static glow.
+fn breathes() -> bool {
+    cfg!(windows) && !super::motion::reduced()
 }
 
 pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool, breathing: Breathe) -> Element<'a, M> {
@@ -149,9 +159,8 @@ impl<M> canvas::Program<M> for Border {
         let canvas::Event::Window(window::Event::RedrawRequested(now)) = event else {
             return None;
         };
-        let mut breathing = self.breathing != Breathe::Off
-            && self.mode == Mode::Overlay
-            && !super::motion::reduced();
+        let mut breathing =
+            self.breathing != Breathe::Off && self.mode == Mode::Overlay && breathes();
         if breathing && self.breathing == Breathe::Paused && state.drawn.is_some() {
             return None;
         }
@@ -523,7 +532,7 @@ mod tests {
                     for reduced in reduced {
                         super::super::motion::set_reduced(reduced);
                         let seen = frames(&case, &[0, 16, 200, 2000, 60_000]);
-                        let moves = breathes && !reduced;
+                        let moves = breathes && !reduced && cfg!(windows);
                         let same = seen.windows(2).all(|p| p[0].0 == p[1].0);
                         let asks = seen.iter().any(|f| f.1);
                         let has = edge(&look, mode, 1920, 1080, 1.0, false, 0.0).is_some();
@@ -546,6 +555,11 @@ mod tests {
         let look = spectrum();
         let b = border(Mode::Overlay, look, Breathe::On);
         let seen = frames(&b, &[0, 1000, 2000, 3000, 4000, 4010]);
+        if !cfg!(windows) {
+            // #142: Linux's glow stays still (near 0 % CPU while untouched)
+            assert!(seen.iter().all(|f| !f.1 && f.0 == seen[0].0));
+            return;
+        }
         let alpha_at = |p: f32, d: usize| {
             edge(&look, Mode::Overlay, 1920, 1080, 1.0, false, p)
                 .unwrap()

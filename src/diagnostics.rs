@@ -20,10 +20,14 @@ pub fn report(c: &Config) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let windows_ocr = match crate::ocr::system::known() {
-        Some(Some(tag)) => format!("reads {tag}"),
-        Some(None) => "no recognizer for the Windows languages".into(),
-        None => "not asked yet".into(),
+    let windows_ocr = if !cfg!(windows) {
+        String::new() // no Windows OCR here: say nothing of it (#143)
+    } else {
+        match crate::ocr::system::known() {
+            Some(Some(tag)) => format!("  Windows OCR: reads {tag}\n"),
+            Some(None) => "  Windows OCR: no recognizer for the Windows languages\n".into(),
+            None => "  Windows OCR: not asked yet\n".into(),
+        }
     };
     let l = c.labs;
     let text = format!(
@@ -35,7 +39,7 @@ pub fn report(c: &Config) -> String {
          text reader {reader:?}, snip after {after:?}, format {format:?}\n  \
          start with the OS {autostart}, auto update {update:?}, quick actions {quick}\n\
          Labs: snip {}, editor {}, song {}, history {}, pins {}\n\n\
-         OCR:\n  Windows OCR: {windows_ocr}\n  text reader files downloaded: {ready}\n\n\
+         OCR:\n{windows_ocr}  text reader files downloaded: {ready}\n\n\
          Last log lines:\n{log}\n",
         l.snip,
         l.editor,
@@ -99,6 +103,13 @@ fn encode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #143: off Windows the report says nothing of Windows OCR.
+    #[test]
+    fn windows_ocr_is_only_reported_on_windows() {
+        let (c, _) = Config::parse("");
+        assert_eq!(report(&c).contains("Windows OCR"), cfg!(windows));
+    }
 
     #[test]
     fn the_report_has_no_secrets() {

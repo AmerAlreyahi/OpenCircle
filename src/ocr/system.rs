@@ -170,7 +170,13 @@ pub fn known() -> Option<Option<&'static str>> {
     #[cfg(test)]
     return LANGUAGE_HERE.get().or(Some(None)); // never this PC's Windows OCR
     #[cfg(not(test))]
-    LANGUAGE.get().map(Option::as_deref)
+    only_on_windows(LANGUAGE.get().map(Option::as_deref))
+}
+
+/// Off Windows there is no Windows OCR to ask: "none", so nothing tries it
+/// (#143: Linux logged a failed Windows read at every opening).
+fn only_on_windows(asked: Option<Option<&str>>) -> Option<Option<&str>> {
+    if cfg!(windows) { asked } else { Some(None) }
 }
 
 #[cfg(test)]
@@ -375,6 +381,12 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn windows_ocr_is_never_tried_off_windows() {
+        let want = if cfg!(windows) { None } else { Some(None) };
+        assert_eq!(super::only_on_windows(None), want);
+    }
+
     #[test]
     fn missing_recognizers_are_found_by_base_language() {
         let s = |v: &[&str]| v.iter().map(|t| t.to_string()).collect::<Vec<_>>();

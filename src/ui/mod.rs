@@ -75,6 +75,20 @@ const ASK_INPUT: &str = "overlay-ask";
 /// selected. Nothing is sent until the user picks one (`[selection] after`).
 /// The field's placeholder.
 const ASK_PLACEHOLDER: &str = "Ask OpenCircle AI about your screen…";
+/// Shorter ones where the font or a narrow screen leaves the field too little
+/// room for it (#144): never cut off mid-word.
+const ASK_PLACEHOLDERS: [&str; 4] = [
+    ASK_PLACEHOLDER,
+    "Ask AI about your screen…",
+    "Ask OpenCircle AI…",
+    "Ask AI…",
+];
+
+/// The placeholder that fits a field `width` wide, in the UI font.
+fn ask_placeholder(width: f32) -> &'static str {
+    let room = width - widgets::AI_FIELD_LEFT - widgets::AI_FIELD_RIGHT;
+    widgets::fitting(&ASK_PLACEHOLDERS, 14.0, room)
+}
 /// How long the bar takes to turn into the editing toolbar (and back),
 /// and to settle on a new spot after a drag (the design's drag release).
 const BAR_MORPH: Duration = motion::MORPH;
@@ -4159,7 +4173,7 @@ impl App {
         let (width, _) = self.bar_size();
         let input = widgets::input(
             ASK_INPUT,
-            ASK_PLACEHOLDER,
+            ask_placeholder(width),
             &self.ask,
             Message::AskInput,
             Message::AskSubmit,
@@ -5914,7 +5928,7 @@ mod tests {
             app.panel.as_ref().map(|(_, p)| p.kind()),
             Some(actions::Panel::Ask)
         );
-        let bottom = |t: &String| t == ASK_PLACEHOLDER;
+        let bottom = |t: &String| ASK_PLACEHOLDERS.contains(&t.as_str());
         assert!(
             !overlay_texts(&app).iter().any(bottom),
             "the card's own field takes over"
@@ -6509,6 +6523,25 @@ mod tests {
         }
     }
 
+    /// #144: the ask field's placeholder fits its text area at every bar width,
+    /// in the UI font on this machine (Inter here, Segoe UI on Windows).
+    #[test]
+    fn ask_placeholder_always_fits_its_field() {
+        for icons in 0..=5 {
+            for screen in (600..=3840).step_by(40) {
+                let (field, _) = bar::bottom_size(screen as f32, icons as f32);
+                let room = field - widgets::AI_FIELD_LEFT - widgets::AI_FIELD_RIGHT;
+                let p = ask_placeholder(field);
+                assert!(
+                    p == "Ask AI…" || widgets::text_width(p, 14.0) <= room,
+                    "{p:?} is cut in a {field} px field"
+                );
+            }
+        }
+        // the design's 320 px field keeps the sentence's meaning
+        assert!(ask_placeholder(bar::FIELD).ends_with("screen…"));
+    }
+
     #[test]
     fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         // The default (and every migrated) config: nothing runs after a selection.
@@ -6543,7 +6576,10 @@ mod tests {
             ],
             "{tips:?}"
         );
-        assert!(texts.iter().any(|t| t == ASK_PLACEHOLDER), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| ASK_PLACEHOLDERS.contains(&t.as_str())),
+            "{texts:?}"
+        );
         // the three labelled pills, in the design's order
         let pills: Vec<&String> = (texts.iter())
             .filter(|t| ["Search in browser", "Copy text", "Translate"].contains(&t.as_str()))

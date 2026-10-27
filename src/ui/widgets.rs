@@ -34,8 +34,12 @@ pub const MONO: Font = Font::with_name("JetBrains Mono");
 /// The UI font, the design's stack: Segoe UI Variable Text, else Segoe UI
 /// (Windows), else the bundled Inter. Picked once, from the fonts on this PC.
 pub fn ui_font() -> Font {
-    static FONT: std::sync::OnceLock<Font> = std::sync::OnceLock::new();
-    *FONT.get_or_init(|| {
+    Font::with_name(ui_font_name())
+}
+
+fn ui_font_name() -> &'static str {
+    static FONT: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    FONT.get_or_init(|| {
         let mut fonts = iced::advanced::graphics::text::font_system()
             .write()
             .expect("font system");
@@ -44,12 +48,34 @@ pub fn ui_font() -> Font {
             db.faces()
                 .any(|f| f.families.iter().any(|(family, _)| family == name))
         };
-        let name = ["Segoe UI Variable Text", "Segoe UI"]
+        ["Segoe UI Variable Text", "Segoe UI"]
             .into_iter()
             .find(found)
-            .unwrap_or("Inter");
-        Font::with_name(name)
+            .unwrap_or("Inter")
     })
+}
+
+/// How wide `text` is on one line at `size` in the UI font.
+pub fn text_width(text: &str, size: f32) -> f32 {
+    use iced::advanced::graphics::text::cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping};
+    let name = ui_font_name(); // (takes the same lock: before ours)
+    let mut fonts = iced::advanced::graphics::text::font_system()
+        .write()
+        .expect("font system");
+    let fs = fonts.raw();
+    let mut buf = Buffer::new(fs, Metrics::new(size, size * LINE));
+    buf.set_size(fs, None, None);
+    let attrs = Attrs::new().family(Family::Name(name));
+    buf.set_text(fs, text, &attrs, Shaping::Advanced, None);
+    buf.shape_until_scroll(fs, false);
+    buf.layout_runs().map(|r| r.line_w).fold(0.0, f32::max)
+}
+
+/// The first of `texts` (longest first) that fits `room` px on one line at
+/// `size`, else the last: a placeholder is never cut off, in any font.
+pub fn fitting<'a>(texts: &[&'a str], size: f32, room: f32) -> &'a str {
+    let last = texts.len() - 1;
+    (texts.iter().position(|t| text_width(t, size) <= room)).map_or(texts[last], |i| texts[i])
 }
 
 /// A line of text is this many times its font size tall wherever its box
@@ -1119,6 +1145,10 @@ pub fn bar_pill<'a, Message: Clone + 'a>(
         })
 }
 
+/// The AI field's inner padding: the logo sits left, the badge right.
+pub const AI_FIELD_LEFT: f32 = 40.0;
+pub const AI_FIELD_RIGHT: f32 = 52.0;
+
 /// The bottom bar's AI field (the new design's search bar): `width` wide, our
 /// logo inside on the left (`on_logo`: opens the AI), the "AI ↵" badge on the
 /// right (`on_badge`: asks, like Enter).
@@ -1177,7 +1207,11 @@ pub fn ai_field<'a, Message: Clone + 'a>(
             },
             ..button::Style::default()
         });
-    let input = input.padding(iced::Padding::new(13.0).left(40.0).right(52.0));
+    let input = input.padding(
+        iced::Padding::new(13.0)
+            .left(AI_FIELD_LEFT)
+            .right(AI_FIELD_RIGHT),
+    );
     let over = row![
         hint(
             logo,
