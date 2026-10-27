@@ -152,7 +152,7 @@ operating it. See the [Privacy](docs/privacy.md) page.
 | Live translate on / off | `Ctrl+Shift+L` |
 | Circle, then explain with AI | `Ctrl+Shift+E` |
 | Circle, then copy its text | `Ctrl+Shift+X` |
-| Snip a region / a window / the full screen | `Print Screen` / `Alt+Print Screen` / `Ctrl+Print Screen` |
+| Snip a region / a window / the full screen (with Labs > Snip on) | `Print Screen` / `Alt+Print Screen` / `Ctrl+Print Screen` |
 
 All of them change in Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
 
