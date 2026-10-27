@@ -421,8 +421,12 @@ impl Windows {
                         onboarding::Outcome::Finished(cfg) => {
                             let id = *id;
                             self.onboarding = None;
+                            let notice = tray_notice(&cfg.shortcut);
                             apply(cfg);
-                            return window::close(id);
+                            return Task::batch([
+                                window::close(id),
+                                self.toast(&notice, true, None, NOTICE_MS),
+                            ]);
                         }
                         onboarding::Outcome::AskScreenshot => {
                             return ask_screenshot(Msg::Onboarding);
@@ -770,6 +774,16 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
 
 /// How long a confirmation toast shows (the design's 1800 ms).
 pub const TOAST_MS: u64 = 1800;
+
+/// How long the first-run tray notice shows (longer than a confirmation: it is read).
+pub const NOTICE_MS: u64 = 6000;
+
+/// The notice after onboarding (the window closes, the app lives on in the tray); it
+/// names the shortcut that is really configured.
+pub fn tray_notice(shortcut: &str) -> String {
+    let keys = super::settings::key_labels(shortcut).join("+");
+    format!("OpenCircle is running in the tray. Press {keys}.")
+}
 
 /// A toast's window size (logical px): padding 14x8, a 12 px line, the dot.
 pub fn toast_size(text: &str, ok: bool) -> Size {
@@ -1434,6 +1448,15 @@ mod tests {
         let mut windows = Windows::default();
         let _ = windows.update(Msg::Closed(id));
         assert!(!is_floating(id));
+    }
+
+    #[test]
+    fn the_tray_notice_names_the_configured_shortcut() {
+        assert_eq!(
+            tray_notice("Ctrl+Shift+Space"),
+            "OpenCircle is running in the tray. Press Ctrl+Shift+Space."
+        );
+        assert!(tray_notice("Alt+PrintScreen").ends_with("Alt+PrtSc."));
     }
 
     /// Popups come and go by the design's motion (`motion`): the toast pill

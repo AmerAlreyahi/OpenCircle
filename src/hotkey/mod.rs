@@ -8,7 +8,7 @@
 mod portal;
 mod socket;
 
-pub use socket::{Command, forward, forward_or_start, listen};
+pub use socket::{Command, forward, forward_or_start, listen, running};
 
 use std::cell::RefCell;
 use std::sync::{Mutex, MutexGuard};
@@ -331,6 +331,7 @@ fn route_id(bindings: &[Binding], id: &str, at: Instant) -> Option<Trigger> {
 pub fn trigger(command: &Command, at: Instant) -> Trigger {
     match command {
         Command::Capture => Trigger::Capture(at),
+        Command::OpenSettings => Trigger::OpenSettings,
         Command::Quit => Trigger::Quit,
         Command::Run { action, target } => {
             let configured = bindings().iter().find_map(|b| match &b.what {

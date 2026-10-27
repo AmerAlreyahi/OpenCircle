@@ -152,7 +152,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         // hidden: started by an update, once the old process has exited
-        Some(update::RELAUNCH_ARG) if update::wait_for_old(|| hotkey::forward("").is_ok()) => None,
+        Some(update::RELAUNCH_ARG) if update::wait_for_old(hotkey::running) => None,
         Some(update::RELAUNCH_ARG) => return ExitCode::FAILURE,
         Some("quit") => {
             // Never starts the app: with none running there is nothing to quit.
@@ -185,8 +185,8 @@ fn main() -> ExitCode {
             }
         };
     }
-    if hotkey::forward("").is_ok() {
-        eprintln!("OpenCircle is already running");
+    if hotkey::forward(&hotkey::Command::OpenSettings.line()).is_ok() {
+        eprintln!("OpenCircle is already running; opened its Settings");
         return ExitCode::SUCCESS;
     }
 

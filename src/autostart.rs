@@ -15,12 +15,23 @@ pub fn apply(config: &Config) {
     if cfg!(any(test, debug_assertions)) {
         return;
     }
+    // No config file = onboarding is not finished (it saves the file): no entry yet.
+    let onboarded = Config::path().is_some_and(|p| p.exists());
     let result = std::env::current_exe().and_then(|exe| {
         let exe = std::env::var_os("APPIMAGE").map_or(exe, Into::into); // not the mount
-        sync(&Store::real(), &exe, config.general.autostart)
+        sync_when_onboarded(&Store::real(), &exe, config.general.autostart, onboarded)
     });
     if let Err(e) = result {
         eprintln!("[opencircle] start with the OS: {e}");
+    }
+}
+
+/// `sync`, but only once onboarding is finished: its Finish saves the user's choice.
+fn sync_when_onboarded(store: &Store, exe: &Path, on: bool, onboarded: bool) -> io::Result<()> {
+    if onboarded {
+        sync(store, exe, on)
+    } else {
+        Ok(())
     }
 }
 
@@ -219,6 +230,9 @@ mod tests {
         } else {
             "/opt/Open Circle/opencircle"
         });
+        assert_eq!(store.read(), None);
+        // onboarding not finished: nothing is written, whatever the setting says
+        sync_when_onboarded(&store, exe, true, false).unwrap();
         assert_eq!(store.read(), None);
         sync(&store, exe, false).unwrap(); // off and absent: nothing to do
         assert_eq!(store.read(), None);

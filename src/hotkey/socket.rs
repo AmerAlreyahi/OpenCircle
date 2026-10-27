@@ -25,6 +25,8 @@ const MAX_ACTION: usize = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Capture,
+    /// A bare second launch (the empty line, internal: not a CLI command): open Settings.
+    OpenSettings,
     /// Ask the running instance to exit (removes its tray icon cleanly).
     Quit,
     /// `target: None` = the target the user configured for that action.
@@ -39,6 +41,7 @@ impl Command {
     pub fn line(&self) -> String {
         match self {
             Command::Capture => "capture".into(),
+            Command::OpenSettings => String::new(),
             Command::Quit => "quit".into(),
             Command::Run {
                 action,
@@ -110,6 +113,7 @@ pub fn parse_command(line: &str) -> Result<Command, String> {
     let words: Vec<&str> = line.split(' ').collect();
     match words.as_slice() {
         ["capture"] => Ok(Command::Capture),
+        [""] => Ok(Command::OpenSettings),
         ["quit"] => Ok(Command::Quit),
         ["run", action] => run(action, None),
         ["run", action, target] => run(action, Some(target)),
@@ -131,6 +135,11 @@ pub fn forward(command: &str) -> io::Result<()> {
     let mut stream = LocalSocketStream::connect(endpoint()?)?;
     stream.write_all(command.as_bytes())?;
     stream.write_all(b"\n")
+}
+
+/// Is an instance running? Connects and sends nothing (the listener drops it).
+pub fn running() -> bool {
+    endpoint().and_then(LocalSocketStream::connect).is_ok()
 }
 
 /// How long `forward_or_start` waits for a freshly started instance.
@@ -355,7 +364,6 @@ mod tests {
         for bad in [
             "capture", // unfinished
             "",
-            "\n",
             "Capture\n",
             "capture now\n",
             "capture \n",
@@ -432,9 +440,20 @@ mod tests {
     }
 
     #[test]
+    fn the_empty_line_opens_settings() {
+        assert_eq!(parse_command("\n"), Ok(Command::OpenSettings));
+        assert_eq!(Command::OpenSettings.line(), "");
+        assert!(matches!(
+            super::super::trigger(&Command::OpenSettings, Instant::now()),
+            crate::Trigger::OpenSettings
+        ));
+    }
+
+    #[test]
     fn what_we_send_is_what_we_accept() {
         for command in [
             Command::Capture,
+            Command::OpenSettings,
             run_of("translate", None),
             run_of("ai_explain", Some(Target::Circle)),
             run_of("copy_text", Some(Target::LastRegion)),
