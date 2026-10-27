@@ -124,6 +124,9 @@ production systems.
   core/theme-context.js), the selection line colour (the stroke logic stays).
   Installer screens: widgets/installer.js. Lands with N-18/N-19 (#79/#80); #23 already
   uses the design's motion timings.
+- Instant text (owner, 2026-10-27): Windows OCR (#62, #63) moves into 0.1.x right after
+  the installer: the whole screen is read right after the opening, so text is selectable
+  at once; #123's read-on-touch is the stopgap until then.
 - Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
   is on hold until the owner resumes it.
 
