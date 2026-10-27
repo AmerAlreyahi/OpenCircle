@@ -139,6 +139,12 @@ production systems.
   look): it fades in with the overlay, then only the design's very soft 4 s breathing
   (ripplePulse) shows the app is alive; no moving colours, no draw-back. Live and snip:
   static. Must stay near 0 % CPU while the overlay is open and still.
+- v0.1.1 core (owner, 2026-10-27): Circle to Search AND one-shot translate must both
+  work properly (translate fast: about 3 s for a page, first lines in about 1 s). Live
+  translate is hidden behind Labs until 0.3.0. No widget transparency until glass (0.1.3).
+- Version plan (owner, 2026-10-27): 0.1.2 new look (solid) + Feature showcase + AI chat
+  with markdown; 0.1.3 GPU renderer + glass; 0.2.0 AI online (web search, sign-ins) +
+  fast core; 0.3.0 live translation; 0.4.0 snip; 0.5.0 visual search + sound.
 - Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
   is on hold until the owner resumes it.
 
