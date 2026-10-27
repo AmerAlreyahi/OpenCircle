@@ -602,6 +602,9 @@ impl Engine {
                     return;
                 }
 
+                let drawn = physical_bounds.intersection(&_clip_bounds);
+                let px = drawn.map_or(0.0, |r| r.width * r.height);
+                PIPELINE_PIXELS.set(PIPELINE_PIXELS.get() + px as u64);
                 self.raster_pipeline.draw(
                     &image.handle,
                     image.filter_method,
@@ -852,6 +855,14 @@ fn rounded_box_sdf(
     let y = (to_center.y.abs() - size.height() + radius).max(0.0);
 
     (x.powf(2.0) + y.powf(2.0)).sqrt() - radius
+}
+
+thread_local! {
+    /// OpenCircle patch (#134): the pixels of raster images this thread drew
+    /// through tiny-skia's pipeline (not `Pipeline::blit`), for the app's
+    /// tests: an animation over the frozen screen must blit its tiles and edge
+    /// strips (a small icon moving by fractions of a pixel may not).
+    pub static PIPELINE_PIXELS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// OpenCircle patch (#23): the whole pixels a clip to `r` (device px) holds,

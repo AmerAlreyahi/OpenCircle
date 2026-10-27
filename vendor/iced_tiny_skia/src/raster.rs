@@ -111,14 +111,16 @@ impl Pipeline {
             || (t.sy * hs - 1.0).abs() > 1e-5
             || !whole(t.tx)
             || !whole(t.ty)
-            || !whole(bounds.x / ws)
-            || !whole(bounds.y / hs)
         {
             return false;
         }
-        // where `draw_pixmap` puts it
-        let x = (bounds.x / ws).round() as i64 + t.tx.round() as i64;
-        let y = (bounds.y / hs).round() as i64 + t.ty.round() as i64;
+        // where `draw` puts it: its position truncated to whole pixels (as
+        // `draw` hands it to `draw_pixmap`), so the frozen tiles and the edge
+        // strips, placed a quarter pixel in against float error, are blitted
+        // too (#134: they went through the pipeline, ~20 ms a frame of the
+        // opening on the 4-core VM)
+        let x = (bounds.x / ws) as i32 as i64 + t.tx.round() as i64;
+        let y = (bounds.y / hs) as i32 as i64 + t.ty.round() as i64;
         let (w, h) = (pixels.width(), pixels.height());
         let Ok(dst) = bytemuck::try_cast_slice_mut::<u8, u32>(pixels.data_mut())
         else {

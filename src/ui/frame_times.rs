@@ -107,8 +107,9 @@ pub fn frames(
     out
 }
 
-/// Total work allowed for the opening's 16 frames in the CI test.
-const BUDGET: Duration = Duration::from_secs(4);
+/// Total work allowed for the opening's 16 frames in the CI test: their 16
+/// beats of the frame clock (`motion::FRAME`).
+const BUDGET: Duration = Duration::from_millis(16 * 16);
 
 /// The bar let go near the top on frame 0: it glides there.
 fn dock_glide(app: &mut App, i: u32, now: Instant) {
@@ -296,8 +297,8 @@ fn the_tiled_frame_is_the_frame() {
 /// under the dim (the window fades in as a whole, `windows::fade`), and never
 /// a layer's whole bounds when a widget gets or leaves a layer of its own
 /// (the hint while it slides). At 1080p at most 60 % of the screen per frame
-/// (the glow's band is 42 % of it; its last frame swaps it for the rest
-/// glow's, 53 %), the middle never; and what it draws is
+/// (the glow's strips, cut to what shows, #134: 21 % on average), the middle
+/// never; and what it draws is
 /// exactly the frame drawn afresh.
 #[test]
 fn the_opening_redraws_only_what_moves() {
@@ -337,23 +338,49 @@ fn the_opening_redraws_only_what_moves() {
 
 /// The CI budget (#59) for the opening at 1080p: not a wall-clock p95 (noisy
 /// on shared runners) but the least total work over three runs of its 16
-/// frames, and the mean share of the screen redrawn. Fails if the opening
-/// redraws the whole screen per frame again (about 100 %), or if its work grows
-/// past a clear multiple of today's (release; see the printed numbers).
+/// frames, and the mean share of the screen redrawn. Windows OCR's two reads
+/// land during it, as they do from the capture (#62: the quick read about
+/// 0.1 s in, the closer one at the end), and their handling on the UI thread
+/// counts too (#134). Fails if the opening redraws more than 30 % of the
+/// screen per frame (21 % since #134 cut the glow's strips to what shows; 42 %
+/// before, about 100 % before #23), or if its work grows past its 16 beats of
+/// 16 ms (release; see the printed numbers: CI's Linux runner took 563 ms
+/// before #134, when the frozen tiles missed the blit).
 /// Run: `cargo test --release the_opening_stays -- --nocapture`.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "timing: CI runs it in release")]
 fn the_opening_stays_within_its_frame_budget() {
     let (w, h) = (1920, 1080);
+    let whole = Rectangle::with_size(Size::new(w as f32, h as f32));
+    // a page of text: 90 lines of 80 characters
+    let page = |words: &str| {
+        let blocks = (0..90)
+            .map(|i| TextBlock {
+                text: format!("{words} {i} ").repeat(8),
+                bounds: [40.0, 20.0 + 11.5 * i as f32, 1200.0, 10.0],
+                confidence: 1.0,
+            })
+            .collect();
+        word::lines(blocks, [0, 0], 1.0)
+    };
     let mut best = Duration::MAX;
     let mut share = 0.0;
     for _ in 0..3 {
         let mut app = open_app(w, h, 1.0);
         app.appear = None;
-        let drawn = frames(&mut app, 16, false, |app, _, now| {
+        app.text_by = Some(ocr::Source::System);
+        let mut read = Duration::ZERO;
+        let drawn = frames(&mut app, 16, false, |app, i, now| {
             let _ = app.update(Message::Frame(now));
+            if i == 6 || i == 13 {
+                let lines = Ok(page(if i == 6 { "quick" } else { "closer" }));
+                let t = Instant::now();
+                let _ = app.update(Message::ScreenText(app.opening, whole, lines));
+                read += t.elapsed();
+            }
         });
-        best = best.min(drawn.iter().map(|d| d.took).sum());
+        assert_eq!(app.screen_text.lines().len(), 90, "both reads landed");
+        best = best.min(drawn.iter().map(|d| d.took).sum::<Duration>() + read);
         let area: f32 = (drawn.iter())
             .flat_map(|d| d.damage.iter().map(|r| r.width * r.height))
             .sum();
@@ -364,7 +391,7 @@ fn the_opening_stays_within_its_frame_budget() {
         share * 100.0
     );
     assert!(
-        share <= 0.55,
+        share <= 0.3,
         "redrew {:.0} % of the screen per frame",
         share * 100.0
     );
@@ -372,6 +399,32 @@ fn the_opening_stays_within_its_frame_budget() {
         best <= BUDGET,
         "16 opening frames took {best:?}, over {BUDGET:?}"
     );
+}
+
+/// The opening blits the frozen screen's tiles and the edge glow's strips
+/// (`iced_tiny_skia`'s `Pipeline::blit`) instead of running tiny-skia's
+/// per-pixel pipeline over them, at 100 % and 125 %: under 1 % of the screen
+/// a frame goes through the pipeline (a bar icon moving by fractions of a
+/// pixel). #134: the tiles, placed a quarter pixel in against float error,
+/// all went through it: about 20 ms of each opening frame on the 4-core VM,
+/// so its frames came 30-45 ms apart.
+#[test]
+fn the_opening_blits_its_images() {
+    for (w, h, scale) in [(1920, 1080, 1.0), (1700, 900, 1.25)] {
+        let mut app = open_app(w, h, scale);
+        app.appear = None;
+        let before = iced_tiny_skia::PIPELINE_PIXELS.get();
+        let drawn = frames(&mut app, 16, false, |app, _, now| {
+            let _ = app.update(Message::Frame(now));
+        });
+        let piped = (iced_tiny_skia::PIPELINE_PIXELS.get() - before) as f32;
+        let share = piped / ((drawn.len() + 1) as f32 * (w * h) as f32);
+        assert!(
+            share < 0.01,
+            "{:.0} % of the screen a frame through the pipeline at {scale}",
+            share * 100.0
+        );
+    }
 }
 
 /// Once the opening, the bar and a card have settled, nothing asks for a

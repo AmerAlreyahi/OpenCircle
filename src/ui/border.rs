@@ -602,28 +602,75 @@ fn alphas(glow: bool, paint: &Paint, frame: Frame) -> [u8; 256] {
 const BAYER: [u8; 16] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 /// Each strip's rectangle and pixels (RGBA, straight alpha). `keyed`: every
-/// pixel fully clear or fully solid.
+/// pixel fully clear or fully solid. Where the edge reaches only part of the
+/// band (the activation glow drawing back, #134) the strips are cut to what
+/// shows: the sides to the lit depth, the four corner squares whole (their
+/// rounded inner edge reaches the band's full depth). What isn't sent was
+/// clear: the screen is the same, but each frame redraws and blends a third
+/// as many pixels (the opening's glow was half of a 1080p screen a frame).
 fn render(cache: &Cache, paint: &Paint, frame: Frame, keyed: bool) -> Vec<([u32; 4], Vec<u8>)> {
     let lut = colours(paint, frame, keyed);
     let alpha = alphas(cache.geo.glow, paint, frame);
-    (cache.strips.iter())
-        .map(|&([x0, y0, w, h], ref px)| {
-            let mut rgba = vec![0; (w * h * 4) as usize];
-            for (i, &(at, level)) in px.iter().enumerate() {
+    let lit = lit_depth(cache, &alpha);
+    let mut out = Vec::new();
+    for (side, &([x0, y0, w, h], ref px)) in cache.strips.iter().enumerate() {
+        for [px0, py0, pw, ph] in pieces(side, w, h, lit) {
+            let mut rgba = vec![0; (pw * ph * 4) as usize];
+            for (i, chunk) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                let (lx, ly) = (px0 + i as u32 % pw, py0 + i as u32 / pw);
+                let (at, level) = px[(ly * w + lx) as usize];
                 let mut a = alpha[level as usize];
                 if keyed {
-                    let (x, y) = (x0 + i as u32 % w, y0 + i as u32 / w);
+                    let (x, y) = (x0 + lx, y0 + ly);
                     let threshold = BAYER[(y % 4 * 4 + x % 4) as usize] * 16 + 8;
                     a = if a > threshold { 255 } else { 0 };
                 }
                 if a > 0 {
                     let [r, g, b] = lut[at as usize];
-                    rgba[i * 4..i * 4 + 4].copy_from_slice(&[r, g, b, a]);
+                    *chunk = [r, g, b, a];
                 }
             }
-            ([x0, y0, w, h], rgba)
-        })
-        .collect()
+            out.push(([x0 + px0, y0 + py0, pw, ph], rgba));
+        }
+    }
+    out
+}
+
+/// How deep (px from the screen edge) the edge shows along the straight
+/// sides with these alphas: the top strip's middle column, lit rows counted.
+fn lit_depth(cache: &Cache, alpha: &[u8; 256]) -> u32 {
+    let Some(([_, _, w, h], px)) = cache.strips.first() else {
+        return 0;
+    };
+    (0..*h)
+        .filter(|y| alpha[px[(y * w + w / 2) as usize].1 as usize] > 0)
+        .map(|y| y + 1)
+        .max()
+        .unwrap_or(0)
+}
+
+/// The parts of strip `side` (`Geo::strips`' order: top, right, bottom,
+/// left; `w` x `h`, band deep) that hold the edge when it shows `lit` px
+/// deep along the sides, in the strip's own px: the whole strip when it
+/// shows (nearly) all of it; else the side cut to `lit` (first) and, on the
+/// top and bottom strips, the corner squares whole.
+fn pieces(side: usize, w: u32, h: u32, lit: u32) -> Vec<[u32; 4]> {
+    let band = if side.is_multiple_of(2) { h } else { w };
+    if lit >= band {
+        return vec![[0, 0, w, h]];
+    }
+    let mut out = Vec::new();
+    match side {
+        1 => out.push([band - lit, 0, lit, h]),
+        3 => out.push([0, 0, lit, h]),
+        _ => {
+            let y = if side == 0 { 0 } else { band - lit };
+            out.push([band, y, w - 2 * band, lit]);
+            out.extend([[0, 0, band, band], [w - band, 0, band, band]]);
+        }
+    }
+    out.retain(|&[_, _, pw, ph]| pw > 0 && ph > 0);
+    out
 }
 
 #[cfg(test)]
@@ -757,15 +804,65 @@ mod tests {
             false,
         );
         assert_ne!(spectrum, aurora);
-        assert_eq!(spectrum.len(), 4);
+        // the sides cut to the lit 48 px, the corner squares whole
+        assert_eq!(spectrum.len(), 8);
         // and the colours go round the edge: top-left violet, the right side warm
-        let top = &spectrum[0].1;
-        let px = |x: usize| &top[x * 4..x * 4 + 4];
-        assert!(px(2)[2] > px(2)[1], "violet near the top-left: {:?}", px(2));
-        let ([_, _, band, _], right) = &spectrum[1];
-        let edge = (*band as usize - 1) * 4; // the first row's pixel at the screen edge
-        let px = &right[edge..edge + 4];
-        assert!(px[3] > 0 && px[0] > px[2], "warm on the right: {px:?}");
+        let px = |x: u32, y: u32| {
+            let (r, p) = (spectrum.iter())
+                .find(|([px, py, w, h], _)| {
+                    (*px..px + w).contains(&x) && (*py..py + h).contains(&y)
+                })
+                .expect("a strip there");
+            let i = (((y - r[1]) * r[2] + x - r[0]) * 4) as usize;
+            [p[i], p[i + 1], p[i + 2], p[i + 3]]
+        };
+        assert!(
+            px(2, 0)[2] > px(2, 0)[1],
+            "violet near the top-left: {:?}",
+            px(2, 0)
+        );
+        let edge = px(639, 120); // on the right side, at the screen edge
+        assert!(
+            edge[3] > 0 && edge[0] > edge[2],
+            "warm on the right: {edge:?}"
+        );
+    }
+
+    /// The activation glow drawing back (#134): the strips cut to what shows
+    /// hold every lit pixel with its alpha (nothing lit is left out), and as
+    /// it draws back they cover ever less of the screen: under a third of a
+    /// 720p screen half way through (the whole band was two thirds of it).
+    #[test]
+    fn the_strips_are_cut_to_the_glow_as_it_draws_back() {
+        let (w, h) = (1280u32, 720u32);
+        let look = spectrum();
+        let mut areas = Vec::new();
+        for ms in [0, 30, 60, 105, 150, 209] {
+            let (spec, frame, _) = plan(Mode::Overlay, &look, Duration::from_millis(ms), true);
+            let geo = Geo::new(w, h, 1.0, spec.unwrap());
+            let cache = Cache::build(geo);
+            let paint = Paint::of(&look, EdgeStyle::Glow);
+            let alpha = alphas(true, &paint, frame);
+            let strips = render(&cache, &paint, frame, false);
+            let mut shown = vec![0u8; (w * h) as usize];
+            for ([x0, y0, sw, _], rgba) in &strips {
+                for (i, p) in rgba.as_chunks::<4>().0.iter().enumerate() {
+                    let (x, y) = (x0 + i as u32 % sw, y0 + i as u32 / sw);
+                    shown[(y * w + x) as usize] = p[3];
+                }
+            }
+            for y in 0..h {
+                for x in 0..w {
+                    let want = alpha[geo.level(x, y) as usize];
+                    assert_eq!(shown[(y * w + x) as usize], want, "({x}, {y}) at {ms} ms");
+                }
+            }
+            areas.push(area(&strips.iter().map(|s| s.0).collect::<Vec<_>>()));
+        }
+        assert!(areas.windows(2).all(|a| a[1] <= a[0]), "{areas:?}");
+        let full = area(&Geo::new(w, h, 1.0, Spec::glow(ACT_REACH)).strips());
+        assert!(areas[0] < full, "the corners only are band deep: {areas:?}");
+        assert!(areas[3] * 3 < w * h, "{areas:?}");
     }
 
     #[test]
