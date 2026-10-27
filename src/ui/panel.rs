@@ -459,6 +459,16 @@ impl Panel {
             title: action.label,
             chip,
         };
+        // the Text panel's download question, progress and error are short
+        // cards, as tall as their text and buttons, not a slab (#127)
+        let at = match &self.state {
+            State::Text(Reading::Consent) => widgets::card::short(at, screen, 90, 60.0),
+            State::Text(Reading::Downloading(_)) => widgets::card::short(at, screen, 45, 40.0),
+            State::Text(Reading::Failed(e)) => {
+                widgets::card::short(at, screen, e.chars().count(), 0.0)
+            }
+            _ => at,
+        };
         widgets::card::frame(header, body, footer, at, screen, hover, Msg::Card)
     }
 
@@ -802,6 +812,50 @@ mod tests {
             false,
         ));
         assert!(texts.contains(&msg), "{texts:?}");
+    }
+
+    /// The Text panel's download question, progress and error are short
+    /// cards: every text and button inside the window, no empty slab (#127).
+    #[test]
+    fn text_prompts_are_short_cards_on_small_screens() {
+        let backdrop = iced::Color::from_rgb8(240, 240, 240);
+        for (name, reading) in [
+            ("consent", Reading::Consent),
+            ("downloading", Reading::Downloading(0.4)),
+            (
+                "failed",
+                Reading::Failed("The model could not be downloaded (offline).".into()),
+            ),
+        ] {
+            let panel = panel_in(State::Text(reading));
+            for (w, h) in [
+                (1097.0, 617.0),
+                (1125.0, 575.0),
+                (700.0, 500.0),
+                (1920.0, 1080.0),
+            ] {
+                let size = Size::new(w, h);
+                let lost = widgets::shot::out_of_reach(panel.view(at(size), size, false), size);
+                assert!(lost.is_empty(), "{name} at {w}x{h}: out of reach {lost:?}");
+                let view = iced::widget::container(panel.view(at(size), size, false))
+                    .style(move |_| iced::widget::container::Style::default().background(backdrop));
+                let px = widgets::shot::save(&format!("text-{name}-{w}x{h}"), view.into(), size);
+                let a = at(size);
+                let x = a.x + a.width * 0.9;
+                let dark = |y: usize| {
+                    px[((y * w as usize) + x as usize) * 4..][..3]
+                        .iter()
+                        .all(|&v| v < 100)
+                };
+                let rows: Vec<usize> = (0..h as usize).filter(|&y| dark(y)).collect();
+                assert!(!rows.is_empty(), "{name} at {w}x{h}: no card");
+                let tall = rows[rows.len() - 1] - rows[0];
+                assert!(
+                    tall < 330 && (tall as f32) < 0.7 * h,
+                    "{name} at {w}x{h}: a slab {tall}px tall"
+                );
+            }
+        }
     }
 
     fn sample_crop() -> Crop {
