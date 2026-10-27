@@ -138,6 +138,33 @@ fn free_when_idle() {
     });
 }
 
+/// The languages in `wanted` (BCP-47 tags) that no tag in `installed` covers.
+/// Compared by base language ("en-GB" is read by an "en-US" recognizer), each
+/// reported once, lower case (#63).
+pub fn missing(installed: &[String], wanted: &[String]) -> Vec<String> {
+    let base = |t: &str| {
+        t.split(['-', '_'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    };
+    let have: Vec<String> = installed.iter().map(|t| base(t)).collect();
+    let mut out: Vec<String> = Vec::new();
+    for w in wanted.iter().map(|t| base(t)) {
+        if !w.is_empty() && !have.contains(&w) && !out.contains(&w) {
+            out.push(w);
+        }
+    }
+    out
+}
+
+/// What Windows OCR can read (the recognizers installed in Windows) and the
+/// Windows display language (its first profile language). Empty / `None`
+/// elsewhere. Quick, but not free: ask when Settings opens, never while capturing.
+pub fn windows_languages() -> (Vec<String>, Option<String>) {
+    imp::languages()
+}
+
 /// `language`, if it is known yet (never blocks): `None` = not asked yet.
 pub fn known() -> Option<Option<&'static str>> {
     #[cfg(test)]
@@ -277,6 +304,20 @@ mod imp {
         Some((engine, tag))
     }
 
+    /// Installed recognizers' tags, and the first profile language's.
+    pub(super) fn languages() -> (Vec<String>, Option<String>) {
+        use windows::System::UserProfile::GlobalizationPreferences;
+        let installed = OcrEngine::AvailableRecognizerLanguages()
+            .map(|v| v.into_iter().filter_map(|l| l.LanguageTag().ok()))
+            .map(|tags| tags.map(|t| t.to_string()).collect())
+            .unwrap_or_default();
+        let first = GlobalizationPreferences::Languages()
+            .ok()
+            .and_then(|v| v.into_iter().next())
+            .map(|t| t.to_string());
+        (installed, first)
+    }
+
     fn err(e: windows::core::Error) -> OcrError {
         OcrError::Engine(format!("Windows OCR: {e}"))
     }
@@ -323,6 +364,10 @@ mod imp {
 
     pub(super) fn below_normal() -> impl Sized {}
 
+    pub(super) fn languages() -> (Vec<String>, Option<String>) {
+        (Vec::new(), None)
+    }
+
     pub(super) fn read(_: &(), _: &[u8], _: u32, _: u32) -> Result<Vec<Vec<Word>>, OcrError> {
         unreachable!("no engine is made on this OS")
     }
@@ -330,6 +375,19 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn missing_recognizers_are_found_by_base_language() {
+        let s = |v: &[&str]| v.iter().map(|t| t.to_string()).collect::<Vec<_>>();
+        let have = s(&["en-US", "fr-FR"]);
+        assert!(super::missing(&have, &s(&["en-GB", "fr"])).is_empty());
+        assert_eq!(
+            super::missing(&have, &s(&["ja", "en", "ja-JP", "AR-sa"])),
+            ["ja", "ar"]
+        );
+        assert_eq!(super::missing(&[], &s(&["en-US"])), ["en"]);
+        assert!(super::missing(&have, &[]).is_empty());
+    }
+
     use super::*;
 
     fn w(text: &str, x: f32, y: f32, width: f32) -> Word {

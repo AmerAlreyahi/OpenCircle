@@ -26,7 +26,7 @@ use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 use crate::config::{
     After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
     EdgeStyle, Engine, Format, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
-    SnipAfter, SnipConfig, SongSource, Target, Theme, WidgetTheme, parse_shortcut,
+    SnipAfter, SnipConfig, SongSource, Target, TextReader, Theme, WidgetTheme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::labs::{Feature, Labs};
@@ -527,6 +527,10 @@ pub struct State {
     previews: Vec<Handle>,
     /// The last Check now's result (`None` = not checked in this window).
     update_status: Option<String>,
+    /// Windows OCR's recognizers and the Windows display language, asked when
+    /// the window opens (#63; empty off Windows).
+    recognizers: Vec<String>,
+    profile: Option<String>,
 }
 
 impl fmt::Debug for State {
@@ -576,6 +580,9 @@ pub enum Message {
     SelectStyle(SelectStyle),
     After(After),
     SearchWith(SearchWith),
+    TextReader(TextReader),
+    /// The text reader row's button: Windows' language settings.
+    OpenLanguageSettings,
     Look(LookTheme),
     /// The custom look's controls.
     Palette(PaletteChoice),
@@ -734,6 +741,7 @@ impl State {
             })
             .collect();
         let interval = config.translate.live_interval_ms.to_string();
+        let (recognizers, profile) = crate::ocr::system::windows_languages();
         let mut s = State {
             section: Section::General,
             saved: config.clone(),
@@ -758,6 +766,8 @@ impl State {
             hex: String::new(),
             previews: Vec::new(),
             update_status: None,
+            recognizers,
+            profile,
         };
         s.previews = LOOKS.iter().map(|(t, ..)| preview(&s.look(*t))).collect();
         s.revalidate();
@@ -1018,6 +1028,8 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         Message::SelectStyle(v) => state.draft.selection.style = v,
         Message::After(v) => state.draft.selection.after = v,
         Message::SearchWith(v) => state.draft.selection.search_with = v,
+        Message::TextReader(v) => state.draft.selection.text_reader = v,
+        Message::OpenLanguageSettings => open_language_settings(),
         Message::Look(t) => {
             // The first time Custom is picked it starts as the look in use.
             let look = &mut state.draft.look;
@@ -1585,6 +1597,7 @@ fn look_rows(state: &State) -> Vec<Element<'_, Message>> {
             None,
         ),
     ];
+    rows.extend(text_reader_row(state));
     // The looks, as a grid of previews (4 per row).
     let tiles: Vec<Element<'_, Message>> = (LOOKS.iter().zip(&state.previews))
         .map(|(&(theme, label, hint), preview)| {
@@ -1629,6 +1642,90 @@ fn look_rows(state: &State) -> Vec<Element<'_, Message>> {
         rows.extend(custom_rows(state));
     }
     rows
+}
+
+/// Windows' language settings (never installs anything itself).
+fn open_language_settings() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let run = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", "ms-settings:regionlanguage"])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn();
+        if let Err(e) = run {
+            eprintln!("[opencircle] could not open Windows' language settings: {e}");
+        }
+    }
+}
+
+impl State {
+    /// The languages Windows has no text recognition for, among the ones this
+    /// user needs: the Windows display language and the translate source.
+    fn missing_recognizers(&self) -> Vec<String> {
+        let source = &self.draft.translate.source;
+        let wanted: Vec<String> = (self.profile.iter())
+            .chain((source != lang::AUTO).then_some(source))
+            .cloned()
+            .collect();
+        crate::ocr::system::missing(&self.recognizers, &wanted)
+    }
+
+    /// The one quiet note under the text reader row, if a language is missing.
+    fn reader_note(&self) -> Option<String> {
+        let missing = self.missing_recognizers();
+        if missing.is_empty() || self.draft.selection.text_reader == TextReader::PpOcr {
+            return None;
+        }
+        let names: Vec<&str> = missing.iter().map(|c| lang::name(c)).collect();
+        Some(format!(
+            "Windows has no text recognition for {}. Using the downloaded reader.",
+            names.join(", ")
+        ))
+    }
+}
+
+/// Who reads the screen's text. Windows only: elsewhere there is one reader.
+fn text_reader_row(state: &State) -> Option<Element<'_, Message>> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let mut control = column![segmented(
+        &[
+            (
+                TextReader::Auto,
+                "Auto",
+                "Windows OCR when it has your language, else the downloaded reader",
+            ),
+            (
+                TextReader::Windows,
+                "Windows OCR",
+                "Read with Windows' own text recognition",
+            ),
+            (
+                TextReader::PpOcr,
+                "Downloaded reader",
+                "Always read with the downloaded text reader",
+            ),
+        ],
+        state.draft.selection.text_reader,
+        Message::TextReader,
+    )]
+    .spacing(8);
+    if let Some(note) = state.reader_note() {
+        control = control.push(caption(note)).push(button_row([form_button(
+            "Add in Windows",
+            false,
+            Some(Message::OpenLanguageSettings),
+        )
+        .into()]));
+    }
+    Some(form_row(
+        "Text reader",
+        "Who reads the screen's text, so you can select it",
+        control,
+        None,
+    ))
 }
 
 /// The custom look's controls.
@@ -3219,6 +3316,48 @@ pub(super) mod tests {
         }
         theme::apply(Theme::Dark);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn the_text_reader_row_is_windows_only_and_saves() {
+        let path = tmp("reader");
+        let (mut s, _) = state(Some(path.clone()));
+        let texts = page(&mut s, Section::Look);
+        let shown = texts.iter().any(|t| t == "Text reader");
+        assert_eq!(shown, cfg!(windows), "{texts:?}");
+        update(&mut s, Message::TextReader(TextReader::PpOcr));
+        let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+            panic!("not saved: {:?}", s.notice)
+        };
+        assert_eq!(cfg.selection.text_reader, TextReader::PpOcr);
+        assert_eq!(
+            Config::load_from(&path).0.selection.text_reader,
+            TextReader::PpOcr
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_missing_recognizer_gets_one_quiet_note() {
+        let (mut s, _) = state(None);
+        s.recognizers = vec!["en-US".into()];
+        s.profile = Some("en-GB".into());
+        assert_eq!(s.reader_note(), None);
+        s.draft.translate.source = "ja".into();
+        let note = "Windows has no text recognition for Japanese. Using the downloaded reader.";
+        assert_eq!(s.reader_note().as_deref(), Some(note));
+        // the note and its button are in the row (Windows only)
+        let texts = page(&mut s, Section::Look);
+        assert_eq!(texts.iter().any(|t| t == note), cfg!(windows), "{texts:?}");
+        assert_eq!(texts.iter().any(|t| t == "Add in Windows"), cfg!(windows));
+        // the downloaded reader chosen: nothing to say
+        s.draft.selection.text_reader = TextReader::PpOcr;
+        assert_eq!(s.reader_note(), None);
+        // a display language with no recognizer counts too
+        s.draft.selection.text_reader = TextReader::Auto;
+        s.draft.translate.source = "auto".into();
+        s.profile = Some("de-DE".into());
+        assert!(s.reader_note().unwrap().contains("German"));
     }
 
     #[test]

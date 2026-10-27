@@ -147,6 +147,9 @@ its table test `main_mode_text_is_routed_to_the_right_reader`. An engine returns
 `Vec<ocr::TextBlock>` (lines, frame px) and `ui/word.rs` (`lines`, `measure`) makes them
 selectable, whoever read them; Windows' words become lines in `ocr::system::blocks`.
 Selections, translate and live mode call PP-OCR directly (`recognize_in_child`).
+Settings > Look & behaviour > Text reader (Windows only) sets the setting; its note about a missing
+Windows recognizer comes from `ocr::system::missing` (installed list x display language + translate
+source) and its button opens ms-settings:regionlanguage (nothing is installed by us).
 
 **Add a colour**: add it to both `DARK` and `LIGHT` in `theme.rs` (or a `const`
 if it is theme-independent). Nowhere else.
