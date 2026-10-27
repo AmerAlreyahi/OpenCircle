@@ -150,8 +150,22 @@ production systems.
   live in the PRIVATE repo AmerAlreyahi/OpenCircle-planning (same board, project 8);
   the public repo keeps only real bugs and user reports; fixed bugs are closed with a
   "fixed on main, ships in vX" note.
-- Stop point (owner, 2026-10-27): work stops at v0.1.1; 0.1.2 does NOT start until the
-  owner says so (after the owner's own v0.1.1 check and release).
+- 0.1.2 started (owner, 2026-10-27, replaces the v0.1.1 stop point): v0.1.1 is published
+  (2026-10-27); work on 0.1.2 "New look + AI chat" in the board's Order.
+- Feature showcase (owner, 2026-10-27): shows ONLY features that ship today (Labs features only
+  while their Labs switch is on); no "Coming soon" group. Each new feature is added to the design,
+  then to the showcase list, when it is ready.
+- Frontend architecture (owner, 2026-10-27): professional, scalable UI. ONE shared UI kit
+  (src/ui/kit/): every kind of control (button, pill, toggle, dropdown, option list, field, keycap,
+  card, toast, ...) is built once; ONE design per object, never two looks for the same kind of
+  control; screens only compose kit parts and never style; colours, sizes, radii, spacing and
+  motion come only from tokens; screens/pages/steps/actions come from lists (a new feature = one
+  entry + one view file; recipe in ARCHITECTURE.md). Rebuilding or restructuring current UI code
+  for this is allowed (behaviour, frozen contracts and tests kept).
+- Backend cleanup (lead plan 2026-10-27, owner OK pending): the targeted backend cleanup
+  (docs/internal/REPORT_backend_audit.md items 1-5: one config writer, overlay state dropped on
+  close, freed fonts/caches, backend logic out of ui/, quick wins) lands in 0.1.2 with the UI
+  restructure; the rest goes to 0.1.3 with glass; 0.2.0 stays AI online + fast core.
 - v0.1.1 release OK (owner, 2026-10-27): publish v0.1.1 after the last fixes (Linux links/launcher/
   takeover #146, Linux I-beam, MSI dropped) are merged and CI is green. Windows assets: the Setup exe
   (with /quiet) + the portable exe; no separate MSI download.

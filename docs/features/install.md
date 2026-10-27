@@ -33,7 +33,7 @@ Install OpenCircle on Windows, or use the portable executable; Linux packages ar
 
 ## Limits
 
-- The Windows Setup executable does not yet support silent installation with `OpenCircle-Setup-<version>-x64.exe /quiet [/dir="…"]`. Use the interactive setup.
+- Silent install (for IT): `OpenCircle-Setup-<version>-x64.exe /quiet [/dir="…"]`; silent uninstall: `/uninstall /quiet`. See [Getting started](../getting-started.md).
 - Update signatures verify downloads; they are separate from Windows code signing. Windows SmartScreen may warn about the unsigned executable. See [Signing](../signing.md).
 - Linux is a preview. `.deb` and `.rpm` installations notify you about updates and link to the release rather than replacing the package themselves.
 - Windows OCR needs an installed recognition language. Other text readers and offline translation models download on first use.
