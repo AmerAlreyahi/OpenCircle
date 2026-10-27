@@ -66,19 +66,35 @@ pub fn refresh() {
     apply();
 }
 
-/// The tray icon's one identity. Windows (a fixed GUID, bound to the exe path) replaces a ghost left by a killed
-/// run instead of stacking a new icon beside it. Never change it.
-const TRAY_GUID: u128 = 0x6f70_656e_6369_7263_6c65_5472_6179_0001;
+/// The tray icon's identity for the exe at `path`: a hash of the lower-cased path (FNV-1a, 128 bit, so it never
+/// changes between Rust versions). Windows binds a GUID to the exe path that first registers it and refuses it
+/// from any other path, so one constant GUID fails for every copy but one (portable, installed, updated); a GUID
+/// per path is always ours. A new start of the same exe then replaces the ghost a killed run left, not stacks.
+fn guid_for(path: &std::path::Path) -> u128 {
+    path.to_string_lossy()
+        .to_lowercase()
+        .bytes()
+        .fold(0x6c62_272e_07bb_0142_62b8_2175_6295_c58d, |h, b| {
+            (h ^ u128::from(b)).wrapping_mul(0x0000_0000_0100_0000_0000_0000_0000_013b)
+        })
+}
 
-/// Windows only: removes whatever icon holds `TRAY_GUID` (a ghost of a killed run, or our own on a crash path).
-/// Cheap and safe to call when there is none.
+/// The GUID the icon is registered under (not set for the plain fallback).
+#[cfg(windows)]
+static HELD_GUID: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+
+/// Windows only: removes our GUID icon on a crash path (a panic, Ctrl+C), and only when we hold one. Deleting
+/// a GUID we do not hold makes the shell drop our next plain icon too (VM, Windows 10: no icon at all).
 #[cfg(windows)]
 pub fn remove_icon() {
+    let Some(guid) = HELD_GUID.get() else {
+        return;
+    };
     use windows::Win32::UI::Shell::{NIF_GUID, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW};
     let nid = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
         uFlags: NIF_GUID,
-        guidItem: windows::core::GUID::from_u128(TRAY_GUID),
+        guidItem: windows::core::GUID::from_u128(*guid),
         ..Default::default()
     };
     // SAFETY: plain shell call with a fully initialised struct.
@@ -122,10 +138,7 @@ pub fn start(tx: Triggers) -> Option<TrayIcon> {
     #[cfg(not(target_os = "linux"))]
     {
         #[cfg(windows)]
-        {
-            remove_icon(); // a ghost with our GUID would make the add below fail
-            remove_on_crash();
-        }
+        remove_on_crash();
         build(tx)
     }
 }
@@ -223,7 +236,8 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
         }
     }));
     let icon = icon();
-    add_with_fallback(|guid| {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let tray = add_with_fallback(guid_for(&exe), |guid| {
         let mut builder = TrayIconBuilder::new()
             .with_menu(Box::new(menu.clone()))
             .with_tooltip("OpenCircle")
@@ -236,12 +250,21 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
         // whether the icon exists: with a GUID it must have a position.
         #[cfg(windows)]
         if guid.is_some() && tray.rect().is_none() {
+            // Not dropped: its drop would delete a GUID we do not hold, and the shell then ignores the next
+            // (plain) icon too (VM, Windows 10: no icon at all). The leaked window shows nothing.
+            std::mem::forget(tray);
             return Err("the shell did not take the icon".to_string());
         }
         Ok::<_, String>(tray)
     })
     .map_err(|e| eprintln!("[opencircle] tray unavailable: {e}"))
-    .ok()
+    .ok()?;
+    #[cfg(windows)]
+    #[cfg(windows)]
+    if let Some(guid) = tray.1 {
+        let _ = HELD_GUID.set(guid);
+    }
+    Some(tray.0)
 }
 
 /// The longest wait for the menu to go (then the capture goes ahead).
@@ -279,17 +302,18 @@ fn menu_shown() -> bool {
     false
 }
 
-/// Adds the icon under the fixed identity first; if the shell refuses it (Windows binds a GUID to the exe path,
-/// so a moved or second copy of the exe is refused), adds it without one: the icon shows, and only a force-kill
-/// can leave a ghost. `add` gets the GUID to use.
+/// Adds the icon under `guid` first (the add replaces a dead run's ghost holding it); if the shell refuses it
+/// (the GUID is bound to another exe path, e.g. left by an older version), adds it without one: the icon shows,
+/// and only a force-kill can leave a ghost. `add` gets the GUID to use; the result says which one the icon holds.
 fn add_with_fallback<T, E: std::fmt::Display>(
+    guid: u128,
     mut add: impl FnMut(Option<u128>) -> Result<T, E>,
-) -> Result<T, E> {
-    match add(Some(TRAY_GUID)) {
-        Ok(icon) => Ok(icon),
+) -> Result<(T, Option<u128>), E> {
+    match add(Some(guid)) {
+        Ok(icon) => Ok((icon, Some(guid))),
         Err(e) => {
-            eprintln!("[opencircle] tray: fixed identity refused ({e}); using a plain icon");
-            add(None)
+            eprintln!("[opencircle] tray: icon identity refused ({e}); using a plain icon");
+            add(None).map(|icon| (icon, None))
         }
     }
 }
@@ -309,7 +333,8 @@ fn icon() -> Icon {
 
 #[cfg(test)]
 mod tests {
-    use super::{TRAY_GUID, add_with_fallback};
+    use super::{add_with_fallback, guid_for};
+    use std::path::Path;
 
     /// Started from the tray menu, a capture waits until the menu (and its
     /// fade-out) is gone and the screen settled. Before: the menu was
@@ -357,20 +382,31 @@ mod tests {
     }
 
     #[test]
-    fn the_fixed_identity_is_tried_first_and_used_when_accepted() {
+    fn the_identity_is_tried_first_and_used_when_accepted() {
         let mut tried = Vec::new();
-        let r: Result<(), String> = add_with_fallback(|g| {
+        let r = add_with_fallback::<(), String>(7, |g| {
             tried.push(g);
             Ok(())
         });
-        assert!(r.is_ok());
-        assert_eq!(tried, [Some(TRAY_GUID)]);
+        assert_eq!(r, Ok(((), Some(7))));
+        assert_eq!(tried, [Some(7)]);
+    }
+
+    /// Windows refuses a GUID from any exe path but the one that first registered it, so the identity follows
+    /// the path: stable for one exe (any letter case), different for every other copy. Before: one constant
+    /// GUID, refused for every copy but one (no ghost replacement there).
+    #[test]
+    fn the_identity_follows_the_exe_path() {
+        let a = guid_for(Path::new(r"C:\Apps\OpenCircle\opencircle.exe"));
+        assert_eq!(a, guid_for(Path::new(r"c:\apps\opencircle\OPENCIRCLE.EXE")));
+        assert_ne!(a, guid_for(Path::new(r"C:\Portable\opencircle.exe")));
+        assert_ne!(a, guid_for(Path::new("")));
     }
 
     #[test]
     fn a_refused_identity_falls_back_to_a_plain_icon() {
         let mut tried = Vec::new();
-        let r: Result<&str, String> = add_with_fallback(|g| {
+        let r = add_with_fallback::<&str, String>(7, |g| {
             tried.push(g);
             if g.is_some() {
                 Err("refused".to_string())
@@ -378,7 +414,8 @@ mod tests {
                 Ok("plain")
             }
         });
-        assert_eq!(r, Ok("plain"));
-        assert_eq!(tried, [Some(TRAY_GUID), None]);
+        // not holding the GUID: a crash path must not delete it (the shell then drops the plain icon too)
+        assert_eq!(r, Ok(("plain", None)));
+        assert_eq!(tried, [Some(7), None]);
     }
 }
