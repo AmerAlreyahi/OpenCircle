@@ -19,6 +19,92 @@ use std::path::{Path, PathBuf};
 /// The hidden argument the MSI's uninstall starts the installed exe with.
 pub const FORGET_ARG: &str = "--forget-user-data";
 
+/// The hidden argument of our Apps & features entry's uninstall
+/// (`opencircle.exe --uninstall-ui {ProductCode}`, written by the MSI; its own
+/// entry is hidden, ARPSYSTEMCOMPONENT): our uninstall window (`ui::setup`).
+pub const UNINSTALL_ARG: &str = "--uninstall-ui";
+
+/// The temp folder a copy of the exe runs the uninstall window from.
+const UNINSTALL_COPY: &str = "OpenCircle-Uninstall-";
+
+/// `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`: a product code, nothing else.
+pub fn is_product_code(code: &str) -> bool {
+    let b = code.as_bytes();
+    b.len() == 38
+        && b[0] == b'{'
+        && b[37] == b'}'
+        && b[1..37].iter().enumerate().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => *c == b'-',
+            _ => c.is_ascii_hexdigit(),
+        })
+}
+
+/// `opencircle --uninstall-ui {ProductCode}`, from Apps & features. The
+/// installed exe can't remove itself while it runs, so it copies itself to a
+/// temp folder of its own, starts the copy and exits; the copy shows the
+/// window (`ui::setup::run_uninstall`), then has its folder deleted once it
+/// has exited.
+pub fn uninstall_ui(code: Option<&str>) -> std::process::ExitCode {
+    use std::process::ExitCode;
+    let Some(code) = code.filter(|c| is_product_code(c)) else {
+        return ExitCode::from(2);
+    };
+    let Ok(exe) = std::env::current_exe() else {
+        return ExitCode::FAILURE;
+    };
+    let copy_dir = exe.parent().filter(|d| {
+        d.file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with(UNINSTALL_COPY))
+    });
+    let Some(dir) = copy_dir else {
+        // the installed exe: hand over to a copy
+        let dir = std::env::temp_dir().join(format!("{UNINSTALL_COPY}{}", std::process::id()));
+        let copy = dir.join("opencircle.exe");
+        let started = std::fs::create_dir(&dir)
+            .and_then(|()| std::fs::copy(&exe, &copy))
+            .and_then(|_| {
+                std::process::Command::new(&copy)
+                    .args([UNINSTALL_ARG, code])
+                    .env("OPENCIRCLE_INSTALLED", exe.parent().unwrap_or(&dir))
+                    .spawn()
+            });
+        return match started {
+            Ok(_) => ExitCode::SUCCESS,
+            Err(e) => {
+                crate::log!("[opencircle] uninstall: start the copy: {e}");
+                let _ = std::fs::remove_dir_all(&dir);
+                ExitCode::FAILURE
+            }
+        };
+    };
+    let folder = std::env::var("OPENCIRCLE_INSTALLED").unwrap_or_default();
+    if let Err(e) = crate::ui::setup::run_uninstall(code.to_string(), folder) {
+        crate::log!("[opencircle] uninstall: {e}");
+    }
+    delete_when_gone(dir);
+    ExitCode::SUCCESS
+}
+
+/// Deletes `dir` (this exe's own folder) a moment after this process exits:
+/// a hidden `cmd` waits two seconds, then removes it.
+fn delete_when_gone(dir: &Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let line = format!(
+            "ping -n 3 127.0.0.1 >nul & rmdir /s /q \"{}\"",
+            dir.display()
+        );
+        let _ = std::process::Command::new("cmd")
+            .arg("/c")
+            .raw_arg(line)
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    let _ = dir;
+}
+
 /// The MSI this exe carries: only the setup build has one.
 pub fn payload() -> Option<&'static [u8]> {
     #[cfg(setup_payload)]
@@ -109,6 +195,66 @@ pub fn app_in(folder: &str) -> PathBuf {
     Path::new(folder).join("opencircle.exe")
 }
 
+/// How long a launched app has to answer on its socket.
+const START_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The setup's "Launch OpenCircle", run off the UI thread: an OpenCircle still
+/// running (the old version, still on its way out after the upgrade asked it
+/// to quit) quits first, or the new one would hand itself to it and exit, and
+/// then the old one goes too: nothing left running. Then the installed app
+/// starts (`start`) and is waited for until it answers. `Err` = why not.
+pub fn launch(exe: &Path) -> Result<(), String> {
+    launch_with(
+        exe,
+        quit_running_app,
+        start,
+        crate::hotkey::running,
+        START_WAIT,
+    )
+}
+
+fn launch_with(
+    exe: &Path,
+    quit: impl FnOnce() -> bool,
+    start: impl FnOnce(&Path) -> std::io::Result<()>,
+    running: impl Fn() -> bool,
+    wait: std::time::Duration,
+) -> Result<(), String> {
+    if !quit() {
+        crate::log!("[opencircle] setup: the running OpenCircle did not quit");
+    }
+    start(exe).map_err(|e| {
+        crate::log!("[opencircle] setup: launch {}: {e}", exe.display());
+        format!("OpenCircle did not start ({e}). Start it from the Start menu.")
+    })?;
+    let deadline = std::time::Instant::now() + wait;
+    while !running() {
+        if std::time::Instant::now() >= deadline {
+            crate::log!("[opencircle] setup: {} did not answer", exe.display());
+            return Err("OpenCircle did not start. Start it from the Start menu.".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Ok(())
+}
+
+/// Starts `exe` as the signed-in user and returns at once: never a child of
+/// the setup (no handles, no console, nothing waits for it). A setup that runs
+/// elevated (started "as administrator") hands the start to Explorer, so the
+/// app does not run elevated too.
+fn start(exe: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    // SAFETY: a plain query of this process's token.
+    if unsafe { windows::Win32::UI::Shell::IsUserAnAdmin() }.as_bool() {
+        let windir = std::env::var_os("WINDIR").unwrap_or_else(|| r"C:\Windows".into());
+        return std::process::Command::new(Path::new(&windir).join("explorer.exe"))
+            .arg(exe)
+            .spawn()
+            .map(drop);
+    }
+    crate::spawn_detached(exe)
+}
+
 /// What is installed already (the MSI's upgrade family).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Installed {
@@ -157,14 +303,19 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
     {
         crate::log!("[opencircle] start with Windows: {e}");
     }
-    if quiet
-        || !msi::ask_yes_no(
+    if !quiet
+        && msi::ask_yes_no(
             "Uninstall OpenCircle",
             "Also remove your OpenCircle settings, downloaded models and saved keys?\n\nChoose No to keep them for a later install.",
         )
     {
-        return std::process::ExitCode::SUCCESS;
+        remove_user_data();
     }
+    std::process::ExitCode::SUCCESS
+}
+
+/// The user's settings, downloaded models, histories and saved keys: gone.
+pub fn remove_user_data() {
     for dir in user_data() {
         if dir.exists()
             && let Err(e) = std::fs::remove_dir_all(&dir)
@@ -177,7 +328,6 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
         let _ = crate::secrets::delete(provider);
     }
     let _ = crate::secrets::by_name::delete(crate::music::SERVICE.key_entry());
-    std::process::ExitCode::SUCCESS
 }
 
 #[cfg(test)]
@@ -238,6 +388,69 @@ mod tests {
         let folder = default_folder();
         assert_eq!(check_folder(&folder), Ok(folder.clone()), "{folder}");
         assert!(folder.ends_with(r"\OpenCircle\"));
+    }
+
+    /// Launch after an upgrade: the old copy quits BEFORE the new one starts
+    /// (else the new one hands itself to the old one and exits), and Launch
+    /// waits until the new one answers.
+    #[test]
+    fn launch_quits_the_old_copy_first_and_waits_for_the_new_one() {
+        use std::cell::RefCell;
+        use std::time::Duration;
+        let steps = RefCell::new(Vec::new());
+        let polls = RefCell::new(0);
+        let result = launch_with(
+            Path::new("app.exe"),
+            || {
+                steps.borrow_mut().push("quit");
+                true
+            },
+            |_| {
+                steps.borrow_mut().push("start");
+                Ok(())
+            },
+            || {
+                *polls.borrow_mut() += 1;
+                *polls.borrow() > 2 // answers on the third look
+            },
+            Duration::from_secs(5),
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(*steps.borrow(), ["quit", "start"]);
+        assert_eq!(*polls.borrow(), 3);
+
+        let silent = launch_with(
+            Path::new("app.exe"),
+            || true,
+            |_| Ok(()),
+            || false,
+            Duration::from_millis(250),
+        );
+        assert!(silent.unwrap_err().contains("did not start"));
+        let refused = launch_with(
+            Path::new("app.exe"),
+            || true,
+            |_| Err(std::io::Error::other("blocked")),
+            || true,
+            Duration::from_secs(1),
+        );
+        assert!(refused.unwrap_err().contains("blocked"));
+    }
+
+    #[test]
+    fn the_uninstall_takes_only_a_product_code() {
+        assert!(is_product_code("{046BC980-BD0C-45D2-B990-202898DD0BAD}"));
+        for bad in [
+            "",
+            "046BC980-BD0C-45D2-B990-202898DD0BAD",
+            "{046BC980-BD0C-45D2-B990-202898DD0BA}",
+            "{046BC980-BD0C-45D2-B990-202898DD0BAX}",
+            "{046BC980BBD0C-45D2-B990-202898DD0BAD}",
+            "{046BC980-BD0C-45D2-B990-202898DD0BAD} /qn",
+            "/x {046BC980-BD0C-45D2-B990-202898DD0BAD}",
+        ] {
+            assert!(!is_product_code(bad), "{bad:?}");
+        }
     }
 
     #[test]

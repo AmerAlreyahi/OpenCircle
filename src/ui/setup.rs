@@ -57,10 +57,22 @@ struct Strings {
     finishing: &'static str,
     try_again: &'static str,
     launch: &'static str,
+    starting: &'static str,
     start_with_windows: &'static str,
     off: &'static str,
     on: &'static str,
     pick_title: &'static str,
+    uninstall_title: &'static str,
+    uninstall_intro: &'static str,
+    uninstall: &'static str,
+    your_data: &'static str,
+    keep: &'static str,
+    remove: &'static str,
+    removing: &'static str,
+    removed: &'static str,
+    removed_kept: &'static str,
+    removed_all: &'static str,
+    close: &'static str,
     no_folder: &'static str,
     not_local: &'static str,
     drive_root: &'static str,
@@ -89,10 +101,22 @@ const EN: Strings = Strings {
     finishing: "Finishing…",
     try_again: "Try again",
     launch: "Launch OpenCircle",
+    starting: "Starting OpenCircle…",
     start_with_windows: "Start with Windows",
     off: "Off",
     on: "On",
     pick_title: "Choose where to install OpenCircle",
+    uninstall_title: "Uninstall OpenCircle",
+    uninstall_intro: "Removes OpenCircle from this PC. Your settings can stay for a later install.",
+    uninstall: "Uninstall",
+    your_data: "Settings, models and keys",
+    keep: "Keep",
+    remove: "Remove",
+    removing: "Removing OpenCircle…",
+    removed: "OpenCircle was removed",
+    removed_kept: "Your settings, models and keys are kept for a later install.",
+    removed_all: "Your settings, models and keys were removed too.",
+    close: "Close",
     no_folder: "Choose a folder.",
     not_local: r"Use a folder on this PC, like C:\Program Files\OpenCircle.",
     drive_root: "Choose a folder, not a whole drive.",
@@ -134,8 +158,13 @@ pub enum Message {
     Msi(msi::Event),
     Launch,
     Autostart(bool),
+    /// The uninstall's Keep (false) / Remove (true) for the user's data.
+    RemoveData(bool),
     Retry,
     Close,
+    /// The last step's work is done (`State::leave`): close, or why the app
+    /// did not start.
+    Left(Result<(), String>),
     Drag,
     Frame(Instant),
     /// The OS's light / dark mode (Daylight / Sapphire).
@@ -170,6 +199,18 @@ pub struct State {
     risen: Instant,
     now: Instant,
     package: Option<Arc<Package>>,
+    /// Launch or close was chosen on the last step: on its way out.
+    leaving: bool,
+    /// Why Launch did not start the app (shown in place of the finish text).
+    launch_error: Option<String>,
+    /// The last step's work (`finish`; tests put a stand-in here).
+    finish: fn(&str, bool, bool) -> Result<(), String>,
+    /// The uninstall window: the product code it removes.
+    uninstall: Option<String>,
+    /// The uninstall removes the user's data too (the Keep / Remove switch),
+    /// and its thumb glides from this value since then.
+    remove_data: bool,
+    data_glide: (bool, Instant),
 }
 
 /// The setup's whole program: the window until it closes.
@@ -199,14 +240,37 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
         shortcut: config.shortcut,
         autostart: !warnings.is_empty() || config.general.autostart,
     };
-    let boot = move || {
-        let mut state = State::new(
+    show(move || {
+        State::new(
             installed.clone(),
             size,
             file_name.clone(),
             shown.clone(),
             Some(package.clone()),
-        );
+        )
+    })
+}
+
+/// The uninstall window (`setup::uninstall_ui`): removes the installed product
+/// `code` from `folder`, and the user's data too if they choose so.
+pub fn run_uninstall(code: String, folder: String) -> iced::Result {
+    let (config, _) = crate::config::Config::load();
+    let shown = Config {
+        shortcut: config.shortcut,
+        autostart: false,
+    };
+    show(move || {
+        let mut state = State::new(None, None, "opencircle.exe".into(), shown.clone(), None);
+        state.folder = folder.clone();
+        state.uninstall = Some(code.clone());
+        state
+    })
+}
+
+/// The setup's window with the state `make` builds, until it closes.
+fn show(make: impl Fn() -> State + 'static) -> iced::Result {
+    let boot = move || {
+        let mut state = make();
         let (id, open) = windows::setup_window(Size::new(WIDTH, state.height()), RADIUS);
         state.window = Some(id);
         let h = state.height();
@@ -227,7 +291,10 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
         app = app.font(font);
     }
     app.default_font(widgets::ui_font())
-        .title(|_: &State, _| EN.window_title.to_string())
+        .title(|s: &State, _| match s.uninstall {
+            Some(_) => EN.uninstall_title.to_string(),
+            None => EN.window_title.to_string(),
+        })
         .theme(|_: &State, _| Some(theme()))
         .subscription(State::subscription)
         .run()
@@ -309,11 +376,25 @@ impl State {
             risen: now - motion::MORPH,
             now,
             package,
+            leaving: false,
+            launch_error: None,
+            finish,
+            uninstall: None,
+            remove_data: false,
+            data_glide: (false, now - motion::GLIDE),
         }
     }
 
     /// The window's height in this state (the design's measured card heights).
     fn height(&self) -> f32 {
+        if self.uninstall.is_some() {
+            return match &self.step {
+                Step::Configure => 359.0,
+                Step::Installing => 360.0,
+                Step::Failed(_) => 376.0,
+                Step::Finish => 330.0,
+            };
+        }
         match &self.step {
             Step::Configure if self.open => 367.0 + if self.bad.is_some() { 20.0 } else { 0.0 },
             Step::Configure => 328.0,
@@ -371,6 +452,7 @@ impl State {
             || self.bar_at() != self.bar.1
             || self.height_at() != self.height.1
             || motion::done(self.autostart_glide.1, self.now, motion::GLIDE) < 1.0
+            || motion::done(self.data_glide.1, self.now, motion::GLIDE) < 1.0
             || motion::done(self.risen, self.now, motion::MORPH) < 1.0
     }
 
@@ -407,6 +489,29 @@ impl State {
             }
             Message::Picked(None) => Task::none(),
             Message::Picked(Some(picked)) => self.update(Message::Folder(chosen(&picked))),
+            Message::Install if self.uninstall.is_some() => {
+                let code = self.uninstall.clone().unwrap_or_default();
+                let remove_data = self.remove_data;
+                self.bar = (0.0, 0.0, Instant::now());
+                let steps = self.go(Step::Installing);
+                let work = super::background(move |tx| {
+                    msi::uninstall(&code, &|event| {
+                        if remove_data && event == msi::Event::Done(Ok(())) {
+                            setup_core::remove_user_data();
+                        }
+                        let _ = tx.unbounded_send(event);
+                    });
+                });
+                steps.chain(work.map(Message::Msi))
+            }
+            Message::RemoveData(on) => {
+                if on != self.remove_data {
+                    self.now = Instant::now();
+                    self.data_glide = (self.remove_data, self.now);
+                    self.remove_data = on;
+                }
+                Task::none()
+            }
             Message::Install => {
                 let Ok(folder) = setup_core::check_folder(&self.folder) else {
                     self.open = true;
@@ -443,48 +548,43 @@ impl State {
                 }
                 Task::none()
             }
-            Message::Launch => {
-                self.keep_choice();
-                if let Err(e) = std::process::Command::new(setup_core::app_in(&self.folder)).spawn()
-                {
-                    crate::log!("[opencircle] setup: launch: {e}");
-                }
-                self.close()
-            }
+            Message::Launch => self.leave(true),
             Message::Close => match self.step {
                 Step::Installing => Task::none(), // Windows Installer is working: wait
-                Step::Finish => {
-                    self.keep_choice();
-                    self.close()
-                }
+                Step::Finish if self.uninstall.is_some() => self.close(),
+                Step::Finish => self.leave(false),
                 _ => self.close(),
             },
+            Message::Left(Ok(())) => self.close(),
+            Message::Left(Err(why)) => {
+                self.leaving = false;
+                self.launch_error = Some(why);
+                Task::none()
+            }
         }
+    }
+
+    /// The last step's way out: the choice kept and (`launch`) the app started
+    /// on a thread of their own (registry, config file, process start: the
+    /// window keeps answering meanwhile), then the setup closes. Once only.
+    fn leave(&mut self, launch: bool) -> Task<Message> {
+        if self.leaving {
+            return Task::none();
+        }
+        self.leaving = true;
+        let (folder, autostart) = (self.folder.clone(), self.autostart);
+        self.launch_error = None;
+        let work = self.finish;
+        super::background(move |tx| {
+            let _ = tx.unbounded_send(work(&folder, autostart, launch));
+        })
+        .map(Message::Left)
     }
 
     fn close(&self) -> Task<Message> {
         match self.window {
             Some(id) => windows::close(id).chain(iced::exit()),
             None => iced::exit(),
-        }
-    }
-
-    /// "Start with Windows" as left on the last step: the Run entry for the
-    /// installed exe now, and the app's own setting where it has one (a first
-    /// run's onboarding asks again).
-    fn keep_choice(&self) {
-        let exe = setup_core::app_in(&self.folder);
-        if let Err(e) = crate::autostart::choose(&exe, self.autostart) {
-            crate::log!("[opencircle] setup: start with Windows: {e}");
-        }
-        if crate::config::Config::path().is_some_and(|p| p.exists()) {
-            let (mut config, warnings) = crate::config::Config::load();
-            if warnings.is_empty() && config.general.autostart != self.autostart {
-                config.general.autostart = self.autostart;
-                if let Err(e) = config.save() {
-                    crate::log!("[opencircle] setup: save the setting: {e}");
-                }
-            }
         }
     }
 
@@ -560,8 +660,15 @@ impl State {
 
     fn body(&self) -> Element<'_, Message> {
         let finished = self.step == Step::Finish;
+        let uninstall = self.uninstall.is_some();
+        let heading = match (uninstall, finished) {
+            (true, true) => EN.removed,
+            (true, false) => EN.uninstall_title,
+            (false, true) => EN.ready,
+            (false, false) => EN.title,
+        };
         let title = row![
-            text(if finished { EN.ready } else { EN.title })
+            text(heading)
                 .size(18)
                 .font(weight(Weight::Semibold))
                 .color(t().text),
@@ -570,14 +677,22 @@ impl State {
         .spacing(8)
         .align_y(Center)
         .height(28);
-        let intro = match finished {
-            true => fill(EN.installed, &self.shortcut),
-            false => EN.intro.to_string(),
+        let intro = match (&self.launch_error, finished) {
+            _ if uninstall && finished && self.remove_data => EN.removed_all.to_string(),
+            _ if uninstall && finished => EN.removed_kept.to_string(),
+            _ if uninstall => EN.uninstall_intro.to_string(),
+            (Some(why), true) => why.clone(),
+            (None, true) => fill(EN.installed, &self.shortcut),
+            (_, false) => EN.intro.to_string(),
+        };
+        let color = match self.launch_error.is_some() && finished {
+            true => DANGER,
+            false => t().text_sub,
         };
         let intro = container(
             text(intro)
                 .size(12)
-                .color(t().text_sub)
+                .color(color)
                 .line_height(LineHeight::Absolute(19.5.into()))
                 .align_x(Center)
                 .width(Fill),
@@ -652,6 +767,42 @@ impl State {
     /// The step's main control and what is below it.
     fn action(&self) -> Element<'_, Message> {
         match &self.step {
+            Step::Configure if self.uninstall.is_some() => {
+                let data = row![
+                    text(EN.your_data).size(11.5).color(t().text_sub),
+                    Space::new().width(Fill),
+                    sapphire::segmented(
+                        &[(false, EN.keep), (true, EN.remove)],
+                        self.remove_data,
+                        self.data_glide.0,
+                        motion::progress(
+                            self.data_glide.1,
+                            self.now,
+                            motion::GLIDE,
+                            Curve::Standard
+                        ),
+                        Message::RemoveData
+                    ),
+                ]
+                .align_y(Center);
+                column![
+                    sapphire::cta(
+                        sapphire::cta_label(EN.uninstall, None),
+                        DANGER,
+                        Message::Install
+                    ),
+                    Space::new().height(14),
+                    sapphire::divider(),
+                    Space::new().height(12),
+                    data,
+                ]
+                .into()
+            }
+            Step::Finish if self.uninstall.is_some() => sapphire::cta(
+                sapphire::cta_label(EN.close, None),
+                t().accent,
+                Message::Close,
+            ),
             Step::Configure => {
                 let label = match &self.installed {
                     None => EN.install,
@@ -707,6 +858,7 @@ impl State {
             Step::Installing => {
                 let share = self.bar_at();
                 let stage = match self.bar.1 {
+                    _ if self.uninstall.is_some() => EN.removing,
                     s if s < 0.38 => EN.preparing,
                     s if s < 0.78 => EN.copying,
                     _ => EN.finishing,
@@ -744,7 +896,7 @@ impl State {
             }
             Step::Finish => {
                 let label = row![
-                    sapphire::cta_label(EN.launch, None),
+                    sapphire::cta_label(if self.leaving { EN.starting } else { EN.launch }, None),
                     text("→")
                         .size(13)
                         .font(weight(Weight::Semibold))
@@ -830,6 +982,34 @@ impl State {
     }
 }
 
+/// The last step's work: the choice kept, and (`launch`) the app started.
+fn finish(folder: &str, autostart: bool, launch: bool) -> Result<(), String> {
+    keep_choice(folder, autostart);
+    match launch {
+        true => setup_core::launch(&setup_core::app_in(folder)),
+        false => Ok(()),
+    }
+}
+
+/// "Start with Windows" as left on the last step: the Run entry for the
+/// installed exe now, and the app's own setting where it has one (a first
+/// run's onboarding asks again).
+fn keep_choice(folder: &str, autostart: bool) {
+    let exe = setup_core::app_in(folder);
+    if let Err(e) = crate::autostart::choose(&exe, autostart) {
+        crate::log!("[opencircle] setup: start with Windows: {e}");
+    }
+    if crate::config::Config::path().is_some_and(|p| p.exists()) {
+        let (mut config, warnings) = crate::config::Config::load();
+        if warnings.is_empty() && config.general.autostart != autostart {
+            config.general.autostart = autostart;
+            if let Err(e) = config.save() {
+                crate::log!("[opencircle] setup: save the setting: {e}");
+            }
+        }
+    }
+}
+
 /// A picked folder as the install folder: its own `OpenCircle` folder inside
 /// it, unless it is one already.
 fn chosen(picked: &Path) -> String {
@@ -892,7 +1072,24 @@ mod tests {
             folder: Some(r"C:\Program Files\OpenCircle\".into()),
             same: false,
         }));
+        let uninstall = || {
+            let mut s = state(None);
+            s.uninstall = Some("{046BC980-BD0C-45D2-B990-202898DD0BAD}".into());
+            s
+        };
+        let mut remove = uninstall();
+        remove.remove_data = true;
+        remove.data_glide.0 = true;
+        let mut removing = uninstall();
+        removing.step = Step::Installing;
+        removing.bar = (0.62, 0.62, removing.now);
+        let mut removed = uninstall();
+        removed.step = Step::Finish;
         vec![
+            ("6-uninstall", uninstall()),
+            ("6-uninstall-remove", remove),
+            ("7-removing", removing),
+            ("8-removed", removed),
             ("1-welcome", configure),
             ("2-folder", customize),
             ("2-folder-refused", bad),
@@ -1008,6 +1205,52 @@ mod tests {
         assert_eq!(s.step, Step::Configure);
         let _ = s.update(Message::Msi(msi::Event::Done(Ok(()))));
         assert_eq!(s.step, Step::Finish);
+    }
+
+    /// The owner's "Not Responding" on the finish step: Launch's work (the
+    /// old copy's quit, the registry, the config file, the process start) ran
+    /// on the UI thread. It runs on a thread of its own: `update` returns at
+    /// once, the button says it is starting, a second press does nothing, and
+    /// a start that failed says why instead of closing.
+    #[test]
+    fn launch_never_blocks_the_window() {
+        let mut s = state(None);
+        s.step = Step::Finish;
+        s.finish = |_, _, _| {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            Ok(())
+        };
+        let started = Instant::now();
+        let _ = s.update(Message::Launch);
+        let _ = s.update(Message::Launch);
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+        assert!(s.leaving);
+        let _ = s.update(Message::Left(Err("OpenCircle did not start.".into())));
+        assert!(!s.leaving, "Launch can be pressed again");
+        assert_eq!(s.launch_error.as_deref(), Some("OpenCircle did not start."));
+        assert_eq!(s.step, Step::Finish);
+    }
+
+    /// The uninstall window: Keep / Remove, then removing, then removed; it
+    /// never touches "Start with Windows" or starts the app on its way out.
+    #[test]
+    fn the_uninstall_asks_removes_and_closes() {
+        let mut s = state(None);
+        s.uninstall = Some("{046BC980-BD0C-45D2-B990-202898DD0BAD}".into());
+        s.finish = |_, _, _| panic!("the uninstall keeps no choice and starts nothing");
+        assert!(!s.remove_data, "keeps the data unless asked");
+        let _ = s.update(Message::RemoveData(true));
+        assert!(
+            s.remove_data && !s.data_glide.0,
+            "the thumb glides from Keep"
+        );
+        s.step = Step::Installing;
+        let _ = s.update(Message::Close);
+        assert_eq!(s.step, Step::Installing, "no closing while it removes");
+        let _ = s.update(Message::Msi(msi::Event::Done(Ok(()))));
+        assert_eq!(s.step, Step::Finish);
+        let _ = s.update(Message::Close);
+        assert!(!s.leaving);
     }
 
     #[test]

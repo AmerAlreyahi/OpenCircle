@@ -64,6 +64,13 @@
         <Icon Id="ProductIcon" SourceFile="{{icon_path}}"/>
         <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
         {{/if}}
+        <!-- Apps & features shows ONE entry, ours (ArpEntry below): its Uninstall
+             opens our own uninstall window (src/setup: uninstall_ui), which removes
+             this product through Windows Installer with our UI. The MSI's own entry
+             is hidden; msiexec /x … /qn and repair work as before. -->
+        <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
+        <!-- No System Restore point (the slow part of an install or uninstall). -->
+        <Property Id="MSIFASTINSTALL" Value="1" />
         <!-- Repair stays (Apps & features, the setup); Modify has nothing to change -->
         <SetProperty Id="ARPNOMODIFY" Value="1" After="InstallValidate" Sequence="execute"/>
 
@@ -128,6 +135,19 @@
                     </RegistryKey>
                 </RegistryKey>
                 {{/each~}}
+            </Component>
+            <Component Id="ArpEntry" Guid="*" Win64="$(var.Win64)">
+                <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\\{{product_name}}">
+                    <RegistryValue Name="DisplayName" Type="string" Value="{{product_name}}" KeyPath="yes" />
+                    <RegistryValue Name="DisplayVersion" Type="string" Value="[ProductVersion]" />
+                    <RegistryValue Name="Publisher" Type="string" Value="{{manufacturer}}" />
+                    <RegistryValue Name="DisplayIcon" Type="string" Value="&quot;[INSTALLDIR]opencircle.exe&quot;,0" />
+                    <RegistryValue Name="InstallLocation" Type="string" Value="[INSTALLDIR]" />
+                    <RegistryValue Name="UninstallString" Type="string" Value="&quot;[INSTALLDIR]opencircle.exe&quot; --uninstall-ui [ProductCode]" />
+                    <RegistryValue Name="QuietUninstallString" Type="string" Value="MsiExec.exe /x [ProductCode] /qn" />
+                    <RegistryValue Name="NoModify" Type="integer" Value="1" />
+                    <RegistryValue Name="NoRepair" Type="integer" Value="1" />
+                </RegistryKey>
             </Component>
             <Component Id="Path" Guid="{{path_component_guid}}" Win64="$(var.Win64)">
                 <File Id="Path" Source="{{app_exe_source}}" KeyPath="yes" Checksum="yes"/>
@@ -199,6 +219,7 @@
                 Absent="disallow">
 
             <ComponentRef Id="RegistryEntries"/>
+            <ComponentRef Id="ArpEntry"/>
 
             {{#each resource_file_ids as |resource_file_id| ~}}
                 <ComponentRef Id="{{ resource_file_id }}"/>

@@ -140,7 +140,7 @@ pub fn outcome(code: u32, last: Option<&str>) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-pub use win::{ask_yes_no, install, installed, installed_size};
+pub use win::{ask_yes_no, install, installed, installed_size, uninstall};
 
 #[cfg(not(windows))]
 pub fn installed_size(_: &Package) -> Option<u64> {
@@ -154,6 +154,11 @@ pub fn installed(_: &Package) -> Option<Installed> {
 
 #[cfg(not(windows))]
 pub fn install(_: &Package, _: &str, _: bool, report: &dyn Fn(Event)) {
+    report(Event::Done(Err("The setup runs on Windows only.".into())));
+}
+
+#[cfg(not(windows))]
+pub fn uninstall(_: &str, report: &dyn Fn(Event)) {
     report(Event::Done(Err("The setup runs on Windows only.".into())));
 }
 
@@ -324,6 +329,30 @@ mod win {
     }
 
     pub fn install(package: &Package, folder: &str, repair: bool, report: &dyn Fn(Event)) {
+        let path = HSTRING::from(package.path.as_os_str());
+        let line = HSTRING::from(command_line(folder, repair));
+        // SAFETY: two NUL-terminated wide strings that outlive the call.
+        with_our_ui(report, || unsafe { MsiInstallProductW(&path, &line) });
+    }
+
+    /// Removes the installed product `code` (`{GUID}`) the way Apps & features
+    /// would, with our window as its only UI (the uninstall's question is ours).
+    pub fn uninstall(code: &str, report: &dyn Fn(Event)) {
+        let code = HSTRING::from(code);
+        // SAFETY: a NUL-terminated wide string that outlives the call.
+        with_our_ui(report, || unsafe {
+            MsiConfigureProductExW(
+                &code,
+                INSTALLLEVEL_DEFAULT,
+                INSTALLSTATE_ABSENT,
+                &HSTRING::new(),
+            )
+        });
+    }
+
+    /// Runs `call` (one Windows Installer action) with no Windows Installer
+    /// window but the UAC prompt; its progress and its end go to `report`.
+    fn with_our_ui(report: &dyn Fn(Event), call: impl FnOnce() -> u32) {
         let mut ui = Ui {
             report,
             progress: Progress::default(),
@@ -339,9 +368,7 @@ mod win {
         ]
         .iter()
         .fold(0, |all, m| all | m.0) as u32;
-        let path = HSTRING::from(package.path.as_os_str());
-        let line = HSTRING::from(command_line(folder, repair));
-        // SAFETY: the handler only touches `ui`, which outlives the install call;
+        // SAFETY: the handler only touches `ui`, which outlives the call;
         // both settings are this process's, set back to none after it.
         let code = unsafe {
             MsiSetInternalUI(
@@ -354,7 +381,7 @@ mod win {
                 Some(&mut ui as *mut Ui as *const c_void),
                 None,
             );
-            let code = MsiInstallProductW(&path, &line);
+            let code = call();
             MsiSetExternalUIRecord(None, 0, None, None);
             code
         };

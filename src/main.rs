@@ -85,10 +85,15 @@ fn attach_parent_console() {
 
 /// Starts this exe with no arguments as the resident app, detached from the
 /// terminal (own process group, no console, no stdio), and returns at once.
-#[cfg(unix)]
 fn start_detached() -> std::io::Result<()> {
+    spawn_detached(&std::env::current_exe()?)
+}
+
+/// Starts `exe` with no arguments, detached (see `start_detached`), and returns at once.
+#[cfg(unix)]
+pub fn spawn_detached(exe: &std::path::Path) -> std::io::Result<()> {
     use std::process::{Command, Stdio};
-    let mut app = Command::new(std::env::current_exe()?);
+    let mut app = Command::new(exe);
     app.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -101,7 +106,7 @@ fn start_detached() -> std::io::Result<()> {
 /// its output pipe), so a script capturing this command's output would wait
 /// until the app quits.
 #[cfg(windows)]
-fn start_detached() -> std::io::Result<()> {
+pub fn spawn_detached(exe: &std::path::Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
@@ -110,7 +115,6 @@ fn start_detached() -> std::io::Result<()> {
     };
     use windows::core::{PCWSTR, PWSTR};
 
-    let exe = std::env::current_exe()?;
     let mut cmdline: Vec<u16> = std::iter::once(b'"' as u16)
         .chain(exe.as_os_str().encode_wide())
         .chain([b'"' as u16, 0])
@@ -163,6 +167,10 @@ fn main() -> ExitCode {
         Some(setup::FORGET_ARG) => {
             // hidden: the MSI's uninstall
             return setup::forget_user_data(args.get(1).is_some_and(|a| a == "--quiet"));
+        }
+        // hidden: our Apps & features entry's uninstall
+        Some(setup::UNINSTALL_ARG) => {
+            return setup::uninstall_ui(args.get(1).map(String::as_str));
         }
         Some(update::VERSION_ARG) => {
             println!("{}", env!("CARGO_PKG_VERSION"));
