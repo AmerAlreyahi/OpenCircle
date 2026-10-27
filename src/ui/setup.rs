@@ -882,6 +882,11 @@ mod tests {
         );
         let mut finish = state(None);
         finish.step = Step::Finish;
+        // Start with Windows turned off (the thumb on the first pill)
+        let mut finish_off = state(None);
+        finish_off.step = Step::Finish;
+        finish_off.autostart = false;
+        finish_off.autostart_glide.0 = false;
         let update = state(Some(Installed {
             version: "0.1.0".into(),
             folder: Some(r"C:\Program Files\OpenCircle\".into()),
@@ -894,6 +899,7 @@ mod tests {
             ("3-progress", installing),
             ("3-failed", failed),
             ("4-finish", finish),
+            ("4-finish-off", finish_off),
             ("5-update", update),
         ]
     }

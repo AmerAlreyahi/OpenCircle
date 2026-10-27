@@ -151,7 +151,15 @@ pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
                 .color(t().elevated_border),
             ..container::Style::default()
         }),
-    ];
+    ]
+    // the base layer of the stack sets its size: as wide as all the pills
+    .width(
+        options
+            .iter()
+            .map(|&(_, l)| pill_width(l) + GAP)
+            .sum::<f32>()
+            - GAP,
+    );
     let pills = options.iter().map(|&(value, label)| {
         let active = value == chosen;
         button(
