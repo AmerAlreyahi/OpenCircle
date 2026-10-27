@@ -9,12 +9,17 @@
 //!   (u32 LE), width*height*4 RGBA bytes;
 //!   reply `[TextBlock...]`.
 //! - Translate: `t`, JSON `[source, target, [text...]]`; reply `[text...]` (same length).
+#[cfg(test)]
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use std::time::Duration;
+use std::time::Instant;
 
-use super::session::{self, MAX_REQUEST, Session};
+#[cfg(test)]
+use super::session::Session;
+use super::session::{self, MAX_REQUEST};
 use super::{Engine, OcrError, Read, TextBlock, check_image, models, models_dir};
 use crate::mt::{self, Pair, Translator};
 
@@ -32,6 +37,7 @@ const TRANSLATE: u8 = b't';
 /// 1 MB of text is far beyond any screen.
 const MAX_TEXT: usize = 1 << 20;
 /// Idle this long, the helper gives its freed memory back to the OS.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
 const IDLE_TRIM: Duration = Duration::from_secs(2);
 
 /// Reads the text lines of an RGBA image in the helper, with the recognizer
@@ -116,7 +122,7 @@ fn ready(read: Read) -> Result<(), OcrError> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 pub(super) fn recognize_with(
     exe: &Path,
     rgba: &[u8],

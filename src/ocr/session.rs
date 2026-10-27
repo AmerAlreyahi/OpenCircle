@@ -138,7 +138,7 @@ impl Session {
     }
 
     /// The running child's process id.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn pid(&self) -> Option<u32> {
         self.helper.as_ref().map(|h| h.child.id())
     }
@@ -379,6 +379,7 @@ pub(super) fn call(payload: &[&[u8]]) -> Result<Vec<u8>, OcrError> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    #[cfg(unix)]
     use std::sync::Arc;
 
     /// The helper stays held while translations keep coming, and is let go

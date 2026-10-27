@@ -25,7 +25,6 @@ use crate::translate::lang::Script;
 use image::RgbImage;
 use image::imageops::FilterType::Triangle;
 use oar_ocr::core::config::{OrtExecutionProvider, OrtSessionConfig};
-use oar_ocr::core::traits::OrtConfigurable;
 use oar_ocr::domain::tasks::TextDetectionConfig;
 use oar_ocr::predictors::{TextDetectionPredictor, TextRecognitionPredictor};
 use oar_ocr::processors::LimitType;

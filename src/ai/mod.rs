@@ -56,6 +56,7 @@ impl Message {
         Self::new(Role::User, text)
     }
 
+    #[cfg(test)]
     pub fn with_image(mut self, png: Vec<u8>) -> Self {
         self.image_png = Some(png);
         self
@@ -131,10 +132,6 @@ pub(crate) enum Event {
     Skip,
 }
 
-pub fn ask(cfg: &AiConfig, key: Option<&Secret>, messages: &[Message]) -> Result<String, AiError> {
-    ask_stream(cfg, key, messages, |_| {})
-}
-
 /// Streams the answer; `on_delta` gets each new piece of text. Returns the full text.
 pub fn ask_stream(
     cfg: &AiConfig,
@@ -145,7 +142,7 @@ pub fn ask_stream(
     stream(cfg, key, messages, None, on_delta)
 }
 
-/// Like `ask`, for short mechanical answers (translation): the answer is capped
+/// Like `ask_stream`, for short mechanical answers (translation): the answer is capped
 /// at `max_tokens` and the provider is asked not to "think" first. Only the
 /// request differs; the answer is read the same way.
 pub(crate) fn ask_fast(

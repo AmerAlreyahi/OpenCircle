@@ -339,19 +339,18 @@ fn fetch(
     }
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    hmac_sha256::Hash::hash(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
 fn is_verified(path: &Path, f: &ModelFile) -> io::Result<bool> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(bytes.len() as u64 == f.size && sha256_hex(&bytes) == f.sha256),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(e),
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    if file.metadata()?.len() != f.size {
+        return Ok(false);
     }
+    // Streamed: a model is tens of MB, never held in RAM to be hashed.
+    let hash = crate::update::verify::sha256(file)?;
+    Ok(hash.iter().map(|b| format!("{b:02x}")).collect::<String>() == f.sha256)
 }
 
 /// Streams `body` to `<dest>.part` and renames it to `dest` only when the size
@@ -468,6 +467,8 @@ mod tests {
         write_verified(&b"hello"[..], &dest, &HELLO, |_| {}).unwrap();
         assert!(is_verified(&dest, &HELLO).unwrap());
         fs::write(&dest, b"hellO").unwrap();
+        assert!(!is_verified(&dest, &HELLO).unwrap());
+        fs::write(&dest, b"hello!").unwrap(); // wrong size
         assert!(!is_verified(&dest, &HELLO).unwrap());
         assert!(!is_verified(&dir.join("missing"), &HELLO).unwrap());
         fs::remove_dir_all(dir).unwrap();

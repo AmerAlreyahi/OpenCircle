@@ -287,6 +287,7 @@ pub struct Translated {
 
 /// Translates every text block of an RGBA frame in place. An OCR or AI
 /// error returns before anything is drawn (never a half-translated frame).
+#[cfg(test)]
 pub fn translate_frame(
     rgba: &[u8],
     width: u32,

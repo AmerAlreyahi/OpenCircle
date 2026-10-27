@@ -75,16 +75,25 @@ pub fn own_windows() -> Vec<[i32; 4]> {
 // ponytail: Linux has no watcher (logind's Lock signal / DPMS when Linux
 // work resumes); there a locked screen just fails its captures.
 static AWAY: AtomicU8 = AtomicU8::new(0);
+#[cfg(any(windows, test))]
 const LOCKED: u8 = 1;
+#[cfg(any(windows, test))]
 const DISCONNECTED: u8 = 2;
+#[cfg(any(windows, test))]
 const SCREEN_OFF: u8 = 4;
 
 /// `WM_WTSSESSION_CHANGE`'s events (its wParam), as winuser.h numbers them.
+#[cfg(any(windows, test))]
 const WTS_CONSOLE_CONNECT: u32 = 1;
+#[cfg(any(windows, test))]
 const WTS_CONSOLE_DISCONNECT: u32 = 2;
+#[cfg(any(windows, test))]
 const WTS_REMOTE_CONNECT: u32 = 3;
+#[cfg(any(windows, test))]
 const WTS_REMOTE_DISCONNECT: u32 = 4;
+#[cfg(any(windows, test))]
 const WTS_SESSION_LOCK: u32 = 7;
+#[cfg(any(windows, test))]
 const WTS_SESSION_UNLOCK: u32 = 8;
 
 /// The session is away (locked, switched or disconnected, screen off): live
@@ -100,6 +109,7 @@ pub fn away() -> bool {
 }
 
 /// The away bits after a session event (`WTS_*`).
+#[cfg(any(windows, test))]
 fn on_session(away: u8, event: u32) -> u8 {
     match event {
         WTS_SESSION_LOCK => away | LOCKED,
@@ -112,6 +122,7 @@ fn on_session(away: u8, event: u32) -> u8 {
 
 /// The away bits after the display's state changed (0 off, 1 on, 2 dimmed:
 /// still readable).
+#[cfg(any(windows, test))]
 fn on_display(away: u8, state: u32) -> u8 {
     match state {
         0 => away | SCREEN_OFF,

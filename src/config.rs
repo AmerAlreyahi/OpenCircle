@@ -231,6 +231,7 @@ pub enum DefaultAction {
 }
 
 impl DefaultAction {
+    #[cfg(test)]
     pub const ALL: [DefaultAction; 4] = [Self::Lens, Self::Ai, Self::Text, Self::Copy];
 
     /// The id in `actions::ACTIONS`.

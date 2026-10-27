@@ -49,6 +49,7 @@ impl DragFile {
         })
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // read by the Windows drag-out
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -69,6 +70,7 @@ impl Drop for DragFile {
 }
 
 /// A packed bottom-up 32-bit DIB (BITMAPINFOHEADER + BGRA rows) of `crop`.
+#[cfg_attr(not(windows), allow(dead_code))] // Windows clipboard/drag format
 pub fn dib(crop: &Crop) -> Vec<u8> {
     let (w, h) = (crop.width as usize, crop.height as usize);
     let mut out = Vec::with_capacity(40 + w * h * 4);

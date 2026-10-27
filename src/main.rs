@@ -4,30 +4,23 @@
 // a release exe is run from a terminal.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod actions;
-#[allow(dead_code)] // library API, wired into the UI later
 mod ai;
 mod autostart;
 mod capture;
-#[allow(dead_code)] // library API, wired into the UI later
 mod config;
 mod diagnostics;
-#[allow(dead_code)] // the annotation editor; the UI wires it (Edit in place, Snip mode)
 mod editor;
 mod hotkey;
 mod labs;
 mod lens;
-#[allow(dead_code)] // live-translate layer (platform calls); the UI wires it
 mod live;
 mod log;
 mod mt;
 mod music;
-#[allow(dead_code, unused_imports)] // library for the Text/Translate actions; not wired in yet
 mod ocr;
 mod search_history;
-#[allow(dead_code)] // library API, wired into the UI later
 mod secrets;
 mod setup;
-#[allow(dead_code)] // library for full-screen translate; the UI wires it
 mod translate;
 mod ui;
 mod update;

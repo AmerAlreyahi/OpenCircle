@@ -13,9 +13,10 @@ use std::hash::{DefaultHasher, Hasher};
 use std::time::Instant;
 
 use super::pipeline::{
-    Cache, Deps, Error, Timings, Translation, check_frame, cut_off, is_rtl, to_line,
-    translate_blocks, translations,
+    Cache, Deps, Error, Timings, check_frame, cut_off, is_rtl, to_line, translate_blocks,
 };
+#[cfg(test)]
+use super::pipeline::{Translation, translations};
 use super::{Block, Drawn, Line, group_blocks, render};
 use crate::ocr::TextBlock;
 
@@ -39,6 +40,7 @@ pub struct Live {
     size: (u32, u32),
     hashes: Vec<u64>,
     lines: Vec<Line>,
+    #[cfg(test)]
     blocks: Vec<Translation>,
     patches: Vec<Patch>,
     /// What the last render drew and left as it was (its rooms dropped).
@@ -64,6 +66,7 @@ impl Live {
     }
 
     /// The blocks on screen, for "click a block -> explanation".
+    #[cfg(test)]
     pub fn blocks(&self) -> &[Translation] {
         &self.blocks
     }
@@ -71,6 +74,7 @@ impl Live {
     /// Feeds one captured frame. `Ok(None)`: nothing changed, keep the layer.
     /// `Ok(Some)`: redraw the layer from [`Live::patches`]. On an error the
     /// state is kept, so the next frame retries the same regions.
+    #[cfg(test)]
     pub fn step(
         &mut self,
         frame: &[u8],
@@ -161,6 +165,7 @@ impl Live {
         *self = Live {
             size: (width, height),
             hashes,
+            #[cfg(test)]
             blocks: translations(&blocks, &tr),
             lines,
             patches,

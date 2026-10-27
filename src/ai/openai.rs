@@ -9,10 +9,6 @@ use super::{AiError, Event, HttpRequest, Message, Role, join_url, png_b64, run_s
 use crate::config::AiConfig;
 use crate::secrets::Secret;
 
-pub fn ask(cfg: &AiConfig, key: Option<&Secret>, messages: &[Message]) -> Result<String, AiError> {
-    ask_stream(cfg, key, messages, None, |_| {})
-}
-
 /// `fast` = Some(max answer tokens) for translate calls (see `fast_fields`).
 pub fn ask_stream(
     cfg: &AiConfig,

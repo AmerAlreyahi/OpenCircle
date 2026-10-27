@@ -13,10 +13,6 @@ const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 /// Cap on the answer (not a cost). Streaming, so a big cap does not risk a timeout.
 const MAX_TOKENS: u32 = 16_000;
 
-pub fn ask(cfg: &AiConfig, key: Option<&Secret>, messages: &[Message]) -> Result<String, AiError> {
-    ask_stream(cfg, key, messages, None, |_| {})
-}
-
 /// `fast` = Some(max answer tokens) for translate calls (see `build_request`).
 pub fn ask_stream(
     cfg: &AiConfig,

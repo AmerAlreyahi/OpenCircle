@@ -314,6 +314,7 @@ impl Document {
     }
 
     /// Where each capture is on the board, image px.
+    #[cfg(test)]
     pub fn tiles(&self) -> &[Rectangle] {
         &self.tiles
     }

@@ -3,7 +3,6 @@
 //! POST) to lens.google.com, then open that page in the default browser. The
 //! page file lives until the overlay drops its [`LensPage`] (or the next start
 //! sweeps it after a crash).
-#![allow(dead_code)] // until the action bar wires `lens::open`
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Cursor, Write};
@@ -179,21 +178,8 @@ fn page_html(png: &[u8], w: u32, h: u32, hl: &str, st: u128) -> String {
 }
 
 fn base64(data: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for c in data.chunks(3) {
-        let n = (c[0] as u32) << 16
-            | (*c.get(1).unwrap_or(&0) as u32) << 8
-            | *c.get(2).unwrap_or(&0) as u32;
-        for i in 0..4 {
-            out.push(if i <= c.len() {
-                T[(n >> (18 - 6 * i) & 63) as usize] as char
-            } else {
-                '='
-            });
-        }
-    }
-    out
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 // ---- locale -------------------------------------------------------------
@@ -407,6 +393,7 @@ fn spawn(target: &std::ffi::OsStr) -> io::Result<()> {
 }
 
 /// How Linux hands `target` to the desktop.
+#[cfg(any(target_os = "linux", test))]
 #[derive(Debug, PartialEq, Eq)]
 enum Route {
     /// A web link or `mailto:`: the desktop portal (OpenURI), which finds the
@@ -420,6 +407,7 @@ enum Route {
     Command,
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn route(target: &str) -> Route {
     if target.starts_with('/') {
         Route::Browser
@@ -576,6 +564,27 @@ fn reap(cmd: &mut Command) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hand-written encoder this replaced: RFC 4648 vectors plus every
+    /// padding length of binary bytes (generated, then checked against the old function).
+    #[test]
+    fn base64_matches_the_standard_encoding() {
+        for (raw, want) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(raw.as_bytes()), want);
+        }
+        assert_eq!(
+            base64(&[0x89, b'P', b'N', b'G', 0, 255, 254]),
+            "iVBORwD//g=="
+        );
+    }
 
     fn scratch(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("oc-lens-test-{tag}-{}", std::process::id()));

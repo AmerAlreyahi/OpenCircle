@@ -38,7 +38,9 @@ pub use style::PRESETS;
 pub use text::Style as TextStyle;
 pub use toolbar::size as toolbar_size;
 
-use iced::widget::{column, image, pin, stack};
+#[cfg(test)]
+use iced::widget::column;
+use iced::widget::{image, pin, stack};
 use iced::{ContentFit, Element, Point, Rectangle, Size};
 
 use crate::actions::Crop;
@@ -578,6 +580,7 @@ impl Editor {
     }
 
     /// The canvas (image + annotations, takes the pointer) above the toolbar.
+    #[cfg(test)]
     pub fn view(&self) -> Element<'_, Message> {
         column![self.canvas(), self.toolbar()]
             .spacing(12)
@@ -620,6 +623,7 @@ impl Editor {
     }
 
     /// The floating editing toolbar (with the open popover under it).
+    #[cfg(test)]
     pub fn toolbar(&self) -> Element<'_, Message> {
         toolbar::view(self, f32::INFINITY)
     }

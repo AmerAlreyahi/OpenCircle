@@ -2,7 +2,9 @@
 //! opens them in a strip under it) · colour · board · undo/redo · drag, pin ·
 //! Copy, Save. The open popover shows under its button. Built only from the
 //! shared widgets.
-use iced::widget::{Space, column, row, tooltip};
+#[cfg(test)]
+use iced::widget::Space;
+use iced::widget::{column, row, tooltip};
 use iced::{Color, Element, Point, Rectangle, Size, Vector};
 
 use super::board::Layout;
@@ -74,6 +76,7 @@ pub fn size(max_width: f32) -> Size {
 }
 
 /// The toolbar with its open popover under it (where nothing limits the room).
+#[cfg(test)]
 pub fn view(e: &Editor, max_width: f32) -> Element<'_, Message> {
     let (bar, popover) = build(e, max_width);
     match popover {

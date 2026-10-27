@@ -14,7 +14,7 @@ mod notes;
 mod release;
 pub use release::version;
 mod swap;
-mod verify;
+pub(crate) mod verify;
 
 use std::path::Path;
 use std::process::{Command, Stdio};

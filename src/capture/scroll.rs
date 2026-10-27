@@ -4,7 +4,6 @@
 //! Windows: `SendInput` mouse wheel (needs the target not to be elevated, UIPI
 //! drops input to elevated windows silently). X11: XTest buttons 4/5. Wayland
 //! forbids synthetic input: `Unsupported`, the UI falls back to manual scrolling.
-#![allow(dead_code)] // wired by the snip UI later; the tests exercise the loop
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};

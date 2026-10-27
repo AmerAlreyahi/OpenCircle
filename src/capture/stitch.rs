@@ -5,7 +5,6 @@
 //! strip left out), sticky header/footer = rows fixed in every moving pair,
 //! scroll offset = lowest mean row cost over informative rows. Output pixels are always
 //! copied from a real frame, never blended. Pure: no I/O, no platform code.
-#![allow(dead_code)] // wired by the snip UI later; the tests exercise everything
 
 /// Hard cap on the stitched height, in pixels.
 pub const MAX_HEIGHT: u32 = 30_000;
@@ -217,6 +216,7 @@ impl Stitcher {
     }
 
     /// True once the height cap is reached; further frames are rejected.
+    #[cfg(test)]
     pub fn is_full(&self) -> bool {
         self.height >= MAX_HEIGHT as usize
     }
