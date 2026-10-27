@@ -17,20 +17,49 @@ const MAX_EDGE: u32 = 1600;
 /// A page younger than this is never swept (it may belong to a live instance).
 const SWEEP_AGE: Duration = Duration::from_secs(60);
 
+// The hand-off page: it posts the crop the moment it is parsed (the script runs
+// before anything below it is drawn), and while Lens answers it shows a calm
+// card in our design (Sapphire on a dark OS, Daylight on a light one, the
+// tokens of `ui::theme::sapphire`): our logo, one line and a soft loading
+// sweep (still when the OS asks for less motion). Everything is inline: no
+// font, script or image from anywhere. The button is a fallback that appears
+// after 2 s (CSS, no script needed), in case the post did not go.
+/// The new design's logo (`newdesing/assets/logo.svg`, its colours filled in).
+const LOGO: &str = include_str!("../assets/lens/logo.svg");
+
 const TEMPLATE: &str = r#"<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OpenCircle</title>
-<style>body{font:16px system-ui,sans-serif;margin:3em;color:#333}button{font:inherit;margin-top:1em;padding:.4em 1em}</style>
+<style>
+:root{color-scheme:dark light;--bg:#0c172e;--glow:rgba(56,189,248,.13);--card:#101f3d;--rim:rgba(155,205,255,.17);--text:#f0f7ff;--sub:rgba(198,222,255,.66);--track:#071021;--accent:#38bdf8;--shadow:0 18px 48px rgba(2,6,18,.5)}
+@media (prefers-color-scheme:light){:root{--bg:#f5f7fa;--glow:rgba(37,99,235,.10);--card:#ffffff;--rim:rgba(15,23,42,.11);--text:#0f141e;--sub:rgba(15,20,30,.62);--track:#e2e7f0;--accent:#2563eb;--shadow:0 18px 48px rgba(15,23,42,.12)}}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(60% 55% at 50% 45%,var(--glow),transparent 70%),var(--bg);color:var(--sub);font:13px/1.5 "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+.card{display:flex;flex-direction:column;align-items:center;gap:14px;width:240px;padding:28px 24px 24px;background:var(--card);border:1px solid var(--rim);border-radius:16px;box-shadow:var(--shadow);animation:rise .19s cubic-bezier(.16,1,.3,1) both}
+.logo{position:relative;width:52px;height:52px}
+.logo::before{content:"";position:absolute;inset:-14px;border-radius:50%;background:var(--glow);filter:blur(14px)}
+.logo svg{position:relative;width:100%;height:100%}
+h1{margin:0;font-size:14px;font-weight:600;color:var(--text);letter-spacing:-.01em}
+.bar{position:relative;width:120px;height:3px;border-radius:2px;background:var(--track);overflow:hidden}
+.bar::after{content:"";position:absolute;top:0;bottom:0;left:0;width:40%;border-radius:2px;background:var(--accent);animation:sweep 1.2s cubic-bezier(.65,0,.35,1) infinite}
+form{display:none}
+#go{visibility:hidden;animation:show 0s 2s forwards;font:inherit;font-size:12px;color:var(--accent);background:none;border:0;padding:2px 6px;cursor:pointer}
+#go:hover{text-decoration:underline}
+@keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}}
+@keyframes show{to{visibility:visible}}
+@media (prefers-reduced-motion:reduce){.card{animation:none}.bar::after{animation:none;width:100%;opacity:.5}}
+</style>
 </head>
 <body>
-<p>Opening Lens&hellip;</p>
 <form id="f" method="POST" enctype="multipart/form-data" action="https://lens.google.com/v3/upload?ep=gsbubb&amp;st={{ST}}&amp;hl={{HL}}">
   <input type="file" id="img" name="encoded_image" accept="image/png" hidden>
   <input type="hidden" name="processed_image_dimensions" value="{{W}},{{H}}">
-  <button type="submit">Search with Lens</button>
 </form>
 <script>
 (function () {
@@ -42,6 +71,12 @@ const TEMPLATE: &str = r#"<!doctype html>
   document.getElementById("f").submit();
 })();
 </script>
+<main class="card" role="status">
+<div class="logo">{{LOGO}}</div>
+<h1>Opening Google Lens&hellip;</h1>
+<div class="bar"></div>
+</main>
+<button id="go" type="submit" form="f">Open it now</button>
 </body>
 </html>
 "#;
@@ -140,6 +175,7 @@ fn page_html(png: &[u8], w: u32, h: u32, hl: &str, st: u128) -> String {
         .replace("{{W}}", &w.to_string())
         .replace("{{H}}", &h.to_string())
         .replace("{{B64}}", &base64(png))
+        .replace("{{LOGO}}", LOGO)
 }
 
 fn base64(data: &[u8]) -> String {
@@ -481,9 +517,40 @@ mod tests {
         assert!(html.contains("name=\"encoded_image\""));
         assert!(html.contains("name=\"processed_image_dimensions\" value=\"3,2\""));
         assert!(html.contains("atob(\"TWE=\")"));
-        assert!(html.contains("Opening Lens"));
+        assert!(html.contains("Opening Google Lens"));
         assert!(html.contains("type=\"submit\""));
         assert!(!html.contains("{{"));
+    }
+
+    /// The hand-off page should feel like nothing: the post goes before any text
+    /// is drawn, on the OS's own light or dark background, and the button shows
+    /// only if the post has not gone after 2 s.
+    #[test]
+    fn the_hand_off_page_posts_at_once_in_the_os_colours() {
+        let html = page_html(b"Ma", 3, 2, "en", 0);
+        let submit = html.find(".submit()").expect("auto-submit script");
+        let words = html.find("Opening Google Lens").unwrap();
+        let logo = html
+            .find("<div class=\"logo\"><svg")
+            .expect("our logo, inline");
+        assert!(
+            submit < words && submit < logo,
+            "posts before anything is drawn"
+        );
+        assert!(html.contains("<meta name=\"color-scheme\" content=\"dark light\">"));
+        assert!(html.contains("@media (prefers-color-scheme:light)"));
+        assert!(html.contains("@media (prefers-reduced-motion:reduce)"));
+        assert!(html.contains("#go{visibility:hidden;animation:show 0s 2s forwards"));
+        assert!(html.contains("<button id=\"go\""), "the fallback button");
+        assert!(
+            !html.contains("var(--logo"),
+            "the logo's colours are filled in"
+        );
+        // a local page: nothing is fetched from anywhere but the form's post
+        let lower = html.to_lowercase();
+        assert_eq!(lower.matches("https://").count(), 1, "only the Lens post");
+        assert!(!lower.contains("src=\"http") && !lower.contains("url(http"));
+        assert!(!lower.contains("@import") && !lower.contains("gstatic"));
     }
 
     #[test]
