@@ -1,5 +1,6 @@
 # Release build. Two ways in:
-#   * push of a tag `v*`      -> build everything, then create a DRAFT release.
+#   * push of a tag `v*`      -> build everything, then create a DRAFT release
+#     (a tag `vX.Y.Z-beta.N` -> a DRAFT PRE-release; stable users never get it).
 #   * manual "Run workflow"   -> dry run: build everything, upload it as workflow
 #     artifacts, create NO release (not even with dry_run unticked: only a tag
 #     push can create the draft).
@@ -66,8 +67,11 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version="$INPUT_VERSION"; fi
+          # A beta tag (vX.Y.Z-beta.N) builds as X.Y.Z: the MSI version must be numeric.
+          # The draft below is marked a pre-release, which the updater never offers.
+          version="${version%-beta.*}"
           if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::version '$version' is not X.Y.Z (tag vX.Y.Z)"; exit 1
+            echo "::error::version '$version' is not X.Y.Z (tag vX.Y.Z or vX.Y.Z-beta.N)"; exit 1
           fi
           sed -i "0,/^version = \".*\"/s//version = \"$version\"/" Cargo.toml
           grep -m1 '^version = ' Cargo.toml
@@ -307,5 +311,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+          pre=""; case "$TAG" in *-beta.*) pre="--prerelease";; esac
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft $pre \
             --title "OpenCircle $TAG" --notes "Release notes are written before publishing."

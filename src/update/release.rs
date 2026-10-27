@@ -597,6 +597,24 @@ pub(crate) mod tests {
         assert_eq!(picked(&new, "aarch64"), None, "no arm build");
     }
 
+    /// Beta channel: a `vX.Y.Z-beta.N` pre-release must never reach a stable user.
+    #[test]
+    fn a_beta_prerelease_is_never_picked() {
+        // The updater only asks for GitHub's "latest" (final releases only)...
+        assert!(
+            crate::update::LATEST_URL.ends_with("/releases/latest"),
+            "listing releases would need its own pre-release filter"
+        );
+        // ...and if a pre-release still arrived, it is refused, flagged or not.
+        for flagged in [true, false] {
+            let mut r = release("v99.0.0-beta.1");
+            r.prerelease = flagged;
+            let fake = server(&r, v::SIG);
+            let got = latest(&fake, LATEST, &mut Memo::default()).unwrap();
+            assert!(!is_newer(&got, "0.1.0"), "flagged={flagged}");
+        }
+    }
+
     #[test]
     fn check_sends_the_etag_and_reuses_the_answer_on_304() {
         let mut fake = server(&release("v9.9.9"), v::SIG);
