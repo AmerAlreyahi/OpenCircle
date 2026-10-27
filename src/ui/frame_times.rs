@@ -107,6 +107,9 @@ pub fn frames(
     out
 }
 
+/// Total work allowed for the opening's 16 frames in the CI test.
+const BUDGET: Duration = Duration::from_secs(4);
+
 /// The bar let go near the top on frame 0: it glides there.
 fn dock_glide(app: &mut App, i: u32, now: Instant) {
     if i == 0 {
@@ -330,6 +333,45 @@ fn the_opening_redraws_only_what_moves() {
     let whole = frames(&mut app, 1, true, |_, _, _| {}).remove(0).rgba;
     let off = (last.rgba.iter().zip(&whole)).filter(|(a, b)| a.abs_diff(**b) > 2);
     assert_eq!(off.count(), 0, "the redrawn frame is the frame");
+}
+
+/// The CI budget (#59) for the opening at 1080p: not a wall-clock p95 (noisy
+/// on shared runners) but the least total work over three runs of its 16
+/// frames, and the mean share of the screen redrawn. Fails if the opening
+/// redraws the whole screen per frame again (about 100 %), or if its work grows
+/// past a clear multiple of today's (release; see the printed numbers).
+/// Run: `cargo test --release the_opening_stays -- --nocapture`.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "timing: CI runs it in release")]
+fn the_opening_stays_within_its_frame_budget() {
+    let (w, h) = (1920, 1080);
+    let mut best = Duration::MAX;
+    let mut share = 0.0;
+    for _ in 0..3 {
+        let mut app = open_app(w, h, 1.0);
+        app.appear = None;
+        let drawn = frames(&mut app, 16, false, |app, _, now| {
+            let _ = app.update(Message::Frame(now));
+        });
+        best = best.min(drawn.iter().map(|d| d.took).sum());
+        let area: f32 = (drawn.iter())
+            .flat_map(|d| d.damage.iter().map(|r| r.width * r.height))
+            .sum();
+        share = area / (drawn.len() as f32 * (w * h) as f32);
+    }
+    println!(
+        "opening: {best:?} for 16 frames, {:.0} % redrawn",
+        share * 100.0
+    );
+    assert!(
+        share <= 0.55,
+        "redrew {:.0} % of the screen per frame",
+        share * 100.0
+    );
+    assert!(
+        best <= BUDGET,
+        "16 opening frames took {best:?}, over {BUDGET:?}"
+    );
 }
 
 /// Once the opening, the bar and a card have settled, nothing asks for a

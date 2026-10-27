@@ -489,7 +489,13 @@ mod tests {
         let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
         let info = reader.next_frame(&mut rgba).unwrap();
         assert_eq!(info.color_type, png::ColorType::Rgba);
+        let began = Instant::now();
         let got = recognize(&rgba, info.width, info.height, 2).unwrap();
+        // CI latency budget (#59): a cold read (engine made) of a small screen
+        // is far under this even on a shared runner.
+        let took = began.elapsed();
+        println!("Windows OCR took {took:?}");
+        assert!(took < Duration::from_millis(1500), "OCR took {took:?}");
         let texts: Vec<&str> = got.iter().map(|b| b.text.as_str()).collect();
         println!("Windows OCR ({tag}): {got:?}");
         if !tag.starts_with("en") {
