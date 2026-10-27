@@ -6,6 +6,7 @@
 //! warm one while a `Hold` lives: `session`).
 pub(crate) mod models;
 pub(crate) mod session;
+pub mod system;
 pub(crate) mod worker;
 
 pub use models::{download_size, ensure_models, models_dir, ready};
@@ -18,6 +19,7 @@ pub use worker::{
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::config::TextReader;
 use crate::translate::lang::Script;
 
 use image::RgbImage;
@@ -172,6 +174,30 @@ impl Read {
             i if (i as usize) < models::RECOGNIZERS.len() => Some(Read::One(i as usize)),
             _ => None,
         }
+    }
+}
+
+/// Who reads main mode's screen text (#62): Windows' own OCR (the whole
+/// screen at once, `system`) or the text reader helper (PP-OCR, band by band).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    System,
+    Helper,
+}
+
+/// The `setting`'s reader, given the Windows OCR language (`system::known`:
+/// `None` = not asked yet, `Some(None)` = none). Auto: Windows OCR, but not
+/// for a right-to-left language (PP-OCR reads Arabic better) nor without a
+/// recognizer (#63; Linux never has one); not asked yet = try it (a failed
+/// read falls back to the helper). Selections, translation and live mode
+/// keep PP-OCR whatever this says.
+pub fn route(setting: TextReader, system: Option<Option<&str>>) -> Source {
+    match (setting, system) {
+        (TextReader::PpOcr, _) | (_, Some(None)) => Source::Helper,
+        (TextReader::Auto, Some(Some(tag))) if crate::translate::lang::is_rtl(tag) => {
+            Source::Helper
+        }
+        _ => Source::System,
     }
 }
 
@@ -601,6 +627,30 @@ mod tests {
         assert_eq!(Read::for_source("en"), Read::One(0));
         let ar = Read::for_source("ar-EG");
         assert!(matches!(ar, Read::One(i) if models::RECOGNIZERS[i].id == "arabic"));
+    }
+
+    /// #62/#63: Windows OCR reads main mode's screen unless the setting says
+    /// PP-OCR, Windows has no recognizer (or no Windows: Linux), or (Auto)
+    /// its language is right-to-left; not known yet = try it.
+    #[test]
+    fn main_mode_text_is_routed_to_the_right_reader() {
+        use Source::{Helper, System};
+        use TextReader::{Auto, PpOcr, Windows};
+        for (setting, system, want) in [
+            (Auto, Some(Some("en-US")), System),
+            (Auto, Some(Some("de")), System),
+            (Auto, Some(Some("ja")), System),
+            (Auto, None, System), // first opening: tried, a failure falls back
+            (Auto, Some(None), Helper), // no recognizer installed (or Linux)
+            (Auto, Some(Some("ar-SA")), Helper),
+            (Auto, Some(Some("he")), Helper),
+            (Windows, Some(Some("ar-SA")), System),
+            (Windows, Some(None), Helper),
+            (PpOcr, Some(Some("en-US")), Helper),
+            (PpOcr, None, Helper),
+        ] {
+            assert_eq!(route(setting, system), want, "{setting:?} {system:?}");
+        }
     }
 
     #[test]

@@ -305,8 +305,13 @@ production systems.
   is missing on some desktops → fallback: user binds `opencircle capture` in
   their desktop's shortcut settings.
 - `Windows.Media.Ocr` works unpackaged (no MSIX needed; benchmarked 2026-10-26: 90-335 ms
-  per screen). It is the fast engine on Windows (N-12, #62); PP-OCRv5 stays for selections,
-  Arabic and games. It reads only languages installed in Windows (#63).
+  per screen). It reads main mode's whole screen right after the opening animation (#62,
+  `ocr/system.rs`, in the app's process; `ocr::route`); PP-OCRv5 stays for selections,
+  translate, live, Arabic/RTL and games (`selection.text_reader = "pp_ocr"`). It reads only
+  languages installed in Windows (#63): no recognizer = PP-OCR, logged once. It drops short
+  words in small text ("needed to trained"): under 150 % the frame is read doubled, in grey.
+  A synthetic press needs a pointer move over the overlay first (iced has no cursor position
+  before one); VM scripts must be per-monitor DPI aware to click on a second screen.
 - Google Lens has no public upload API. Existing clones upload to imgur/uguu
   (privacy leak). Our approach: the browser itself posts the image to Lens
   through a local auto-submitting form (spike S1 in the plan proves it).

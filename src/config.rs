@@ -36,6 +36,7 @@
 //! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
 //! after = "wait"                    # wait (nothing is sent until the user picks an action) | search (run search_with at once)
 //! search_with = "lens"              # lens | ai | both
+//! text_reader = "auto"              # who reads text to select: auto | windows (Windows OCR) | pp_ocr
 //!
 //! [look]                            # how the screen looks while OpenCircle is active
 //! theme = "spectrum"                # spectrum | aurora | sunset | ocean | neon | mono | calm | custom
@@ -420,6 +421,20 @@ pub struct SelectionConfig {
     pub style: SelectStyle,
     pub after: After,
     pub search_with: SearchWith,
+    pub text_reader: TextReader,
+}
+
+/// Who reads the screen's text for selecting it (`ocr::route`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextReader {
+    /// Windows OCR where it has the language (not right-to-left), else PP-OCR.
+    #[default]
+    Auto,
+    /// Windows OCR whenever it has a recognizer.
+    Windows,
+    /// Always the downloaded text reader (PP-OCR): Arabic, games.
+    PpOcr,
 }
 
 /// The active look: a preset, or the user's own bundle (`[look.custom]`).
@@ -992,6 +1007,7 @@ impl Config {
                 c.selection.after = After::Wait;
             }
             c.selection.search_with = get(t, p, "search_with", d.search_with, &mut w);
+            c.selection.text_reader = get(t, p, "text_reader", d.text_reader, &mut w);
         }
         if let Some(t) = section(&root, "look", &mut w) {
             c.look.theme = get(t, "look.", "theme", d.look.theme, &mut w);
@@ -1660,6 +1676,7 @@ mod tests {
                 style: SelectStyle::Shape,
                 after: After::Wait,
                 search_with: SearchWith::Both,
+                text_reader: TextReader::PpOcr,
             },
             ..Config::default()
         };

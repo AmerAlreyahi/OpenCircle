@@ -12,7 +12,7 @@ capture the screen and show it.
 | `hotkey/` | Global shortcuts from the config (capture + one per quick action; `global-hotkey`, or the Wayland portal) and the per-user command socket behind `opencircle capture` / `opencircle run <action>`. `hotkey::reload(&Config)` re-registers after a settings change. Wayland portal ids = `Binding::portal_id` (a non-default key rides in the id, because GNOME keeps the key it stored under an id). |
 | `config.rs` | The one config reader/validator. `config::current()` is the running app's config (one source of truth: panels read it, `set_current` replaces it when Settings saves). New settings: add the field + default + check in `parse` + a round-trip test, then a row in `ui/settings.rs`. `general.default_action` = what Enter runs (`actions::default_for`), `general.save_folder` = Save's start folder, `translate.live_interval_ms` = the live layer's period, `translate.source` / `target` = the languages (`auto` = detect). `[selection]` = snap / shape, search at once / wait, Lens / AI / both; `[look]` = the active look: a preset (`PRESETS`, one table of `Look`s) or `[look.custom]`; `config::look()` reads it without cloning the config (the edge every frame, the widgets on every style), so a saved change applies at once. |
 | `capture/` | One frozen RGBA frame of a monitor, or of every monitor at once (snip); one file per platform (`monitors`, `grab`, `pointer`). `choose` = the monitor holding most of the active window (`window_rect::active_rect`: not the desktop, taskbar or ours), else the pointer's, else the primary: Circle to Search, translate and quick actions open there (`active_monitor`). Wayland: the portal's whole desktop, as before. `window_rect.rs`: visible windows, topmost first (snip Window mode), and the foreground window. `cursor.rs`: the pointer drawn into a snip (`snip.cursor`). `uia.rs`: a window's controls (Windows UI Automation) for snapping. `stitch.rs` + `scroll.rs`: scrolling capture (started by the editor toolbar's button; the pill window is kept out of the frames, `windows::hide_from_capture`). |
-| `ocr/`, `mt/` | OCR (PP-OCRv5) and offline translation (OPUS-MT) on ONNX Runtime, only in the helper process `opencircle ocr-worker` (`ocr/worker.rs`: requests, the serve loop; models load on first use and stay). `ocr/session.rs`: the app side (framed, request ids, one request at a time, timeout -> kill -> next call respawns). `ocr::hold()` keeps ONE warm helper while held: live mode (`ui/live_layer.rs`) and an open overlay (`App::helper`) each hold one; the last drop kills it. Unheld calls get a child per call. |
+| `ocr/`, `mt/` | OCR (PP-OCRv5) and offline translation (OPUS-MT) on ONNX Runtime, only in the helper process `opencircle ocr-worker` (`ocr/worker.rs`: requests, the serve loop; models load on first use and stay). `ocr/session.rs`: the app side (framed, request ids, one request at a time, timeout -> kill -> next call respawns). `ocr::hold()` keeps ONE warm helper while held: live mode (`ui/live_layer.rs`) and an open overlay (`App::helper`) each hold one; the last drop kills it. Unheld calls get a child per call. `ocr/system.rs`: Windows OCR (`Windows.Media.Ocr`) in the app's process, for main mode's whole screen (`ocr::route`). |
 | `translate/lang.rs` | The ONE language table (code, English and native name, script, RTL, OCR recognizer id): pickers, the AI prompt, RTL layout and recognizer choice read it. `ocr::models::RECOGNIZERS` = one pinned recognizer per script (en, latin, arabic, cyrillic, cjk; a source picks one, `auto` = English, then the other downloaded ones when it reads badly: `ocr::Read`); `mt::PAIRS` = one pinned OPUS-MT model per direction. New language: a row (+ a recognizer / pair entry if it has one). |
 | `ui/mod.rs` | The iced daemon: overlay window state, capture on a thread, open / close (the multi-step `Hiding`), running actions, held Lens pages, `background` (thread work → messages). |
 | `ui/overlay.rs` | The canvas over the frozen frame: dim, strokes, selection rules (`classify`: tap / scribble / drag / loop; `settle` = the selection and the stroke it keeps, a scribble's padded hull), corner handles (resize / move math), the Shift count badge, mouse / wheel / key events. `View` = the zoomed (1x–4x) and panned part of the frame: selections live in image px (the overlay at 1x), so crops are right at any zoom. Snap (`[selection] style`): `snap` turns the selection into a rounded box (`Kind::Snap`, stroke = two corners), `morph` draws the stroke becoming it (≤ 200 ms, the canvas asks for frames while it runs), `brackets` / `bracket_at` are its corners and grips (`grip_at`: brackets or corner dots). Dims and colours come from the active look (`theme::dims`, `theme::accent_of`); select-text mode fills every word box and the picked ones. |
@@ -61,8 +61,14 @@ capture the screen and show it.
    crop stacked in one image, the rest the box around all). The ask bar at the bottom
    opens Ask AI with its text (in "wait" mode, Enter with nothing typed = Search). Its
    buttons: Include screen, Copy, Save, Translate, Live, Music, Edit (no Search / Ask AI
-   / Text buttons; their keys L / A / T stay). Text selection needs the screen's text,
-   read on demand, never at open (#123; `word::Screen`, `App::read_more`): nothing is
+   / Text buttons; their keys L / A / T stay). Text selection needs the screen's text.
+   Who reads it is `ocr::route` (`App::system_text`, decided per opening in `App::text_by`):
+   on Windows, Windows OCR (`ocr::system`) reads the whole screen in one go right after
+   the opening animation (`App::warm` -> `read_more` -> `read_band` of the whole screen;
+   or at a press during it), ~0.2-0.5 s, so every word is selectable once the pointer
+   moves; a failed read (no recognizer, an RTL language) falls back to the helper for
+   that opening. Otherwise (Linux, `pp_ocr`, Arabic) the helper reads on demand, never at
+   open (#123; `word::Screen`, `App::read_more`): nothing is
    read while the opening animation runs; after it the held helper starts (`App::warm`).
    A press, tap, Shift+click or Ctrl+A reads the full-width band under it first (at
    once, `ocr::recognize_band` with only the band's new rows); once text was used, the
@@ -134,6 +140,13 @@ opacity, on Windows); inside the overlay a widget only moves or scales (no alpha
 for a group of widgets on the CPU renderer). Over the frozen frame only the moving
 widget may redraw: keep the overlay canvas's inputs (`overlay::Shown`) unchanged,
 and check with `frame_times::frames` (its damage) and `animation_frame_times`.
+
+**Change who reads the screen's text** (main mode): `ocr::route` is the one decision
+(setting `selection.text_reader`, Windows OCR's language from `ocr::system::known`), with
+its table test `main_mode_text_is_routed_to_the_right_reader`. An engine returns
+`Vec<ocr::TextBlock>` (lines, frame px) and `ui/word.rs` (`lines`, `measure`) makes them
+selectable, whoever read them; Windows' words become lines in `ocr::system::blocks`.
+Selections, translate and live mode call PP-OCR directly (`recognize_in_child`).
 
 **Add a colour**: add it to both `DARK` and `LIGHT` in `theme.rs` (or a `const`
 if it is theme-independent). Nowhere else.

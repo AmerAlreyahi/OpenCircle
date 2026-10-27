@@ -48,6 +48,7 @@ use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task
 use crate::actions::{self, Action, Crop, Run, copy, lens, qr, save, text};
 use crate::config::{
     self, After, BarAnchor, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target,
+    TextReader,
 };
 use crate::editor::{self, Output};
 use crate::labs::{self, BarButton, Labs};
@@ -496,6 +497,9 @@ struct App {
     frame_times: RefCell<Vec<Instant>>,
     /// How that read is going (the note over the bar).
     reader: Reader,
+    /// Who reads this opening's text (`ocr::route`), once its first read
+    /// started: Windows OCR (the whole screen at once) or the helper (bands).
+    text_by: Option<ocr::Source>,
     /// A press that began on text: its stroke so far (image px). It selects
     /// words unless it turns into a loop (`overlay::winds`).
     text_press: Option<Vec<Point>>,
@@ -659,6 +663,7 @@ impl App {
             ocr_ready: false,
             frame_times: RefCell::default(),
             reader: Reader::Idle,
+            text_by: None,
             text_press: None,
             clicks: None,
             appear: None,
@@ -690,6 +695,7 @@ impl App {
                 style: SelectStyle::Shape,
                 after: After::Wait,
                 search_with: SearchWith::Lens,
+                text_reader: TextReader::Auto,
             },
             morph: None,
             text_mode: None,
@@ -1064,10 +1070,26 @@ impl App {
                 self.reading = None;
                 match read {
                     Ok(lines) => {
+                        if self.text_by == Some(ocr::Source::System)
+                            && let Some((first, _)) = self.appear
+                        {
+                            let ms = first.elapsed().as_millis();
+                            eprintln!(
+                                "[opencircle] screen text ready {ms} ms after the first frame"
+                            );
+                        }
                         self.screen_text.add(band, lines, self.screen);
                         let done = self.more_text();
                         let released = self.release_held();
                         Task::batch([done, released, self.read_more()])
+                    }
+                    // Windows OCR couldn't (no recognizer, #63): the helper reads
+                    Err(e) if self.text_by == Some(ocr::Source::System) => {
+                        eprintln!("[opencircle] Windows OCR didn't read the screen: {e}");
+                        self.text_by = Some(ocr::Source::Helper);
+                        self.note_reader();
+                        let released = self.release_held();
+                        Task::batch([released, self.warm(), self.read_more()])
                     }
                     // (the next press tries again; the helper backs off by itself)
                     Err(e) => {
@@ -2038,24 +2060,36 @@ impl App {
     /// Main mode without the OCR models: the note over the bar says so and
     /// offers them (`Reader::Missing`). Nothing is read at open (#123).
     fn note_reader(&mut self) {
-        if matches!(self.purpose, Purpose::Search) && !self.ocr_ready {
+        if matches!(self.purpose, Purpose::Search) && !self.ocr_ready && !self.system_text() {
             self.reader = Reader::Missing(ocr::download_size());
         }
     }
 
-    /// Main mode's text can be read: OCR models here, no translation shown.
+    /// Main mode's text can be read: Windows OCR or the OCR models here, no
+    /// translation shown.
     fn reads_text(&self) -> bool {
-        self.ocr_ready
+        (self.ocr_ready || self.system_text())
             && self.frame.is_some()
             && matches!(self.purpose, Purpose::Search)
             && self.translate.is_none()
     }
 
-    /// After the opening animation: the held helper starts and loads its
-    /// models (gently), so the first text read is quick. Nothing during it.
+    /// Windows OCR reads this opening's text (#62): decided at its first read,
+    /// until then what `ocr::route` says now.
+    fn system_text(&self) -> bool {
+        let route = || ocr::route(self.behaviour.text_reader, ocr::system::known());
+        self.text_by.unwrap_or_else(route) == ocr::Source::System
+    }
+
+    /// After the opening animation: Windows OCR reads the whole screen (#62),
+    /// or the held helper starts and loads its models (gently), so the first
+    /// text read is quick. Nothing during it.
     fn warm(&mut self) -> Task<Message> {
         if !self.reads_text() {
             return Task::none();
+        }
+        if self.system_text() {
+            return self.read_more();
         }
         let held = self.helper.as_ref().map(Arc::downgrade).unwrap_or_default();
         background(move |tx| {
@@ -2078,6 +2112,17 @@ impl App {
         if self.reading.is_some() || !self.reads_text() {
             return Task::none();
         }
+        // Windows OCR: the whole screen at once, the first time (after the
+        // opening animation, `warm`, or at a press during it: waiting for
+        // its end made the text ~80 ms later and the frames no smoother)
+        if self.system_text() {
+            if self.text_by.is_some() {
+                return Task::none(); // read (or being read)
+            }
+            self.text_by = Some(ocr::Source::System);
+            return self.read_band(Rectangle::with_size(self.screen), false);
+        }
+        self.text_by = Some(ocr::Source::Helper);
         let text = &self.screen_text;
         let pressed = (self.drawing && !self.adding)
             .then(|| self.stroke.first().copied())
@@ -2126,12 +2171,25 @@ impl App {
         self.reading = Some(band);
         let (scale, opening) = (self.scale, self.opening);
         let held = self.helper.as_ref().map(Arc::downgrade).unwrap_or_default();
+        let system =
+            (self.text_by == Some(ocr::Source::System)).then_some(self.behaviour.text_reader);
         background(move |tx| {
             // closed meanwhile: nothing to read for (and no helper started)
             let Some(_held) = held.upgrade() else {
                 return;
             };
             let read = match actions::crop(&pixels, width, height, scale, band) {
+                // (its language known now: a right-to-left one goes to the helper)
+                Some(c) if let Some(setting) = system => {
+                    match ocr::route(setting, Some(ocr::system::language())) {
+                        ocr::Source::System => {
+                            ocr::system::recognize(&c.rgba, c.width, c.height, scale)
+                        }
+                        ocr::Source::Helper => Err(ocr::OcrError::Engine(
+                            "Windows OCR: a right-to-left language".into(),
+                        )),
+                    }
+                }
                 Some(c) => ocr::recognize_band(&c.rgba, c.width, c.height, rows, gently),
                 None => Err(ocr::OcrError::BadImage("an empty band".into())),
             };
@@ -3276,6 +3334,7 @@ impl App {
         self.held = None;
         self.text_used = false;
         self.reader = Reader::Idle;
+        self.text_by = None;
         self.text_press = None;
         self.ask = String::new();
         self.drawing = false;
@@ -5979,6 +6038,111 @@ mod tests {
         text::MODELS_HERE.set(None);
     }
 
+    /// #62: with Windows OCR (no PP-OCR models needed: no download note) the
+    /// whole screen is read in one go once the opening animation ends, never
+    /// during it; a drag begun on text before it arrives becomes a text
+    /// selection when it does, and Ctrl+C then copies the text. Nothing more
+    /// is read after it (no bands, no helper).
+    #[test]
+    fn windows_ocr_reads_the_whole_screen_after_the_opening() {
+        text::MODELS_HERE.set(Some(false));
+        ocr::system::LANGUAGE_HERE.set(Some(Some("en-US")));
+        let page = text_app();
+        let mut app = App::idle(window::Id::unique());
+        app.labs = Labs::all_on();
+        let shot = Shot {
+            image: page.frame.clone().unwrap(),
+            scale: 1.0,
+            origin: Point::ORIGIN,
+            size: page.screen,
+            snip: None,
+        };
+        let _ = app.open(Instant::now(), Ok(shot));
+        assert_eq!(app.reader, Reader::Idle, "no download offered");
+        let start = Instant::now();
+        let mut ms = 0;
+        while app.appear.is_none() || app.appearing() {
+            let _ = app.update(Message::Frame(start + Duration::from_millis(ms)));
+            ms += 16;
+            if app.appearing() {
+                assert_eq!(app.reading, None, "read at {ms} ms of the opening");
+            }
+        }
+        let whole = Rectangle::with_size(app.screen);
+        assert_eq!(app.reading, Some(whole), "the whole screen at once");
+        assert_eq!(app.text_by, Some(ocr::Source::System));
+        // a drag on text while it is read: a stroke for now
+        let at = caret(1, 7.0);
+        event(&mut app, overlay::Event::Press { at, shift: false });
+        for i in 1..=8 {
+            let p = at + (caret(1, 21.0) - at) * (i as f32 / 8.0);
+            event(&mut app, overlay::Event::Move(p));
+        }
+        assert!(app.drawing && app.word.is_none());
+        let _ = answer(&mut app, whole);
+        assert!(app.screen_text.is_whole(app.screen.height));
+        event(&mut app, overlay::Event::Release);
+        assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
+        assert_eq!(app.reading, None, "nothing more to read");
+        // every word is selectable now, at once
+        click_at(&mut app, at_word(4, 6.0), false);
+        click_at(&mut app, at_word(4, 6.0), false);
+        assert_eq!(picked_text(&app).as_deref(), Some("Shift"));
+        assert_eq!(app.reading, None);
+        ocr::system::LANGUAGE_HERE.set(None);
+        text::MODELS_HERE.set(None);
+    }
+
+    /// #63: Windows OCR can't read (no recognizer for the user's languages;
+    /// here: no Windows at all): the helper reads instead, band by band, and
+    /// without its models the bar offers their download, as before.
+    #[test]
+    fn without_windows_ocr_the_helper_reads() {
+        ocr::system::LANGUAGE_HERE.set(Some(Some("en-US"))); // as if it were there
+        let mut app = text_app();
+        assert!(app.reads_text() && app.reader == Reader::Idle);
+        app.helper = Some(Arc::new(ocr::hold())); // open, as `open` does
+        let task = app.warm();
+        assert_eq!(app.text_by, Some(ocr::Source::System));
+        run_task(&mut app, task); // the real read: there is none here
+        assert_eq!(app.text_by, Some(ocr::Source::Helper));
+        assert!(matches!(app.reader, Reader::Missing(_)), "{:?}", app.reader);
+        assert!(!app.reads_text() && app.screen_text.lines().is_empty());
+        // with the models, a press reads the band under it (#123)
+        let mut app = reader_app();
+        app.text_by = Some(ocr::Source::Helper);
+        let at = caret(1, 7.0);
+        event(&mut app, overlay::Event::Press { at, shift: false });
+        assert_eq!(app.reading, Some(word::Screen::band(at.y, app.screen)));
+        ocr::system::LANGUAGE_HERE.set(None);
+    }
+
+    /// Windows OCR reads the frame in physical px: the whole screen's band is
+    /// the whole frame and its lines land on their text at 100/150/175 %
+    /// (the frame is the screen's own, so on a second screen too, #47).
+    #[test]
+    fn windows_ocr_lines_land_on_the_frame_at_any_scale() {
+        for scale in [1.0, 1.5, 1.75] {
+            let screen = Size::new(1920.0 / scale, 1080.0 / scale);
+            let whole = Rectangle::with_size(screen);
+            let crop = actions::crop_bounds(1920, 1080, scale, whole);
+            assert_eq!(crop, Some([0, 0, 1920, 1080]), "{scale}x");
+            // "Hello" at image (100, 40), 60 x 20, as Windows reads it (frame px)
+            let px = |v: f32| v * scale;
+            let word = (
+                "Hello".to_string(),
+                [px(100.0), px(40.0), px(60.0), px(20.0)],
+            );
+            let lines = word::lines(ocr::system::blocks(vec![vec![word]]), [0, 0], scale);
+            let b = lines[0].bounds;
+            let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+            assert!(
+                near(b.x, 100.0) && near(b.y, 40.0) && near(b.width, 60.0) && near(b.height, 20.0),
+                "{scale}x: {b:?}"
+            );
+        }
+    }
+
     /// A quick drag on text let go (and Ctrl+C pressed) before the band under
     /// its press is read: both wait for it, and the text is what is copied.
     /// Off text, the held drag is a stroke as before.
@@ -7099,6 +7263,7 @@ mod tests {
             style,
             after,
             search_with,
+            text_reader: TextReader::Auto,
         }
     }
 
