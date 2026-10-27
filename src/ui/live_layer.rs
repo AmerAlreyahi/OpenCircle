@@ -878,10 +878,12 @@ mod tests {
         let stop = AtomicBool::new(false);
         let begun = Instant::now();
         let mut starts = Vec::new();
+        let mut first_end = Duration::ZERO;
         let tick = || {
             starts.push(begun.elapsed());
             if starts.len() == 1 {
                 std::thread::sleep(beat * 3 / 2); // busy past the second beat
+                first_end = begun.elapsed();
             }
             if starts.len() == 3 {
                 stop.store(true, Ordering::SeqCst);
@@ -890,10 +892,18 @@ mod tests {
         };
         pump(&stop, beat, tick, |()| true);
         assert_eq!(starts.len(), 3);
-        // beats at 0, 40, 80, 120 ms: the first step ends at 60, so the
-        // 40 ms beat is skipped and the next steps start at 80 and 120
-        assert!(starts[1] >= beat * 2, "{starts:?}: started while busy");
-        assert!(starts[2] - starts[1] >= beat * 9 / 10, "{starts:?}");
+        // the next step waits for the busy one, and every step has a beat of
+        // its own (sleeps overshoot, by ~15 ms on Windows: no exact times)
+        let slot = |t: Duration| t.as_millis() / beat.as_millis();
+        assert!(starts[1] >= first_end, "{starts:?}: started while busy");
+        assert!(
+            slot(starts[1]) >= 2,
+            "{starts:?}: the busy beat was not skipped"
+        );
+        assert!(
+            slot(starts[2]) > slot(starts[1]),
+            "{starts:?}: two steps in one beat"
+        );
     }
 
     /// #56: a locked (or switched, or dark) session captures nothing; the
