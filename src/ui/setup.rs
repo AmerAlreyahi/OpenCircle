@@ -1001,12 +1001,12 @@ fn keep_choice(folder: &str, autostart: bool) {
         crate::log!("[opencircle] setup: start with Windows: {e}");
     }
     if crate::config::Config::path().is_some_and(|p| p.exists()) {
-        let (mut config, warnings) = crate::config::Config::load();
-        if warnings.is_empty() && config.general.autostart != autostart {
-            config.general.autostart = autostart;
-            if let Err(e) = config.save() {
-                crate::log!("[opencircle] setup: save the setting: {e}");
-            }
+        let (config, warnings) = crate::config::Config::load();
+        if warnings.is_empty()
+            && config.general.autostart != autostart
+            && let Err(e) = crate::config::update(|c| c.general.autostart = autostart)
+        {
+            crate::log!("[opencircle] setup: save the setting: {e}");
         }
     }
 }

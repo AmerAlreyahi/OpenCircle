@@ -435,12 +435,11 @@ impl Live {
             }
             Msg::NoteDone => {
                 self.note = false;
-                let mut cfg = config::current();
-                cfg.translate.live_note_shown = true;
-                if let Err(e) = cfg.save() {
-                    crate::log!("[opencircle] could not save the config: {e}");
-                }
-                config::set_current(cfg);
+                std::thread::spawn(|| {
+                    if let Err(e) = config::update(|c| c.translate.live_note_shown = true) {
+                        crate::log!("[opencircle] could not save the config: {e}");
+                    }
+                });
             }
             Msg::TestShot(shot) => save_test_shot(&shot),
             Msg::Progress(done) => {

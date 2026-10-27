@@ -4117,14 +4117,15 @@ impl App {
 
     /// The bar was dropped: its place is remembered (config `[bar]`).
     fn remember_bar(&self) -> Task<Message> {
-        let mut cfg = config::current();
-        cfg.bar.anchor = self.bar_anchor;
-        config::set_current(cfg.clone());
+        let anchor = self.bar_anchor;
         if cfg!(test) {
+            let mut cfg = config::current();
+            cfg.bar.anchor = anchor;
+            config::set_current(cfg);
             return Task::none(); // never the user's file
         }
         background(move |_: &UnboundedSender<()>| {
-            if let Err(e) = cfg.save() {
+            if let Err(e) = config::update(|c| c.bar.anchor = anchor) {
                 crate::log!("[opencircle] the bar's place was not saved: {e}");
             }
         })

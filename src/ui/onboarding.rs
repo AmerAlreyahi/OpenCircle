@@ -298,12 +298,9 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         }
         Message::Finish => {
             let config = state.config();
-            let result = match &state.path {
-                Some(p) => config.save_to(p),
-                None => config.save(),
-            };
+            let result = crate::config::update_at(state.path.as_deref(), |c| *c = config.clone());
             match result {
-                Ok(()) => return Outcome::Finished(config),
+                Ok(_) => return Outcome::Finished(config),
                 Err(e) => state.error = Some(format!("Could not save your settings: {e}")),
             }
         }

@@ -1143,12 +1143,8 @@ impl Config {
         (c, w)
     }
 
-    /// Write atomically (temp file in the same folder, then rename).
-    pub fn save(&self) -> std::io::Result<()> {
-        let path = Self::path().ok_or_else(|| std::io::Error::other("no user config directory"))?;
-        self.save_to(&path)
-    }
-
+    /// Write atomically (a uniquely named temp file in the same folder, then
+    /// rename). Writers go through `update`, which serialises them.
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
         let body = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
         let text = format!(
@@ -1156,7 +1152,9 @@ impl Config {
         );
         let dir = path.parent().unwrap_or(Path::new("."));
         std::fs::create_dir_all(dir)?;
-        let tmp = path.with_extension("toml.tmp");
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_extension(format!("toml.tmp{}-{n}", std::process::id()));
         let mut f = std::fs::File::create(&tmp)?;
         let written = f.write_all(text.as_bytes()).and_then(|()| f.sync_all());
         drop(f);
@@ -1269,6 +1267,73 @@ pub fn current() -> Config {
 
 pub fn set_current(config: Config) {
     *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = Some(config);
+}
+
+static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The one way to change the saved config: under one lock, apply `f` to the
+/// config as it is NOW (not to a copy somebody opened earlier), write it
+/// atomically and make it the running app's config. Returns the result.
+pub fn update(f: impl FnOnce(&mut Config)) -> std::io::Result<Config> {
+    update_at(None, f)
+}
+
+/// `update` on another file (`Some`, Settings and onboarding tests); the
+/// running app's config is then left alone.
+pub fn update_at(path: Option<&Path>, f: impl FnOnce(&mut Config)) -> std::io::Result<Config> {
+    let real = path.is_none();
+    let path = match path {
+        Some(p) => p.to_path_buf(),
+        None => Config::path().ok_or_else(|| std::io::Error::other("no user config directory"))?,
+    };
+    // ponytail: one process-wide lock, fsync inside it; a per-file lock if a second file ever needs writing.
+    let _w = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = if real {
+        current()
+    } else {
+        Config::load_from(&path).0
+    };
+    f(&mut c);
+    c.save_to(&path)?;
+    if real {
+        set_current(c.clone());
+    }
+    Ok(c)
+}
+
+/// `base` with the edits that turned `from` into `to` laid on it: what Settings
+/// saves, so a value changed elsewhere while it was open survives. Compared
+/// leaf by leaf in the file's own shape (a list counts as one leaf).
+pub fn rebase(base: &Config, from: &Config, to: &Config) -> Config {
+    fn table(c: &Config) -> Table {
+        match Value::try_from(c) {
+            Ok(Value::Table(t)) => t,
+            _ => Table::new(),
+        }
+    }
+    fn merge(base: &mut Table, from: &Table, to: &Table) {
+        for (k, v) in to {
+            match (from.get(k), v) {
+                (Some(old), _) if old == v => {}
+                (Some(Value::Table(f)), Value::Table(t))
+                    if matches!(base.get(k), Some(Value::Table(_))) =>
+                {
+                    if let Some(Value::Table(b)) = base.get_mut(k) {
+                        merge(b, f, t);
+                    }
+                }
+                _ => {
+                    base.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        for k in from.keys().filter(|k| !to.contains_key(*k)) {
+            base.remove(k);
+        }
+    }
+    let mut t = table(base);
+    merge(&mut t, &table(from), &table(to));
+    toml::to_string(&t).map_or_else(|_| base.clone(), |s| Config::parse(&s).0)
 }
 
 // ---- field readers: each returns the default (plus a warning) on a bad value ----
@@ -1575,6 +1640,26 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_updates_all_land_and_leave_no_temp_file() {
+        let dir = tmp_dir("concurrent");
+        let path = dir.join("config.toml");
+        std::thread::scope(|s| {
+            s.spawn(|| update_at(Some(&path), |c| c.bar.anchor = BarAnchor::Top).unwrap());
+            s.spawn(|| update_at(Some(&path), |c| c.theme = Theme::Light).unwrap());
+            s.spawn(|| update_at(Some(&path), |c| c.general.autostart = false).unwrap());
+        });
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert!(c.bar.anchor == BarAnchor::Top && c.theme == Theme::Light && !c.general.autostart);
+        let files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(files.len(), 1, "{files:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn labs_switches_round_trip_and_keep_the_hidden_features_settings() {
         let (mut c, _) = Config::parse(V010_USED);
         c.labs.snip = true;
@@ -1597,7 +1682,7 @@ mod tests {
     #[test]
     fn tests_never_read_or_write_the_machines_config() {
         assert_eq!(Config::path(), None);
-        assert!(Config::default().save().is_err());
+        assert!(update(|_| {}).is_err());
     }
 
     #[test]

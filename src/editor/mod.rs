@@ -1131,16 +1131,12 @@ impl Editor {
 }
 
 /// Remembers the line assist choice (`editor.line_assist`) for the next editor.
-// ponytail: an open Settings window saves its own copy later and may undo this.
 fn save_assist(on: bool) {
     if cfg!(test) {
         return; // never the user's config file
     }
-    let mut config = crate::config::current();
-    config.editor.line_assist = on;
-    crate::config::set_current(config.clone());
     std::thread::spawn(move || {
-        if let Err(e) = config.save() {
+        if let Err(e) = crate::config::update(|c| c.editor.line_assist = on) {
             crate::log!("[opencircle] config: {e}");
         }
     });

@@ -25,7 +25,7 @@ use iced::widget::{column, container, row, scrollable, space};
 use iced::{Color, Element, Length, Size, Subscription, event, keyboard};
 
 use crate::config::{
-    After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
+    self, After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
     EdgeStyle, Engine, Format, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
     SnipAfter, SnipConfig, SongSource, Target, TextReader, Theme, WidgetTheme, parse_shortcut,
 };
@@ -1215,17 +1215,15 @@ fn apply(state: &mut State, message: Message) -> Outcome {
 /// A Labs switch writes at once, and only itself: the saved config with this one
 /// switch changed (other edits in the draft stay unsaved). A failed write changes nothing.
 fn set_lab(state: &mut State, feature: Feature, on: bool) -> Outcome {
-    let mut cfg = state.saved.clone();
-    cfg.labs.set(feature, on);
-    let written = match &state.path {
-        Some(p) => cfg.save_to(p),
-        None => cfg.save(),
+    let cfg = match config::update_at(state.path.as_deref(), |c| c.labs.set(feature, on)) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            state.notice = Some(format!("Could not save: {e}"));
+            return Outcome::None;
+        }
     };
-    if let Err(e) = written {
-        state.notice = Some(format!("Could not save: {e}"));
-        return Outcome::None;
-    }
-    state.draft.labs = cfg.labs;
+    // The draft keeps its unsaved edits, on top of what is saved now.
+    state.draft = config::rebase(&cfg, &state.saved, &state.draft);
     state.saved = cfg.clone();
     if state.section == Section::Snip && !cfg.labs.has(Feature::Snip) {
         state.section = Section::Labs;
@@ -1243,13 +1241,15 @@ fn save(state: &mut State) -> Outcome {
         state.notice = Some("Nothing to save".into());
         return Outcome::None;
     }
-    let result = match &state.path {
-        Some(p) => state.draft.save_to(p),
-        None => state.draft.save(),
-    };
-    match result {
-        Ok(()) => {
-            state.saved = state.draft.clone();
+    // Only what was edited here is written, over the config as it is now.
+    // ponytail: the write (fsync) runs on the UI thread; a Task + Outcome round trip if it ever stalls.
+    let (saved, draft) = (state.saved.clone(), state.draft.clone());
+    match config::update_at(state.path.as_deref(), |c| {
+        *c = config::rebase(c, &saved, &draft)
+    }) {
+        Ok(cfg) => {
+            state.draft = cfg.clone();
+            state.saved = cfg;
             state.saved_at = Some(Instant::now());
             Outcome::Saved(state.saved.clone())
         }
@@ -2856,6 +2856,22 @@ pub(super) mod tests {
         assert!(!s.leaving() && s.asking_close);
         theme::apply(Theme::Dark);
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// Something else changes the saved config while Settings is open (the bar is
+    /// dragged): saving a theme change must keep it.
+    #[test]
+    fn saving_keeps_what_changed_elsewhere_meanwhile() {
+        let path = tmp("keep-elsewhere");
+        let (mut s, _) = state(Some(path.clone()));
+        config::update_at(Some(&path), |c| c.bar.anchor = config::BarAnchor::Top).unwrap();
+        update(&mut s, Message::Theme(Theme::Light));
+        assert!(matches!(update(&mut s, Message::Save), Outcome::Saved(_)));
+        let on_disk = Config::load_from(&path).0;
+        assert_eq!(on_disk.theme, Theme::Light);
+        assert_eq!(on_disk.bar.anchor, config::BarAnchor::Top);
+        assert!(!s.dirty(), "{:?}", s.notice);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     /// #136: in the real window a valid change is on disk at once; one with a
