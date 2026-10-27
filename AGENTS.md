@@ -151,6 +151,9 @@ production systems.
   "fixed on main, ships in vX" note.
 - Stop point (owner, 2026-10-27): work stops at v0.1.1; 0.1.2 does NOT start until the
   owner says so (after the owner's own v0.1.1 check and release).
+- v0.1.1 release OK (owner, 2026-10-27): publish v0.1.1 after the last fixes (Linux links/launcher/
+  takeover #146, Linux I-beam, MSI dropped) are merged and CI is green. Windows assets: the Setup exe
+  (with /quiet) + the portable exe; no separate MSI download.
 - Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
   is on hold until the owner resumes it.
 
