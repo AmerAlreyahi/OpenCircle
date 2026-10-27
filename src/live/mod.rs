@@ -86,7 +86,8 @@ mod win {
     use super::{COLOUR_KEY, Layer, LayerError};
     use windows::Win32::Foundation::{COLORREF, HWND};
     use windows::Win32::UI::WindowsAndMessaging::{
-        GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOPMOST, LWA_COLORKEY, SWP_NOACTIVATE, SWP_NOMOVE,
+        GWL_EXSTYLE, GetLayeredWindowAttributes, GetWindowLongPtrW, HWND_TOPMOST,
+        LAYERED_WINDOW_ATTRIBUTES_FLAGS, LWA_ALPHA, LWA_COLORKEY, SWP_NOACTIVATE, SWP_NOMOVE,
         SWP_NOSIZE, SetLayeredWindowAttributes, SetWindowDisplayAffinity, SetWindowLongPtrW,
         SetWindowPos, WDA_EXCLUDEFROMCAPTURE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
         WS_EX_TOPMOST, WS_EX_TRANSPARENT,
@@ -145,7 +146,17 @@ mod win {
             let old = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             // tool window: no taskbar button, not in Alt+Tab
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, old | (ex | WS_EX_TOOLWINDOW).0 as isize);
-            SetLayeredWindowAttributes(hwnd, COLORREF(r | g << 8 | b << 16), 255, LWA_COLORKEY)
+            // a fade under way (`ui::windows::fade`, the controller) keeps its alpha
+            let (mut alpha, mut flags) = (255, LAYERED_WINDOW_ATTRIBUTES_FLAGS(0));
+            let fading = old & WS_EX_LAYERED.0 as isize != 0
+                && GetLayeredWindowAttributes(hwnd, None, Some(&mut alpha), Some(&mut flags))
+                    .is_ok()
+                && flags.contains(LWA_ALPHA);
+            let (alpha, flags) = match fading {
+                true => (alpha, LWA_COLORKEY | LWA_ALPHA),
+                false => (255, LWA_COLORKEY),
+            };
+            SetLayeredWindowAttributes(hwnd, COLORREF(r | g << 8 | b << 16), alpha, flags)
                 .map_err(os)?;
             SetWindowPos(
                 hwnd,

@@ -209,6 +209,23 @@ impl Layer {
         ));
     }
 
+    /// OpenCircle patch (#23): the damage between two frames' layer stacks.
+    /// Upstream counts a layer that came or went (a widget translated into
+    /// its own layer while it slides, a popup) as its whole bounds, which are
+    /// the window's: one bar sliding in redrew the full screen. Here such a
+    /// layer counts only where it draws.
+    pub fn frame_damage(previous: &[Self], current: &[Self]) -> Vec<Rectangle> {
+        damage::diff(
+            previous,
+            current,
+            |layer| {
+                use graphics::Layer as _;
+                Self::damage(&Self::with_bounds(layer.bounds), layer)
+            },
+            Self::damage,
+        )
+    }
+
     pub fn damage(previous: &Self, current: &Self) -> Vec<Rectangle> {
         if previous.bounds != current.bounds {
             return vec![previous.bounds, current.bounds];

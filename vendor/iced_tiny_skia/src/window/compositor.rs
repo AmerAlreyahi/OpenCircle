@@ -176,15 +176,19 @@ pub fn present(
     let damage = last_layers
         .and_then(|last_layers| {
             (surface.background_color == background_color).then(|| {
-                damage::diff(
-                    last_layers,
-                    renderer.layers(),
-                    |layer| vec![layer.bounds],
-                    Layer::damage,
-                )
+                Layer::frame_damage(last_layers, renderer.layers())
             })
         })
         .unwrap_or_else(|| vec![Rectangle::with_size(viewport.logical_size())]);
+
+    // OpenCircle patch (#23): on Windows only the redrawn rectangles go to
+    // the window (upstream copied the whole buffer every frame: a full-screen
+    // blit for each frame of a small animation). DWM keeps every window's
+    // last picture, so the rest is still there. A frame with nothing redrawn
+    // (an expose: the window shown or uncovered) still copies it all.
+    // ponytail: Windows only; X11 without a compositor loses covered pixels,
+    // and an expose there can come with a change in the same frame.
+    let mut shown: Option<Vec<softbuffer::Rect>> = None;
 
     if damage.is_empty() {
         if let Some(last_layers) = last_layers {
@@ -213,10 +217,41 @@ pub fn present(
             &damage,
             background_color,
         );
+
+        if cfg!(windows) {
+            shown = Some(physical(&damage, viewport));
+        }
     }
 
     on_pre_present();
-    buffer.present().map_err(|_| compositor::SurfaceError::Lost)
+    match shown {
+        Some(rects) => buffer.present_with_damage(&rects),
+        None => buffer.present(),
+    }
+    .map_err(|_| compositor::SurfaceError::Lost)
+}
+
+/// OpenCircle patch (#23): `damage` (logical) as whole physical pixels,
+/// every pixel `Renderer::draw` may have touched in it.
+fn physical(damage: &[Rectangle], viewport: &Viewport) -> Vec<softbuffer::Rect> {
+    let size = viewport.physical_size();
+    let scale = viewport.scale_factor();
+    damage
+        .iter()
+        .filter_map(|r| {
+            let r = *r * scale;
+            let x0 = (r.x.floor().max(0.0) as u32).min(size.width);
+            let y0 = (r.y.floor().max(0.0) as u32).min(size.height);
+            let x1 = ((r.x + r.width).ceil().max(0.0) as u32).min(size.width);
+            let y1 = ((r.y + r.height).ceil().max(0.0) as u32).min(size.height);
+            Some(softbuffer::Rect {
+                x: x0,
+                y: y0,
+                width: NonZeroU32::new(x1.saturating_sub(x0))?,
+                height: NonZeroU32::new(y1.saturating_sub(y0))?,
+            })
+        })
+        .collect()
 }
 
 pub fn screenshot(

@@ -11,7 +11,7 @@ use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
 use super::widgets::chrome;
-use super::{onboarding, settings, shape, theme, update_card, widgets};
+use super::{motion, onboarding, settings, shape, theme, update_card, widgets};
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::config::{self, Config, Theme};
 use crate::editor::dragout::{self, DragFile};
@@ -277,6 +277,7 @@ impl Windows {
                 ..window::Settings::default()
             },
             0.0, // a picture: square
+            POPUP,
         );
         eprintln!("[opencircle] pinned {}x{}", crop.width, crop.height);
         self.pins.push(Pin {
@@ -304,16 +305,17 @@ impl Windows {
                 ..window::Settings::default()
             },
             widgets::TOAST_RADIUS,
+            TOAST,
         );
         self.toasts.push((id, text.to_string(), ok));
-        // gone after `ms` (a thread sleeps, the UI never waits)
+        // gone after `ms` (a thread sleeps, the UI never waits): fades out
         let (done, wait) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(ms));
             let _ = done.send(());
         });
         open.discard()
-            .chain(Task::future(wait).then(move |_| window::close(id)))
+            .chain(Task::future(wait).then(move |_| close(id)))
     }
 
     /// The open toasts' text and dot (tests).
@@ -338,6 +340,7 @@ impl Windows {
                 ..window::Settings::default()
             },
             widgets::SURFACE_RADIUS,
+            POPUP,
         );
         self.update_card = Some((id, card));
         open.discard()
@@ -405,7 +408,7 @@ impl Windows {
                         return window::drag(id);
                     }
                     update_card::Msg::Card(widgets::card::Event::Close) => {
-                        return window::close(id);
+                        return close(id);
                     }
                     update_card::Msg::Card(_) => {}
                     update_card::Msg::Link(url) => open_url(&url),
@@ -559,8 +562,8 @@ impl Windows {
                 Task::none()
             }
             PinMsg::Close => {
-                self.pins.remove(at); // frees the image
-                window::close(id)
+                // the image goes when the window has (`Closed`): it fades out first
+                close(id)
             }
         }
     }
@@ -782,12 +785,21 @@ pub fn toast_size(text: &str, ok: bool) -> Size {
 /// exists, so no box shows behind a pill. Nothing in a floating window may paint
 /// outside its content (no shadow: use `widgets::solid_surface` / `toast_pill`).
 /// After a `window::resize` nothing is needed: the resize event reshapes it.
-pub fn floating(settings: window::Settings, radius: f32) -> (window::Id, Task<window::Id>) {
+/// It comes and goes by `how` (`Motion`): faded in once its shape is cut,
+/// faded out by `close`.
+pub fn floating(
+    settings: window::Settings,
+    radius: f32,
+    how: Motion,
+) -> (window::Id, Task<window::Id>) {
+    let fades = settings.visible && shape::can_fade();
     let settings = window::Settings {
         decorations: false,
         transparent: true,
         level: Level::AlwaysOnTop,
         exit_on_close_request: false,
+        // shown once clear and cut (`appear`)
+        visible: settings.visible && !fades,
         ..settings
     };
     // ponytail: Linux cannot hide a window from the taskbar through iced.
@@ -800,8 +812,100 @@ pub fn floating(settings: window::Settings, radius: f32) -> (window::Id, Task<wi
         ..settings
     };
     let (id, open) = open(settings);
-    FLOATING.lock().unwrap().push((id, radius));
-    (id, open.then(|id| reshape(id).map(move |_| id)))
+    FLOATING.lock().unwrap().push((id, radius, how));
+    let open = open.then(move |id| {
+        let shown = match fades {
+            true => appear(id, how),
+            false => Task::none(),
+        };
+        reshape(id).discard().chain(shown).chain(Task::done(id))
+    });
+    (id, open)
+}
+
+/// How a floating window comes and goes (`motion`): its pace, and how far it
+/// rises as it shows (sinks as it goes), logical px.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Motion {
+    pub pace: motion::Pace,
+    pub rise: f32,
+}
+
+/// Popups (pin, update card, live controller): the design's widget open/close.
+pub const POPUP: Motion = Motion {
+    pace: motion::WIDGET,
+    rise: 0.0,
+};
+/// The toast pill: fade and an 8 px rise (#52).
+pub const TOAST: Motion = Motion {
+    pace: motion::TOAST_PACE,
+    rise: motion::TOAST_RISE,
+};
+
+/// Shows the hidden window `id` from fully clear and fades it in by `how`
+/// (`fade`; the task ends at once, the fade runs on).
+pub fn appear<T: Send + 'static>(id: window::Id, how: Motion) -> Task<T> {
+    opacity(id, 0.0)
+        .chain(window::set_mode(id, window::Mode::Windowed))
+        .chain(fade(id, true, how, false))
+}
+
+/// Closes the window `id`: a floating one fades out first (by its `Motion`),
+/// where windows can fade; any other closes at once.
+pub fn close<T: Send + 'static>(id: window::Id) -> Task<T> {
+    let how = (FLOATING.lock().unwrap().iter())
+        .find(|(f, ..)| *f == id)
+        .map(|(_, _, how)| *how);
+    match how {
+        Some(how) if shape::can_fade() => fade(id, false, how, true).chain(window::close(id)),
+        _ => window::close(id),
+    }
+}
+
+/// The window `id` at `alpha` (0..1) of its opacity, as a whole (`shape::opacity`).
+pub fn opacity<T: Send + 'static>(id: window::Id, alpha: f32) -> Task<T> {
+    window::run(id, move |w| {
+        if let Ok(handle) = w.window_handle()
+            && let Err(e) = shape::opacity(handle.as_raw(), alpha)
+        {
+            eprintln!("[opencircle] window opacity: {e}");
+        }
+    })
+    .discard()
+}
+
+/// Fades the window `id` in (`open`) or out by `how` on a thread of its own
+/// (`shape::fade`: the OS composites each step, nothing is redrawn); the
+/// task ends at once, or with the fade when `wait`. Nothing where windows
+/// can't fade.
+pub fn fade<T: Send + 'static>(id: window::Id, open: bool, how: Motion, wait: bool) -> Task<T> {
+    if !shape::can_fade() {
+        return Task::none();
+    }
+    let started = window::run(id, move |w| {
+        let (done, finished) = iced::futures::channel::oneshot::channel::<()>();
+        let window = w
+            .window_handle()
+            .ok()
+            .and_then(|h| shape::fadeable(h.as_raw()));
+        if let Some(window) = window {
+            motion::refresh();
+            let now = Instant::now();
+            let shown = match open {
+                true => motion::Shown::opening(how.pace, now),
+                false => motion::Shown::closing(how.pace, now),
+            };
+            std::thread::spawn(move || {
+                shape::fade(window, shown, how.rise);
+                let _ = done.send(());
+            });
+        }
+        finished
+    });
+    match wait {
+        true => started.then(Task::future).discard(),
+        false => started.discard(),
+    }
 }
 
 /// A screen-sized window (the capture overlay, the live layer): no frame, not
@@ -827,14 +931,14 @@ fn open(settings: window::Settings) -> (window::Id, Task<window::Id>) {
 }
 
 /// Floating windows and their corner radius (see `floating`).
-static FLOATING: Mutex<Vec<(window::Id, f32)>> = Mutex::new(Vec::new());
+static FLOATING: Mutex<Vec<(window::Id, f32, Motion)>> = Mutex::new(Vec::new());
 
 pub fn is_floating(id: window::Id) -> bool {
-    FLOATING.lock().unwrap().iter().any(|(f, _)| *f == id)
+    FLOATING.lock().unwrap().iter().any(|(f, ..)| *f == id)
 }
 
 fn forget_floating(id: window::Id) {
-    FLOATING.lock().unwrap().retain(|(f, _)| *f != id);
+    FLOATING.lock().unwrap().retain(|(f, ..)| *f != id);
 }
 
 /// The theme of floating windows: a fully clear background.
@@ -852,7 +956,7 @@ pub fn clear_theme() -> iced::Theme {
 /// `uncut`. Where a window is opened as a popup, `floating` does this itself.
 pub fn cut(id: window::Id, radius: f32) -> Task<Msg> {
     forget_floating(id);
-    FLOATING.lock().unwrap().push((id, radius));
+    FLOATING.lock().unwrap().push((id, radius, POPUP));
     reshape(id)
 }
 
@@ -904,8 +1008,8 @@ pub fn reshape(id: window::Id) -> Task<Msg> {
         .lock()
         .unwrap()
         .iter()
-        .find(|(f, _)| *f == id)
-        .map(|(_, r)| *r);
+        .find(|(f, ..)| *f == id)
+        .map(|(_, r, _)| *r);
     let Some(radius) = radius else {
         return Task::none();
     };
@@ -1139,8 +1243,11 @@ mod tests {
                 .is_some_and(|c| c.rgba.len() == 200 * 100 * 4)
         );
 
-        // Esc / double-click / the close button: that pin goes, the others stay.
+        // Esc / double-click / the close button: that pin goes, the others
+        // stay. It fades out first: shown until its window has closed.
         let _ = windows.update(Msg::Pin(ids[1], PinMsg::Close));
+        assert!(windows.view(ids[1]).is_some(), "fading out");
+        let _ = windows.update(Msg::Closed(ids[1]));
         assert_eq!(pin_ids(&windows), [ids[0], ids[2]]);
         assert!(
             windows.view(ids[1]).is_none(),
@@ -1154,6 +1261,7 @@ mod tests {
         let _ = windows.update(Msg::Pin(ids[1], PinMsg::Close));
         assert_eq!(pin_ids(&windows), [ids[2]]);
         let _ = windows.update(Msg::Pin(ids[2], PinMsg::Close));
+        let _ = windows.update(Msg::Closed(ids[2]));
         assert!(windows.pins.is_empty());
     }
 
@@ -1320,12 +1428,44 @@ mod tests {
 
     #[test]
     fn floating_windows_are_known_until_they_close() {
-        let (id, _open) = floating(window::Settings::default(), 20.0);
+        let (id, _open) = floating(window::Settings::default(), 20.0, POPUP);
         assert!(is_floating(id));
         assert!(!is_floating(window::Id::unique()));
         let mut windows = Windows::default();
         let _ = windows.update(Msg::Closed(id));
         assert!(!is_floating(id));
+    }
+
+    /// Popups come and go by the design's motion (`motion`): the toast pill
+    /// fades with an 8 px rise in 200 ms each way (#52), the others like
+    /// every widget (210 ms open eased out, 150 ms close eased in). Where the
+    /// OS composites a window's opacity it starts clear and fades in; the
+    /// toast's fade by the clock: clear and 8 px low, then there.
+    #[test]
+    fn popups_come_and_go_by_the_design_motion() {
+        let motion_of = |id| {
+            let floating = FLOATING.lock().unwrap();
+            floating.iter().find(|(f, ..)| *f == id).map(|(.., m)| *m)
+        };
+        let mut windows = Windows::default();
+        let _ = windows.toast("Copied", true, None, TOAST_MS);
+        let toast = windows.toasts.last().unwrap().0;
+        assert_eq!(motion_of(toast), Some(TOAST));
+        assert_eq!((TOAST.pace, TOAST.rise), (motion::TOAST_PACE, 8.0));
+        let _ = windows.pin(picture(20, 10), None, 1.0);
+        assert_eq!(motion_of(windows.pins[0].id), Some(POPUP));
+        assert_eq!((POPUP.pace, POPUP.rise), (motion::WIDGET, 0.0));
+        let t0 = Instant::now();
+        let shown = motion::Shown::opening(TOAST.pace, t0);
+        let at = |ms| shown.at(t0 + Duration::from_millis(ms));
+        let low = |a: f32| (1.0 - a) * TOAST.rise;
+        assert_eq!((at(0), low(at(0))), (0.0, 8.0));
+        assert!(at(100) > 0.5 && at(100) < 1.0);
+        assert_eq!((at(200), low(at(200))), (1.0, 0.0));
+        let gone = motion::Shown::closing(TOAST.pace, t0);
+        assert_eq!(gone.at(t0 + motion::TOAST), 0.0);
+        let _ = windows.update(Msg::Closed(toast));
+        assert!(motion_of(toast).is_none());
     }
 
     #[test]

@@ -2542,12 +2542,7 @@ pub mod shot {
             );
             let layers = renderer.layers().to_vec();
             let changed = match &last {
-                Some(last) => damage::diff(
-                    last,
-                    &layers,
-                    |l| vec![l.bounds],
-                    iced_tiny_skia::Layer::damage,
-                ),
+                Some(last) => iced_tiny_skia::Layer::frame_damage(last, &layers),
                 None => vec![all],
             };
             let changed = damage::group(changed, all);

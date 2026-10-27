@@ -48,10 +48,10 @@ const HANDLE_HIT: f32 = 12.0;
 /// become it, and its corner brackets (gap outside the box, arm length range,
 /// line width; screen px).
 const SNAP_RADIUS: f32 = 16.0;
-pub const MORPH: Duration = motion::MOVE;
-/// The overlay's opening: the dim fades in, the edge glow draws back to its
+pub const MORPH: Duration = motion::GLIDE;
+/// The overlay's opening: the window fades in, the edge glow draws back to its
 /// rest and the bars slide in, as one eased animation from the first frame.
-pub const APPEAR: Duration = motion::ENTER;
+pub const APPEAR: Duration = motion::OPEN;
 const BRACKET_GAP: f32 = 3.0;
 const BRACKET_ARM: (f32, f32) = (14.0, 36.0);
 const BRACKET_WIDTH: f32 = 4.0;
@@ -65,6 +65,8 @@ const MAX_ZOOM: f32 = 4.0;
 const WHEEL_PX: f32 = 50.0;
 /// Two right presses this close are a double right-click (back to 1x).
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// Frame times kept for one log line at most (`Overlay::frame_times`).
+pub const FRAME_LOG: usize = 4096;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Event {
@@ -764,6 +766,8 @@ pub struct Overlay<'a> {
     /// Counts overlay openings: pointer state from an earlier opening is stale.
     pub opening: u32,
     pub first_draw: &'a Cell<Option<(Instant, Size)>>,
+    /// When each frame was drawn (`App::log_frames`; at most `FRAME_LOG`).
+    pub frame_times: &'a RefCell<Vec<Instant>>,
     /// Report moves without a button down too (snip's Window mode).
     pub hover: bool,
     /// Dim the frame (not over a full-screen translation).
@@ -782,8 +786,6 @@ pub struct Overlay<'a> {
     pub picked: Vec<Rectangle>,
     /// The text lines on the frame (image px): the pointer is an I-beam over them.
     pub text: Vec<Rectangle>,
-    /// How far the opening is (0..1, eased; `APPEAR`): the dim fades in.
-    pub appear: f32,
 }
 
 /// The pointer as the canvas saw it, event by event. Events can arrive in one batch
@@ -820,7 +822,6 @@ struct Shown {
     morph: Option<f32>,
     words: Vec<Rectangle>,
     picked: Vec<Rectangle>,
-    appear: f32,
 }
 
 impl canvas::Program<Event> for Overlay<'_> {
@@ -930,6 +931,12 @@ impl canvas::Program<Event> for Overlay<'_> {
         bounds: Rectangle,
         _cursor: Cursor,
     ) -> Vec<Geometry> {
+        let mut drawn = self.frame_times.borrow_mut();
+        if drawn.len() >= FRAME_LOG {
+            drawn.clear(); // never logged (a long hover): no growth
+        }
+        drawn.push(Instant::now());
+        drop(drawn);
         // Logged once the window is really full-screen (WSLg maps it windowed first).
         if let Some((at, size)) = self.first_draw.get()
             && (bounds.width - size.width).abs() < 1.0
@@ -957,7 +964,6 @@ impl canvas::Program<Event> for Overlay<'_> {
             morph: morph_t,
             words: self.words.to_vec(),
             picked: self.picked.clone(),
-            appear: self.appear,
         };
         if pointer.shown.borrow().as_ref() != Some(&shown) {
             pointer.drawn.clear();
@@ -974,11 +980,9 @@ impl canvas::Program<Event> for Overlay<'_> {
                 .collect();
 
             // A snapped box on its way from the drawn stroke: the outline between.
+            // At full from the first frame: the window fades in as a whole
+            // (`windows::opacity`), never the dim over the whole screen.
             let (dim_idle, dim_outside) = theme::dims(&self.look);
-            let (dim_idle, dim_outside) = (
-                dim_idle.scale_alpha(self.appear),
-                dim_outside.scale_alpha(self.appear),
-            );
             let snapped = (self.selection).filter(|s| s.kind == Kind::Snap);
             let box_on_screen = snapped.map(|s| self.view.rect_to_screen(s.area));
             let morph = match (box_on_screen, self.morph, morph_t) {
@@ -1945,6 +1949,7 @@ mod tests {
             handles: false,
             opening: 0,
             first_draw: &first_draw,
+            frame_times: &RefCell::default(),
             hover: false,
             dim: true,
             live_drag,
@@ -1953,7 +1958,6 @@ mod tests {
             words: &[],
             picked: Vec::new(),
             text: Vec::new(),
-            appear: 1.0,
         };
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
@@ -1985,6 +1989,7 @@ mod tests {
             handles: true,
             opening: 0,
             first_draw: &first_draw,
+            frame_times: &RefCell::default(),
             hover: false,
             dim: true,
             live_drag: false,
@@ -1993,7 +1998,6 @@ mod tests {
             words: &[],
             picked: Vec::new(),
             text: Vec::new(),
-            appear: 1.0,
         };
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)

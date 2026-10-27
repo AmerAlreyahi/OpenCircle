@@ -5,6 +5,8 @@
 //! compositor). Wayland has no way to cut a window, so there floating contents
 //! are drawn square (`radius`) and fill the window: no stray pixel either.
 //! Called by `windows.rs` after a floating window opens and on every resize.
+//! Also `opacity`: a whole window faded by the OS (Windows), for every open
+//! and close (`motion`), so the CPU never redraws a fade.
 //! Also `no_caption`: on Windows no window of ours ever gets the system's
 //! classic title bar painted over its top (#126).
 use iced::window::raw_window_handle::RawWindowHandle;
@@ -78,6 +80,48 @@ pub fn apply(handle: RawWindowHandle, max_radius: f32) -> Result<(), String> {
     }
 }
 
+/// Whether a whole window can fade here (`opacity`): Windows (DWM composites
+/// a layered window's alpha on the GPU, free for our CPU renderer).
+// ponytail: Windows only. X11 has _NET_WM_WINDOW_OPACITY (compositor-only),
+// Wayland nothing; there windows show and go at once (Linux test round).
+pub fn can_fade() -> bool {
+    cfg!(windows)
+}
+
+/// The window behind `handle` drawn at `alpha` (0..1) of its opacity, as a
+/// whole (a fade without redrawing a pixel). Nothing where `can_fade` is false.
+pub fn opacity(handle: RawWindowHandle, alpha: f32) -> Result<(), String> {
+    match handle {
+        #[cfg(windows)]
+        RawWindowHandle::Win32(h) => win::opacity(h.hwnd.get(), alpha),
+        _ => {
+            let _ = alpha;
+            Ok(())
+        }
+    }
+}
+
+/// The window behind `handle` as `fade` takes it (a plain number, for a
+/// thread); `None` where windows can't fade.
+pub fn fadeable(handle: RawWindowHandle) -> Option<isize> {
+    match handle {
+        #[cfg(windows)]
+        RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
+        _ => None,
+    }
+}
+
+/// Fades the window `fadeable` gave along `shown` (its opacity), one step per
+/// screen refresh, and returns when `shown` is done; `rise` (logical px): it
+/// also sits that much lower while closed (rises as it opens, sinks as it
+/// closes). Blocks: call it on a thread of its own (`windows::fade`).
+pub fn fade(window: isize, shown: super::motion::Shown, rise: f32) {
+    #[cfg(windows)]
+    win::fade(window, shown, rise);
+    #[cfg(not(windows))]
+    let _ = (window, shown, rise);
+}
+
 /// Windows: the system never paints its classic title bar over the window behind
 /// `handle` (`win::no_caption`). Called once by `windows.rs` for every window it
 /// opens. Elsewhere nothing.
@@ -97,8 +141,9 @@ mod win {
     use windows::Win32::Graphics::Gdi::{CreateRectRgn, CreateRoundRectRgn, SetWindowRgn};
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, GWLP_WNDPROC, GetPropW, GetWindowLongPtrW, GetWindowRect, RemovePropW,
-        SetPropW, SetWindowLongPtrW, WM_NCACTIVATE, WM_NCDESTROY, WNDPROC,
+        CallWindowProcW, GWL_EXSTYLE, GWLP_WNDPROC, GetPropW, GetWindowLongPtrW, GetWindowRect,
+        RemovePropW, STYLESTRUCT, SetPropW, SetWindowLongPtrW, WM_NCACTIVATE, WM_NCDESTROY,
+        WM_STYLECHANGING, WNDPROC, WS_EX_LAYERED,
     };
     use windows::core::{PCWSTR, w};
 
@@ -134,10 +179,115 @@ mod win {
             let next: WNDPROC = std::mem::transmute(GetPropW(h, NEXT).0);
             if msg == WM_NCDESTROY {
                 let _ = RemovePropW(h, NEXT);
+                let _ = RemovePropW(h, LAYERED);
+            }
+            // winit rewrites the extended style whole on every show, hide or
+            // full-screen change: a faded window (`opacity`) stays layered, its
+            // alpha kept (else it would flash in opaque before its fade)
+            if msg == WM_STYLECHANGING
+                && w.0 as i32 == GWL_EXSTYLE.0
+                && !GetPropW(h, LAYERED).is_invalid()
+            {
+                let style = &mut *(l.0 as *mut STYLESTRUCT);
+                style.styleNew |= WS_EX_LAYERED.0;
             }
             let l = if msg == WM_NCACTIVATE { LPARAM(-1) } else { l };
             CallWindowProcW(next, h, msg, w, l)
         }
+    }
+
+    /// Set on a window `opacity` made layered (`wndproc` keeps it so).
+    const LAYERED: PCWSTR = w!("OpenCircle.layered");
+
+    /// A layered window (style set once) at `alpha`; GDI still paints into it
+    /// as before (the system keeps its picture) and its region still cuts it.
+    /// A colour key already set (the live controller) stays.
+    pub fn opacity(hwnd: isize, alpha: f32) -> Result<(), String> {
+        use windows::Win32::Foundation::COLORREF;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetLayeredWindowAttributes, LAYERED_WINDOW_ATTRIBUTES_FLAGS, LWA_ALPHA, LWA_COLORKEY,
+            SetLayeredWindowAttributes,
+        };
+        let hwnd = HWND(hwnd as *mut _);
+        let alpha = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+        // SAFETY: `hwnd` is a live window of this process (the UI's raw handle);
+        // these calls only read and change its extended style, its alpha and
+        // a property of ours.
+        unsafe {
+            if GetPropW(hwnd, LAYERED).is_invalid() {
+                SetPropW(hwnd, LAYERED, Some(HANDLE(std::ptr::dangling_mut())))
+                    .map_err(|e| e.to_string())?;
+            }
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let (mut key, mut flags) = (COLORREF(0), LAYERED_WINDOW_ATTRIBUTES_FLAGS(0));
+            if ex & WS_EX_LAYERED.0 as isize == 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED.0 as isize);
+            } else if GetLayeredWindowAttributes(hwnd, Some(&mut key), None, Some(&mut flags))
+                .is_err()
+            {
+                flags = LAYERED_WINDOW_ATTRIBUTES_FLAGS(0);
+            }
+            let flags = LWA_ALPHA | (flags & LWA_COLORKEY);
+            SetLayeredWindowAttributes(hwnd, key, alpha, flags).map_err(|e| e.to_string())
+        }
+    }
+
+    /// The latest fade of each window: an older one still running stops (a
+    /// close during the opening, an overlay opened again).
+    static LATEST: std::sync::Mutex<Vec<(isize, u64)>> = std::sync::Mutex::new(Vec::new());
+
+    /// `super::fade`: a step per beat of the frame clock (`motion::FRAME`):
+    /// the window changes once a frame, by the clock.
+    pub fn fade(hwnd: isize, shown: crate::ui::motion::Shown, rise: f32) {
+        use std::time::{Duration, Instant};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+        };
+        let me = {
+            let mut latest = LATEST.lock().unwrap();
+            let next = latest.iter().map(|(_, n)| n + 1).max().unwrap_or(0);
+            latest.retain(|(w, _)| *w != hwnd);
+            latest.push((hwnd, next));
+            next
+        };
+        let mine = || LATEST.lock().unwrap().contains(&(hwnd, me));
+        let h = HWND(hwnd as *mut _);
+        let mut rest = RECT::default();
+        // SAFETY: `h` is a live window of this process; reading its place and
+        // DPI, and moving it (asynchronously: never waits on the UI thread).
+        let px = rise * unsafe { GetDpiForWindow(h) }.max(96) as f32 / 96.0;
+        // the steps' gaps, for the log (the VM frame budget, #23)
+        let (mut steps, mut last, mut worst) = (0, Instant::now(), Duration::ZERO);
+        let mut next = Instant::now();
+        if px == 0.0 || unsafe { GetWindowRect(h, &mut rest) }.is_ok() {
+            // until done, or a newer fade took over
+            while mine() {
+                let step = Instant::now();
+                (steps, worst, last) = (steps + 1, worst.max(step - last), step);
+                let a = shown.at(step);
+                if let Err(e) = opacity(hwnd, a) {
+                    eprintln!("[opencircle] window fade: {e}");
+                    break;
+                }
+                if px != 0.0 {
+                    let y = rest.top + ((1.0 - a) * px).round() as i32;
+                    let how = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS;
+                    // SAFETY: as above.
+                    let _ = unsafe { SetWindowPos(h, None, rest.left, y, 0, 0, how) };
+                }
+                if !shown.moving(step) {
+                    break;
+                }
+                // the frame clock's beat (`motion::FRAME`), on deadlines
+                next += crate::ui::motion::FRAME;
+                std::thread::sleep(next.saturating_duration_since(Instant::now()));
+            }
+        }
+        LATEST.lock().unwrap().retain(|e| *e != (hwnd, me));
+        eprintln!(
+            "[opencircle] window fade: {steps} steps, max {} ms apart",
+            worst.as_millis()
+        );
     }
 
     pub fn clear(hwnd: isize) -> Result<(), String> {

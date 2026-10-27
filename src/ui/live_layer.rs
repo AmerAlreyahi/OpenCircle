@@ -279,6 +279,7 @@ impl Live {
                 ..window::Settings::default()
             },
             widgets::SURFACE_RADIUS,
+            windows::POPUP,
         );
         self.controller = Some(id);
         let prepare = window::run(id, |w| match w.window_handle() {
@@ -483,8 +484,8 @@ impl Live {
     /// window closes, the patches and the step state are freed.
     pub fn stop(self) -> Task<Msg> {
         self.stop.store(true, Ordering::Relaxed);
-        let windows = self.window().into_iter().chain(self.controller);
-        Task::batch(windows.map(window::close))
+        let ours = self.window().into_iter().chain(self.controller);
+        Task::batch(ours.map(window::close)) // at once: its state goes now
     }
 
     /// Captures and steps on a thread until `stop` (or the layer is dropped).

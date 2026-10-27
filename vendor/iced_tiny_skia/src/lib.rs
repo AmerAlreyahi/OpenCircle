@@ -79,30 +79,22 @@ impl Renderer {
         for &damage_bounds in damage {
             let damage_bounds = damage_bounds * scale_factor;
 
-            let path = tiny_skia::PathBuilder::from_rect(
-                tiny_skia::Rect::from_xywh(
-                    damage_bounds.x,
-                    damage_bounds.y,
-                    damage_bounds.width,
-                    damage_bounds.height,
-                )
-                .expect("Create damage rectangle"),
-            );
-
-            pixels.fill_path(
-                &path,
-                &tiny_skia::Paint {
-                    shader: tiny_skia::Shader::SolidColor(engine::into_color(
-                        background_color,
-                    )),
-                    anti_alias: false,
-                    blend_mode: tiny_skia::BlendMode::Source,
-                    ..Default::default()
-                },
-                tiny_skia::FillRule::default(),
-                tiny_skia::Transform::identity(),
-                None,
-            );
+            // OpenCircle patch (#23): the damage's pixels by the clip mask's
+            // rule (`engine::pixel_rect`), set straight to the background.
+            let (w, h) = (pixels.width(), pixels.height());
+            let [x0, y0, x1, y1] = engine::pixel_rect(damage_bounds, w, h);
+            let c = engine::into_color(background_color)
+                .premultiply()
+                .to_color_u8();
+            let c = [c.red(), c.green(), c.blue(), c.alpha()];
+            for row in pixels.data_mut().chunks_exact_mut(w as usize * 4)
+                .skip(y0 as usize)
+                .take((y1 - y0) as usize)
+            {
+                for px in row[x0 as usize * 4..x1 as usize * 4].chunks_exact_mut(4) {
+                    px.copy_from_slice(&c);
+                }
+            }
 
             for layer in self.layers.iter() {
                 let Some(layer_bounds) =

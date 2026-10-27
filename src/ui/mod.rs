@@ -31,7 +31,7 @@ mod word;
 
 pub use tray::{refresh as refresh_tray, start as start_tray};
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -72,10 +72,10 @@ const ASK_INPUT: &str = "overlay-ask";
 /// selected. Nothing is sent until the user picks one (`[selection] after`).
 /// The field's placeholder.
 const ASK_PLACEHOLDER: &str = "Ask OpenCircle AI about your screen…";
-/// How long the bar takes to turn into the editing toolbar (back: `motion::EXIT`),
-/// and to glide to a new spot.
-const BAR_MORPH: Duration = motion::ENTER;
-const GLIDE: Duration = motion::MOVE;
+/// How long the bar takes to turn into the editing toolbar (and back),
+/// and to settle on a new spot after a drag (the design's drag release).
+const BAR_MORPH: Duration = motion::MORPH;
+const GLIDE: Duration = motion::DOCK;
 /// A QR code's chip under a selection (its room; the chip is centred in it).
 const QR_WIDTH: f32 = 520.0;
 /// The bottom bar's Live translate icon (lucide "radio").
@@ -99,6 +99,10 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
 /// The text reader's helper starts this long after the opening animation.
 const WARM_AFTER: Duration = Duration::from_millis(400);
+
+/// The overlay fades in at most this long after it was shown, its first
+/// full frame drawn or not (never left invisible over the screen).
+const REVEAL_WAIT: Duration = Duration::from_millis(400);
 
 /// Between stacked crops (several selections sent as one image).
 const STACK_GAP: u32 = 16;
@@ -485,8 +489,9 @@ struct App {
     pointer: Point,
     /// The text reader's models are here (checked at open).
     ocr_ready: bool,
-    /// When each frame of the opening animation came (the log's frame times).
-    frame_times: Vec<Instant>,
+    /// When the overlay drew each frame since the last `log_frames` (the
+    /// VM frame budget: the opening, a bar or card drag, the glide after).
+    frame_times: RefCell<Vec<Instant>>,
     /// How that read is going (the note over the bar).
     reader: Reader,
     /// A press that began on text: its stroke so far (image px). It selects
@@ -510,6 +515,9 @@ struct App {
     opening: u32,
     /// Trigger time + expected size of the full-screen frame not drawn yet (latency log).
     first_draw: Cell<Option<(Instant, Size)>>,
+    /// Shown but still fully clear (`show`): fades in once its first full
+    /// frame is drawn (`first_draw` taken), or after `REVEAL_WAIT` anyway.
+    reveal: Option<Instant>,
     hiding: Hiding,
     /// The open result panel and its number.
     panel: Option<(u32, panel::Panel)>,
@@ -572,6 +580,9 @@ struct App {
     card: Option<Rectangle>,
     /// The card's grip or corner is held, and the pointer's last position.
     card_drag: Option<(widgets::card::Drag, Option<Point>)>,
+    /// The result card opening (`motion::WIDGET`): which panel, its motion,
+    /// and how open it was at the latest frame (it grows from `OPEN_SCALE`).
+    card_open: Option<(u32, motion::Shown, f32)>,
     /// The pointer is on the card's resize edge (its grip shows).
     card_hover: bool,
     /// Song search on this overlay, and its number.
@@ -644,7 +655,7 @@ impl App {
             text_used: false,
             pointer: Point::ORIGIN,
             ocr_ready: false,
-            frame_times: Vec::new(),
+            frame_times: RefCell::default(),
             reader: Reader::Idle,
             text_press: None,
             clicks: None,
@@ -655,6 +666,7 @@ impl App {
             ask: String::new(),
             opening: 0,
             first_draw: Cell::new(None),
+            reveal: None,
             hiding: Hiding::No,
             panel: None,
             panels: 0,
@@ -691,6 +703,7 @@ impl App {
             work_inset: 0.0,
             card: None,
             card_drag: None,
+            card_open: None,
             card_hover: false,
             song: None,
             songs: 0,
@@ -865,6 +878,7 @@ impl App {
             }
             Message::BarGrab => {
                 self.bar_drag = Some((None, self.bar_at()));
+                self.frame_times.borrow_mut().clear();
                 Task::none()
             }
             // While held it follows the pointer (kept on screen).
@@ -893,6 +907,7 @@ impl App {
                     let size = self.dock_size();
                     self.bar_anchor = bar::nearest(at, self.screen, size, self.work_inset);
                     eprintln!("[opencircle] bar docked: {:?}", self.bar_anchor);
+                    self.log_frames("bar drag");
                     self.bar_now = Some(at);
                     self.remember_bar()
                 }
@@ -910,7 +925,11 @@ impl App {
             }
             // Let go: the card stays where the user put it, until the overlay closes.
             Message::CardReleased => {
-                self.card_drag = None;
+                match self.card_drag.take() {
+                    Some((card::Drag::Move, _)) => self.log_frames("card drag"),
+                    Some((card::Drag::Resize, _)) => self.log_frames("card resize"),
+                    None => {}
+                }
                 Task::none()
             }
             Message::AskInput(text) => {
@@ -951,7 +970,33 @@ impl App {
             }
             Message::Frame(now) => {
                 self.esc_back = false;
+                // Shown fully clear: once its first full frame is up (or after
+                // REVEAL_WAIT), the window fades in and the opening's clock starts.
+                let mut revealed = Task::none();
+                if let Some(since) = self.reveal {
+                    if self.first_draw.get().is_some()
+                        && now.saturating_duration_since(since) < REVEAL_WAIT
+                    {
+                        return Task::none();
+                    }
+                    self.reveal = None;
+                    self.appear = None;
+                    self.frame_times.borrow_mut().clear();
+                    revealed = windows::fade(self.overlay, true, windows::POPUP, false);
+                }
+                // a new result card grows open from its first frame
+                self.card_open = match (&self.panel, self.card_open) {
+                    (Some((id, _)), Some((was, shown, _))) if *id == was => {
+                        Some((was, shown, shown.at(now)))
+                    }
+                    (Some((id, _)), _) => {
+                        let shown = motion::Shown::opening(motion::WIDGET, now);
+                        Some((*id, shown, shown.at(now)))
+                    }
+                    (None, _) => None,
+                };
                 let opening = self.appearing() || self.appear.is_none();
+                let gliding = self.bar_glide.is_some();
                 // every motion by the clock since it began (`motion`)
                 self.appear = match self.appear {
                     Some((start, t)) if t < 1.0 => {
@@ -968,7 +1013,7 @@ impl App {
                     _ => Some((now, self.swap, target)),
                 };
                 if let Some((began, from, to)) = self.swap_at {
-                    let length = if to > from { BAR_MORPH } else { motion::EXIT };
+                    let length = BAR_MORPH; // the design: the same rise both ways
                     let t = match self.purpose {
                         Purpose::Search => motion::done(began, now, length),
                         _ => 1.0, // Snip has no bar to turn into the toolbar
@@ -986,7 +1031,7 @@ impl App {
                         (Some(at), _) if at == to => to,
                         // on its way there already
                         (Some(_), Some((began, from, end))) if end == to => {
-                            let t = motion::progress(began, now, GLIDE, motion::Curve::Out);
+                            let t = motion::progress(began, now, GLIDE, motion::Curve::Standard);
                             from + (to - from) * t
                         }
                         // a new place: it glides there from where it is
@@ -1000,28 +1045,16 @@ impl App {
                         self.bar_glide = None;
                     }
                 }
-                if !opening {
-                    return Task::none();
+                if gliding && self.bar_glide.is_none() && !opening {
+                    self.log_frames("bar glide");
                 }
-                self.frame_times.push(now);
-                if self.appearing() {
-                    return Task::none();
+                if !opening || self.appearing() {
+                    return revealed;
                 }
                 // The opening animation is over: its frame times to the log
-                // (the VM's budget, #123), then the text reader's helper starts.
-                let mut gaps: Vec<u128> = (self.frame_times.windows(2))
-                    .map(|w| (w[1] - w[0]).as_millis())
-                    .collect();
-                self.frame_times.clear();
-                gaps.sort_unstable();
-                if let Some(&max) = gaps.last() {
-                    let p95 = gaps[(gaps.len() * 95).div_ceil(100) - 1];
-                    eprintln!(
-                        "[opencircle] opening animation: {} frames, p95 {p95} ms, max {max} ms apart",
-                        gaps.len() + 1
-                    );
-                }
-                self.warm()
+                // (the VM's budget), then the text reader's helper starts.
+                self.log_frames("opening animation");
+                Task::batch([revealed, self.warm()])
             }
             Message::ScreenText(opening, band, read)
                 if opening == self.opening && self.frame.is_some() =>
@@ -1200,7 +1233,7 @@ impl App {
         self.set_frame(shot.image, shot.scale, shot.origin, size);
         self.helper = Some(Arc::new(ocr::hold()));
         self.ocr_ready = text::models_present();
-        self.frame_times.clear();
+        self.frame_times.borrow_mut().clear();
         self.opening = self.opening.wrapping_add(1);
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
@@ -1301,11 +1334,24 @@ impl App {
             (self.overlay, self.overlay_open) = (id, true);
             return open.discard().chain(window::gain_focus(id));
         }
+        // Shown fully clear: it fades in as a whole once its first full frame
+        // is drawn (`Message::Frame`), so the CPU never redraws a fade.
+        let clear = match shape::can_fade() {
+            true => {
+                self.reveal = Some(Instant::now());
+                if self.first_draw.get().is_none() {
+                    self.first_draw.set(Some((Instant::now(), self.screen)));
+                }
+                windows::opacity(self.overlay, 0.0)
+            }
+            false => Task::none(),
+        };
         // Place and size the window to cover the monitor BEFORE set_mode shows it:
         // iced makes it visible before going full-screen, so whatever is shown
         // first must already cover the monitor (no small black box flash).
         let show = windows::uncut(self.overlay)
             .map(Message::Windows)
+            .chain(clear)
             .chain(place_window(self.overlay, self.place()))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
             .chain(window::gain_focus(self.overlay));
@@ -2911,7 +2957,9 @@ impl App {
         if !self.can_hide {
             return Task::none();
         }
+        // never left clear by an opening that hadn't faded in yet (`show`)
         window::set_mode(self.overlay, Mode::Windowed)
+            .chain(windows::opacity(self.overlay, 1.0))
             .chain(window::resize(self.overlay, snip::PILL))
             .chain(window::move_to(
                 self.overlay,
@@ -3115,7 +3163,10 @@ impl App {
             return Task::none();
         };
         match msg {
-            panel::Msg::Card(card::Event::Grab(how)) => self.card_drag = Some((how, None)),
+            panel::Msg::Card(card::Event::Grab(how)) => {
+                self.card_drag = Some((how, None));
+                self.frame_times.borrow_mut().clear();
+            }
             panel::Msg::Card(card::Event::Hover(on)) => self.card_hover = on,
             panel::Msg::Card(card::Event::Reset) => self.card = None,
             panel::Msg::Card(card::Event::Close) => self.panel = None,
@@ -3238,6 +3289,7 @@ impl App {
         self.swap = 0.0;
         self.esc_back = false;
         self.song = None; // stops listening
+        self.reveal = None; // the next show clears it again
         if self.can_hide {
             self.hiding = Hiding::Empty;
             return Task::none();
@@ -3355,6 +3407,7 @@ impl App {
         match msg {
             translate::Msg::Card(card::Event::Grab(how)) => {
                 self.card_drag = Some((how, None));
+                self.frame_times.borrow_mut().clear();
                 Task::none()
             }
             translate::Msg::Card(card::Event::Hover(on)) => {
@@ -3500,6 +3553,7 @@ impl App {
             handles: self.handles(),
             opening: self.opening,
             first_draw: &self.first_draw,
+            frame_times: &self.frame_times,
             hover: snip.is_some_and(|s| s.kind.picks()) && self.edit.is_none(),
             dim: self.translate.is_none() || self.selection.is_some(),
             live_drag: snip.is_some(),
@@ -3507,7 +3561,6 @@ impl App {
             morph: (self.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
             words: (self.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
             picked,
-            appear: self.appeared(),
             text: match self.translate {
                 None if matches!(self.purpose, Purpose::Search) => {
                     self.screen_text.iter().map(|l| l.bounds).collect()
@@ -3580,9 +3633,11 @@ impl App {
                 .map(move |msg| Message::Song(id, msg))
         } else if let Some((id, panel)) = &self.panel {
             let id = *id;
-            panel
-                .view(self.card_at(), self.screen, self.card_hover)
-                .map(move |msg| Message::Panel(id, msg))
+            let at = self.card_at();
+            let card = panel
+                .view(at, self.screen, self.card_hover)
+                .map(move |msg| Message::Panel(id, msg));
+            grow(card, at, self.card_grown())
         } else if let Some((id, session)) = &self.translate {
             let id = *id;
             session
@@ -3679,6 +3734,51 @@ impl App {
             layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
         }
         layers.into()
+    }
+
+    /// How open the result card is (0..1; 0 before its first frame, 1 at once
+    /// when the OS asks for no animations).
+    fn card_grown(&self) -> f32 {
+        match (&self.panel, self.card_open) {
+            _ if motion::reduced() => 1.0,
+            (Some((id, _)), Some((was, _, grown))) if *id == was => grown,
+            _ => 0.0,
+        }
+    }
+
+    /// Something on the overlay moves by the clock (`Message::Frame` wanted):
+    /// the opening, the bar turning or gliding, a card opening.
+    fn animating(&self) -> bool {
+        self.appear.is_none()
+            || self.reveal.is_some()
+            || self.appearing()
+            || self.swapping()
+            || self.bar_gliding()
+            || self.card_opening()
+            || self.bar_now.is_none()
+    }
+
+    /// The result card still opening (frames wanted).
+    fn card_opening(&self) -> bool {
+        self.frame.is_some() && self.panel.is_some() && self.card_grown() < 1.0
+    }
+
+    /// The gaps between the overlay's frames since the last log, as `what`
+    /// (the VM frame budget, #23: p95 <= 16 ms, none over 25 ms); then forgets
+    /// them.
+    fn log_frames(&self, what: &str) {
+        let drawn = std::mem::take(&mut *self.frame_times.borrow_mut());
+        let mut gaps: Vec<u128> = (drawn.windows(2))
+            .map(|w| (w[1] - w[0]).as_millis())
+            .collect();
+        gaps.sort_unstable();
+        if let Some(&max) = gaps.last() {
+            let p95 = gaps[(gaps.len() * 95).div_ceil(100) - 1];
+            eprintln!(
+                "[opencircle] {what}: {} frames, p95 {p95} ms, max {max} ms apart",
+                gaps.len() + 1
+            );
+        }
     }
 
     /// How far the opening animation is (0..1, eased out); 0 on its first frame.
@@ -4121,14 +4221,9 @@ impl App {
                 }),
                 _ => Subscription::none(),
             };
-            // The opening animation: one message per frame until it is done.
-            let moving = self.appear.is_none()
-                || self.appearing()
-                || self.swapping()
-                || self.bar_gliding()
-                || self.bar_now.is_none();
-            let frames = match moving {
-                true => window::frames().map(Message::Frame),
+            // One message per frame while something moves, none at rest.
+            let frames = match self.animating() {
+                true => motion::frames().map(Message::Frame),
                 false => Subscription::none(),
             };
             // Dragging the bar by its handle: the pointer anywhere, until let go. On
@@ -4160,6 +4255,21 @@ impl App {
             triggers
         }
     }
+}
+
+/// The card at `at`, `grown` of the way open: from `motion::OPEN_SCALE` to its
+/// size, about its own middle (the design's open, without its fade: the CPU
+/// renderer has no alpha for a group of widgets). Plain once open.
+fn grow(card: Element<'_, Message>, at: Rectangle, grown: f32) -> Element<'_, Message> {
+    if grown >= 1.0 {
+        return card;
+    }
+    let s = motion::OPEN_SCALE + (1.0 - motion::OPEN_SCALE) * grown;
+    let middle = at.center();
+    iced::widget::float(card)
+        .scale(s)
+        .translate(move |bounds, _| (middle - bounds.center()) * (1.0 - s))
+        .into()
 }
 
 /// Where the chips (`size`) go: centred under the box `area`, `CHIP_SPACE`
@@ -6471,7 +6581,8 @@ mod tests {
 
     #[test]
     fn the_opening_is_one_eased_animation_from_its_first_frame() {
-        // frame 1 is t = 0: no dim yet (the frozen frame as it is)
+        // frame 1 is t = 0, already dimmed: the window fades in as a whole
+        // (`windows::fade`), the dim never fades over the whole screen
         let first = opening_at(None);
         assert_eq!(first.appeared(), 0.0);
         let shot = |app: &App| widgets::shot::render(app.view(app.overlay), 960, 420);
@@ -6483,8 +6594,9 @@ mod tests {
             Some(image::Handle::Rgba { pixels, .. }) => pixels.to_vec(),
             _ => unreachable!(),
         };
-        assert_eq!(bright(&shot(&first)), bright(&frame), "undimmed on frame 1");
-        // then it only ever moves one way, to rest by APPEAR
+        let dimmed = bright(&shot(&first));
+        assert!(dimmed < bright(&frame), "dimmed on frame 1");
+        // then it only ever moves one way, to rest by APPEAR; the dim stays
         let steps: Vec<(f32, u32)> = (0..=300)
             .step_by(25)
             .map(|ms| {
@@ -6493,10 +6605,7 @@ mod tests {
             })
             .collect();
         for pair in steps.windows(2) {
-            assert!(
-                pair[1].0 >= pair[0].0 && pair[1].1 <= pair[0].1,
-                "{steps:?}"
-            );
+            assert!(pair[1].0 >= pair[0].0 && pair[1].1 == dimmed, "{steps:?}");
         }
         assert!(
             steps[1].0 > 0.0 && steps[1].0 < 1.0,
@@ -6526,8 +6635,8 @@ mod tests {
 
     /// `OPENCIRCLE_RENDER_DIR=<dir> cargo test opening_frames -- --ignored`:
     /// the overlay's first 300 ms, a PNG every 25 ms; and the time a full
-    /// frame of the opening takes at 3440x1440 (every pixel changes as the dim
-    /// fades in).
+    /// frame of the opening takes at 3440x1440 (the first frame: every pixel
+    /// drawn, while the window is still clear).
     #[test]
     #[ignore = "writes PNGs and prints timings"]
     fn opening_frames() {

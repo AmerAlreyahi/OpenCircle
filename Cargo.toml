@@ -171,5 +171,8 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std", "si
 # iced 0.14's CPU renderer with one fix (#53, `drawn_bounds` in its src/layer.rs):
 # a changed centred or right-aligned text (every dropdown's value) was redrawn
 # in the wrong place and left ghost glyphs. The damage is computed inside the
-# renderer, out of reach of app code. Drop this when iced fixes it upstream.
+# renderer, out of reach of app code. Also the frame cost (#23): damage of a
+# layer that comes or goes, the clip mask, pixel-for-pixel images without the
+# pipeline, and only the redrawn rectangles presented on Windows (each marked
+# "OpenCircle patch" in the source; ARCHITECTURE.md). Drop each upstream fix.
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }

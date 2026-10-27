@@ -193,7 +193,11 @@ impl<M> canvas::Program<M> for Border {
         let look = self.look.unwrap_or_else(config::look);
         let (spec, frame, next) = plan(self.mode, &look, elapsed, state.motion);
         let spec = spec.map(|s| s.on_window(self.keyed, look.edge(self.mode)));
-        let redraw = next.map(|d| Action::request_redraw_at(*now + d));
+        // during the overlay's opening its frames come from the app's clock
+        let driven = self.opening.is_some_and(|t| t < 1.0);
+        let redraw = next
+            .filter(|_| !driven)
+            .map(|d| Action::request_redraw_at(*now + d));
         let Some(spec) = spec.filter(|_| frame.alpha > 0.0) else {
             state.strips.clear();
             state.drawn = None;

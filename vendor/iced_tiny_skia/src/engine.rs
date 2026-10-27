@@ -581,6 +581,27 @@ impl Engine {
                     center.y,
                 );
 
+                // OpenCircle patch (#23): pixel for pixel, no pipeline; the
+                // mask's pixels where `draw` would use it
+                let (w, h) = (_pixels.width(), _pixels.height());
+                let clip = match clip_mask {
+                    Some(_) => pixel_rect(_clip_bounds, w, h),
+                    None => [0, 0, w, h],
+                };
+                if radians == 0.0
+                    && image.opacity == 1.0
+                    && image.filter_method == crate::core::image::FilterMethod::Nearest
+                    && self.raster_pipeline.blit(
+                        &image.handle,
+                        *bounds,
+                        transform,
+                        _pixels,
+                        clip,
+                    )
+                {
+                    return;
+                }
+
                 self.raster_pipeline.draw(
                     &image.handle,
                     image.filter_method,
@@ -833,28 +854,49 @@ fn rounded_box_sdf(
     (x.powf(2.0) + y.powf(2.0)).sqrt() - radius
 }
 
+/// OpenCircle patch (#23): the whole pixels a clip to `r` (device px) holds,
+/// (x0, y0, x1, y1) inside a `w` x `h` target: those whose middle is in `r`.
+/// One rule for the mask, the damage's clearing and `raster::Pipeline::blit`.
+pub fn pixel_rect(r: Rectangle, w: u32, h: u32) -> [u32; 4] {
+    let px = |v: f32, max: u32| ((v + 0.5).floor().max(0.0) as u32).min(max);
+    let (x0, y0) = (px(r.x, w), px(r.y, h));
+    [x0, y0, px(r.x + r.width, w).max(x0), px(r.y + r.height, h).max(y0)]
+}
+
+/// OpenCircle patch (#23): sets the mask to `bounds` (`pixel_rect`),
+/// touching only the pixels that change. Upstream cleared and refilled the
+/// whole window-sized mask for every layer, group and damage rectangle
+/// (dozens of full-screen passes per frame: most of a small redraw's time).
+/// The rectangle last set is remembered with the mask's address and size,
+/// and trusted only while its first pixel is still set (a new mask at the
+/// same address is all clear): the same rectangle again costs nothing,
+/// another one clears only the old one's pixels.
 pub fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
-    clip_mask.clear();
+    use std::cell::Cell;
+    // (mask pixels, width, height, the pixels set)
+    type Set = (usize, u32, u32, [u32; 4]);
+    thread_local!(static SET: Cell<Option<Set>> = const { Cell::new(None) });
 
-    let path = {
-        let mut builder = tiny_skia::PathBuilder::new();
-        builder.push_rect(
-            tiny_skia::Rect::from_xywh(
-                bounds.x,
-                bounds.y,
-                bounds.width,
-                bounds.height,
-            )
-            .unwrap(),
-        );
-
-        builder.finish().unwrap()
+    let (w, h) = (clip_mask.width(), clip_mask.height());
+    let id = clip_mask.data().as_ptr() as usize;
+    let rect = pixel_rect(bounds, w, h);
+    let fill = |data: &mut [u8], [x0, y0, x1, y1]: [u32; 4], v: u8| {
+        for y in y0..y1 {
+            let row = (y * w) as usize;
+            data[row + x0 as usize..row + x1 as usize].fill(v);
+        }
     };
-
-    clip_mask.fill_path(
-        &path,
-        tiny_skia::FillRule::EvenOdd,
-        false,
-        tiny_skia::Transform::default(),
-    );
+    let ours = SET.get().filter(|&(at, lw, lh, [x0, y0, x1, y1])| {
+        (at, lw, lh) == (id, w, h)
+            && x0 < x1
+            && y0 < y1
+            && clip_mask.data()[(y0 * w + x0) as usize] == 255
+    });
+    match ours {
+        Some((.., was)) if was == rect => return,
+        Some((.., was)) => fill(clip_mask.data_mut(), was, 0),
+        None => clip_mask.clear(),
+    }
+    fill(clip_mask.data_mut(), rect, 255);
+    SET.set(Some((id, w, h, rect)));
 }
