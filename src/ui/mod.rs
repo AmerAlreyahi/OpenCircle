@@ -5939,9 +5939,11 @@ mod tests {
         let mut ms = 0;
         let mut last = Task::none();
         while app.appear.is_none() || app.appearing() {
+            let revealing = app.reveal.is_some();
             last = app.update(Message::Frame(start + Duration::from_millis(ms)));
             ms += 16;
-            if app.appearing() {
+            // the reveal's frame fades the window in (Windows, #23): not work
+            if app.appearing() && !(revealing && app.reveal.is_none()) {
                 assert_eq!(last.units(), 0, "work at {ms} ms of the opening");
             }
             assert_eq!(app.reading, None);
