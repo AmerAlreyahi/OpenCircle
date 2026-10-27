@@ -163,10 +163,9 @@ production systems.
   entry + one view file; recipe in ARCHITECTURE.md). Rebuilding or restructuring current UI code
   for this is allowed (behaviour, frozen contracts and tests kept).
 - Version scope (owner, 2026-10-27, supersedes the 0.1.2 line of "Version plan"): 0.1.2 = new UI +
-  architecture: the UI restructure + backend items 1-5 of docs/internal/REPORT_backend_audit.md (one
-  config writer, overlay state dropped on close, freed fonts/caches, backend logic out of ui/, quick
-  wins) + AI chat; the remaining backend cleanup lands in 0.1.3 with the GPU renderer and glass;
-  0.2.0 stays AI online (OpenRouter sign-in, web search) + fast core.
+  architecture: the UI restructure + the WHOLE backend cleanup of docs/internal/REPORT_backend_audit.md
+  (every finding, none left for 0.1.3) + AI chat. 0.1.3 = GPU renderer + glass only; 0.2.0 = AI online
+  (OpenRouter sign-in, web search) + fast core.
 - Showcase placement (owner, 2026-10-27, refines "Feature showcase"): no separate showcase page, tab
   or onboarding step: a compact live preview at the top of each feature's Settings page, hideable per
   page, a still frame with reduced motion.
