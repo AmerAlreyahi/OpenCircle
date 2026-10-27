@@ -126,6 +126,23 @@ in Settings.
 
 The [Getting started](docs/getting-started.md) guide walks through the first run.
 
+## Code signing policy
+
+We have applied to [SignPath Foundation](https://signpath.org) for free code
+signing (code signing by [SignPath.io](https://about.signpath.io), certificate by
+SignPath Foundation). Until it is approved, the installers are unsigned and
+SmartScreen may warn.
+
+- Committers and reviewers: [AmerAlreyahi](https://github.com/AmerAlreyahi)
+- Approvers: [AmerAlreyahi](https://github.com/AmerAlreyahi)
+
+Every release is built by GitHub Actions from a tagged commit in this
+repository, and each one is approved by hand before it is published.
+
+Privacy: this program will not transfer any information to other networked
+systems unless specifically requested by the user or the person installing or
+operating it. See the [Privacy](docs/privacy.md) page.
+
 ## Shortcuts
 
 | Action | Shortcut |

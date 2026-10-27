@@ -31,7 +31,8 @@ whether OpenCircle starts with Windows. Skip any of it; everything can change
 later in **Settings** (tray menu). If a second launch finds it already running,
 it opens Settings.
 
-Auto-update is asked about once, on first run. It is off until you say yes. See
+Auto-update is asked about once, on first run, where the switch starts on; you
+can turn it off there or later in Settings. See
 [Updates](#updates).
 
 ## Circle something
