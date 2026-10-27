@@ -125,7 +125,9 @@ pub fn outcome(code: u32, last: Option<&str>) -> Result<(), String> {
         1618 => {
             Err("Another installation is running. Wait for it to finish, then try again.".into())
         }
-        1625 => Err("A system policy does not allow this installation.".into()),
+        1625 => Err(
+            "Windows did not allow the install. Try again and choose Yes when Windows asks.".into(),
+        ),
         1638 => Err(
             "Another version of OpenCircle is installed. Remove it in Settings > Apps first."
                 .into(),

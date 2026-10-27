@@ -158,7 +158,10 @@ fn main() -> ExitCode {
     let command = match args.first().map(String::as_str) {
         None => None,
         Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
-        Some(setup::FORGET_ARG) => return setup::forget_user_data(), // hidden: the MSI's uninstall
+        Some(setup::FORGET_ARG) => {
+            // hidden: the MSI's uninstall
+            return setup::forget_user_data(args.get(1).is_some_and(|a| a == "--quiet"));
+        }
         Some(update::VERSION_ARG) => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;

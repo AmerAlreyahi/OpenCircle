@@ -32,6 +32,18 @@ pub fn choose(exe: &Path, on: bool) -> io::Result<()> {
     sync(&Store::real(), exe, on)
 }
 
+/// The uninstall: the entry goes if it starts `exe` (another copy's entry stays).
+pub fn forget(exe: &Path) -> io::Result<()> {
+    forget_in(&Store::real(), exe)
+}
+
+fn forget_in(store: &Store, exe: &Path) -> io::Result<()> {
+    match store.read() {
+        Some(have) if have == store.entry(exe) => store.remove(),
+        _ => Ok(()),
+    }
+}
+
 /// `sync`, but only once onboarding is finished: its Finish saves the user's choice.
 fn sync_when_onboarded(store: &Store, exe: &Path, on: bool, onboarded: bool) -> io::Result<()> {
     if onboarded {
@@ -145,10 +157,13 @@ mod os {
     }
 
     #[cfg(test)]
-    pub fn temp_store() -> Store {
+    pub fn temp_store(tag: &str) -> Store {
         // a throwaway key, never the real Run key
         Store {
-            subkey: format!(r"Software\OpenCircleTest\autostart-{}", std::process::id()),
+            subkey: format!(
+                r"Software\OpenCircleTest\autostart-{tag}-{}",
+                std::process::id()
+            ),
         }
     }
 
@@ -210,8 +225,8 @@ mod os {
     }
 
     #[cfg(test)]
-    pub fn temp_store() -> Store {
-        let dir = std::env::temp_dir().join(format!("oc-autostart-{}", std::process::id()));
+    pub fn temp_store(tag: &str) -> Store {
+        let dir = std::env::temp_dir().join(format!("oc-autostart-{tag}-{}", std::process::id()));
         Store {
             file: dir.join("autostart").join("com.opencircle.app.desktop"),
         }
@@ -230,7 +245,7 @@ mod tests {
     #[test]
     fn the_setting_writes_fixes_and_removes_the_entry() {
         assert!(Config::default().general.autostart, "on by default");
-        let store = os::temp_store();
+        let store = os::temp_store("setting");
         let exe = Path::new(if cfg!(windows) {
             r"C:\Program Files\OpenCircle\opencircle.exe"
         } else {
@@ -260,6 +275,31 @@ mod tests {
         sync(&store, moved, false).unwrap();
         assert_eq!(store.read(), None);
         sync(&store, moved, false).unwrap();
+        os::drop_temp(&store);
+    }
+
+    /// An uninstall removes its own entry, never another copy's (#55).
+    #[test]
+    fn the_uninstall_forgets_only_its_own_entry() {
+        let store = os::temp_store("uninstall");
+        let (mine, other) = if cfg!(windows) {
+            (
+                Path::new(r"C:\Program Files\OpenCircle\opencircle.exe"),
+                Path::new(r"C:\oc\opencircle.exe"),
+            )
+        } else {
+            (
+                Path::new("/opt/oc/opencircle"),
+                Path::new("/home/me/opencircle"),
+            )
+        };
+        sync(&store, other, true).unwrap();
+        forget_in(&store, mine).unwrap();
+        assert!(store.read().is_some(), "another copy's entry stays");
+        sync(&store, mine, true).unwrap();
+        forget_in(&store, mine).unwrap();
+        assert_eq!(store.read(), None);
+        forget_in(&store, mine).unwrap(); // none: fine
         os::drop_temp(&store);
     }
 

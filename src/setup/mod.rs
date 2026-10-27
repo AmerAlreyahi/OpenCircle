@@ -145,15 +145,24 @@ fn user_data() -> Vec<PathBuf> {
         .collect()
 }
 
-/// `opencircle --forget-user-data`, run by the MSI's uninstall (not when
-/// silent, not for an upgrade): quits a running OpenCircle, then asks whether
-/// the user's settings, downloaded models and saved keys go too.
-pub fn forget_user_data() -> std::process::ExitCode {
+/// `opencircle --forget-user-data [--quiet]`, run by the MSI's uninstall (not
+/// for an upgrade), before Windows Installer looks for files in use: quits a
+/// running OpenCircle, removes this copy's "Start with Windows" entry, then
+/// (not `quiet`, i.e. not a silent uninstall) asks whether the user's settings,
+/// downloaded models and saved keys go too.
+pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
     quit_running_app();
-    if !msi::ask_yes_no(
-        "Uninstall OpenCircle",
-        "Also remove your OpenCircle settings, downloaded models and saved keys?\n\nChoose No to keep them for a later install.",
-    ) {
+    if let Ok(exe) = std::env::current_exe()
+        && let Err(e) = crate::autostart::forget(&exe)
+    {
+        eprintln!("[opencircle] start with Windows: {e}");
+    }
+    if quiet
+        || !msi::ask_yes_no(
+            "Uninstall OpenCircle",
+            "Also remove your OpenCircle settings, downloaded models and saved keys?\n\nChoose No to keep them for a later install.",
+        )
+    {
         return std::process::ExitCode::SUCCESS;
     }
     for dir in user_data() {

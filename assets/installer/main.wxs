@@ -35,14 +35,17 @@
             <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="!(loc.DowngradeErrorMessage)" AllowSameVersionUpgrades="yes" />
         {{/if}}
 
-        <!-- Uninstall (not an upgrade, not silent): the installed exe quits a running
-             OpenCircle and asks whether the user's settings, models and keys go too
-             (src/setup: forget_user_data). Its answer never stops the uninstall. -->
+        <!-- Uninstall (not an upgrade), before Windows Installer looks for files in use:
+             the installed exe quits a running OpenCircle, removes its own "Start with
+             Windows" entry and, unless silent, asks whether the user's settings, models
+             and keys go too (src/setup: forget_user_data). Never stops the uninstall. -->
         <CustomAction Id="AskAboutUserData" FileKey="Path" ExeCommand="--forget-user-data" Execute="immediate" Return="ignore" />
+        <CustomAction Id="QuietUninstall" FileKey="Path" ExeCommand="--forget-user-data --quiet" Execute="immediate" Return="ignore" />
 
         <InstallExecuteSequence>
             <RemoveShortcuts>Installed AND NOT UPGRADINGPRODUCTCODE</RemoveShortcuts>
-            <Custom Action="AskAboutUserData" After="InstallInitialize">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND UILevel &gt;= 3</Custom>
+            <Custom Action="AskAboutUserData" Before="InstallValidate">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND UILevel &gt;= 3</Custom>
+            <Custom Action="QuietUninstall" Before="InstallValidate">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND UILevel &lt; 3</Custom>
         </InstallExecuteSequence>
 
         <Media Id="1" Cabinet="app.cab" EmbedCab="yes" />
@@ -112,8 +115,6 @@
                 <RegistryKey Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}">
                     <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
                 </RegistryKey>
-                <!-- Uninstall: the app's "Start with Windows" entry goes too -->
-                <RemoveRegistryValue Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="OpenCircle" />
                 <!-- Change the Root to HKCU for perUser installations -->
                 {{#each deep_link_protocols as |protocol| ~}}
                 <RegistryKey Root="HKLM" Key="Software\Classes\\{{protocol}}">
