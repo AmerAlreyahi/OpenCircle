@@ -51,7 +51,7 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
     if shown.warn {
         chips = chips.push(widgets::error("Hidden text-direction marks"));
     }
-    let host = qr::web_url(text).and_then(crate::lens::web_host);
+    let host = qr::web_url(text).and_then(crate::sys::open::web_host);
     if let (Some(open), Some(host)) = (open, host) {
         // The whole host on the button (like the Text panel's link chips): the
         // site it really opens, never cut.

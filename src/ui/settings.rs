@@ -1757,11 +1757,7 @@ fn look_rows(state: &State) -> Vec<Element<'_, Message>> {
 fn open_language_settings() {
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        let run = std::process::Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", "ms-settings:regionlanguage"])
-            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-            .spawn();
+        let run = crate::sys::open::open_system_settings("ms-settings:regionlanguage");
         if let Err(e) = run {
             crate::log!("[opencircle] could not open Windows' language settings: {e}");
         }

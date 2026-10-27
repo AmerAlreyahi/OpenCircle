@@ -389,7 +389,7 @@ mod tests {
             youtube("Kevin MacLeod", "Wallpaper & Co?"),
             "https://www.youtube.com/results?search_query=Kevin+MacLeod+Wallpaper+%26+Co%3F"
         );
-        assert!(crate::lens::web_host(&youtube("Ünïcode", "ü")).is_some());
+        assert!(crate::sys::open::web_host(&youtube("Ünïcode", "ü")).is_some());
     }
 
     #[test]

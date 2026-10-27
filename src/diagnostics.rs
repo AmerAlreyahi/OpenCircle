@@ -151,7 +151,10 @@ mod tests {
         assert!(url.starts_with(
             "https://github.com/AmerAlreyahi/OpenCircle/issues/new?title=Problem%3A%20&body="
         ));
-        assert_eq!(crate::lens::web_host(&url).as_deref(), Some("github.com"));
+        assert_eq!(
+            crate::sys::open::web_host(&url).as_deref(),
+            Some("github.com")
+        );
         assert!(!url.contains([' ', '\n', '"']), "{url}");
         let body = url.split("&body=").nth(1).unwrap();
         let version = format!("OpenCircle%20{}", env!("CARGO_PKG_VERSION"));

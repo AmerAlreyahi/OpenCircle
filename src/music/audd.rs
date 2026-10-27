@@ -108,7 +108,7 @@ fn parse(body: &str) -> Result<Song, Error> {
 /// from Apple's image server.
 fn cover(template: &str) -> Option<String> {
     let (base, _) = template.split_once("{w}x{h}")?;
-    let host = crate::lens::web_host(base)?;
+    let host = crate::sys::open::web_host(base)?;
     (base.starts_with("https://") && host.ends_with(".mzstatic.com"))
         .then(|| format!("{base}{COVER}"))
 }
@@ -141,7 +141,7 @@ mod tests {
         );
         assert_eq!(song.links[2].1, "https://lis.tn/mxzrXE");
         for (_, url) in &song.links {
-            assert!(crate::lens::web_host(url).is_some(), "{url}");
+            assert!(crate::sys::open::web_host(url).is_some(), "{url}");
         }
     }
 

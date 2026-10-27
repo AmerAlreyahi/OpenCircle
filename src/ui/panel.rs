@@ -726,10 +726,10 @@ impl Panel {
 /// What a chip click does: open the link or a new message, or copy the number.
 fn act_on(entity: &Entity) -> Result<&'static str, String> {
     match entity.kind {
-        Kind::Link => crate::lens::open_link(&entity.text)
+        Kind::Link => crate::sys::open::open_link(&entity.text)
             .map(|()| "Opened in your browser.")
             .map_err(|e| format!("Could not open the link: {e}")),
-        Kind::Email => crate::lens::open_mailto(&entity.text)
+        Kind::Email => crate::sys::open::open_mailto(&entity.text)
             .map(|()| "Opened your mail app.")
             .map_err(|e| format!("Could not open the mail app: {e}")),
         Kind::Phone => actions::copy::text(entity.text.clone())

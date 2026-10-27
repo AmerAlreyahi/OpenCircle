@@ -345,7 +345,7 @@ fn start(exe: &Path) -> std::io::Result<()> {
             .spawn()
             .map(drop);
     }
-    crate::spawn_detached(exe)
+    crate::sys::spawn::spawn_detached(exe)
 }
 
 /// What is installed already (the MSI's upgrade family).

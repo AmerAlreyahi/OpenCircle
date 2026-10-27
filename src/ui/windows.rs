@@ -1236,7 +1236,7 @@ fn pick_folder() -> Task<Msg> {
 
 /// Opens `url` in the browser if it is one plain web link (`lens::open_link`).
 fn open_url(url: &str) {
-    if let Err(e) = crate::lens::open_link(url) {
+    if let Err(e) = crate::sys::open::open_link(url) {
         crate::log!("cannot open {url}: {e}");
     }
 }

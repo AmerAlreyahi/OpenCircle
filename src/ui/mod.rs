@@ -1852,7 +1852,7 @@ impl App {
             qr::Act::Open => match qr::web_url(&text).map(str::to_string) {
                 // the browser has the screen now
                 Some(url) => background(move |tx| {
-                    let opened = crate::lens::open_link(&url);
+                    let opened = crate::sys::open::open_link(&url);
                     let pill = opened.err().map(|e| failed(e.to_string()));
                     let _ = tx.unbounded_send(Message::ThenClose(pill));
                 }),
@@ -2709,7 +2709,7 @@ impl App {
         let url = crate::ai::browser::search_url(text);
         let (text, crop) = (text.to_string(), self.crop());
         background(move |tx| {
-            let pill = match crate::lens::open_link(&url) {
+            let pill = match crate::sys::open::open_link(&url) {
                 Ok(()) => {
                     crate::search_history::keep("text", &text, &url, crop.as_ref());
                     None
@@ -3557,7 +3557,7 @@ impl App {
             // The browser comes to the front: the overlay closes so it isn't on top.
             song::Outcome::Open(url) => {
                 let open = background(move |_: &UnboundedSender<()>| {
-                    if let Err(e) = crate::lens::open_link(&url) {
+                    if let Err(e) = crate::sys::open::open_link(&url) {
                         crate::log!("[opencircle] can't open the link: {e}");
                     }
                 })

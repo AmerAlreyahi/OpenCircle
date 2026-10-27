@@ -215,7 +215,7 @@ mod tests {
     use super::*;
 
     fn https(url: &str) -> bool {
-        url.starts_with("https://") && crate::lens::web_host(url).is_some()
+        url.starts_with("https://") && crate::sys::open::web_host(url).is_some()
     }
 
     #[test]

@@ -102,7 +102,7 @@ pub fn ask_with(
 
 /// [`ask_with`] through the user's default browser.
 pub fn ask(question: &str) -> Result<String, String> {
-    ask_with(question, crate::lens::open_url)
+    ask_with(question, crate::sys::open::open_google)
 }
 
 #[cfg(test)]
@@ -140,7 +140,10 @@ mod tests {
             "https://www.google.com/search?q=Roter%20Sand%20%26%20lighthouse%20%231%3F"
         );
         // what lens::open_link accepts: one plain link on Google's host
-        assert_eq!(crate::lens::web_host(&u).as_deref(), Some("www.google.com"));
+        assert_eq!(
+            crate::sys::open::web_host(&u).as_deref(),
+            Some("www.google.com")
+        );
         assert!(!search_url("x&udm=50").contains("&udm"));
     }
 
