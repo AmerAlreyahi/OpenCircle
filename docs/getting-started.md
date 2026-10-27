@@ -20,18 +20,16 @@ page (see the [README](../README.md#install)).
 - **Windows, no install:** `OpenCircle-<version>-x64-portable.exe` runs as it is.
 - **Linux (preview):** install the `.deb` or `.rpm`, or run the `.AppImage`.
 
-<p align="center">
-  <img src="images/installer.png" alt="The OpenCircle Windows installer: the licence page, the finish page with a Launch OpenCircle checkbox, and the installed folder." width="700">
-</p>
-
 OpenCircle lives in the system tray. Starting it again while it runs hands the
 request to the running copy. It starts with Windows by default; turn that off
 in **Settings > General**.
 
 ## First run
 
-A short welcome shows your shortcut, an optional AI provider and a theme. Skip
-any of it; everything can change later in **Settings** (tray menu).
+A short welcome shows your shortcut, an optional AI provider, a theme and
+whether OpenCircle starts with Windows. Skip any of it; everything can change
+later in **Settings** (tray menu). If a second launch finds it already running,
+it opens Settings.
 
 Auto-update is asked about once, on first run. It is off until you say yes. See
 [Updates](#updates).
@@ -49,6 +47,12 @@ Auto-update is asked about once, on first run. It is off until you say yes. See
 Settings > Look & behaviour can change this: keep the drawn shape, or run a
 search as soon as you select (**Auto action**).
 
+The box can be adjusted before you choose: drag inside it to move it (not over
+text; hold `Alt` to move it over text), drag its edges or corners to resize it,
+and use the arrow keys to nudge it (`Shift` = 10 px; `Ctrl`+arrows resize from
+the bottom-right). It opens on the screen of your active window, or the
+pointer's screen when no window is active.
+
 ## The bottom bar
 
 One bar does everything. It starts with a drag handle, then the question field,
@@ -64,7 +68,7 @@ then the rest:
 | Music | Finds a song from a short clip (Settings > Labs; see [Song search](song-search.md)) | |
 | Edit | Turns the bar into the annotation toolbar (Settings > Labs). A back arrow returns | `E` |
 
-`Ctrl+C` copies the selection as an image (selected text is copied as text) and
+`Ctrl+C` copies the selection as an image only (picked words are copied as text) and
 `Ctrl+S` saves it as a PNG or JPEG in your save folder (Settings > General).
 A small pill at the bottom right says "Copied" or "Saved to ..." for a moment.
 
@@ -83,15 +87,17 @@ highlight. Then:
 - **Translate** translates them.
 - **Search in browser** searches them in your default browser.
 
-The first time you select text, OpenCircle asks before downloading the
-text reader. It is about 30 MB (the app shows the exact size), checked against
-pinned checksums and stored on your PC:
+On Windows, text is read at once by Windows' own text recognition, for the
+languages installed in Windows. Otherwise (Linux, Arabic, or if you choose
+**Settings > Look & behaviour > Text reader > Downloaded**), the first time you
+select text OpenCircle asks before downloading its text reader. It is about 30 MB
+(the app shows the exact size), checked against pinned checksums and stored on
+your PC:
 
 - Windows: `%LOCALAPPDATA%\OpenCircle\ocr`
 - Linux: `~/.local/share/OpenCircle/ocr`
 
-After that, reading text works offline. The built-in reader handles English
-(Latin script) text. On a fresh Windows install the
+After that, reading text works offline. On a fresh Windows install the
 [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
 may be needed; OpenCircle tells you if it is.
 
@@ -121,8 +127,10 @@ unfinished, and hidden everywhere until you turn them on.
 
 - `Print Screen` snips a region, `Alt+Print Screen` a window,
   `Ctrl+Print Screen` the full screen.
-- Copy puts the image on the clipboard, ready to paste into an AI chat. On
-  Windows, the copy also carries the text OpenCircle reads from it.
+- Copy puts the picture only on the clipboard, ready to paste into an AI chat.
+  Copy text from a selection when you want the words.
+- Blur is a soft smoothing and is not made for secrets: use **Redact** (a solid
+  box) to hide passwords and similar.
 - Edit opens the annotation toolbar. Move any drawing, change its style and
   text options, and use the board for notes.
 
@@ -144,12 +152,10 @@ Details: [Snip and annotate](snip-and-annotate.md).
   default), Aurora, Sunset, Ocean, Neon, Mono and Calm, or Custom: your own
   colours, glow, dim, corners and a screen edge per mode.
 
-**Settings > Appearance** sets the app theme (System, Light or Dark) and the
-floating widgets (Default, Frost or Graphite), with glass effect on or off.
+**Settings > Appearance** sets the app theme (System, Light or Dark).
 
-<p align="center">
-  <img src="images/settings.png" alt="OpenCircle settings in dark theme: general options, appearance with theme and floating widget choices, and the sidebar with its pages." width="800">
-</p>
+**Settings > Labs** switches the unfinished features on (Snip, Image editor,
+Song search, Search history, Pins). They are off by default.
 
 Changes apply when you press Save. Nothing needs a restart.
 
@@ -173,7 +179,8 @@ shows the release page instead.
 ## Settings and config file
 
 Settings (tray menu) has General, Appearance, Look & behaviour, Shortcuts,
-Snip, AI, Translate, Song search and About. It writes a plain TOML file you may
+Snip, AI, Translate, Song search, Labs and About (Snip and Song search appear
+once switched on in Labs). It writes a plain TOML file you may
 also edit by hand:
 
 - Windows: `%APPDATA%\opencircle\config.toml`
@@ -190,5 +197,7 @@ crashes the app. API keys are never in this file.
 - **No tray icon on Linux.** Install AppIndicator support (Debian/Ubuntu:
   `libayatana-appindicator3-1`, Fedora: `libayatana-appindicator-gtk3`). The
   shortcuts and `opencircle capture` still work.
-- **Logs.** OpenCircle prints warnings to standard error. Start it from a
-  terminal to see them.
+- **Something broke.** OpenCircle keeps a small log on your PC (see
+  [Privacy](privacy.md)). **Settings > About > Copy diagnostics** puts a report
+  (no keys, no folders) on your clipboard, and **Report a problem** opens a
+  pre-filled GitHub issue in your browser. Nothing is sent by OpenCircle.

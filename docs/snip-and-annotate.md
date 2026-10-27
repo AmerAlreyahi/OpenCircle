@@ -57,7 +57,7 @@ and Full are offered and the scrolling button is dimmed.
 
 <p align="center">
   <img src="images/editor-toolbar.png" alt="The editor toolbar at the bottom of a screenshot of an account page: tools in a row, a colour popover with presets, and Copy and Save buttons." width="900"><br>
-  <sub>The editor: tools, colour presets, and Copy and Save at the bottom.</sub>
+  <sub>An earlier look of the editor; the tools and shortcuts below still apply. It will be replaced with the new design.</sub>
 </p>
 
 Every tool has a key while the editor is open:
@@ -81,9 +81,9 @@ One colour button opens the colour picker, with three stroke widths and a
 custom colour. `Ctrl+Z` undoes, `Ctrl+Shift+Z` redoes. Annotations stay
 editable until you copy or save. `Esc` goes back.
 
-**Blur is irreversible in the saved image.** It is not a plain mosaic: each cell is
-blurred, randomised and coarsely quantised, so the hidden text cannot be
-recovered from the pixels.
+**Blur is soft, Redact is solid.** Blur is a smooth brush for making text or a
+face less prominent; do not rely on it for secrets. To hide a password, a key or
+an account number, use **Redact** (a solid box; press `K`).
 
 ## Copy, save or pin
 

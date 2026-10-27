@@ -42,6 +42,11 @@ While the overlay is open: `Esc` closes, `Enter` runs the default action
 (Search unless you changed it in **Settings → General**), and the action keys
 are `L` Search, `A` Ask AI, `T` Text, `E` Edit, `R` Translate.
 
+**Selection box.** After you draw, the box can be moved (drag inside it, not over
+text; `Alt`+drag moves it over text), resized by its edges and corners, and
+nudged with the arrow keys (1 px, `Shift` 10 px; `Ctrl`+arrows resize from the
+bottom-right). It stays on the screen.
+
 **Typing always wins.** While a text box has the focus (the bar's AI field, a
 card's question box or text), every key you press is typed into it: the letter
 keys above do nothing then. They work again as soon as no text box has the
