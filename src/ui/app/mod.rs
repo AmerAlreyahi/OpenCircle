@@ -4,5 +4,6 @@
 pub(in crate::ui) mod background;
 pub(in crate::ui) mod keys;
 pub(in crate::ui) mod message;
+pub(in crate::ui) mod opening;
 pub(in crate::ui) mod quick;
 pub(in crate::ui) mod word;

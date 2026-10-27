@@ -32,6 +32,7 @@ mod windows;
 
 use app::background::{background, triggers};
 use app::message::{Await, BarKeys, Grab, Hiding, Message, PickAct, Purpose, Shot, WordRead};
+use app::opening::Opening;
 use app::{keys, quick, word};
 use platform::monitor::{can_hide_windows, place_window, taskbar_inset};
 use platform::shape;
@@ -49,12 +50,9 @@ use iced::window::{self, Level, Mode};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
 use crate::actions::{self, Action, Crop, Run, copy, lens, qr, save, text};
-use crate::config::{
-    self, After, BarAnchor, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target,
-    TextReader,
-};
+use crate::config::{self, After, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target};
 use crate::editor::{self, Output};
-use crate::labs::{self, BarButton, Labs};
+use crate::labs::{self, BarButton};
 use crate::ocr::{self, TextBlock};
 use crate::translate::pipeline::Cache;
 use crate::{Trigger, capture};
@@ -204,6 +202,8 @@ const SHRINK_FRAMES: u8 = 10;
 const TOAST_MARGIN: f32 = 16.0;
 
 struct App {
+    /// Everything one capture holds (`Opening`), reset as a whole by `close`.
+    o: Opening,
     /// The overlay window's id; a closed window's while `overlay_open` is false.
     overlay: window::Id,
     /// The overlay window exists: always where it is pre-created and hidden
@@ -216,155 +216,32 @@ struct App {
     capturing: Option<u32>,
     /// Captures started (numbers them).
     captures: u32,
-    /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
-    /// Its RGBA bytes are also what actions crop (shared, never copied whole).
-    frame: Option<image::Handle>,
-    /// The frame cut into tiles for drawing (`overlay::tiles`), and its id.
-    tiles: Option<(iced::advanced::image::Id, Vec<(Point, image::Handle)>)>,
-    /// Physical px per logical px of `frame`.
-    scale: f32,
-    /// The overlay's logical size (the monitor's).
-    screen: Size,
-    /// The stroke being drawn or the selection's (image px; see `overlay::View`).
-    stroke: Vec<Point>,
-    drawing: bool,
-    selection: Option<overlay::Selection>,
-    /// Selections kept with Shift before the current one, with their strokes.
-    others: Vec<(overlay::Selection, Vec<Point>)>,
-    /// The stroke being drawn adds to `others` (Shift).
-    adding: bool,
-    /// Alt is held: a press inside the box moves it, even over text.
-    alt: bool,
-    /// Resizing or moving the selection.
-    grab: Option<Grab>,
-    /// The zoomed / panned part of the frame on screen; a pan's start.
-    view: overlay::View,
-    pan: Option<(Point, overlay::View)>,
-    /// The tapped word(s) the selection is, and the latest tap's number.
-    word: Option<word::Picked>,
+    /// The latest word tap's number (a tap still reading is stale after it).
     taps: u32,
-    /// Main mode: the frame's text lines (image px), read on demand band by
-    /// band (#123): never at open, the band the user touches first.
-    screen_text: word::Screen,
-    /// The band OCR reads now (one at a time: the helper serves one request
-    /// at a time anyway).
-    reading: Option<Rectangle>,
-    /// A tap or Shift+click waiting for the band under it.
-    awaits: Option<(Point, Await)>,
-    /// Ctrl+A waits for the whole screen to be read.
-    want_all: bool,
-    /// A drag let go before the band under its press was read, and the
-    /// overlay events after it: replayed once it is.
-    held: Option<Vec<overlay::Event>>,
-    /// Text was selected in this opening (or, off Windows, its helper
-    /// started: `Warmed`): the rest of the screen is read in the background
-    /// (gently), nearest the pointer first.
-    text_used: bool,
-    /// Where the pointer was last seen (image px).
-    pointer: Point,
-    /// The text reader's models are here (checked at open).
-    ocr_ready: bool,
     /// When the overlay drew each frame since the last `log_frames` (the
     /// VM frame budget: the opening, a bar or card drag, the glide after).
     frame_times: RefCell<Vec<Instant>>,
-    /// How that read is going (the note over the bar).
-    reader: Reader,
-    /// Who reads this opening's text (`ocr::route`), once its first read
-    /// started: Windows OCR (the whole screen at once) or the helper (bands).
-    text_by: Option<ocr::Source>,
-    /// A press that began on text: its stroke so far (image px). It selects
-    /// words unless it turns into a loop (`overlay::winds`).
-    text_press: Option<Vec<Point>>,
-    /// The opening animation (`overlay::APPEAR`): the latest frame's time and
-    /// how far it is (0..1, linear); `None` until the first frame (t = 0).
-    appear: Option<(Instant, f32)>,
-    /// The bar's highlighted pill: Search in browser at every opening, then the
-    /// one last pressed (the new design's active pill).
-    pill: BarButton,
-    /// The shortcuts the bottom bar's tooltips show (read at open).
-    bar_keys: BarKeys,
-    /// Which unfinished features are on (read at open; Settings changes apply to the next one).
-    labs: Labs,
-    /// The last press: when, where (image px), and how many in a row.
-    clicks: Option<(Instant, Point, u8)>,
-    /// The ask bar's text.
-    ask: String,
     /// Bumped on every open (resets the overlay's pointer state).
     opening: u32,
     /// Trigger time + expected size of the full-screen frame not drawn yet (latency log).
     first_draw: Cell<Option<(Instant, Size)>>,
-    /// Shown but still fully clear (`show`): fades in once its first full
-    /// frame is drawn (`first_draw` taken), or after `REVEAL_WAIT` anyway.
-    reveal: Option<Instant>,
     hiding: Hiding,
-    /// The open result panel and its number.
-    panel: Option<(u32, panel::Panel)>,
+    /// Result panels opened (numbers them).
     panels: u32,
-    /// Lens pages opened from this overlay, released when it closes.
-    lens_pages: Vec<lens::Held>,
     windows: windows::Windows,
-    purpose: Purpose,
-    /// The annotation editor on the selection; kept when going back to the bar.
-    edit: Option<Editing>,
-    /// The shown monitor's origin (logical px): the key of `regions`.
-    origin: Point,
     /// The last selection per monitor, for `last_region` (memory only).
     regions: Vec<(Point, Rectangle)>,
-    /// A short status over the frame (copy text).
-    toast: Option<&'static str>,
-    /// What the current selection holds (QR code, protected capture); `None` until scanned.
-    scan: Option<qr::Scan>,
-    /// Translate in place on this overlay, and its number.
-    translate: Option<(u32, translate::Session)>,
+    /// Translate sessions started (numbers them).
     translates: u32,
     /// Translations by text, shared by one-shot and live mode.
     cache: Arc<Cache>,
     /// Live translate, while on.
     live: Option<live_layer::Live>,
-    /// One warm OCR / translation helper while the overlay is open (tap a
-    /// word, Text, Translate), started by the first of them.
-    /// (shared with the screen's text reads: one that starts after the
-    /// overlay closed reads nothing, `read_band`)
-    helper: Option<Arc<ocr::Hold>>,
-    /// How selections behave (`[selection]`), read when the overlay opens.
-    behaviour: SelectionConfig,
-    /// A snapped selection's drawn stroke (image px) morphing into its box.
-    morph: Option<(Vec<Point>, Instant)>,
-    text_mode: Option<TextMode>,
-    /// The bottom bar turning into the editing toolbar in its place: 0 = the
-    /// bar, 1 = the toolbar (linear), and while it turns: since when, from
-    /// and to where (`None`: at rest).
-    swap: f32,
-    swap_at: Option<(Instant, f32, f32)>,
-    /// The editor just went back to the bar (until the next frame): an
-    /// Escape now is the key that did it.
-    esc_back: bool,
-    /// Where Tab put the focus in the bottom bar (the field's own focus is the
-    /// text input's); none = the overlay has it, so the letters are shortcuts.
-    bar_focus: Option<bar::Stop>,
     /// The next snip capture is the one a timer waited for: no timer again.
     timed: bool,
-    /// The bar's spot (`config::BarConfig`); while its handle is held, the
-    /// pointer's last position and where the bar follows it (top-left);
-    /// where it is drawn now (gliding to its spot); how much of the screen's
-    /// bottom the taskbar takes (logical px).
-    bar_anchor: BarAnchor,
-    bar_drag: Option<(Option<Point>, Point)>,
-    bar_now: Option<Point>,
-    /// Its glide to a new spot: since when, from and to where.
-    bar_glide: Option<(Instant, Point, Point)>,
-    work_inset: f32,
     /// Where the user moved / sized the result card (this run of the app).
     card: Option<Rectangle>,
-    /// The card's grip or corner is held, and the pointer's last position.
-    card_drag: Option<(widgets::card::Drag, Option<Point>)>,
-    /// The result card opening (`motion::WIDGET`): which panel, its motion,
-    /// and how open it was at the latest frame (it grows from `OPEN_SCALE`).
-    card_open: Option<(u32, motion::Shown, f32)>,
-    /// The pointer is on the card's resize edge (its grip shows).
-    card_hover: bool,
-    /// Song search on this overlay, and its number.
-    song: Option<(u32, song::Session)>,
+    /// Song searches started (numbers them).
     songs: u32,
     /// A verified update waiting until nothing is open (`is_idle`).
     update: Option<crate::update::Staged>,
@@ -406,87 +283,25 @@ impl App {
     /// Nothing open yet (the overlay window `overlay` pre-created, hidden).
     fn idle(overlay: window::Id) -> App {
         App {
+            o: Opening::default(),
             overlay,
             overlay_open: true,
             can_hide: true,
             capturing: None,
             captures: 0,
-            frame: None,
-            tiles: None,
-            scale: 1.0,
-            screen: Size::ZERO,
-            stroke: Vec::new(),
-            drawing: false,
-            selection: None,
-            others: Vec::new(),
-            adding: false,
-            alt: false,
-            grab: None,
-            view: overlay::View::new(1, 1, Size::new(1.0, 1.0)),
-            pan: None,
-            word: None,
             taps: 0,
-            screen_text: word::Screen::default(),
-            reading: None,
-            awaits: None,
-            want_all: false,
-            held: None,
-            text_used: false,
-            pointer: Point::ORIGIN,
-            ocr_ready: false,
             frame_times: RefCell::default(),
-            reader: Reader::Idle,
-            text_by: None,
-            text_press: None,
-            clicks: None,
-            appear: None,
-            pill: BarButton::Search,
-            bar_keys: BarKeys::default(),
-            labs: Labs::default(),
-            ask: String::new(),
             opening: 0,
             first_draw: Cell::new(None),
-            reveal: None,
             hiding: Hiding::No,
-            panel: None,
             panels: 0,
-            lens_pages: Vec::new(),
             windows: windows::Windows::default(),
-            purpose: Purpose::Search,
-            edit: None,
-            origin: Point::ORIGIN,
             regions: Vec::new(),
-            toast: None,
-            scan: None,
-            translate: None,
             translates: 0,
             cache: Arc::new(Cache::new(8)),
             live: None,
-            helper: None,
-            // As before the setting existed; `open` reads the config.
-            behaviour: SelectionConfig {
-                style: SelectStyle::Shape,
-                after: After::Wait,
-                search_with: SearchWith::Lens,
-                text_reader: TextReader::Auto,
-            },
-            morph: None,
-            text_mode: None,
-            swap: 0.0,
-            swap_at: None,
-            esc_back: false,
-            bar_focus: None,
             timed: false,
-            bar_anchor: BarAnchor::Bottom,
-            bar_drag: None,
-            bar_now: None,
-            bar_glide: None,
-            work_inset: 0.0,
             card: None,
-            card_drag: None,
-            card_open: None,
-            card_hover: false,
-            song: None,
             songs: 0,
             update: None,
         }
@@ -511,7 +326,7 @@ impl App {
             Message::Trigger(Trigger::Update(event)) => self.on_update(event),
             Message::UpdateTick => self.try_update(),
             // the rebuilt view shows the actions; the opt-in auto action runs now
-            Message::Settled if self.others.is_empty() => self.auto_search(),
+            Message::Settled if self.o.others.is_empty() => self.auto_search(),
             Message::Settled => Task::none(),
             Message::Trigger(Trigger::Quick(at, qa))
                 if qa.live && qa.action == actions::translate::ACTION.id =>
@@ -521,7 +336,7 @@ impl App {
             Message::Live(msg) => self.on_live(msg),
             Message::Translate(id, msg) => self.on_translate(id, msg),
             Message::Peek(down) => {
-                if let Some((_, session)) = &mut self.translate {
+                if let Some((_, session)) = &mut self.o.translate {
                     let _ = session.update(translate::Msg::Peek(down));
                 }
                 Task::none()
@@ -542,23 +357,25 @@ impl App {
             // Open but maybe behind another app (Alt+Tab, a click elsewhere): its
             // keys (Esc) went there. The shortcut brings it back in front, with
             // the keyboard, instead of nothing happening.
-            Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..)) if self.frame.is_some() => {
+            Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..))
+                if self.o.frame.is_some() =>
+            {
                 crate::log!(
                     "[opencircle] shortcut while the overlay is open: brought to the front"
                 );
                 window::gain_focus(self.overlay)
             }
             Message::Trigger(Trigger::Capture(at)) => {
-                self.purpose = Purpose::Search;
+                self.o.purpose = Purpose::Search;
                 self.capture(at, None)
             }
             Message::Trigger(Trigger::Quick(at, qa)) => {
-                self.purpose = Purpose::Search;
+                self.o.purpose = Purpose::Search;
                 if qa.action == "snip" {
                     return self.capture(at, Some(snip::Kind::for_target(qa.target)));
                 }
                 match Quick::for_id(&qa.action) {
-                    Some(q) => self.purpose = Purpose::Quick(q, qa.target),
+                    Some(q) => self.o.purpose = Purpose::Quick(q, qa.target),
                     None => crate::log!("unknown action {}; opening the overlay", qa.action),
                 }
                 self.capture(at, None)
@@ -581,35 +398,35 @@ impl App {
                     CAPTURE_TIMEOUT.as_secs()
                 );
                 self.capturing = None;
-                self.purpose = Purpose::Search;
+                self.o.purpose = Purpose::Search;
                 Task::none()
             }
             Message::CaptureTimedOut(_) => Task::none(),
             Message::Escape if self.capturing.is_some() => {
                 crate::log!("[opencircle] capture cancelled");
                 self.capturing = None;
-                self.purpose = Purpose::Search;
+                self.o.purpose = Purpose::Search;
                 Task::none()
             }
             Message::Overlay(event) => self.on_overlay(event),
-            Message::Escape if self.frame.is_none() => Task::none(),
+            Message::Escape if self.o.frame.is_none() => Task::none(),
             Message::Escape if let Some(scroll) = self.scroll() => {
                 scroll.stop(); // what was gathered opens in the editor
                 Task::none()
             }
             // The editor has its own Esc (finish typing, close the picker, back).
-            Message::Escape if self.edit.as_ref().is_some_and(Editing::is_open) => Task::none(),
+            Message::Escape if self.o.edit.as_ref().is_some_and(Editing::is_open) => Task::none(),
             Message::Escape if std::env::var_os(TEST_SHOT).is_some() => self.test_shot(),
             // The editor's Esc went back to the bar: the same key's Escape
             // (it may come after) doesn't close the overlay too.
-            Message::Escape if self.esc_back => {
-                self.esc_back = false;
+            Message::Escape if self.o.esc_back => {
+                self.o.esc_back = false;
                 Task::none()
             }
             Message::Escape => self.close(),
             Message::EscapeTaken
-                if self.edit.is_some()
-                    || self.esc_back
+                if self.o.edit.is_some()
+                    || self.o.esc_back
                     || self.capturing.is_some()
                     || self.scroll().is_some() =>
             {
@@ -618,12 +435,12 @@ impl App {
             // A field took it: it was that field's Esc (a second one closes).
             Message::EscapeTaken => Task::none(),
             Message::Field(keys::Keyed::Left) => {
-                self.bar_focus = None;
+                self.o.bar_focus = None;
                 Task::none()
             }
             // (a click put the focus in the bar's field: Tab goes on from there)
             Message::Field(keys::Keyed::Focus) => {
-                self.bar_focus = Some(bar::Stop::Field);
+                self.o.bar_focus = Some(bar::Stop::Field);
                 Task::none()
             }
             Message::Field(keys::Keyed::Copy) => self.on_overlay(overlay::Event::Key {
@@ -635,8 +452,8 @@ impl App {
             Message::Confirm(place, result) => self.toast_for(place, result),
             Message::ThenClose(Some(pill)) => self.toast_then_close(pill),
             Message::ThenClose(None) => self.close(),
-            Message::TextRead(copied) if self.toast.is_some() => {
-                self.toast = Some(match copied {
+            Message::TextRead(copied) if self.o.toast.is_some() => {
+                self.o.toast = Some(match copied {
                     Ok(()) => "Text copied",
                     Err(e) => {
                         crate::log!("copy text failed: {e}");
@@ -651,13 +468,13 @@ impl App {
             }
             Message::TextRead(_) => Task::none(), // closed meanwhile
             Message::Scanned(area, scan) => {
-                if self.selection.map(|s| s.area) == Some(area) {
-                    self.scan = Some(scan);
+                if self.o.selection.map(|s| s.area) == Some(area) {
+                    self.o.scan = Some(scan);
                 }
                 Task::none()
             }
             Message::Qr(act) => self.on_qr(act),
-            Message::ToastDone if self.toast.is_some() => self.close(),
+            Message::ToastDone if self.o.toast.is_some() => self.close(),
             Message::ToastDone => Task::none(),
             Message::Panel(id, msg) => self.on_panel(id, msg),
             Message::Run(action) => self.run(action),
@@ -668,55 +485,55 @@ impl App {
                 Task::none()
             }
             Message::BarGrab => {
-                self.bar_drag = Some((None, self.bar_at()));
+                self.o.bar_drag = Some((None, self.bar_at()));
                 self.frame_times.borrow_mut().clear();
                 Task::none()
             }
             // While held it follows the pointer (kept on screen).
             Message::BarMoved(p) => {
-                if let Some((last, at)) = self.bar_drag {
+                if let Some((last, at)) = self.o.bar_drag {
                     let size = self.dock_size();
                     let at = match last {
                         Some(from) => {
                             let to = at + (p - from);
                             let max = |whole: f32, side: f32| (whole - side).max(0.0);
                             Point::new(
-                                to.x.clamp(0.0, max(self.screen.width, size.width)),
-                                to.y.clamp(0.0, max(self.screen.height, size.height)),
+                                to.x.clamp(0.0, max(self.o.screen.width, size.width)),
+                                to.y.clamp(0.0, max(self.o.screen.height, size.height)),
                             )
                         }
                         None => at,
                     };
-                    self.bar_drag = Some((Some(p), at));
-                    self.bar_now = Some(at);
+                    self.o.bar_drag = Some((Some(p), at));
+                    self.o.bar_now = Some(at);
                 }
                 Task::none()
             }
             // Let go: it glides to the nearest spot, remembered.
-            Message::BarReleased => match self.bar_drag.take() {
+            Message::BarReleased => match self.o.bar_drag.take() {
                 Some((_, at)) => {
                     let size = self.dock_size();
-                    self.bar_anchor = bar::nearest(at, self.screen, size, self.work_inset);
-                    crate::log!("[opencircle] bar docked: {:?}", self.bar_anchor);
+                    self.o.bar_anchor = bar::nearest(at, self.o.screen, size, self.o.work_inset);
+                    crate::log!("[opencircle] bar docked: {:?}", self.o.bar_anchor);
                     self.log_frames("bar drag");
-                    self.bar_now = Some(at);
+                    self.o.bar_now = Some(at);
                     self.remember_bar()
                 }
                 None => Task::none(),
             },
             Message::CardMoved(p) => {
-                if let Some((how, last)) = self.card_drag {
+                if let Some((how, last)) = self.o.card_drag {
                     if let Some(from) = last {
                         let at = self.card_at();
-                        self.card = Some(widgets::card::drag(at, how, p - from, self.screen));
+                        self.card = Some(widgets::card::drag(at, how, p - from, self.o.screen));
                     }
-                    self.card_drag = Some((how, Some(p)));
+                    self.o.card_drag = Some((how, Some(p)));
                 }
                 Task::none()
             }
             // Let go: the card stays where the user put it, until the overlay closes.
             Message::CardReleased => {
-                match self.card_drag.take() {
+                match self.o.card_drag.take() {
                     Some((card::Drag::Move, _)) => self.log_frames("card drag"),
                     Some((card::Drag::Resize, _)) => self.log_frames("card resize"),
                     None => {}
@@ -724,14 +541,14 @@ impl App {
                 Task::none()
             }
             Message::AskInput(text) => {
-                self.ask = text;
+                self.o.ask = text;
                 Task::none()
             }
             // The AI field (the new design): Enter, its logo or its "AI ↵" badge.
             // A question asks about the selection (before one: the whole
             // screen); an empty field opens Ask AI with its presets.
             Message::AskSubmit | Message::AskButton => {
-                let question = std::mem::take(&mut self.ask);
+                let question = std::mem::take(&mut self.o.ask);
                 let question = (!question.trim().is_empty()).then_some(question);
                 match self.stacked().or_else(|| self.whole()) {
                     Some(crop) => self.open_panel(actions::Panel::Ask, crop, question),
@@ -739,7 +556,7 @@ impl App {
                 }
             }
             Message::Pill(pill) => {
-                self.pill = pill;
+                self.o.pill = pill;
                 self.on_pill(pill)
             }
             // Live translate runs over the live screen: the frozen one goes.
@@ -748,35 +565,35 @@ impl App {
                 closing.chain(self.toggle_live(Instant::now()))
             }
             Message::EditScreen => {
-                self.others.clear();
-                self.word = None;
-                self.select(Rectangle::with_size(self.screen));
+                self.o.others.clear();
+                self.o.word = None;
+                self.select(Rectangle::with_size(self.o.screen));
                 self.open_editor()
             }
             Message::TranslateScreen => {
-                self.others.clear();
-                self.word = None;
-                self.select(Rectangle::with_size(self.screen));
+                self.o.others.clear();
+                self.o.word = None;
+                self.select(Rectangle::with_size(self.o.screen));
                 self.start_translate()
             }
             Message::Frame(now) => {
-                self.esc_back = false;
+                self.o.esc_back = false;
                 // Shown fully clear: once its first full frame is up (or after
                 // REVEAL_WAIT), the window fades in and the opening's clock starts.
                 let mut revealed = Task::none();
-                if let Some(since) = self.reveal {
+                if let Some(since) = self.o.reveal {
                     if self.first_draw.get().is_some()
                         && now.saturating_duration_since(since) < REVEAL_WAIT
                     {
                         return Task::none();
                     }
-                    self.reveal = None;
-                    self.appear = None;
+                    self.o.reveal = None;
+                    self.o.appear = None;
                     self.frame_times.borrow_mut().clear();
                     revealed = windows::fade(self.overlay, true, windows::POPUP, false);
                 }
                 // a new result card grows open from its first frame
-                self.card_open = match (&self.panel, self.card_open) {
+                self.o.card_open = match (&self.o.panel, self.o.card_open) {
                     (Some((id, _)), Some((was, shown, _))) if *id == was => {
                         Some((was, shown, shown.at(now)))
                     }
@@ -786,39 +603,39 @@ impl App {
                     }
                     (None, _) => None,
                 };
-                let opening = self.appearing() || self.appear.is_none();
-                let gliding = self.bar_glide.is_some();
+                let opening = self.appearing() || self.o.appear.is_none();
+                let gliding = self.o.bar_glide.is_some();
                 // every motion by the clock since it began (`motion`)
-                self.appear = match self.appear {
+                self.o.appear = match self.o.appear {
                     Some((start, t)) if t < 1.0 => {
                         Some((start, motion::done(start, now, overlay::APPEAR)))
                     }
                     None => Some((now, motion::done(now, now, overlay::APPEAR))),
                     done => done,
                 };
-                let (target, was) = (self.swap_target(), self.swap);
+                let (target, was) = (self.swap_target(), self.o.swap);
                 // to the toolbar (enter) or back to the bar (exit), from where it is
-                self.swap_at = match self.swap_at {
+                self.o.swap_at = match self.o.swap_at {
                     Some(m @ (_, _, to)) if to == target => Some(m),
-                    _ if self.swap == target => None,
-                    _ => Some((now, self.swap, target)),
+                    _ if self.o.swap == target => None,
+                    _ => Some((now, self.o.swap, target)),
                 };
-                if let Some((began, from, to)) = self.swap_at {
+                if let Some((began, from, to)) = self.o.swap_at {
                     let length = BAR_MORPH; // the design: the same rise both ways
-                    let t = match self.purpose {
+                    let t = match self.o.purpose {
                         Purpose::Search => motion::done(began, now, length),
                         _ => 1.0, // Snip has no bar to turn into the toolbar
                     };
-                    self.swap = from + (to - from) * t;
+                    self.o.swap = from + (to - from) * t;
                     if t >= 1.0 {
-                        self.swap_at = None;
+                        self.o.swap_at = None;
                     }
                 }
-                if self.bar_drag.is_none() {
+                if self.o.bar_drag.is_none() {
                     let to = self.bar_target();
-                    self.bar_now = Some(match (self.bar_now, self.bar_glide) {
+                    self.o.bar_now = Some(match (self.o.bar_now, self.o.bar_glide) {
                         // turning into the toolbar (or back): it stays on its spot
-                        _ if self.swap != was => to,
+                        _ if self.o.swap != was => to,
                         (Some(at), _) if at == to => to,
                         // on its way there already
                         (Some(_), Some((began, from, end))) if end == to => {
@@ -827,16 +644,16 @@ impl App {
                         }
                         // a new place: it glides there from where it is
                         (Some(at), _) => {
-                            self.bar_glide = Some((now, at, to));
+                            self.o.bar_glide = Some((now, at, to));
                             at
                         }
                         (None, _) => to,
                     });
-                    if self.bar_now == Some(to) {
-                        self.bar_glide = None;
+                    if self.o.bar_now == Some(to) {
+                        self.o.bar_glide = None;
                     }
                 }
-                if gliding && self.bar_glide.is_none() && !opening {
+                if gliding && self.o.bar_glide.is_none() && !opening {
                     self.log_frames("bar glide");
                 }
                 if !opening || self.appearing() {
@@ -848,26 +665,26 @@ impl App {
                 Task::batch([revealed, self.warm()])
             }
             Message::ScreenText(opening, band, read)
-                if opening == self.opening && self.frame.is_some() =>
+                if opening == self.opening && self.o.frame.is_some() =>
             {
-                self.reading = None;
+                self.o.reading = None;
                 match read {
                     Ok(lines) => {
-                        let system = self.text_by == Some(ocr::Source::System);
+                        let system = self.o.text_by == Some(ocr::Source::System);
                         if system {
                             // Windows OCR's closer read replaces its quick one
-                            self.screen_text = word::Screen::default();
+                            self.o.screen_text = word::Screen::default();
                         }
-                        let first = self.screen_text == word::Screen::default();
-                        self.screen_text.add(band, lines, self.screen);
+                        let first = self.o.screen_text == word::Screen::default();
+                        self.o.screen_text.add(band, lines, self.o.screen);
                         // (the helper: its first band and its last, the VM's timings)
-                        let whole = self.screen_text.is_whole(self.screen.height);
+                        let whole = self.o.screen_text.is_whole(self.o.screen.height);
                         if system || first || whole {
                             let what = match system || whole {
                                 true => "screen text ready",
                                 false => "first screen text",
                             };
-                            match self.appear {
+                            match self.o.appear {
                                 Some((at, _)) => crate::log!(
                                     "[opencircle] {what} {} ms after the first frame",
                                     at.elapsed().as_millis()
@@ -880,9 +697,9 @@ impl App {
                         Task::batch([done, released, self.read_more()])
                     }
                     // Windows OCR couldn't (no recognizer, #63): the helper reads
-                    Err(e) if self.text_by == Some(ocr::Source::System) => {
+                    Err(e) if self.o.text_by == Some(ocr::Source::System) => {
                         crate::log!("[opencircle] Windows OCR didn't read the screen: {e}");
-                        self.text_by = Some(ocr::Source::Helper);
+                        self.o.text_by = Some(ocr::Source::Helper);
                         self.note_reader();
                         let released = self.release_held();
                         Task::batch([released, self.warm(), self.read_more()])
@@ -899,13 +716,13 @@ impl App {
             // gently, band by band from the pointer out: the I-beam shows over
             // text before any press, as it does on Windows.
             Message::Warmed(opening) if opening == self.opening && !cfg!(windows) => {
-                self.text_used = true;
+                self.o.text_used = true;
                 self.read_more()
             }
             Message::Warmed(_) => Task::none(),
             // Only on this click: nothing is downloaded without it.
-            Message::ReaderDownload if self.frame.is_some() => {
-                self.reader = Reader::Downloading(0.0);
+            Message::ReaderDownload if self.o.frame.is_some() => {
+                self.o.reader = Reader::Downloading(0.0);
                 if cfg!(test) {
                     return Task::none(); // never the network
                 }
@@ -922,15 +739,15 @@ impl App {
                 })
                 .map(move |step| Message::Reader(opening, step))
             }
-            Message::Reader(opening, step) if opening == self.opening && self.frame.is_some() => {
+            Message::Reader(opening, step) if opening == self.opening && self.o.frame.is_some() => {
                 match step {
-                    Ok(text::Progress::Download(done)) => self.reader = Reader::Downloading(done),
+                    Ok(text::Progress::Download(done)) => self.o.reader = Reader::Downloading(done),
                     Ok(text::Progress::Reading) => {
-                        (self.ocr_ready, self.reader) = (text::models_present(), Reader::Idle);
+                        (self.o.ocr_ready, self.o.reader) = (text::models_present(), Reader::Idle);
                         self.note_reader();
                         return self.warm();
                     }
-                    Err(e) => self.reader = Reader::Failed(e),
+                    Err(e) => self.o.reader = Reader::Failed(e),
                 }
                 Task::none()
             }
@@ -1039,7 +856,7 @@ impl App {
             Ok(shot) => shot,
             Err(e) => {
                 crate::log!("capture failed: {e}");
-                self.purpose = Purpose::Search;
+                self.o.purpose = Purpose::Search;
                 if !capture::refused(&e) {
                     return Task::none();
                 }
@@ -1058,22 +875,22 @@ impl App {
         );
         let size = shot.size;
         self.set_frame(shot.image, shot.scale, shot.origin, size);
-        self.helper = Some(Arc::new(ocr::hold()));
-        self.ocr_ready = text::models_present();
+        self.o.helper = Some(Arc::new(ocr::hold()));
+        self.o.ocr_ready = text::models_present();
         self.frame_times.borrow_mut().clear();
         self.opening = self.opening.wrapping_add(1);
         self.first_draw.set(Some((at, size)));
         self.hiding = Hiding::No;
         let cfg = config::current();
-        self.appear = None; // its first frame is t = 0
-        self.pill = BarButton::Search;
-        self.bar_anchor = cfg.bar.anchor;
-        self.bar_now = None;
-        self.bar_glide = None;
+        self.o.appear = None; // its first frame is t = 0
+        self.o.pill = BarButton::Search;
+        self.o.bar_anchor = cfg.bar.anchor;
+        self.o.bar_now = None;
+        self.o.bar_glide = None;
         motion::refresh();
-        self.behaviour = cfg.selection;
-        self.bar_keys = BarKeys::of(&cfg);
-        self.labs = cfg.labs;
+        self.o.behaviour = cfg.selection;
+        self.o.bar_keys = BarKeys::of(&cfg);
+        self.o.labs = cfg.labs;
         let mut first = None;
         let mut extras = Task::none();
         let mut timer = None;
@@ -1089,10 +906,10 @@ impl App {
             if cfg!(windows) {
                 snip.set_reader(reader, UIA_WINDOWS); // else dropped: no controls
             }
-            self.purpose = Purpose::Snip(Box::new(snip));
+            self.o.purpose = Purpose::Snip(Box::new(snip));
             extras = self.snip_extras(read);
         }
-        let Purpose::Quick(quick, target) = self.purpose else {
+        let Purpose::Quick(quick, target) = self.o.purpose else {
             let next = match (first, timer) {
                 (Some(next), _) => self.snip_next(Some(next)),
                 (None, Some(secs)) => self.on_snip(snip::Msg::Delay(secs)),
@@ -1138,23 +955,26 @@ impl App {
     /// what the overlay shows.
     fn set_frame(&mut self, image: image::Handle, scale: f32, origin: Point, size: Size) {
         let px = |v: f32| (v * scale).round() as u32;
-        self.view = overlay::View::new(px(size.width), px(size.height), size);
-        self.tiles = overlay::tiles(&image).map(|t| (image.id(), t));
-        self.frame = Some(image);
-        glass::set_frame(self.frame.as_ref(), scale);
-        self.scale = scale;
-        self.screen = size;
-        self.origin = origin;
-        self.work_inset = taskbar_inset(origin, size, scale);
+        self.o.view = overlay::View::new(px(size.width), px(size.height), size);
+        self.o.tiles = overlay::tiles(&image).map(|t| (image.id(), t));
+        self.o.frame = Some(image);
+        glass::set_frame(self.o.frame.as_ref(), scale);
+        self.o.scale = scale;
+        self.o.screen = size;
+        self.o.origin = origin;
+        self.o.work_inset = taskbar_inset(origin, size, scale);
     }
 
     /// The shown monitor in physical desktop px.
     fn place(&self) -> snip::Place {
-        let px = |v: f32| (v * self.scale).round();
+        let px = |v: f32| (v * self.o.scale).round();
         snip::Place {
-            origin: (px(self.origin.x) as i32, px(self.origin.y) as i32),
-            px: (px(self.screen.width) as u32, px(self.screen.height) as u32),
-            scale: self.scale,
+            origin: (px(self.o.origin.x) as i32, px(self.o.origin.y) as i32),
+            px: (
+                px(self.o.screen.width) as u32,
+                px(self.o.screen.height) as u32,
+            ),
+            scale: self.o.scale,
         }
     }
 
@@ -1162,7 +982,7 @@ impl App {
     /// it full-screen where it was closed (see `can_hide_windows`).
     fn show(&mut self) -> Task<Message> {
         if !self.overlay_open {
-            let (id, open) = windows::screen(overlay_window(Some(self.screen)));
+            let (id, open) = windows::screen(overlay_window(Some(self.o.screen)));
             crate::log!("[opencircle] overlay window opened");
             (self.overlay, self.overlay_open) = (id, true);
             return open.discard().chain(window::gain_focus(id));
@@ -1171,9 +991,9 @@ impl App {
         // is drawn (`Message::Frame`), so the CPU never redraws a fade.
         let clear = match shape::can_fade() {
             true => {
-                self.reveal = Some(Instant::now());
+                self.o.reveal = Some(Instant::now());
                 if self.first_draw.get().is_none() {
-                    self.first_draw.set(Some((Instant::now(), self.screen)));
+                    self.first_draw.set(Some((Instant::now(), self.o.screen)));
                 }
                 windows::opacity(self.overlay, 0.0)
             }
@@ -1200,12 +1020,12 @@ impl App {
 
     fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {
         if let overlay::Event::Alt(alt) = event {
-            self.alt = alt;
+            self.o.alt = alt;
             return Task::none();
         }
         // A drag let go before the band under its press was read waits for
         // it, with the keys after it (Ctrl+C); a new press goes on without.
-        if let Some(held) = &mut self.held {
+        if let Some(held) = &mut self.o.held {
             match event {
                 overlay::Event::Press { .. } => {
                     let released = self.release_held();
@@ -1219,8 +1039,8 @@ impl App {
             }
         }
         // The editor, a toast or a scrolling capture has the screen.
-        if self.edit.as_ref().is_some_and(Editing::is_open)
-            || self.toast.is_some()
+        if self.o.edit.as_ref().is_some_and(Editing::is_open)
+            || self.o.toast.is_some()
             || self.snip_pill()
         {
             return Task::none();
@@ -1229,39 +1049,39 @@ impl App {
         let event = match event {
             overlay::Event::Zoom { at, notches } => {
                 if self.can_zoom() {
-                    self.view = self.view.zoomed(at, notches);
-                } else if let Purpose::Snip(snip) = &mut self.purpose {
+                    self.o.view = self.o.view.zoomed(at, notches);
+                } else if let Purpose::Snip(snip) = &mut self.o.purpose {
                     snip.walk(notches); // control -> window -> screen, and back
                 }
                 return Task::none();
             }
             overlay::Event::PanStart(at) => {
-                self.pan = self.can_zoom().then_some((at, self.view));
+                self.o.pan = self.can_zoom().then_some((at, self.o.view));
                 return Task::none();
             }
             overlay::Event::PanMove(at) => {
-                if let Some((from, start)) = self.pan {
-                    self.view = start.panned(at - from);
+                if let Some((from, start)) = self.o.pan {
+                    self.o.view = start.panned(at - from);
                 }
                 return Task::none();
             }
             overlay::Event::ZoomReset => {
-                self.view = self.view.reset();
+                self.o.view = self.o.view.reset();
                 return Task::none();
             }
             overlay::Event::Press { at, shift } => {
-                self.bar_focus = None; // a click puts the focus back on the overlay
+                self.o.bar_focus = None; // a click puts the focus back on the overlay
                 overlay::Event::Press {
-                    at: self.view.to_image(at),
+                    at: self.o.view.to_image(at),
                     shift,
                 }
             }
-            overlay::Event::Move(at) => overlay::Event::Move(self.view.to_image(at)),
-            overlay::Event::Hover(at) => overlay::Event::Hover(self.view.to_image(at)),
+            overlay::Event::Move(at) => overlay::Event::Move(self.o.view.to_image(at)),
+            overlay::Event::Hover(at) => overlay::Event::Hover(self.o.view.to_image(at)),
             event => event,
         };
         // Snip: the loupe follows the pointer; a drag's ends snap to edges.
-        let event = match (&mut self.purpose, event) {
+        let event = match (&mut self.o.purpose, event) {
             (Purpose::Snip(snip), overlay::Event::Press { at, shift }) => {
                 snip.hover(at);
                 overlay::Event::Press {
@@ -1281,7 +1101,7 @@ impl App {
         };
         // Over a translation: a tap opens a block's word card, E / A are the
         // card's; a new selection leaves the translation.
-        if let Some((id, session)) = &mut self.translate {
+        if let Some((id, session)) = &mut self.o.translate {
             let id = *id;
             match event {
                 overlay::Event::Key {
@@ -1299,14 +1119,14 @@ impl App {
                 overlay::Event::Key { .. } | overlay::Event::Enter | overlay::Event::Space => {
                     return Task::none();
                 }
-                overlay::Event::Release if overlay::select(&self.stroke, 1.0).is_none() => {
-                    let at = self.stroke.last().copied().unwrap_or(Point::ORIGIN);
-                    session.click(Point::new(at.x * self.scale, at.y * self.scale));
-                    self.drawing = false;
-                    self.stroke.clear();
+                overlay::Event::Release if overlay::select(&self.o.stroke, 1.0).is_none() => {
+                    let at = self.o.stroke.last().copied().unwrap_or(Point::ORIGIN);
+                    session.click(Point::new(at.x * self.o.scale, at.y * self.o.scale));
+                    self.o.drawing = false;
+                    self.o.stroke.clear();
                     return Task::none();
                 }
-                overlay::Event::Release => self.translate = None,
+                overlay::Event::Release => self.o.translate = None,
                 _ => {}
             }
         }
@@ -1317,94 +1137,96 @@ impl App {
                 shift: false,
             } if self.picks_text_at(p) => {
                 let (area, unit) = (self.area(), self.click(p));
-                if let Some(mode) = &mut self.text_mode {
+                if let Some(mode) = &mut self.o.text_mode {
                     let lines = mode.lines.clone().unwrap_or_default();
                     mode.picked = word::Picked::new(lines, area, p, unit);
                     mode.picking = mode.picked.is_some();
                 }
             }
-            overlay::Event::Move(p) if self.text_mode.as_ref().is_some_and(|m| m.picking) => {
-                if let Some(picked) = self.text_mode.as_mut().and_then(|m| m.picked.as_mut()) {
+            overlay::Event::Move(p) if self.o.text_mode.as_ref().is_some_and(|m| m.picking) => {
+                if let Some(picked) = self.o.text_mode.as_mut().and_then(|m| m.picked.as_mut()) {
                     picked.extend(p);
                 }
             }
-            overlay::Event::Release if self.text_mode.as_ref().is_some_and(|m| m.picking) => {
-                if let Some(mode) = &mut self.text_mode {
+            overlay::Event::Release if self.o.text_mode.as_ref().is_some_and(|m| m.picking) => {
+                if let Some(mode) = &mut self.o.text_mode {
                     mode.picking = false;
                 }
             }
             overlay::Event::Press { at: p, shift } => {
-                self.pointer = p;
+                self.o.pointer = p;
                 // A new selection: the panel and the edits were about the old one.
-                self.panel = None;
-                self.text_mode = None;
-                self.morph = None;
-                self.edit = None;
-                self.scan = None;
+                self.o.panel = None;
+                self.o.text_mode = None;
+                self.o.morph = None;
+                self.o.edit = None;
+                self.o.scan = None;
                 self.taps = self.taps.wrapping_add(1); // a tap still reading is stale
                 let unit = self.click(p);
                 if !shift && let Some(grab) = self.grab_at(p) {
-                    self.grab = Some(grab);
+                    self.o.grab = Some(grab);
                     return Task::none();
                 }
                 // On text (once the screen is read): selected like in a document.
                 // Shift+click stretches the text selection there.
                 if shift
                     && self.text_at(p, unit).is_some()
-                    && let Some(word) = &mut self.word
+                    && let Some(word) = &mut self.o.word
                     && word.extend(p)
                 {
                     self.select_word();
-                    self.text_press = Some(vec![p]);
+                    self.o.text_press = Some(vec![p]);
                     return Task::none();
                 }
                 if !shift && let Some(word) = self.text_at(p, unit) {
-                    self.word = Some(word);
-                    self.text_used = true;
+                    self.o.word = Some(word);
+                    self.o.text_used = true;
                     self.select_word();
-                    self.text_press = Some(vec![p]);
+                    self.o.text_press = Some(vec![p]);
                     return Task::none();
                 }
                 // Shift keeps the selection and adds the next one.
-                self.adding = shift && matches!(self.purpose, Purpose::Search);
-                match self.selection.take() {
-                    Some(sel) if self.adding => {
-                        self.others.push((sel, std::mem::take(&mut self.stroke)));
+                self.o.adding = shift && matches!(self.o.purpose, Purpose::Search);
+                match self.o.selection.take() {
+                    Some(sel) if self.o.adding => {
+                        self.o
+                            .others
+                            .push((sel, std::mem::take(&mut self.o.stroke)));
                     }
-                    _ => self.others.clear(),
+                    _ => self.o.others.clear(),
                 }
-                self.stroke = vec![p];
-                self.drawing = true;
+                self.o.stroke = vec![p];
+                self.o.drawing = true;
                 // perhaps on text not read yet: its band now
                 return self.read_more();
             }
-            overlay::Event::Move(p) if self.text_press.is_some() => return self.drag_text(p),
-            overlay::Event::Move(p) if self.grab.is_some() => self.drag_grab(p),
-            overlay::Event::Move(p) if self.drawing => self.stroke.push(p),
+            overlay::Event::Move(p) if self.o.text_press.is_some() => return self.drag_text(p),
+            overlay::Event::Move(p) if self.o.grab.is_some() => self.drag_grab(p),
+            overlay::Event::Move(p) if self.o.drawing => self.o.stroke.push(p),
             overlay::Event::Move(_) => {}
             overlay::Event::Hover(p) => {
-                self.pointer = p;
+                self.o.pointer = p;
                 // Snip's Window mode: the window under the pointer lights up.
-                if let Purpose::Snip(snip) = &self.purpose
+                if let Purpose::Snip(snip) = &self.o.purpose
                     && snip.kind == snip::Kind::Window
                 {
                     match snip.window_at(p) {
-                        Some(w) if self.selection.map(|s| s.area) != Some(w) => self.select(w),
+                        Some(w) if self.o.selection.map(|s| s.area) != Some(w) => self.select(w),
                         Some(_) => {}
                         None => {
-                            self.selection = None;
-                            self.stroke.clear();
+                            self.o.selection = None;
+                            self.o.stroke.clear();
                         }
                     }
                 }
             }
-            overlay::Event::Release if self.text_press.take().is_some() => {
-                if self.word.as_ref().is_some_and(word::Picked::is_empty) {
-                    self.word = None; // a click on text: nothing selected
+            overlay::Event::Release if self.o.text_press.take().is_some() => {
+                if self.o.word.as_ref().is_some_and(word::Picked::is_empty) {
+                    self.o.word = None; // a click on text: nothing selected
                 }
                 return self.selected();
             }
-            overlay::Event::Release if let Some(grab) = self.grab.take() => {
+            overlay::Event::Release if let Some(grab) = self.o.grab.take() => {
                 return if grab.moved {
                     // The search first: a waiting quick action (`selected`)
                     // turns the purpose back to Search, and must not get it too.
@@ -1417,25 +1239,25 @@ impl App {
             // A drag that may have begun on text not read yet: the band under
             // its press decides (text or a stroke) once read (`release_held`).
             overlay::Event::Release
-                if !self.adding
-                    && let Some(&start) = self.stroke.first()
-                    && self.reading.is_some_and(|band| band.contains(start))
-                    && !self.screen_text.knows(start.y)
-                    && !overlay::is_tap(&self.stroke, self.view.zoom()) =>
+                if !self.o.adding
+                    && let Some(&start) = self.o.stroke.first()
+                    && self.o.reading.is_some_and(|band| band.contains(start))
+                    && !self.o.screen_text.knows(start.y)
+                    && !overlay::is_tap(&self.o.stroke, self.o.view.zoom()) =>
             {
-                self.held = Some(Vec::new());
+                self.o.held = Some(Vec::new());
             }
             overlay::Event::Release => {
-                self.drawing = false;
+                self.o.drawing = false;
                 let mut settle = Task::none();
-                let zoom = self.view.zoom();
-                let mut settled = overlay::settle(&self.stroke, zoom, self.screen);
+                let zoom = self.o.view.zoom();
+                let mut settled = overlay::settle(&self.o.stroke, zoom, self.o.screen);
                 // Snap: the stroke becomes a rounded box (it morphs there).
                 if let Some((sel, kept)) = &mut settled
                     && self.snaps()
                 {
                     if sel.kind != overlay::Kind::Drag {
-                        self.morph = Some((kept.clone(), Instant::now()));
+                        self.o.morph = Some((kept.clone(), Instant::now()));
                         settle = background(|tx| {
                             std::thread::sleep(overlay::MORPH + Duration::from_millis(20));
                             let _ = tx.unbounded_send(());
@@ -1444,41 +1266,41 @@ impl App {
                     }
                     (*sel, *kept) = overlay::snap(sel.area);
                 }
-                self.selection = settled.as_ref().map(|(sel, _)| *sel);
+                self.o.selection = settled.as_ref().map(|(sel, _)| *sel);
                 let drawn = match settled {
-                    Some((_, kept)) => std::mem::replace(&mut self.stroke, kept),
-                    None => self.stroke.clone(),
+                    Some((_, kept)) => std::mem::replace(&mut self.o.stroke, kept),
+                    None => self.o.stroke.clone(),
                 };
-                if let Purpose::Snip(snip) = &self.purpose {
-                    let area = self.selection.map(|s| s.area);
+                if let Purpose::Snip(snip) = &self.o.purpose {
+                    let area = self.o.selection.map(|s| s.area);
                     let at = drawn.last().copied().unwrap_or(Point::ORIGIN);
-                    let next = snip.pick(area, at, self.screen);
+                    let next = snip.pick(area, at, self.o.screen);
                     self.remember_region();
                     return self.snip_next(next);
                 }
-                if std::mem::take(&mut self.adding)
-                    && self.selection.is_none()
-                    && let Some((sel, stroke)) = self.others.pop()
+                if std::mem::take(&mut self.o.adding)
+                    && self.o.selection.is_none()
+                    && let Some((sel, stroke)) = self.o.others.pop()
                 {
                     // Nothing added (a tap, a line): the last one is current again.
-                    (self.selection, self.stroke) = (Some(sel), stroke);
+                    (self.o.selection, self.o.stroke) = (Some(sel), stroke);
                     // Shift+click on text with words picked: stretch them there.
                     if sel.kind == overlay::Kind::Word
-                        && self.word.is_some()
+                        && self.o.word.is_some()
                         && overlay::is_tap(&drawn, zoom)
                     {
                         return self.extend_words(drawn[0]);
                     }
                     return Task::none();
                 }
-                if self.selection.is_some() {
-                    self.word = None;
+                if self.o.selection.is_some() {
+                    self.o.word = None;
                 } else if overlay::is_tap(&drawn, zoom) {
                     return self.tap(drawn[0]);
                 }
                 // The search first: a waiting quick action (`selected`) turns
                 // the purpose back to Search, and must not get it too.
-                let search = match self.others.is_empty() {
+                let search = match self.o.others.is_empty() {
                     true => self.auto_search(),
                     false => Task::none(), // Shift: more to come
                 };
@@ -1486,13 +1308,13 @@ impl App {
             }
             // Tab moved the focus onto a bar button: Enter / Space press it.
             overlay::Event::Enter | overlay::Event::Space
-                if let Some(stop) = self.bar_focus
+                if let Some(stop) = self.o.bar_focus
                     && self.bottom_bar_shown() =>
             {
                 return self.activate(stop);
             }
             overlay::Event::Tab { back } if self.bottom_bar_shown() => return self.tab_bar(back),
-            overlay::Event::Enter if matches!(self.purpose, Purpose::Search) => {
+            overlay::Event::Enter if matches!(self.o.purpose, Purpose::Search) => {
                 return self.run(actions::default_for(&config::current()));
             }
             // Ctrl+A: all the text on the screen.
@@ -1501,15 +1323,15 @@ impl App {
                 ctrl: true,
             } if self.reads_text() => {
                 // all of it once read (the rest is read now, nearest the pointer first)
-                self.want_all = true;
-                self.text_used = true;
+                self.o.want_all = true;
+                self.o.text_used = true;
                 let done = self.more_text();
                 return Task::batch([done, self.read_more()]);
             }
-            overlay::Event::Key { letter, ctrl } if matches!(self.purpose, Purpose::Search) => {
+            overlay::Event::Key { letter, ctrl } if matches!(self.o.purpose, Purpose::Search) => {
                 // Nothing selected: Ask AI, Translate and Edit take the whole screen
                 // (as the bottom bar's buttons do).
-                let bar = match actions::for_key(&self.labs, letter, ctrl).map(|a| a.id) {
+                let bar = match actions::for_key(&self.o.labs, letter, ctrl).map(|a| a.id) {
                     Some(id) if id == actions::ask::ACTION.id => Some(Message::AskButton),
                     Some(id) if id == actions::translate::ACTION.id => {
                         Some(Message::TranslateScreen)
@@ -1517,10 +1339,10 @@ impl App {
                     Some(id) if id == actions::edit::ACTION.id => Some(Message::EditScreen),
                     _ => None,
                 };
-                if let (None, Some(message)) = (self.selection, bar) {
+                if let (None, Some(message)) = (self.o.selection, bar) {
                     return self.update(message);
                 }
-                if let Some(action) = actions::for_key(&self.labs, letter, ctrl) {
+                if let Some(action) = actions::for_key(&self.o.labs, letter, ctrl) {
                     return self.run(action);
                 }
             }
@@ -1530,13 +1352,13 @@ impl App {
             overlay::Event::Key {
                 letter: 'c',
                 ctrl: true,
-            } if matches!(self.purpose, Purpose::Snip(_)) => {
-                let Purpose::Snip(snip) = &self.purpose else {
+            } if matches!(self.o.purpose, Purpose::Snip(_)) => {
+                let Purpose::Snip(snip) = &self.o.purpose else {
                     return Task::none();
                 };
                 let at = snip.pointer.unwrap_or(Point::ORIGIN);
-                let area = self.selection.map(|s| s.area);
-                let Some(snip::Next::Edit(area)) = snip.pick(area, at, self.screen) else {
+                let area = self.o.selection.map(|s| s.area);
+                let Some(snip::Next::Edit(area)) = snip.pick(area, at, self.o.screen) else {
                     return Task::none();
                 };
                 self.select(area);
@@ -1579,7 +1401,7 @@ impl App {
 
     /// The QR chip was clicked: copy its text, or open it (a link, on this click only).
     fn on_qr(&mut self, act: qr::Act) -> Task<Message> {
-        let Some(text) = self.scan.as_ref().and_then(|s| s.qr.clone()) else {
+        let Some(text) = self.o.scan.as_ref().and_then(|s| s.qr.clone()) else {
             return Task::none();
         };
         let failed = |e: String| {
@@ -1639,7 +1461,7 @@ impl App {
     /// Nothing of OpenCircle is in use: no overlay (editor, snip, panel), capture,
     /// live translate, Settings, onboarding or pinned image.
     fn is_idle(&self) -> bool {
-        self.frame.is_none()
+        self.o.frame.is_none()
             && self.capturing.is_none()
             && self.live.is_none()
             && self.hiding == Hiding::No
@@ -1680,7 +1502,7 @@ impl App {
 
     /// Shows `message` over the frame for a moment, then closes the overlay.
     fn toast_then_close(&mut self, message: &'static str) -> Task<Message> {
-        self.toast = Some(message);
+        self.o.toast = Some(message);
         background(|tx| {
             std::thread::sleep(Duration::from_millis(900));
             let _ = tx.unbounded_send(());
@@ -1691,38 +1513,39 @@ impl App {
     /// The frame can be zoomed: Circle to Search and quick actions (Snip, the
     /// editor and a translation draw at 1x).
     fn can_zoom(&self) -> bool {
-        matches!(self.purpose, Purpose::Search | Purpose::Quick(..))
-            && self.edit.is_none()
-            && self.translate.is_none()
+        matches!(self.o.purpose, Purpose::Search | Purpose::Quick(..))
+            && self.o.edit.is_none()
+            && self.o.translate.is_none()
     }
 
     /// The selection shows its handles (and can be resized / moved) while the
     /// action bar is there.
     fn handles(&self) -> bool {
         let snapped = self
+            .o
             .selection
             .is_some_and(|s| s.kind == overlay::Kind::Snap);
-        matches!(self.purpose, Purpose::Search)
-            && !self.drawing
-            && (self.panel.is_none() || snapped)
-            && self.edit.is_none()
-            && self.translate.is_none()
+        matches!(self.o.purpose, Purpose::Search)
+            && !self.o.drawing
+            && (self.o.panel.is_none() || snapped)
+            && self.o.edit.is_none()
+            && self.o.translate.is_none()
     }
 
     /// A press at `p` (image px) on the selection: a corner or an edge resizes
     /// it; inside moves it, unless the press is on text (that selects text).
     fn grab_at(&self, p: Point) -> Option<Grab> {
         // Selected text is not a box: a press on it starts a new selection.
-        let sel = (self.selection).filter(|s| self.handles() && s.kind != overlay::Kind::Word)?;
-        let on_screen = self.view.rect_to_screen(sel.area);
-        let grip = overlay::grip_at(sel.kind, on_screen, self.view.to_screen(p));
+        let sel = (self.o.selection).filter(|s| self.handles() && s.kind != overlay::Kind::Word)?;
+        let on_screen = self.o.view.rect_to_screen(sel.area);
+        let grip = overlay::grip_at(sel.kind, on_screen, self.o.view.to_screen(p));
         let inside = sel.area.contains(p)
-            && (self.alt
-                || self.text_mode.is_none() && self.text_at(p, word::Unit::Caret).is_none());
+            && (self.o.alt
+                || self.o.text_mode.is_none() && self.text_at(p, word::Unit::Caret).is_none());
         (grip.is_some() || inside).then(|| Grab {
             grip,
             from: p,
-            start: (sel, self.stroke.clone()),
+            start: (sel, self.o.stroke.clone()),
             moved: false,
         })
     }
@@ -1731,8 +1554,8 @@ impl App {
     /// never off the screen. A freehand loop scales with its box; anything
     /// else becomes that box.
     fn drag_grab(&mut self, p: Point) {
-        let Some(grab) = &mut self.grab else { return };
-        let zoom = self.view.zoom();
+        let Some(grab) = &mut self.o.grab else { return };
+        let zoom = self.o.view.zoom();
         grab.moved |= !overlay::is_tap(&[grab.from, p], zoom);
         if !grab.moved {
             return;
@@ -1742,8 +1565,8 @@ impl App {
         let delta = p - grab.from;
         let on = |to: Point| {
             Point::new(
-                to.x.clamp(0.0, self.screen.width),
-                to.y.clamp(0.0, self.screen.height),
+                to.x.clamp(0.0, self.o.screen.width),
+                to.y.clamp(0.0, self.o.screen.height),
             )
         };
         let area = match grab.grip {
@@ -1761,70 +1584,71 @@ impl App {
                 on(overlay::corner(start.area, e) + delta),
                 min,
             ),
-            None => overlay::keep_inside(start.area + delta, self.screen),
+            None => overlay::keep_inside(start.area + delta, self.o.screen),
         };
         let kind = match start.kind {
             overlay::Kind::Loop | overlay::Kind::Scribble | overlay::Kind::Snap => start.kind,
             overlay::Kind::Drag | overlay::Kind::Word => overlay::Kind::Drag,
         };
-        self.morph = None;
-        self.stroke = overlay::refit(stroke, start.area, area);
-        self.selection = Some(overlay::Selection { area, kind });
-        self.word = None; // the words are no longer what is selected
+        self.o.morph = None;
+        self.o.stroke = overlay::refit(stroke, start.area, area);
+        self.o.selection = Some(overlay::Selection { area, kind });
+        self.o.word = None; // the words are no longer what is selected
     }
 
     /// An arrow key on the box (`overlay::Event::Arrow`): 1 px (Shift: 10) on
     /// the overlay, kept on the screen and over the minimum size.
     fn nudge(&mut self, dx: i8, dy: i8, resize: bool, big: bool) {
         let Some(sel) = self
+            .o
             .selection
             .filter(|s| self.handles() && s.kind != overlay::Kind::Word)
         else {
             return;
         };
-        let one = self.view.to_image(Point::new(1.0, 1.0)) - self.view.to_image(Point::ORIGIN);
+        let one = self.o.view.to_image(Point::new(1.0, 1.0)) - self.o.view.to_image(Point::ORIGIN);
         let by = Vector::new(dx as f32 * one.x, dy as f32 * one.y) * if big { 10.0 } else { 1.0 };
-        let min = overlay::MIN_SIDE / self.view.zoom();
+        let min = overlay::MIN_SIDE / self.o.view.zoom();
         let a = sel.area;
         let area = if resize {
             let fit = |len: f32, at: f32, max: f32| (len).min(max - at).max(min);
             Rectangle::new(
                 a.position(),
                 Size::new(
-                    fit(a.width + by.x, a.x, self.screen.width),
-                    fit(a.height + by.y, a.y, self.screen.height),
+                    fit(a.width + by.x, a.x, self.o.screen.width),
+                    fit(a.height + by.y, a.y, self.o.screen.height),
                 ),
             )
         } else {
-            overlay::keep_inside(a + by, self.screen)
+            overlay::keep_inside(a + by, self.o.screen)
         };
-        self.morph = None;
-        self.panel = None;
-        self.text_mode = None;
-        self.scan = None;
-        self.stroke = overlay::refit(&self.stroke, a, area);
-        self.selection = Some(overlay::Selection { area, ..sel });
-        self.word = None;
+        self.o.morph = None;
+        self.o.panel = None;
+        self.o.text_mode = None;
+        self.o.scan = None;
+        self.o.stroke = overlay::refit(&self.o.stroke, a, area);
+        self.o.selection = Some(overlay::Selection { area, ..sel });
+        self.o.word = None;
         self.remember_region();
     }
 
     /// The selection on the shown monitor, for `last_region`.
     fn remember_region(&mut self) {
-        if let Some(sel) = self.selection {
-            self.regions.retain(|(origin, _)| *origin != self.origin);
-            self.regions.push((self.origin, sel.area));
+        if let Some(sel) = self.o.selection {
+            self.regions.retain(|(origin, _)| *origin != self.o.origin);
+            self.regions.push((self.o.origin, sel.area));
         }
     }
 
     /// A selection was made (drawn, moved, a word tapped): remembered, and a
     /// quick action waiting for it runs. No selection: the stroke goes.
     fn selected(&mut self) -> Task<Message> {
-        if self.selection.is_none() {
-            self.stroke.clear();
+        if self.o.selection.is_none() {
+            self.o.stroke.clear();
             return Task::none();
         }
         self.remember_region();
-        match (&self.purpose, self.selection) {
+        match (&self.o.purpose, self.o.selection) {
             (Purpose::Quick(quick, _), _) => {
                 let quick = *quick;
                 self.run_quick(quick)
@@ -1840,32 +1664,32 @@ impl App {
     /// otherwise OCR reads around the tap on a thread. Without the OCR models a
     /// tap does nothing (it never asks to download them).
     fn tap(&mut self, at: Point) -> Task<Message> {
-        if self.selection.is_none() {
-            self.stroke.clear(); // the tap's own dot
+        if self.o.selection.is_none() {
+            self.o.stroke.clear(); // the tap's own dot
         }
         if self.reads_text() {
-            if self.screen_text.knows(at.y) {
+            if self.o.screen_text.knows(at.y) {
                 return Task::none(); // read: no text here
             }
             // the word there once its band is read (a triple tap: the line)
-            let unit = match self.clicks {
+            let unit = match self.o.clicks {
                 Some((_, _, n)) if n >= 3 => word::Unit::Line,
                 _ => word::Unit::Word,
             };
-            self.awaits = Some((at, Await::Tap(unit)));
+            self.o.awaits = Some((at, Await::Tap(unit)));
             return self.read_more();
         }
         // A click on a selection keeps it unless a word is found there.
-        self.read_words(word::region(at, self.screen), at, false)
+        self.read_words(word::region(at, self.o.screen), at, false)
     }
 
     /// A press at `p` (image px) on the screen's text read there (main mode
     /// only): the caret there, or its word or line (`unit`).
     fn text_at(&self, p: Point, unit: word::Unit) -> Option<word::Picked> {
-        let main = matches!(self.purpose, Purpose::Search) && self.translate.is_none();
-        let all = Rectangle::with_size(self.screen);
-        let read = main && self.screen_text.knows(p.y);
-        read.then(|| word::Picked::new(self.screen_text.lines(), all, p, unit))?
+        let main = matches!(self.o.purpose, Purpose::Search) && self.o.translate.is_none();
+        let all = Rectangle::with_size(self.o.screen);
+        let read = main && self.o.screen_text.knows(p.y);
+        read.then(|| word::Picked::new(self.o.screen_text.lines(), all, p, unit))?
     }
 
     /// Counts a press at `p` (image px) as the first, second or third click in
@@ -1873,11 +1697,11 @@ impl App {
     /// selects on text.
     fn click(&mut self, p: Point) -> word::Unit {
         let now = Instant::now();
-        let n = match self.clicks {
+        let n = match self.o.clicks {
             Some((at, last, n)) if now - at <= DOUBLE_CLICK && last.distance(p) <= 4.0 => n + 1,
             _ => 1,
         };
-        self.clicks = Some((now, p, n));
+        self.o.clicks = Some((now, p, n));
         match n {
             1 => word::Unit::Caret,
             2 => word::Unit::Word,
@@ -1889,18 +1713,18 @@ impl App {
     /// there, unless the stroke loops, which makes it a circle after all.
     /// Into rows not read yet: they are read first (`read_more`).
     fn drag_text(&mut self, p: Point) -> Task<Message> {
-        let Some(stroke) = &mut self.text_press else {
+        let Some(stroke) = &mut self.o.text_press else {
             return Task::none();
         };
         stroke.push(p);
-        if overlay::winds(stroke, self.view.zoom()) {
-            self.stroke = self.text_press.take().unwrap_or_default();
-            self.drawing = true;
-            self.word = None;
-            self.selection = None;
+        if overlay::winds(stroke, self.o.view.zoom()) {
+            self.o.stroke = self.o.text_press.take().unwrap_or_default();
+            self.o.drawing = true;
+            self.o.word = None;
+            self.o.selection = None;
             return Task::none();
         }
-        if let Some(word) = &mut self.word
+        if let Some(word) = &mut self.o.word
             && word.extend(p)
         {
             self.select_word();
@@ -1912,22 +1736,27 @@ impl App {
     /// began on text becomes a text selection to where the pointer is now
     /// (a loop stays a circle, `drag_text`).
     fn drag_became_text(&mut self) {
-        let Some(&start) = self.stroke.first().filter(|_| self.drawing && !self.adding) else {
+        let Some(&start) = self
+            .o
+            .stroke
+            .first()
+            .filter(|_| self.o.drawing && !self.o.adding)
+        else {
             return;
         };
         let Some(word) = self.text_at(start, word::Unit::Caret) else {
             return;
         };
-        let stroke = std::mem::take(&mut self.stroke);
-        self.drawing = false;
-        self.word = Some(word);
-        self.text_used = true;
+        let stroke = std::mem::take(&mut self.o.stroke);
+        self.o.drawing = false;
+        self.o.word = Some(word);
+        self.o.text_used = true;
         self.select_word();
-        self.text_press = Some(vec![start]);
+        self.o.text_press = Some(vec![start]);
         for &p in &stroke[1..] {
-            match self.text_press {
+            match self.o.text_press {
                 Some(_) => _ = self.drag_text(p), // (the caller reads on)
-                None => self.stroke.push(p),      // it looped: a circle after all
+                None => self.o.stroke.push(p),    // it looped: a circle after all
             }
         }
     }
@@ -1935,25 +1764,25 @@ impl App {
     /// Main mode without the OCR models: the note over the bar says so and
     /// offers them (`Reader::Missing`). Nothing is read at open (#123).
     fn note_reader(&mut self) {
-        if matches!(self.purpose, Purpose::Search) && !self.ocr_ready && !self.system_text() {
-            self.reader = Reader::Missing(ocr::download_size());
+        if matches!(self.o.purpose, Purpose::Search) && !self.o.ocr_ready && !self.system_text() {
+            self.o.reader = Reader::Missing(ocr::download_size());
         }
     }
 
     /// Main mode's text can be read: Windows OCR or the OCR models here, no
     /// translation shown.
     fn reads_text(&self) -> bool {
-        (self.ocr_ready || self.system_text())
-            && self.frame.is_some()
-            && matches!(self.purpose, Purpose::Search)
-            && self.translate.is_none()
+        (self.o.ocr_ready || self.system_text())
+            && self.o.frame.is_some()
+            && matches!(self.o.purpose, Purpose::Search)
+            && self.o.translate.is_none()
     }
 
     /// Windows OCR reads this opening's text (#62): decided at its first read,
     /// until then what `ocr::route` says now.
     fn system_text(&self) -> bool {
-        let route = || ocr::route(self.behaviour.text_reader, ocr::system::known());
-        self.text_by.unwrap_or_else(route) == ocr::Source::System
+        let route = || ocr::route(self.o.behaviour.text_reader, ocr::system::known());
+        self.o.text_by.unwrap_or_else(route) == ocr::Source::System
     }
 
     /// After the opening animation: Windows OCR reads the whole screen (#62)
@@ -1966,7 +1795,12 @@ impl App {
         if self.system_text() {
             return self.read_more();
         }
-        let held = self.helper.as_ref().map(Arc::downgrade).unwrap_or_default();
+        let held = self
+            .o
+            .helper
+            .as_ref()
+            .map(Arc::downgrade)
+            .unwrap_or_default();
         let opening = self.opening;
         background(move |tx| {
             // after the bar has settled too; closed meanwhile: nothing starts
@@ -1985,33 +1819,33 @@ impl App {
     /// unread rows, a tap, a Shift+click) first; then, once text was used
     /// (or Ctrl+A waits), the rest, nearest the pointer first.
     fn read_more(&mut self) -> Task<Message> {
-        if self.reading.is_some() || !self.reads_text() {
+        if self.o.reading.is_some() || !self.reads_text() {
             return Task::none();
         }
         // Windows OCR: the whole screen at once, the first time (from the
         // capture, `open`; else after the opening animation, `warm`)
         if self.system_text() {
-            if self.text_by.is_some() {
+            if self.o.text_by.is_some() {
                 return Task::none(); // read (or being read)
             }
-            self.text_by = Some(ocr::Source::System);
-            return self.read_band(Rectangle::with_size(self.screen), false);
+            self.o.text_by = Some(ocr::Source::System);
+            return self.read_band(Rectangle::with_size(self.o.screen), false);
         }
-        self.text_by = Some(ocr::Source::Helper);
-        let text = &self.screen_text;
-        let pressed = (self.drawing && !self.adding)
-            .then(|| self.stroke.first().copied())
+        self.o.text_by = Some(ocr::Source::Helper);
+        let text = &self.o.screen_text;
+        let pressed = (self.o.drawing && !self.o.adding)
+            .then(|| self.o.stroke.first().copied())
             .flatten();
-        let dragged = self.text_press.as_ref().and_then(|s| s.last().copied());
-        let touched = [dragged, pressed, self.awaits.map(|(p, _)| p)]
+        let dragged = self.o.text_press.as_ref().and_then(|s| s.last().copied());
+        let touched = [dragged, pressed, self.o.awaits.map(|(p, _)| p)]
             .into_iter()
             .flatten()
             .find(|p| !text.knows(p.y));
         let (band, gently) = match touched {
-            Some(p) => (word::Screen::band(p.y, self.screen), false),
-            None if self.want_all || self.text_used => {
-                match text.next(self.pointer.y, self.screen) {
-                    Some(band) => (band, !self.want_all), // (Ctrl+A: the user waits)
+            Some(p) => (word::Screen::band(p.y, self.o.screen), false),
+            None if self.o.want_all || self.o.text_used => {
+                match text.next(self.o.pointer.y, self.o.screen) {
+                    Some(band) => (band, !self.o.want_all), // (Ctrl+A: the user waits)
                     None => return Task::none(),
                 }
             }
@@ -2029,25 +1863,30 @@ impl App {
             height,
             pixels,
             ..
-        }) = &self.frame
+        }) = &self.o.frame
         else {
             return Task::none();
         };
         let (width, height, pixels) = (*width, *height, pixels.clone());
-        let Some([x0, y0, ..]) = actions::crop_bounds(width, height, self.scale, band) else {
+        let Some([x0, y0, ..]) = actions::crop_bounds(width, height, self.o.scale, band) else {
             return Task::none();
         };
         // only the lines it is read for (frame px in the crop)
-        let Some((top, bottom)) = self.screen_text.unread(band, self.screen) else {
+        let Some((top, bottom)) = self.o.screen_text.unread(band, self.o.screen) else {
             return Task::none();
         };
-        let at = |y: f32| ((y * self.scale) as u32).saturating_sub(y0);
+        let at = |y: f32| ((y * self.o.scale) as u32).saturating_sub(y0);
         let rows = (at(top), at(bottom));
-        self.reading = Some(band);
-        let (scale, opening) = (self.scale, self.opening);
-        let held = self.helper.as_ref().map(Arc::downgrade).unwrap_or_default();
+        self.o.reading = Some(band);
+        let (scale, opening) = (self.o.scale, self.opening);
+        let held = self
+            .o
+            .helper
+            .as_ref()
+            .map(Arc::downgrade)
+            .unwrap_or_default();
         let system =
-            (self.text_by == Some(ocr::Source::System)).then_some(self.behaviour.text_reader);
+            (self.o.text_by == Some(ocr::Source::System)).then_some(self.o.behaviour.text_reader);
         background(move |tx| {
             // closed meanwhile: nothing to read for (and no helper started)
             let Some(_held) = held.upgrade() else {
@@ -2091,7 +1930,7 @@ impl App {
     /// The held release (and the events after it) go on, now that the band
     /// under the press is read (or failed): a text selection or a stroke.
     fn release_held(&mut self) -> Task<Message> {
-        let Some(events) = self.held.take() else {
+        let Some(events) = self.o.held.take() else {
             return Task::none();
         };
         let mut tasks = vec![self.on_overlay(overlay::Event::Release)];
@@ -2104,31 +1943,31 @@ impl App {
     /// a text selection, and a tap, Shift+click or Ctrl+A waiting for it is
     /// done.
     fn more_text(&mut self) -> Task<Message> {
-        let all = Rectangle::with_size(self.screen);
-        if let Some(word) = &mut self.word {
-            word.reread(self.screen_text.lines(), all);
-            if let Some(&p) = self.text_press.as_ref().and_then(|s| s.last()) {
+        let all = Rectangle::with_size(self.o.screen);
+        if let Some(word) = &mut self.o.word {
+            word.reread(self.o.screen_text.lines(), all);
+            if let Some(&p) = self.o.text_press.as_ref().and_then(|s| s.last()) {
                 word.extend(p);
             }
             self.select_word();
         }
         self.drag_became_text();
         let mut done = Task::none();
-        if let Some((at, wait)) = self.awaits
-            && self.screen_text.knows(at.y)
+        if let Some((at, wait)) = self.o.awaits
+            && self.o.screen_text.knows(at.y)
         {
-            self.awaits = None;
+            self.o.awaits = None;
             match wait {
                 Await::Tap(unit) => {
                     if let Some(word) = self.text_at(at, unit) {
-                        self.word = Some(word);
-                        self.text_used = true;
+                        self.o.word = Some(word);
+                        self.o.text_used = true;
                         self.select_word();
                         done = self.selected();
                     }
                 }
                 Await::Extend => {
-                    if let Some(word) = &mut self.word
+                    if let Some(word) = &mut self.o.word
                         && word.extend(at)
                     {
                         self.select_word();
@@ -2137,9 +1976,9 @@ impl App {
                 }
             }
         }
-        if self.want_all && self.screen_text.is_whole(self.screen.height) {
-            self.want_all = false;
-            self.word = word::Picked::all(self.screen_text.lines(), all);
+        if self.o.want_all && self.o.screen_text.is_whole(self.o.screen.height) {
+            self.o.want_all = false;
+            self.o.word = word::Picked::all(self.o.screen_text.lines(), all);
             self.select_word();
             done = self.selected();
         }
@@ -2153,27 +1992,27 @@ impl App {
             height,
             pixels,
             ..
-        }) = &self.frame
+        }) = &self.o.frame
         else {
             return None;
         };
-        let all = Rectangle::with_size(self.screen);
-        actions::crop(pixels, *width, *height, self.scale, all)
+        let all = Rectangle::with_size(self.o.screen);
+        actions::crop(pixels, *width, *height, self.o.scale, all)
     }
 
     /// The picked words stretch to `at` (image px), where a drag ended or a Shift
     /// click landed. Past the lines already read, OCR reads a band across the
     /// screen first (on a thread, through the warm helper).
     fn extend_words(&mut self, at: Point) -> Task<Message> {
-        if self.word.is_some() && self.reads_text() && !self.screen_text.knows(at.y) {
-            self.awaits = Some((at, Await::Extend));
+        if self.o.word.is_some() && self.reads_text() && !self.o.screen_text.knows(at.y) {
+            self.o.awaits = Some((at, Await::Extend));
             return self.read_more();
         }
-        let Some(word) = &mut self.word else {
+        let Some(word) = &mut self.o.word else {
             return Task::none();
         };
         if !word.covers(at) {
-            let band = word.band(at, self.screen);
+            let band = word.band(at, self.o.screen);
             return self.read_words(band, at, true);
         }
         if word.extend(at) {
@@ -2191,7 +2030,7 @@ impl App {
             height,
             pixels,
             ..
-        }) = &self.frame
+        }) = &self.o.frame
         else {
             return Task::none();
         };
@@ -2199,8 +2038,8 @@ impl App {
             return Task::none();
         }
         let (Some([x0, y0, ..]), Some(crop)) = (
-            actions::crop_bounds(*width, *height, self.scale, region),
-            actions::crop(pixels, *width, *height, self.scale, region),
+            actions::crop_bounds(*width, *height, self.o.scale, region),
+            actions::crop(pixels, *width, *height, self.o.scale, region),
         ) else {
             return Task::none();
         };
@@ -2222,7 +2061,7 @@ impl App {
     /// OCR for tap or drag `what` is back: the word under the tap is the
     /// selection, or the picked words stretch to where the drag ended.
     fn on_tapped(&mut self, what: WordRead, read: Result<Vec<TextBlock>, String>) -> Task<Message> {
-        if what.id != self.taps || self.frame.is_none() {
+        if what.id != self.taps || self.o.frame.is_none() {
             return Task::none(); // pressed again meanwhile, or closed
         }
         let blocks = match read {
@@ -2232,18 +2071,18 @@ impl App {
                 return Task::none();
             }
         };
-        let mut lines = word::lines(blocks, what.origin, self.scale);
+        let mut lines = word::lines(blocks, what.origin, self.o.scale);
         if let Some(image::Handle::Rgba {
             width,
             height,
             pixels,
             ..
-        }) = &self.frame
+        }) = &self.o.frame
         {
-            word::measure(&mut lines, pixels, *width, *height, self.scale);
+            word::measure(&mut lines, pixels, *width, *height, self.o.scale);
         }
         if what.extend {
-            let Some(word) = &mut self.word else {
+            let Some(word) = &mut self.o.word else {
                 return Task::none();
             };
             word.reread(lines, what.region);
@@ -2253,7 +2092,7 @@ impl App {
             else {
                 return Task::none(); // no text there
             };
-            self.word = Some(picked);
+            self.o.word = Some(picked);
         }
         self.select_word();
         self.selected()
@@ -2263,15 +2102,15 @@ impl App {
     /// (the stroke holds a top-left / bottom-right pair for each). Nothing
     /// selected yet (a caret): no selection.
     fn select_word(&mut self) {
-        self.others.clear();
-        self.selection = None;
-        self.stroke.clear();
-        if let Some(word) = self.word.as_ref().filter(|w| !w.is_empty()) {
-            self.selection = Some(overlay::Selection {
+        self.o.others.clear();
+        self.o.selection = None;
+        self.o.stroke.clear();
+        if let Some(word) = self.o.word.as_ref().filter(|w| !w.is_empty()) {
+            self.o.selection = Some(overlay::Selection {
                 area: word.area(),
                 kind: overlay::Kind::Word,
             });
-            self.stroke = (word.rects().iter())
+            self.o.stroke = (word.rects().iter())
                 .flat_map(|r| [r.position(), r.position() + Vector::from(r.size())])
                 .collect();
         }
@@ -2279,43 +2118,44 @@ impl App {
 
     /// Makes `area` the selection, drawn as a dragged rectangle.
     fn select(&mut self, area: Rectangle) {
-        self.selection = Some(overlay::Selection {
+        self.o.selection = Some(overlay::Selection {
             area,
             kind: overlay::Kind::Drag,
         });
-        self.stroke = vec![area.position(), area.position() + Vector::from(area.size())];
+        self.o.stroke = vec![area.position(), area.position() + Vector::from(area.size())];
     }
 
     /// A finished stroke snaps to a box (`[selection] style`; not in Snip).
     fn snaps(&self) -> bool {
-        self.behaviour.style == SelectStyle::Snap
-            && matches!(self.purpose, Purpose::Search | Purpose::Quick(..))
+        self.o.behaviour.style == SelectStyle::Snap
+            && matches!(self.o.purpose, Purpose::Search | Purpose::Quick(..))
     }
 
     /// The selection's box (image px), or nothing.
     fn area(&self) -> Rectangle {
-        self.selection.map(|s| s.area).unwrap_or_default()
+        self.o.selection.map(|s| s.area).unwrap_or_default()
     }
 
     /// What runs by itself once a selection is made.
     fn auto_actions(&self) -> &'static [&'static Action] {
         let word = self
+            .o
             .selection
             .is_some_and(|s| s.kind == overlay::Kind::Word);
         // (after the snap: the Settled message runs them)
-        if !matches!(self.purpose, Purpose::Search)
+        if !matches!(self.o.purpose, Purpose::Search)
             || word
-            || self.selection.is_none()
+            || self.o.selection.is_none()
             || self.settling()
         {
             return &[];
         }
-        auto_targets(self.behaviour)
+        auto_targets(self.o.behaviour)
     }
 
     /// Words picked in a snapped box (select-text mode), not still being dragged.
     fn picked_in_box(&self) -> bool {
-        (self.text_mode.as_ref()).is_some_and(|m| m.picked.is_some() && !m.picking)
+        (self.o.text_mode.as_ref()).is_some_and(|m| m.picked.is_some() && !m.picking)
     }
 
     /// Runs `auto_actions` (Lens and Ask AI: the Lens page opens in the browser
@@ -2329,7 +2169,7 @@ impl App {
     /// word in it becomes pickable. Without the OCR models the Text panel asks
     /// before downloading them.
     fn select_text(&mut self) -> Task<Message> {
-        if self.text_mode.take().is_some() {
+        if self.o.text_mode.take().is_some() {
             return Task::none(); // "Done"
         }
         if !text::models_present() {
@@ -2341,24 +2181,24 @@ impl App {
             height,
             pixels,
             ..
-        }) = &self.frame
+        }) = &self.o.frame
         else {
             return Task::none();
         };
         let (Some([x0, y0, ..]), Some(crop)) = (
-            actions::crop_bounds(*width, *height, self.scale, area),
-            actions::crop(pixels, *width, *height, self.scale, area),
+            actions::crop_bounds(*width, *height, self.o.scale, area),
+            actions::crop(pixels, *width, *height, self.o.scale, area),
         ) else {
             return Task::none();
         };
-        self.panel = None;
-        self.text_mode = Some(TextMode {
+        self.o.panel = None;
+        self.o.text_mode = Some(TextMode {
             lines: None,
             boxes: Vec::new(),
             picked: None,
             picking: false,
         });
-        let (scale, frame) = (self.scale, (*width, *height, pixels.clone()));
+        let (scale, frame) = (self.o.scale, (*width, *height, pixels.clone()));
         background(move |tx| {
             let read = ocr::recognize_in_child(&crop.rgba, crop.width, crop.height);
             let lines = read.map(|blocks| {
@@ -2375,7 +2215,7 @@ impl App {
     /// moved on or the mode was left).
     fn on_text_lines(&mut self, area: Rectangle, read: Result<Vec<word::Line>, String>) {
         let same = self.area() == area;
-        let Some(mode) = self.text_mode.as_mut().filter(|_| same) else {
+        let Some(mode) = self.o.text_mode.as_mut().filter(|_| same) else {
             return;
         };
         match read {
@@ -2385,7 +2225,7 @@ impl App {
             }
             Err(e) => {
                 crate::log!("[opencircle] select text failed: {e}");
-                self.text_mode = None;
+                self.o.text_mode = None;
             }
         }
     }
@@ -2393,7 +2233,7 @@ impl App {
     /// A press at `p` (image px) picks words: select-text mode is on, read, and
     /// `p` is in the box.
     fn picks_text_at(&self, p: Point) -> bool {
-        self.text_mode.as_ref().is_some_and(|m| m.lines.is_some())
+        self.o.text_mode.as_ref().is_some_and(|m| m.lines.is_some())
             && self.area().contains(p)
             && self.grab_at(p).is_none() // (a bracket or edge adjusts the box)
     }
@@ -2401,9 +2241,9 @@ impl App {
     /// The select-text popup: Copy closes with the words copied; Translate and
     /// Search make the words' box the selection and translate it in place / search it.
     fn on_picked(&mut self, act: PickAct) -> Task<Message> {
-        let picked = (self.text_mode.as_ref())
+        let picked = (self.o.text_mode.as_ref())
             .and_then(|m| m.picked.clone())
-            .or_else(|| self.word.clone());
+            .or_else(|| self.o.word.clone());
         let Some(picked) = picked else {
             return Task::none();
         };
@@ -2423,9 +2263,9 @@ impl App {
         }
         // Words picked in a snapped box: their box becomes the selection (a
         // word selection already is it).
-        if self.text_mode.take().is_some() {
-            self.morph = None;
-            (self.selection, self.stroke) = {
+        if self.o.text_mode.take().is_some() {
+            self.o.morph = None;
+            (self.o.selection, self.o.stroke) = {
                 let (sel, stroke) = overlay::snap(picked.area());
                 (Some(sel), stroke)
             };
@@ -2436,8 +2276,8 @@ impl App {
 
     /// Picked words (a word selection, or select-text mode's picks): their text.
     fn picked_text(&self) -> Option<String> {
-        let picked = (self.text_mode.as_ref()).and_then(|m| m.picked.as_ref());
-        picked.or(self.word.as_ref()).map(word::Picked::text)
+        let picked = (self.o.text_mode.as_ref()).and_then(|m| m.picked.as_ref());
+        picked.or(self.o.word.as_ref()).map(word::Picked::text)
     }
 
     /// Search in browser on a text selection: the text, as a Google search in
@@ -2471,9 +2311,9 @@ impl App {
         let picked = self.picked_in_box();
         match pill {
             BarButton::Search => self.run(&lens::ACTION),
-            BarButton::CopyText if picked || self.word.is_some() => self.on_picked(PickAct::Copy),
+            BarButton::CopyText if picked || self.o.word.is_some() => self.on_picked(PickAct::Copy),
             BarButton::CopyText => self.run_quick(Quick::CopyText),
-            BarButton::Translate if self.selection.is_none() => {
+            BarButton::Translate if self.o.selection.is_none() => {
                 self.update(Message::TranslateScreen)
             }
             BarButton::Translate if picked => self.on_picked(PickAct::Translate),
@@ -2487,7 +2327,7 @@ impl App {
         let mine = self
             .regions
             .iter()
-            .find(|(origin, _)| *origin == self.origin);
+            .find(|(origin, _)| *origin == self.o.origin);
         mine.map(|(_, area)| *area)
     }
 
@@ -2497,7 +2337,7 @@ impl App {
     fn run(&mut self, action: &'static Action) -> Task<Message> {
         // Search in browser on picked words: their text, not a picture of them.
         if action.id == lens::ACTION.id
-            && self.edit.is_none()
+            && self.o.edit.is_none()
             && let Some(text) = self.picked_text()
         {
             return self.search_text(text);
@@ -2509,9 +2349,9 @@ impl App {
             // (the bar's or Ctrl+C) copies exactly their text.
             Run::Finish(_)
                 if action.id == copy::ACTION.id
-                    && self.edit.is_none()
-                    && (self.word.is_some()
-                        || (self.text_mode.as_ref()).is_some_and(|m| m.picked.is_some())) =>
+                    && self.o.edit.is_none()
+                    && (self.o.word.is_some()
+                        || (self.o.text_mode.as_ref()).is_some_and(|m| m.picked.is_some())) =>
             {
                 return self.on_picked(PickAct::Copy);
             }
@@ -2557,7 +2397,7 @@ impl App {
         &mut self,
         work: impl FnOnce() -> Result<String, String> + Send + 'static,
     ) -> Task<Message> {
-        let place = (self.origin, self.screen, self.scale);
+        let place = (self.o.origin, self.o.screen, self.o.scale);
         let done = background(move |tx| {
             let _ = tx.unbounded_send(work());
         })
@@ -2589,7 +2429,7 @@ impl App {
     /// Runs a quick action on the selection (no action bar). Only once: a new
     /// selection after it gets the bar.
     fn run_quick(&mut self, quick: Quick) -> Task<Message> {
-        self.purpose = Purpose::Search;
+        self.o.purpose = Purpose::Search;
         match quick {
             Quick::Action(action) => self.run(action),
             // No OCR models yet: the Text panel asks before downloading them.
@@ -2598,7 +2438,7 @@ impl App {
                 let Some(crop) = self.crop() else {
                     return Task::none();
                 };
-                self.toast = Some("Reading text…");
+                self.o.toast = Some("Reading text…");
                 background(move |tx| {
                     let read = text::read(&crop, |_| {});
                     let copied = read.and_then(|t| match t.trim() {
@@ -2625,12 +2465,12 @@ impl App {
     /// place on screen; the toolbar takes the bar's place. Edits made before
     /// (then Back) are still there.
     fn open_editor(&mut self) -> Task<Message> {
-        if !self.labs.has(labs::Feature::Editor) {
+        if !self.o.labs.has(labs::Feature::Editor) {
             return Task::none();
         }
-        self.panel = None;
-        self.view = self.view.reset(); // the editor works at 1x
-        if let Some(edit) = &mut self.edit {
+        self.o.panel = None;
+        self.o.view = self.o.view.reset(); // the editor works at 1x
+        if let Some(edit) = &mut self.o.edit {
             edit.reopen();
             return Task::none();
         }
@@ -2642,17 +2482,17 @@ impl App {
                 ..
             }),
             Some(selection),
-        ) = (&self.frame, self.selection)
+        ) = (&self.o.frame, self.o.selection)
         else {
             return Task::none();
         };
-        let bounds = actions::crop_bounds(*width, *height, self.scale, selection.area);
-        let crop = actions::crop(pixels, *width, *height, self.scale, selection.area);
+        let bounds = actions::crop_bounds(*width, *height, self.o.scale, selection.area);
+        let crop = actions::crop(pixels, *width, *height, self.o.scale, selection.area);
         if let (Some(bounds), Some(crop)) = (bounds, crop) {
-            let mut edit = Editing::in_place(crop, bounds, self.scale);
+            let mut edit = Editing::in_place(crop, bounds, self.o.scale);
             // Scrolling capture needs the page under the area: Snip, in place.
-            edit.editor.scroll = matches!(&self.purpose, Purpose::Snip(s) if s.can_scroll());
-            self.edit = Some(edit);
+            edit.editor.scroll = matches!(&self.o.purpose, Purpose::Snip(s) if s.can_scroll());
+            self.o.edit = Some(edit);
         }
         Task::none()
     }
@@ -2662,7 +2502,7 @@ impl App {
         if matches!(msg, editor::Message::Back) && std::env::var_os(TEST_SHOT).is_some() {
             return self.test_shot();
         }
-        let Some(edit) = &mut self.edit else {
+        let Some(edit) = &mut self.o.edit else {
             return Task::none();
         };
         let out = edit.update(msg);
@@ -2673,33 +2513,33 @@ impl App {
                 height,
                 pixels,
                 ..
-            }) = &self.frame
-            && let Some(crop) = actions::crop(pixels, *width, *height, self.scale, area)
+            }) = &self.o.frame
+            && let Some(crop) = actions::crop(pixels, *width, *height, self.o.scale, area)
         {
-            edit.add(crop, work_area(self.screen, self.work_inset));
+            edit.add(crop, work_area(self.o.screen, self.o.work_inset));
         }
         match out {
             None => Task::none(),
             // Snip has no action bar: back to picking an area.
-            Some(Output::Back) if matches!(self.purpose, Purpose::Snip(_)) => {
-                self.edit = None;
-                self.selection = None;
-                self.stroke.clear();
+            Some(Output::Back) if matches!(self.o.purpose, Purpose::Snip(_)) => {
+                self.o.edit = None;
+                self.o.selection = None;
+                self.o.stroke.clear();
                 Task::none()
             }
             Some(Output::Back) => {
                 edit.back();
-                self.esc_back = true;
+                self.o.esc_back = true;
                 Task::none()
             }
             Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
             Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
-            Some(Output::Pin(_)) if !self.labs.has(labs::Feature::Pins) => Task::none(),
+            Some(Output::Pin(_)) if !self.o.labs.has(labs::Feature::Pins) => Task::none(),
             Some(Output::Pin(crop)) => self.pin(crop),
             // Scrolling capture of the area under the editor.
-            Some(Output::Scroll) => match self.selection {
+            Some(Output::Scroll) => match self.o.selection {
                 Some(selection) => {
-                    self.edit = None;
+                    self.o.edit = None;
                     self.start_scroll(selection.area)
                 }
                 None => Task::none(),
@@ -2711,14 +2551,17 @@ impl App {
 
     /// Pin: the overlay closes and the image floats where the selection was.
     fn pin(&mut self, crop: Crop) -> Task<Message> {
-        let at = (self.selection).map(|s| self.origin + Vector::new(s.area.x, s.area.y));
-        let pinned = self.windows.pin(crop, at, self.scale).map(Message::Windows);
+        let at = (self.o.selection).map(|s| self.o.origin + Vector::new(s.area.x, s.area.y));
+        let pinned = self
+            .windows
+            .pin(crop, at, self.o.scale)
+            .map(Message::Windows);
         Task::batch([self.close(), pinned])
     }
 
     /// The running scrolling capture.
     fn scroll(&self) -> Option<&snip::Scroll> {
-        match &self.purpose {
+        match &self.o.purpose {
             Purpose::Snip(snip) => snip.scroll.as_ref(),
             _ => None,
         }
@@ -2728,13 +2571,13 @@ impl App {
         // The timer ran out and the overlay is gone (hidden or closed): capture
         // again in that mode, unless something else opened meanwhile.
         if let snip::Msg::Shoot(kind) = msg {
-            if self.frame.is_some() || self.capturing.is_some() {
+            if self.o.frame.is_some() || self.capturing.is_some() {
                 return Task::none();
             }
             self.timed = true;
             return self.capture(Instant::now(), Some(kind));
         }
-        let Purpose::Snip(snip) = &mut self.purpose else {
+        let Purpose::Snip(snip) = &mut self.o.purpose else {
             return Task::none();
         };
         match msg {
@@ -2753,8 +2596,8 @@ impl App {
             snip::Msg::Done(stitched) => {
                 snip.scroll = None;
                 let visible = windows::hide_from_capture(self.overlay, false).map(Message::Windows);
-                self.selection = None;
-                self.stroke.clear();
+                self.o.selection = None;
+                self.o.stroke.clear();
                 let next = match stitched {
                     Ok(crop) if crop.height > 0 => self.snip_captured(Some(crop), true),
                     Ok(_) => Task::none(),
@@ -2773,8 +2616,8 @@ impl App {
                     return Task::none();
                 };
                 let foreground = snip.foreground;
-                self.selection = None;
-                self.stroke.clear();
+                self.o.selection = None;
+                self.o.stroke.clear();
                 if !self.can_hide {
                     // Wayland: no pill (the window can't shrink or hide), so it
                     // closes, waits, and captures again.
@@ -2816,10 +2659,10 @@ impl App {
                 if toast.in_place {
                     let _ = self.open_editor();
                 } else {
-                    self.edit = Some(Editing::fitted(
+                    self.o.edit = Some(Editing::fitted(
                         toast.crop,
-                        work_area(self.screen, self.work_inset),
-                        self.scale,
+                        work_area(self.o.screen, self.o.work_inset),
+                        self.o.scale,
                     ));
                 }
                 self.show()
@@ -2838,14 +2681,14 @@ impl App {
             // monitor's frame was frozen with this one), unless a drag, the
             // editor or a pill holds this one.
             snip::Msg::Left => {
-                if self.drawing || self.edit.is_some() {
+                if self.o.drawing || self.o.edit.is_some() {
                     return Task::none();
                 }
                 let Some((place, image)) = capture::pointer().and_then(|p| snip.follow(p)) else {
                     return Task::none();
                 };
-                self.selection = None;
-                self.stroke.clear();
+                self.o.selection = None;
+                self.o.stroke.clear();
                 self.set_frame(image, place.scale, place.logical_origin(), place.size());
                 // Full-screen stays on its monitor: windowed first.
                 window::set_mode(self.overlay, Mode::Windowed).chain(self.show())
@@ -2863,8 +2706,8 @@ impl App {
             })
             .map(|read| Message::Snip(snip::Msg::Loaded(read))),
             snip::Msg::Loaded(Ok(crop)) => {
-                self.selection = None;
-                self.stroke.clear();
+                self.o.selection = None;
+                self.o.stroke.clear();
                 self.snip_captured(Some(crop), false)
             }
             snip::Msg::Loaded(Err(e)) => {
@@ -2881,17 +2724,17 @@ impl App {
 
     /// The window is only Snip's pill (scrolling, the timer, the toast).
     fn snip_pill(&self) -> bool {
-        matches!(&self.purpose, Purpose::Snip(s) if s.is_pill())
+        matches!(&self.o.purpose, Purpose::Snip(s) if s.is_pill())
     }
 
     /// Snip's "Copied" toast is showing.
     fn snip_toast(&self) -> bool {
-        matches!(&self.purpose, Purpose::Snip(s) if s.has_toast())
+        matches!(&self.o.purpose, Purpose::Snip(s) if s.has_toast())
     }
 
     /// Shrinks the overlay to the pill at the top of the monitor (no focus taken).
     fn pill_at_top(&self) -> Task<Message> {
-        let x = (self.screen.width - snip::PILL.width) / 2.0;
+        let x = (self.o.screen.width - snip::PILL.width) / 2.0;
         self.pill_window(Point::new(x.max(0.0), ASK_MARGIN))
     }
 
@@ -2910,7 +2753,7 @@ impl App {
             .chain(window::resize(self.overlay, snip::PILL))
             .chain(window::move_to(
                 self.overlay,
-                self.origin + Vector::new(at.x, at.y),
+                self.o.origin + Vector::new(at.x, at.y),
             ))
             // The window is exactly the pill: cut it to the pill's shape (no box).
             .chain(windows::cut(self.overlay, widgets::SURFACE_RADIUS).map(Message::Windows))
@@ -2967,7 +2810,7 @@ impl App {
             snip::remember(&crop);
         }
         // No editor (Labs): a snip is only copied.
-        let route = match self.labs.has(labs::Feature::Editor) {
+        let route = match self.o.labs.has(labs::Feature::Editor) {
             true => snip::route(config::current().snip.after),
             false => (true, false),
         };
@@ -2981,14 +2824,14 @@ impl App {
             if in_place {
                 return self.open_editor();
             }
-            self.edit = Some(Editing::fitted(
+            self.o.edit = Some(Editing::fitted(
                 crop,
-                work_area(self.screen, self.work_inset),
-                self.scale,
+                work_area(self.o.screen, self.o.work_inset),
+                self.o.scale,
             ));
             return Task::none();
         }
-        let Purpose::Snip(snip) = &mut self.purpose else {
+        let Purpose::Snip(snip) = &mut self.o.purpose else {
             return Task::none();
         };
         let id = snip.toast(crop.clone(), in_place);
@@ -3018,8 +2861,8 @@ impl App {
     fn snip_next(&mut self, next: Option<snip::Next>) -> Task<Message> {
         match next {
             None => {
-                self.selection = None;
-                self.stroke.clear();
+                self.o.selection = None;
+                self.o.stroke.clear();
                 Task::none()
             }
             Some(snip::Next::Edit(area)) => {
@@ -3033,17 +2876,18 @@ impl App {
     /// progress pill beside the area, so it is in none of the frames.
     fn start_scroll(&mut self, area: Rectangle) -> Task<Message> {
         let (Some(image::Handle::Rgba { width, height, .. }), Purpose::Snip(snip)) =
-            (&self.frame, &mut self.purpose)
+            (&self.o.frame, &mut self.o.purpose)
         else {
             return Task::none();
         };
-        let Some([x0, y0, x1, y1]) = actions::crop_bounds(*width, *height, self.scale, area) else {
+        let Some([x0, y0, x1, y1]) = actions::crop_bounds(*width, *height, self.o.scale, area)
+        else {
             return Task::none();
         };
-        let at = |v: f32, offset: u32| (v * self.scale).round() as i32 + offset as i32;
+        let at = |v: f32, offset: u32| (v * self.o.scale).round() as i32 + offset as i32;
         let region = (
-            at(self.origin.x, x0),
-            at(self.origin.y, y0),
+            at(self.o.origin.x, x0),
+            at(self.o.origin.y, y0),
             x1 - x0,
             y1 - y0,
         );
@@ -3061,7 +2905,7 @@ impl App {
         .map(Message::Snip);
         // An area as tall as the screen leaves the pill over it: it is kept out of
         // the frames (`hide_from_capture`, Windows; elsewhere it stays beside the area).
-        let at = bar::place(area, snip::PILL, self.screen);
+        let at = bar::place(area, snip::PILL, self.o.screen);
         self.pill_window(at)
             .chain(windows::hide_from_capture(self.overlay, true).map(Message::Windows))
             .chain(window::gain_focus(self.overlay))
@@ -3090,15 +2934,15 @@ impl App {
         self.panels = self.panels.wrapping_add(1);
         let id = self.panels;
         let (panel, task) = panel::Panel::open(kind, crop, question);
-        self.panel = Some((id, panel));
+        self.o.panel = Some((id, panel));
         task.map(move |msg| Message::Panel(id, msg))
     }
 
     fn on_panel(&mut self, id: u32, msg: panel::Msg) -> Task<Message> {
         // Every opened page is held, whichever panel is showing now.
         if let panel::Msg::LensOpened(Ok(page)) = &msg {
-            if self.frame.is_some() {
-                self.lens_pages.push(page.clone());
+            if self.o.frame.is_some() {
+                self.o.lens_pages.push(page.clone());
                 // The search is in the browser now: the overlay, its panel and
                 // pills must not stay on screen behind or over it. Close.
                 return self.close();
@@ -3106,18 +2950,18 @@ impl App {
                 page.clone().release(); // the overlay closed meanwhile
             }
         }
-        let Some((_, panel)) = self.panel.as_mut().filter(|(open, _)| *open == id) else {
+        let Some((_, panel)) = self.o.panel.as_mut().filter(|(open, _)| *open == id) else {
             return Task::none();
         };
         match msg {
             panel::Msg::Card(card::Event::Grab(how)) => {
-                self.card_drag = Some((how, None));
+                self.o.card_drag = Some((how, None));
                 self.frame_times.borrow_mut().clear();
             }
-            panel::Msg::Card(card::Event::Hover(on)) => self.card_hover = on,
+            panel::Msg::Card(card::Event::Hover(on)) => self.o.card_hover = on,
             panel::Msg::Card(card::Event::Reset) => self.card = None,
-            panel::Msg::Card(card::Event::Close) => self.panel = None,
-            panel::Msg::Cancel => self.panel = None,
+            panel::Msg::Card(card::Event::Close) => self.o.panel = None,
+            panel::Msg::Cancel => self.o.panel = None,
             panel::Msg::Search => return self.run(&lens::ACTION),
             // A card's focused field gave Ctrl+C back (nothing selected in it).
             panel::Msg::Key(keys::Keyed::Copy) => {
@@ -3152,7 +2996,7 @@ impl App {
     /// The selection cut out of the frozen frame, in physical pixels; with the
     /// edits once it was edited (Ask AI then sees the annotations).
     fn crop(&self) -> Option<Crop> {
-        if let Some(edit) = &self.edit {
+        if let Some(edit) = &self.o.edit {
             return Some(edit.image());
         }
         let (
@@ -3163,12 +3007,12 @@ impl App {
                 ..
             }),
             Some(selection),
-        ) = (&self.frame, self.selection)
+        ) = (&self.o.frame, self.o.selection)
         else {
             return None;
         };
-        let all = (self.others.iter()).fold(selection.area, |all, (s, _)| all.union(&s.area));
-        actions::crop(pixels, *width, *height, self.scale, all)
+        let all = (self.o.others.iter()).fold(selection.area, |all, (s, _)| all.union(&s.area));
+        actions::crop(pixels, *width, *height, self.o.scale, all)
     }
 
     /// Every selection's crop, in the order made, stacked top to bottom on white
@@ -3177,7 +3021,7 @@ impl App {
     // ponytail: one stacked image, not one image per selection: the Ask panel
     // (panel.rs) sends one; give `ai::Message` several images when it can.
     fn stacked(&self) -> Option<Crop> {
-        if self.others.is_empty() || self.edit.is_some() {
+        if self.o.others.is_empty() || self.o.edit.is_some() {
             return self.crop();
         }
         let Some(image::Handle::Rgba {
@@ -3185,13 +3029,14 @@ impl App {
             height,
             pixels,
             ..
-        }) = &self.frame
+        }) = &self.o.frame
         else {
             return None;
         };
-        let areas = (self.others.iter().map(|(s, _)| s.area)).chain(self.selection.map(|s| s.area));
+        let areas =
+            (self.o.others.iter().map(|(s, _)| s.area)).chain(self.o.selection.map(|s| s.area));
         let crops: Vec<Crop> = areas
-            .filter_map(|area| actions::crop(pixels, *width, *height, self.scale, area))
+            .filter_map(|area| actions::crop(pixels, *width, *height, self.o.scale, area))
             .collect();
         stack_crops(&crops)
     }
@@ -3202,42 +3047,10 @@ impl App {
         if let Some(scroll) = self.scroll() {
             scroll.stop();
         }
-        self.panel = None;
-        self.lens_pages.drain(..).for_each(lens::Held::release);
-        self.frame = None;
-        self.tiles = None;
+        // Everything the opening held goes at once (the panel, translate and
+        // song stop; the next show clears the window again).
+        std::mem::take(&mut self.o).finish();
         glass::set_frame(None, 1.0);
-        self.stroke = Vec::new();
-        self.selection = None;
-        self.others = Vec::new();
-        self.adding = false;
-        self.grab = None;
-        self.pan = None;
-        self.word = None;
-        self.screen_text = word::Screen::default();
-        self.reading = None;
-        self.awaits = None;
-        self.want_all = false;
-        self.held = None;
-        self.text_used = false;
-        self.reader = Reader::Idle;
-        self.text_by = None;
-        self.text_press = None;
-        self.ask = String::new();
-        self.drawing = false;
-        self.purpose = Purpose::Search;
-        self.edit = None;
-        self.toast = None;
-        self.scan = None;
-        self.translate = None;
-        self.helper = None;
-        self.morph = None;
-        self.text_mode = None;
-        self.bar_drag = None;
-        self.swap = 0.0;
-        self.esc_back = false;
-        self.song = None; // stops listening
-        self.reveal = None; // the next show clears it again
         if self.can_hide {
             // Gone at once: the hide steps draw the empty view (the theme's
             // background) full-screen, then restore the window from full-screen,
@@ -3276,14 +3089,14 @@ impl App {
         self.songs = self.songs.wrapping_add(1);
         let id = self.songs;
         // The song's card takes the result card's turn: one card at a time.
-        self.panel = None;
+        self.o.panel = None;
         let (session, work) = song::Session::start();
-        self.song = Some((id, session));
+        self.o.song = Some((id, session));
         work.map(move |msg| Message::Song(id, msg))
     }
 
     fn on_song(&mut self, id: u32, msg: song::Msg) -> Task<Message> {
-        let Some((current, session)) = &mut self.song else {
+        let Some((current, session)) = &mut self.o.song else {
             return Task::none();
         };
         if *current != id {
@@ -3292,7 +3105,7 @@ impl App {
         match session.update(msg) {
             song::Outcome::None => Task::none(),
             song::Outcome::Close => {
-                self.song = None;
+                self.o.song = None;
                 Task::none()
             }
             song::Outcome::Retry => self.start_song(),
@@ -3329,42 +3142,47 @@ impl App {
     /// frame) is translated on a thread, then swapped in.
     fn start_translate(&mut self) -> Task<Message> {
         let (Some(frame @ image::Handle::Rgba { width, height, .. }), Some(selection)) =
-            (&self.frame, self.selection)
+            (&self.o.frame, self.o.selection)
         else {
             return Task::none();
         };
-        let Some(area) = actions::crop_bounds(*width, *height, self.scale, selection.area) else {
+        let Some(area) = actions::crop_bounds(*width, *height, self.o.scale, selection.area) else {
             return Task::none();
         };
-        self.panel = None;
-        self.edit = None;
-        self.view = self.view.reset(); // the translation is drawn at 1x
+        self.o.panel = None;
+        self.o.edit = None;
+        self.o.view = self.o.view.reset(); // the translation is drawn at 1x
         let models = text::models_present();
-        let (session, task) =
-            translate::Session::start(frame.clone(), area, self.scale, self.cache.clone(), models);
+        let (session, task) = translate::Session::start(
+            frame.clone(),
+            area,
+            self.o.scale,
+            self.cache.clone(),
+            models,
+        );
         if session.full() {
             // nothing to outline: the translation is the whole screen
-            self.selection = None;
-            self.stroke.clear();
+            self.o.selection = None;
+            self.o.stroke.clear();
         }
         self.translates = self.translates.wrapping_add(1);
         let id = self.translates;
-        self.translate = Some((id, session));
+        self.o.translate = Some((id, session));
         task.map(move |msg| Message::Translate(id, msg))
     }
 
     fn on_translate(&mut self, id: u32, msg: translate::Msg) -> Task<Message> {
-        let Some((_, session)) = self.translate.as_mut().filter(|(open, _)| *open == id) else {
+        let Some((_, session)) = self.o.translate.as_mut().filter(|(open, _)| *open == id) else {
             return Task::none();
         };
         match msg {
             translate::Msg::Card(card::Event::Grab(how)) => {
-                self.card_drag = Some((how, None));
+                self.o.card_drag = Some((how, None));
                 self.frame_times.borrow_mut().clear();
                 Task::none()
             }
             translate::Msg::Card(card::Event::Hover(on)) => {
-                self.card_hover = on;
+                self.o.card_hover = on;
                 Task::none()
             }
             translate::Msg::Card(card::Event::Reset) => {
@@ -3388,7 +3206,7 @@ impl App {
                     self.panels = self.panels.wrapping_add(1);
                     let id = self.panels;
                     let (panel, task) = panel::Panel::open_chat(crop, chat);
-                    self.panel = Some((id, panel));
+                    self.o.panel = Some((id, panel));
                     task.map(move |msg| Message::Panel(id, msg))
                 }
                 None => Task::none(),
@@ -3480,11 +3298,11 @@ impl App {
                 return live.controller_view().map(Message::Live);
             }
         }
-        let Some(frame) = &self.frame else {
+        let Some(frame) = &self.o.frame else {
             return space().into();
         };
         glass::building_overlay(true);
-        let snip = match &self.purpose {
+        let snip = match &self.o.purpose {
             Purpose::Snip(snip) => Some(snip),
             _ => None,
         };
@@ -3495,50 +3313,50 @@ impl App {
         {
             return pill.map(Message::Snip);
         }
-        let picked: Vec<Rectangle> = (self.text_mode.as_ref())
+        let picked: Vec<Rectangle> = (self.o.text_mode.as_ref())
             .and_then(|m| m.picked.as_ref())
             .map_or_else(Vec::new, word::Picked::rects);
         let overlay = overlay::Overlay {
-            stroke: &self.stroke,
-            selection: self.selection,
-            others: &self.others,
-            view: self.view,
+            stroke: &self.o.stroke,
+            selection: self.o.selection,
+            others: &self.o.others,
+            view: self.o.view,
             handles: self.handles(),
             opening: self.opening,
             first_draw: &self.first_draw,
             frame_times: &self.frame_times,
-            hover: snip.is_some_and(|s| s.kind.picks()) && self.edit.is_none(),
-            dim: self.translate.is_none() || self.selection.is_some(),
+            hover: snip.is_some_and(|s| s.kind.picks()) && self.o.edit.is_none(),
+            dim: self.o.translate.is_none() || self.o.selection.is_some(),
             live_drag: snip.is_some(),
             look: config::look(),
-            morph: (self.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
-            words: (self.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
+            morph: (self.o.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
+            words: (self.o.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
             picked,
-            text: match self.translate {
-                None if matches!(self.purpose, Purpose::Search) => {
-                    self.screen_text.iter().map(|l| l.bounds).collect()
+            text: match self.o.translate {
+                None if matches!(self.o.purpose, Purpose::Search) => {
+                    self.o.screen_text.iter().map(|l| l.bounds).collect()
                 }
                 _ => Vec::new(),
             },
         };
-        let translation = self.translate.as_ref().and_then(|(_, s)| s.image());
+        let translation = self.o.translate.as_ref().and_then(|(_, s)| s.image());
         // The frame is its own layer: iced draws a canvas's images above its shapes.
         let mut shown = image(translation.unwrap_or(frame).clone())
             .width(Fill)
             .height(Fill)
             .content_fit(ContentFit::Fill);
-        match self.view.crop() {
+        match self.o.view.crop() {
             Some(part) => shown = shown.crop(part), // zoomed in
             // pixel for pixel: no filtering (a full redraw, e.g. while the dim
             // fades in, costs a copy, not a resample)
             None => shown = shown.filter_method(image::FilterMethod::Nearest),
         }
         // At rest (not zoomed, no translation): drawn as tiles (`overlay::tiles`).
-        let shown: Element<'_, Message> = match &self.tiles {
+        let shown: Element<'_, Message> = match &self.o.tiles {
             Some((id, tiles))
-                if *id == frame.id() && translation.is_none() && self.view.crop().is_none() =>
+                if *id == frame.id() && translation.is_none() && self.o.view.crop().is_none() =>
             {
-                let scale = self.scale;
+                let scale = self.o.scale;
                 let frozen = overlay::Frozen { tiles, scale };
                 canvas(frozen).width(Fill).height(Fill).into()
             }
@@ -3554,11 +3372,11 @@ impl App {
                 } else {
                     border::Mode::Overlay
                 },
-                self.scale,
+                self.o.scale,
                 false,
                 // the glow breathes once the opening is over, and rests while
                 // anything else moves
-                match self.appear {
+                match self.o.appear {
                     Some((_, t)) if t >= 1.0 => {
                         if self.animating() {
                             border::Breathe::Paused
@@ -3570,13 +3388,17 @@ impl App {
                 },
             ),
         ];
-        if let Some(edit) = &self.edit {
+        if let Some(edit) = &self.o.edit {
             if edit.is_open() {
                 // the toolbar once the bar has turned into it, in its place
                 let at = self.bar_at();
                 let toolbar = (self.swapped() >= 1.0).then_some(at);
-                layers =
-                    layers.push(edit.view(self.screen, toolbar, Message::Editor, Message::BarGrab));
+                layers = layers.push(edit.view(
+                    self.o.screen,
+                    toolbar,
+                    Message::Editor,
+                    Message::BarGrab,
+                ));
                 if toolbar.is_none() {
                     layers = layers.push(self.morphing_bar(at));
                 }
@@ -3585,39 +3407,39 @@ impl App {
             layers = layers.extend(edit.flat_view());
         }
         // Snip: the loupe beside the pointer (under the hint).
-        if self.edit.is_none()
-            && let Some(loupe) = snip.and_then(|s| s.guides(frame, self.scale, self.drawing))
+        if self.o.edit.is_none()
+            && let Some(loupe) = snip.and_then(|s| s.guides(frame, self.o.scale, self.o.drawing))
         {
             layers = layers.push(loupe.map(Message::Snip));
         }
         let top = if let Some(pill) = snip.and_then(|s| s.pill_view()) {
             pill.map(Message::Snip) // Wayland only (above)
-        } else if let Some(toast) = self.toast {
+        } else if let Some(toast) = self.o.toast {
             container(widgets::pill(toast))
                 .center_x(Fill)
                 .padding(24)
                 .into()
-        } else if let Some((id, song)) = &self.song {
+        } else if let Some((id, song)) = &self.o.song {
             let id = *id;
-            song.view(self.screen)
+            song.view(self.o.screen)
                 .map(move |msg| Message::Song(id, msg))
-        } else if let Some((id, panel)) = &self.panel {
+        } else if let Some((id, panel)) = &self.o.panel {
             let id = *id;
             let at = self.card_at();
             let card = panel
-                .view(at, self.screen, self.card_hover)
+                .view(at, self.o.screen, self.o.card_hover)
                 .map(move |msg| Message::Panel(id, msg));
             grow(card, at, self.card_grown())
-        } else if let Some((id, session)) = &self.translate {
+        } else if let Some((id, session)) = &self.o.translate {
             let id = *id;
             session
-                .view(self.screen, self.card_at(), self.card_hover)
+                .view(self.o.screen, self.card_at(), self.o.card_hover)
                 .map(move |msg| Message::Translate(id, msg))
         } else if let Some(snip) = snip {
             snip.view().map(Message::Snip)
-        } else if let Some(selection) = self.selection {
-            match self.purpose {
-                Purpose::Search if !self.drawing && !self.settling() => {
+        } else if let Some(selection) = self.o.selection {
+            match self.o.purpose {
+                Purpose::Search if !self.o.drawing && !self.settling() => {
                     self.selection_ui(selection)
                 }
                 _ => space().into(),
@@ -3645,15 +3467,15 @@ impl App {
         }
         // Beside a panel (an auto-search's): the chips.
         if let (Some(_), Some(selection), Purpose::Search, false) = (
-            &self.panel,
-            self.selection,
-            &self.purpose,
-            self.drawing || self.settling(),
+            &self.o.panel,
+            self.o.selection,
+            &self.o.purpose,
+            self.o.drawing || self.settling(),
         ) {
             layers = layers.push(self.selection_ui(selection));
         }
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
-        if self.selection.is_some() && self.scan.as_ref().is_some_and(|s| s.protected) {
+        if self.o.selection.is_some() && self.o.scan.as_ref().is_some_and(|s| s.protected) {
             let room = self.room();
             let pill = container(widgets::pill(PROTECTED))
                 .center_x(room.width)
@@ -3666,25 +3488,25 @@ impl App {
     /// Where the result card shows: where the user left it, else away from
     /// the selection (`widgets::card::place`).
     fn card_at(&self) -> Rectangle {
-        let selection = self.selection.map(|s| self.view.rect_to_screen(s.area));
-        widgets::card::place(self.screen, selection, self.card)
+        let selection = self.o.selection.map(|s| self.o.view.rect_to_screen(s.area));
+        widgets::card::place(self.o.screen, selection, self.card)
     }
 
     /// The part of the overlay a result card leaves free (all of it without
     /// one): the bar, chips, popup and pills go there.
     fn room(&self) -> Rectangle {
-        card::free(self.screen, self.panel.as_ref().map(|_| self.card_at()))
+        card::free(self.o.screen, self.o.panel.as_ref().map(|_| self.card_at()))
     }
 
     /// What floats around `selection`: only small chips ("Select text" under a
     /// snapped box, a QR code's); every action is in the bottom bar.
     fn selection_ui(&self, selection: overlay::Selection) -> Element<'_, Message> {
-        let area = self.view.rect_to_screen(selection.area);
+        let area = self.o.view.rect_to_screen(selection.area);
         let room = self.room();
         let mut layers = stack![];
         let mut below = area;
         if selection.kind == overlay::Kind::Snap {
-            let label = match &self.text_mode {
+            let label = match &self.o.text_mode {
                 None => "Select text",
                 Some(TextMode { lines: None, .. }) => "Reading text…",
                 Some(_) => "Done",
@@ -3695,7 +3517,7 @@ impl App {
             let chip = widgets::float_chip(label, Message::SelectText);
             layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
         }
-        if let Some(text) = self.scan.as_ref().and_then(|s| s.qr.as_deref()) {
+        if let Some(text) = self.o.scan.as_ref().and_then(|s| s.qr.as_deref()) {
             let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
             let chip = bar::qr_chip(text, Message::Qr(qr::Act::Copy), open);
             let size = Size::new(QR_WIDTH, widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING);
@@ -3709,7 +3531,7 @@ impl App {
     /// How open the result card is (0..1; 0 before its first frame, 1 at once
     /// when the OS asks for no animations).
     fn card_grown(&self) -> f32 {
-        match (&self.panel, self.card_open) {
+        match (&self.o.panel, self.o.card_open) {
             _ if motion::reduced() => 1.0,
             (Some((id, _)), Some((was, _, grown))) if *id == was => grown,
             _ => 0.0,
@@ -3719,18 +3541,18 @@ impl App {
     /// Something on the overlay moves by the clock (`Message::Frame` wanted):
     /// the opening, the bar turning or gliding, a card opening.
     fn animating(&self) -> bool {
-        self.appear.is_none()
-            || self.reveal.is_some()
+        self.o.appear.is_none()
+            || self.o.reveal.is_some()
             || self.appearing()
             || self.swapping()
             || self.bar_gliding()
             || self.card_opening()
-            || self.bar_now.is_none()
+            || self.o.bar_now.is_none()
     }
 
     /// The result card still opening (frames wanted).
     fn card_opening(&self) -> bool {
-        self.frame.is_some() && self.panel.is_some() && self.card_grown() < 1.0
+        self.o.frame.is_some() && self.o.panel.is_some() && self.card_grown() < 1.0
     }
 
     /// The gaps between the overlay's frames since the last log, as `what`
@@ -3753,35 +3575,37 @@ impl App {
 
     /// How far the opening animation is (0..1, eased out); 0 on its first frame.
     fn appeared(&self) -> f32 {
-        self.appear.map_or(0.0, |(_, t)| motion::Curve::Out.ease(t))
+        self.o
+            .appear
+            .map_or(0.0, |(_, t)| motion::Curve::Out.ease(t))
     }
 
     /// A drawn stroke is still morphing into its box: the selection's actions
     /// wait for it (draw, release, snap, then the user acts).
     fn settling(&self) -> bool {
-        (self.morph.as_ref())
+        (self.o.morph.as_ref())
             .is_some_and(|(_, at)| overlay::morph_progress(*at, Instant::now()) < 1.0)
     }
 
     /// The opening animation still runs (a frame drawn and more to come).
     fn appearing(&self) -> bool {
-        self.frame.is_some() && self.appeared() < 1.0
+        self.o.frame.is_some() && self.appeared() < 1.0
     }
 
     /// The bottom bar shows in main mode from the first frame, through drawing
     /// and selecting; a result card, a translation, the song card or a toast
     /// take its place.
     fn bottom_bar_shown(&self) -> bool {
-        matches!(self.purpose, Purpose::Search)
-            && self.panel.is_none()
-            && self.translate.is_none()
-            && self.song.is_none()
-            && self.toast.is_none()
+        matches!(self.o.purpose, Purpose::Search)
+            && self.o.panel.is_none()
+            && self.o.translate.is_none()
+            && self.o.song.is_none()
+            && self.o.toast.is_none()
     }
 
     /// The editing toolbar is up (not back at the bar).
     fn editing(&self) -> bool {
-        self.edit.as_ref().is_some_and(Editing::is_open)
+        self.o.edit.as_ref().is_some_and(Editing::is_open)
     }
 
     /// The bar is the toolbar (1) while editing, else the bar (0).
@@ -3791,15 +3615,15 @@ impl App {
 
     /// The bar is turning into the toolbar, or back.
     fn swapping(&self) -> bool {
-        self.frame.is_some() && self.swap != self.swap_target()
+        self.o.frame.is_some() && self.o.swap != self.swap_target()
     }
 
     /// How far the bar has turned into the toolbar (0..1, eased); Snip, which
     /// has no bar, is always there.
     fn swapped(&self) -> f32 {
-        match self.purpose {
+        match self.o.purpose {
             // back to the bar: the same curve run backwards, an ease-in
-            Purpose::Search => motion::Curve::Out.ease(self.swap),
+            Purpose::Search => motion::Curve::Out.ease(self.o.swap),
             _ => self.swap_target(),
         }
     }
@@ -3807,18 +3631,18 @@ impl App {
     /// The bottom bar's field width and size: the same in every state (no
     /// selection, a selection, after a card), so it never jumps.
     fn bar_size(&self) -> (f32, Size) {
-        let icons = labs::bar(&self.labs)
+        let icons = labs::bar(&self.o.labs)
             .iter()
             .filter(|b| !b.is_pill())
             .count();
-        bar::bottom_size(self.screen.width, icons as f32)
+        bar::bottom_size(self.o.screen.width, icons as f32)
     }
 
     /// The size of what is docked at the bar's spot now: the bar, the editing
     /// toolbar, or the shape between them while one turns into the other.
     fn dock_size(&self) -> Size {
         let (_, bar) = self.bar_size();
-        let tool = Editing::toolbar_size(self.screen.width);
+        let tool = Editing::toolbar_size(self.o.screen.width);
         let t = self.swapped();
         Size::new(
             bar.width + (tool.width - bar.width) * t,
@@ -3828,41 +3652,41 @@ impl App {
 
     /// Where the bar is drawn now (top-left): on its way to `bar_target`.
     fn bar_at(&self) -> Point {
-        self.bar_now.unwrap_or_else(|| self.bar_target())
+        self.o.bar_now.unwrap_or_else(|| self.bar_target())
     }
 
     /// Where the bar (or the toolbar in its place) goes: following the pointer
     /// while held, else its spot, or the nearest free one while the selection
     /// (the editor's canvas) is where it would be.
     fn bar_target(&self) -> Point {
-        if let Some((_, at)) = self.bar_drag {
+        if let Some((_, at)) = self.o.bar_drag {
             return at;
         }
         let size = self.dock_size();
-        let canvas = self.edit.as_ref().map(Editing::canvas_rect);
-        let blocked: Vec<Rectangle> = (self.selection.iter())
-            .chain(self.others.iter().map(|(s, _)| s))
-            .map(|s| self.view.rect_to_screen(s.area))
+        let canvas = self.o.edit.as_ref().map(Editing::canvas_rect);
+        let blocked: Vec<Rectangle> = (self.o.selection.iter())
+            .chain(self.o.others.iter().map(|(s, _)| s))
+            .map(|s| self.o.view.rect_to_screen(s.area))
             .chain(canvas)
             .collect();
         let spot = bar::free(
-            self.bar_anchor,
+            self.o.bar_anchor,
             &blocked,
-            self.screen,
+            self.o.screen,
             size,
-            self.work_inset,
+            self.o.work_inset,
         );
-        bar::anchor_at(spot, self.screen, size, self.work_inset)
+        bar::anchor_at(spot, self.o.screen, size, self.o.work_inset)
     }
 
     /// The bar is on its way somewhere.
     fn bar_gliding(&self) -> bool {
-        self.frame.is_some() && self.bar_now.is_some_and(|at| at != self.bar_target())
+        self.o.frame.is_some() && self.o.bar_now.is_some_and(|at| at != self.bar_target())
     }
 
     /// The bar was dropped: its place is remembered (config `[bar]`).
     fn remember_bar(&self) -> Task<Message> {
-        let anchor = self.bar_anchor;
+        let anchor = self.o.bar_anchor;
         if cfg!(test) {
             let mut cfg = config::current();
             cfg.bar.anchor = anchor;
@@ -3879,7 +3703,7 @@ impl App {
 
     /// Something is selected for the bar's pills to act on.
     fn selected_for_bar(&self) -> bool {
-        self.selection.is_some() && !self.settling()
+        self.o.selection.is_some() && !self.settling()
     }
 
     /// What a bar button does (also what Enter / Space do on it once Tab
@@ -3900,9 +3724,9 @@ impl App {
     /// Tab / Shift+Tab: the focus moves on through the bar (`bar::stops`).
     /// The AI field takes the text input's focus, any other stop lets go of it.
     fn tab_bar(&mut self, back: bool) -> Task<Message> {
-        let stops = bar::stops(self.selected_for_bar(), &labs::bar(&self.labs));
-        self.bar_focus = bar::tab(&stops, self.bar_focus, back);
-        match self.bar_focus {
+        let stops = bar::stops(self.selected_for_bar(), &labs::bar(&self.o.labs));
+        self.o.bar_focus = bar::tab(&stops, self.o.bar_focus, back);
+        match self.o.bar_focus {
             Some(bar::Stop::Field) => operation::focus(ASK_INPUT),
             _ => operation::focus("overlay-none"), // focusing nothing unfocuses the field
         }
@@ -3936,11 +3760,11 @@ impl App {
         let input = widgets::input(
             ASK_INPUT,
             ask_placeholder(width),
-            &self.ask,
+            &self.o.ask,
             Message::AskInput,
             Message::AskSubmit,
         );
-        let kbd = |stop| self.bar_focus == Some(stop);
+        let kbd = |stop| self.o.bar_focus == Some(stop);
         let field = widgets::ai_field(
             input,
             width,
@@ -3948,11 +3772,11 @@ impl App {
             (Message::AskSubmit, kbd(bar::Stop::Badge)),
         );
         let field = keys::guard(field, Message::Field);
-        let keys = &self.bar_keys;
+        let keys = &self.o.bar_keys;
         let selected = self.selected_for_bar();
-        let shown = labs::bar(&self.labs);
+        let shown = labs::bar(&self.o.labs);
         let icons = shown.iter().filter(|b| !b.is_pill()).count() as f32;
-        let widths = bar::pill_widths(self.screen.width, icons);
+        let widths = bar::pill_widths(self.o.screen.width, icons);
         let pills = [
             (
                 BarButton::Search,
@@ -3980,7 +3804,7 @@ impl App {
                 glyph,
                 label,
                 width,
-                self.pill == which,
+                self.o.pill == which,
                 self.bar_message(which),
                 kbd(bar::Stop::Button(which)),
             );
@@ -4058,7 +3882,7 @@ impl App {
     /// size, its progress, a failure to try again, or "Reading text…".
     fn reader_note(&self) -> Option<Element<'_, Message>> {
         // what it says, then its button or progress bar
-        let (say, then): (Element<'_, Message>, Element<'_, Message>) = match &self.reader {
+        let (say, then): (Element<'_, Message>, Element<'_, Message>) = match &self.o.reader {
             Reader::Idle => return None,
             Reader::Missing(bytes) => {
                 let mb = bytes.div_ceil(1_000_000).max(1);
@@ -4093,7 +3917,7 @@ impl App {
     fn beside_bar<'a>(&self, note: Element<'a, Message>, at: Point) -> Element<'a, Message> {
         let (_, size) = self.bar_size();
         let height = widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING;
-        let (y, align) = match at.y > self.screen.height / 2.0 {
+        let (y, align) = match at.y > self.o.screen.height / 2.0 {
             true => (at.y - bar::SPACING - height, iced::Bottom),
             false => (at.y + size.height + bar::SPACING, iced::Top),
         };
@@ -4151,7 +3975,7 @@ impl App {
             Some(_) => Subscription::batch([triggers, escape()]),
             None => triggers,
         };
-        if self.frame.is_some() {
+        if self.o.frame.is_some() {
             let escape = escape();
             // Alt held = the original under a translation.
             let alt = iced::event::listen_with(|event, _, _| match event {
@@ -4160,13 +3984,13 @@ impl App {
                 }
                 _ => None,
             });
-            let alt = if self.translate.is_some() {
+            let alt = if self.o.translate.is_some() {
                 alt
             } else {
                 Subscription::none()
             };
             // Dragging the result card: the pointer anywhere, until let go.
-            let card = match self.card_drag {
+            let card = match self.o.card_drag {
                 Some(_) => iced::event::listen_with(|event, _, _| match event {
                     iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                         Some(Message::CardMoved(position))
@@ -4180,7 +4004,7 @@ impl App {
             };
             // Snip: Shift held = no snapping; the pointer leaving may be for
             // another monitor.
-            let shift = match self.purpose {
+            let shift = match self.o.purpose {
                 Purpose::Snip(_) => iced::event::listen_with(|event, _, _| match event {
                     iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                         Some(Message::Snip(snip::Msg::Shift(m.shift())))
@@ -4335,11 +4159,13 @@ fn stack_crops(crops: &[Crop]) -> Option<Crop> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{BarAnchor, TextReader};
+    use crate::labs::Labs;
 
     fn closing_app() -> App {
         let mut app = App::idle(window::Id::unique());
-        app.labs = Labs::all_on();
         let _ = app.close();
+        app.o.labs = Labs::all_on(); // (read at open: close forgets them)
         app
     }
 
@@ -4366,7 +4192,7 @@ mod tests {
             url: String::new(),
         };
         let mut app = App::idle(window::Id::unique());
-        app.labs = Labs::all_on();
+        app.o.labs = Labs::all_on();
         assert!(app.is_idle());
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         assert!(!app.is_idle(), "a capture is out");
@@ -4401,17 +4227,17 @@ mod tests {
             "a press left no line"
         );
         let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
-        assert!(app.frame.is_some());
+        assert!(app.o.frame.is_some());
         let again = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         assert!(said("brought to the front"), "a press left no line");
         assert!(again.units() > 0, "the overlay takes the focus back");
-        assert!(app.frame.is_some(), "still open, same frame");
+        assert!(app.o.frame.is_some(), "still open, same frame");
     }
 
     #[test]
     fn a_timed_out_capture_frees_the_trigger_and_its_late_answer_is_dropped() {
         let mut app = App::idle(window::Id::unique());
-        app.labs = Labs::all_on();
+        app.o.labs = Labs::all_on();
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let first = app.capturing.expect("pending");
         // A second press while it is out does nothing.
@@ -4424,26 +4250,26 @@ mod tests {
         assert_ne!(first, second);
         // The first capture's answer arrives late: ignored, the new one still waits.
         let _ = app.update(Message::Captured(first, Instant::now(), a_shot()));
-        assert!(app.frame.is_none());
+        assert!(app.o.frame.is_none());
         assert_eq!(app.capturing, Some(second));
         // A stale timeout doesn't touch the new capture.
         let _ = app.update(Message::CaptureTimedOut(first));
         assert_eq!(app.capturing, Some(second));
         let _ = app.update(Message::Captured(second, Instant::now(), a_shot()));
-        assert!(app.frame.is_some(), "the live one opens");
+        assert!(app.o.frame.is_some(), "the live one opens");
         assert_eq!(app.capturing, None);
     }
 
     #[test]
     fn esc_cancels_a_pending_capture() {
         let mut app = App::idle(window::Id::unique());
-        app.labs = Labs::all_on();
+        app.o.labs = Labs::all_on();
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let n = app.capturing.expect("pending");
         let _ = app.update(Message::Escape);
         assert_eq!(app.capturing, None);
         let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
-        assert!(app.frame.is_none(), "the overlay doesn't open");
+        assert!(app.o.frame.is_none(), "the overlay doesn't open");
         assert_eq!(app.hiding, Hiding::No);
     }
 
@@ -4452,10 +4278,10 @@ mod tests {
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let n = app.capturing.expect("pending");
         let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
-        assert!(app.frame.is_some() && app.overlay_open);
+        assert!(app.o.frame.is_some() && app.overlay_open);
         let shown = app.overlay;
         let _ = app.update(Message::Escape);
-        assert!(app.frame.is_none());
+        assert!(app.o.frame.is_none());
         (shown, app.overlay)
     }
 
@@ -4537,15 +4363,18 @@ mod tests {
         // no models: the session waits for consent (no thread starts)
         let (session, _) =
             translate::Session::start(frame.clone(), [0, 0, 40, 20], 1.0, app.cache.clone(), false);
-        app.frame = Some(frame);
+        app.o.frame = Some(frame);
         app.hiding = Hiding::No;
-        app.translate = Some((7, session));
+        app.o.translate = Some((7, session));
         let _ = app.update(Message::Translate(6, translate::Msg::Close));
-        assert!(app.frame.is_some(), "a stale session's message is ignored");
+        assert!(
+            app.o.frame.is_some(),
+            "a stale session's message is ignored"
+        );
         let _ = app.update(Message::Peek(true));
         // declining the download closes the overlay and drops the session
         let _ = app.update(Message::Translate(7, translate::Msg::Close));
-        assert!(app.translate.is_none() && app.frame.is_none());
+        assert!(app.o.translate.is_none() && app.o.frame.is_none());
         assert_eq!(app.hiding, Hiding::Empty);
     }
 
@@ -4553,15 +4382,15 @@ mod tests {
     fn selected_app(frame: &Crop) -> (App, Rectangle) {
         let mut app = closing_app();
         let area = Rectangle::with_size(Size::new(frame.width as f32, frame.height as f32));
-        app.frame = Some(image::Handle::from_rgba(
+        app.o.frame = Some(image::Handle::from_rgba(
             frame.width,
             frame.height,
             frame.rgba.clone(),
         ));
         app.hiding = Hiding::No;
-        app.screen = area.size();
-        app.view = overlay::View::new(frame.width, frame.height, app.screen);
-        app.selection = Some(overlay::Selection {
+        app.o.screen = area.size();
+        app.o.view = overlay::View::new(frame.width, frame.height, app.o.screen);
+        app.o.selection = Some(overlay::Selection {
             area,
             kind: overlay::Kind::Drag,
         });
@@ -4592,14 +4421,14 @@ mod tests {
             Point::new(700.0, 20.0),
             Size::new(code.width as f32, code.height as f32),
         );
-        app.selection = Some(overlay::Selection {
+        app.o.selection = Some(overlay::Selection {
             area,
             kind: overlay::Kind::Drag,
         });
         // The scan of a selection that has since moved on is dropped.
         let moved = Rectangle::with_size(area.size() * 0.5);
         let _ = app.update(Message::Scanned(moved, qr::scan(&frame)));
-        assert!(app.scan.is_none());
+        assert!(app.o.scan.is_none());
         assert!(!overlay_texts(&app).iter().any(|t| t.starts_with("QR code")));
 
         let scan = qr::scan(&app.crop().unwrap());
@@ -4611,10 +4440,10 @@ mod tests {
         );
         assert!(texts.contains(&"Open link · example.com".into()));
         assert!(
-            app.toast.is_none() && app.frame.is_some(),
+            app.o.toast.is_none() && app.o.frame.is_some(),
             "nothing happened by itself"
         );
-        let size = app.screen;
+        let size = app.o.screen;
         widgets::shot::save("overlay-qr-chip", app.view(app.overlay), size);
 
         // A new press forgets the old code.
@@ -4622,7 +4451,7 @@ mod tests {
             at: Point::new(5.0, 5.0),
             shift: false,
         }));
-        assert!(app.scan.is_none());
+        assert!(app.o.scan.is_none());
     }
 
     /// What Search in browser hands to Lens is exactly the selected pixels, never
@@ -4650,14 +4479,17 @@ mod tests {
                 snip: None,
             };
             let _ = app.open(Instant::now(), Ok(shot));
-            app.behaviour = config::Config::default().selection;
+            app.o.behaviour = config::Config::default().selection;
             drag(
                 &mut app,
                 Point::new(100.0, 120.0),
                 Point::new(300.0, 220.0),
                 false,
             );
-            assert!(app.panel.is_none(), "{scale}: nothing sent before a choice");
+            assert!(
+                app.o.panel.is_none(),
+                "{scale}: nothing sent before a choice"
+            );
             let crop = app.crop().expect("a crop");
             let (x0, y0) = ((100.0 * scale) as u32, (120.0 * scale) as u32);
             assert_eq!(
@@ -4705,18 +4537,18 @@ mod tests {
     /// [x % 256, y % 256, x / 256, 255].
     pub(super) fn open_app(w: u32, h: u32, scale: f32) -> App {
         let mut app = App::idle(window::Id::unique());
-        app.labs = Labs::all_on();
+        app.o.labs = Labs::all_on();
         let rgba: Vec<u8> = (0..h)
             .flat_map(|y| (0..w).flat_map(move |x| [x as u8, y as u8, (x >> 8) as u8, 255]))
             .collect();
         let frame = image::Handle::from_rgba(w, h, rgba);
-        app.tiles = overlay::tiles(&frame).map(|t| (frame.id(), t));
-        app.frame = Some(frame);
-        app.scale = scale;
-        app.screen = Size::new(w as f32 / scale, h as f32 / scale);
-        app.view = overlay::View::new(w, h, app.screen);
-        app.bar_keys = BarKeys::of(&config::Config::default());
-        app.appear = Some((Instant::now(), 1.0)); // opened
+        app.o.tiles = overlay::tiles(&frame).map(|t| (frame.id(), t));
+        app.o.frame = Some(frame);
+        app.o.scale = scale;
+        app.o.screen = Size::new(w as f32 / scale, h as f32 / scale);
+        app.o.view = overlay::View::new(w, h, app.o.screen);
+        app.o.bar_keys = BarKeys::of(&config::Config::default());
+        app.o.appear = Some((Instant::now(), 1.0)); // opened
         app
     }
 
@@ -4792,7 +4624,7 @@ mod tests {
     fn snipping(area: Rectangle) -> App {
         let mut app = open_app(800, 600, 1.0);
         let window = snip::Pick::window(area, "App", 1);
-        app.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.place(), true, None)));
+        app.o.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.place(), true, None)));
         event(&mut app, overlay::Event::Hover(area.center()));
         app
     }
@@ -4850,7 +4682,7 @@ mod tests {
         let mut app = selected();
         let _ = copy::copied::image();
         let task = app.on_overlay(key('c'));
-        assert!(app.frame.is_none() && app.windows.toasts().is_empty());
+        assert!(app.o.frame.is_none() && app.windows.toasts().is_empty());
         run_task(&mut app, task);
         assert_eq!(copy::copied::image(), Some((300, 200)));
         assert_eq!(app.windows.toasts(), [("Copied".to_string(), true)]);
@@ -4875,7 +4707,7 @@ mod tests {
         );
         // an error: the same pill, the error text, no dot
         let mut app = selected();
-        let place = (app.origin, app.screen, app.scale);
+        let place = (app.o.origin, app.o.screen, app.o.scale);
         let failed = Err("Couldn't save. Pick a folder you can write to.".into());
         let _ = app.update(Message::Confirm(place, failed));
         assert_eq!(
@@ -4906,7 +4738,7 @@ mod tests {
         };
         with_delay(3);
         let mut app = App::idle(window::Id::unique());
-        app.labs = Labs::all_on();
+        app.o.labs = Labs::all_on();
         let _ = app.open(Instant::now(), shot());
         assert!(app.snip_pill(), "counting down, the overlay is only a pill");
         // the capture the timer waited for opens plain
@@ -4916,7 +4748,7 @@ mod tests {
         // no timer in Settings: no pill
         with_delay(0);
         let mut app = App::idle(window::Id::unique());
-        app.labs = Labs::all_on();
+        app.o.labs = Labs::all_on();
         let _ = app.open(Instant::now(), shot());
         assert!(!app.snip_pill());
     }
@@ -4928,14 +4760,14 @@ mod tests {
         app.select(area);
         let _ = app.open_editor();
         let _ = app.update(Message::Editor(editor::Message::Scroll));
-        assert!(app.edit.is_none(), "the editor steps aside");
+        assert!(app.o.edit.is_none(), "the editor steps aside");
         assert!(app.scroll().is_some(), "scrolling and stitching has begun");
         // no auto-scroll here (Wayland) or no snip (Edit in place): the button is dimmed
         let mut app = open_app(800, 600, 1.0);
         app.select(area);
         let _ = app.open_editor();
         let _ = app.update(Message::Editor(editor::Message::Scroll));
-        assert!(app.edit.is_some() && app.scroll().is_none());
+        assert!(app.o.edit.is_some() && app.scroll().is_none());
     }
 
     #[test]
@@ -4947,11 +4779,11 @@ mod tests {
         let _ = app.open_editor();
         editor::dragout::TEST_DROP.set(Some(false));
         let _ = app.update(Message::Editor(editor::Message::DragOut));
-        assert!(app.editing() && app.frame.is_some());
+        assert!(app.editing() && app.o.frame.is_some());
         // an app took it: closed like Copy, nothing of the editor or the frame left
         editor::dragout::TEST_DROP.set(Some(true));
         let _ = app.update(Message::Editor(editor::Message::DragOut));
-        assert!(app.edit.is_none() && app.frame.is_none() && !app.editing());
+        assert!(app.o.edit.is_none() && app.o.frame.is_none() && !app.editing());
         assert_eq!(app.hiding, Hiding::Empty, "hides by the usual steps");
     }
 
@@ -4966,7 +4798,7 @@ mod tests {
                 notches: 2.0,
             },
         );
-        let v = app.view;
+        let v = app.o.view;
         assert!(v.zoom() > 1.5);
         drag(
             &mut app,
@@ -4974,7 +4806,7 @@ mod tests {
             Point::new(200.0, 180.0),
             false,
         );
-        let sel = app.selection.expect("a rectangle");
+        let sel = app.o.selection.expect("a rectangle");
         assert!(
             app.selected().units() > 0,
             "a drawn selection is scanned (QR)"
@@ -4992,7 +4824,7 @@ mod tests {
             Point::new(220.0, 190.0),
             false,
         );
-        let resized = v.rect_to_screen(app.selection.unwrap().area);
+        let resized = v.rect_to_screen(app.o.selection.unwrap().area);
         let want = Rectangle::new(Point::new(100.0, 100.0), Size::new(120.0, 90.0));
         assert!(close_to(resized, want), "{resized:?}");
 
@@ -5003,27 +4835,27 @@ mod tests {
             Point::new(130.0, 160.0),
             false,
         );
-        let moved = v.rect_to_screen(app.selection.unwrap().area);
+        let moved = v.rect_to_screen(app.o.selection.unwrap().area);
         let want = Rectangle::new(Point::new(80.0, 110.0), Size::new(120.0, 90.0));
         assert!(close_to(moved, want), "{moved:?}");
         // the crop is what is under it: image px x 2, the top-left pixel included
         let crop = app.crop().unwrap();
-        let area = app.selection.unwrap().area;
+        let area = app.o.selection.unwrap().area;
         let first = [area.x * 2.0, area.y * 2.0].map(|v| v.floor() as u32);
         assert_eq!(crop.rgba[..2], [first[0] as u8, first[1] as u8]);
         assert!((crop.width as f32 - area.width * 2.0).abs() <= 1.0);
 
         // a freehand loop resized by a corner scales its stroke with the box
         circle(&mut app, Point::new(300.0, 150.0), 40.0, false);
-        let lp = app.selection.unwrap();
+        let lp = app.o.selection.unwrap();
         assert_eq!(lp.kind, overlay::Kind::Loop);
         let box_ = v.rect_to_screen(lp.area);
         let corner = Point::new(box_.x, box_.y);
         drag(&mut app, corner, corner - Vector::new(40.0, 0.0), false);
-        let grown = app.selection.unwrap();
+        let grown = app.o.selection.unwrap();
         assert_eq!(grown.kind, overlay::Kind::Loop, "still the drawn shape");
         assert!((grown.area.width - lp.area.width * 1.5).abs() < 0.5);
-        let xs = app.stroke.iter().map(|p| p.x);
+        let xs = app.o.stroke.iter().map(|p| p.x);
         let min = xs.fold(f32::MAX, f32::min);
         assert!(
             (min - grown.area.x).abs() < 0.01,
@@ -5032,7 +4864,7 @@ mod tests {
 
         // double right-click: back to 1x
         event(&mut app, overlay::Event::ZoomReset);
-        assert_eq!(app.view.zoom(), 1.0);
+        assert_eq!(app.o.view.zoom(), 1.0);
     }
 
     #[test]
@@ -5040,7 +4872,7 @@ mod tests {
         let mut app = open_app(400, 300, 1.0);
         circle(&mut app, Point::new(60.0, 60.0), 30.0, false);
         circle(&mut app, Point::new(300.0, 200.0), 40.0, true);
-        assert_eq!(app.others.len(), 1, "two selections");
+        assert_eq!(app.o.others.len(), 1, "two selections");
         // a Shift tap adds nothing and keeps both
         drag(
             &mut app,
@@ -5048,9 +4880,9 @@ mod tests {
             Point::new(11.0, 290.0),
             true,
         );
-        assert_eq!(app.others.len(), 1);
-        assert!(app.selection.is_some());
-        let (a, b) = (app.others[0].0.area, app.selection.unwrap().area);
+        assert_eq!(app.o.others.len(), 1);
+        assert!(app.o.selection.is_some());
+        let (a, b) = (app.o.others[0].0.area, app.o.selection.unwrap().area);
 
         // Lens / Copy: the box around all of them
         let union = app.crop().unwrap();
@@ -5080,14 +4912,14 @@ mod tests {
 
         // a new selection without Shift starts over
         circle(&mut app, Point::new(200.0, 100.0), 30.0, false);
-        assert!(app.others.is_empty());
+        assert!(app.o.others.is_empty());
         assert_eq!(app.stacked().unwrap().height, app.crop().unwrap().height);
         let _ = app.close();
-        assert!(app.others.is_empty() && app.word.is_none() && app.ask.is_empty());
+        assert!(app.o.others.is_empty() && app.o.word.is_none() && app.o.ask.is_empty());
     }
 
     fn pixels(app: &App) -> Vec<u8> {
-        match &app.frame {
+        match &app.o.frame {
             Some(image::Handle::Rgba { pixels, .. }) => pixels.to_vec(),
             _ => Vec::new(),
         }
@@ -5112,12 +4944,15 @@ mod tests {
             extend: false,
         };
         let stale = app.on_tapped(read(6), Ok(vec![block.clone()]));
-        assert!(stale.units() == 0 && app.selection.is_none(), "an old tap");
+        assert!(
+            stale.units() == 0 && app.o.selection.is_none(),
+            "an old tap"
+        );
         let scan = app.on_tapped(read(7), Ok(vec![block]));
         assert_eq!(scan.units(), 0, "a word is not scanned for a QR code");
-        let sel = app.selection.expect("the word");
+        let sel = app.o.selection.expect("the word");
         assert_eq!(sel.kind, overlay::Kind::Word);
-        assert_eq!(app.word.as_ref().unwrap().text(), "any");
+        assert_eq!(app.o.word.as_ref().unwrap().text(), "any");
     }
 
     const TEXT: [&str; 6] = [
@@ -5162,7 +4997,7 @@ mod tests {
         let page = container(column(lines)).padding([40, 60]);
         let rgba = widgets::shot::render(Element::from(page), 960, 420);
         let mut app = open_app(960, 420, 1.0);
-        app.frame = Some(image::Handle::from_rgba(960, 420, rgba));
+        app.o.frame = Some(image::Handle::from_rgba(960, 420, rgba));
         app
     }
 
@@ -5196,19 +5031,19 @@ mod tests {
         read_back(&mut app, start, first, false);
         let end = caret(5, 18.0); // after "anywhere": not read yet
         drag(&mut app, end, end, true);
-        let word = app.word.as_ref().unwrap();
+        let word = app.o.word.as_ref().unwrap();
         assert_eq!(word.text(), "while", "unchanged until that is read");
         assert!(!word.covers(end), "the end is past what was read");
         // the band OCR reads for it: whole width, every line the drag crosses
-        let band = word.band(end, app.screen);
+        let band = word.band(end, app.o.screen);
         assert!(band.width == 960.0 && band.y <= 60.0 && band.y + band.height >= end.y);
         // its answer (not stale: nothing pressed since) stretches the words there
         read_back(&mut app, end, band, true);
-        let word = app.word.as_ref().unwrap();
+        let word = app.o.word.as_ref().unwrap();
         assert_eq!(word.text().lines().count(), 5);
         assert!(word.text().starts_with("while you drag"));
         assert!(word.text().ends_with("selection anywhere"));
-        assert_eq!(app.stroke.len(), 10);
+        assert_eq!(app.o.stroke.len(), 10);
         // a read for an earlier press is dropped
         let before = word.text();
         app.taps += 1;
@@ -5220,7 +5055,7 @@ mod tests {
             extend: true,
         };
         let _ = app.on_tapped(stale, Ok(text_blocks()));
-        assert_eq!(app.word.as_ref().unwrap().text(), before);
+        assert_eq!(app.o.word.as_ref().unwrap().text(), before);
     }
 
     #[test]
@@ -5231,19 +5066,19 @@ mod tests {
         let end = caret(4, 18.0); // after "add"
         drag(&mut app, end, end, true);
         assert_eq!(
-            app.word.as_ref().unwrap().text(),
+            app.o.word.as_ref().unwrap().text(),
             "while you drag a finger\nacross the words you want to\ncopy, translate or look up.\nPress Shift to add"
         );
-        assert!(app.others.is_empty(), "stretched, not a second selection");
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Word);
+        assert!(app.o.others.is_empty(), "stretched, not a second selection");
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Word);
         // Shift+click on the first line: from there to where it began ("while")
         drag(&mut app, caret(0, 10.0), caret(0, 10.0), true);
-        let text = app.word.as_ref().unwrap().text();
+        let text = app.o.word.as_ref().unwrap().text();
         assert_eq!(text, "Search keeps the page\nfrozen");
         // a Shift drag still adds a second selection
         circle(&mut app, Point::new(700.0, 300.0), 40.0, true);
-        assert_eq!(app.others.len(), 1);
-        assert!(app.word.is_none());
+        assert_eq!(app.o.others.len(), 1);
+        assert!(app.o.word.is_none());
     }
 
     #[test]
@@ -5272,11 +5107,11 @@ mod tests {
             .iter()
             .for_each(|&p| event(&mut app, overlay::Event::Move(p)));
         event(&mut app, overlay::Event::Release);
-        let sel = app.selection.expect("a scribble selects");
+        let sel = app.o.selection.expect("a scribble selects");
         assert_eq!(sel.kind, overlay::Kind::Scribble);
-        assert!(app.word.is_none() && app.handles());
+        assert!(app.o.word.is_none() && app.handles());
         // the kept stroke is the hull and the area its box, grown past the scribble's own box
-        assert!(app.stroke.len() > 8);
+        assert!(app.o.stroke.len() > 8);
         assert!(sel.area.x < 300.0 && sel.area.y < 150.0);
         assert!(sel.area.x + sel.area.width > 500.0 && sel.area.y + sel.area.height > 230.0);
         assert!(app.selected().units() > 0, "scanned like a drawn area");
@@ -5286,21 +5121,21 @@ mod tests {
         // a corner drag resizes it and keeps the shape
         let corner = Point::new(sel.area.x + sel.area.width, sel.area.y + sel.area.height);
         drag(&mut app, corner, corner + Vector::new(30.0, 20.0), false);
-        let grown = app.selection.unwrap();
+        let grown = app.o.selection.unwrap();
         assert_eq!(grown.kind, overlay::Kind::Scribble);
         assert!((grown.area.width - sel.area.width - 30.0).abs() < 0.5);
-        let xs = app.stroke.iter().map(|p| p.x);
+        let xs = app.o.stroke.iter().map(|p| p.x);
         assert!((xs.fold(f32::MIN, f32::max) - (grown.area.x + grown.area.width)).abs() < 0.01);
         // a loop or a drag next to it still work as before
         circle(&mut app, Point::new(200.0, 300.0), 40.0, false);
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Loop);
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Loop);
         drag(
             &mut app,
             Point::new(600.0, 50.0),
             Point::new(800.0, 120.0),
             false,
         );
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Drag);
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Drag);
     }
 
     /// `OPENCIRCLE_SELECTION_PNG=<dir> cargo test selection_shots -- --ignored`
@@ -5346,7 +5181,7 @@ mod tests {
             .for_each(|&p| event(&mut app, overlay::Event::Move(p)));
         shot(&app, "3-scribble-drawing.png");
         event(&mut app, overlay::Event::Release);
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Scribble);
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Scribble);
         shot(&app, "4-scribble-selected.png");
     }
 
@@ -5365,22 +5200,22 @@ mod tests {
         // The design: an empty field opens Ask AI (its presets), asking nothing.
         let _ = app.update(Message::AskInput("   ".into()));
         let _ = app.update(Message::AskSubmit);
-        let (_, panel) = app.panel.as_mut().expect("Ask AI opens");
+        let (_, panel) = app.o.panel.as_mut().expect("Ask AI opens");
         assert_eq!(panel.kind(), actions::Panel::Ask);
         assert!(panel.take_input().is_empty(), "no question");
-        app.panel = None;
+        app.o.panel = None;
         let _ = app.update(Message::AskInput("what is this?".into()));
         let _ = app.update(Message::AskSubmit);
-        let (_, panel) = app.panel.as_ref().expect("Ask AI opens");
+        let (_, panel) = app.o.panel.as_ref().expect("Ask AI opens");
         assert_eq!(panel.kind(), actions::Panel::Ask);
-        assert!(app.ask.is_empty());
+        assert!(app.o.ask.is_empty());
     }
 
     /// `text_app` with its text reader (the OCR models) here: main mode reads
     /// the screen's text on demand.
     fn reader_app() -> App {
         let mut app = text_app();
-        app.ocr_ready = true;
+        app.o.ocr_ready = true;
         app
     }
 
@@ -5398,7 +5233,7 @@ mod tests {
     fn read_app() -> App {
         let mut app = reader_app();
         let _ = answer(&mut app, page());
-        assert!(app.screen_text.is_whole(420.0));
+        assert!(app.o.screen_text.is_whole(420.0));
         app
     }
 
@@ -5416,8 +5251,8 @@ mod tests {
     }
 
     fn picked_text(app: &App) -> Option<String> {
-        let word = app.selection.filter(|s| s.kind == overlay::Kind::Word);
-        word.and(app.word.as_ref()).map(word::Picked::text)
+        let word = app.o.selection.filter(|s| s.kind == overlay::Kind::Word);
+        word.and(app.o.word.as_ref()).map(word::Picked::text)
     }
 
     /// A click (press and release, no move) at `p`.
@@ -5433,7 +5268,7 @@ mod tests {
         let mut app = read_app();
         stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
-        assert!(app.text_press.is_none() && !app.drawing);
+        assert!(app.o.text_press.is_none() && !app.o.drawing);
         stroke(&mut app, &[caret(1, 9.4), caret(1, 18.6)]);
         assert_eq!(picked_text(&app).as_deref(), Some("ile you dr"));
         // to a line's end and on to the next lines: reading order, middle lines whole
@@ -5446,7 +5281,7 @@ mod tests {
             picked_text(&app).as_deref(),
             Some("while you drag a finger\nacross the words you want to\ncopy, translate")
         );
-        let rects = app.word.as_ref().unwrap().rects();
+        let rects = app.o.word.as_ref().unwrap().rects();
         assert_eq!(rects.len(), 3);
         assert_eq!(rects[1].x, 60.0, "the middle line from its start");
         assert!((rects[1].x + rects[1].width - (60.0 + 28.0 * CHAR)).abs() < 0.01);
@@ -5454,7 +5289,7 @@ mod tests {
         // (with text selected before, as on the VM)
         let shift = caret(4, 8.0); // in "Shift"
         click_at(&mut app, shift, false);
-        assert!(app.selection.is_none() && app.word.is_none());
+        assert!(app.o.selection.is_none() && app.o.word.is_none());
         click_at(&mut app, shift, false);
         assert_eq!(picked_text(&app).as_deref(), Some("Shift"));
         click_at(&mut app, shift, false);
@@ -5472,16 +5307,16 @@ mod tests {
             })
             .collect();
         stroke(&mut app, &around);
-        let sel = app.selection.expect("a circle");
+        let sel = app.o.selection.expect("a circle");
         assert_eq!(sel.kind, overlay::Kind::Loop);
-        assert!(app.word.is_none());
+        assert!(app.o.word.is_none());
         // a press off the text draws as before
         let mut app = read_app();
         stroke(
             &mut app,
             &[Point::new(600.0, 250.0), Point::new(800.0, 400.0)],
         );
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Drag);
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Drag);
         // before the screen is read, a drag along text is a stroke too
         let mut app = text_app();
         stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
@@ -5498,7 +5333,7 @@ mod tests {
             !texts.contains(&"Copy".to_string()),
             "no floating pill: {texts:?}"
         );
-        let click = |p| widgets::shot::click(app.view(app.overlay), app.screen, p);
+        let click = |p| widgets::shot::click(app.view(app.overlay), app.o.screen, p);
         let copy = click(bar_pill(&app, 1));
         assert!(
             copy.iter()
@@ -5520,7 +5355,7 @@ mod tests {
             picked_text(&app).as_deref(),
             Some("while you drag a finger\nacross the words")
         );
-        assert!(app.others.is_empty());
+        assert!(app.o.others.is_empty());
         // Ctrl+A: all the text on the screen
         event(
             &mut app,
@@ -5538,18 +5373,18 @@ mod tests {
                 ctrl: false,
             },
         );
-        let (_, panel) = app.panel.as_ref().expect("Ask AI opens");
+        let (_, panel) = app.o.panel.as_ref().expect("Ask AI opens");
         assert_eq!(panel.kind(), actions::Panel::Ask);
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Word);
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Word);
     }
 
     #[test]
     fn the_bottom_bar_is_there_from_the_first_frame() {
         let mut app = open_app(800, 600, 1.0);
         let _ = app.update(Message::AskInput("what is on my screen?".into()));
-        let has_field = |app: &App| overlay_texts(app).contains(&app.ask);
+        let has_field = |app: &App| overlay_texts(app).contains(&app.o.ask);
         assert!(has_field(&app), "before any selection");
-        let clicked = widgets::shot::click(app.view(app.overlay), app.screen, bar_pill(&app, 2));
+        let clicked = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_pill(&app, 2));
         assert!(
             clicked
                 .iter()
@@ -5566,13 +5401,13 @@ mod tests {
         event(&mut app, overlay::Event::Move(Point::new(150.0, 120.0)));
         assert!(has_field(&app), "while drawing");
         event(&mut app, overlay::Event::Release);
-        assert!(app.selection.is_some() && has_field(&app));
+        assert!(app.o.selection.is_some() && has_field(&app));
         // Enter with no selection asks about the whole screen
         let mut app = open_app(800, 600, 1.0);
         let _ = app.update(Message::AskInput("what is this?".into()));
         let _ = app.update(Message::AskSubmit);
         assert_eq!(
-            app.panel.as_ref().map(|(_, p)| p.kind()),
+            app.o.panel.as_ref().map(|(_, p)| p.kind()),
             Some(actions::Panel::Ask)
         );
         let bottom = |t: &String| ASK_PLACEHOLDERS.contains(&t.as_str());
@@ -5583,7 +5418,7 @@ mod tests {
         // Translate translates the whole screen
         let mut app = open_app(800, 600, 1.0);
         let _ = app.update(Message::Pill(BarButton::Translate));
-        assert!(app.translate.is_some() && app.selection.is_none());
+        assert!(app.o.translate.is_some() && app.o.selection.is_none());
     }
 
     /// Where the bottom bar's pills start (x), and its middle (y), as laid out.
@@ -5599,8 +5434,11 @@ mod tests {
 
     /// The bar's pills' widths as laid out.
     fn pill_widths(app: &App) -> [f32; 3] {
-        let icons = labs::bar(&app.labs).iter().filter(|b| !b.is_pill()).count();
-        bar::pill_widths(app.screen.width, icons as f32)
+        let icons = labs::bar(&app.o.labs)
+            .iter()
+            .filter(|b| !b.is_pill())
+            .count();
+        bar::pill_widths(app.o.screen.width, icons as f32)
     }
 
     /// The centre of the bottom bar's pill `k` (0 = Search in browser, 1 = Copy
@@ -5636,7 +5474,7 @@ mod tests {
     fn a_selection_brings_its_actions_into_the_bottom_bar_not_a_second_bar() {
         let mut app = open_app(1280, 800, 1.0);
         let pill = |app: &App, k| {
-            widgets::shot::click(app.view(app.overlay), app.screen, bar_pill(app, k))
+            widgets::shot::click(app.view(app.overlay), app.o.screen, bar_pill(app, k))
         };
         // before a selection: Search in browser and Copy text are dimmed
         let pressed = |got: Vec<Message>| got.iter().any(|m| matches!(m, Message::Pill(_)));
@@ -5647,7 +5485,7 @@ mod tests {
             Point::new(500.0, 350.0),
             false,
         );
-        assert!(app.selection.is_some());
+        assert!(app.o.selection.is_some());
         let texts = overlay_texts(&app);
         for label in ["Search in browser", "Copy text", "Translate"] {
             assert!(texts.iter().any(|t| t == label), "{label}: {texts:?}");
@@ -5670,12 +5508,12 @@ mod tests {
                 "{which:?}: {sent:?}"
             );
         }
-        let live = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(&app, 0));
+        let live = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_button(&app, 0));
         assert!(live.iter().any(|m| matches!(m, Message::LiveToggle)));
         // the pressed pill is the highlighted one; Translate takes the selection
         let _ = app.update(Message::Pill(BarButton::Translate));
-        assert_eq!(app.pill, BarButton::Translate);
-        assert!(app.translate.is_some() && app.selection.is_some());
+        assert_eq!(app.o.pill, BarButton::Translate);
+        assert!(app.o.translate.is_some() && app.o.selection.is_some());
         // picked words in a snapped box: the pills take their text
         let mut words = select_text_app();
         drag(&mut words, caret(1, 7.0), caret(2, 16.0), false);
@@ -5692,7 +5530,7 @@ mod tests {
         (0..(size.width as usize / 8))
             .flat_map(|i| {
                 let p = Point::new(at.x + 8.0 * i as f32, y);
-                widgets::shot::click(app.view(app.overlay), app.screen, p)
+                widgets::shot::click(app.view(app.overlay), app.o.screen, p)
             })
             .collect()
     }
@@ -5705,8 +5543,8 @@ mod tests {
     fn without_the_text_reader_the_bar_offers_its_download() {
         let mut app = open_app(1280, 800, 1.0);
         app.note_reader(); // as at open (the tests have no models)
-        let Reader::Missing(bytes) = app.reader else {
-            panic!("{:?}", app.reader);
+        let Reader::Missing(bytes) = app.o.reader else {
+            panic!("{:?}", app.o.reader);
         };
         assert!(bytes > 1_000_000, "{bytes}");
         let texts = overlay_texts(&app);
@@ -5714,7 +5552,7 @@ mod tests {
         let say = format!("Text selection needs the text reader (~{mb} MB).");
         assert!(texts.contains(&say), "{texts:?}");
         assert!(texts.contains(&"Download".to_string()), "{texts:?}");
-        widgets::shot::save("reader-missing", app.view(app.overlay), app.screen);
+        widgets::shot::save("reader-missing", app.view(app.overlay), app.o.screen);
         // nothing fetched by itself: drawing, selecting, frames leave it offered
         drag(
             &mut app,
@@ -5723,7 +5561,7 @@ mod tests {
             false,
         );
         settle_bar(&mut app);
-        assert!(matches!(app.reader, Reader::Missing(_)));
+        assert!(matches!(app.o.reader, Reader::Missing(_)));
         // one click on Download
         let clicks = note_clicks(&app);
         assert!(
@@ -5731,7 +5569,7 @@ mod tests {
             "{clicks:?}"
         );
         let _ = app.update(Message::ReaderDownload);
-        assert_eq!(app.reader, Reader::Downloading(0.0));
+        assert_eq!(app.o.reader, Reader::Downloading(0.0));
         let opening = app.opening;
         let step = move |p| Message::Reader(opening, p);
         let _ = app.update(step(Ok(text::Progress::Download(0.42))));
@@ -5740,11 +5578,11 @@ mod tests {
             texts.contains(&"Downloading the text reader… 42%".to_string()),
             "{texts:?}"
         );
-        widgets::shot::save("reader-downloading", app.view(app.overlay), app.screen);
+        widgets::shot::save("reader-downloading", app.view(app.overlay), app.o.screen);
         // another opening's download says nothing here
         let stale = Message::Reader(app.opening.wrapping_add(1), Err("x".into()));
         let _ = app.update(stale);
-        assert_eq!(app.reader, Reader::Downloading(0.42));
+        assert_eq!(app.o.reader, Reader::Downloading(0.42));
         let _ = app.update(step(Err("no network".into())));
         let texts = overlay_texts(&app);
         assert!(
@@ -5758,7 +5596,11 @@ mod tests {
         );
         // done: the screen is read (here, still no models: offered again)
         let _ = app.update(step(Ok(text::Progress::Reading)));
-        assert!(matches!(app.reader, Reader::Missing(_)), "{:?}", app.reader);
+        assert!(
+            matches!(app.o.reader, Reader::Missing(_)),
+            "{:?}",
+            app.o.reader
+        );
     }
 
     /// A drag on text that began before the screen's text was read becomes a
@@ -5777,10 +5619,10 @@ mod tests {
             let p = caret(1, 7.0) + (caret(1, 15.0) - caret(1, 7.0)) * (i as f32 / 8.0);
             event(&mut app, overlay::Event::Move(p));
         }
-        assert!(app.drawing, "a stroke until the words are read");
-        let band = app.reading.expect("the band under the press is read");
+        assert!(app.o.drawing, "a stroke until the words are read");
+        let band = app.o.reading.expect("the band under the press is read");
         let _ = answer(&mut app, band);
-        assert!(!app.drawing && app.text_press.is_some());
+        assert!(!app.o.drawing && app.o.text_press.is_some());
         event(&mut app, overlay::Event::Move(caret(1, 21.0)));
         event(&mut app, overlay::Event::Release);
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
@@ -5794,11 +5636,11 @@ mod tests {
             },
         );
         event(&mut app, overlay::Event::Move(Point::new(700.0, 300.0)));
-        let band = app.reading.expect("a press may be on text");
+        let band = app.o.reading.expect("a press may be on text");
         let _ = answer(&mut app, band);
-        assert!(app.drawing && app.word.is_none());
+        assert!(app.o.drawing && app.o.word.is_none());
         assert!(
-            !app.text_used && app.reading.is_none(),
+            !app.o.text_used && app.o.reading.is_none(),
             "no text: no more is read"
         );
     }
@@ -5812,38 +5654,38 @@ mod tests {
         text::MODELS_HERE.set(Some(true));
         let page = text_app();
         let mut app = App::idle(window::Id::unique());
-        app.labs = Labs::all_on();
+        app.o.labs = Labs::all_on();
         let shot = Shot {
-            image: page.frame.clone().unwrap(),
+            image: page.o.frame.clone().unwrap(),
             scale: 1.0,
             origin: Point::ORIGIN,
-            size: page.screen,
+            size: page.o.screen,
             snip: None,
         };
         let _ = app.open(Instant::now(), Ok(shot));
-        assert!(app.ocr_ready && app.reader == Reader::Idle);
-        assert_eq!(app.reading, None, "nothing read at open");
+        assert!(app.o.ocr_ready && app.o.reader == Reader::Idle);
+        assert_eq!(app.o.reading, None, "nothing read at open");
         // the opening animation: nothing read, no helper started
         let start = Instant::now();
         let mut ms = 0;
         let mut last = Task::none();
-        while app.appear.is_none() || app.appearing() {
-            let revealing = app.reveal.is_some();
+        while app.o.appear.is_none() || app.appearing() {
+            let revealing = app.o.reveal.is_some();
             last = app.update(Message::Frame(start + Duration::from_millis(ms)));
             ms += 16;
             // the reveal's frame fades the window in (Windows, #23): not work
-            if app.appearing() && !(revealing && app.reveal.is_none()) {
+            if app.appearing() && !(revealing && app.o.reveal.is_none()) {
                 assert_eq!(last.units(), 0, "work at {ms} ms of the opening");
             }
-            assert_eq!(app.reading, None);
+            assert_eq!(app.o.reading, None);
         }
         assert!(last.units() > 0, "its end starts the helper");
         // a press on text: the band under it is read first, not the screen
         let at = caret(1, 7.0);
         event(&mut app, overlay::Event::Press { at, shift: false });
-        let first = app.reading.expect("the touched band");
-        assert_eq!(first, word::Screen::band(at.y, app.screen));
-        assert!(first.height < app.screen.height / 1.5 && first.contains(at));
+        let first = app.o.reading.expect("the touched band");
+        assert_eq!(first, word::Screen::band(at.y, app.o.screen));
+        assert!(first.height < app.o.screen.height / 1.5 && first.contains(at));
         for i in 1..=8 {
             let p = at + (caret(1, 21.0) - at) * (i as f32 / 8.0);
             event(&mut app, overlay::Event::Move(p));
@@ -5852,16 +5694,16 @@ mod tests {
         event(&mut app, overlay::Event::Release);
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
         // text was used: the rest of the screen, band by band
-        let next = app.reading.expect("the rest, in the background");
+        let next = app.o.reading.expect("the rest, in the background");
         assert_ne!(next, first);
         let mut bands = 1;
-        while let Some(band) = app.reading {
+        while let Some(band) = app.o.reading {
             let _ = answer(&mut app, band);
             bands += 1;
             assert!(bands < 10);
         }
-        assert!(app.screen_text.is_whole(app.screen.height));
-        assert_eq!(app.screen_text.lines().len(), TEXT.len());
+        assert!(app.o.screen_text.is_whole(app.o.screen.height));
+        assert_eq!(app.o.screen_text.lines().len(), TEXT.len());
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"), "kept");
         text::MODELS_HERE.set(None);
     }
@@ -5875,22 +5717,22 @@ mod tests {
     #[cfg(not(windows))]
     fn off_windows_the_screen_is_read_once_the_helper_is_warm() {
         let mut app = reader_app();
-        app.pointer = caret(2, 3.0);
+        app.o.pointer = caret(2, 3.0);
         let _ = app.update(Message::Warmed(app.opening.wrapping_sub(1)));
-        assert_eq!(app.reading, None, "an earlier opening's helper");
+        assert_eq!(app.o.reading, None, "an earlier opening's helper");
         let _ = app.update(Message::Warmed(app.opening));
-        let first = app.reading.expect("read with no press");
-        assert!(first.contains(app.pointer), "the pointer's band first");
+        let first = app.o.reading.expect("read with no press");
+        assert!(first.contains(app.o.pointer), "the pointer's band first");
         let mut bands = 0;
-        while let Some(band) = app.reading {
+        while let Some(band) = app.o.reading {
             let _ = answer(&mut app, band);
             bands += 1;
             assert!(bands < 10);
         }
-        assert!(app.screen_text.is_whole(app.screen.height));
-        assert_eq!(app.screen_text.lines().len(), TEXT.len());
+        assert!(app.o.screen_text.is_whole(app.o.screen.height));
+        assert_eq!(app.o.screen_text.lines().len(), TEXT.len());
         assert!(
-            app.word.is_none() && app.selection.is_none(),
+            app.o.word.is_none() && app.o.selection.is_none(),
             "nothing selected"
         );
     }
@@ -5906,26 +5748,30 @@ mod tests {
         ocr::system::LANGUAGE_HERE.set(Some(Some("en-US")));
         let page = text_app();
         let mut app = App::idle(window::Id::unique());
-        app.labs = Labs::all_on();
+        app.o.labs = Labs::all_on();
         let shot = Shot {
-            image: page.frame.clone().unwrap(),
+            image: page.o.frame.clone().unwrap(),
             scale: 1.0,
             origin: Point::ORIGIN,
-            size: page.screen,
+            size: page.o.screen,
             snip: None,
         };
         let opened = app.open(Instant::now(), Ok(shot));
-        assert_eq!(app.reader, Reader::Idle, "no download offered");
-        let whole = Rectangle::with_size(app.screen);
-        assert_eq!(app.reading, Some(whole), "the whole screen, at the capture");
-        assert_eq!(app.text_by, Some(ocr::Source::System));
+        assert_eq!(app.o.reader, Reader::Idle, "no download offered");
+        let whole = Rectangle::with_size(app.o.screen);
+        assert_eq!(
+            app.o.reading,
+            Some(whole),
+            "the whole screen, at the capture"
+        );
+        assert_eq!(app.o.text_by, Some(ocr::Source::System));
         assert!(opened.units() > 0);
         let start = Instant::now();
         let mut ms = 0;
-        while app.appear.is_none() || app.appearing() {
+        while app.o.appear.is_none() || app.appearing() {
             let _ = app.update(Message::Frame(start + Duration::from_millis(ms)));
             ms += 16;
-            assert_eq!(app.reading, Some(whole), "one read at {ms} ms");
+            assert_eq!(app.o.reading, Some(whole), "one read at {ms} ms");
         }
         // a drag on text while it is read: a stroke for now
         let at = caret(1, 7.0);
@@ -5934,22 +5780,22 @@ mod tests {
             let p = at + (caret(1, 21.0) - at) * (i as f32 / 8.0);
             event(&mut app, overlay::Event::Move(p));
         }
-        assert!(app.drawing && app.word.is_none());
+        assert!(app.o.drawing && app.o.word.is_none());
         let _ = answer(&mut app, whole);
-        assert!(app.screen_text.is_whole(app.screen.height));
+        assert!(app.o.screen_text.is_whole(app.o.screen.height));
         event(&mut app, overlay::Event::Release);
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
-        assert_eq!(app.reading, None, "nothing more to read");
+        assert_eq!(app.o.reading, None, "nothing more to read");
         // every word is selectable now, at once
         click_at(&mut app, at_word(4, 6.0), false);
         click_at(&mut app, at_word(4, 6.0), false);
         assert_eq!(picked_text(&app).as_deref(), Some("Shift"));
-        assert_eq!(app.reading, None);
+        assert_eq!(app.o.reading, None);
         // the closer (doubled) read replaces the quick one; the selection stays
         let blocks: Vec<TextBlock> = text_blocks().into_iter().skip(1).collect();
         let closer = word::lines(blocks, [0, 0], 1.0);
         let _ = app.update(Message::ScreenText(app.opening, whole, Ok(closer)));
-        assert_eq!(app.screen_text.lines().len(), TEXT.len() - 1, "replaced");
+        assert_eq!(app.o.screen_text.lines().len(), TEXT.len() - 1, "replaced");
         assert_eq!(picked_text(&app).as_deref(), Some("Shift"));
         ocr::system::LANGUAGE_HERE.set(None);
         text::MODELS_HERE.set(None);
@@ -5963,20 +5809,24 @@ mod tests {
     fn without_windows_ocr_the_helper_reads() {
         ocr::system::LANGUAGE_HERE.set(Some(Some("en-US"))); // as if it were there
         let mut app = text_app();
-        assert!(app.reads_text() && app.reader == Reader::Idle);
-        app.helper = Some(Arc::new(ocr::hold())); // open, as `open` does
+        assert!(app.reads_text() && app.o.reader == Reader::Idle);
+        app.o.helper = Some(Arc::new(ocr::hold())); // open, as `open` does
         let task = app.warm();
-        assert_eq!(app.text_by, Some(ocr::Source::System));
+        assert_eq!(app.o.text_by, Some(ocr::Source::System));
         run_task(&mut app, task); // the real read: there is none here
-        assert_eq!(app.text_by, Some(ocr::Source::Helper));
-        assert!(matches!(app.reader, Reader::Missing(_)), "{:?}", app.reader);
-        assert!(!app.reads_text() && app.screen_text.lines().is_empty());
+        assert_eq!(app.o.text_by, Some(ocr::Source::Helper));
+        assert!(
+            matches!(app.o.reader, Reader::Missing(_)),
+            "{:?}",
+            app.o.reader
+        );
+        assert!(!app.reads_text() && app.o.screen_text.lines().is_empty());
         // with the models, a press reads the band under it (#123)
         let mut app = reader_app();
-        app.text_by = Some(ocr::Source::Helper);
+        app.o.text_by = Some(ocr::Source::Helper);
         let at = caret(1, 7.0);
         event(&mut app, overlay::Event::Press { at, shift: false });
-        assert_eq!(app.reading, Some(word::Screen::band(at.y, app.screen)));
+        assert_eq!(app.o.reading, Some(word::Screen::band(at.y, app.o.screen)));
         ocr::system::LANGUAGE_HERE.set(None);
     }
 
@@ -6013,8 +5863,8 @@ mod tests {
     fn a_drag_let_go_before_its_band_is_read_waits_for_it() {
         let mut app = reader_app();
         stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
-        let band = app.reading.expect("the band under the press");
-        assert!(app.held.is_some() && app.selection.is_none(), "held");
+        let band = app.o.reading.expect("the band under the press");
+        assert!(app.o.held.is_some() && app.o.selection.is_none(), "held");
         let ctrl_c = overlay::Event::Key {
             letter: 'c',
             ctrl: true,
@@ -6024,17 +5874,17 @@ mod tests {
         let task = answer(&mut app, band);
         run_task(&mut app, task);
         assert_eq!(copy::copied::text().as_deref(), Some("while you drag"));
-        assert!(app.held.is_none());
+        assert!(app.o.held.is_none());
         // off text: a stroke, snapped to a box as before
         let mut app = reader_app();
         stroke(
             &mut app,
             &[Point::new(600.0, 250.0), Point::new(800.0, 400.0)],
         );
-        let band = app.reading.expect("the band under the press");
+        let band = app.o.reading.expect("the band under the press");
         let _ = answer(&mut app, band);
-        assert!(app.held.is_none() && app.word.is_none());
-        assert_eq!(app.selection.map(|s| s.kind), Some(overlay::Kind::Drag));
+        assert!(app.o.held.is_none() && app.o.word.is_none());
+        assert_eq!(app.o.selection.map(|s| s.kind), Some(overlay::Kind::Drag));
     }
 
     /// A tap, a Shift+click and Ctrl+A before their text is read wait for it.
@@ -6044,20 +5894,20 @@ mod tests {
         let mut app = reader_app();
         let tap = at_word(4, 6.0); // "Shift"
         click_at(&mut app, tap, false);
-        let band = app.reading.expect("the tapped band");
+        let band = app.o.reading.expect("the tapped band");
         assert!(band.contains(tap) && band.height < 420.0);
         let _ = answer(&mut app, band);
         assert_eq!(picked_text(&app).as_deref(), Some("Shift"));
         // Shift+click past the rows read: that band, then the words stretch there
         let mut app = reader_app();
-        let band = word::Screen::band(caret(0, 0.0).y, app.screen);
+        let band = word::Screen::band(caret(0, 0.0).y, app.o.screen);
         let _ = answer(&mut app, band);
         stroke(&mut app, &[caret(0, 7.0), caret(0, 16.0)]);
         assert_eq!(picked_text(&app).as_deref(), Some("to Search"));
         let end = caret(5, 9.0);
-        assert!(!app.screen_text.knows(end.y));
+        assert!(!app.o.screen_text.knows(end.y));
         click_at(&mut app, end, true);
-        while let Some(band) = app.reading {
+        while let Some(band) = app.o.reading {
             let _ = answer(&mut app, band); // the background band, then the clicked one
         }
         let text = picked_text(&app).unwrap();
@@ -6073,10 +5923,10 @@ mod tests {
             ctrl: true,
         };
         event(&mut app, ctrl_a);
-        let first = app.reading.expect("from the pointer");
+        let first = app.o.reading.expect("from the pointer");
         assert!(first.contains(caret(3, 0.0)));
-        while let Some(band) = app.reading {
-            assert!(app.selection.is_none(), "not before all is read");
+        while let Some(band) = app.o.reading {
+            assert!(app.o.selection.is_none(), "not before all is read");
             let _ = answer(&mut app, band);
         }
         assert_eq!(picked_text(&app).unwrap(), TEXT.join("\n"));
@@ -6103,7 +5953,7 @@ mod tests {
     fn hidden_features_have_no_bar_button_key_or_editor_and_turning_them_on_brings_them_back() {
         let mut app = open_app(1280, 800, 1.0);
         let (_, full) = app.bar_size();
-        app.labs = Labs::default();
+        app.o.labs = Labs::default();
         let (_, small) = app.bar_size();
         assert!(
             small.width < full.width,
@@ -6127,7 +5977,7 @@ mod tests {
                 ctrl: false,
             },
         );
-        assert!(app.edit.is_none() && !app.editing());
+        assert!(app.o.edit.is_none() && !app.editing());
         drag(
             &mut app,
             Point::new(200.0, 150.0),
@@ -6143,19 +5993,19 @@ mod tests {
         );
         let _ = app.update(Message::Run(&actions::edit::ACTION));
         let _ = app.update(Message::EditScreen);
-        assert!(app.edit.is_none(), "the editor never opens");
+        assert!(app.o.edit.is_none(), "the editor never opens");
         // Pins and a snip's editor are off too.
-        assert!(!app.labs.has(labs::Feature::Pins));
+        assert!(!app.o.labs.has(labs::Feature::Pins));
         // Song search on: its button is back (one more), the editor still off.
-        app.labs.set(labs::Feature::Song, true);
+        app.o.labs.set(labs::Feature::Song, true);
         assert!(bar_names(&app).iter().any(|n| n == "Song search"));
         // (the first icon also brings the divider before the icons)
         assert!(app.bar_size().1.width >= small.width + widgets::BUBBLE + bar::SPACING);
         // Live translate on: its button is back.
-        app.labs.set(labs::Feature::Live, true);
+        app.o.labs.set(labs::Feature::Live, true);
         assert!(bar_names(&app).iter().any(|n| n == "Live translate (Beta)"));
         // Editor on: Edit is back, and E opens it.
-        app.labs.set(labs::Feature::Editor, true);
+        app.o.labs.set(labs::Feature::Editor, true);
         assert!(bar_names(&app).iter().any(|n| n.starts_with("Edit")));
         let _ = app.update(Message::Run(&actions::edit::ACTION));
         assert!(app.editing());
@@ -6171,13 +6021,13 @@ mod tests {
             false,
         );
         let _ = app.open_editor();
-        app.labs.set(labs::Feature::Pins, false);
+        app.o.labs.set(labs::Feature::Pins, false);
         let _ = app.update(Message::Editor(editor::Message::Pin));
         assert!(
-            app.frame.is_some() && app.edit.is_some(),
+            app.o.frame.is_some() && app.o.edit.is_some(),
             "the overlay stays: nothing was pinned"
         );
-        app.labs.set(labs::Feature::Pins, true);
+        app.o.labs.set(labs::Feature::Pins, true);
         let _ = app.update(Message::Editor(editor::Message::Pin));
         assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }
@@ -6186,7 +6036,7 @@ mod tests {
     fn a_hidden_features_trigger_does_nothing() {
         // The shared config is the defaults here: Snip and Song are off.
         let mut app = open_app(1280, 800, 1.0);
-        app.frame = None;
+        app.o.frame = None;
         let qa = |action: &str| QuickAction {
             action: action.into(),
             shortcut: String::new(),
@@ -6222,18 +6072,18 @@ mod tests {
     fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         // The default (and every migrated) config: nothing runs after a selection.
         let mut app = open_app(1280, 800, 1.0);
-        app.labs = Labs::all_on();
-        app.behaviour = config::Config::default().selection;
+        app.o.labs = Labs::all_on();
+        app.o.behaviour = config::Config::default().selection;
         drag(
             &mut app,
             Point::new(200.0, 150.0),
             Point::new(500.0, 350.0),
             false,
         );
-        assert!(app.selection.is_some());
+        assert!(app.o.selection.is_some());
         assert!(app.auto_actions().is_empty(), "nothing runs by itself");
-        assert!(app.panel.is_none(), "no Lens, no Ask AI before a choice");
-        assert!(app.lens_pages.is_empty(), "nothing handed to the browser");
+        assert!(app.o.panel.is_none(), "no Lens, no Ask AI before a choice");
+        assert!(app.o.lens_pages.is_empty(), "nothing handed to the browser");
         let _ = widgets::tests_support::shown();
         let texts = overlay_texts(&app);
         let tips = widgets::tests_support::shown();
@@ -6265,12 +6115,12 @@ mod tests {
         let _ = app.update(Message::AskInput("  ".into()));
         let _ = app.update(Message::AskSubmit);
         assert_eq!(
-            app.panel.as_ref().map(|(_, p)| p.kind()),
+            app.o.panel.as_ref().map(|(_, p)| p.kind()),
             Some(actions::Panel::Ask)
         );
         // "Auto action" opted back in: the selection searches by itself
         let mut app = open_app(1280, 800, 1.0);
-        app.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+        app.o.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
         drag(
             &mut app,
             Point::new(200.0, 150.0),
@@ -6278,7 +6128,7 @@ mod tests {
             false,
         );
         assert_eq!(
-            app.panel.as_ref().map(|(_, p)| p.kind()),
+            app.o.panel.as_ref().map(|(_, p)| p.kind()),
             Some(actions::Panel::Lens)
         );
         // the keys still work: T reads the text, A asks, L searches
@@ -6287,7 +6137,7 @@ mod tests {
             ('a', actions::Panel::Ask),
             ('l', actions::Panel::Lens),
         ] {
-            app.panel = None;
+            app.o.panel = None;
             event(
                 &mut app,
                 overlay::Event::Key {
@@ -6295,7 +6145,7 @@ mod tests {
                     ctrl: false,
                 },
             );
-            assert_eq!(app.panel.as_ref().map(|(_, p)| p.kind()), Some(kind));
+            assert_eq!(app.o.panel.as_ref().map(|(_, p)| p.kind()), Some(kind));
         }
     }
 
@@ -6311,7 +6161,7 @@ mod tests {
     /// The bar's bounds, and whether its Edit slot (the last) is Edit, once settled.
     fn bar_box(app: &mut App) -> (Rectangle, bool) {
         settle_bar(app);
-        let edit = widgets::shot::click(app.view(app.overlay), app.screen, bar_button(app, 2));
+        let edit = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_button(app, 2));
         let is_edit = |m: &Message| match m {
             Message::EditScreen => true,
             Message::Run(a) => a.id == actions::edit::ACTION.id,
@@ -6332,7 +6182,7 @@ mod tests {
         // nothing selected: Search in browser and Copy text are there but do nothing
         for k in 0..=1 {
             let at = bar_pill(&app, k);
-            let got = widgets::shot::click(app.view(app.overlay), app.screen, at);
+            let got = widgets::shot::click(app.view(app.overlay), app.o.screen, at);
             assert!(
                 !got.iter().any(|m| matches!(m, Message::Pill(_))),
                 "{k}: {got:?}"
@@ -6345,13 +6195,13 @@ mod tests {
             Point::new(500.0, 350.0),
             false,
         );
-        app.panel = None; // the auto-search's card
+        app.o.panel = None; // the auto-search's card
         let (selected, edits) = bar_box(&mut app);
         assert_eq!(selected, before);
         assert!(edits);
         // Ask AI's card opens (the bar steps aside) and closes: the same again
         let _ = app.update(Message::AskButton);
-        let (id, _) = app.panel.as_ref().expect("Ask AI opens");
+        let (id, _) = app.o.panel.as_ref().expect("Ask AI opens");
         let id = *id;
         assert!(!app.bottom_bar_shown());
         let _ = app.update(Message::Panel(id, panel::Msg::Card(card::Event::Close)));
@@ -6367,7 +6217,7 @@ mod tests {
     #[test]
     fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
         let mut app = open_app(1280, 800, 1.0);
-        app.work_inset = 40.0;
+        app.o.work_inset = 40.0;
         // clear of both spots, even for a two-row toolbar
         drag(
             &mut app,
@@ -6376,9 +6226,9 @@ mod tests {
             false,
         );
         let (bar_box, _) = bar_box(&mut app);
-        let spot = |app: &App, size| bar::anchor_at(app.bar_anchor, app.screen, size, 40.0);
+        let spot = |app: &App, size| bar::anchor_at(app.o.bar_anchor, app.o.screen, size, 40.0);
         assert_eq!(bar_box.position(), spot(&app, bar_box.size()));
-        let tool = Editing::toolbar_size(app.screen.width);
+        let tool = Editing::toolbar_size(app.o.screen.width);
         let _ = app.update(Message::Run(&actions::edit::ACTION));
         assert!(app.editing());
         // on its way: one shape between the two sizes, at the same spot
@@ -6392,8 +6242,8 @@ mod tests {
         assert_eq!(app.bar_at(), spot(&app, mid));
         // ...drawn at its whole size (inside it differs from just outside it)
         // (over a plain frame)
-        app.frame = Some(image::Handle::from_rgba(4, 4, vec![9; 4 * 4 * 4]));
-        let px = widgets::shot::save("bar-morph", app.view(app.overlay), app.screen);
+        app.o.frame = Some(image::Handle::from_rgba(4, 4, vec![9; 4 * 4 * 4]));
+        let px = widgets::shot::save("bar-morph", app.view(app.overlay), app.o.screen);
         let at = app.bar_at();
         let y = (at.y + mid.height / 2.0) as usize;
         let pixel = |x: f32| {
@@ -6416,7 +6266,7 @@ mod tests {
         let pad = widgets::SURFACE_PADDING;
         let row = pad + widgets::CONTROL / 2.0;
         let back = at + Vector::new(row, row);
-        let hit = |app: &App, p| widgets::shot::click(app.view(app.overlay), app.screen, p);
+        let hit = |app: &App, p| widgets::shot::click(app.view(app.overlay), app.o.screen, p);
         assert!(
             hit(&app, back)
                 .iter()
@@ -6434,7 +6284,7 @@ mod tests {
         let _ = app.update(Message::BarMoved(edge));
         let _ = app.update(Message::BarMoved(edge - Vector::new(0.0, 560.0)));
         let _ = app.update(Message::BarReleased);
-        assert_eq!(app.bar_anchor, BarAnchor::Top);
+        assert_eq!(app.o.bar_anchor, BarAnchor::Top);
         assert_eq!(config::current().bar.anchor, BarAnchor::Top, "remembered");
         settle_bar(&mut app);
         assert_eq!(app.bar_at(), spot(&app, tool));
@@ -6444,7 +6294,7 @@ mod tests {
         assert!(!app.editing());
         // Esc did it: the same key's Escape doesn't close the overlay too
         let _ = app.update(Message::Escape);
-        assert!(app.frame.is_some(), "still open, at the bar");
+        assert!(app.o.frame.is_some(), "still open, at the bar");
         settle_bar(&mut app);
         let (_, size) = app.bar_size();
         assert_eq!(app.bar_at(), spot(&app, size));
@@ -6467,7 +6317,7 @@ mod tests {
     #[test]
     fn the_bar_drags_by_its_handle_and_docks_at_the_nearest_spot() {
         let mut app = open_app(1280, 800, 1.0);
-        app.work_inset = 40.0; // a taskbar
+        app.o.work_inset = 40.0; // a taskbar
         let (_, size) = app.bar_size();
         assert_eq!(app.bar_at().y + size.height, 800.0 - 40.0 - bar::BOTTOM_GAP);
         let handle = app.bar_at()
@@ -6475,10 +6325,10 @@ mod tests {
                 widgets::SURFACE_PADDING + bar::HANDLE / 2.0,
                 size.height / 2.0,
             );
-        let grabbed = widgets::shot::click(app.view(app.overlay), app.screen, handle);
+        let grabbed = widgets::shot::click(app.view(app.overlay), app.o.screen, handle);
         assert!(grabbed.iter().any(|m| matches!(m, Message::BarGrab)));
         // the field and the buttons don't drag it
-        let field = widgets::shot::click(app.view(app.overlay), app.screen, bar_field(&app));
+        let field = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_field(&app));
         assert!(!field.iter().any(|m| matches!(m, Message::BarGrab)));
         // held, it follows the pointer
         let before = app.bar_at();
@@ -6488,7 +6338,7 @@ mod tests {
         assert_eq!(app.bar_at(), before - Vector::new(100.0, 560.0));
         // let go near the top: it glides to the top spot, remembered
         let _ = app.update(Message::BarReleased);
-        assert_eq!(app.bar_anchor, BarAnchor::Top);
+        assert_eq!(app.o.bar_anchor, BarAnchor::Top);
         assert_eq!(config::current().bar.anchor, BarAnchor::Top, "remembered");
         let now = Instant::now();
         let _ = app.update(Message::Frame(now));
@@ -6502,7 +6352,7 @@ mod tests {
         assert_eq!(app.bar_at().y, bar::TOP);
         // the next opening finds it there
         let mut next = open_app(1280, 800, 1.0);
-        next.bar_anchor = config::current().bar.anchor;
+        next.o.bar_anchor = config::current().bar.anchor;
         assert_eq!(next.bar_at().y, bar::TOP);
         // a selection where the bar is: it moves to a free spot, and comes back
         let bar_box = Rectangle::new(next.bar_at(), size);
@@ -6512,9 +6362,9 @@ mod tests {
             bar_box.position() + Vector::new(300.0, 120.0),
             false,
         );
-        assert!(next.selection.is_some());
+        assert!(next.o.selection.is_some());
         settle_bar(&mut next);
-        let sel = next.view.rect_to_screen(next.selection.unwrap().area);
+        let sel = next.o.view.rect_to_screen(next.o.selection.unwrap().area);
         let (_, size) = next.bar_size();
         assert!(
             !Rectangle::new(next.bar_at(), size).intersects(&sel),
@@ -6522,7 +6372,7 @@ mod tests {
         );
         let _ = next.update(Message::Escape); // closes the overlay
         let mut back = open_app(1280, 800, 1.0);
-        back.bar_anchor = BarAnchor::Top;
+        back.o.bar_anchor = BarAnchor::Top;
         settle_bar(&mut back);
         assert_eq!(back.bar_at().y, bar::TOP, "free again: home");
         // dropped far off screen: the nearest spot, inside the work area
@@ -6530,7 +6380,7 @@ mod tests {
         let _ = back.update(Message::BarMoved(Point::new(10.0, 10.0)));
         let _ = back.update(Message::BarMoved(Point::new(5000.0, 5000.0)));
         let _ = back.update(Message::BarReleased);
-        assert_eq!(back.bar_anchor, BarAnchor::BottomRight);
+        assert_eq!(back.o.bar_anchor, BarAnchor::BottomRight);
         let mut cfg = config::current();
         cfg.bar.anchor = BarAnchor::Bottom;
         config::set_current(cfg);
@@ -6541,7 +6391,7 @@ mod tests {
         for (w, h) in [(1280, 800), (800, 600), (640, 480)] {
             let app = open_app(w, h, 1.0);
             let _ = widgets::tests_support::shown(); // drop older records
-            let click = |at| widgets::shot::click(app.view(app.overlay), app.screen, at);
+            let click = |at| widgets::shot::click(app.view(app.overlay), app.o.screen, at);
             let translate = click(bar_pill(&app, 2));
             let messages: Vec<Vec<Message>> = (0..3).map(|k| click(bar_button(&app, k))).collect();
             let is = |k: usize, f: fn(&Message) -> bool| messages[k].iter().any(f);
@@ -6574,7 +6424,7 @@ mod tests {
         let mut app = open_app(800, 600, 1.0);
         let _ = app.song(false);
         assert!(
-            app.song.is_none() && app.frame.is_none(),
+            app.o.song.is_none() && app.o.frame.is_none(),
             "closed, not listening"
         );
         assert!(app.windows.busy(), "Settings opened (Song search)");
@@ -6582,7 +6432,7 @@ mod tests {
         let mut app = open_app(800, 600, 1.0);
         let _ = app.update(Message::AskButton);
         assert_eq!(
-            app.panel.as_ref().map(|(_, p)| p.kind()),
+            app.o.panel.as_ref().map(|(_, p)| p.kind()),
             Some(actions::Panel::Ask)
         );
         // the same keys with nothing selected: A asks, E edits, R translates, all the screen
@@ -6594,10 +6444,10 @@ mod tests {
                 ctrl: false,
             },
         );
-        assert!(app.edit.is_some(), "the whole screen in the editor");
+        assert!(app.o.edit.is_some(), "the whole screen in the editor");
         assert_eq!(
-            app.selection.map(|s| s.area),
-            Some(Rectangle::with_size(app.screen))
+            app.o.selection.map(|s| s.area),
+            Some(Rectangle::with_size(app.o.screen))
         );
         let mut app = open_app(800, 600, 1.0);
         event(
@@ -6607,7 +6457,7 @@ mod tests {
                 ctrl: false,
             },
         );
-        assert!(app.translate.is_some());
+        assert!(app.o.translate.is_some());
         let mut app = open_app(800, 600, 1.0);
         event(
             &mut app,
@@ -6616,14 +6466,14 @@ mod tests {
                 ctrl: false,
             },
         );
-        assert!(app.panel.is_some());
+        assert!(app.o.panel.is_some());
     }
 
     /// The opening as drawn `ms` after its first frame (`None`: the first frame).
     /// (A frame every 10 ms.)
     fn opening_at(ms: Option<u64>) -> App {
         let mut app = text_app();
-        app.appear = None;
+        app.o.appear = None;
         if let Some(ms) = ms {
             let start = Instant::now();
             for at in (0..=ms).step_by(10).chain([ms]) {
@@ -6644,7 +6494,7 @@ mod tests {
             let at = (300 * 960 + 700) * 4; // an empty part of the page
             u32::from(rgba[at]) + u32::from(rgba[at + 1]) + u32::from(rgba[at + 2])
         };
-        let frame = match &first.frame {
+        let frame = match &first.o.frame {
             Some(image::Handle::Rgba { pixels, .. }) => pixels.to_vec(),
             _ => unreachable!(),
         };
@@ -6672,7 +6522,7 @@ mod tests {
         // by the clock from the first frame: one slow frame (a busy machine)
         // lands where 60 fps would be, neither ahead nor behind
         let mut slow = opening_at(Some(0));
-        let start = slow.appear.unwrap().0;
+        let start = slow.o.appear.unwrap().0;
         let _ = slow.update(Message::Frame(start + Duration::from_millis(100)));
         let smooth = opening_at(Some(100));
         assert_eq!(slow.appeared(), smooth.appeared());
@@ -6700,8 +6550,8 @@ mod tests {
             widgets::shot::save(&name, app.view(app.overlay), Size::new(960.0, 420.0));
         }
         let mut app = open_app(3440, 1440, 1.0);
-        app.appear = None;
-        app.appear = Some((Instant::now(), 0.4));
+        app.o.appear = None;
+        app.o.appear = Some((Instant::now(), 0.4));
         let t = Instant::now();
         for _ in 0..5 {
             widgets::shot::render(app.view(app.overlay), 3440, 1440);
@@ -6712,7 +6562,7 @@ mod tests {
             widgets::shot::render(Element::<'_, Message>::from(space()), 3440, 1440);
         }
         println!("3440x1440 empty frame (the harness): {:?}", t.elapsed() / 5);
-        let frame = app.frame.clone().unwrap();
+        let frame = app.o.frame.clone().unwrap();
         let t = Instant::now();
         for _ in 0..5 {
             let only = image(frame.clone())
@@ -6732,7 +6582,7 @@ mod tests {
         use iced_runtime::user_interface::{Cache, UserInterface};
         let mut renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0));
         let view = app.view(app.overlay);
-        let mut ui = UserInterface::build(view, app.screen, Cache::default(), &mut renderer);
+        let mut ui = UserInterface::build(view, app.o.screen, Cache::default(), &mut renderer);
         let actions = iced_runtime::task::into_stream(task)
             .map(iced::futures::executor::block_on_stream)
             .into_iter()
@@ -6795,7 +6645,7 @@ mod tests {
         let crop = app.crop().unwrap();
         let opened = app.open_panel(actions::Panel::Ask, crop.clone(), None);
         drop(opened); // its work (the setup) is done below by hand
-        let (id, _) = app.panel.as_ref().map(|(id, p)| (*id, p.kind())).unwrap();
+        let (id, _) = app.o.panel.as_ref().map(|(id, p)| (*id, p.kind())).unwrap();
         let setup = actions::ask::setup(&crop).map(Arc::new);
         assert!(setup.is_ok(), "the no-key provider needs no setup");
         let ready = app.update(Message::Panel(id, panel::Msg::Ready(setup)));
@@ -6847,7 +6697,7 @@ mod tests {
         );
         let crop = app.crop().unwrap();
         let _ = app.open_panel(actions::Panel::Ask, crop.clone(), None);
-        let (id, _) = app.panel.as_ref().map(|(id, p)| (*id, p.kind())).unwrap();
+        let (id, _) = app.o.panel.as_ref().map(|(id, p)| (*id, p.kind())).unwrap();
         let setup = actions::ask::setup(&crop).map(Arc::new);
         let _ = app.update(Message::Panel(id, panel::Msg::Ready(setup)));
         (app, id)
@@ -6864,7 +6714,7 @@ mod tests {
         );
         let crop = app.crop().unwrap();
         let _ = app.open_panel(actions::Panel::Text, crop, None);
-        let id = app.panel.as_ref().map(|(id, _)| *id).unwrap();
+        let id = app.o.panel.as_ref().map(|(id, _)| *id).unwrap();
         let _ = app.update(Message::Panel(id, panel::Msg::Read(Ok(text.into()))));
         app
     }
@@ -6876,7 +6726,7 @@ mod tests {
     ) -> (Vec<Message>, Vec<iced::event::Status>) {
         shot::feed(
             app.view(app.overlay),
-            app.screen,
+            app.o.screen,
             focus,
             events,
             &mut Clip::default(),
@@ -6931,14 +6781,14 @@ mod tests {
     #[test]
     fn a_translation_has_no_field_to_take_the_letters() {
         let mut app = open_app(800, 600, 1.0);
-        let frame = app.frame.clone().unwrap();
+        let frame = app.o.frame.clone().unwrap();
         let (session, _) =
             translate::Session::start(frame, [0, 0, 800, 600], 1.0, app.cache.clone(), false);
-        app.translate = Some((7, session));
+        app.o.translate = Some((7, session));
         assert!(!app.bottom_bar_shown(), "no bar, so no ask field");
         // Tab has no bar to move through; the card's E / A stay the card's.
         let _ = app.on_overlay(overlay::Event::Tab { back: false });
-        assert_eq!(app.bar_focus, None);
+        assert_eq!(app.o.bar_focus, None);
         let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("ea"));
         assert_eq!(shortcuts(&messages), "ea");
     }
@@ -6961,7 +6811,7 @@ mod tests {
         );
         // the subscription turns that into EscapeTaken: nothing closes
         let _ = app.update(Message::EscapeTaken);
-        assert!(app.frame.is_some() && app.hiding == Hiding::No);
+        assert!(app.o.frame.is_some() && app.hiding == Hiding::No);
         // with the field let go, letters are shortcuts again
         let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("t"));
         assert_eq!(shortcuts(&messages), "t");
@@ -6969,7 +6819,7 @@ mod tests {
         let (_, status) = feed(&app, Focus::Nothing, &esc);
         assert_eq!(status[1], iced::event::Status::Ignored);
         let _ = app.update(Message::Escape);
-        assert!(app.frame.is_none());
+        assert!(app.o.frame.is_none());
         // the Ask panel's input and the Text panel's editor (which lets Esc through)
         let (app, _) = app_with_ask_panel();
         let (messages, status) = feed(&app, Focus::Id(panel::INPUT), &esc);
@@ -7002,12 +6852,12 @@ mod tests {
             Point::new(400.0, 280.0),
             false,
         );
-        app.ask = "hello".into();
+        app.o.ask = "hello".into();
         let run = |app: &App, events: Vec<iced::Event>| {
             let mut clip = Clip::default();
             let (messages, _) = shot::feed(
                 app.view(app.overlay),
-                app.screen,
+                app.o.screen,
                 Focus::Id(ASK_INPUT),
                 &events,
                 &mut clip,
@@ -7049,7 +6899,7 @@ mod tests {
             Point::new(400.0, 280.0),
             false,
         );
-        app.ask = "hello".into();
+        app.o.ask = "hello".into();
         let (messages, _) = run(&app, shot::chord('s'));
         assert!(messages.iter().any(|m| matches!(
             m,
@@ -7065,7 +6915,7 @@ mod tests {
         let mut app = open_app(800, 600, 1.0);
         let tab = |app: &mut App, back| {
             let _ = app.on_overlay(overlay::Event::Tab { back });
-            app.bar_focus
+            app.o.bar_focus
         };
         use bar::Stop::{Badge, Button, Field, Logo};
         let forward: Vec<_> = (0..8).map(|_| tab(&mut app, false)).collect();
@@ -7097,29 +6947,29 @@ mod tests {
             Point::new(100.0, 80.0),
             Size::new(300.0, 200.0),
         ));
-        app.bar_focus = Some(Badge);
+        app.o.bar_focus = Some(Badge);
         assert_eq!(tab(&mut app, false), Some(Button(BarButton::Search)));
         assert_eq!(tab(&mut app, false), Some(Button(BarButton::CopyText)));
         // Enter and Space press the focused control
         let mut app = open_app(800, 600, 1.0);
-        app.bar_focus = Some(Button(BarButton::Translate));
+        app.o.bar_focus = Some(Button(BarButton::Translate));
         let _ = app.on_overlay(overlay::Event::Space);
-        assert_eq!(app.pill, BarButton::Translate);
+        assert_eq!(app.o.pill, BarButton::Translate);
         let mut app = open_app(800, 600, 1.0);
-        app.bar_focus = Some(Logo);
+        app.o.bar_focus = Some(Logo);
         let _ = app.on_overlay(overlay::Event::Enter);
-        assert!(app.panel.is_some(), "the logo opens the AI chat");
+        assert!(app.o.panel.is_some(), "the logo opens the AI chat");
         // Space with nothing focused does nothing
         let mut app = open_app(800, 600, 1.0);
         let _ = app.on_overlay(overlay::Event::Space);
-        assert!(app.panel.is_none() && app.bar_focus.is_none());
+        assert!(app.o.panel.is_none() && app.o.bar_focus.is_none());
         // a click puts the focus back on the overlay
-        app.bar_focus = Some(Badge);
+        app.o.bar_focus = Some(Badge);
         let _ = app.on_overlay(overlay::Event::Press {
             at: Point::new(5.0, 5.0),
             shift: false,
         });
-        assert_eq!(app.bar_focus, None);
+        assert_eq!(app.o.bar_focus, None);
     }
 
     #[test]
@@ -7174,35 +7024,35 @@ mod tests {
         );
         // an App: a drawn selection searches; a tapped word, Snip or nothing doesn't
         let mut app = open_app(400, 300, 1.0);
-        app.behaviour = behaviour(snap, After::Search, SearchWith::Ai);
+        app.o.behaviour = behaviour(snap, After::Search, SearchWith::Ai);
         assert!(app.auto_actions().is_empty(), "no selection yet");
         app.select(Rectangle::new(
             Point::new(10.0, 10.0),
             Size::new(80.0, 60.0),
         ));
         assert_eq!(app.auto_actions().len(), 1);
-        app.selection.as_mut().unwrap().kind = overlay::Kind::Word;
+        app.o.selection.as_mut().unwrap().kind = overlay::Kind::Word;
         assert!(app.auto_actions().is_empty(), "a tapped word waits");
-        app.selection.as_mut().unwrap().kind = overlay::Kind::Snap;
-        app.purpose = Purpose::Snip(Box::new(Snip::new(Vec::new(), app.place(), false, None)));
+        app.o.selection.as_mut().unwrap().kind = overlay::Kind::Snap;
+        app.o.purpose = Purpose::Snip(Box::new(Snip::new(Vec::new(), app.place(), false, None)));
         assert!(app.auto_actions().is_empty(), "Snip has no search");
         // an App opened before the setting existed behaves as before
-        assert!(auto_targets(App::idle(window::Id::unique()).behaviour).is_empty());
+        assert!(auto_targets(App::idle(window::Id::unique()).o.behaviour).is_empty());
     }
 
     #[test]
     fn a_circle_snaps_to_a_box_that_morphs_and_resizes_by_its_brackets() {
         let mut app = open_app(800, 600, 1.0);
-        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
         circle(&mut app, Point::new(300.0, 250.0), 80.0, false);
-        let sel = app.selection.unwrap();
+        let sel = app.o.selection.unwrap();
         assert_eq!(sel.kind, overlay::Kind::Snap);
         assert!(close_to(
             sel.area,
             Rectangle::new(Point::new(220.0, 170.0), Size::new(160.0, 160.0))
         ));
-        assert_eq!(app.stroke.len(), 2, "the box's corners");
-        let (from, _) = app.morph.as_ref().expect("it morphs from the drawn loop");
+        assert_eq!(app.o.stroke.len(), 2, "the box's corners");
+        let (from, _) = app.o.morph.as_ref().expect("it morphs from the drawn loop");
         assert!(from.len() > 20);
         // a straight drag is already a box: no morph
         drag(
@@ -7211,30 +7061,30 @@ mod tests {
             Point::new(300.0, 200.0),
             false,
         );
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
-        assert!(app.morph.is_none());
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Snap);
+        assert!(app.o.morph.is_none());
         // the bottom-right bracket's arm resizes it; it stays a snapped box
         let arm = Point::new(303.0, 185.0);
         drag(&mut app, arm, arm + Vector::new(50.0, 40.0), false);
-        let grown = app.selection.unwrap();
+        let grown = app.o.selection.unwrap();
         assert_eq!(grown.kind, overlay::Kind::Snap);
         assert!(close_to(
             grown.area,
             Rectangle::new(Point::new(100.0, 100.0), Size::new(250.0, 140.0))
         ));
         // "As drawn": the loop as before
-        app.behaviour.style = SelectStyle::Shape;
+        app.o.behaviour.style = SelectStyle::Shape;
         circle(&mut app, Point::new(500.0, 300.0), 60.0, false);
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Loop);
-        assert!(app.morph.is_none());
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Loop);
+        assert!(app.o.morph.is_none());
     }
 
     /// A snapped box on `text_app`'s page, the screen's text read.
     fn boxed_text(area: Rectangle) -> App {
         let mut app = read_app();
-        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
         let (sel, stroke) = overlay::snap(area);
-        (app.selection, app.stroke) = (Some(sel), stroke);
+        (app.o.selection, app.o.stroke) = (Some(sel), stroke);
         app
     }
 
@@ -7252,7 +7102,7 @@ mod tests {
             Point::new(300.0, 11.0),
             false,
         );
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Snap);
         assert_eq!(app.area(), rect4(20.0, 10.0, 520.0, 180.0));
         // the right edge, in 100; the bottom-left bracket, out
         drag(
@@ -7300,7 +7150,7 @@ mod tests {
         );
         assert_eq!(app.area(), rect4(40.0, 30.0, 520.0, 170.0));
         let boxed = rect4(20.0, 20.0, 520.0, 170.0);
-        app.selection = Some(overlay::snap(boxed).0);
+        app.o.selection = Some(overlay::snap(boxed).0);
         drag(
             &mut app,
             Point::new(40.0, 100.0),
@@ -7309,7 +7159,7 @@ mod tests {
         );
         assert_eq!(app.area(), rect4(0.0, 250.0, 520.0, 170.0));
         // on a word: text is selected, the box stays where it was
-        app.selection = Some(overlay::snap(rect4(20.0, 20.0, 520.0, 170.0)).0);
+        app.o.selection = Some(overlay::snap(rect4(20.0, 20.0, 520.0, 170.0)).0);
         stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
     }
@@ -7321,7 +7171,7 @@ mod tests {
         let on_text = caret(1, 7.0);
         drag(&mut app, on_text, on_text + Vector::new(20.0, 10.0), false);
         assert_eq!(app.area(), rect4(40.0, 30.0, 520.0, 170.0));
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Snap);
         // a bracket still resizes with Alt held
         drag(
             &mut app,
@@ -7357,7 +7207,7 @@ mod tests {
         arrow(&mut app, 1, 1, true, false);
         arrow(&mut app, 1, 0, true, true);
         assert_eq!(app.area(), rect4(21.0, 30.0, 531.0, 171.0));
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Snap);
         // the actions take the adjusted box
         assert_eq!(app.regions.last().map(|r| r.1), Some(app.area()));
         // stops at the screen (960x420) and at the minimum size
@@ -7412,9 +7262,9 @@ mod tests {
     #[test]
     fn the_selections_actions_wait_for_the_snap_to_finish() {
         let mut app = open_app(1280, 800, 1.0);
-        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
         let pill = |app: &App| {
-            let got = widgets::shot::click(app.view(app.overlay), app.screen, bar_pill(app, 0));
+            let got = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_pill(app, 0));
             got.iter().any(|m| matches!(m, Message::Pill(_)))
         };
         let ring = ring(300.0, 250.0, 80.0);
@@ -7428,22 +7278,22 @@ mod tests {
         for &p in &ring[1..] {
             event(&mut app, overlay::Event::Move(p));
             // the press: the stroke and nothing else (no box, no snap, no actions)
-            assert!(app.selection.is_none() && app.morph.is_none() && !app.settling());
-            assert!(app.drawing && !pill(&app));
+            assert!(app.o.selection.is_none() && app.o.morph.is_none() && !app.settling());
+            assert!(app.o.drawing && !pill(&app));
         }
         event(&mut app, overlay::Event::Release);
-        assert!(app.selection.is_some() && app.settling(), "morphing");
+        assert!(app.o.selection.is_some() && app.settling(), "morphing");
         assert!(!pill(&app), "no actions mid-morph");
         // the morph ends: the actions are there
-        let (from, _) = app.morph.take().unwrap();
-        app.morph = Some((from, Instant::now() - overlay::MORPH * 2));
+        let (from, _) = app.o.morph.take().unwrap();
+        app.o.morph = Some((from, Instant::now() - overlay::MORPH * 2));
         assert!(!app.settling() && pill(&app));
     }
 
     #[test]
     fn a_circle_snaps_and_searches_only_on_release() {
         let mut app = open_app(800, 600, 1.0);
-        app.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+        app.o.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
         let ring = ring(300.0, 250.0, 80.0);
         let press = overlay::Event::Press {
             at: ring[0],
@@ -7452,28 +7302,31 @@ mod tests {
         event(&mut app, press);
         for &p in &ring[1..] {
             event(&mut app, overlay::Event::Move(p));
-            assert!(app.selection.is_none() && app.morph.is_none(), "drawing");
+            assert!(
+                app.o.selection.is_none() && app.o.morph.is_none(),
+                "drawing"
+            );
             assert!(app.auto_actions().is_empty(), "nothing searches yet");
         }
         event(&mut app, overlay::Event::Release);
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
-        assert!(app.morph.is_some(), "the stroke morphs into the box");
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Snap);
+        assert!(app.o.morph.is_some(), "the stroke morphs into the box");
         assert!(app.auto_actions().is_empty(), "not while it snaps");
-        let (from, _) = app.morph.take().unwrap();
-        app.morph = Some((from, Instant::now() - overlay::MORPH * 2));
+        let (from, _) = app.o.morph.take().unwrap();
+        app.o.morph = Some((from, Instant::now() - overlay::MORPH * 2));
         assert!(!app.auto_actions().is_empty(), "then the search runs");
     }
 
     /// A snapped box over `text_app`'s lines 1-3, in select-text mode with its words read.
     fn select_text_app() -> App {
         let mut app = text_app();
-        app.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+        app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
         let (sel, stroke) = overlay::snap(Rectangle::new(
             Point::new(40.0, 66.0),
             Size::new(480.0, 112.0),
         ));
-        (app.selection, app.stroke) = (Some(sel), stroke);
-        app.text_mode = Some(TextMode {
+        (app.o.selection, app.o.stroke) = (Some(sel), stroke);
+        app.o.text_mode = Some(TextMode {
             lines: None,
             boxes: Vec::new(),
             picked: None,
@@ -7492,25 +7345,26 @@ mod tests {
         let mut app = select_text_app();
         let texts = widgets::shot::texts(app.view(app.overlay));
         assert!(texts.contains(&"Done".to_string()), "{texts:?}");
-        let mode = app.text_mode.as_ref().unwrap();
+        let mode = app.o.text_mode.as_ref().unwrap();
         assert_eq!(mode.boxes.len(), 17, "every word of lines 1-3");
         // a stale read (the box moved on) is dropped
         app.on_text_lines(Rectangle::default(), Ok(Vec::new()));
-        assert_eq!(app.text_mode.as_ref().unwrap().boxes.len(), 17);
+        assert_eq!(app.o.text_mode.as_ref().unwrap().boxes.len(), 17);
         // press before "while", drag to after "words": two lines picked, the box stays
         drag(&mut app, caret(1, 7.0), caret(2, 16.0), false);
-        let mode = app.text_mode.as_ref().unwrap();
+        let mode = app.o.text_mode.as_ref().unwrap();
         let picked = mode.picked.as_ref().unwrap();
         assert_eq!(picked.text(), "while you drag a finger\nacross the words");
         assert!(!mode.picking);
-        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Snap);
         // the bottom bar's text actions take the picked words; no pill, no second bar
         let texts = widgets::shot::texts(app.view(app.overlay));
         assert!(
             !texts.iter().any(|t| t == "Copy" || t == "Edit"),
             "{texts:?}"
         );
-        let click = |k| widgets::shot::click(app.view(app.overlay), app.screen, bar_pill(&app, k));
+        let click =
+            |k| widgets::shot::click(app.view(app.overlay), app.o.screen, bar_pill(&app, k));
         assert!(
             click(1)
                 .iter()
@@ -7533,7 +7387,7 @@ mod tests {
         );
         // Done leaves the mode; a press outside the box starts over
         let _ = app.update(Message::SelectText);
-        assert!(app.text_mode.is_none());
+        assert!(app.o.text_mode.is_none());
         let _ = app.update(Message::SelectText); // no OCR models here: the Text panel asks
         drag(
             &mut app,
@@ -7541,7 +7395,7 @@ mod tests {
             Point::new(900.0, 400.0),
             false,
         );
-        assert!(app.text_mode.is_none());
+        assert!(app.o.text_mode.is_none());
     }
 
     #[test]
@@ -7585,23 +7439,23 @@ mod tests {
         assert!(room.intersection(&card).is_none(), "{room:?} vs {card:?}");
         assert!(room.width > 0.0);
         // and with no card, the whole screen
-        app.panel = None;
-        assert_eq!(app.room(), Rectangle::with_size(app.screen));
+        app.o.panel = None;
+        assert_eq!(app.room(), Rectangle::with_size(app.o.screen));
     }
 
     #[test]
     fn a_quick_action_on_a_drawn_area_runs_alone_not_the_auto_search_too() {
         let mut app = open_app(1920, 1080, 1.0);
-        app.behaviour = SelectionConfig::default(); // auto search: Lens
+        app.o.behaviour = SelectionConfig::default(); // auto search: Lens
         let ask = Quick::Action(&actions::ask::ACTION);
-        app.purpose = Purpose::Quick(ask, config::Target::Circle);
+        app.o.purpose = Purpose::Quick(ask, config::Target::Circle);
         drag(
             &mut app,
             Point::new(100.0, 100.0),
             Point::new(400.0, 300.0),
             false,
         );
-        let panel = app.panel.as_ref().map(|(_, p)| p.kind());
+        let panel = app.o.panel.as_ref().map(|(_, p)| p.kind());
         assert_eq!(panel, Some(actions::Panel::Ask), "Ask AI, not Lens over it");
     }
 
@@ -7615,12 +7469,12 @@ mod tests {
             false,
         );
         let _ = app.update(Message::Run(&lens::ACTION));
-        let id = app.panel.as_ref().expect("the Lens panel").0;
+        let id = app.o.panel.as_ref().expect("the Lens panel").0;
         let opened = panel::Msg::LensOpened(Ok(lens::Held::for_test()));
         let _ = app.update(Message::Panel(id, opened));
         // Closed on every OS: nothing of ours stays on screen after the hand-off.
-        assert!(app.frame.is_none());
-        assert!(app.panel.is_none());
+        assert!(app.o.frame.is_none());
+        assert!(app.o.panel.is_none());
     }
 
     #[test]
@@ -7633,11 +7487,11 @@ mod tests {
             false,
         );
         let _ = app.update(Message::Run(&text::ACTION)); // no models: the consent card
-        assert!(app.panel.is_some());
+        assert!(app.o.panel.is_some());
         let at = app.card_at();
         assert_eq!(at.x + at.width, 1920.0 - card::GAP, "right");
         // the grip: the card follows the pointer while held
-        let id = app.panel.as_ref().unwrap().0;
+        let id = app.o.panel.as_ref().unwrap().0;
         let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Move));
         let _ = app.update(Message::Panel(id, grab));
         let _ = app.update(Message::CardMoved(Point::new(1700.0, 200.0)));
@@ -7679,32 +7533,32 @@ mod tests {
             actions::write_png(&dir.join(name), 960, 420, &rgba).unwrap();
         };
         let glowing_at = |app: &mut App, w: u32, h: u32| {
-            if let Some(image::Handle::Rgba { pixels, .. }) = &app.frame {
+            if let Some(image::Handle::Rgba { pixels, .. }) = &app.o.frame {
                 let mut rgba = pixels.to_vec();
                 border::paint(&mut rgba, w, h, 1.0, &config::look(), border::Mode::Overlay);
-                app.frame = Some(image::Handle::from_rgba(w, h, rgba));
+                app.o.frame = Some(image::Handle::from_rgba(w, h, rgba));
             }
         };
         let glowing = |app: &mut App| {
-            if let Some(image::Handle::Rgba { pixels, .. }) = &app.frame {
+            if let Some(image::Handle::Rgba { pixels, .. }) = &app.o.frame {
                 let mut rgba = pixels.to_vec();
                 let look = config::look();
                 border::paint(&mut rgba, 960, 420, 1.0, &look, border::Mode::Overlay);
-                app.frame = Some(image::Handle::from_rgba(960, 420, rgba));
+                app.o.frame = Some(image::Handle::from_rgba(960, 420, rgba));
             }
         };
         let mut app = text_app();
         glowing(&mut app);
-        app.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+        app.o.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
         let ring = ring(280.0, 122.0, 110.0)
             .into_iter()
             .map(|p| Point::new(p.x * 1.9 - 250.0, p.y * 0.9 + 12.0))
             .collect::<Vec<_>>();
         let (sel, stroke) = overlay::snap(overlay::select(&ring, 1.0).unwrap().area);
-        (app.selection, app.stroke) = (Some(sel), stroke);
-        app.morph = Some((ring, Instant::now() - overlay::MORPH / 3));
+        (app.o.selection, app.o.stroke) = (Some(sel), stroke);
+        app.o.morph = Some((ring, Instant::now() - overlay::MORPH / 3));
         shot(&app, "look-1-snap-morphing.png");
-        app.morph = None;
+        app.o.morph = None;
         shot(&app, "look-2-snapped-chips.png");
         let _ = app.update(Message::Run(&text::ACTION)); // no models here: the consent card
         shot(&app, "look-6-result-card.png");
@@ -7719,7 +7573,7 @@ mod tests {
             false,
         );
         let _ = wide.update(Message::Run(&actions::ask::ACTION));
-        wide.card_hover = true;
+        wide.o.card_hover = true;
         let rgba = widgets::shot::render(wide.view(wide.overlay), 1440, 900);
         actions::write_png(&dir.join("look-7-ask-card-1440.png"), 1440, 900, &rgba).unwrap();
         let mut app = select_text_app();
@@ -7769,8 +7623,8 @@ mod tests {
                 ..config::Config::default()
             });
             let mut app = open_app(w, h, 1.0);
-            app.frame = Some(image::Handle::from_rgba(w, h, busy.clone()));
-            glass::set_frame(app.frame.as_ref(), 1.0);
+            app.o.frame = Some(image::Handle::from_rgba(w, h, busy.clone()));
+            glass::set_frame(app.o.frame.as_ref(), 1.0);
             drag(
                 &mut app,
                 Point::new(90.0, 160.0),
@@ -7813,7 +7667,7 @@ mod tests {
         editor(editor::Message::Press(Point::new(700.0, 100.0)));
         editor(editor::Message::Move(Point::new(1000.0, 400.0)));
         editor(editor::Message::Release);
-        let edit = app.edit.as_ref().expect("still editing");
+        let edit = app.o.edit.as_ref().expect("still editing");
         assert_eq!(edit.editor.doc.tiles().len(), 2);
         let board = edit.image();
         assert!(
@@ -7822,5 +7676,51 @@ mod tests {
         );
         let r = edit.canvas_rect();
         assert!(r.x >= 0.0 && r.y >= 0.0 && r.x + r.width <= 1200.0 && r.y + r.height <= 800.0);
+    }
+
+    /// The old hand reset in `close` forgot these: a bar button Tab had focused
+    /// stayed focused (and took Enter) in the next opening; Alt stayed held.
+    #[test]
+    fn close_forgets_the_bar_focus_and_alt() {
+        let mut app = open_app(800, 600, 1.0);
+        let _ = app.update(Message::Field(keys::Keyed::Focus));
+        event(&mut app, overlay::Event::Alt(true));
+        assert!(app.o.bar_focus.is_some() && app.o.alt);
+        let _ = app.close();
+        assert_eq!(app.o.bar_focus, None, "no focus left for the next opening");
+        assert!(!app.o.alt);
+    }
+
+    /// After an opening that used a selection, a word, the screen's text, a
+    /// panel, a translation and song search, close leaves a fresh `Opening`.
+    #[test]
+    fn close_leaves_a_fresh_opening() {
+        let mut app = read_app(); // the screen's text read
+        app.taps += 1;
+        read_back(&mut app, at_word(1, 7.0), page(), false);
+        assert!(app.o.word.is_some() && app.o.selection.is_some());
+        let crop = app.crop().unwrap();
+        let _ = app.open_panel(actions::Panel::Text, crop, None);
+        let frame = app.o.frame.clone().unwrap();
+        let (session, _) =
+            translate::Session::start(frame, [0, 0, 40, 20], 1.0, app.cache.clone(), false);
+        app.o.translate = Some((1, session));
+        let (song, _) = song::Session::start();
+        app.o.song = Some((1, song));
+        app.o.ask = "what is this".into();
+        app.o.bar_focus = Some(bar::Stop::Logo);
+        app.o.clicks = Some((Instant::now(), Point::ORIGIN, 2));
+        assert!(app.o.panel.is_some());
+        let _ = app.close();
+        let (o, fresh) = (&app.o, Opening::default());
+        assert!(o.frame.is_none() && o.tiles.is_none() && o.selection.is_none());
+        assert!(o.stroke.is_empty() && o.others.is_empty() && o.word.is_none());
+        assert_eq!(o.screen_text, fresh.screen_text);
+        assert!(o.panel.is_none() && o.translate.is_none() && o.song.is_none());
+        assert!(o.helper.is_none() && o.lens_pages.is_empty() && o.edit.is_none());
+        assert!(o.ask.is_empty() && o.reader == fresh.reader && o.held.is_none());
+        assert!(matches!(o.purpose, Purpose::Search));
+        assert_eq!(o.bar_focus, None, "the old reset forgot it");
+        assert!(o.clicks.is_none(), "the old reset forgot it");
     }
 }

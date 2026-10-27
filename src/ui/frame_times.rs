@@ -31,12 +31,12 @@ pub fn frames(
     pixels: bool,
     mut step: impl FnMut(&mut App, u32, Instant),
 ) -> Vec<Drawn> {
-    let k = app.scale;
+    let k = app.o.scale;
     let (w, h) = (
-        (app.screen.width * k).round() as u32,
-        (app.screen.height * k).round() as u32,
+        (app.o.screen.width * k).round() as u32,
+        (app.o.screen.height * k).round() as u32,
     );
-    let size = app.screen;
+    let size = app.o.screen;
     let mut renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0));
     let mut pixmap = tiny_skia::Pixmap::new(w, h).unwrap();
     let mut mask = tiny_skia::Mask::new(w, h).unwrap();
@@ -117,7 +117,7 @@ fn dock_glide(app: &mut App, i: u32, now: Instant) {
         let _ = app.update(Message::BarGrab);
         let at = app.bar_at();
         let _ = app.update(Message::BarMoved(at));
-        let up = Vector::new(0.0, app.screen.height * 0.7);
+        let up = Vector::new(0.0, app.o.screen.height * 0.7);
         let _ = app.update(Message::BarMoved(at - up));
         let _ = app.update(Message::BarReleased);
     }
@@ -162,7 +162,7 @@ fn animation_frame_times() {
         // the opening: the bar slides up (the edge glow is still; the window
         // fades in as a whole: the OS's work)
         let mut app = open_app(w, h, 1.0);
-        app.appear = None;
+        app.o.appear = None;
         let t = frames(&mut app, 16, false, |app, _, now| {
             let _ = app.update(Message::Frame(now));
         });
@@ -218,7 +218,7 @@ fn animation_frame_times() {
             ("card resize", card::Drag::Resize),
         ] {
             let mut app = card_app(w, h);
-            let id = app.panel.as_ref().expect("a card").0;
+            let id = app.o.panel.as_ref().expect("a card").0;
             let t = frames(&mut app, 16, false, |app, i, _| {
                 if i == 0 {
                     let grab = card::Event::Grab(how);
@@ -284,8 +284,8 @@ fn the_tiled_frame_is_the_frame() {
     for scale in [1.0, 1.25, 1.5] {
         let mut app = open_app(1700, 900, scale);
         let tiled = frames(&mut app, 1, true, |_, _, _| {}).remove(0).rgba;
-        assert!(app.tiles.as_ref().is_some_and(|(_, t)| t.len() == 7 * 4));
-        app.tiles = None; // the frame as one image
+        assert!(app.o.tiles.as_ref().is_some_and(|(_, t)| t.len() == 7 * 4));
+        app.o.tiles = None; // the frame as one image
         let whole = frames(&mut app, 1, true, |_, _, _| {}).remove(0).rgba;
         let off = (tiled.iter().zip(&whole)).filter(|(a, b)| a != b).count();
         assert_eq!(off, 0, "at {scale}");
@@ -303,7 +303,7 @@ fn the_tiled_frame_is_the_frame() {
 fn the_opening_redraws_only_what_moves() {
     let (w, h) = (1920, 1080);
     let mut app = open_app(w, h, 1.0);
-    app.appear = None;
+    app.o.appear = None;
     let drawn = frames(&mut app, 16, true, |app, _, now| {
         let _ = app.update(Message::Frame(now));
     });
@@ -379,8 +379,8 @@ fn the_opening_stays_within_its_frame_budget() {
     let mut share = 0.0;
     for _ in 0..3 {
         let mut app = open_app(w, h, 1.0);
-        app.appear = None;
-        app.text_by = Some(ocr::Source::System);
+        app.o.appear = None;
+        app.o.text_by = Some(ocr::Source::System);
         let mut read = Duration::ZERO;
         let drawn = frames(&mut app, 16, false, |app, i, now| {
             let _ = app.update(Message::Frame(now));
@@ -391,7 +391,7 @@ fn the_opening_stays_within_its_frame_budget() {
                 read += t.elapsed();
             }
         });
-        assert_eq!(app.screen_text.lines().len(), 90, "both reads landed");
+        assert_eq!(app.o.screen_text.lines().len(), 90, "both reads landed");
         best = best.min(drawn.iter().map(|d| d.took).sum::<Duration>() + read);
         let area: f32 = (drawn.iter())
             .flat_map(|d| d.damage.iter().map(|r| r.width * r.height))
@@ -424,7 +424,7 @@ fn the_opening_stays_within_its_frame_budget() {
 fn the_opening_blits_its_images() {
     for (w, h, scale) in [(1920, 1080, 1.0), (1700, 900, 1.25)] {
         let mut app = open_app(w, h, scale);
-        app.appear = None;
+        app.o.appear = None;
         let before = iced_tiny_skia::PIPELINE_PIXELS.get();
         let drawn = frames(&mut app, 16, false, |app, _, now| {
             let _ = app.update(Message::Frame(now));
@@ -449,7 +449,7 @@ fn a_still_overlay_asks_for_no_frames() {
     // motion stays on there: the still overlay must cost nothing.
     motion::set_reduced(cfg!(windows));
     let mut app = open_app(1280, 720, 1.0);
-    app.appear = None;
+    app.o.appear = None;
     let (a, b) = (Point::new(300.0, 200.0), Point::new(600.0, 400.0));
     let drawn = frames(&mut app, 40, false, |app, i, now| {
         if i == 1 {
@@ -460,7 +460,7 @@ fn a_still_overlay_asks_for_no_frames() {
         }
         let _ = app.update(Message::Frame(now));
     });
-    assert!(app.panel.is_some(), "a card is up");
+    assert!(app.o.panel.is_some(), "a card is up");
     assert!(!app.animating(), "no frame messages");
     let last = drawn.last().unwrap();
     assert_eq!(
@@ -481,7 +481,7 @@ fn the_breath_redraws_only_the_edge() {
     let (w, h) = (1920, 1080);
     motion::set_reduced(false);
     let mut app = open_app(w, h, 1.0);
-    app.appear = None;
+    app.o.appear = None;
     let drawn = frames(&mut app, 80, false, |app, _, now| {
         let _ = app.update(Message::Frame(now));
     });
@@ -523,7 +523,7 @@ fn widgets_open_by_the_design_motion_or_at_once() {
     let opened = |reduced: bool| {
         motion::set_reduced(reduced);
         let mut app = open_app(1280, 720, 1.0);
-        app.appear = None;
+        app.o.appear = None;
         let (a, b) = (Point::new(300.0, 200.0), Point::new(600.0, 400.0));
         drag(&mut app, a, b, false);
         let _ = app.update(Message::Run(&text::ACTION));
