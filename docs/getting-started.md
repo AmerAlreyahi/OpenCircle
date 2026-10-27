@@ -65,7 +65,7 @@ then the rest:
 | Search in browser | Opens the selection in your default browser: a picture goes to Google Lens, selected text to a Google search | `L` |
 | Copy text | Copies the selection's text | |
 | Translate | Translates the selection in place (no selection: the whole screen) | |
-| Live translate (Beta) | Keeps translating the screen while you play | `Ctrl+Shift+L` |
+| Live translate (Labs, unfinished) | Keeps translating the screen while you play | `Ctrl+Shift+L` |
 | Music | Finds a song from a short clip (Settings > Labs; see [Song search](song-search.md)) | |
 | Edit | Turns the bar into the annotation toolbar (Settings > Labs). A back arrow returns | `E` |
 
@@ -114,7 +114,8 @@ may be needed; OpenCircle tells you if it is.
 ## Translate and live translate
 
 - `Ctrl+Shift+T` translates the whole screen once, in place. `Esc` closes it.
-- `Ctrl+Shift+L` turns live translate on or off. It keeps translating as the
+- `Ctrl+Shift+L` turns live translate on or off (a Labs feature: unfinished, off
+  until you switch it on in **Settings > Labs**; planned for 0.3.0). It keeps translating as the
   screen changes.
 - Hold `Alt` to see the original; release to see the translation again.
 
@@ -123,7 +124,7 @@ Translation runs on your PC by default. See [Translate](translate.md).
 
 ## Snip and annotate
 
-Snip, the editor, song search, search history and pins are in **Settings > Labs**: off by default,
+Snip, the editor, song search, search history, pins and live translate are in **Settings > Labs**: off by default,
 unfinished, and hidden everywhere until you turn them on.
 
 - `Print Screen` snips a region, `Alt+Print Screen` a window,

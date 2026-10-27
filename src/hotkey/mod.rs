@@ -135,7 +135,7 @@ fn plan(cfg: &Config) -> (Vec<Binding>, Vec<String>) {
 
     for qa in &cfg.quick_actions {
         // A hidden (Labs) feature has no shortcut; its entry stays in the config.
-        if qa.shortcut.is_empty() || !crate::labs::action_on(&cfg.labs, &qa.action) {
+        if qa.shortcut.is_empty() || !crate::labs::quick_on(&cfg.labs, qa) {
             continue;
         }
         let hotkey = match parse_shortcut(&qa.shortcut) {
@@ -663,9 +663,13 @@ mod tests {
 
     #[test]
     fn a_key_press_routes_to_its_trigger() {
-        let (b, _) = plan(&Config::default());
+        let (b, _) = plan(&all_labs());
         let at = Instant::now();
         let id = |s: &str| parse_shortcut(s).unwrap().id();
+        // Live translate is a Labs feature: off, Ctrl+Shift+L is not registered.
+        let (off, _) = plan(&Config::default());
+        assert!(route_hotkey(&off, id("Ctrl+Shift+L"), at).is_none());
+        assert!(!off.iter().any(|b| b.id.ends_with("-live")));
 
         assert!(matches!(
             route_hotkey(&b, id("Ctrl+Shift+Space"), at),

@@ -1452,7 +1452,7 @@ fn glass(radius: f32, blurred: bool) -> container::Style {
     let themed = crate::config::widgets().0 != crate::config::WidgetTheme::Default;
     let (background, border, width) = match crate::config::look().bar {
         BarStyle::Solid => (palette.panel_solid, palette.border, 1.0),
-        BarStyle::Outline => (palette.panel.scale_alpha(0.55), theme::accent().0, 1.5),
+        BarStyle::Outline => (palette.panel, theme::accent().0, 1.5),
         _ if themed && !blurred => (palette.panel_solid, palette.border, 1.0),
         _ => (palette.panel, palette.border, 1.0),
     };

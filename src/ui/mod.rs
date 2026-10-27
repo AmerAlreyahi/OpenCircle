@@ -742,7 +742,7 @@ impl App {
             // A hidden (Labs) feature does nothing, whoever asks (no shortcut or tray
             // item reaches here; this is the one place that also covers a late trigger).
             Message::Trigger(Trigger::Quick(_, qa))
-                if !labs::action_on(&config::current().labs, &qa.action) =>
+                if !labs::quick_on(&config::current().labs, &qa) =>
             {
                 crate::log!("[opencircle] \"{}\" is off (Settings > Labs)", qa.action);
                 Task::none()
@@ -6422,8 +6422,8 @@ mod tests {
         let names = bar_names(&app);
         assert_eq!(
             names,
-            ["Ask AI", "Live translate (Beta)", "Open OpenCircle AI chat"],
-            "the design's bar, no Song search, no Edit"
+            ["Ask AI", "Open OpenCircle AI chat"],
+            "the design's bar, no Live translate, no Song search, no Edit"
         );
         let texts = overlay_texts(&app);
         for pill in ["Search in browser", "Copy text", "Translate"] {
@@ -6459,10 +6459,11 @@ mod tests {
         // Song search on: its button is back (one more), the editor still off.
         app.labs.set(labs::Feature::Song, true);
         assert!(bar_names(&app).iter().any(|n| n == "Song search"));
-        assert_eq!(
-            app.bar_size().1.width,
-            small.width + widgets::BUBBLE + bar::SPACING
-        );
+        // (the first icon also brings the divider before the icons)
+        assert!(app.bar_size().1.width >= small.width + widgets::BUBBLE + bar::SPACING);
+        // Live translate on: its button is back.
+        app.labs.set(labs::Feature::Live, true);
+        assert!(bar_names(&app).iter().any(|n| n == "Live translate (Beta)"));
         // Editor on: Edit is back, and E opens it.
         app.labs.set(labs::Feature::Editor, true);
         assert!(bar_names(&app).iter().any(|n| n.starts_with("Edit")));

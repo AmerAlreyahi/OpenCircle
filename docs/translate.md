@@ -13,7 +13,7 @@ works on anything you can see.
 Three ways in, all from the same bar or keys:
 
 - **Translate** on a selection (the bar, or `Ctrl+Shift+T` for the whole screen).
-- **Live translate** (`Ctrl+Shift+L`, or the bar's button) keeps going as the screen changes.
+- **Live translate** (a Labs feature, unfinished; `Ctrl+Shift+L`, or the bar's button) keeps going as the screen changes.
 - **Select text**, then Translate, for only the words you picked.
 
 ## How it works

@@ -87,7 +87,7 @@ production systems.
 - UI questions (owner, 2026-10-26): the new design answers them
   (.claude/artifacts/design/newdesing*): build exactly what it shows. Bar: drag grip,
   AI field (replaces an Ask AI button), pills Search in browser (default) / Copy text /
-  Translate, Live translate (Beta) icon, Song / Edit image only when on in Labs;
+  Translate, Live translate (Beta) icon, Song / Edit image only when on in Labs (Live too, 2026-10-27);
   Copy image = Ctrl+C, Save = Ctrl+S with a pill (#51, #52).
 - Exact design behaviour (owner, 2026-10-26): copy the new design's widgets EXACTLY:
   behaviour, states, keyboard, drag/dock, styles and animations, not only the look.
@@ -96,7 +96,7 @@ production systems.
   source lines). Pass its shots and sections to the UI worker.
   Where the design is silent or buggy (DESIGN_BEHAVIOR.md section 13, e.g. no bar snap
   anchors, no Esc, no focus ring), keep today's behaviour. Owner decisions beat the
-  design (e.g. Live translate (Beta) stays visible with Labs off).
+  design (e.g. Live translate is hidden behind Labs until 0.3.0 (owner, 2026-10-27); no widget transparency until glass returns with the GPU renderer in 0.1.3 (owner, 2026-10-27)).
 - Overnight / owner away (2026-10-26): continue item by item in Order with the
   recommended defaults; leave each verified item in "Needs your check"; no releases.
 - Board statuses (owner, 2026-10-26): Todo / In Progress / Needs your check / Done.

@@ -3,13 +3,14 @@
 ## Defaults
 
 The Snip rows and the Song search shortcut are hidden (not registered) until you turn Snip or
-Song search on in **Settings > Labs**. Live translate stays on and is marked Beta.
+Song search on in **Settings > Labs**. Live translate is a Labs feature too (unfinished, planned
+for 0.3.0): its shortcut, tray item and bar button appear only when it is on.
 
 | Action | Default | What it does |
 |---|---|---|
 | Circle to search | `Ctrl+Shift+Space` | Freeze the screen, then select and act |
 | Translate full screen | `Ctrl+Shift+T` | Translate the whole screen at once |
-| Live translate | `Ctrl+Shift+L` | Toggle continuous translation |
+| Live translate (Labs) | `Ctrl+Shift+L` | Toggle continuous translation |
 | Explain with AI | `Ctrl+Shift+E` | Circle something; the AI explains it |
 | Copy text | `Ctrl+Shift+X` | Circle something; its text is copied |
 | Search with Lens | unset | Circle something; Lens opens |
@@ -55,7 +56,7 @@ closes it.
 
 **Keyboard path.** `Tab` / `Shift+Tab` move the focus through the bar in the
 order you see it: the logo, the AI field, the `AI ↵` badge, Search in browser,
-Copy text, Translate, Live translate, then the other round buttons (a dimmed
+Copy text, Translate, Live translate (Labs), then the other round buttons (a dimmed
 button is skipped). `Enter` or `Space` presses the focused button; a click puts
 the focus back on the screen.
 

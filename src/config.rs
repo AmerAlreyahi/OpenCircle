@@ -73,6 +73,7 @@
 //! song = false                      # song search
 //! history = false                   # the local search history
 //! pins = false                      # pinning a capture to the screen
+//! live = false                      # live translate (unfinished until 0.3.0): bar button, tray item, shortcut
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
@@ -1110,6 +1111,7 @@ impl Config {
             c.labs.song = get(t, p, "song", d.song, &mut w);
             c.labs.history = get(t, p, "history", d.history, &mut w);
             c.labs.pins = get(t, p, "pins", d.pins, &mut w);
+            c.labs.live = get(t, p, "live", d.live, &mut w);
         }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);

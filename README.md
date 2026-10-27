@@ -43,13 +43,13 @@ licensed, and has no account and no telemetry.
   one-time download of about 30 MB. Settings > Look & behaviour > Text reader
   chooses.
 - **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
-  browser, Copy text, Translate and Live translate (Beta); Music and Edit appear
+  browser, Copy text, and Translate; Live translate, Music and Edit appear
   once you turn them on in Settings > Labs. `Ctrl+C` copies the selection as an
   image (or the picked words as text), `Ctrl+S` saves it; a small pill confirms.
   Drag the bar to any edge.
 - **Labs.** Unfinished features (Snip, the image editor, song search, search
-  history, pins) are off by default and hidden until you switch them on in
-  Settings > Labs. Live translate stays visible and is marked Beta.
+  history, pins, live translate) are off by default and hidden until you switch
+  them on in Settings > Labs. Live translate is unfinished (planned for 0.3.0).
 - **Snip and annotate** (Labs). Region, window, full screen or scrolling capture.
   Arrows, shapes, text, numbered steps, spotlight, a soft blur, and a solid
   Redact (use Redact, not Blur, to hide passwords). Copy puts the picture on the
@@ -149,7 +149,7 @@ operating it. See the [Privacy](docs/privacy.md) page.
 |---|---|
 | Circle to search | `Ctrl+Shift+Space` |
 | Translate the whole screen | `Ctrl+Shift+T` |
-| Live translate on / off | `Ctrl+Shift+L` |
+| Live translate on / off (Labs, unfinished) | `Ctrl+Shift+L` |
 | Circle, then explain with AI | `Ctrl+Shift+E` |
 | Circle, then copy its text | `Ctrl+Shift+X` |
 | Snip a region / a window / the full screen (with Labs > Snip on) | `Print Screen` / `Alt+Print Screen` / `Ctrl+Print Screen` |

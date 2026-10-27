@@ -576,7 +576,6 @@ pub enum Message {
     ReportProblem,
     Theme(Theme),
     WidgetTheme(WidgetTheme),
-    GlassEffect(bool),
     Record(Slot),
     Key(Chord),
     Provider(Provider),
@@ -878,7 +877,7 @@ impl State {
     fn slots(&self) -> std::vec::IntoIter<Slot> {
         let labs = &self.draft.labs;
         let quick = self.draft.quick_actions.iter().enumerate();
-        let shown = quick.filter(|(_, q)| crate::labs::action_on(labs, &q.action));
+        let shown = quick.filter(|(_, q)| crate::labs::quick_on(labs, q));
         let mut all = vec![Slot::Capture];
         all.extend(shown.map(|(i, _)| Slot::Quick(i)));
         all.into_iter()
@@ -1026,7 +1025,6 @@ fn apply(state: &mut State, message: Message) -> Outcome {
             theme::apply(t);
         }
         Message::WidgetTheme(t) => state.draft.widget_theme = t,
-        Message::GlassEffect(on) => state.draft.glass_effect = on,
         Message::Record(slot) => {
             state.recording = (state.recording != Some(slot)).then_some(slot);
             state.shortcut_error = None;
@@ -1304,24 +1302,11 @@ fn content(state: &State) -> Element<'_, Message> {
                     segmented(
                         &[
                             (WidgetTheme::Default, "Default", "Follow the app theme"),
-                            (WidgetTheme::Frost, "Frost", "Frosted glass over the screen"),
+                            (WidgetTheme::Frost, "Frost", "A pale, solid look"),
                             (WidgetTheme::Graphite, "Graphite", "Calm dark graphite"),
                         ],
                         d.widget_theme,
                         Message::WidgetTheme,
-                    ),
-                    None,
-                ),
-                form_row(
-                    "Glass effect",
-                    "Frost and Graphite blur the screen behind them",
-                    segmented(
-                        &[
-                            (true, "On", "Blur the screen behind the widgets"),
-                            (false, "Off", "A plain tinted widget"),
-                        ],
-                        d.glass_effect,
-                        Message::GlassEffect,
                     ),
                     None,
                 ),
@@ -1332,9 +1317,8 @@ fn content(state: &State) -> Element<'_, Message> {
         Section::Ai => ("AI", ai_rows(state)),
         Section::Song => ("Song search", song_rows(state)),
         Section::Labs => ("Labs", labs_rows(&state.draft.labs)),
-        Section::Translate => (
-            "Translate",
-            vec![
+        Section::Translate => {
+            let mut rows = vec![
                 form_row(
                     "Engine",
                     match d.translate.engine {
@@ -1402,7 +1386,10 @@ fn content(state: &State) -> Element<'_, Message> {
                     ),
                     issue(&state.problems, "translate.target"),
                 ),
-                {
+            ];
+            // Live translate is a Labs feature (until 0.3.0): its row only while on.
+            if state.draft.labs.has(Feature::Live) {
+                rows.push({
                     let error = issue(&state.problems, "translate.live_interval_ms");
                     form_row(
                         "Live refresh",
@@ -1419,9 +1406,10 @@ fn content(state: &State) -> Element<'_, Message> {
                         ),
                         error,
                     )
-                },
-            ],
-        ),
+                });
+            }
+            ("Translate", rows)
+        }
     };
     // The rows scroll under the title: the Shortcuts list outgrows the window.
     let mut list = column![].padding(iced::Padding::ZERO.right(12));
@@ -1608,6 +1596,16 @@ fn general_rows(state: &State) -> Vec<Element<'_, Message>> {
         ),
     ]);
     rows
+}
+
+/// The Screen edge segments: Live only while live translate is on in Labs.
+fn edge_modes(labs: &Labs) -> Vec<(EdgeMode, &'static str, &'static str)> {
+    let mut modes = vec![(EdgeMode::Overlay, "Circle", "The edge while circling")];
+    if labs.has(Feature::Live) {
+        modes.push((EdgeMode::Live, "Live", "The edge of live translate"));
+    }
+    modes.push((EdgeMode::Snip, "Snip", "The edge while snipping"));
+    modes
 }
 
 fn look_rows(state: &State) -> Vec<Element<'_, Message>> {
@@ -1930,11 +1928,7 @@ fn custom_rows(state: &State) -> Vec<Element<'_, Message>> {
             "Screen edge for",
             "Each mode has its own edge",
             segmented(
-                &[
-                    (EdgeMode::Overlay, "Circle", "The edge while circling"),
-                    (EdgeMode::Live, "Live", "The edge of live translate"),
-                    (EdgeMode::Snip, "Snip", "The edge while snipping"),
-                ],
+                &edge_modes(&state.draft.labs),
                 state.edge_mode,
                 Message::EdgeMode,
             ),
@@ -2622,6 +2616,7 @@ pub(super) mod tests {
     #[test]
     fn conflicts_show_inline_and_do_not_assign() {
         let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
         // Quick action 0 (Ctrl+Shift+T) vs the capture shortcut.
         update(&mut s, Message::Record(Slot::Quick(0)));
         press(&mut s, chord(true, true, "Space"));

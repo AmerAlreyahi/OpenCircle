@@ -45,9 +45,12 @@ const DARK_WINDOW: Color = Color::from_rgb8(0x12, 0x13, 0x1f);
 const LIGHT_PANEL: Color = Color::from_rgba8(255, 255, 255, 0.90);
 const LIGHT_WINDOW: Color = Color::from_rgb8(0xf6, 0xf6, 0xfa);
 
+const DARK_SOLID: Color = solid(DARK_PANEL, DARK_WINDOW);
+const LIGHT_SOLID: Color = solid(LIGHT_PANEL, LIGHT_WINDOW);
+
 const DARK: Palette = Palette {
-    panel: DARK_PANEL,
-    panel_solid: solid(DARK_PANEL, DARK_WINDOW),
+    panel: DARK_SOLID,
+    panel_solid: DARK_SOLID,
     border: Color::from_rgba8(255, 255, 255, 0.09),
     text: Color::from_rgb8(0xec, 0xec, 0xf4),
     muted: Color::from_rgb8(0xa3, 0xa3, 0xb8),
@@ -62,8 +65,8 @@ const DARK: Palette = Palette {
 };
 
 const LIGHT: Palette = Palette {
-    panel: LIGHT_PANEL,
-    panel_solid: solid(LIGHT_PANEL, LIGHT_WINDOW),
+    panel: LIGHT_SOLID,
+    panel_solid: LIGHT_SOLID,
     border: Color::from_rgba8(16, 16, 40, 0.10),
     text: Color::from_rgb8(0x1a, 0x1a, 0x24),
     muted: Color::from_rgb8(0x5b, 0x5b, 0x6e),
@@ -77,14 +80,16 @@ const LIGHT: Palette = Palette {
     danger: Color::from_rgb8(0xc6, 0x28, 0x28),
 };
 
-// Widget themes (config `widget_theme`): the floating widgets only. Their `panel`
-// is a translucent tint (the blurred screen shows through when the glass effect
-// is on); `panel_solid` is a near-opaque tint over `window` for glass off / popups.
+// Widget themes (config `widget_theme`): the floating widgets only. Every widget
+// surface is OPAQUE for now (owner, 2026-10-27: the page behind never shows
+// through); glass returns with the GPU renderer, so `panel` and `panel_solid`
+// are the same solid colour until then.
 const FROST_WINDOW: Color = Color::from_rgb8(0xe4, 0xea, 0xf4);
+const FROST_SOLID: Color = solid(Color::from_rgba8(246, 249, 255, 0.86), FROST_WINDOW);
 /// Frosted glass: a pale tint, a bright 1 px edge, dark text.
 const FROST: Palette = Palette {
-    panel: Color::from_rgba8(246, 249, 255, 0.50),
-    panel_solid: solid(Color::from_rgba8(246, 249, 255, 0.86), FROST_WINDOW),
+    panel: FROST_SOLID,
+    panel_solid: FROST_SOLID,
     border: Color::from_rgba8(255, 255, 255, 0.70),
     text: Color::from_rgb8(0x14, 0x18, 0x26),
     muted: Color::from_rgb8(0x3f, 0x46, 0x5a),
@@ -99,10 +104,11 @@ const FROST: Palette = Palette {
 };
 
 const GRAPHITE_WINDOW: Color = Color::from_rgb8(0x1f, 0x22, 0x28);
+const GRAPHITE_SOLID: Color = solid(Color::from_rgba8(38, 41, 48, 0.96), GRAPHITE_WINDOW);
 /// Calm dark graphite: a warm grey tint, a hairline edge.
 const GRAPHITE: Palette = Palette {
-    panel: Color::from_rgba8(38, 41, 48, 0.72),
-    panel_solid: solid(Color::from_rgba8(38, 41, 48, 0.96), GRAPHITE_WINDOW),
+    panel: GRAPHITE_SOLID,
+    panel_solid: GRAPHITE_SOLID,
     border: Color::from_rgba8(255, 255, 255, 0.10),
     text: Color::from_rgb8(0xe6, 0xe8, 0xec),
     muted: Color::from_rgb8(0x9a, 0xa0, 0xaa),
@@ -506,7 +512,6 @@ mod tests {
         for t in all {
             let p = widget_palette(t).unwrap_or(&DARK);
             assert_eq!(p.panel_solid.a, 1.0);
-            assert!(p.panel.a < 1.0, "the tint lets the blur through");
             texts.push(p.text);
         }
         assert!(texts[0] != texts[1] && texts[1] != texts[2] && texts[0] != texts[2]);
@@ -514,6 +519,22 @@ mod tests {
         let l = |c: Color| 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
         for p in [&FROST, &GRAPHITE] {
             assert!((l(p.text) - l(p.panel_solid)).abs() > 0.6);
+        }
+    }
+
+    #[test]
+    fn every_widget_surface_is_opaque_in_every_theme() {
+        for t in [
+            WidgetTheme::Default,
+            WidgetTheme::Frost,
+            WidgetTheme::Graphite,
+        ] {
+            for p in [widget_palette(t).unwrap_or(&DARK), &LIGHT] {
+                assert_eq!((p.panel.a, p.panel_solid.a, p.window.a), (1.0, 1.0, 1.0));
+            }
+        }
+        for t in [&sapphire::SAPPHIRE, &sapphire::DAYLIGHT] {
+            assert_eq!((t.bg.a, t.track.a, t.elevated.a), (1.0, 1.0, 1.0));
         }
     }
 

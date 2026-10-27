@@ -4,7 +4,7 @@
 //! has no shortcut, tray item, bar button or Settings row. Its own settings stay in
 //! the file untouched; turning it on brings them back.
 //!
-//! Live translate is not here: it stays visible and is labelled "Beta" where offered.
+//! Live translate is hidden here until 0.3.0 (owner, 2026-10-27).
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,15 +19,18 @@ pub enum Feature {
     History,
     /// Pinning an image to the screen from the editor.
     Pins,
+    /// Live translate: bar button, tray item, shortcut and its Settings rows.
+    Live,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 5] = [
+    pub const ALL: [Feature; 6] = [
         Feature::Snip,
         Feature::Editor,
         Feature::Song,
         Feature::History,
         Feature::Pins,
+        Feature::Live,
     ];
 
     /// The switch's name in Settings and in messages.
@@ -38,6 +41,7 @@ impl Feature {
             Feature::Song => "Song search",
             Feature::History => "Search history",
             Feature::Pins => "Pins",
+            Feature::Live => "Live translate",
         }
     }
 
@@ -51,6 +55,7 @@ impl Feature {
             Feature::Song => "Find the song playing on your PC. Unfinished; may change",
             Feature::History => "Keep a list of your searches on this PC. Unfinished; may change",
             Feature::Pins => "Float a capture above your windows. Unfinished; may change",
+            Feature::Live => "Keep the screen translated as it changes. Unfinished; may change",
         }
     }
 }
@@ -64,6 +69,7 @@ impl Feature {
             Feature::Song => ("Hide song search", "Show song search"),
             Feature::History => ("Hide search history", "Show search history"),
             Feature::Pins => ("Hide pins", "Show pins"),
+            Feature::Live => ("Hide live translate", "Show live translate"),
         }
     }
 }
@@ -76,6 +82,7 @@ pub struct Labs {
     pub song: bool,
     pub history: bool,
     pub pins: bool,
+    pub live: bool,
 }
 
 impl Labs {
@@ -86,6 +93,7 @@ impl Labs {
             Feature::Song => self.song,
             Feature::History => self.history,
             Feature::Pins => self.pins,
+            Feature::Live => self.live,
         }
     }
 
@@ -96,6 +104,7 @@ impl Labs {
             Feature::Song => self.song = on,
             Feature::History => self.history = on,
             Feature::Pins => self.pins = on,
+            Feature::Live => self.live = on,
         }
     }
 
@@ -107,6 +116,7 @@ impl Labs {
             song: true,
             history: true,
             pins: true,
+            live: true,
         }
     }
 }
@@ -129,6 +139,11 @@ pub fn action_feature(id: &str) -> Option<Feature> {
 /// Is the action `id` available with these switches?
 pub fn action_on(labs: &Labs, id: &str) -> bool {
     action_feature(id).is_none_or(|f| labs.has(f))
+}
+
+/// Is this quick action available? Live translate is its own Labs feature.
+pub fn quick_on(labs: &Labs, q: &crate::config::QuickAction) -> bool {
+    action_on(labs, &q.action) && (!q.live || labs.live)
 }
 
 /// The CLI's answer for a hidden feature's target (`opencircle run snip`): this
@@ -182,6 +197,7 @@ impl BarButton {
         match self {
             BarButton::Song => Some(Feature::Song),
             BarButton::Edit => Some(Feature::Editor),
+            BarButton::Live => Some(Feature::Live),
             _ => None,
         }
     }
@@ -220,10 +236,12 @@ mod tests {
         use BarButton::*;
         assert_eq!(
             bar(&Labs::default()),
-            [Search, CopyText, Translate, Live],
+            [Search, CopyText, Translate],
             "the design's bar with Labs off"
         );
         let mut on = Labs::default();
+        on.set(Feature::Live, true);
+        assert_eq!(bar(&on), [Search, CopyText, Translate, Live]);
         on.set(Feature::Song, true);
         assert_eq!(bar(&on), [Search, CopyText, Translate, Live, Song]);
         on.set(Feature::Editor, true);

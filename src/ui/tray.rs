@@ -30,6 +30,7 @@ fn entries(labs: &Labs) -> Vec<Entry> {
     ]
     .into_iter()
     .filter(|e| *e != Entry::Snip || labs.has(Feature::Snip))
+    .filter(|e| *e != Entry::Live || labs.has(Feature::Live))
     .collect()
 }
 
@@ -395,16 +396,19 @@ mod tests {
         use super::{Entry, entries};
         use crate::labs::{Feature, Labs};
         let off = entries(&Labs::default());
+        assert_eq!(off, [Entry::Circle, Entry::Settings, Entry::Quit]);
+        let mut on = Labs::default();
+        on.set(Feature::Live, true);
         assert_eq!(
-            off,
+            entries(&on),
             [Entry::Circle, Entry::Live, Entry::Settings, Entry::Quit]
         );
-        let mut on = Labs::default();
+        on.set(Feature::Live, false);
         on.set(Feature::Song, true);
         on.set(Feature::Editor, true);
         assert_eq!(entries(&on), off, "only Snip has a tray item");
         on.set(Feature::Snip, true);
-        assert_eq!(entries(&on).len(), 5);
+        assert_eq!(entries(&on).len(), 4);
         assert_eq!(entries(&on)[1], Entry::Snip);
     }
 
