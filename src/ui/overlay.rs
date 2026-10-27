@@ -92,6 +92,16 @@ pub enum Event {
         letter: char,
         ctrl: bool,
     },
+    /// An arrow key: `(dx, dy)` = -1, 0 or 1 per axis. The box moves; with Ctrl
+    /// it grows / shrinks from its bottom-right edge; Shift = 10 px, else 1.
+    Arrow {
+        dx: i8,
+        dy: i8,
+        ctrl: bool,
+        shift: bool,
+    },
+    /// Alt went down / up: with it a press inside the box moves it, even over text.
+    Alt(bool),
     /// The wheel turned `notches` (away from the user = positive) at `at`.
     Zoom {
         at: Point,
@@ -849,6 +859,7 @@ pub struct Pointer {
     /// The last right press that did not reset the zoom.
     right: Option<Instant>,
     shift: bool,
+    alt: bool,
     /// The last drawing and what it shows: drawn again only when that
     /// changes, so a frame where only a widget above it moves redraws only
     /// round that widget (the window redraws what changed).
@@ -904,7 +915,9 @@ impl canvas::Program<Event> for Overlay<'_> {
             }
             canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                 pointer.shift = m.shift();
-                return None;
+                // (only a change is sent: nothing redraws for Shift or Ctrl)
+                return (std::mem::replace(&mut pointer.alt, m.alt()) != m.alt())
+                    .then(|| Action::publish(Event::Alt(m.alt())));
             }
             canvas::Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
@@ -916,6 +929,20 @@ impl canvas::Program<Event> for Overlay<'_> {
                 keyboard::Key::Named(Named::Space) => Event::Space,
                 keyboard::Key::Named(Named::Tab) => Event::Tab {
                     back: modifiers.shift(),
+                },
+                keyboard::Key::Named(arrow @ (Named::ArrowLeft | Named::ArrowRight)) => {
+                    Event::Arrow {
+                        dx: if *arrow == Named::ArrowLeft { -1 } else { 1 },
+                        dy: 0,
+                        ctrl: modifiers.command(),
+                        shift: modifiers.shift(),
+                    }
+                }
+                keyboard::Key::Named(arrow @ (Named::ArrowUp | Named::ArrowDown)) => Event::Arrow {
+                    dx: 0,
+                    dy: if *arrow == Named::ArrowUp { -1 } else { 1 },
+                    ctrl: modifiers.command(),
+                    shift: modifiers.shift(),
                 },
                 _ => Event::Key {
                     letter: key.to_latin(*physical_key)?.to_ascii_lowercase(),
@@ -1150,7 +1177,7 @@ impl canvas::Program<Event> for Overlay<'_> {
             (self.handles, self.selection, cursor.position_in(bounds))
         {
             let r = self.view.rect_to_screen(sel.area);
-            let over_text = self.over_text(p);
+            let over_text = self.over_text(p) && !pointer.alt; // (Alt moves even over text)
             match grip_at(sel.kind, r, p).filter(|_| sel.kind != Kind::Word) {
                 Some(Grip::Corner(0 | 2)) => return mouse::Interaction::ResizingDiagonallyDown,
                 Some(Grip::Corner(_)) => return mouse::Interaction::ResizingDiagonallyUp,

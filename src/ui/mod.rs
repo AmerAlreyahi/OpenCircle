@@ -464,6 +464,8 @@ struct App {
     others: Vec<(overlay::Selection, Vec<Point>)>,
     /// The stroke being drawn adds to `others` (Shift).
     adding: bool,
+    /// Alt is held: a press inside the box moves it, even over text.
+    alt: bool,
     /// Resizing or moving the selection.
     grab: Option<Grab>,
     /// The zoomed / panned part of the frame on screen; a pan's start.
@@ -648,6 +650,7 @@ impl App {
             selection: None,
             others: Vec::new(),
             adding: false,
+            alt: false,
             grab: None,
             view: overlay::View::new(1, 1, Size::new(1.0, 1.0)),
             pan: None,
@@ -1403,6 +1406,10 @@ impl App {
     }
 
     fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {
+        if let overlay::Event::Alt(alt) = event {
+            self.alt = alt;
+            return Task::none();
+        }
         // A drag let go before the band under its press was read waits for
         // it, with the keys after it (Ctrl+C); a new press goes on without.
         if let Some(held) = &mut self.held {
@@ -1745,9 +1752,16 @@ impl App {
                 };
                 return self.snip_routed(crop, true, (true, false));
             }
+            overlay::Event::Arrow {
+                dx,
+                dy,
+                ctrl,
+                shift,
+            } => self.nudge(dx, dy, ctrl, shift),
             overlay::Event::Enter
             | overlay::Event::Space
             | overlay::Event::Tab { .. }
+            | overlay::Event::Alt(_)
             | overlay::Event::Key { .. } => {}
             // mapped above
             overlay::Event::Zoom { .. }
@@ -1910,8 +1924,8 @@ impl App {
         let on_screen = self.view.rect_to_screen(sel.area);
         let grip = overlay::grip_at(sel.kind, on_screen, self.view.to_screen(p));
         let inside = sel.area.contains(p)
-            && self.text_mode.is_none()
-            && self.text_at(p, word::Unit::Caret).is_none();
+            && (self.alt
+                || self.text_mode.is_none() && self.text_at(p, word::Unit::Caret).is_none());
         (grip.is_some() || inside).then(|| Grab {
             grip,
             from: p,
@@ -1964,6 +1978,41 @@ impl App {
         self.stroke = overlay::refit(stroke, start.area, area);
         self.selection = Some(overlay::Selection { area, kind });
         self.word = None; // the words are no longer what is selected
+    }
+
+    /// An arrow key on the box (`overlay::Event::Arrow`): 1 px (Shift: 10) on
+    /// the overlay, kept on the screen and over the minimum size.
+    fn nudge(&mut self, dx: i8, dy: i8, resize: bool, big: bool) {
+        let Some(sel) = self
+            .selection
+            .filter(|s| self.handles() && s.kind != overlay::Kind::Word)
+        else {
+            return;
+        };
+        let one = self.view.to_image(Point::new(1.0, 1.0)) - self.view.to_image(Point::ORIGIN);
+        let by = Vector::new(dx as f32 * one.x, dy as f32 * one.y) * if big { 10.0 } else { 1.0 };
+        let min = overlay::MIN_SIDE / self.view.zoom();
+        let a = sel.area;
+        let area = if resize {
+            let fit = |len: f32, at: f32, max: f32| (len).min(max - at).max(min);
+            Rectangle::new(
+                a.position(),
+                Size::new(
+                    fit(a.width + by.x, a.x, self.screen.width),
+                    fit(a.height + by.y, a.y, self.screen.height),
+                ),
+            )
+        } else {
+            overlay::keep_inside(a + by, self.screen)
+        };
+        self.morph = None;
+        self.panel = None;
+        self.text_mode = None;
+        self.scan = None;
+        self.stroke = overlay::refit(&self.stroke, a, area);
+        self.selection = Some(overlay::Selection { area, ..sel });
+        self.word = None;
+        self.remember_region();
     }
 
     /// The selection on the shown monitor, for `last_region`.
@@ -7476,6 +7525,99 @@ mod tests {
         app.selection = Some(overlay::snap(rect4(20.0, 20.0, 520.0, 170.0)).0);
         stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
+    }
+
+    #[test]
+    fn alt_drag_moves_the_box_even_over_text() {
+        let mut app = boxed_text(rect4(20.0, 20.0, 520.0, 170.0));
+        event(&mut app, overlay::Event::Alt(true));
+        let on_text = caret(1, 7.0);
+        drag(&mut app, on_text, on_text + Vector::new(20.0, 10.0), false);
+        assert_eq!(app.area(), rect4(40.0, 30.0, 520.0, 170.0));
+        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        // a bracket still resizes with Alt held
+        drag(
+            &mut app,
+            Point::new(37.0, 33.0),
+            Point::new(27.0, 23.0),
+            false,
+        );
+        assert_eq!(app.area(), rect4(30.0, 20.0, 530.0, 180.0));
+        // Alt let go: text selects again
+        event(&mut app, overlay::Event::Alt(false));
+        stroke(&mut app, &[caret(1, 7.0), caret(1, 21.0)]);
+        assert_eq!(picked_text(&app).as_deref(), Some("while you drag"));
+    }
+
+    fn arrow(app: &mut App, dx: i8, dy: i8, ctrl: bool, shift: bool) {
+        event(
+            app,
+            overlay::Event::Arrow {
+                dx,
+                dy,
+                ctrl,
+                shift,
+            },
+        );
+    }
+
+    #[test]
+    fn arrows_nudge_and_resize_the_box_within_the_screen() {
+        let mut app = boxed_text(rect4(20.0, 20.0, 520.0, 170.0));
+        arrow(&mut app, 1, 0, false, false);
+        arrow(&mut app, 0, 1, false, true);
+        assert_eq!(app.area(), rect4(21.0, 30.0, 520.0, 170.0));
+        arrow(&mut app, 1, 1, true, false);
+        arrow(&mut app, 1, 0, true, true);
+        assert_eq!(app.area(), rect4(21.0, 30.0, 531.0, 171.0));
+        assert_eq!(app.selection.unwrap().kind, overlay::Kind::Snap);
+        // the actions take the adjusted box
+        assert_eq!(app.regions.last().map(|r| r.1), Some(app.area()));
+        // stops at the screen (960x420) and at the minimum size
+        for _ in 0..30 {
+            arrow(&mut app, -1, -1, false, true);
+        }
+        assert_eq!(app.area(), rect4(0.0, 0.0, 531.0, 171.0));
+        for _ in 0..100 {
+            arrow(&mut app, 1, 1, true, true);
+        }
+        assert_eq!((app.area().width, app.area().height), (960.0, 420.0));
+        for _ in 0..100 {
+            arrow(&mut app, -1, -1, true, true);
+        }
+        let min = overlay::MIN_SIDE;
+        assert_eq!(app.area().size(), Size::new(min, min));
+        for _ in 0..200 {
+            arrow(&mut app, 1, 1, false, true);
+        }
+        let a = app.area();
+        assert_eq!((a.x + a.width, a.y + a.height), (960.0, 420.0));
+    }
+
+    #[test]
+    fn arrows_do_nothing_while_a_text_field_has_the_focus() {
+        use iced::keyboard::key::{Named, NativeCode, Physical};
+        use iced::keyboard::{Key, Location, Modifiers};
+        let app = boxed_text(rect4(20.0, 20.0, 520.0, 170.0));
+        let key = Key::Named(Named::ArrowRight);
+        let press = iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: Physical::Unidentified(NativeCode::Unidentified),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: None,
+            repeat: false,
+        });
+        let arrows = |m: &[Message]| {
+            (m.iter())
+                .filter(|m| matches!(m, Message::Overlay(overlay::Event::Arrow { .. })))
+                .count()
+        };
+        let (messages, _) = feed(&app, Focus::Id(ASK_INPUT), std::slice::from_ref(&press));
+        assert_eq!(arrows(&messages), 0, "{messages:?}");
+        let (messages, _) = feed(&app, Focus::Nothing, &[press]);
+        assert_eq!(arrows(&messages), 1, "{messages:?}");
     }
 
     /// Draw, release, snap, then act: during the press only the stroke is there,
