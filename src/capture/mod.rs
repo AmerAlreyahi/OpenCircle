@@ -168,12 +168,23 @@ pub fn wayland_session() -> bool {
     is_wayland(
         std::env::var_os("WAYLAND_DISPLAY").as_deref(),
         std::env::var_os("XDG_SESSION_TYPE").as_deref(),
+        std::env::var_os("DISPLAY").as_deref(),
     )
 }
 
+/// Wayland: a Wayland socket and either the session says so, or it says nothing
+/// useful (an ssh/systemd launch has type `tty` or none) and there is no X11 display.
+/// WSLg sets both displays and no session type: not Wayland for us.
 #[cfg(target_os = "linux")]
-fn is_wayland(display: Option<&std::ffi::OsStr>, session_type: Option<&std::ffi::OsStr>) -> bool {
-    display.is_some_and(|d| !d.is_empty()) && session_type.is_some_and(|t| t == "wayland")
+fn is_wayland(
+    wayland: Option<&std::ffi::OsStr>,
+    session_type: Option<&std::ffi::OsStr>,
+    x11: Option<&std::ffi::OsStr>,
+) -> bool {
+    let set = |v: Option<&std::ffi::OsStr>| v.is_some_and(|d| !d.is_empty());
+    set(wayland)
+        && (session_type.is_some_and(|t| t == "wayland")
+            || (!set(x11) && session_type.is_none_or(|t| t != "x11")))
 }
 
 pub(crate) fn from_png(path: &std::ffi::OsStr) -> Result<Frame, String> {
@@ -220,14 +231,18 @@ mod tests {
     fn detects_a_wayland_session() {
         use std::ffi::OsStr;
         let w = Some(OsStr::new("wayland-0"));
-        assert!(is_wayland(w, Some(OsStr::new("wayland"))));
-        assert!(!is_wayland(w, Some(OsStr::new("x11"))));
-        assert!(!is_wayland(w, None)); // WSLg: no session type
-        assert!(!is_wayland(None, Some(OsStr::new("wayland"))));
-        assert!(!is_wayland(
-            Some(OsStr::new("")),
-            Some(OsStr::new("wayland"))
-        ));
+        let x = Some(OsStr::new(":0"));
+        let t = |s| Some(OsStr::new(s));
+        assert!(is_wayland(w, t("wayland"), x));
+        assert!(!is_wayland(w, t("x11"), None));
+        assert!(!is_wayland(w, None, x)); // WSLg: no session type, both displays
+        assert!(!is_wayland(None, t("wayland"), x));
+        assert!(!is_wayland(Some(OsStr::new("")), t("wayland"), x));
+        // Started from ssh or systemd-run: type tty or unset, only the Wayland socket.
+        assert!(is_wayland(w, t("tty"), None));
+        assert!(is_wayland(w, None, None));
+        assert!(is_wayland(w, t("tty"), Some(OsStr::new(""))));
+        assert!(!is_wayland(w, t("tty"), x));
     }
 
     #[test]

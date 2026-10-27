@@ -216,9 +216,22 @@ fn main() -> ExitCode {
             }
         };
     }
-    if hotkey::forward(&hotkey::Command::OpenSettings.line()).is_ok() {
-        crate::log!("OpenCircle is already running; opened its Settings");
-        return ExitCode::SUCCESS;
+    let ours = env!("CARGO_PKG_VERSION");
+    match hotkey::running_version() {
+        // An older copy ignores what we forward: ask it to quit and start in its place.
+        Ok(theirs) if hotkey::is_older(theirs.as_deref(), ours) => {
+            let was = theirs.as_deref().unwrap_or("0.1.x");
+            if !take_over() {
+                crate::log!("OpenCircle v{was} is running and did not quit");
+                return ExitCode::FAILURE;
+            }
+            crate::log!("[opencircle] took over from v{was}");
+        }
+        Ok(_) if hotkey::forward(&hotkey::Command::OpenSettings.line()).is_ok() => {
+            crate::log!("OpenCircle is already running; opened its Settings");
+            return ExitCode::SUCCESS;
+        }
+        _ => {}
     }
 
     log::install_panic_hook(log::dir());
@@ -238,6 +251,8 @@ fn main() -> ExitCode {
     }
     hotkey::start(tx.clone(), &config);
     autostart::apply(&config);
+    #[cfg(target_os = "linux")]
+    capture::portal::repair_user_launcher();
     std::thread::spawn(|| remove_old_webview(&app_data_dir()));
     config::set_current(config);
     let _tray = ui::start_tray(tx.clone());
@@ -253,6 +268,18 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Asks the running copy to quit and waits (5 s) until it lets go of the socket.
+fn take_over() -> bool {
+    let _ = hotkey::forward(&hotkey::Command::Quit.line());
+    for _ in 0..50 {
+        if !hotkey::running() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    false
 }
 
 fn app_data_dir() -> std::path::PathBuf {

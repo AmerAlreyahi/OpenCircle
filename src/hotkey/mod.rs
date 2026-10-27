@@ -8,7 +8,7 @@
 mod portal;
 mod socket;
 
-pub use socket::{Command, forward, forward_or_start, listen, running};
+pub use socket::{Command, forward, forward_or_start, is_older, listen, running, running_version};
 
 use std::cell::RefCell;
 use std::sync::{Mutex, MutexGuard};
@@ -333,6 +333,7 @@ pub fn trigger(command: &Command, at: Instant) -> Trigger {
         Command::Capture => Trigger::Capture(at),
         Command::OpenSettings => Trigger::OpenSettings,
         Command::Quit => Trigger::Quit,
+        Command::Version => unreachable!("answered by the socket, never a trigger"),
         Command::Run { action, target } => {
             let configured = bindings().iter().find_map(|b| match &b.what {
                 What::Quick(qa) if qa.action == *action => Some(qa.clone()),

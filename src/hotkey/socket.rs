@@ -29,6 +29,9 @@ pub enum Command {
     OpenSettings,
     /// Ask the running instance to exit (removes its tray icon cleanly).
     Quit,
+    /// Internal, not a CLI command: asks which version runs. The answer is the line
+    /// `version X.Y.Z`; v0.1.x does not know it and closes without one.
+    Version,
     /// `target: None` = the target the user configured for that action.
     Run {
         action: String,
@@ -43,6 +46,7 @@ impl Command {
             Command::Capture => "capture".into(),
             Command::OpenSettings => String::new(),
             Command::Quit => "quit".into(),
+            Command::Version => "version".into(),
             Command::Run {
                 action,
                 target: None,
@@ -115,6 +119,7 @@ pub fn parse_command(line: &str) -> Result<Command, String> {
         ["capture"] => Ok(Command::Capture),
         [""] => Ok(Command::OpenSettings),
         ["quit"] => Ok(Command::Quit),
+        ["version"] => Ok(Command::Version),
         ["run", action] => run(action, None),
         ["run", action, target] => run(action, Some(target)),
         _ => Err("unknown command".into()),
@@ -135,6 +140,33 @@ pub fn forward(command: &str) -> io::Result<()> {
     let mut stream = LocalSocketStream::connect(endpoint()?)?;
     stream.write_all(command.as_bytes())?;
     stream.write_all(b"\n")
+}
+
+/// The version a running instance answers: `Ok(None)` = one runs but gives no
+/// answer (v0.1.x, or hung), `Err` = none runs.
+pub fn running_version() -> io::Result<Option<String>> {
+    let mut stream = LocalSocketStream::connect(endpoint()?)?;
+    stream.write_all(b"version\n")?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(stream.take(MAX_LINE)).read_line(&mut line);
+        let _ = tx.send(line);
+    });
+    let line = rx.recv_timeout(Duration::from_secs(2)).unwrap_or_default();
+    Ok(line.strip_prefix("version ").map(|v| v.trim().to_string()))
+}
+
+/// Is the instance that answered `answer` (see `running_version`) older than `ours`?
+/// No answer = older than the `version` command itself. An answer we can't read is left alone.
+pub fn is_older(answer: Option<&str>, ours: &str) -> bool {
+    match answer {
+        None => true,
+        Some(v) => matches!(
+            (crate::update::version(v), crate::update::version(ours)),
+            (Some(theirs), Some(ours)) if theirs < ours
+        ),
+    }
 }
 
 /// Is an instance running? Connects and sends nothing (the listener drops it).
@@ -187,9 +219,16 @@ pub fn listen(tx: Triggers) -> io::Result<()> {
             // client costs one parked thread, not the service.
             let tx = tx.clone();
             std::thread::spawn(move || {
+                let mut conn = conn;
                 // Dropped silently: the peer is a script, not a person to explain to.
-                if let Ok(command) = read_command(conn) {
-                    let _ = tx.unbounded_send(super::trigger(&command, Instant::now()));
+                match read_command(&mut conn) {
+                    Ok(Command::Version) => {
+                        let _ = writeln!(conn, "version {}", env!("CARGO_PKG_VERSION"));
+                    }
+                    Ok(command) => {
+                        let _ = tx.unbounded_send(super::trigger(&command, Instant::now()));
+                    }
+                    Err(_) => {}
                 }
             });
         }
@@ -439,6 +478,22 @@ mod tests {
         }
     }
 
+    /// A launch that finds an older copy running takes over from it; v0.1.x gives no
+    /// answer to `version`, which counts as older.
+    #[test]
+    fn an_older_or_silent_instance_is_taken_over() {
+        assert!(is_older(None, "0.2.0"));
+        assert!(is_older(Some("0.1.1"), "0.1.2"));
+        assert!(is_older(Some("0.1.9"), "0.2.0"));
+        assert!(!is_older(Some("0.2.0"), "0.2.0"));
+        assert!(
+            !is_older(Some("0.3.0"), "0.2.0"),
+            "never downgrade a newer copy"
+        );
+        assert!(!is_older(Some("garbage"), "0.2.0"));
+        assert_eq!(parse_command("version\n"), Ok(Command::Version));
+    }
+
     #[test]
     fn the_empty_line_opens_settings() {
         assert_eq!(parse_command("\n"), Ok(Command::OpenSettings));
@@ -454,6 +509,7 @@ mod tests {
         for command in [
             Command::Capture,
             Command::OpenSettings,
+            Command::Version,
             run_of("translate", None),
             run_of("ai_explain", Some(Target::Circle)),
             run_of("copy_text", Some(Target::LastRegion)),

@@ -1234,37 +1234,10 @@ fn pick_folder() -> Task<Msg> {
     start.map(Msg::Folder)
 }
 
-/// Opens `url` (one of our own constants) in the default browser.
-/// Opens `url` in the browser if it is one plain web link (`lens::web_host`).
+/// Opens `url` in the browser if it is one plain web link (`lens::open_link`).
 fn open_url(url: &str) {
-    if crate::lens::web_host(url).is_none() {
-        crate::log!("[opencircle] not a web link: not opened");
-        return;
-    }
-    #[cfg(windows)]
-    let mut cmd = {
-        use std::os::windows::process::CommandExt;
-        let mut c = std::process::Command::new("rundll32");
-        c.arg("url.dll,FileProtocolHandler").arg(url);
-        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        c
-    };
-    #[cfg(not(windows))]
-    let mut cmd = {
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(url);
-        c
-    };
-    use std::process::Stdio;
-    match cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        // Reaped off the UI thread: xdg-open can outlive the click.
-        Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
-        Err(e) => crate::log!("cannot open {url}: {e}"),
+    if let Err(e) = crate::lens::open_link(url) {
+        crate::log!("cannot open {url}: {e}");
     }
 }
 

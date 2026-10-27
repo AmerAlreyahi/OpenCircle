@@ -12,6 +12,7 @@
 
 mod notes;
 mod release;
+pub use release::version;
 mod swap;
 mod verify;
 

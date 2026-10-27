@@ -181,6 +181,17 @@ fn register(conn: &DBusConnection) {
 /// minimal user-level one, only if no `APP_ID.desktop` exists yet (or the one we
 /// wrote names another path). Returns the path written.
 fn ensure_desktop_file() -> std::io::Result<Option<PathBuf>> {
+    let (data_home, system) = desktop_dirs()?;
+    // An AppImage runs from a new mount each time: name the image itself.
+    let exe = match std::env::var_os("APPIMAGE") {
+        Some(image) => PathBuf::from(image),
+        None => std::env::current_exe()?,
+    };
+    write_desktop_file(&data_home, &system, &exe)
+}
+
+/// The user's data dir and the system ones, where `applications/` lives.
+fn desktop_dirs() -> std::io::Result<(PathBuf, Vec<PathBuf>)> {
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
@@ -190,13 +201,62 @@ fn ensure_desktop_file() -> std::io::Result<Option<PathBuf>> {
         .ok()
         .filter(|d| !d.is_empty())
         .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-    let system: Vec<PathBuf> = dirs.split(':').map(PathBuf::from).collect();
-    // An AppImage runs from a new mount each time: name the image itself.
-    let exe = match std::env::var_os("APPIMAGE") {
-        Some(image) => PathBuf::from(image),
-        None => std::env::current_exe()?,
+    Ok((data_home, dirs.split(':').map(PathBuf::from).collect()))
+}
+
+/// Run from a package (the .deb installed `APP_ID.desktop` and we are under /usr): a
+/// user-level `APP_ID.desktop` that starts anything else (an AppImage since deleted)
+/// shadows the package's launcher, and the menu entry fails. Removes that one.
+pub fn repair_user_launcher() {
+    if cfg!(debug_assertions) {
+        return; // a dev build never touches the machine's launchers
+    }
+    let Ok(((data_home, system), exe)) =
+        desktop_dirs().and_then(|d| Ok((d, std::env::current_exe()?)))
+    else {
+        return;
     };
-    write_desktop_file(&data_home, &system, &exe)
+    match remove_shadowing_launcher(&data_home, &system, &exe) {
+        Ok(Some(path)) => crate::log!(
+            "[opencircle] removed {}: it started another copy and hid the installed launcher",
+            path.display()
+        ),
+        Ok(None) => {}
+        Err(e) => crate::log!("[opencircle] could not repair the user launcher: {e}"),
+    }
+}
+
+fn remove_shadowing_launcher(
+    data_home: &Path,
+    system: &[PathBuf],
+    exe: &Path,
+) -> std::io::Result<Option<PathBuf>> {
+    let name = format!("{APP_ID}.desktop");
+    let packaged = exe.starts_with("/usr")
+        && system
+            .iter()
+            .any(|d| d.join("applications").join(&name).exists());
+    let user = data_home.join("applications").join(&name);
+    let Some(have) = packaged
+        .then(|| std::fs::read_to_string(&user).ok())
+        .flatten()
+    else {
+        return Ok(None);
+    };
+    if exec_program(&have).as_deref() == exe.to_str() {
+        return Ok(None);
+    }
+    std::fs::remove_file(&user)?;
+    Ok(Some(user))
+}
+
+/// The program of a desktop file's `Exec=` line (quoted or plain; its arguments dropped).
+fn exec_program(entry: &str) -> Option<String> {
+    let exec = entry.lines().find_map(|l| l.strip_prefix("Exec="))?.trim();
+    match exec.strip_prefix('"') {
+        Some(quoted) => quoted.split('"').next().map(str::to_string),
+        None => exec.split_whitespace().next().map(str::to_string),
+    }
 }
 
 /// Marks a desktop file OpenCircle wrote itself: it may rewrite that one, never a package's.
@@ -509,6 +569,55 @@ mod tests {
         assert_eq!(write_desktop_file(&home, &[sys], exe).unwrap(), None);
         assert!(!file.exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// #146: the .deb is installed, but an old AppImage's user-level launcher (same id)
+    /// shadows the system one in the app menu.
+    #[test]
+    fn a_stale_user_launcher_is_removed_when_run_from_a_package() {
+        let dir = scratch("stale");
+        let (home, sys) = (dir.join("home"), dir.join("sys"));
+        let user = home.join("applications/com.opencircle.app.desktop");
+        let system = sys.join("applications/com.opencircle.app.desktop");
+        let packaged = Path::new("/usr/bin/opencircle");
+        let run = |exe: &Path| remove_shadowing_launcher(&home, std::slice::from_ref(&sys), exe);
+        std::fs::create_dir_all(user.parent().unwrap()).unwrap();
+        std::fs::write(
+            &user,
+            desktop_entry(Path::new("/home/me/My Apps/oc.AppImage")),
+        )
+        .unwrap();
+
+        // No package launcher yet (a raw binary or an AppImage run): never touched.
+        assert_eq!(run(packaged).unwrap(), None);
+        assert!(user.exists());
+        std::fs::create_dir_all(system.parent().unwrap()).unwrap();
+        std::fs::write(&system, "x").unwrap();
+        // Package launcher, but this is not the packaged copy: left alone.
+        assert_eq!(run(Path::new("/home/me/opencircle")).unwrap(), None);
+        assert!(user.exists());
+        // The packaged copy runs: the launcher that starts another copy goes.
+        assert_eq!(run(packaged).unwrap().as_deref(), Some(user.as_path()));
+        assert!(!user.exists());
+        assert_eq!(run(packaged).unwrap(), None, "nothing left to do");
+        // One that starts this very copy stays.
+        std::fs::write(&user, desktop_entry(packaged)).unwrap();
+        assert_eq!(run(packaged).unwrap(), None);
+        assert!(user.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reads_the_program_of_an_exec_line() {
+        for (exec, want) in [
+            ("Exec=/usr/bin/opencircle", "/usr/bin/opencircle"),
+            ("Exec=/usr/bin/opencircle %U", "/usr/bin/opencircle"),
+            ("Exec=\"/home/me/My Apps/oc\" %U", "/home/me/My Apps/oc"),
+        ] {
+            let entry = format!("[Desktop Entry]\nName=x\n{exec}\nIcon=y\n");
+            assert_eq!(exec_program(&entry).as_deref(), Some(want));
+        }
+        assert_eq!(exec_program("[Desktop Entry]\nName=x\n"), None);
     }
 
     #[test]

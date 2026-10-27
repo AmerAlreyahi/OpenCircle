@@ -399,7 +399,93 @@ fn spawn(target: &std::ffi::OsStr) -> io::Result<()> {
     if let Some(program) = test_browser {
         return reap(Command::new(program).arg(target));
     }
+    #[cfg(target_os = "linux")]
+    if open_on_linux(target) {
+        return Ok(());
+    }
     reap(&mut launcher(target))
+}
+
+/// How Linux hands `target` to the desktop.
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    /// A web link or `mailto:`: the desktop portal (OpenURI), which finds the
+    /// browser itself. `xdg-open` fetches the page and opens its source in a text
+    /// editor when no https handler is set (Ubuntu 26.04 out of the box).
+    Portal,
+    /// A local file (the Lens hand-off page): the browser, by name. The file's
+    /// own default (text/html) can be a text editor.
+    Browser,
+    /// Anything else: the plain launcher.
+    Command,
+}
+
+fn route(target: &str) -> Route {
+    if target.starts_with('/') {
+        Route::Browser
+    } else if web_host(target).is_some() || target.starts_with("mailto:") {
+        Route::Portal
+    } else {
+        Route::Command
+    }
+}
+
+/// Opens `target` by its [`Route`]; `false` = fall back to `xdg-open` (logged).
+#[cfg(target_os = "linux")]
+fn open_on_linux(target: &std::ffi::OsStr) -> bool {
+    let Some(target) = target.to_str() else {
+        return false;
+    };
+    let opened = match route(target) {
+        Route::Portal => open_uri(target),
+        Route::Browser => open_in_browser(target),
+        Route::Command => return false,
+    };
+    if let Err(e) = &opened {
+        crate::log!("[opencircle] cannot open a link through the desktop ({e}); trying xdg-open");
+    }
+    opened.is_ok()
+}
+
+#[cfg(target_os = "linux")]
+fn open_uri(uri: &str) -> Result<(), String> {
+    use crate::capture::portal;
+    use gtk::gio::{Cancellable, DBusCallFlags};
+    use gtk::glib::{ToVariant, VariantDict};
+
+    let args = ("", uri, VariantDict::new(None)).to_variant();
+    portal::session_bus()?
+        .call_sync(
+            Some(portal::DESKTOP),
+            portal::PATH,
+            "org.freedesktop.portal.OpenURI",
+            "OpenURI",
+            Some(&args),
+            None,
+            DBusCallFlags::NONE,
+            5000,
+            None::<&Cancellable>,
+        )
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+/// The user's https handler (else any registered browser) opens the local file.
+#[cfg(target_os = "linux")]
+fn open_in_browser(path: &str) -> Result<(), String> {
+    use gtk::gio::{self, prelude::AppInfoExt};
+
+    let uri = gtk::glib::filename_to_uri(path, None).map_err(|e| e.to_string())?;
+    let browser = gio::AppInfo::default_for_uri_scheme("https")
+        .or_else(|| {
+            gio::AppInfo::all_for_type("x-scheme-handler/https")
+                .into_iter()
+                .next()
+        })
+        .ok_or("no browser is registered for https")?;
+    browser
+        .launch_uris(&[uri.as_str()], None::<&gio::AppLaunchContext>)
+        .map_err(|e| e.to_string())
 }
 
 /// Windows keeps a new window behind the always-on-top overlay, and only lets a
@@ -754,6 +840,23 @@ mod tests {
         }
         #[cfg(windows)]
         assert_eq!(args.len(), 2); // "url.dll,FileProtocolHandler" + target
+    }
+
+    #[test]
+    fn links_go_to_the_portal_and_the_hand_off_page_to_a_browser() {
+        // A web link or mailto: never goes through xdg-open on Linux (no https
+        // handler = the page source in a text editor); the local page opens in a browser.
+        for link in [
+            "https://github.com/AmerAlreyahi/OpenCircle",
+            "HTTP://example.com/a?b=c",
+            "mailto:me@example.com",
+        ] {
+            assert_eq!(route(link), Route::Portal, "{link}");
+        }
+        assert_eq!(route("/tmp/opencircle-lens-1-2.html"), Route::Browser);
+        for other in ["file:///etc/passwd", "-x", "ftp://example.com/", ""] {
+            assert_eq!(route(other), Route::Command, "{other}");
+        }
     }
 
     #[test]
