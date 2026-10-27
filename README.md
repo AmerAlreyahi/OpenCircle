@@ -23,16 +23,16 @@ licensed, and has no account and no telemetry.
 
 <table>
   <tr>
-    <td width="50%"><img src="gallery/clips/clip-1-circle.webp" alt="Circle a photo, then Search in browser: Google Lens opens with the crop."><br><sub><b>Circle anything, then choose Search.</b> Lens opens in your own browser.</sub></td>
-    <td width="50%"><img src="gallery/clips/clip-2-text.webp" alt="Select a line of text on screen, copy it and paste it into Notepad."><br><sub><b>Select text. Copy. Paste.</b> Text on screen is selectable at once.</sub></td>
+    <td width="50%"><a href="docs/features/circle-to-search.md"><img src="gallery/clips/clip-1-circle.webp" alt="Circle a photo, then Search in browser: Google Lens opens with the crop."><br><sub><b>Circle anything, then choose Search.</b> Lens opens in your own browser.</sub></a></td>
+    <td width="50%"><a href="docs/features/select-text.md"><img src="gallery/clips/clip-2-text.webp" alt="Select a line of text on screen, copy it and paste it into Notepad."><br><sub><b>Select text. Copy. Paste.</b> Text on screen is selectable at once.</sub></a></td>
   </tr>
   <tr>
-    <td><img src="gallery/clips/clip-3-translate.webp" alt="An English article is translated to Arabic in place, block by block."><br><sub><b>Read the page in Arabic.</b> Offline, drawn where the text stood.</sub></td>
-    <td><img src="gallery/clips/clip-4-adjust.webp" alt="Resize the selection box, move it with Alt+drag and copy the image."><br><sub><b>Adjust the box.</b> Resize, Alt+drag or arrows; Ctrl+C copies the image.</sub></td>
+    <td><a href="docs/features/translate.md"><img src="gallery/clips/clip-3-translate.webp" alt="An English article is translated to Arabic in place, block by block."><br><sub><b>Read the page in Arabic.</b> Offline, drawn where the text stood.</sub></a></td>
+    <td><a href="docs/features/selection-box.md"><img src="gallery/clips/clip-4-adjust.webp" alt="Resize the selection box, move it with Alt+drag and copy the image."><br><sub><b>Adjust the box.</b> Resize, Alt+drag or arrows; Ctrl+C copies the image.</sub></a></td>
   </tr>
   <tr>
-    <td><img src="gallery/clips/clip-5-save.webp" alt="Ctrl+S saves the selection and a pill shows where."><br><sub><b>Keep it with Ctrl+S.</b> Saved straight to your folder.</sub></td>
-    <td><img src="gallery/clips/clip-6-install.webp" alt="The setup installs OpenCircle, launches it, and it waits in the tray."><br><sub><b>Install. Launch. Ready.</b> One small setup, then one shortcut.</sub></td>
+    <td><a href="docs/features/save-and-copy.md"><img src="gallery/clips/clip-5-save.webp" alt="Ctrl+S saves the selection and a pill shows where."><br><sub><b>Keep it with Ctrl+S.</b> Saved straight to your folder.</sub></a></td>
+    <td><a href="docs/features/install.md"><img src="gallery/clips/clip-6-install.webp" alt="The setup installs OpenCircle, launches it, and it waits in the tray."><br><sub><b>Install. Launch. Ready.</b> One small setup, then one shortcut.</sub></a></td>
   </tr>
 </table>
 

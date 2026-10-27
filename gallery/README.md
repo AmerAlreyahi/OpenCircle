@@ -8,9 +8,9 @@ also available as an MP4.
 
 | | |
 |---|---|
-| ![Circle anything, then choose Search](clips/clip-1-circle.webp)<br>Circle anything, then choose Search ([MP4](clips/clip-1-circle.mp4)) | ![Select text. Copy. Paste.](clips/clip-2-text.webp)<br>Select text. Copy. Paste. ([MP4](clips/clip-2-text.mp4)) |
-| ![Read the page in Arabic](clips/clip-3-translate.webp)<br>Read the page in Arabic ([MP4](clips/clip-3-translate.mp4)) | ![Tip: Alt+drag moves the box](clips/clip-4-adjust.webp)<br>Tip: Alt+drag moves the box ([MP4](clips/clip-4-adjust.mp4)) |
-| ![Keep it with Ctrl+S](clips/clip-5-save.webp)<br>Keep it with Ctrl+S ([MP4](clips/clip-5-save.mp4)) | ![Install. Launch. Ready.](clips/clip-6-install.webp)<br>Install. Launch. Ready. ([MP4](clips/clip-6-install.mp4)) |
+| [![Circle anything, then choose Search](clips/clip-1-circle.webp)](../docs/features/circle-to-search.md)<br>[Circle anything, then choose Search](../docs/features/circle-to-search.md) ([MP4](clips/clip-1-circle.mp4)) | [![Select text. Copy. Paste.](clips/clip-2-text.webp)](../docs/features/select-text.md)<br>[Select text. Copy. Paste.](../docs/features/select-text.md) ([MP4](clips/clip-2-text.mp4)) |
+| [![Read the page in Arabic](clips/clip-3-translate.webp)](../docs/features/translate.md)<br>[Read the page in Arabic](../docs/features/translate.md) ([MP4](clips/clip-3-translate.mp4)) | [![Tip: Alt+drag moves the box](clips/clip-4-adjust.webp)](../docs/features/selection-box.md)<br>[Tip: Alt+drag moves the box](../docs/features/selection-box.md) ([MP4](clips/clip-4-adjust.mp4)) |
+| [![Keep it with Ctrl+S](clips/clip-5-save.webp)](../docs/features/save-and-copy.md)<br>[Keep it with Ctrl+S](../docs/features/save-and-copy.md) ([MP4](clips/clip-5-save.mp4)) | [![Install. Launch. Ready.](clips/clip-6-install.webp)](../docs/features/install.md)<br>[Install. Launch. Ready.](../docs/features/install.md) ([MP4](clips/clip-6-install.mp4)) |
 
 ## Screenshots of 0.1.0 (older look)
 
