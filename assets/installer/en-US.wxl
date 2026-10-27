@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The MSI wizard's texts in OpenCircle's words (the setup's, ui/setup.rs). WixUI's
+     other strings and cargo-packager's own (CargoPackagerLanguage, LaunchApp, …)
+     keep their defaults: cargo-packager adds those missing here. -->
+<WixLocalization Culture="en-us" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+    <String Id="WelcomeDlgTitle">{\WixUI_Font_Bigger}OpenCircle [ProductVersion]</String>
+    <String Id="WelcomeDlgDescription">Circle anything on your screen to search, read text, translate in place, or ask AI.
+
+Click Next to choose where it goes.</String>
+    <String Id="InstallDirDlgTitle">{\WixUI_Font_Title}Install folder</String>
+    <String Id="InstallDirDlgDescription">Where OpenCircle goes. Your settings and models stay in your user folder.</String>
+    <String Id="ExitDialogTitle">{\WixUI_Font_Bigger}OpenCircle is ready</String>
+    <String Id="ExitDialogDescription">Installed cleanly. Press Ctrl + Shift + Space anytime to circle your screen.</String>
+</WixLocalization>

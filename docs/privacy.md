@@ -47,6 +47,10 @@ only to the server you configured. A remote server must use `https://`; plain
   `song_history.json` in your local data folder.
 - **Settings** are in `config.toml` in your user config folder; they hold no
   keys.
+- **Setup and uninstall (Windows).** The setup installs offline and sends
+  nothing; it unpacks its installer to a temporary folder that it deletes when
+  it closes. Uninstalling asks whether your settings, downloaded models and
+  saved keys go too; a silent uninstall keeps them.
 
 ## Offline use
 

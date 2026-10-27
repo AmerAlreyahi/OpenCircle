@@ -48,7 +48,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest   # NSIS .exe + .msi
+          - os: windows-latest   # setup .exe + .msi + portable .exe
             artifact: build-windows
           - os: ubuntu-22.04     # .AppImage + .deb + .rpm (22.04 = widest glibc reach)
             artifact: build-linux
@@ -101,7 +101,7 @@ jobs:
       # cargo-packager runs `cargo build --release` itself (before-packaging-command).
       - name: Package (Windows)
         if: runner.os == 'Windows'
-        run: cargo packager --release --formats nsis,wix --out-dir dist
+        run: cargo packager --release --formats wix --out-dir dist
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
@@ -112,13 +112,21 @@ jobs:
           packaging/deb-app-id.sh dist/*.deb
           cargo generate-rpm -o dist/
 
-      # The auto-update replaces an installed exe with this plain copy (src/update).
-      - name: Portable exe (Windows)
+      # The Windows names (#55): OpenCircle-<ver>-x64.msi, OpenCircle-<ver>-x64-portable.exe
+      # (the auto-update replaces an installed exe with this plain copy, src/update)
+      # and, for ONE release only, the portable exe under its old name
+      # OpenCircle_<ver>_x64-portable.exe: 0.1.0's updater looks for that one.
+      - name: Name the MSI, portable exe (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          msi=$(ls dist/*.msi)
+          [ "$(echo "$msi" | wc -l)" = 1 ] || { echo "::error::expected one MSI: $msi"; exit 1; }
+          mv "$msi" "dist/OpenCircle-${version}-x64.msi"
+          cp target/release/opencircle.exe "dist/OpenCircle-${version}-x64-portable.exe"
           cp target/release/opencircle.exe "dist/OpenCircle_${version}_x64-portable.exe"
+          ls -la dist
 
       # The exe must be GUI-subsystem (2) and carry the icon + version info.
       - name: Check the Windows exe
@@ -136,6 +144,20 @@ jobs:
           $info = (Get-Item $exe).VersionInfo
           $info | Format-List FileVersion, ProductVersion, ProductName, FileDescription, OriginalFilename
           if (-not $info.FileVersion.StartsWith((Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value)) { throw "version info does not match Cargo.toml" }
+
+      # Our setup (src/setup): this program again with the MSI inside. Built after
+      # the checks above, since it overwrites target/release/opencircle.exe.
+      - name: Setup exe (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          OPENCIRCLE_SETUP_MSI="dist/OpenCircle-${version}-x64.msi" cargo build --release
+          cp target/release/opencircle.exe "dist/OpenCircle-Setup-${version}-x64.exe"
+          msi=$(stat -c %s "dist/OpenCircle-${version}-x64.msi")
+          setup=$(stat -c %s "dist/OpenCircle-Setup-${version}-x64.exe")
+          [ "$setup" -gt "$msi" ] || { echo "::error::the setup does not carry the MSI"; exit 1; }
+          ls -la dist
 
       # Prove the runtime dependencies. ldd lists what is linked (and fails on a
       # missing library); the libraries gtk/winit/tray-icon dlopen are not linked,

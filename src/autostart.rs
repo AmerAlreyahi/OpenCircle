@@ -26,6 +26,12 @@ pub fn apply(config: &Config) {
     }
 }
 
+/// The setup's "Start with Windows": the entry for `exe` written (`on`) or
+/// removed now, whatever the onboarding state (the user just chose).
+pub fn choose(exe: &Path, on: bool) -> io::Result<()> {
+    sync(&Store::real(), exe, on)
+}
+
 /// `sync`, but only once onboarding is finished: its Finish saves the user's choice.
 fn sync_when_onboarded(store: &Store, exe: &Path, on: bool, onboarded: bool) -> io::Result<()> {
     if onboarded {

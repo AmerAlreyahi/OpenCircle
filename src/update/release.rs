@@ -97,18 +97,20 @@ impl Install {
 }
 
 /// The asset that updates `install` on `arch` (`std::env::consts::ARCH`), named as
-/// release.yml / cargo-packager name them.
+/// release.yml names them: `OpenCircle-<ver>-x64-portable.exe` since #55, before
+/// that `OpenCircle_<ver>_x64-portable.exe` (accepted for one more release;
+/// release.yml also ships that copy once, for 0.1.0's updater, which knows only it).
 pub fn pick<'a>(assets: &'a [Asset], install: &Install, arch: &str) -> Option<&'a Asset> {
-    let (suffix, arch) = match (install, arch) {
-        (Install::Exe(_), "x86_64") => ("-portable.exe", "_x64"),
-        (Install::Exe(_), "aarch64") => ("-portable.exe", "_arm64"),
-        (Install::AppImage(_), "x86_64") => (".AppImage", "_x86_64"),
-        (Install::AppImage(_), "aarch64") => (".AppImage", "_aarch64"),
+    let endings: &[&str] = match (install, arch) {
+        (Install::Exe(_), "x86_64") => &["-x64-portable.exe", "_x64-portable.exe"],
+        (Install::Exe(_), "aarch64") => &["-arm64-portable.exe", "_arm64-portable.exe"],
+        (Install::AppImage(_), "x86_64") => &["_x86_64.AppImage"],
+        (Install::AppImage(_), "aarch64") => &["_aarch64.AppImage"],
         _ => return None,
     };
-    assets
+    endings
         .iter()
-        .find(|a| a.name.ends_with(suffix) && a.name.contains(arch) && !a.name.contains('/'))
+        .find_map(|end| (assets.iter()).find(|a| a.name.ends_with(end) && !a.name.contains('/')))
 }
 
 /// One HTTP answer.
@@ -545,6 +547,54 @@ pub(crate) mod tests {
             None,
             "deb / rpm: notify only"
         );
+    }
+
+    /// #55's names (`OpenCircle-<ver>-x64-portable.exe`, the setup, the MSI) and,
+    /// for one release, the old ones; never the setup or the MSI for the exe.
+    #[test]
+    fn the_exe_takes_the_new_portable_name_and_still_the_old_one() {
+        let named = |names: &[&str]| {
+            let mut r = release("v9.9.9");
+            r.assets = (names.iter())
+                .map(|n| Asset {
+                    name: n.to_string(),
+                    browser_download_url: format!("{BASE}{n}"),
+                    size: 1,
+                })
+                .collect();
+            r
+        };
+        let exe = Install::Exe("C:/x/opencircle.exe".into());
+        let picked = |r: &Release, arch| pick(&r.assets, &exe, arch).map(|a| a.name.clone());
+        let both = named(&[
+            "OpenCircle-Setup-9.9.9-x64.exe",
+            "OpenCircle-9.9.9-x64.msi",
+            "OpenCircle_9.9.9_x64-portable.exe",
+            "OpenCircle-9.9.9-x64-portable.exe",
+            SUMS,
+            SIG,
+        ]);
+        assert_eq!(
+            picked(&both, "x86_64").as_deref(),
+            Some("OpenCircle-9.9.9-x64-portable.exe"),
+            "the new name first"
+        );
+        let new = named(&[
+            "OpenCircle-Setup-9.9.9-x64.exe",
+            "OpenCircle-9.9.9-x64-portable.exe",
+        ]);
+        assert_eq!(
+            picked(&new, "x86_64").as_deref(),
+            Some("OpenCircle-9.9.9-x64-portable.exe")
+        );
+        assert_eq!(
+            picked(&release("v9.9.9"), "x86_64").as_deref(),
+            Some("OpenCircle_9.9.9_x64-portable.exe"),
+            "the old name, for one release"
+        );
+        let installers = named(&["OpenCircle-Setup-9.9.9-x64.exe", "OpenCircle-9.9.9-x64.msi"]);
+        assert_eq!(picked(&installers, "x86_64"), None, "never an installer");
+        assert_eq!(picked(&new, "aarch64"), None, "no arm build");
     }
 
     #[test]

@@ -62,7 +62,7 @@ xcb = { version = "1.7", features = ["randr", "xtest", "xfixes", "shape"] }
 cpal = { version = "0.18", default-features = false }
 widestring = "1"
 xcap = "0.9"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_SystemInformation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_ApplicationInstallationAndServicing", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_SystemInformation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 strip = true
@@ -86,24 +86,24 @@ icons = [
     "assets/icons/512x512.png",
 ]
 # cargo-packager has no rpm format: the .rpm comes from cargo-generate-rpm (below).
-formats = ["nsis", "wix", "appimage", "deb"]
-# The installers' licence/notice page (RTF is what WiX needs; NSIS takes it too).
+# Windows: the MSI only. Our own setup exe (src/setup, OpenCircle-Setup-*.exe) is
+# built over it by release.yml (owner 2026-10-26, #55: no NSIS).
+formats = ["wix", "appimage", "deb"]
+# The MSI's licence/notice page (RTF is what WiX needs).
 license-file = "assets/installer/license.rtf"
 
 # Windows MSI: cargo-packager's template is already WixUI_InstallDir (pick the folder),
 # with a "Launch OpenCircle" checkbox (checked) on the finish page, a Start menu
 # shortcut, and a stable UpgradeCode derived from the identifier (upgrades replace).
-# Ours: the artwork (493x58 banner, 493x312 welcome/finish image) and main.wxs, the
-# default template minus the desktop shortcut and the "Uninstall" shortcut (owner).
+# Ours: main.wxs (the default template minus the desktop shortcut and the
+# "Uninstall" shortcut (owner), with repair, and the uninstall's question about the
+# user's data), the wizard in the Sapphire look: the artwork (493x58 banner,
+# 493x312 welcome/finish image, scripts/installer-art.py) and its texts (en-US.wxl).
 [package.metadata.packager.wix]
 template = "assets/installer/main.wxs"
 banner-path = "assets/installer/banner.bmp"
 dialog-image-path = "assets/installer/dialog.bmp"
-
-# NSIS (.exe): sidebar on welcome/finish, header on the inner pages.
-[package.metadata.packager.nsis]
-sidebar-image = "assets/installer/nsis-sidebar.bmp"
-header-image = "assets/installer/nsis-header.bmp"
+languages = [{ identifier = "en-US", path = "assets/installer/en-US.wxl" }]
 
 # Linux runtime libraries. `ldd target/release/opencircle` links gtk3, glib and
 # libxcb; winit, iced and tray-icon dlopen the rest (X11, xkbcommon, wayland,

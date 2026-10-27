@@ -21,7 +21,7 @@ pub const PROFILE_URL: &str = "https://github.com/AmerAlreyahi";
 
 /// Who made what we ship or download: (what, made by, licence). The full texts
 /// are in the repository's NOTICE file.
-pub const NOTICES: [(&str, &str, &str); 10] = [
+pub const NOTICES: [(&str, &str, &str); 11] = [
     (
         "Text recognition",
         "PaddleOCR PP-OCRv5, Baidu",
@@ -40,6 +40,7 @@ pub const NOTICES: [(&str, &str, &str); 10] = [
     ("Lucide icons", "Lucide contributors", "ISC"),
     ("Inter font", "Rasmus Andersson", "OFL-1.1"),
     ("Noto Sans Arabic", "Google", "OFL-1.1"),
+    ("JetBrains Mono", "JetBrains", "OFL-1.1"),
 ];
 
 /// The developer card's data: `assets/about/profile.toml`.

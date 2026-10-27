@@ -5,8 +5,19 @@
 Download the installer from the [Releases](https://github.com/AmerAlreyahi/OpenCircle/releases)
 page (see the [README](../README.md#install)).
 
-- **Windows:** run the `.msi` (or the `.exe`). The installer asks for the
-  install folder and, at the end, whether to launch OpenCircle.
+- **Windows:** run `OpenCircle-Setup-<version>-x64.exe` and click **Install
+  OpenCircle** (Windows asks for permission once). **Customize install** picks
+  another folder. At the end choose whether OpenCircle starts with Windows, then
+  **Launch OpenCircle**. Running a newer setup updates OpenCircle in place and
+  keeps your settings and downloaded models; running the same one again repairs it.
+  Uninstall it in **Settings > Apps**: it asks whether your settings, downloaded
+  models and saved keys go too.
+- **Windows, managed PCs:** the `.msi` is a full installer on its own (it shows a
+  wizard with the folder choice). Silent install, as administrator:
+  `msiexec /i OpenCircle-<version>-x64.msi /qn INSTALLDIR="C:\Apps\OpenCircle"`
+  (silent uninstall: `msiexec /x OpenCircle-<version>-x64.msi /qn`, which keeps
+  every user's data).
+- **Windows, no install:** `OpenCircle-<version>-x64-portable.exe` runs as it is.
 - **Linux (preview):** install the `.deb` or `.rpm`, or run the `.AppImage`.
 
 <p align="center">

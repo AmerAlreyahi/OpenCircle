@@ -35,8 +35,14 @@
             <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="!(loc.DowngradeErrorMessage)" AllowSameVersionUpgrades="yes" />
         {{/if}}
 
+        <!-- Uninstall (not an upgrade, not silent): the installed exe quits a running
+             OpenCircle and asks whether the user's settings, models and keys go too
+             (src/setup: forget_user_data). Its answer never stops the uninstall. -->
+        <CustomAction Id="AskAboutUserData" FileKey="Path" ExeCommand="--forget-user-data" Execute="immediate" Return="ignore" />
+
         <InstallExecuteSequence>
             <RemoveShortcuts>Installed AND NOT UPGRADINGPRODUCTCODE</RemoveShortcuts>
+            <Custom Action="AskAboutUserData" After="InstallInitialize">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND UILevel &gt;= 3</Custom>
         </InstallExecuteSequence>
 
         <Media Id="1" Cabinet="app.cab" EmbedCab="yes" />
@@ -55,7 +61,7 @@
         <Icon Id="ProductIcon" SourceFile="{{icon_path}}"/>
         <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
         {{/if}}
-        <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />      <!-- Remove repair -->
+        <!-- Repair stays (Apps & features, the setup); Modify has nothing to change -->
         <SetProperty Id="ARPNOMODIFY" Value="1" After="InstallValidate" Sequence="execute"/>
 
         <!-- initialize with previous InstallDir -->

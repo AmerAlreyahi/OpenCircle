@@ -42,6 +42,8 @@ pub enum Curve {
     In,
     /// The plain ease (the toast's fade and rise).
     Ease,
+    /// `animate-pulse`'s in-out (the setup's logo while installing).
+    Pulse,
 }
 
 impl Curve {
@@ -52,6 +54,7 @@ impl Curve {
             Curve::Standard => [0.22, 1.0, 0.36, 1.0],
             Curve::In => [0.4, 0.0, 1.0, 1.0],
             Curve::Ease => [0.4, 0.0, 0.2, 1.0],
+            Curve::Pulse => [0.4, 0.0, 0.6, 1.0],
         }
     }
 

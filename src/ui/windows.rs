@@ -772,6 +772,31 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
     open(settings)
 }
 
+/// The setup's window (`ui::setup`): a fixed-size normal window (taskbar entry,
+/// our own header), centred, cut to the design's rounded corners (`radius`, as
+/// a floating window: nothing shows outside them, and it fades in and out by
+/// `POPUP`). After a `window::resize`, `reshape` cuts it again.
+pub fn setup_window(size: Size, radius: f32) -> (window::Id, Task<window::Id>) {
+    let fades = shape::can_fade();
+    let (id, open) = open(window::Settings {
+        size,
+        resizable: false,
+        position: Position::Centered,
+        exit_on_close_request: false,
+        visible: !fades, // shown once cut (`appear`)
+        ..window::Settings::default()
+    });
+    FLOATING.lock().unwrap().push((id, radius, POPUP));
+    let open = open.then(move |id| {
+        let shown = match fades {
+            true => appear(id, POPUP),
+            false => Task::none(),
+        };
+        reshape(id).discard().chain(shown).chain(Task::done(id))
+    });
+    (id, open)
+}
+
 /// How long a confirmation toast shows (the design's 1800 ms).
 pub const TOAST_MS: u64 = 1800;
 
@@ -1500,7 +1525,7 @@ mod tests {
         assert!(!app_window(asked).decorations);
     }
 
-    /// Every window is opened by `normal`, `floating` or `screen` here, all through
+    /// Every window is opened by `normal`, `floating`, `screen` or `setup_window` here, all through
     /// `open`, so none can show a box, a gray strip or the OS title bar by forgetting
     /// a setting.
     #[test]

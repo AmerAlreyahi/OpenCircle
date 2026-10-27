@@ -15,15 +15,21 @@ use crate::config::BarStyle;
 
 /// The icon font (Lucide subset, see `assets/lucide/`); load it once at start.
 pub const ICON_FONT_BYTES: &[u8] = include_bytes!("../../assets/lucide/lucide-subset.ttf");
-const ICON_FONT: Font = Font::with_name("lucide");
+pub(crate) const ICON_FONT: Font = Font::with_name("lucide");
 /// Every font the UI registers at start (`ui::run`; the headless renders too):
-/// the icons, Inter (the UI font where Segoe UI is missing) and Noto Sans
-/// Arabic (Arabic where the UI font has none). OFL licences in `assets/fonts/`.
-pub const FONTS: [&[u8]; 3] = [
+/// the icons, Inter (the UI font where Segoe UI is missing), Noto Sans
+/// Arabic (Arabic where the UI font has none) and the design's mono font
+/// (`MONO`: a Latin subset of JetBrains Mono, weights 400-600, plus ▴ ▾ ✓ →).
+/// OFL licences in `assets/fonts/`.
+pub const FONTS: [&[u8]; 4] = [
     ICON_FONT_BYTES,
     include_bytes!("../../assets/fonts/Inter.ttf"),
     include_bytes!("../../assets/fonts/NotoSansArabic.ttf"),
+    include_bytes!("../../assets/fonts/JetBrainsMono.ttf"),
 ];
+
+/// The design's `.mono` text (file names, versions, sizes, paths).
+pub const MONO: Font = Font::with_name("JetBrains Mono");
 
 /// The UI font, the design's stack: Segoe UI Variable Text, else Segoe UI
 /// (Windows), else the bundled Inter. Picked once, from the fonts on this PC.

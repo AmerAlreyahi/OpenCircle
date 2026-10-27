@@ -364,6 +364,54 @@ fn palette(setting: Theme, os_dark: bool) -> &'static Palette {
     }
 }
 
+/// The new design's main theme, Sapphire (`newdesing/styles/tokens.css`), solid
+/// look (no glass on the CPU renderer). The setup uses it today; the redesign
+/// (N-18) moves every screen onto these tokens. Names follow the design's
+/// variables (`--app-bg-solid` = `BG`, …); `scripts/installer-art.py` repeats a
+/// few for the setup's baked images.
+pub mod sapphire {
+    use iced::Color;
+
+    /// `--app-bg-solid`: windows (Settings, Onboarding, the setup).
+    pub const BG: Color = Color::from_rgb8(0x0c, 0x17, 0x2e);
+    /// `--app-track-solid`: recessed controls (segmented track, inputs).
+    pub const TRACK: Color = Color::from_rgb8(0x07, 0x10, 0x21);
+    /// `--app-track-glass`: a recessed panel over a window (the setup's progress).
+    pub const TRACK_GLASS: Color = Color::from_rgba8(4, 10, 24, 0.46);
+    /// `--ui-elevated-bg` / `-hover`: buttons and the chosen segment.
+    pub const ELEVATED: Color = Color::from_rgb8(0x1c, 0x36, 0x64);
+    pub const ELEVATED_HOVER: Color = Color::from_rgb8(0x23, 0x42, 0x7a);
+    /// `--app-rim-border`: a window's or a field's 1 px edge.
+    pub const RIM: Color = Color::from_rgba8(155, 205, 255, 0.17);
+    /// `--app-divider`: hairlines.
+    pub const DIVIDER: Color = Color::from_rgba8(155, 205, 255, 0.085);
+    /// `--app-hover-bg`: a quiet fill (hover, the logo's tile, progress track).
+    pub const HOVER: Color = Color::from_rgba8(155, 205, 255, 0.065);
+    /// `--app-text`, `--app-text-sub`, `--app-text-muted`.
+    pub const TEXT: Color = Color::from_rgb8(0xf0, 0xf7, 0xff);
+    pub const TEXT_SUB: Color = Color::from_rgba8(198, 222, 255, 0.66);
+    pub const TEXT_MUTED: Color = Color::from_rgba8(198, 222, 255, 0.42);
+    /// `--app-accent` and `--app-accent-soft` (chips).
+    pub const ACCENT: Color = Color::from_rgb8(0x38, 0xbd, 0xf8);
+    pub const ACCENT_SOFT: Color = Color::from_rgba8(56, 189, 248, 0.18);
+    /// The design's fixed colours: success `emerald-400`, danger `rose-400`, the
+    /// text on an accent or success button `slate-950`.
+    pub const SUCCESS: Color = Color::from_rgb8(0x34, 0xd3, 0x99);
+    pub const DANGER: Color = Color::from_rgb8(0xfb, 0x71, 0x85);
+    pub const ON_ACCENT: Color = Color::from_rgb8(0x02, 0x06, 0x17);
+
+    /// `c` as CSS `brightness(1.1)` draws it (a hovered accent button).
+    pub fn brighter(c: Color) -> Color {
+        let up = |v: f32| (v * 1.1).min(1.0);
+        Color {
+            r: up(c.r),
+            g: up(c.g),
+            b: up(c.b),
+            a: c.a,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

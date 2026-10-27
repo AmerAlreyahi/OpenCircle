@@ -44,9 +44,10 @@ ONNX Runtime by Microsoft (MIT), https://github.com/microsoft/onnxruntime.
 
 Bundled fonts
 -------------
-Inter by Rasmus Andersson and Noto Sans Arabic by Google, both under the SIL
-Open Font License 1.1 (assets/fonts/OFL-Inter.txt, OFL-NotoSansArabic.txt),
-subset. Lucide icons (ISC, assets/lucide/LICENSE), subset.
+Inter by Rasmus Andersson, Noto Sans Arabic by Google and JetBrains Mono by
+JetBrains, all under the SIL Open Font License 1.1 (assets/fonts/OFL-Inter.txt,
+OFL-NotoSansArabic.txt, OFL-JetBrainsMono.txt), subset. Lucide icons (ISC,
+assets/lucide/LICENSE), subset.
 
 Renderer
 --------

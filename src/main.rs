@@ -24,6 +24,7 @@ mod ocr;
 mod search_history;
 #[allow(dead_code)] // library API, wired into the UI later
 mod secrets;
+mod setup;
 #[allow(dead_code)] // library for full-screen translate; the UI wires it
 mod translate;
 mod ui;
@@ -142,11 +143,22 @@ fn main() -> ExitCode {
     #[cfg(all(windows, not(debug_assertions)))]
     attach_parent_console();
     ui::limit_malloc_arenas();
+    // The setup build (OpenCircle-Setup-*.exe) is the setup, whatever it is asked.
+    if let Some(msi) = setup::payload() {
+        return match ui::setup::run(msi) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let relaunched = args.first().map(String::as_str) == Some(update::RELAUNCH_ARG);
     let command = match args.first().map(String::as_str) {
         None => None,
         Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
+        Some(setup::FORGET_ARG) => return setup::forget_user_data(), // hidden: the MSI's uninstall
         Some(update::VERSION_ARG) => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;

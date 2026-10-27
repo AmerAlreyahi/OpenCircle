@@ -15,13 +15,14 @@ run. A user can click **More info**, then **Run anyway**.
 
 To sign, you need a code-signing certificate (from a certificate authority, or
 your organisation's in-house CA for managed PCs) and `signtool` from the
-Windows SDK. Sign the installers (`.exe` and `.msi`) and, if you distribute the
-program on its own, `opencircle.exe`:
+Windows SDK. Sign `opencircle.exe` before it is packaged, then the `.msi`, then
+build the setup over the signed `.msi` (it carries the MSI inside, see
+`.github/workflows/release.yml`) and sign `OpenCircle-Setup-<version>-x64.exe`:
 
 ```powershell
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-  /f my-certificate.pfx /p $env:PFX_PASSWORD OpenCircle-setup.exe
-signtool verify /pa /v OpenCircle-setup.exe
+  /f my-certificate.pfx /p $env:PFX_PASSWORD OpenCircle-Setup-<version>-x64.exe
+signtool verify /pa /v OpenCircle-Setup-<version>-x64.exe
 ```
 
 Use your certificate store (`/sha1 <thumbprint>` or `/n "Your Company"`) or a
