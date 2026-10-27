@@ -172,8 +172,8 @@ pub fn wayland_session() -> bool {
     )
 }
 
-/// Wayland: a Wayland socket and either the session says so, or it says nothing
-/// useful (an ssh/systemd launch has type `tty` or none) and there is no X11 display.
+/// Wayland: a Wayland socket and a session type of `wayland`, or `tty` (an ssh login
+/// into a Wayland desktop), or none and no X11 display. XDG_SESSION_TYPE=x11 wins.
 /// WSLg sets both displays and no session type: not Wayland for us.
 #[cfg(target_os = "linux")]
 fn is_wayland(
@@ -183,8 +183,11 @@ fn is_wayland(
 ) -> bool {
     let set = |v: Option<&std::ffi::OsStr>| v.is_some_and(|d| !d.is_empty());
     set(wayland)
-        && (session_type.is_some_and(|t| t == "wayland")
-            || (!set(x11) && session_type.is_none_or(|t| t != "x11")))
+        && match session_type.and_then(|t| t.to_str()) {
+            Some("wayland" | "tty") => true,
+            Some("x11") => false,
+            _ => !set(x11),
+        }
 }
 
 pub(crate) fn from_png(path: &std::ffi::OsStr) -> Result<Frame, String> {
@@ -242,7 +245,11 @@ mod tests {
         assert!(is_wayland(w, t("tty"), None));
         assert!(is_wayland(w, None, None));
         assert!(is_wayland(w, t("tty"), Some(OsStr::new(""))));
-        assert!(!is_wayland(w, t("tty"), x));
+        assert!(
+            is_wayland(w, t("tty"), x),
+            "ssh keeps DISPLAY=:0 of XWayland"
+        );
+        assert!(!is_wayland(None, t("tty"), x));
     }
 
     #[test]
