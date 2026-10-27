@@ -114,12 +114,16 @@ pub fn fadeable(handle: RawWindowHandle) -> Option<isize> {
 /// Fades the window `fadeable` gave along `shown` (its opacity), one step per
 /// screen refresh, and returns when `shown` is done; `rise` (logical px): it
 /// also sits that much lower while closed (rises as it opens, sinks as it
-/// closes). Blocks: call it on a thread of its own (`windows::fade`).
-pub fn fade(window: isize, shown: super::motion::Shown, rise: f32) {
+/// closes). The fade is the window's latest from this call (an older one
+/// stops; a later `clear_now` stops this one); the returned run blocks: call
+/// it on a thread of its own (`windows::fade`).
+pub fn fade(window: isize, shown: super::motion::Shown, rise: f32) -> impl FnOnce() + Send {
     #[cfg(windows)]
-    win::fade(window, shown, rise);
+    return win::fade(window, shown, rise);
     #[cfg(not(windows))]
-    let _ = (window, shown, rise);
+    move || {
+        let _ = (window, shown, rise);
+    }
 }
 
 /// Windows: the system never paints its classic title bar over the window behind
@@ -129,6 +133,32 @@ pub fn no_caption(handle: RawWindowHandle) {
     #[cfg(windows)]
     if let RawWindowHandle::Win32(h) = handle {
         win::no_caption(h.hwnd.get());
+    }
+    #[cfg(not(windows))]
+    let _ = handle;
+}
+
+/// Windows: the window `fadeable` gave, clear at once, from the calling thread,
+/// its fade (if any) stopped: nothing it draws shows until its opacity is set
+/// again. The overlay's close: its last frames (the empty view, the restore from
+/// full-screen) are drawn before it hides, and none of them may show. Nothing
+/// where windows can't fade.
+pub fn clear_now(window: isize) {
+    #[cfg(windows)]
+    win::clear_now(window);
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
+/// Windows: the window behind `handle` never gets a taskbar button: a tool
+/// window (`WS_EX_TOOLWINDOW`, not `WS_EX_APPWINDOW`) now and after every style
+/// winit writes (`win::wndproc`). winit's `skip_taskbar` only deletes the
+/// button once; the window's next show (or leaving full-screen) brings it back.
+/// Needs `no_caption` first (its subclass). Elsewhere nothing.
+pub fn no_taskbar(handle: RawWindowHandle) {
+    #[cfg(windows)]
+    if let RawWindowHandle::Win32(h) = handle {
+        win::no_taskbar(h.hwnd.get());
     }
     #[cfg(not(windows))]
     let _ = handle;
@@ -184,6 +214,7 @@ mod win {
             if msg == WM_NCDESTROY {
                 let _ = RemovePropW(h, NEXT);
                 let _ = RemovePropW(h, LAYERED);
+                let _ = RemovePropW(h, TOOL);
             }
             // winit rewrites the extended style whole on every show, hide or
             // full-screen change: a faded window (`opacity`) stays layered, its
@@ -194,6 +225,14 @@ mod win {
             {
                 let style = &mut *(l.0 as *mut STYLESTRUCT);
                 style.styleNew |= WS_EX_LAYERED.0;
+            }
+            // ... and a tool window stays one (no taskbar button, `no_taskbar`)
+            if msg == WM_STYLECHANGING
+                && w.0 as i32 == GWL_EXSTYLE.0
+                && !GetPropW(h, TOOL).is_invalid()
+            {
+                let style = &mut *(l.0 as *mut STYLESTRUCT);
+                style.styleNew = tool_style(style.styleNew);
             }
             match msg {
                 WM_NCUAHDRAWCAPTION | WM_NCUAHDRAWFRAME => LRESULT(0),
@@ -222,6 +261,35 @@ mod win {
 
     /// Set on a window `opacity` made layered (`wndproc` keeps it so).
     const LAYERED: PCWSTR = w!("OpenCircle.layered");
+    /// Set on a window `no_taskbar` made a tool window (`wndproc` keeps it so).
+    const TOOL: PCWSTR = w!("OpenCircle.tool");
+
+    /// An extended style with no taskbar button.
+    pub(super) fn tool_style(ex: u32) -> u32 {
+        use windows::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_EX_TOOLWINDOW};
+        (ex | WS_EX_TOOLWINDOW.0) & !WS_EX_APPWINDOW.0
+    }
+
+    pub fn no_taskbar(hwnd: isize) {
+        let hwnd = HWND(hwnd as *mut _);
+        // SAFETY: `hwnd` is a live window of this thread; a property of ours and
+        // its extended style (which our `wndproc` then keeps).
+        unsafe {
+            if SetPropW(hwnd, TOOL, Some(HANDLE(std::ptr::dangling_mut()))).is_ok() {
+                let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, tool_style(ex as u32) as isize);
+            }
+        }
+    }
+
+    pub fn clear_now(hwnd: isize) {
+        // under the lock: no fade step lands after it (`fade`)
+        let mut latest = LATEST.lock().unwrap();
+        latest.retain(|(w, _)| *w != hwnd);
+        if let Err(e) = opacity(hwnd, 0.0) {
+            crate::log!("[opencircle] window clear: {e}");
+        }
+    }
 
     /// A layered window (style set once) at `alpha`; GDI still paints into it
     /// as before (the system keeps its picture) and its region still cuts it.
@@ -262,17 +330,23 @@ mod win {
 
     /// `super::fade`: a step per beat of the frame clock (`motion::FRAME`):
     /// the window changes once a frame, by the clock.
-    pub fn fade(hwnd: isize, shown: crate::ui::motion::Shown, rise: f32) {
+    pub fn fade(hwnd: isize, shown: crate::ui::motion::Shown, rise: f32) -> impl FnOnce() + Send {
+        // never reused (a number reused after a `clear_now` emptied the list
+        // would let a stopped fade run on)
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let me = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        {
+            let mut latest = LATEST.lock().unwrap();
+            latest.retain(|(w, _)| *w != hwnd);
+            latest.push((hwnd, me));
+        }
+        move || steps(hwnd, me, shown, rise)
+    }
+
+    fn steps(hwnd: isize, me: u64, shown: crate::ui::motion::Shown, rise: f32) {
         use std::time::{Duration, Instant};
         use windows::Win32::UI::WindowsAndMessaging::{
             SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
-        };
-        let me = {
-            let mut latest = LATEST.lock().unwrap();
-            let next = latest.iter().map(|(_, n)| n + 1).max().unwrap_or(0);
-            latest.retain(|(w, _)| *w != hwnd);
-            latest.push((hwnd, next));
-            next
         };
         let mine = || LATEST.lock().unwrap().contains(&(hwnd, me));
         let h = HWND(hwnd as *mut _);
@@ -289,10 +363,18 @@ mod win {
                 let step = Instant::now();
                 (steps, worst, last) = (steps + 1, worst.max(step - last), step);
                 let a = shown.at(step);
+                // checked and stepped under the lock: never after a `clear_now`
+                // (the window is already layered, `appear` made it so on the UI
+                // thread: no style change here, so nothing waits on that thread)
+                let latest = LATEST.lock().unwrap();
+                if !latest.contains(&(hwnd, me)) {
+                    break;
+                }
                 if let Err(e) = opacity(hwnd, a) {
                     crate::log!("[opencircle] window fade: {e}");
                     break;
                 }
+                drop(latest);
                 if px != 0.0 {
                     let y = rest.top + ((1.0 - a) * px).round() as i32;
                     let how = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS;
@@ -517,6 +599,115 @@ mod tests {
             "title set on a visible window"
         );
         assert!(visible_after, "the window stays visible");
+    }
+
+    /// A hidden top-level test window of this thread (winit's default style:
+    /// overlapped, `WS_EX_APPWINDOW`), with our subclass; destroyed by the caller.
+    #[cfg(windows)]
+    fn test_window() -> windows::Win32::Foundation::HWND {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
+        };
+        use windows::core::w;
+        // SAFETY: a plain window of this thread, never shown.
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_APPWINDOW,
+                w!("STATIC"),
+                w!("style test"),
+                WS_OVERLAPPEDWINDOW,
+                0,
+                0,
+                100,
+                100,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        win::no_caption(hwnd.0 as isize);
+        hwnd
+    }
+
+    /// The owner's taskbar flash: winit rewrites the whole extended style (with
+    /// `WS_EX_APPWINDOW`) on every show, hide and full-screen change, so the
+    /// overlay got a taskbar button whenever it was shown windowed (leaving
+    /// full-screen as it closed). A `no_taskbar` window stays a tool window
+    /// through any such rewrite; another window is left as it is.
+    #[cfg(windows)]
+    #[test]
+    fn a_window_off_the_taskbar_stays_off_it() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DestroyWindow, GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, WS_EX_ACCEPTFILES,
+            WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        };
+        let (tool, app) = (test_window(), test_window());
+        win::no_taskbar(tool.0 as isize);
+        let rewrite = (WS_EX_APPWINDOW | WS_EX_ACCEPTFILES).0 as isize;
+        // SAFETY: the test's own windows, destroyed at the end.
+        let (tool_ex, app_ex) = unsafe {
+            let first = GetWindowLongPtrW(tool, GWL_EXSTYLE) as u32;
+            assert!(
+                first & WS_EX_TOOLWINDOW.0 != 0,
+                "not a tool window: {first:x}"
+            );
+            SetWindowLongPtrW(tool, GWL_EXSTYLE, rewrite); // winit, on a show
+            SetWindowLongPtrW(app, GWL_EXSTYLE, rewrite);
+            let ex = |h| GetWindowLongPtrW(h, GWL_EXSTYLE) as u32;
+            let got = (ex(tool), ex(app));
+            let _ = DestroyWindow(tool);
+            let _ = DestroyWindow(app);
+            got
+        };
+        assert!(
+            tool_ex & WS_EX_TOOLWINDOW.0 != 0,
+            "tool style dropped: {tool_ex:x}"
+        );
+        assert!(
+            tool_ex & WS_EX_APPWINDOW.0 == 0,
+            "app window again: {tool_ex:x}"
+        );
+        assert!(
+            tool_ex & WS_EX_ACCEPTFILES.0 != 0,
+            "the rest of winit's style kept"
+        );
+        assert_eq!(app_ex & WS_EX_TOOLWINDOW.0, 0, "another window untouched");
+    }
+
+    /// The owner's gray flash, the fade's part: `clear_now` leaves the window
+    /// clear, and a fade asked before it (the overlay's fade-in, Esc during the
+    /// opening) never steps it visible again, even one whose thread had not
+    /// started yet.
+    #[cfg(windows)]
+    #[test]
+    fn a_cleared_window_stays_clear() {
+        use windows::Win32::UI::WindowsAndMessaging::{DestroyWindow, GetLayeredWindowAttributes};
+        let hwnd = test_window();
+        let raw = hwnd.0 as isize;
+        // a session without a desktop (a service, SSH) has no layered windows
+        if let Err(e) = win::opacity(raw, 1.0) {
+            eprintln!("skipped: no layered windows in this session ({e})");
+            // SAFETY: the test's own window.
+            let _ = unsafe { DestroyWindow(hwnd) };
+            return;
+        }
+        let now = std::time::Instant::now();
+        let fade_in = fade(
+            raw,
+            super::super::motion::Shown::opening(super::super::motion::WIDGET, now),
+            0.0,
+        );
+        clear_now(raw);
+        fade_in(); // its thread, late
+        let mut alpha = 255u8;
+        // SAFETY: the test's own window, destroyed at the end.
+        unsafe {
+            GetLayeredWindowAttributes(hwnd, None, Some(&mut alpha), None).unwrap();
+            let _ = DestroyWindow(hwnd);
+        }
+        assert_eq!(alpha, 0, "shown again after the clear");
     }
 
     #[test]

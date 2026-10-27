@@ -485,6 +485,7 @@ impl Windows {
             }
             Msg::Closed(id) => {
                 forget_floating(id);
+                HANDLES.lock().unwrap().retain(|(w, _)| *w != id);
                 self.chrome.remove(&id);
                 self.toasts.retain(|(t, ..)| *t != id);
                 if self.update_card.as_ref().is_some_and(|(c, _)| *c == id) {
@@ -977,8 +978,9 @@ pub fn fade<T: Send + 'static>(id: window::Id, open: bool, how: Motion, wait: bo
                 true => motion::Shown::opening(how.pace, now),
                 false => motion::Shown::closing(how.pace, now),
             };
+            let run = shape::fade(window, shown, how.rise);
             std::thread::spawn(move || {
-                shape::fade(window, shown, how.rise);
+                run();
                 let _ = done.send(());
             });
         }
@@ -998,18 +1000,53 @@ pub fn screen(settings: window::Settings) -> (window::Id, Task<window::Id>) {
 
 /// What the three above share: `app_window`'s settings, and on Windows no classic
 /// title bar painted over the window at (de)activation (`shape::no_caption`).
+/// A window asked off the taskbar (`skip_taskbar`: the overlay, popups) is a tool
+/// window for good (`shape::no_taskbar`: winit's own skip comes undone).
 fn open(settings: window::Settings) -> (window::Id, Task<window::Id>) {
+    #[cfg(windows)]
+    let no_taskbar = settings.platform_specific.skip_taskbar;
+    #[cfg(not(windows))]
+    let no_taskbar = false;
     let (id, opened) = window::open(app_window(settings));
     let caption_off = move |id| {
-        window::run(id, |w| {
+        window::run(id, move |w| {
             if let Ok(handle) = w.window_handle() {
                 shape::no_caption(handle.as_raw());
+                if no_taskbar {
+                    shape::no_taskbar(handle.as_raw());
+                }
+                if let Some(raw) = shape::fadeable(handle.as_raw()) {
+                    HANDLES.lock().unwrap().push((id, raw));
+                }
             }
         })
         .discard()
         .chain(Task::done(id))
     };
     (id, opened.then(caption_off))
+}
+
+/// Every window `open` opened, with its handle as `shape::fadeable` gives it
+/// (where windows can fade), for the calls that cannot wait on a task.
+static HANDLES: Mutex<Vec<(window::Id, isize)>> = Mutex::new(Vec::new());
+
+/// The window `id` clear NOW, on the UI thread, any fade of it stopped
+/// (`shape::clear_now`): every frame it draws from here on stays unseen until
+/// its opacity is set again (`show` does). A `Task` would run after the next
+/// frame may already be on screen. Nothing where windows can't fade.
+pub fn clear_now(id: window::Id) {
+    #[cfg(test)]
+    CLEARED.with(|c| c.borrow_mut().push(id));
+    let raw = (HANDLES.lock().unwrap().iter()).find_map(|(w, raw)| (*w == id).then_some(*raw));
+    if let Some(raw) = raw {
+        shape::clear_now(raw);
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The windows `clear_now` was called on (this test's thread).
+    pub static CLEARED: std::cell::RefCell<Vec<window::Id>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Floating windows and their corner radius (see `floating`).

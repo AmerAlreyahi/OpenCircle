@@ -389,9 +389,18 @@ fn winit_picks_wayland(
         .any(|v| v.is_some_and(|v| !v.is_empty()))
 }
 
-/// The overlay window: hidden (pre-created), or full-screen at `size`.
+/// The overlay window: hidden (pre-created), or full-screen at `size`. Never on
+/// the taskbar (Windows): it leaves full-screen visible while it closes (`Hiding`).
 fn overlay_window(shown: Option<Size>) -> window::Settings {
+    #[cfg(windows)]
+    let platform_specific = window::settings::PlatformSpecific {
+        skip_taskbar: true,
+        ..Default::default()
+    };
+    #[cfg(not(windows))]
+    let platform_specific = Default::default();
     window::Settings {
+        platform_specific,
         size: shown.unwrap_or(window::Settings::default().size),
         visible: shown.is_some(),
         fullscreen: shown.is_some(),
@@ -3455,6 +3464,11 @@ impl App {
         self.song = None; // stops listening
         self.reveal = None; // the next show clears it again
         if self.can_hide {
+            // Gone at once: the hide steps draw the empty view (the theme's
+            // background) full-screen, then restore the window from full-screen,
+            // all while it is still shown. Unseen, at opacity 0 (`show` clears
+            // and fades it in again).
+            windows::clear_now(self.overlay);
             self.hiding = Hiding::Empty;
             return Task::none();
         }
@@ -4816,6 +4830,20 @@ mod tests {
             assert_eq!(app.hiding, Hiding::Empty);
             app.hiding = Hiding::No; // (the hide steps run on frames)
         }
+    }
+
+    /// The owner's gray flash: Esc drew the empty view (the theme's background)
+    /// over the whole screen, then the window left full-screen, still shown.
+    /// The window is cleared in the very update that closes it, before any of
+    /// those frames (a `Task` would land after one may be on screen).
+    #[test]
+    fn esc_clears_the_overlay_before_its_last_frames() {
+        let first = window::Id::unique();
+        let mut app = App::idle(first);
+        let _ = open_and_escape(&mut app);
+        let cleared = windows::CLEARED.with(|c| std::mem::take(&mut *c.borrow_mut()));
+        assert_eq!(cleared, vec![first], "not cleared at the close");
+        assert_eq!(app.hiding, Hiding::Empty, "then hidden by the usual steps");
     }
 
     #[test]
