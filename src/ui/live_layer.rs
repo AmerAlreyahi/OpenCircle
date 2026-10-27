@@ -14,15 +14,13 @@ use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 
 use super::live_controller::{self, Controller, Out};
 use super::{background, border, theme, widgets, windows};
-use crate::ai::AiError;
 use crate::capture::{self, window_rect};
 use crate::config;
 use crate::live::{self, LayerError};
 use crate::mt::Pair;
-use crate::ocr::{self, TextBlock};
-use crate::translate::lang;
+use crate::ocr;
 use crate::translate::live::{Live as Steps, Patch};
-use crate::translate::pipeline::{Cache, Deps, Real};
+use crate::translate::pipeline::Cache;
 
 /// How often live mode re-captures (Settings > Translate > Live refresh;
 /// 1.5 s by default): steps start on this fixed beat, and a slow step skips
@@ -503,9 +501,9 @@ impl Live {
             // The languages are the controller's (they start as the config's).
             let start = chosen.lock().map(|l| l.clone()).unwrap_or_default();
             let deps_for = |(source, target): &(String, String)| {
-                crate::actions::translate::deps_for(source, target).map(|(real, _)| Reader {
-                    real,
-                    scale: monitor.scale,
+                crate::actions::translate::deps_for(source, target).map(|(mut real, _)| {
+                    real.scale = monitor.scale;
+                    real
                 })
             };
             let mut deps = match deps_for(&start) {
@@ -690,48 +688,6 @@ fn shown(patches: &[Patch], area: [u32; 4], blanked: &[[u32; 4]]) -> Vec<Shown> 
             image: image::Handle::from_rgba(bounds[2], bounds[3], p.rgba.clone()),
         })
         .collect()
-}
-
-/// Live reads (#56): Windows OCR where Auto routing says so (#62: a screen in
-/// ~0.1-0.3 s, in this process, at below-normal priority) and it reads the
-/// source language, else PP-OCR in the helper (also when Windows' read
-/// fails). Translation as `real` does it (offline by default).
-struct Reader {
-    real: Real,
-    /// The monitor's (Windows OCR reads small text better doubled).
-    scale: f32,
-}
-
-impl Reader {
-    fn system(&self) -> bool {
-        let reader = config::current().selection.text_reader;
-        let tag = ocr::system::language();
-        let base = |t: &str| {
-            t.split(['-', '_'])
-                .next()
-                .unwrap_or_default()
-                .to_lowercase()
-        };
-        ocr::route(reader, Some(tag)) == ocr::Source::System
-            && (self.real.source == lang::AUTO || tag.is_some_and(|t| base(t) == self.real.source))
-    }
-}
-
-impl Deps for Reader {
-    fn recognize(&self, rgba: &[u8], w: u32, h: u32) -> Result<Vec<TextBlock>, ocr::OcrError> {
-        if self.system() {
-            let k = *ocr::system::passes(self.scale, w, h).last().unwrap_or(&1);
-            match ocr::system::recognize(rgba, w, h, k) {
-                Ok(lines) => return Ok(lines),
-                Err(e) => crate::log!("[opencircle] live: Windows OCR failed ({e}); PP-OCR reads"),
-            }
-        }
-        self.real.recognize(rgba, w, h)
-    }
-
-    fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
-        self.real.translate(texts, target)
-    }
 }
 
 /// A patch at `bounds` (x, y, w, h) touches a part of the frame that was

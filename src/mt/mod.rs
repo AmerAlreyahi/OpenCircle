@@ -361,8 +361,10 @@ pub static PAIRS: [Pair; 10] = [
     ),
 ];
 
-/// Lines per decoder run (padded to the longest; sorted by length first).
-/// 20 lines: one run of 20 took 0.37 s, one run per line 1.7 s.
+/// Lines per decoder run (sorted by length first; a line that ended leaves
+/// the run). Each decoding step costs about the same for 1 line or 32, so
+/// fewer, fuller runs are faster: the 32 sentences of a release-notes page
+/// took 1.2 s in one run, 1.6 s in runs of 8, 5.1 s one by one (2 cores).
 // ponytail: dynamic int8 quantization scales by the whole batch, so a line's
 // wording can change with its neighbours (the cache keeps the first one).
 // Translate one line per run if that ever matters more than speed.
@@ -492,11 +494,20 @@ impl Translator {
         let dir = pair.dir();
         // Every batch has a new shape: memory patterns would only add RAM.
         // No spin-waiting threads after a run (they slowed the app, see OCR).
+        // The decoder's output layer is DequantizeLinear(int8 weights) -> MatMul:
+        // ORT keeps a DequantizeLinear for QDQ fusion, so every decoding step
+        // made the 62k x 512 float matrix again (~70 ms a step, 2.8x the
+        // whole page). Without QDQ handling (these models have none: they use
+        // MatMulInteger) it is folded once at load: ~130 MB more in the
+        // helper, the same translations.
         let session = |f: &ModelFile| {
             Session::builder()
                 .and_then(|b| b.with_memory_pattern(false).map_err(Into::into))
                 .and_then(|b| b.with_intra_threads(THREADS).map_err(Into::into))
                 .and_then(|b| b.with_intra_op_spinning(false).map_err(Into::into))
+                .and_then(|b| {
+                    (b.with_config_entry("session.disable_quant_qdq", "1")).map_err(Into::into)
+                })
                 .and_then(without_arena)
                 .and_then(|mut b| b.commit_from_file(dir.join(f.name)))
                 .map_err(engine_err)
@@ -564,9 +575,11 @@ impl Translator {
             ids[r * n..r * n + row.len()].copy_from_slice(row);
             mask[r * n..r * n + row.len()].fill(1);
         }
-        let mask = Tensor::from_array(([b, n], mask)).map_err(engine_err)?;
+        let mut mask = Tensor::from_array(([b, n], mask))
+            .map_err(engine_err)?
+            .into_dyn();
         let ids = Tensor::from_array(([b, n], ids)).map_err(engine_err)?;
-        let hidden = self
+        let mut hidden = self
             .encoder
             .run(ort::inputs!["input_ids" => ids, "attention_mask" => &mask])
             .map_err(engine_err)?
@@ -593,7 +606,16 @@ impl Translator {
         let max_len = (2 * n + 10).min(MAX_TOKENS);
         let decoder = &mut self.decoder;
         let mut first = true;
-        greedy(b, p.pad, p.eos, max_len, |tokens| {
+        greedy(b, p.pad, p.eos, max_len, |tokens, keep| {
+            // rows that ended leave the batch: their inputs and past go
+            if keep.len() < mask.shape()[0] as usize {
+                mask = rows_of::<i64>(&mask, keep)?;
+                hidden = rows_of::<f32>(&hidden, keep)?;
+                for v in past.iter_mut() {
+                    *v = rows_of::<f32>(v, keep)?;
+                }
+            }
+            let b = tokens.len();
             let input = Tensor::from_array(([b, 1], tokens.to_vec())).map_err(engine_err)?;
             let branch = Tensor::from_array(([1], vec![!first])).map_err(engine_err)?;
             let mut inputs: Vec<(std::borrow::Cow<str>, SessionInputValue)> = vec![
@@ -628,8 +650,27 @@ impl Translator {
     }
 }
 
-/// Greedy decoding of `rows` sequences. `step(previous token per row)`
-/// returns rows x vocab next-token logits; a row ends at `eos`, all end by
+/// `value` (rows first) with only the rows `keep`, in that order.
+fn rows_of<T>(value: &DynValue, keep: &[usize]) -> Result<DynValue, OcrError>
+where
+    T: ort::value::PrimitiveTensorElementType + Clone + std::fmt::Debug + 'static,
+{
+    let (shape, data) = value.try_extract_tensor::<T>().map_err(engine_err)?;
+    let mut dims: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+    let row = data.len() / dims[0].max(1);
+    let kept: Vec<T> = (keep.iter())
+        .flat_map(|&k| data[k * row..(k + 1) * row].iter().cloned())
+        .collect();
+    dims[0] = keep.len();
+    Ok(Tensor::from_array((dims, kept))
+        .map_err(engine_err)?
+        .into_dyn())
+}
+
+/// Greedy decoding of `rows` sequences. `step(previous token per row still
+/// running, which rows of the last step's those are)` returns their next-token
+/// logits (rows x vocab); a row ends at `eos` and leaves the batch (a batch
+/// costs what its rows need, not what its longest one does), all end by
 /// `max_len` tokens. `pad` (the start token) is never chosen. Ids exclude
 /// `eos`.
 fn greedy(
@@ -637,34 +678,35 @@ fn greedy(
     pad: u32,
     eos: u32,
     max_len: usize,
-    mut step: impl FnMut(&[i64]) -> Result<Vec<f32>, OcrError>,
+    mut step: impl FnMut(&[i64], &[usize]) -> Result<Vec<f32>, OcrError>,
 ) -> Result<Vec<Vec<u32>>, OcrError> {
     let mut out = vec![Vec::new(); rows];
-    let mut done = vec![false; rows];
+    // the rows still running, the last step's rows they are, their tokens
+    let mut running: Vec<usize> = (0..rows).collect();
+    let mut keep = running.clone();
     let mut tokens = vec![i64::from(pad); rows];
     for _ in 0..max_len {
-        let logits = step(&tokens)?;
-        let vocab = logits.len() / rows.max(1);
-        if vocab == 0 || logits.len() != rows * vocab {
+        let logits = step(&tokens, &keep)?;
+        let vocab = logits.len() / running.len().max(1);
+        if vocab == 0 || logits.len() != running.len() * vocab {
             return Err(engine_err("the decoder gave no logits"));
         }
-        for r in 0..rows {
-            let row = &logits[r * vocab..][..vocab];
+        let mut next = (Vec::new(), Vec::new(), Vec::new());
+        for (at, &r) in running.iter().enumerate() {
+            let row = &logits[at * vocab..][..vocab];
             let best = (row.iter().enumerate())
                 .filter(|&(i, _)| i != pad as usize)
                 .max_by(|a, b| a.1.total_cmp(b.1))
                 .map_or(eos, |(i, _)| i as u32);
-            tokens[r] = best.into();
-            if done[r] {
-                continue;
-            }
-            if best == eos {
-                done[r] = true;
-            } else {
+            if best != eos {
                 out[r].push(best);
+                next.0.push(r);
+                next.1.push(at);
+                next.2.push(best.into());
             }
         }
-        if done.iter().all(|d| *d) {
+        (running, keep, tokens) = next;
+        if running.is_empty() {
             break;
         }
     }
@@ -681,23 +723,30 @@ fn clean(text: &str) -> String {
 mod tests {
     use super::*;
 
-    /// A fake decoder: plays `script` (one token per row per step) and
-    /// checks it is fed back the previous tokens.
+    /// A fake decoder: plays `script` (per step, one token per row still
+    /// running) and checks it is fed back the previous tokens, and which
+    /// rows of the last step are kept.
     fn scripted(
-        script: Vec<Vec<u32>>,
+        script: Vec<(Vec<usize>, Vec<u32>)>,
         vocab: usize,
-    ) -> impl FnMut(&[i64]) -> Result<Vec<f32>, OcrError> {
+    ) -> impl FnMut(&[i64], &[usize]) -> Result<Vec<f32>, OcrError> {
         let mut step = 0;
         let mut prev: Option<Vec<i64>> = None;
-        move |tokens: &[i64]| {
+        move |tokens: &[i64], keep: &[usize]| {
+            let (kept, row) = &script[step.min(script.len() - 1)];
             match &prev {
                 None => assert!(
                     tokens.iter().all(|&t| t == 9),
                     "starts with pad: {tokens:?}"
                 ),
-                Some(p) => assert_eq!(tokens, p.as_slice(), "fed back"),
+                Some(p) => {
+                    let fed: Vec<i64> = kept.iter().map(|&k| p[k]).collect();
+                    assert_eq!(tokens, fed.as_slice(), "fed back");
+                }
             }
-            let row = &script[step.min(script.len() - 1)];
+            if step > 0 {
+                assert_eq!(keep, kept.as_slice(), "step {step}");
+            }
             step += 1;
             let mut logits = vec![0.0; tokens.len() * vocab];
             for (r, &t) in row.iter().enumerate() {
@@ -711,15 +760,20 @@ mod tests {
 
     #[test]
     fn greedy_stops_rows_at_eos_and_all_at_max_len() {
-        // row 0: 3 4 eos; row 1: 5 eos; then both keep getting tokens
-        let script = vec![vec![3, 5], vec![4, 0], vec![0, 7], vec![6, 6]];
-        let out = greedy(2, 9, 0, 50, scripted(script, 10)).unwrap();
-        assert_eq!(out, vec![vec![3, 4], vec![5]]);
+        // rows 0, 1, 2: "3 4", "5", "6 7 8"; an ended row leaves the batch
+        let script = vec![
+            (vec![0, 1, 2], vec![3, 5, 6]),
+            (vec![0, 1, 2], vec![4, 0, 7]),
+            (vec![0, 2], vec![0, 8]),
+            (vec![1], vec![0]),
+        ];
+        let out = greedy(3, 9, 0, 50, scripted(script, 10)).unwrap();
+        assert_eq!(out, vec![vec![3, 4], vec![5], vec![6, 7, 8]]);
         // never ends: capped
-        let out = greedy(1, 9, 0, 4, scripted(vec![vec![2]], 10)).unwrap();
+        let out = greedy(1, 9, 0, 4, scripted(vec![(vec![0], vec![2])], 10)).unwrap();
         assert_eq!(out, vec![vec![2, 2, 2, 2]]);
         // a decoder that answers nothing is an error, not a panic
-        assert!(greedy(2, 9, 0, 4, |_| Ok(vec![1.0])).is_err());
+        assert!(greedy(2, 9, 0, 4, |_, _| Ok(vec![1.0])).is_err());
     }
 
     #[test]

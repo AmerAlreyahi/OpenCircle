@@ -3566,7 +3566,7 @@ impl App {
         self.view = self.view.reset(); // the translation is drawn at 1x
         let models = text::models_present();
         let (session, task) =
-            translate::Session::start(frame.clone(), area, self.cache.clone(), models);
+            translate::Session::start(frame.clone(), area, self.scale, self.cache.clone(), models);
         if session.full() {
             // nothing to outline: the translation is the whole screen
             self.selection = None;
@@ -4875,7 +4875,7 @@ mod tests {
         let frame = image::Handle::from_rgba(40, 20, vec![0; 40 * 20 * 4]);
         // no models: the session waits for consent (no thread starts)
         let (session, _) =
-            translate::Session::start(frame.clone(), [0, 0, 40, 20], app.cache.clone(), false);
+            translate::Session::start(frame.clone(), [0, 0, 40, 20], 1.0, app.cache.clone(), false);
         app.frame = Some(frame);
         app.hiding = Hiding::No;
         app.translate = Some((7, session));
@@ -7221,7 +7221,7 @@ mod tests {
         let mut app = open_app(800, 600, 1.0);
         let frame = app.frame.clone().unwrap();
         let (session, _) =
-            translate::Session::start(frame, [0, 0, 800, 600], app.cache.clone(), false);
+            translate::Session::start(frame, [0, 0, 800, 600], 1.0, app.cache.clone(), false);
         app.translate = Some((7, session));
         assert!(!app.bottom_bar_shown(), "no bar, so no ask field");
         // Tab has no bar to move through; the card's E / A stay the card's.

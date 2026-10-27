@@ -324,6 +324,42 @@ impl Drop for Hold {
     }
 }
 
+/// After offline translation the helper (with its models) stays warm this
+/// long, so the next translation starts at once (Windows OCR's rule).
+const WARM_FOR: Duration = match cfg!(test) {
+    true => Duration::from_millis(200), // (tests)
+    false => Duration::from_secs(60),
+};
+/// `keep_warm`'s hold and when it was last asked for.
+static WARM: Mutex<Option<(Hold, Instant)>> = Mutex::new(None);
+
+/// Holds the helper until it was not asked for `WARM_FOR` (one thread waits
+/// to drop the hold; each call pushes the time back).
+pub fn keep_warm() {
+    let mut warm = WARM.lock().unwrap_or_else(|e| e.into_inner());
+    let waiting = warm.is_some();
+    let held = warm.take().map_or_else(hold, |(h, _)| h);
+    *warm = Some((held, Instant::now()));
+    if waiting {
+        return;
+    }
+    std::thread::spawn(|| {
+        loop {
+            let wait = {
+                let mut warm = WARM.lock().unwrap_or_else(|e| e.into_inner());
+                match &*warm {
+                    Some((_, at)) if at.elapsed() < WARM_FOR => WARM_FOR - at.elapsed(),
+                    _ => {
+                        *warm = None; // the hold goes: the helper ends
+                        return;
+                    }
+                }
+            };
+            std::thread::sleep(wait);
+        }
+    });
+}
+
 /// One request to the app's helper: the shared warm child while held (one
 /// request at a time; others wait), else a child for this call only.
 pub(super) fn call(payload: &[&[u8]]) -> Result<Vec<u8>, OcrError> {
@@ -344,6 +380,24 @@ mod tests {
     use super::*;
     use std::io::Cursor;
     use std::sync::Arc;
+
+    /// The helper stays held while translations keep coming, and is let go
+    /// `WARM_FOR` after the last one.
+    #[test]
+    fn keep_warm_holds_until_idle() {
+        let warm = || WARM.lock().unwrap().is_some();
+        for _ in 0..3 {
+            keep_warm();
+            assert!(warm());
+            std::thread::sleep(WARM_FOR / 2);
+        }
+        assert!(warm(), "each use pushed the end back");
+        let until = Instant::now() + Duration::from_secs(5);
+        while warm() && Instant::now() < until {
+            std::thread::sleep(WARM_FOR / 4);
+        }
+        assert!(!warm(), "let go once idle");
+    }
 
     #[test]
     fn frames_round_trip_and_stay_strict() {

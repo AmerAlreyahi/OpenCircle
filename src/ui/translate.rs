@@ -1,6 +1,6 @@
 //! Translate in place (DESIGN.md "Full-screen translate"): the frozen frame, or
 //! the selection in it, is translated on a thread (`translate::pipeline`) and
-//! swapped in where it was; nothing is drawn until every block is ready.
+//! swapped in where it was, top first as the blocks are ready (#27).
 //! Hold Alt = the original. Click a translated block = its word card, whose
 //! Explain (an explicit click) asks the AI; `A` continues as an Ask AI chat.
 use std::sync::Arc;
@@ -37,6 +37,8 @@ pub enum Msg {
     Progress(f32),
     /// The models are in place; translating now.
     Translating,
+    /// What is translated so far (the rest still shows the original).
+    Partial(Shown),
     Done(Result<Shown, Problem>),
     /// Alt went down (true) or up.
     Peek(bool),
@@ -97,6 +99,10 @@ pub struct Session {
     offline: Option<&'static Pair>,
     /// Source → target (the config's at first).
     picker: Picker,
+    /// The monitor's scale (`Real::scale`).
+    scale: f32,
+    /// While translating: what is translated so far.
+    partial: Option<Shown>,
 }
 
 /// The card of one clicked block.
@@ -119,6 +125,7 @@ impl Session {
     pub fn start(
         frame: image::Handle,
         area: [u32; 4],
+        scale: f32,
         cache: Arc<Cache>,
         models: bool,
     ) -> (Session, Task<Msg>) {
@@ -140,6 +147,8 @@ impl Session {
             work: None,
             offline: None,
             picker: Picker::new(&cfg.source, &cfg.target, offline),
+            scale,
+            partial: None,
         };
         let task = session.begin(models);
         (session, task)
@@ -154,6 +163,7 @@ impl Session {
             .map(|p| (p, p.missing_bytes()))
             .filter(|&(_, b)| b > 0);
         self.card = None;
+        self.partial = None;
         if models && offline.is_none() {
             self.phase = Phase::Translating;
             self.run(false)
@@ -174,7 +184,9 @@ impl Session {
     /// Alt is held or it isn't ready.
     pub fn image(&self) -> Option<&image::Handle> {
         match &self.phase {
-            Phase::Shown(shown) if !self.peek => Some(&shown.image),
+            _ if self.peek => None,
+            Phase::Shown(shown) => Some(&shown.image),
+            Phase::Translating => self.partial.as_ref().map(|p| &p.image),
             _ => None,
         }
     }
@@ -205,8 +217,12 @@ impl Session {
                 self.phase = Phase::Downloading(done);
             }
             Msg::Translating => self.phase = Phase::Translating,
+            Msg::Partial(shown) if matches!(self.phase, Phase::Translating) => {
+                self.partial = Some(shown);
+            }
             Msg::Done(result) if matches!(self.phase, Phase::Translating) => {
                 self.work = None;
+                self.partial = None;
                 self.phase = match result {
                     Ok(shown) => Phase::Shown(shown),
                     Err(problem) => Phase::Failed(problem),
@@ -317,9 +333,12 @@ impl Session {
     fn run(&mut self, download: bool) -> Task<Msg> {
         let (frame, area, cache) = (self.frame.clone(), self.area, self.cache.clone());
         let (source, target) = (self.picker.source.clone(), self.picker.target.clone());
-        let agreed = self.offline;
+        let (agreed, scale) = (self.offline, self.scale);
         let (task, handle) = background(move |tx| {
-            let deps = actions::translate::deps_for(&source, &target);
+            let deps = actions::translate::deps_for(&source, &target).map(|(mut real, target)| {
+                real.scale = scale;
+                (real, target)
+            });
             let offline = deps.as_ref().is_ok_and(|(real, _)| real.offline());
             if download {
                 let progress = |done: u64, total: u64| {
@@ -353,7 +372,10 @@ impl Session {
             if expected.and_then(ask).is_some() {
                 return;
             }
-            let result = translate(&frame, area, &cache, &deps);
+            let partial = |shown| {
+                let _ = tx.unbounded_send(Msg::Partial(shown));
+            };
+            let result = translate(&frame, area, &cache, &deps, partial);
             // "auto" read another language than expected: ask for its pair
             if result.is_err()
                 && let Ok((real, _)) = &deps
@@ -470,13 +492,14 @@ impl Session {
 }
 
 /// Runs the pipeline on `area` of `frame` and pastes the result back into a
-/// copy of the frame. `deps` = `actions::translate::deps()`. Blocking (OCR
-/// helper, HTTP).
+/// copy of the frame; `partial` gets the same for what is translated so far.
+/// `deps` = `actions::translate::deps()`. Blocking (OCR helper, HTTP).
 fn translate(
     frame: &image::Handle,
     area: [u32; 4],
     cache: &Cache,
     deps: &Result<(impl Deps, String), String>,
+    mut partial: impl FnMut(Shown),
 ) -> Result<Shown, Problem> {
     let image::Handle::Rgba {
         width,
@@ -498,8 +521,35 @@ fn translate(
     );
     let crop = actions::crop(pixels, *width, *height, 1.0, rect)
         .ok_or_else(|| problem("nothing to translate there".into(), false))?;
-    let out = pipeline::translate_frame(&crop.rgba, crop.width, crop.height, target, cache, deps)
-        .map_err(|e| {
+    // the area's result pasted into a copy of the whole frame
+    let mut swap = std::time::Duration::ZERO;
+    let mut shown = |out: &pipeline::Translated| {
+        let t = std::time::Instant::now();
+        let mut full = pixels.to_vec();
+        paste(&mut full, *width, area, &out.rgba);
+        let blocks = (out.blocks.iter().cloned())
+            .map(|mut b| {
+                b.bounds[0] += x0 as f32;
+                b.bounds[1] += y0 as f32;
+                b
+            })
+            .collect();
+        swap += t.elapsed();
+        Shown {
+            image: image::Handle::from_rgba(*width, *height, full),
+            blocks,
+        }
+    };
+    let out = pipeline::translate_progressively(
+        &crop.rgba,
+        crop.width,
+        crop.height,
+        target,
+        cache,
+        deps,
+        |out| partial(shown(out)),
+    )
+    .map_err(|e| {
         // Offline can't do it (no model, not downloaded): AI is the other way.
         let setup = matches!(
             e,
@@ -507,15 +557,19 @@ fn translate(
         );
         problem(e.to_string(), setup)
     })?;
+    let result = shown(&out);
     let t = out.timings;
     crate::log!(
         "[opencircle] translate {}x{} at {x0},{y0}: ocr {} ms, translate {} ms, render {} ms, \
-         total {} ms; {} blocks, {} drawn, {} left (busy background {}, no room {})",
+         swap {} ms, first shown {} ms, total {} ms; {} blocks, {} drawn, {} left \
+         (busy background {}, no room {})",
         crop.width,
         crop.height,
         t.ocr.as_millis(),
         t.translate.as_millis(),
         t.render.as_millis(),
+        swap.as_millis(),
+        t.first.as_millis(),
         t.total.as_millis(),
         out.blocks.len(),
         out.drawn.drawn,
@@ -523,19 +577,7 @@ fn translate(
         out.drawn.busy,
         out.drawn.no_room,
     );
-    let mut full = pixels.to_vec();
-    paste(&mut full, *width, area, &out.rgba);
-    let blocks = (out.blocks.into_iter())
-        .map(|mut b| {
-            b.bounds[0] += x0 as f32;
-            b.bounds[1] += y0 as f32;
-            b
-        })
-        .collect();
-    Ok(Shown {
-        image: image::Handle::from_rgba(*width, *height, full),
-        blocks,
-    })
+    Ok(result)
 }
 
 fn problem(message: String, setup: bool) -> Problem {
@@ -688,6 +730,8 @@ mod tests {
             work: None,
             offline: None,
             picker: Picker::new("auto", "ar", false),
+            scale: 1.0,
+            partial: None,
         }
     }
 
@@ -825,6 +869,26 @@ mod tests {
         // a late result changes nothing
         let _ = s.update(Msg::Done(Err(problem("late".into(), false))));
         assert_eq!(s.image(), Some(&translated));
+    }
+
+    /// #27: what is translated so far shows while the rest is translated;
+    /// an error afterwards goes back to the original.
+    #[test]
+    fn parts_show_while_translating() {
+        let mut s = session(true);
+        let part = Shown {
+            image: frame(4, 4),
+            blocks: Vec::new(),
+        };
+        let _ = s.update(Msg::Partial(part.clone()));
+        assert_eq!(s.image(), Some(&part.image));
+        let _ = s.update(Msg::Peek(true));
+        assert!(s.image().is_none(), "Alt: the original");
+        let _ = s.update(Msg::Peek(false));
+        let _ = s.update(Msg::Done(Err(problem("helper stopped".into(), false))));
+        assert!(s.image().is_none(), "failed: the original");
+        let _ = s.update(Msg::Partial(part));
+        assert!(s.image().is_none(), "a late part changes nothing");
     }
 
     #[test]
@@ -1023,16 +1087,30 @@ mod tests {
         // no key: the steps' first line, Settings offered
         let no_key: Result<(Fake, String), String> =
             Err("AI is not set up yet: no API key is saved.\n\n1. ...".into());
-        let e = translate(&original, area, &cache, &no_key).unwrap_err();
+        let e = translate(&original, area, &cache, &no_key, |_| {}).unwrap_err();
         let first = "AI is not set up yet: no API key is saved.";
         assert_eq!(e, problem(first.into(), true));
         // the provider fails: an error, nothing painted; a rejected key: Settings
-        let e = translate(&original, area, &cache, &ok(Err(AiError::Server(503)))).unwrap_err();
+        let e = translate(
+            &original,
+            area,
+            &cache,
+            &ok(Err(AiError::Server(503))),
+            |_| {},
+        )
+        .unwrap_err();
         assert!(!e.setup && e.message.contains("503"), "{e:?}");
-        let e = translate(&original, area, &cache, &ok(Err(AiError::Auth(401)))).unwrap_err();
+        let e = translate(
+            &original,
+            area,
+            &cache,
+            &ok(Err(AiError::Auth(401))),
+            |_| {},
+        )
+        .unwrap_err();
         assert!(e.setup);
 
-        let shown = translate(&original, area, &cache, &ok(Ok("خروج"))).unwrap();
+        let shown = translate(&original, area, &cache, &ok(Ok("خروج")), |_| {}).unwrap();
         // blocks in frame pixels: OCR saw the crop, offset by the area's corner
         let b = &shown.blocks[0];
         assert_eq!(

@@ -175,6 +175,7 @@ impl Live {
             translate,
             render,
             total: start.elapsed(),
+            ..Timings::default()
         }))
     }
 

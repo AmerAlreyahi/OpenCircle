@@ -12,7 +12,7 @@ pub use super::lang::is_rtl;
 use super::lang::{self, Script};
 use super::{Block, Drawn, Line, MARKUP, group_blocks, render};
 use crate::ai::{self, AiError};
-use crate::config::AiConfig;
+use crate::config::{AiConfig, TextReader};
 use crate::mt;
 use crate::ocr::{self, OcrError, TextBlock};
 use crate::secrets::Secret;
@@ -24,14 +24,25 @@ pub trait Deps {
     /// ONE call: exactly `texts.len()` translations, in order, with
     /// [`MARKUP`] spans (the offline engine never marks any).
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError>;
+    /// About how many sentences the first `translate` call gets when the
+    /// results are shown as they come (one-shot; each next call twice as
+    /// many); MAX = all in one call.
+    fn batch(&self) -> usize {
+        usize::MAX
+    }
+    /// Gets translation into `target` ready while the text is read.
+    fn warm(&self, _target: &str) {}
 }
 
-/// OCR in the helper process (the recognizer for `source`); translation by
-/// the user's AI provider, or offline (`crate::mt`, also in the helper).
+/// OCR by Windows OCR where it reads the source (`system_reads`), else in
+/// the helper process (the recognizer for `source`); translation by the
+/// user's AI provider, or offline (`crate::mt`, also in the helper).
 pub struct Real {
     /// `translate.source`: "auto" or a language code.
     pub source: String,
     pub via: Via,
+    /// The monitor's scale (Windows OCR reads small text better doubled).
+    pub scale: f32,
     /// Offline: the pair a translation needed whose models are missing (the
     /// UI then asks to download it).
     missing: Mutex<Option<&'static mt::Pair>>,
@@ -52,8 +63,15 @@ impl Real {
         Real {
             source: source.into(),
             via,
+            scale: 1.0,
             missing: Mutex::new(None),
         }
+    }
+
+    /// Windows OCR reads this source (`system_reads`; asks Windows once).
+    fn system(&self) -> bool {
+        let reader = crate::config::current().selection.text_reader;
+        system_reads(reader, ocr::system::language(), &self.source)
     }
 
     pub fn offline(&self) -> bool {
@@ -100,6 +118,7 @@ impl Real {
                         pair.label()
                     )));
                 }
+                ocr::keep_warm();
                 by_sentence(texts, |t| {
                     mt::translate(t, pair).map_err(|e| AiError::Offline(e.to_string()))
                 })
@@ -108,13 +127,58 @@ impl Real {
     }
 }
 
+/// Windows OCR reads the text (#62: a screen in ~0.1-0.3 s, in this
+/// process) where `reader` routes to it for its language `tag`
+/// (`ocr::route`: not right-to-left) and `source` is that language or
+/// "auto"; else PP-OCR. One-shot and live translate alike (#56, #107).
+fn system_reads(reader: TextReader, tag: Option<&str>, source: &str) -> bool {
+    let base = |t: &str| {
+        t.split(['-', '_'])
+            .next()
+            .unwrap_or_default()
+            .to_lowercase()
+    };
+    ocr::route(reader, Some(tag)) == ocr::Source::System
+        && (source == lang::AUTO || tag.is_some_and(|t| base(t) == base(source)))
+}
+
 impl Deps for Real {
     fn recognize(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {
+        if self.system() {
+            let k = *ocr::system::passes(self.scale, width, height)
+                .last()
+                .unwrap_or(&1);
+            match ocr::system::recognize(rgba, width, height, k) {
+                Ok(lines) => return Ok(lines),
+                Err(e) => crate::log!("[opencircle] Windows OCR failed ({e}); PP-OCR reads"),
+            }
+        }
         ocr::recognize_as(rgba, width, height, &self.source)
     }
 
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
         self.lines(texts, target, MARKUP)
+    }
+
+    /// Offline: the top lines first, quickly (a cloud model gets one call: a
+    /// round trip each).
+    fn batch(&self) -> usize {
+        match self.via {
+            Via::Offline => FIRST,
+            Via::Ai { .. } => usize::MAX,
+        }
+    }
+
+    /// Offline: loads the likely pair (English for "auto") in the helper,
+    /// which stays warm, while the screen is read.
+    fn warm(&self, target: &str) {
+        let Ok(pair) = self.pair_for(&[], target) else {
+            return;
+        };
+        if self.offline() && pair.missing_bytes() == 0 {
+            ocr::keep_warm();
+            std::thread::spawn(move || mt::translate(&[], pair));
+        }
     }
 }
 
@@ -195,6 +259,9 @@ pub struct Timings {
     /// Zero when every text came from the cache.
     pub translate: Duration,
     pub render: Duration,
+    /// One-shot: when the first translated blocks were ready to show
+    /// (`translate_progressively`); zero when nothing was shown early.
+    pub first: Duration,
     pub total: Duration,
 }
 
@@ -228,8 +295,38 @@ pub fn translate_frame(
     cache: &Cache,
     deps: &impl Deps,
 ) -> Result<Translated, Error> {
+    translate_progressively(rgba, width, height, target, cache, deps, |_| {})
+}
+
+/// Offline, the first call's sentences: a release-notes page's top 8 came
+/// back in ~0.3 s (4 cores). Each next call gets twice as many: every
+/// decoding step costs about the same for 1 line or 32 (`mt::BATCH`), so a
+/// call per 8 made the page 1.7x slower, doubling 1.1x.
+const FIRST: usize = 8;
+
+/// A partial frame is shown at most this often (each is a whole render):
+/// the first one at once, then as the rest comes in, then the whole page.
+const SHOW_EVERY: Duration = Duration::from_millis(300);
+
+/// `translate_frame`, showing progress (#27): the blocks are translated top
+/// of the screen first, [`Deps::batch`] sentences, then twice as many per
+/// call, and `shown` gets
+/// the frame with what is translated so far (the first part at once, then at
+/// most every [`SHOW_EVERY`]), each drawn from the original as the whole page
+/// will be, so nothing moves when the rest arrives. An error after a partial
+/// frame still fails the whole (the caller goes back to the original).
+pub fn translate_progressively(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    target: &str,
+    cache: &Cache,
+    deps: &impl Deps,
+    mut shown: impl FnMut(&Translated),
+) -> Result<Translated, Error> {
     let start = Instant::now();
     check_frame(rgba, width, height)?;
+    deps.warm(target);
     let found = deps.recognize(rgba, width, height).map_err(Error::Ocr)?;
     let lines: Vec<Line> = (found.into_iter())
         .filter(|b| !cut_off(b, (width, height)))
@@ -237,28 +334,85 @@ pub fn translate_frame(
         .collect();
     let ocr = start.elapsed();
     let blocks = group_blocks(&lines);
-    let t = Instant::now();
-    let tr = translate_blocks(&blocks, target, cache, deps).map_err(Error::Ai)?;
-    let translate = t.elapsed();
+    let mut tr = vec![String::new(); blocks.len()];
+    let mut timings = Timings {
+        ocr,
+        ..Timings::default()
+    };
+    let mut last_shown = None::<Instant>;
+    let parts = parts(&blocks, deps.batch());
+    for (k, part) in parts.iter().enumerate() {
+        let t = Instant::now();
+        let chunk: Vec<Block> = part.iter().map(|&i| blocks[i].clone()).collect();
+        let out = translate_blocks(&chunk, target, cache, deps).map_err(Error::Ai)?;
+        timings.translate += t.elapsed();
+        for (&i, t) in part.iter().zip(out) {
+            tr[i] = t;
+        }
+        let last = k + 1 == parts.len();
+        if last || last_shown.is_some_and(|at| at.elapsed() < SHOW_EVERY) {
+            continue;
+        }
+        last_shown = Some(Instant::now());
+        let partial = draw(rgba, (width, height), target, &blocks, &tr, &mut timings);
+        if timings.first.is_zero() {
+            timings.first = start.elapsed();
+        }
+        shown(&partial);
+    }
+    let mut out = draw(rgba, (width, height), target, &blocks, &tr, &mut timings);
+    timings.total = start.elapsed();
+    out.timings = timings;
+    Ok(out)
+}
+
+/// The original frame with `tr` (one per block, "" = as it was) drawn in.
+fn draw(
+    rgba: &[u8],
+    (width, height): (u32, u32),
+    target: &str,
+    blocks: &[Block],
+    tr: &[String],
+    timings: &mut Timings,
+) -> Translated {
     let t = Instant::now();
     let mut out = rgba.to_vec();
-    let drawn = render(&mut out, width, height, &blocks, &tr, is_rtl(target));
-    let render = t.elapsed();
-    Ok(Translated {
+    let drawn = render(&mut out, width, height, blocks, tr, is_rtl(target));
+    timings.render += t.elapsed();
+    Translated {
         rgba: out,
-        blocks: translations(&blocks, &tr),
+        blocks: translations(blocks, tr),
         drawn: Drawn {
             rooms: Vec::new(),
             ink: Vec::new(),
             ..drawn
         },
-        timings: Timings {
-            ocr,
-            translate,
-            render,
-            total: start.elapsed(),
-        },
-    })
+        timings: *timings,
+    }
+}
+
+/// The blocks (indices) in the order they are translated: top of the
+/// screen first, in parts of about `batch`, `2 batch`, `4 batch`...
+/// sentences (a block is never cut).
+fn parts(blocks: &[Block], batch: usize) -> Vec<Vec<usize>> {
+    let mut order: Vec<usize> = (0..blocks.len()).collect();
+    order.sort_by(|&a, &b| blocks[a].bounds[1].total_cmp(&blocks[b].bounds[1]));
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    let (mut n, mut size) = (0, batch);
+    for i in order {
+        if out.is_empty() || n >= size {
+            if !out.is_empty() {
+                size = size.saturating_mul(2);
+            }
+            out.push(Vec::new());
+            n = 0;
+        }
+        n += sentences(&blocks[i].text).len();
+        out.last_mut().expect("just pushed").push(i);
+    }
+    // each part in reading order (what an AI gets as context)
+    out.iter_mut().for_each(|p| p.sort_unstable());
+    out
 }
 
 pub(super) fn check_frame(rgba: &[u8], width: u32, height: u32) -> Result<(), Error> {
@@ -441,6 +595,8 @@ pub(super) mod tests {
         pub lines: OcrFn,
         pub answer: fn(&str) -> String,
         pub fail_ai: bool,
+        /// `Deps::batch` (sentences per call when shown as they come).
+        pub batch: usize,
         pub ocr_calls: RefCell<Vec<(u32, u32)>>,
         pub ai_calls: RefCell<Vec<Vec<String>>>,
     }
@@ -451,6 +607,7 @@ pub(super) mod tests {
                 lines: Box::new(lines),
                 answer: |s| format!("ترجمة {s}"),
                 fail_ai: false,
+                batch: usize::MAX,
                 ocr_calls: RefCell::default(),
                 ai_calls: RefCell::default(),
             }
@@ -469,6 +626,10 @@ pub(super) mod tests {
                 return Err(AiError::Server(503));
             }
             Ok(texts.iter().map(|t| (self.answer)(t)).collect())
+        }
+
+        fn batch(&self) -> usize {
+            self.batch
         }
     }
 
@@ -539,6 +700,110 @@ pub(super) mod tests {
         let again = translate_frame(&img, 800, 450, "ar", &cache, &fake).unwrap();
         assert_eq!(fake.ai_calls.borrow().len(), 1);
         assert!(again.rgba == out.rgba);
+    }
+
+    /// #27: top of the screen first, a few sentences, then more per call, and the first
+    /// part is shown before the rest is translated; the whole page is then
+    /// exactly the all-at-once result, and the part shown early stays put.
+    #[test]
+    fn blocks_arrive_top_first_and_are_shown_before_the_last_is_translated() {
+        // OCR lists the bottom label first (a sidebar read before the page)
+        let labels = ["Quit", "Load", "Save", "Help", "Exit", "Undo"];
+        let ys = [400.0, 40.0, 100.0, 160.0, 220.0, 280.0];
+        let lines = move || -> Vec<TextBlock> {
+            (labels.iter().zip(ys))
+                .map(|(t, y)| tb(t, [40.0, y, 120.0, 30.0]))
+                .collect()
+        };
+        let boxes: Vec<[f32; 4]> = lines().iter().map(|b| b.bounds).collect();
+        let img = frame(400, 480, &boxes);
+        let mut fake = Fake::new(move |_, _, _| lines());
+        fake.batch = 2;
+        let mut shown = Vec::new();
+        let out = translate_progressively(&img, 400, 480, "ar", &Cache::new(64), &fake, |p| {
+            shown.push((
+                fake.ai_calls.borrow().len(),
+                p.rgba.clone(),
+                p.blocks.clone(),
+            ));
+        })
+        .unwrap();
+        let calls = fake.ai_calls.borrow().clone();
+        // 2 sentences, then twice as many; a part in reading order
+        let want: [&[&str]; 2] = [&["Load", "Save"], &["Quit", "Help", "Exit", "Undo"]];
+        assert_eq!(calls, want);
+        // the first part is on screen after one call of two
+        let (after, first, blocks) = &shown[0];
+        assert_eq!(*after, 1, "shown before the rest was translated");
+        let done: Vec<&str> = (blocks.iter())
+            .filter(|b| !b.translation.is_empty())
+            .map(|b| b.original.as_str())
+            .collect();
+        assert_eq!(done, ["Load", "Save"]);
+        assert!(out.timings.first > Duration::ZERO && out.timings.first <= out.timings.total);
+        // the whole page = one call for everything
+        let whole = translate_frame(
+            &img,
+            400,
+            480,
+            "ar",
+            &Cache::new(64),
+            &Fake::new(move |_, _, _| lines()),
+        )
+        .unwrap();
+        assert!(out.rgba == whole.rgba);
+        assert_eq!(out.blocks, whole.blocks);
+        // rows 0..140 (Load, Save) look the same early and at the end; the
+        // rest is still the original in the early frame
+        let row = 400 * 4;
+        assert!(first[..140 * row] == out.rgba[..140 * row]);
+        assert!(first[150 * row..] == img[150 * row..]);
+        assert!(out.rgba[150 * row..] != img[150 * row..]);
+    }
+
+    /// The one call of a cloud model (and of any `Deps` without a batch):
+    /// nothing is shown early.
+    #[test]
+    fn one_call_shows_nothing_early() {
+        let fake = Fake::new(|_, _, _| screen());
+        let mut shown = 0;
+        let img = frame(800, 450, &[]);
+        translate_progressively(&img, 800, 450, "ar", &Cache::new(8), &fake, |_| shown += 1)
+            .unwrap();
+        assert_eq!((shown, fake.ai_calls.borrow().len()), (0, 1));
+        let ai = Real::new(
+            "auto",
+            Via::Ai {
+                ai: AiConfig::default(),
+                key: None,
+            },
+        );
+        assert_eq!(ai.batch(), usize::MAX);
+        assert_eq!(Real::new("auto", Via::Offline).batch(), FIRST);
+    }
+
+    /// #107: one-shot translate reads with Windows OCR where it reads the
+    /// source (as main mode and live do), PP-OCR otherwise.
+    #[test]
+    fn windows_ocr_reads_where_it_has_the_language() {
+        use TextReader::{Auto, PpOcr, Windows};
+        for (reader, tag, source, system) in [
+            (Auto, Some("en-US"), "auto", true),
+            (Auto, Some("en-US"), "en", true),
+            (Auto, Some("en-GB"), "en-US", true),
+            (Windows, Some("en-US"), "auto", true),
+            (Auto, Some("en-US"), "fr", false), // its recognizer can't read French
+            (Auto, Some("ar-SA"), "auto", false), // right-to-left: PP-OCR reads it better
+            (Windows, Some("ar-SA"), "ar", true), // ... unless chosen
+            (Auto, None, "auto", false),        // no recognizer (and Linux)
+            (PpOcr, Some("en-US"), "auto", false),
+        ] {
+            assert_eq!(
+                system_reads(reader, tag, source),
+                system,
+                "{reader:?} {tag:?} {source}"
+            );
+        }
     }
 
     #[test]
