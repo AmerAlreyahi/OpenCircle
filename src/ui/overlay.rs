@@ -16,7 +16,7 @@ use iced::widget::image::{FilterMethod, Handle};
 use iced::widget::text::Alignment;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, Vector};
 
-use super::{motion, theme};
+use super::{kit::motion, theme};
 use crate::config::{BracketStyle, Look};
 
 /// A selection smaller than this (screen px, either side) is a tap, not a circle.

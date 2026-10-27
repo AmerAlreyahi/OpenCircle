@@ -63,7 +63,7 @@ pub enum Breathe {
 /// core on the Linux VM); the owner's rule is near 0 % while the overlay is
 /// still. Windows measured 0.10 %. Linux keeps the static glow.
 fn breathes() -> bool {
-    cfg!(windows) && !super::motion::reduced()
+    cfg!(windows) && !super::kit::motion::reduced()
 }
 
 pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool, breathing: Breathe) -> Element<'a, M> {
@@ -530,7 +530,7 @@ mod tests {
                 for (case, breathes) in cases {
                     let reduced = [false, true];
                     for reduced in reduced {
-                        super::super::motion::set_reduced(reduced);
+                        super::super::kit::motion::set_reduced(reduced);
                         let seen = frames(&case, &[0, 16, 200, 2000, 60_000]);
                         let moves = breathes && !reduced && cfg!(windows);
                         let same = seen.windows(2).all(|p| p[0].0 == p[1].0);
@@ -543,7 +543,7 @@ mod tests {
                 }
             }
         }
-        super::super::motion::set_reduced(false);
+        super::super::kit::motion::set_reduced(false);
     }
 
     /// The overlay's breath is the design's `ripplePulse`: 4 s, the blurs
@@ -551,7 +551,7 @@ mod tests {
     /// strips (never the screen), and it asks for the next step, not every frame.
     #[test]
     fn the_overlay_breathes_slowly_in_its_strips_only() {
-        super::super::motion::set_reduced(false);
+        super::super::kit::motion::set_reduced(false);
         let look = spectrum();
         let b = border(Mode::Overlay, look, Breathe::On);
         let seen = frames(&b, &[0, 1000, 2000, 3000, 4000, 4010]);
@@ -587,10 +587,10 @@ mod tests {
         let area: f32 = state.strips.iter().map(|(r, _)| r.width * r.height).sum();
         assert!(area < 0.3 * 1920.0 * 1080.0, "{area}");
         // reduced motion: still
-        super::super::motion::set_reduced(true);
+        super::super::kit::motion::set_reduced(true);
         let seen = frames(&b, &[0, 2000]);
         assert!(seen[0].0 == seen[1].0 && !seen[1].1);
-        super::super::motion::set_reduced(false);
+        super::super::kit::motion::set_reduced(false);
     }
 
     #[test]

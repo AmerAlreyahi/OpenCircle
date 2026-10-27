@@ -117,7 +117,7 @@ pub fn fadeable(handle: RawWindowHandle) -> Option<isize> {
 /// closes). The fade is the window's latest from this call (an older one
 /// stops; a later `clear_now` stops this one); the returned run blocks: call
 /// it on a thread of its own (`windows::fade`).
-pub fn fade(window: isize, shown: super::motion::Shown, rise: f32) -> impl FnOnce() + Send {
+pub fn fade(window: isize, shown: super::kit::motion::Shown, rise: f32) -> impl FnOnce() + Send {
     #[cfg(windows)]
     return win::fade(window, shown, rise);
     #[cfg(not(windows))]
@@ -330,7 +330,11 @@ mod win {
 
     /// `super::fade`: a step per beat of the frame clock (`motion::FRAME`):
     /// the window changes once a frame, by the clock.
-    pub fn fade(hwnd: isize, shown: crate::ui::motion::Shown, rise: f32) -> impl FnOnce() + Send {
+    pub fn fade(
+        hwnd: isize,
+        shown: crate::ui::kit::motion::Shown,
+        rise: f32,
+    ) -> impl FnOnce() + Send {
         // never reused (a number reused after a `clear_now` emptied the list
         // would let a stopped fade run on)
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -343,7 +347,7 @@ mod win {
         move || steps(hwnd, me, shown, rise)
     }
 
-    fn steps(hwnd: isize, me: u64, shown: crate::ui::motion::Shown, rise: f32) {
+    fn steps(hwnd: isize, me: u64, shown: crate::ui::kit::motion::Shown, rise: f32) {
         use std::time::{Duration, Instant};
         use windows::Win32::UI::WindowsAndMessaging::{
             SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
@@ -385,7 +389,7 @@ mod win {
                     break;
                 }
                 // the frame clock's beat (`motion::FRAME`), on deadlines
-                next += crate::ui::motion::FRAME;
+                next += crate::ui::kit::motion::FRAME;
                 std::thread::sleep(next.saturating_duration_since(Instant::now()));
             }
         }
@@ -696,7 +700,7 @@ mod tests {
         let now = std::time::Instant::now();
         let fade_in = fade(
             raw,
-            super::super::motion::Shown::opening(super::super::motion::WIDGET, now),
+            super::super::kit::motion::Shown::opening(super::super::kit::motion::WIDGET, now),
             0.0,
         );
         clear_now(raw);

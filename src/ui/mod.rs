@@ -1,6 +1,8 @@
 //! The iced daemon: owns the overlay window (pre-created and hidden between uses
 //! where windows can hide, see `can_hide_windows`) and its state.
 mod about;
+#[cfg(test)]
+mod arch_tests;
 mod bar;
 mod border;
 mod edit;
@@ -9,9 +11,9 @@ mod edit;
 mod frame_times;
 mod glass;
 mod keys;
+mod kit;
 mod live_controller;
 mod live_layer;
-pub(crate) mod motion;
 mod onboarding;
 mod overlay;
 mod panel;
@@ -56,6 +58,7 @@ use crate::ocr::{self, TextBlock};
 use crate::translate::pipeline::Cache;
 use crate::{Trigger, capture};
 use edit::Editing;
+use kit::motion;
 use quick::{Quick, Start};
 use snip::Snip;
 use widgets::card;

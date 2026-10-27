@@ -1263,7 +1263,7 @@ fn save(state: &mut State) -> Outcome {
 /// Key presses, only while a shortcut field is recording.
 pub fn subscription(state: &State) -> Subscription<Message> {
     let clock = match state.saved_at {
-        Some(_) => crate::ui::motion::frames().map(|_| Message::Tick),
+        Some(_) => crate::ui::kit::motion::frames().map(|_| Message::Tick),
         None => Subscription::none(),
     };
     if state.recording.is_none() {

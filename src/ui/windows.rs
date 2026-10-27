@@ -11,7 +11,7 @@ use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
 use super::widgets::chrome;
-use super::{motion, onboarding, settings, shape, theme, update_card, widgets};
+use super::{kit::motion, onboarding, settings, shape, theme, update_card, widgets};
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::config::{self, Config, Theme};
 use crate::editor::dragout::{self, DragFile};

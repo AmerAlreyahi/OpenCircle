@@ -16,7 +16,7 @@ use iced::widget::{Space, column, container, image, mouse_area, row, stack, text
 use iced::window;
 use iced::{Border, Center, Element, Fill, Size, Subscription, Task};
 
-use super::motion::{self, Curve};
+use super::kit::motion::{self, Curve};
 use super::sapphire::{self, mono, weight};
 use super::theme::sapphire::{self as sapphire_tokens, *};
 use super::{widgets, windows};
