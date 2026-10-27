@@ -136,7 +136,9 @@ production systems.
   stable v0.1.1 still needs the gate and the owner's OK.
 - Screen edge (owner, 2026-10-27, firm): the old moving multi-colour edge animation
   never ships again. The edge is the design's Active Look inset glow (two colours per
-  look), STATIC: it only fades in with the overlay; no pulse, no moving colours.
+  look): it fades in with the overlay, then only the design's very soft 4 s breathing
+  (ripplePulse) shows the app is alive; no moving colours, no draw-back. Live and snip:
+  static. Must stay near 0 % CPU while the overlay is open and still.
 - Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
   is on hold until the owner resumes it.
 
