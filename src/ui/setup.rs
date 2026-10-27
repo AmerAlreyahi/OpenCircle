@@ -235,7 +235,7 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "OpenCircle-Setup.exe".into());
-    let (config, warnings) = crate::config::Config::load();
+    let (config, warnings) = crate::config::Config::peek();
     let shown = Config {
         shortcut: config.shortcut,
         autostart: !warnings.is_empty() || config.general.autostart,
@@ -254,7 +254,7 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
 /// The uninstall window (`setup::uninstall_ui`): removes the installed product
 /// `code` from `folder`, and the user's data too if they choose so.
 pub fn run_uninstall(code: String, folder: String) -> iced::Result {
-    let (config, _) = crate::config::Config::load();
+    let (config, _) = crate::config::Config::peek();
     let shown = Config {
         shortcut: config.shortcut,
         autostart: false,

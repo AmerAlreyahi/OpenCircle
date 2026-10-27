@@ -902,6 +902,15 @@ impl Config {
         }
     }
 
+    /// The user's config read as is, never migrated or written (the setup only
+    /// looks at it; the app it installs migrates it on its first start).
+    pub fn peek() -> (Config, Vec<String>) {
+        match Self::path().map(std::fs::read_to_string) {
+            Some(Ok(text)) => Self::parse(&text),
+            _ => (Config::default(), vec![]),
+        }
+    }
+
     pub fn load_from(path: &Path) -> (Config, Vec<String>) {
         match std::fs::read_to_string(path) {
             Ok(text) => {
