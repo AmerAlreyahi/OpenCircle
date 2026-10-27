@@ -12,11 +12,13 @@ use std::time::Instant;
 use iced::font::Weight;
 use iced::widget::image::Handle;
 use iced::widget::text::LineHeight;
-use iced::widget::{Space, column, container, image, mouse_area, row, stack, text};
+use iced::widget::{Space, column, container, image, row, stack, text};
 use iced::window;
 use iced::{Border, Center, Element, Fill, Size, Subscription, Task};
 
+use super::kit::button::Kind;
 use super::kit::motion::{self, Curve};
+use super::kit::{self, tokens::Role};
 use super::sapphire::{self, mono, weight};
 use super::theme::sapphire::{self as sapphire_tokens, *};
 use super::{widgets, windows};
@@ -27,8 +29,6 @@ use crate::setup::{self as setup_core, BadFolder, Installed};
 pub const WIDTH: f32 = 420.0;
 /// The window's corner radius (`rounded-2xl`).
 const RADIUS: f32 = 16.0;
-/// The header strip (`h-9`).
-const HEADER: f32 = 36.0;
 /// How far a new step's body rises in (`animatePageSwitch`: 14 px, 190 ms expo-out).
 const RISE: f32 = 14.0;
 /// The logo's pulse while installing (`animate-pulse`: 2 s, opacity 1 ↔ .5).
@@ -618,22 +618,7 @@ impl State {
                 image(g).width(418).height(128)
             ]
         });
-        let header = row![
-            mouse_area(
-                container(
-                    text(&self.file_name)
-                        .font(mono(Weight::Medium))
-                        .size(11)
-                        .color(t().text_muted)
-                )
-                .padding([0, 14])
-                .center_y(HEADER)
-                .width(Fill)
-            )
-            .on_press(Message::Drag),
-            sapphire::close_button(HEADER, Message::Close),
-        ]
-        .height(HEADER);
+        let header = sapphire::header(&self.file_name, Message::Drag, Message::Close);
         let body = container(self.body())
             .padding(iced::Padding {
                 top: 8.0 + rise,
@@ -646,17 +631,7 @@ impl State {
         if let Some(glow) = glow {
             layers = layers.push(glow);
         }
-        let card = layers.push(column![header, body]);
-        container(card)
-            .padding(1)
-            .width(Fill)
-            .height(Fill)
-            .style(|_| iced::widget::container::Style {
-                background: Some(t().bg.into()),
-                border: Border::default().rounded(RADIUS).width(1).color(t().rim),
-                ..Default::default()
-            })
-            .into()
+        sapphire::window(layers.push(column![header, body]))
     }
 
     fn body(&self) -> Element<'_, Message> {
@@ -669,10 +644,7 @@ impl State {
             (false, false) => EN.title,
         };
         let title = row![
-            text(heading)
-                .size(18)
-                .font(weight(Weight::Semibold))
-                .color(t().text),
+            kit::text::text(Role::APP_NAME, heading),
             sapphire::chip(format!("v{}", self.version)),
         ]
         .spacing(8)
@@ -773,7 +745,7 @@ impl State {
                     text(EN.your_data).size(11.5).color(t().text_sub),
                     Space::new().width(Fill),
                     sapphire::segmented(
-                        &[(false, EN.keep), (true, EN.remove)],
+                        [EN.keep, EN.remove],
                         self.remove_data,
                         self.data_glide.0,
                         motion::progress(
@@ -789,7 +761,7 @@ impl State {
                 column![
                     sapphire::cta(
                         sapphire::cta_label(EN.uninstall, None),
-                        DANGER,
+                        Kind::Danger,
                         Message::Install
                     ),
                     Space::new().height(14),
@@ -801,7 +773,7 @@ impl State {
             }
             Step::Finish if self.uninstall.is_some() => sapphire::cta(
                 sapphire::cta_label(EN.close, None),
-                t().accent,
+                Kind::Accent,
                 Message::Close,
             ),
             Step::Configure => {
@@ -845,7 +817,7 @@ impl State {
                 let mut parts = column![
                     sapphire::cta(
                         sapphire::cta_label(label, self.size.clone()),
-                        t().accent,
+                        Kind::Accent,
                         Message::Install
                     ),
                     Space::new().height(14),
@@ -909,7 +881,7 @@ impl State {
                     text(EN.start_with_windows).size(11.5).color(t().text_sub),
                     Space::new().width(Fill),
                     sapphire::segmented(
-                        &[(false, EN.off), (true, EN.on)],
+                        [EN.off, EN.on],
                         self.autostart,
                         self.autostart_glide.0,
                         motion::progress(
@@ -923,7 +895,7 @@ impl State {
                 ]
                 .align_y(Center);
                 column![
-                    sapphire::cta(label, SUCCESS, Message::Launch),
+                    sapphire::cta(label, Kind::Success, Message::Launch),
                     Space::new().height(14),
                     sapphire::divider(),
                     Space::new().height(12),
@@ -1026,7 +998,7 @@ fn chosen(picked: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::widgets::shot;
+    use crate::ui::kit::testing::{golden, shot};
 
     fn state(installed: Option<Installed>) -> State {
         let mut s = State::new(
@@ -1102,29 +1074,11 @@ mod tests {
         ]
     }
 
-    fn decode(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
-        let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
-            .read_info()
-            .unwrap();
-        let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut rgba).unwrap();
-        rgba.truncate(info.buffer_size());
-        (info.width, info.height, rgba)
-    }
-
     /// Each setup screen, dark (Sapphire) and light (Daylight), at 100 % and
-    /// 200 %, matches its golden image
-    /// (`tests/fixtures/setup/`; `OPENCIRCLE_UPDATE_GOLDEN=1` writes them anew,
-    /// then look at every one). Only where the UI font is the bundled Inter
-    /// (Windows draws Segoe UI).
+    /// 200 %, matches its golden image (`tests/fixtures/setup/`,
+    /// `kit::testing::golden`).
     #[test]
     fn every_screen_matches_its_golden_image() {
-        if widgets::ui_font() != iced::Font::with_name("Inter") {
-            crate::log!("golden images are drawn with Inter; this machine has Segoe UI");
-            return;
-        }
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/setup");
-        let update = std::env::var_os("OPENCIRCLE_UPDATE_GOLDEN").is_some();
         let mut failed = Vec::new();
         for ((name, s), light) in (screens().into_iter().map(|n| (n, false)))
             .chain(screens().into_iter().map(|n| (n, true)))
@@ -1134,37 +1088,10 @@ mod tests {
                 true => format!("{name}-light"),
                 false => name.to_string(),
             };
-            for scale in [1.0, 2.0] {
-                let size = Size::new(WIDTH, s.height());
-                let (_, pixels) = shot::redrawn(
-                    |i| (i == 0).then(|| s.view(window::Id::unique())),
-                    size,
-                    scale,
-                );
-                let (w, h) = ((WIDTH * scale) as u32, (s.height() * scale) as u32);
-                let file = dir.join(format!("{name}@{scale}x.png"));
-                if update {
-                    std::fs::create_dir_all(&dir).unwrap();
-                    crate::actions::write_png(&file, w, h, &pixels).unwrap();
-                    continue;
-                }
-                let Ok(golden) = std::fs::read(&file) else {
-                    failed.push(format!("{name}@{scale}x: no golden image"));
-                    continue;
-                };
-                let (gw, gh, golden) = decode(&golden);
-                if (gw, gh) != (w, h) {
-                    failed.push(format!("{name}@{scale}x: {w}x{h}, golden {gw}x{gh}"));
-                    continue;
-                }
-                // tiny differences in anti-aliasing between CPUs are fine
-                let off = (pixels.chunks(4).zip(golden.chunks(4)))
-                    .filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 24))
-                    .count();
-                if off * 1000 > (w * h) as usize {
-                    failed.push(format!("{name}@{scale}x: {off} pixels differ"));
-                }
-            }
+            let size = Size::new(WIDTH, s.height());
+            failed.extend(golden::check("setup", &name, size, &[1.0, 2.0], || {
+                s.view(window::Id::unique())
+            }));
         }
         sapphire_tokens::set_light(false);
         assert!(failed.is_empty(), "{failed:#?}");

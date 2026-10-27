@@ -371,8 +371,6 @@ fn palette(setting: Theme, os_dark: bool) -> &'static Palette {
 /// the kit (plan step 21); `scripts/installer-art.py` repeats a few colours for
 /// the setup's baked images.
 pub mod sapphire {
-    use iced::Color;
-
     use crate::ui::kit::themes::{self, Colours, DAYLIGHT, SAPPHIRE};
     pub use crate::ui::kit::tokens::fixed::{DANGER, ON_ACCENT, SUCCESS};
 
@@ -387,18 +385,7 @@ pub mod sapphire {
 
     /// The token set in use.
     pub fn t() -> &'static Colours {
-        &themes::current().c
-    }
-
-    /// `c` as CSS `brightness(1.1)` draws it (a hovered accent button).
-    pub fn brighter(c: Color) -> Color {
-        let up = |v: f32| (v * 1.1).min(1.0);
-        Color {
-            r: up(c.r),
-            g: up(c.g),
-            b: up(c.b),
-            a: c.a,
-        }
+        themes::c()
     }
 }
 

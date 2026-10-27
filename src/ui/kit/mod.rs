@@ -1,11 +1,27 @@
-//! The one UI kit: tokens, themes, looks and motion (components join it as
-//! their first screen is ported). Depends only on `iced`, `std` and itself
-//! (`arch_tests::kit_depends_only_on_tokens`).
+//! The one UI kit: tokens, themes, looks and motion, and one implementation
+//! of each control (a component joins as its first screen uses it; each has a
+//! gallery sheet, `testing::gallery`). Depends only on `iced`, `std` and
+//! itself (`arch_tests::kit_depends_only_on_tokens`); components read no
+//! config and no clock (animation progress comes in as an `f32`).
 
 pub mod looks;
 pub mod motion;
 pub mod themes;
 pub mod tokens;
+
+pub mod button;
+pub mod chip;
+pub mod divider;
+pub mod field;
+pub mod header;
+pub mod icon;
+pub mod progress;
+pub mod segmented;
+pub mod surface;
+pub mod text;
+
+#[cfg(test)]
+pub mod testing;
 
 #[cfg(test)]
 mod tests {

@@ -74,6 +74,11 @@ pub fn set(theme: &'static Theme) {
     CURRENT.set(theme);
 }
 
+/// The colours of the theme in use (what the components draw with).
+pub fn c() -> &'static Colours {
+    &current().c
+}
+
 /// The theme to show: the dark pick or the light pick (theme ids) by `mode`,
 /// `System` following the OS. An unknown id, or one of the other mode, falls
 /// back to Sapphire / Daylight.

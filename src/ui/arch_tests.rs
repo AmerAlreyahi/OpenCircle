@@ -128,7 +128,12 @@ fn screens_never_style() {
 
 #[test]
 fn kit_depends_only_on_tokens() {
+    // ponytail: the test harness renders every screen (legacy ones too) on the
+    // old palette's window colour and writes PNGs; exempt until theme.rs goes (step 38)
     for (name, src) in sources("kit") {
+        if name.starts_with("kit/testing/") {
+            continue;
+        }
         for line in code(&src) {
             let outside = line
                 .match_indices("crate::")
@@ -152,6 +157,37 @@ fn platform_is_isolated() {
                 !ui && !line.contains("super::super"),
                 "{name} reaches into the UI (take it as a parameter): {}",
                 line.trim()
+            );
+        }
+    }
+}
+
+/// Not components: the kit's data and clock.
+const KIT_DATA: [&str; 5] = ["looks", "mod", "motion", "themes", "tokens"];
+
+/// Each kit component has its gallery sheet (`kit/testing/gallery.rs`) and
+/// its golden images in both themes (`tests/fixtures/kit/`).
+#[test]
+fn every_kit_component_has_a_gallery_sheet() {
+    let gallery = std::fs::read_to_string("src/ui/kit/testing/gallery.rs").unwrap();
+    let components: Vec<String> = sources("kit")
+        .into_iter()
+        .filter_map(|(name, _)| {
+            let file = name.strip_prefix("kit/")?.strip_suffix(".rs")?;
+            (!file.contains('/') && !KIT_DATA.contains(&file)).then(|| file.to_string())
+        })
+        .collect();
+    assert!(components.contains(&"button".to_string()), "{components:?}");
+    for c in components {
+        assert!(
+            gallery.contains(&format!("sheet(\"{c}\"")),
+            "{c}: add its sheet to kit/testing/gallery.rs"
+        );
+        for theme in ["sapphire", "daylight"] {
+            let png = format!("tests/fixtures/kit/{c}-{theme}@1x.png");
+            assert!(
+                std::path::Path::new(&png).exists(),
+                "{png} missing (OPENCIRCLE_UPDATE_GOLDEN=1)"
             );
         }
     }
