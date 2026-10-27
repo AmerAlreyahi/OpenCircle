@@ -141,9 +141,9 @@ mod win {
     use windows::Win32::Graphics::Gdi::{CreateRectRgn, CreateRoundRectRgn, SetWindowRgn};
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, GWL_EXSTYLE, GWLP_WNDPROC, GetPropW, GetWindowLongPtrW, GetWindowRect,
-        RemovePropW, STYLESTRUCT, SetPropW, SetWindowLongPtrW, WM_NCACTIVATE, WM_NCDESTROY,
-        WM_STYLECHANGING, WNDPROC, WS_EX_LAYERED,
+        CallWindowProcW, GWL_EXSTYLE, GWL_STYLE, GWLP_WNDPROC, GetPropW, GetWindowLongPtrW,
+        GetWindowRect, RemovePropW, STYLESTRUCT, SetPropW, SetWindowLongPtrW, WM_NCACTIVATE,
+        WM_NCDESTROY, WM_SETICON, WM_SETTEXT, WM_STYLECHANGING, WNDPROC, WS_EX_LAYERED, WS_VISIBLE,
     };
     use windows::core::{PCWSTR, w};
 
@@ -157,7 +157,11 @@ mod win {
     /// the top 22 px of our content at every (de)activation (the Start menu, a
     /// click on another app), and nothing paints over it: only damage is redrawn.
     /// lParam -1 tells DefWindowProc not to repaint the non-client area; winit
-    /// still sees every activation.
+    /// still sees every activation. The other ways the system paints that caption
+    /// (Windows 11 draws its themed one through them): the theme engine's
+    /// WM_NCUAHDRAWCAPTION / WM_NCUAHDRAWFRAME (swallowed), and DefWindowProc's
+    /// WM_SETTEXT / WM_SETICON on a visible window (run with WS_VISIBLE off for
+    /// the call, so nothing is painted; the text and icon are still set).
     pub fn no_caption(hwnd: isize) {
         let hwnd = HWND(hwnd as *mut _);
         let ours = wndproc as *const () as isize;
@@ -191,10 +195,30 @@ mod win {
                 let style = &mut *(l.0 as *mut STYLESTRUCT);
                 style.styleNew |= WS_EX_LAYERED.0;
             }
-            let l = if msg == WM_NCACTIVATE { LPARAM(-1) } else { l };
-            CallWindowProcW(next, h, msg, w, l)
+            match msg {
+                WM_NCUAHDRAWCAPTION | WM_NCUAHDRAWFRAME => LRESULT(0),
+                WM_NCACTIVATE => CallWindowProcW(next, h, msg, w, LPARAM(-1)),
+                WM_SETTEXT | WM_SETICON => {
+                    let style = GetWindowLongPtrW(h, GWL_STYLE);
+                    let shown = style & WS_VISIBLE.0 as isize != 0;
+                    if shown {
+                        SetWindowLongPtrW(h, GWL_STYLE, style & !(WS_VISIBLE.0 as isize));
+                    }
+                    let result = CallWindowProcW(next, h, msg, w, l);
+                    if shown {
+                        let now = GetWindowLongPtrW(h, GWL_STYLE);
+                        SetWindowLongPtrW(h, GWL_STYLE, now | WS_VISIBLE.0 as isize);
+                    }
+                    result
+                }
+                _ => CallWindowProcW(next, h, msg, w, l),
+            }
         }
     }
+
+    /// Undocumented: the theme engine asks the window to paint its caption / frame.
+    pub(super) const WM_NCUAHDRAWCAPTION: u32 = 0x00AE;
+    pub(super) const WM_NCUAHDRAWFRAME: u32 = 0x00AF;
 
     /// Set on a window `opacity` made layered (`wndproc` keeps it so).
     const LAYERED: PCWSTR = w!("OpenCircle.layered");
@@ -401,30 +425,42 @@ mod tests {
     }
 
     /// #126: DefWindowProc must get WM_NCACTIVATE with lParam -1 (no caption
-    /// painted); every other message reaches the window's own procedure unchanged,
-    /// and installing twice changes nothing.
+    /// painted), never the theme engine's caption / frame paints, and WM_SETTEXT /
+    /// WM_SETICON only while the window is not visible (visible again after);
+    /// every other message reaches the window's own procedure unchanged, and
+    /// installing twice changes nothing.
     #[cfg(windows)]
     #[test]
-    fn activation_never_paints_the_caption() {
+    fn the_system_never_paints_the_caption() {
         use std::sync::atomic::{AtomicIsize, Ordering};
         use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
         use windows::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, DestroyWindow, GWLP_WNDPROC, HWND_MESSAGE, SendMessageW,
-            SetWindowLongPtrW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_NCACTIVATE, WM_USER,
+            CreateWindowExW, DestroyWindow, GWL_STYLE, GWLP_WNDPROC, GetWindowLongPtrW,
+            HWND_MESSAGE, SendMessageW, SetWindowLongPtrW, WINDOW_EX_STYLE, WINDOW_STYLE,
+            WM_NCACTIVATE, WM_SETTEXT, WM_USER, WS_VISIBLE,
         };
         use windows::core::w;
 
-        static SEEN: [AtomicIsize; 2] = [AtomicIsize::new(0), AtomicIsize::new(0)];
-        unsafe extern "system" fn own(_: HWND, msg: u32, _: WPARAM, l: LPARAM) -> LRESULT {
+        // [NCACTIVATE lParam, WM_USER lParam, theme paints seen, visible during SETTEXT]
+        static SEEN: [AtomicIsize; 4] = [const { AtomicIsize::new(0) }; 4];
+        unsafe extern "system" fn own(h: HWND, msg: u32, _: WPARAM, l: LPARAM) -> LRESULT {
             match msg {
                 WM_NCACTIVATE => SEEN[0].store(l.0, Ordering::SeqCst),
                 WM_USER => SEEN[1].store(l.0, Ordering::SeqCst),
+                win::WM_NCUAHDRAWCAPTION | win::WM_NCUAHDRAWFRAME => {
+                    SEEN[2].fetch_add(1, Ordering::SeqCst);
+                }
+                WM_SETTEXT => {
+                    // SAFETY: reads the style of the live test window.
+                    let style = unsafe { GetWindowLongPtrW(h, GWL_STYLE) };
+                    SEEN[3].store(style & WS_VISIBLE.0 as isize, Ordering::SeqCst);
+                }
                 _ => {}
             }
             LRESULT(1)
         }
         // SAFETY: a message-only window of this thread, destroyed at the end.
-        unsafe {
+        let visible_after = unsafe {
             let hwnd = CreateWindowExW(
                 WINDOW_EX_STYLE(0),
                 w!("STATIC"),
@@ -449,8 +485,21 @@ mod tests {
             win::no_caption(hwnd.0 as isize); // twice: no loop, no second hop
             SendMessageW(hwnd, WM_NCACTIVATE, Some(WPARAM(0)), Some(LPARAM(0)));
             SendMessageW(hwnd, WM_USER, Some(WPARAM(0)), Some(LPARAM(7)));
+            SendMessageW(hwnd, win::WM_NCUAHDRAWCAPTION, None, None);
+            SendMessageW(hwnd, win::WM_NCUAHDRAWFRAME, None, None);
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+            SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_VISIBLE.0 as isize);
+            SEEN[3].store(-1, Ordering::SeqCst);
+            SendMessageW(
+                hwnd,
+                WM_SETTEXT,
+                None,
+                Some(LPARAM(w!("new").as_ptr() as isize)),
+            );
+            let after = GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE.0 as isize != 0;
             let _ = DestroyWindow(hwnd);
-        }
+            after
+        };
         assert_eq!(
             SEEN[0].load(Ordering::SeqCst),
             -1,
@@ -461,6 +510,13 @@ mod tests {
             7,
             "other messages unchanged"
         );
+        assert_eq!(SEEN[2].load(Ordering::SeqCst), 0, "theme caption painted");
+        assert_eq!(
+            SEEN[3].load(Ordering::SeqCst),
+            0,
+            "title set on a visible window"
+        );
+        assert!(visible_after, "the window stays visible");
     }
 
     #[test]

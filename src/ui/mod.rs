@@ -764,9 +764,19 @@ impl App {
                 closing.chain(self.update(Message::Trigger(trigger)))
             }
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..))
-                if self.frame.is_some() || self.capturing.is_some() =>
+                if self.capturing.is_some() =>
             {
+                crate::log!("[opencircle] shortcut ignored: a capture is still on its way");
                 Task::none()
+            }
+            // Open but maybe behind another app (Alt+Tab, a click elsewhere): its
+            // keys (Esc) went there. The shortcut brings it back in front, with
+            // the keyboard, instead of nothing happening.
+            Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..)) if self.frame.is_some() => {
+                crate::log!(
+                    "[opencircle] shortcut while the overlay is open: brought to the front"
+                );
+                window::gain_focus(self.overlay)
             }
             Message::Trigger(Trigger::Capture(at)) => {
                 self.purpose = Purpose::Search;
@@ -4673,6 +4683,25 @@ mod tests {
         assert!(app.is_idle());
         let _ = app.update(Message::UpdateTick);
         assert_eq!(app.update, None, "tried once idle");
+    }
+
+    #[test]
+    fn a_shortcut_while_open_brings_the_overlay_back_and_says_so() {
+        let mut app = App::idle(window::Id::unique());
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        let n = app.capturing.expect("pending");
+        let said = |line: &str| crate::log::tail(200).iter().any(|l| l.contains(line));
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        assert!(
+            said("a capture is still on its way"),
+            "a press left no line"
+        );
+        let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
+        assert!(app.frame.is_some());
+        let again = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        assert!(said("brought to the front"), "a press left no line");
+        assert!(again.units() > 0, "the overlay takes the focus back");
+        assert!(app.frame.is_some(), "still open, same frame");
     }
 
     #[test]
