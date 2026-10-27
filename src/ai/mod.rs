@@ -14,6 +14,7 @@ pub mod openai;
 
 use std::fmt;
 use std::io::BufRead;
+use std::ops::ControlFlow;
 
 use serde_json::Value;
 
@@ -131,12 +132,13 @@ pub(crate) enum Event {
     Skip,
 }
 
-/// Streams the answer; `on_delta` gets each new piece of text. Returns the full text.
+/// Streams the answer; `on_delta` gets each new piece of text and returns `Break`
+/// to stop (the connection is dropped). Returns the text so far.
 pub fn ask_stream(
     cfg: &AiConfig,
     key: Option<&Secret>,
     messages: &[Message],
-    on_delta: impl FnMut(&str),
+    on_delta: impl FnMut(&str) -> ControlFlow<()>,
 ) -> Result<String, AiError> {
     stream(cfg, key, messages, None, on_delta)
 }
@@ -150,7 +152,9 @@ pub(crate) fn ask_fast(
     messages: &[Message],
     max_tokens: u32,
 ) -> Result<String, AiError> {
-    stream(cfg, key, messages, Some(max_tokens), |_| {})
+    stream(cfg, key, messages, Some(max_tokens), |_| {
+        ControlFlow::Continue(())
+    })
 }
 
 fn stream(
@@ -158,7 +162,7 @@ fn stream(
     key: Option<&Secret>,
     messages: &[Message],
     fast: Option<u32>,
-    on_delta: impl FnMut(&str),
+    on_delta: impl FnMut(&str) -> ControlFlow<()>,
 ) -> Result<String, AiError> {
     match &cfg.provider {
         Provider::Browser => Err(AiError::NotConfigured(
@@ -273,11 +277,11 @@ fn parse_translation(answer: &str, expected: usize) -> Result<Vec<String>, AiErr
 // ---- shared HTTP plumbing ----
 
 /// POST, check the status, then feed each SSE `data:` payload to `parse` and
-/// pass text deltas to `on_delta`. Returns the concatenated text.
+/// pass text deltas to `on_delta` (`Break` ends the stream). Returns the concatenated text.
 pub(crate) fn run_stream(
     req: &HttpRequest,
     key: Option<&Secret>,
-    mut on_delta: impl FnMut(&str),
+    mut on_delta: impl FnMut(&str) -> ControlFlow<()>,
     parse: fn(&str) -> Result<Event, AiError>,
 ) -> Result<String, AiError> {
     let agent = crate::net::agent(crate::net::AI);
@@ -301,9 +305,8 @@ pub(crate) fn run_stream(
     let reader = std::io::BufReader::new(resp.into_body().into_reader());
     read_sse(reader, |data| match parse(data) {
         Ok(Event::Delta(piece)) => {
-            on_delta(&piece);
             full.push_str(&piece);
-            true
+            on_delta(&piece).is_continue()
         }
         Ok(Event::Skip) => true,
         Ok(Event::Done) => false,

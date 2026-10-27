@@ -4,6 +4,7 @@
 //! `https://openrouter.ai/api/v1`, Gemini's `.../v1beta/openai`.
 
 use serde_json::{Value, json};
+use std::ops::ControlFlow;
 
 use super::{AiError, Event, HttpRequest, Message, Role, join_url, png_b64, run_stream};
 use crate::config::AiConfig;
@@ -15,7 +16,7 @@ pub fn ask_stream(
     key: Option<&Secret>,
     messages: &[Message],
     fast: Option<u32>,
-    on_delta: impl FnMut(&str),
+    on_delta: impl FnMut(&str) -> ControlFlow<()>,
 ) -> Result<String, AiError> {
     let req = build_request(cfg, key, messages, fast)?;
     run_stream(&req, key, on_delta, parse_event)

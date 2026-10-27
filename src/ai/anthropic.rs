@@ -1,6 +1,7 @@
 //! Anthropic Messages API (`POST {base}/v1/messages`, SSE streaming).
 
 use serde_json::{Value, json};
+use std::ops::ControlFlow;
 
 use super::{
     ANTHROPIC_API_VERSION, AiError, DEFAULT_ANTHROPIC_MODEL, Event, HttpRequest, Message, Role,
@@ -19,7 +20,7 @@ pub fn ask_stream(
     key: Option<&Secret>,
     messages: &[Message],
     fast: Option<u32>,
-    on_delta: impl FnMut(&str),
+    on_delta: impl FnMut(&str) -> ControlFlow<()>,
 ) -> Result<String, AiError> {
     let req = build_request(cfg, key, messages, fast)?;
     run_stream(&req, key, on_delta, parse_event)

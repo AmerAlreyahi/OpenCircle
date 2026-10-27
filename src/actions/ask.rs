@@ -1,7 +1,7 @@
 //! Ask AI: a chat about the crop with the provider the user configured
 //! (`crate::ai`). Nothing is sent until the user asks a question.
 use std::fmt;
-use std::panic::{self, AssertUnwindSafe};
+use std::ops::ControlFlow;
 
 use super::{Action, Crop, Key, Panel, Run};
 use crate::ai::{self, Role};
@@ -266,9 +266,6 @@ impl Chat {
     }
 }
 
-/// Unwinds out of `ai::ask_stream` when the reader is gone.
-struct Stopped;
-
 /// Streams the answer to `messages`; `on_delta` gets each piece and returns
 /// `false` to stop. Blocking (network): call off the UI thread.
 ///
@@ -285,20 +282,19 @@ pub fn stream(
         on_delta(&ai::browser::ask(question)?);
         return Ok(());
     }
-    let run = panic::catch_unwind(AssertUnwindSafe(|| {
-        ai::ask_stream(&setup.cfg, setup.key.as_ref(), messages, |piece| {
-            if !on_delta(piece) {
-                // ponytail: ask_stream has no way to stop; unwinding out of the
-                // callback drops the connection. Let on_delta return "stop" when
-                // src/ai/ is next changed. resume_unwind skips the panic hook.
-                panic::resume_unwind(Box::new(Stopped));
-            }
-        })
-    }));
-    match run {
-        Ok(answer) => answer.map(drop).map_err(|e| e.to_string()),
-        Err(payload) if payload.is::<Stopped>() => Err("Stopped.".into()),
-        Err(payload) => panic::resume_unwind(payload),
+    let mut stopped = false;
+    let answer = ai::ask_stream(&setup.cfg, setup.key.as_ref(), messages, |piece| {
+        if on_delta(piece) {
+            ControlFlow::Continue(())
+        } else {
+            stopped = true;
+            ControlFlow::Break(())
+        }
+    });
+    match answer {
+        Ok(_) if stopped => Err("Stopped.".into()),
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -637,6 +633,20 @@ pub(crate) mod tests {
             false // the panel is gone
         });
         assert_eq!(result, Err("Stopped.".into()));
+        assert_eq!(got, ["one"]);
+    }
+
+    #[test]
+    fn break_ends_the_stream_with_the_text_so_far() {
+        let setup = local_setup(stub(&["one", "two", "three"]));
+        let messages = Chat::default().ask("Explain", &setup.png).unwrap();
+        let mut got = Vec::new();
+        // No unwinding: the caller gets the partial answer back as a normal Ok.
+        let text = ai::ask_stream(&setup.cfg, setup.key.as_ref(), &messages, |piece| {
+            got.push(piece.to_string());
+            ControlFlow::Break(())
+        });
+        assert_eq!(text.unwrap(), "one");
         assert_eq!(got, ["one"]);
     }
 }
