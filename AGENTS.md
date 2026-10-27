@@ -162,10 +162,17 @@ production systems.
   motion come only from tokens; screens/pages/steps/actions come from lists (a new feature = one
   entry + one view file; recipe in ARCHITECTURE.md). Rebuilding or restructuring current UI code
   for this is allowed (behaviour, frozen contracts and tests kept).
-- Backend cleanup (lead plan 2026-10-27, owner OK pending): the targeted backend cleanup
-  (docs/internal/REPORT_backend_audit.md items 1-5: one config writer, overlay state dropped on
-  close, freed fonts/caches, backend logic out of ui/, quick wins) lands in 0.1.2 with the UI
-  restructure; the rest goes to 0.1.3 with glass; 0.2.0 stays AI online + fast core.
+- Version scope (owner, 2026-10-27, supersedes the 0.1.2 line of "Version plan"): 0.1.2 = new UI +
+  architecture: the UI restructure + backend items 1-5 of docs/internal/REPORT_backend_audit.md (one
+  config writer, overlay state dropped on close, freed fonts/caches, backend logic out of ui/, quick
+  wins) + AI chat; the remaining backend cleanup lands in 0.1.3 with the GPU renderer and glass;
+  0.2.0 stays AI online (OpenRouter sign-in, web search) + fast core.
+- Showcase placement (owner, 2026-10-27, refines "Feature showcase"): no separate showcase page, tab
+  or onboarding step: a compact live preview at the top of each feature's Settings page, hideable per
+  page, a still frame with reduced motion.
+- Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
+  Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
+  Codex in the design (widgets/tray-menu.js), then ported.
 - v0.1.1 release OK (owner, 2026-10-27): publish v0.1.1 after the last fixes (Linux links/launcher/
   takeover #146, Linux I-beam, MSI dropped) are merged and CI is green. Windows assets: the Setup exe
   (with /quiet) + the portable exe; no separate MSI download.
