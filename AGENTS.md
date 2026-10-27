@@ -131,6 +131,9 @@ production systems.
   acceptable, under 1 s is the ideal. Games: most players have a dedicated GPU, so the
   GPU translation path (#26) matters for live game translation; it must never cost the
   game frames (measured with the private cutscene test, #82).
+- Beta release OK (owner, 2026-10-27): the lead may publish v0.1.1-beta.1 as a GitHub
+  PRE-release (never auto-installed) without waiting; the owner reviews it later. The
+  stable v0.1.1 still needs the gate and the owner's OK.
 - Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
   is on hold until the owner resumes it.
 
