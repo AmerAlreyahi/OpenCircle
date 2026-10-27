@@ -131,9 +131,9 @@ production systems.
   acceptable, under 1 s is the ideal. Games: most players have a dedicated GPU, so the
   GPU translation path (#26) matters for live game translation; it must never cost the
   game frames (measured with the private cutscene test, #82).
-- Beta release OK (owner, 2026-10-27): the lead may publish v0.1.1-beta.1 as a GitHub
-  PRE-release (never auto-installed) without waiting; the owner reviews it later. The
-  stable v0.1.1 still needs the gate and the owner's OK.
+- Releases (owner, 2026-10-27, firm; withdraws the beta OK): no tag, draft, beta or
+  stable release until the owner has checked every feature and explicitly says to
+  publish that release.
 - Screen edge (owner, 2026-10-27, firm): the old moving multi-colour edge animation
   never ships again. The edge is the design's Active Look inset glow (two colours per
   look): it fades in with the overlay, then only the design's very soft 4 s breathing
