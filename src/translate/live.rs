@@ -80,6 +80,24 @@ impl Live {
         cache: &Cache,
         deps: &impl Deps,
     ) -> Result<Option<Timings>, Error> {
+        self.step_hiding(frame, width, height, target, cache, deps, |_| {})
+    }
+
+    /// [`Live::step`], and before the slow part (OCR, translation): where the
+    /// text under a patch changed, the patch goes at once and `hide` gets the
+    /// ones left, so the layer never shows a stale translation over new text
+    /// while the new one is read (#56).
+    #[allow(clippy::too_many_arguments)]
+    pub fn step_hiding(
+        &mut self,
+        frame: &[u8],
+        width: u32,
+        height: u32,
+        target: &str,
+        cache: &Cache,
+        deps: &impl Deps,
+        hide: impl FnOnce(&[Patch]),
+    ) -> Result<Option<Timings>, Error> {
         let start = Instant::now();
         check_frame(frame, width, height)?;
         let fresh = self.size != (width, height);
@@ -99,6 +117,17 @@ impl Live {
         };
         if !changed.contains(&true) {
             return Ok(None);
+        }
+        let tw = width.div_ceil(TILE);
+        let stale = |p: &Patch| {
+            let [x0, y0, x1, y1] = rect(p.bounds);
+            (y0 / TILE..y1.div_ceil(TILE))
+                .any(|ty| (x0 / TILE..x1.div_ceil(TILE)).any(|tx| changed[(ty * tw + tx) as usize]))
+        };
+        let before = self.patches.len();
+        self.patches.retain(|p| !fresh && !stale(p));
+        if self.patches.len() < before {
+            hide(&self.patches);
         }
         let old = if fresh { &[][..] } else { &self.lines[..] };
         let regions = regions(&changed, width, height, old);
@@ -497,6 +526,48 @@ mod tests {
                 .is_none()
         );
         assert_eq!(fake.ocr_calls.borrow().len(), 1);
+    }
+
+    /// New text under a patch: the patch goes before the new text is read
+    /// (no stale translation over it meanwhile); one elsewhere stays.
+    #[test]
+    fn a_patch_whose_text_changed_is_hidden_before_the_reread() {
+        const FAR: [f32; 4] = [40.0, 140.0, 120.0, 24.0];
+        let (img, cache) = (frame(W, H, &[OLD, FAR]), Cache::new(16));
+        let fake = Fake::new(|_, _, _| vec![tb("Open the gate", OLD), tb("Run", FAR)]);
+        let mut live = Live::new();
+        live.step(&img, W, H, "ar", &cache, &fake).unwrap();
+        let [kept, gone] = [1, 0].map(|i| live.patches()[i].clone());
+        let mut next = img.clone();
+        paste(&mut next, W, [60, 44, 80, 54], &[255; 20 * 10 * 4]);
+        let (mut left, mut reads) = (None, 0);
+        let hide = |p: &[Patch]| {
+            left = Some(p.to_vec());
+            reads = fake.ocr_calls.borrow().len();
+        };
+        live.step_hiding(&next, W, H, "ar", &cache, &fake, hide)
+            .unwrap();
+        assert_eq!(left, Some(vec![kept]), "only the far patch stays");
+        assert_eq!(reads, 1, "hidden before the new text is read");
+        assert!(!live.patches().contains(&gone));
+
+        // new text again, and its translation fails: still hidden
+        let mut fake = fake;
+        fake.fail_ai = true;
+        fake.lines = Box::new(|_: &[u8], _, _| vec![tb("Shut the gate", OLD)]);
+        let n = live.patches().len();
+        paste(&mut next, W, [60, 44, 80, 54], &[9; 20 * 10 * 4]);
+        let mut hidden = false;
+        assert!(
+            live.step_hiding(&next, W, H, "ar", &cache, &fake, |_| hidden = true)
+                .is_err()
+        );
+        assert!(hidden && live.patches().len() < n);
+        // nothing new under a patch: nothing hidden
+        let mut called = false;
+        live.step_hiding(&next, W, H, "ar", &cache, &fake, |_| called = true)
+            .ok();
+        assert!(!called);
     }
 
     #[test]

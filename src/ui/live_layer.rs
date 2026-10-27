@@ -1,9 +1,9 @@
 //! Live translate (DESIGN.md "Full-screen translate", Ctrl+Shift+L): a
 //! borderless, monitor-sized, always-on-top window made click-through (and,
 //! on Windows, invisible to capture) by `crate::live::prepare_layer`. It shows
-//! only the translated patches; everything else is see-through. A thread
-//! captures the monitor about once a second and runs `translate::live::Live`,
-//! one step at a time, and sends what changed.
+//! only the translated patches; everything else is see-through. A thread at
+//! below-normal priority captures the monitor every 1.5 s (by default) and runs
+//! `translate::live::Live`, one step at a time, and sends what changed.
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -14,17 +14,19 @@ use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 
 use super::live_controller::{self, Controller, Out};
 use super::{background, border, theme, widgets, windows};
+use crate::ai::AiError;
 use crate::capture::{self, window_rect};
 use crate::config;
 use crate::live::{self, LayerError};
 use crate::mt::Pair;
-use crate::ocr;
-use crate::translate::live::Live as Steps;
-use crate::translate::pipeline::Cache;
+use crate::ocr::{self, TextBlock};
+use crate::translate::lang;
+use crate::translate::live::{Live as Steps, Patch};
+use crate::translate::pipeline::{Cache, Deps, Real};
 
-/// Time between captures (start to start; a slow step just delays the next).
-// ponytail: fixed; a `translate.live_interval` setting when someone asks for it.
-/// How often live mode re-captures (Settings > Translate > Live refresh).
+/// How often live mode re-captures (Settings > Translate > Live refresh;
+/// 1.5 s by default): steps start on this fixed beat, and a slow step skips
+/// the beats it ran over (`pump`).
 fn interval() -> Duration {
     Duration::from_millis(crate::config::current().translate.live_interval_ms.into())
 }
@@ -494,10 +496,18 @@ impl Live {
         let (stop, cache) = (self.stop.clone(), self.cache.clone());
         let (paused, chosen, mask) = (self.paused.clone(), self.langs.clone(), self.mask.clone());
         let (task, handle) = background(move |tx| {
+            // capture, OCR and translation after the game and the desktop
+            ocr::gently_here();
             // The languages are the controller's (they start as the config's).
             let start = chosen.lock().map(|l| l.clone()).unwrap_or_default();
-            let mut deps = match crate::actions::translate::deps_for(&start.0, &start.1) {
-                Ok((deps, _)) => deps,
+            let deps_for = |(source, target): &(String, String)| {
+                crate::actions::translate::deps_for(source, target).map(|(real, _)| Reader {
+                    real,
+                    scale: monitor.scale,
+                })
+            };
+            let mut deps = match deps_for(&start) {
+                Ok(deps) => deps,
                 Err(e) => {
                     let first = e.lines().next().unwrap_or_default().to_string();
                     let _ = tx.unbounded_send(Msg::Failed(first));
@@ -507,15 +517,19 @@ impl Live {
             let mut steps = Steps::new();
             let mut last_error = None;
             let mut langs = start;
+            let mut was_away = false;
             let tick = || {
                 if paused.load(Ordering::Relaxed) {
                     return None;
                 }
+                if let Some(clear) = away_gate(live::away(), &mut was_away, &mut steps) {
+                    return clear;
+                }
                 let now = chosen.lock().map(|l| l.clone()).unwrap_or_default();
                 if now != langs {
                     steps = Steps::new(); // another language: read everything again
-                    match crate::actions::translate::deps_for(&now.0, &now.1) {
-                        Ok((d, _)) => deps = d,
+                    match deps_for(&now) {
+                        Ok(d) => deps = d,
                         Err(e) => {
                             let first = e.lines().next().unwrap_or_default().to_string();
                             return report(&mut last_error, first);
@@ -562,7 +576,11 @@ impl Live {
                         .copied()
                         .collect()
                 };
-                match steps.step(&page, cw, ch, target, &cache, &deps) {
+                // new text under a patch: it goes now, not after the re-read
+                let hide = |left: &[Patch]| {
+                    let _ = tx.unbounded_send(Msg::Patches(shown(left, area, &blanked)));
+                };
+                match steps.step_hiding(&page, cw, ch, target, &cache, &deps, hide) {
                     Ok(None) => None,
                     Ok(Some(t)) => {
                         last_error = None;
@@ -581,19 +599,7 @@ impl Live {
                             d.busy,
                             d.no_room,
                         );
-                        let shown = (steps.patches().iter())
-                            .map(|p| {
-                                let [px, py, pw, ph] = p.bounds;
-                                ([px + area[0], py + area[1], pw, ph], p)
-                            })
-                            // its erase saw black there: it would draw a black box
-                            .filter(|(bounds, _)| !over_blanked(*bounds, &blanked))
-                            .map(|(bounds, p)| Shown {
-                                bounds,
-                                image: image::Handle::from_rgba(bounds[2], bounds[3], p.rgba.clone()),
-                            })
-                            .collect();
-                        Some(Msg::Patches(shown))
+                        Some(Msg::Patches(shown(steps.patches(), area, &blanked)))
                     }
                     Err(e) => report(&mut last_error, e.to_string()),
                 }
@@ -665,10 +671,89 @@ fn blank_own(
     blanked
 }
 
+/// The step's patches (page px) as the layer shows them: moved by the
+/// page's top-left in the frame (`area`), none over a `blanked` part.
+fn shown(patches: &[Patch], area: [u32; 4], blanked: &[[u32; 4]]) -> Vec<Shown> {
+    (patches.iter())
+        .map(|p| {
+            let [px, py, pw, ph] = p.bounds;
+            ([px + area[0], py + area[1], pw, ph], p)
+        })
+        // its erase saw black there: it would draw a black box
+        .filter(|(bounds, _)| !over_blanked(*bounds, blanked))
+        .map(|(bounds, p)| Shown {
+            bounds,
+            image: image::Handle::from_rgba(bounds[2], bounds[3], p.rgba.clone()),
+        })
+        .collect()
+}
+
+/// Live reads (#56): Windows OCR where Auto routing says so (#62: a screen in
+/// ~0.1-0.3 s, in this process, at below-normal priority) and it reads the
+/// source language, else PP-OCR in the helper (also when Windows' read
+/// fails). Translation as `real` does it (offline by default).
+struct Reader {
+    real: Real,
+    /// The monitor's (Windows OCR reads small text better doubled).
+    scale: f32,
+}
+
+impl Reader {
+    fn system(&self) -> bool {
+        let reader = config::current().selection.text_reader;
+        let tag = ocr::system::language();
+        let base = |t: &str| {
+            t.split(['-', '_'])
+                .next()
+                .unwrap_or_default()
+                .to_lowercase()
+        };
+        ocr::route(reader, Some(tag)) == ocr::Source::System
+            && (self.real.source == lang::AUTO || tag.is_some_and(|t| base(t) == self.real.source))
+    }
+}
+
+impl Deps for Reader {
+    fn recognize(&self, rgba: &[u8], w: u32, h: u32) -> Result<Vec<TextBlock>, ocr::OcrError> {
+        if self.system() {
+            let k = *ocr::system::passes(self.scale, w, h).last().unwrap_or(&1);
+            match ocr::system::recognize(rgba, w, h, k) {
+                Ok(lines) => return Ok(lines),
+                Err(e) => eprintln!("[opencircle] live: Windows OCR failed ({e}); PP-OCR reads"),
+            }
+        }
+        self.real.recognize(rgba, w, h)
+    }
+
+    fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
+        self.real.translate(texts, target)
+    }
+}
+
 /// A patch at `bounds` (x, y, w, h) touches a part of the frame that was
 /// blanked out (black), so its erase and redraw would show black there.
 fn over_blanked([x, y, w, h]: [u32; 4], blanked: &[[u32; 4]]) -> bool {
     (blanked.iter()).any(|&[bx, by, bw, bh]| x < bx + bw && bx < x + w && y < by + bh && by < y + h)
+}
+
+/// A tick while the session is `away` (locked, switched, screen off: #56):
+/// `Some` = skip it, nothing captured, with a message clearing the layer
+/// when it just went away. Going away or coming back starts the steps
+/// afresh: everything is read again.
+fn away_gate(away: bool, was: &mut bool, steps: &mut Steps) -> Option<Option<Msg>> {
+    let changed = std::mem::replace(was, away) != away;
+    if changed {
+        *steps = Steps::new();
+        eprintln!(
+            "[opencircle] live translate {}",
+            if away {
+                "stopped: the session is away"
+            } else {
+                "resumed"
+            }
+        );
+    }
+    away.then(|| changed.then(|| Msg::Patches(Vec::new())))
 }
 
 /// A step error once (not every second), then nothing until it changes.
@@ -681,23 +766,29 @@ fn report(last: &mut Option<String>, e: String) -> Option<Msg> {
     Some(Msg::Failed(e))
 }
 
-/// Calls `tick` about every `interval` until `stop` is set or `send` fails
-/// (the layer is gone). One tick at a time: a slow one delays the next.
+/// Calls `tick` on a fixed beat of `interval` until `stop` is set or `send`
+/// fails (the layer is gone). One tick at a time, never piled up: a tick
+/// that runs over skips the beats it missed and the next starts on the next
+/// beat (#56), so a slow PC gets fewer steps, not back-to-back ones.
 fn pump<T>(
     stop: &AtomicBool,
     interval: Duration,
     mut tick: impl FnMut() -> Option<T>,
     mut send: impl FnMut(T) -> bool,
 ) {
+    let start = Instant::now();
     while !stop.load(Ordering::Relaxed) {
-        let start = Instant::now();
         if let Some(out) = tick()
             && !send(out)
         {
             return;
         }
-        while !stop.load(Ordering::Relaxed) && start.elapsed() < interval {
-            let left = interval.saturating_sub(start.elapsed());
+        let beats = (start.elapsed().as_nanos())
+            .checked_div(interval.as_nanos())
+            .map_or(0, |n| n + 1);
+        let next = interval.saturating_mul(beats as u32);
+        while !stop.load(Ordering::Relaxed) && start.elapsed() < next {
+            let left = next.saturating_sub(start.elapsed());
             std::thread::sleep(left.min(Duration::from_millis(50)));
         }
     }
@@ -774,6 +865,55 @@ mod tests {
             },
         );
         assert_eq!(sent, 3);
+    }
+
+    /// #56: steps start on a fixed beat; one that runs over skips the beats
+    /// it missed (the next waits for the next beat, never back to back).
+    #[test]
+    fn a_slow_step_skips_beats_instead_of_piling_up() {
+        let beat = Duration::from_millis(40);
+        let stop = AtomicBool::new(false);
+        let begun = Instant::now();
+        let mut starts = Vec::new();
+        let tick = || {
+            starts.push(begun.elapsed());
+            if starts.len() == 1 {
+                std::thread::sleep(beat * 3 / 2); // busy past the second beat
+            }
+            if starts.len() == 3 {
+                stop.store(true, Ordering::SeqCst);
+            }
+            Some(())
+        };
+        pump(&stop, beat, tick, |()| true);
+        assert_eq!(starts.len(), 3);
+        // beats at 0, 40, 80, 120 ms: the first step ends at 60, so the
+        // 40 ms beat is skipped and the next steps start at 80 and 120
+        assert!(starts[1] >= beat * 2, "{starts:?}: started while busy");
+        assert!(starts[2] - starts[1] >= beat * 9 / 10, "{starts:?}");
+    }
+
+    /// #56: a locked (or switched, or dark) session captures nothing; the
+    /// layer clears once as it goes away, and steps run again once back.
+    #[test]
+    fn live_stops_while_the_session_is_away_and_resumes_after() {
+        let (mut was, mut steps) = (false, Steps::new());
+        assert!(
+            away_gate(false, &mut was, &mut steps).is_none(),
+            "steps run"
+        );
+        let gone = away_gate(true, &mut was, &mut steps);
+        assert!(
+            matches!(gone, Some(Some(Msg::Patches(ref p))) if p.is_empty()),
+            "the layer clears as it goes"
+        );
+        for _ in 0..3 {
+            assert!(
+                matches!(away_gate(true, &mut was, &mut steps), Some(None)),
+                "nothing captured, nothing sent"
+            );
+        }
+        assert!(away_gate(false, &mut was, &mut steps).is_none(), "resumed");
     }
 
     /// Live mode with every model on disk (`check` finds nothing missing).

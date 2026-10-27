@@ -10,7 +10,7 @@ pub mod system;
 pub(crate) mod worker;
 
 pub use models::{download_size, ensure_models, models_dir, ready};
-pub use session::{Hold, hold};
+pub use session::{Hold, gently_here, hold};
 pub use worker::{
     WORKER_ARG, recognize_as, recognize_band, recognize_in_child, translate_in_child, warm,
     worker_main,
@@ -189,8 +189,8 @@ pub enum Source {
 /// `None` = not asked yet, `Some(None)` = none). Auto: Windows OCR, but not
 /// for a right-to-left language (PP-OCR reads Arabic better) nor without a
 /// recognizer (#63; Linux never has one); not asked yet = try it (a failed
-/// read falls back to the helper). Selections, translation and live mode
-/// keep PP-OCR whatever this says.
+/// read falls back to the helper). Live translate follows it too (#56, for
+/// its source language); selections and one-shot translation keep PP-OCR.
 pub fn route(setting: TextReader, system: Option<Option<&str>>) -> Source {
     match (setting, system) {
         (TextReader::PpOcr, _) | (_, Some(None)) => Source::Helper,

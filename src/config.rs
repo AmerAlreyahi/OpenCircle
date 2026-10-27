@@ -27,7 +27,7 @@
 //! source = "auto"                   # language code the text is in; auto = detect
 //! target = "ar"                     # language code to translate into
 //! engine = "ai"                     # ai | offline (ai falls back to offline when AI isn't set up)
-//! live_interval_ms = 1000           # live translate repeats every N ms (500-5000)
+//! live_interval_ms = 1500           # live translate repeats every N ms (500-5000)
 //! live_note_shown = false           # the one-time live-mode note was shown
 //! whole_screen = false              # live translate reads the whole screen,
 //!                                   # not just the foreground window (no taskbar, no browser bars)
@@ -114,7 +114,7 @@ const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
 const AI_OFF: &str = ", but AI is off until you choose a provider in Settings > AI";
 /// Live translate repeats this often (ms); the allowed range is `LIVE_INTERVAL_MS`.
-pub const DEFAULT_LIVE_INTERVAL_MS: u32 = 1000;
+pub const DEFAULT_LIVE_INTERVAL_MS: u32 = 1500;
 pub const LIVE_INTERVAL_MS: std::ops::RangeInclusive<u32> = 500..=5000;
 /// Long edge (px) Copy / Save scale a capture down to: what AI chats take
 /// without shrinking it again themselves. `0` = original size.
@@ -1622,7 +1622,7 @@ mod tests {
         assert!(c.quick_actions[1].live);
         assert_eq!(c.general.default_action, DefaultAction::Lens);
         assert_eq!(c.general.save_folder, "");
-        assert_eq!(c.translate.live_interval_ms, 1000);
+        assert_eq!(c.translate.live_interval_ms, 1500);
         assert_eq!(c.translate.engine, Engine::Ai);
         // Snip: Print Screen = region, Alt = window, Ctrl = full screen.
         let snip: Vec<_> = c
@@ -1866,7 +1866,7 @@ mod tests {
             "good survives"
         );
         assert_eq!(c.general.save_folder, "");
-        assert_eq!(c.translate.live_interval_ms, 1000);
+        assert_eq!(c.translate.live_interval_ms, 1500);
         assert!(
             w.iter().any(|m| m.starts_with("general.save_folder")),
             "{w:?}"
@@ -1891,7 +1891,10 @@ mod tests {
         }
         for bad in ["5001", "499", "-1", "\"1000\"", "1.5"] {
             let (c, w) = Config::parse(&format!("[translate]\nlive_interval_ms = {bad}\n"));
-            assert_eq!(c.translate.live_interval_ms, 1000, "{bad}");
+            assert_eq!(
+                c.translate.live_interval_ms, DEFAULT_LIVE_INTERVAL_MS,
+                "{bad}"
+            );
             assert_eq!(w.len(), 1, "{bad}: {w:?}");
         }
         let abs = std::env::temp_dir().to_string_lossy().replace('\\', "/");

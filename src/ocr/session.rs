@@ -132,6 +132,7 @@ impl Session {
                 .helper
                 .insert(Helper::spawn(&self.program, &self.args)?),
         };
+        helper.set_gentle(GENTLE.get());
         self.last_id += 1;
         helper.request(self.last_id, payload, self.timeout)
     }
@@ -147,6 +148,36 @@ struct Helper {
     child: Child,
     stdin: ChildStdin,
     stdout: ChildStdout,
+    /// Its process runs below normal priority (`gently_here`).
+    gentle: bool,
+}
+
+thread_local! {
+    /// This thread's helper requests run below normal priority (`gently_here`).
+    static GENTLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// This thread runs below normal priority for the rest of its life, and so
+/// does the helper while it answers this thread (Windows: its process class,
+/// set per request, so a request from elsewhere gets it back at normal).
+/// Live translate's step thread (#56): the game and the desktop come first.
+// ponytail: Linux lowers this thread only; an unprivileged process can't
+// raise the helper back afterwards (RLIMIT_NICE).
+pub fn gently_here() {
+    GENTLE.set(true);
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL,
+        };
+        // SAFETY: the pseudo handle of this thread.
+        let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) };
+    }
+    #[cfg(target_os = "linux")]
+    // SAFETY: changes this thread's nice value only.
+    unsafe {
+        libc::setpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t, 10);
+    }
 }
 
 impl Helper {
@@ -162,12 +193,35 @@ impl Helper {
                 child,
                 stdin,
                 stdout,
+                gentle: false,
             }),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
                 Err(OcrError::Engine("helper has no pipes".into()))
             }
+        }
+    }
+
+    /// Windows: its process below normal priority, or back at normal.
+    fn set_gentle(&mut self, on: bool) {
+        if self.gentle == on {
+            return;
+        }
+        self.gentle = on;
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows::Win32::Foundation::HANDLE;
+            use windows::Win32::System::Threading::{
+                BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS, SetPriorityClass,
+            };
+            let class = match on {
+                true => BELOW_NORMAL_PRIORITY_CLASS,
+                false => NORMAL_PRIORITY_CLASS,
+            };
+            // SAFETY: our child's process handle, open while `child` lives.
+            let _ = unsafe { SetPriorityClass(HANDLE(self.child.as_raw_handle()), class) };
         }
     }
 
@@ -188,6 +242,7 @@ impl Helper {
             child,
             stdin,
             stdout,
+            ..
         } = self;
         let deadline = Instant::now() + timeout;
         let ((wrote_tx, wrote_rx), (reply_tx, reply_rx)) = (mpsc::channel(), mpsc::channel());

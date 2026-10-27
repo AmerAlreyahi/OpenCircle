@@ -1332,7 +1332,7 @@ fn content(state: &State) -> Element<'_, Message> {
                         "Milliseconds between updates in live translate",
                         tip(
                             text_field(
-                                "1000",
+                                "1500",
                                 &state.interval,
                                 error.is_some(),
                                 Message::LiveInterval,
@@ -1905,12 +1905,12 @@ fn custom_rows(state: &State) -> Vec<Element<'_, Message>> {
             ),
             None,
         ),
-        form_row(
+    ]);
+    // live translate's edge never moves (#56)
+    if state.edge_mode != EdgeMode::Live {
+        rows.push(form_row(
             "Edge motion",
-            match state.edge_mode {
-                EdgeMode::Live => "Moves while live translate runs",
-                _ => "Once when it opens",
-            },
+            "Once when it opens",
             segmented(
                 &[
                     (true, "Animate", "The edge moves"),
@@ -1920,8 +1920,8 @@ fn custom_rows(state: &State) -> Vec<Element<'_, Message>> {
                 Message::Animate,
             ),
             None,
-        ),
-    ]);
+        ));
+    }
     rows
 }
 
@@ -3012,7 +3012,7 @@ pub(super) mod tests {
     fn live_interval_is_checked_against_its_range() {
         let (mut s, _) = state(None);
         update(&mut s, Message::Section(Section::Translate));
-        assert_eq!(s.interval, "1000");
+        assert_eq!(s.interval, "1500");
         for ok in ["500", "1000", "5000", " 2500 "] {
             update(&mut s, Message::LiveInterval(ok.into()));
             assert!(s.problems.is_empty(), "{ok}: {:?}", s.problems);

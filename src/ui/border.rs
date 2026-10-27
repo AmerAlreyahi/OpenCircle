@@ -4,9 +4,9 @@
 //!
 //! Motion: the overlay's activation glow (a wide glow from the first frame
 //! that draws back to the edge, the overlay's opening `overlay::APPEAR`) or, without it, a fade-in (glow) / one
-//! shimmer sweep (thin); snip the same when its edge animates; live translate a
-//! slow flow of the colours round the edge (glow) or a light circling it (thin).
-//! Off when the look says so or the OS asks for less motion (Windows).
+//! shimmer sweep (thin); snip the same when its edge animates. Live translate's
+//! edge stays still (#56: nothing redraws while nothing changes). Off when the
+//! look says so or the OS asks for less motion (Windows).
 //!
 //! Cheap: the edge is four strip images. Their geometry (where each pixel is
 //! along the edge and how deep inside the band) is computed once per size and
@@ -48,18 +48,8 @@ const SWEEP_GLOW: f32 = 0.85;
 const ACT_REACH: f32 = 150.0;
 const ACTIVATION: Duration = super::overlay::APPEAR;
 const ACT_FRAME: Duration = Duration::from_millis(16);
-/// Live, thin: one turn of the light, its frame time (20 fps) and brightness.
-/// A light, not a turning gradient: a frame changes only the strips near it.
-const FLOW_LOOP: Duration = Duration::from_secs(5);
-const FLOW_FRAME: Duration = Duration::from_millis(50);
-const FLOW_GLOW: f32 = 0.45;
 /// The light's width (fraction of the perimeter, Gaussian).
 const LIGHT_WIDTH: f32 = 0.035;
-/// Live, glow: the colours flow once round the edge in this long, a frame
-/// every `DRIFT_FRAME` (5 fps: each frame redraws all four strips, the CPU
-/// budget; a slow loop keeps each step small).
-const DRIFT_LOOP: Duration = Duration::from_secs(20);
-const DRIFT_FRAME: Duration = Duration::from_millis(200);
 /// Colours per turn of the edge.
 const LUT: usize = 512;
 
@@ -284,7 +274,7 @@ impl Spec {
 
     /// What a window shows of `self` (`edge`'s): a colour-keyed window has no
     /// partial alpha, so a glow there would be a coarse dither (blotchy, thick):
-    /// it gets the thin line at the edge's thickness instead, still animated.
+    /// it gets the thin line at the edge's thickness instead.
     fn on_window(self, keyed: bool, edge: config::Edge) -> Spec {
         match self.style {
             EdgeStyle::Glow if keyed => Spec::of(config::Edge {
@@ -401,25 +391,7 @@ fn plan(
             };
             (Some(spec), frame, Some(FRAME))
         }
-        (Mode::Live, EdgeStyle::Thin) => {
-            let turn = elapsed.as_millis() % FLOW_LOOP.as_millis();
-            let frame = Frame {
-                head: turn as f32 / FLOW_LOOP.as_millis() as f32,
-                light: FLOW_GLOW,
-                ..Frame::REST
-            };
-            (Some(spec), frame, Some(FLOW_FRAME))
-        }
-        (Mode::Live, _) => {
-            // Whole frames only: the same moment always draws the same.
-            let frames = DRIFT_LOOP.as_millis() / DRIFT_FRAME.as_millis();
-            let n = elapsed.as_millis() / DRIFT_FRAME.as_millis() % frames;
-            let frame = Frame {
-                shift: n as f32 / frames as f32,
-                ..Frame::REST
-            };
-            (Some(spec), frame, Some(DRIFT_FRAME))
-        }
+        // Live (#56) and the rest: still.
         _ => still,
     }
 }
@@ -833,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn thin_sweeps_once_live_moves_snip_stays() {
+    fn thin_sweeps_once_live_and_snip_stay_still() {
         let ms = Duration::from_millis;
         let look = aurora();
         assert!(!look.activation_glow);
@@ -843,23 +815,15 @@ mod tests {
         assert!((mid.light - SWEEP_GLOW).abs() < 1e-3 && mid.mirrored);
         assert!((mid.head - 0.375).abs() < 1e-3, "eased: past halfway");
         assert_eq!(plan(Mode::Overlay, &look, SWEEP, true).2, None);
-        // live thin: a light goes round every FLOW_LOOP, 20 fps
-        assert_eq!(plan(Mode::Live, &look, ms(2500), true).1.head, 0.5);
-        let hours = plan(
-            Mode::Live,
-            &look,
-            Duration::from_secs(36_000) + ms(500),
-            true,
-        );
-        assert!((hours.1.head - 0.1).abs() < 1e-6 && hours.2 == Some(FLOW_FRAME));
-        // live glow: the colours drift, at most 20 fps, the same moment the same frame
+        // live: still, whatever the look says (#56: no redraws while live runs)
         let glow = spectrum();
-        let (_, a, next) = plan(Mode::Live, &glow, ms(1000), true);
-        assert!(next.unwrap() >= Duration::from_millis(50));
-        assert!(a.shift > 0.0 && a.shift < 0.2);
-        assert_eq!(plan(Mode::Live, &glow, ms(1010), true).1, a);
-        let (_, wrapped, _) = plan(Mode::Live, &glow, DRIFT_LOOP + ms(1000), true);
-        assert_eq!(wrapped, a);
+        for look in [look, glow].iter().chain(PRESETS.iter().map(|(_, l)| l)) {
+            for at in [0, 700, 2500, 36_000_000] {
+                let (spec, frame, next) = plan(Mode::Live, look, ms(at), true);
+                assert_eq!((frame, next), (Frame::REST, None), "{at} ms");
+                assert_eq!(spec, Spec::of(look.live));
+            }
+        }
         // snip: thin and still by default; none = nothing
         assert_eq!(plan(Mode::Snip, &glow, ms(0), true).2, None);
         let mut none = glow;
@@ -868,36 +832,6 @@ mod tests {
         // reduce motion: nothing moves
         for mode in [Mode::Overlay, Mode::Live] {
             assert_eq!(plan(mode, &look, ms(300), false).2, None);
-        }
-    }
-
-    #[test]
-    fn a_live_frame_changes_few_strips_for_a_light_and_all_for_a_drift() {
-        let ms = Duration::from_millis;
-        let changed = |look: &Look, at: u64, step: Duration| {
-            let (spec, a, _) = plan(Mode::Live, look, ms(at), true);
-            let (_, b, _) = plan(Mode::Live, look, ms(at) + step, true);
-            let geo = Geo::new(1920, 1080, 1.0, spec.unwrap());
-            let cache = Cache::build(geo);
-            let paint = Paint::of(look, geo_style(geo));
-            let (a, b) = (
-                render(&cache, &paint, a, true),
-                render(&cache, &paint, b, true),
-            );
-            a.iter().zip(&b).filter(|(a, b)| a != b).count()
-        };
-        for at in (0..5000).step_by(500) {
-            let n = changed(&aurora(), at, FLOW_FRAME);
-            assert!((1..=2).contains(&n), "{n} strips at {at} ms");
-        }
-        assert_eq!(changed(&spectrum(), 1000, DRIFT_FRAME), 4);
-    }
-
-    fn geo_style(geo: Geo) -> EdgeStyle {
-        if geo.glow {
-            EdgeStyle::Glow
-        } else {
-            EdgeStyle::Thin
         }
     }
 

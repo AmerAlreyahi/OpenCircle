@@ -5,6 +5,8 @@
 //! `window::run(id, |w| w.window_handle().map(|h| live::prepare_layer(h.as_raw())))`.
 //! What to draw comes from `translate::Live`.
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use iced::window::raw_window_handle::RawWindowHandle;
 
 /// Windows: the layer is colour-keyed. Paint every pixel that is not a patch
@@ -66,6 +68,69 @@ pub fn own_windows() -> Vec<[i32; 4]> {
     Vec::new()
 }
 
+/// Why live translate captures nothing now (#56), as bits: the session is
+/// locked, its console went to another user / was disconnected, or the
+/// screen is off. Windows: kept by `win::watch` from the WTS session and
+/// display notifications; never set elsewhere.
+// ponytail: Linux has no watcher (logind's Lock signal / DPMS when Linux
+// work resumes); there a locked screen just fails its captures.
+static AWAY: AtomicU8 = AtomicU8::new(0);
+const LOCKED: u8 = 1;
+const DISCONNECTED: u8 = 2;
+const SCREEN_OFF: u8 = 4;
+
+/// `WM_WTSSESSION_CHANGE`'s events (its wParam), as winuser.h numbers them.
+const WTS_CONSOLE_CONNECT: u32 = 1;
+const WTS_CONSOLE_DISCONNECT: u32 = 2;
+const WTS_REMOTE_CONNECT: u32 = 3;
+const WTS_REMOTE_DISCONNECT: u32 = 4;
+const WTS_SESSION_LOCK: u32 = 7;
+const WTS_SESSION_UNLOCK: u32 = 8;
+
+/// The session is away (locked, switched or disconnected, screen off): live
+/// translate captures nothing until it is back. The first call starts the
+/// watcher (Windows).
+pub fn away() -> bool {
+    #[cfg(windows)]
+    {
+        static WATCH: std::sync::Once = std::sync::Once::new();
+        WATCH.call_once(win::watch);
+    }
+    AWAY.load(Ordering::SeqCst) != 0
+}
+
+/// The away bits after a session event (`WTS_*`).
+fn on_session(away: u8, event: u32) -> u8 {
+    match event {
+        WTS_SESSION_LOCK => away | LOCKED,
+        WTS_SESSION_UNLOCK => away & !LOCKED,
+        WTS_CONSOLE_DISCONNECT | WTS_REMOTE_DISCONNECT => away | DISCONNECTED,
+        WTS_CONSOLE_CONNECT | WTS_REMOTE_CONNECT => away & !DISCONNECTED,
+        _ => away,
+    }
+}
+
+/// The away bits after the display's state changed (0 off, 1 on, 2 dimmed:
+/// still readable).
+fn on_display(away: u8, state: u32) -> u8 {
+    match state {
+        0 => away | SCREEN_OFF,
+        _ => away & !SCREEN_OFF,
+    }
+}
+
+#[cfg(windows)]
+fn update_away(change: impl Fn(u8) -> u8) {
+    let was = AWAY
+        .try_update(Ordering::SeqCst, Ordering::SeqCst, |a| Some(change(a)))
+        .unwrap_or_default();
+    let now = change(was);
+    if (was == 0) != (now == 0) {
+        let what = if now == 0 { "back" } else { "away" };
+        eprintln!("[opencircle] session {what} (locked / switched / screen off: {now:03b})");
+    }
+}
+
 pub fn prepare_layer(handle: RawWindowHandle) -> Result<Layer, LayerError> {
     match handle {
         #[cfg(windows)]
@@ -84,6 +149,7 @@ pub fn prepare_layer(handle: RawWindowHandle) -> Result<Layer, LayerError> {
 #[cfg(windows)]
 mod win {
     use super::{COLOUR_KEY, Layer, LayerError};
+    use std::sync::atomic::Ordering;
     use windows::Win32::Foundation::{COLORREF, HWND};
     use windows::Win32::UI::WindowsAndMessaging::{
         GWL_EXSTYLE, GetLayeredWindowAttributes, GetWindowLongPtrW, HWND_TOPMOST,
@@ -92,6 +158,96 @@ mod win {
         SetWindowPos, WDA_EXCLUDEFROMCAPTURE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
         WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     };
+
+    /// A message-only window on its own thread for the rest of the run: WTS
+    /// session changes (lock, user switch, disconnect) and the display's
+    /// on/off state set `AWAY`. It costs one thread asleep in `GetMessageW`.
+    pub fn watch() {
+        use std::sync::atomic::AtomicIsize;
+        use windows::Win32::Foundation::{HANDLE, LPARAM, LRESULT, WPARAM};
+        use windows::Win32::System::Power::{
+            POWERBROADCAST_SETTING, RegisterPowerSettingNotification,
+        };
+        use windows::Win32::System::RemoteDesktop::{
+            NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CallWindowProcW, CreateWindowExW, DEVICE_NOTIFY_WINDOW_HANDLE, DispatchMessageW,
+            GWLP_WNDPROC, GetMessageW, HWND_MESSAGE, MSG, PBT_POWERSETTINGCHANGE, WINDOW_EX_STYLE,
+            WINDOW_STYLE, WM_POWERBROADCAST, WM_WTSSESSION_CHANGE, WNDPROC,
+        };
+        use windows::core::{GUID, w};
+        /// GUID_CONSOLE_DISPLAY_STATE (SystemServices, a big feature for one GUID).
+        const DISPLAY: GUID = GUID::from_u128(0x6fe69556_704a_47a0_8f24_c28d936fda47);
+        static OLD: AtomicIsize = AtomicIsize::new(0);
+
+        unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+            match msg {
+                WM_WTSSESSION_CHANGE => super::update_away(|a| super::on_session(a, w.0 as u32)),
+                WM_POWERBROADCAST if w.0 as u32 == PBT_POWERSETTINGCHANGE => {
+                    // SAFETY: with PBT_POWERSETTINGCHANGE, lParam points to the
+                    // setting; GUID_CONSOLE_DISPLAY_STATE's data is one DWORD.
+                    let state = unsafe {
+                        let s = &*(l.0 as *const POWERBROADCAST_SETTING);
+                        (s.PowerSetting == DISPLAY && s.DataLength >= 4)
+                            .then(|| (s.Data.as_ptr() as *const u32).read_unaligned())
+                    };
+                    if let Some(state) = state {
+                        super::update_away(|a| super::on_display(a, state));
+                    }
+                    return LRESULT(1);
+                }
+                _ => {}
+            }
+            // SAFETY: the STATIC class's own procedure, saved before this one
+            // was installed.
+            unsafe {
+                let old: WNDPROC = std::mem::transmute(OLD.load(Ordering::SeqCst));
+                CallWindowProcW(old, hwnd, msg, w, l)
+            }
+        }
+
+        std::thread::spawn(|| {
+            // SAFETY: a message-only window of this thread, alive as long as
+            // the process; its procedure only reads its messages.
+            unsafe {
+                let Ok(hwnd) = CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("STATIC"),
+                    w!("OpenCircle session watch"),
+                    WINDOW_STYLE(0),
+                    0,
+                    0,
+                    0,
+                    0,
+                    Some(HWND_MESSAGE),
+                    None,
+                    None,
+                    None,
+                ) else {
+                    eprintln!("[opencircle] live translate: no session watch window");
+                    return;
+                };
+                let old = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, proc as *const () as isize);
+                OLD.store(old, Ordering::SeqCst);
+                if let Err(e) = WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) {
+                    eprintln!("[opencircle] live translate: no session notifications: {e}");
+                }
+                // (it sends the display's state at once)
+                if let Err(e) = RegisterPowerSettingNotification(
+                    HANDLE(hwnd.0),
+                    &DISPLAY,
+                    DEVICE_NOTIFY_WINDOW_HANDLE,
+                ) {
+                    eprintln!("[opencircle] live translate: no display notifications: {e}");
+                }
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                    DispatchMessageW(&msg);
+                }
+            }
+        });
+    }
 
     pub fn own_windows() -> Vec<[i32; 4]> {
         use windows::Win32::Foundation::{LPARAM, RECT};
@@ -272,6 +428,30 @@ mod tests {
     use super::*;
     use iced::window::raw_window_handle::WaylandWindowHandle;
     use std::ptr::NonNull;
+
+    /// #56: a lock, a user switch / disconnect or the screen going off each
+    /// make the session away; it is back only when all of them are undone.
+    #[test]
+    fn lock_switch_and_screen_off_make_the_session_away() {
+        let mut a = 0;
+        a = on_session(a, WTS_SESSION_LOCK);
+        assert_ne!(a, 0, "locked");
+        a = on_display(a, 0);
+        a = on_session(a, WTS_SESSION_UNLOCK);
+        assert_ne!(a, 0, "unlocked, the screen still off");
+        a = on_display(a, 2);
+        assert_eq!(a, 0, "dimmed is on");
+        a = on_session(a, WTS_CONSOLE_DISCONNECT);
+        assert_ne!(a, 0, "another user on the console");
+        a = on_session(a, 5); // a logon elsewhere: no change
+        assert_ne!(a, 0);
+        a = on_session(a, WTS_REMOTE_CONNECT);
+        assert_eq!(a, 0, "back over Remote Desktop");
+        a = on_session(on_session(a, WTS_REMOTE_DISCONNECT), WTS_CONSOLE_CONNECT);
+        assert_eq!(a, 0);
+        #[cfg(not(windows))]
+        assert!(!away(), "nothing sets it here");
+    }
 
     #[test]
     fn wayland_is_unsupported() {
