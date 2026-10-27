@@ -127,6 +127,10 @@ production systems.
 - Instant text (owner, 2026-10-27): Windows OCR (#62, #63) moves into 0.1.x right after
   the installer: the whole screen is read right after the opening, so text is selectable
   at once; #123's read-on-touch is the stopgap until then.
+- Translate targets (owner, 2026-10-27): a full page on a normal PC: up to 3 s is
+  acceptable, under 1 s is the ideal. Games: most players have a dedicated GPU, so the
+  GPU translation path (#26) matters for live game translation; it must never cost the
+  game frames (measured with the private cutscene test, #82).
 - Linux (owner, 2026-10-26): the 25 Oct Linux round stays on main; further Linux work
   is on hold until the owner resumes it.
 
