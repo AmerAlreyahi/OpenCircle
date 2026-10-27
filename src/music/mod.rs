@@ -298,10 +298,7 @@ pub fn cover(url: &str) -> Option<(u32, u32, Vec<u8>)> {
     if !url.starts_with("https://") {
         return None;
     }
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(10)))
-        .build()
-        .into();
+    let agent = crate::net::agent(crate::net::COVER);
     let bytes = agent
         .get(url)
         .call()

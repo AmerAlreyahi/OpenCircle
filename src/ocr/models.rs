@@ -5,7 +5,6 @@
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use super::OcrError;
 use crate::translate::lang::Script;
@@ -286,14 +285,7 @@ pub(crate) fn ensure(
             fs::create_dir_all(dir)?;
         }
         if !is_verified(path, f)? {
-            let agent = agent.get_or_insert_with(|| {
-                ureq::Agent::config_builder()
-                    .https_only(true)
-                    .timeout_connect(Some(Duration::from_secs(30)))
-                    .timeout_global(Some(Duration::from_secs(600)))
-                    .build()
-                    .new_agent()
-            });
+            let agent = agent.get_or_insert_with(|| crate::net::agent(crate::net::MODELS));
             fetch(agent, f, path, |n| progress(done + n, total))?;
         }
         done += f.size;

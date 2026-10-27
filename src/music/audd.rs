@@ -2,8 +2,6 @@
 //! `api_token`; the answer is JSON: `{"status":"success","result":{...}|null}`
 //! or `{"status":"error","error":{"error_code":N,"error_message":"..."}}`.
 
-use std::time::Duration;
-
 use serde_json::Value;
 
 use super::{Clip, Error, Song, youtube};
@@ -41,12 +39,7 @@ fn request(key: &Secret, clip: &Clip) -> (String, Vec<u8>) {
 }
 
 pub fn identify(key: &Secret, clip: &Clip) -> Result<Song, Error> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(10)))
-        .timeout_global(Some(Duration::from_secs(30)))
-        .http_status_as_error(false)
-        .build()
-        .into();
+    let agent = crate::net::agent(crate::net::SONG);
     let (kind, body) = request(key, clip);
     let mut resp = agent
         .post(URL)

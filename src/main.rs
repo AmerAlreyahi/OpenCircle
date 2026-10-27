@@ -17,6 +17,7 @@ mod live;
 mod log;
 mod mt;
 mod music;
+mod net;
 mod ocr;
 mod search_history;
 mod secrets;

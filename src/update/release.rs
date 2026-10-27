@@ -132,15 +132,11 @@ pub struct Net;
 
 impl Http for Net {
     fn get(&self, url: &str, etag: Option<&str>) -> Result<Got, String> {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            // https only, except the test hook's local fake server
-            .https_only(super::test_url().is_none())
-            .http_status_as_error(false)
-            .user_agent("OpenCircle")
-            .timeout_connect(Some(Duration::from_secs(20)))
-            .timeout_global(Some(Duration::from_secs(900)))
-            .build()
-            .into();
+        // https only, except the test hook's local fake server
+        let agent = crate::net::agent(crate::net::Policy {
+            https_only: super::test_url().is_none(),
+            ..crate::net::UPDATE
+        });
         let mut req = agent
             .get(url)
             .header("Accept", "application/vnd.github+json");

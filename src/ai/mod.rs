@@ -14,7 +14,6 @@ pub mod openai;
 
 use std::fmt;
 use std::io::BufRead;
-use std::time::Duration;
 
 use serde_json::Value;
 
@@ -281,12 +280,7 @@ pub(crate) fn run_stream(
     mut on_delta: impl FnMut(&str),
     parse: fn(&str) -> Result<Event, AiError>,
 ) -> Result<String, AiError> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(10)))
-        .timeout_global(Some(Duration::from_secs(300)))
-        .http_status_as_error(false)
-        .build()
-        .into();
+    let agent = crate::net::agent(crate::net::AI);
     let mut builder = agent.post(&req.url);
     for (name, value) in &req.headers {
         builder = builder.header(*name, value.as_str());
