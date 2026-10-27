@@ -72,8 +72,9 @@ capture the screen and show it.
    open (#123; `word::Screen`, `App::read_more`): nothing is
    read while the opening animation runs; after it the held helper starts (`App::warm`).
    A press, tap, Shift+click or Ctrl+A reads the full-width band under it first (at
-   once, `ocr::recognize_band` with only the band's new rows); once text was used, the
-   rest follows band by band, nearest the pointer first, gently (the helper on at most
+   once, `ocr::recognize_band` with only the band's new rows); once text was used (off
+   Windows: once the helper is warm, `Message::Warmed`, so the I-beam shows over text
+   before any press), the rest follows band by band, nearest the pointer first, gently (the helper on at most
    two cores, below normal priority: `ocr/worker.rs` `Gentle`). One band at a time. A
    drag that began on text before its band arrived becomes a text selection then; one
    let go before it is held (with the keys after it, e.g. Ctrl+C) until it arrives

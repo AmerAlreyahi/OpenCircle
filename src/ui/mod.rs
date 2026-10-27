@@ -228,8 +228,9 @@ enum Message {
     Frame(Instant),
     /// OCR read this band of this opening's frame (main mode, on demand).
     ScreenText(u32, Rectangle, Result<Vec<word::Line>, String>),
-    /// The opening animation is over: the text reader's helper may start.
-    Warmed,
+    /// The text reader's helper of this opening has started (after its
+    /// opening animation).
+    Warmed(u32),
     /// The note over the bar's Download (the text reader's models), and how
     /// that download for this opening goes (`Reading` = done).
     ReaderDownload,
@@ -510,8 +511,9 @@ struct App {
     /// A drag let go before the band under its press was read, and the
     /// overlay events after it: replayed once it is.
     held: Option<Vec<overlay::Event>>,
-    /// Text was selected in this opening: the rest of the screen is read in
-    /// the background (gently), nearest the pointer first.
+    /// Text was selected in this opening (or, off Windows, its helper
+    /// started: `Warmed`): the rest of the screen is read in the background
+    /// (gently), nearest the pointer first.
     text_used: bool,
     /// Where the pointer was last seen (image px).
     pointer: Point,
@@ -1106,22 +1108,28 @@ impl App {
                 self.reading = None;
                 match read {
                     Ok(lines) => {
-                        if self.text_by == Some(ocr::Source::System) {
-                            match self.appear {
-                                Some((first, _)) => crate::log!(
-                                    "[opencircle] screen text ready {} ms after the first frame",
-                                    first.elapsed().as_millis()
-                                ),
-                                None => crate::log!(
-                                    "[opencircle] screen text ready before the first frame"
-                                ),
-                            }
-                        }
-                        if self.text_by == Some(ocr::Source::System) {
+                        let system = self.text_by == Some(ocr::Source::System);
+                        if system {
                             // Windows OCR's closer read replaces its quick one
                             self.screen_text = word::Screen::default();
                         }
+                        let first = self.screen_text == word::Screen::default();
                         self.screen_text.add(band, lines, self.screen);
+                        // (the helper: its first band and its last, the VM's timings)
+                        let whole = self.screen_text.is_whole(self.screen.height);
+                        if system || first || whole {
+                            let what = match system || whole {
+                                true => "screen text ready",
+                                false => "first screen text",
+                            };
+                            match self.appear {
+                                Some((at, _)) => crate::log!(
+                                    "[opencircle] {what} {} ms after the first frame",
+                                    at.elapsed().as_millis()
+                                ),
+                                None => crate::log!("[opencircle] {what} before the first frame"),
+                            }
+                        }
                         let done = self.more_text();
                         let released = self.release_held();
                         Task::batch([done, released, self.read_more()])
@@ -1142,7 +1150,14 @@ impl App {
                 }
             }
             Message::ScreenText(..) => Task::none(), // closed or opened again meanwhile
-            Message::Warmed => Task::none(),
+            // Off Windows (no Windows OCR, #62) the whole screen is read now,
+            // gently, band by band from the pointer out: the I-beam shows over
+            // text before any press, as it does on Windows.
+            Message::Warmed(opening) if opening == self.opening && !cfg!(windows) => {
+                self.text_used = true;
+                self.read_more()
+            }
+            Message::Warmed(_) => Task::none(),
             // Only on this click: nothing is downloaded without it.
             Message::ReaderDownload if self.frame.is_some() => {
                 self.reader = Reader::Downloading(0.0);
@@ -2207,6 +2222,7 @@ impl App {
             return self.read_more();
         }
         let held = self.helper.as_ref().map(Arc::downgrade).unwrap_or_default();
+        let opening = self.opening;
         background(move |tx| {
             // after the bar has settled too; closed meanwhile: nothing starts
             std::thread::sleep(WARM_AFTER);
@@ -2215,7 +2231,7 @@ impl App {
             {
                 crate::log!("[opencircle] the text reader didn't start: {e}");
             }
-            let _ = tx.unbounded_send(Message::Warmed);
+            let _ = tx.unbounded_send(Message::Warmed(opening));
         })
     }
 
@@ -6217,6 +6233,35 @@ mod tests {
         assert_eq!(app.screen_text.lines().len(), TEXT.len());
         assert_eq!(picked_text(&app).as_deref(), Some("while you drag"), "kept");
         text::MODELS_HERE.set(None);
+    }
+
+    /// Off Windows (no Windows OCR): once the helper has started after the
+    /// opening animation, the whole screen is read gently, band by band from
+    /// the pointer out, with no press: the I-beam shows over its text (the
+    /// overlay gets its lines), as on Windows. A late `Warmed` of an earlier
+    /// opening reads nothing.
+    #[test]
+    #[cfg(not(windows))]
+    fn off_windows_the_screen_is_read_once_the_helper_is_warm() {
+        let mut app = reader_app();
+        app.pointer = caret(2, 3.0);
+        let _ = app.update(Message::Warmed(app.opening.wrapping_sub(1)));
+        assert_eq!(app.reading, None, "an earlier opening's helper");
+        let _ = app.update(Message::Warmed(app.opening));
+        let first = app.reading.expect("read with no press");
+        assert!(first.contains(app.pointer), "the pointer's band first");
+        let mut bands = 0;
+        while let Some(band) = app.reading {
+            let _ = answer(&mut app, band);
+            bands += 1;
+            assert!(bands < 10);
+        }
+        assert!(app.screen_text.is_whole(app.screen.height));
+        assert_eq!(app.screen_text.lines().len(), TEXT.len());
+        assert!(
+            app.word.is_none() && app.selection.is_none(),
+            "nothing selected"
+        );
     }
 
     /// #62: with Windows OCR (no PP-OCR models needed: no download note) the
