@@ -3758,11 +3758,28 @@ impl App {
         let mut layers = stack![
             shown,
             Element::from(canvas(overlay).width(Fill).height(Fill)).map(Message::Overlay),
-            match snip {
-                Some(_) => border::view(border::Mode::Snip, self.scale, false),
-                // the activation glow keeps step with the opening (`appear`)
-                None => border::opening(self.scale, self.appear.map_or(0.0, |(_, t)| t)),
-            },
+            // static: drawn once, with the window's fade-in
+            border::view(
+                if snip.is_some() {
+                    border::Mode::Snip
+                } else {
+                    border::Mode::Overlay
+                },
+                self.scale,
+                false,
+                // the glow breathes once the opening is over, and rests while
+                // anything else moves
+                match self.appear {
+                    Some((_, t)) if t >= 1.0 => {
+                        if self.animating() {
+                            border::Breathe::Paused
+                        } else {
+                            border::Breathe::On
+                        }
+                    }
+                    _ => border::Breathe::Off,
+                },
+            ),
         ];
         if let Some(edit) = &self.edit {
             if edit.is_open() {

@@ -1,21 +1,21 @@
 //! The screen edge (DESIGN.md "Feel", config `[look]`): per mode (overlay,
-//! live translate, snip) a soft glow fading inward, a thin line with rounded
-//! inner corners, or nothing, in the active look's colours (`theme::along`).
+//! live translate, snip) the design's Active Look edge, a soft inset glow
+//! inside the screen edges (`box-shadow: inset 0 0 22px c1, inset 0 0 54px c2`
+//! of the design's `.effect-ambient-glow`), in the active look's two colours
+//! (`theme::edge_glow`); or nothing.
 //!
-//! Motion: the overlay's activation glow (a wide glow from the first frame
-//! that draws back to the edge, the overlay's opening `overlay::APPEAR`) or, without it, a fade-in (glow) / one
-//! shimmer sweep (thin); snip the same when its edge animates. Live translate's
-//! edge stays still (#56: nothing redraws while nothing changes). Off when the
-//! look says so or the OS asks for less motion (Windows).
-//!
-//! Cheap: the edge is four strip images. Their geometry (where each pixel is
-//! along the edge and how deep inside the band) is computed once per size and
-//! style (`Cache`); a frame is then two small tables (colour round the edge,
-//! alpha per depth) applied to it, and only strips whose pixels changed get a
-//! new image (the renderer redraws only those). On the colour-keyed live layer
-//! (Windows) every pixel is clear or solid: the glow is an ordered dither,
-//! never a blend toward the key colour.
-use std::f32::consts::PI;
+//! Static (owner, 2026-10-27): no moving colours, no draw-back, no travel. The
+//! edge is four strip images made once per size and look, on the first frame;
+//! every later frame draws the same images and so redraws nothing. The
+//! overlay's own fade-in (`windows::fade`) moves it as a whole.
+//! The one motion is the design's `ripplePulse`, a barely-there breath of the
+//! overlay's glow once its opening is over (owner, 2026-10-27): 4 s, the
+//! blurs going 22/54 px -> 38/85 px -> 22/54 px, redrawn as the edge strips
+//! ONLY (never the screen), `STEP` apart (12.5 fps), from a cached depth map so
+//! a step is a table lookup per pixel. Live translate and snip stay still, and
+//! so does the overlay when the OS asks for reduced motion.
+//! On the colour-keyed live layer (Windows) there is no partial alpha: a thin
+//! solid line in c1 stands in for the glow.
 use std::time::{Duration, Instant};
 
 use iced::mouse::Cursor;
@@ -28,58 +28,41 @@ use crate::config::{self, EdgeStyle, Look};
 
 use super::theme;
 
-/// The thin line's inner corner radius, logical px.
+/// The screen's corner radius in the overlay, logical px (the design's 14).
 const RADIUS: f32 = 14.0;
-/// A glow reaches this many times its thickness inward.
-const GLOW_REACH: f32 = 8.0;
-/// Animation on or off (also off when the OS asks for less motion, Windows).
-// ponytail: Linux has no reduce-motion read (GNOME's enable-animations needs
-// gsettings / D-Bus); read it when a Linux user asks, or flip this.
-const ANIMATE: bool = true;
-/// Overlay / snip: the thin line's sweep, the glow's fade-in, their frame time
-/// and the sweep's peak brightness.
-const SWEEP: Duration = Duration::from_millis(700);
-const FADE: Duration = Duration::from_millis(450);
-const FRAME: Duration = Duration::from_millis(16);
-const SWEEP_GLOW: f32 = 0.85;
-/// The overlay's activation glow: how far it reaches (logical px), how long it
-/// takes to draw back to the edge (the overlay's opening, with its dim and
-/// bars) and its frame time.
-const ACT_REACH: f32 = 150.0;
-const ACTIVATION: Duration = super::overlay::APPEAR;
-const ACT_FRAME: Duration = Duration::from_millis(16);
-/// The light's width (fraction of the perimeter, Gaussian).
-const LIGHT_WIDTH: f32 = 0.035;
-/// Colours per turn of the edge.
-const LUT: usize = 512;
+/// The design's two blurs (c1's layer, c2's), logical px; a CSS blur of `b`
+/// is a Gaussian of sigma `b / 2`.
+const BLUR: [f32; 2] = [22.0, 54.0];
+/// The blurs at the breath's peak (the design's 50 % keyframe).
+const BLUR_PEAK: [f32; 2] = [38.0, 85.0];
+/// The breath: its length and the gap between redraws.
+const BREATH: Duration = Duration::from_secs(4);
+const STEP: Duration = Duration::from_millis(80);
+/// How far inward the glow reaches at its peak, logical px: past this the
+/// outer layer at full strength is under half a level of alpha.
+const REACH: f32 = 102.0;
 
 /// The edge over a window that shows a whole monitor at `scale` (physical px
 /// per logical px), in the active look. `keyed`: the window's background is a
-/// colour key (no partial alpha). Its state (when it started) lives as long
-/// as the widget.
-pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool) -> Element<'a, M> {
+/// colour key (no partial alpha).
+/// Whether the overlay's glow breathes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Breathe {
+    /// Not (yet): the opening is on, or the edge is not the overlay's.
+    Off,
+    /// It does, but another motion is on (the bar gliding, a card opening):
+    /// the edge keeps what it shows and draws nothing meanwhile.
+    Paused,
+    On,
+}
+
+pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool, breathing: Breathe) -> Element<'a, M> {
     canvas::Canvas::new(Border {
         mode,
         scale,
         keyed,
+        breathing,
         look: None,
-        opening: None,
-    })
-    .width(Fill)
-    .height(Fill)
-    .into()
-}
-
-/// The overlay's edge, its activation glow `opening` of the way through
-/// (0..1, linear; the time share of the overlay's opening)
-/// rather than by the clock, so it keeps step with the dim and the bars.
-pub fn opening<'a, M: 'a>(scale: f32, opening: f32) -> Element<'a, M> {
-    canvas::Canvas::new(Border {
-        mode: Mode::Overlay,
-        scale,
-        keyed: false,
-        look: None,
-        opening: Some(opening),
     })
     .width(Fill)
     .height(Fill)
@@ -88,19 +71,18 @@ pub fn opening<'a, M: 'a>(scale: f32, opening: f32) -> Element<'a, M> {
 
 /// Puts a fixed colour where the live edge is, in a capture (`rgba`, `w` x `h`)
 /// of the monitor it frames: a capture that shows the layer (X11) then never
-/// changes there while the edge moves, so live mode doesn't re-read the edges.
+/// changes there, so live mode doesn't re-read the edges.
 /// Returns the strips (x, y, w, h) it may have blanked.
 pub fn mask(rgba: &mut [u8], w: u32, h: u32, scale: f32) -> Vec<[u32; 4]> {
-    let Some(spec) = Spec::of(config::look().live) else {
+    let Some((geo, table)) = edge(&config::look(), Mode::Live, w, h, scale, false, 0.0) else {
         return Vec::new();
     };
-    let geo = Geo::new(w, h, scale, spec);
     let strips = geo.strips();
     for &[x0, y0, sw, sh] in &strips {
         for y in y0..y0 + sh {
             for x in x0..x0 + sw {
                 let i = ((y * w + x) * 4) as usize;
-                if geo.level(x, y) > 0
+                if table[geo.index(x, y)][3] > 0
                     && let Some(px) = rgba.get_mut(i..i + 4)
                 {
                     px.copy_from_slice(&[0, 0, 0, 255]);
@@ -111,15 +93,13 @@ pub fn mask(rgba: &mut [u8], w: u32, h: u32, scale: f32) -> Vec<[u32; 4]> {
     strips
 }
 
-/// `mode`'s edge in `look` at rest, laid over `rgba` (`w` x `h`, straight
-/// alpha) as if the screen were `w / scale` logical px wide: Settings' previews.
+/// `mode`'s edge in `look`, laid over `rgba` (`w` x `h`, straight alpha) as if
+/// the screen were `w / scale` logical px wide: Settings' previews.
 pub fn paint(rgba: &mut [u8], w: u32, h: u32, scale: f32, look: &Look, mode: Mode) {
-    let Some(spec) = Spec::of(look.edge(mode)) else {
+    let Some((geo, table)) = edge(look, mode, w, h, scale, false, 0.0) else {
         return;
     };
-    let cache = Cache::build(Geo::new(w, h, scale, spec));
-    let paint = Paint::of(look, spec.style);
-    for ([x0, y0, sw, _], px) in render(&cache, &paint, Frame::REST, false) {
+    for ([x0, y0, sw, _], px) in render(&depths(geo), &table) {
         for (i, p) in px.as_chunks::<4>().0.iter().enumerate() {
             let (x, y) = (x0 + i as u32 % sw, y0 + i as u32 / sw);
             let j = ((y * w + x) * 4) as usize;
@@ -136,20 +116,19 @@ struct Border {
     mode: Mode,
     scale: f32,
     keyed: bool,
+    breathing: Breathe,
     /// Tests: this look instead of the config's.
     look: Option<Look>,
-    /// The overlay's opening, 0..1 (`opening`): the activation's time.
-    opening: Option<f32>,
 }
 
 #[derive(Default)]
 pub struct State {
-    /// The first frame's time, and whether the OS allows motion (read then).
-    start: Option<Instant>,
-    motion: bool,
-    cache: Option<Cache>,
     /// What `strips` show.
-    drawn: Option<(Geo, Frame, Paint)>,
+    drawn: Option<(Geo, Vec<[u8; 4]>)>,
+    /// Each strip's depth map (`depths`), kept while the geometry is.
+    depths: Option<(Geo, Vec<Depths>)>,
+    /// When the breath began (the first frame that was allowed to).
+    since: Option<Instant>,
     /// Logical bounds and pixels of each strip.
     strips: Vec<(Rectangle, Handle)>,
 }
@@ -157,9 +136,9 @@ pub struct State {
 impl<M> canvas::Program<M> for Border {
     type State = State;
 
-    /// On each frame: the edge for now, re-rendered only if it changed (and a
-    /// strip's image replaced only if its pixels did), and the next frame's
-    /// time while it moves.
+    /// On each frame: the edge, rebuilt only if its size, look or breath step
+    /// changed (the first frame, in practice), and the next step's time while
+    /// it breathes.
     fn update(
         &self,
         state: &mut State,
@@ -170,63 +149,55 @@ impl<M> canvas::Program<M> for Border {
         let canvas::Event::Window(window::Event::RedrawRequested(now)) = event else {
             return None;
         };
-        if state.start.is_none() {
-            state.start = Some(*now);
-            state.motion = !super::motion::reduced();
+        let mut breathing = self.breathing != Breathe::Off
+            && self.mode == Mode::Overlay
+            && !super::motion::reduced();
+        if breathing && self.breathing == Breathe::Paused && state.drawn.is_some() {
+            return None;
         }
-        let clock = now.saturating_duration_since(state.start?);
-        let elapsed = match self.opening {
-            Some(t) if t < 1.0 => ACTIVATION.mul_f32(t),
-            Some(_) => clock.max(ACTIVATION),
-            None => clock,
-        };
-        let look = self.look.unwrap_or_else(config::look);
-        let (spec, frame, next) = plan(self.mode, &look, elapsed, state.motion);
-        let spec = spec.map(|s| s.on_window(self.keyed, look.edge(self.mode)));
-        // during the overlay's opening its frames come from the app's clock
-        let driven = self.opening.is_some_and(|t| t < 1.0);
-        let redraw = next
-            .filter(|_| !driven)
-            .map(|d| Action::request_redraw_at(*now + d));
-        let Some(spec) = spec.filter(|_| frame.alpha > 0.0) else {
-            state.strips.clear();
-            state.drawn = None;
-            return redraw;
-        };
+        breathing &= self.breathing == Breathe::On;
+        let since = *state.since.get_or_insert(*now);
+        if !breathing {
+            state.since = None;
+        }
+        let step = (now.saturating_duration_since(since).as_millis() / STEP.as_millis()) as u32;
+        let breath = if breathing { breath(step) } else { 0.0 };
         let px = |v: f32| (v * self.scale).round() as u32;
-        let geo = Geo::new(px(bounds.width), px(bounds.height), self.scale, spec);
-        if state.cache.as_ref().is_none_or(|c| c.geo != geo) {
-            state.cache = Some(Cache::build(geo));
+        let look = self.look.unwrap_or_else(config::look);
+        let want = edge(
+            &look,
+            self.mode,
+            px(bounds.width),
+            px(bounds.height),
+            self.scale,
+            self.keyed,
+            breath,
+        );
+        let next = (breathing && want.is_some())
+            .then(|| Action::request_redraw_at(since + STEP * (step + 1)));
+        if state.drawn == want {
+            return next;
         }
-        let paint = Paint::of(&look, spec.style);
-        let key = (geo, frame, paint);
-        if state.drawn.as_ref() == Some(&key) {
-            return redraw;
+        if let Some((geo, table)) = &want {
+            if state.depths.as_ref().is_none_or(|(g, _)| g != geo) {
+                state.depths = Some((*geo, depths(*geo)));
+            }
+            let depths = &state.depths.as_ref()?.1;
+            state.strips = (render(depths, table).into_iter())
+                .map(|([x, y, w, h], rgba)| {
+                    // + a quarter pixel: the canvas hands image bounds on
+                    // with float error and tiny-skia truncates them to
+                    // whole pixels (a strip at x = 1917 landed on 1916).
+                    let at = iced::Point::new(x as f32 + 0.25, y as f32 + 0.25);
+                    let at = Rectangle::new(at, iced::Size::new(w as f32, h as f32));
+                    (at * (1.0 / self.scale), Handle::from_rgba(w, h, rgba))
+                })
+                .collect();
+        } else {
+            state.strips.clear();
         }
-        let same_geo = state.drawn.as_ref().is_some_and(|(g, ..)| *g == geo);
-        let old = std::mem::take(&mut state.strips);
-        let cache = state.cache.as_ref()?;
-        state.strips = (render(cache, &key.2, frame, self.keyed)
-            .into_iter()
-            .enumerate())
-        .map(|(i, ([x, y, w, h], rgba))| match old.get(i) {
-            Some((at, handle @ Handle::Rgba { pixels, .. }))
-                if same_geo && pixels[..] == rgba[..] =>
-            {
-                (*at, handle.clone())
-            }
-            _ => {
-                // + a quarter pixel: the canvas hands image bounds on
-                // with float error and tiny-skia truncates them to
-                // whole pixels (a strip at x = 1917 landed on 1916).
-                let at = iced::Point::new(x as f32 + 0.25, y as f32 + 0.25);
-                let at = Rectangle::new(at, iced::Size::new(w as f32, h as f32));
-                (at * (1.0 / self.scale), Handle::from_rgba(w, h, rgba))
-            }
-        })
-        .collect();
-        state.drawn = Some(key);
-        redraw
+        state.drawn = want;
+        next
     }
 
     fn draw(
@@ -248,309 +219,92 @@ impl<M> canvas::Program<M> for Border {
     }
 }
 
-/// The edge's shape in logical px: a glow `inset` deep, or a line `inset`
-/// wide; inner corners rounded by `rad`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Spec {
-    style: EdgeStyle,
-    inset: f32,
-    rad: f32,
-}
-
-impl Spec {
-    /// A mode's edge at rest (`None`: no edge).
-    fn of(edge: config::Edge) -> Option<Spec> {
-        let t = f32::from(edge.thickness);
-        match edge.style {
-            EdgeStyle::None => None,
-            EdgeStyle::Thin => Some(Spec {
-                style: EdgeStyle::Thin,
-                inset: t,
-                rad: RADIUS,
-            }),
-            EdgeStyle::Glow => Some(Spec::glow(t * GLOW_REACH)),
-        }
-    }
-
-    /// What a window shows of `self` (`edge`'s): a colour-keyed window has no
-    /// partial alpha, so a glow there would be a coarse dither (blotchy, thick):
-    /// it gets the thin line at the edge's thickness instead.
-    fn on_window(self, keyed: bool, edge: config::Edge) -> Spec {
-        match self.style {
-            EdgeStyle::Glow if keyed => Spec::of(config::Edge {
-                style: EdgeStyle::Thin,
-                ..edge
-            })
-            .unwrap_or(self),
-            _ => self,
-        }
-    }
-
-    fn glow(reach: f32) -> Spec {
-        Spec {
-            style: EdgeStyle::Glow,
-            inset: reach,
-            rad: reach / 4.0,
-        }
-    }
-}
-
-/// What the edge shows at one moment: its colours turned `shift` round the
-/// edge, `alpha` of its strength, a glow reaching `reach` of its depth, plus a
-/// light at `head` along the edge (0..1 clockwise from the top-left corner) of
-/// strength `light` (0 = none); `mirrored`: a second light at `1 - head`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Frame {
-    shift: f32,
-    alpha: f32,
-    reach: f32,
-    head: f32,
-    light: f32,
-    mirrored: bool,
-}
-
-impl Frame {
-    const REST: Frame = Frame {
-        shift: 0.0,
-        alpha: 1.0,
-        reach: 1.0,
-        head: 0.0,
-        light: 0.0,
-        mirrored: false,
-    };
-}
-
-fn ease(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    1.0 - (1.0 - t).powi(3)
-}
-
-/// The edge `elapsed` after the first frame: its shape (`None`: none), the
-/// frame, and the time to the next frame (`None`: still from now on).
-fn plan(
-    mode: Mode,
-    look: &Look,
-    elapsed: Duration,
-    motion: bool,
-) -> (Option<Spec>, Frame, Option<Duration>) {
-    let edge = look.edge(mode);
-    let rest = Spec::of(edge);
-    let moving = ANIMATE && motion;
-    let secs = |d: Duration| d.as_secs_f32();
-    let mut after = elapsed;
-    if mode == Mode::Overlay && look.activation_glow && moving {
-        if elapsed < ACTIVATION {
-            // A wide glow from the first frame draws back to the edge's own
-            // glow (or away: a thin line / no edge follows), eased out.
-            let t = secs(elapsed) / secs(ACTIVATION);
-            let end = match rest {
-                Some(s) if s.style == EdgeStyle::Glow => s.inset / ACT_REACH,
-                _ => 0.0,
-            };
-            let back = ease(t);
-            let frame = Frame {
-                shift: 0.2 * (back - 1.0),
-                alpha: 1.0,
-                reach: 1.0 + (end - 1.0) * back,
-                ..Frame::REST
-            };
-            return (Some(Spec::glow(ACT_REACH)), frame, Some(ACT_FRAME));
-        }
-        after = elapsed - ACTIVATION;
-    }
-    let Some(spec) = rest else {
-        return (None, Frame::REST, None);
-    };
-    let still = (Some(spec), Frame::REST, None);
-    if !moving || !edge.animate {
-        return still;
-    }
-    match (mode, spec.style) {
-        // Two lights leave the top-left corner both ways (eased out) and meet
-        // at the bottom-right, fading in and out.
-        (Mode::Overlay | Mode::Snip, EdgeStyle::Thin) if after < SWEEP => {
-            let t = secs(after) / secs(SWEEP);
-            let frame = Frame {
-                head: 0.5 * (1.0 - (1.0 - t).powi(2)),
-                light: SWEEP_GLOW * (PI * t).sin(),
-                mirrored: true,
-                ..Frame::REST
-            };
-            (Some(spec), frame, Some(FRAME))
-        }
-        // The overlay right after its activation glow is already there.
-        (Mode::Overlay, EdgeStyle::Glow) if after != elapsed => still,
-        // A glow grows in from the edge, its colours settling into place.
-        (Mode::Overlay | Mode::Snip, EdgeStyle::Glow) if after < FADE => {
-            let t = ease(secs(after) / secs(FADE));
-            let frame = Frame {
-                shift: 0.12 * (t - 1.0),
-                alpha: t,
-                reach: 0.4 + 0.6 * t,
-                ..Frame::REST
-            };
-            (Some(spec), frame, Some(FRAME))
-        }
-        // Live (#56) and the rest: still.
-        _ => still,
-    }
-}
-
-/// What colours a frame is drawn in: the look's edge colours and, for a glow,
-/// its strength (0..1).
-#[derive(Debug, Clone, PartialEq)]
-struct Paint {
-    stops: Vec<Color>,
-    peak: f32,
-}
-
-impl Paint {
-    fn of(look: &Look, style: EdgeStyle) -> Paint {
-        Paint {
-            stops: theme::edge_colours(look),
-            peak: match style {
-                EdgeStyle::Glow => f32::from(look.glow) / 100.0,
-                _ => 1.0,
-            },
-        }
-    }
-}
-
-/// The edge's shape on one monitor, physical px.
+/// The edge's shape on one monitor, physical px: the screen's size, the band
+/// it lives in (`t` deep: the glow's reach, or the line's width) and the
+/// screen's corner radius `r`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Geo {
     w: u32,
     h: u32,
-    glow: bool,
-    /// Line width / glow depth, and inner corner radius.
     t: u32,
     r: u32,
 }
 
-impl Geo {
-    fn new(w: u32, h: u32, scale: f32, spec: Spec) -> Geo {
-        let px = |v: f32| (v * scale).round() as u32;
-        Geo {
-            w,
-            h,
-            glow: spec.style == EdgeStyle::Glow,
-            t: px(spec.inset).max(1),
-            r: px(spec.rad),
-        }
-    }
-
-    /// The four strips (x, y, w, h): top and bottom full width, left and right
-    /// between them, each `t + r` deep (all a pixel inside the band can be).
-    /// None on a screen too small for an edge.
-    fn strips(self) -> Vec<[u32; 4]> {
-        let (w, h, band) = (self.w, self.h, self.t + self.r);
-        if w <= 2 * band || h <= 2 * band {
-            return Vec::new();
-        }
-        let down = h - 2 * band;
-        vec![
-            [0, 0, w, band],
-            [w - band, band, band, down],
-            [0, h - band, w, band],
-            [0, band, band, down],
-        ]
-    }
-
-    /// How far pixel (x, y)'s centre is outside the inner rounded rectangle
-    /// (`t` in from the screen edge, corners rounded by `r`); negative inside.
-    fn outside(self, x: u32, y: u32) -> f32 {
-        let (cx, cy) = (self.w as f32 / 2.0, self.h as f32 / 2.0);
-        let (t, r) = (self.t as f32, self.r as f32);
-        let qx = (x as f32 + 0.5 - cx).abs() - (cx - t) + r;
-        let qy = (y as f32 + 0.5 - cy).abs() - (cy - t) + r;
-        qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r
-    }
-
-    /// How strongly the edge covers pixel (x, y), 0..255: a line's coverage, a
-    /// glow's nearness to the screen edge (255 at it, 0 at its inner end).
-    fn level(self, x: u32, y: u32) -> u8 {
-        let out = self.outside(x, y);
-        let v = if self.glow {
-            if out <= 0.0 {
-                0.0
-            } else {
-                (out / self.t as f32).min(1.0)
-            }
-        } else {
-            (out + 0.5).clamp(0.0, 1.0)
-        };
-        (v * 255.0).round() as u8
-    }
-
-    /// Where pixel (x, y) is along the edge, clockwise from the top-left
-    /// corner (0..1): where the ray from the screen's centre through it leaves
-    /// the screen (smooth round the corners, unlike the nearest edge).
-    fn along(self, x: u32, y: u32) -> f32 {
-        let (w, h) = (self.w as f32, self.h as f32);
-        let (dx, dy) = (x as f32 + 0.5 - w / 2.0, y as f32 + 0.5 - h / 2.0);
-        let (kx, ky) = (w / 2.0 / dx.abs().max(1e-6), h / 2.0 / dy.abs().max(1e-6));
-        let k = kx.min(ky);
-        let (qx, qy) = (w / 2.0 + dx * k, h / 2.0 + dy * k);
-        let s = match (kx < ky, dx > 0.0, dy > 0.0) {
-            (false, _, false) => qx,                    // top
-            (true, true, _) => w + qy,                  // right
-            (false, _, true) => w + h + (w - qx),       // bottom
-            (true, false, _) => 2.0 * w + h + (h - qy), // left
-        };
-        (s / (2.0 * (w + h))).rem_euclid(1.0)
-    }
+/// How far into the breath (0..1: 0 = the design's 22/54 px blurs, 1 = 38/85)
+/// step `step` of the 4 s cycle is: eased, there and back.
+fn breath(step: u32) -> f32 {
+    let t = STEP.as_secs_f32() * step as f32 / BREATH.as_secs_f32();
+    0.5 - 0.5 * (std::f32::consts::TAU * t).cos()
 }
 
-/// One strip's rectangle and, per pixel, its colour index round the edge and its level.
-type Strip = ([u32; 4], Vec<(u16, u8)>);
-
-struct Cache {
-    geo: Geo,
-    strips: Vec<Strip>,
-}
-
-impl Cache {
-    fn build(geo: Geo) -> Cache {
-        let strips = (geo.strips().into_iter())
-            .map(|[x0, y0, w, h]| {
-                let px = (y0..y0 + h)
-                    .flat_map(|y| (x0..x0 + w).map(move |x| (x, y)))
-                    .map(|(x, y)| {
-                        let at = (geo.along(x, y) * LUT as f32) as usize % LUT;
-                        (at as u16, geo.level(x, y))
-                    })
-                    .collect();
-                ([x0, y0, w, h], px)
+/// The edge `mode` shows in `look` on a `w` x `h` screen at `scale`: its shape
+/// and its RGBA (straight alpha) per whole px of depth from the screen edge,
+/// the last entry clear (`None`: no edge). `keyed`: a solid line, no blending.
+/// `breath`: see `breath()`.
+fn edge(
+    look: &Look,
+    mode: Mode,
+    w: u32,
+    h: u32,
+    scale: f32,
+    keyed: bool,
+    breath: f32,
+) -> Option<(Geo, Vec<[u8; 4]>)> {
+    let e = look.edge(mode);
+    let strength = f32::from(look.glow) / 100.0;
+    if e.style == EdgeStyle::None || strength <= 0.0 {
+        return None;
+    }
+    let px = |v: f32| (v * scale).round() as u32;
+    let [c1, c2] = theme::edge_glow(look);
+    let (t, table) = if keyed {
+        let t = px(f32::from(e.thickness)).max(1);
+        let [r, g, b, _] = c1.into_rgba8();
+        let [r, g, b] = off_key([r, g, b]);
+        let table = (0..=t)
+            .map(|i| if i < t { [r, g, b, 255] } else { [0; 4] })
+            .collect();
+        (t, table)
+    } else {
+        let t = px(REACH).max(1);
+        let sigma: Vec<f32> = (BLUR.iter().zip(BLUR_PEAK))
+            .map(|(b, peak)| (b + (peak - b) * breath) / 2.0 * scale)
+            .collect();
+        let table = (0..=t)
+            .map(|i| {
+                let d = i as f32 + 0.5;
+                let tail = |s: f32| 0.5 * erfc(d / (s * std::f32::consts::SQRT_2));
+                let a1 = c1.a * strength * tail(sigma[0]);
+                let a2 = c2.a * strength * tail(sigma[1]);
+                // c1's layer over c2's
+                let a = a1 + a2 * (1.0 - a1);
+                if i == t || a < 0.5 / 255.0 {
+                    return [0; 4];
+                }
+                let mix = |u: f32, v: f32| (u * a1 + v * a2 * (1.0 - a1)) / a;
+                let [r, g, b, _] =
+                    Color::from_rgb(mix(c1.r, c2.r), mix(c1.g, c2.g), mix(c1.b, c2.b)).into_rgba8();
+                [r, g, b, (a * 255.0).round() as u8]
             })
             .collect();
-        Cache { geo, strips }
-    }
+        (t, table)
+    };
+    let geo = Geo {
+        w,
+        h,
+        t,
+        r: px(RADIUS),
+    };
+    Some((geo, table))
 }
 
-/// The colours round the edge for `frame` (`LUT` steps), lit toward
-/// `theme::SHIMMER` near its light(s); over a colour key (`keyed`), kept
-/// clear of the key.
-fn colours(paint: &Paint, frame: Frame, keyed: bool) -> Vec<[u8; 3]> {
-    let to = |u: f32, head: f32| {
-        let d = (u - head).rem_euclid(1.0);
-        d.min(1.0 - d)
-    };
-    (0..LUT)
-        .map(|i| {
-            let u = i as f32 / LUT as f32;
-            let mut c = theme::along(&paint.stops, u - frame.shift);
-            if frame.light > 0.0 {
-                let mut d = to(u, frame.head);
-                if frame.mirrored {
-                    d = d.min(to(u, 1.0 - frame.head));
-                }
-                let light = frame.light * (-(d / LIGHT_WIDTH).powi(2)).exp();
-                c = mix(c, theme::SHIMMER, light);
-            }
-            let [r, g, b, _] = c.into_rgba8();
-            if keyed { off_key([r, g, b]) } else { [r, g, b] }
-        })
-        .collect()
+/// 1 - erf(x), x >= 0 (Abramowitz & Stegun 7.1.26, error < 1.5e-7).
+fn erfc(x: f32) -> f32 {
+    let t = 1.0 / (1.0 + 0.327_591_1 * x);
+    let poly = t
+        * (0.254_829_6
+            + t * (-0.284_496_74 + t * (1.421_413_8 + t * (-1.453_152_1 + t * 1.061_405_4))));
+    poly * (-x * x).exp()
 }
 
 /// A colour too near the live layer's key (it would be keyed out, a hole) is
@@ -565,485 +319,336 @@ fn off_key(c: [u8; 3]) -> [u8; 3] {
     [dark(c[0]), c[1], dark(c[2])]
 }
 
-fn mix(a: Color, b: Color, k: f32) -> Color {
-    let m = |a: f32, b: f32| a + (b - a) * k;
-    Color::from_rgb(m(a.r, b.r), m(a.g, b.g), m(a.b, b.b))
-}
-
-/// Alpha (0..255) per level for `frame`: a line's coverage, a glow's soft
-/// fall-off from the screen edge to `reach` of its depth.
-fn alphas(glow: bool, paint: &Paint, frame: Frame) -> [u8; 256] {
-    let mut out = [0; 256];
-    for (level, a) in out.iter_mut().enumerate() {
-        let v = level as f32 / 255.0;
-        let strength = if glow {
-            // depth into the band, 0 at the screen edge, 1 at its inner end
-            let depth = 1.0 - v;
-            let x = if frame.reach > 0.0 {
-                depth / frame.reach
-            } else {
-                1.0
-            };
-            if level == 0 || x >= 1.0 {
-                0.0
-            } else {
-                paint.peak * (1.0 - x).powi(2)
-            }
-        } else {
-            v
-        };
-        *a = (strength * frame.alpha * 255.0).round().clamp(0.0, 255.0) as u8;
-    }
-    out
-}
-
-/// 4x4 ordered dither thresholds (1..255): a keyed glow's pixel is solid where
-/// its alpha beats the threshold.
-const BAYER: [u8; 16] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-
-/// Each strip's rectangle and pixels (RGBA, straight alpha). `keyed`: every
-/// pixel fully clear or fully solid. Where the edge reaches only part of the
-/// band (the activation glow drawing back, #134) the strips are cut to what
-/// shows: the sides to the lit depth, the four corner squares whole (their
-/// rounded inner edge reaches the band's full depth). What isn't sent was
-/// clear: the screen is the same, but each frame redraws and blends a third
-/// as many pixels (the opening's glow was half of a 1080p screen a frame).
-fn render(cache: &Cache, paint: &Paint, frame: Frame, keyed: bool) -> Vec<([u32; 4], Vec<u8>)> {
-    let lut = colours(paint, frame, keyed);
-    let alpha = alphas(cache.geo.glow, paint, frame);
-    let lit = lit_depth(cache, &alpha);
-    let mut out = Vec::new();
-    for (side, &([x0, y0, w, h], ref px)) in cache.strips.iter().enumerate() {
-        for [px0, py0, pw, ph] in pieces(side, w, h, lit) {
-            let mut rgba = vec![0; (pw * ph * 4) as usize];
-            for (i, chunk) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-                let (lx, ly) = (px0 + i as u32 % pw, py0 + i as u32 / pw);
-                let (at, level) = px[(ly * w + lx) as usize];
-                let mut a = alpha[level as usize];
-                if keyed {
-                    let (x, y) = (x0 + lx, y0 + ly);
-                    let threshold = BAYER[(y % 4 * 4 + x % 4) as usize] * 16 + 8;
-                    a = if a > threshold { 255 } else { 0 };
-                }
-                if a > 0 {
-                    let [r, g, b] = lut[at as usize];
-                    *chunk = [r, g, b, a];
-                }
-            }
-            out.push(([x0 + px0, y0 + py0, pw, ph], rgba));
+impl Geo {
+    /// The four strips (x, y, w, h): top and bottom full width, left and right
+    /// between them, each as deep as the band or the corner radius (all a lit
+    /// pixel can be). None on a screen too small for an edge.
+    fn strips(self) -> Vec<[u32; 4]> {
+        let (w, h, band) = (self.w, self.h, self.t.max(self.r));
+        if w <= 2 * band || h <= 2 * band {
+            return Vec::new();
         }
+        let down = h - 2 * band;
+        vec![
+            [0, 0, w, band],
+            [w - band, band, band, down],
+            [0, h - band, w, band],
+            [0, band, band, down],
+        ]
     }
-    out
+
+    /// Which table entry pixel (x, y) takes: its centre's depth inside the
+    /// screen's rounded rectangle (0 in a square corner outside it), capped at
+    /// the table's clear last entry.
+    fn index(self, x: u32, y: u32) -> usize {
+        let (cx, cy) = (self.w as f32 / 2.0, self.h as f32 / 2.0);
+        let r = self.r as f32;
+        let qx = (x as f32 + 0.5 - cx).abs() - (cx - r);
+        let qy = (y as f32 + 0.5 - cy).abs() - (cy - r);
+        let outside = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r;
+        ((-outside).max(0.0) as usize).min(self.t as usize)
+    }
 }
 
-/// How deep (px from the screen edge) the edge shows along the straight
-/// sides with these alphas: the top strip's middle column, lit rows counted.
-fn lit_depth(cache: &Cache, alpha: &[u8; 256]) -> u32 {
-    let Some(([_, _, w, h], px)) = cache.strips.first() else {
-        return 0;
-    };
-    (0..*h)
-        .filter(|y| alpha[px[(y * w + w / 2) as usize].1 as usize] > 0)
-        .map(|y| y + 1)
-        .max()
-        .unwrap_or(0)
+/// A strip's rectangle and, per pixel, its table entry (`Geo::index`).
+type Depths = ([u32; 4], Vec<u16>);
+
+/// Every strip's depth map: made once per geometry, so that a breath step is
+/// a lookup per pixel and not a distance per pixel.
+fn depths(geo: Geo) -> Vec<Depths> {
+    (geo.strips().into_iter())
+        .map(|rect @ [x0, y0, w, h]| {
+            let at = |i: u32| geo.index(x0 + i % w, y0 + i / w) as u16;
+            (rect, (0..w * h).map(at).collect())
+        })
+        .collect()
 }
 
-/// The parts of strip `side` (`Geo::strips`' order: top, right, bottom,
-/// left; `w` x `h`, band deep) that hold the edge when it shows `lit` px
-/// deep along the sides, in the strip's own px: the whole strip when it
-/// shows (nearly) all of it; else the side cut to `lit` (first) and, on the
-/// top and bottom strips, the corner squares whole.
-fn pieces(side: usize, w: u32, h: u32, lit: u32) -> Vec<[u32; 4]> {
-    let band = if side.is_multiple_of(2) { h } else { w };
-    if lit >= band {
-        return vec![[0, 0, w, h]];
-    }
-    let mut out = Vec::new();
-    match side {
-        1 => out.push([band - lit, 0, lit, h]),
-        3 => out.push([0, 0, lit, h]),
-        _ => {
-            let y = if side == 0 { 0 } else { band - lit };
-            out.push([band, y, w - 2 * band, lit]);
-            out.extend([[0, 0, band, band], [w - band, 0, band, band]]);
-        }
-    }
-    out.retain(|&[_, _, pw, ph]| pw > 0 && ph > 0);
-    out
+/// Each strip's rectangle and pixels (RGBA, straight alpha).
+fn render(depths: &[Depths], table: &[[u8; 4]]) -> Vec<([u32; 4], Vec<u8>)> {
+    (depths.iter())
+        .map(|(rect, at)| {
+            let mut rgba = vec![0; at.len() * 4];
+            for (chunk, &i) in rgba.as_chunks_mut::<4>().0.iter_mut().zip(at) {
+                *chunk = table[usize::from(i)];
+            }
+            (*rect, rgba)
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{ColourSet, LookConfig, LookTheme, PRESETS};
+    use std::time::{Duration, Instant};
 
     fn spectrum() -> Look {
         LookConfig::default().active()
     }
 
-    fn aurora() -> Look {
-        LookTheme::Aurora.look(&spectrum())
+    fn rgba8(c: Color) -> [u8; 4] {
+        c.into_rgba8()
     }
 
-    fn thin(t: f32) -> Spec {
-        Spec::of(config::Edge {
-            style: EdgeStyle::Thin,
-            thickness: t as u8,
-            animate: false,
-        })
-        .unwrap()
+    /// The whole edge as one `w` x `h` image (clear where it is not).
+    fn full(geo: Geo, table: &[[u8; 4]]) -> Vec<u8> {
+        let mut out = vec![0; (geo.w * geo.h * 4) as usize];
+        for ([x0, y0, sw, _], px) in render(&depths(geo), table) {
+            for (i, p) in px.as_chunks::<4>().0.iter().enumerate() {
+                let (x, y) = (x0 + i as u32 % sw, y0 + i as u32 / sw);
+                let j = ((y * geo.w + x) * 4) as usize;
+                out[j..j + 4].copy_from_slice(p);
+            }
+        }
+        out
     }
 
-    fn area(strips: &[[u32; 4]]) -> u32 {
-        strips.iter().map(|[_, _, sw, sh]| sw * sh).sum()
+    #[test]
+    fn the_glow_is_the_designs_inset_shadow_in_the_looks_two_colours() {
+        // c1 (22 px blur) over c2 (54 px): strongest at the screen edge, about
+        // half a layer's alpha there (a CSS blur), gone past the reach
+        let (_, table) = edge(&spectrum(), Mode::Overlay, 1920, 1080, 1.0, false, 0.0).unwrap();
+        let alpha: Vec<u8> = table.iter().map(|p| p[3]).collect();
+        assert!(alpha.windows(2).all(|p| p[0] >= p[1]), "{alpha:?}");
+        // 0.5 * 0.42 over 0.5 * 0.26: 0.21 + 0.13 * 0.79 = 0.31
+        assert!((75..=84).contains(&alpha[0]), "{alpha:?}");
+        assert!(alpha[22] > 0 && alpha[22] * 4 < alpha[0], "{alpha:?}");
+        assert!(alpha[65] <= 1, "{alpha:?}");
+        assert_eq!(alpha.last(), Some(&0));
+        // at the edge c1 shows (violet), further in c2 (coral)
+        let [r, g, b, _] = table[0];
+        assert!(b > r && r > g, "violet: {:?}", table[0]);
+        let deep = table[40];
+        assert!(deep[0] > deep[2] + 100, "coral: {deep:?}");
+    }
+
+    #[test]
+    fn every_look_has_its_design_colours() {
+        // how far a table colour is from a design colour (rgb)
+        let apart = |a: [u8; 4], c: Color| {
+            let b = rgba8(c);
+            (0..3).map(|i| u32::from(a[i].abs_diff(b[i]))).sum::<u32>()
+        };
+        for palette in [
+            ColourSet::Spectrum,
+            ColourSet::Aurora,
+            ColourSet::Sunset,
+            ColourSet::Ocean,
+            ColourSet::Neon,
+            ColourSet::Mono,
+            ColourSet::TwoColour,
+        ] {
+            let look = Look {
+                palette,
+                ..spectrum()
+            };
+            let [c1, c2] = theme::edge_glow(&look);
+            let (_, table) = edge(&look, Mode::Overlay, 1920, 1080, 1.0, false, 0.0).unwrap();
+            if palette == ColourSet::Mono {
+                continue; // both white
+            }
+            // c1 leads at the edge, c2 alone further in
+            let (e, d) = (table[0], table[50]);
+            assert!(
+                apart(e, c1) < apart(e, c2),
+                "{palette:?} at the edge: {e:?}"
+            );
+            assert!(apart(d, c2) < 12, "{palette:?} further in: {d:?}");
+        }
+        // the default look is the design's Spectrum
+        let [c1, c2] = theme::edge_glow(&spectrum());
+        assert_eq!(rgba8(c1), [155, 123, 255, 107]);
+        assert_eq!(rgba8(c2), [255, 107, 94, 66]);
+    }
+
+    #[test]
+    fn none_and_zero_strength_draw_nothing() {
+        let mut look = spectrum();
+        look.overlay.style = EdgeStyle::None;
+        assert!(edge(&look, Mode::Overlay, 1920, 1080, 1.0, false, 0.0).is_none());
+        assert!(edge(&look, Mode::Live, 1920, 1080, 1.0, false, 0.0).is_some());
+        let calm = LookTheme::Calm.look(&look);
+        assert!(edge(&calm, Mode::Overlay, 1920, 1080, 1.0, false, 0.0).is_none());
+        let grey = vec![60u8; 192 * 108 * 4];
+        let mut b = grey.clone();
+        paint(&mut b, 192, 108, 0.1, &look, Mode::Overlay);
+        assert_eq!(b, grey);
+    }
+
+    /// Runs the canvas over frames at `ms` after the first: the strips after
+    /// each and whether it asked for another frame.
+    fn frames(border: &Border, ms: &[u64]) -> Vec<(Vec<(Rectangle, Handle)>, bool)> {
+        let bounds = Rectangle::with_size(iced::Size::new(1920.0, 1080.0));
+        let mut state = State::default();
+        let start = Instant::now();
+        (ms.iter())
+            .map(|&ms| {
+                let at = start + Duration::from_millis(ms);
+                let event = canvas::Event::Window(window::Event::RedrawRequested(at));
+                let action = <Border as canvas::Program<()>>::update(
+                    border,
+                    &mut state,
+                    &event,
+                    bounds,
+                    Cursor::Unavailable,
+                );
+                (state.strips.clone(), action.is_some())
+            })
+            .collect()
+    }
+
+    fn border(mode: Mode, look: Look, breathing: Breathe) -> Border {
+        Border {
+            mode,
+            scale: 1.0,
+            keyed: false,
+            breathing,
+            look: Some(look),
+        }
+    }
+
+    /// The owner's rule: no moving colours, no draw-back, no travel. Everywhere
+    /// but the overlay after its opening, frames 0.2 s and 60 s after the
+    /// first hold the very same images, and none asks for another frame.
+    #[test]
+    fn the_edge_is_still_but_for_the_overlays_breath() {
+        for look in PRESETS.iter().map(|(_, l)| *l) {
+            for mode in [Mode::Overlay, Mode::Live, Mode::Snip] {
+                // the opening (not breathing yet), live, snip, reduced motion
+                let mut cases = vec![(border(mode, look, Breathe::Off), false)];
+                cases.push((border(mode, look, Breathe::On), mode == Mode::Overlay));
+                for (case, breathes) in cases {
+                    let reduced = [false, true];
+                    for reduced in reduced {
+                        super::super::motion::set_reduced(reduced);
+                        let seen = frames(&case, &[0, 16, 200, 2000, 60_000]);
+                        let moves = breathes && !reduced;
+                        let same = seen.windows(2).all(|p| p[0].0 == p[1].0);
+                        let asks = seen.iter().any(|f| f.1);
+                        let has = edge(&look, mode, 1920, 1080, 1.0, false, 0.0).is_some();
+                        assert_eq!(asks, moves && has, "{mode:?} asks");
+                        assert_eq!(!same, moves && has, "{mode:?} moves");
+                        assert_eq!(!seen[0].0.is_empty(), has, "{mode:?}");
+                    }
+                }
+            }
+        }
+        super::super::motion::set_reduced(false);
+    }
+
+    /// The overlay's breath is the design's `ripplePulse`: 4 s, the blurs
+    /// 22/54 px -> 38/85 px at 2 s -> back, in steps of `STEP`; only the edge's
+    /// strips (never the screen), and it asks for the next step, not every frame.
+    #[test]
+    fn the_overlay_breathes_slowly_in_its_strips_only() {
+        super::super::motion::set_reduced(false);
+        let look = spectrum();
+        let b = border(Mode::Overlay, look, Breathe::On);
+        let seen = frames(&b, &[0, 1000, 2000, 3000, 4000, 4010]);
+        let alpha_at = |p: f32, d: usize| {
+            edge(&look, Mode::Overlay, 1920, 1080, 1.0, false, p)
+                .unwrap()
+                .1[d][3]
+        };
+        // peak: deeper than at rest, the same at 4 s as at 0
+        assert!(alpha_at(1.0, 40) > alpha_at(0.0, 40) + 2);
+        assert!(seen[2].0 != seen[0].0 && seen[1].0 != seen[0].0);
+        assert!(seen.iter().all(|f| f.1), "asks for the next step");
+        assert!(seen[5].0 == seen[4].0, "10 ms later: the same step");
+        assert!((breath(0) - 0.0).abs() < 1e-6 && (breath(25) - 1.0).abs() < 1e-5);
+        assert!((breath(50) - 0.0).abs() < 1e-5);
+        // never more than the four strips, all inside the edge's band
+        let mut state = State::default();
+        let bounds = Rectangle::with_size(iced::Size::new(1920.0, 1080.0));
+        let event = canvas::Event::Window(window::Event::RedrawRequested(Instant::now()));
+        let _ = <Border as canvas::Program<()>>::update(
+            &b,
+            &mut state,
+            &event,
+            bounds,
+            Cursor::Unavailable,
+        );
+        assert_eq!(state.strips.len(), 4);
+        let area: f32 = state.strips.iter().map(|(r, _)| r.width * r.height).sum();
+        assert!(area < 0.3 * 1920.0 * 1080.0, "{area}");
+        // reduced motion: still
+        super::super::motion::set_reduced(true);
+        let seen = frames(&b, &[0, 2000]);
+        assert!(seen[0].0 == seen[1].0 && !seen[1].1);
+        super::super::motion::set_reduced(false);
     }
 
     #[test]
     fn geometry_follows_the_monitor_size_and_scale() {
         for (w, h, scale, t, r) in [
-            (1920, 1080, 1.0, 3, 14),
-            (2560, 1440, 1.25, 4, 18),
-            (3440, 1440, 1.5, 5, 21),
-            (3840, 2160, 2.0, 6, 28),
+            (1920, 1080, 1.0, 102, 14),
+            (2560, 1440, 1.25, 128, 18),
+            (3840, 2160, 2.0, 204, 28),
         ] {
-            let geo = Geo::new(w, h, scale, thin(3.0));
+            let (geo, table) = edge(&spectrum(), Mode::Overlay, w, h, scale, false, 0.0).unwrap();
             assert_eq!((geo.t, geo.r), (t, r), "{w}x{h} @ {scale}");
+            assert_eq!(table.len(), t as usize + 1);
             let strips = geo.strips();
             assert_eq!(strips.len(), 4);
             for [x, y, sw, sh] in &strips {
                 assert!(x + sw <= w && y + sh <= h, "inside the screen");
             }
-            // no overlap: top and bottom full width, the sides between
-            let band = t + r;
-            assert_eq!(area(&strips), 2 * w * band + 2 * band * (h - 2 * band));
+            // every lit pixel is in a strip, and the middle is clear
+            let img = full(geo, &table);
+            let inside = |x: u32, y: u32| {
+                (strips.iter()).any(|[sx, sy, sw, sh]| {
+                    (*sx..sx + sw).contains(&x) && (*sy..sy + sh).contains(&y)
+                })
+            };
+            for y in (0..h).step_by(7) {
+                for x in (0..w).step_by(5) {
+                    if img[((y * w + x) * 4 + 3) as usize] > 0 {
+                        assert!(inside(x, y) || geo.index(x, y) == 0, "({x}, {y})");
+                    }
+                }
+            }
+            let mid = (((h / 2) * w + w / 2) * 4 + 3) as usize;
+            assert_eq!(img[mid], 0);
         }
         // too small for an edge: nothing (no zero-sized images)
-        assert!(Geo::new(30, 30, 1.0, thin(3.0)).strips().is_empty());
-        assert!(Geo::new(1, 1, 2.0, thin(3.0)).strips().is_empty());
-        // the glow: 8x its thickness deep, a quarter of that as corner radius
-        let glow = Geo::new(1920, 1080, 1.0, Spec::glow(48.0));
-        assert_eq!((glow.t, glow.r, glow.glow), (48, 12, true));
+        let (small, _) = edge(&spectrum(), Mode::Overlay, 30, 30, 1.0, false, 0.0).unwrap();
+        assert!(small.strips().is_empty());
     }
 
+    /// The live layer (colour-keyed on Windows) shows a thin solid line at the
+    /// edge's thickness: every pixel clear or solid, none near the key.
     #[test]
-    fn a_line_is_solid_to_the_edge_with_rounded_inner_corners() {
-        let geo = Geo::new(1920, 1080, 1.0, thin(3.0));
-        let t = geo.t;
-        for (x, y) in [(0, 0), (960, 0), (960, t - 1), (1919, 540), (960, 1079)] {
-            assert_eq!(geo.level(x, y), 255, "({x}, {y})");
-        }
-        for (x, y) in [(960, t), (t, 540), (1919 - t, 540), (960, 540)] {
-            assert_eq!(geo.level(x, y), 0, "({x}, {y})");
-        }
-        let d = t + geo.r / 4;
-        assert_eq!(geo.level(d, d), 255);
-        assert_eq!(geo.level(1919 - d, 1079 - d), 255);
-        assert_eq!(geo.level(t + geo.r, t + geo.r), 0);
-    }
-
-    #[test]
-    fn a_glow_fades_inward_and_the_strips_hold_it_all() {
-        let geo = Geo::new(800, 600, 1.0, Spec::glow(48.0));
-        let paint = Paint::of(&spectrum(), EdgeStyle::Glow);
-        let alpha = alphas(true, &paint, Frame::REST);
-        let at = |x, y| alpha[geo.level(x, y) as usize];
-        // strongest at the edge, weaker inward, gone past the reach
-        let column: Vec<u8> = [0, 8, 16, 32, 47, 48, 80].map(|y| at(400, y)).to_vec();
-        assert!(column.windows(2).all(|p| p[0] >= p[1]), "{column:?}");
-        assert!(column[0] >= 190 && column[3] < column[1], "{column:?}");
-        assert_eq!(column[5..], [0, 0]);
-        // the glow's strength scales its peak
-        let half = Paint { peak: 0.4, ..paint };
-        assert!(alphas(true, &half, Frame::REST)[255] < 110);
-        // every lit pixel is inside a strip
-        let strips = geo.strips();
-        let inside = |x, y| {
-            (strips.iter())
-                .any(|[sx, sy, sw, sh]| (*sx..sx + sw).contains(&x) && (*sy..sy + sh).contains(&y))
-        };
-        for y in 0..600 {
-            for x in 0..800 {
-                if geo.level(x, y) > 0 {
-                    assert!(inside(x, y), "lit pixel ({x}, {y}) outside the strips");
-                }
-            }
-        }
-        // all four strips together at 1920x1080, a 48 px glow: under 20% of the screen
-        let big = Geo::new(1920, 1080, 1.0, Spec::glow(48.0));
-        assert!(area(&big.strips()) * 100 < 20 * 1920 * 1080);
-    }
-
-    #[test]
-    fn the_cache_is_per_size_and_style_and_the_palette_only_recolours() {
-        let a = Geo::new(640, 360, 1.0, Spec::glow(48.0));
-        let cache = Cache::build(a);
-        assert_eq!(cache.geo, a);
-        // the same size and style: the same geometry (the view keeps it)
-        assert_eq!(Geo::new(640, 360, 1.0, Spec::glow(48.0)), a);
-        // another size, scale or style: another geometry (rebuilt)
-        for other in [
-            Geo::new(800, 360, 1.0, Spec::glow(48.0)),
-            Geo::new(640, 360, 1.5, Spec::glow(48.0)),
-            Geo::new(640, 360, 1.0, Spec::glow(36.0)),
-            Geo::new(640, 360, 1.0, thin(3.0)),
-        ] {
-            assert_ne!(other, a);
-        }
-        // another palette: the same cache, other pixels
-        let spectrum = render(
-            &cache,
-            &Paint::of(&spectrum(), EdgeStyle::Glow),
-            Frame::REST,
-            false,
-        );
-        let aurora = render(
-            &cache,
-            &Paint::of(&aurora(), EdgeStyle::Glow),
-            Frame::REST,
-            false,
-        );
-        assert_ne!(spectrum, aurora);
-        // the sides cut to the lit 48 px, the corner squares whole
-        assert_eq!(spectrum.len(), 8);
-        // and the colours go round the edge: top-left violet, the right side warm
-        let px = |x: u32, y: u32| {
-            let (r, p) = (spectrum.iter())
-                .find(|([px, py, w, h], _)| {
-                    (*px..px + w).contains(&x) && (*py..py + h).contains(&y)
-                })
-                .expect("a strip there");
-            let i = (((y - r[1]) * r[2] + x - r[0]) * 4) as usize;
-            [p[i], p[i + 1], p[i + 2], p[i + 3]]
-        };
-        assert!(
-            px(2, 0)[2] > px(2, 0)[1],
-            "violet near the top-left: {:?}",
-            px(2, 0)
-        );
-        let edge = px(639, 120); // on the right side, at the screen edge
-        assert!(
-            edge[3] > 0 && edge[0] > edge[2],
-            "warm on the right: {edge:?}"
-        );
-    }
-
-    /// The activation glow drawing back (#134): the strips cut to what shows
-    /// hold every lit pixel with its alpha (nothing lit is left out), and as
-    /// it draws back they cover ever less of the screen: under a third of a
-    /// 720p screen half way through (the whole band was two thirds of it).
-    #[test]
-    fn the_strips_are_cut_to_the_glow_as_it_draws_back() {
-        let (w, h) = (1280u32, 720u32);
-        let look = spectrum();
-        let mut areas = Vec::new();
-        for ms in [0, 30, 60, 105, 150, 209] {
-            let (spec, frame, _) = plan(Mode::Overlay, &look, Duration::from_millis(ms), true);
-            let geo = Geo::new(w, h, 1.0, spec.unwrap());
-            let cache = Cache::build(geo);
-            let paint = Paint::of(&look, EdgeStyle::Glow);
-            let alpha = alphas(true, &paint, frame);
-            let strips = render(&cache, &paint, frame, false);
-            let mut shown = vec![0u8; (w * h) as usize];
-            for ([x0, y0, sw, _], rgba) in &strips {
-                for (i, p) in rgba.as_chunks::<4>().0.iter().enumerate() {
-                    let (x, y) = (x0 + i as u32 % sw, y0 + i as u32 / sw);
-                    shown[(y * w + x) as usize] = p[3];
-                }
-            }
-            for y in 0..h {
-                for x in 0..w {
-                    let want = alpha[geo.level(x, y) as usize];
-                    assert_eq!(shown[(y * w + x) as usize], want, "({x}, {y}) at {ms} ms");
-                }
-            }
-            areas.push(area(&strips.iter().map(|s| s.0).collect::<Vec<_>>()));
-        }
-        assert!(areas.windows(2).all(|a| a[1] <= a[0]), "{areas:?}");
-        let full = area(&Geo::new(w, h, 1.0, Spec::glow(ACT_REACH)).strips());
-        assert!(areas[0] < full, "the corners only are band deep: {areas:?}");
-        assert!(areas[3] * 3 < w * h, "{areas:?}");
-    }
-
-    #[test]
-    fn overlay_activation_starts_wide_and_eases_back_to_the_edge() {
-        let look = spectrum();
-        let ms = Duration::from_millis;
-        let (spec, first, next) = plan(Mode::Overlay, &look, ms(0), true);
-        assert_eq!((first.alpha, first.reach), (1.0, 1.0), "frame 1 is t = 0");
-        assert_eq!((spec.unwrap().inset, next), (ACT_REACH, Some(ACT_FRAME)));
-        // the reach only shrinks, and is the edge's own by the end
-        let reach = |t: u64| plan(Mode::Overlay, &look, ms(t), true).1.reach;
-        let steps: Vec<f32> = (0..=ACTIVATION.as_millis() as u64 - 1)
-            .step_by(10)
-            .map(reach)
-            .collect();
-        assert!(steps.windows(2).all(|w| w[1] <= w[0]), "{steps:?}");
-        let last = reach(ACTIVATION.as_millis() as u64 - 1);
-        assert!((last - 48.0 / ACT_REACH).abs() < 0.01, "{last}");
-        // then the edge's own glow, still; the reach matched, so no jump
-        let (spec, rest, next) = plan(Mode::Overlay, &look, ACTIVATION + ms(1), true);
-        assert_eq!((spec.unwrap().inset, rest, next), (48.0, Frame::REST, None));
-        // no activation glow: the glow grows in, then rests
-        let quiet = Look {
-            activation_glow: false,
-            ..look
-        };
-        let (spec, grow, _) = plan(Mode::Overlay, &quiet, ms(100), true);
-        assert_eq!(spec.unwrap().inset, 48.0);
-        assert!(grow.alpha > 0.0 && grow.alpha < 1.0);
-        assert_eq!(plan(Mode::Overlay, &quiet, FADE, true).1, Frame::REST);
-        // reduce motion: at rest at once
-        let (spec, still, next) = plan(Mode::Overlay, &look, ms(0), false);
-        assert_eq!(
-            (spec.unwrap().inset, still, next),
-            (48.0, Frame::REST, None)
-        );
-    }
-
-    #[test]
-    fn thin_sweeps_once_live_and_snip_stay_still() {
-        let ms = Duration::from_millis;
-        let look = aurora();
-        assert!(!look.activation_glow);
-        let (_, first, next) = plan(Mode::Overlay, &look, ms(0), true);
-        assert_eq!((first.light, next), (0.0, Some(FRAME)));
-        let (_, mid, _) = plan(Mode::Overlay, &look, ms(350), true);
-        assert!((mid.light - SWEEP_GLOW).abs() < 1e-3 && mid.mirrored);
-        assert!((mid.head - 0.375).abs() < 1e-3, "eased: past halfway");
-        assert_eq!(plan(Mode::Overlay, &look, SWEEP, true).2, None);
-        // live: still, whatever the look says (#56: no redraws while live runs)
-        let glow = spectrum();
-        for look in [look, glow].iter().chain(PRESETS.iter().map(|(_, l)| l)) {
-            for at in [0, 700, 2500, 36_000_000] {
-                let (spec, frame, next) = plan(Mode::Live, look, ms(at), true);
-                assert_eq!((frame, next), (Frame::REST, None), "{at} ms");
-                assert_eq!(spec, Spec::of(look.live));
-            }
-        }
-        // snip: thin and still by default; none = nothing
-        assert_eq!(plan(Mode::Snip, &glow, ms(0), true).2, None);
-        let mut none = glow;
-        none.snip.style = EdgeStyle::None;
-        assert_eq!(plan(Mode::Snip, &none, ms(0), true).0, None);
-        // reduce motion: nothing moves
-        for mode in [Mode::Overlay, Mode::Live] {
-            assert_eq!(plan(mode, &look, ms(300), false).2, None);
-        }
-    }
-
-    #[test]
-    fn the_aurora_line_runs_violet_to_cyan_and_the_lights_brighten_it() {
-        let paint = Paint::of(&aurora(), EdgeStyle::Thin);
-        let still = colours(&paint, Frame::REST, false);
-        let near = |a: [u8; 3], b: Color| {
-            let [r, g, bb, _] = b.into_rgba8();
-            (a[0].abs_diff(r) as u32 + a[1].abs_diff(g) as u32 + a[2].abs_diff(bb) as u32) < 6
-        };
-        assert!(near(still[0], theme::STROKE_START));
-        assert!(near(still[LUT / 2], theme::STROKE_END));
-        let lum = |c: [u8; 3]| c.iter().map(|&v| v as u32).sum::<u32>();
-        let sweep = plan(Mode::Overlay, &aurora(), Duration::from_millis(350), true).1;
-        let lit = colours(&paint, sweep, false);
-        let i = |u: f32| (u * LUT as f32) as usize;
-        assert!(lum(lit[i(0.375)]) > lum(still[i(0.375)]) + 60);
-        assert!(lum(lit[i(0.625)]) > lum(still[i(0.625)]) + 60);
-        assert_eq!(lit[0], still[0]);
-    }
-
-    /// The live layer (colour-keyed on Windows) draws every look's edge as the
-    /// thin line at the overlay's resting thickness: solid, never a dithered glow.
-    #[test]
-    fn the_keyed_live_edge_is_a_thin_solid_line_at_the_overlays_thickness() {
-        let (w, h, scale) = (1366u32, 768u32, 1.25f32);
-        for (theme, look) in PRESETS {
-            let Some(spec) = Spec::of(look.live) else {
-                continue;
-            };
-            let spec = spec.on_window(true, look.live);
-            let want = f32::from(look.overlay.thickness);
-            assert_eq!(
-                (spec.style, spec.inset),
-                (EdgeStyle::Thin, want),
-                "{theme:?}"
-            );
-            let cache = Cache::build(Geo::new(w, h, scale, spec));
-            let frame = plan(Mode::Live, &look, Duration::from_millis(700), true).1;
-            let strips = render(&cache, &Paint::of(&look, spec.style), frame, true);
-            // the top strip's middle column: solid from the edge, then clear
-            let ([_, _, sw, sh], top) = &strips[0];
-            let column: Vec<u8> = (0..*sh)
-                .map(|y| top[((y * sw + sw / 2) * 4 + 3) as usize])
-                .collect();
-            let lit = column.iter().take_while(|&&a| a == 255).count();
-            assert_eq!(
-                lit,
-                (want * scale).round() as usize,
-                "{theme:?}: {column:?}"
-            );
-            assert!(
-                column[lit..].iter().all(|&a| a == 0),
-                "{theme:?}: {column:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn keyed_edges_have_no_key_pixels_and_no_partial_alpha() {
+    fn the_keyed_edge_is_a_thin_solid_line_away_from_the_key() {
         let key = crate::live::COLOUR_KEY;
-        let ms = Duration::from_millis;
-        // every preset, glow and line, over the key colour
-        let mut looks: Vec<Look> = PRESETS.iter().map(|(_, l)| *l).collect();
         let mut magenta = spectrum();
         magenta.palette = ColourSet::TwoColour;
         magenta.colours = [config::Rgb(key), config::Rgb([250, 10, 240])];
-        looks.push(magenta);
-        for look in looks {
-            for (spec, frame) in [
-                (
-                    Spec::of(look.live),
-                    plan(Mode::Live, &look, ms(700), true).1,
-                ),
-                (Some(Spec::glow(48.0)), Frame::REST),
-                (Some(thin(3.0)), Frame::REST),
-            ] {
-                let Some(spec) = spec else { continue };
-                let cache = Cache::build(Geo::new(1366, 768, 1.25, spec));
-                let paint = Paint::of(&look, spec.style);
-                let mut solid = 0;
-                for (_, rgba) in render(&cache, &paint, frame, true) {
-                    for px in rgba.as_chunks::<4>().0 {
-                        match px[3] {
-                            0 => {}
-                            255 => {
-                                solid += 1;
-                                let d: u32 = (px[..3].iter().zip(key))
-                                    .map(|(a, b)| a.abs_diff(b) as u32)
-                                    .sum();
-                                assert!(d > 200, "{px:?} is close to the key");
-                            }
-                            a => panic!("partial alpha {a}: a blend toward the key"),
-                        }
+        let looks = PRESETS.iter().map(|(_, l)| *l).chain([magenta]);
+        for look in looks.filter(|l| l.glow > 0) {
+            let (geo, table) = edge(&look, Mode::Live, 1366, 768, 1.25, true, 0.0).unwrap();
+            let want = (f32::from(look.live.thickness) * 1.25).round() as u32;
+            assert_eq!(geo.t, want);
+            let img = full(geo, &table);
+            let column: Vec<u8> = (0..60)
+                .map(|y| img[((y * 1366 + 683) * 4 + 3) as usize])
+                .collect();
+            let lit = column.iter().take_while(|&&a| a == 255).count();
+            assert_eq!(lit, want as usize, "{column:?}");
+            assert!(column[lit..].iter().all(|&a| a == 0), "{column:?}");
+            for px in img.as_chunks::<4>().0 {
+                match px[3] {
+                    0 => {}
+                    255 => {
+                        let d: u32 = (px[..3].iter().zip(key))
+                            .map(|(a, b)| a.abs_diff(b) as u32)
+                            .sum();
+                        assert!(d > 200, "{px:?} is close to the key");
                     }
-                }
-                if look.glow > 0 || spec.style == EdgeStyle::Thin {
-                    assert!(solid > 0, "{:?} drew nothing", look.palette);
+                    a => panic!("partial alpha {a}"),
                 }
             }
         }
-        // unkeyed: soft
-        let cache = Cache::build(Geo::new(640, 360, 1.0, Spec::glow(48.0)));
-        let soft = render(
-            &cache,
-            &Paint::of(&spectrum(), EdgeStyle::Glow),
-            Frame::REST,
-            false,
-        );
-        assert!(
-            soft.iter().any(|(_, rgba)| {
-                (rgba.as_chunks::<4>().0.iter()).any(|p| p[3] > 0 && p[3] < 255)
-            })
-        );
     }
 
     #[test]
@@ -1051,160 +656,34 @@ mod tests {
         let (w, h) = (192, 108);
         let grey = vec![60u8; (w * h * 4) as usize];
         let mut a = grey.clone();
-        paint(&mut a, w, h, 0.1, &spectrum(), Mode::Overlay);
+        paint(&mut a, w, h, 0.3, &spectrum(), Mode::Overlay);
         assert_ne!(a, grey);
         let centre = ((54 * w + 96) * 4) as usize;
         assert_eq!(a[centre..centre + 3], [60, 60, 60], "the middle stays");
-        let mut none = spectrum();
-        none.overlay.style = EdgeStyle::None;
-        let mut b = grey.clone();
-        paint(&mut b, w, h, 0.1, &none, Mode::Overlay);
-        assert_eq!(b, grey);
     }
 
-    /// `cargo test --release border::tests::frame_cost -- --ignored --nocapture`
+    /// The default look's edge at 1080p, pixel for pixel
+    /// (`tests/fixtures/edge-default-1080p.png`, clear in the middle). A change
+    /// to the edge on purpose: `OPENCIRCLE_UPDATE_GOLDEN=1 cargo test border::`.
     #[test]
-    #[ignore = "timing, release only"]
-    fn frame_cost() {
-        let look = spectrum();
-        let cache = Cache::build(Geo::new(1920, 1080, 1.0, Spec::of(look.live).unwrap()));
-        let paint = Paint::of(&look, EdgeStyle::Glow);
-        let start = Instant::now();
-        for i in 0..50 {
-            let frame = Frame {
-                shift: i as f32 / 150.0,
-                ..Frame::REST
-            };
-            std::hint::black_box(render(&cache, &paint, frame, false));
-        }
-        println!("render: {:?} per frame", start.elapsed() / 50);
-    }
-
-    /// `OPENCIRCLE_BORDER_PNG=<dir> cargo test border::tests::snapshots -- --ignored`
-    /// writes the edge as the canvas draws it (headless tiny-skia, 1920x1080).
-    #[test]
-    #[ignore = "writes PNGs to look at"]
-    fn snapshots() {
-        use iced::advanced::renderer::{Headless, Style};
-        use iced::advanced::widget::Tree;
-        use iced::advanced::{Layout, Shell, clipboard, layout};
-        let dir = std::path::PathBuf::from(
-            std::env::var("OPENCIRCLE_BORDER_PNG").expect("OPENCIRCLE_BORDER_PNG=<dir>"),
+    fn the_default_edge_at_1080p_matches_its_golden_image() {
+        let (geo, table) = edge(&spectrum(), Mode::Overlay, 1920, 1080, 1.0, false, 0.0).unwrap();
+        let img = full(geo, &table);
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/edge-default-1080p.png"
         );
-        let size = iced::Size::new(1920.0, 1080.0);
-        let screen = Rectangle::with_size(size);
-        let [r, g, b] = crate::live::COLOUR_KEY;
-        let (grey, key) = (Color::from_rgb8(40, 42, 54), Color::from_rgb8(r, g, b));
-        let calm = LookTheme::Calm.look(&spectrum());
-        let neon = LookTheme::Neon.look(&spectrum());
-        let sunset = LookTheme::Sunset.look(&spectrum());
-        for (name, look, mode, keyed, ms, background) in [
-            (
-                "overlay-activation-150ms",
-                spectrum(),
-                Mode::Overlay,
-                false,
-                150,
-                grey,
-            ),
-            (
-                "overlay-activation-400ms",
-                spectrum(),
-                Mode::Overlay,
-                false,
-                400,
-                grey,
-            ),
-            (
-                "overlay-glow-rest",
-                spectrum(),
-                Mode::Overlay,
-                false,
-                2000,
-                grey,
-            ),
-            (
-                "live-glow-1000ms",
-                spectrum(),
-                Mode::Live,
-                false,
-                1000,
-                grey,
-            ),
-            (
-                "live-glow-5000ms",
-                spectrum(),
-                Mode::Live,
-                false,
-                5000,
-                grey,
-            ),
-            ("live-glow-keyed", spectrum(), Mode::Live, true, 1000, key),
-            (
-                "live-aurora-1000ms",
-                aurora(),
-                Mode::Live,
-                false,
-                1000,
-                grey,
-            ),
-            (
-                "overlay-aurora-sweep-300ms",
-                aurora(),
-                Mode::Overlay,
-                false,
-                300,
-                grey,
-            ),
-            ("overlay-sunset", sunset, Mode::Overlay, false, 2000, grey),
-            ("overlay-neon", neon, Mode::Overlay, false, 2000, grey),
-            ("overlay-calm", calm, Mode::Overlay, false, 2000, grey),
-            ("snip-thin", spectrum(), Mode::Snip, false, 300, grey),
-        ] {
-            let mut element: Element<'_, ()> = canvas::Canvas::new(Border {
-                mode,
-                scale: 1.0,
-                keyed,
-                look: Some(look),
-                opening: None,
-            })
-            .width(Fill)
-            .height(Fill)
-            .into();
-            let mut renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0));
-            let mut tree = Tree::new(element.as_widget());
-            let limits = layout::Limits::new(iced::Size::ZERO, size);
-            let node = element
-                .as_widget_mut()
-                .layout(&mut tree, &renderer, &limits);
-            let start = Instant::now();
-            for at in [start, start + Duration::from_millis(ms)] {
-                let event = canvas::Event::Window(window::Event::RedrawRequested(at));
-                let mut messages = Vec::new();
-                let mut shell = Shell::new(&mut messages);
-                element.as_widget_mut().update(
-                    &mut tree,
-                    &event,
-                    Layout::new(&node),
-                    Cursor::Unavailable,
-                    &renderer,
-                    &mut clipboard::Null,
-                    &mut shell,
-                    &screen,
-                );
-            }
-            element.as_widget().draw(
-                &tree,
-                &mut renderer,
-                &Theme::Dark,
-                &Style::default(),
-                Layout::new(&node),
-                Cursor::Unavailable,
-                &screen,
-            );
-            let rgba = renderer.screenshot(iced::Size::new(1920, 1080), 1.0, background);
-            let path = dir.join(format!("edge-{name}.png"));
-            crate::actions::write_png(&path, 1920, 1080, &rgba).unwrap();
+        if std::env::var_os("OPENCIRCLE_UPDATE_GOLDEN").is_some() {
+            crate::actions::write_png(std::path::Path::new(path), 1920, 1080, &img).unwrap();
         }
+        let png = png::Decoder::new(std::io::Cursor::new(std::fs::read(path).unwrap()));
+        let mut reader = png.read_info().unwrap();
+        let mut want = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut want).unwrap();
+        assert_eq!((info.width, info.height), (1920, 1080));
+        assert!(
+            img == want[..img.len()],
+            "the edge differs from its golden image"
+        );
     }
 }

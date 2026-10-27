@@ -159,7 +159,7 @@ fn animation_frame_times() {
         );
     };
     for (w, h) in [(1920, 1080), (3440, 1440)] {
-        // the opening: the bar slides up, the edge glow draws back (the window
+        // the opening: the bar slides up (the edge glow is still; the window
         // fades in as a whole: the OS's work)
         let mut app = open_app(w, h, 1.0);
         app.appear = None;
@@ -292,13 +292,12 @@ fn the_tiled_frame_is_the_frame() {
     }
 }
 
-/// The opening redraws only what moves: the edge band (the activation glow
-/// drawing back), the bar rising and the hint coming down. Never the frame
-/// under the dim (the window fades in as a whole, `windows::fade`), and never
-/// a layer's whole bounds when a widget gets or leaves a layer of its own
-/// (the hint while it slides). At 1080p at most 60 % of the screen per frame
-/// (the glow's strips, cut to what shows, #134: 21 % on average), the middle
-/// never; and what it draws is
+/// The opening redraws only what moves: the bar rising and the hint coming
+/// down. Never the frame under the dim (the window fades in as a whole,
+/// `windows::fade`), never the screen edge's static glow after its first frame
+/// (the left and right bands stay untouched), and never a layer's whole bounds
+/// when a widget gets or leaves a layer of its own (the hint while it slides).
+/// At 1080p at most 10 % of the screen per frame; and what it draws is
 /// exactly the frame drawn afresh.
 #[test]
 fn the_opening_redraws_only_what_moves() {
@@ -308,12 +307,17 @@ fn the_opening_redraws_only_what_moves() {
     let drawn = frames(&mut app, 16, true, |app, _, now| {
         let _ = app.update(Message::Frame(now));
     });
-    // inside the activation glow's band, above the bar, below the hint
+    // the edge's left and right bands (no widget moves there)
+    let sides = [
+        Rectangle::new(Point::new(0.0, 0.0), Size::new(80.0, h as f32)),
+        Rectangle::new(Point::new(w as f32 - 80.0, 0.0), Size::new(80.0, h as f32)),
+    ];
+    // above the bar, below the hint
     let middle = Rectangle::new(Point::new(250.0, 250.0), Size::new(1420.0, 550.0));
     for (i, frame) in drawn.iter().enumerate() {
         let area: f32 = frame.damage.iter().map(|r| r.width * r.height).sum();
         assert!(
-            area <= 0.6 * (w * h) as f32,
+            area <= 0.1 * (w * h) as f32,
             "frame {}: redrew {:.0} % of the screen: {:?}",
             i + 1,
             100.0 * area / (w * h) as f32,
@@ -325,6 +329,15 @@ fn the_opening_redraws_only_what_moves() {
                 .iter()
                 .all(|r| r.intersection(&middle).is_none()),
             "frame {}: redrew the still middle: {:?}",
+            i + 1,
+            frame.damage
+        );
+        assert!(
+            frame
+                .damage
+                .iter()
+                .all(|r| sides.iter().all(|s| r.intersection(s).is_none())),
+            "frame {}: redrew the edge glow: {:?}",
             i + 1,
             frame.damage
         );
@@ -341,11 +354,10 @@ fn the_opening_redraws_only_what_moves() {
 /// frames, and the mean share of the screen redrawn. Windows OCR's two reads
 /// land during it, as they do from the capture (#62: the quick read about
 /// 0.1 s in, the closer one at the end), and their handling on the UI thread
-/// counts too (#134). Fails if the opening redraws more than 30 % of the
-/// screen per frame (21 % since #134 cut the glow's strips to what shows; 42 %
-/// before, about 100 % before #23), or if its work grows past its 16 beats of
-/// 16 ms (release; see the printed numbers: CI's Linux runner took 563 ms
-/// before #134, when the frozen tiles missed the blit).
+/// counts too (#134). Fails if the opening redraws more than 10 % of the
+/// screen per frame (3 % now that the edge glow is drawn once; 21 % before,
+/// when it drew back; 42 % before #134, about 100 % before #23), or if its
+/// work grows past its 16 beats of 16 ms (release; see the printed numbers).
 /// Run: `cargo test --release the_opening_stays -- --nocapture`.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "timing: CI runs it in release")]
@@ -391,7 +403,7 @@ fn the_opening_stays_within_its_frame_budget() {
         share * 100.0
     );
     assert!(
-        share <= 0.3,
+        share <= 0.1,
         "redrew {:.0} % of the screen per frame",
         share * 100.0
     );
@@ -432,6 +444,9 @@ fn the_opening_blits_its_images() {
 /// rest), and a frame drawn anyway redraws nothing.
 #[test]
 fn a_still_overlay_asks_for_no_frames() {
+    // the edge glow's slow breath is its one motion, off with reduced motion
+    // (`the_breath_redraws_only_the_edge`)
+    motion::set_reduced(true);
     let mut app = open_app(1280, 720, 1.0);
     app.appear = None;
     let (a, b) = (Point::new(300.0, 200.0), Point::new(600.0, 400.0));
@@ -453,6 +468,48 @@ fn a_still_overlay_asks_for_no_frames() {
         "no widget wants one"
     );
     assert!(last.damage.is_empty(), "{:?}", last.damage);
+}
+
+/// The edge glow's breath (owner, 2026-10-27) redraws only the edge's strips,
+/// once per `border::STEP`, and only after the opening: never the middle of the
+/// screen, and a few percent of the screen per frame at most.
+#[test]
+fn the_breath_redraws_only_the_edge() {
+    let (w, h) = (1920, 1080);
+    motion::set_reduced(false);
+    let mut app = open_app(w, h, 1.0);
+    app.appear = None;
+    let drawn = frames(&mut app, 80, false, |app, _, now| {
+        let _ = app.update(Message::Frame(now));
+    });
+    // the breath starts at the opening's end (frame 13); before it, no edge work
+    let middle = Rectangle::new(Point::new(260.0, 260.0), Size::new(1400.0, 540.0));
+    let mut steps = 0;
+    for (i, frame) in drawn.iter().enumerate().skip(16) {
+        assert!(
+            frame
+                .damage
+                .iter()
+                .all(|r| r.intersection(&middle).is_none()),
+            "frame {}: redrew the middle: {:?}",
+            i + 1,
+            frame.damage
+        );
+        steps += usize::from(!frame.damage.is_empty());
+    }
+    assert!(
+        (8..=16).contains(&steps),
+        "{steps} breath steps in 64 frames"
+    );
+    let area: f32 = (drawn.iter().skip(16))
+        .flat_map(|d| d.damage.iter().map(|r| r.width * r.height))
+        .sum();
+    let share = area / (64.0 * (w * h) as f32);
+    println!(
+        "breath: {steps} steps, {:.1} % of the screen a frame",
+        share * 100.0
+    );
+    assert!(share < 0.08, "{:.1} %", share * 100.0);
 }
 
 /// Every open goes by `motion`: the opening's clock, a result card growing

@@ -605,14 +605,11 @@ pub enum Message {
     Palette(PaletteChoice),
     Glow(u8),
     Dim(u8),
-    Activation(bool),
     Brackets(BracketColour),
     BracketStyle(BracketStyle),
     Bar(BarChoice),
     EdgeMode(EdgeMode),
     EdgeStyle(EdgeStyle),
-    Thickness(u8),
-    Animate(bool),
     /// Open / close the picker for custom colour 0 (from) or 1 (to).
     Picker(usize),
     PickColour(Color),
@@ -1133,26 +1130,20 @@ fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Palette(_)
         | Message::Glow(_)
         | Message::Dim(_)
-        | Message::Activation(_)
         | Message::Brackets(_)
         | Message::BracketStyle(_)
         | Message::Bar(_)
-        | Message::EdgeStyle(_)
-        | Message::Thickness(_)
-        | Message::Animate(_) => {
+        | Message::EdgeStyle(_) => {
             let mode = state.edge_mode;
             let custom = &mut state.draft.look.custom;
             match message {
                 Message::Palette(p) => custom.palette = p.0,
                 Message::Glow(v) => custom.glow = v,
                 Message::Dim(v) => custom.dim = v,
-                Message::Activation(v) => custom.activation_glow = v,
                 Message::Brackets(v) => custom.brackets = v,
                 Message::BracketStyle(v) => custom.bracket_style = v,
                 Message::Bar(v) => custom.bar = v.0,
                 Message::EdgeStyle(v) => state.draft.look.edge_mut(mode).style = v,
-                Message::Thickness(v) => state.draft.look.edge_mut(mode).thickness = v,
-                Message::Animate(v) => state.draft.look.edge_mut(mode).animate = v,
                 _ => {}
             }
             state.refresh_custom();
@@ -1891,19 +1882,6 @@ fn custom_rows(state: &State) -> Vec<Element<'_, Message>> {
             None,
         ),
         form_row(
-            "Activation glow",
-            "A wide glow when the screen freezes",
-            segmented(
-                &[
-                    (true, "On", "Glow when the screen freezes"),
-                    (false, "Off", "No glow when the screen freezes"),
-                ],
-                c.activation_glow,
-                Message::Activation,
-            ),
-            None,
-        ),
-        form_row(
             "Selection corners",
             "The brackets on a snapped box",
             segmented(
@@ -1964,50 +1942,23 @@ fn custom_rows(state: &State) -> Vec<Element<'_, Message>> {
         ),
         form_row(
             "Edge style",
-            "A soft glow, a thin line, or none",
+            "A soft glow along the screen edge, or none",
             segmented(
                 &[
                     (EdgeStyle::Glow, "Glow", "A soft glow fading inward"),
-                    (EdgeStyle::Thin, "Thin", "A thin line"),
                     (EdgeStyle::None, "None", "No screen edge"),
                 ],
-                edge.style,
+                // a "thin" edge from an older config shows as the glow it now is
+                if edge.style == EdgeStyle::None {
+                    EdgeStyle::None
+                } else {
+                    EdgeStyle::Glow
+                },
                 Message::EdgeStyle,
             ),
             None,
         ),
-        form_row(
-            "Edge thickness",
-            "A glow reaches 8 times as far",
-            tip(
-                slider(
-                    crate::config::EDGE_THICKNESS,
-                    edge.thickness,
-                    " px",
-                    Message::Thickness,
-                ),
-                "Edge thickness",
-                Position::Top,
-            ),
-            None,
-        ),
     ]);
-    // live translate's edge never moves (#56)
-    if state.edge_mode != EdgeMode::Live {
-        rows.push(form_row(
-            "Edge motion",
-            "Once when it opens",
-            segmented(
-                &[
-                    (true, "Animate", "The edge moves"),
-                    (false, "Still", "The edge stays still"),
-                ],
-                edge.animate,
-                Message::Animate,
-            ),
-            None,
-        ));
-    }
     rows
 }
 
@@ -3465,9 +3416,7 @@ pub(super) mod tests {
         update(&mut s, Message::Glow(55));
         update(&mut s, Message::Dim(30));
         update(&mut s, Message::EdgeMode(EdgeMode::Live));
-        update(&mut s, Message::EdgeStyle(EdgeStyle::Thin));
-        update(&mut s, Message::Thickness(9));
-        update(&mut s, Message::Animate(false));
+        update(&mut s, Message::EdgeStyle(EdgeStyle::None));
         update(&mut s, Message::Bar(BarChoice(BarStyle::Solid)));
         update(
             &mut s,
@@ -3501,8 +3450,7 @@ pub(super) mod tests {
         assert_eq!(back, cfg);
         let look = back.look.active();
         assert_eq!((look.glow, look.dim, look.bar), (55, 30, BarStyle::Solid));
-        assert_eq!(look.live.style, EdgeStyle::Thin);
-        assert_eq!((look.live.thickness, look.live.animate), (9, false));
+        assert_eq!(look.live.style, EdgeStyle::None);
         assert_eq!(
             look.overlay,
             LookTheme::Neon.look(&look).overlay,

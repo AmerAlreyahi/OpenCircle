@@ -118,9 +118,6 @@ const GRAPHITE: Palette = Palette {
 
 /// Selection stroke and screen border gradient (both themes): violet → cyan.
 pub const STROKE_START: Color = Color::from_rgb8(0xa9, 0x9b, 0xff);
-pub const STROKE_END: Color = Color::from_rgb8(0x5f, 0xe0, 0xf0);
-/// The screen border's shimmer sweep lights the gradient toward this.
-pub const SHIMMER: Color = Color::WHITE;
 
 /// Accent gradient (both themes): primary buttons, active tools.
 pub const ACCENT_START: Color = Color::from_rgb8(0x8f, 0x80, 0xff);
@@ -139,35 +136,35 @@ pub const DIM_OUTSIDE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
 
 // ---- Active looks (config `[look]`): the presets' colours, one table ----
 
-/// A palette's edge colours (spaced evenly round the screen edge, clockwise
-/// from the top-left corner, back to the first) and its accent gradient.
+/// A palette's screen-edge glow (the two colours of the design's look of the
+/// same name, alpha included: the inner and the outer layer) and its accent
+/// gradient.
 pub struct Colours {
-    pub edge: &'static [Color],
+    pub glow: [Color; 2],
     pub accent: (Color, Color),
 }
 
 const AURORA: Colours = Colours {
-    edge: &[STROKE_START, STROKE_END],
+    glow: [
+        Color::from_rgba8(125, 211, 252, 0.42),
+        Color::from_rgba8(167, 139, 250, 0.25),
+    ],
     accent: (ACCENT_START, ACCENT_END),
 };
 
 /// Our own spectrum: violet, coral, amber, lemon, mint, sky.
 const SPECTRUM: Colours = Colours {
-    edge: &[
-        Color::from_rgb8(0x9b, 0x7b, 0xff),
-        Color::from_rgb8(0xff, 0x6b, 0x5e),
-        Color::from_rgb8(0xff, 0xb5, 0x47),
-        Color::from_rgb8(0xf2, 0xdc, 0x5a),
-        Color::from_rgb8(0x5f, 0xd3, 0x8a),
-        Color::from_rgb8(0x4a, 0xa8, 0xff),
+    glow: [
+        Color::from_rgba8(155, 123, 255, 0.42),
+        Color::from_rgba8(255, 107, 94, 0.26),
     ],
     accent: (ACCENT_START, ACCENT_END),
 };
 
 const SUNSET: Colours = Colours {
-    edge: &[
-        Color::from_rgb8(0xff, 0x8f, 0x3f),
-        Color::from_rgb8(0xff, 0x55, 0x9a),
+    glow: [
+        Color::from_rgba8(255, 143, 63, 0.44),
+        Color::from_rgba8(255, 85, 154, 0.28),
     ],
     accent: (
         Color::from_rgb8(0xff, 0xa0, 0x58),
@@ -176,9 +173,9 @@ const SUNSET: Colours = Colours {
 };
 
 const OCEAN: Colours = Colours {
-    edge: &[
-        Color::from_rgb8(0x2a, 0xd4, 0xc7),
-        Color::from_rgb8(0x3d, 0x7b, 0xff),
+    glow: [
+        Color::from_rgba8(42, 212, 199, 0.45),
+        Color::from_rgba8(61, 123, 255, 0.3),
     ],
     accent: (
         Color::from_rgb8(0x3f, 0xd8, 0xcc),
@@ -187,9 +184,9 @@ const OCEAN: Colours = Colours {
 };
 
 const NEON: Colours = Colours {
-    edge: &[
-        Color::from_rgb8(0x00, 0xf0, 0xff),
-        Color::from_rgb8(0xff, 0x3f, 0xd0),
+    glow: [
+        Color::from_rgba8(0, 240, 255, 0.5),
+        Color::from_rgba8(255, 63, 208, 0.34),
     ],
     accent: (
         Color::from_rgb8(0x2a, 0xf2, 0xff),
@@ -198,9 +195,9 @@ const NEON: Colours = Colours {
 };
 
 const MONO: Colours = Colours {
-    edge: &[
-        Color::from_rgb8(0xff, 0xff, 0xff),
-        Color::from_rgb8(0x9a, 0xa0, 0xaa),
+    glow: [
+        Color::from_rgba8(255, 255, 255, 0.42),
+        Color::from_rgba8(255, 255, 255, 0.07),
     ],
     accent: (
         Color::from_rgb8(0xe8, 0xe8, 0xee),
@@ -225,11 +222,22 @@ fn rgb(c: Rgb) -> Color {
     Color::from_rgb8(r, g, b)
 }
 
-/// The look's edge colours (a `TwoColour` look: its own two).
-pub fn edge_colours(look: &Look) -> Vec<Color> {
+/// The look's edge glow colours c1 (near the edge), c2 (further in), with
+/// alpha (a `TwoColour` look: its own two, at the Spectrum's alphas).
+pub fn edge_glow(look: &Look) -> [Color; 2] {
+    let [a, b] = colours(ColourSet::Spectrum).glow.map(|c| c.a);
     match look.palette {
-        ColourSet::TwoColour => look.colours.map(rgb).to_vec(),
-        p => colours(p).edge.to_vec(),
+        ColourSet::TwoColour => [
+            Color {
+                a,
+                ..rgb(look.colours[0])
+            },
+            Color {
+                a: b,
+                ..rgb(look.colours[1])
+            },
+        ],
+        p => colours(p).glow,
     }
 }
 
@@ -243,18 +251,6 @@ pub fn accent_of(look: &Look) -> (Color, Color) {
         ColourSet::TwoColour => (rgb(look.colours[0]), rgb(look.colours[1])),
         p => colours(p).accent,
     }
-}
-
-/// The colour at `u` (0..1, clockwise from the top-left corner) round the edge
-/// of a screen framed in `stops`: cosine-eased between neighbours, cyclic.
-pub fn along(stops: &[Color], u: f32) -> Color {
-    let n = stops.len().max(1);
-    let at = u.rem_euclid(1.0) * n as f32;
-    let i = (at as usize).min(n - 1);
-    let k = 0.5 - 0.5 * (std::f32::consts::PI * (at - i as f32)).cos();
-    let (a, b) = (stops[i % n], stops[(i + 1) % n]);
-    let m = |a: f32, b: f32| a + (b - a) * k;
-    Color::from_rgb(m(a.r, b.r), m(a.g, b.g), m(a.b, b.b))
 }
 
 /// The dim over the whole frozen frame (before a selection) and outside a

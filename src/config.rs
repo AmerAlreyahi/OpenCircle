@@ -43,16 +43,16 @@
 //! [look.custom]                     # theme = "custom" only (a copy of a preset to edit)
 //! palette = "spectrum"              # spectrum | aurora | sunset | ocean | neon | mono | two_colour
 //! colours = ["#8f80ff", "#4fc9e0"]  # palette = two_colour: from, to
-//! glow = 80                         # edge glow strength, 0-100 %
+//! glow = 100                        # edge glow strength, 0-100 % (100 = the design's; 0 = no edge)
 //! dim = 12                          # dim over the frozen screen, 0-60 %
-//! activation_glow = true            # a wide glow fades in when the overlay opens
+//! activation_glow = true            # kept, unused: the edge is static (2026-10-27)
 //! brackets = "white"                # white | accent: the selection's corner colour
 //! bracket_style = "corners"         # corners | frame
 //! bar = "glass"                     # glass | glass_dark | glass_light | solid | outline
 //! [look.custom.overlay]             # the screen edge per mode: overlay, live, snip
-//! style = "glow"                    # glow | thin | none
-//! thickness = 6                     # 1-12 px
-//! animate = true                    # overlay/snip: once on open; live: keeps moving
+//! style = "glow"                    # glow | none (thin: the glow too)
+//! thickness = 6                     # 1-12 px; only the line on the live layer (Windows)
+//! animate = true                    # kept, unused: the edge is static
 //! [song]                            # song search (the service key: OS keyring only)
 //! source = "system"                 # system (what this PC plays) | microphone
 //! history = false                   # keep recent songs on this PC
@@ -614,7 +614,7 @@ pub const PRESETS: [(LookTheme, Look); 7] = {
     [
         (
             LookTheme::Spectrum,
-            preset(ColourSet::Spectrum, 80, 12, true, BarStyle::Glass),
+            preset(ColourSet::Spectrum, 100, 12, true, BarStyle::Glass),
         ),
         // Today's look: the thin violet → cyan line with its sweep.
         (
@@ -622,16 +622,16 @@ pub const PRESETS: [(LookTheme, Look); 7] = {
             Look {
                 overlay: thin,
                 live: thin,
-                ..preset(ColourSet::Aurora, 70, 12, false, BarStyle::Glass)
+                ..preset(ColourSet::Aurora, 100, 12, false, BarStyle::Glass)
             },
         ),
         (
             LookTheme::Sunset,
-            preset(ColourSet::Sunset, 80, 15, true, BarStyle::GlassDark),
+            preset(ColourSet::Sunset, 100, 15, true, BarStyle::GlassDark),
         ),
         (
             LookTheme::Ocean,
-            preset(ColourSet::Ocean, 70, 12, true, BarStyle::Glass),
+            preset(ColourSet::Ocean, 100, 12, true, BarStyle::Glass),
         ),
         (
             LookTheme::Neon,
@@ -648,7 +648,7 @@ pub const PRESETS: [(LookTheme, Look); 7] = {
                 bracket_style: BracketStyle::Frame,
                 overlay: thin,
                 live: thin,
-                ..preset(ColourSet::Mono, 50, 10, false, BarStyle::Solid)
+                ..preset(ColourSet::Mono, 100, 10, false, BarStyle::Solid)
             },
         ),
         (
@@ -1714,7 +1714,7 @@ mod tests {
         assert_eq!(c.selection.style, SelectStyle::Snap);
         assert_eq!(c.selection.after, After::Wait, "good survives");
         let look = c.look.active();
-        assert_eq!((look.glow, look.dim), (80, 12));
+        assert_eq!((look.glow, look.dim), (100, 12));
         assert_eq!(look.colours, d.look.custom.colours);
         assert_eq!(look.bar, BarStyle::Solid);
         assert_eq!(look.overlay.style, EdgeStyle::Thin);

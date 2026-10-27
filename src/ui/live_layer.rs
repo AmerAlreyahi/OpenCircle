@@ -628,7 +628,8 @@ impl Live {
         let mut layers = stack![border::view(
             border::Mode::Live,
             monitor.scale,
-            cfg!(windows)
+            cfg!(windows),
+            border::Breathe::Off,
         )];
         // (Paused: `patches` is empty.)
         for p in &self.patches {
