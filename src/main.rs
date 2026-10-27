@@ -87,7 +87,7 @@ fn start_detached() -> std::io::Result<()> {
 fn main() -> ExitCode {
     #[cfg(all(windows, not(debug_assertions)))]
     attach_parent_console();
-    ui::limit_malloc_arenas();
+    sys::mem::limit_malloc_arenas();
     // The setup build (OpenCircle-Setup-*.exe) is the setup, whatever it is asked.
     if let Some(msi) = setup::payload() {
         let args: Vec<String> = std::env::args().skip(1).collect();

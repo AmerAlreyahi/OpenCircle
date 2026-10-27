@@ -67,17 +67,14 @@ fn styles(line: &str) -> bool {
 
 /// Not screens: the kit, the palettes and components the kit replaces (step
 /// 5 / 23), OS glue (platform/), state and logic (app/), and tests.
-const NOT_SCREENS: [&str; 10] = [
+const NOT_SCREENS: [&str; 7] = [
     "arch_tests.rs",
     "frame_times.rs",
     "glass.rs",
-    "keys.rs",
-    "quick.rs",
     "sapphire.rs",
     "theme.rs",
     "widgets.rs",
     "windows.rs",
-    "word.rs",
 ];
 
 /// Screen files that still style in place. A ratchet: a port removes its file
@@ -104,7 +101,9 @@ const LEGACY: &[&str] = &[
 fn screens_never_style() {
     let styled: Vec<String> = sources("")
         .into_iter()
-        .filter(|(name, _)| !name.starts_with("kit/") && !name.starts_with("platform/"))
+        .filter(|(name, _)| {
+            !name.starts_with("kit/") && !name.starts_with("platform/") && !name.starts_with("app/")
+        })
         .filter(|(name, _)| !NOT_SCREENS.contains(&name.as_str()))
         .filter(|(_, src)| code(src).any(styles))
         .map(|(name, _)| name)

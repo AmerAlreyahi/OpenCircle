@@ -608,7 +608,7 @@ impl Live {
             // Live off: its frames and patches are freed; give the memory
             // back (glibc keeps it: the app stayed ~80 MB, not ~30).
             drop(steps);
-            super::trim_heap();
+            crate::sys::mem::trim_heap();
         })
         .abortable();
         self.work = Some(handle.abort_on_drop());

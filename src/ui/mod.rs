@@ -1,6 +1,7 @@
 //! The iced daemon: owns the overlay window (pre-created and hidden between uses
 //! where windows can hide, see `can_hide_windows`) and its state.
 mod about;
+mod app;
 #[cfg(test)]
 mod arch_tests;
 mod bar;
@@ -10,7 +11,6 @@ mod edit;
 #[cfg(test)]
 mod frame_times;
 mod glass;
-mod keys;
 mod kit;
 mod live_controller;
 mod live_layer;
@@ -19,7 +19,6 @@ mod overlay;
 mod panel;
 mod picker;
 mod platform;
-mod quick;
 mod sapphire;
 mod settings;
 pub(crate) mod setup;
@@ -30,19 +29,20 @@ mod translate;
 mod update_card;
 pub(crate) mod widgets;
 mod windows;
-mod word;
 
+use app::background::{background, triggers};
+use app::message::{Await, BarKeys, Grab, Hiding, Message, PickAct, Purpose, Shot, WordRead};
+use app::{keys, quick, word};
 use platform::monitor::{can_hide_windows, place_window, taskbar_inset};
 use platform::shape;
 pub use platform::tray::{refresh as refresh_tray, start as start_tray};
 
 use std::cell::{Cell, RefCell};
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use iced::futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use iced::futures::stream::{self, Stream, StreamExt};
+use iced::futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use iced::keyboard::{self, key::Named};
 use iced::widget::{canvas, container, image, opaque, operation, space, stack};
 use iced::window::{self, Level, Mode};
@@ -128,34 +128,8 @@ const REVEAL_WAIT: Duration = Duration::from_millis(400);
 /// Between stacked crops (several selections sent as one image).
 const STACK_GAP: u32 = 16;
 
-/// Handed from `run` to the subscription (a subscription builder can't capture).
-static TRIGGERS: Mutex<Option<UnboundedReceiver<Trigger>>> = Mutex::new(None);
-
-/// Call first in `main`, before any thread starts (glibc fixes the arena limit
-/// at the first thread's first allocation). Frames and panel work are allocated
-/// on short-lived threads; with per-thread arenas each overlay session kept a
-/// whole frame (~20 MB at 3440x1440) after closing. One arena keeps the app at
-/// its idle size.
-pub fn limit_malloc_arenas() {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    // SAFETY: only changes an allocator setting; no memory is touched.
-    unsafe {
-        libc::mallopt(libc::M_ARENA_MAX, 1);
-    }
-}
-
-/// Gives freed heap memory back to the OS (glibc keeps it otherwise). Cheap
-/// (a few ms); call once big buffers are gone and the app is going idle.
-pub(crate) fn trim_heap() {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    // SAFETY: malloc_trim only releases free heap pages.
-    unsafe {
-        libc::malloc_trim(0);
-    }
-}
-
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
-    *TRIGGERS.lock().unwrap() = Some(triggers);
+    app::background::set_triggers(triggers);
     crate::lens::sweep_stale(); // pages left by a crash
     let logo = widgets::chrome::logo();
     platform::windows::set_icon(logo.rgba.clone(), logo.width, logo.height);
@@ -168,137 +142,6 @@ pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
         .theme(App::theme)
         .subscription(App::subscription)
         .run()
-}
-
-#[derive(Debug, Clone)]
-enum Message {
-    Trigger(Trigger),
-    /// Capture number `.0`'s thread is done (`Instant` = trigger time, latency log).
-    Captured(u32, Instant, Result<Shot, String>),
-    /// Capture number `.0` has waited `CAPTURE_TIMEOUT`.
-    CaptureTimedOut(u32),
-    Overlay(overlay::Event),
-    /// Esc, wherever the focus is.
-    Escape,
-    /// Esc that a widget took (a field let go of the focus; the editor): it
-    /// only closes what the widget does not own.
-    EscapeTaken,
-    /// A focused field gave a key back (`keys`).
-    Field(keys::Keyed),
-    /// From the panel with this number (stale numbers are ignored).
-    Panel(u32, panel::Msg),
-    /// Run an action on the selection (action bar button or its key).
-    Run(&'static Action),
-    TestShot(window::Screenshot),
-    /// While closing: a frame was drawn / the window was resized (see `Hiding`).
-    Drawn,
-    Resized(Size),
-    /// Settings / onboarding windows and the OS theme (`windows.rs`).
-    Windows(windows::Msg),
-    /// From the annotation editor (Edit in place, Snip).
-    Editor(editor::Message),
-    Snip(snip::Msg),
-    /// The copy-text quick action read the text and copied it (or why not).
-    TextRead(Result<(), String>),
-    /// A Copy / Save run off the UI thread is done: its pill, where the
-    /// overlay was (its origin, size and scale).
-    Confirm((Point, Size, f32), Result<String, String>),
-    /// A link opened (or text copied) off the UI thread: the overlay closes,
-    /// after this pill if any.
-    ThenClose(Option<&'static str>),
-    /// The toast has been shown long enough.
-    ToastDone,
-    /// The selection with this area was scanned (a stale area is ignored).
-    Scanned(Rectangle, qr::Scan),
-    /// The QR chip's Copy / Open link.
-    Qr(qr::Act),
-    /// From the translate session with this number (stale numbers are ignored).
-    Translate(u32, translate::Msg),
-    /// Alt went down / up (peek at the original under a translation).
-    Peek(bool),
-    Live(live_layer::Msg),
-    /// OCR for a tap or a text drag read these lines.
-    Tapped(WordRead, Result<Vec<TextBlock>, String>),
-    /// The bottom bar: its ask field's text, Enter in it, its Translate button.
-    AskInput(String),
-    AskSubmit,
-    /// The bottom bar's buttons: Ask AI (Enter, or the presets with an empty
-    /// field), Translate the screen, Live translate, the whole screen in the editor.
-    AskButton,
-    /// One of the bar's labelled pills (Search in browser, Copy text, Translate).
-    Pill(BarButton),
-    TranslateScreen,
-    LiveToggle,
-    EditScreen,
-    /// A frame of the overlay's opening animation was drawn at this time.
-    Frame(Instant),
-    /// OCR read this band of this opening's frame (main mode, on demand).
-    ScreenText(u32, Rectangle, Result<Vec<word::Line>, String>),
-    /// The text reader's helper of this opening has started (after its
-    /// opening animation).
-    Warmed(u32),
-    /// The note over the bar's Download (the text reader's models), and how
-    /// that download for this opening goes (`Reading` = done).
-    ReaderDownload,
-    Reader(u32, Result<text::Progress, String>),
-    /// The "Select text" chip under a snapped box, and the lines OCR read in it.
-    SelectText,
-    TextLines(Rectangle, Result<Vec<word::Line>, String>),
-    /// The bottom bar's handle went down / the pointer moved / it was let go.
-    BarGrab,
-    BarMoved(Point),
-    BarReleased,
-    /// While the result card is dragged: the pointer moved / was let go.
-    CardMoved(Point),
-    CardReleased,
-    /// The music button (or the song_search quick action).
-    SongStart,
-    /// From the song search with this number (stale numbers are ignored).
-    Song(u32, song::Msg),
-    /// Whether a song-search key is saved (checked once, off the UI thread).
-    SongKey,
-    /// Try the waiting update again (it waits while OpenCircle is in use).
-    UpdateTick,
-    /// A snapped stroke finished morphing into its box: the selection's actions show.
-    Settled,
-}
-
-/// The shortcuts of the bottom bar's buttons, as the tooltips show them ("" = none).
-#[derive(Debug, Default, Clone, PartialEq)]
-struct BarKeys {
-    search: String,
-    copy_text: String,
-    translate: String,
-    live: String,
-    song: String,
-    edit: String,
-}
-
-impl BarKeys {
-    fn of(cfg: &config::Config) -> BarKeys {
-        let quick = |id: &str, live: bool| {
-            let bound = (cfg.quick_actions.iter())
-                .find(|q| q.action == id && q.live == live && !q.shortcut.is_empty());
-            bound.map(|q| q.shortcut.clone()).unwrap_or_default()
-        };
-        let key = |a: &Action| bar::key_hint(a.key);
-        BarKeys {
-            search: key(&lens::ACTION),
-            copy_text: quick("copy_text", false),
-            translate: quick(actions::translate::ACTION.id, false),
-            live: quick(actions::translate::ACTION.id, true),
-            song: quick("song_search", false),
-            edit: key(&actions::edit::ACTION),
-        }
-    }
-}
-
-/// What the select-text popup does with the picked words.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PickAct {
-    Copy,
-    Translate,
-    Search,
 }
 
 /// Select-text mode on a snapped box: its words (`None` while OCR reads them)
@@ -325,65 +168,7 @@ enum Reader {
     Failed(String),
 }
 
-/// What waits for the band under it to be read (main mode).
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Await {
-    /// A tap: the word there (a triple tap: the line) becomes the selection.
-    Tap(word::Unit),
-    /// A Shift+click: the text selection stretches there.
-    Extend,
-}
-
 const CHIP_SPACE: f32 = 12.0;
-
-/// What an OCR read for words was asked for, to place its answer.
-#[derive(Debug, Clone, Copy)]
-struct WordRead {
-    /// The tap's number (a newer press makes older reads stale).
-    id: u32,
-    /// The tap, or where the drag ended (image px).
-    at: Point,
-    /// The crop's top-left (frame px) and extent (image px).
-    origin: [u32; 2],
-    region: Rectangle,
-    /// Stretch the picked words to `at` (else: pick the word at `at`).
-    extend: bool,
-}
-
-/// A press on the selection: resizing it by a corner or an edge, or moving it.
-struct Grab {
-    /// The corner or edge, or `None` = move.
-    grip: Option<overlay::Grip>,
-    /// Where the press was (image px).
-    from: Point,
-    /// The selection and its stroke when the press began.
-    start: (overlay::Selection, Vec<Point>),
-    /// It moved further than a tap.
-    moved: bool,
-}
-
-/// What the open overlay is for.
-enum Purpose {
-    /// Circle to Search: select, then the action bar.
-    Search,
-    /// A quick action: runs on its target's area, or on the first selection.
-    Quick(Quick, Target),
-    /// Snip: pick an area, then the editor (no action bar).
-    Snip(Box<Snip>),
-}
-
-/// Closing steps. The renderer frees the frame cache and resizes its buffers only
-/// when it draws, and a hidden window never draws, so shrink first, then hide.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Hiding {
-    No,
-    /// Wait for one empty full-size frame (drops the cached frame).
-    Empty,
-    /// Left full-screen and asked for 1x1; wait for the resize to land (frames so far).
-    Shrinking(u8),
-    /// Wait for one frame at the small size (shrinks the buffers), then hide.
-    Shrunk,
-}
 
 /// The overlay window: hidden (pre-created), or full-screen at `size`. Never on
 /// the taskbar (Windows): it leaves full-screen visible while it closes (`Hiding`).
@@ -417,27 +202,6 @@ const SHRINK_FRAMES: u8 = 10;
 
 /// The toast pill's gap to the screen's right edge and to the taskbar (design: 16).
 const TOAST_MARGIN: f32 = 16.0;
-
-/// A captured monitor, ready to show.
-#[derive(Debug, Clone)]
-struct Shot {
-    image: image::Handle,
-    scale: f32,
-    /// Logical px: the monitor's origin and size.
-    origin: Point,
-    size: Size,
-    /// Snip mode: the mode to start in, every window (physical desktop px,
-    /// topmost first), the window the user was in (Windows), and every monitor
-    /// with its frame (this one too).
-    snip: Option<SnipShot>,
-}
-
-type SnipShot = (
-    snip::Kind,
-    Vec<snip::Pick>,
-    Option<isize>,
-    Vec<(snip::Place, image::Handle)>,
-);
 
 struct App {
     /// The overlay window's id; a closed window's while `overlay_open` is false.
@@ -1195,7 +959,7 @@ impl App {
                 self.hiding = Hiding::No;
                 // Panel threads (PNG, HTTP, OCR I/O) leave freed memory in their
                 // own malloc arenas; give it back to the OS while idle.
-                trim_heap();
+                crate::sys::mem::trim_heap();
                 window::set_mode(self.overlay, Mode::Hidden)
             }
             Message::Drawn => {
@@ -3487,7 +3251,7 @@ impl App {
             return Task::none(); // never shown (Copy, Save)
         }
         crate::log!("[opencircle] overlay window closed");
-        trim_heap();
+        crate::sys::mem::trim_heap();
         window::close(self.overlay)
     }
 
@@ -4566,30 +4330,6 @@ fn stack_crops(crops: &[Crop]) -> Option<Crop> {
         height,
         rgba,
     })
-}
-
-/// Runs `work` on its own thread; what it sends arrives as messages, so the UI
-/// never waits on it. Dropping (aborting) the task disconnects `work`'s sender.
-fn background<T: Send + 'static>(
-    work: impl FnOnce(&UnboundedSender<T>) + Send + 'static,
-) -> Task<T> {
-    let (tx, rx) = mpsc::unbounded();
-    // (tests: the test's name, so what it copies is its own, `copy::copied`)
-    let name = match cfg!(test) {
-        true => std::thread::current().name().unwrap_or_default().into(),
-        false => "background".into(),
-    };
-    let spawned = std::thread::Builder::new()
-        .name(name)
-        .spawn(move || work(&tx));
-    if let Err(e) = spawned {
-        crate::log!("cannot start a thread: {e}");
-    }
-    Task::stream(rx)
-}
-
-fn triggers() -> impl Stream<Item = Trigger> {
-    stream::iter(TRIGGERS.lock().unwrap().take()).flatten()
 }
 
 #[cfg(test)]

@@ -236,11 +236,7 @@ fn heap_keeper() -> Arc<Mutex<Option<Instant>>> {
     let idle = Arc::new(Mutex::new(None::<Instant>));
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     {
-        // SAFETY: allocator settings only; no memory is touched.
-        unsafe {
-            libc::mallopt(libc::M_MMAP_THRESHOLD, 256 << 20);
-            libc::mallopt(libc::M_TRIM_THRESHOLD, 1 << 30);
-        }
+        crate::sys::mem::keep_free_heap();
         let mark = idle.clone();
         std::thread::spawn(move || {
             loop {
@@ -249,8 +245,7 @@ fn heap_keeper() -> Arc<Mutex<Option<Instant>>> {
                 if since.is_some_and(|t| t.elapsed() >= IDLE_TRIM) {
                     *since = None;
                     drop(since);
-                    // SAFETY: malloc_trim only releases free heap pages.
-                    unsafe { libc::malloc_trim(0) };
+                    crate::sys::mem::trim_heap();
                 }
             }
         });
