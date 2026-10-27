@@ -467,6 +467,14 @@ impl Panel {
             State::Text(Reading::Failed(e)) => {
                 widgets::card::short(at, screen, e.chars().count(), 0.0)
             }
+            // thumbnail, question bubble, buttons and the privacy line under the text
+            State::Ask {
+                browse: Browse::Consent(q),
+                ..
+            } => {
+                let chars = 165 + q.chars().count();
+                widgets::card::short(at, screen, chars, THUMB_HEIGHT + 190.0)
+            }
             _ => at,
         };
         widgets::card::frame(header, body, footer, at, screen, hover, Msg::Card)
@@ -855,6 +863,48 @@ mod tests {
                     "{name} at {w}x{h}: a slab {tall}px tall"
                 );
             }
+        }
+    }
+
+    /// The Ask panel's browser-consent card is as tall as its content on a
+    /// big screen too, all inside the window (#127).
+    #[test]
+    fn ask_consent_is_a_short_card() {
+        let crop = sample_crop();
+        for (w, h) in [(1097.0, 617.0), (1920.0, 1080.0)] {
+            let size = Size::new(w, h);
+            let panel = panel_in(State::Ask {
+                thumb: image::Handle::from_rgba(crop.width, crop.height, crop.rgba.clone()),
+                setup: Some(Ok(Arc::new(ask::tests::browser_setup()))),
+                chat: Chat::default(),
+                browse: Browse::Consent("What is this?".into()),
+            });
+            let lost = widgets::shot::out_of_reach(panel.view(at(size), size, false), size);
+            assert!(lost.is_empty(), "{w}x{h}: out of reach {lost:?}");
+            let px = widgets::shot::save(
+                &format!("ask-consent-{w}x{h}"),
+                iced::widget::container(panel.view(at(size), size, false))
+                    .style(|_| {
+                        iced::widget::container::Style::default()
+                            .background(iced::Color::from_rgb8(240, 240, 240))
+                    })
+                    .into(),
+                size,
+            );
+            let a = at(size);
+            let x = (a.x + a.width * 0.97) as usize;
+            let dark = |y: usize| {
+                px[((y * w as usize) + x) * 4..][..3]
+                    .iter()
+                    .all(|&v| v < 100)
+            };
+            let rows: Vec<usize> = (0..h as usize).filter(|&y| dark(y)).collect();
+            let tall = (rows[rows.len() - 1] - rows[0]) as f32;
+            assert!(
+                tall < a.height - 40.0,
+                "{w}x{h}: a slab {tall}px of {}",
+                a.height
+            );
         }
     }
 
