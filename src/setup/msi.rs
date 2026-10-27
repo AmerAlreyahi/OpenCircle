@@ -27,7 +27,7 @@ pub enum Event {
 pub struct Package {
     pub path: PathBuf,
     dir: PathBuf,
-    _lock: File,
+    lock: Option<File>,
 }
 
 impl Package {
@@ -44,13 +44,14 @@ impl Package {
         Ok(Package {
             path,
             dir,
-            _lock: lock,
+            lock: Some(lock),
         })
     }
 }
 
 impl Drop for Package {
     fn drop(&mut self) {
+        drop(self.lock.take()); // Windows deletes no open file
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
@@ -183,7 +184,7 @@ mod win {
 
     /// A string property of an MSI handle by `get(handle, buffer, len)`.
     fn read(get: impl Fn(Option<PWSTR>, *mut u32) -> u32) -> Option<String> {
-        let mut buf = vec![0u16; 512];
+        let mut buf = vec![0u16; 2048];
         let mut len = buf.len() as u32;
         (get(Some(PWSTR(buf.as_mut_ptr())), &mut len) == 0)
             .then(|| String::from_utf16_lossy(&buf[..len as usize]))
