@@ -364,41 +364,101 @@ fn palette(setting: Theme, os_dark: bool) -> &'static Palette {
     }
 }
 
-/// The new design's main theme, Sapphire (`newdesing/styles/tokens.css`), solid
-/// look (no glass on the CPU renderer). The setup uses it today; the redesign
-/// (N-18) moves every screen onto these tokens. Names follow the design's
-/// variables (`--app-bg-solid` = `BG`, …); `scripts/installer-art.py` repeats a
-/// few for the setup's baked images.
+/// The new design's token sets (`newdesing/styles/tokens.css`), solid look (no
+/// glass on the CPU renderer): its main theme Sapphire for a dark OS, Daylight for
+/// a light one (`set_light`, from the OS). The setup uses them today; the redesign
+/// (N-18) moves every screen onto them. Field names follow the design's variables
+/// (`--app-bg-solid` = `bg`, …); `scripts/installer-art.py` repeats a few for the
+/// setup's baked images.
 pub mod sapphire {
+    use std::cell::Cell;
+
     use iced::Color;
 
-    /// `--app-bg-solid`: windows (Settings, Onboarding, the setup).
-    pub const BG: Color = Color::from_rgb8(0x0c, 0x17, 0x2e);
-    /// `--app-track-solid`: recessed controls (segmented track, inputs).
-    pub const TRACK: Color = Color::from_rgb8(0x07, 0x10, 0x21);
-    /// `--app-track-glass`: a recessed panel over a window (the setup's progress).
-    pub const TRACK_GLASS: Color = Color::from_rgba8(4, 10, 24, 0.46);
-    /// `--ui-elevated-bg` / `-hover`: buttons and the chosen segment.
-    pub const ELEVATED: Color = Color::from_rgb8(0x1c, 0x36, 0x64);
-    pub const ELEVATED_HOVER: Color = Color::from_rgb8(0x23, 0x42, 0x7a);
-    /// `--app-rim-border`: a window's or a field's 1 px edge.
-    pub const RIM: Color = Color::from_rgba8(155, 205, 255, 0.17);
-    /// `--app-divider`: hairlines.
-    pub const DIVIDER: Color = Color::from_rgba8(155, 205, 255, 0.085);
-    /// `--app-hover-bg`: a quiet fill (hover, the logo's tile, progress track).
-    pub const HOVER: Color = Color::from_rgba8(155, 205, 255, 0.065);
-    /// `--app-text`, `--app-text-sub`, `--app-text-muted`.
-    pub const TEXT: Color = Color::from_rgb8(0xf0, 0xf7, 0xff);
-    pub const TEXT_SUB: Color = Color::from_rgba8(198, 222, 255, 0.66);
-    pub const TEXT_MUTED: Color = Color::from_rgba8(198, 222, 255, 0.42);
-    /// `--app-accent` and `--app-accent-soft` (chips).
-    pub const ACCENT: Color = Color::from_rgb8(0x38, 0xbd, 0xf8);
-    pub const ACCENT_SOFT: Color = Color::from_rgba8(56, 189, 248, 0.18);
+    pub struct Tokens {
+        /// `--app-bg-solid`: windows (Settings, Onboarding, the setup).
+        pub bg: Color,
+        /// `--app-track-solid`: recessed controls (segmented track, inputs).
+        pub track: Color,
+        /// `--app-track-glass`: a recessed panel over a window (the setup's progress).
+        pub track_glass: Color,
+        /// `--ui-elevated-bg` / `-hover` / `-border`: buttons and the chosen segment.
+        pub elevated: Color,
+        pub elevated_hover: Color,
+        pub elevated_border: Color,
+        /// `--app-rim-border`: a window's or a field's 1 px edge.
+        pub rim: Color,
+        /// `--app-divider`: hairlines.
+        pub divider: Color,
+        /// `--app-hover-bg`: a quiet fill (hover, the logo's tile, progress track).
+        pub hover: Color,
+        /// `--app-text`, `--app-text-sub`, `--app-text-muted`.
+        pub text: Color,
+        pub text_sub: Color,
+        pub text_muted: Color,
+        /// `--app-accent` and `--app-accent-soft` (chips).
+        pub accent: Color,
+        pub accent_soft: Color,
+    }
+
+    pub const SAPPHIRE: Tokens = Tokens {
+        bg: Color::from_rgb8(0x0c, 0x17, 0x2e),
+        track: Color::from_rgb8(0x07, 0x10, 0x21),
+        track_glass: Color::from_rgba8(4, 10, 24, 0.46),
+        elevated: Color::from_rgb8(0x1c, 0x36, 0x64),
+        elevated_hover: Color::from_rgb8(0x23, 0x42, 0x7a),
+        elevated_border: Color::TRANSPARENT,
+        rim: Color::from_rgba8(155, 205, 255, 0.17),
+        divider: Color::from_rgba8(155, 205, 255, 0.085),
+        hover: Color::from_rgba8(155, 205, 255, 0.065),
+        text: Color::from_rgb8(0xf0, 0xf7, 0xff),
+        text_sub: Color::from_rgba8(198, 222, 255, 0.66),
+        text_muted: Color::from_rgba8(198, 222, 255, 0.42),
+        accent: Color::from_rgb8(0x38, 0xbd, 0xf8),
+        accent_soft: Color::from_rgba8(56, 189, 248, 0.18),
+    };
+
+    pub const DAYLIGHT: Tokens = Tokens {
+        bg: Color::from_rgb8(0xf5, 0xf7, 0xfa),
+        track: Color::from_rgb8(0xe2, 0xe7, 0xf0),
+        track_glass: Color::from_rgba8(15, 23, 42, 0.07),
+        elevated: Color::WHITE,
+        elevated_hover: Color::from_rgb8(0xf8, 0xfa, 0xfc),
+        elevated_border: Color::from_rgba8(15, 23, 42, 0.08),
+        rim: Color::from_rgba8(15, 23, 42, 0.11),
+        divider: Color::from_rgba8(15, 23, 42, 0.075),
+        hover: Color::from_rgba8(15, 23, 42, 0.045),
+        text: Color::from_rgb8(0x0f, 0x14, 0x1e),
+        text_sub: Color::from_rgba8(15, 20, 30, 0.62),
+        text_muted: Color::from_rgba8(15, 20, 30, 0.42),
+        accent: Color::from_rgb8(0x25, 0x63, 0xeb),
+        accent_soft: Color::from_rgba8(37, 99, 235, 0.12),
+    };
+
     /// The design's fixed colours: success `emerald-400`, danger `rose-400`, the
     /// text on an accent or success button `slate-950`.
     pub const SUCCESS: Color = Color::from_rgb8(0x34, 0xd3, 0x99);
     pub const DANGER: Color = Color::from_rgb8(0xfb, 0x71, 0x85);
     pub const ON_ACCENT: Color = Color::from_rgb8(0x02, 0x06, 0x17);
+
+    thread_local! {
+        /// The OS is in light mode (the UI thread's view; set by `set_light`).
+        static LIGHT: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// What the OS reports: light = Daylight, dark (or no preference) = Sapphire.
+    pub fn set_light(light: bool) {
+        LIGHT.set(light);
+    }
+
+    pub fn is_light() -> bool {
+        LIGHT.get()
+    }
+
+    /// The token set in use.
+    pub fn t() -> &'static Tokens {
+        if is_light() { &DAYLIGHT } else { &SAPPHIRE }
+    }
 
     /// `c` as CSS `brightness(1.1)` draws it (a hovered accent button).
     pub fn brighter(c: Color) -> Color {

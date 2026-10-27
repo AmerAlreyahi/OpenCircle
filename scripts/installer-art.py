@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Rebuilds the setup's and the MSI wizard's artwork (Sapphire look) from our logo.
 
-Inputs: assets/setup/logo.png (the design's vector logo in the Sapphire tones,
+Inputs: assets/setup/logo.png (the design's vector logo in the Sapphire tones; its
+Daylight twin assets/setup/logo-light.png is rendered the same way, from the canvas,
 rendered at 3x of its 46 px). Outputs:
   assets/setup/back.png         the emblem's halo and the tile's shadow (blurs
                                 our CPU renderer can't draw), window top-aligned

@@ -18,7 +18,7 @@ use iced::{Border, Center, Element, Fill, Size, Subscription, Task};
 
 use super::motion::{self, Curve};
 use super::sapphire::{self, mono, weight};
-use super::theme::sapphire::*;
+use super::theme::sapphire::{self as sapphire_tokens, *};
 use super::{widgets, windows};
 use crate::setup::msi::{self, Package};
 use crate::setup::{self as setup_core, BadFolder, Installed};
@@ -138,6 +138,8 @@ pub enum Message {
     Close,
     Drag,
     Frame(Instant),
+    /// The OS's light / dark mode (Daylight / Sapphire).
+    Os(iced::theme::Mode),
 }
 
 pub struct State {
@@ -151,6 +153,12 @@ pub struct State {
     /// " · 19 MB": what the app takes on disk.
     size: Option<String>,
     autostart: bool,
+    /// The switch's thumb glides from this value since then (`motion::GLIDE`).
+    autostart_glide: (bool, Instant),
+    /// The window's height: from, to, since (200 ms ease, the design's
+    /// `transition-all`), and the height last given to the window.
+    height: (f32, f32, Instant),
+    applied: f32,
     /// The capture shortcut as the finish text names it.
     shortcut: String,
     file_name: String,
@@ -201,11 +209,18 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
         );
         let (id, open) = windows::setup_window(Size::new(WIDTH, state.height()), RADIUS);
         state.window = Some(id);
+        let h = state.height();
+        state.height = (h, h, state.now);
+        state.applied = h;
         // A setup is what the user just started: in front, with the focus (a window
         // opened behind another, e.g. from a script, was not drawn until activated).
         let front = window::gain_focus(id);
         let drawn = Task::perform(async {}, |()| Message::Frame(Instant::now()));
-        (state, open.discard().chain(front).chain(drawn))
+        let os = iced::system::theme().map(Message::Os);
+        (
+            state,
+            Task::batch([os, open.discard().chain(front).chain(drawn)]),
+        )
     };
     let mut app = iced::daemon(boot, State::update, State::view);
     for font in widgets::FONTS {
@@ -225,15 +240,14 @@ struct Config {
     autostart: bool,
 }
 
+/// iced's theme for the window: the token set's colours (Sapphire or Daylight).
 fn theme() -> iced::Theme {
-    static THEME: LazyLock<iced::Theme> = LazyLock::new(|| {
-        let mut palette = iced::Theme::Dark.palette();
-        palette.background = BG;
-        palette.text = TEXT;
-        palette.primary = ACCENT;
-        iced::Theme::custom("sapphire", palette)
-    });
-    THEME.clone()
+    let tokens = t();
+    let mut palette = iced::Theme::Dark.palette();
+    palette.background = tokens.bg;
+    palette.text = tokens.text;
+    palette.primary = tokens.accent;
+    iced::Theme::custom("setup", palette)
 }
 
 /// A bundled PNG, decoded once per call site (`LazyLock`).
@@ -257,6 +271,7 @@ macro_rules! bundled {
     };
 }
 bundled!(logo, "logo.png");
+bundled!(logo_light, "logo-light.png");
 bundled!(back, "back.png");
 bundled!(glow_accent, "glow-accent.png");
 bundled!(glow_success, "glow-success.png");
@@ -288,6 +303,9 @@ impl State {
             file_name,
             version: env!("CARGO_PKG_VERSION"),
             bar: (0.0, 0.0, now),
+            autostart_glide: (config.autostart, now - motion::GLIDE),
+            height: (0.0, 0.0, now - motion::GLIDE),
+            applied: 0.0,
             risen: now - motion::MORPH,
             now,
             package,
@@ -317,11 +335,30 @@ impl State {
         self.resize()
     }
 
-    fn resize(&self) -> Task<Message> {
-        let Some(id) = self.window else {
+    /// The window's height glides to this state's (`height_at`, by `Frame`).
+    fn resize(&mut self) -> Task<Message> {
+        let to = self.height();
+        if to != self.height.1 {
+            let now = Instant::now();
+            self.now = now;
+            self.height = (self.height_at(), to, now);
+        }
+        self.apply_height()
+    }
+
+    fn height_at(&self) -> f32 {
+        let (from, to, since) = self.height;
+        from + (to - from) * motion::progress(since, self.now, motion::GLIDE, Curve::Ease)
+    }
+
+    /// Gives the window its height of this frame, when it changed.
+    fn apply_height(&mut self) -> Task<Message> {
+        let h = self.height_at().round();
+        let Some(id) = self.window.filter(|_| h != self.applied) else {
             return Task::none();
         };
-        window::resize(id, Size::new(WIDTH, self.height())).chain(windows::reshape(id).discard())
+        self.applied = h;
+        window::resize(id, Size::new(WIDTH, h)).chain(windows::reshape(id).discard())
     }
 
     fn bar_at(&self) -> f32 {
@@ -332,6 +369,8 @@ impl State {
     fn animating(&self) -> bool {
         self.step == Step::Installing
             || self.bar_at() != self.bar.1
+            || self.height_at() != self.height.1
+            || motion::done(self.autostart_glide.1, self.now, motion::GLIDE) < 1.0
             || motion::done(self.risen, self.now, motion::MORPH) < 1.0
     }
 
@@ -339,6 +378,10 @@ impl State {
         match message {
             Message::Frame(now) => {
                 self.now = now;
+                self.apply_height()
+            }
+            Message::Os(mode) => {
+                sapphire_tokens::set_light(mode == iced::theme::Mode::Light);
                 Task::none()
             }
             Message::Drag => self.window.map_or(Task::none(), window::drag),
@@ -393,7 +436,11 @@ impl State {
             Message::Msi(msi::Event::Done(Err(why))) => self.go(Step::Failed(why)),
             Message::Retry => self.go(Step::Configure),
             Message::Autostart(on) => {
-                self.autostart = on;
+                if on != self.autostart {
+                    self.now = Instant::now();
+                    self.autostart_glide = (self.autostart, self.now);
+                    self.autostart = on;
+                }
                 Task::none()
             }
             Message::Launch => {
@@ -442,7 +489,10 @@ impl State {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let closing = window::close_requests().map(|_| Message::Close);
+        let closing = Subscription::batch([
+            window::close_requests().map(|_| Message::Close),
+            iced::system::theme_changes().map(Message::Os),
+        ]);
         match self.animating() {
             true => Subscription::batch([closing, motion::frames().map(Message::Frame)]),
             false => closing,
@@ -473,7 +523,7 @@ impl State {
                     text(&self.file_name)
                         .font(mono(Weight::Medium))
                         .size(11)
-                        .color(TEXT_MUTED)
+                        .color(t().text_muted)
                 )
                 .padding([0, 14])
                 .center_y(HEADER)
@@ -501,8 +551,8 @@ impl State {
             .width(Fill)
             .height(Fill)
             .style(|_| iced::widget::container::Style {
-                background: Some(BG.into()),
-                border: Border::default().rounded(RADIUS).width(1).color(RIM),
+                background: Some(t().bg.into()),
+                border: Border::default().rounded(RADIUS).width(1).color(t().rim),
                 ..Default::default()
             })
             .into()
@@ -514,7 +564,7 @@ impl State {
             text(if finished { EN.ready } else { EN.title })
                 .size(18)
                 .font(weight(Weight::Semibold))
-                .color(TEXT),
+                .color(t().text),
             sapphire::chip(format!("v{}", self.version)),
         ]
         .spacing(8)
@@ -527,7 +577,7 @@ impl State {
         let intro = container(
             text(intro)
                 .size(12)
-                .color(TEXT_SUB)
+                .color(t().text_sub)
                 .line_height(LineHeight::Absolute(19.5.into()))
                 .align_x(Center)
                 .width(Fill),
@@ -560,13 +610,18 @@ impl State {
             }
             _ => 1.0,
         };
-        let tile = container(image(logo()).width(46).height(46).opacity(pulse))
+        let logo = if sapphire_tokens::is_light() {
+            logo_light()
+        } else {
+            logo()
+        };
+        let tile = container(image(logo).width(46).height(46).opacity(pulse))
             .width(68)
             .height(68)
             .padding(11)
             .style(|_| iced::widget::container::Style {
-                background: Some(HOVER.into()),
-                border: Border::default().rounded(20).width(1).color(RIM),
+                background: Some(t().hover.into()),
+                border: Border::default().rounded(20).width(1).color(t().rim),
                 ..Default::default()
             });
         let mut emblem = stack![container(tile).padding(4)].width(76).height(76);
@@ -628,7 +683,7 @@ impl State {
                 let below = row![
                     customize,
                     Space::new().width(Fill),
-                    row![dot, text(status).size(11).color(TEXT_MUTED)]
+                    row![dot, text(status).size(11).color(t().text_muted)]
                         .spacing(6)
                         .align_y(Center),
                 ]
@@ -638,7 +693,7 @@ impl State {
                 let mut parts = column![
                     sapphire::cta(
                         sapphire::cta_label(label, self.size.clone()),
-                        ACCENT,
+                        t().accent,
                         Message::Install
                     ),
                     Space::new().height(14),
@@ -661,24 +716,24 @@ impl State {
                         text(stage)
                             .size(12)
                             .font(weight(Weight::Medium))
-                            .color(TEXT_SUB),
+                            .color(t().text_sub),
                         Space::new().width(Fill),
                         text(format!("{}%", (share * 100.0).round()))
                             .size(12)
                             .font(mono(Weight::Semibold))
-                            .color(ACCENT),
+                            .color(t().accent),
                     ]
                     .height(16)
                     .align_y(Center),
-                    Space::new().height(10),
+                    Space::new().height(4),
                     sapphire::progress_bar(share),
                 ]);
                 column![progress, Space::new().height(12), self.path_row(None)].into()
             }
             Step::Failed(why) => {
                 let message = container(text(why).size(12).color(DANGER).width(Fill))
-                    .height(48)
-                    .center_y(48);
+                    .height(54)
+                    .center_y(54);
                 let retry = sapphire::text_link(text(EN.try_again).size(11), Message::Retry);
                 column![
                     sapphire::panel(message),
@@ -698,11 +753,18 @@ impl State {
                 .spacing(8)
                 .align_y(Center);
                 let start = row![
-                    text(EN.start_with_windows).size(11.5).color(TEXT_SUB),
+                    text(EN.start_with_windows).size(11.5).color(t().text_sub),
                     Space::new().width(Fill),
                     sapphire::segmented(
                         &[(false, EN.off), (true, EN.on)],
                         self.autostart,
+                        self.autostart_glide.0,
+                        motion::progress(
+                            self.autostart_glide.1,
+                            self.now,
+                            motion::GLIDE,
+                            Curve::Standard
+                        ),
                         Message::Autostart
                     ),
                 ]
@@ -730,7 +792,7 @@ impl State {
             text(path)
                 .font(mono(Weight::Normal))
                 .size(11)
-                .color(TEXT_MUTED),
+                .color(t().text_muted),
             Space::new().width(Fill),
         ]
         .padding([0, 2])
@@ -747,7 +809,7 @@ impl State {
         let locked = self.folder_locked();
         let on_input = (!locked).then_some(Message::Folder);
         let folder = row![
-            text(EN.folder).size(11.5).color(TEXT_SUB),
+            text(EN.folder).size(11.5).color(t().text_sub),
             row![
                 container(sapphire::field(&self.folder, on_input, Message::Install)).width(Fill),
                 sapphire::small_button(EN.browse, (!locked).then_some(Message::Browse)),
@@ -846,7 +908,8 @@ mod tests {
         (info.width, info.height, rgba)
     }
 
-    /// Each setup screen, at 100 % and 200 %, matches its golden image
+    /// Each setup screen, dark (Sapphire) and light (Daylight), at 100 % and
+    /// 200 %, matches its golden image
     /// (`tests/fixtures/setup/`; `OPENCIRCLE_UPDATE_GOLDEN=1` writes them anew,
     /// then look at every one). Only where the UI font is the bundled Inter
     /// (Windows draws Segoe UI).
@@ -859,7 +922,14 @@ mod tests {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/setup");
         let update = std::env::var_os("OPENCIRCLE_UPDATE_GOLDEN").is_some();
         let mut failed = Vec::new();
-        for (name, s) in screens() {
+        for ((name, s), light) in (screens().into_iter().map(|n| (n, false)))
+            .chain(screens().into_iter().map(|n| (n, true)))
+        {
+            sapphire_tokens::set_light(light);
+            let name = match light {
+                true => format!("{name}-light"),
+                false => name.to_string(),
+            };
             for scale in [1.0, 2.0] {
                 let size = Size::new(WIDTH, s.height());
                 let (_, pixels) = shot::redrawn(
@@ -892,12 +962,16 @@ mod tests {
                 }
             }
         }
+        sapphire_tokens::set_light(false);
         assert!(failed.is_empty(), "{failed:#?}");
     }
 
     #[test]
     fn no_text_is_cut_off_on_any_screen() {
-        for (name, s) in screens() {
+        for ((name, s), light) in (screens().into_iter().map(|n| (n, false)))
+            .chain(screens().into_iter().map(|n| (n, true)))
+        {
+            sapphire_tokens::set_light(light);
             let lost =
                 shot::out_of_reach(s.view(window::Id::unique()), Size::new(WIDTH, s.height()));
             assert!(lost.is_empty(), "{name}: {lost:?}");
@@ -949,6 +1023,36 @@ mod tests {
         );
         assert_eq!(s.folder, r"D:\Tools\OpenCircle\");
         assert!(s.folder_locked());
+    }
+
+    #[test]
+    fn the_window_height_and_the_switch_glide_on_the_designs_clock() {
+        motion::set_reduced(false);
+        let mut s = state(None);
+        let h = s.height();
+        s.height = (h, h, s.now);
+        let _ = s.update(Message::Customize);
+        let (from, to, since) = s.height;
+        assert_eq!((from, to), (328.0, 367.0));
+        assert_eq!(s.height_at(), from, "starts where it was");
+        assert!(s.animating());
+        s.now = since + motion::GLIDE / 2;
+        let mid = s.height_at();
+        assert!(from < mid && mid < to, "{mid}");
+        s.now = since + motion::GLIDE;
+        assert_eq!(s.height_at(), to);
+        assert!(!s.animating());
+
+        s.step = Step::Finish;
+        let _ = s.update(Message::Autostart(false));
+        assert!(s.autostart_glide.0, "the thumb leaves On");
+        assert!(s.animating(), "and glides");
+        let view = |s: &State| shot::render(s.view(window::Id::unique()), WIDTH as u32, 359);
+        let start = view(&s);
+        s.now = s.autostart_glide.1 + motion::GLIDE / 2;
+        assert_ne!(view(&s), start, "the thumb moved");
+        s.now = s.autostart_glide.1 + motion::GLIDE;
+        assert!(!s.animating());
     }
 
     #[test]
