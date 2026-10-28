@@ -150,8 +150,10 @@ impl App {
                 self.o.scale,
                 false,
                 // the glow breathes once the opening is over, and rests while
-                // anything else moves
+                // anything else moves; gone to another screen (the mouse's),
+                // it rests, so the hidden strips are never made again
                 match self.o.appear {
+                    _ if self.o.glow.here().is_some() => border::Breathe::Paused,
                     Some((_, t)) if t >= 1.0 => {
                         if self.animating() {
                             border::Breathe::Paused
@@ -161,6 +163,7 @@ impl App {
                     }
                     _ => border::Breathe::Off,
                 },
+                self.o.glow.at(None),
             ),
         ]);
         if let Some(edit) = &self.o.edit {

@@ -49,10 +49,10 @@ impl App {
         let all = snip.is_none() && matches!(self.next, Purpose::Search);
         let shot = background(move |tx| {
             let Some(kind) = snip else {
-                // The monitor of the window the user is in (else the pointer's)
-                // first: its overlay opens on it; then the others.
+                // The monitor the mouse is on first: its overlay opens on it;
+                // then the others.
                 let mut first = true;
-                capture::active_first(all, |frame| {
+                capture::mouse_first(all, |frame| {
                     let grabbed = match (std::mem::take(&mut first), frame) {
                         (true, frame) => Grabbed::Active(frame.map(|frame| {
                             let (place, image) = snip::screen_of(frame);
@@ -68,7 +68,7 @@ impl App {
                             let (place, image) = snip::screen_of(frame);
                             Grabbed::Other(place, image)
                         }
-                        (false, Err(_)) => return, // (`active_first` hands over none)
+                        (false, Err(_)) => return, // (`mouse_first` hands over none)
                     };
                     let _ = tx.unbounded_send(grabbed);
                 });

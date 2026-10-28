@@ -78,13 +78,22 @@ fn breathes() -> bool {
 
 /// The edge over a window that shows a whole monitor at `scale` (physical px
 /// per logical px), in the active look. `keyed`: the window's background is a
-/// colour key (no partial alpha).
-pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool, breathing: Breathe) -> Element<'a, M> {
+/// colour key (no partial alpha). `opacity`: how much of it shows (the glow
+/// fading between screens, `app::screens::Glow`): the same strips drawn
+/// fainter, never made again; none at 0.
+pub fn view<'a, M: 'a>(
+    mode: Mode,
+    scale: f32,
+    keyed: bool,
+    breathing: Breathe,
+    opacity: f32,
+) -> Element<'a, M> {
     canvas::Canvas::new(EdgeCanvas {
         mode,
         scale,
         keyed,
         breathing,
+        opacity,
         look: None,
     })
     .width(Fill)
@@ -142,6 +151,7 @@ struct EdgeCanvas {
     scale: f32,
     keyed: bool,
     breathing: Breathe,
+    opacity: f32,
     /// Tests: this look instead of the config's.
     look: Option<LookConfig>,
 }
@@ -235,9 +245,10 @@ impl<M> canvas::Program<M> for EdgeCanvas {
         _cursor: Cursor,
     ) -> Vec<Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        for (at, handle) in &state.strips {
+        for (at, handle) in state.strips.iter().filter(|_| self.opacity > 0.0) {
             let image = canvas::Image::new(handle.clone())
                 .filter_method(FilterMethod::Nearest)
+                .opacity(self.opacity.min(1.0))
                 .snap(true);
             frame.draw_image(*at, image);
         }
@@ -763,6 +774,7 @@ mod tests {
 
     fn border(mode: Mode, look: LookConfig, breathing: Breathe) -> EdgeCanvas {
         EdgeCanvas {
+            opacity: 1.0,
             mode,
             scale: 1.0,
             keyed: false,

@@ -1,10 +1,14 @@
-//! `.oc-input` over several lines (the AI chat's composer): the one-line field's
-//! look (`field::input`: 12 px on `track`, radius 10, a `rim` edge that turns
-//! `accent` while focused), growing with its text up to `LINES` lines, then
-//! scrolling. Enter is `on_enter`; Shift+Enter and Ctrl+Enter break the line.
+//! The AI chat's composer (`ai-chat.js:379-411`): one `.oc-input` box (track,
+//! a `rim` edge, radius 16, 10 px in, its parts 8 px apart) holding, top to
+//! bottom, an optional line over the field (the attached screen's chip), the
+//! message field (13 px, borderless, growing with its text up to `LINES`
+//! lines, then scrolling) and its controls row. Enter is `on_enter`;
+//! Shift+Enter and Ctrl+Enter break the line. As in the design, focus changes
+//! nothing round the box (the caret shows it).
 use iced::keyboard::{self, key::Named};
 use iced::widget::text_editor::{self, Action, Binding, Content, KeyPress, Status};
-use iced::{Border, Element};
+use iced::widget::{column, container};
+use iced::{Border, Color, Element, Fill};
 
 use super::themes::c;
 use super::tokens::{Role, radius};
@@ -12,12 +16,15 @@ use super::tokens::{Role, radius};
 /// It grows up to this many lines, then scrolls.
 pub const LINES: f32 = 5.0;
 const LINE_HEIGHT: f32 = 1.5;
-const PAD: [f32; 2] = [6.0, 11.0];
+/// The field's text room (`px-1.5`), the box's padding (`p-2.5`) and the gap
+/// between its parts (`gap-2`).
+const PAD: [f32; 2] = [0.0, 6.0];
+const BOX_PAD: f32 = 10.0;
+const GAP: f32 = 8.0;
 
-/// Its text's height at most (`LINES` lines), logical px; the field adds its
-/// padding round it.
+/// Its text's height at most (`LINES` lines), logical px.
 pub fn max_height() -> f32 {
-    Role::NOTE.size * LINE_HEIGHT * LINES
+    Role::CHAT.size * LINE_HEIGHT * LINES
 }
 
 /// What a key does in it: Enter (no Shift / Ctrl) = `on_enter`, Shift / Ctrl +
@@ -36,37 +43,51 @@ pub fn binding<M: Clone>(press: KeyPress, on_enter: &M) -> Option<Binding<M>> {
     }
 }
 
-/// The field with `content`, its `id`, `placeholder`; `on_action` edits it.
+/// The composer with `content` in its field (`id`, `placeholder`; `on_action`
+/// edits it): `top` over the field, `controls` under it.
 pub fn text_area<'a, M: Clone + 'a>(
     id: &'static str,
     placeholder: &'a str,
     content: &'a Content,
     on_action: impl Fn(Action) -> M + 'a,
     on_enter: M,
+    top: Option<Element<'a, M>>,
+    controls: Element<'a, M>,
 ) -> Element<'a, M> {
-    text_editor::TextEditor::new(content)
+    let field = text_editor::TextEditor::new(content)
         .id(id)
         .placeholder(placeholder)
         .on_action(on_action)
         .key_binding(move |press| binding(press, &on_enter))
-        .font(super::text::font(Role::NOTE))
-        .size(Role::NOTE.size)
+        .font(super::text::font(Role::CHAT))
+        .size(Role::CHAT.size)
         .line_height(LINE_HEIGHT)
         .padding(PAD)
         .height(iced::Shrink)
         .max_height(max_height())
-        .style(|_, status| text_editor::Style {
-            background: c().track.into(),
-            border: Border::default()
-                .rounded(radius::TRACK)
-                .width(1)
-                .color(match status {
-                    Status::Focused { .. } => c().accent,
-                    _ => c().rim,
-                }),
+        .style(|_, _| text_editor::Style {
+            background: Color::TRANSPARENT.into(),
+            border: Border::default(),
             placeholder: c().text_muted,
             value: c().text,
             selection: c().accent_soft,
+        });
+    let parts = column![]
+        .push(top)
+        .push(field)
+        .push(controls)
+        .spacing(GAP)
+        .width(Fill);
+    container(parts)
+        .padding(BOX_PAD)
+        .width(Fill)
+        .style(|_| container::Style {
+            background: Some(c().track.into()),
+            border: Border::default()
+                .rounded(radius::WINDOW)
+                .width(1)
+                .color(c().rim),
+            ..container::Style::default()
         })
         .into()
 }
@@ -103,7 +124,7 @@ mod tests {
 
     #[test]
     fn it_grows_to_five_lines_then_scrolls() {
-        let line = Role::NOTE.size * LINE_HEIGHT;
+        let line = Role::CHAT.size * LINE_HEIGHT;
         assert_eq!(max_height(), 5.0 * line);
     }
 }

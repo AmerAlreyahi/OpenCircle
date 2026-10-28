@@ -345,6 +345,60 @@ fn the_chat_matches_its_golden_images() {
                 answered("Explain", "", Some(Err(ai::AiError::Auth(401).to_string())))
             }),
         ),
+        (
+            "history",
+            Box::new(|| {
+                let now = chats::now();
+                let entry = |id: &str, title: &str, ago: u64, star, crop| chats::Entry {
+                    id: id.into(),
+                    title: title.into(),
+                    updated: now - ago,
+                    star,
+                    crop,
+                };
+                let mut p = api_chat();
+                let _ = p.update(Msg::Drawer(Some(Tab::History)));
+                let _ = p.update(Msg::Listed(vec![
+                    entry(
+                        "1-0",
+                        "Windows 11 DWM glass flicker",
+                        5,
+                        true,
+                        Some((420, 260)),
+                    ),
+                    entry(
+                        "2-0",
+                        "Translate Japanese RPG dialogue in-place",
+                        18 * 60,
+                        true,
+                        Some((680, 190)),
+                    ),
+                    entry(
+                        "3-0",
+                        "Extract table from PDF chart to Markdown",
+                        26 * 3600,
+                        false,
+                        None,
+                    ),
+                ]));
+                if let State::Ask { chat, .. } = &mut p.state {
+                    chat.id = Some("1-0".into());
+                }
+                p
+            }),
+        ),
+        (
+            "settings",
+            Box::new(|| {
+                let mut p = api_chat();
+                let _ = p.update(Msg::Drawer(Some(Tab::Settings)));
+                p
+            }),
+        ),
+        (
+            "followup",
+            Box::new(move || answered("What is this?", "A **cat** on a mat.", Some(Ok(())))),
+        ),
     ];
     let mut failed = Vec::new();
     for theme in [&SAPPHIRE, &DAYLIGHT] {
@@ -508,25 +562,69 @@ fn a_new_crop_goes_with_the_next_question_into_the_same_chat() {
     assert_eq!(chat(&panel).turns.len(), 2);
 }
 
-/// The composer is one row: field, Include screen, Send.
+/// The composer as the design: the attached screen's chip only while a
+/// picture goes with the next message, the field, then Include screen and
+/// Send; no web search control (0.2.0) and no privacy line under it.
 #[test]
-fn the_composer_is_one_row() {
-    let panel = api_chat();
-    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+fn the_composer_is_chip_field_then_controls() {
+    let texts = |p: &Panel| crate::ui::kit::testing::shot::texts(p.view(at(SCREEN), SCREEN, false));
+    let mut panel = api_chat();
+    let t = texts(&panel);
+    let chip = t.iter().position(|t| t == "Screen selection attached");
+    let size = t.iter().position(|t| t == "240×120 px");
+    let switch = t.iter().position(|t| t == "Include screen");
+    assert!(chip.is_some() && size == chip.map(|c| c + 1), "{t:?}");
+    assert!(chip < switch, "chip, then the controls: {t:?}");
+    assert_eq!(t.last(), Some(&Icon::Send.glyph().to_string()), "Send last");
+    for gone in [
+        "Auto",
+        "Off",
+        "Only this selection is sent, and only to the provider you chose.",
+    ] {
+        assert!(!t.iter().any(|t| t == gone), "{gone}: {t:?}");
+    }
+    // Include screen off: no chip
+    let _ = panel.update(Msg::IncludeScreen);
     assert!(
-        !texts
+        !texts(&panel)
             .iter()
-            .any(|t| t.starts_with("Screen selection attached")),
-        "{texts:?}"
+            .any(|t| t == "Screen selection attached")
     );
-    // the field (its text is the editor's), then the switch and Send, last
-    let glyph = |i: crate::ui::kit::icon::Icon| i.glyph().to_string();
-    let n = texts.len();
-    assert_eq!(
-        texts[n - 3..n - 1],
-        [glyph(Icon::Screen), glyph(Icon::Send)],
-        "{texts:?}"
+    let _ = panel.update(Msg::IncludeScreen);
+    // asked and answered: the picture went, so the follow-up carries none
+    ask(&mut panel, "What is this?");
+    answer(&mut panel, "A cat");
+    let t = texts(&panel);
+    assert!(!t.iter().any(|t| t == "Screen selection attached"), "{t:?}");
+    // a new crop (a new capture into this chat) goes with the next one
+    let _ = panel.ask_about(sample_crop_of(90), None, true);
+    let setup = ask::tests::local_setup("http://127.0.0.1:9/v1".into());
+    let mut setup = setup;
+    setup.png = vec![9; 4];
+    let _ = panel.update(Msg::Ready(Ok(Arc::new(setup))));
+    assert!(
+        texts(&panel)
+            .iter()
+            .any(|t| t == "Screen selection attached")
     );
+}
+
+fn sample_crop_of(height: u32) -> Crop {
+    Crop {
+        height,
+        rgba: vec![0; (240 * height * 4) as usize],
+        ..sample_crop()
+    }
+}
+
+/// The placeholder asks for a message, then for a follow-up.
+#[test]
+fn the_placeholder_turns_into_a_follow_up() {
+    let mut panel = api_chat();
+    assert_eq!(view::placeholder(chat(&panel)), "Message OpenCircle AI…");
+    ask(&mut panel, "Hi");
+    answer(&mut panel, "Hello");
+    assert_eq!(view::placeholder(chat(&panel)), "Ask a follow-up…");
 }
 
 /// The drawer opens from the logo on History, switches to Settings, closes.
@@ -536,20 +634,93 @@ fn the_drawer_opens_on_history_and_shows_the_chat_settings() {
     let _ = panel.update(Msg::Card(Event::Menu));
     assert_eq!(panel.drawer, Some(Tab::History));
     let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
-    assert!(texts.iter().any(|t| t == "Workspace"), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "+ New chat"), "{texts:?}");
+    for want in [
+        "Workspace",
+        "Search chats…",
+        "+ New",
+        "Local on this PC",
+        "Clear all",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
     let _ = panel.update(Msg::Drawer(Some(Tab::Settings)));
     let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     for want in [
         "AI chat stays open",
         "After a follow-up",
         "Always",
-        "Open AI settings →",
+        "Open AI & model settings →",
     ] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
     let _ = panel.update(Msg::Card(Event::Menu));
     assert_eq!(panel.drawer, None, "the logo again closes it");
+}
+
+/// History's cards: star + title, "time ago · size", Del; the open chat
+/// selected; the search's no-match line; a star at once on its card.
+#[test]
+fn history_cards_show_star_time_size_and_filter() {
+    let now = chats::now();
+    let entry = |id: &str, title: &str, ago: u64, star, crop| chats::Entry {
+        id: id.into(),
+        title: title.into(),
+        updated: now - ago,
+        star,
+        crop,
+    };
+    let mut panel = api_chat();
+    let _ = panel.update(Msg::Drawer(Some(Tab::History)));
+    let _ = panel.update(Msg::Listed(vec![
+        entry(
+            "1-0",
+            "Windows 11 DWM glass flicker",
+            5,
+            true,
+            Some((420, 260)),
+        ),
+        entry("2-0", "Extract table", 18 * 60, false, None),
+    ]));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    for want in [
+        "Windows 11 DWM glass flicker",
+        "Just now",
+        "420×260 px",
+        "18m ago",
+        "Del",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    assert_eq!(texts.iter().filter(|t| *t == "Del").count(), 2);
+    let _ = panel.update(Msg::Star("2-0".into(), true));
+    assert!(panel.listed[1].star, "starred at once");
+    let _ = panel.update(Msg::Find("zzz".into()));
+    assert_eq!(panel.find, "zzz");
+    let _ = panel.update(Msg::Listed(Vec::new()));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    assert!(
+        texts.iter().any(|t| t == "No matching conversations"),
+        "{texts:?}"
+    );
+}
+
+#[test]
+fn history_says_how_long_ago() {
+    let day = 24 * 3600;
+    let now = 100 * day;
+    assert_eq!(view::ago(now - 10, now), "Just now");
+    assert_eq!(view::ago(now - 18 * 60, now), "18m ago");
+    assert_eq!(view::ago(now - 3 * 3600, now), "3h ago");
+    assert_eq!(view::ago(now - day - 5, now), "Yesterday");
+    assert_eq!(
+        view::ago(now - 3 * day, now),
+        crate::log::date(now - 3 * day)
+    );
+    assert_eq!(
+        view::ago(now + 5, now),
+        "Just now",
+        "a clock that went back"
+    );
 }
 
 #[test]
@@ -631,10 +802,11 @@ fn answered_chats_are_saved_as_text_only_and_off_writes_nothing() {
     let saved = (0..200)
         .find_map(|_| {
             std::thread::sleep(std::time::Duration::from_millis(10));
-            chats::list(&db).into_iter().next()
+            chats::list(&db, "").into_iter().next()
         })
         .expect("saved on its thread");
     assert_eq!(saved.title, "What is this?");
+    assert_eq!(saved.crop, Some((240, 120)), "the crop's size, as text");
     let back = chats::load(&db, &saved.id).unwrap();
     assert!(back.turns[0].screen && back.turns[0].answer == "A cat");
     let mut bytes = std::fs::read(&db).unwrap();

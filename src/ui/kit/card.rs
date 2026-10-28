@@ -160,3 +160,94 @@ pub fn grid<'a, Message: 'a>(
     }
     rows.into()
 }
+
+/// A saved chat in History (`renderAiHistoryListHtml`), a picking card
+/// `width` wide: the star (a favourite toggle: `accent` when on, faint when
+/// off), the 12 px / 600 title cut to its room, under them the 10.5 px meta
+/// in `text_sub` ("18m ago · 680×190 px", the size in mono), and at the right
+/// "Del" (10 px `text_muted`, `DANGER` on a rose tint under the cursor).
+/// `selected`: the chat that is open.
+pub struct Chat<'a, Message> {
+    pub title: &'a str,
+    pub when: String,
+    pub crop: Option<String>,
+    pub starred: bool,
+    pub selected: bool,
+    pub width: f32,
+    pub open: Message,
+    pub star: Message,
+    pub delete: Message,
+}
+
+pub fn chat<'a, Message: Clone + 'a>(chat: Chat<'a, Message>) -> Element<'a, Message> {
+    use super::button::faded;
+    use super::icon::{Icon, icon};
+    use super::tokens::fixed;
+    use iced::font::Weight;
+    use iced::widget::text as plain;
+    const TITLE: f32 = 12.0;
+    const META: f32 = 10.5;
+    const STAR: f32 = 12.0;
+    let quiet = |hot: bool, on: bool| button::Style {
+        text_color: match (on, hot) {
+            (true, _) => c().accent,
+            (false, true) => c().text,
+            (false, false) => faded(c().text_muted, 0.6),
+        },
+        ..button::Style::default()
+    };
+    let starred = chat.starred;
+    let star = button(icon(Icon::Star, STAR))
+        .padding(0)
+        .on_press(chat.star)
+        .style(move |_, s| {
+            quiet(
+                matches!(s, button::Status::Hovered | button::Status::Pressed),
+                starred,
+            )
+        });
+    let del = button(
+        plain("Del")
+            .size(10)
+            .font(super::text::weight(Weight::Normal)),
+    )
+    .padding([2, 6])
+    .on_press(chat.delete)
+    .style(|_, s| {
+        let hot = matches!(s, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: hot.then(|| faded(fixed::DANGER, 0.2).into()),
+            text_color: if hot { fixed::DANGER } else { c().text_muted },
+            border: Border::default().rounded(4),
+            ..button::Style::default()
+        }
+    });
+    let font = super::text::weight(Weight::Semibold);
+    // the card's padding and edges, the star and its gap, Del and its gap
+    let room = chat.width - 2.0 * (space::CARD[1] + 1.0) - (STAR + space::GAP) - 36.0;
+    let title = super::text::cut(chat.title, TITLE, font, room.max(0.0));
+    let title = row![star, plain(title).size(TITLE).font(font)]
+        .spacing(space::GAP)
+        .align_y(Center);
+    let meta_font = super::text::weight(Weight::Normal);
+    let meta = row![plain(chat.when).size(META).font(meta_font)]
+        .push(chat.crop.map(|crop| {
+            row![
+                plain("·").size(META).font(meta_font),
+                plain(crop)
+                    .size(META)
+                    .font(super::text::mono(Weight::Normal))
+            ]
+            .spacing(8)
+        }))
+        .spacing(8);
+    let meta = container(meta).style(|_| container::Style {
+        text_color: Some(c().text_sub),
+        ..container::Style::default()
+    });
+    let lines = column![title, meta].spacing(2).width(Fill);
+    let content = row![lines, del].spacing(8).align_y(Center);
+    container(pick(content, chat.selected, Some(chat.open)))
+        .width(chat.width)
+        .into()
+}

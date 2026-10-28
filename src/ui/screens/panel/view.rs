@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use iced::widget::tooltip::Position;
 use iced::widget::{column, container, markdown as md, row, stack};
-use iced::{Bottom, Center, Element, Fill, Rectangle, Right, Size};
+use iced::{Center, Element, Fill, Rectangle, Right, Size};
 
 use super::{Browse, LOG, Msg, PICKS, Panel, State, Tab, classifier, picked};
 use crate::actions;
@@ -20,10 +20,9 @@ use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::markdown;
 use crate::ui::kit::motion;
-use crate::ui::kit::option_list;
 use crate::ui::kit::panel_frame::{self as frame, Event, Header};
 use crate::ui::kit::scroll::scroll;
-use crate::ui::kit::segmented::segmented;
+use crate::ui::kit::segmented::{self, segmented};
 use crate::ui::kit::spinner;
 use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::text_area::text_area;
@@ -170,10 +169,13 @@ impl Panel {
                 Msg::Card,
             );
             return match self.drawer {
-                Some(tab) => stack![card, frame::drawer(self.drawer_view(tab), at)]
-                    .width(Fill)
-                    .height(Fill)
-                    .into(),
+                Some(tab) => {
+                    let inside = self.drawer_view(tab, frame::drawer_room(at));
+                    stack![card, frame::drawer(inside, at)]
+                        .width(Fill)
+                        .height(Fill)
+                        .into()
+                }
                 None => card,
             };
         }
@@ -192,7 +194,7 @@ impl Panel {
         .spacing(STACK);
         (
             body.into(),
-            Some(self.follow_up("Ask AI about it…", false, None)),
+            Some(self.follow_up("Ask AI about it…", false, None, None)),
         )
     }
 
@@ -205,7 +207,7 @@ impl Panel {
         answers: &'a [(usize, md::Content)],
         include: bool,
     ) -> Part<'a> {
-        let Some(Ok(_)) = setup else {
+        let Some(Ok(ready)) = setup else {
             let line: Element<'a, Msg> = match setup {
                 Some(Err(steps)) => scroll(note(steps.as_str())).height(Fill).into(),
                 _ => note("Getting ready…").into(),
@@ -303,23 +305,18 @@ impl Panel {
             ]
             .spacing(STACK)
             .into()
-        } else if browser {
-            self.follow_up("Ask a follow-up…", streaming, None)
         } else {
-            self.composer(include, streaming)
-        };
-        let privacy = match (browser, include) {
-            (true, true) => {
-                "When you send, your question and the text read from the selection go to \
-                 Google AI Mode. The image is not uploaded unless you choose Lens."
+            let placeholder = placeholder(chat);
+            match browser {
+                true => self.follow_up(placeholder, streaming, None, None),
+                false => {
+                    let attached = include && chat.takes(&ready.png);
+                    self.composer(placeholder, include, attached, streaming)
+                }
             }
-            (true, false) => "When you send, only your question goes to Google AI Mode.",
-            (false, true) => "Only this selection is sent, and only to the provider you chose.",
-            (false, false) => "Only your question is sent, to the provider you chose.",
         };
         let body = scroll(log).id(LOG).height(Fill);
-        let footer = column![input, note(privacy)].spacing(STACK);
-        (body.into(), Some(footer.into()))
+        (body.into(), Some(input))
     }
 
     /// The user's turn `i`: the selection's chip when it went along, the
@@ -343,78 +340,78 @@ impl Panel {
         side.push(tools).into()
     }
 
-    /// The chat's composer, on one row: the field (more lines with Shift /
-    /// Ctrl+Enter), the Include screen switch, and Send (Stop while answering).
-    fn composer(&self, include: bool, streaming: bool) -> Element<'_, Msg> {
-        let switch = field::toggle(Icon::Screen, include, false, Msg::IncludeScreen);
-        let switch = hint(
-            switch,
-            match include {
-                true => "Include screen: on (the selection goes with your question)",
-                false => "Include screen: off (only your question goes)",
-            },
-            Why::Icon,
-            Position::Top,
-        );
-        self.follow_up("Message OpenCircle AI…", streaming, Some(switch))
+    /// The chat's composer (the design's, solid): the attached screen's chip
+    /// while a picture goes with the next message (`attached`), the field
+    /// (more lines with Shift / Ctrl+Enter), then Include screen and Send
+    /// (Stop while answering). Web search's Auto / On / Off joins it in 0.2.0.
+    fn composer<'a>(
+        &'a self,
+        placeholder: &'a str,
+        include: bool,
+        attached: bool,
+        streaming: bool,
+    ) -> Element<'a, Msg> {
+        let size = format!("{}×{} px", self.crop.width, self.crop.height);
+        let top = attached.then(|| chip::attached("UI", "Screen selection attached", size));
+        let switch = crate::ui::kit::button::switch("Include screen", include, Msg::IncludeScreen);
+        self.follow_up(placeholder, streaming, top, Some(switch))
     }
 
-    /// The field, `extra` beside it (the composer's switch), and its send
-    /// (or, while streaming, stop) button.
+    /// The composer box: `top` over the field, `extra` at the start of its
+    /// controls row (the Include screen switch) and its send (or, while
+    /// streaming, stop) button at the end.
     fn follow_up<'a>(
         &'a self,
         placeholder: &'a str,
         streaming: bool,
+        top: Option<Element<'a, Msg>>,
         extra: Option<Element<'a, Msg>>,
     ) -> Element<'a, Msg> {
-        let top = Position::Top;
-        let button = match streaming {
+        use crate::ui::kit::button::{COMPACT_H, compact};
+        let round =
+            |icon: Icon, msg| compact(icon.glyph(), None, COMPACT_H, (false, false), Some(msg));
+        let send = match streaming {
             true => hint(
-                icon_button(
-                    Icon::Stop.glyph(),
-                    icon_button::State::default(),
-                    Some(Msg::Stop),
-                ),
+                round(Icon::Stop, Msg::Stop),
                 "Stop",
                 Why::Icon,
-                top,
+                Position::Top,
             ),
             false => hint(
-                icon_button(
-                    Icon::Send.glyph(),
-                    icon_button::State::default(),
-                    Some(Msg::Submit),
-                ),
+                round(Icon::Send, Msg::Submit),
                 "Send",
                 Why::Keys("Enter"),
-                top,
+                Position::Top,
             ),
         };
-        let input = text_area(
+        let controls = row![]
+            .push(extra)
+            .push(iced::widget::space::horizontal())
+            .push(send)
+            .spacing(space::GAP)
+            .align_y(Center);
+        let composer = text_area(
             super::INPUT,
             placeholder,
             &self.input,
             Msg::Edit,
             Msg::Submit,
+            top,
+            controls.into(),
         );
-        row![container(keys::guard(input, Msg::Key)).width(Fill)]
-            .push(extra)
-            .push(button)
-            .spacing(space::GAP)
-            .align_y(Bottom)
-            .into()
+        keys::guard(composer, Msg::Key)
     }
 
-    /// The drawer (the design's "Workspace"): back, its title and the tabs, then
-    /// the tab.
-    fn drawer_view(&self, tab: Tab) -> Element<'_, Msg> {
+    /// The drawer (the design's "Workspace"), `width` inside: back, its title
+    /// and the tabs, then the tab.
+    fn drawer_view(&self, tab: Tab, width: f32) -> Element<'_, Msg> {
         let back = icon_button(
             Icon::Back.glyph(),
             icon_button::State::default(),
             Some(Msg::Drawer(None)),
         );
         let back = hint(back, "Back to the chat", Why::Icon, Position::Bottom);
-        let tabs = segmented(
+        let tabs = segmented::inline(
             &[(Tab::History, "History"), (Tab::Settings, "Settings")],
             tab,
             tab,
@@ -428,60 +425,63 @@ impl Panel {
         ]
         .spacing(space::GAP)
         .align_y(Center);
-        let body = match tab {
-            Tab::History => self.history_view(),
-            Tab::Settings => self.settings_view(),
+        let parts = match tab {
+            Tab::History => self.history_view(width),
+            Tab::Settings => vec![scroll(self.settings_view()).height(Fill).into()],
         };
-        column![top, scroll(body).height(Fill)]
-            .spacing(STACK)
-            .into()
+        column![top].extend(parts).spacing(STACK).into()
     }
 
-    /// This PC's saved chats, newest first: open one, delete one, or all.
-    fn history_view(&self) -> Element<'_, Msg> {
-        let new = button(label("+ New chat"), Kind::Elevated, Some(Msg::NewChat));
-        let mut list = column![new].spacing(STACK).width(Fill);
+    /// This PC's saved chats, favourites then newest first: the search field
+    /// and a new chat, a card per chat (star, open, delete), and the footer.
+    fn history_view(&self, width: f32) -> Vec<Element<'_, Msg>> {
+        let search = field::input("Search chats…", &self.find, false, false)
+            .on_input(Msg::Find)
+            .width(Fill);
+        let new = button(label("+ New"), Kind::Elevated, Some(Msg::NewChat));
+        let top = row![search, new].spacing(space::GAP).align_y(Center);
         if !config::current().chat.keep_history {
-            return list
-                .push(note(
-                    "Chat history is off (Settings > AI). Nothing is saved.",
-                ))
-                .into();
-        }
-        if self.listed.is_empty() {
-            return list.push(note("No saved chats yet.")).into();
+            let off = note("Chat history is off (Settings > AI). Nothing is saved.");
+            return vec![top.into(), off.into()];
         }
         let open = match &self.state {
             State::Ask { chat, .. } => chat.id.clone(),
             State::Lens(_) => None,
         };
-        let mut rows = column![].width(Fill);
+        let now = crate::store::chats::now();
+        let mut cards = column![].spacing(space::GAP).width(Fill);
         for entry in &self.listed {
-            let current = open.as_deref() == Some(entry.id.as_str());
-            let item = option_list::item(
-                &entry.title,
-                current,
-                Some(crate::log::date(entry.updated)),
-                false,
-                Msg::OpenSaved(entry.id.clone()),
-            );
-            let delete = icon_button(
-                Icon::Close.glyph(),
-                icon_button::State::default(),
-                Some(Msg::DeleteSaved(entry.id.clone())),
-            );
-            let delete = hint(delete, "Delete this chat", Why::Icon, Position::Left);
-            rows = rows.push(row![container(item).width(Fill), delete].align_y(Center));
+            cards = cards.push(crate::ui::kit::card::chat(crate::ui::kit::card::Chat {
+                title: &entry.title,
+                when: ago(entry.updated, now),
+                crop: entry.crop.map(|(w, h)| format!("{w}×{h} px")),
+                starred: entry.star,
+                selected: open.as_deref() == Some(entry.id.as_str()),
+                width,
+                open: Msg::OpenSaved(entry.id.clone()),
+                star: Msg::Star(entry.id.clone(), !entry.star),
+                delete: Msg::DeleteSaved(entry.id.clone()),
+            }));
         }
-        list = list.push(rows).push(button(
-            label("Clear all history"),
-            Kind::Quiet,
-            Some(Msg::ClearHistory),
-        ));
-        list.push(note(
-            "Saved on this PC only, text only: screenshots are never kept.",
-        ))
-        .into()
+        let list: Element<'_, Msg> = match self.listed.is_empty() {
+            true if self.find.trim().is_empty() => note("No saved chats yet.").into(),
+            true => container(note("No matching conversations"))
+                .center_x(Fill)
+                .into(),
+            false => scroll(cards).height(Fill).into(),
+        };
+        let clear = button(label("Clear all"), Kind::Remove, Some(Msg::ClearHistory));
+        let footer = row![
+            container(crate::ui::kit::text::muted(
+                Role::CARD_DESC,
+                "Local on this PC"
+            ))
+            .width(Fill),
+            clear
+        ]
+        .align_y(Center);
+        let list = container(list).height(Fill);
+        vec![top.into(), list.into(), footer.into()]
     }
 
     /// "AI chat stays open", the quick provider / model picker, and the way to
@@ -500,9 +500,9 @@ impl Panel {
         );
         let provider = dropdown(&PICKS[..], picked(&cfg.ai), "Choose a provider", Msg::Pick);
         let mut part = column![
-            sub(Role::ROW_TITLE, "AI chat stays open"),
+            sub(Role::LABEL, "AI chat stays open"),
             stays,
-            sub(Role::ROW_TITLE, "Provider"),
+            sub(Role::LABEL, "Provider"),
             provider,
         ]
         .spacing(STACK)
@@ -511,7 +511,7 @@ impl Panel {
             let model = field::input("Model id", &self.model, true, false)
                 .on_input(Msg::Model)
                 .on_submit(Msg::SaveModel);
-            part = part.push(sub(Role::ROW_TITLE, "Model")).push(model);
+            part = part.push(sub(Role::LABEL, "Model")).push(model);
             if classifier(&self.model) {
                 part = part.push(error(
                     Role::NOTE,
@@ -520,11 +520,33 @@ impl Panel {
                 ));
             }
         }
-        part.push(button(
-            label("Open AI settings →"),
-            Kind::Elevated,
+        part.push(crate::ui::kit::button::fill(
+            label("Open AI & model settings →"),
             Some(Msg::OpenAiSettings),
         ))
         .into()
+    }
+}
+
+/// The composer's placeholder: a first message, then a follow-up.
+pub(super) fn placeholder(chat: &Chat) -> &'static str {
+    match chat.turns.is_empty() {
+        true => "Message OpenCircle AI…",
+        false => "Ask a follow-up…",
+    }
+}
+
+/// When a saved chat last changed, as History says it (`now`: unix seconds):
+/// "Just now", "18m ago", "3h ago", "Yesterday", then its date.
+pub(super) fn ago(then: u64, now: u64) -> String {
+    const MIN: u64 = 60;
+    const HOUR: u64 = 60 * MIN;
+    const DAY: u64 = 24 * HOUR;
+    match now.saturating_sub(then) {
+        s if s < MIN => "Just now".into(),
+        s if s < HOUR => format!("{}m ago", s / MIN),
+        s if s < DAY => format!("{}h ago", s / HOUR),
+        s if s < 2 * DAY => "Yesterday".into(),
+        _ => crate::log::date(then),
     }
 }

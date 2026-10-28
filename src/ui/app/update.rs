@@ -143,6 +143,10 @@ impl App {
             Message::Overlay(event) => self.on_overlay(event),
             Message::Screen(n, place, frame) => self.add_screen(n, place, frame),
             Message::ScreenEvent(window, event) => self.on_screen_event(window, event),
+            Message::PointerOn(window) => {
+                self.pointer_on(window, Instant::now());
+                Task::none()
+            }
             Message::Escape if self.o.is_none() => Task::none(),
             Message::Escape if let Some(scroll) = self.scroll() => {
                 scroll.stop(); // what was gathered opens in the editor
@@ -380,6 +384,7 @@ impl App {
                 if let Some(chat) = &mut self.chat {
                     chat.panel.tick(now);
                 }
+                self.o.glow.tick(now);
                 // the chat card docking where it was let go
                 if let Some((began, from, _)) = self.o.chat_glide {
                     let t = motion::progress(began, now, motion::DOCK, motion::Curve::Standard);

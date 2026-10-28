@@ -159,6 +159,10 @@ pub enum Msg {
     OpenAiSettings,
     /// The History tab's list of saved chats (newest first).
     Listed(Vec<chats::Entry>),
+    /// History's search field: chats whose title or text hold it.
+    Find(String),
+    /// Star a saved chat (a favourite, listed first), or not.
+    Star(String, bool),
     /// Open a saved chat, delete one, or all.
     OpenSaved(String),
     Loaded(Result<chats::Saved, String>),
@@ -181,9 +185,11 @@ pub struct Panel {
     pinned: bool,
     /// Picked up and dragged by its header (the App sets it).
     pub held: bool,
-    /// The drawer's open tab, its History list and its model field.
+    /// The drawer's open tab, its History list (and what it was searched
+    /// for) and its model field.
     drawer: Option<Tab>,
     listed: Vec<chats::Entry>,
+    find: String,
     model: String,
     /// The older messages' summary being written; dropping it stops that.
     summarizing: Option<task::Handle>,
@@ -332,6 +338,7 @@ impl Panel {
             held: false,
             drawer: None,
             listed: Vec::new(),
+            find: String::new(),
             model: String::new(),
             summarizing: None,
             work: None,
@@ -441,10 +448,30 @@ impl Panel {
                 self.drawer = tab;
                 self.model = config::current().ai.model;
                 if tab == Some(Tab::History) {
-                    return list_saved();
+                    return list_saved(&self.find);
                 }
             }
             (_, Msg::Listed(all)) => self.listed = all,
+            (_, Msg::Find(find)) => {
+                self.find = find;
+                return list_saved(&self.find);
+            }
+            (_, Msg::Star(id, on)) => {
+                // at once on the card; the list sorts again once written
+                if let Some(entry) = self.listed.iter_mut().find(|e| e.id == id) {
+                    entry.star = on;
+                }
+                let Some(db) = store::path() else {
+                    return Task::none();
+                };
+                let find = self.find.clone();
+                return background(move |tx| {
+                    if let Err(e) = chats::star(&db, &id, on) {
+                        crate::log!("[opencircle] {e}");
+                    }
+                    let _ = tx.unbounded_send(Msg::Listed(chats::list(&db, &find)));
+                });
+            }
             (_, Msg::OpenSaved(id)) => {
                 let Some(db) = store::path() else {
                     return Task::none();
@@ -475,11 +502,12 @@ impl Panel {
                 {
                     chat.id = None; // this chat, if saved again, is a new one
                 }
+                let find = self.find.clone();
                 return background(move |tx| {
                     if let Err(e) = chats::delete(&db, &id) {
                         crate::log!("[opencircle] {e}");
                     }
-                    let _ = tx.unbounded_send(Msg::Listed(chats::list(&db)));
+                    let _ = tx.unbounded_send(Msg::Listed(chats::list(&db, &find)));
                 });
             }
             (_, Msg::ClearHistory) => {
@@ -822,13 +850,15 @@ fn keep_in(db: Option<std::path::PathBuf>, on: bool, chat: &mut Chat) -> Task<Ms
     })
 }
 
-/// The saved chats, newest first (`Listed`).
-fn list_saved() -> Task<Msg> {
+/// The saved chats holding `find` (all when blank), favourites then newest
+/// first (`Listed`).
+fn list_saved(find: &str) -> Task<Msg> {
     let Some(db) = store::path() else {
         return Task::none();
     };
+    let find = find.to_string();
     background(move |tx| {
-        let _ = tx.unbounded_send(Msg::Listed(chats::list(&db)));
+        let _ = tx.unbounded_send(Msg::Listed(chats::list(&db, &find)));
     })
 }
 

@@ -201,6 +201,7 @@ fn button_sheet() {
             Kind::Quiet => text(s(ar, "Customize install ▾", "تخصيص التثبيت"))
                 .size(11.5)
                 .into(),
+            Kind::Remove => label(s(ar, "Clear all", "مسح الكل")).into(),
         }
     }
     let mut rows = Vec::new();
@@ -211,6 +212,7 @@ fn button_sheet() {
             Kind::Success => ["success", "  hover", "  pressed", "  disabled"],
             Kind::Danger => ["danger", "  hover", "  pressed", "  disabled"],
             Kind::Quiet => ["quiet", "  hover", "  pressed", "  disabled"],
+            Kind::Remove => ["remove", "  hover", "  pressed", "  disabled"],
         };
         for (state, act, enabled) in [
             (name[0], Act::Rest, true),
@@ -233,6 +235,15 @@ fn button_sheet() {
     ] {
         rows.push(row(state, act, move |ar| {
             button::regular(s(ar, "Download", "تنزيل"), accent, enabled.then_some(()))
+        }));
+    }
+    for (state, act, on) in [
+        ("switch on", Act::Rest, true),
+        ("  hover", Act::Hover, true),
+        ("switch off", Act::Rest, false),
+    ] {
+        rows.push(row(state, act, move |ar| {
+            button::switch(s(ar, "Include screen", "تضمين الشاشة"), on, ())
         }));
     }
     sheet("button", Size::new(260.0, 60.0), &rows);
@@ -322,6 +333,10 @@ fn chip_sheet() {
         row("emblem", Act::Rest, |_| {
             chip::emblem(super::super::icon::Icon::Translate)
         }),
+        row("attached", Act::Rest, |ar| {
+            let label = s(ar, "Screen selection", "تحديد الشاشة");
+            chip::attached("UI", label, "420×260 px".into())
+        }),
     ];
     sheet("chip", Size::new(200.0, 48.0), &rows);
 }
@@ -342,6 +357,26 @@ fn card_sheet() {
             card::look_card(name, l.badge, l.desc, l.preview, selected, on)
         }
     };
+    let chat = |starred, selected| {
+        move |ar| {
+            let title = s(
+                ar,
+                "Translate Japanese RPG dialogue in-place",
+                "ترجمة حوار لعبة يابانية في مكانه",
+            );
+            card::chat(card::Chat {
+                title,
+                when: s(ar, "18m ago", "قبل 18 دقيقة").into(),
+                crop: Some("680×190 px".into()),
+                starred,
+                selected,
+                width: 228.0,
+                open: (),
+                star: (),
+                delete: (),
+            })
+        }
+    };
     let rows = rows
         .into_iter()
         .chain([
@@ -352,6 +387,10 @@ fn card_sheet() {
             row("look hover", Act::Hover, look(false, Some(()))),
             row("look selected", Act::Rest, look(true, Some(()))),
             row("look not offered", Act::Rest, look(false, None)),
+            row("chat", Act::Rest, chat(false, false)),
+            row("chat hover", Act::Hover, chat(false, false)),
+            row("chat starred", Act::Rest, chat(true, false)),
+            row("chat selected", Act::Rest, chat(true, true)),
         ])
         .collect::<Vec<_>>();
     sheet("card", Size::new(260.0, 84.0), &rows);
@@ -996,8 +1035,9 @@ fn hero_sheet() {
     sheet("hero", Size::new(420.0, 340.0), &rows);
 }
 
-/// `text_area`, the AI chat's composer: empty, one line, focused, and seven
-/// lines (it stops growing at five and scrolls).
+/// `text_area`, the AI chat's composer box: empty with its controls row, one
+/// line, focused, seven lines (it stops growing at five and scrolls), and with
+/// the attached screen's chip over the field.
 #[test]
 fn text_area_sheet() {
     use super::super::text_area::text_area;
@@ -1015,22 +1055,60 @@ fn text_area_sheet() {
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let controls = |ar: bool| -> Element<'static, ()> {
+        iced::widget::row![
+            button::switch(s(ar, "Include screen", "تضمين الشاشة"), true, ()),
+            iced::widget::space::horizontal(),
+            button::compact(
+                '\u{e04e}',
+                None,
+                button::COMPACT_H,
+                (false, false),
+                Some(())
+            ),
+        ]
+        .align_y(iced::Center)
+        .into()
+    };
     let rows = vec![
-        row("placeholder", Act::Rest, |ar| {
+        row("placeholder", Act::Rest, move |ar| {
             let hint = s(ar, "Message OpenCircle AI…", "راسل OpenCircle AI…");
-            text_area("t", hint, content(String::new()), |_| (), ())
+            text_area(
+                "t",
+                hint,
+                content(String::new()),
+                |_| (),
+                (),
+                None,
+                controls(ar),
+            )
         }),
-        row("one line", Act::Rest, |ar| {
-            text_area("t", "", content(line(ar).into()), |_| (), ())
+        row("one line", Act::Rest, move |ar| {
+            let text = content(line(ar).into());
+            text_area("t", "", text, |_| (), (), None, controls(ar))
         }),
-        row("focused", Act::Click, |ar| {
-            text_area("t", "", content(line(ar).into()), |_| (), ())
+        row("focused", Act::Click, move |ar| {
+            let text = content(line(ar).into());
+            text_area("t", "", text, |_| (), (), None, controls(ar))
         }),
         row("seven lines", Act::Rest, move |ar| {
-            text_area("t", "", content(many(ar)), |_| (), ())
+            text_area("t", "", content(many(ar)), |_| (), (), None, controls(ar))
+        }),
+        row("attached", Act::Rest, move |ar| {
+            let label = s(ar, "Screen selection attached", "تحديد الشاشة مرفق");
+            let chip = chip::attached("UI", label, "420×260 px".into());
+            text_area(
+                "t",
+                "",
+                content(line(ar).into()),
+                |_| (),
+                (),
+                Some(chip),
+                controls(ar),
+            )
         }),
     ];
-    sheet("text_area", Size::new(300.0, 110.0), &rows);
+    sheet("text_area", Size::new(340.0, 230.0), &rows);
 }
 
 /// `tooltip::hint`: the hint pill under an icon button, shown while hovered.

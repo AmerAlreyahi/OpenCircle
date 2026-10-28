@@ -55,6 +55,9 @@ pub struct Saved {
     pub turns: Vec<Turn>,
     /// What the model was told about the turns before its last messages.
     pub summary: Option<Summary>,
+    /// Its last screenshot's size, physical px (`None` on a save: the one
+    /// kept stays).
+    pub crop: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -79,6 +82,21 @@ pub struct Entry {
     pub id: String,
     pub title: String,
     pub updated: u64,
+    /// A favourite: listed first.
+    pub star: bool,
+    /// Its last screenshot's size, physical px.
+    pub crop: Option<(u32, u32)>,
+}
+
+/// A crop size as the database keeps it ("420x260"), and back.
+fn crop_text(crop: Option<(u32, u32)>) -> Option<String> {
+    crop.map(|(w, h)| format!("{w}x{h}"))
+}
+
+fn crop_of(text: Option<String>) -> Option<(u32, u32)> {
+    let text = text?;
+    let (w, h) = text.split_once('x')?;
+    Some((w.parse().ok()?, h.parse().ok()?))
 }
 
 impl Saved {
@@ -126,11 +144,20 @@ pub fn save(path: &Path, chat: &Saved, generation: u64) -> Result<()> {
         Some(s) => (Some(s.text.as_str()), Some(s.at as i64)),
         None => (None, None),
     };
+    // (the star is History's own: a save never changes it)
     tx.execute(
-        "INSERT INTO chats (id, title, created, updated, summary, summary_at)
-         VALUES (?1, ?2, ?3, ?3, ?4, ?5)
-         ON CONFLICT(id) DO UPDATE SET title = ?2, updated = ?3, summary = ?4, summary_at = ?5",
-        params![chat.id, chat.title(), chat.updated as i64, summary, at],
+        "INSERT INTO chats (id, title, created, updated, summary, summary_at, crop)
+         VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET title = ?2, updated = ?3, summary = ?4,
+             summary_at = ?5, crop = COALESCE(?6, crop)",
+        params![
+            chat.id,
+            chat.title(),
+            chat.updated as i64,
+            summary,
+            at,
+            crop_text(chat.crop)
+        ],
     )
     .map_err(err)?;
     tx.execute("DELETE FROM messages WHERE chat_id = ?1", [&chat.id])
@@ -150,9 +177,10 @@ pub fn save(path: &Path, chat: &Saved, generation: u64) -> Result<()> {
                 .map_err(err)?;
         }
     }
+    // (favourites are the last to go)
     tx.execute(
         "DELETE FROM chats WHERE id NOT IN
-         (SELECT id FROM chats ORDER BY updated DESC, id DESC LIMIT ?1)",
+         (SELECT id FROM chats ORDER BY star DESC, updated DESC, id DESC LIMIT ?1)",
         [KEEP as i64],
     )
     .map_err(err)?;
@@ -165,22 +193,30 @@ pub fn save(path: &Path, chat: &Saved, generation: u64) -> Result<()> {
     flush(&db)
 }
 
-/// Every saved chat, newest first (none when there is no database).
-pub fn list(path: &Path) -> Vec<Entry> {
+/// Every saved chat whose title or text holds `find` (any case; blank = all),
+/// favourites first, then newest first (none when there is no database).
+pub fn list(path: &Path, find: &str) -> Vec<Entry> {
     if !path.exists() {
         return Vec::new();
     }
     let read = || -> Result<Vec<Entry>> {
         let db = open(path)?;
         let mut q = db
-            .prepare("SELECT id, title, updated FROM chats ORDER BY updated DESC, id DESC")
+            .prepare(
+                "SELECT id, title, updated, star, crop FROM chats
+                 WHERE ?1 = '' OR instr(lower(title), ?1) > 0 OR id IN
+                     (SELECT chat_id FROM messages WHERE instr(lower(text), ?1) > 0)
+                 ORDER BY star DESC, updated DESC, id DESC",
+            )
             .map_err(err)?;
         let rows = q
-            .query_map([], |r| {
+            .query_map([find.trim().to_lowercase()], |r| {
                 Ok(Entry {
                     id: r.get(0)?,
                     title: r.get(1)?,
                     updated: r.get::<_, i64>(2)? as u64,
+                    star: r.get(3)?,
+                    crop: crop_of(r.get(4)?),
                 })
             })
             .map_err(err)?;
@@ -195,11 +231,12 @@ pub fn list(path: &Path) -> Vec<Entry> {
 /// The chat `id` with its messages.
 pub fn load(path: &Path, id: &str) -> Result<Saved> {
     let db = open(path)?;
-    let (updated, summary, at): (i64, Option<String>, Option<i64>) = db
+    type Row = (i64, Option<String>, Option<i64>, Option<String>);
+    let (updated, summary, at, crop): Row = db
         .query_row(
-            "SELECT updated, summary, summary_at FROM chats WHERE id = ?1",
+            "SELECT updated, summary, summary_at, crop FROM chats WHERE id = ?1",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .map_err(err)?;
     let mut q = db
@@ -230,7 +267,17 @@ pub fn load(path: &Path, id: &str) -> Result<Saved> {
             text,
             at: at.unwrap_or_default() as usize,
         }),
+        crop: crop_of(crop),
     })
+}
+
+/// Stars the chat `id` (a favourite, listed first), or not.
+pub fn star(path: &Path, id: &str, on: bool) -> Result<()> {
+    let _w = write();
+    let db = open(path)?;
+    db.execute("UPDATE chats SET star = ?2 WHERE id = ?1", params![id, on])
+        .map_err(err)?;
+    Ok(())
 }
 
 pub fn delete(path: &Path, id: &str) -> Result<()> {
@@ -305,32 +352,89 @@ mod tests {
                 text: "short".into(),
                 at: 22,
             }),
+            crop: Some((420, 260)),
         }
+    }
+
+    /// History's search (title and text, any case), its star (favourites
+    /// first, kept by later saves) and the crop size (kept when a save has none).
+    #[test]
+    fn search_stars_and_crop_sizes() {
+        let db = tmp("star");
+        save(&db, &chat("1-0", 10), generation()).unwrap();
+        let mut other = chat("2-0", 20);
+        other.turns[1].answer = "The Ferris wheel".into();
+        other.crop = None;
+        save(&db, &other, generation()).unwrap();
+        let ids =
+            |find: &str| -> Vec<String> { list(&db, find).into_iter().map(|e| e.id).collect() };
+        assert_eq!(ids(""), ["2-0", "1-0"]);
+        assert_eq!(ids("  ferris "), ["2-0"], "in an answer, any case");
+        assert_eq!(ids("q 1-0"), ["1-0"], "in the title");
+        assert!(ids("nowhere").is_empty());
+        star(&db, "1-0", true).unwrap();
+        save(&db, &chat("1-0", 11), generation()).unwrap(); // a later save keeps it
+        let all = list(&db, "");
+        assert_eq!((all[0].id.as_str(), all[0].star), ("1-0", true));
+        assert_eq!(all[0].crop, Some((420, 260)));
+        assert_eq!((all[1].star, all[1].crop), (false, None));
+        // a save without a crop keeps the one kept
+        let mut again = chat("1-0", 12);
+        again.crop = None;
+        save(&db, &again, generation()).unwrap();
+        assert_eq!(load(&db, "1-0").unwrap().crop, Some((420, 260)));
+        star(&db, "1-0", false).unwrap();
+        assert_eq!(ids(""), ["2-0", "1-0"]);
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    /// A database from before the star (schema 1) gets it, its chats kept.
+    #[test]
+    fn a_schema_one_database_is_migrated_with_its_chats() {
+        let db = tmp("v1");
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let old = Connection::open(&db).unwrap();
+        old.execute_batch(crate::store::MIGRATIONS[0]).unwrap();
+        old.execute_batch(
+            "INSERT INTO chats (id, title, created, updated) VALUES ('1-0', 'Old', 1, 1);
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+        drop(old);
+        let all = list(&db, "");
+        assert_eq!(all.len(), 1);
+        assert_eq!(
+            (all[0].title.as_str(), all[0].star, all[0].crop),
+            ("Old", false, None)
+        );
+        star(&db, "1-0", true).unwrap();
+        assert!(list(&db, "")[0].star);
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
     }
 
     #[test]
     fn saved_newest_first_round_trip_and_delete() {
         let db = tmp("list");
         assert!(
-            list(&db).is_empty() && !db.exists(),
+            list(&db, "").is_empty() && !db.exists(),
             "nothing written by reading"
         );
         save(&db, &chat("1-0", 10), generation()).unwrap();
         save(&db, &chat("2-0", 30), generation()).unwrap();
         save(&db, &chat("3-0", 20), generation()).unwrap();
-        let ids: Vec<_> = list(&db).into_iter().map(|c| c.id).collect();
+        let ids: Vec<_> = list(&db, "").into_iter().map(|c| c.id).collect();
         assert_eq!(ids, ["2-0", "3-0", "1-0"]);
         assert_eq!(load(&db, "2-0").unwrap(), chat("2-0", 30));
-        assert_eq!(list(&db)[0].title, "Q 2-0");
+        assert_eq!(list(&db, "")[0].title, "Q 2-0");
         // saved again: replaced, not doubled
         let mut c = chat("2-0", 40);
         c.turns.pop();
         save(&db, &c, generation()).unwrap();
         assert_eq!(load(&db, "2-0").unwrap().turns.len(), 1);
         delete(&db, "3-0").unwrap();
-        assert_eq!(list(&db).len(), 2);
+        assert_eq!(list(&db, "").len(), 2);
         clear(&db).unwrap();
-        assert!(list(&db).is_empty());
+        assert!(list(&db, "").is_empty());
         let _ = std::fs::remove_dir_all(db.parent().unwrap());
     }
 
@@ -340,7 +444,7 @@ mod tests {
         for i in 0..(KEEP as u64 + 3) {
             save(&db, &chat(&format!("{i}-0"), i), generation()).unwrap();
         }
-        let all = list(&db);
+        let all = list(&db, "");
         assert_eq!(all.len(), KEEP);
         assert_eq!(all.last().unwrap().id, "3-0", "the three oldest went");
         assert!(load(&db, "0-0").is_err());
@@ -384,7 +488,7 @@ mod tests {
         forget_all();
         let gone = (0..200).any(|_| {
             std::thread::sleep(std::time::Duration::from_millis(10));
-            list(&db).is_empty()
+            list(&db, "").is_empty()
         });
         crate::store::test_path(None);
         assert!(gone);
@@ -438,7 +542,7 @@ mod tests {
         save(&db, &chat("1-0", 1), began).unwrap();
         assert!(!db.exists(), "nothing written");
         save(&db, &chat("2-0", 2), generation()).unwrap();
-        assert_eq!(list(&db).len(), 1, "a new save goes on");
+        assert_eq!(list(&db, "").len(), 1, "a new save goes on");
         let _ = std::fs::remove_dir_all(db.parent().unwrap());
     }
 

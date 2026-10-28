@@ -631,6 +631,7 @@ impl Live {
             monitor.scale,
             cfg!(windows),
             border::Breathe::Off,
+            1.0,
         )];
         // (Paused: `patches` is empty.)
         for p in &self.patches {

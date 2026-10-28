@@ -430,7 +430,7 @@ pub fn drawer<'a, Message: 'a>(
     at: Rectangle,
 ) -> Element<'a, Message> {
     let size = Size::new(
-        (at.width * DRAWER_SHARE).max(MIN.width.min(at.width) - 2.0 * DRAWER_INSET),
+        drawer_room(at) + 2.0 * DRAWER_PAD,
         (at.height - 2.0 * DRAWER_INSET).max(0.0),
     );
     let panel = surface(Material::Widget, CARD_RADIUS, content)
@@ -440,6 +440,12 @@ pub fn drawer<'a, Message: 'a>(
     pin(opaque(panel))
         .position(at.position() + Vector::new(DRAWER_INSET, DRAWER_INSET))
         .into()
+}
+
+/// How wide the drawer's content is on the card at `at` (inside its padding).
+pub fn drawer_room(at: Rectangle) -> f32 {
+    let width = (at.width * DRAWER_SHARE).max(MIN.width.min(at.width) - 2.0 * DRAWER_INSET);
+    (width - 2.0 * DRAWER_PAD).max(0.0)
 }
 
 /// The drawer's share of the card's width, its inset and padding (the design's).

@@ -152,6 +152,23 @@ impl Shown {
         }
     }
 
+    /// Turns to open at `now`, from where it is (nothing if opening already).
+    pub fn open(&mut self, now: Instant) {
+        if !self.open {
+            *self = Shown {
+                open: true,
+                from: self.at(now),
+                start: now,
+                ..*self
+            };
+        }
+    }
+
+    /// Opening (or open), not closing.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
     /// How open it is at `now` (0..1, eased).
     pub fn at(&self, now: Instant) -> f32 {
         let (length, curve) = match self.open {
@@ -358,6 +375,12 @@ mod tests {
         assert_eq!(c.at(t0), 1.0);
         assert!(c.at(ms(40)) > 0.85, "soft start");
         assert_eq!(c.at(ms(150)), 0.0);
+        // opened again while closing: from where it is
+        let mut c = Shown::closing(WIDGET, t0);
+        let mid = c.at(ms(75));
+        c.open(ms(75));
+        assert!(c.is_open() && c.at(ms(75)) == mid, "no jump");
+        assert_eq!(c.at(ms(300)), 1.0);
     }
 
     /// The OS asks for no animation: every motion is there at once.

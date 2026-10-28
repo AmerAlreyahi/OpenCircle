@@ -301,6 +301,7 @@ impl App {
             || self.bar_gliding()
             || self.card_opening()
             || self.o.chat_glide.is_some()
+            || self.o.glow.moving()
             || self.o.zoom.is_some()
             || (self.o.panel.as_ref()).is_some_and(|(_, p)| p.spinning())
             || self.chat.as_ref().is_some_and(|c| c.panel.spinning())
@@ -459,7 +460,18 @@ impl App {
                 }),
                 false => Subscription::none(),
             };
-            Subscription::batch([triggers, escape, alt, card, shift, frames, bar])
+            // Several screens: the edge glow follows the pointer onto the one it
+            // comes into (one message per crossing, none while it moves).
+            let glow = match self.o.screens.is_empty() {
+                true => Subscription::none(),
+                false => iced::event::listen_with(|event, _, id| match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorEntered) => {
+                        Some(Message::PointerOn(id))
+                    }
+                    _ => None,
+                }),
+            };
+            Subscription::batch([triggers, escape, alt, card, shift, frames, bar, glow])
         } else if self.hiding != Hiding::No {
             // One stream for both, so a resize is always seen before the frames after it.
             // Every message makes iced redraw, so frames keep coming while this runs.

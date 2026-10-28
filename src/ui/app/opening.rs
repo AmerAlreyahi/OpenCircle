@@ -174,6 +174,8 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) screens: Vec<Screen>,
     /// Their frames that landed during the opening animation (shown after it).
     pub(in crate::ui) waiting: Vec<(crate::ui::snip::Place, image::Handle)>,
+    /// Where the edge glow is: the screen the mouse is on (`screens::Glow`).
+    pub(in crate::ui) glow: crate::ui::app::screens::Glow,
 }
 
 impl Default for Opening {
@@ -253,6 +255,7 @@ impl Default for Opening {
             capture: 0,
             screens: Vec::new(),
             waiting: Vec::new(),
+            glow: Default::default(),
         }
     }
 }

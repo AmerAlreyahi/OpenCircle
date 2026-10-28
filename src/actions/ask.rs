@@ -275,6 +275,18 @@ impl Chat {
         self.turns.iter().filter(|t| !t.answer.is_empty())
     }
 
+    /// The picture `png` goes with the next question (`ask`): there is one, and
+    /// no answered turn the request carries took it already (again once the
+    /// turn that took it left the window). The composer's "attached" chip.
+    pub fn takes(&self, png: &[u8]) -> bool {
+        let answered: Vec<&Turn> = self.answered().collect();
+        let skip = answered.len().saturating_sub(WINDOW / 2);
+        !png.is_empty()
+            && !answered[skip..]
+                .iter()
+                .any(|t| t.image.as_deref() == Some(png))
+    }
+
     /// Starts a turn and returns the conversation to send: the last `WINDOW` messages,
     /// the summary of any older ones, and the question. The crop `png`, if any, goes
     /// with this question unless an earlier answered one already took it. `None` while
@@ -298,11 +310,7 @@ impl Chat {
             messages.push(asked);
             messages.push(ai::Message::new(Role::Assistant, &turn.answer));
         }
-        // (again once the turn that took it left the window)
-        let new = !png.is_empty()
-            && !answered[skip..]
-                .iter()
-                .any(|t| t.image.as_deref() == Some(png));
+        let new = self.takes(png);
         let mut asked = ai::Message::user(question);
         asked.image_png = new.then(|| png.to_vec()); // none: a plain question, or sent already
         messages.push(asked);
@@ -359,6 +367,7 @@ impl Chat {
                 })
                 .collect(),
             summary: self.summary.clone(),
+            crop: self.turns.iter().rev().find_map(|t| t.shot),
         }
     }
 

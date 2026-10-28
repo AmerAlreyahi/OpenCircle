@@ -25,7 +25,9 @@ use crate::ui::app::capture::overlay_window;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::word;
+use crate::ui::kit::motion;
 use crate::ui::platform::monitor::{Place, place_window};
+use crate::ui::screens::overlay::edge as border;
 use crate::ui::{overlay, windows};
 
 use super::App;
@@ -68,6 +70,70 @@ impl Screen {
             lines: Vec::new(),
             read: false,
             reading: false,
+        }
+    }
+}
+
+/// Where the edge glow (the Active Look) is (owner, 2026-10-28): on the
+/// screen the mouse is on, the starting one (`None`) at first. Moving to
+/// another screen fades it out of the one left and into the new one at the
+/// widget pace (150 ms ease-in out, 210 ms expo-out in), from wherever each
+/// was; the frame clock runs only while a fade is on (`moving`).
+#[derive(Default)]
+pub(in crate::ui) struct Glow {
+    /// Each screen that faded (the starting one: `None`), and how.
+    fades: Vec<(Option<window::Id>, motion::Shown)>,
+    /// The latest frame's time (`tick`); `None` until the first move.
+    now: Option<Instant>,
+}
+
+impl Glow {
+    /// The screen it is on (or going to).
+    pub(in crate::ui) fn here(&self) -> Option<window::Id> {
+        (self.fades.iter().find(|(_, s)| s.is_open())).and_then(|(w, _)| *w)
+    }
+
+    /// The pointer is on the screen `to` at `now`: the glow goes there.
+    pub(in crate::ui) fn move_to(&mut self, to: Option<window::Id>, now: Instant) {
+        let from = self.here();
+        if from == to {
+            return;
+        }
+        match self.fades.iter_mut().find(|(w, _)| *w == from) {
+            Some((_, s)) => s.close(now),
+            None => self
+                .fades
+                .push((from, motion::Shown::closing(motion::WIDGET, now))),
+        }
+        match self.fades.iter_mut().find(|(w, _)| *w == to) {
+            Some((_, s)) => s.open(now),
+            None => self
+                .fades
+                .push((to, motion::Shown::opening(motion::WIDGET, now))),
+        }
+        self.now = Some(now);
+    }
+
+    /// A frame at `now`.
+    pub(in crate::ui) fn tick(&mut self, now: Instant) {
+        if self.now.is_some() {
+            self.now = Some(now);
+        }
+    }
+
+    /// A fade is on: frames wanted.
+    pub(in crate::ui) fn moving(&self) -> bool {
+        self.now
+            .is_some_and(|now| self.fades.iter().any(|(_, s)| s.moving(now)))
+    }
+
+    /// How strong the glow is on the screen `on` (0..1) at the latest frame.
+    pub(in crate::ui) fn at(&self, on: Option<window::Id>) -> f32 {
+        let fade = self.fades.iter().find(|(w, _)| *w == on);
+        match (fade, self.now) {
+            (Some((_, s)), Some(now)) => s.at(now),
+            _ if on.is_none() => 1.0,
+            _ => 0.0,
         }
     }
 }
@@ -479,9 +545,24 @@ impl App {
         }
     }
 
-    /// Another monitor's window: its frozen frame, dimmed, and whatever of the
-    /// selection is on it. No edge glow, bar, card, toast or hint: those stay
-    /// on the starting screen.
+    /// The pointer came into `window` at `now`: the edge glow follows it there
+    /// when it is one of this opening's screens (the bar stays put).
+    pub(in crate::ui) fn pointer_on(&mut self, window: window::Id, now: Instant) {
+        if self.o.is_none() || !matches!(self.o.purpose, Purpose::Search) {
+            return;
+        }
+        let to = match window {
+            w if w == self.overlay => None,
+            w if self.o.screens.iter().any(|s| s.window == w) => Some(w),
+            _ => return, // the pinned chat, a popup
+        };
+        self.o.glow.move_to(to, now);
+    }
+
+    /// Another monitor's window: its frozen frame, dimmed, whatever of the
+    /// selection is on it, and the edge glow while the mouse is there (still:
+    /// the breath is the starting screen's). No bar, card, toast or hint:
+    /// those stay on the starting screen.
     pub(in crate::ui) fn screen_view<'a>(&'a self, screen: &'a Screen) -> Element<'a, Message> {
         let picked: Vec<Rectangle> = (self.o.text_mode.as_ref())
             .and_then(|m| m.picked.as_ref())
@@ -515,11 +596,17 @@ impl App {
             scale: screen.place.scale,
         };
         let window = screen.window;
+        let glow = self.o.glow.at(Some(window));
         stack![
             canvas(frozen).width(Fill).height(Fill),
             Element::from(canvas(overlay).width(Fill).height(Fill))
                 .map(move |event| Message::ScreenEvent(window, event)),
         ]
+        // (last: its coming and going leaves the layers under it as they are)
+        .push((glow > 0.0).then(|| {
+            let (mode, scale) = (border::Mode::Overlay, screen.place.scale);
+            border::view(mode, scale, false, border::Breathe::Off, glow)
+        }))
         .into()
     }
 }
@@ -592,6 +679,70 @@ mod tests {
         let rgba = shot::render(app.view(app.overlay), 640, 400);
         let (pixels, _) = rgba.as_chunks::<4>();
         assert!(pixels.iter().any(|p| *p != pixels[320 * 640 + 200]));
+    }
+
+    /// The edge glow follows the mouse (owner, 2026-10-28): onto the screen it
+    /// comes into, fading out of the one it left and in there, frames only
+    /// while it fades; the bar stays where it opened; a popup's window and the
+    /// screen it is on already change nothing.
+    #[test]
+    fn the_glow_follows_the_mouse_onto_another_screen() {
+        use std::time::Duration;
+        let (mut app, n) = opened();
+        // (big enough for the glow: a tiny screen has none)
+        let right = place((640, 0), (960, 600), 1.5);
+        let _ = app.update(Message::Screen(n, right, solid(right, 90)));
+        let id = app.o.screens[0].window;
+        (app.o.bar_now, app.o.reveal) = (Some(app.bar_target()), None);
+        let bar = app.bar_at();
+        assert!(!app.animating(), "at rest");
+        assert_eq!((app.o.glow.at(None), app.o.glow.at(Some(id))), (1.0, 0.0));
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        app.pointer_on(app.overlay, t0);
+        assert!(!app.animating(), "where it is already: nothing");
+        app.pointer_on(id, t0);
+        assert_eq!(app.o.glow.here(), Some(id));
+        assert!(app.animating(), "frames while it fades");
+        let _ = app.update(Message::Frame(ms(100)));
+        let (start, there) = (app.o.glow.at(None), app.o.glow.at(Some(id)));
+        assert!(start > 0.0 && start < 1.0, "fading out: {start}");
+        assert!(there > 0.0 && there < 1.0, "fading in: {there}");
+        let _ = app.update(Message::Frame(ms(300)));
+        assert_eq!((app.o.glow.at(None), app.o.glow.at(Some(id))), (0.0, 1.0));
+        assert!(!app.animating(), "then at rest: no frames");
+        assert_eq!(app.bar_at(), bar, "the bar stays where it opened");
+        // drawn there now: more than the dim (a frame as the window draws it)
+        type Both = (App, window::Id);
+        let view: for<'a> fn(&'a Both) -> Element<'a, Message> = |(app, id)| app.view(*id);
+        let no_input = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+        let mut both = (app, id);
+        let drawn = crate::ui::frame_times::drawn(
+            &mut both,
+            right.size(),
+            1.5,
+            view,
+            1,
+            true,
+            |_, _, _| {},
+            no_input,
+        );
+        let (mut app, id) = both;
+        let (pixels, _) = drawn[0].rgba.as_chunks::<4>();
+        let (w, h) = right.px;
+        let (middle, edge) = (
+            pixels[(h / 2 * w + w / 2) as usize],
+            pixels[(h / 2 * w + 2) as usize],
+        );
+        assert!(edge != middle, "its edge glows: {edge:?} {middle:?}");
+        // a popup's window (the pinned chat) doesn't move it
+        app.pointer_on(window::Id::unique(), ms(400));
+        assert_eq!(app.o.glow.here(), Some(id));
+        // back: it returns, from where it is
+        app.pointer_on(app.overlay, ms(400));
+        assert_eq!(app.o.glow.here(), None);
+        let _ = app.update(Message::Frame(ms(800)));
+        assert_eq!((app.o.glow.at(None), app.o.glow.at(Some(id))), (1.0, 0.0));
     }
 
     /// The crop's pixels as runs of one grey: (grey, how many) per row.

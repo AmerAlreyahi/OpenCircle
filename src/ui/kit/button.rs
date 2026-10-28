@@ -25,16 +25,19 @@ pub enum Kind {
     Danger,
     /// Text that acts: `text_sub`, `text` under the cursor, no fill.
     Quiet,
+    /// Quiet text that removes (History's Clear all): `DANGER` under the cursor.
+    Remove,
 }
 
 impl Kind {
     #[cfg(test)]
-    pub const ALL: [Kind; 5] = [
+    pub const ALL: [Kind; 6] = [
         Kind::Elevated,
         Kind::Accent,
         Kind::Success,
         Kind::Danger,
         Kind::Quiet,
+        Kind::Remove,
     ];
 
     /// A call to action's fill.
@@ -43,7 +46,7 @@ impl Kind {
             Kind::Accent => Some(c().accent),
             Kind::Success => Some(fixed::SUCCESS),
             Kind::Danger => Some(fixed::DANGER),
-            Kind::Elevated | Kind::Quiet => None,
+            Kind::Elevated | Kind::Quiet | Kind::Remove => None,
         }
     }
 }
@@ -103,6 +106,7 @@ pub fn button<'a, Message: Clone + 'a>(
             .style(move |_, status| iced_button::Style {
                 text_color: match status {
                     _ if !enabled => c().text_muted,
+                    Status::Hovered | Status::Pressed if kind == Kind::Remove => fixed::DANGER,
                     Status::Hovered | Status::Pressed => c().text,
                     _ => c().text_sub,
                 },
@@ -216,6 +220,48 @@ pub fn regular<'a, Message: Clone + 'a>(
                     .rounded(radius::CONTROL)
                     .width(width)
                     .color(dim(edge)),
+                ..iced_button::Style::default()
+            }
+        })
+        .into()
+}
+
+/// An on / off pill (the composer's Include screen, `#aiIncludeScreenToggle`):
+/// `.oc-btn`'s look at 4x10 px, radius 8, a 6 px dot (`accent` while `on`,
+/// `text_muted` while off) and the 11 px label; lighter under the cursor, a 2
+/// px inset edge while pressed.
+pub fn switch<'a, Message: Clone + 'a>(
+    label: &'a str,
+    on: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use super::tokens::{Role, space};
+    use iced_button::Status;
+    let dot = super::chip::dot(if on { c().accent } else { c().text_muted });
+    let line = row![
+        dot,
+        text(label)
+            .size(Role::META.size)
+            .font(super::text::font(Role::META))
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    iced_button(line)
+        .padding([4.0, 10.0])
+        .on_press(on_press)
+        .style(|_, status| {
+            let (fill, width, edge) = match status {
+                Status::Pressed => (c().elevated_hover, 2.0, c().widget),
+                Status::Hovered => (c().elevated_hover, 1.0, c().elevated_border),
+                _ => (c().elevated, 1.0, c().elevated_border),
+            };
+            iced_button::Style {
+                background: Some(fill.into()),
+                text_color: c().text,
+                border: Border::default()
+                    .rounded(radius::MENU)
+                    .width(width)
+                    .color(edge),
                 ..iced_button::Style::default()
             }
         })
