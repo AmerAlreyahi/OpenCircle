@@ -175,6 +175,9 @@ production systems.
 - No Text panel (owner, 2026-10-28): "Copy text" and Ctrl+C copy the text straight to the clipboard
   with the Copied pill; the Text result card (review/edit, link chips, Search/Translate from it) is
   removed. Translate and Search stay on the bar.
+- AI marks and loading (owner, 2026-10-28): no generic AI icons (sparkles etc.); every AI marker
+  uses the OpenCircle logo. Loading = the logo's circle spinning (kit spinner; frame clock only while
+  it spins; reduced motion = still logo).
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.
