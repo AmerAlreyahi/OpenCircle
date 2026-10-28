@@ -444,7 +444,7 @@ fn translate(
     area: [u32; 4],
     cache: &Cache,
     deps: &Result<(impl Deps, String), String>,
-    mut partial: impl FnMut(Part),
+    mut partial: impl FnMut(Part) + Send,
 ) -> Result<Shown, Problem> {
     let image::Handle::Rgba {
         width,

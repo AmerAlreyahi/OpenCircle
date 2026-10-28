@@ -1167,18 +1167,25 @@ impl canvas::Program<Event> for Overlay<'_> {
                 None => {}
             }
             let holes: Vec<Rectangle> = holes.into_iter().filter_map(self::bounds).collect();
-            dim(renderer, screen, &holes, dim_outside, self.zooming, |p| {
-                for (kind, s) in &others {
-                    shape(p, *kind, s, true);
-                }
-                match &morph {
-                    Some((_, outline)) => shape(p, Kind::Scribble, outline, true),
-                    None if closed => shape(p, kind, &current, true),
-                    None => {}
-                }
-            })
+            dim(
+                renderer,
+                screen,
+                &holes,
+                dim_outside,
+                self.zooming,
+                |p, tile| {
+                    for (kind, s) in &others {
+                        seen_in(p, *kind, s, tile);
+                    }
+                    match &morph {
+                        Some((_, outline)) => shape(p, Kind::Scribble, outline, true),
+                        None if closed => seen_in(p, kind, &current, tile),
+                        None => {}
+                    }
+                },
+            )
         } else if self.dim {
-            dim(renderer, screen, &[], dim_idle, self.zooming, |_| {})
+            dim(renderer, screen, &[], dim_idle, self.zooming, |_, _| {})
         } else {
             Vec::new()
         };
@@ -1324,11 +1331,32 @@ fn gradient_style(span: Rectangle, alpha: f32, (start, end): (Color, Color)) -> 
     canvas::Style::Gradient(linear.into())
 }
 
+/// A closed `kind` shape as far as `tile` sees it: a box no rounded corner
+/// of which is in the tile as its rectangle cut to just past the tile, so the
+/// tile's drawing stays the same while the box changes elsewhere (a box across
+/// two screens resized on one: the other's tiles along it redrew every move);
+/// any other shape whole.
+fn seen_in(p: &mut canvas::path::Builder, kind: Kind, stroke: &[Point], tile: Rectangle) {
+    let r = drag_rect(stroke);
+    let k = match kind {
+        Kind::Drag => 0.0,
+        Kind::Snap => snap_radius(r) + 1.0,
+        _ => return shape(p, kind, stroke, true),
+    };
+    let corner = |c: Point| Rectangle::new(c - Vector::new(k, k), Size::new(2.0 * k, 2.0 * k));
+    if k > 0.0 && corners(r).into_iter().any(|c| corner(c).intersects(&tile)) {
+        return shape(p, kind, stroke, true);
+    }
+    if let Some(seen) = r.intersection(&tile.expand(2.0)) {
+        p.rectangle(seen.position(), seen.size());
+    }
+}
+
 /// The dim's tile side (logical px).
 const TILE: u32 = 256;
 
-/// Dims `screen` in `colour` but for the `cut` shapes (even-odd), which lie
-/// within `holes` (their bounds). One drawing per `TILE`, clipped to it: a
+/// Dims `screen` in `colour` but for the `cut` shapes (even-odd; as the tile
+/// passed sees them), which lie within `holes` (their bounds). One drawing per `TILE`, clipped to it: a
 /// stroke drawn or a box moved changes only the tiles it touches, so only
 /// those are redrawn (one drawing for all of it redrew the whole window on
 /// every pointer move). `whole` (the wheel zoom easing: every frame redraws
@@ -1341,7 +1369,7 @@ fn dim(
     holes: &[Rectangle],
     colour: Color,
     whole: bool,
-    cut: impl Fn(&mut canvas::path::Builder),
+    cut: impl Fn(&mut canvas::path::Builder, Rectangle),
 ) -> Vec<Geometry> {
     // a smoothed loop may bulge a little past its points
     let holes: Vec<Rectangle> = holes.iter().map(|h| h.expand(16.0)).collect();
@@ -1362,7 +1390,7 @@ fn dim(
                     true => {
                         let path = Path::new(|p| {
                             p.rectangle(tile.position(), size);
-                            cut(p);
+                            cut(p, tile);
                         });
                         let style = canvas::Style::Solid(colour);
                         frame.fill(&path, Fill { style, rule });
@@ -1408,7 +1436,7 @@ fn dim(
             touched
                 .iter()
                 .for_each(|t| p.rectangle(t.position(), t.size()));
-            cut(p);
+            cut(p, screen);
         });
         let style = canvas::Style::Solid(colour);
         frame.fill(&path, Fill { style, rule });

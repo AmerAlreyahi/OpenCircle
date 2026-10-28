@@ -358,8 +358,11 @@ const SHOW_EVERY: Duration = Duration::from_millis(300);
 /// call, and `shown` gets
 /// the frame with what is translated so far (the first part at once, then at
 /// most every [`SHOW_EVERY`]), each drawn from the original as the whole page
-/// will be, so nothing moves when the rest arrives. An error after a partial
-/// frame still fails the whole (the caller goes back to the original).
+/// will be, so nothing moves when the rest arrives. A partial frame is drawn
+/// on its own thread while the next call runs (the calls wait on the helper
+/// or the network), so only the whole page's render adds to the total; a
+/// drawer behind skips to the newest part. An error after a partial frame
+/// still fails the whole (the caller goes back to the original).
 pub fn translate_progressively(
     rgba: &[u8],
     width: u32,
@@ -367,7 +370,7 @@ pub fn translate_progressively(
     target: &str,
     cache: &Cache,
     deps: &impl Deps,
-    mut shown: impl FnMut(&Translated),
+    mut shown: impl FnMut(&Translated) + Send,
 ) -> Result<Translated, Error> {
     let start = Instant::now();
     check_frame(rgba, width, height)?;
@@ -384,27 +387,50 @@ pub fn translate_progressively(
         ocr,
         ..Timings::default()
     };
-    let mut last_shown = None::<Instant>;
     let parts = parts(&blocks, deps.batch());
-    for (k, part) in parts.iter().enumerate() {
-        let t = Instant::now();
-        let chunk: Vec<Block> = part.iter().map(|&i| blocks[i].clone()).collect();
-        let out = translate_blocks(&chunk, target, cache, deps).map_err(Error::Ai)?;
-        timings.translate += t.elapsed();
-        for (&i, t) in part.iter().zip(out) {
-            tr[i] = t;
-        }
-        let last = k + 1 == parts.len();
-        if last || last_shown.is_some_and(|at| at.elapsed() < SHOW_EVERY) {
-            continue;
-        }
-        last_shown = Some(Instant::now());
-        let partial = draw(rgba, (width, height), target, &blocks, &tr, &mut timings);
-        if timings.first.is_zero() {
-            timings.first = start.elapsed();
-        }
-        shown(&partial);
-    }
+    let (to_draw, todo) = std::sync::mpsc::channel::<Vec<String>>();
+    let drawn = std::thread::scope(|s| {
+        let blocks = &blocks;
+        let drawer = s.spawn(move || {
+            let mut t = Timings::default();
+            while let Ok(mut tr) = todo.recv() {
+                // behind: only the newest part is worth drawing
+                while let Ok(newer) = todo.try_recv() {
+                    tr = newer;
+                }
+                let partial = draw(rgba, (width, height), target, blocks, &tr, &mut t);
+                if t.first.is_zero() {
+                    t.first = start.elapsed();
+                }
+                shown(&partial);
+            }
+            t
+        });
+        let mut last_shown = None::<Instant>;
+        let translated = (|| {
+            for (k, part) in parts.iter().enumerate() {
+                let t = Instant::now();
+                let chunk: Vec<Block> = part.iter().map(|&i| blocks[i].clone()).collect();
+                let out = translate_blocks(&chunk, target, cache, deps).map_err(Error::Ai)?;
+                timings.translate += t.elapsed();
+                for (&i, t) in part.iter().zip(out) {
+                    tr[i] = t;
+                }
+                let last = k + 1 == parts.len();
+                if last || last_shown.is_some_and(|at| at.elapsed() < SHOW_EVERY) {
+                    continue;
+                }
+                last_shown = Some(Instant::now());
+                let _ = to_draw.send(tr.clone());
+            }
+            Ok(())
+        })();
+        drop(to_draw);
+        let drawn = drawer.join().expect("the partial frames' drawer");
+        translated.map(|()| drawn)
+    })?;
+    timings.render = drawn.render;
+    timings.first = drawn.first;
     let mut out = draw(rgba, (width, height), target, &blocks, &tr, &mut timings);
     timings.total = start.elapsed();
     out.timings = timings;
@@ -642,6 +668,8 @@ pub(super) mod tests {
         pub fail_ai: bool,
         /// `Deps::batch` (sentences per call when shown as they come).
         pub batch: usize,
+        /// How long each translate call takes.
+        pub delay: Duration,
         pub ocr_calls: RefCell<Vec<(u32, u32)>>,
         pub ai_calls: RefCell<Vec<Vec<String>>>,
     }
@@ -653,6 +681,7 @@ pub(super) mod tests {
                 answer: |s| format!("ترجمة {s}"),
                 fail_ai: false,
                 batch: usize::MAX,
+                delay: Duration::ZERO,
                 ocr_calls: RefCell::default(),
                 ai_calls: RefCell::default(),
             }
@@ -667,6 +696,7 @@ pub(super) mod tests {
 
         fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
             self.ai_calls.borrow_mut().push(texts.to_vec());
+            std::thread::sleep(self.delay);
             if self.fail_ai {
                 return Err(AiError::Server(503));
             }
@@ -766,20 +796,15 @@ pub(super) mod tests {
         fake.batch = 2;
         let mut shown = Vec::new();
         let out = translate_progressively(&img, 400, 480, "ar", &Cache::new(64), &fake, |p| {
-            shown.push((
-                fake.ai_calls.borrow().len(),
-                p.rgba.clone(),
-                p.blocks.clone(),
-            ));
+            shown.push((p.rgba.clone(), p.blocks.clone()));
         })
         .unwrap();
         let calls = fake.ai_calls.borrow().clone();
         // 2 sentences, then twice as many; a part in reading order
         let want: [&[&str]; 2] = [&["Load", "Save"], &["Quit", "Help", "Exit", "Undo"]];
         assert_eq!(calls, want);
-        // the first part is on screen after one call of two
-        let (after, first, blocks) = &shown[0];
-        assert_eq!(*after, 1, "shown before the rest was translated");
+        // the first part is on screen, drawn while the second call ran
+        let (first, blocks) = &shown[0];
         let done: Vec<&str> = (blocks.iter())
             .filter(|b| !b.translation.is_empty())
             .map(|b| b.original.as_str())
@@ -804,6 +829,33 @@ pub(super) mod tests {
         assert!(first[..140 * row] == out.rgba[..140 * row]);
         assert!(first[150 * row..] == img[150 * row..]);
         assert!(out.rgba[150 * row..] != img[150 * row..]);
+    }
+
+    /// A partial frame is drawn and shown while the next call runs, not
+    /// between the calls (gate 0.1.2: 3.04 s for a page, 0.2 s of it partial
+    /// renders waiting for each other).
+    #[test]
+    fn a_partial_frame_is_drawn_while_the_next_call_runs() {
+        let lines = || {
+            vec![
+                tb("Load", [40.0, 40.0, 120.0, 30.0]),
+                tb("Quit", [40.0, 300.0, 120.0, 30.0]),
+            ]
+        };
+        let boxes: Vec<[f32; 4]> = lines().iter().map(|b| b.bounds).collect();
+        let img = frame(400, 480, &boxes);
+        let mut fake = Fake::new(move |_, _, _| lines());
+        (fake.batch, fake.delay) = (1, Duration::from_millis(300));
+        let mut shown = 0;
+        let out = translate_progressively(&img, 400, 480, "ar", &Cache::new(8), &fake, |_| {
+            std::thread::sleep(Duration::from_millis(300)); // a slow draw
+            shown += 1;
+        })
+        .unwrap();
+        assert_eq!((shown, fake.ai_calls.borrow().len()), (1, 2));
+        // two calls of 300 ms, the 300 ms partial beside the second
+        let total = out.timings.total;
+        assert!(total < Duration::from_millis(800), "{total:?}");
     }
 
     /// The one call of a cloud model (and of any `Deps` without a batch):

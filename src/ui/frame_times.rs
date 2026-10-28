@@ -540,7 +540,7 @@ fn a_still_overlay_asks_for_no_frames() {
 }
 
 /// The edge glow's breath (owner, 2026-10-27) redraws only the edge's strips,
-/// once per `edge::STEP`, and only after the opening: never the middle of the
+/// when its level changes (`edge::LEVELS`), only after the opening: never the middle of the
 /// screen, and a few percent of the screen per frame at most. (Windows only:
 /// Linux's glow stays still, #142.)
 #[test]
@@ -569,7 +569,7 @@ fn the_breath_redraws_only_the_edge() {
         steps += usize::from(!frame.damage.is_empty());
     }
     assert!(
-        (8..=16).contains(&steps),
+        (4..=8).contains(&steps), // levels 1..=6 of the rise (`edge::LEVELS`)
         "{steps} breath steps in 64 frames"
     );
     let area: f32 = (drawn.iter().skip(16))
@@ -581,6 +581,29 @@ fn the_breath_redraws_only_the_edge() {
         share * 100.0
     );
     assert!(share < 0.08, "{:.1} %", share * 100.0);
+}
+
+/// The breath's steps timed (run in release:
+/// `cargo test --release breath_frame_times -- --ignored --nocapture`).
+#[test]
+#[cfg(windows)] // (Linux: no breath, #142)
+#[ignore = "timing: run by hand, in release"]
+fn breath_frame_times() {
+    for (w, h, k) in [(1920, 1080, 1.0), (1920, 1080, 1.5), (3840, 2160, 2.5)] {
+        motion::set_reduced(false);
+        let mut app = open_app(w, h, k);
+        app.o.appear = None;
+        let drawn = frames(&mut app, 120, false, |app, _, now| {
+            let _ = app.update(Message::Frame(now));
+        });
+        let before = iced_tiny_skia::PIPELINE_PIXELS.get();
+        let steps: Vec<Drawn> = (drawn.into_iter().skip(20))
+            .filter(|d| !d.damage.is_empty())
+            .collect();
+        let piped = iced_tiny_skia::PIPELINE_PIXELS.get() - before;
+        report("breath step", app.o.screen, k, &steps);
+        println!("  {} steps, {piped} pipeline px", steps.len());
+    }
 }
 
 /// Every open goes by `motion`: the opening's clock, a result card growing
@@ -1083,13 +1106,24 @@ fn zoom_frame_times() {
     }
 }
 
+/// What `across_screens` does with the box.
+#[derive(Clone, Copy, PartialEq)]
+enum Gesture {
+    /// Draws it.
+    Stroke,
+    /// Moves it by its middle.
+    Move,
+    /// Resizes it by its bottom-right corner (on the other screen).
+    Resize,
+}
+
 /// Each window's frames (the starting screen's, then the other screen's) of
 /// a stroke drawn from the starting screen (`w` x `h` at `k`) onto `side`,
-/// then (`moved`) of the box it made, moved by its middle.
+/// then of the box it made, moved or resized (`gesture`).
 fn across_screens(
     (w, h, k): (u32, u32, f32),
     side: super::platform::monitor::Place,
-    moved: bool,
+    gesture: Gesture,
 ) -> [Vec<Drawn>; 2] {
     use super::app::screens::Screen;
     use crate::ui::overlay::Event;
@@ -1109,17 +1143,27 @@ fn across_screens(
     };
     let from = std::cell::Cell::new(Point::ORIGIN);
     let step = |app: &mut App, i: u32| {
-        if !moved {
+        if gesture == Gesture::Stroke {
             return stroke(app, i);
         }
         if i == 0 {
             (0..=30).for_each(|i| stroke(app, i));
             let _ = app.on_overlay(Event::Release);
             settle_bar(app);
-            let r = app.o.selection.expect("a selection").area;
-            from.set(app.o.view.to_screen(r.center()));
+            let r = app
+                .o
+                .view
+                .rect_to_screen(app.o.selection.expect("a selection").area);
+            from.set(match gesture {
+                Gesture::Resize => crate::ui::overlay::corner(r, 2),
+                _ => r.center(),
+            });
         }
-        let at = from.get() + Vector::new(12.0, 5.0) * i as f32;
+        let by = match gesture {
+            Gesture::Resize => Vector::new(-4.0, 3.0),
+            _ => Vector::new(12.0, 5.0),
+        };
+        let at = from.get() + by * i as f32;
         let e = match i {
             0 => Event::Press { at, shift: false },
             _ => Event::Move(at),
@@ -1159,8 +1203,8 @@ fn a_stroke_across_screens_redraws_only_round_itself() {
         scale: 1.5,
     };
     let screens = [Size::new(1920.0, 1080.0), side.size()];
-    for moved in [false, true] {
-        let windows = across_screens((1920, 1080, 1.0), side, moved);
+    for gesture in [Gesture::Stroke, Gesture::Move, Gesture::Resize] {
+        let windows = across_screens((1920, 1080, 1.0), side, gesture);
         for (t, size) in windows.iter().zip(screens) {
             // (frame 0 of the move holds the whole stroke and its release)
             for (i, d) in t.iter().enumerate().skip(1) {
@@ -1168,12 +1212,70 @@ fn a_stroke_across_screens_redraws_only_round_itself() {
                 let whole = size.width * size.height;
                 assert!(
                     area < 0.75 * whole,
-                    "moved {moved}, frame {i}: {:.0} % redrawn",
+                    "frame {i}: {:.0} % redrawn",
                     100.0 * area / whole
                 );
             }
         }
     }
+}
+
+/// A box across two screens resized (gate 0.1.2: the other screen's frames
+/// p95 30-32 ms against 25): each window redraws only the tiles where the
+/// box's edges moved, not every tile along it (a tile drew the whole box, so
+/// a change anywhere redrew all of them: 29 % of the starting screen and
+/// 35 % of the other a frame), and draws what a fresh frame draws.
+#[test]
+fn a_box_resized_across_screens_redraws_only_its_moving_edges() {
+    use super::platform::monitor::Place;
+    let side = Place {
+        origin: (1920, 0),
+        px: (1920, 1080),
+        scale: 1.5,
+    };
+    let screens = [Size::new(1920.0, 1080.0), side.size()];
+    let windows = across_screens((1920, 1080, 1.0), side, Gesture::Resize);
+    for (t, size) in windows.iter().zip(screens) {
+        let area: f32 = (t.iter().skip(1))
+            .flat_map(|d| d.damage.iter().map(|r| r.width * r.height))
+            .sum();
+        let share = area / ((t.len() - 1) as f32 * size.width * size.height);
+        assert!(share < 0.2, "{:.0} % a frame", share * 100.0);
+    }
+    // the last frame, drawn bit by bit, is the frame drawn afresh
+    let mut app = open_app(1280, 720, 1.0);
+    settle_bar(&mut app);
+    drag(
+        &mut app,
+        Point::new(100.0, 150.0),
+        Point::new(1100.0, 600.0),
+        false,
+    );
+    settle_bar(&mut app);
+    app.o.morph = None;
+    let r = app
+        .o
+        .view
+        .rect_to_screen(app.o.selection.expect("a box").area);
+    let corner = crate::ui::overlay::corner(r, 0);
+    let t = frames(&mut app, 12, true, |app, i, _| {
+        let at = corner + Vector::new(9.0, 7.0) * i as f32;
+        let e = match i {
+            0 => crate::ui::overlay::Event::Press { at, shift: false },
+            _ => crate::ui::overlay::Event::Move(at),
+        };
+        let _ = app.on_overlay(e);
+    });
+    let now = app
+        .o
+        .view
+        .rect_to_screen(app.o.selection.expect("a box").area);
+    assert!(
+        app.o.grab.is_some() && now != r,
+        "resized: {r:?} -> {now:?}"
+    );
+    let fresh = frames(&mut app, 1, true, |_, _, _| {});
+    assert!(t.last().unwrap().rgba == fresh[0].rgba, "as drawn afresh");
 }
 
 /// The AI chat card dragged in the overlay by its header (picked up), at the
@@ -1232,8 +1334,12 @@ fn stroke_across_screens_frame_times() {
     ] {
         let k = start.2;
         let size = Size::new(start.0 as f32 / k, start.1 as f32 / k);
-        for (what, moved) in [("stroke", false), ("box move", true)] {
-            let [a, b] = across_screens(start, side, moved);
+        for (what, gesture) in [
+            ("stroke", Gesture::Stroke),
+            ("box move", Gesture::Move),
+            ("box resize", Gesture::Resize),
+        ] {
+            let [a, b] = across_screens(start, side, gesture);
             report(&format!("{what}, starting screen"), size, k, &a);
             report(
                 &format!("{what}, other screen"),

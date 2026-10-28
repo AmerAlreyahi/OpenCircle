@@ -20,10 +20,13 @@
 //! The one motion is the design's `ripplePulse`, a barely-there breath of the
 //! overlay's glow once its opening is over (owner, 2026-10-27): 4 s, the
 //! blurs going 22/54 px -> 38/85 px -> 22/54 px, redrawn as the edge strips
-//! ONLY (never the screen), `STEP` apart (12.5 fps), from a cached depth map so
-//! a step is a table lookup per pixel. Live translate and snip stay still, and
-//! so does the overlay when the OS asks for reduced motion, and on Linux
-//! (`breathes`).
+//! ONLY (never the screen), from a cached depth map so a step is a table
+//! lookup per pixel, and only when it shows: the breath moves no pixel by
+//! more than 2 of 255 a step (`LEVELS`), so it is redrawn when its level
+//! changes, 24 times in 4 s (it was every `STEP`, 50: each redraws about 30 %
+//! of the screen, ~11 ms of the VM's CPU, 14 % of a core while still). Live
+//! translate and snip stay still, and so does the overlay when the OS asks for
+//! reduced motion, and on Linux (`breathes`).
 //! On the colour-keyed live layer (Windows) there is no partial alpha: a thin
 //! solid line in c1 stands in for any look.
 use std::time::{Duration, Instant};
@@ -52,6 +55,9 @@ const HUD: [f32; 5] = [12.0, 30.0, 2.5, 8.0, 8.0];
 /// The breath: its length and the gap between redraws.
 const BREATH: Duration = Duration::from_secs(4);
 const STEP: Duration = Duration::from_millis(80);
+/// The breath's levels from rest to peak: the whole breath changes a pixel by
+/// 17-18 of 255 at most (premultiplied), so a level is at most 2 of them.
+const LEVELS: f32 = 12.0;
 /// How far inward the glow reaches at its peak, logical px: past this the
 /// outer layer at full strength is under half a level of alpha.
 const REACH: f32 = 102.0;
@@ -198,7 +204,7 @@ impl<M> canvas::Program<M> for EdgeCanvas {
             state.since = None;
         }
         let step = (now.saturating_duration_since(since).as_millis() / STEP.as_millis()) as u32;
-        let breath = if breathing { breath(step) } else { 0.0 };
+        let breath = if breathing { level(step) } else { 0.0 };
         let px = |v: f32| (v * self.scale).round() as u32;
         let want = edge(
             &look,
@@ -210,7 +216,7 @@ impl<M> canvas::Program<M> for EdgeCanvas {
             breath,
         );
         let next = (breathing && want.is_some())
-            .then(|| Action::request_redraw_at(since + STEP * (step + 1)));
+            .then(|| Action::request_redraw_at(since + STEP * next_step(step)));
         if state.drawn == want {
             return next;
         }
@@ -284,6 +290,20 @@ struct Paint {
 fn breath(step: u32) -> f32 {
     let t = STEP.as_secs_f32() * step as f32 / BREATH.as_secs_f32();
     0.5 - 0.5 * (std::f32::consts::TAU * t).cos()
+}
+
+/// `breath(step)` rounded to one of the `LEVELS`: what step `step` draws.
+fn level(step: u32) -> f32 {
+    (breath(step) * LEVELS).round() / LEVELS
+}
+
+/// The first step after `step` that draws another level (the next redraw).
+fn next_step(step: u32) -> u32 {
+    let cycle = (BREATH.as_millis() / STEP.as_millis()) as u32;
+    let now = level(step);
+    (step + 1..=step + cycle)
+        .find(|&s| level(s) != now)
+        .unwrap_or(step + 1)
 }
 
 /// The stored look's kind and edge colours c1, c2 (alpha included): a design
@@ -846,6 +866,50 @@ mod tests {
         let seen = frames(&border(Mode::Overlay, spectrum(), Breathe::On), &[0, 2000]);
         assert!(seen[0].0 == seen[1].0 && !seen[1].1);
         motion::set_reduced(false);
+    }
+
+    /// Bug A (gate 0.1.2): the still overlay's breath asked for a redraw every
+    /// `STEP`, 50 in 4 s, each about 30 % of the screen (14 % of a VM core,
+    /// hidden from Task Manager's tick count). It asks only when its level
+    /// changes, 24 times a cycle, and a redraw still moves no pixel by more
+    /// than 2 of 255: as smooth as before, half the redraws.
+    #[test]
+    fn the_breath_asks_for_a_frame_only_when_it_shows() {
+        let cycle = (BREATH.as_millis() / STEP.as_millis()) as u32;
+        let mut drawn = vec![0];
+        while *drawn.last().unwrap() < cycle {
+            drawn.push(next_step(*drawn.last().unwrap()));
+        }
+        let redraws = drawn.iter().filter(|&&s| s > 0 && s <= cycle).count();
+        assert!((20..=24).contains(&redraws), "{redraws} redraws in 4 s");
+        let pm =
+            |p: [u8; 4]| [p[0], p[1], p[2]].map(|c| (u32::from(c) * u32::from(p[3]) + 127) / 255);
+        for scale in [1.0, 1.5, 2.5] {
+            let t = |b: f32| {
+                edge(&spectrum(), Mode::Overlay, 1920, 1080, scale, false, b)
+                    .unwrap()
+                    .1
+                    .table
+            };
+            for pair in drawn.windows(2) {
+                let (a, b) = (t(level(pair[0])), t(level(pair[1])));
+                let most = (a.iter().zip(&b))
+                    .flat_map(|(x, y)| {
+                        let alpha = x[3].abs_diff(y[3]);
+                        pm(*x)
+                            .into_iter()
+                            .zip(pm(*y))
+                            .map(move |(p, q)| p.abs_diff(q).max(alpha.into()))
+                    })
+                    .max()
+                    .unwrap();
+                assert!(most <= 2, "steps {pair:?} at {scale}: {most} of 255");
+            }
+        }
+        // the level of a step drawn is what it shows until the next one
+        for pair in drawn.windows(2) {
+            assert!((pair[0]..pair[1]).all(|s| level(s) == level(pair[0])));
+        }
     }
 
     #[test]

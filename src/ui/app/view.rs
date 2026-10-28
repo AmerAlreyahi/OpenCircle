@@ -20,6 +20,24 @@ use super::{
 };
 
 impl App {
+    /// The starting screen's glow breathes once the opening is over, and rests
+    /// while anything else moves or the pointer draws, moves or resizes a
+    /// selection (a breath step redraws ~30 % of the screen: those frames, on
+    /// every screen, come first; gate 0.1.2, the box across two screens); gone
+    /// to another screen (the mouse's), it rests, so the hidden strips are
+    /// never made again.
+    pub(in crate::ui) fn breathing(&self) -> border::Breathe {
+        let pressed = self.o.drawing || self.o.grab.is_some() || self.o.text_press.is_some();
+        match self.o.appear {
+            _ if self.o.glow.here().is_some() => border::Breathe::Paused,
+            Some((_, t)) if t >= 1.0 => match self.animating() || pressed {
+                true => border::Breathe::Paused,
+                false => border::Breathe::On,
+            },
+            _ => border::Breathe::Off,
+        }
+    }
+
     pub(in crate::ui) fn view(&self, window: window::Id) -> Element<'_, Message> {
         if let Some(page) = self.windows.view(window) {
             return page.map(Message::Windows);
@@ -149,20 +167,7 @@ impl App {
                 },
                 self.o.scale,
                 false,
-                // the glow breathes once the opening is over, and rests while
-                // anything else moves; gone to another screen (the mouse's),
-                // it rests, so the hidden strips are never made again
-                match self.o.appear {
-                    _ if self.o.glow.here().is_some() => border::Breathe::Paused,
-                    Some((_, t)) if t >= 1.0 => {
-                        if self.animating() {
-                            border::Breathe::Paused
-                        } else {
-                            border::Breathe::On
-                        }
-                    }
-                    _ => border::Breathe::Off,
-                },
+                self.breathing(),
                 self.o.glow.at(None),
             ),
         ]);
