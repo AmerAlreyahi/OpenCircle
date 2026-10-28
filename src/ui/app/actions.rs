@@ -96,7 +96,7 @@ impl App {
         background(move |tx| {
             let pill = match crate::sys::open::open_link(&url) {
                 Ok(()) => {
-                    crate::search_history::keep("text", &text, &url, crop.as_ref());
+                    crate::history::search::keep("text", &text, &url, crop.as_ref());
                     None
                 }
                 Err(e) => {

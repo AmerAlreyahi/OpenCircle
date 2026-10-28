@@ -11,7 +11,8 @@ use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 use super::widgets::card;
 use super::{background, widgets};
 use crate::config;
-use crate::music::{self, LISTEN_SECS, Song, history};
+use crate::history::song as history;
+use crate::music::{self, LISTEN_SECS, Song};
 
 /// Lucide "music" (in the subset font).
 pub const MUSIC: char = '\u{e125}';

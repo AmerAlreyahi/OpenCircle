@@ -158,7 +158,7 @@ impl App {
                 Task::none()
             }
             snip::Msg::OpenRecent(path) => background(move |tx| {
-                let _ = tx.unbounded_send(snip::open_recent(&path));
+                let _ = tx.unbounded_send(crate::history::recent::open(&path));
             })
             .map(|read| Message::Snip(snip::Msg::Loaded(read))),
             snip::Msg::Loaded(Ok(crop)) => {
@@ -172,7 +172,7 @@ impl App {
             }
             snip::Msg::ClearRecent => {
                 snip.set_recent(Vec::new());
-                snip::clear_recent();
+                crate::history::recent::clear();
                 Task::none()
             }
         }
@@ -232,7 +232,7 @@ impl App {
         read: std::sync::mpsc::Receiver<isize>,
     ) -> Task<Message> {
         let recent = background(|tx| {
-            let _ = tx.unbounded_send(snip::load_recent());
+            let _ = tx.unbounded_send(crate::history::recent::load());
         })
         .map(|recent| Message::Snip(snip::Msg::Recent(recent)));
         if !cfg!(windows) {
@@ -270,7 +270,7 @@ impl App {
             return Task::none();
         };
         if remember {
-            snip::remember(&crop);
+            crate::history::recent::remember(&crop);
         }
         // No editor (Labs): a snip is only copied.
         let route = match self.o.labs.has(labs::Feature::Editor) {
@@ -362,7 +362,7 @@ impl App {
             let progress = |height| {
                 let _ = tx.unbounded_send(snip::Msg::Progress(height));
             };
-            let stitched = snip::scroll_capture(region, &stop, progress);
+            let stitched = crate::capture::scroll::scroll_capture(region, &stop, progress);
             let _ = tx.unbounded_send(snip::Msg::Done(stitched));
         })
         .map(Message::Snip);

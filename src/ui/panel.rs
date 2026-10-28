@@ -414,7 +414,7 @@ impl Panel {
             let line = match ai::browser::ask(&question) {
                 Ok(opened) => {
                     let url = ai::browser::url(&question).0;
-                    crate::search_history::keep("ai", &prompt, &url, Some(&crop));
+                    crate::history::search::keep("ai", &prompt, &url, Some(&crop));
                     format!("{opened}{note}")
                 }
                 Err(e) => e,

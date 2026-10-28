@@ -8,9 +8,7 @@
 //! last captures, kept only in the user's data dir.
 //! Scrolling auto-scrolls and stitches on a thread (`scroll_capture`) while the
 //! overlay shrinks to a progress pill beside the area, so it isn't in the frames.
-use std::cell::Cell;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -23,22 +21,14 @@ use iced::{Center, Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme
 use super::widgets::{self, CLOSE, STOP};
 use super::{overlay, theme};
 use crate::actions::Crop;
-use crate::capture::scroll::{self, Params};
-use crate::capture::stitch::Stitcher;
 use crate::capture::window_rect::WinRect;
 use crate::config::{SnipAfter, Target};
-
-/// Test hook: a tall PNG stands in for the scrolled page (WSLg/CI can't scroll).
-const TEST_SCROLL: &str = "OPENCIRCLE_TEST_SCROLL";
 
 /// An edge snaps to a window / control edge this near (logical px).
 const SNAP: f32 = 8.0;
 /// The toast offers Edit this long, then the overlay closes.
 pub const TOAST_SECS: u64 = 4;
 pub const COPIED: &str = "Copied: paste it into your AI chat";
-/// Recent: captures kept on disk, and shown in the strip.
-const HISTORY: usize = 20;
-const STRIP: usize = 8;
 /// The loupe: physical px each side of the one under the pointer, and the
 /// logical size each is drawn at (8x zoom).
 const LOUPE_RADIUS: i32 = 7;
@@ -909,231 +899,6 @@ impl canvas::Program<Msg> for Loupe<'_> {
     }
 }
 
-// ---- Recent captures: only with `snip.history` on, only in the user's data dir ----
-
-/// `<user data dir>/opencircle/recent` (Windows: %LOCALAPPDATA%).
-fn history_dir() -> Option<PathBuf> {
-    crate::paths::recent()
-}
-
-/// Keeps `crop` in Recent (on a thread) if the user turned history on.
-pub fn remember(crop: &Crop) {
-    if !crate::config::current().snip.history {
-        return;
-    }
-    let (Some(dir), crop) = (history_dir(), crop.clone()) else {
-        return;
-    };
-    let spawned = std::thread::Builder::new()
-        .name("recent".into())
-        .spawn(move || {
-            if let Err(e) = keep(&dir, &crop, HISTORY) {
-                crate::log!("[opencircle] recent capture not kept: {e}");
-            }
-        });
-    if let Err(e) = spawned {
-        crate::log!("[opencircle] recent capture not kept: {e}");
-    }
-}
-
-/// Writes `crop` into `dir` as the newest PNG, then drops all but the newest `limit`.
-fn keep(dir: &Path, crop: &Crop, limit: usize) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis());
-    // Fixed-width names sort by time. Always after the newest kept one: a stamp freed
-    // by pruning must not be reused (it would sort as the oldest).
-    let newest = list(dir)
-        .first()
-        .and_then(|p| p.file_stem()?.to_str()?.parse::<u128>().ok());
-    let stamp = newest.map_or(now, |n| now.max(n + 1));
-    let path = dir.join(format!("{stamp:016}.png"));
-    crate::actions::write_png(&path, crop.width, crop.height, &crop.rgba)?;
-    for old in list(dir).into_iter().skip(limit) {
-        let _ = std::fs::remove_file(old);
-    }
-    Ok(path)
-}
-
-/// The kept captures, newest first.
-fn list(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut out: Vec<PathBuf> = (entries.flatten())
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "png"))
-        .collect();
-    out.sort();
-    out.reverse();
-    out
-}
-
-/// Blocking: the Recent strip (newest `STRIP`, as thumbnails). With history off,
-/// whatever an earlier "on" left is deleted instead: off = nothing on disk.
-pub fn load_recent() -> Vec<(PathBuf, image::Handle)> {
-    let Some(dir) = history_dir() else {
-        return Vec::new();
-    };
-    if !crate::config::current().snip.history {
-        clear_dir(&dir);
-        return Vec::new();
-    }
-    (list(&dir).into_iter().take(STRIP))
-        .filter_map(|path| {
-            let frame = crate::capture::from_png(path.as_os_str()).ok()?;
-            let crop = Crop {
-                width: frame.width,
-                height: frame.height,
-                rgba: frame.rgba,
-            };
-            let small = crate::actions::fit_long_edge(crop, 96);
-            let picture = image::Handle::from_rgba(small.width, small.height, small.rgba);
-            Some((path, picture))
-        })
-        .collect()
-}
-
-/// Blocking: a recent capture, full size.
-pub fn open_recent(path: &Path) -> Result<Crop, String> {
-    let frame = crate::capture::from_png(path.as_os_str())?;
-    Ok(Crop {
-        width: frame.width,
-        height: frame.height,
-        rgba: frame.rgba,
-    })
-}
-
-/// The Clear button: every kept capture goes.
-pub fn clear_recent() {
-    if let Some(dir) = history_dir() {
-        clear_dir(&dir);
-    }
-}
-
-fn clear_dir(dir: &Path) {
-    if dir.exists()
-        && let Err(e) = std::fs::remove_dir_all(dir)
-    {
-        crate::log!("[opencircle] recent captures not cleared: {e}");
-    }
-}
-
-/// Auto-scroll can run: synthetic wheel input works (not on native Wayland).
-pub fn can_scroll() -> bool {
-    #[cfg(target_os = "linux")]
-    if crate::capture::wayland_session() {
-        return false;
-    }
-    true
-}
-
-/// Auto-scrolls `region` (physical desktop px: x, y, width, height) and stitches
-/// it until the end of the page, the height cap or `stop`. Blocking: run it on a
-/// thread. `progress` gets the stitched height after each new frame.
-pub fn scroll_capture(
-    region: (i32, i32, u32, u32),
-    stop: &AtomicBool,
-    progress: impl FnMut(u32),
-) -> Result<Crop, String> {
-    let (x, y, w, h) = region;
-    if let Some(path) = std::env::var_os(TEST_SCROLL) {
-        let page = crate::capture::from_png(&path)?;
-        let fake = FakePage::new(page.rgba, page.width, page.height);
-        let params = Params {
-            poll: std::time::Duration::from_millis(30),
-            ..Params::default()
-        };
-        return stitch(
-            w,
-            h,
-            || fake.frame(w, h),
-            |n| fake.scroll(n, h),
-            stop,
-            &params,
-            progress,
-        );
-    }
-    let centre = (x + w as i32 / 2, y + h as i32 / 2);
-    let grab = || {
-        let frame = crate::capture::monitor_of(Some(region)).map_err(io::Error::other)?;
-        let crop = cut(&frame.rgba, frame.width, (x - frame.x, y - frame.y), (w, h));
-        crop.ok_or_else(|| io::Error::other("the area left the monitor"))
-    };
-    let scroll = |n| scroll::scroll_once(centre, n);
-    stitch(w, h, grab, scroll, stop, &Params::default(), progress)
-}
-
-/// The capture loop over any source; a failed or stopped run keeps what it gathered.
-fn stitch(
-    w: u32,
-    h: u32,
-    grab: impl FnMut() -> io::Result<Vec<u8>>,
-    scroll: impl FnMut(i32) -> io::Result<()>,
-    stop: &AtomicBool,
-    params: &Params,
-    progress: impl FnMut(u32),
-) -> Result<Crop, String> {
-    let mut st = Stitcher::new(w, h);
-    match scroll::run(&mut st, grab, scroll, stop, params, progress) {
-        Ok(reason) => crate::log!("[opencircle] scrolling capture: {reason:?}"),
-        Err(e) if st.height() == 0 => return Err(e.to_string()),
-        Err(e) => crate::log!("[opencircle] scrolling capture stopped early: {e}"),
-    }
-    let (rgba, width, height) = st.finish();
-    Ok(Crop {
-        width,
-        height,
-        rgba,
-    })
-}
-
-/// `size` pixels at `at` out of a `width`-wide RGBA frame; `None` if not inside it.
-fn cut(rgba: &[u8], width: u32, at: (i32, i32), size: (u32, u32)) -> Option<Vec<u8>> {
-    let (x, y) = (u32::try_from(at.0).ok()?, u32::try_from(at.1).ok()?);
-    let height = rgba.len() as u32 / 4 / width.max(1);
-    if x + size.0 > width || y + size.1 > height {
-        return None;
-    }
-    let row = |r: u32| {
-        let start = (((y + r) * width + x) * 4) as usize;
-        &rgba[start..start + size.0 as usize * 4]
-    };
-    Some((0..size.1).flat_map(row).copied().collect())
-}
-
-/// A tall page seen through a viewport that scrolls 100 px per notch.
-struct FakePage {
-    rgba: Vec<u8>,
-    width: u32,
-    height: u32,
-    top: Cell<u32>,
-}
-
-impl FakePage {
-    fn new(rgba: Vec<u8>, width: u32, height: u32) -> Self {
-        FakePage {
-            rgba,
-            width,
-            height,
-            top: Cell::new(0),
-        }
-    }
-
-    fn frame(&self, w: u32, h: u32) -> io::Result<Vec<u8>> {
-        cut(&self.rgba, self.width, (0, self.top.get() as i32), (w, h))
-            .ok_or_else(|| io::Error::other("the test page is smaller than the area"))
-    }
-
-    fn scroll(&self, notches: i32, h: u32) -> io::Result<()> {
-        let to = self.top.get() as i64 + i64::from(notches) * 100;
-        self.top
-            .set(to.clamp(0, i64::from(self.height.saturating_sub(h))) as u32);
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1279,113 +1044,6 @@ mod tests {
             None,
         );
         assert!(!elsewhere.kinds().contains(&Kind::Window));
-    }
-
-    /// A page with a distinct block pattern on every row (the stitcher matches rows).
-    fn page(w: u32, h: u32) -> Vec<u8> {
-        let mut seed = 0x9e37_79b9_u32;
-        let blocks: Vec<u8> = (0..(w / 8 + 1) * (h / 4 + 1))
-            .map(|_| {
-                seed ^= seed << 13;
-                seed ^= seed >> 17;
-                seed ^= seed << 5;
-                seed as u8
-            })
-            .collect();
-        (0..h)
-            .flat_map(|y| (0..w).map(move |x| (x, y)))
-            .flat_map(|(x, y)| {
-                let v = blocks[((y / 4) * (w / 8 + 1) + x / 8) as usize];
-                [v, v.wrapping_mul(3), 255 - v, 255]
-            })
-            .collect()
-    }
-
-    fn fast() -> Params {
-        Params {
-            poll: std::time::Duration::ZERO,
-            settle_tries: 2,
-            ..Params::default()
-        }
-    }
-
-    #[test]
-    fn scrolling_runs_to_the_end_of_the_page_with_progress() {
-        let (w, h, vh) = (320, 3000, 600);
-        let fake = FakePage::new(page(w, h), w, h);
-        let mut seen = Vec::new();
-        let stop = AtomicBool::new(false);
-        let out = stitch(
-            w,
-            vh,
-            || fake.frame(w, vh),
-            |n| fake.scroll(n, vh),
-            &stop,
-            &fast(),
-            |height| seen.push(height),
-        )
-        .unwrap();
-        assert_eq!((out.width, out.height), (w, h));
-        assert!(out.rgba == fake.rgba, "stitched page differs");
-        assert!(seen.windows(2).all(|p| p[0] < p[1]), "{seen:?}");
-        assert_eq!(seen.last(), Some(&h));
-    }
-
-    #[test]
-    fn stop_keeps_what_was_gathered() {
-        let (w, h, vh) = (320, 6000, 600);
-        let fake = FakePage::new(page(w, h), w, h);
-        let stop = AtomicBool::new(false);
-        let mut seen = Vec::new();
-        let out = stitch(
-            w,
-            vh,
-            || fake.frame(w, vh),
-            |n| fake.scroll(n, vh),
-            &stop,
-            &fast(),
-            |height| {
-                seen.push(height);
-                if seen.len() == 3 {
-                    stop.store(true, Ordering::Relaxed); // the Stop button
-                }
-            },
-        )
-        .unwrap();
-        assert_eq!(seen.len(), 3);
-        assert_eq!(out.height, seen[2]);
-        assert!(vh < out.height && out.height < h);
-        // The part gathered is the top of the page, exactly.
-        let n = (w * out.height * 4) as usize;
-        assert!(out.rgba[..] == fake.rgba[..n]);
-    }
-
-    #[test]
-    fn a_source_that_fails_at_once_is_an_error() {
-        let err = stitch(
-            4,
-            4,
-            || Err(io::Error::other("no screen")),
-            |_| Ok(()),
-            &AtomicBool::new(false),
-            &fast(),
-            |_| {},
-        );
-        assert_eq!(err.unwrap_err(), "no screen");
-    }
-
-    #[test]
-    fn cut_takes_an_area_inside_the_frame_only() {
-        // 3x2 frame, pixel (x, y) = [x, y, 0, 255].
-        let frame: Vec<u8> = (0..2u8)
-            .flat_map(|y| (0..3u8).flat_map(move |x| [x, y, 0, 255]))
-            .collect();
-        assert_eq!(
-            cut(&frame, 3, (1, 1), (2, 1)),
-            Some(vec![1, 1, 0, 255, 2, 1, 0, 255])
-        );
-        assert_eq!(cut(&frame, 3, (2, 0), (2, 1)), None);
-        assert_eq!(cut(&frame, 3, (-1, 0), (1, 1)), None);
     }
 
     #[test]
@@ -1546,59 +1204,8 @@ mod tests {
     }
 
     #[test]
-    fn recent_keeps_the_newest_twenty_and_clears() {
-        let dir = std::env::temp_dir().join(format!("oc-recent-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let shot = |v: u8| Crop {
-            width: 2,
-            height: 2,
-            rgba: vec![v; 16],
-        };
-        let mut kept = Vec::new();
-        for i in 0..23 {
-            kept.push(keep(&dir, &shot(i), HISTORY).unwrap());
-        }
-        let now = list(&dir);
-        assert_eq!(now.len(), HISTORY);
-        // Newest first; the three oldest were dropped.
-        assert_eq!(now[0], kept[22]);
-        assert_eq!(now[HISTORY - 1], kept[3]);
-        assert!(!kept[2].exists());
-        assert_eq!(open_recent(&now[0]).unwrap().rgba, vec![22; 16]);
-        clear_dir(&dir);
-        assert!(!dir.exists() && list(&dir).is_empty());
-    }
-
-    #[test]
-    fn rapid_captures_with_pruning_stay_newest_first() {
-        let dir = std::env::temp_dir().join(format!("oc-recent-burst-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let shot = |v: u8| Crop {
-            width: 1,
-            height: 1,
-            rgba: vec![v; 4],
-        };
-        // Many captures within a few ms: pruned stamps must never be reused.
-        let kept: Vec<_> = (0..40).map(|i| keep(&dir, &shot(i), 3).unwrap()).collect();
-        assert_eq!(
-            list(&dir),
-            vec![kept[39].clone(), kept[38].clone(), kept[37].clone()]
-        );
-        clear_dir(&dir);
-    }
-
-    #[test]
-    fn recent_is_off_by_default_and_never_written_then() {
+    fn the_recent_strip_shows_only_with_pictures() {
         assert!(!crate::config::Config::default().snip.history);
-        // Off: `remember` writes nothing (the running config has the default).
-        let before = history_dir().map(|d| list(&d).len());
-        remember(&Crop {
-            width: 1,
-            height: 1,
-            rgba: vec![0; 4],
-        });
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        assert_eq!(history_dir().map(|d| list(&d).len()), before);
         // The strip is empty without history; with pictures it shows them.
         let mut s = Snip::new(
             wins(&[rect(0.0, 0.0, 10.0, 10.0)]),

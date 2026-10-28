@@ -13,7 +13,6 @@ mod audd;
 #[cfg_attr(target_os = "linux", path = "capture_linux.rs")]
 #[cfg_attr(windows, path = "capture_windows.rs")]
 mod capture;
-pub mod history;
 
 use std::fmt;
 use std::io::Cursor;

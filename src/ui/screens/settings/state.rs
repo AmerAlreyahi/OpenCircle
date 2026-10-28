@@ -1234,7 +1234,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::SearchHistory(on) => {
             state.draft.general.search_history = on;
             if !on {
-                crate::search_history::clear_default(); // turning it off deletes it
+                crate::history::search::clear_default(); // turning it off deletes it
             }
         }
         Message::Autostart(on) => state.draft.general.autostart = on,

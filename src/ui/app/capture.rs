@@ -143,7 +143,12 @@ impl App {
         let mut extras = Task::none();
         let mut timer = None;
         if let Some((kind, windows, foreground, screens)) = shot.snip {
-            let mut snip = Snip::new(windows, self.place(), snip::can_scroll(), foreground);
+            let mut snip = Snip::new(
+                windows,
+                self.place(),
+                crate::capture::scroll::can_scroll(),
+                foreground,
+            );
             snip.set_screens(screens);
             first = snip.start(kind, size); // Full = the whole screen at once
             let wait = config::current().snip.delay;

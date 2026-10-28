@@ -5,11 +5,13 @@
 //! drops input to elevated windows silently). X11: XTest buttons 4/5. Wayland
 //! forbids synthetic input: `Unsupported`, the UI falls back to manual scrolling.
 
+use std::cell::Cell;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use super::stitch::{MAX_HEIGHT, Push, Stitcher};
+use crate::actions::Crop;
 
 /// Scrolls the content under the pointer at `at` (physical desktop pixels) by
 /// `notches` wheel notches: positive scrolls down (towards the end of the page),
@@ -228,6 +230,123 @@ pub fn run(
     }
 }
 
+/// Test hook: a tall PNG stands in for the scrolled page (WSLg/CI can't scroll).
+const TEST_SCROLL: &str = "OPENCIRCLE_TEST_SCROLL";
+
+/// Auto-scroll can run: synthetic wheel input works (not on native Wayland).
+pub fn can_scroll() -> bool {
+    #[cfg(target_os = "linux")]
+    if super::wayland_session() {
+        return false;
+    }
+    true
+}
+
+/// Auto-scrolls `region` (physical desktop px: x, y, width, height) and stitches
+/// it until the end of the page, the height cap or `stop`. Blocking: run it on a
+/// thread. `progress` gets the stitched height after each new frame.
+pub fn scroll_capture(
+    region: (i32, i32, u32, u32),
+    stop: &AtomicBool,
+    progress: impl FnMut(u32),
+) -> Result<Crop, String> {
+    let (x, y, w, h) = region;
+    if let Some(path) = std::env::var_os(TEST_SCROLL) {
+        let page = super::from_png(&path)?;
+        let fake = FakePage::new(page.rgba, page.width, page.height);
+        let params = Params {
+            poll: std::time::Duration::from_millis(30),
+            ..Params::default()
+        };
+        return gather(
+            w,
+            h,
+            || fake.frame(w, h),
+            |n| fake.scroll(n, h),
+            stop,
+            &params,
+            progress,
+        );
+    }
+    let centre = (x + w as i32 / 2, y + h as i32 / 2);
+    let grab = || {
+        let frame = super::monitor_of(Some(region)).map_err(io::Error::other)?;
+        let crop = cut(&frame.rgba, frame.width, (x - frame.x, y - frame.y), (w, h));
+        crop.ok_or_else(|| io::Error::other("the area left the monitor"))
+    };
+    let scroll = |n| scroll_once(centre, n);
+    gather(w, h, grab, scroll, stop, &Params::default(), progress)
+}
+
+/// The capture loop over any source; a failed or stopped run keeps what it gathered.
+fn gather(
+    w: u32,
+    h: u32,
+    grab: impl FnMut() -> io::Result<Vec<u8>>,
+    scroll: impl FnMut(i32) -> io::Result<()>,
+    stop: &AtomicBool,
+    params: &Params,
+    progress: impl FnMut(u32),
+) -> Result<Crop, String> {
+    let mut st = Stitcher::new(w, h);
+    match run(&mut st, grab, scroll, stop, params, progress) {
+        Ok(reason) => crate::log!("[opencircle] scrolling capture: {reason:?}"),
+        Err(e) if st.height() == 0 => return Err(e.to_string()),
+        Err(e) => crate::log!("[opencircle] scrolling capture stopped early: {e}"),
+    }
+    let (rgba, width, height) = st.finish();
+    Ok(Crop {
+        width,
+        height,
+        rgba,
+    })
+}
+
+/// `size` pixels at `at` out of a `width`-wide RGBA frame; `None` if not inside it.
+fn cut(rgba: &[u8], width: u32, at: (i32, i32), size: (u32, u32)) -> Option<Vec<u8>> {
+    let (x, y) = (u32::try_from(at.0).ok()?, u32::try_from(at.1).ok()?);
+    let height = rgba.len() as u32 / 4 / width.max(1);
+    if x + size.0 > width || y + size.1 > height {
+        return None;
+    }
+    let row = |r: u32| {
+        let start = (((y + r) * width + x) * 4) as usize;
+        &rgba[start..start + size.0 as usize * 4]
+    };
+    Some((0..size.1).flat_map(row).copied().collect())
+}
+
+/// A tall page seen through a viewport that scrolls 100 px per notch.
+struct FakePage {
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+    top: Cell<u32>,
+}
+
+impl FakePage {
+    fn new(rgba: Vec<u8>, width: u32, height: u32) -> Self {
+        FakePage {
+            rgba,
+            width,
+            height,
+            top: Cell::new(0),
+        }
+    }
+
+    fn frame(&self, w: u32, h: u32) -> io::Result<Vec<u8>> {
+        cut(&self.rgba, self.width, (0, self.top.get() as i32), (w, h))
+            .ok_or_else(|| io::Error::other("the test page is smaller than the area"))
+    }
+
+    fn scroll(&self, notches: i32, h: u32) -> io::Result<()> {
+        let to = self.top.get() as i64 + i64::from(notches) * 100;
+        self.top
+            .set(to.clamp(0, i64::from(self.height.saturating_sub(h))) as u32);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
@@ -413,5 +532,117 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.to_string(), "gone");
+    }
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+
+    /// A page with a distinct block pattern on every row (the stitcher matches rows).
+    fn page(w: u32, h: u32) -> Vec<u8> {
+        let mut seed = 0x9e37_79b9_u32;
+        let blocks: Vec<u8> = (0..(w / 8 + 1) * (h / 4 + 1))
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as u8
+            })
+            .collect();
+        (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                let v = blocks[((y / 4) * (w / 8 + 1) + x / 8) as usize];
+                [v, v.wrapping_mul(3), 255 - v, 255]
+            })
+            .collect()
+    }
+
+    fn fast_two() -> Params {
+        Params {
+            poll: std::time::Duration::ZERO,
+            settle_tries: 2,
+            ..Params::default()
+        }
+    }
+
+    #[test]
+    fn scrolling_runs_to_the_end_of_the_page_with_progress() {
+        let (w, h, vh) = (320, 3000, 600);
+        let fake = FakePage::new(page(w, h), w, h);
+        let mut seen = Vec::new();
+        let stop = AtomicBool::new(false);
+        let out = gather(
+            w,
+            vh,
+            || fake.frame(w, vh),
+            |n| fake.scroll(n, vh),
+            &stop,
+            &fast_two(),
+            |height| seen.push(height),
+        )
+        .unwrap();
+        assert_eq!((out.width, out.height), (w, h));
+        assert!(out.rgba == fake.rgba, "stitched page differs");
+        assert!(seen.windows(2).all(|p| p[0] < p[1]), "{seen:?}");
+        assert_eq!(seen.last(), Some(&h));
+    }
+
+    #[test]
+    fn stop_keeps_what_was_gathered() {
+        let (w, h, vh) = (320, 6000, 600);
+        let fake = FakePage::new(page(w, h), w, h);
+        let stop = AtomicBool::new(false);
+        let mut seen = Vec::new();
+        let out = gather(
+            w,
+            vh,
+            || fake.frame(w, vh),
+            |n| fake.scroll(n, vh),
+            &stop,
+            &fast_two(),
+            |height| {
+                seen.push(height);
+                if seen.len() == 3 {
+                    stop.store(true, Ordering::Relaxed); // the Stop button
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(seen.len(), 3);
+        assert_eq!(out.height, seen[2]);
+        assert!(vh < out.height && out.height < h);
+        // The part gathered is the top of the page, exactly.
+        let n = (w * out.height * 4) as usize;
+        assert!(out.rgba[..] == fake.rgba[..n]);
+    }
+
+    #[test]
+    fn a_source_that_fails_at_once_is_an_error() {
+        let err = gather(
+            4,
+            4,
+            || Err(io::Error::other("no screen")),
+            |_| Ok(()),
+            &AtomicBool::new(false),
+            &fast_two(),
+            |_| {},
+        );
+        assert_eq!(err.unwrap_err(), "no screen");
+    }
+
+    #[test]
+    fn cut_takes_an_area_inside_the_frame_only() {
+        // 3x2 frame, pixel (x, y) = [x, y, 0, 255].
+        let frame: Vec<u8> = (0..2u8)
+            .flat_map(|y| (0..3u8).flat_map(move |x| [x, y, 0, 255]))
+            .collect();
+        assert_eq!(
+            cut(&frame, 3, (1, 1), (2, 1)),
+            Some(vec![1, 1, 0, 255, 2, 1, 0, 255])
+        );
+        assert_eq!(cut(&frame, 3, (2, 0), (2, 1)), None);
+        assert_eq!(cut(&frame, 3, (-1, 0), (1, 1)), None);
     }
 }
