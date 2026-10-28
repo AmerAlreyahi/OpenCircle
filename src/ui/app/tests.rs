@@ -3303,24 +3303,37 @@ fn chips_go_under_the_box_else_above_never_on_it() {
     let screen = Rectangle::with_size(Size::new(1920.0, 1080.0));
     let size = Size::new(280.0, 44.0);
     let area = Rectangle::new(Point::new(400.0, 300.0), Size::new(500.0, 200.0));
-    let at = chips_at(area, size, screen);
+    let at = chips_at(area, size, screen, None);
     assert_eq!(at, Point::new(510.0, 512.0), "centred, 12 px under the box");
     // no room below: above
     let low = Rectangle::new(Point::new(400.0, 900.0), Size::new(500.0, 150.0));
-    let at = chips_at(low, size, screen);
+    let at = chips_at(low, size, screen, None);
     assert_eq!(at.y, 900.0 - CHIP_SPACE - 44.0);
     for a in [area, low] {
-        let chips = Rectangle::new(chips_at(a, size, screen), size);
+        let chips = Rectangle::new(chips_at(a, size, screen, None), size);
         assert!(chips.intersection(&a).is_none(), "{a:?} -> {chips:?}");
     }
     // beside a card: kept in the free part
     let room = Rectangle::new(Point::ORIGIN, Size::new(1112.0, 1080.0));
     let edge = Rectangle::new(Point::new(950.0, 300.0), Size::new(150.0, 100.0));
-    let at = chips_at(edge, size, room);
+    let at = chips_at(edge, size, room, None);
     assert!(at.x + size.width <= room.width - bar::GAP);
     // the whole screen selected: on it, at the bottom, still on screen
-    let all = chips_at(screen, size, screen);
+    let all = chips_at(screen, size, screen, None);
     assert_eq!(all.y, 1080.0 - bar::GAP - 44.0);
+    // gate 0.1.2 bug 1: the bar docked at the top, a box (the address bar)
+    // just above it: the chip goes past the bar, never under it
+    let url = Rectangle::new(Point::new(106.0, 50.0), Size::new(266.0, 22.0));
+    let dock = Rectangle::new(Point::new(20.0, 84.0), Size::new(900.0, 56.0));
+    let chip = Rectangle::new(chips_at(url, size, screen, Some(dock)), size);
+    assert!(chip.intersection(&dock).is_none(), "{chip:?} under the bar");
+    assert!(chip.intersection(&url).is_none() && chip.y >= dock.y + dock.height);
+    // a bar elsewhere changes nothing
+    let far = Rectangle::new(Point::new(500.0, 1000.0), Size::new(900.0, 56.0));
+    assert_eq!(
+        chips_at(area, size, screen, Some(far)),
+        Point::new(510.0, 512.0)
+    );
 }
 
 #[test]
@@ -3777,7 +3790,8 @@ fn a_link_in_the_selected_words_gets_a_click_only_chip() {
     // nothing is opened by showing it; its click asks for the link
     let size = Size::new(LINK_WIDTH, bar::HEIGHT);
     let area = app.o.view.rect_to_screen(app.o.selection.unwrap().area);
-    let at = chips_at(area, size, app.room()) + Vector::new(LINK_WIDTH / 2.0, bar::HEIGHT / 2.0);
+    let at = chips_at(area, size, app.room(), app.chip_bar())
+        + Vector::new(LINK_WIDTH / 2.0, bar::HEIGHT / 2.0);
     let clicks = crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, at);
     assert!(
         clicks

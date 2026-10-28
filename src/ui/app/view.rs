@@ -277,6 +277,11 @@ impl App {
         card::free(self.o.screen, card)
     }
 
+    /// Where the bar goes, for the chips to keep off it (it is drawn over them).
+    pub(in crate::ui) fn chip_bar(&self) -> Option<Rectangle> {
+        (self.bottom_bar_shown()).then(|| Rectangle::new(self.bar_target(), self.dock_size()))
+    }
+
     /// What floats around `selection`: only small chips ("Select text" under a
     /// snapped box, a QR code's); every action is in the bottom bar.
     pub(in crate::ui) fn selection_ui(
@@ -285,6 +290,7 @@ impl App {
     ) -> Element<'_, Message> {
         let area = self.o.view.rect_to_screen(selection.area);
         let room = self.room();
+        let bar = self.chip_bar();
         let mut layers = stack![];
         let mut below = area;
         if selection.kind == overlay::Kind::Snap {
@@ -294,7 +300,7 @@ impl App {
                 Some(_) => "Done",
             };
             let size = Size::new(SELECT_WIDTH, bar::HEIGHT);
-            let at = chips_at(area, size, room);
+            let at = chips_at(area, size, room, bar);
             below = area.union(&Rectangle::new(at, size));
             let chip =
                 crate::ui::screens::bar::view::action_chip(label.into(), Message::SelectText);
@@ -306,7 +312,7 @@ impl App {
             let chip =
                 crate::ui::screens::bar::view::qr_chip(text, Message::Qr(qr::Act::Copy), open);
             let size = Size::new(QR_WIDTH, bar::HEIGHT);
-            let at = chips_at(below, size, room);
+            let at = chips_at(below, size, room, bar);
             let chip = container(chip).center_x(QR_WIDTH);
             below = below.union(&Rectangle::new(at, size));
             layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
@@ -316,7 +322,7 @@ impl App {
             let open = Message::OpenEntity(entity.clone());
             let chip = crate::ui::screens::bar::view::link_chip(&entity, open);
             let size = Size::new(LINK_WIDTH, bar::HEIGHT);
-            let at = chips_at(below, size, room);
+            let at = chips_at(below, size, room, bar);
             let chip = container(chip).center_x(LINK_WIDTH);
             layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
         }
@@ -344,21 +350,37 @@ pub(in crate::ui) fn grow(
 }
 
 /// Where the chips (`size`) go: centred under the box `area`, `CHIP_SPACE`
-/// below it, else above it; inside `room` (logical px), never on the box
-/// unless it fills the screen.
-pub(in crate::ui) fn chips_at(area: Rectangle, size: Size, room: Rectangle) -> Point {
+/// below it, else above it, else under the bar (`dock`) when the bar is on
+/// the box's other side; inside `room` (logical px), never on the box or the
+/// bar unless the box fills the screen.
+pub(in crate::ui) fn chips_at(
+    area: Rectangle,
+    size: Size,
+    room: Rectangle,
+    dock: Option<Rectangle>,
+) -> Point {
     let x = (area.center_x() - size.width / 2.0)
         .min(room.x + room.width - bar::GAP - size.width)
         .max(room.x + bar::GAP);
     let (top, bottom) = (room.y + bar::GAP, room.y + room.height - bar::GAP);
     let below = area.y + area.height + CHIP_SPACE;
     let above = area.y - CHIP_SPACE - size.height;
-    let y = if below + size.height <= bottom {
-        below
-    } else if above >= top {
-        above
-    } else {
-        bottom - size.height // the box fills the screen: on it, at the bottom
+    let past_bar = dock.map(|d| d.y + d.height + CHIP_SPACE);
+    let free = |y: &f32| {
+        *y >= top
+            && *y + size.height <= bottom
+            && dock.is_none_or(|d| {
+                d.intersection(&Rectangle::new(Point::new(x, *y), size))
+                    .is_none()
+            })
+            && Rectangle::new(Point::new(x, *y), size)
+                .intersection(&area)
+                .is_none()
     };
+    let y = [below, above]
+        .into_iter()
+        .chain(past_bar)
+        .find(free)
+        .unwrap_or(bottom - size.height); // the box fills the screen: on it, at the bottom
     Point::new(x, y)
 }
