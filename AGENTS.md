@@ -189,7 +189,10 @@ production systems.
   After a follow-up (default) | Always. Design approved by the owner 2026-10-28 (.claude/artifacts/design/
   newdesing/pinned-chat-demo.html), plus: one-line composer, Shift/Ctrl+Enter = new line, "Thought for" only
   when the model reasons, drawer = "AI chat stays open" + provider/model picker, a warning for safety-classifier
-  models; History = this session only, never on disk (lead default; owner may choose saved history later).
+  models. Chat history (owner, 2026-10-28): saved on this PC, TEXT ONLY (screenshots never written; shown as
+  "Screenshot not kept"), all past chats in the drawer's History, delete one / clear all, Settings "Keep chat
+  history" (on by default), newest 100 kept. Context sent to the model: the last 20 messages in full + one short
+  summary of older ones (written by the user's own provider, refreshed every 10 messages); never the whole chat.
 - Smooth on the CPU (owner, 2026-10-28): the GPU renderer stays in 0.1.3. 0.1.2 must feel smooth on the
   CPU renderer, also on weak laptops and 4K/120 Hz screens: Settings pages switch instantly (the page rise
   returns with the GPU), scrolling copies the already-drawn pixels and redraws only the newly shown strip.
