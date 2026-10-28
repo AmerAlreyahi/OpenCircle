@@ -200,6 +200,8 @@ every preset round-trips and draws no key colour on the live layer.
 - `OPENCIRCLE_TEST_LIVE_SHOT=<out.png>`: live translate saves its layer once the first patches (or the first error) are drawn.
 - `OPENCIRCLE_TEST_UPDATE_URL=<release JSON URL>`: the update check asks this URL (http allowed: a local fake
   release server) 3 s after start, also from a 0.0.0 build. Downloads still need a signature by `RELEASE_PUBLIC_KEY`.
+- `OPENCIRCLE_TEST_CAPTURABLE=1`: the pinned AI chat's own window is not excluded from screen capture
+  (VM screenshots of it over the desktop; it then also shows in the next capture's frozen frame).
 - `OPENCIRCLE_TEST_SHOT=<out.png>`: Esc saves what the overlay shows before closing
   (shot ~150 ms after Esc, with no message in between: a relayout would drop the
   text editor's drawn text from the shot).

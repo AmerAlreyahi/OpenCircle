@@ -40,6 +40,9 @@ pub(in crate::ui) struct Resident {
     pub size: Size,
 }
 
+/// Test hook: the chat's own window is not hidden from screen capture.
+const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
+
 /// A dragged chat window docks this long after its last move (the OS drags
 /// it: no release is reported).
 const SETTLE: Duration = Duration::from_millis(250);
@@ -134,9 +137,11 @@ impl App {
             windows::POPUP,
         );
         chat.window = Some(id);
+        // (test hook: VM screenshots can see it)
+        let hidden = std::env::var_os(CAPTURABLE).is_none();
         open.then(move |id| {
             place_window::<()>(id, place)
-                .chain(windows::hide_from_capture(id, true))
+                .chain(windows::hide_from_capture(id, hidden))
                 .chain(windows::appear(id, windows::POPUP))
         })
         .discard()
