@@ -49,7 +49,7 @@ impl Entry {
 
 /// `<data dir>/OpenCircle/search_history.json`.
 pub fn path() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|d| d.join("OpenCircle").join("search_history.json"))
+    crate::paths::search_history()
 }
 
 /// The user turned history on, and its Labs switch is on (hidden: nothing is

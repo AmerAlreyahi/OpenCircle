@@ -410,10 +410,7 @@ pub fn unavailable(source: &str, target: &str) -> String {
 /// Per-user folder (Linux `~/.local/share/OpenCircle/mt`, Windows
 /// `%LOCALAPPDATA%\OpenCircle\mt`), beside OCR's.
 fn models_root() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("OpenCircle")
-        .join("mt")
+    crate::paths::mt()
 }
 
 impl Pair {

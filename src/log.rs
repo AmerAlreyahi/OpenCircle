@@ -37,10 +37,7 @@ struct Log {
 static LOG: Mutex<Option<Log>> = Mutex::new(None);
 
 pub fn dir() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("OpenCircle")
-        .join("logs")
+    crate::paths::logs()
 }
 
 impl Log {

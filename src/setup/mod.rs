@@ -377,11 +377,7 @@ pub fn quit_running_app() -> bool {
 /// The user's data: the settings folder and the local data (models, recent
 /// captures, histories, the update cache), and the keys in the keyring.
 fn user_data() -> Vec<PathBuf> {
-    [dirs::config_dir(), dirs::data_local_dir()]
-        .into_iter()
-        .flatten()
-        .map(|d| d.join("opencircle"))
-        .collect()
+    crate::paths::user_data()
 }
 
 /// `opencircle --forget-user-data [--quiet]`, run by the MSI's uninstall (not
@@ -409,13 +405,7 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
 
 /// The user's settings, downloaded models, histories and saved keys: gone.
 pub fn remove_user_data() {
-    for dir in user_data() {
-        if dir.exists()
-            && let Err(e) = std::fs::remove_dir_all(&dir)
-        {
-            crate::log!("[opencircle] remove {}: {e}", dir.display());
-        }
-    }
+    remove_dirs(&user_data());
     use crate::config::Provider;
     for provider in [Provider::Anthropic, Provider::OpenaiCompatible] {
         let _ = crate::secrets::delete(provider);
@@ -423,9 +413,43 @@ pub fn remove_user_data() {
     let _ = crate::secrets::by_name::delete(crate::music::SERVICE.key_entry());
 }
 
+fn remove_dirs(dirs: &[PathBuf]) {
+    for dir in dirs {
+        if dir.exists()
+            && let Err(e) = std::fs::remove_dir_all(dir)
+        {
+            crate::log!("[opencircle] remove {}: {e}", dir.display());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Forget-my-data removes the settings folder and BOTH data folders (the
+    /// capitalised one holds the models, logs and search history), nothing else.
+    #[test]
+    fn forgetting_user_data_removes_both_data_folders() {
+        let home = std::env::temp_dir().join(format!("oc-forget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let (data, config) = (home.join("data"), home.join("config"));
+        let names = [
+            config.join("opencircle"),
+            data.join("opencircle"),
+            data.join("OpenCircle"),
+        ];
+        let other = data.join("somebody-else");
+        for d in names.iter().chain([&other]) {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let found = crate::paths::user_data_in(Some(&data), Some(&config));
+        remove_dirs(&found);
+        // (a case-insensitive disk is one folder: gone either way)
+        assert!(names.iter().all(|d| !d.exists()), "{found:?}");
+        assert!(other.exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn a_good_folder_is_tidied() {

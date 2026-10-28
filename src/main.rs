@@ -19,6 +19,7 @@ mod mt;
 mod music;
 mod net;
 mod ocr;
+mod paths;
 mod search_history;
 mod secrets;
 mod setup;
@@ -192,7 +193,7 @@ fn main() -> ExitCode {
     autostart::apply(&config);
     #[cfg(target_os = "linux")]
     capture::portal::repair_user_launcher();
-    std::thread::spawn(|| remove_old_webview(&app_data_dir()));
+    std::thread::spawn(|| remove_old_webview(&paths::app_data()));
     config::set_current(config);
     let _tray = ui::start_tray(tx.clone());
     update::start(tx.clone());
@@ -219,12 +220,6 @@ fn take_over() -> bool {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     false
-}
-
-fn app_data_dir() -> std::path::PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("OpenCircle")
 }
 
 /// v0.1.0's web view left its profile (cache, cookies) in `<data>/webview`; the

@@ -240,10 +240,7 @@ pub(crate) fn missing_bytes(files: &[(PathBuf, &ModelFile)]) -> u64 {
 /// Per-user folder for ORT and the models (Linux `~/.local/share/OpenCircle/ocr`,
 /// Windows `%LOCALAPPDATA%\OpenCircle\ocr`).
 pub fn models_dir() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("OpenCircle")
-        .join("ocr")
+    crate::paths::ocr()
 }
 
 /// Makes sure every file OCR needs for the configured source language

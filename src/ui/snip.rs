@@ -913,7 +913,7 @@ impl canvas::Program<Msg> for Loupe<'_> {
 
 /// `<user data dir>/opencircle/recent` (Windows: %LOCALAPPDATA%).
 fn history_dir() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|d| d.join("opencircle").join("recent"))
+    crate::paths::recent()
 }
 
 /// Keeps `crop` in Recent (on a thread) if the user turned history on.

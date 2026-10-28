@@ -80,7 +80,7 @@ pub struct Marker {
 impl Marker {
     /// `<local data dir>/opencircle/update.json`.
     pub fn path() -> Option<PathBuf> {
-        dirs::data_local_dir().map(|d| d.join("opencircle").join("update.json"))
+        crate::paths::update_marker()
     }
 
     pub fn write(&self, path: &Path) -> io::Result<()> {

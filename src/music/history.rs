@@ -18,7 +18,7 @@ pub struct Entry {
 }
 
 pub fn path() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|d| d.join("opencircle").join("song_history.json"))
+    crate::paths::song_history()
 }
 
 /// Newest first; nothing when the file is missing or unreadable.

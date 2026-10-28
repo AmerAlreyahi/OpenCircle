@@ -787,7 +787,7 @@ impl Config {
         if cfg!(test) {
             return None;
         }
-        dirs::config_dir().map(|d| d.join("opencircle").join("config.toml"))
+        crate::paths::config_file()
     }
 
     /// Read the config. Never fails: problems come back as warnings (one line

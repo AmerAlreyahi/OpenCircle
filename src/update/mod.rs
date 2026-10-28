@@ -212,7 +212,7 @@ fn check(
 /// Where downloads are staged: `<local data dir>/opencircle/update`, this user's
 /// own (never the shared temp dir), made fresh and private for each download.
 fn stage_dir() -> Option<std::path::PathBuf> {
-    dirs::data_local_dir().map(|d| d.join("opencircle").join("update"))
+    crate::paths::update_stage()
 }
 
 /// A download left by an earlier run (only one instance runs, so none is in use).
