@@ -128,12 +128,16 @@ pub(crate) struct HttpRequest {
 /// What one SSE event means.
 pub(crate) enum Event {
     Delta(String),
+    /// The model is reasoning before it answers (its text is not shown).
+    Thinking,
     Done,
     Skip,
 }
 
 /// Streams the answer; `on_delta` gets each new piece of text and returns `Break`
-/// to stop (the connection is dropped). Returns the text so far.
+/// to stop (the connection is dropped). An empty piece means the model is
+/// thinking (the provider streams its reasoning, which is not shown). Returns
+/// the text so far.
 pub fn ask_stream(
     cfg: &AiConfig,
     key: Option<&Secret>,
@@ -308,6 +312,7 @@ pub(crate) fn run_stream(
             full.push_str(&piece);
             on_delta(&piece).is_continue()
         }
+        Ok(Event::Thinking) => on_delta("").is_continue(),
         Ok(Event::Skip) => true,
         Ok(Event::Done) => false,
         Err(e) => {

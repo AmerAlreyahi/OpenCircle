@@ -38,6 +38,7 @@ impl Session {
                 glyph: actions::translate::ACTION.icon,
                 title,
                 chip: None,
+                docked: false,
             };
             card(header, body, footer, at, screen, hover, Msg::Card)
         };

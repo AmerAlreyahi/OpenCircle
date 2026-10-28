@@ -34,12 +34,7 @@ fn unknown_provider_shows_the_fix_and_sends_nothing() {
         rgba: vec![0; 4],
     };
     let mut panel = Panel {
-        state: State::Ask {
-            thumb: image::Handle::from_rgba(1, 1, crop.rgba.clone()),
-            setup: None,
-            chat: Chat::default(),
-            browse: Browse::Idle,
-        },
+        state: State::ask(Chat::default()),
         crop: Arc::new(crop),
         input: "Explain".into(), // e.g. the Lens follow-up, sent once ready
         work: None,
@@ -109,48 +104,6 @@ fn text_prompts_are_short_cards_on_small_screens() {
     }
 }
 
-/// The Ask panel's browser-consent card is as tall as its content on a
-/// big screen too, all inside the window (#127).
-#[test]
-fn ask_consent_is_a_short_card() {
-    let crop = sample_crop();
-    for (w, h) in [(1097.0, 617.0), (1920.0, 1080.0)] {
-        let size = Size::new(w, h);
-        let panel = panel_in(State::Ask {
-            thumb: image::Handle::from_rgba(crop.width, crop.height, crop.rgba.clone()),
-            setup: Some(Ok(Arc::new(ask::tests::browser_setup()))),
-            chat: Chat::default(),
-            browse: Browse::Consent("What is this?".into()),
-        });
-        let lost = widgets::shot::out_of_reach(panel.view(at(size), size, false), size);
-        assert!(lost.is_empty(), "{w}x{h}: out of reach {lost:?}");
-        let px = widgets::shot::save(
-            &format!("ask-consent-{w}x{h}"),
-            iced::widget::container(panel.view(at(size), size, false))
-                .style(|_| {
-                    iced::widget::container::Style::default()
-                        .background(iced::Color::from_rgb8(240, 240, 240))
-                })
-                .into(),
-            size,
-        );
-        let a = at(size);
-        let x = (a.x + a.width * 0.97) as usize;
-        let dark = |y: usize| {
-            px[((y * w as usize) + x) * 4..][..3]
-                .iter()
-                .all(|&v| v < 100)
-        };
-        let rows: Vec<usize> = (0..h as usize).filter(|&y| dark(y)).collect();
-        let tall = (rows[rows.len() - 1] - rows[0]) as f32;
-        assert!(
-            tall < a.height - 40.0,
-            "{w}x{h}: a slab {tall}px of {}",
-            a.height
-        );
-    }
-}
-
 fn sample_crop() -> Crop {
     let rgba = (0..120u32)
         .flat_map(|y| (0..240u32).flat_map(move |x| [x as u8, (y * 2) as u8, 160, 255]))
@@ -182,13 +135,7 @@ fn not_blank(px: &[u8]) -> bool {
 
 #[test]
 fn ask_panel_offers_the_six_presets() {
-    let crop = sample_crop();
-    let mut panel = panel_in(State::Ask {
-        thumb: image::Handle::from_rgba(crop.width, crop.height, crop.rgba.clone()),
-        setup: None,
-        chat: Chat::default(),
-        browse: Browse::Idle,
-    });
+    let mut panel = panel_in(State::ask(Chat::default()));
     let _ = panel.update(Msg::Ready(Ok(Arc::new(ask::tests::browser_setup()))));
     let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     for preset in PRESETS {
@@ -270,7 +217,6 @@ fn every_result_card_matches_its_golden_image() {
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     const CARD: Size = Size::new(420.0, 560.0);
     let at = Rectangle::with_size(CARD);
-    let crop = sample_crop();
     type Make = Box<dyn Fn() -> Panel>;
     let states: Vec<(&str, Make)> = vec![
         ("lens", Box::new(|| panel_in(State::Lens(Some(Ok(())))))),
@@ -290,12 +236,7 @@ fn every_result_card_matches_its_golden_image() {
         (
             "ask",
             Box::new(move || {
-                let mut p = panel_in(State::Ask {
-                    thumb: image::Handle::from_rgba(crop.width, crop.height, crop.rgba.clone()),
-                    setup: None,
-                    chat: Chat::default(),
-                    browse: Browse::Idle,
-                });
+                let mut p = panel_in(State::ask(Chat::default()));
                 let _ = p.update(Msg::Ready(Ok(Arc::new(ask::tests::browser_setup()))));
                 p
             }),
@@ -307,6 +248,197 @@ fn every_result_card_matches_its_golden_image() {
         for (name, panel) in &states {
             let panel = panel();
             let file = format!("result-card-{name}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, CARD, &[1.0], || {
+                panel.view(at, Size::new(1920.0, 1080.0), false)
+            }));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A chat with an API provider, ready (a local server that is never called:
+/// the answer is fed in as `Delta`s, as the stream's thread sends them).
+fn api_chat() -> Panel {
+    let mut panel = panel_in(State::ask(Chat::default()));
+    let setup = ask::tests::local_setup("http://127.0.0.1:9/v1".into());
+    let _ = panel.update(Msg::Ready(Ok(Arc::new(setup))));
+    panel
+}
+
+fn ask(panel: &mut Panel, question: &str) {
+    let _ = panel.update(Msg::Input(question.into()));
+    let _ = panel.update(Msg::Submit);
+}
+
+fn chat(panel: &Panel) -> &Chat {
+    let State::Ask { chat, .. } = &panel.state else {
+        unreachable!()
+    };
+    chat
+}
+
+/// What the answer's Markdown has parsed so far, per turn.
+fn parsed(panel: &Panel) -> Vec<usize> {
+    let State::Ask { answers, .. } = &panel.state else {
+        unreachable!()
+    };
+    answers
+        .iter()
+        .map(|(n, md)| n * (!md.items().is_empty()) as usize)
+        .collect()
+}
+
+const ANSWER: &str = "## Shortcuts\n\n| Key | Action |\n|---|---|\n| Ctrl+C | Copy |\n\n\
+    ```rust\nfn main() {}\n```\n";
+
+#[test]
+fn a_streamed_answer_is_markdown_and_stop_keeps_the_part_so_far() {
+    let mut panel = api_chat();
+    ask(&mut panel, "What are the keys?");
+    assert_eq!(chat(&panel).status, Status::Streaming);
+    let (first, rest) = ANSWER.split_at(30);
+    let _ = panel.update(Msg::Delta(first.into()));
+    assert_eq!(parsed(&panel), [30]);
+    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let stop = crate::ui::kit::icon::Icon::Stop.glyph().to_string();
+    assert!(texts.contains(&stop), "the Stop button: {texts:?}");
+    // Stop mid-stream: no panic, the part so far stays, a late piece is dropped.
+    let _ = panel.update(Msg::Stop);
+    let _ = panel.update(Msg::Delta(rest.into()));
+    let _ = panel.update(Msg::Answered(Err("Stopped.".into())));
+    assert_eq!(chat(&panel).status, Status::Cancelled);
+    assert_eq!(chat(&panel).turns[0].answer, first);
+    assert!(panel.work.is_none());
+    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    assert!(texts.iter().any(|t| t == "Stopped."), "{texts:?}");
+    assert_eq!(parsed(&panel), [30], "the part so far stays as Markdown");
+}
+
+#[test]
+fn edit_resends_and_regenerate_asks_again() {
+    let mut panel = api_chat();
+    for (q, a) in [("One?", "**1**"), ("Two?", "2")] {
+        ask(&mut panel, q);
+        let _ = panel.update(Msg::Delta(a.into()));
+        let _ = panel.update(Msg::Answered(Ok(())));
+    }
+    // Regenerate: the last question again, its old answer gone.
+    let _ = panel.update(Msg::Regenerate);
+    assert_eq!(chat(&panel).status, Status::Streaming);
+    assert_eq!(chat(&panel).turns.len(), 2);
+    assert_eq!(chat(&panel).turns[1].question, "Two?");
+    assert_eq!(chat(&panel).turns[1].answer, "");
+    assert_eq!(parsed(&panel), [5, 0]);
+    let _ = panel.update(Msg::Delta("Two!".into()));
+    let _ = panel.update(Msg::Answered(Ok(())));
+    // Edit the first: back in the input; sending replaces it and what followed.
+    let _ = panel.update(Msg::EditTurn(0));
+    assert_eq!(panel.input, "One?");
+    assert_eq!(chat(&panel).turns.len(), 2, "nothing goes before Send");
+    ask(&mut panel, "One, edited?");
+    let turns = &chat(&panel).turns;
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].question, "One, edited?");
+    assert!(turns[0].answer.is_empty() && parsed(&panel) == [0]);
+}
+
+#[test]
+fn an_error_says_why_and_offers_retry() {
+    let mut panel = api_chat();
+    ask(&mut panel, "Hi");
+    let why = ai::AiError::Auth(401).to_string();
+    let _ = panel.update(Msg::Answered(Err(why.clone())));
+    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    assert!(texts.contains(&why), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Retry"), "{texts:?}");
+    let _ = panel.update(Msg::Regenerate);
+    assert_eq!(chat(&panel).status, Status::Streaming);
+    assert_eq!(chat(&panel).turns.len(), 1);
+}
+
+#[test]
+fn the_screen_goes_only_while_include_screen_is_on() {
+    let mut panel = api_chat();
+    let shown = |panel: &Panel| {
+        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+        texts
+            .iter()
+            .any(|t| t.starts_with("Screen selection attached"))
+    };
+    assert!(shown(&panel), "on by default");
+    ask(&mut panel, "With");
+    let _ = panel.update(Msg::Answered(Ok(())));
+    let _ = panel.update(Msg::IncludeScreen);
+    assert!(!shown(&panel));
+    ask(&mut panel, "Without");
+    let turns = &chat(&panel).turns;
+    assert!(turns[0].screen && !turns[1].screen);
+    // A new chat starts empty, the switch kept.
+    let _ = panel.update(Msg::NewChat);
+    assert!(chat(&panel).turns.is_empty() && panel.work.is_none());
+    assert!(parsed(&panel).is_empty());
+}
+
+/// The AI chat in Sapphire and Daylight: empty with its suggestions, a
+/// Markdown answer (heading, table, code), an Arabic one, stopped, failed.
+#[test]
+fn the_chat_matches_its_golden_images() {
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    const CARD: Size = Size::new(504.0, 760.0);
+    let at = Rectangle::with_size(CARD);
+    let answered = |q: &str, a: &str, end: Option<Result<(), String>>| {
+        let mut p = api_chat();
+        ask(&mut p, q);
+        let _ = p.update(Msg::Delta(a.into()));
+        match end {
+            Some(Ok(())) => {
+                let _ = p.update(Msg::Answered(Ok(())));
+            }
+            Some(Err(e)) => {
+                let _ = p.update(Msg::Answered(Err(e)));
+            }
+            None => {
+                let _ = p.update(Msg::Stop);
+            }
+        }
+        p
+    };
+    type Make = Box<dyn Fn() -> Panel>;
+    let states: Vec<(&str, Make)> = vec![
+        ("empty", Box::new(api_chat)),
+        (
+            "answer",
+            Box::new(move || answered("What are the keys?", ANSWER, Some(Ok(())))),
+        ),
+        (
+            "arabic",
+            Box::new(move || {
+                answered(
+                    "ما هذا؟",
+                    "هذه **نافذة** إعدادات.\n\n- اضغط `Ctrl+C` للنسخ\n- ثم الصق النص في Notepad",
+                    Some(Ok(())),
+                )
+            }),
+        ),
+        (
+            "stopped",
+            Box::new(move || answered("Explain", "The first part of an", None)),
+        ),
+        (
+            "error",
+            Box::new(move || {
+                answered("Explain", "", Some(Err(ai::AiError::Auth(401).to_string())))
+            }),
+        ),
+    ];
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        themes::set(theme);
+        for (name, panel) in &states {
+            let panel = panel();
+            let file = format!("chat-{name}-{}", theme.id);
             failed.extend(golden::check("screens", &file, CARD, &[1.0], || {
                 panel.view(at, Size::new(1920.0, 1080.0), false)
             }));

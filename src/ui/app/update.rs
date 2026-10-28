@@ -248,7 +248,10 @@ impl App {
             },
             Message::CardMoved(p) => {
                 if let Some((how, last)) = self.o.card_drag {
-                    if let Some(from) = last {
+                    if let (Some(from), true) = (last, self.chatting()) {
+                        self.o.chat_off += p - from;
+                        self.o.chat_glide = None;
+                    } else if let Some(from) = last {
                         let at = self.card_at();
                         self.card = Some(card::drag(at, how, p - from, self.o.screen));
                     }
@@ -259,6 +262,10 @@ impl App {
             // Let go: the card stays where the user put it, until the overlay closes.
             Message::CardReleased => {
                 match self.o.card_drag.take() {
+                    Some((card::Drag::Move, _)) if self.chatting() => {
+                        self.dock_chat(Instant::now());
+                        self.log_frames("chat drag");
+                    }
                     Some((card::Drag::Move, _)) => self.log_frames("card drag"),
                     Some((card::Drag::Resize, _)) => self.log_frames("card resize"),
                     None => {}
@@ -328,6 +335,11 @@ impl App {
                     }
                     (None, _) => None,
                 };
+                // the chat card docking where it was let go
+                if let Some((began, from, _)) = self.o.chat_glide {
+                    let t = motion::progress(began, now, motion::DOCK, motion::Curve::Standard);
+                    self.o.chat_glide = (t < 1.0).then_some((began, from, t));
+                }
                 let opening = self.appearing() || self.o.appear.is_none();
                 let gliding = self.o.bar_glide.is_some();
                 // every motion by the clock since it began (`motion`)

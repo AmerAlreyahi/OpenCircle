@@ -22,6 +22,7 @@ pub mod header;
 pub mod icon;
 pub mod icon_button;
 pub mod keycap;
+pub mod markdown;
 pub mod option_list;
 pub mod panel_frame;
 pub mod progress;

@@ -182,6 +182,8 @@ pub(in crate::ui) struct App {
     pub(in crate::ui) timed: bool,
     /// Where the user moved / sized the result card (this run of the app).
     pub(in crate::ui) card: Option<Rectangle>,
+    /// The side the user docked the AI chat to (this run of the app).
+    pub(in crate::ui) chat_side: Option<crate::ui::kit::panel_frame::Side>,
     /// Song searches started (numbers them).
     pub(in crate::ui) songs: u32,
     /// A verified update waiting until nothing is open (`is_idle`).
@@ -249,6 +251,7 @@ impl App {
             live: None,
             timed: false,
             card: None,
+            chat_side: None,
             songs: 0,
             update: None,
         }
@@ -285,6 +288,7 @@ impl App {
             || self.swapping()
             || self.bar_gliding()
             || self.card_opening()
+            || self.o.chat_glide.is_some()
             || self.o.bar_now.is_none()
     }
 

@@ -109,8 +109,8 @@ pub(crate) fn build_request(
     })
 }
 
-/// One SSE `data:` payload. Only text deltas matter; thinking deltas, pings and
-/// block markers are skipped. `stop_reason: refusal` and `error` events fail.
+/// One SSE `data:` payload. Text deltas are the answer, thinking deltas only
+/// say the model is thinking; pings and block markers are skipped. `stop_reason: refusal` and `error` events fail.
 pub(crate) fn parse_event(data: &str) -> Result<Event, AiError> {
     let v: Value = serde_json::from_str(data)
         .map_err(|_| AiError::BadResponse("unreadable stream event".into()))?;
@@ -118,6 +118,9 @@ pub(crate) fn parse_event(data: &str) -> Result<Event, AiError> {
         Some("content_block_delta") if v["delta"]["type"] == "text_delta" => Ok(Event::Delta(
             v["delta"]["text"].as_str().unwrap_or_default().to_string(),
         )),
+        Some("content_block_delta") if v["delta"]["type"] == "thinking_delta" => {
+            Ok(Event::Thinking)
+        }
         Some("message_delta") if v["delta"]["stop_reason"] == "refusal" => Err(AiError::Refused),
         Some("message_stop") => Ok(Event::Done),
         Some("error") => {
@@ -178,7 +181,7 @@ data: {"type":"message_stop"}
                 out.push(t);
                 true
             }
-            Ok(Event::Skip) => true,
+            Ok(Event::Skip | Event::Thinking) => true,
             Ok(Event::Done) => false,
             Err(e) => {
                 err = Some(e);
@@ -380,8 +383,12 @@ data: {"type":"message_stop"}
     }
 
     #[test]
-    fn thinking_deltas_are_not_shown() {
+    fn thinking_deltas_say_thinking_and_are_not_shown() {
         let ev = r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}"#;
-        assert!(matches!(parse_event(ev), Ok(Event::Skip)));
+        assert!(matches!(parse_event(ev), Ok(Event::Thinking)));
+        assert_eq!(
+            collect(&format!("data: {ev}\n\n")).unwrap(),
+            Vec::<String>::new()
+        );
     }
 }

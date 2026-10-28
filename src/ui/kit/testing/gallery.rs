@@ -541,6 +541,7 @@ fn panel_frame_card_sheet() {
                 glyph: Icon::Check.glyph(),
                 title: s(ar, "Text", "النص"),
                 chip: Some("model"),
+                docked: false,
             };
             let close = icon_button(Icon::Close.glyph(), State::default(), Some(()));
             let body =
@@ -607,6 +608,62 @@ fn bubble_sheet() {
     let view = |ar| bubble(s(ar, "What is this?", "ما هذا؟"));
     let rows = [row("rest", Act::Rest, view)];
     sheet("bubble", Size::new(220.0, 52.0), &rows);
+}
+
+/// `markdown`: an AI answer. Latin and Arabic: inline styles and a link,
+/// a heading with lists, mixed directions, a table, a code block.
+#[test]
+fn markdown_sheet() {
+    use super::super::markdown::markdown;
+    use iced::widget::markdown::Content;
+    fn md(latin: &str, arabic: &str) -> impl Fn(bool) -> Element<'static, ()> + 'static {
+        let parse = |s: &str| -> &'static Content { Box::leak(Box::new(Content::parse(s))) };
+        let (latin, arabic) = (parse(latin), parse(arabic));
+        move |ar| markdown(if ar { arabic } else { latin }.items()).map(|_| ())
+    }
+    let rows = vec![
+        row(
+            "inline",
+            Act::Rest,
+            md(
+                "**Bold**, *italic*, `code` and a [link](https://example.com).",
+                "**مرحبا** بك، هذا *نص* عربي مع [رابط](https://example.com).",
+            ),
+        ),
+        row(
+            "heading, lists",
+            Act::Rest,
+            md(
+                "### Steps\n- Copy the text\n- Paste it\n\n1. One\n2. Two",
+                "### الخطوات\n- انسخ النص\n- الصقه\n\n1. واحد\n2. اثنان",
+            ),
+        ),
+        row(
+            "mixed",
+            Act::Rest,
+            md(
+                "The word «مرحبا» means hello; press `Ctrl+C` to copy.",
+                "اضغط Ctrl+C لنسخ النص من OpenCircle.",
+            ),
+        ),
+        row(
+            "table",
+            Act::Rest,
+            md(
+                "| Key | Action |\n|---|---|\n| Ctrl+C | Copy |\n| Esc | Close |",
+                "| المفتاح | الإجراء |\n|---|---|\n| Ctrl+C | نسخ |\n| Esc | إغلاق |",
+            ),
+        ),
+        row(
+            "code",
+            Act::Rest,
+            md(
+                "```rust\nfn main() {\n    println!(\"hi\");\n}\n```",
+                "```python\n# طباعة تحية\nprint(\"مرحبا\")\n```",
+            ),
+        ),
+    ];
+    sheet("markdown", Size::new(340.0, 150.0), &rows);
 }
 
 #[test]

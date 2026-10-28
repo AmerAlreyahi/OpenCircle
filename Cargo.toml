@@ -12,6 +12,8 @@ iced = { version = "0.14", default-features = false, features = [
     "tiny-skia", "x11", "wayland", "thread-pool", "canvas", "image-without-codecs",
     "linux-theme-detection", # System theme follows the OS (Linux; Windows is built in)
     "advanced", # font system + headless renderer for the editor (no extra code)
+    # the AI chat's answers (pulldown-cmark; never "highlighter": no syntect)
+    "markdown",
 ] }
 arboard = "3.7"
 base64 = "0.22"

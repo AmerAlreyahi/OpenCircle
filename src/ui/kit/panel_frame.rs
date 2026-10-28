@@ -246,6 +246,36 @@ fn keep_on(r: Rectangle, screen: Size) -> Rectangle {
     Rectangle::new(Point::new(x, y), r.size())
 }
 
+/// The AI chat's card (`#widgetAiContainer`): 35 % of the screen wide
+/// (340..640 px, never past the screen), 95 % of the height above the
+/// taskbar (`taskbar` px at the bottom), 16 px from the `side` (left or
+/// right; `Top` counts as right) and 14 px from the top. It is not resized:
+/// a drag moves it, and where it is let go it docks (`dock_side`).
+pub fn docked(screen: Size, side: Side, taskbar: f32) -> Rectangle {
+    const SHARE: f32 = 0.35;
+    const WIDE: (f32, f32) = (340.0, 640.0);
+    const TALL: f32 = 0.95;
+    const SIDE_GAP: f32 = 16.0;
+    const TOP_GAP: f32 = 14.0;
+    let room = (screen.width - 2.0 * SIDE_GAP).max(0.0);
+    let width = (screen.width * SHARE).clamp(WIDE.0, WIDE.1).min(room);
+    let height = ((screen.height - taskbar) * TALL).min(screen.height - TOP_GAP);
+    let x = match side {
+        Side::Left => SIDE_GAP,
+        _ => screen.width - SIDE_GAP - width,
+    };
+    Rectangle::new(Point::new(x, TOP_GAP), Size::new(width, height.max(0.0)))
+}
+
+/// The side a dragged chat card docks to where it is let go: the one its
+/// middle is on.
+pub fn dock_side(r: Rectangle, screen: Size) -> Side {
+    match r.center_x() < screen.width / 2.0 {
+        true => Side::Left,
+        false => Side::Right,
+    }
+}
+
 /// The part of the screen the card at `at` leaves free (with `GAP` to it):
 /// beside it, or above a card at the bottom. Floating bars and pills go there.
 pub fn free(screen: Size, at: Option<Rectangle>) -> Rectangle {
@@ -276,6 +306,8 @@ pub struct Header<'a> {
     pub glyph: char,
     pub title: &'a str,
     pub chip: Option<&'a str>,
+    /// A docked card (the AI chat, `docked`): no resize edge.
+    pub docked: bool,
 }
 
 /// The result card at `at` on a `screen` (`.as-card`: the widget surface,
@@ -362,7 +394,12 @@ pub fn card<'a, Message: Clone + 'a>(
     // In layers of its own bounds (an empty first child: a stack draws the
     // rest in layers clipped to its container): dragged, the card redraws as
     // its old and new place, not as each of its parts.
-    let layers = stack![Space::new(), opaque(card), pin(edge).position(place)]
+    let edge = match header.docked {
+        true => None,
+        false => Some(pin(edge).position(place)),
+    };
+    let layers = stack![Space::new(), opaque(card)]
+        .push(edge)
         .width(at.width)
         .height(at.height);
     let layers = container(layers).width(at.width).height(at.height);
@@ -455,6 +492,40 @@ mod tests {
         let small_screen = Size::new(1280.0, 600.0);
         let fit = place(small_screen, None, Some(huge));
         assert!(inside(fit, small_screen), "{fit:?}");
+    }
+
+    #[test]
+    fn the_chat_docks_left_or_right_at_the_designs_size() {
+        // 1920: 35 % = 672, capped at 640; 95 % of the height over a 48 px taskbar
+        let right = docked(SCREEN, Side::Right, 48.0);
+        assert_eq!(right.size(), Size::new(640.0, (1080.0 - 48.0) * 0.95));
+        assert_eq!((right.x + right.width, right.y), (1920.0 - 16.0, 14.0));
+        let left = docked(SCREEN, Side::Left, 48.0);
+        assert_eq!((left.x, left.width), (16.0, 640.0));
+        // 1440: 504 wide (the design's measure); a small screen: 340, inside it
+        assert_eq!(
+            docked(Size::new(1440.0, 900.0), Side::Left, 48.0).width,
+            504.0
+        );
+        assert_eq!(
+            docked(Size::new(800.0, 600.0), Side::Left, 0.0).width,
+            340.0
+        );
+        let tiny = docked(Size::new(300.0, 200.0), Side::Right, 0.0);
+        assert!(tiny.x >= 0.0 && tiny.y + tiny.height <= 200.0, "{tiny:?}");
+        // let go: it docks to the side its middle is on
+        let dragged = right + Vector::new(-500.0, 30.0);
+        assert_eq!(
+            dock_side(dragged, SCREEN),
+            Side::Right,
+            "a short drag stays"
+        );
+        let dragged = right + Vector::new(-1000.0, 30.0);
+        assert_eq!(dock_side(dragged, SCREEN), Side::Left);
+        assert_eq!(
+            dock_side(left + Vector::new(1200.0, 0.0), SCREEN),
+            Side::Right
+        );
     }
 
     #[test]

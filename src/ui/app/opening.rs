@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iced::widget::image;
-use iced::{Point, Rectangle, Size};
+use iced::{Point, Rectangle, Size, Vector};
 
 use crate::actions::{lens, qr};
 use crate::config::{After, BarAnchor, SearchWith, SelectStyle, SelectionConfig, TextReader};
@@ -150,6 +150,10 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) card_open: Option<(u32, motion::Shown, f32)>,
     /// The pointer is on the card's resize edge (its grip shows).
     pub(in crate::ui) card_hover: bool,
+    /// The AI chat card held away from its dock (logical px), and its glide
+    /// back to a dock once let go: since when, from where, how far it is.
+    pub(in crate::ui) chat_off: Vector,
+    pub(in crate::ui) chat_glide: Option<(Instant, Rectangle, f32)>,
     /// Song search on this overlay, and its number.
     pub(in crate::ui) song: Option<(u32, song::Session)>,
 }
@@ -221,6 +225,8 @@ impl Default for Opening {
             card_drag: None,
             card_open: None,
             card_hover: false,
+            chat_off: Vector::ZERO,
+            chat_glide: None,
             song: None,
         }
     }

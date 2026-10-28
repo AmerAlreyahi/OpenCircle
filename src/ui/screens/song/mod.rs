@@ -176,6 +176,7 @@ impl Session {
             glyph: MUSIC,
             title: "Song search",
             chip: None,
+            docked: false,
         };
         super::panel::card(
             header,

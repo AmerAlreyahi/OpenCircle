@@ -4,20 +4,22 @@
 use std::sync::Arc;
 
 use iced::widget::tooltip::Position;
-use iced::widget::{column, container, image, row};
-use iced::{Center, ContentFit, Element, Fill, Rectangle, Size};
+use iced::widget::{column, container, markdown as md, row};
+use iced::{Center, Element, Fill, Rectangle, Right, Size};
 
 use super::{Browse, LOG, Msg, Panel, Reading, State};
 use crate::actions;
-use crate::actions::ask::{Chat, PRESETS, Setup, Status};
+use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
 use crate::ui::keys;
 use crate::ui::kit::bubble::bubble;
 use crate::ui::kit::button::{Kind, button, cta_label, label};
+use crate::ui::kit::chip::Tone;
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, icon_button};
+use crate::ui::kit::markdown;
 use crate::ui::kit::panel_frame::{self as frame, Event, Header};
 use crate::ui::kit::scroll::scroll;
-use crate::ui::kit::text::{error, sub, text};
+use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::{chip, field, progress};
 use crate::ui::screens::model_download::{self, On, Stage};
@@ -26,8 +28,10 @@ use crate::ui::widgets::{self, Why};
 /// A card's body and its footer.
 type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
 
-/// The crop's thumbnail in the Ask AI card.
-const THUMB_HEIGHT: f32 = 112.0;
+/// The AI chat's title (the design's header).
+const CHAT_TITLE: &str = "OpenCircle AI";
+/// Between a chat's turns (`space-y-4`).
+const TURN_GAP: f32 = 16.0;
 /// Between a card's blocks (`.as-note` margins, the textarea's top).
 const STACK: f32 = 10.0;
 /// Between the actions of a row (`.as-actions` gap 8; a call to action
@@ -48,13 +52,23 @@ pub fn card<'a, M: Clone + 'a>(
     hover: bool,
     on: impl Fn(Event) -> M,
 ) -> Element<'a, M> {
+    let close = close(&on);
+    frame::card(header, close, body, footer, at, screen, hover, on)
+}
+
+/// A card's close button (Esc).
+fn close<'a, M: Clone + 'a>(on: impl Fn(Event) -> M) -> Element<'a, M> {
     let close = icon_button(
         Icon::Close.glyph(),
         icon_button::State::default(),
         Some(on(Event::Close)),
     );
-    let close = widgets::hint(close, "Close", Why::Keys("Esc"), Position::Bottom);
-    frame::card(header, close, body, footer, at, screen, hover, on)
+    widgets::hint(close, "Close", Why::Keys("Esc"), Position::Bottom)
+}
+
+/// A small quiet text button (a message's Copy, Edit, Regenerate).
+fn quiet<'a>(name: &'a str, msg: Msg) -> Element<'a, Msg> {
+    button(label(name), Kind::Quiet, Some(msg))
 }
 
 /// A card's note (`.as-note`): 12 px secondary text.
@@ -129,14 +143,16 @@ impl Panel {
                 self.text_view(reading),
             ),
             State::Ask {
-                thumb,
                 setup,
                 chat,
                 browse,
+                answers,
+                include,
+                ..
             } => (
                 actions::ask::ACTION.icon,
-                actions::ask::ACTION.label,
-                self.ask_view(thumb, setup.as_ref(), chat, browse),
+                CHAT_TITLE,
+                self.ask_view(setup.as_ref(), chat, browse, answers, *include),
             ),
         };
         let chip = match &self.state {
@@ -150,21 +166,37 @@ impl Panel {
             } => Some(setup.cfg.model.as_str()),
             _ => None,
         };
-        let header = Header { glyph, title, chip };
+        let chatting = matches!(self.state, State::Ask { .. });
+        let header = Header {
+            glyph,
+            title,
+            chip,
+            docked: chatting,
+        };
         // the Text card's download question, progress and error are short
         // cards, as tall as their text and buttons, not a slab (#127)
         let at = match &self.state {
             State::Text(Reading::Failed(e)) => frame::short(at, screen, e.chars().count(), 0.0),
-            // thumbnail, question bubble, buttons and the privacy line under the text
-            State::Ask {
-                browse: Browse::Consent(q),
-                ..
-            } => {
-                let chars = 165 + q.chars().count();
-                frame::short(at, screen, chars, THUMB_HEIGHT + 190.0)
-            }
             _ => at,
         };
+        if chatting {
+            // the header's end: a new chat, then close
+            let new = button(label("+ New"), Kind::Elevated, Some(Msg::NewChat));
+            let new = widgets::hint(new, "New chat", Why::Icon, Position::Bottom);
+            let ends = row![new, close(Msg::Card)]
+                .spacing(space::GAP)
+                .align_y(Center);
+            return frame::card(
+                header,
+                ends.into(),
+                body,
+                footer,
+                at,
+                screen,
+                hover,
+                Msg::Card,
+            );
+        }
         card(header, body, footer, at, screen, hover, Msg::Card)
     }
 
@@ -181,36 +213,39 @@ impl Panel {
         (body.into(), Some(self.follow_up("Ask AI about it…", false)))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn ask_view<'a>(
         &'a self,
-        thumb: &'a image::Handle,
         setup: Option<&'a Result<Arc<Setup>, String>>,
         chat: &'a Chat,
         browse: &'a Browse,
+        answers: &'a [(usize, md::Content)],
+        include: bool,
     ) -> Part<'a> {
-        let thumb = container(
-            image(thumb.clone())
-                .height(THUMB_HEIGHT)
-                .content_fit(ContentFit::Contain),
-        )
-        .align_right(Fill);
         let Some(Ok(_)) = setup else {
             let line: Element<'a, Msg> = match setup {
                 Some(Err(steps)) => scroll(note(steps.as_str())).height(Fill).into(),
                 _ => note("Getting ready…").into(),
             };
-            return (column![thumb, line].spacing(STACK).into(), None);
+            return (line, None);
         };
 
         let browser = matches!(setup, Some(Ok(s)) if s.browser());
-        let mut log = column![].spacing(STACK).width(Fill);
+        let streaming = chat.status == Status::Streaming;
+        let mut log = column![].spacing(TURN_GAP).width(Fill);
         for (i, turn) in chat.turns.iter().enumerate() {
-            log = log.push(bubble(&turn.question));
             let last = i + 1 == chat.turns.len();
-            if !turn.answer.is_empty() {
-                log = log.push(text(Role::CHAT, &turn.answer));
-            } else if last && chat.status == Status::Streaming {
-                log = log.push(match browse {
+            log = log.push(self.question(i, turn, !streaming && !browser));
+            let mut answer = column![].spacing(STACK).width(Fill);
+            if let Some(thought) = turn.thought {
+                let line = format!("Thought for {:.1} s", thought.as_secs_f32());
+                answer = answer.push(chip::status(line, Tone::Busy));
+            }
+            let busy = last && streaming;
+            if let (false, Some((_, parsed))) = (turn.answer.is_empty(), answers.get(i)) {
+                answer = answer.push(markdown::markdown(parsed.items()).map(Msg::Answer));
+            } else if busy {
+                answer = answer.push(match browse {
                     Browse::Downloading(done) => {
                         downloading("Downloading the text-recognition model…", *done)
                     }
@@ -218,6 +253,14 @@ impl Panel {
                     _ => note("Thinking…").into(),
                 });
             }
+            if !turn.answer.is_empty() && !busy && !browser {
+                let mut tools = row![quiet("Copy", Msg::CopyTurn(i, true))].spacing(ACTIONS_GAP);
+                if last {
+                    tools = tools.push(quiet("Regenerate", Msg::Regenerate));
+                }
+                answer = answer.push(tools);
+            }
+            log = log.push(answer);
         }
         // Questions about the picture itself: Lens takes the crop (browser provider).
         if browser && chat.status == Status::Done {
@@ -229,7 +272,11 @@ impl Panel {
             log = log.push(lens);
         }
         match &chat.status {
-            Status::Failed(e) => log = log.push(error(Role::NOTE, e)),
+            Status::Failed(e) if browser => log = log.push(error(Role::NOTE, e)),
+            Status::Failed(e) => {
+                let retry = quiet("Retry", Msg::Regenerate);
+                log = log.push(column![error(Role::NOTE, e), retry].spacing(STACK));
+            }
             Status::Cancelled => log = log.push(note("Stopped.")),
             _ => {}
         }
@@ -241,8 +288,19 @@ impl Panel {
                 .iter()
                 .enumerate()
                 .map(|(i, p)| chip::action(p.label.to_string(), Msg::Preset(i)));
-            log = log.push(row(prompts).spacing(CHIPS_GAP).wrap());
+            log = log.push(
+                column![
+                    note("Circle anything on your screen or ask a question below."),
+                    row(prompts).spacing(CHIPS_GAP).wrap()
+                ]
+                .spacing(STACK),
+            );
         }
+        log = match &self.note {
+            Some(Ok(done)) => log.push(note(*done)),
+            Some(Err(e)) => log.push(error(Role::NOTE, e)),
+            None => log,
+        };
         let input: Element<'a, Msg> = if matches!(browse, Browse::Consent(_)) {
             column![
                 note(
@@ -257,20 +315,73 @@ impl Panel {
             ]
             .spacing(STACK)
             .into()
+        } else if browser {
+            self.follow_up("Ask a follow-up…", streaming)
         } else {
-            self.follow_up("Ask a follow-up…", chat.status == Status::Streaming)
+            self.composer(include, streaming)
         };
-        let privacy = if browser {
-            "When you send, your question and the text read from the selection go to Google \
-             AI Mode. The image is not uploaded unless you choose Lens."
-        } else {
-            "Only this selection is sent, and only to the provider you chose."
+        let privacy = match (browser, include) {
+            (true, _) => {
+                "When you send, your question and the text read from the selection go to \
+                 Google AI Mode. The image is not uploaded unless you choose Lens."
+            }
+            (false, true) => "Only this selection is sent, and only to the provider you chose.",
+            (false, false) => "Only your question is sent, to the provider you chose.",
         };
-        let body = scroll(column![thumb, log].spacing(STACK))
-            .id(LOG)
-            .height(Fill);
+        let body = scroll(log).id(LOG).height(Fill);
         let footer = column![input, note(privacy)].spacing(STACK);
         (body.into(), Some(footer.into()))
+    }
+
+    /// The user's turn `i`: the selection's chip when it went along, the
+    /// bubble, and Copy / Edit (`editable`: not while an answer streams).
+    fn question<'a>(&'a self, i: usize, turn: &'a Turn, editable: bool) -> Element<'a, Msg> {
+        let mut side = column![].spacing(STACK).align_x(Right).width(Fill);
+        if turn.screen {
+            side = side.push(chip::status(
+                self.crop_size("Selected screen region"),
+                Tone::Busy,
+            ));
+        }
+        side = side.push(bubble(&turn.question));
+        let mut tools = row![quiet("Copy", Msg::CopyTurn(i, false))].spacing(ACTIONS_GAP);
+        if editable {
+            tools = tools.push(quiet("Edit", Msg::EditTurn(i)));
+        }
+        side.push(tools).into()
+    }
+
+    /// "`what` · W×H px" (the crop, physical px).
+    fn crop_size(&self, what: &str) -> String {
+        format!("{what} · {}×{} px", self.crop.width, self.crop.height)
+    }
+
+    /// The chat's composer: the attached selection's chip (while Include
+    /// screen is on), the field with Send (Stop while answering), and the
+    /// Include screen switch.
+    fn composer(&self, include: bool, streaming: bool) -> Element<'_, Msg> {
+        let toggle = button(
+            row![chip::dot(include), label("Include screen")]
+                .spacing(space::GAP)
+                .align_y(Center),
+            Kind::Elevated,
+            Some(Msg::IncludeScreen),
+        );
+        let toggle = widgets::hint(
+            toggle,
+            "Send the selection with your question",
+            Why::Icon,
+            Position::Top,
+        );
+        let mut parts = column![].spacing(STACK);
+        if include {
+            let attached = self.crop_size("Screen selection attached");
+            parts = parts.push(chip::status(attached, Tone::Busy));
+        }
+        parts
+            .push(self.follow_up("Message OpenCircle AI…", streaming))
+            .push(toggle)
+            .into()
     }
 
     /// The field with its send (or, while streaming, stop) button.

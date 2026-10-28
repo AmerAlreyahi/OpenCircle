@@ -1,12 +1,12 @@
-//! Result panels (DESIGN.md Flow step 5): Search (Lens), Text and Ask AI. One
-//! floating card (`kit::panel_frame::card`: on the side away from the
+//! Result panels (DESIGN.md Flow step 5): Search (Lens), Text and Ask AI (the
+//! AI chat: docked, its answers as Markdown). One floating card (`kit::panel_frame::card`: on the side away from the
 //! selection, a card at the bottom on narrow screens; dragged and resized by
 //! its frame) over the frozen frame, so the selection stays visible. Slow work
 //! runs on its own thread (`background`); its results arrive as `Msg`s.
 //! Dropping a panel stops its running work. What it shows: `view`.
 use std::sync::Arc;
 
-use iced::widget::{image, operation, text_editor};
+use iced::widget::{markdown, operation, text_editor};
 use iced::{Task, task};
 
 use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
@@ -16,6 +16,7 @@ use crate::actions::{self, Crop, lens};
 use crate::ai;
 use crate::ui::background;
 use crate::ui::keys;
+use crate::ui::kit::markdown::Act;
 use crate::ui::kit::panel_frame;
 
 mod view;
@@ -62,6 +63,19 @@ pub enum Msg {
     Acted(Result<&'static str, String>),
     /// A focused field gave a key back (`keys`); the App handles it.
     Key(keys::Keyed),
+    /// Ask AI: send the selection with the next question, or not.
+    IncludeScreen,
+    /// Ask AI: an empty chat (the running answer stops).
+    NewChat,
+    /// A click in an answer: a link, or a code block's Copy.
+    Answer(Act),
+    /// Copy turn `i`'s answer (`false`: its question).
+    CopyTurn(usize, bool),
+    /// Put turn `i`'s question back in the input; sending replaces it and
+    /// the turns after it.
+    EditTurn(usize),
+    /// Ask the last question again (also Retry after an error).
+    Regenerate,
 }
 
 pub struct Panel {
@@ -84,11 +98,16 @@ enum State {
     Lens(Option<Result<(), String>>),
     Text(Reading),
     Ask {
-        thumb: image::Handle,
         /// `None` while loading the config and key.
         setup: Option<Result<Arc<Setup>, String>>,
         chat: Chat,
         browse: Browse,
+        /// Each turn's answer parsed as Markdown, and how much of it.
+        answers: Vec<(usize, markdown::Content)>,
+        /// The selection goes with the next question (on by default).
+        include: bool,
+        /// The question being edited (its turn).
+        editing: Option<usize>,
     },
 }
 
@@ -143,12 +162,7 @@ impl Panel {
                 Task::none()
             }
             actions::Panel::Ask => {
-                panel.state = State::Ask {
-                    thumb: image::Handle::from_rgba(crop.width, crop.height, crop.rgba.clone()),
-                    setup: None,
-                    chat: Chat::default(),
-                    browse: Browse::Idle,
-                };
+                panel.state = State::ask(Chat::default());
                 // No key (Google AI Mode): nothing to load (no keyring, no PNG), so
                 // the question goes at once, never "Getting ready…" before it.
                 if crate::config::current().ai.provider == crate::config::Provider::Browser {
@@ -171,6 +185,7 @@ impl Panel {
         if let State::Ask { chat: open, .. } = &mut panel.state {
             *open = chat;
         }
+        panel.sync();
         (panel, task)
     }
 
@@ -198,6 +213,32 @@ impl Panel {
     /// Messages for the panel itself (the App handles Cancel, CopyText, Search
     /// and the Lens follow-up first).
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
+        let task = self.on(msg);
+        self.sync();
+        task
+    }
+
+    /// The answers' Markdown follows the chat: new text parsed on, a turn
+    /// taken back or replaced parsed anew.
+    fn sync(&mut self) {
+        let State::Ask { chat, answers, .. } = &mut self.state else {
+            return;
+        };
+        answers.truncate(chat.turns.len());
+        for (i, turn) in chat.turns.iter().enumerate() {
+            if answers.len() == i {
+                answers.push((0, markdown::Content::new()));
+            }
+            let (parsed, md) = &mut answers[i];
+            if turn.answer.len() < *parsed {
+                (*parsed, *md) = (0, markdown::Content::new());
+            }
+            md.push_str(&turn.answer[*parsed..]);
+            *parsed = turn.answer.len();
+        }
+    }
+
+    fn on(&mut self, msg: Msg) -> Task<Msg> {
         match (&mut self.state, msg) {
             (State::Lens(status), Msg::LensOpened(result)) => *status = Some(result.map(drop)),
             (_, Msg::Input(value)) => self.input = value,
@@ -212,7 +253,67 @@ impl Panel {
                 Msg::Submit,
             ) if chat.status != Status::Streaming => {
                 let question = self.take_input();
+                if let State::Ask { chat, editing, .. } = &mut self.state
+                    && let Some(i) = editing.take()
+                    && !question.trim().is_empty()
+                {
+                    chat.take_back(i);
+                }
                 return self.send(&question);
+            }
+            (State::Ask { include, .. }, Msg::IncludeScreen) => *include = !*include,
+            (
+                State::Ask {
+                    chat,
+                    browse,
+                    editing,
+                    ..
+                },
+                Msg::NewChat,
+            ) => {
+                (*chat, *browse, *editing) = (Chat::default(), Browse::Idle, None);
+                self.work = None;
+                self.input.clear();
+                self.note = None;
+            }
+            (State::Ask { .. }, Msg::Answer(act)) => {
+                return match act {
+                    // Only on a click, and only a web link (`open_link`).
+                    Act::Link(url) => background(move |tx| {
+                        let done = crate::sys::open::open_link(&url)
+                            .map(|()| "Opened in your browser.")
+                            .map_err(|e| format!("Could not open the link: {e}"));
+                        let _ = tx.unbounded_send(Msg::Acted(done));
+                    }),
+                    Act::Copy(code) => copy(code),
+                };
+            }
+            (State::Ask { chat, .. }, Msg::CopyTurn(i, answer)) => {
+                if let Some(turn) = chat.turns.get(i) {
+                    return copy(match answer {
+                        true => turn.answer.clone(),
+                        false => turn.question.clone(),
+                    });
+                }
+            }
+            (State::Ask { chat, editing, .. }, Msg::EditTurn(i))
+                if chat.status != Status::Streaming =>
+            {
+                if let Some(turn) = chat.turns.get(i) {
+                    self.input = turn.question.clone();
+                    *editing = Some(i);
+                    return operation::focus(INPUT);
+                }
+            }
+            (State::Ask { chat, .. }, Msg::Regenerate) => {
+                if let Some(question) = chat
+                    .turns
+                    .len()
+                    .checked_sub(1)
+                    .and_then(|i| chat.take_back(i))
+                {
+                    return self.send(&question);
+                }
             }
             (State::Ask { .. }, Msg::Preset(i)) => {
                 if let Some(preset) = PRESETS.get(i) {
@@ -345,6 +446,7 @@ impl Panel {
             setup: Some(Ok(setup)),
             chat,
             browse,
+            include,
             ..
         } = &mut self.state
         else {
@@ -361,7 +463,9 @@ impl Panel {
             }
             return self.browse(question.into(), true);
         }
-        let Some(messages) = chat.ask(question, &setup.png) else {
+        // Include screen off: the question goes without the picture.
+        let png: &[u8] = if *include { &setup.png } else { &[] };
+        let Some(messages) = chat.ask(question, png) else {
             return Task::none();
         };
         let setup = setup.clone();
@@ -426,6 +530,30 @@ impl Panel {
         self.work = Some(handle.abort_on_drop());
         task
     }
+}
+
+impl State {
+    /// A new Ask AI chat (`chat`), getting ready.
+    fn ask(chat: Chat) -> State {
+        State::Ask {
+            setup: None,
+            chat,
+            browse: Browse::Idle,
+            answers: Vec::new(),
+            include: true,
+            editing: None,
+        }
+    }
+}
+
+/// Puts `text` on the clipboard (on a thread); its note says so.
+fn copy(text: String) -> Task<Msg> {
+    background(move |tx| {
+        let done = actions::copy::text(text)
+            .map(|()| "Copied.")
+            .map_err(|e| format!("Could not copy: {e}"));
+        let _ = tx.unbounded_send(Msg::Acted(done));
+    })
 }
 
 /// What a chip click does: open the link or a new message, or copy the number.

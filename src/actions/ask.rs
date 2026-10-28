@@ -2,6 +2,7 @@
 //! (`crate::ai`). Nothing is sent until the user asks a question.
 use std::fmt;
 use std::ops::ControlFlow;
+use std::time::{Duration, Instant};
 
 use super::{Action, Crop, Key, Panel, Run};
 use crate::ai::{self, Role};
@@ -21,7 +22,7 @@ pub const ACTION: Action = Action {
 
 const SYSTEM: &str = "The image is part of the user's screen that they selected. \
 Answer their questions about it briefly and plainly, in the language they write in. \
-Use plain text, no Markdown.";
+Use Markdown only where it helps: short lists, tables, fenced code blocks.";
 
 /// A suggested question: a chip in the Ask panel. ONE list for every provider: the
 /// API providers send `prompt` with the picture, the browser provider puts it in
@@ -203,6 +204,10 @@ fn steps(provider: &Provider) -> String {
 pub struct Turn {
     pub question: String,
     pub answer: String,
+    /// The selection went with this question (Include screen was on).
+    pub screen: bool,
+    /// How long the model thought before answering, if it said it did.
+    pub thought: Option<Duration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -221,6 +226,8 @@ pub enum Status {
 pub struct Chat {
     pub turns: Vec<Turn>,
     pub status: Status,
+    /// The model began thinking (no text yet).
+    thinking: Option<Instant>,
 }
 
 impl Chat {
@@ -242,15 +249,37 @@ impl Chat {
         self.turns.push(Turn {
             question: question.into(),
             answer: String::new(),
+            screen: !png.is_empty(),
+            thought: None,
         });
         self.status = Status::Streaming;
+        self.thinking = None;
         Some(messages)
     }
 
+    /// A piece of the answer; an empty one = the model is thinking (`ai::ask_stream`).
     pub fn delta(&mut self, piece: &str) {
         if let (Status::Streaming, Some(turn)) = (&self.status, self.turns.last_mut()) {
+            if piece.is_empty() {
+                self.thinking.get_or_insert_with(Instant::now);
+            } else if let Some(since) = self.thinking.take() {
+                turn.thought = Some(since.elapsed());
+            }
             turn.answer.push_str(piece);
         }
+    }
+
+    /// Takes turn `i` and every turn after it back out of the chat, and
+    /// returns its question: to edit it, or to ask it again (Regenerate).
+    /// `None` while an answer streams.
+    pub fn take_back(&mut self, i: usize) -> Option<String> {
+        if self.status == Status::Streaming || i >= self.turns.len() {
+            return None;
+        }
+        let question = self.turns[i].question.clone();
+        self.turns.truncate(i);
+        self.status = Status::Idle;
+        Some(question)
     }
 
     pub fn finish(&mut self, result: Result<(), String>) {
@@ -387,8 +416,54 @@ pub(crate) mod tests {
         assert!(chat.ask("Next", b"png").is_some(), "can ask again");
     }
 
+    #[test]
+    fn edit_and_regenerate_take_turns_back() {
+        let mut chat = Chat::default();
+        for q in ["One", "Two", "Three"] {
+            chat.ask(q, b"png").unwrap();
+            chat.delta(&format!("{q}!"));
+            assert!(chat.take_back(0).is_none(), "not while streaming");
+            chat.finish(Ok(()));
+        }
+        // Regenerate: the last question again, the earlier history kept.
+        let last = chat.turns.len() - 1;
+        let again = chat.take_back(last).unwrap();
+        assert_eq!(again, "Three");
+        let sent = chat.ask(&again, b"png").unwrap();
+        let texts: Vec<_> = sent[1..].iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(texts, ["One", "One!", "Two", "Two!", "Three"]);
+        chat.finish(Ok(()));
+        // Edit the second: it and what came after go; the edited one is resent.
+        assert_eq!(chat.take_back(1).unwrap(), "Two");
+        assert_eq!(chat.turns.len(), 1);
+        let sent = chat.ask("Two, edited", b"png").unwrap();
+        let texts: Vec<_> = sent[1..].iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(texts, ["One", "One!", "Two, edited"]);
+        assert!(chat.take_back(9).is_none());
+    }
+
+    #[test]
+    fn the_screen_goes_only_when_included_and_thinking_is_timed() {
+        let mut chat = Chat::default();
+        // Include screen off: no image anywhere in the request.
+        let sent = chat.ask("Hi", &[]).unwrap();
+        assert!(sent.iter().all(|m| m.image_png.is_none()));
+        assert!(!chat.turns[0].screen);
+        chat.delta(""); // thinking
+        std::thread::sleep(Duration::from_millis(5));
+        chat.delta("Hello");
+        chat.delta("");
+        chat.finish(Ok(()));
+        assert_eq!(chat.turns[0].answer, "Hello");
+        assert!(chat.turns[0].thought.unwrap() >= Duration::from_millis(5));
+        // On again: the picture goes with this request.
+        let sent = chat.ask("And now?", b"png").unwrap();
+        assert_eq!(sent.iter().filter(|m| m.image_png.is_some()).count(), 1);
+        assert!(chat.turns[1].screen && chat.turns[1].thought.is_none());
+    }
+
     /// A one-shot OpenAI-compatible server on 127.0.0.1 that streams `pieces`.
-    fn stub(pieces: &'static [&'static str]) -> String {
+    pub(crate) fn stub(pieces: &'static [&'static str]) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         std::thread::spawn(move || {
@@ -425,7 +500,7 @@ pub(crate) mod tests {
         url
     }
 
-    fn local_setup(base_url: String) -> Setup {
+    pub(crate) fn local_setup(base_url: String) -> Setup {
         Setup {
             cfg: AiConfig {
                 provider: Provider::OpenaiCompatible,

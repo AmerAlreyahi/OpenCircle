@@ -133,10 +133,44 @@ impl App {
     }
 
     /// Where the result card shows: where the user left it, else away from
-    /// the selection (`card::place`).
+    /// the selection (`card::place`). The AI chat docks (`chat_at`).
     pub(in crate::ui) fn card_at(&self) -> Rectangle {
         let selection = self.o.selection.map(|s| self.o.view.rect_to_screen(s.area));
+        if self.chatting() {
+            return self.chat_at(selection);
+        }
         card::place(self.o.screen, selection, self.card)
+    }
+
+    /// The AI chat is the card shown.
+    pub(in crate::ui) fn chatting(&self) -> bool {
+        (self.o.panel.as_ref()).is_some_and(|(_, p)| p.kind() == actions::Panel::Ask)
+    }
+
+    /// The AI chat's card: docked on the side the user last let it go on,
+    /// else the side `card::place` picks (away from the `selection`); held
+    /// off it while dragged, gliding back once let go (`motion::DOCK`).
+    fn chat_at(&self, selection: Option<Rectangle>) -> Rectangle {
+        let screen = self.o.screen;
+        let side = self
+            .chat_side
+            .unwrap_or_else(|| card::dock_side(card::place(screen, selection, None), screen));
+        let dock = card::docked(screen, side, self.o.work_inset);
+        match self.o.chat_glide {
+            Some((_, from, t)) => Rectangle::new(
+                from.position() + (dock.position() - from.position()) * t,
+                dock.size(),
+            ),
+            None => dock + self.o.chat_off,
+        }
+    }
+
+    /// The chat card let go: it docks to the side its middle is on, gliding there.
+    pub(in crate::ui) fn dock_chat(&mut self, now: std::time::Instant) {
+        let at = self.card_at();
+        self.chat_side = Some(card::dock_side(at, self.o.screen));
+        self.o.chat_off = iced::Vector::ZERO;
+        self.o.chat_glide = Some((now, at, 0.0));
     }
 
     /// How open the result card is (0..1; 0 before its first frame, 1 at once

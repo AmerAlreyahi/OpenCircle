@@ -135,8 +135,16 @@ pub(crate) fn parse_event(data: &str) -> Result<Event, AiError> {
     if choice["finish_reason"] == "content_filter" {
         return Err(AiError::Refused);
     }
-    match choice["delta"]["content"].as_str() {
+    let delta = &choice["delta"];
+    match delta["content"].as_str() {
         Some(text) if !text.is_empty() => Ok(Event::Delta(text.to_string())),
+        // DeepSeek / Ollama / LM Studio: `reasoning_content`; OpenRouter: `reasoning`
+        _ if [&delta["reasoning_content"], &delta["reasoning"]]
+            .iter()
+            .any(|r| r.as_str().is_some_and(|r| !r.is_empty())) =>
+        {
+            Ok(Event::Thinking)
+        }
         _ => Ok(Event::Skip),
     }
 }
@@ -331,7 +339,7 @@ data: {"id":"never read","choices":[{"delta":{"content":"X"}}]}
                 out.push_str(&t);
                 true
             }
-            Event::Skip => true,
+            Event::Skip | Event::Thinking => true,
             Event::Done => false,
         })
         .unwrap();
@@ -351,5 +359,17 @@ data: {"id":"never read","choices":[{"delta":{"content":"X"}}]}
             Err(AiError::BadResponse(_))
         ));
         assert!(matches!(parse_event(r#"{"choices":[]}"#), Ok(Event::Skip)));
+    }
+
+    #[test]
+    fn reasoning_deltas_say_thinking() {
+        for ev in [
+            r#"{"choices":[{"delta":{"content":null,"reasoning_content":"Let me"}}]}"#,
+            r#"{"choices":[{"delta":{"content":"","reasoning":"Let me"}}]}"#,
+        ] {
+            assert!(matches!(parse_event(ev), Ok(Event::Thinking)), "{ev}");
+        }
+        let empty = r#"{"choices":[{"delta":{"content":"","reasoning":""}}]}"#;
+        assert!(matches!(parse_event(empty), Ok(Event::Skip)));
     }
 }

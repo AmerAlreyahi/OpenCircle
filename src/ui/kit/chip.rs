@@ -198,3 +198,19 @@ pub fn action<'a, Message: Clone + 'a>(label: String, on_press: Message) -> Elem
         })
         .into()
 }
+
+/// A 6 px dot: `accent` when `on`, `text_muted` when off (the chat's
+/// Include screen).
+pub fn dot<'a, Message: 'a>(on: bool) -> Element<'a, Message> {
+    let fill = match on {
+        true => c().accent,
+        false => c().text_muted,
+    };
+    container(Space::new().width(size::DOT).height(size::DOT))
+        .style(move |_| container::Style {
+            background: Some(fill.into()),
+            border: Border::default().rounded(radius::FULL),
+            ..container::Style::default()
+        })
+        .into()
+}
