@@ -277,6 +277,12 @@ pub fn full_size() -> u64 {
         .sum()
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A test serving the files from its own local fake server may fetch.
+    pub(crate) static LOCAL_FAKE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// `ensure_models` for any list of pinned files (OCR's plus offline
 /// translation's: one download, one progress).
 pub(crate) fn ensure(
@@ -291,6 +297,15 @@ pub(crate) fn ensure(
             fs::create_dir_all(dir)?;
         }
         if !is_verified(path, f)? {
+            // Tests never download (a real fetch filled CI's data folder and
+            // broke other tests); the manual, ignored model tests opt in.
+            #[cfg(test)]
+            if !LOCAL_FAKE.get() && std::env::var_os("OPENCIRCLE_TEST_DOWNLOADS").is_none() {
+                panic!(
+                    "a test tried to download {} (set OPENCIRCLE_TEST_DOWNLOADS=1 for the manual model tests)",
+                    path.display()
+                );
+            }
             let agent = agent.get_or_insert_with(|| crate::net::agent(crate::net::MODELS));
             fetch(agent, f, path, |n| progress(done + n, total))?;
         }
@@ -474,6 +489,7 @@ mod tests {
 
     #[test]
     fn ensure_spans_folders_and_fetches_only_what_is_missing() {
+        LOCAL_FAKE.set(true); // its files come from a local fake server
         let dir = temp_dir("ensure");
         let files = [
             (dir.join("a/hello.bin"), &HELLO),

@@ -15,8 +15,17 @@ pub const ACTION: Action = Action {
     run: Run::Finish(copy_read),
 };
 
-/// Reads `crop`'s text and copies it (the pill's text, or why not).
+/// The text reader's models aren't here: Copy text never fetches them itself
+/// (only the download card does, on the user's click).
+pub const NEEDS_READER: &str = "Get the text reader first: press Copy text in the overlay.";
+
+/// Reads `crop`'s text and copies it (the pill's text, or why not). Never
+/// downloads: without the models it says so (the overlay shows the download
+/// card before it gets here; the quick action and `run text` get this answer).
 fn copy_read(crop: Crop) -> Result<String, String> {
+    if !models_present() {
+        return Err(NEEDS_READER.into());
+    }
     let text = read(&crop, |_| {})?;
     if text.trim().is_empty() {
         return Err("No text found in the selection.".into());
@@ -130,5 +139,22 @@ mod tests {
         let blocks = [block("one", 0.0, 0.0), block("two", 0.0, 8.0)];
         assert_eq!(join_lines(&blocks), "one\ntwo");
         assert_eq!(join_lines(&[]), "");
+    }
+}
+
+#[cfg(test)]
+mod copy_read_tests {
+    /// Copy text without the models answers, and never fetches them (it used to
+    /// download them unasked; in CI that put real models in the data folder).
+    #[test]
+    fn copy_text_never_downloads_the_models() {
+        super::MODELS_HERE.set(Some(false));
+        let crop = crate::actions::Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        };
+        assert_eq!(super::copy_read(crop), Err(super::NEEDS_READER.to_string()));
+        super::MODELS_HERE.set(None);
     }
 }
