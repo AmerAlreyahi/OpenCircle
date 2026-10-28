@@ -4187,7 +4187,7 @@ fn the_pinned_chats_black_spot_is_no_protected_app() {
         area,
         kind: overlay::Kind::Drag,
     });
-    let scan = qr::scan_around(&app.crop().unwrap(), app.chat_hole());
+    let scan = qr::scan_around(&app.crop().unwrap(), app.chat_hole(), &[[0, 0, w, h]]);
     assert!(!scan.protected, "only our own chat was there");
     // wholly under it: judged as usual (black)
     let area = Rectangle::new(Point::new(450.0, 50.0), Size::new(100.0, 100.0));
@@ -4195,7 +4195,7 @@ fn the_pinned_chats_black_spot_is_no_protected_app() {
         area,
         kind: overlay::Kind::Drag,
     });
-    assert!(qr::scan_around(&app.crop().unwrap(), app.chat_hole()).protected);
+    assert!(qr::scan_around(&app.crop().unwrap(), app.chat_hole(), &[[0, 0, w, h]]).protected);
     // a real black window elsewhere still says so
     let black = Crop {
         width: w,
@@ -4206,7 +4206,7 @@ fn the_pinned_chats_black_spot_is_no_protected_app() {
     app.o.chat_hole = Some(chat);
     let _ = app.update(Message::Scanned(
         area,
-        qr::scan_around(&app.crop().unwrap(), app.chat_hole()),
+        qr::scan_around(&app.crop().unwrap(), app.chat_hole(), &[[0, 0, w, h]]),
     ));
     assert!(overlay_texts(&app).contains(&PROTECTED.to_string()));
 }

@@ -163,16 +163,7 @@ impl App {
         if !self.o.screens.iter().any(|s| meets(&s)) {
             return actions::crop(pixels, *width, *height, self.o.scale, area);
         }
-        // the edges round outwards, as `crop` does (past a mapping's float
-        // error), kept on the screens
-        let desk = self.o.desk().intersection(&area)?;
-        let a = to_desktop(start, desk.position());
-        let b = to_desktop(start, desk.position() + Vector::from(desk.size()));
-        let (down, up) = (
-            |v: f32| (v + 0.01).floor() as i32,
-            |v: f32| (v - 0.01).ceil() as i32,
-        );
-        let bounds = [down(a.x), down(a.y), up(b.x), up(b.y)];
+        let bounds = self.desk_bounds(area)?;
         fn part(at: (i32, i32), frame: &image::Handle) -> Option<actions::crop::Part<'_>> {
             match frame {
                 image::Handle::Rgba {
@@ -190,6 +181,38 @@ impl App {
             .flatten()
             .collect();
         actions::stitch(&parts, bounds)
+    }
+
+    /// `area` (image px, on a stitched crop) in desktop px: `[x0, y0, x1, y1]`, the
+    /// edges rounded outwards, as `crop` does (past a mapping's float error), kept
+    /// on the screens.
+    fn desk_bounds(&self, area: Rectangle) -> Option<[i32; 4]> {
+        let start = self.o.place();
+        let desk = self.o.desk().intersection(&area)?;
+        let a = to_desktop(start, desk.position());
+        let b = to_desktop(start, desk.position() + Vector::from(desk.size()));
+        let (down, up) = (
+            |v: f32| (v + 0.01).floor() as i32,
+            |v: f32| (v - 0.01).ceil() as i32,
+        );
+        Some([down(a.x), down(a.y), up(b.x), up(b.y)])
+    }
+
+    /// The desktop px (physical) of `crop_of(area)`'s top-left corner.
+    pub(in crate::ui) fn crop_origin(&self, area: Rectangle) -> Option<(i32, i32)> {
+        let image::Handle::Rgba { width, height, .. } = self.o.frame.as_ref()? else {
+            return None;
+        };
+        let start = self.o.place();
+        let meets = |s: &Screen| {
+            (area_of(start, s.place).intersection(&area)).is_some_and(|r| r.width * r.height > 0.0)
+        };
+        if self.o.screens.iter().any(meets) {
+            let [x, y, ..] = self.desk_bounds(area)?;
+            return Some((x, y));
+        }
+        let [x, y, ..] = actions::crop_bounds(*width, *height, self.o.scale, area)?;
+        Some((start.origin.0 + x as i32, start.origin.1 + y as i32))
     }
 
     /// `overlay::settle` on the desk (`Opening::desk`): a scribble's hull is

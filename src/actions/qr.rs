@@ -6,8 +6,6 @@ use super::Crop;
 /// Pixels this dark (every channel) count as black.
 const BLACK: u8 = 3;
 /// A capture with at least this share of black pixels is "protected".
-// ponytail: a genuinely pure-black selection (OLED theme, empty terminal) also trips
-// it; the pill only says so, nothing is blocked. Tighten here if users report it.
 const PROTECTED_SHARE: f64 = 0.98;
 
 /// What a selection holds.
@@ -26,16 +24,30 @@ pub enum Act {
     Open,
 }
 
+/// `scan_around` with a protected window over the whole crop and no hole.
 #[cfg(test)]
 pub fn scan(crop: &Crop) -> Scan {
-    scan_around(crop, None)
+    scan_around(crop, None, &[[0, 0, crop.width, crop.height]])
 }
 
-/// `scan`, not judging the pixels in `hole` (crop px, x0 y0 x1 y1): what our own
-/// pinned AI chat covered (its window is kept out of captures, so the OS may leave
-/// that part black). A crop lying wholly in the hole is judged as usual.
-pub fn scan_around(crop: &Crop, hole: Option<[u32; 4]>) -> Scan {
-    let protected = is_protected_around(crop, hole);
+/// `is_protected_around` with a window over the whole crop.
+#[cfg(test)]
+fn is_protected(crop: &Crop) -> bool {
+    around(crop, None)
+}
+
+#[cfg(test)]
+fn around(crop: &Crop, hole: Option<[u32; 4]>) -> bool {
+    is_protected_around(crop, hole, &[[0, 0, crop.width, crop.height]])
+}
+
+/// What a selection holds. `windows`: the windows the OS keeps out of captures
+/// (display affinity), as crop px rects (x0 y0 x1 y1); a black crop is only
+/// "protected" where one of them lies. `hole`: not judged, what our own pinned
+/// AI chat covered (its window is kept out of captures, so the OS may leave that
+/// part black); a crop lying wholly in the hole is judged as usual.
+pub fn scan_around(crop: &Crop, hole: Option<[u32; 4]>, windows: &[[u32; 4]]) -> Scan {
+    let protected = is_protected_around(crop, hole, windows);
     Scan {
         // All black: nothing to decode, and the scan below would be wasted time.
         qr: if protected { None } else { decode(crop) },
@@ -43,36 +55,47 @@ pub fn scan_around(crop: &Crop, hole: Option<[u32; 4]>) -> Scan {
     }
 }
 
-/// Whether (almost) every pixel of `crop` is black.
-#[cfg(test)]
-pub fn is_protected(crop: &Crop) -> bool {
-    is_protected_around(crop, None)
+/// Window rects (physical desktop px: x, y, w, h) in the crop px of a crop whose
+/// top-left is at `origin` (desktop px): cut at the crop's top-left, empty ones
+/// dropped.
+pub fn crop_rects(origin: (i32, i32), rects: &[(i32, i32, u32, u32)]) -> Vec<[u32; 4]> {
+    let to = |v: i64, o: i32| (v - i64::from(o)).clamp(0, i64::from(u32::MAX)) as u32;
+    rects
+        .iter()
+        .map(|&(x, y, w, h)| {
+            let (x, y) = (i64::from(x), i64::from(y));
+            [
+                to(x, origin.0),
+                to(y, origin.1),
+                to(x + i64::from(w), origin.0),
+                to(y + i64::from(h), origin.1),
+            ]
+        })
+        .filter(|[x0, y0, x1, y1]| x1 > x0 && y1 > y0)
+        .collect()
 }
 
-/// `is_protected` over the pixels outside `hole` (all of them when none is).
-fn is_protected_around(crop: &Crop, hole: Option<[u32; 4]>) -> bool {
+/// Whether (almost) every pixel of `crop` inside `windows` is black. Pixels
+/// outside every window are never judged: a black wallpaper is not protected.
+fn is_protected_around(crop: &Crop, hole: Option<[u32; 4]>, windows: &[[u32; 4]]) -> bool {
     let w = crop.width.max(1) as usize;
-    let inside = |i: usize| {
-        hole.is_some_and(|[x0, y0, x1, y1]| {
-            let (x, y) = ((i % w) as u32, (i / w) as u32);
-            (x0..x1).contains(&x) && (y0..y1).contains(&y)
-        })
+    let within = |r: &[u32; 4], i: usize| {
+        let (x, y) = ((i % w) as u32, (i / w) as u32);
+        (r[0]..r[2]).contains(&x) && (r[1]..r[3]).contains(&y)
     };
+    let in_hole = |i: usize| hole.as_ref().is_some_and(|r| within(r, i));
     let pixels = crop.rgba.as_chunks::<4>().0;
-    let count = |skip: bool| {
-        let judged = pixels
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !(skip && inside(*i)));
+    let count = |judge: &dyn Fn(usize) -> bool| {
         let (mut all, mut black) = (0usize, 0usize);
-        for (_, p) in judged {
+        for (_, p) in pixels.iter().enumerate().filter(|(i, _)| judge(*i)) {
             all += 1;
             black += usize::from(p[..3].iter().all(|&c| c <= BLACK));
         }
         (all, black)
     };
-    let (all, black) = match count(true) {
-        (0, _) => count(false), // only under the chat: as usual
+    let (all, black) = match count(&|i| !in_hole(i) && windows.iter().any(|r| within(r, i))) {
+        // only under the chat: as usual
+        (0, _) if (0..pixels.len()).all(in_hole) => count(&|_| true),
         counted => counted,
     };
     all > 0 && black as f64 >= all as f64 * PROTECTED_SHARE
@@ -244,21 +267,51 @@ pub(crate) mod tests {
             rgba,
         };
         let hole = Some([1, 0, 64, 64]);
-        assert!(is_protected_around(&crop, None), "98 % black");
-        assert!(
-            !is_protected_around(&crop, hole),
-            "the black is only our chat"
-        );
-        assert!(!scan_around(&crop, hole).protected);
+        assert!(around(&crop, None), "98 % black");
+        assert!(!around(&crop, hole), "the black is only our chat");
+        assert!(!scan_around(&crop, hole, &[[0, 0, 64, 64]]).protected);
         let black = solid([0, 0, 0, 255], 64, 64);
         assert!(
-            is_protected_around(&black, Some([32, 0, 64, 64])),
+            around(&black, Some([32, 0, 64, 64])),
             "a black app beside it"
         );
         assert!(
-            is_protected_around(&black, Some([0, 0, 64, 64])),
+            around(&black, Some([0, 0, 64, 64])),
             "wholly under it: as usual"
         );
+    }
+
+    #[test]
+    fn black_is_protected_only_where_a_protected_window_is() {
+        let black = solid([0, 0, 0, 255], 64, 64);
+        // a black wallpaper: no window under it
+        assert!(!scan_around(&black, None, &[]).protected);
+        // a window covering a corner of it
+        assert!(scan_around(&black, None, &[[0, 0, 10, 10]]).protected);
+        // a protected window beside the black: the black there is not judged
+        let mut rgba = [0, 0, 0, 255].repeat(64 * 64);
+        for y in 0..64 {
+            rgba[(y * 64 + 32) * 4..][..(32 * 4)].fill(90);
+        }
+        let half = Crop {
+            width: 64,
+            height: 64,
+            rgba,
+        };
+        assert!(!scan_around(&half, None, &[[32, 0, 64, 64]]).protected);
+        assert!(scan_around(&half, None, &[[0, 0, 32, 64]]).protected);
+    }
+
+    #[test]
+    fn window_rects_land_in_crop_px() {
+        // a crop whose top-left is at desktop (100, 50)
+        let r = crop_rects(
+            (100, 50),
+            &[(90, 60, 30, 20), (0, 0, 10, 10), (150, 70, 40, 40)],
+        );
+        assert_eq!(r, vec![[0, 10, 20, 30], [50, 20, 90, 60]]);
+        // a window left of a negative-origin crop
+        assert!(crop_rects((-1920, 0), &[(-2000, 0, 50, 50)]).is_empty());
     }
 
     #[test]

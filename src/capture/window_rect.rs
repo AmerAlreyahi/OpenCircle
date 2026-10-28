@@ -17,6 +17,9 @@ pub struct Win {
     pub title: String,
     /// Windows: its handle (for UI Automation); X11: its id.
     pub handle: isize,
+    /// Windows: kept out of captures by its app (display affinity), so a
+    /// capture shows it black or not at all. Never set elsewhere.
+    pub protected: bool,
 }
 
 /// Every visible top-level window, topmost first; empty where unknown.
@@ -25,6 +28,18 @@ pub fn list() -> Vec<Win> {
         crate::log!("[opencircle] window list unavailable: {e}");
         Vec::new()
     })
+}
+
+/// The rects of the windows their apps keep out of captures (none off Windows).
+pub fn protected() -> Vec<WinRect> {
+    protected_in(&list())
+}
+
+fn protected_in(wins: &[Win]) -> Vec<WinRect> {
+    wins.iter()
+        .filter(|w| w.protected)
+        .map(|w| w.rect)
+        .collect()
 }
 
 /// The window the user is in (Windows: its handle), read before the overlay shows.
@@ -154,6 +169,7 @@ fn platform() -> Result<Vec<Win>, String> {
             rect,
             title,
             handle: xcb::Xid::resource_id(&window) as isize,
+            protected: false,
         });
     }
     Ok(out)
@@ -167,8 +183,8 @@ fn platform() -> Result<Vec<Win>, String> {
         DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GWL_EXSTYLE, GetWindowLongW, GetWindowRect, GetWindowTextW,
-        GetWindowThreadProcessId, IsIconic, IsWindowVisible, WS_EX_TOOLWINDOW,
+        EnumWindows, GWL_EXSTYLE, GetWindowDisplayAffinity, GetWindowLongW, GetWindowRect,
+        GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, WS_EX_TOOLWINDOW,
     };
     use windows::core::BOOL;
 
@@ -214,6 +230,11 @@ fn platform() -> Result<Vec<Win>, String> {
                     ),
                     title: String::from_utf16_lossy(&title[..n]),
                     handle: hwnd.0 as isize,
+                    protected: {
+                        let mut affinity = 0;
+                        let _ = GetWindowDisplayAffinity(hwnd, &mut affinity);
+                        affinity != 0
+                    },
                 });
             }
         }
@@ -493,6 +514,21 @@ fn active(_: bool) -> Option<(WinRect, String, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_windows_kept_out_of_captures_are_protected() {
+        let win = |x, protected| Win {
+            rect: (x, 0, 10, 10),
+            title: String::new(),
+            handle: 0,
+            protected,
+        };
+        assert_eq!(
+            protected_in(&[win(1, false), win(2, true), win(3, false)]),
+            vec![(2, 0, 10, 10)]
+        );
+        assert!(protected_in(&[win(1, false)]).is_empty());
+    }
 
     #[test]
     fn a_browser_loses_its_bars_other_apps_keep_the_client_area() {
