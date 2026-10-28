@@ -84,14 +84,7 @@ const NOT_SCREENS: [&str; 10] = [
 
 /// Screen files that still style in place. A ratchet: a port removes its file
 /// here, and the list only shrinks.
-const LEGACY: &[&str] = &[
-    "border.rs",
-    "edit.rs",
-    "live_layer.rs",
-    "overlay.rs",
-    "setup.rs",
-    "snip.rs",
-];
+const LEGACY: &[&str] = &["border.rs", "edit.rs", "overlay.rs", "setup.rs", "snip.rs"];
 
 #[test]
 fn screens_never_style() {

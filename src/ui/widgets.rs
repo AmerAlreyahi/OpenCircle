@@ -5,7 +5,7 @@
 //! behind each surface (no nested/live blur).
 use iced::widget::text::IntoFragment;
 use iced::widget::{
-    Button, Container, Text, Tooltip, button, container, row, scrollable, space, text, tooltip,
+    Button, Container, Text, Tooltip, button, container, row, space, text, tooltip,
 };
 use iced::{Background, Border, Color, Element, gradient};
 
@@ -247,29 +247,6 @@ pub fn float_chip<'a, Message: Clone + 'a>(
         container(button).style(move |_| glass(999.0, blurred)),
         999.0,
     )
-}
-
-/// Vertical scroll area with a thin scroller from the palette.
-pub fn scroll<'a, Message: 'a>(
-    content: impl Into<Element<'a, Message>>,
-) -> scrollable::Scrollable<'a, Message> {
-    let palette = theme::floating();
-    scrollable(content)
-        .direction(scrollable::Direction::Vertical(
-            scrollable::Scrollbar::new().width(4).scroller_width(4),
-        ))
-        .style(move |theme, status| {
-            let mut style = scrollable::default(theme, status);
-            style.vertical_rail = scrollable::Rail {
-                background: None,
-                border: Border::default(),
-                scroller: scrollable::Scroller {
-                    background: palette.border.into(),
-                    border: Border::default().rounded(2),
-                },
-            };
-            style
-        })
 }
 
 /// Button background: accent gradient for `primary`, else clear until hovered.

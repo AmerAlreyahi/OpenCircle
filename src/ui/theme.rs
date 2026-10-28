@@ -20,8 +20,6 @@ pub struct Palette {
     pub pressed: Color,
     /// Settings / onboarding window background.
     pub window: Color,
-    /// Error text and invalid-field outline.
-    pub danger: Color,
 }
 
 /// `over` (with its alpha) laid on `under`, as one opaque colour.
@@ -51,7 +49,6 @@ const DARK: Palette = Palette {
     hover: Color::from_rgba8(255, 255, 255, 0.08),
     pressed: Color::from_rgba8(255, 255, 255, 0.14),
     window: DARK_WINDOW,
-    danger: Color::from_rgb8(0xff, 0x8a, 0x8a),
 };
 
 const LIGHT: Palette = Palette {
@@ -63,7 +60,6 @@ const LIGHT: Palette = Palette {
     hover: Color::from_rgba8(16, 16, 40, 0.06),
     pressed: Color::from_rgba8(16, 16, 40, 0.11),
     window: LIGHT_WINDOW,
-    danger: Color::from_rgb8(0xc6, 0x28, 0x28),
 };
 
 // Widget themes (config `widget_theme`): the floating widgets only. Every widget
@@ -82,7 +78,6 @@ const FROST: Palette = Palette {
     hover: Color::from_rgba8(255, 255, 255, 0.45),
     pressed: Color::from_rgba8(255, 255, 255, 0.70),
     window: FROST_WINDOW,
-    danger: Color::from_rgb8(0xb3, 0x26, 0x26),
 };
 
 const GRAPHITE_WINDOW: Color = Color::from_rgb8(0x1f, 0x22, 0x28);
@@ -97,7 +92,6 @@ const GRAPHITE: Palette = Palette {
     hover: Color::from_rgba8(255, 255, 255, 0.07),
     pressed: Color::from_rgba8(255, 255, 255, 0.12),
     window: GRAPHITE_WINDOW,
-    danger: Color::from_rgb8(0xf0, 0x8c, 0x8c),
 };
 
 /// Selection stroke and screen border gradient (both themes): violet → cyan.
