@@ -53,6 +53,13 @@ impl App {
         let picked: Vec<Rectangle> = (self.o.text_mode.as_ref())
             .and_then(|m| m.picked.as_ref())
             .map_or_else(Vec::new, word::Picked::rects);
+        // The plain dim (nothing selected) while the view moves: folded into
+        // the zoomed frame's drawing (`overlay::Zoomed`), one pass.
+        let dim = self.o.translate.is_none() || self.o.selection.is_some();
+        let dim_frame = (self.view_moving() && dim)
+            .then_some(())
+            .filter(|_| self.o.selection.is_none() && self.o.others.is_empty())
+            .map(|_| crate::ui::theme::dims(&config::look()).0.a);
         let overlay = overlay::Overlay {
             stroke: &self.o.stroke,
             selection: self.o.selection,
@@ -64,7 +71,7 @@ impl App {
             first_draw: &self.first_draw,
             frame_times: &self.frame_times,
             hover: snip.is_some_and(|s| s.kind.picks()) && self.o.edit.is_none(),
-            dim: self.o.translate.is_none() || self.o.selection.is_some(),
+            dim: dim && dim_frame.is_none(),
             live_drag: snip.is_some(),
             look: config::look(),
             morph: (self.o.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
@@ -89,22 +96,21 @@ impl App {
             // fades in, costs a copy, not a resample)
             None => shown = shown.filter_method(image::FilterMethod::Nearest),
         }
-        // At rest (not zoomed, no translation): drawn as tiles (`overlay::tiles`).
-        let shown: Element<'_, Message> = match &self.o.tiles {
+        // At rest (not zoomed, no translation): pixel for pixel (`overlay::Frozen`).
+        let shown: Element<'_, Message> = match translation {
             // zooming or panning: Nearest (fractions of a frame px)
             _ if self.view_moving() => {
                 let picture = translation.unwrap_or(frame);
                 let zoomed = overlay::Zoomed {
                     picture,
                     view: self.o.view,
+                    dim: dim_frame.unwrap_or(0.0),
                 };
                 canvas(zoomed).width(Fill).height(Fill).into()
             }
-            Some((id, tiles))
-                if *id == frame.id() && translation.is_none() && self.o.view.crop().is_none() =>
-            {
+            None if self.o.view.crop().is_none() => {
                 let scale = self.o.scale;
-                let frozen = overlay::Frozen { tiles, scale };
+                let frozen = overlay::Frozen { frame, scale };
                 canvas(frozen).width(Fill).height(Fill).into()
             }
             _ => shown.into(),

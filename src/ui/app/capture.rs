@@ -219,7 +219,6 @@ impl App {
         let px = |v: f32| (v * scale).round() as u32;
         self.o.view = overlay::View::new(px(size.width), px(size.height), size);
         self.o.zoom = None;
-        self.o.tiles = overlay::tiles(&image).map(|t| (image.id(), t));
         self.o.frame = Some(image);
         self.o.scale = scale;
         self.o.screen = size;

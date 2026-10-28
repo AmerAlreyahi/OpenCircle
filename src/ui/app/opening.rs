@@ -1,6 +1,6 @@
 //! `Opening`: everything one capture holds, from `open` to `close`; `App::o`
 //! holds it only while the overlay is open (`Open`). Closing takes it whole,
-//! so no field (the frame, its tiles, the text read) outlives its opening.
+//! so no field (the frame, the text read) outlives its opening.
 
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -26,8 +26,6 @@ pub(in crate::ui) struct Opening {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
     /// Its RGBA bytes are also what actions crop (shared, never copied whole).
     pub(in crate::ui) frame: Option<image::Handle>,
-    /// The frame cut into tiles for drawing (`overlay::tiles`), and its id.
-    pub(in crate::ui) tiles: Option<(iced::advanced::image::Id, Vec<(Point, image::Handle)>)>,
     /// Physical px per logical px of `frame`.
     pub(in crate::ui) scale: f32,
     /// The overlay's logical size (the monitor's).
@@ -175,7 +173,6 @@ impl Default for Opening {
     fn default() -> Self {
         Opening {
             frame: None,
-            tiles: None,
             scale: 1.0,
             screen: Size::ZERO,
             stroke: Vec::new(),

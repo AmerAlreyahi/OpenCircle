@@ -1302,14 +1302,13 @@ fn gradient_style(span: Rectangle, alpha: f32, (start, end): (Color, Color)) -> 
     canvas::Style::Gradient(linear.into())
 }
 
-/// The frozen frame's tile side (device px); the dim's (logical px).
+/// The dim's tile side (logical px).
 const TILE: u32 = 256;
 
 /// Dims `screen` in `colour` but for the `cut` shapes (even-odd), which lie
 /// within `holes` (their bounds). As one rectangle per `TILE`, and one path
-/// for the tiles the holes touch: like the frame (`tiles`), a small redraw
-/// then fills only the dim under it (tiny-skia fills a clipped path over its
-/// whole size). `whole` (the wheel zoom easing: every frame redraws all of
+/// for the tiles the holes touch: a small redraw then fills only the dim
+/// under it (tiny-skia fills a clipped path over its whole size). `whole` (the wheel zoom easing: every frame redraws all of
 /// it): a row's untouched tiles side by side as one rectangle (the renderer
 /// blends a big one on all its cores).
 fn dim(
@@ -1363,42 +1362,15 @@ fn dim(
     }
 }
 
-/// The frozen frame cut into `TILE`-sized tiles (device px x, y and its
-/// image). tiny-skia copies a clipped image over its whole size, so a frame
-/// drawn whole makes every small redraw (a bar gliding, a card dragged) cost a
-/// full-screen copy; drawn as tiles, a redraw copies only the tiles under it.
-/// `None`: not an RGBA frame.
-pub fn tiles(frame: &Handle) -> Option<Vec<(Point, Handle)>> {
-    let Handle::Rgba {
-        width,
-        height,
-        pixels,
-        ..
-    } = frame
-    else {
-        return None;
-    };
-    let (w, h) = (*width, *height);
-    let mut out = Vec::new();
-    for y0 in (0..h).step_by(TILE as usize) {
-        for x0 in (0..w).step_by(TILE as usize) {
-            let (tw, th) = (TILE.min(w - x0), TILE.min(h - y0));
-            let mut px = Vec::with_capacity((tw * th * 4) as usize);
-            for y in y0..y0 + th {
-                let row = ((y * w + x0) * 4) as usize;
-                px.extend_from_slice(pixels.get(row..row + (tw * 4) as usize)?);
-            }
-            let at = Point::new(x0 as f32, y0 as f32);
-            out.push((at, Handle::from_rgba(tw, th, px)));
-        }
-    }
-    Some(out)
-}
-
-/// The frozen frame as its tiles (`tiles`), filling the canvas pixel for
-/// pixel: `scale` device px per logical px.
+/// The frozen frame filling the canvas pixel for pixel (`scale` device px
+/// per logical px), a quarter pixel in: tiny-skia truncates image bounds to
+/// whole device pixels, and float error would shift it one. The renderer
+/// copies just the damaged part of it (`Pipeline::blit`), with nothing
+/// cleared under it, and the zoom draws the same image: its pixels are
+/// prepared once, by the opening's first frame (#89: drawn as tiles, the
+/// first zoom converted the whole frame, 25 ms at 4K).
 pub struct Frozen<'a> {
-    pub tiles: &'a [(Point, Handle)],
+    pub frame: &'a Handle,
     pub scale: f32,
 }
 
@@ -1414,16 +1386,11 @@ impl<M> canvas::Program<M> for Frozen<'_> {
         _cursor: Cursor,
     ) -> Vec<Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let k = 1.0 / self.scale;
-        for (at, handle) in self.tiles {
-            let Handle::Rgba { width, height, .. } = handle else {
-                continue;
-            };
-            // + a quarter pixel: tiny-skia truncates image bounds to whole
-            // device pixels, and float error would leave a seam.
-            let at = Point::new((at.x + 0.25) * k, (at.y + 0.25) * k);
+        if let Handle::Rgba { width, height, .. } = self.frame {
+            let k = 1.0 / self.scale;
+            let at = Point::new(0.25 * k, 0.25 * k);
             let size = Size::new(*width as f32 * k, *height as f32 * k);
-            let image = canvas::Image::new(handle.clone()).filter_method(FilterMethod::Nearest);
+            let image = canvas::Image::new(self.frame.clone()).filter_method(FilterMethod::Nearest);
             frame.draw_image(Rectangle::new(at, size), image);
         }
         vec![frame.into_geometry()]
@@ -1434,10 +1401,13 @@ impl<M> canvas::Program<M> for Frozen<'_> {
 /// whole picture where `view` puts it, to a fraction of a pixel, Nearest (the
 /// renderer scales it straight into the window: a whole 4K screen redrawn
 /// each frame of the ease). At rest the image widget crops it (`View::crop`)
-/// with its usual filter.
+/// with its usual filter. `dim`: the overlay's plain dim (its alpha), drawn
+/// here as the picture faded over black, which the renderer does in the same
+/// pass as the picture (`iced_tiny_skia`'s `Renderer::base`).
 pub struct Zoomed<'a> {
     pub picture: &'a Handle,
     pub view: View,
+    pub dim: f32,
 }
 
 impl<M> canvas::Program<M> for Zoomed<'_> {
@@ -1452,7 +1422,10 @@ impl<M> canvas::Program<M> for Zoomed<'_> {
         _cursor: Cursor,
     ) -> Vec<Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let image = canvas::Image::new(self.picture.clone()).filter_method(FilterMethod::Nearest);
+        frame.fill_rectangle(Point::ORIGIN, bounds.size(), Color::BLACK);
+        let image = canvas::Image::new(self.picture.clone())
+            .filter_method(FilterMethod::Nearest)
+            .opacity(1.0 - self.dim);
         frame.draw_image(self.view.frame_on_screen(), image);
         vec![frame.into_geometry()]
     }

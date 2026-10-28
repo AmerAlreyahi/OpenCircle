@@ -274,20 +274,20 @@ impl Layer {
         let primitives = damage::list(
             &previous.primitives,
             &current.primitives,
+            // OpenCircle patch (#89): where each primitive draws, a stroke's
+            // width and anti-aliasing included (upstream: its path's bounds),
+            // a cached canvas's too (upstream: the whole canvas, so any change
+            // to the overlay's full-window canvas redrew the window)
             |item| match item {
-                Item::Live(primitive) => vec![primitive.visible_bounds()],
-                Item::Group(primitives, group_bounds, transformation) => {
-                    primitives
-                        .as_slice()
-                        .iter()
-                        .map(Primitive::visible_bounds)
-                        .map(|bounds| bounds * *transformation)
-                        .filter_map(|bounds| bounds.intersection(group_bounds))
-                        .collect()
-                }
-                Item::Cached(_primitives, bounds, _transformation) => {
-                    vec![*bounds]
-                }
+                Item::Live(primitive) => vec![drawn_primitive(primitive)],
+                Item::Group(_, group_bounds, transformation)
+                | Item::Cached(_, group_bounds, transformation) => item
+                    .as_slice()
+                    .iter()
+                    .map(drawn_primitive)
+                    .map(|bounds| bounds * *transformation)
+                    .filter_map(|bounds| bounds.intersection(group_bounds))
+                    .collect(),
             },
             |primitive_a, primitive_b| match (primitive_a, primitive_b) {
                 (
@@ -298,6 +298,12 @@ impl Layer {
                         && bounds_a == bounds_b
                         && transformation_a == transformation_b
                 }
+                // OpenCircle patch (#89): a canvas drawn anew the same as
+                // before (the zoomed frame's black under its picture, a few
+                // shapes) is unchanged (upstream: always redrawn)
+                (Item::Group(a, bounds_a, t_a), Item::Group(b, bounds_b, t_b)) => {
+                    bounds_a == bounds_b && t_a == t_b && a == b
+                }
                 _ => false,
             },
         );
@@ -306,7 +312,7 @@ impl Layer {
             &previous.images,
             &current.images,
             |image| vec![image.bounds().expand(1.0)],
-            Image::eq,
+            same_image,
         );
 
         damage.extend(text);
@@ -314,6 +320,44 @@ impl Layer {
         damage.extend(images);
         damage
     }
+}
+
+/// OpenCircle patch (#89): where `primitive` draws: its path's bounds, a
+/// pixel more for anti-aliasing, and a stroke's reach past its path (half
+/// its width, a mitred corner up to its miter limit times that).
+fn drawn_primitive(primitive: &Primitive) -> Rectangle {
+    let reach = match primitive {
+        Primitive::Fill { .. } => 0.0,
+        Primitive::Stroke { stroke, .. } => {
+            stroke.width / 2.0 * stroke.miter_limit.max(1.0)
+        }
+    };
+    primitive.visible_bounds().expand(reach + 1.0)
+}
+
+/// OpenCircle patch (#89): `a` and `b` are the same picture drawn the same
+/// way. Upstream `Image::eq` compares an RGBA handle's pixels byte by byte (a
+/// 4K frozen screen: 33 MB, on each frame the overlay redraws); handles with
+/// the same id hold the same pixels.
+pub(crate) fn same_image(a: &Image, b: &Image) -> bool {
+    match (a, b) {
+        (
+            Image::Raster { image: a, bounds: ab, clip_bounds: ac },
+            Image::Raster { image: b, bounds: bb, clip_bounds: bc },
+        ) => same_look(a, b) && ab == bb && ac == bc,
+        _ => a == b,
+    }
+}
+
+/// OpenCircle patch (#89): `a` and `b` draw the same picture the same way,
+/// anywhere (`same_image`).
+pub(crate) fn same_look(a: &core::Image, b: &core::Image) -> bool {
+    a.handle.id() == b.handle.id()
+        && a.filter_method == b.filter_method
+        && a.rotation == b.rotation
+        && a.border_radius == b.border_radius
+        && a.opacity == b.opacity
+        && a.snap == b.snap
 }
 
 /// OpenCircle patch (#53): where a text is really drawn. Upstream

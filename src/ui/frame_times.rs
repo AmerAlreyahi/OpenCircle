@@ -315,17 +315,47 @@ fn a_gliding_bar_redraws_only_round_itself() {
     assert_eq!(off.count(), 0, "the redrawn frame is the frame");
 }
 
-/// The frame drawn as tiles is pixel for pixel the frame, at 125 % too (no
-/// seam where two tiles meet).
+/// The frozen frame as the overlay draws it (`overlay::Frozen`, blitted with
+/// nothing cleared under it) is pixel for pixel the frame, at 125 and 150 %
+/// too.
 #[test]
-fn the_tiled_frame_is_the_frame() {
+fn the_frozen_frame_is_the_frame() {
+    use crate::ui::overlay::Frozen;
+    use iced::widget::{canvas, image};
+    struct S(image::Handle, f32, bool);
+    fn view(s: &S) -> Element<'_, ()> {
+        match s.2 {
+            true => canvas(Frozen {
+                frame: &s.0,
+                scale: s.1,
+            })
+            .width(iced::Fill)
+            .height(iced::Fill)
+            .into(),
+            false => image(s.0.clone())
+                .width(iced::Fill)
+                .height(iced::Fill)
+                .content_fit(iced::ContentFit::Fill)
+                .filter_method(image::FilterMethod::Nearest)
+                .into(),
+        }
+    }
     for scale in [1.0, 1.25, 1.5] {
-        let mut app = open_app(1700, 900, scale);
-        let tiled = frames(&mut app, 1, true, |_, _, _| {}).remove(0).rgba;
-        assert!(app.o.tiles.as_ref().is_some_and(|(_, t)| t.len() == 7 * 4));
-        app.o.tiles = None; // the frame as one image
-        let whole = frames(&mut app, 1, true, |_, _, _| {}).remove(0).rgba;
-        let off = (tiled.iter().zip(&whole)).filter(|(a, b)| a != b).count();
+        let (w, h) = (1700, 900);
+        let rgba: Vec<u8> = (0..w * h)
+            .flat_map(|i| [(i * 7) as u8, (i % w) as u8, (i / w) as u8, 255])
+            .collect();
+        let frame = image::Handle::from_rgba(w, h, rgba);
+        let size = Size::new(w as f32 / scale, h as f32 / scale);
+        let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+        let draw = |frozen| {
+            let mut s = S(frame.clone(), scale, frozen);
+            drawn(&mut s, size, scale, view, 1, true, |_, _, _| {}, still)
+                .remove(0)
+                .rgba
+        };
+        let (frozen, whole) = (draw(true), draw(false));
+        let off = (frozen.iter().zip(&whole)).filter(|(a, b)| a != b).count();
         assert_eq!(off, 0, "at {scale}");
     }
 }
@@ -648,6 +678,9 @@ fn report(name: &str, size: Size, k: f32, t: &[Drawn]) {
     let n = t.len() as f64;
     let mean = t.iter().map(|d| ms(d.took)).sum::<f64>() / n;
     let worst = t.iter().map(|d| ms(d.took)).fold(0.0, f64::max);
+    let mut sorted: Vec<f64> = t.iter().map(|d| ms(d.took)).collect();
+    sorted.sort_by(f64::total_cmp);
+    let p95 = sorted[((sorted.len() as f64 * 0.95).ceil() as usize).clamp(1, sorted.len()) - 1];
     let layout = t.iter().map(|d| ms(d.layout)).sum::<f64>() / n;
     let raster = t.iter().map(|d| ms(d.raster)).sum::<f64>() / n;
     let px = (size.width * k) * (size.height * k);
@@ -657,7 +690,7 @@ fn report(name: &str, size: Size, k: f32, t: &[Drawn]) {
         .sum::<f32>()
         / (t.len() as f32 * px);
     println!(
-        "{name:<22} {}x{} @{k}: mean {mean:5.1} ms, worst {worst:5.1} ms | layout {layout:4.1}, \
+        "{name:<22} {}x{} @{k}: mean {mean:5.1} ms, p95 {p95:5.1}, worst {worst:5.1} ms | layout {layout:4.1}, \
          draw {:4.1}, raster {raster:4.1} ms | redrawn {:3.0}%",
         (size.width * k) as u32,
         (size.height * k) as u32,
@@ -920,8 +953,9 @@ fn an_onboarding_step_change_redraws_only_the_track() {
 }
 
 /// The zoom's drawing (`iced_tiny_skia` patch, #89): the frozen frame scaled
-/// and placed at fractions of a pixel (`overlay::Zoomed`), and the dim's
-/// solid rectangles over it, are what tiny-skia's own pipeline draws.
+/// and placed at fractions of a pixel (`overlay::Zoomed`), faded over black
+/// by the plain dim or not, and the dim's solid rectangles over it, are what
+/// tiny-skia's own pipeline draws.
 #[test]
 fn a_zoomed_frame_and_its_dim_are_drawn_as_tiny_skia_draws_them() {
     use crate::ui::overlay::{View, Zoomed};
@@ -949,11 +983,12 @@ fn a_zoomed_frame_and_its_dim_are_drawn_as_tiny_skia_draws_them() {
             vec![f.into_geometry()]
         }
     }
-    struct S(iced::widget::image::Handle, View);
+    struct S(iced::widget::image::Handle, View, f32);
     fn view(s: &S) -> Element<'_, ()> {
         let zoomed = canvas(Zoomed {
             picture: &s.0,
             view: s.1,
+            dim: s.2,
         });
         let dim = canvas(Dim).width(iced::Fill).height(iced::Fill);
         iced::widget::stack![zoomed.width(iced::Fill).height(iced::Fill), dim].into()
@@ -966,47 +1001,50 @@ fn a_zoomed_frame_and_its_dim_are_drawn_as_tiny_skia_draws_them() {
     let (size, k) = (Size::new(80.0, 50.0), 1.5);
     let at_rest = View::new(iw, ih, size);
     let v = at_rest.lerp(&at_rest.zoomed(Point::new(30.0, 20.0), 4.0), 0.37);
-    let handle = iced::widget::image::Handle::from_rgba(iw, ih, rgba.clone());
-    let mut state = S(handle, v);
-    let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
-    let drawn = drawn(&mut state, size, k, view, 1, true, |_, _, _| {}, still);
-    // tiny-skia's own: black, the picture scaled, the dim filled over it
-    let (w, h) = ((size.width * k) as u32, (size.height * k) as u32);
-    let mut reference = tiny_skia::Pixmap::new(w, h).unwrap();
-    reference.fill(tiny_skia::Color::BLACK);
-    let size_px = tiny_skia::IntSize::from_wh(iw, ih).unwrap();
-    let picture = tiny_skia::Pixmap::from_vec(rgba, size_px).unwrap();
-    let on = v.frame_on_screen();
-    let (sx, sy) = (on.width * k / iw as f32, on.height * k / ih as f32);
-    let at = tiny_skia::Transform::from_row(sx, 0.0, 0.0, sy, on.x * k, on.y * k);
-    let paint = tiny_skia::PixmapPaint {
-        quality: tiny_skia::FilterQuality::Nearest,
-        ..Default::default()
-    };
-    reference.draw_pixmap(0, 0, picture.as_ref(), &paint, at, None);
-    let mut fill = tiny_skia::Paint::default();
-    fill.set_color(tiny_skia::Color::from_rgba(0.0, 0.0, 0.0, 0.3).unwrap());
-    fill.anti_alias = false;
-    let r = DIM_AT * k;
-    let rect = tiny_skia::Rect::from_xywh(r.x, r.y, r.width, r.height).unwrap();
-    let path = tiny_skia::PathBuilder::from_rect(rect);
-    let rule = tiny_skia::FillRule::Winding;
-    reference.fill_path(&path, &fill, rule, tiny_skia::Transform::identity(), None);
-    let (got, want) = (&drawn[0].rgba, reference.data());
-    let off: Vec<usize> = (0..(w * h) as usize)
-        .filter(|&i| (0..4).any(|c| got[i * 4 + c].abs_diff(want[i * 4 + c]) > 1))
-        .collect();
-    let xy: Vec<_> = (off.iter().take(5))
-        .map(|i| (i % w as usize, i / w as usize))
-        .collect();
-    let px = |i: usize| (&got[i * 4..i * 4 + 4], &want[i * 4..i * 4 + 4]);
-    let first = off.first().map(|&i| px(i));
-    let last = off.last().map(|&i| (i % w as usize, i / w as usize, px(i)));
-    assert!(
-        off.is_empty(),
-        "{} pixels differ, first {xy:?} {first:?}, last {last:?}",
-        off.len()
-    );
+    for faded in [0.0, 0.4] {
+        let handle = iced::widget::image::Handle::from_rgba(iw, ih, rgba.clone());
+        let mut state = S(handle, v, faded);
+        let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+        let drawn = drawn(&mut state, size, k, view, 1, true, |_, _, _| {}, still);
+        // tiny-skia's own: black, the picture scaled, the dim filled over it
+        let (w, h) = ((size.width * k) as u32, (size.height * k) as u32);
+        let mut reference = tiny_skia::Pixmap::new(w, h).unwrap();
+        reference.fill(tiny_skia::Color::BLACK);
+        let size_px = tiny_skia::IntSize::from_wh(iw, ih).unwrap();
+        let picture = tiny_skia::Pixmap::from_vec(rgba.clone(), size_px).unwrap();
+        let on = v.frame_on_screen();
+        let (sx, sy) = (on.width * k / iw as f32, on.height * k / ih as f32);
+        let at = tiny_skia::Transform::from_row(sx, 0.0, 0.0, sy, on.x * k, on.y * k);
+        let paint = tiny_skia::PixmapPaint {
+            quality: tiny_skia::FilterQuality::Nearest,
+            opacity: 1.0 - faded,
+            ..Default::default()
+        };
+        reference.draw_pixmap(0, 0, picture.as_ref(), &paint, at, None);
+        let mut fill = tiny_skia::Paint::default();
+        fill.set_color(tiny_skia::Color::from_rgba(0.0, 0.0, 0.0, 0.3).unwrap());
+        fill.anti_alias = false;
+        let r = DIM_AT * k;
+        let rect = tiny_skia::Rect::from_xywh(r.x, r.y, r.width, r.height).unwrap();
+        let path = tiny_skia::PathBuilder::from_rect(rect);
+        let rule = tiny_skia::FillRule::Winding;
+        reference.fill_path(&path, &fill, rule, tiny_skia::Transform::identity(), None);
+        let (got, want) = (&drawn[0].rgba, reference.data());
+        let off: Vec<usize> = (0..(w * h) as usize)
+            .filter(|&i| (0..4).any(|c| got[i * 4 + c].abs_diff(want[i * 4 + c]) > 1))
+            .collect();
+        let xy: Vec<_> = (off.iter().take(5))
+            .map(|i| (i % w as usize, i / w as usize))
+            .collect();
+        let px = |i: usize| (&got[i * 4..i * 4 + 4], &want[i * 4..i * 4 + 4]);
+        let first = off.first().map(|&i| px(i));
+        let last = off.last().map(|&i| (i % w as usize, i / w as usize, px(i)));
+        assert!(
+            off.is_empty(),
+            "faded {faded}: {} pixels differ, first {xy:?} {first:?}, last {last:?}",
+            off.len()
+        );
+    }
 }
 
 /// The wheel zoom of the frozen screen: 4 notches in (one every 3 frames, so

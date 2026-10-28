@@ -613,6 +613,10 @@ impl Engine {
         _pixels: &mut tiny_skia::PixmapMut<'_>,
         _clip_mask: &mut tiny_skia::Mask,
         _clip_bounds: Rectangle,
+        // OpenCircle patch (#89): the one opaque colour under it (a
+        // premultiplied pixel), when the caller knows (`Renderer::base`) and
+        // skipped the clear: a faded picture is drawn over it in one pass
+        _under: Option<u32>,
     ) {
         match image {
             #[cfg(feature = "image")]
@@ -642,8 +646,9 @@ impl Engine {
                     Some(_) => pixel_rect(_clip_bounds, w, h),
                     None => [0, 0, w, h],
                 };
+                let under = _under;
                 if radians == 0.0
-                    && image.opacity == 1.0
+                    && (image.opacity == 1.0 || under.is_some())
                     && image.filter_method == crate::core::image::FilterMethod::Nearest
                     && self.raster_pipeline.blit(
                         &image.handle,
@@ -651,11 +656,23 @@ impl Engine {
                         transform,
                         _pixels,
                         clip,
+                        image.opacity,
+                        under,
                     )
                 {
                     return;
                 }
 
+                // (the caller skipped the clear under it: lay its colour first)
+                if let (Some(c), Ok(data)) = (
+                    under,
+                    bytemuck::try_cast_slice_mut::<u8, u32>(_pixels.data_mut()),
+                ) {
+                    let [x0, y0, x1, y1] = pixel_rect(_clip_bounds, w, h);
+                    for row in data.chunks_exact_mut(w as usize).take(y1 as usize).skip(y0 as usize) {
+                        row[x0 as usize..x1 as usize].fill(c);
+                    }
+                }
                 let drawn = physical_bounds.intersection(&_clip_bounds);
                 let px = drawn.map_or(0.0, |r| r.width * r.height);
                 PIPELINE_PIXELS.set(PIPELINE_PIXELS.get() + px as u64);
@@ -931,29 +948,12 @@ fn fill_rect(
     physical: Rectangle,
     pixels: &mut tiny_skia::PixmapMut<'_>,
 ) -> bool {
-    use tiny_skia::PathSegment as S;
-    let tiny_skia::Shader::SolidColor(color) = paint.shader else {
+    let Some(src) = solid_rect(path, paint) else {
         return false;
     };
-    let b = path.bounds();
-    let corner = |p: &tiny_skia::Point| {
-        (p.x == b.left() || p.x == b.right()) && (p.y == b.top() || p.y == b.bottom())
-    };
-    if paint.anti_alias
-        || paint.blend_mode != tiny_skia::BlendMode::SourceOver
-        || !matches!(
-            path.segments().collect::<Vec<_>>()[..],
-            [S::MoveTo(a), S::LineTo(b), S::LineTo(c), S::LineTo(d), S::Close]
-                if [a, b, c, d].iter().all(corner)
-        )
-    {
-        return false;
-    }
     let (w, h) = (pixels.width(), pixels.height());
     let [x0, y0, x1, y1] = pixel_rect(physical, w, h);
-    let c = color.premultiply().to_color_u8();
-    let src = u32::from_ne_bytes([c.red(), c.green(), c.blue(), c.alpha()]);
-    let keep = 255 - u32::from(c.alpha());
+    let keep = 255 - u32::from(src.to_ne_bytes()[3]);
     let Ok(data) = bytemuck::try_cast_slice_mut::<u8, u32>(pixels.data_mut()) else {
         return false;
     };
@@ -987,6 +987,31 @@ fn fill_rect(
         blend(&mut row[x0 as usize..x1 as usize]);
     });
     true
+}
+
+/// OpenCircle patch (#89): `path` filled with `paint` is a solid rectangle
+/// (`fill_rect`): its colour, premultiplied, as a pixel.
+pub(crate) fn solid_rect(path: &tiny_skia::Path, paint: &tiny_skia::Paint<'_>) -> Option<u32> {
+    use tiny_skia::PathSegment as S;
+    let tiny_skia::Shader::SolidColor(color) = paint.shader else {
+        return None;
+    };
+    let b = path.bounds();
+    let corner = |p: &tiny_skia::Point| {
+        (p.x == b.left() || p.x == b.right()) && (p.y == b.top() || p.y == b.bottom())
+    };
+    if paint.anti_alias
+        || paint.blend_mode != tiny_skia::BlendMode::SourceOver
+        || !matches!(
+            path.segments().collect::<Vec<_>>()[..],
+            [S::MoveTo(a), S::LineTo(b), S::LineTo(c), S::LineTo(d), S::Close]
+                if [a, b, c, d].iter().all(corner)
+        )
+    {
+        return None;
+    }
+    let c = color.premultiply().to_color_u8();
+    Some(u32::from_ne_bytes([c.red(), c.green(), c.blue(), c.alpha()]))
 }
 
 /// OpenCircle patch (#23): the whole pixels a clip to `r` (device px) holds,

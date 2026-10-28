@@ -421,7 +421,6 @@ pub(in crate::ui) fn reopen(app: &mut App, w: u32, h: u32, scale: f32) {
         .flat_map(|y| (0..w).flat_map(move |x| [x as u8, y as u8, (x >> 8) as u8, 255]))
         .collect();
     let frame = image::Handle::from_rgba(w, h, rgba);
-    app.o.tiles = overlay::tiles(&frame).map(|t| (frame.id(), t));
     app.o.frame = Some(frame);
     app.o.scale = scale;
     app.o.screen = Size::new(w as f32 / scale, h as f32 / scale);
@@ -3540,7 +3539,7 @@ fn close_leaves_a_fresh_opening() {
     let _ = app.close();
     assert!(app.o.is_none(), "nothing of the opening is kept");
     let (o, fresh) = (&app.o, Opening::default());
-    assert!(o.frame.is_none() && o.tiles.is_none() && o.selection.is_none());
+    assert!(o.frame.is_none() && o.selection.is_none());
     assert!(o.stroke.is_empty() && o.others.is_empty() && o.word.is_none());
     assert_eq!(o.screen_text, fresh.screen_text);
     assert!(o.panel.is_none() && o.translate.is_none() && o.song.is_none());
@@ -3572,7 +3571,7 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
         snip: None,
     };
     let _ = app.open(Instant::now(), Ok(shot));
-    assert!(app.o.is_some() && app.o.tiles.is_some());
+    assert!(app.o.is_some() && app.o.frame.is_some());
     app.select(Rectangle::new(Point::new(4.0, 4.0), Size::new(40.0, 30.0)));
     let crop = app.crop().unwrap();
     let _ = app.open_panel(actions::Panel::Lens, crop, None);

@@ -93,6 +93,8 @@ impl Pipeline {
         transform: tiny_skia::Transform,
         pixels: &mut tiny_skia::PixmapMut<'_>,
         clip: [u32; 4],
+        opacity: f32,
+        under: Option<u32>,
     ) -> bool {
         let mut cache = self.cache.borrow_mut();
         if cache.allocate(handle).is_err() {
@@ -108,12 +110,14 @@ impl Pipeline {
         if t.kx != 0.0 || t.ky != 0.0 {
             return false;
         }
-        if (t.sx * ws - 1.0).abs() > 1e-5
+        if opacity < 1.0
+            || (t.sx * ws - 1.0).abs() > 1e-5
             || (t.sy * hs - 1.0).abs() > 1e-5
             || !whole(t.tx)
             || !whole(t.ty)
         {
-            return image.opaque && scaled(image, bounds, t, pixels, clip);
+            return image.opaque
+                && scaled(image, bounds, t, pixels, clip, opacity, under);
         }
         // where `draw` puts it: its position truncated to whole pixels (as
         // `draw` hands it to `draw_pixmap`), so the frozen tiles and the edge
@@ -136,10 +140,10 @@ impl Pipeline {
             return true;
         }
         let n = (x1 - x0) as usize;
-        for row in y0..y1 {
-            let s = (row - y) as usize * iw as usize + (x0 - x) as usize;
-            let d = row as usize * w as usize + x0 as usize;
-            let (src, dst) = (&image.pixels[s..s + n], &mut dst[d..d + n]);
+        // (#89: on all cores when big, the edge glow's strips under a pan)
+        rows(dst, w as usize, y0 as usize..y1 as usize, |row, dst| {
+            let s = (row as i64 - y) as usize * iw as usize + (x0 - x) as usize;
+            let (src, dst) = (&image.pixels[s..s + n], &mut dst[x0 as usize..x0 as usize + n]);
             if image.opaque {
                 dst.copy_from_slice(src);
             } else {
@@ -151,8 +155,17 @@ impl Pipeline {
                     }
                 }
             }
-        }
+        });
         true
+    }
+
+    /// OpenCircle patch (#89): an image's size and whether it is opaque,
+    /// loaded now if it isn't (`None`: it can't be).
+    pub fn loaded(&self, handle: &raster::Handle) -> Option<(u32, u32, bool)> {
+        let mut cache = self.cache.borrow_mut();
+        let _ = cache.allocate(handle).ok()?;
+        let image = cache.entries.get(&handle.id())?.as_ref()?;
+        Some((image.width, image.height, image.opaque))
     }
 
     pub fn trim_cache(&mut self) {
@@ -162,41 +175,38 @@ impl Pipeline {
 
 /// OpenCircle patch (#89): an opaque image scaled by any amount and placed
 /// at any fraction of a pixel, Nearest: each device pixel takes the image
-/// pixel under its middle (tiny-skia's Nearest), a column table per draw and
-/// a row copied whole where the one above took the same image row. The
-/// overlay's zoom redraws the whole frozen screen every frame of its ease
-/// (tiny-skia's pipeline: ~75 ms a 4K frame). `false`: not drawable so (a
-/// flipped image).
+/// pixel under its middle (tiny-skia's Nearest, `nearest`), a column table
+/// per draw. The overlay's zoom redraws the whole frozen screen every frame
+/// of its ease (tiny-skia's pipeline: ~75 ms a 4K frame). At `opacity` below
+/// 1 it is drawn over `under` (the one opaque colour beneath it, known to
+/// the caller: the dim folded into the picture, one pass), and needs it.
+/// `false`: not drawable so (a flipped image, a faded one over unknown pixels).
 fn scaled(
     image: &Entry,
     bounds: Rectangle,
     t: tiny_skia::Transform,
     pixels: &mut tiny_skia::PixmapMut<'_>,
     clip: [u32; 4],
+    opacity: f32,
+    under: Option<u32>,
 ) -> bool {
     let (iw, ih) = (image.width as usize, image.height as usize);
-    // device px per image px, and where the image's corner lands
-    let (sx, sy) = (
-        f64::from(t.sx) * f64::from(bounds.width) / iw as f64,
-        f64::from(t.sy) * f64::from(bounds.height) / ih as f64,
-    );
-    if !(sx > 0.0 && sy > 0.0) {
+    let Some((ox, sx, oy, sy)) = placed(image.width, image.height, bounds, t) else {
         return false;
-    }
-    let ox = f64::from(t.sx) * f64::from(bounds.x) + f64::from(t.tx);
-    let oy = f64::from(t.sy) * f64::from(bounds.y) + f64::from(t.ty);
+    };
+    let under = match under {
+        _ if opacity >= 1.0 => None,
+        Some(under) => Some(under),
+        None => return false,
+    };
     let (w, h) = (pixels.width(), pixels.height());
     let Ok(dst) = bytemuck::try_cast_slice_mut::<u8, u32>(pixels.data_mut()) else {
         return false;
     };
     let [x0, y0, x1, y1] = [clip[0], clip[1], clip[2].min(w), clip[3].min(h)];
-    let src = |d: u32, o: f64, s: f64, n: usize| {
-        let u = ((f64::from(d) + 0.5 - o) / s).floor();
-        (u >= 0.0 && u < n as f64).then_some(u as usize)
-    };
     let (mut cols, mut first) = (Vec::with_capacity((x1.saturating_sub(x0)) as usize), None);
     for x in x0..x1 {
-        if let Some(u) = src(x, ox, sx, iw) {
+        if let Some(u) = nearest(x, ox, sx, iw) {
             let _ = first.get_or_insert(x as usize);
             cols.push(u as u32);
         }
@@ -205,16 +215,62 @@ fn scaled(
         return true; // nothing of it in the clip
     };
     let n = cols.len();
+    // faded: each byte p * o + under * (1 - o), rounded, 8 pixels at a time
+    // (the compiler turns the fixed arrays into vector code)
+    let o = (opacity.clamp(0.0, 1.0) * 255.0).round() as u16;
+    let lift: Option<[u16; 32]> = under.map(|u| {
+        std::array::from_fn(|i| u16::from(u.to_ne_bytes()[i % 4]) * (255 - o))
+    });
+    let fade = |d: &mut [u8], l: &[u16]| {
+        for (d, &l) in d.iter_mut().zip(l) {
+            let t = u16::from(*d) * o + l + 128;
+            *d = ((t + (t >> 8)) >> 8) as u8;
+        }
+    };
     rows(dst, w as usize, y0 as usize..y1 as usize, |y, row| {
-        let Some(v) = src(y as u32, oy, sy, ih) else {
+        let Some(v) = nearest(y as u32, oy, sy, ih) else {
             return;
         };
         let at = &image.pixels[v * iw..(v + 1) * iw];
-        for (p, &u) in row[xa..xa + n].iter_mut().zip(&cols) {
+        let row = &mut row[xa..xa + n];
+        for (p, &u) in row.iter_mut().zip(&cols) {
             *p = at[u as usize];
+        }
+        if let Some(lift) = &lift {
+            let bytes: &mut [u8] = bytemuck::cast_slice_mut(row);
+            let mut chunks = bytes.chunks_exact_mut(32);
+            for chunk in &mut chunks {
+                let chunk: &mut [u8; 32] = chunk.try_into().expect("32 bytes");
+                fade(chunk, lift);
+            }
+            fade(chunks.into_remainder(), lift);
         }
     });
     true
+}
+
+/// OpenCircle patch (#89): where `scaled` puts an `iw` x `ih` image drawn
+/// in `bounds` by `t`: (x of its corner, device px per image px across, y,
+/// down). `None`: flipped or skewed.
+pub(crate) fn placed(
+    iw: u32,
+    ih: u32,
+    bounds: Rectangle,
+    t: tiny_skia::Transform,
+) -> Option<(f64, f64, f64, f64)> {
+    let sx = f64::from(t.sx) * f64::from(bounds.width) / f64::from(iw);
+    let sy = f64::from(t.sy) * f64::from(bounds.height) / f64::from(ih);
+    let ox = f64::from(t.sx) * f64::from(bounds.x) + f64::from(t.tx);
+    let oy = f64::from(t.sy) * f64::from(bounds.y) + f64::from(t.ty);
+    (t.kx == 0.0 && t.ky == 0.0 && sx > 0.0 && sy > 0.0).then_some((ox, sx, oy, sy))
+}
+
+/// OpenCircle patch (#89): the image px (of `n`) Nearest puts in device px
+/// `d`, for an image whose corner is at `o` with `s` device px per image px:
+/// the one under the pixel's middle. `None`: outside the image.
+pub(crate) fn nearest(d: u32, o: f64, s: f64, n: usize) -> Option<usize> {
+    let u = ((f64::from(d) + 0.5 - o) / s).floor();
+    (u >= 0.0 && u < n as f64).then_some(u as usize)
 }
 
 /// OpenCircle patch (#89): `each(y, row)` over the rows `ys` of a `w` px wide
@@ -229,7 +285,7 @@ pub(crate) fn rows(
     let data = &mut data[ys.start * w..ys.end * w];
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get().min(8));
     let band = ys.len().div_ceil(cores).max(1);
-    if cores == 1 || data.len() < 1 << 20 {
+    if cores == 1 || data.len() < 1 << 18 {
         for (i, row) in data.chunks_exact_mut(w).enumerate() {
             each(ys.start + i, row);
         }

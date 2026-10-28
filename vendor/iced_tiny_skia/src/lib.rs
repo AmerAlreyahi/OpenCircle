@@ -110,16 +110,21 @@ impl Renderer {
                 .to_color_u8();
             // (a whole pixel at a time: byte by byte cost ~3 ms a 4K frame)
             let c = u32::from_ne_bytes([c.red(), c.green(), c.blue(), c.alpha()]);
+            // OpenCircle patch (#89): not under a picture that covers it
+            let base = (self.layers.iter().next())
+                .and_then(|layer| self.base(layer, [x0, y0, x1, y1], scale_factor, c));
             let data: &mut [u32] = bytemuck::cast_slice_mut(pixels.data_mut());
             for row in data
                 .chunks_exact_mut(w as usize)
                 .skip(y0 as usize)
                 .take((y1 - y0) as usize)
+                .filter(|_| base.is_none())
             {
                 row[x0 as usize..x1 as usize].fill(c);
             }
 
-            for layer in self.layers.iter() {
+            for (i, layer) in self.layers.iter().enumerate() {
+                let base = base.filter(|_| i == 0);
                 let Some(layer_bounds) =
                     damage_bounds.intersection(&(layer.bounds * scale_factor))
                 else {
@@ -128,7 +133,7 @@ impl Renderer {
 
                 engine::adjust_clip_mask(clip_mask, layer_bounds);
 
-                if !layer.quads.is_empty() {
+                if !layer.quads.is_empty() && base.is_none() {
                     let render_span = debug::render(debug::Primitive::Quad);
                     for (quad, background) in &layer.quads {
                         self.engine.draw_quad(
@@ -143,7 +148,7 @@ impl Renderer {
                     render_span.finish();
                 }
 
-                if !layer.primitives.is_empty() {
+                if !layer.primitives.is_empty() && base.is_none() {
                     let render_span = debug::render(debug::Primitive::Triangle);
 
                     for group in &layer.primitives {
@@ -176,13 +181,14 @@ impl Renderer {
                 if !layer.images.is_empty() {
                     let render_span = debug::render(debug::Primitive::Image);
 
-                    for image in &layer.images {
+                    for (j, image) in layer.images.iter().enumerate() {
                         self.engine.draw_image(
                             image,
                             Transformation::scale(scale_factor),
                             pixels,
                             clip_mask,
                             layer_bounds,
+                            base.filter(|_| j == 0),
                         );
                     }
 
@@ -211,6 +217,64 @@ impl Renderer {
         }
 
         self.engine.trim();
+    }
+
+    /// OpenCircle patch (#89): the bottom of the window's picture in the
+    /// whole pixels `r` (x0, y0, x1, y1), when `layer` (the first) starts
+    /// with a picture covering them: an opaque raster image drawn Nearest,
+    /// unturned (the frozen screen). The colour under it then: the
+    /// background `clear`, or the one opaque solid rectangle its layer fills
+    /// under it (`Overlay`'s zoomed frame: black, the picture faded over it,
+    /// which is the dim). The caller skips the clear and what the layer draws
+    /// under it (hidden, or that colour), and the picture is drawn over that
+    /// colour in one pass. `None`: draw it all as usual.
+    fn base(&self, layer: &Layer, r: [u32; 4], k: f32, clear: u32) -> Option<u32> {
+        // a clip or a solid fill holds the pixels whose middle it holds
+        // (`engine::pixel_rect`), and so does the picture (`raster::nearest`;
+        // blitted, it starts at its position truncated: within half a px;
+        // a little less, for float error)
+        let holds = |b: Rectangle| {
+            let [bx0, by0, bx1, by1] = engine::pixel_rect(b, u32::MAX, u32::MAX);
+            bx0 <= r[0] && by0 <= r[1] && bx1 >= r[2] && by1 >= r[3]
+        };
+        let [x0, y0, x1, y1] = r.map(|v| v as f32);
+        let covers = |b: Rectangle| {
+            b.x <= x0 + 0.45
+                && b.y <= y0 + 0.45
+                && b.x + b.width > x1 - 0.45
+                && b.y + b.height > y1 - 0.45
+        };
+        let Some(graphics::Image::Raster { image, bounds, .. }) = layer.images.first() else {
+            return None;
+        };
+        let (iw, ih, opaque) = self.engine.raster_pipeline.loaded(&image.handle)?;
+        let fits = raster::placed(iw, ih, *bounds, tiny_skia::Transform::from_scale(k, k));
+        if !opaque
+            || fits.is_none()
+            || f32::from(image.rotation) != 0.0
+            || image.filter_method != core::image::FilterMethod::Nearest
+            || !covers(*bounds * k)
+            || !holds(layer.bounds * k)
+        {
+            return None;
+        }
+        if image.opacity >= 1.0 {
+            return Some(clear); // what is under it is hidden
+        }
+        let fills: Vec<_> = (layer.primitives.iter())
+            .flat_map(|item| item.as_slice().iter().map(move |p| (item, p)))
+            .collect();
+        match (&layer.quads[..], &fills[..]) {
+            ([], []) => Some(clear),
+            ([], [(item, Primitive::Fill { path, paint, .. })]) => {
+                let at = Transformation::scale(k) * item.transformation();
+                let solid = engine::solid_rect(path, paint)?;
+                let drawn = item.as_slice()[0].visible_bounds() * at;
+                (solid.to_ne_bytes()[3] == 255 && holds(drawn) && holds(item.clip_bounds() * k))
+                    .then_some(solid)
+            }
+            _ => None,
+        }
     }
 }
 
