@@ -3762,6 +3762,9 @@ fn copy_text_without_models_shows_the_download_card_then_copies() {
 fn a_link_in_the_selected_words_gets_a_click_only_chip() {
     let pick = |line: &str| {
         let mut app = reader_app();
+        // a blank frame: the words lie where OCR says, not on the sample page's
+        // ink (its glyphs differ per machine's fonts; CI picked "see")
+        app.o.frame = Some(image::Handle::from_rgba(960, 420, vec![255; 960 * 420 * 4]));
         app.taps += 1;
         let block = TextBlock {
             text: line.into(),
