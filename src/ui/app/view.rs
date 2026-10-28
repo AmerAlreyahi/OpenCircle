@@ -9,8 +9,8 @@ use crate::config::{self};
 
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::word;
-use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
+use crate::ui::kit::{motion, surface};
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::{overlay, widgets};
@@ -204,7 +204,7 @@ impl App {
             }
         } else {
             // slides down into place as the overlay opens
-            let hint = container(widgets::pill(HINT)).center_x(Fill).padding(24);
+            let hint = container(surface::hint(HINT)).center_x(Fill).padding(24);
             let rise = (1.0 - self.appeared()) * SLIDE;
             iced::widget::float(hint)
                 .translate(move |_, _| Vector::new(0.0, -rise))
@@ -235,7 +235,7 @@ impl App {
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
         if self.o.selection.is_some() && self.o.scan.as_ref().is_some_and(|s| s.protected) {
             let room = self.room();
-            let pill = container(widgets::pill(PROTECTED))
+            let pill = container(surface::hint(PROTECTED))
                 .center_x(room.width)
                 .padding(24);
             layers = layers.push(iced::widget::pin(pill).position(room.position()));

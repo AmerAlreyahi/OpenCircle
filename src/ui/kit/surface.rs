@@ -1,9 +1,13 @@
 //! `surface(Material, radius, content)`: what every panel and window body sits
 //! on, solid (glass joins with the GPU renderer, 0.1.3).
-use iced::widget::{Container, container};
+use iced::widget::{Container, container, text::IntoFragment};
 use iced::{Border, Element};
 
 use super::themes::c;
+use super::tokens::{Role, radius};
+
+/// A hint's padding (the toast pill's, design 11.2).
+const HINT_PAD: [f32; 2] = [8.0, 14.0];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Material {
@@ -41,4 +45,12 @@ pub fn surface<'a, Message: 'a>(
             ..container::Style::default()
         }
     })
+}
+
+/// A one-line hint over the screen ("Circle, drag or tap anything", the
+/// editor's area picker, a protected capture): a solid pill on the bar's
+/// surface, in its text, in every theme.
+pub fn hint<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a, Message> {
+    let line = super::text::text(Role::NOTE, label);
+    surface(Material::Widget, radius::FULL, line).padding(HINT_PAD)
 }

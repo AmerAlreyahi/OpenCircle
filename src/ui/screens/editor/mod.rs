@@ -13,8 +13,8 @@ pub mod toolbar;
 
 use crate::actions::Crop;
 use crate::editor::{self, Editor, Image, Message, Output};
+use crate::ui::kit::surface;
 use crate::ui::screens::bar::geometry::{BOTTOM_GAP, GAP};
-use crate::ui::widgets;
 
 /// The hint's distance from the edge.
 const HINT_PAD: f32 = 24.0;
@@ -159,7 +159,7 @@ impl Editing {
         grab: M,
     ) -> Element<'a, M> {
         if let Some(drag) = self.picking {
-            let hint = container(widgets::pill(PICK_HINT))
+            let hint = container(surface::hint(PICK_HINT))
                 .center_x(Fill)
                 .padding(HINT_PAD);
             return Element::from(stack![

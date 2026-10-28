@@ -3994,3 +3994,28 @@ fn the_wheel_zoom_eases_to_its_target_and_stops() {
     assert_eq!(app.o.view, still);
     assert!(app.o.zoom.is_none());
 }
+
+/// The hint at the top of the overlay is a kit pill on the bar's surface and
+/// text, in every theme (it was the old palette's black pill): the overlay
+/// with its hint and bar in Sapphire and Daylight.
+#[test]
+fn the_overlay_hint_matches_the_bar_in_every_theme() {
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        themes::set(theme);
+        let mut app = open_app(720, 260, 1.0);
+        settle_bar(&mut app);
+        let file = format!("overlay-hint-{}", theme.id);
+        failed.extend(golden::check(
+            "screens",
+            &file,
+            app.o.screen,
+            &[1.0],
+            || app.view(app.overlay),
+        ));
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
