@@ -1,5 +1,6 @@
 //! Screen capture: one frozen frame of a monitor (`choose`: the active window's,
-//! else the pointer's), or of every monitor at once (snip).
+//! else the pointer's) first and then the others (Circle to Search), or of every
+//! monitor at once (snip).
 //! One file per platform: `x11.rs` (Linux X11/XWayland), `portal.rs` (Linux Wayland),
 //! `win.rs` (Windows, xcap). Scrolling capture: `stitch.rs` + `scroll.rs`.
 pub mod cursor;
@@ -98,11 +99,59 @@ pub fn monitor_under_cursor() -> Result<Frame, CaptureError> {
     monitor_of(None)
 }
 
-/// Captures the monitor of the active window (most of it), for Circle to Search,
-/// translate and the quick actions; the pointer's monitor when no real window is
-/// active (the desktop, the taskbar, one of ours).
-pub fn active_monitor() -> Result<Frame, CaptureError> {
-    monitor_of(window_rect::active_rect())
+/// Circle to Search: the monitor of the active window (most of it; the
+/// pointer's when no real window is active: the desktop, the taskbar, one of
+/// ours) handed to `each` as soon as it is grabbed (its overlay opens on it,
+/// as fast as with one screen), then with `all` every other monitor, grabbed
+/// together after it. A monitor that fails is left out (logged); only the
+/// active one failing is an error, and then nothing else is grabbed. Wayland
+/// and the test frame: the one whole desktop, as before.
+pub fn active_first(all: bool, each: impl FnMut(Result<Frame, CaptureError>)) {
+    let mut each = each;
+    if let Some(frame) = whole_desktop() {
+        return each(frame);
+    }
+    let monitors = match platform::monitors() {
+        Ok(monitors) => monitors,
+        Err(e) => return each(Err(e.into())),
+    };
+    match choose(&monitors, window_rect::active_rect(), platform::pointer()) {
+        Some(at) => grab_active_first(&monitors, at, all, platform::grab, each),
+        None => each(Err("no monitor found".into())),
+    }
+}
+
+/// `active_first` past choosing: `monitors[at]` first, then (`all`) the rest.
+fn grab_active_first(
+    monitors: &[Monitor],
+    at: usize,
+    all: bool,
+    grab: impl Fn(&Monitor) -> Result<Frame, String> + Sync,
+    mut each: impl FnMut(Result<Frame, CaptureError>),
+) {
+    let active = grab(&monitors[at]);
+    let failed = active.is_err();
+    each(active.map_err(CaptureError::from));
+    if failed || !all {
+        return;
+    }
+    // A thread each: one capture takes tens of ms.
+    let grab = &grab;
+    let rest = std::thread::scope(|s| {
+        let grabs: Vec<_> = (monitors.iter().enumerate())
+            .filter(|&(i, _)| i != at)
+            .map(|(_, m)| s.spawn(move || grab(m)))
+            .collect();
+        (grabs.into_iter())
+            .map(|g| g.join().unwrap_or_else(|_| Err("capture failed".into())))
+            .collect::<Vec<_>>()
+    });
+    for frame in rest {
+        match frame {
+            Ok(frame) => each(Ok(frame)),
+            Err(e) => crate::log!("[opencircle] a monitor's capture failed: {e}"),
+        }
+    }
 }
 
 /// Snip: every monitor at once (frozen together), and which one the pointer is on.
@@ -271,6 +320,45 @@ mod tests {
         // Equal shares: the first.
         assert_eq!(choose(&no_primary, Some((5, 0, 10, 10)), None), Some(0));
         assert_eq!(choose(&[], None, None), None);
+    }
+
+    #[test]
+    fn the_active_monitor_comes_first_and_a_failed_one_keeps_the_rest() {
+        let m = |x| Monitor {
+            rect: (x, 0, 10, 10),
+            scale: 1.0,
+            primary: x == 0,
+        };
+        let monitors = [m(-10), m(0), m(10), m(20)];
+        let grab = |mon: &Monitor| match mon.rect.0 {
+            10 => Err("gone".to_string()),
+            x => {
+                if x == 20 {
+                    // slow: the others still wait for the active one
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                }
+                Ok(Frame {
+                    rgba: Vec::new(),
+                    width: 10,
+                    height: 10,
+                    x,
+                    y: 0,
+                    scale: 1.0,
+                })
+            }
+        };
+        let run = |at, all| {
+            let mut got = Vec::new();
+            grab_active_first(&monitors, at, all, grab, |f| got.push(f.map(|f| f.x)));
+            got
+        };
+        // the slow active one first, then the rest; the failed one is left out
+        assert_eq!(run(3, true), [Ok(20), Ok(-10), Ok(0)]);
+        assert_eq!(run(1, true), [Ok(0), Ok(-10), Ok(20)]);
+        // the active one failing: that error, nothing else grabbed
+        assert_eq!(run(2, true), [Err(CaptureError::Failed("gone".into()))]);
+        // one screen asked: the active one only
+        assert_eq!(run(0, false), [Ok(-10)]);
     }
 
     #[test]

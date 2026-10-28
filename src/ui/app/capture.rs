@@ -49,16 +49,22 @@ impl App {
             let shot = match snip {
                 Some(kind) => Self::snip_shot(kind),
                 // The monitor of the window the user is in (else the pointer's).
-                None => capture::active_monitor().map(|frame| {
-                    let (place, image) = snip::screen_of(frame);
-                    Shot {
-                        origin: place.logical_origin(),
-                        size: place.size(),
-                        image,
-                        scale: place.scale,
-                        snip: None,
-                    }
-                }),
+                None => {
+                    let mut shot = None;
+                    capture::active_first(false, |frame| {
+                        shot.get_or_insert(frame.map(|frame| {
+                            let (place, image) = snip::screen_of(frame);
+                            Shot {
+                                origin: place.logical_origin(),
+                                size: place.size(),
+                                image,
+                                scale: place.scale,
+                                snip: None,
+                            }
+                        }));
+                    });
+                    shot.unwrap_or_else(|| Err("no monitor found".into()))
+                }
             };
             let _ = tx.unbounded_send(shot);
         })
