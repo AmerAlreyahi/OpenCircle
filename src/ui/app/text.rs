@@ -582,15 +582,7 @@ impl App {
             return Task::none();
         };
         if act == PickAct::Copy {
-            let text = picked.text();
-            return self.confirm_after(move || {
-                (copy::text(text))
-                    .map(|()| copy::COPIED_PILL.to_string())
-                    .map_err(|e| {
-                        crate::log!("copy text failed: {e}");
-                        "Couldn't copy. Close what holds the clipboard and try again.".to_string()
-                    })
-            });
+            return self.copy_text(picked.text());
         }
         if act == PickAct::Search {
             return self.search_text(picked.text());
@@ -606,6 +598,28 @@ impl App {
             self.remember_region();
         }
         self.start_translate()
+    }
+
+    /// Closes the overlay with `text` copied (the "Copied" pill).
+    pub(in crate::ui) fn copy_text(&mut self, text: String) -> Task<Message> {
+        self.confirm_after(move || {
+            (copy::text(text))
+                .map(|()| copy::COPIED_PILL.to_string())
+                .map_err(|e| {
+                    crate::log!("copy text failed: {e}");
+                    "Couldn't copy. Close what holds the clipboard and try again.".to_string()
+                })
+        })
+    }
+
+    /// Select-text mode's box, read: all its text in reading order (`None`
+    /// before it is read, or with no text in it).
+    pub(in crate::ui) fn box_text(&self) -> Option<String> {
+        let lines = self.o.text_mode.as_ref()?.lines.as_ref()?;
+        let text: Vec<&str> = (lines.iter().map(|l| l.text.trim()))
+            .filter(|t| !t.is_empty())
+            .collect();
+        (!text.is_empty()).then(|| text.join("\n"))
     }
 
     /// Picked words (a word selection, or select-text mode's picks): their text.

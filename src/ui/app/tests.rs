@@ -3256,6 +3256,35 @@ fn select_text_highlights_every_word_and_a_drag_picks_some() {
     assert!(app.o.text_mode.is_none());
 }
 
+/// Select text pressed, nothing picked yet: Ctrl+C copies all the box's text
+/// in reading order, not the picture of the box (owner, 2026-10-28). Before
+/// its words are read it reads them (Copy text), still never the picture.
+#[test]
+fn ctrl_c_in_select_text_mode_copies_the_boxs_text_not_its_picture() {
+    let ctrl_c = overlay::Event::Key {
+        letter: 'c',
+        ctrl: true,
+    };
+    let mut app = select_text_app();
+    let _ = copy::copied::text();
+    let _ = copy::copied::image();
+    let want = app.box_text().expect("the box's lines");
+    assert!(want.contains('\n'), "every line of the box: {want}");
+    let task = app.update(Message::Overlay(ctrl_c));
+    run_task(&mut app, task);
+    assert_eq!(copy::copied::text().as_deref(), Some(want.as_str()));
+    assert_eq!(copy::copied::image(), None, "not the picture");
+    // not read yet: it reads the box, and copies no picture meanwhile
+    let mut early = select_text_app();
+    early.o.text_mode.as_mut().unwrap().lines = None;
+    let task = early.update(Message::Overlay(ctrl_c));
+    let reading = early.o.toast == Some("Reading text…");
+    let asking = early.o.panel.as_ref().map(|(_, p)| p.kind()) == Some(actions::Panel::Text);
+    assert!(reading || asking, "reads the box (or asks for its model)");
+    run_task(&mut early, task);
+    assert_eq!(copy::copied::image(), None, "not the picture");
+}
+
 #[test]
 fn chips_go_under_the_box_else_above_never_on_it() {
     let screen = Rectangle::with_size(Size::new(1920.0, 1080.0));

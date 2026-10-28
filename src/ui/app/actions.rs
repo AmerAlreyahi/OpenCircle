@@ -140,14 +140,18 @@ impl App {
             Run::Edit => return self.open_editor(),
             Run::Translate => return self.start_translate(),
             // Picked words (a word selection, or select-text mode's picks): Copy
-            // (the bar's or Ctrl+C) copies exactly their text.
+            // (the bar's or Ctrl+C) copies exactly their text. In select-text
+            // mode with nothing picked: all the box's text, never its picture
+            // (read first if it isn't yet).
             Run::Finish(_)
                 if action.id == copy::ACTION.id
                     && self.o.edit.is_none()
-                    && (self.o.word.is_some()
-                        || (self.o.text_mode.as_ref()).is_some_and(|m| m.picked.is_some())) =>
+                    && (self.o.word.is_some() || self.o.text_mode.is_some()) =>
             {
-                return self.on_picked(PickAct::Copy);
+                return match self.picked_text().or_else(|| self.box_text()) {
+                    Some(text) => self.copy_text(text),
+                    None => self.run_quick(Quick::CopyText),
+                };
             }
             _ => {}
         }
