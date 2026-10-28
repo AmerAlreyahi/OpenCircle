@@ -386,6 +386,7 @@ impl App {
         self.o.panel = None;
         self.o.edit = None;
         self.o.view = self.o.view.reset(); // the translation is drawn at 1x
+        self.o.zoom = None;
         let models = text::models_present();
         let (session, task) = translate::Session::start(
             frame.clone(),

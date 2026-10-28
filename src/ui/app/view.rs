@@ -52,6 +52,7 @@ impl App {
             selection: self.o.selection,
             others: &self.o.others,
             view: self.o.view,
+            zooming: self.view_moving(),
             handles: self.handles(),
             opening: self.opening,
             first_draw: &self.first_draw,
@@ -84,6 +85,15 @@ impl App {
         }
         // At rest (not zoomed, no translation): drawn as tiles (`overlay::tiles`).
         let shown: Element<'_, Message> = match &self.o.tiles {
+            // zooming or panning: Nearest (fractions of a frame px)
+            _ if self.view_moving() => {
+                let picture = translation.unwrap_or(frame);
+                let zoomed = overlay::Zoomed {
+                    picture,
+                    view: self.o.view,
+                };
+                canvas(zoomed).width(Fill).height(Fill).into()
+            }
             Some((id, tiles))
                 if *id == frame.id() && translation.is_none() && self.o.view.crop().is_none() =>
             {

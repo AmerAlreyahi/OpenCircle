@@ -47,6 +47,8 @@ pub(in crate::ui) struct Opening {
     /// The zoomed / panned part of the frame on screen; a pan's start.
     pub(in crate::ui) view: overlay::View,
     pub(in crate::ui) pan: Option<(Point, overlay::View)>,
+    /// The wheel zoom easing `view` to its target (`zoom.rs`).
+    pub(in crate::ui) zoom: Option<crate::ui::app::zoom::ZoomMotion>,
     /// The tapped word(s) the selection is (the tap's number: `App::taps`).
     pub(in crate::ui) word: Option<word::Picked>,
     /// Main mode: the frame's text lines (image px), read on demand band by
@@ -180,6 +182,7 @@ impl Default for Opening {
             grab: None,
             view: overlay::View::new(1, 1, Size::new(1.0, 1.0)),
             pan: None,
+            zoom: None,
             word: None,
             screen_text: word::Screen::default(),
             reading: None,

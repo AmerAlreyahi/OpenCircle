@@ -660,8 +660,9 @@ fn after_a_drag_out_the_editor_is_still_there_or_the_overlay_closes_whole() {
 
 #[test]
 fn handles_resize_and_moving_drags_at_any_zoom_and_scale() {
-    // scale 2 (a 400x300 overlay on 800x600 pixels), zoomed in 1.5625x
+    // scale 2 (a 400x300 overlay on 800x600 pixels), zoomed in 1.5625x (at once)
     let mut app = open_app(800, 600, 2.0);
+    motion::set_reduced(true);
     event(
         &mut app,
         overlay::Event::Zoom {
@@ -3941,4 +3942,55 @@ fn the_ai_fields_include_screen_is_the_chats_switch() {
     // a new opening starts on
     let app = open_app(1280, 720, 1.0);
     assert!(app.o.include);
+}
+
+/// The wheel zoom eases (#89): a notch sets the target, the drawn view moves
+/// there by the clock with the pointer's frame pixel under it all the way;
+/// a notch on the way goes on from where it is (no jump); at rest it is the
+/// stepped zoom's view (the same crops) and the frame clock stops. Reduced
+/// motion: at once.
+#[test]
+fn the_wheel_zoom_eases_to_its_target_and_stops() {
+    let mut app = open_app(3840, 2160, 2.0);
+    settle_bar(&mut app);
+    let still = app.o.view;
+    let at = Point::new(600.0, 300.0);
+    let under = still.to_image(at);
+    event(&mut app, overlay::Event::Zoom { at, notches: 2.0 });
+    assert_eq!(app.o.view, still, "nothing moves before the next frame");
+    assert!(app.animating());
+    let t0 = Instant::now();
+    let mut last = still.zoom();
+    for ms in [0, 30, 60, 90] {
+        let _ = app.update(Message::Frame(t0 + Duration::from_millis(ms)));
+        let v = app.o.view;
+        assert!(
+            v.to_image(at).distance(under) < 0.5,
+            "{ms} ms: {:?}",
+            v.to_image(at)
+        );
+        assert!(v.zoom() >= last, "{ms} ms: only ever in");
+        last = v.zoom();
+    }
+    assert!(
+        last > 1.0 && last < still.zoomed(at, 2.0).zoom() - 0.01,
+        "on its way: {last}"
+    );
+    // a notch on the way: on from where it is (the next frame starts there)
+    let shown = app.o.view;
+    event(&mut app, overlay::Event::Zoom { at, notches: 1.0 });
+    let _ = app.update(Message::Frame(t0 + Duration::from_millis(100)));
+    assert_eq!(app.o.view, shown, "no jump");
+    let _ = app.update(Message::Frame(
+        t0 + Duration::from_millis(100) + motion::GLIDE,
+    ));
+    // at rest: what the stepped zoom shows, the clock off
+    assert_eq!(app.o.view, still.zoomed(at, 3.0));
+    assert_eq!(app.o.view.crop(), still.zoomed(at, 3.0).crop());
+    assert!(app.o.zoom.is_none() && !app.animating());
+    // reduced motion: there at once
+    motion::set_reduced(true);
+    event(&mut app, overlay::Event::ZoomReset);
+    assert_eq!(app.o.view, still);
+    assert!(app.o.zoom.is_none());
 }

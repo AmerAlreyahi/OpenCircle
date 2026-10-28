@@ -350,6 +350,7 @@ impl App {
                 if let Some((_, panel)) = &mut self.o.panel {
                     panel.tick(now);
                 }
+                self.step_zoom(now);
                 // the chat card docking where it was let go
                 if let Some((began, from, _)) = self.o.chat_glide {
                     let t = motion::progress(began, now, motion::DOCK, motion::Curve::Standard);

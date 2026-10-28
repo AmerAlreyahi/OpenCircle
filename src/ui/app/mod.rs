@@ -38,6 +38,7 @@ pub(in crate::ui) mod tests;
 pub(in crate::ui) mod text;
 pub(in crate::ui) mod update;
 pub(in crate::ui) mod view;
+pub(in crate::ui) mod zoom;
 
 pub(in crate::ui) const HINT: &str = "Circle, drag or tap anything · Esc to close";
 
@@ -291,6 +292,7 @@ impl App {
             || self.bar_gliding()
             || self.card_opening()
             || self.o.chat_glide.is_some()
+            || self.o.zoom.is_some()
             || (self.o.panel.as_ref()).is_some_and(|(_, p)| p.spinning())
             || self.o.bar_now.is_none()
     }

@@ -47,13 +47,17 @@ impl App {
         let event = match event {
             overlay::Event::Zoom { at, notches } => {
                 if self.can_zoom() {
-                    self.o.view = self.o.view.zoomed(at, notches);
+                    self.zoom_by(at, notches);
                 } else if let Purpose::Snip(snip) = &mut self.o.purpose {
                     snip.walk(notches); // control -> window -> screen, and back
                 }
                 return Task::none();
             }
             overlay::Event::PanStart(at) => {
+                // a zoom on its way stops where it is (on whole frame px)
+                if self.o.zoom.take().is_some() {
+                    self.o.view = self.o.view.panned(iced::Vector::ZERO);
+                }
                 self.o.pan = self.can_zoom().then_some((at, self.o.view));
                 return Task::none();
             }
@@ -63,8 +67,13 @@ impl App {
                 }
                 return Task::none();
             }
+            // drawn with its usual filter again (`App::view_moving`)
+            overlay::Event::PanEnd => {
+                self.o.pan = None;
+                return Task::none();
+            }
             overlay::Event::ZoomReset => {
-                self.o.view = self.o.view.reset();
+                self.zoom_to(self.o.view.reset());
                 return Task::none();
             }
             overlay::Event::Press { at, shift } => {
@@ -380,6 +389,7 @@ impl App {
             overlay::Event::Zoom { .. }
             | overlay::Event::PanStart(_)
             | overlay::Event::PanMove(_)
+            | overlay::Event::PanEnd
             | overlay::Event::ZoomReset => {}
         }
         Task::none()

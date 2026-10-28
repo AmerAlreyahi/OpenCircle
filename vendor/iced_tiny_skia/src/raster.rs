@@ -105,14 +105,15 @@ impl Pipeline {
         let (ws, hs) = (bounds.width / iw as f32, bounds.height / ih as f32);
         let whole = |v: f32| (v - v.round()).abs() < 1e-3;
         let t = transform;
-        if t.kx != 0.0
-            || t.ky != 0.0
-            || (t.sx * ws - 1.0).abs() > 1e-5
+        if t.kx != 0.0 || t.ky != 0.0 {
+            return false;
+        }
+        if (t.sx * ws - 1.0).abs() > 1e-5
             || (t.sy * hs - 1.0).abs() > 1e-5
             || !whole(t.tx)
             || !whole(t.ty)
         {
-            return false;
+            return image.opaque && scaled(image, bounds, t, pixels, clip);
         }
         // where `draw` puts it: its position truncated to whole pixels (as
         // `draw` hands it to `draw_pixmap`), so the frozen tiles and the edge
@@ -157,6 +158,93 @@ impl Pipeline {
     pub fn trim_cache(&mut self) {
         self.cache.borrow_mut().trim();
     }
+}
+
+/// OpenCircle patch (#89): an opaque image scaled by any amount and placed
+/// at any fraction of a pixel, Nearest: each device pixel takes the image
+/// pixel under its middle (tiny-skia's Nearest), a column table per draw and
+/// a row copied whole where the one above took the same image row. The
+/// overlay's zoom redraws the whole frozen screen every frame of its ease
+/// (tiny-skia's pipeline: ~75 ms a 4K frame). `false`: not drawable so (a
+/// flipped image).
+fn scaled(
+    image: &Entry,
+    bounds: Rectangle,
+    t: tiny_skia::Transform,
+    pixels: &mut tiny_skia::PixmapMut<'_>,
+    clip: [u32; 4],
+) -> bool {
+    let (iw, ih) = (image.width as usize, image.height as usize);
+    // device px per image px, and where the image's corner lands
+    let (sx, sy) = (
+        f64::from(t.sx) * f64::from(bounds.width) / iw as f64,
+        f64::from(t.sy) * f64::from(bounds.height) / ih as f64,
+    );
+    if !(sx > 0.0 && sy > 0.0) {
+        return false;
+    }
+    let ox = f64::from(t.sx) * f64::from(bounds.x) + f64::from(t.tx);
+    let oy = f64::from(t.sy) * f64::from(bounds.y) + f64::from(t.ty);
+    let (w, h) = (pixels.width(), pixels.height());
+    let Ok(dst) = bytemuck::try_cast_slice_mut::<u8, u32>(pixels.data_mut()) else {
+        return false;
+    };
+    let [x0, y0, x1, y1] = [clip[0], clip[1], clip[2].min(w), clip[3].min(h)];
+    let src = |d: u32, o: f64, s: f64, n: usize| {
+        let u = ((f64::from(d) + 0.5 - o) / s).floor();
+        (u >= 0.0 && u < n as f64).then_some(u as usize)
+    };
+    let (mut cols, mut first) = (Vec::with_capacity((x1.saturating_sub(x0)) as usize), None);
+    for x in x0..x1 {
+        if let Some(u) = src(x, ox, sx, iw) {
+            let _ = first.get_or_insert(x as usize);
+            cols.push(u as u32);
+        }
+    }
+    let Some(xa) = first else {
+        return true; // nothing of it in the clip
+    };
+    let n = cols.len();
+    rows(dst, w as usize, y0 as usize..y1 as usize, |y, row| {
+        let Some(v) = src(y as u32, oy, sy, ih) else {
+            return;
+        };
+        let at = &image.pixels[v * iw..(v + 1) * iw];
+        for (p, &u) in row[xa..xa + n].iter_mut().zip(&cols) {
+            *p = at[u as usize];
+        }
+    });
+    true
+}
+
+/// OpenCircle patch (#89): `each(y, row)` over the rows `ys` of a `w` px wide
+/// image, split between the CPU's cores when there are many pixels (a whole
+/// screen each frame of the wheel zoom); in order on one core when few.
+pub(crate) fn rows(
+    data: &mut [u32],
+    w: usize,
+    ys: std::ops::Range<usize>,
+    each: impl Fn(usize, &mut [u32]) + Sync,
+) {
+    let data = &mut data[ys.start * w..ys.end * w];
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get().min(8));
+    let band = ys.len().div_ceil(cores).max(1);
+    if cores == 1 || data.len() < 1 << 20 {
+        for (i, row) in data.chunks_exact_mut(w).enumerate() {
+            each(ys.start + i, row);
+        }
+        return;
+    }
+    std::thread::scope(|scope| {
+        for (b, chunk) in data.chunks_mut(band * w).enumerate() {
+            let each = &each;
+            let _ = scope.spawn(move || {
+                for (i, row) in chunk.chunks_exact_mut(w).enumerate() {
+                    each(ys.start + b * band + i, row);
+                }
+            });
+        }
+    });
 }
 
 #[derive(Debug, Default)]

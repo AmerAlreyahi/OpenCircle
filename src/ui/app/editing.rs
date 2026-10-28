@@ -25,6 +25,7 @@ impl App {
         }
         self.o.panel = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x
+        self.o.zoom = None;
         if let Some(edit) = &mut self.o.edit {
             edit.reopen();
             return Task::none();

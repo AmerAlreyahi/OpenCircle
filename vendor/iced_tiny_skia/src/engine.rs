@@ -561,6 +561,9 @@ impl Engine {
                 let clip_mask = (!physical_bounds.is_within(&clip_bounds))
                     .then_some(clip_mask as &_);
 
+                if clip_mask.is_none() && fill_rect(path, paint, physical_bounds, pixels) {
+                    return;
+                }
                 pixels.fill_path(
                     path,
                     paint,
@@ -914,6 +917,76 @@ thread_local! {
     /// tests: an animation over the frozen screen must blit its tiles and edge
     /// strips (a small icon moving by fractions of a pixel may not).
     pub static PIPELINE_PIXELS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// OpenCircle patch (#89): a canvas's solid rectangle (`fill_rectangle`: not
+/// anti-aliased, source-over, inside its clip), blended straight into the
+/// pixels: the pixels whose middle it covers (tiny-skia's non-AA rule),
+/// premultiplied, two channels at a time. The overlay's dim is a whole
+/// screen of them, redrawn on every frame of the wheel zoom (tiny-skia's
+/// pipeline: ~13 ms a 4K frame). `false` (nothing drawn): not such a fill.
+fn fill_rect(
+    path: &tiny_skia::Path,
+    paint: &tiny_skia::Paint<'_>,
+    physical: Rectangle,
+    pixels: &mut tiny_skia::PixmapMut<'_>,
+) -> bool {
+    use tiny_skia::PathSegment as S;
+    let tiny_skia::Shader::SolidColor(color) = paint.shader else {
+        return false;
+    };
+    let b = path.bounds();
+    let corner = |p: &tiny_skia::Point| {
+        (p.x == b.left() || p.x == b.right()) && (p.y == b.top() || p.y == b.bottom())
+    };
+    if paint.anti_alias
+        || paint.blend_mode != tiny_skia::BlendMode::SourceOver
+        || !matches!(
+            path.segments().collect::<Vec<_>>()[..],
+            [S::MoveTo(a), S::LineTo(b), S::LineTo(c), S::LineTo(d), S::Close]
+                if [a, b, c, d].iter().all(corner)
+        )
+    {
+        return false;
+    }
+    let (w, h) = (pixels.width(), pixels.height());
+    let [x0, y0, x1, y1] = pixel_rect(physical, w, h);
+    let c = color.premultiply().to_color_u8();
+    let src = u32::from_ne_bytes([c.red(), c.green(), c.blue(), c.alpha()]);
+    let keep = 255 - u32::from(c.alpha());
+    let Ok(data) = bytemuck::try_cast_slice_mut::<u8, u32>(pixels.data_mut()) else {
+        return false;
+    };
+    if x0 >= x1 || y0 >= y1 {
+        return true;
+    }
+    // each byte: src + d * keep / 255 (rounded), 8 pixels at a time (the
+    // compiler turns the fixed arrays into vector code)
+    let c: [u8; 32] = std::array::from_fn(|i| src.to_ne_bytes()[i % 4]);
+    let keep = keep as u16;
+    let mix = |d: &mut [u8], c: &[u8]| {
+        for (d, &c) in d.iter_mut().zip(c) {
+            let t = u16::from(*d) * keep + 128;
+            *d = c + ((t + (t >> 8)) >> 8) as u8;
+        }
+    };
+    let blend = |row: &mut [u32]| match keep {
+        0 => row.fill(src),
+        255 => {}
+        _ => {
+            let bytes: &mut [u8] = bytemuck::cast_slice_mut(row);
+            let mut chunks = bytes.chunks_exact_mut(32);
+            for chunk in &mut chunks {
+                let chunk: &mut [u8; 32] = chunk.try_into().expect("32 bytes");
+                mix(chunk, &c);
+            }
+            mix(chunks.into_remainder(), &c);
+        }
+    };
+    crate::raster::rows(data, w as usize, y0 as usize..y1 as usize, |_, row| {
+        blend(&mut row[x0 as usize..x1 as usize]);
+    });
+    true
 }
 
 /// OpenCircle patch (#23): the whole pixels a clip to `r` (device px) holds,

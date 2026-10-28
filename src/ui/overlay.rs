@@ -110,6 +110,8 @@ pub enum Event {
     /// Right or middle button down / the pointer moved while it is down: pan.
     PanStart(Point),
     PanMove(Point),
+    /// That button let go.
+    PanEnd,
     /// Double right-click: back to 1x.
     ZoomReset,
 }
@@ -699,29 +701,26 @@ fn brackets(frame: &mut canvas::Frame, r: Rectangle, look: &Look, alpha: f32) {
 }
 
 /// What part of the frozen frame the overlay shows: all of it at 1x, a part of
-/// it zoomed in. The shown part is whole frame pixels (what the image widget
-/// crops), and the mapping uses exactly that, so a selection drawn at any zoom
-/// crops what was under it.
+/// it zoomed in. At rest the shown part is whole frame pixels (what the image
+/// widget crops), and the mapping uses exactly that, so a selection drawn at
+/// any zoom crops what was under it; while the wheel zoom eases (`lerp`) it
+/// is fractional (drawn by `Zoomed`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct View {
     /// The frame (physical px) and the overlay (logical px).
     frame: (u32, u32),
     screen: Size,
     /// The frame pixels shown.
-    shown: Rectangle<u32>,
+    shown: Rectangle,
 }
 
 impl View {
     pub fn new(width: u32, height: u32, screen: Size) -> View {
+        let (w, h) = (width.max(1) as f32, height.max(1) as f32);
         View {
             frame: (width, height),
             screen,
-            shown: Rectangle {
-                x: 0,
-                y: 0,
-                width: width.max(1),
-                height: height.max(1),
-            },
+            shown: Rectangle::new(Point::ORIGIN, Size::new(w, h)),
         }
     }
 
@@ -731,7 +730,7 @@ impl View {
     }
 
     pub fn zoom(&self) -> f32 {
-        self.frame.0 as f32 / self.shown.width as f32
+        self.frame.0 as f32 / self.shown.width
     }
 
     /// Frame px per image px, and screen px per shown frame px (per axis).
@@ -739,8 +738,8 @@ impl View {
         let (w, h) = (self.frame.0 as f32, self.frame.1 as f32);
         let px = Vector::new(w / self.screen.width, h / self.screen.height);
         let per = Vector::new(
-            self.screen.width / self.shown.width as f32,
-            self.screen.height / self.shown.height as f32,
+            self.screen.width / self.shown.width,
+            self.screen.height / self.shown.height,
         );
         (px, per)
     }
@@ -749,8 +748,8 @@ impl View {
     pub fn to_image(self, p: Point) -> Point {
         let (px, per) = self.ratios();
         Point::new(
-            (self.shown.x as f32 + p.x / per.x) / px.x,
-            (self.shown.y as f32 + p.y / per.y) / px.y,
+            (self.shown.x + p.x / per.x) / px.x,
+            (self.shown.y + p.y / per.y) / px.y,
         )
     }
 
@@ -758,8 +757,8 @@ impl View {
     pub fn to_screen(self, q: Point) -> Point {
         let (px, per) = self.ratios();
         Point::new(
-            (q.x * px.x - self.shown.x as f32) * per.x,
-            (q.y * px.y - self.shown.y as f32) * per.y,
+            (q.x * px.x - self.shown.x) * per.x,
+            (q.y * px.y - self.shown.y) * per.y,
         )
     }
 
@@ -771,7 +770,35 @@ impl View {
 
     /// The frame crop the image widget shows; `None` at 1x (all of it).
     pub fn crop(&self) -> Option<Rectangle<u32>> {
-        (self.shown.width < self.frame.0 || self.shown.height < self.frame.1).then_some(self.shown)
+        let s = self.shown;
+        let whole = Rectangle {
+            x: s.x.round() as u32,
+            y: s.y.round() as u32,
+            width: s.width.round() as u32,
+            height: s.height.round() as u32,
+        };
+        (whole.width < self.frame.0 || whole.height < self.frame.1).then_some(whole)
+    }
+
+    /// The whole frame as drawn on screen (logical px; past the screen's
+    /// edges when zoomed in): `Zoomed` draws it there.
+    pub fn frame_on_screen(&self) -> Rectangle {
+        self.rect_to_screen(Rectangle::with_size(self.screen))
+    }
+
+    /// The view `t` (0..1) of the way from `self` to `to`: the shown part's
+    /// edges move linearly, so a frame pixel both have under the same screen
+    /// point stays under it all the way (the wheel zoom's ease).
+    pub fn lerp(&self, to: &View, t: f32) -> View {
+        let (a, b) = (self.shown, to.shown);
+        let at = |a: f32, b: f32| a + (b - a) * t;
+        let shown = Rectangle {
+            x: at(a.x, b.x),
+            y: at(a.y, b.y),
+            width: at(a.width, b.width),
+            height: at(a.height, b.height),
+        };
+        View { shown, ..*to }
     }
 
     /// A picture of just `area` of the frame (x0, y0, x1, y1 in frame px), as the
@@ -779,10 +806,10 @@ impl View {
     /// crop of the picture, in its px) and where that goes on screen. `None`: out of view.
     pub fn patch_in_view(&self, area: [u32; 4]) -> Option<(Rectangle<u32>, Rectangle)> {
         let [x0, y0, x1, y1] = area;
-        let (sx, sy) = (self.shown.x, self.shown.y);
-        let (left, top) = (x0.max(sx), y0.max(sy));
-        let right = x1.min(sx + self.shown.width);
-        let bottom = y1.min(sy + self.shown.height);
+        let s = self.shown;
+        let (left, top) = (x0.max(s.x.floor() as u32), y0.max(s.y.floor() as u32));
+        let right = x1.min((s.x + s.width).ceil() as u32);
+        let bottom = y1.min((s.y + s.height).ceil() as u32);
         if right <= left || bottom <= top {
             return None;
         }
@@ -794,7 +821,7 @@ impl View {
             height: bottom - top,
         };
         let on_screen = Rectangle::new(
-            Point::new((left - sx) as f32 * per.x, (top - sy) as f32 * per.y),
+            Point::new((left as f32 - s.x) * per.x, (top as f32 - s.y) * per.y),
             Size::new((right - left) as f32 * per.x, (bottom - top) as f32 * per.y),
         );
         Some((crop, on_screen))
@@ -803,13 +830,18 @@ impl View {
     /// Zoomed by `notches` wheel notches (1x–4x) around `at` (screen px): the
     /// frame pixel under the pointer stays under it.
     pub fn zoomed(&self, at: Point, notches: f32) -> View {
-        let zoom = (self.zoom() * ZOOM_STEP.powf(notches)).clamp(1.0, MAX_ZOOM);
+        self.zoomed_to(at, self.zoom() * ZOOM_STEP.powf(notches))
+    }
+
+    /// At `zoom` (kept to 1x–4x) around `at` (screen px), whole frame px.
+    pub fn zoomed_to(&self, at: Point, zoom: f32) -> View {
+        let zoom = zoom.clamp(1.0, MAX_ZOOM);
         let (fw, fh) = self.frame;
         let w = ((fw as f32 / zoom).round() as u32).clamp(1, fw);
         let h = ((fh as f32 / zoom).round() as u32).clamp(1, fh);
         let (_, per) = self.ratios();
-        let under = |shown: u32, at: f32, per: f32, screen: f32, new: u32| {
-            shown as f32 + at / per - at / screen * new as f32
+        let under = |shown: f32, at: f32, per: f32, screen: f32, new: u32| {
+            shown + at / per - at / screen * new as f32
         };
         let x = under(self.shown.x, at.x, per.x, self.screen.width, w);
         let y = under(self.shown.y, at.y, per.y, self.screen.height, h);
@@ -819,21 +851,19 @@ impl View {
     /// Moved by `by` screen px (the frame follows the pointer).
     pub fn panned(&self, by: Vector) -> View {
         let (_, per) = self.ratios();
-        let (x, y) = (
-            self.shown.x as f32 - by.x / per.x,
-            self.shown.y as f32 - by.y / per.y,
-        );
-        self.place(x, y, self.shown.width, self.shown.height)
+        let (x, y) = (self.shown.x - by.x / per.x, self.shown.y - by.y / per.y);
+        let whole = |v: f32| (v.round() as u32).max(1);
+        self.place(x, y, whole(self.shown.width), whole(self.shown.height))
     }
 
     /// `w` x `h` frame px at (`x`, `y`), rounded, kept inside the frame.
     fn place(&self, x: f32, y: f32, width: u32, height: u32) -> View {
-        let clamp = |v: f32, max: u32| (v.round().max(0.0) as u32).min(max);
+        let clamp = |v: f32, max: u32| (v.round().max(0.0) as u32).min(max) as f32;
         let shown = Rectangle {
-            x: clamp(x, self.frame.0 - width),
-            y: clamp(y, self.frame.1 - height),
-            width,
-            height,
+            x: clamp(x, self.frame.0.saturating_sub(width)),
+            y: clamp(y, self.frame.1.saturating_sub(height)),
+            width: width as f32,
+            height: height as f32,
         };
         View { shown, ..*self }
     }
@@ -846,6 +876,8 @@ pub struct Overlay<'a> {
     /// Selections added before this one (Shift), with their strokes.
     pub others: &'a [(Selection, Vec<Point>)],
     pub view: View,
+    /// The wheel zoom is easing `view` (every frame redraws the whole screen).
+    pub zooming: bool,
     /// Corner handles on `selection` (resize; drag inside moves it).
     pub handles: bool,
     /// Counts overlay openings: pointer state from an earlier opening is stale.
@@ -901,6 +933,7 @@ struct Shown {
     selection: Option<Selection>,
     others: Vec<(Selection, Vec<Point>)>,
     view: View,
+    zooming: bool,
     handles: bool,
     dim: bool,
     live_drag: bool,
@@ -1000,8 +1033,10 @@ impl canvas::Program<Event> for Overlay<'_> {
             canvas::Event::Mouse(mouse::Event::ButtonReleased(
                 mouse::Button::Right | mouse::Button::Middle,
             )) => {
-                pointer.panning = false;
-                return None;
+                if !std::mem::take(&mut pointer.panning) {
+                    return None;
+                }
+                Event::PanEnd
             }
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 let at = cursor.position_in(bounds)?;
@@ -1066,6 +1101,7 @@ impl canvas::Program<Event> for Overlay<'_> {
             selection: self.selection,
             others: self.others.to_vec(),
             view: self.view,
+            zooming: self.zooming,
             handles: self.handles,
             dim: self.dim,
             live_drag: self.live_drag,
@@ -1112,7 +1148,7 @@ impl canvas::Program<Event> for Overlay<'_> {
                     None => {}
                 }
                 let holes: Vec<Rectangle> = holes.into_iter().filter_map(self::bounds).collect();
-                dim(frame, screen, &holes, dim_outside, |p| {
+                dim(frame, screen, &holes, dim_outside, self.zooming, |p| {
                     for (kind, s) in &others {
                         shape(p, *kind, s, true);
                     }
@@ -1123,7 +1159,7 @@ impl canvas::Program<Event> for Overlay<'_> {
                     }
                 });
             } else if self.dim {
-                dim(frame, screen, &[], dim_idle, |_| {});
+                dim(frame, screen, &[], dim_idle, self.zooming, |_| {});
             }
 
             let accent = theme::accent_of(&self.look);
@@ -1273,12 +1309,15 @@ const TILE: u32 = 256;
 /// within `holes` (their bounds). As one rectangle per `TILE`, and one path
 /// for the tiles the holes touch: like the frame (`tiles`), a small redraw
 /// then fills only the dim under it (tiny-skia fills a clipped path over its
-/// whole size).
+/// whole size). `whole` (the wheel zoom easing: every frame redraws all of
+/// it): a row's untouched tiles side by side as one rectangle (the renderer
+/// blends a big one on all its cores).
 fn dim(
     frame: &mut canvas::Frame,
     screen: Rectangle,
     holes: &[Rectangle],
     colour: Color,
+    whole: bool,
     cut: impl Fn(&mut canvas::path::Builder),
 ) {
     // a smoothed loop may bulge a little past its points
@@ -1288,14 +1327,26 @@ fn dim(
     let mut y = 0.0;
     while y < screen.height {
         let mut x = 0.0;
+        let mut run: Option<Rectangle> = None;
         while x < screen.width {
             let size = Size::new(side.min(screen.width - x), side.min(screen.height - y));
             let tile = Rectangle::new(Point::new(x, y), size);
             match holes.iter().any(|h| h.intersects(&tile)) {
                 true => touched.push(tile),
+                false if whole => {
+                    run = Some(run.map_or(tile, |r| r.union(&tile)));
+                    x += side;
+                    continue;
+                }
                 false => frame.fill_rectangle(tile.position(), size, colour),
             }
+            if let Some(r) = run.take() {
+                frame.fill_rectangle(r.position(), r.size(), colour);
+            }
             x += side;
+        }
+        if let Some(r) = run {
+            frame.fill_rectangle(r.position(), r.size(), colour);
         }
         y += side;
     }
@@ -1375,6 +1426,34 @@ impl<M> canvas::Program<M> for Frozen<'_> {
             let image = canvas::Image::new(handle.clone()).filter_method(FilterMethod::Nearest);
             frame.draw_image(Rectangle::new(at, size), image);
         }
+        vec![frame.into_geometry()]
+    }
+}
+
+/// The frozen frame (or its translation) while the wheel zoom eases: the
+/// whole picture where `view` puts it, to a fraction of a pixel, Nearest (the
+/// renderer scales it straight into the window: a whole 4K screen redrawn
+/// each frame of the ease). At rest the image widget crops it (`View::crop`)
+/// with its usual filter.
+pub struct Zoomed<'a> {
+    pub picture: &'a Handle,
+    pub view: View,
+}
+
+impl<M> canvas::Program<M> for Zoomed<'_> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let image = canvas::Image::new(self.picture.clone()).filter_method(FilterMethod::Nearest);
+        frame.draw_image(self.view.frame_on_screen(), image);
         vec![frame.into_geometry()]
     }
 }
@@ -2030,6 +2109,29 @@ mod tests {
         assert!(c.x + c.width <= 3840 && c.y + c.height <= 2160);
     }
 
+    /// The zoom's ease (#89): between two views with the same frame pixel
+    /// under the pointer, every step keeps it there; the ends are the views.
+    #[test]
+    fn lerp_keeps_the_pointers_pixel_under_it_at_every_t() {
+        let v = view().zoomed(Point::new(1500.0, 900.0), 2.0);
+        for at in [Point::new(600.0, 300.0), Point::new(1900.0, 20.0)] {
+            let to = v.zoomed_to(at, 3.7);
+            let under = v.to_image(at);
+            // (the target is on whole frame px: off by a little, never more)
+            let end = to.to_image(at).distance(under);
+            assert!(end < 0.5);
+            for i in 0..=20 {
+                let t = i as f32 / 20.0;
+                let step = v.lerp(&to, t);
+                let off = step.to_image(at).distance(under);
+                assert!(off <= end * t + 1e-3, "{at:?} at t {t}: {off} px off");
+                let z = step.zoom();
+                assert!(z >= v.zoom() - 1e-3 && z <= to.zoom() + 1e-3, "{z}");
+            }
+            assert_eq!((v.lerp(&to, 0.0), v.lerp(&to, 1.0)), (v, to));
+        }
+    }
+
     #[test]
     fn a_patch_goes_where_its_area_is_in_the_view() {
         // 3840x2160 frame on a 1920x1080 screen: 2 frame px per screen px
@@ -2136,6 +2238,7 @@ mod tests {
             selection,
             others: &[],
             view: View::new(960, 540, Size::new(960.0, 540.0)),
+            zooming: false,
             handles: false,
             opening: 0,
             first_draw: &first_draw,
@@ -2176,6 +2279,7 @@ mod tests {
             }),
             others: &[],
             view: View::new(960, 540, Size::new(960.0, 540.0)),
+            zooming: false,
             handles: true,
             opening: 0,
             first_draw: &first_draw,
