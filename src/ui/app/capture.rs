@@ -294,6 +294,8 @@ impl App {
         // Everything the opening held goes at once (the panel, translate and
         // song stop; the next show clears the window again).
         std::mem::take(&mut self.o).finish();
+        // hidden or closed alike: the editor's glyphs go with the opening
+        crate::editor::free_glyphs();
         glass::set_frame(None, 1.0);
         if self.can_hide {
             // Gone at once: the hide steps draw the empty view (the theme's
@@ -308,7 +310,6 @@ impl App {
             return Task::none(); // never shown (Copy, Save)
         }
         crate::log!("[opencircle] overlay window closed");
-        crate::editor::free_glyphs();
         crate::sys::mem::trim_heap();
         window::close(self.overlay)
     }
