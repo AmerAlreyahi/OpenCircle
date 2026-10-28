@@ -1,0 +1,434 @@
+//! Running actions on a selection: pills, quick actions, auto-search, QR, translate, song.
+
+use crate::ui::*;
+
+impl App {
+    /// Scans the new selection for a QR code and a black (protected) capture, on a
+    /// thread; the result comes back as `Scanned` and is dropped if the selection moved on.
+    pub(in crate::ui) fn scan(&mut self, area: Rectangle) -> Task<Message> {
+        let Some(crop) = self.crop() else {
+            return Task::none();
+        };
+        background(move |tx| {
+            let _ = tx.unbounded_send(qr::scan(&crop));
+        })
+        .map(move |scan| Message::Scanned(area, scan))
+    }
+
+    /// The QR chip was clicked: copy its text, or open it (a link, on this click only).
+    pub(in crate::ui) fn on_qr(&mut self, act: qr::Act) -> Task<Message> {
+        let Some(text) = self.o.scan.as_ref().and_then(|s| s.qr.clone()) else {
+            return Task::none();
+        };
+        let failed = |e: String| {
+            crate::log!("QR chip failed: {e}");
+            "That didn't work"
+        };
+        match act {
+            qr::Act::Copy => background(move |tx| {
+                let pill = copy::text(text).map_or_else(failed, |()| "QR text copied");
+                let _ = tx.unbounded_send(Message::ThenClose(Some(pill)));
+            }),
+            qr::Act::Open => match qr::web_url(&text).map(str::to_string) {
+                // the browser has the screen now
+                Some(url) => background(move |tx| {
+                    let opened = crate::sys::open::open_link(&url);
+                    let pill = opened.err().map(|e| failed(e.to_string()));
+                    let _ = tx.unbounded_send(Message::ThenClose(pill));
+                }),
+                None => Task::none(),
+            },
+        }
+    }
+
+    /// What runs by itself once a selection is made.
+    pub(in crate::ui) fn auto_actions(&self) -> &'static [&'static Action] {
+        let word = self
+            .o
+            .selection
+            .is_some_and(|s| s.kind == overlay::Kind::Word);
+        // (after the snap: the Settled message runs them)
+        if !matches!(self.o.purpose, Purpose::Search)
+            || word
+            || self.o.selection.is_none()
+            || self.settling()
+        {
+            return &[];
+        }
+        auto_targets(self.o.behaviour)
+    }
+
+    /// Runs `auto_actions` (Lens and Ask AI: the Lens page opens in the browser
+    /// and stays held whichever panel then shows).
+    pub(in crate::ui) fn auto_search(&mut self) -> Task<Message> {
+        let runs: Vec<_> = (self.auto_actions().iter()).map(|a| self.run(a)).collect();
+        Task::batch(runs)
+    }
+
+    /// Search in browser on a text selection: the text, as a Google search in
+    /// the user's own browser (the user picked it; no web view). Like Lens,
+    /// the overlay closes.
+    pub(in crate::ui) fn search_text(&mut self, text: String) -> Task<Message> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Task::none();
+        }
+        let url = crate::ai::browser::search_url(text);
+        let (text, crop) = (text.to_string(), self.crop());
+        background(move |tx| {
+            let pill = match crate::sys::open::open_link(&url) {
+                Ok(()) => {
+                    crate::search_history::keep("text", &text, &url, crop.as_ref());
+                    None
+                }
+                Err(e) => {
+                    crate::log!("[opencircle] text search not opened: {e}");
+                    Some("Couldn't open your browser")
+                }
+            };
+            let _ = tx.unbounded_send(Message::ThenClose(pill));
+        })
+    }
+
+    /// A pill of the bottom bar: Search in browser and Copy text act on the
+    /// selection (dimmed without one); Translate on it, else the whole screen.
+    pub(in crate::ui) fn on_pill(&mut self, pill: BarButton) -> Task<Message> {
+        let picked = self.picked_in_box();
+        match pill {
+            BarButton::Search => self.run(&lens::ACTION),
+            BarButton::CopyText if picked || self.o.word.is_some() => self.on_picked(PickAct::Copy),
+            BarButton::CopyText => self.run_quick(Quick::CopyText),
+            BarButton::Translate if self.o.selection.is_none() => {
+                self.update(Message::TranslateScreen)
+            }
+            BarButton::Translate if picked => self.on_picked(PickAct::Translate),
+            BarButton::Translate => self.run(&actions::translate::ACTION),
+            _ => Task::none(),
+        }
+    }
+
+    /// Runs `action` on the selection: a finishing action closes the overlay first
+    /// (so dialogs aren't hidden under it); a panel action opens its panel; Edit
+    /// turns the bar into the editing toolbar. No selection yet = nothing to do.
+    pub(in crate::ui) fn run(&mut self, action: &'static Action) -> Task<Message> {
+        // Search in browser on picked words: their text, not a picture of them.
+        if action.id == lens::ACTION.id
+            && self.o.edit.is_none()
+            && let Some(text) = self.picked_text()
+        {
+            return self.search_text(text);
+        }
+        match action.run {
+            Run::Edit => return self.open_editor(),
+            Run::Translate => return self.start_translate(),
+            // Picked words (a word selection, or select-text mode's picks): Copy
+            // (the bar's or Ctrl+C) copies exactly their text.
+            Run::Finish(_)
+                if action.id == copy::ACTION.id
+                    && self.o.edit.is_none()
+                    && (self.o.word.is_some()
+                        || (self.o.text_mode.as_ref()).is_some_and(|m| m.picked.is_some())) =>
+            {
+                return self.on_picked(PickAct::Copy);
+            }
+            _ => {}
+        }
+        // Several selections: Ask AI and Text get each of them (stacked), the
+        // rest the box around all of them.
+        let all = matches!(
+            action.run,
+            Run::Panel(actions::Panel::Ask | actions::Panel::Text)
+        );
+        let Some(crop) = (if all { self.stacked() } else { self.crop() }) else {
+            return Task::none();
+        };
+        match action.run {
+            Run::Finish(_) => self.finish(action, crop),
+            Run::Panel(kind) => self.open_panel(kind, crop, None),
+            Run::Edit | Run::Translate => Task::none(), // handled above
+        }
+    }
+
+    /// Closes the overlay, then runs a finishing action (Copy, Save) on `crop`.
+    pub(in crate::ui) fn finish(&mut self, action: &Action, crop: Crop) -> Task<Message> {
+        let Run::Finish(finish) = action.run else {
+            return Task::none();
+        };
+        let id = action.id;
+        self.confirm_after(move || {
+            let result = finish(crop);
+            if let Err(e) = &result {
+                crate::log!("{id} failed: {e}");
+            }
+            result
+        })
+    }
+
+    /// Closes the overlay and tells the user how Copy / Save went: the toast pill
+    /// in its own window (bottom right, above the taskbar), so the screen is the
+    /// user's again at once and the pill outlives the overlay. `work`
+    /// (encoding, the clipboard, a file) runs on a thread: the pill comes when
+    /// it is done (#123).
+    pub(in crate::ui) fn confirm_after(
+        &mut self,
+        work: impl FnOnce() -> Result<String, String> + Send + 'static,
+    ) -> Task<Message> {
+        let place = (self.o.origin, self.o.screen, self.o.scale);
+        let done = background(move |tx| {
+            let _ = tx.unbounded_send(work());
+        })
+        .map(move |result| Message::Confirm(place, result));
+        Task::batch([self.close(), done])
+    }
+
+    /// The Copy / Save pill for an overlay at `place` (origin, size, scale).
+    pub(in crate::ui) fn toast_for(
+        &mut self,
+        (origin, screen, scale): (Point, Size, f32),
+        result: Result<String, String>,
+    ) -> Task<Message> {
+        let (text, ok) = match result {
+            Ok(text) => (text, true),
+            Err(text) => (text, false),
+        };
+        let size = windows::toast_size(&text, ok);
+        let inset = taskbar_inset(origin, screen, scale);
+        let at = Point::new(
+            origin.x + screen.width - size.width - TOAST_MARGIN,
+            origin.y + screen.height - size.height - TOAST_MARGIN - inset,
+        );
+        self.windows
+            .toast(&text, ok, Some(at), windows::TOAST_MS)
+            .map(Message::Windows)
+    }
+
+    /// Runs a quick action on the selection (no action bar). Only once: a new
+    /// selection after it gets the bar.
+    pub(in crate::ui) fn run_quick(&mut self, quick: Quick) -> Task<Message> {
+        self.o.purpose = Purpose::Search;
+        match quick {
+            Quick::Action(action) => self.run(action),
+            // No OCR models yet: the Text panel asks before downloading them.
+            Quick::CopyText if !text::models_present() => self.run(&text::ACTION),
+            Quick::CopyText => {
+                let Some(crop) = self.crop() else {
+                    return Task::none();
+                };
+                self.o.toast = Some("Reading text…");
+                background(move |tx| {
+                    let read = text::read(&crop, |_| {});
+                    let copied = read.and_then(|t| match t.trim() {
+                        "" => Err("no text found".into()),
+                        _ => copy::text(t),
+                    });
+                    let _ = tx.unbounded_send(copied);
+                })
+                .map(Message::TextRead)
+            }
+            Quick::Song => self.start_song(),
+            Quick::Explain => match self.crop() {
+                Some(crop) => self.open_panel(
+                    actions::Panel::Ask,
+                    crop,
+                    Some(actions::ask::PRESETS[0].text(&config::current().translate.target)),
+                ),
+                None => Task::none(),
+            },
+        }
+    }
+
+    /// The music button: song search with a key (`has_key`); without one its
+    /// setup (Settings > Song search), and nothing is recorded.
+    pub(in crate::ui) fn song(&mut self, has_key: bool) -> Task<Message> {
+        if has_key {
+            return self.start_song();
+        }
+        let closing = self.close();
+        let settings = self.windows.open(windows::Kind::Settings);
+        let section = self
+            .windows
+            .update(windows::Msg::Settings(settings::Message::Section(
+                settings::Section::Song,
+            )));
+        closing.chain(settings.chain(section).map(Message::Windows))
+    }
+
+    /// Song search: listens on a thread; its pill, then its card, over the overlay.
+    pub(in crate::ui) fn start_song(&mut self) -> Task<Message> {
+        self.songs = self.songs.wrapping_add(1);
+        let id = self.songs;
+        // The song's card takes the result card's turn: one card at a time.
+        self.o.panel = None;
+        let (session, work) = song::Session::start();
+        self.o.song = Some((id, session));
+        work.map(move |msg| Message::Song(id, msg))
+    }
+
+    pub(in crate::ui) fn on_song(&mut self, id: u32, msg: song::Msg) -> Task<Message> {
+        let Some((current, session)) = &mut self.o.song else {
+            return Task::none();
+        };
+        if *current != id {
+            return Task::none();
+        }
+        match session.update(msg) {
+            song::Outcome::None => Task::none(),
+            song::Outcome::Close => {
+                self.o.song = None;
+                Task::none()
+            }
+            song::Outcome::Retry => self.start_song(),
+            // The browser comes to the front: the overlay closes so it isn't on top.
+            song::Outcome::Open(url) => {
+                let open = background(move |_: &UnboundedSender<()>| {
+                    if let Err(e) = crate::sys::open::open_link(&url) {
+                        crate::log!("[opencircle] can't open the link: {e}");
+                    }
+                })
+                .discard();
+                Task::batch([open, self.close()])
+            }
+        }
+    }
+
+    /// The music button shows only once a key is known to be saved.
+    pub(in crate::ui) fn has_song_key(&self) -> bool {
+        crate::music::key_known() == Some(true)
+    }
+
+    /// First open: ask the keyring (off the UI thread) whether a song key is saved.
+    pub(in crate::ui) fn check_song_key(&self) -> Task<Message> {
+        if crate::music::key_known().is_some() || cfg!(test) {
+            return Task::none();
+        }
+        background(|tx| {
+            let _ = tx.unbounded_send(crate::music::check_key());
+        })
+        .map(|_| Message::SongKey)
+    }
+
+    /// Translate in place: the selection (or, with no selection left, the whole
+    /// frame) is translated on a thread, then swapped in.
+    pub(in crate::ui) fn start_translate(&mut self) -> Task<Message> {
+        let (Some(frame @ image::Handle::Rgba { width, height, .. }), Some(selection)) =
+            (&self.o.frame, self.o.selection)
+        else {
+            return Task::none();
+        };
+        let Some(area) = actions::crop_bounds(*width, *height, self.o.scale, selection.area) else {
+            return Task::none();
+        };
+        self.o.panel = None;
+        self.o.edit = None;
+        self.o.view = self.o.view.reset(); // the translation is drawn at 1x
+        let models = text::models_present();
+        let (session, task) = translate::Session::start(
+            frame.clone(),
+            area,
+            self.o.scale,
+            self.cache.clone(),
+            models,
+        );
+        if session.full() {
+            // nothing to outline: the translation is the whole screen
+            self.o.selection = None;
+            self.o.stroke.clear();
+        }
+        self.translates = self.translates.wrapping_add(1);
+        let id = self.translates;
+        self.o.translate = Some((id, session));
+        task.map(move |msg| Message::Translate(id, msg))
+    }
+
+    pub(in crate::ui) fn on_translate(&mut self, id: u32, msg: translate::Msg) -> Task<Message> {
+        let Some((_, session)) = self.o.translate.as_mut().filter(|(open, _)| *open == id) else {
+            return Task::none();
+        };
+        match msg {
+            translate::Msg::Card(card::Event::Grab(how)) => {
+                self.o.card_drag = Some((how, None));
+                self.frame_times.borrow_mut().clear();
+                Task::none()
+            }
+            translate::Msg::Card(card::Event::Hover(on)) => {
+                self.o.card_hover = on;
+                Task::none()
+            }
+            translate::Msg::Card(card::Event::Reset) => {
+                self.card = None;
+                Task::none()
+            }
+            // the word card's ×: back to the translation; a prompt's: done
+            translate::Msg::Card(card::Event::Close) if session.has_card() => {
+                session.close_card();
+                Task::none()
+            }
+            translate::Msg::Card(card::Event::Close) | translate::Msg::Close => self.close(),
+            translate::Msg::OpenSettings => {
+                let closing = self.close();
+                let settings = self.windows.open(windows::Kind::Settings);
+                closing.chain(settings.map(Message::Windows))
+            }
+            // The word card goes on as an Ask AI chat (its crop, its explanation).
+            translate::Msg::Ask => match session.take_chat() {
+                Some((crop, chat)) => {
+                    self.panels = self.panels.wrapping_add(1);
+                    let id = self.panels;
+                    let (panel, task) = panel::Panel::open_chat(crop, chat);
+                    self.o.panel = Some((id, panel));
+                    task.map(move |msg| Message::Panel(id, msg))
+                }
+                None => Task::none(),
+            },
+            msg => session
+                .update(msg)
+                .map(move |msg| Message::Translate(id, msg)),
+        }
+    }
+
+    /// Ctrl+Shift+L (or the tray): live translate on, or off again.
+    pub(in crate::ui) fn toggle_live(&mut self, at: Instant) -> Task<Message> {
+        if let Some(live) = self.live.take() {
+            crate::log!("[opencircle] live translate off");
+            return live.stop().map(Message::Live);
+        }
+        if live_layer::unsupported() {
+            crate::log!(
+                "[opencircle] live translate: Wayland has no layer over other apps; translating once"
+            );
+            return self.translate_once(at);
+        }
+        let (live, task) = live_layer::Live::start(self.cache.clone());
+        self.live = Some(live);
+        task.map(Message::Live)
+    }
+
+    pub(in crate::ui) fn on_live(&mut self, msg: live_layer::Msg) -> Task<Message> {
+        let Some(live) = &mut self.live else {
+            return Task::none();
+        };
+        let off = |app: &mut Self| match app.live.take() {
+            Some(live) => live.stop().map(Message::Live),
+            None => Task::none(),
+        };
+        match live.update(msg) {
+            live_layer::Outcome::Task(task) => task.map(Message::Live),
+            live_layer::Outcome::Off => off(self),
+            live_layer::Outcome::OneShot => {
+                let stopped = off(self);
+                stopped.chain(self.translate_once(Instant::now()))
+            }
+        }
+    }
+
+    /// The one-shot full-screen translate (Ctrl+Shift+T).
+    pub(in crate::ui) fn translate_once(&mut self, at: Instant) -> Task<Message> {
+        let once = QuickAction {
+            action: actions::translate::ACTION.id.into(),
+            shortcut: String::new(),
+            target: Target::FullScreen,
+            live: false,
+        };
+        self.update(Message::Trigger(Trigger::Quick(at, once)))
+    }
+}
