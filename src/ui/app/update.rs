@@ -491,6 +491,12 @@ impl App {
                 }
             }
             Message::ScreenText(..) => Task::none(), // closed or opened again meanwhile
+            Message::ScreenLines(opening, window, read)
+                if opening == self.opening && self.o.frame.is_some() =>
+            {
+                self.on_screen_lines(window, read)
+            }
+            Message::ScreenLines(..) => Task::none(),
             // Off Windows (no Windows OCR, #62) the whole screen is read now,
             // gently, band by band from the pointer out: the I-beam shows over
             // text before any press, as it does on Windows.

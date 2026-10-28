@@ -34,6 +34,20 @@ pub struct Line {
     pub carets: Vec<f32>,
 }
 
+impl Line {
+    /// The line `k` times bigger and moved by `at`: from another screen's
+    /// own px into the starting screen's (`screens::into_model`).
+    pub fn mapped(mut self, k: f32, at: Vector) -> Line {
+        let x = |v: f32| v * k + at.x;
+        self.bounds = Rectangle::new(
+            Point::new(x(self.bounds.x), self.bounds.y * k + at.y),
+            self.bounds.size() * k,
+        );
+        self.carets.iter_mut().for_each(|c| *c = x(*c));
+        self
+    }
+}
+
 /// The part of a `screen`-sized overlay that OCR reads for a tap at `at`.
 pub fn region(at: Point, screen: Size) -> Rectangle {
     let size = Size::new(

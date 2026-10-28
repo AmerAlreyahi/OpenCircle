@@ -19,6 +19,8 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self, Crop};
 use crate::config;
+use crate::ocr;
+use crate::ui::app::background::background;
 use crate::ui::app::capture::overlay_window;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::opening::Opening;
@@ -41,6 +43,11 @@ pub(in crate::ui) struct Screen {
     /// Its own draw log, so the starting screen's frame budget stays its own.
     pub(in crate::ui) first_draw: Cell<Option<(Instant, Size)>>,
     pub(in crate::ui) frame_times: RefCell<Vec<Instant>>,
+    /// Its text (Windows OCR, one read of its frame), in the starting screen's
+    /// px, once `read`; `reading` while it is out.
+    pub(in crate::ui) lines: Vec<word::Line>,
+    pub(in crate::ui) read: bool,
+    pub(in crate::ui) reading: bool,
 }
 
 impl Screen {
@@ -58,6 +65,9 @@ impl Screen {
             view: view_of(start, place),
             first_draw: Cell::new(None),
             frame_times: RefCell::default(),
+            lines: Vec::new(),
+            read: false,
+            reading: false,
         }
     }
 }
@@ -100,6 +110,17 @@ pub(in crate::ui) fn view_of(start: Place, place: Place) -> overlay::View {
         (start.origin.1 - place.origin.1) as f32 / place.scale,
     );
     overlay::View::mapped(place.size(), k, at)
+}
+
+/// How the lines of the monitor at `place` (its own logical px) go into the
+/// starting screen's px (`Line::mapped`): through the desktop px both share.
+pub(in crate::ui) fn into_model(start: Place, place: Place) -> (f32, Vector) {
+    let k = place.scale / start.scale;
+    let at = Vector::new(
+        (place.origin.0 - start.origin.0) as f32 / start.scale,
+        (place.origin.1 - start.origin.1) as f32 / start.scale,
+    );
+    (k, at)
 }
 
 impl Opening {
@@ -215,6 +236,123 @@ impl App {
         Some((start.origin.0 + x as i32, start.origin.1 + y as i32))
     }
 
+    /// The other screens' text is read too: Windows OCR reads this opening
+    /// (one read of each frame). The helper reads the starting screen only.
+    // ponytail: the helper's bands are the starting screen's rows; add a Rows
+    // per screen if the helper ever reads other screens.
+    fn screens_text(&self) -> bool {
+        self.o.text_by == Some(ocr::Source::System) && !self.o.screens.is_empty()
+    }
+
+    /// Row or screen under `p` (image px) was read: its lines are known (or
+    /// there are none).
+    pub(in crate::ui) fn text_known(&self, p: Point) -> bool {
+        let start = self.o.place();
+        let other = (self.o.screens.iter())
+            .filter(|_| self.screens_text())
+            .find(|s| area_of(start, s.place).contains(p));
+        other.map_or_else(|| self.o.screen_text.knows(p.y), |s| s.read)
+    }
+
+    /// Every screen's text was read.
+    pub(in crate::ui) fn text_whole(&self) -> bool {
+        self.o.screen_text.is_whole(self.o.screen.height)
+            && (!self.screens_text() || self.o.screens.iter().all(|s| s.read))
+    }
+
+    /// Every line read so far, whichever screen.
+    pub(in crate::ui) fn lines_iter(&self) -> impl Iterator<Item = &word::Line> {
+        let others = (self.o.screens.iter()).flat_map(|s| s.lines.iter());
+        self.o.screen_text.iter().chain(others)
+    }
+
+    /// Every line read so far in reading order: screen by screen, left to
+    /// right (then top to bottom), so a selection across a seam runs from the
+    /// end of one screen's text into the start of the next's.
+    pub(in crate::ui) fn all_lines(&self) -> Vec<word::Line> {
+        if !self.screens_text() {
+            return self.o.screen_text.lines();
+        }
+        let mut parts: Vec<((i32, i32), Vec<word::Line>)> = (self.o.screens.iter())
+            .map(|s| (s.place.origin, s.lines.clone()))
+            .collect();
+        parts.push((self.o.place().origin, self.o.screen_text.lines()));
+        parts.sort_by_key(|(origin, _)| *origin);
+        parts.into_iter().flat_map(|(_, lines)| lines).collect()
+    }
+
+    /// Windows OCR reads the next other screen not read yet, when the starting
+    /// screen's own read is done and none is out: one read of its frame, in
+    /// the starting screen's px.
+    pub(in crate::ui) fn read_screens(&mut self) -> Task<Message> {
+        if !self.screens_text() || self.o.screens.iter().any(|s| s.reading) {
+            return Task::none();
+        }
+        let start = self.o.place();
+        let opening = self.opening;
+        let held = (self.o.helper.as_ref())
+            .map(std::sync::Arc::downgrade)
+            .unwrap_or_default();
+        let setting = self.o.behaviour.text_reader;
+        let Some(screen) = self.o.screens.iter_mut().find(|s| !s.read) else {
+            return Task::none();
+        };
+        let image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        } = &screen.frame
+        else {
+            screen.read = true;
+            return Task::none();
+        };
+        screen.reading = true;
+        let (width, height, pixels) = (*width, *height, pixels.clone());
+        let (place, window) = (screen.place, screen.window);
+        background(move |tx| {
+            let Some(_held) = held.upgrade() else {
+                return; // closed meanwhile
+            };
+            let read = || -> Result<Vec<word::Line>, String> {
+                if ocr::route(setting, Some(ocr::system::language())) == ocr::Source::Helper {
+                    return Err("Windows OCR: a right-to-left language".into());
+                }
+                // the closer read only: no quick one first (gently, nobody waits)
+                let k = *ocr::system::passes(place.scale, width, height)
+                    .last()
+                    .unwrap_or(&1);
+                let blocks =
+                    ocr::system::recognize(&pixels, width, height, k).map_err(|e| e.to_string())?;
+                let mut lines = word::lines(blocks, [0, 0], place.scale);
+                word::measure(&mut lines, &pixels, width, height, place.scale);
+                let (k, at) = into_model(start, place);
+                Ok(lines.into_iter().map(|l| l.mapped(k, at)).collect())
+            };
+            let _ = tx.unbounded_send(read());
+        })
+        .map(move |read| Message::ScreenLines(opening, window, read))
+    }
+
+    /// Another screen's text is back (or failed: it is then read, with none):
+    /// a text selection takes it in, and the next screen is read.
+    pub(in crate::ui) fn on_screen_lines(
+        &mut self,
+        window: window::Id,
+        read: Result<Vec<word::Line>, String>,
+    ) -> Task<Message> {
+        let Some(screen) = self.o.screens.iter_mut().find(|s| s.window == window) else {
+            return Task::none();
+        };
+        (screen.read, screen.reading) = (true, false);
+        match read {
+            Ok(lines) => screen.lines = lines,
+            Err(e) => crate::log!("[opencircle] Windows OCR didn't read another screen: {e}"),
+        }
+        let done = self.more_text();
+        Task::batch([done, self.read_more()])
+    }
+
     /// `overlay::settle` on the desk (`Opening::desk`): a scribble's hull is
     /// kept to the screens, not to the starting one.
     pub(in crate::ui) fn settle_on_desk(
@@ -282,10 +420,12 @@ impl App {
             place.px.1,
             place.origin
         );
+        let read = self.read_more(); // its text, once the starting screen's is read
         open.discard()
             .chain(place_window(id, place))
             .chain(window::set_mode(id, Mode::Fullscreen))
             .chain(window::gain_focus(self.overlay))
+            .chain(read)
     }
 
     /// An event from another monitor's window: its points go on in the
@@ -351,7 +491,12 @@ impl App {
             morph: (self.o.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
             words: (self.o.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
             picked,
-            text: Vec::new(),
+            text: match self.o.translate {
+                None if matches!(self.o.purpose, Purpose::Search) => {
+                    self.lines_iter().map(|l| l.bounds).collect()
+                }
+                _ => Vec::new(),
+            },
         };
         let frozen = overlay::Frozen {
             frame: &screen.frame,
@@ -588,5 +733,188 @@ mod tests {
         let a = v.to_screen(Point::new(1536.0, 120.0));
         let b = v.to_screen(Point::new(1537.0, 120.0));
         assert!(near(a, Point::ORIGIN) && (b.x - a.x - 2.5).abs() < 0.01);
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use std::time::Instant;
+
+    use iced::window;
+
+    use super::*;
+    use crate::Trigger;
+    use crate::ocr::Source;
+    use crate::ui::app::message::Shot;
+
+    const START: Place = Place {
+        origin: (0, 0),
+        px: (640, 400),
+        scale: 1.0,
+    };
+    /// Right of it at 150 %: 320 x 200 logical px, 480 px of the starting unit.
+    const RIGHT: Place = Place {
+        origin: (640, 0),
+        px: (480, 300),
+        scale: 1.5,
+    };
+
+    fn line(text: &str, x: f32, y: f32, w: f32) -> word::Line {
+        word::Line {
+            text: text.into(),
+            bounds: Rectangle::new(Point::new(x, y), Size::new(w, 20.0)),
+            carets: Vec::new(),
+        }
+    }
+
+    fn solid(place: Place) -> image::Handle {
+        let (w, h) = place.px;
+        image::Handle::from_rgba(w, h, vec![200; (w * h * 4) as usize])
+    }
+
+    /// Two screens open, the starting one's text ("alpha beta", at 500..600)
+    /// read by Windows OCR, the right one's not yet.
+    fn two_screens() -> (App, window::Id) {
+        let mut app = App::idle(window::Id::unique());
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        let n = app.capturing.expect("pending");
+        let shot = Shot {
+            image: solid(START),
+            scale: 1.0,
+            origin: START.logical_origin(),
+            size: START.size(),
+            snip: None,
+        };
+        let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
+        app.o.appear = Some((Instant::now(), 1.0));
+        let _ = app.update(Message::Screen(n, RIGHT, solid(RIGHT)));
+        app.o.text_by = Some(Source::System);
+        let all = Rectangle::with_size(app.o.screen);
+        let lines = vec![line("alpha beta", 500.0, 100.0, 100.0)];
+        let screen = app.o.screen;
+        app.o
+            .screen_text
+            .add_read(Source::System, all, lines, screen);
+        let id = app.o.screens[0].window;
+        (app, id)
+    }
+
+    /// "gamma delta" as the right screen's OCR gives it: its own logical px.
+    fn right_text(app: &mut App, window: window::Id) {
+        let (k, at) = into_model(START, RIGHT);
+        let own = line("gamma delta", 10.0, 10.0, 100.0);
+        let _ = app.update(Message::ScreenLines(
+            app.opening,
+            window,
+            Ok(vec![own.mapped(k, at)]),
+        ));
+    }
+
+    #[test]
+    fn another_screens_lines_land_in_the_starting_screens_px() {
+        let (k, at) = into_model(START, RIGHT);
+        let l = line("x", 10.0, 10.0, 100.0).mapped(k, at);
+        // (10, 10) of the 150 % screen: 15 px in and 640 px over, in the unit
+        assert_eq!(
+            (l.bounds.x, l.bounds.y, l.bounds.width, l.bounds.height),
+            (655.0, 15.0, 150.0, 30.0)
+        );
+        // the laptop at 250 % starting, a 100 % monitor right of it
+        let laptop = Place {
+            origin: (0, 0),
+            px: (3840, 2400),
+            scale: 2.5,
+        };
+        let monitor = Place {
+            origin: (3840, 300),
+            px: (1920, 1080),
+            scale: 1.0,
+        };
+        let (k, at) = into_model(laptop, monitor);
+        let l = line("x", 0.0, 0.0, 10.0).mapped(k, at);
+        assert_eq!(
+            (l.bounds.x, l.bounds.y, l.bounds.width),
+            (1536.0, 120.0, 4.0)
+        );
+    }
+
+    #[test]
+    fn text_on_every_screen_is_picked_from_its_own_window() {
+        let (mut app, id) = two_screens();
+        let on_right = Point::new(660.0 + 80.0, 25.0); // in "delta"
+        assert!(app.text_known(Point::new(550.0, 110.0)));
+        assert!(!app.text_known(on_right), "its text is not read yet");
+        assert!(app.text_at(on_right, word::Unit::Word).is_none());
+        right_text(&mut app, id);
+        assert!(app.text_known(on_right) && app.screens_text());
+        // the I-beam is over both screens' text
+        assert_eq!(app.lines_iter().count(), 2);
+        // a double click in the right window picks the word there
+        let local = Point::new((on_right.x - 640.0) / 1.5, on_right.y / 1.5);
+        let press = overlay::Event::Press {
+            at: local,
+            shift: false,
+        };
+        for event in [press, overlay::Event::Release, press] {
+            let _ = app.update(Message::ScreenEvent(id, event));
+        }
+        let picked = app.o.word.as_ref().expect("a word is picked");
+        assert_eq!(picked.text(), "delta");
+        let _ = app.update(Message::ScreenEvent(id, overlay::Event::Release));
+    }
+
+    #[test]
+    fn a_text_drag_crosses_the_seam_in_reading_order() {
+        use overlay::Event::{Move, Press, Release};
+        let (mut app, id) = two_screens();
+        right_text(&mut app, id);
+        // from "beta" (the start's) into "gamma" (the right one's)
+        let _ = app.update(Message::Overlay(Press {
+            at: Point::new(561.0, 110.0),
+            shift: false,
+        }));
+        let _ = app.update(Message::Overlay(Move(Point::new(724.0, 30.0))));
+        let _ = app.update(Message::Overlay(Release));
+        assert_eq!(app.o.word.as_ref().unwrap().text(), "beta\ngamma");
+        // and the other way: from the right screen's window back onto the start
+        let local = |x: f32, y: f32| Point::new((x - 640.0) / 1.5, y / 1.5);
+        let _ = app.update(Message::ScreenEvent(
+            id,
+            Press {
+                at: local(724.0, 30.0),
+                shift: false,
+            },
+        ));
+        let _ = app.update(Message::ScreenEvent(id, Move(local(561.0, 110.0))));
+        let _ = app.update(Message::ScreenEvent(id, Release));
+        assert_eq!(app.o.word.as_ref().unwrap().text(), "beta\ngamma");
+    }
+
+    #[test]
+    fn ctrl_a_waits_for_every_screen() {
+        let (mut app, id) = two_screens();
+        app.o.want_all = true;
+        let _ = app.more_text();
+        assert!(app.o.want_all, "the right screen is not read yet");
+        right_text(&mut app, id);
+        assert!(!app.o.want_all);
+        assert_eq!(
+            app.o.word.as_ref().unwrap().text(),
+            "alpha beta\ngamma delta"
+        );
+    }
+
+    #[test]
+    fn the_next_screen_is_read_once_the_starting_screens_text_is() {
+        let (mut app, _) = two_screens();
+        let _ = app.read_screens();
+        assert!(app.o.screens[0].reading, "its read is out");
+        // not twice at once
+        let _ = app.read_screens();
+        let id = app.o.screens[0].window;
+        let _ = app.update(Message::ScreenLines(app.opening, id, Err("none".into())));
+        let screen = &app.o.screens[0];
+        assert!(screen.read && !screen.reading, "failed: read, with no text");
+        assert!(app.text_known(Point::new(700.0, 30.0)));
     }
 }

@@ -253,7 +253,7 @@ impl App {
                 if !self.o.adding
                     && let Some(&start) = self.o.stroke.first()
                     && self.o.reading.is_some_and(|band| band.contains(start))
-                    && !self.o.screen_text.knows(start.y)
+                    && !self.text_known(start)
                     && !overlay::is_tap(&self.o.stroke, self.o.view.zoom()) =>
             {
                 self.o.held = Some(Vec::new());

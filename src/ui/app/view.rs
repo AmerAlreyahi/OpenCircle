@@ -82,7 +82,7 @@ impl App {
             picked,
             text: match self.o.translate {
                 None if matches!(self.o.purpose, Purpose::Search) => {
-                    self.o.screen_text.iter().map(|l| l.bounds).collect()
+                    self.lines_iter().map(|l| l.bounds).collect()
                 }
                 _ => Vec::new(),
             },

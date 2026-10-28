@@ -98,6 +98,8 @@ pub(in crate::ui) enum Message {
     Frame(Instant),
     /// OCR read this band of this opening's frame (main mode, on demand).
     ScreenText(u32, Rectangle, Result<Vec<word::Line>, String>),
+    /// Another screen's text (`Screen::lines`): the opening, its window, the read.
+    ScreenLines(u32, window::Id, Result<Vec<word::Line>, String>),
     /// The text reader's helper of this opening has started (after its
     /// opening animation).
     Warmed(u32),

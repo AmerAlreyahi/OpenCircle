@@ -27,7 +27,7 @@ impl App {
             self.o.stroke.clear(); // the tap's own dot
         }
         if self.reads_text() {
-            if self.o.screen_text.knows(at.y) {
+            if self.text_known(at) {
                 return Task::none(); // read: no text here
             }
             // the word there once its band is read (a triple tap: the line)
@@ -46,9 +46,8 @@ impl App {
     /// only): the caret there, or its word or line (`unit`).
     pub(in crate::ui) fn text_at(&self, p: Point, unit: word::Unit) -> Option<word::Picked> {
         let main = matches!(self.o.purpose, Purpose::Search) && self.o.translate.is_none();
-        let all = Rectangle::with_size(self.o.screen);
-        let read = main && self.o.screen_text.knows(p.y);
-        read.then(|| word::Picked::new(self.o.screen_text.lines(), all, p, unit))?
+        let read = main && self.text_known(p);
+        read.then(|| word::Picked::new(self.all_lines(), self.o.desk(), p, unit))?
     }
 
     /// Counts a press at `p` (image px) as the first, second or third click in
@@ -208,7 +207,7 @@ impl App {
             self.o.text_by = Some(source);
         }
         let Some((band, gently)) = next else {
-            return Task::none();
+            return self.read_screens(); // the starting screen is done: the others
         };
         // Windows OCR: the whole screen at once, the first time (from the
         // capture, `open`; else after the opening animation, `warm`)
@@ -305,10 +304,10 @@ impl App {
     /// a text selection, and a tap, Shift+click or Ctrl+A waiting for it is
     /// done.
     pub(in crate::ui) fn more_text(&mut self) -> Task<Message> {
-        let all = Rectangle::with_size(self.o.screen);
+        let (all, lines) = (self.o.desk(), self.all_lines());
         let o = &mut *self.o;
         if let Some(word) = &mut o.word {
-            word.reread(o.screen_text.lines(), all);
+            word.reread(lines, all);
             if let Some(&p) = o.text_press.as_ref().and_then(|s| s.last()) {
                 word.extend(p);
             }
@@ -317,7 +316,7 @@ impl App {
         self.drag_became_text();
         let mut done = Task::none();
         if let Some((at, wait)) = self.o.awaits
-            && self.o.screen_text.knows(at.y)
+            && self.text_known(at)
         {
             self.o.awaits = None;
             match wait {
@@ -339,9 +338,9 @@ impl App {
                 }
             }
         }
-        if self.o.want_all && self.o.screen_text.is_whole(self.o.screen.height) {
+        if self.o.want_all && self.text_whole() {
             self.o.want_all = false;
-            self.o.word = word::Picked::all(self.o.screen_text.lines(), all);
+            self.o.word = word::Picked::all(self.all_lines(), all);
             self.select_word();
             done = self.selected();
         }
@@ -367,7 +366,7 @@ impl App {
     /// click landed. Past the lines already read, OCR reads a band across the
     /// screen first (on a thread, through the warm helper).
     pub(in crate::ui) fn extend_words(&mut self, at: Point) -> Task<Message> {
-        if self.o.word.is_some() && self.reads_text() && !self.o.screen_text.knows(at.y) {
+        if self.o.word.is_some() && self.reads_text() && !self.text_known(at) {
             self.o.awaits = Some((at, Await::Extend));
             return self.read_more();
         }
@@ -505,10 +504,8 @@ impl App {
         let area = self.area();
         // Windows OCR read the screen: its words in the box, the same ones (and
         // places) a text selection there picks; no second read (#150).
-        if self.o.text_by == Some(ocr::Source::System)
-            && self.o.screen_text.is_whole(self.o.screen.height)
-        {
-            let lines = word::within(self.o.screen_text.iter(), area);
+        if self.o.text_by == Some(ocr::Source::System) && self.text_whole() {
+            let lines = word::within(self.lines_iter(), area);
             self.o.panel = None;
             self.o.text_mode = Some(TextMode {
                 boxes: word::boxes(&lines),
