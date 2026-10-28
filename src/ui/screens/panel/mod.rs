@@ -19,6 +19,7 @@ use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::actions::text::{self, Progress};
 use crate::actions::{self, Crop, lens};
 use crate::ai;
+use crate::ai::providers::{self, Preset};
 use crate::config::{self, Provider, StaysOpen};
 use crate::store::{self, chats};
 use crate::ui::background;
@@ -43,55 +44,51 @@ pub enum Tab {
     Settings,
 }
 
-/// A provider the drawer's quick picker offers: Settings' own list (the
-/// browser, Anthropic, then its server presets), so it follows Settings.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Pick {
-    name: &'static str,
-    provider: Provider,
-    base_url: &'static str,
-    model: &'static str,
-}
+/// A provider the drawer's quick picker offers: Settings' own list
+/// (`ai::providers::PRESETS`, by real name), after the browser. Its key is that
+/// provider's own keyring entry (`providers::key_of`, read by the reload).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pick(Option<Preset>);
 
 impl std::fmt::Display for Pick {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name)
+        match self.0 {
+            Some(p) => p.fmt(f),
+            None => f.write_str("Browser (Google AI Mode)"),
+        }
     }
 }
 
-/// The picker's choices, built once from Settings' list.
+/// The picker's choices: the browser, then every provider but Custom server
+/// (its URL is typed in Settings; a Custom one shows as picked all the same).
 pub(super) static PICKS: std::sync::LazyLock<Vec<Pick>> = std::sync::LazyLock::new(|| {
-    let mut all = vec![
-        Pick {
-            name: "Browser (Google AI Mode)",
-            provider: Provider::Browser,
-            base_url: "",
-            model: "",
-        },
-        Pick {
-            name: "Anthropic",
-            provider: Provider::Anthropic,
-            base_url: "",
-            model: ai::DEFAULT_ANTHROPIC_MODEL,
-        },
-    ];
-    all.extend(crate::ui::screens::settings::PRESETS.iter().map(|p| Pick {
-        name: p.name,
-        provider: Provider::OpenaiCompatible,
-        base_url: p.base_url,
-        model: p.model,
-    }));
-    all
+    let presets = providers::PRESETS.iter().filter(|p| !p.custom());
+    std::iter::once(Pick(None))
+        .chain(presets.map(|p| Pick(Some(*p))))
+        .collect()
 });
 
-/// The pick the running config is (`None`: a server of the user's own).
+/// The pick the running config is (`None`: a value the file can't give).
 pub(super) fn picked(cfg: &config::AiConfig) -> Option<Pick> {
-    (PICKS.iter())
-        .find(|p| {
-            p.provider == cfg.provider
-                && (p.provider != Provider::OpenaiCompatible || p.base_url == cfg.base_url)
-        })
-        .cloned()
+    match cfg.provider {
+        Provider::Browser => Some(Pick(None)),
+        _ => Preset::of(cfg).map(|p| Pick(Some(p))),
+    }
+}
+
+/// `ai` set to `pick` (as Settings' Provider list does): its provider and
+/// server, and its suggested model while the model is empty or another's.
+pub(super) fn apply_pick(ai: &mut config::AiConfig, pick: Pick) {
+    let Some(p) = pick.0 else {
+        ai.provider = Provider::Browser;
+        ai.base_url.clear();
+        return;
+    };
+    ai.provider = p.provider();
+    ai.base_url = p.base_url.to_string();
+    if ai.model.trim().is_empty() || providers::PRESETS.iter().any(|x| x.model == ai.model) {
+        ai.model = p.model.to_string();
+    }
 }
 
 /// "AI chat stays open: Always": a chat is pinned from its first question.
@@ -494,17 +491,12 @@ impl Panel {
                 return save_config(move |c| c.chat.stays_open = how, None);
             }
             (State::Ask { .. }, Msg::Pick(pick)) => {
-                let model = (pick.model.to_string(), self.model.clone());
+                let model = self.model.clone();
                 let crop = self.crop.clone();
                 return save_config(
                     move |c| {
-                        let (preset, typed) = model;
-                        let preset_model = PICKS.iter().any(|p| p.model == typed);
-                        c.ai.provider = pick.provider;
-                        c.ai.base_url = pick.base_url.into();
-                        if !preset.is_empty() && (typed.trim().is_empty() || preset_model) {
-                            c.ai.model = preset;
-                        }
+                        c.ai.model = model; // what the field shows, then the pick's rule
+                        apply_pick(&mut c.ai, pick);
                     },
                     Some(crop),
                 );

@@ -537,17 +537,47 @@ fn safety_classifier_models_are_flagged() {
     }
 }
 
-/// The picker lists Settings' providers (browser, Anthropic, every preset).
+/// The picker lists Settings' providers by name (the browser first, no Custom
+/// server), and a pick writes what Settings' list writes.
 #[test]
 fn the_picker_follows_settings_list() {
-    assert_eq!(PICKS.len(), 2 + crate::ui::screens::settings::PRESETS.len());
+    use crate::ai::providers::{ANTHROPIC, CUSTOM, PRESETS};
+    assert_eq!(PICKS.len(), PRESETS.len()); // + the browser, - Custom server
+    assert_eq!(PICKS[0].to_string(), "Browser (Google AI Mode)");
+    assert!(PICKS.iter().all(|p| p.to_string() != CUSTOM.name));
     let mut cfg = config::AiConfig::default();
-    assert_eq!(picked(&cfg).map(|p| p.provider), Some(Provider::Browser));
-    cfg.provider = Provider::OpenaiCompatible;
-    cfg.base_url = "https://openrouter.ai/api/v1".into();
-    assert_eq!(picked(&cfg).map(|p| p.name), Some("OpenRouter"));
+    assert_eq!(picked(&cfg), Some(PICKS[0]));
+    let router = *PICKS
+        .iter()
+        .find(|p| p.to_string() == "OpenRouter")
+        .unwrap();
+    super::apply_pick(&mut cfg, router);
+    assert_eq!(cfg.provider, Provider::OpenaiCompatible);
+    assert_eq!(cfg.base_url, "https://openrouter.ai/api/v1");
+    assert_eq!(picked(&cfg), Some(router));
+    // its own key: the one stored for OpenRouter, never another provider's
+    assert_eq!(
+        crate::ai::providers::key_of(&cfg).map(|k| k.entry()),
+        Some("ai-key-openrouter".into())
+    );
+    let anthropic = *PICKS
+        .iter()
+        .find(|p| p.to_string() == ANTHROPIC.name)
+        .unwrap();
+    super::apply_pick(&mut cfg, anthropic);
+    assert_eq!(cfg.provider, Provider::Anthropic);
+    assert_eq!(
+        cfg.model, ANTHROPIC.model,
+        "a preset's model follows the pick"
+    );
+    cfg.model = "my-own-model".into();
+    super::apply_pick(&mut cfg, router);
+    assert_eq!(cfg.model, "my-own-model", "a typed model stays");
     cfg.base_url = "http://my-own:9/v1".into();
-    assert!(picked(&cfg).is_none(), "a server of one's own");
+    assert_eq!(
+        picked(&cfg).map(|p| p.to_string()),
+        Some(CUSTOM.name.into())
+    );
 }
 
 /// An answered chat is saved, text only: the database holds no image bytes,

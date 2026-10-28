@@ -495,7 +495,7 @@ impl Panel {
             1.0,
             Msg::StaysOpen,
         );
-        let provider = dropdown(&PICKS[..], picked(&cfg.ai), "Your own server", Msg::Pick);
+        let provider = dropdown(&PICKS[..], picked(&cfg.ai), "Choose a provider", Msg::Pick);
         let mut part = column![
             sub(Role::ROW_TITLE, "AI chat stays open"),
             stays,
