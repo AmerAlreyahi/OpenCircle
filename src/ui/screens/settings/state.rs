@@ -24,7 +24,7 @@ use iced::{Color, Size, Subscription, event, keyboard};
 use crate::config::{
     self, After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
     EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
-    SnipConfig, SongSource, Target, TextReader, Theme, parse_shortcut,
+    SnipConfig, SongSource, StaysOpen, Target, TextReader, Theme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::labs::Feature;
@@ -602,6 +602,8 @@ pub enum Pick {
     Engine(Engine),
     SongSource(SongSource),
     SongHistory(bool),
+    ChatStays(StaysOpen),
+    KeepChats(bool),
     Select(SelectStyle),
     After(After),
     SearchWith(SearchWith),
@@ -654,6 +656,9 @@ pub enum Message {
     SongKey(KeyMessage),
     SongSource(SongSource),
     SongHistory(bool),
+    /// AI: "AI chat stays open" and "Keep chat history".
+    ChatStays(StaysOpen),
+    KeepChats(bool),
     /// A Labs switch: saved and applied at once.
     Labs(Feature, bool),
     Source(Language),
@@ -1157,6 +1162,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Engine(_) => Some(Pick::Engine(state.draft.translate.engine)),
         Message::SongSource(_) => Some(Pick::SongSource(state.draft.song.source)),
         Message::SongHistory(_) => Some(Pick::SongHistory(state.draft.song.history)),
+        Message::ChatStays(_) => Some(Pick::ChatStays(state.draft.chat.stays_open)),
+        Message::KeepChats(_) => Some(Pick::KeepChats(state.draft.chat.keep_history)),
         Message::SelectStyle(_) => Some(Pick::Select(state.draft.selection.style)),
         Message::After(_) => Some(Pick::After(state.draft.selection.after)),
         Message::SearchWith(_) => Some(Pick::SearchWith(state.draft.selection.search_with)),
@@ -1197,6 +1204,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::SongSource(source) => state.draft.song.source = source,
         Message::SongHistory(on) => state.draft.song.history = on,
+        Message::ChatStays(how) => state.draft.chat.stays_open = how,
+        Message::KeepChats(on) => state.draft.chat.keep_history = on,
         Message::Labs(feature, on) => return set_lab(state, feature, on),
         Message::Theme(t) => {
             state.draft.theme = t;

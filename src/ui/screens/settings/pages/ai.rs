@@ -9,20 +9,64 @@ use iced::widget::{Space, column, row};
 use iced::{Element, Fill};
 
 use super::super::state::{
-    Busy, KEY_MASK, KeyField, KeyMessage, KeyStatus, Message, PRESETS, Preset, State, issue,
+    Busy, KEY_MASK, KeyField, KeyMessage, KeyStatus, Message, PRESETS, Pick, Preset, State, issue,
 };
-use crate::config::Provider;
+use crate::config::{Provider, StaysOpen};
 use crate::secrets::Secret;
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::dropdown::dropdown;
 use crate::ui::kit::field::input;
-use crate::ui::kit::segmented::segmented;
+use crate::ui::kit::segmented::{boolean, segmented};
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::widgets::tip;
 
 pub fn view(state: &State) -> Element<'_, Message> {
+    column![provider_rows(state), chat_rows(state)].into()
+}
+
+/// The AI chat's rows, for every provider (the chat's drawer has the first too).
+fn chat_rows(state: &State) -> Element<'_, Message> {
+    let chat = &state.draft.chat;
+    let (from, t) = state.thumb(chat.stays_open, |p| match p {
+        Pick::ChatStays(v) => Some(v),
+        _ => None,
+    });
+    let stays = setting_row::row(
+        title("AI chat stays open"),
+        "Keep the chat above other apps. Its pin unpins and closes it",
+        segmented(
+            &[
+                (StaysOpen::FollowUp, "After a follow-up"),
+                (StaysOpen::Always, "Always"),
+            ],
+            chat.stays_open,
+            from,
+            t,
+            Message::ChatStays,
+        ),
+    );
+    let (from, t) = state.thumb(chat.keep_history, |p| match p {
+        Pick::KeepChats(v) => Some(v),
+        _ => None,
+    });
+    let keep = setting_row::row(
+        title("Keep chat history"),
+        "Chats, text only, kept on this PC. Off deletes them",
+        boolean(
+            ["Off", "On"],
+            chat.keep_history,
+            from,
+            t,
+            Message::KeepChats,
+        ),
+    );
+    column![stays, keep].into()
+}
+
+/// Who answers, and for an AI provider its server, model and key.
+fn provider_rows(state: &State) -> Element<'_, Message> {
     let ai = &state.draft.ai;
     let mut rows = column![provider_row(state)];
     let Some(preset) = Preset::of(ai).filter(|_| keyed(state)) else {

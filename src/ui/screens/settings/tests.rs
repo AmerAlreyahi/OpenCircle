@@ -81,6 +81,33 @@ fn general_has_the_start_with_the_os_switch_on_by_default() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// Settings > AI: "AI chat stays open" and "Keep chat history", for every
+/// provider, saved to the file.
+#[test]
+fn ai_has_the_chat_rows_and_saves_them() {
+    let path = tmp("chat-rows");
+    let (mut s, _) = state(Some(path.clone()));
+    update(&mut s, Message::Section(Section::Ai));
+    update(&mut s, Message::Provider(Provider::Browser));
+    let texts = shot::texts(view(&s));
+    for want in [
+        "AI chat stays open",
+        "After a follow-up",
+        "Keep chat history",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    update(&mut s, Message::ChatStays(crate::config::StaysOpen::Always));
+    update(&mut s, Message::KeepChats(false));
+    let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+        panic!("not saved: {:?}", s.problems);
+    };
+    assert_eq!(cfg.chat.stays_open, crate::config::StaysOpen::Always);
+    let back = Config::load_from(&path).0;
+    assert!(!back.chat.keep_history && back.chat.stays_open == crate::config::StaysOpen::Always);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 #[test]
 fn the_browser_provider_says_it_opens_in_the_browser() {
     let (mut s, _) = state(None);
