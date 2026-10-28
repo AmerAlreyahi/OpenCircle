@@ -300,14 +300,8 @@ fn build(
     );
     if dragout::SUPPORTED {
         rest.push(divide(), bar::DIVIDER);
-        rest.push(
-            hinted(
-                chip::drag_out(Message::DragOut),
-                "Drag the image into another app (an AI chat, a document)",
-                Why::Icon,
-            ),
-            DRAG_WIDTH,
-        );
+        // its word "Drag" says it: no tooltip (owner rule: only when it adds)
+        rest.push(chip::drag_out(Message::DragOut), DRAG_WIDTH);
     }
 
     let content: Element<'_, Message> = if wrap {
