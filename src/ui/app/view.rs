@@ -13,13 +13,12 @@ use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::overlay::edge as border;
-use crate::ui::{glass, overlay, widgets};
+use crate::ui::{overlay, widgets};
 
 use super::{App, CHIP_SPACE, HINT, LINK_WIDTH, PROTECTED, QR_WIDTH, SLIDE, TextMode};
 
 impl App {
     pub(in crate::ui) fn view(&self, window: window::Id) -> Element<'_, Message> {
-        glass::building_overlay(false);
         if let Some(page) = self.windows.view(window) {
             return page.map(Message::Windows);
         }
@@ -34,7 +33,6 @@ impl App {
         let Some(frame) = &self.o.frame else {
             return space().into();
         };
-        glass::building_overlay(true);
         let snip = match &self.o.purpose {
             Purpose::Snip(snip) => Some(snip),
             _ => None,

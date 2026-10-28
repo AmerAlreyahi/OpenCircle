@@ -69,10 +69,9 @@ fn styles(line: &str) -> bool {
 
 /// Not screens: the kit, the palettes and components the kit replaces (step
 /// 5 / 23), OS glue (platform/), state and logic (app/), and tests.
-const NOT_SCREENS: [&str; 9] = [
+const NOT_SCREENS: [&str; 8] = [
     "arch_tests.rs",
     "frame_times.rs",
-    "glass.rs",
     "screens/panel/tests.rs",
     "screens/translate/tests.rs",
     "screens/settings/tests.rs",

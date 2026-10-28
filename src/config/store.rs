@@ -23,14 +23,6 @@ pub fn look_config() -> LookConfig {
     current().look
 }
 
-/// The floating widgets' theme and whether they blur the screen behind them.
-pub fn widgets() -> (WidgetTheme, bool) {
-    let c = CURRENT.read().unwrap_or_else(|e| e.into_inner());
-    c.as_ref().map_or((WidgetTheme::Default, true), |c| {
-        (c.widget_theme, c.glass_effect)
-    })
-}
-
 /// The theme picks, without loading the file (defaults until the app has read it).
 pub fn appearance() -> AppearanceConfig {
     let c = CURRENT.read().unwrap_or_else(|e| e.into_inner());

@@ -57,31 +57,18 @@ pub const SURFACE_PADDING: f32 = 6.0;
 /// Fully rounded glass pill with one line of text (overlay hint, tooltips).
 pub fn pill<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a, Message> {
     let palette = theme::floating();
-    let blurred = super::glass::backdrop().is_some();
-    let inner = container(text(label).size(14).color(palette.text))
+    container(text(label).size(14).color(palette.text))
         .padding([8, 18])
-        .style(move |_| glass(999.0, blurred));
-    glassed(inner, 999.0)
-}
-
-/// `inner` (a `glass` container) over the blurred screen when the widget theme
-/// has one for the widgets being built; else `inner` as it is.
-fn glassed<'a, Message: 'a>(inner: Container<'a, Message>, radius: f32) -> Container<'a, Message> {
-    match super::glass::backdrop() {
-        Some(back) => container(super::glass::frosted(inner, back, radius)),
-        None => inner,
-    }
+        .style(|_| glass(999.0))
 }
 
 /// Glass panel (20 px radius): action bar, toolbars, popovers, side panels.
 pub fn surface<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
-    let blurred = super::glass::backdrop().is_some();
-    let inner = container(content)
+    container(content)
         .padding(SURFACE_PADDING)
-        .style(move |_| glass(20.0, blurred));
-    glassed(inner, 20.0)
+        .style(|_| glass(20.0))
 }
 
 /// A `surface` for a colour-keyed window (the live controller): opaque and
@@ -191,9 +178,7 @@ pub fn float_chip<'a, Message: Clone + 'a>(
     on_press: Message,
 ) -> Container<'a, Message> {
     let palette = theme::floating();
-    // the pill's own glass (frosted with the widget theme), the button on it
-    // only lights up under the pointer
-    let blurred = super::glass::backdrop().is_some();
+    // the pill's own glass, the button on it only lights up under the pointer
     let button = button(text(label).size(14).color(palette.text).center())
         .width(TEXT_BUTTON_WIDTH)
         .height(CONTROL)
@@ -207,10 +192,7 @@ pub fn float_chip<'a, Message: Clone + 'a>(
             border: Border::default().rounded(super::shape::radius(PILL_RADIUS)),
             ..button::Style::default()
         });
-    glassed(
-        container(button).style(move |_| glass(999.0, blurred)),
-        999.0,
-    )
+    container(button).style(|_| glass(999.0))
 }
 
 /// Button background: accent gradient for `primary`, else clear until hovered.
@@ -369,15 +351,10 @@ fn accent(status: button::Status) -> Background {
 /// anywhere: tiny-skia draws a shadow whole on every redraw, outside the part
 /// being redrawn too, so it piles up into a black block (and a floating
 /// window can't show one: no alpha there).
-fn glass(radius: f32, blurred: bool) -> container::Style {
+fn glass(radius: f32) -> container::Style {
     let palette = theme::floating();
-    // Frost / Graphite: the translucent tint only over the blurred screen, else
-    // (glass off, a popup window) the solid tint.
-    let themed = crate::config::widgets().0 != crate::config::WidgetTheme::Default;
     let (background, border, width) = match crate::config::look().bar {
-        BarStyle::Solid => (palette.panel_solid, palette.border, 1.0),
         BarStyle::Outline => (palette.panel, theme::accent().0, 1.5),
-        _ if themed && !blurred => (palette.panel_solid, palette.border, 1.0),
         _ => (palette.panel, palette.border, 1.0),
     };
     container::Style {

@@ -124,9 +124,7 @@ mod parse;
 mod store;
 
 pub use look::PRESETS;
-pub use store::{
-    appearance, current, look, look_config, rebase, set_current, update, update_at, widgets,
-};
+pub use store::{appearance, current, look, look_config, rebase, set_current, update, update_at};
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.

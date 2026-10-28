@@ -811,7 +811,7 @@ impl canvas::Program<Msg> for Loupe<'_> {
                 Size::new(width, 24.0),
                 6.0.into(),
             );
-            frame.fill(&tag, palette.panel_solid);
+            frame.fill(&tag, palette.panel);
             frame.fill_text(canvas::Text {
                 content: label.clone(),
                 position: Point::new(x + 8.0, y + 5.0),
@@ -844,7 +844,7 @@ impl canvas::Program<Msg> for Loupe<'_> {
             Point::new(x - 2.0, y - 2.0),
             Size::new(side + 4.0, side + label + 4.0),
         );
-        frame.fill(&body, palette.panel_solid);
+        frame.fill(&body, palette.panel);
         frame.stroke(
             &body,
             Stroke::default().with_color(palette.border).with_width(1.0),

@@ -22,7 +22,7 @@ use crate::ui::kit::motion;
 use crate::ui::platform::monitor::{place_window, taskbar_inset};
 use crate::ui::platform::shape;
 use crate::ui::snip::Snip;
-use crate::ui::{glass, overlay, snip, windows};
+use crate::ui::{overlay, snip, windows};
 
 use super::{App, CAPTURE_TIMEOUT, UIA_WINDOWS};
 
@@ -217,7 +217,6 @@ impl App {
         self.o.view = overlay::View::new(px(size.width), px(size.height), size);
         self.o.tiles = overlay::tiles(&image).map(|t| (image.id(), t));
         self.o.frame = Some(image);
-        glass::set_frame(self.o.frame.as_ref(), scale);
         self.o.scale = scale;
         self.o.screen = size;
         self.o.origin = origin;
@@ -314,7 +313,6 @@ impl App {
         opening.finish();
         // hidden or closed alike: the editor's glyphs go with the opening
         crate::editor::free_glyphs();
-        glass::set_frame(None, 1.0);
         if self.can_hide {
             // Gone at once: the hide steps draw the empty view (the theme's
             // background) full-screen, then restore the window from full-screen,

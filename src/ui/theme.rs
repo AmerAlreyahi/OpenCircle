@@ -3,14 +3,11 @@ use std::cell::Cell;
 
 use iced::Color;
 
-use crate::config::{self, BarStyle, BracketColour, ColourSet, Look, Rgb, Theme, WidgetTheme};
+use crate::config::{self, BarStyle, BracketColour, ColourSet, Look, Rgb, Theme};
 
 /// One theme's surface colours.
 pub struct Palette {
     pub panel: Color,
-    /// `panel` laid over `window` as one solid colour: for panels over busy
-    /// content (the frozen frame), where see-through glass shows text behind.
-    pub panel_solid: Color,
     pub border: Color,
     pub text: Color,
     /// Secondary text: key hints, captions.
@@ -42,7 +39,6 @@ const LIGHT_SOLID: Color = solid(LIGHT_PANEL, LIGHT_WINDOW);
 
 const DARK: Palette = Palette {
     panel: DARK_SOLID,
-    panel_solid: DARK_SOLID,
     border: Color::from_rgba8(255, 255, 255, 0.09),
     text: Color::from_rgb8(0xec, 0xec, 0xf4),
     muted: Color::from_rgb8(0xa3, 0xa3, 0xb8),
@@ -53,45 +49,12 @@ const DARK: Palette = Palette {
 
 const LIGHT: Palette = Palette {
     panel: LIGHT_SOLID,
-    panel_solid: LIGHT_SOLID,
     border: Color::from_rgba8(16, 16, 40, 0.10),
     text: Color::from_rgb8(0x1a, 0x1a, 0x24),
     muted: Color::from_rgb8(0x5b, 0x5b, 0x6e),
     hover: Color::from_rgba8(16, 16, 40, 0.06),
     pressed: Color::from_rgba8(16, 16, 40, 0.11),
     window: LIGHT_WINDOW,
-};
-
-// Widget themes (config `widget_theme`): the floating widgets only. Every widget
-// surface is OPAQUE for now (owner, 2026-10-27: the page behind never shows
-// through); glass returns with the GPU renderer, so `panel` and `panel_solid`
-// are the same solid colour until then.
-const FROST_WINDOW: Color = Color::from_rgb8(0xe4, 0xea, 0xf4);
-const FROST_SOLID: Color = solid(Color::from_rgba8(246, 249, 255, 0.86), FROST_WINDOW);
-/// Frosted glass: a pale tint, a bright 1 px edge, dark text.
-const FROST: Palette = Palette {
-    panel: FROST_SOLID,
-    panel_solid: FROST_SOLID,
-    border: Color::from_rgba8(255, 255, 255, 0.70),
-    text: Color::from_rgb8(0x14, 0x18, 0x26),
-    muted: Color::from_rgb8(0x3f, 0x46, 0x5a),
-    hover: Color::from_rgba8(255, 255, 255, 0.45),
-    pressed: Color::from_rgba8(255, 255, 255, 0.70),
-    window: FROST_WINDOW,
-};
-
-const GRAPHITE_WINDOW: Color = Color::from_rgb8(0x1f, 0x22, 0x28);
-const GRAPHITE_SOLID: Color = solid(Color::from_rgba8(38, 41, 48, 0.96), GRAPHITE_WINDOW);
-/// Calm dark graphite: a warm grey tint, a hairline edge.
-const GRAPHITE: Palette = Palette {
-    panel: GRAPHITE_SOLID,
-    panel_solid: GRAPHITE_SOLID,
-    border: Color::from_rgba8(255, 255, 255, 0.10),
-    text: Color::from_rgb8(0xe6, 0xe8, 0xec),
-    muted: Color::from_rgb8(0x9a, 0xa0, 0xaa),
-    hover: Color::from_rgba8(255, 255, 255, 0.07),
-    pressed: Color::from_rgba8(255, 255, 255, 0.12),
-    window: GRAPHITE_WINDOW,
 };
 
 /// Selection stroke and screen border gradient (both themes): violet → cyan.
@@ -253,19 +216,6 @@ pub const WORD_PICKED: Color = Color::from_rgba8(0x5a, 0x8c, 0xff, 0.55);
 /// The palette floating surfaces (bar, pills, panels) use under the active
 /// look's bar style: glass dark / light force one; the rest follow the app.
 pub fn floating() -> &'static Palette {
-    widget_palette(config::widgets().0).unwrap_or_else(app_floating)
-}
-
-/// A widget theme's own palette (`Default` has none: it follows the app).
-fn widget_palette(t: WidgetTheme) -> Option<&'static Palette> {
-    match t {
-        WidgetTheme::Frost => Some(&FROST),
-        WidgetTheme::Graphite => Some(&GRAPHITE),
-        WidgetTheme::Default => None,
-    }
-}
-
-fn app_floating() -> &'static Palette {
     match config::look().bar {
         BarStyle::GlassDark => &DARK,
         BarStyle::GlassLight => &LIGHT,
@@ -415,53 +365,9 @@ mod tests {
     }
 
     #[test]
-    fn solid_panels_are_opaque_and_between_panel_and_window() {
+    fn every_widget_surface_is_opaque() {
         for p in [&DARK, &LIGHT] {
-            assert_eq!(p.panel_solid.a, 1.0);
-            for (s, a, b) in [
-                (p.panel_solid.r, p.panel.r, p.window.r),
-                (p.panel_solid.g, p.panel.g, p.window.g),
-                (p.panel_solid.b, p.panel.b, p.window.b),
-            ] {
-                assert!(s >= a.min(b) - 1e-6 && s <= a.max(b) + 1e-6);
-            }
-        }
-        // 0.86 of (22,22,34) over (18,19,31): close to the panel colour
-        assert!((DARK.panel_solid.r - (22.0 * 0.86 + 18.0 * 0.14) / 255.0).abs() < 1e-3);
-        assert!((LIGHT.panel_solid.r - (255.0 * 0.9 + 246.0 * 0.1) / 255.0).abs() < 1e-3);
-    }
-
-    #[test]
-    fn every_widget_theme_resolves_and_has_a_solid_fallback() {
-        let all = [
-            WidgetTheme::Default,
-            WidgetTheme::Frost,
-            WidgetTheme::Graphite,
-        ];
-        let mut texts = Vec::new();
-        for t in all {
-            let p = widget_palette(t).unwrap_or(&DARK);
-            assert_eq!(p.panel_solid.a, 1.0);
-            texts.push(p.text);
-        }
-        assert!(texts[0] != texts[1] && texts[1] != texts[2] && texts[0] != texts[2]);
-        // Readable: text far from the tint in lightness.
-        let l = |c: Color| 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
-        for p in [&FROST, &GRAPHITE] {
-            assert!((l(p.text) - l(p.panel_solid)).abs() > 0.6);
-        }
-    }
-
-    #[test]
-    fn every_widget_surface_is_opaque_in_every_theme() {
-        for t in [
-            WidgetTheme::Default,
-            WidgetTheme::Frost,
-            WidgetTheme::Graphite,
-        ] {
-            for p in [widget_palette(t).unwrap_or(&DARK), &LIGHT] {
-                assert_eq!((p.panel.a, p.panel_solid.a, p.window.a), (1.0, 1.0, 1.0));
-            }
+            assert_eq!((p.panel.a, p.window.a), (1.0, 1.0));
         }
         // the setup's Sapphire / Daylight: kit::tests::every_surface_is_opaque_in_every_theme
     }

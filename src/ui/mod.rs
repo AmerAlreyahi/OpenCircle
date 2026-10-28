@@ -6,7 +6,6 @@ mod arch_tests;
 /// Frames as the window draws them (damage), and the animations' timing.
 #[cfg(test)]
 mod frame_times;
-mod glass;
 mod kit;
 mod live_layer;
 mod overlay;
