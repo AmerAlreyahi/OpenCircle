@@ -405,6 +405,10 @@ impl Windows {
         let menu = tray_menu::Menu::new(&cfg.labs, &cfg, live_on);
         let size = menu.size();
         let place = platform::tray::menu_place(icon, size);
+        crate::log!(
+            "[opencircle] tray menu at {:?} (icon {icon:?})",
+            place.origin
+        );
         let before = match self.tray_menu.take() {
             Some((id, _)) => window::close(id),
             None => Task::none(),
