@@ -2073,10 +2073,18 @@ fn the_bottom_bar_never_changes_size() {
     assert!(edits);
     // Ask AI's card opens (the bar steps aside) and closes: the same again
     let _ = app.update(Message::AskButton);
-    let (id, _) = app.o.panel.as_ref().expect("Ask AI opens");
-    let id = *id;
+    assert!(app.o.panel.is_some(), "Ask AI opens");
     assert!(!app.bottom_bar_shown());
-    let _ = app.update(Message::Panel(id, panel::Msg::Card(card::Event::Close)));
+    // a click on the frozen screen outside the card closes it
+    event(
+        &mut app,
+        overlay::Event::Press {
+            at: Point::new(5.0, 5.0),
+            shift: false,
+        },
+    );
+    event(&mut app, overlay::Event::Release);
+    assert!(app.o.panel.is_none());
     assert!(app.bottom_bar_shown());
     let (after, edits) = bar_box(&mut app);
     assert_eq!(after, before);
@@ -3672,7 +3680,7 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     assert_eq!(app.card_at().x, 16.0);
     assert_eq!(app.chat_side, Some(card::Side::Left));
     // the next chat in this run opens on that side
-    let _ = app.update(Message::Panel(id, panel::Msg::Card(card::Event::Close)));
+    app.o.panel = None;
     let crop = app.crop().unwrap();
     let _ = app.open_panel(actions::Panel::Ask, crop, None);
     assert_eq!(app.card_at().x, 16.0);
@@ -3781,4 +3789,38 @@ fn a_link_in_the_selected_words_gets_a_click_only_chip() {
     let app = pick("just some plain words here");
     assert!(app.chip_entity().is_none());
     assert!(!overlay_texts(&app).iter().any(|t| t.starts_with("Open ")));
+}
+
+/// The result cards have no close button (the design has none): the AI chat
+/// keeps its "+ New"; Esc closes, and so does a click on the frozen screen
+/// outside the card.
+#[test]
+fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
+    let close = crate::ui::kit::icon::Icon::Close.glyph().to_string();
+    let (app, _) = app_with_ask_panel();
+    let texts = overlay_texts(&app);
+    assert!(texts.contains(&"+ New".to_string()), "{texts:?}");
+    assert!(!texts.contains(&close), "a close button: {texts:?}");
+    // Esc
+    let mut esc = app_with_ask_panel().0;
+    let _ = esc.update(Message::Escape);
+    assert!(esc.o.is_none(), "Esc closes");
+    // a click outside the card (the card is docked right, the click is far left, away from the selection)
+    let mut out = app_with_ask_panel().0;
+    let card = out.card_at();
+    let at = Point::new(card.x / 2.0, out.o.screen.height - 20.0);
+    event(&mut out, overlay::Event::Press { at, shift: false });
+    event(&mut out, overlay::Event::Release);
+    assert!(out.o.panel.is_none(), "the click closes the card");
+    // the Lens card too
+    let mut lens = open_app(800, 600, 1.0);
+    drag(
+        &mut lens,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = lens.crop().unwrap();
+    let _ = lens.open_panel(actions::Panel::Lens, crop, None);
+    assert!(!overlay_texts(&lens).contains(&close));
 }

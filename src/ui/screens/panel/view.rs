@@ -41,8 +41,9 @@ const ACTIONS_GAP: f32 = 16.0;
 /// Between chips (`gap-2`).
 const CHIPS_GAP: f32 = 8.0;
 
-/// The result card for `header` at `at` on a `screen`: the kit's frame with
-/// its close button (Esc). `hover`: the pointer is on its resize edge.
+/// The result card for `header` at `at` on a `screen`: the kit's frame, with
+/// no close button (Esc, or a click outside it). `hover`: the pointer is on
+/// its resize edge.
 #[allow(clippy::too_many_arguments)]
 pub fn card<'a, M: Clone + 'a>(
     header: Header<'a>,
@@ -53,18 +54,7 @@ pub fn card<'a, M: Clone + 'a>(
     hover: bool,
     on: impl Fn(Event) -> M,
 ) -> Element<'a, M> {
-    let close = close(&on);
-    frame::card(header, close, body, footer, at, screen, hover, on)
-}
-
-/// A card's close button (Esc).
-fn close<'a, M: Clone + 'a>(on: impl Fn(Event) -> M) -> Element<'a, M> {
-    let close = icon_button(
-        Icon::Close.glyph(),
-        icon_button::State::default(),
-        Some(on(Event::Close)),
-    );
-    widgets::hint(close, "Close", Why::Keys("Esc"), Position::Bottom)
+    frame::card(header, None, body, footer, at, screen, hover, on)
 }
 
 /// A small quiet text button (a message's Copy, Edit, Regenerate).
@@ -146,15 +136,12 @@ impl Panel {
             logo: chatting.then(widgets::chrome::logo_handle),
         };
         if chatting {
-            // the header's end: a new chat, then close
+            // the header's end: a new chat (no close button: Esc closes)
             let new = button(label("+ New"), Kind::Elevated, Some(Msg::NewChat));
             let new = widgets::hint(new, "New chat", Why::Icon, Position::Bottom);
-            let ends = row![new, close(Msg::Card)]
-                .spacing(space::GAP)
-                .align_y(Center);
             return frame::card(
                 header,
-                ends.into(),
+                Some(new),
                 body,
                 footer,
                 at,

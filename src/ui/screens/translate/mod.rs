@@ -348,11 +348,6 @@ impl Session {
         self.card.is_some()
     }
 
-    /// The word card's ×: back to the translation.
-    pub fn close_card(&mut self) {
-        self.card = None;
-    }
-
     /// Hands the card's crop and conversation to an Ask AI panel.
     pub fn take_chat(&mut self) -> Option<(Crop, Chat)> {
         let card = self.card.take()?;

@@ -532,7 +532,6 @@ fn panel_frame_sheet() {
 #[test]
 fn panel_frame_card_sheet() {
     use super::super::icon::Icon;
-    use super::super::icon_button::{State, icon_button};
     use iced::Rectangle;
     const CELL: Size = Size::new(300.0, 200.0);
     let view = |grip: bool| {
@@ -544,7 +543,6 @@ fn panel_frame_card_sheet() {
                 docked: false,
                 logo: None,
             };
-            let close = icon_button(Icon::Close.glyph(), State::default(), Some(()));
             let body =
                 super::super::text::text(Role::NOTE, s(ar, "A refreshed look.", "مظهر جديد."));
             let footer = button::button(
@@ -555,7 +553,7 @@ fn panel_frame_card_sheet() {
             let at = Rectangle::new(Point::new(4.0, 4.0), Size::new(260.0, 190.0));
             panel_frame::card(
                 header,
-                close,
+                None,
                 body,
                 Some(footer),
                 at,

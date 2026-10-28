@@ -10,7 +10,6 @@ use iced::{Center, Element, Fill, Padding, Rectangle, Size};
 use crate::ui::kit::button::{Kind, button, regular};
 use crate::ui::kit::chip::emblem;
 use crate::ui::kit::icon::Icon;
-use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::panel_frame::{Side, side};
 use crate::ui::kit::progress;
 use crate::ui::kit::surface::{Material, surface};
@@ -134,18 +133,12 @@ pub fn card<'a, M: Clone + 'a>(
     on: On<M>,
 ) -> Element<'a, M> {
     let c = &themes::current().c;
-    let close = icon_button(
-        Icon::Close.glyph(),
-        icon_button::State::default(),
-        on.dismiss.clone(),
-    );
     let header = row![
         text("On-device models")
             .size(Role::META.size)
             .color(c.text_muted)
             .width(Fill),
     ]
-    .push(on.dismiss.is_some().then_some(close))
     .padding(HEADER)
     .align_y(Center);
     let content = column![heading(model, bytes, stage)]

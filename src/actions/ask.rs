@@ -16,7 +16,8 @@ pub const ACTION: Action = Action {
         ctrl: false,
         letter: 'a',
     },
-    icon: '\u{e416}', // lucide "sparkles"
+    // Nothing draws this: AI is the OpenCircle logo everywhere (owner, 2026-10-28).
+    icon: '\u{e04e}', // lucide "arrow-up", neutral
     run: Run::Panel(Panel::Ask),
 };
 

@@ -51,7 +51,8 @@ pub enum Msg {
     Cancel,
     Retry,
     Open(String),
-    /// From the card's frame (only its × does something: the card stays put).
+    /// From the card's frame (nothing here moves or closes it: the card stays put).
+    #[allow(dead_code)]
     Card(card::Event),
 }
 
@@ -147,7 +148,6 @@ impl Session {
             Msg::Cancel => return Outcome::Close,
             Msg::Retry => return Outcome::Retry,
             Msg::Open(url) => return Outcome::Open(url),
-            Msg::Card(card::Event::Close) => return Outcome::Close,
             Msg::Card(_) => {}
         }
         Outcome::None

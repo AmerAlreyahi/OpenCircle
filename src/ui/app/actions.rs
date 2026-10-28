@@ -415,12 +415,8 @@ impl App {
                 self.card = None;
                 Task::none()
             }
-            // the word card's ×: back to the translation; a prompt's: done
-            translate::Msg::Card(card::Event::Close) if session.has_card() => {
-                session.close_card();
-                Task::none()
-            }
-            translate::Msg::Card(card::Event::Close) | translate::Msg::Close => self.close(),
+            // (the cards have no close button: Esc, or a click on the screen)
+            translate::Msg::Close => self.close(),
             translate::Msg::OpenSettings => {
                 let closing = self.close();
                 let settings = self.windows.open(windows::Kind::Settings);

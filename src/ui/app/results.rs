@@ -49,7 +49,6 @@ impl App {
             }
             panel::Msg::Card(card::Event::Hover(on)) => self.o.card_hover = on,
             panel::Msg::Card(card::Event::Reset) => self.card = None,
-            panel::Msg::Card(card::Event::Close) => self.o.panel = None,
             panel::Msg::Search => return self.run(&lens::ACTION),
             // A card's focused field gave Ctrl+C back (nothing selected in it).
             panel::Msg::Key(keys::Keyed::Copy) => {

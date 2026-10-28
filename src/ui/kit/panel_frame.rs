@@ -110,10 +110,8 @@ const GRIP: f32 = 40.0;
 const GRIP_GIRTH: f32 = 4.0;
 /// The result card's corners (`.as-card`).
 pub const CARD_RADIUS: f32 = super::tokens::radius::DRAWER;
-/// Its top row: the heading and the close button.
+/// Its top row: the heading (and the AI chat's "+ New").
 const TOP: f32 = super::tokens::size::ICON_BUTTON;
-/// The close button reaches this far into the card's padding (top, right).
-const CLOSE_IN: f32 = 8.0;
 
 /// What a press on the card's frame does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,7 +130,6 @@ pub enum Event {
     Hover(bool),
     /// Double-click on the inner edge: back to the default place and size.
     Reset,
-    Close,
 }
 
 /// The card's edge facing the rest of the screen (the one that resizes).
@@ -195,7 +192,7 @@ pub fn place(screen: Size, selection: Option<Rectangle>, user: Option<Rectangle>
 // text, 20 px a line), not measured; generous by a line. Measure if prompts grow.
 pub fn short(at: Rectangle, screen: Size, chars: usize, below: f32) -> Rectangle {
     // the padding, the top row and the gap under it
-    const CHROME: f32 = 2.0 * PAD - CLOSE_IN + TOP + UNDER_HEADING;
+    const CHROME: f32 = 2.0 * PAD + TOP + UNDER_HEADING;
     let lines = (chars as f32 * 7.2 / (at.width - 2.0 * PAD).max(1.0))
         .ceil()
         .max(1.0)
@@ -314,8 +311,9 @@ pub struct Header<'a> {
 }
 
 /// The result card at `at` on a `screen` (`.as-card`: the widget surface,
-/// radius 18, 22 px in): `header` (pressing it moves the card), `close` at
-/// its end (the screen's close button, with its tooltip), `body`, and
+/// radius 18, 22 px in): `header` (pressing it moves the card), `ends` at
+/// its end (the AI chat's "+ New"; there is no close button: Esc or a click
+/// outside closes it), `body`, and
 /// `footer` 18 px under it (`.as-actions`). The inner edge resizes it: its
 /// grip shows while `hover`; a double-click there resets the card. Solid and
 /// without a shadow (glass joins with the GPU renderer). Presses never reach
@@ -323,7 +321,7 @@ pub struct Header<'a> {
 #[allow(clippy::too_many_arguments)]
 pub fn card<'a, Message: Clone + 'a>(
     header: Header<'a>,
-    close: Element<'a, Message>,
+    ends: Option<Element<'a, Message>>,
     body: impl Into<Element<'a, Message>>,
     footer: Option<Element<'a, Message>>,
     at: Rectangle,
@@ -346,17 +344,14 @@ pub fn card<'a, Message: Clone + 'a>(
     let heading = mouse_area(container(heading).width(Fill).center_y(TOP))
         .on_press(on(Event::Grab(Drag::Move)))
         .interaction(mouse::Interaction::Grab);
-    let top = row![heading, close].align_y(Center);
+    let top = row![heading].push(ends).align_y(Center);
     let mut parts = column![top, container(body).height(Fill)].spacing(UNDER_HEADING);
     if let Some(footer) = footer {
         let above = ABOVE_ACTIONS - UNDER_HEADING;
         parts = parts.push(container(footer).padding(iced::Padding::ZERO.top(above)));
     }
-    let pad = iced::Padding::new(PAD)
-        .top(PAD - CLOSE_IN)
-        .right(PAD - CLOSE_IN);
     let card = surface(Material::Widget, CARD_RADIUS, parts)
-        .padding(pad)
+        .padding(PAD)
         .width(at.width)
         .height(at.height);
     // the inner edge: a thin strip, its grip only while hovered
