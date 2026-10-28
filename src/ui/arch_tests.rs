@@ -208,3 +208,55 @@ fn the_style_scan_finds_styles() {
         assert!(!styles(line), "{line}");
     }
 }
+
+/// The editor's views still live in the editor; they move to `ui/screens/editor`
+/// in plan step 37, and this list then goes (it may only shrink).
+const BACKEND_EXEMPT: [&str; 2] = ["editor/toolbar.rs", "editor/canvas.rs"];
+
+/// The backend (everything in `src` outside `ui/` and `main.rs`) never imports the
+/// UI; `main` wires the two together. Test code may (it looks at pictures).
+#[test]
+fn backend_never_imports_ui() {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let root = Path::new("src");
+    let mut files = Vec::new();
+    walk(root, &mut files);
+    let mut exempt_used = 0;
+    for p in files {
+        let name = p
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        if name.starts_with("ui/") || name == "main.rs" || name.ends_with("tests.rs") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&p).unwrap();
+        // the production part: up to the test module
+        let prod = src.split("#[cfg(test)]\nmod ").next().unwrap();
+        let hits: Vec<&str> = code(prod).filter(|l| l.contains("crate::ui")).collect();
+        if BACKEND_EXEMPT.contains(&name.as_str()) {
+            assert!(
+                !hits.is_empty(),
+                "{name} is clean: drop it from BACKEND_EXEMPT"
+            );
+            exempt_used += 1;
+        } else {
+            assert!(
+                hits.is_empty(),
+                "{name} imports the UI (the backend never does): {}",
+                hits[0].trim()
+            );
+        }
+    }
+    assert_eq!(exempt_used, BACKEND_EXEMPT.len());
+}

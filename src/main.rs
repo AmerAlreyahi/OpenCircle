@@ -116,7 +116,16 @@ fn main() -> ExitCode {
         }
         // hidden: our Apps & features entry's uninstall
         Some(setup::UNINSTALL_ARG) => {
-            return setup::uninstall_ui(args.get(1).map(String::as_str));
+            return match setup::uninstall_ui(args.get(1).map(String::as_str)) {
+                setup::Uninstall::Exit(code) => code,
+                setup::Uninstall::Window { code, folder, dir } => {
+                    if let Err(e) = ui::setup::run_uninstall(code, folder) {
+                        crate::log!("[opencircle] uninstall: {e}");
+                    }
+                    setup::delete_when_gone(&dir);
+                    ExitCode::SUCCESS
+                }
+            };
         }
         Some(update::VERSION_ARG) => {
             println!("{}", env!("CARGO_PKG_VERSION"));

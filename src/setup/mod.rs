@@ -42,18 +42,30 @@ pub fn is_product_code(code: &str) -> bool {
         })
 }
 
+/// What `opencircle --uninstall-ui` does next.
+pub enum Uninstall {
+    /// Nothing more: exit with this code (a bad argument, or the hand-over to the copy).
+    Exit(std::process::ExitCode),
+    /// This is the copy: `main` shows the uninstall window (`ui::setup::run_uninstall`
+    /// with `code` and the installed `folder`), then calls `delete_when_gone(&dir)`.
+    Window {
+        code: String,
+        folder: String,
+        dir: PathBuf,
+    },
+}
+
 /// `opencircle --uninstall-ui {ProductCode}`, from Apps & features. The
 /// installed exe can't remove itself while it runs, so it copies itself to a
 /// temp folder of its own, starts the copy and exits; the copy shows the
-/// window (`ui::setup::run_uninstall`), then has its folder deleted once it
-/// has exited.
-pub fn uninstall_ui(code: Option<&str>) -> std::process::ExitCode {
+/// window (`Uninstall::Window`), then has its folder deleted once it has exited.
+pub fn uninstall_ui(code: Option<&str>) -> Uninstall {
     use std::process::ExitCode;
     let Some(code) = code.filter(|c| is_product_code(c)) else {
-        return ExitCode::from(2);
+        return Uninstall::Exit(ExitCode::from(2));
     };
     let Ok(exe) = std::env::current_exe() else {
-        return ExitCode::FAILURE;
+        return Uninstall::Exit(ExitCode::FAILURE);
     };
     let copy_dir = exe.parent().filter(|d| {
         d.file_name()
@@ -71,26 +83,25 @@ pub fn uninstall_ui(code: Option<&str>) -> std::process::ExitCode {
                     .env("OPENCIRCLE_INSTALLED", exe.parent().unwrap_or(&dir))
                     .spawn()
             });
-        return match started {
+        return Uninstall::Exit(match started {
             Ok(_) => ExitCode::SUCCESS,
             Err(e) => {
                 crate::log!("[opencircle] uninstall: start the copy: {e}");
                 let _ = std::fs::remove_dir_all(&dir);
                 ExitCode::FAILURE
             }
-        };
+        });
     };
-    let folder = std::env::var("OPENCIRCLE_INSTALLED").unwrap_or_default();
-    if let Err(e) = crate::ui::setup::run_uninstall(code.to_string(), folder) {
-        crate::log!("[opencircle] uninstall: {e}");
+    Uninstall::Window {
+        code: code.to_string(),
+        folder: std::env::var("OPENCIRCLE_INSTALLED").unwrap_or_default(),
+        dir: dir.to_path_buf(),
     }
-    delete_when_gone(dir);
-    ExitCode::SUCCESS
 }
 
 /// Deletes `dir` (this exe's own folder) a moment after this process exits:
 /// a hidden `cmd` waits two seconds, then removes it.
-fn delete_when_gone(dir: &Path) {
+pub fn delete_when_gone(dir: &Path) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

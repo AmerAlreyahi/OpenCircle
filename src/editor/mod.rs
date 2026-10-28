@@ -27,7 +27,7 @@ mod select;
 mod shape;
 mod spotlight;
 mod step;
-mod style;
+pub mod style;
 #[cfg(test)]
 mod tests;
 mod text;
@@ -389,7 +389,7 @@ impl Editor {
     /// Opens `image`, shown at `zoom` display px per image px (e.g. 1 / the
     /// monitor's scale factor, so the crop shows at its on-screen size).
     pub fn new(image: Image, zoom: f32) -> Self {
-        let colour = crate::ui::theme::ANNOTATION[0].into_rgba8();
+        let colour = style::ANNOTATION[0].into_rgba8();
         let mut editor = Editor {
             doc: Document::new(image),
             tool: Tool::Arrow,
@@ -696,7 +696,7 @@ impl Editor {
         };
         self.menu = None;
         self.commit();
-        let colour = crate::ui::theme::ANNOTATION[p.colour].into_rgba8();
+        let colour = style::ANNOTATION[p.colour].into_rgba8();
         if p.tool == Tool::Redact
             && let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len())
             && let Shape::Rect { a, b } | Shape::Ellipse { a, b } | Shape::Spotlight { a, b } =

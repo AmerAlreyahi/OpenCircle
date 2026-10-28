@@ -314,22 +314,9 @@ pub const LAYER_CLEAR: Color = {
 #[cfg(not(windows))]
 pub const LAYER_CLEAR: Color = Color::TRANSPARENT;
 
-/// The editor's colour picker (annotations keep their colour in both themes:
-/// they belong to the image, not the UI). The first is the default.
-pub const ANNOTATION: [Color; 12] = [
-    Color::from_rgb8(0xff, 0x3b, 0x30), // red
-    Color::from_rgb8(0xff, 0x95, 0x00), // orange
-    Color::from_rgb8(0xff, 0xd6, 0x0a), // yellow
-    Color::from_rgb8(0x34, 0xc7, 0x59), // green
-    Color::from_rgb8(0x00, 0xc7, 0xbe), // teal
-    Color::from_rgb8(0x0a, 0x84, 0xff), // blue
-    Color::from_rgb8(0x5e, 0x5c, 0xe6), // indigo
-    Color::from_rgb8(0xaf, 0x52, 0xde), // purple
-    Color::from_rgb8(0xff, 0x2d, 0x9a), // pink
-    Color::from_rgb8(0xff, 0xff, 0xff), // white
-    Color::from_rgb8(0x8e, 0x8e, 0x93), // grey
-    Color::from_rgb8(0x1c, 0x1c, 0x1e), // black
-];
+/// The editor's colour picker lives in `editor::style` (annotations belong to the image,
+/// not the UI); re-exported for the Settings colour field.
+pub use crate::editor::style::ANNOTATION;
 
 /// Light palette instead of dark on this thread (the editor's snapshot test).
 #[allow(dead_code)]

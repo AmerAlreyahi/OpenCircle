@@ -1,7 +1,26 @@
 //! Style presets (one click: colour + weight + the tool they are for) and the
 //! copy / paste style between items.
+use iced::Color;
+
 use super::document::{Item, Shape};
 use super::{Tool, Width};
+
+/// The editor's colour picker (annotations keep their colour in both themes:
+/// they belong to the image, not the UI). The first is the default.
+pub const ANNOTATION: [Color; 12] = [
+    Color::from_rgb8(0xff, 0x3b, 0x30), // red
+    Color::from_rgb8(0xff, 0x95, 0x00), // orange
+    Color::from_rgb8(0xff, 0xd6, 0x0a), // yellow
+    Color::from_rgb8(0x34, 0xc7, 0x59), // green
+    Color::from_rgb8(0x00, 0xc7, 0xbe), // teal
+    Color::from_rgb8(0x0a, 0x84, 0xff), // blue
+    Color::from_rgb8(0x5e, 0x5c, 0xe6), // indigo
+    Color::from_rgb8(0xaf, 0x52, 0xde), // purple
+    Color::from_rgb8(0xff, 0x2d, 0x9a), // pink
+    Color::from_rgb8(0xff, 0xff, 0xff), // white
+    Color::from_rgb8(0x8e, 0x8e, 0x93), // grey
+    Color::from_rgb8(0x1c, 0x1c, 0x1e), // black
+];
 
 pub struct Preset {
     /// On its chip.
@@ -9,7 +28,7 @@ pub struct Preset {
     /// Its tooltip (with its key, `key`).
     pub name: &'static str,
     pub key: &'static str,
-    /// Index into `theme::ANNOTATION`.
+    /// Index into `ANNOTATION`.
     pub colour: usize,
     pub width: Width,
     /// The tool it switches to, unless the active one is in `keeps`.

@@ -309,7 +309,7 @@ fn colour_popover(e: &Editor, colour: Color) -> Element<'_, Message> {
     ]
     .spacing(6);
     widgets::colour_popover(
-        &theme::ANNOTATION,
+        &super::style::ANNOTATION,
         colour,
         e.width as usize,
         &e.hex,
