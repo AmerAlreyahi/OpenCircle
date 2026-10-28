@@ -172,6 +172,49 @@ pub fn done<'a, Message: 'a>() -> Element<'a, Message> {
     .into()
 }
 
+/// The composer's attachment line (`#aiAttachedScreenChip`): a mono `mark`
+/// ("UI", 9 px / 600 `accent` on a 20x16 `accent_soft` tile, radius 4), the
+/// 11 px / 500 `label` and the mono `detail` in `text_muted` ("420×260 px"),
+/// across its row on `hover`, 6x10 px, radius 12.
+pub fn attached<'a, Message: 'a>(
+    mark: &'a str,
+    label: &'a str,
+    detail: String,
+) -> Element<'a, Message> {
+    const TILE: (f32, f32) = (20.0, 16.0);
+    let tile = container(text(mark).size(9).font(mono(Weight::Semibold)))
+        .center_x(TILE.0)
+        .center_y(TILE.1)
+        .style(|_| container::Style {
+            background: Some(c().accent_soft.into()),
+            text_color: Some(c().accent),
+            border: Border::default().rounded(SMALL),
+            ..container::Style::default()
+        });
+    let line = row![
+        tile,
+        text(label)
+            .size(11)
+            .font(weight(Weight::Medium))
+            .color(c().text),
+        text(detail)
+            .size(11)
+            .font(mono(Weight::Normal))
+            .color(c().text_muted),
+    ]
+    .spacing(8)
+    .align_y(Center);
+    container(line)
+        .padding([6, 10])
+        .width(iced::Fill)
+        .style(|_| container::Style {
+            background: Some(c().hover.into()),
+            border: Border::default().rounded(radius::CARD),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 /// An emblem: `icon` (20 px, `accent`) centred on a 42 px `accent_soft`
 /// tile, radius 13 (the model download card's heading).
 pub fn emblem<'a, Message: 'a>(icon: super::icon::Icon) -> Element<'a, Message> {
@@ -209,6 +252,38 @@ pub fn action<'a, Message: Clone + 'a>(label: String, on_press: Message) -> Elem
                 .rounded(radius::FULL)
                 .width(1)
                 .color(c().divider),
+            ..button::Style::default()
+        })
+        .into()
+}
+
+/// A chip floating over the screen on its own (a selection's Select text or
+/// link): ONE pill on the widget surface, `height` tall, never a pill inside
+/// another frame.
+pub fn floating<'a, Message: Clone + 'a>(
+    label: String,
+    on_press: Message,
+    height: f32,
+    pad: f32,
+) -> Element<'a, Message> {
+    use iced::widget::button;
+    button(container(text(label).size(12).font(weight(Weight::Normal))).center_y(iced::Fill))
+        .height(height)
+        .padding([0.0, pad])
+        .on_press(on_press)
+        .style(|_, status| button::Style {
+            background: Some(
+                match status {
+                    button::Status::Hovered | button::Status::Pressed => c().elevated_hover,
+                    _ => c().widget,
+                }
+                .into(),
+            ),
+            text_color: c().text,
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(1)
+                .color(c().rim),
             ..button::Style::default()
         })
         .into()

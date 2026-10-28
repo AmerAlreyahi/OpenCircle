@@ -159,6 +159,10 @@ pub enum Msg {
     OpenAiSettings,
     /// The History tab's list of saved chats (newest first).
     Listed(Vec<chats::Entry>),
+    /// History's search field: chats whose title or text hold it.
+    Find(String),
+    /// Star a saved chat (a favourite, listed first), or not.
+    Star(String, bool),
     /// Open a saved chat, delete one, or all.
     OpenSaved(String),
     Loaded(Result<chats::Saved, String>),
@@ -179,9 +183,13 @@ pub struct Panel {
     queued: bool,
     /// Pinned: outside clicks and Esc no longer close it (`App::chat`).
     pinned: bool,
-    /// The drawer's open tab, its History list and its model field.
+    /// Picked up and dragged by its header (the App sets it).
+    pub held: bool,
+    /// The drawer's open tab, its History list (and what it was searched
+    /// for) and its model field.
     drawer: Option<Tab>,
     listed: Vec<chats::Entry>,
+    find: String,
     model: String,
     /// The older messages' summary being written; dropping it stops that.
     summarizing: Option<task::Handle>,
@@ -327,8 +335,10 @@ impl Panel {
             input: text_editor::Content::new(),
             queued: false,
             pinned: false,
+            held: false,
             drawer: None,
             listed: Vec::new(),
+            find: String::new(),
             model: String::new(),
             summarizing: None,
             work: None,
@@ -438,10 +448,30 @@ impl Panel {
                 self.drawer = tab;
                 self.model = config::current().ai.model;
                 if tab == Some(Tab::History) {
-                    return list_saved();
+                    return list_saved(&self.find);
                 }
             }
             (_, Msg::Listed(all)) => self.listed = all,
+            (_, Msg::Find(find)) => {
+                self.find = find;
+                return list_saved(&self.find);
+            }
+            (_, Msg::Star(id, on)) => {
+                // at once on the card; the list sorts again once written
+                if let Some(entry) = self.listed.iter_mut().find(|e| e.id == id) {
+                    entry.star = on;
+                }
+                let Some(db) = store::path() else {
+                    return Task::none();
+                };
+                let find = self.find.clone();
+                return background(move |tx| {
+                    if let Err(e) = chats::star(&db, &id, on) {
+                        crate::log!("[opencircle] {e}");
+                    }
+                    let _ = tx.unbounded_send(Msg::Listed(chats::list(&db, &find)));
+                });
+            }
             (_, Msg::OpenSaved(id)) => {
                 let Some(db) = store::path() else {
                     return Task::none();
@@ -472,11 +502,12 @@ impl Panel {
                 {
                     chat.id = None; // this chat, if saved again, is a new one
                 }
+                let find = self.find.clone();
                 return background(move |tx| {
                     if let Err(e) = chats::delete(&db, &id) {
                         crate::log!("[opencircle] {e}");
                     }
-                    let _ = tx.unbounded_send(Msg::Listed(chats::list(&db)));
+                    let _ = tx.unbounded_send(Msg::Listed(chats::list(&db, &find)));
                 });
             }
             (_, Msg::ClearHistory) => {
@@ -819,13 +850,15 @@ fn keep_in(db: Option<std::path::PathBuf>, on: bool, chat: &mut Chat) -> Task<Ms
     })
 }
 
-/// The saved chats, newest first (`Listed`).
-fn list_saved() -> Task<Msg> {
+/// The saved chats holding `find` (all when blank), favourites then newest
+/// first (`Listed`).
+fn list_saved(find: &str) -> Task<Msg> {
     let Some(db) = store::path() else {
         return Task::none();
     };
+    let find = find.to_string();
     background(move |tx| {
-        let _ = tx.unbounded_send(Msg::Listed(chats::list(&db)));
+        let _ = tx.unbounded_send(Msg::Listed(chats::list(&db, &find)));
     })
 }
 
@@ -860,6 +893,23 @@ fn copy(text: String) -> Task<Msg> {
             .map_err(|e| format!("Could not copy: {e}"));
         let _ = tx.unbounded_send(Msg::Acted(done));
     })
+}
+
+/// Browser provider (no key): Ask AI only hands the question to Google AI Mode
+/// in the user's browser, with the selection's text when Include screen is on
+/// and the text reader is here; no chat, no chat history (the owner,
+/// 2026-10-28). Blocking: the pill's text, or why not.
+pub fn hand_off(crop: &Crop, question: Option<String>, include: bool) -> Result<String, String> {
+    let target = config::current().translate.target;
+    let prompt = question
+        .filter(|q| !q.trim().is_empty())
+        .unwrap_or_else(|| PRESETS[0].text(&target));
+    let read = (include && text::models_present()).then(|| text::read(crop, |_| {}));
+    let (question, _) = browser_turn(&prompt, read);
+    ai::browser::ask(&question)?;
+    let url = ai::browser::url(&question).0;
+    crate::history::search::keep("ai", &prompt, &url, Some(crop));
+    Ok("Opened in your browser".into())
 }
 
 /// Browser provider: the question to open in AI Mode and the line to add to the

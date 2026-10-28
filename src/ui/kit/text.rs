@@ -111,6 +111,27 @@ pub fn width(s: &str, size: f32, font: Font) -> f32 {
     laid_out(s, size, font, None).1
 }
 
+/// `s` cut with "…" to fit `room` px on one line at `size` px in `font` (the
+/// design's `truncate`); as it is when it fits.
+pub fn cut(s: &str, size: f32, font: Font, room: f32) -> String {
+    if width(s, size, font) <= room {
+        return s.to_string();
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let fits = |n: usize| {
+        let t: String = chars[..n].iter().collect();
+        width(&format!("{}…", t.trim_end()), size, font) <= room
+    };
+    // the longest start that fits, by halving (shaping is the cost)
+    let (mut lo, mut hi) = (0, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if fits(mid) { lo = mid } else { hi = mid - 1 }
+    }
+    let t: String = chars[..lo].iter().collect();
+    format!("{}…", t.trim_end())
+}
+
 /// The first of `texts` (longest first) that fits `room` px on one line at
 /// `size` in the UI font, else the last: a placeholder is never cut off.
 pub fn fitting<'a>(texts: &[&'a str], size: f32, room: f32) -> &'a str {
@@ -192,6 +213,11 @@ pub fn text<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
 /// `s` in `role`, in the secondary text colour (a description, a note).
 pub fn sub<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
     text(role, s).color(themes::current().c.text_sub)
+}
+
+/// `s` in `role`, in the muted text colour (a footer's aside).
+pub fn muted<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
+    text(role, s).color(themes::current().c.text_muted)
 }
 
 /// `s` in `role`, in the theme's accent (a handle, a link-like name).

@@ -69,7 +69,7 @@ model = "claude-sonnet-5-5"
 [translate]
 source = "auto"
 target = "ar"
-engine = "ai"
+engine = "offline"
 live_interval_ms = 1500
 
 [snip]

@@ -225,6 +225,10 @@ production systems.
   capture-blocking window (display affinity), so black wallpapers get no false pill. DRM video in a browser (black
   without a protected window) gets no pill for now; a smarter check (a black area exactly filling a video player
   while the rest of the window isn't black) is a later follow-up.
+- Screen under the mouse (owner, 2026-10-28, supersedes the opening-screen part of "Multiple screens"): Ctrl+Shift+Space
+  opens with the live effect (Active Look edge) and the bar on the screen the MOUSE is on; all screens still freeze and
+  stay selectable. Moving the mouse to another screen moves the edge glow there (fade, design timings); the bar stays
+  where it opened until dragged.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.

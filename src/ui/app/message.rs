@@ -33,6 +33,9 @@ pub(in crate::ui) enum Message {
     Screen(u32, snip::Place, image::Handle),
     /// From another monitor's overlay window (its logical px).
     ScreenEvent(window::Id, overlay::Event),
+    /// The pointer came into one of our windows: the edge glow follows it
+    /// onto that screen (`screens::Glow`).
+    PointerOn(window::Id),
     /// Esc, wherever the focus is.
     Escape,
     /// Esc that a widget took (a field let go of the focus; the editor): it

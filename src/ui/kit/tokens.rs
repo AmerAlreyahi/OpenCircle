@@ -101,6 +101,8 @@ impl Role {
     pub const META: Role = role(11.0, Weight::Normal);
     pub const META_STRONG: Role = role(11.0, Weight::Semibold);
     pub const BAR_PILL: Role = role(11.5, Weight::Medium);
+    /// A small label over a control (the chat drawer's "AI chat stays open").
+    pub const LABEL: Role = role(11.5, Weight::Medium);
     pub const CHAT: Role = role(13.0, Weight::Normal);
     /// A menu row's label and its shortcut hint (the tray menu).
     pub const MENU: Role = role(13.0, Weight::Normal);

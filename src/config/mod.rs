@@ -34,7 +34,7 @@
 //! [translate]
 //! source = "auto"                   # language code the text is in; auto = detect
 //! target = "ar"                     # language code to translate into
-//! engine = "ai"                     # ai | offline (ai falls back to offline when AI isn't set up)
+//! engine = "offline"                # offline | ai (ai falls back to offline when AI isn't set up)
 //! live_interval_ms = 1500           # live translate repeats every N ms (500-5000)
 //! live_note_shown = false           # the one-time live-mode note was shown
 //! whole_screen = false              # live translate reads the whole screen,
@@ -268,15 +268,16 @@ impl Serialize for Provider {
     }
 }
 
-/// How text is translated. Anything else in the file is read as `Ai` with a warning.
+/// How text is translated. Anything else in the file is read as `Offline` with a warning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Engine {
     /// The AI provider (`[ai]`). Without a usable one (the browser provider,
     /// no key) translation falls back to `Offline` (`actions::translate::deps`).
-    #[default]
     Ai,
-    /// On-device model (`crate::mt`): no key, nothing leaves the PC.
+    /// On-device model (`crate::mt`): no key, nothing leaves the PC. The
+    /// default: AI only when the user picks it in Settings > Translate.
+    #[default]
     Offline,
 }
 
@@ -810,7 +811,7 @@ impl Default for TranslateConfig {
         TranslateConfig {
             source: crate::translate::lang::AUTO.to_string(),
             target: DEFAULT_TRANSLATE_TARGET.to_string(),
-            engine: Engine::Ai,
+            engine: Engine::Offline,
             live_interval_ms: DEFAULT_LIVE_INTERVAL_MS,
             live_note_shown: false,
             whole_screen: false,
@@ -1224,7 +1225,7 @@ mod tests {
         assert_eq!(c.general.default_action, DefaultAction::Lens);
         assert_eq!(c.general.save_folder, "");
         assert_eq!(c.translate.live_interval_ms, 1500);
-        assert_eq!(c.translate.engine, Engine::Ai);
+        assert_eq!(c.translate.engine, Engine::Offline);
         // Snip: Print Screen = region, Alt = window, Ctrl = full screen.
         let snip: Vec<_> = c
             .quick_actions
@@ -1616,13 +1617,14 @@ mod tests {
     #[test]
     fn engine_is_ai_or_offline() {
         for value in ["\"gemini\"", "\"Offline\"", "3"] {
-            let (c, w) = Config::parse(&format!("[translate]\nengine = {value}\n"));
-            assert_eq!(c.translate.engine, Engine::Ai);
+            let (c, w) = Config::parse(&format!("version = 4\n[translate]\nengine = {value}\n"));
+            assert_eq!(c.translate.engine, Engine::Offline);
             assert_eq!(w.len(), 1, "{value}: {w:?}");
             assert!(w[0].starts_with("translate.engine"), "{w:?}");
         }
         for (value, engine) in [("ai", Engine::Ai), ("offline", Engine::Offline)] {
-            let (c, w) = Config::parse(&format!("[translate]\nengine = \"{value}\"\n"));
+            let text = format!("version = 4\n[translate]\nengine = \"{value}\"\n");
+            let (c, w) = Config::parse(&text);
             assert!(
                 w.is_empty() && c.translate.engine == engine,
                 "{value}: {w:?}"
@@ -1631,7 +1633,28 @@ mod tests {
             let text = toml::to_string_pretty(&c).unwrap();
             assert!(text.contains(&format!("engine = \"{value}\"")), "{text}");
         }
-        assert_eq!(Config::default().translate.engine, Engine::Ai);
+        assert_eq!(Config::default().translate.engine, Engine::Offline);
+    }
+
+    /// Schema 4: a v0.1.1 file's "ai" (the old default) becomes on-device unless
+    /// an API provider was already translating with it, so picking a chat
+    /// provider later never starts sending page text (gate 0.1.2, item 16).
+    #[test]
+    fn an_old_ai_translate_without_an_api_provider_migrates_to_on_device() {
+        let old = |ai: &str| format!("version = 3\n{ai}[translate]\nengine = \"ai\"\n");
+        for ai in ["", "[ai]\nprovider = \"browser\"\n"] {
+            let (dir, path) = config_with("engine-v3", &old(ai));
+            let (c, w) = Config::load_from(&path);
+            assert!(w.is_empty(), "{w:?}");
+            assert_eq!(c.translate.engine, Engine::Offline, "{ai}");
+            assert!(fs_text(&path).contains("engine = \"offline\""));
+            assert_eq!(fs_text(&dir.join("config.toml.bak-v3")), old(ai));
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        let (c, _) = Config::parse(&old("[ai]\nprovider = \"anthropic\"\n"));
+        assert_eq!(c.translate.engine, Engine::Ai, "it was translating with AI");
+        let (c, _) = Config::parse("version = 4\n[translate]\nengine = \"ai\"\n");
+        assert_eq!(c.translate.engine, Engine::Ai, "a v4 choice is kept");
     }
 
     #[test]

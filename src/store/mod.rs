@@ -26,6 +26,10 @@ const MIGRATIONS: &[&str] = &[
          chat_id TEXT NOT NULL, seq INTEGER NOT NULL, role TEXT NOT NULL,
          text TEXT NOT NULL, had_image INTEGER NOT NULL DEFAULT 0,
          PRIMARY KEY (chat_id, seq));",
+    // 2: History's star (a favourite) and the size of the chat's last
+    // screenshot as text ("420x260"; the picture itself is never kept).
+    "ALTER TABLE chats ADD COLUMN star INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE chats ADD COLUMN crop TEXT;",
 ];
 
 pub type Result<T> = std::result::Result<T, String>;

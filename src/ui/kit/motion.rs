@@ -30,6 +30,12 @@ pub const TOAST: Duration = Duration::from_millis(200);
 pub const TOAST_RISE: f32 = 8.0;
 /// A widget's scale when closed (it grows to 1 as it opens).
 pub const OPEN_SCALE: f32 = 0.93;
+/// A dragged widget, picked up (`scale(1.012)`, design 3.4); back to 1 on release.
+pub const DRAG_SCALE: f32 = 1.012;
+/// How near a dragged widget may come to the screen's left, right and top
+/// edges, and to its bottom (the taskbar strip), design 3.4.
+pub const DRAG_EDGE: f32 = 6.0;
+pub const DRAG_EDGE_BOTTOM: f32 = 54.0;
 
 /// The design's easing curves (cubic Béziers).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +150,23 @@ impl Shown {
                 ..*self
             };
         }
+    }
+
+    /// Turns to open at `now`, from where it is (nothing if opening already).
+    pub fn open(&mut self, now: Instant) {
+        if !self.open {
+            *self = Shown {
+                open: true,
+                from: self.at(now),
+                start: now,
+                ..*self
+            };
+        }
+    }
+
+    /// Opening (or open), not closing.
+    pub fn is_open(&self) -> bool {
+        self.open
     }
 
     /// How open it is at `now` (0..1, eased).
@@ -352,6 +375,12 @@ mod tests {
         assert_eq!(c.at(t0), 1.0);
         assert!(c.at(ms(40)) > 0.85, "soft start");
         assert_eq!(c.at(ms(150)), 0.0);
+        // opened again while closing: from where it is
+        let mut c = Shown::closing(WIDGET, t0);
+        let mid = c.at(ms(75));
+        c.open(ms(75));
+        assert!(c.is_open() && c.at(ms(75)) == mid, "no jump");
+        assert_eq!(c.at(ms(300)), 1.0);
     }
 
     /// The OS asks for no animation: every motion is there at once.

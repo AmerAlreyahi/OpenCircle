@@ -247,6 +247,24 @@ pub fn docked(screen: Size, side: Side, taskbar: f32) -> Rectangle {
     Rectangle::new(Point::new(x, TOP_GAP), Size::new(width, height.max(0.0)))
 }
 
+/// The docked chat `dock` kept clear of the `bar` (`GAP` from it): it ends
+/// above a bar at the bottom, starts below one at the top; a bar elsewhere
+/// changes nothing.
+pub fn clear_of(dock: Rectangle, bar: Rectangle) -> Rectangle {
+    if !dock.intersects(&bar) {
+        return dock;
+    }
+    let bottom = dock.y + dock.height;
+    let (top, bottom) = match bar.center_y() < dock.center_y() {
+        true => ((bar.y + bar.height + GAP).max(dock.y), bottom),
+        false => (dock.y, (bar.y - GAP).min(bottom)),
+    };
+    Rectangle::new(
+        Point::new(dock.x, top),
+        Size::new(dock.width, (bottom - top).max(0.0)),
+    )
+}
+
 /// The side a dragged chat card docks to where it is let go: the one its
 /// middle is on.
 pub fn dock_side(r: Rectangle, screen: Size) -> Side {
@@ -293,6 +311,9 @@ pub struct Header<'a> {
     pub docked: bool,
     /// The logo is a button (`Event::Menu`): the AI chat's drawer.
     pub menu: bool,
+    /// Picked up and dragged: the widget's accent edge (`Material::Held`,
+    /// the solid stand-in for the design's dragging ring).
+    pub held: bool,
 }
 
 /// The result card at `at` on a `screen` (`.as-card`: the widget surface,
@@ -339,7 +360,11 @@ pub fn card<'a, Message: Clone + 'a>(
         let above = ABOVE_ACTIONS - UNDER_HEADING;
         parts = parts.push(container(footer).padding(iced::Padding::ZERO.top(above)));
     }
-    let card = surface(Material::Widget, CARD_RADIUS, parts)
+    let material = match header.held {
+        true => Material::Held,
+        false => Material::Widget,
+    };
+    let card = surface(material, CARD_RADIUS, parts)
         .padding(PAD)
         .width(at.width)
         .height(at.height);
@@ -405,7 +430,7 @@ pub fn drawer<'a, Message: 'a>(
     at: Rectangle,
 ) -> Element<'a, Message> {
     let size = Size::new(
-        (at.width * DRAWER_SHARE).max(MIN.width.min(at.width) - 2.0 * DRAWER_INSET),
+        drawer_room(at) + 2.0 * DRAWER_PAD,
         (at.height - 2.0 * DRAWER_INSET).max(0.0),
     );
     let panel = surface(Material::Widget, CARD_RADIUS, content)
@@ -415,6 +440,12 @@ pub fn drawer<'a, Message: 'a>(
     pin(opaque(panel))
         .position(at.position() + Vector::new(DRAWER_INSET, DRAWER_INSET))
         .into()
+}
+
+/// How wide the drawer's content is on the card at `at` (inside its padding).
+pub fn drawer_room(at: Rectangle) -> f32 {
+    let width = (at.width * DRAWER_SHARE).max(MIN.width.min(at.width) - 2.0 * DRAWER_INSET);
+    (width - 2.0 * DRAWER_PAD).max(0.0)
 }
 
 /// The drawer's share of the card's width, its inset and padding (the design's).

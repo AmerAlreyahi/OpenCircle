@@ -359,17 +359,34 @@ fn line_at(lines: &[Line], p: Point) -> Option<usize> {
 /// The line and caret for a drag at `p`: `p` need not be on a line, only within
 /// a line's height of one (the line nearest by height, then by distance along
 /// it), so a drag past the end of a line or into the gap between two follows.
-fn reach(lines: &[Line], p: Point) -> Option<(usize, usize)> {
+/// A line in the `column` the drag started in (sideways over that line's box)
+/// comes first: a drag into the gap between two paragraphs stays in its
+/// column instead of jumping to a sidebar line at that height (gate 0.1.2).
+/// Only lines on the `screen` under `p` (when known) are reached: a drag on
+/// one monitor never ends on another's text (owner, 2026-10-28).
+fn reach(
+    lines: &[Line],
+    p: Point,
+    column: Option<Rectangle>,
+    screen: Option<Rectangle>,
+) -> Option<(usize, usize)> {
     let off = |l: &Line| {
         let b = l.bounds;
         let along = (b.x - p.x).max(p.x - b.x - b.width).max(0.0);
         ((b.y - p.y).max(p.y - b.y - b.height).max(0.0), along)
     };
-    let (line, (across, _)) = (lines.iter().enumerate())
-        .filter(|(_, l)| !l.text.trim().is_empty())
-        .map(|(i, l)| (i, off(l)))
-        .min_by(|(_, a), (_, b)| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)))?;
-    (across <= lines[line].bounds.height).then(|| (line, caret_at(&lines[line], p.x)))
+    let nearest = |keep: &dyn Fn(&Line) -> bool| {
+        let (line, (across, _)) = (lines.iter().enumerate())
+            .filter(|(_, l)| !l.text.trim().is_empty() && keep(l))
+            .map(|(i, l)| (i, off(l)))
+            .min_by(|(_, a), (_, b)| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)))?;
+        (across <= lines[line].bounds.height).then(|| (line, caret_at(&lines[line], p.x)))
+    };
+    let here = |l: &Line| screen.is_none_or(|s| s.contains(l.bounds.center()));
+    let within = |l: &Line| {
+        column.is_some_and(|c| l.bounds.x < c.x + c.width && c.x < l.bounds.x + l.bounds.width)
+    };
+    nearest(&|l| here(l) && within(l)).or_else(|| nearest(&here))
 }
 
 /// What a press selects at first: nothing yet (a caret: one click), the word
@@ -399,6 +416,9 @@ pub struct Picked {
     to: Point,
     /// Everything (Ctrl+A): lines in other columns too.
     all: bool,
+    /// The monitors' areas (image px) when the lines come from several: the
+    /// drag reaches only the one under the pointer (`on_screens`).
+    screens: Vec<Rectangle>,
 }
 
 impl Picked {
@@ -427,6 +447,7 @@ impl Picked {
             from: p,
             to: p,
             all: false,
+            screens: Vec::new(),
         })
     }
 
@@ -444,14 +465,28 @@ impl Picked {
             from,
             to,
             all: true,
+            screens: Vec::new(),
         })
     }
 
+    /// The lines are on these monitors (image px each): a drag reaches only
+    /// the lines on the one under the pointer.
+    pub fn on_screens(mut self, screens: Vec<Rectangle>) -> Picked {
+        self.screens = screens;
+        self
+    }
+
+    /// The monitor under `p`, when the lines are on several.
+    fn screen_at(&self, p: Point) -> Option<Rectangle> {
+        self.screens.iter().copied().find(|s| s.contains(p))
+    }
+
     /// A drag (or Shift+click) to `p`: the selection now ends at the caret
-    /// nearest to it, on any line. `false` = no known line there (read the
-    /// lines anew if `p` is outside `covers`).
+    /// nearest to it, on any line of the monitor there. `false` = no known
+    /// line there (read the lines anew if `p` is outside `covers`).
     pub fn extend(&mut self, p: Point) -> bool {
-        let Some(at) = reach(&self.lines, p) else {
+        let column = self.lines[self.anchor.0].bounds;
+        let Some(at) = reach(&self.lines, p, Some(column), self.screen_at(p)) else {
             return false;
         };
         (self.end, self.to, self.all) = (at, p, false);
@@ -462,7 +497,7 @@ impl Picked {
     /// same text, found again. If it is not there any more nothing changes.
     pub fn reread(&mut self, lines: Vec<Line>, covered: Rectangle) {
         let remap = |(_, caret): (usize, usize), p: Point| {
-            let (line, _) = reach(&lines, p)?;
+            let (line, _) = reach(&lines, p, None, self.screen_at(p))?;
             Some((line, caret.min(lines[line].text.chars().count())))
         };
         if let (Some(anchor), Some(end)) = (remap(self.anchor, self.from), remap(self.end, self.to))
@@ -865,6 +900,48 @@ mod tests {
         let mut p = press(lines, Point::new(100.0, 110.0), Unit::Caret).unwrap();
         assert!(p.extend(Point::new(200.0, 158.0)));
         assert_eq!(p.text(), "left one\nleft two\nleft three");
+    }
+
+    /// Gate 0.1.2 bug 2: a drag down an article into the gap between two of its
+    /// paragraphs, a sidebar line at that height: the sidebar stays out.
+    #[test]
+    fn a_drag_into_a_paragraph_gap_never_takes_the_sidebar() {
+        let mut lines = Vec::new();
+        for (i, y) in [100.0, 124.0, 172.0, 196.0].into_iter().enumerate() {
+            lines.push(line(&format!("article {i} long words here"), 575.0, y));
+        }
+        for i in 0..5 {
+            lines.push(line(&format!("link {i}"), 369.0, 100.0 + 24.0 * i as f32));
+        }
+        lines.sort_by(|a, b| a.bounds.y.total_cmp(&b.bounds.y)); // OCR: row by row
+        let mut p = press(lines, Point::new(600.0, 110.0), Unit::Caret).unwrap();
+        assert!(p.extend(Point::new(1045.0, 154.0))); // the gap; "link 2" is at this height
+        let text = p.text();
+        assert!(!text.contains("link"), "{text}");
+        assert!(text.contains("article 1"), "{text}");
+    }
+
+    /// Two monitors' lines in one model (B right of A): a drag on A never
+    /// ends on B's text at the same height; crossing onto B does reach it.
+    #[test]
+    fn a_drag_on_one_screen_selects_nothing_on_another() {
+        let mut lines = vec![line("A one", 100.0, 100.0), line("A two", 100.0, 124.0)];
+        lines
+            .extend((0..12).map(|i| line(&format!("B file {i}"), 2000.0, 100.0 + 30.0 * i as f32)));
+        let screens = vec![
+            Rectangle::new(Point::ORIGIN, Size::new(1920.0, 1080.0)),
+            Rectangle::new(Point::new(1920.0, 0.0), Size::new(1920.0, 1080.0)),
+        ];
+        let mut p = press(lines, Point::new(100.0, 110.0), Unit::Caret)
+            .unwrap()
+            .on_screens(screens);
+        assert!(p.extend(Point::new(140.0, 134.0)));
+        // down past A's text, level with B's files: nothing new
+        p.extend(Point::new(600.0, 400.0));
+        assert!(!p.text().contains('B'), "{}", p.text());
+        // the pointer really on B: the selection runs on into its text
+        assert!(p.extend(Point::new(2010.0, 140.0)));
+        assert!(p.text().contains("B file"), "{}", p.text());
     }
 
     #[test]

@@ -99,14 +99,14 @@ pub fn monitor_under_cursor() -> Result<Frame, CaptureError> {
     monitor_of(None)
 }
 
-/// Circle to Search: the monitor of the active window (most of it; the
-/// pointer's when no real window is active: the desktop, the taskbar, one of
-/// ours) handed to `each` as soon as it is grabbed (its overlay opens on it,
-/// as fast as with one screen), then with `all` every other monitor, grabbed
-/// together after it. A monitor that fails is left out (logged); only the
-/// active one failing is an error, and then nothing else is grabbed. Wayland
-/// and the test frame: the one whole desktop, as before.
-pub fn active_first(all: bool, each: impl FnMut(Result<Frame, CaptureError>)) {
+/// Circle to Search: the monitor the MOUSE is on (owner, 2026-10-28; not the
+/// active window's: the primary when the pointer is unknown) handed to `each`
+/// as soon as it is grabbed (its overlay, glow and bar open on it, as fast as
+/// with one screen), then with `all` every other monitor, grabbed together
+/// after it. A monitor that fails is left out (logged); only the pointer's
+/// failing is an error, and then nothing else is grabbed. Wayland and the
+/// test frame: the one whole desktop, as before.
+pub fn mouse_first(all: bool, each: impl FnMut(Result<Frame, CaptureError>)) {
     let mut each = each;
     if let Some(frame) = whole_desktop() {
         return each(frame);
@@ -115,14 +115,14 @@ pub fn active_first(all: bool, each: impl FnMut(Result<Frame, CaptureError>)) {
         Ok(monitors) => monitors,
         Err(e) => return each(Err(e.into())),
     };
-    match choose(&monitors, window_rect::active_rect(), platform::pointer()) {
-        Some(at) => grab_active_first(&monitors, at, all, platform::grab, each),
+    match choose(&monitors, None, platform::pointer()) {
+        Some(at) => grab_first(&monitors, at, all, platform::grab, each),
         None => each(Err("no monitor found".into())),
     }
 }
 
-/// `active_first` past choosing: `monitors[at]` first, then (`all`) the rest.
-fn grab_active_first(
+/// `mouse_first` past choosing: `monitors[at]` first, then (`all`) the rest.
+fn grab_first(
     monitors: &[Monitor],
     at: usize,
     all: bool,
@@ -213,8 +213,9 @@ pub fn monitor_of(area: Option<WinRect>) -> Result<Frame, CaptureError> {
     Ok(platform::grab(&monitors[at])?)
 }
 
-/// The monitor holding most of the `active` window, else the one under the
-/// `pointer`, else the primary one, else the first.
+/// The monitor holding most of the area `active` (a scrolling capture's
+/// region; Circle to Search passes none), else the one under the `pointer`,
+/// else the primary one, else the first.
 pub fn choose(
     monitors: &[Monitor],
     active: Option<WinRect>,
@@ -288,7 +289,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_active_windows_monitor_wins_then_the_pointers_then_the_primary() {
+    fn the_pointers_monitor_opens_and_an_area_takes_the_monitor_holding_most_of_it() {
         let m = |rect, primary| Monitor {
             rect,
             scale: 1.0,
@@ -299,10 +300,11 @@ mod tests {
             m((0, 0, 2880, 1800), true),
             m((-1920, 200, 1920, 1080), false),
         ];
+        // Circle to Search (`mouse_first`: no area): the pointer's screen.
         let on_left = Some((-1000, 700));
         assert_eq!(choose(&monitors, None, on_left), Some(1));
         assert_eq!(choose(&monitors, None, Some((100, 100))), Some(0));
-        // Focus in a window on screen 2, the pointer on screen 1: screen 2.
+        // A scrolling capture's region on screen 2, the pointer on screen 1: screen 2.
         let window = (-1800, 300, 1200, 800);
         assert_eq!(choose(&monitors, Some(window), Some((100, 100))), Some(1));
         // Across both: the one holding most of it.
@@ -310,7 +312,7 @@ mod tests {
             choose(&monitors, Some((-300, 300, 1000, 500)), on_left),
             Some(0)
         );
-        // No active window (the desktop), or one off every screen: the pointer.
+        // An area off every screen: the pointer.
         assert_eq!(choose(&monitors, Some((9000, 0, 10, 10)), on_left), Some(1));
         // Pointer unknown or in a gap (above screen 2): the primary.
         assert_eq!(choose(&monitors, None, Some((-1000, 0))), Some(0));
@@ -323,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn the_active_monitor_comes_first_and_a_failed_one_keeps_the_rest() {
+    fn the_mouses_monitor_comes_first_and_a_failed_one_keeps_the_rest() {
         let m = |x| Monitor {
             rect: (x, 0, 10, 10),
             scale: 1.0,
@@ -349,15 +351,15 @@ mod tests {
         };
         let run = |at, all| {
             let mut got = Vec::new();
-            grab_active_first(&monitors, at, all, grab, |f| got.push(f.map(|f| f.x)));
+            grab_first(&monitors, at, all, grab, |f| got.push(f.map(|f| f.x)));
             got
         };
-        // the slow active one first, then the rest; the failed one is left out
+        // the slow first one first, then the rest; the failed one is left out
         assert_eq!(run(3, true), [Ok(20), Ok(-10), Ok(0)]);
         assert_eq!(run(1, true), [Ok(0), Ok(-10), Ok(20)]);
-        // the active one failing: that error, nothing else grabbed
+        // the first one failing: that error, nothing else grabbed
         assert_eq!(run(2, true), [Err(CaptureError::Failed("gone".into()))]);
-        // one screen asked: the active one only
+        // one screen asked: the first one only
         assert_eq!(run(0, false), [Ok(-10)]);
     }
 

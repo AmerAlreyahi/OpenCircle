@@ -296,12 +296,6 @@ fn page((x, y, w, h): WinRect, browser: bool, maximized: bool, scale: f32) -> Op
     (w > 32 && h > bars + 32).then(|| (x, y + bars as i32, w, h - bars))
 }
 
-/// The client rect of the window the user is in, to open on its monitor;
-/// `None` when it is the desktop, the taskbar, one of ours or unknown.
-pub fn active_rect() -> Option<WinRect> {
-    active(false).map(|(rect, _, _)| rect)
-}
-
 /// The active window not ours: its client rect, app name, maximised. When ours
 /// (or none usable) is active: the next window down if `next_down`, else none.
 #[cfg(windows)]
