@@ -6,7 +6,7 @@
 //! `translate::live::Live`, one step at a time, and sends what changed.
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use iced::widget::{image, pin, space, stack};
 use iced::window::{self, Level, Position};
@@ -19,12 +19,12 @@ use crate::config;
 use crate::live::{self, LayerError};
 use crate::mt::Pair;
 use crate::ocr;
-use crate::translate::live::{Live as Steps, Patch};
+use crate::translate::live::{self as live_steps, Live as Steps, Patch};
 use crate::translate::pipeline::Cache;
 
 /// How often live mode re-captures (Settings > Translate > Live refresh;
 /// 1.5 s by default): steps start on this fixed beat, and a slow step skips
-/// the beats it ran over (`pump`).
+/// the beats it ran over (`translate::live::pump`).
 fn interval() -> Duration {
     Duration::from_millis(crate::config::current().translate.live_interval_ms.into())
 }
@@ -523,8 +523,9 @@ impl Live {
                 if paused.load(Ordering::Relaxed) {
                     return None;
                 }
-                if let Some(clear) = away_gate(live::away(), &mut was_away, &mut steps) {
-                    return clear;
+                if let Some(clear) = live_steps::away_gate(live::away(), &mut was_away, &mut steps)
+                {
+                    return clear.then(|| Msg::Patches(Vec::new()));
                 }
                 let now = chosen.lock().map(|l| l.clone()).unwrap_or_default();
                 if now != langs {
@@ -606,7 +607,7 @@ impl Live {
                     Err(e) => report(&mut last_error, e.to_string()),
                 }
             };
-            pump(&stop, interval(), tick, |msg| tx.unbounded_send(msg).is_ok());
+            live_steps::pump(&live_steps::Wall::new(), &stop, interval(), tick, |msg| tx.unbounded_send(msg).is_ok());
             // Live off: its frames and patches are freed; give the memory
             // back (glibc keeps it: the app stayed ~80 MB, not ~30).
             drop(steps);
@@ -697,62 +698,9 @@ fn over_blanked([x, y, w, h]: [u32; 4], blanked: &[[u32; 4]]) -> bool {
     (blanked.iter()).any(|&[bx, by, bw, bh]| x < bx + bw && bx < x + w && y < by + bh && by < y + h)
 }
 
-/// A tick while the session is `away` (locked, switched, screen off: #56):
-/// `Some` = skip it, nothing captured, with a message clearing the layer
-/// when it just went away. Going away or coming back starts the steps
-/// afresh: everything is read again.
-fn away_gate(away: bool, was: &mut bool, steps: &mut Steps) -> Option<Option<Msg>> {
-    let changed = std::mem::replace(was, away) != away;
-    if changed {
-        *steps = Steps::new();
-        crate::log!(
-            "[opencircle] live translate {}",
-            if away {
-                "stopped: the session is away"
-            } else {
-                "resumed"
-            }
-        );
-    }
-    away.then(|| changed.then(|| Msg::Patches(Vec::new())))
-}
-
 /// A step error once (not every second), then nothing until it changes.
 fn report(last: &mut Option<String>, e: String) -> Option<Msg> {
-    if last.as_ref() == Some(&e) {
-        return None;
-    }
-    crate::log!("[opencircle] live translate: {e}");
-    *last = Some(e.clone());
-    Some(Msg::Failed(e))
-}
-
-/// Calls `tick` on a fixed beat of `interval` until `stop` is set or `send`
-/// fails (the layer is gone). One tick at a time, never piled up: a tick
-/// that runs over skips the beats it missed and the next starts on the next
-/// beat (#56), so a slow PC gets fewer steps, not back-to-back ones.
-fn pump<T>(
-    stop: &AtomicBool,
-    interval: Duration,
-    mut tick: impl FnMut() -> Option<T>,
-    mut send: impl FnMut(T) -> bool,
-) {
-    let start = Instant::now();
-    while !stop.load(Ordering::Relaxed) {
-        if let Some(out) = tick()
-            && !send(out)
-        {
-            return;
-        }
-        let beats = (start.elapsed().as_nanos())
-            .checked_div(interval.as_nanos())
-            .map_or(0, |n| n + 1);
-        let next = interval.saturating_mul(beats as u32);
-        while !stop.load(Ordering::Relaxed) && start.elapsed() < next {
-            let left = next.saturating_sub(start.elapsed());
-            std::thread::sleep(left.min(Duration::from_millis(50)));
-        }
-    }
+    live_steps::report_once(last, e).map(Msg::Failed)
 }
 
 fn layer_window(m: Monitor) -> window::Settings {
@@ -792,100 +740,6 @@ fn save_test_shot(shot: &window::Screenshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
-
-    #[test]
-    fn steps_never_overlap_and_stop_when_asked() {
-        let stop = Arc::new(AtomicBool::new(false));
-        let (running, ticks) = (AtomicUsize::new(0), AtomicUsize::new(0));
-        let start = Instant::now();
-        let flag = stop.clone();
-        let tick = || {
-            assert_eq!(running.fetch_add(1, Ordering::SeqCst), 0, "overlap");
-            std::thread::sleep(Duration::from_millis(5));
-            running.fetch_sub(1, Ordering::SeqCst);
-            if ticks.fetch_add(1, Ordering::SeqCst) == 3 {
-                flag.store(true, Ordering::SeqCst); // off, during a step
-            }
-            Some(())
-        };
-        pump(&stop, Duration::from_millis(20), tick, |()| true);
-        assert_eq!(ticks.load(Ordering::SeqCst), 4, "the running step ends it");
-        assert!(start.elapsed() >= Duration::from_millis(60), "paced");
-
-        // the layer went away: the thread ends at the next result
-        let stop = AtomicBool::new(false);
-        let mut sent = 0;
-        pump(
-            &stop,
-            Duration::ZERO,
-            || Some(()),
-            |()| {
-                sent += 1;
-                sent < 3
-            },
-        );
-        assert_eq!(sent, 3);
-    }
-
-    /// #56: steps start on a fixed beat; one that runs over skips the beats
-    /// it missed (the next waits for the next beat, never back to back).
-    #[test]
-    fn a_slow_step_skips_beats_instead_of_piling_up() {
-        let beat = Duration::from_millis(40);
-        let stop = AtomicBool::new(false);
-        let begun = Instant::now();
-        let mut starts = Vec::new();
-        let mut first_end = Duration::ZERO;
-        let tick = || {
-            starts.push(begun.elapsed());
-            if starts.len() == 1 {
-                std::thread::sleep(beat * 3 / 2); // busy past the second beat
-                first_end = begun.elapsed();
-            }
-            if starts.len() == 3 {
-                stop.store(true, Ordering::SeqCst);
-            }
-            Some(())
-        };
-        pump(&stop, beat, tick, |()| true);
-        assert_eq!(starts.len(), 3);
-        // the next step waits for the busy one, and every step has a beat of
-        // its own (sleeps overshoot, by ~15 ms on Windows: no exact times)
-        let slot = |t: Duration| t.as_millis() / beat.as_millis();
-        assert!(starts[1] >= first_end, "{starts:?}: started while busy");
-        assert!(
-            slot(starts[1]) >= 2,
-            "{starts:?}: the busy beat was not skipped"
-        );
-        assert!(
-            slot(starts[2]) > slot(starts[1]),
-            "{starts:?}: two steps in one beat"
-        );
-    }
-
-    /// #56: a locked (or switched, or dark) session captures nothing; the
-    /// layer clears once as it goes away, and steps run again once back.
-    #[test]
-    fn live_stops_while_the_session_is_away_and_resumes_after() {
-        let (mut was, mut steps) = (false, Steps::new());
-        assert!(
-            away_gate(false, &mut was, &mut steps).is_none(),
-            "steps run"
-        );
-        let gone = away_gate(true, &mut was, &mut steps);
-        assert!(
-            matches!(gone, Some(Some(Msg::Patches(ref p))) if p.is_empty()),
-            "the layer clears as it goes"
-        );
-        for _ in 0..3 {
-            assert!(
-                matches!(away_gate(true, &mut was, &mut steps), Some(None)),
-                "nothing captured, nothing sent"
-            );
-        }
-        assert!(away_gate(false, &mut was, &mut steps).is_none(), "resumed");
-    }
 
     /// Live mode with every model on disk (`check` finds nothing missing).
     fn live() -> Live {
@@ -1134,13 +988,5 @@ mod tests {
         let want = |(x, y): (u32, u32)| (x < 10 && (2..10).contains(&y)) || (x >= 30 && y >= 15);
         assert_eq!(blanked.len(), 10 * 8 + 10 * 5);
         assert!(blanked.into_iter().all(want));
-    }
-
-    #[test]
-    fn a_repeated_error_is_reported_once() {
-        let mut last = None;
-        assert!(report(&mut last, "HTTP 429".into()).is_some());
-        assert!(report(&mut last, "HTTP 429".into()).is_none());
-        assert!(report(&mut last, "HTTP 503".into()).is_some());
     }
 }

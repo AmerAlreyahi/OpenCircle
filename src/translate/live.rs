@@ -10,7 +10,8 @@
 
 use std::borrow::Cow;
 use std::hash::{DefaultHasher, Hasher};
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use super::pipeline::{
     Cache, Deps, Error, Timings, check_frame, cut_off, is_rtl, to_line, translate_blocks,
@@ -405,6 +406,91 @@ fn mad(a: &[u8], b: &[u8]) -> f32 {
     sum as f32 / a.len().max(1) as f32
 }
 
+// ---- The beat loop (no window, no capture; the clock is a parameter) ----
+
+/// The loop's time source. `Wall` is the real one; a test advances its own.
+pub trait Clock {
+    /// Time since the clock started.
+    fn elapsed(&self) -> Duration;
+    fn sleep(&self, d: Duration);
+}
+
+/// The real clock.
+pub struct Wall(Instant);
+
+impl Wall {
+    pub fn new() -> Self {
+        Wall(Instant::now())
+    }
+}
+
+impl Clock for Wall {
+    fn elapsed(&self) -> Duration {
+        self.0.elapsed()
+    }
+    fn sleep(&self, d: Duration) {
+        std::thread::sleep(d);
+    }
+}
+
+/// Calls `tick` on a fixed beat of `interval` until `stop` is set or `send`
+/// fails (the layer is gone). One tick at a time, never piled up: a tick
+/// that runs over skips the beats it missed and the next starts on the next
+/// beat (#56), so a slow PC gets fewer steps, not back-to-back ones.
+pub fn pump<T>(
+    clock: &impl Clock,
+    stop: &AtomicBool,
+    interval: Duration,
+    mut tick: impl FnMut() -> Option<T>,
+    mut send: impl FnMut(T) -> bool,
+) {
+    while !stop.load(Ordering::Relaxed) {
+        if let Some(out) = tick()
+            && !send(out)
+        {
+            return;
+        }
+        let beats = (clock.elapsed().as_nanos())
+            .checked_div(interval.as_nanos())
+            .map_or(0, |n| n + 1);
+        let next = interval.saturating_mul(beats as u32);
+        while !stop.load(Ordering::Relaxed) && clock.elapsed() < next {
+            let left = next.saturating_sub(clock.elapsed());
+            clock.sleep(left.min(Duration::from_millis(50)));
+        }
+    }
+}
+
+/// A tick while the session is `away` (locked, switched, screen off: #56):
+/// `Some` = skip it, nothing captured; the `bool` says the layer must be
+/// cleared (the session just went away). Going away or coming back starts the
+/// steps afresh: everything is read again.
+pub fn away_gate(away: bool, was: &mut bool, steps: &mut Live) -> Option<bool> {
+    let changed = std::mem::replace(was, away) != away;
+    if changed {
+        *steps = Live::new();
+        crate::log!(
+            "[opencircle] live translate {}",
+            if away {
+                "stopped: the session is away"
+            } else {
+                "resumed"
+            }
+        );
+    }
+    away.then_some(changed)
+}
+
+/// A step error once (not every second), then nothing until it changes.
+pub fn report_once(last: &mut Option<String>, e: String) -> Option<String> {
+    if last.as_ref() == Some(&e) {
+        return None;
+    }
+    crate::log!("[opencircle] live translate: {e}");
+    *last = Some(e.clone());
+    Some(e)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::pipeline::tests::{Fake, frame, tb};
@@ -590,5 +676,107 @@ mod tests {
                 .is_some()
         );
         assert_eq!(fake.ocr_calls.borrow().len(), 2);
+    }
+
+    /// A clock that only moves when asked to sleep.
+    #[derive(Default)]
+    struct Manual(std::cell::Cell<Duration>);
+
+    impl Clock for Manual {
+        fn elapsed(&self) -> Duration {
+            self.0.get()
+        }
+        fn sleep(&self, d: Duration) {
+            self.0.set(self.0.get() + d);
+        }
+    }
+
+    #[test]
+    fn steps_never_overlap_and_stop_when_asked() {
+        let clock = Manual::default();
+        let stop = AtomicBool::new(false);
+        let beat = Duration::from_millis(20);
+        let mut starts = Vec::new();
+        let tick = || {
+            starts.push(clock.elapsed());
+            clock.sleep(Duration::from_millis(5)); // the step's own time
+            if starts.len() == 4 {
+                stop.store(true, Ordering::SeqCst); // off, during a step
+            }
+            Some(())
+        };
+        pump(&clock, &stop, beat, tick, |()| true);
+        assert_eq!(
+            starts,
+            [0, 20, 40, 60].map(Duration::from_millis),
+            "paced; the running step ends it"
+        );
+
+        // the layer went away: the loop ends at the next result
+        let stop = AtomicBool::new(false);
+        let mut sent = 0;
+        pump(
+            &clock,
+            &stop,
+            Duration::ZERO,
+            || Some(()),
+            |()| {
+                sent += 1;
+                sent < 3
+            },
+        );
+        assert_eq!(sent, 3);
+    }
+
+    /// #56: steps start on a fixed beat; one that runs over skips the beats
+    /// it missed (the next waits for the next beat, never back to back).
+    #[test]
+    fn a_slow_step_skips_beats_instead_of_piling_up() {
+        let clock = Manual::default();
+        let beat = Duration::from_millis(40);
+        let stop = AtomicBool::new(false);
+        let mut starts = Vec::new();
+        let tick = || {
+            starts.push(clock.elapsed());
+            if starts.len() == 1 {
+                clock.sleep(beat * 3 / 2); // busy until 60 ms, past beat 1
+            }
+            if starts.len() == 4 {
+                stop.store(true, Ordering::SeqCst);
+            }
+            Some(())
+        };
+        pump(&clock, &stop, beat, tick, |()| true);
+        // the step ended at 60 ms: beat 1 (40 ms) is skipped, the next is at 80 ms
+        assert_eq!(starts, [0, 80, 120, 160].map(Duration::from_millis));
+    }
+
+    /// #56: a locked (or switched, or dark) session captures nothing; the
+    /// layer clears once as it goes away, and steps run again once back.
+    #[test]
+    fn live_stops_while_the_session_is_away_and_resumes_after() {
+        let (mut was, mut steps) = (false, Live::new());
+        assert_eq!(away_gate(false, &mut was, &mut steps), None, "steps run");
+        assert_eq!(
+            away_gate(true, &mut was, &mut steps),
+            Some(true),
+            "the layer clears as it goes"
+        );
+        for _ in 0..3 {
+            assert_eq!(
+                away_gate(true, &mut was, &mut steps),
+                Some(false),
+                "nothing captured, nothing sent"
+            );
+        }
+        assert_eq!(away_gate(false, &mut was, &mut steps), None, "resumed");
+    }
+
+    #[test]
+    fn a_repeated_error_is_reported_once() {
+        let mut last = None;
+        assert!(report_once(&mut last, "HTTP 429".into()).is_some());
+        assert!(report_once(&mut last, "HTTP 429".into()).is_none());
+        assert!(report_once(&mut last, "HTTP 503".into()).is_some());
     }
 }
