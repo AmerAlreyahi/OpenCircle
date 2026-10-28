@@ -63,7 +63,17 @@ pub fn compare(dir: &str, name: &str, w: u32, h: u32, pixels: &[u8]) -> Result<(
         .filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 24))
         .count();
     match off * 1000 > (w * h) as usize {
-        true => Err(format!("{name}: {off} pixels differ")),
+        true => {
+            // CI uploads these on a failure, to see what was drawn instead.
+            if let Some(out) = std::env::var_os("OPENCIRCLE_GOLDEN_OUT") {
+                let file = std::path::Path::new(&out)
+                    .join(dir)
+                    .join(format!("{name}.png"));
+                let _ = std::fs::create_dir_all(file.parent().unwrap());
+                let _ = crate::actions::write_png(&file, w, h, pixels);
+            }
+            Err(format!("{name}: {off} pixels differ"))
+        }
         false => Ok(()),
     }
 }

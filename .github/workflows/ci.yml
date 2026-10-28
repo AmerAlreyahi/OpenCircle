@@ -45,6 +45,15 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - if: steps.crate.outputs.present == 'true'
         run: cargo test
+        env:
+          OPENCIRCLE_GOLDEN_OUT: ${{ github.workspace }}/golden-out
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-out-${{ runner.os }}
+          path: golden-out
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Frame-time budget (#59): the opening's work and damage area, in release
       # (debug is ~35x slower); +~3 min cold, less with the cache.
