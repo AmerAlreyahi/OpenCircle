@@ -140,6 +140,7 @@ impl Panel {
             docked: chatting,
             logo: chatting.then(|| crate::ui::kit::logo::logo(16)),
             menu: chatting,
+            held: self.held,
         };
         if chatting {
             // the header's end: a new chat and the pin (no close button: Esc
@@ -150,11 +151,13 @@ impl Panel {
                 active: self.pinned,
                 ..Default::default()
             };
-            let pin = icon_button(Icon::Pin.glyph(), state, Some(Msg::Pin));
-            let pin = match self.pinned {
-                true => hint(pin, "Unpin and close", Why::Icon, Position::Bottom),
-                false => hint(pin, "Keep open", Why::Icon, Position::Bottom),
+            // pinned: "pin-off" on the filled (active) button, so it reads at a glance
+            let (glyph, tip) = match self.pinned {
+                true => (Icon::Unpin, "Unpin and close"),
+                false => (Icon::Pin, "Pin chat"),
             };
+            let pin = icon_button(glyph.glyph(), state, Some(Msg::Pin));
+            let pin = hint(pin, tip, Why::Icon, Position::Bottom);
             let ends = row![new, pin].spacing(space::GAP).align_y(Center);
             let card = frame::card(
                 header,

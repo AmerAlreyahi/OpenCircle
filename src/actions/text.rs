@@ -86,22 +86,69 @@ pub fn download(mut progress: impl FnMut(Progress)) -> Result<(), String> {
 
 /// OCR lines (already in reading order) as text: boxes on one row joined by
 /// spaces, rows by newlines. A box continues the row when it lies right of the
-/// previous box and its vertical centre is inside that box.
+/// previous box and its vertical centre is inside that box. A toolbar icon
+/// read as a letter at either end of a row is left out (`icon_like`).
 pub(crate) fn join_lines(blocks: &[TextBlock]) -> String {
-    let mut out = String::new();
+    let mut rows: Vec<Vec<&TextBlock>> = Vec::new();
     let mut prev: Option<[f32; 4]> = None;
     for block in blocks {
         let [x, y, _, h] = block.bounds;
         let centre = y + h / 2.0;
-        match prev {
-            None => {}
-            Some([px, py, _, ph]) if x > px && py <= centre && centre < py + ph => out.push(' '),
-            Some(_) => out.push('\n'),
+        match (prev, rows.last_mut()) {
+            (Some([px, py, _, ph]), Some(row)) if x > px && py <= centre && centre < py + ph => {
+                row.push(block)
+            }
+            _ => rows.push(vec![block]),
         }
-        out.push_str(&block.text);
         prev = Some(block.bounds);
     }
-    out
+    let gap = |a: &TextBlock, b: &TextBlock| b.bounds[0] - (a.bounds[0] + a.bounds[2]);
+    for row in &mut rows {
+        while row.len() > 1 && icon_like(row[0], gap(row[0], row[1]), &row[1].text) {
+            row.remove(0);
+        }
+        while let [.., before, last] = row[..]
+            && icon_like(last, gap(before, last), &before.text)
+        {
+            row.pop();
+        }
+    }
+    let row = |r: &Vec<&TextBlock>| {
+        let words: Vec<&str> = r.iter().map(|b| b.text.as_str()).collect();
+        strip_before_url(&words.join(" "))
+    };
+    rows.iter().map(row).collect::<Vec<_>>().join("\n")
+}
+
+/// A box that is one glyph standing apart (a gap wider than its height) from
+/// `next`, the rest of its row, and is no word: unsure, not a letter or
+/// digit, a Latin letter that is no one-letter word, or next to a URL (an
+/// address bar's reload and lock icons). "I", "a", an Arabic letter stay.
+fn icon_like(b: &TextBlock, gap: f32, next: &str) -> bool {
+    let mut chars = b.text.trim().chars();
+    let (Some(c), None) = (chars.next(), chars.next()) else {
+        return false;
+    };
+    gap > b.bounds[3]
+        && (b.confidence < 0.9
+            || !c.is_alphanumeric()
+            || (c.is_ascii_alphabetic() && !"aAI".contains(c))
+            || is_url(next.split_whitespace().next().unwrap_or_default()))
+}
+
+fn is_url(word: &str) -> bool {
+    word.contains("://") || word.starts_with("www.")
+}
+
+/// One box read with the icons in it ("C 8 https://..."): the lone glyphs
+/// right before a URL that starts the row go.
+fn strip_before_url(row: &str) -> String {
+    let words: Vec<&str> = row.split(' ').collect();
+    let lone = words.iter().take_while(|w| w.chars().count() == 1).count();
+    match words.get(lone) {
+        Some(w) if lone > 0 && is_url(w) => words[lone..].join(" "),
+        _ => row.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -130,6 +177,49 @@ mod tests {
         assert_eq!(
             join_lines(&blocks),
             "Pastel de nata 1,40 €\nTosta mista 4,20 €\nNote:\nindented"
+        );
+    }
+
+    /// Gate 0.1.2 bug 3: an address bar's reload and lock icons read as "C" and
+    /// "8" are left out; real one-letter words stay.
+    #[test]
+    fn icons_read_as_letters_are_left_out_and_one_letter_words_stay() {
+        let at = |text: &str, x: f32, w: f32, confidence: f32| TextBlock {
+            text: text.into(),
+            bounds: [x, 50.0, w, 20.0],
+            confidence,
+        };
+        let bar = [
+            at("C", 10.0, 12.0, 0.95),
+            at("8", 60.0, 12.0, 0.97),
+            at(
+                "https://en.wikipedia.org/wiki/Solar_System",
+                106.0,
+                266.0,
+                0.99,
+            ),
+        ];
+        assert_eq!(
+            join_lines(&bar),
+            "https://en.wikipedia.org/wiki/Solar_System"
+        );
+        // the same, read as one box
+        let one = [at("C 8 https://en.wikipedia.org", 10.0, 300.0, 0.9)];
+        assert_eq!(join_lines(&one), "https://en.wikipedia.org");
+        // a one-letter word, even set apart, a glyph close to its word, an
+        // Arabic letter: all kept
+        let kept = [
+            at("I", 0.0, 8.0, 0.99),
+            at("think so", 40.0, 80.0, 0.99),
+            at("و", 130.0, 8.0, 0.99),
+        ];
+        assert_eq!(join_lines(&kept), "I think so و");
+        let close = [at("x", 0.0, 10.0, 0.5), at("2 = 4", 14.0, 50.0, 0.99)];
+        assert_eq!(join_lines(&close), "x 2 = 4");
+        assert_eq!(
+            join_lines(&[at("Q", 0.0, 12.0, 0.5)]),
+            "Q",
+            "alone on its row"
         );
     }
 

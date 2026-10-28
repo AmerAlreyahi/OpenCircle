@@ -424,6 +424,37 @@ fn a_follow_up_pins_the_chat_and_always_pins_at_once() {
     assert!(!super::starts_pinned(StaysOpen::FollowUp));
 }
 
+/// The header's pin reads at a glance: "pin" while open, "pin-off" on the
+/// filled button once pinned, each with its own tooltip.
+#[test]
+fn the_pin_looks_different_once_pinned() {
+    use crate::ui::kit::testing::shot;
+    use crate::ui::kit::tooltip::tests_support::shown;
+    let glyphs = |panel: &Panel| {
+        let texts = shot::texts(panel.view(at(SCREEN), SCREEN, false));
+        let has = |i: Icon| texts.iter().any(|t| t.contains(i.glyph()));
+        (has(Icon::Pin), has(Icon::Unpin))
+    };
+    let (size, header) = (
+        Size::new(420.0, 120.0),
+        Rectangle::with_size(Size::new(420.0, 400.0)),
+    );
+    let mut panel = api_chat();
+    shot::save("chat-header-open", panel.view(header, SCREEN, false), size);
+    crate::ui::kit::tooltip::SHOWN.with(|s| s.borrow_mut().clear());
+    assert_eq!(glyphs(&panel), (true, false), "open: the plain pin");
+    assert!(shown().iter().any(|t| t == "Pin chat"));
+    let _ = panel.update(Msg::Pin);
+    crate::ui::kit::tooltip::SHOWN.with(|s| s.borrow_mut().clear());
+    assert_eq!(glyphs(&panel), (false, true), "pinned: pin-off");
+    assert!(shown().iter().any(|t| t == "Unpin and close"));
+    shot::save(
+        "chat-header-pinned",
+        panel.view(header, SCREEN, false),
+        size,
+    );
+}
+
 /// "Thought for N s" only when the model sent reasoning (an empty piece from
 /// the stream), never for the wait alone.
 #[test]

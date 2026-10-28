@@ -41,6 +41,7 @@ impl Session {
                 chip: None,
                 docked: false,
                 menu: false,
+                held: false,
                 logo: None,
             };
             card(header, body, footer, at, screen, hover, Msg::Card)

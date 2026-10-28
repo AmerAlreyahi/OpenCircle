@@ -104,26 +104,35 @@ impl Real {
         target: &str,
         markup: &str,
     ) -> Result<Vec<String>, AiError> {
-        match &self.via {
-            Via::Ai { ai, key } => {
-                ai::translate_lines(ai, key.as_ref(), texts, &self.source, target, markup)
+        let Via::Ai { ai, key } = &self.via else {
+            return self.on_device(texts, target);
+        };
+        match ai::translate_lines(ai, key.as_ref(), texts, &self.source, target, markup) {
+            // A reply that isn't the array (a chatty model): on-device instead
+            // of an error card, when a model exists for these lines.
+            Err(AiError::BadResponse(why)) if self.pair_for(texts, target).is_ok() => {
+                crate::log!("[opencircle] AI translation unusable ({why}); on-device instead");
+                self.on_device(texts, target)
             }
-            Via::Offline => {
-                let pair = self.pair_for(texts, target)?;
-                if pair.missing_bytes() > 0 {
-                    *self.missing.lock().unwrap_or_else(|e| e.into_inner()) = Some(pair);
-                    return Err(AiError::Offline(format!(
-                        "{} isn't downloaded yet. Translate once with Ctrl+Shift+T to \
-                         download it, or set up AI in Settings > AI",
-                        pair.label()
-                    )));
-                }
-                ocr::keep_warm();
-                by_sentence(texts, |t| {
-                    mt::translate(t, pair).map_err(|e| AiError::Offline(e.to_string()))
-                })
-            }
+            done => done,
         }
+    }
+
+    /// `texts` into `target` with the on-device model.
+    fn on_device(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
+        let pair = self.pair_for(texts, target)?;
+        if pair.missing_bytes() > 0 {
+            *self.missing.lock().unwrap_or_else(|e| e.into_inner()) = Some(pair);
+            return Err(AiError::Offline(format!(
+                "{} isn't downloaded yet. Translate once with Ctrl+Shift+T to \
+                 download it, or set up AI in Settings > AI",
+                pair.label()
+            )));
+        }
+        ocr::keep_warm();
+        by_sentence(texts, |t| {
+            mt::translate(t, pair).map_err(|e| AiError::Offline(e.to_string()))
+        })
     }
 }
 
@@ -781,6 +790,23 @@ pub(super) mod tests {
         );
         assert_eq!(ai.batch(), usize::MAX);
         assert_eq!(Real::new("auto", Via::Offline).batch(), FIRST);
+    }
+
+    /// A plain model reply (no JSON array) goes on-device, not to an error card
+    /// (gate 0.1.2): translated there, or that model's download asked for.
+    #[test]
+    fn an_unreadable_ai_reply_falls_back_to_on_device() {
+        let url = crate::actions::ask::tests::stub(&["Sure! Voici la traduction : Bonjour."]);
+        let real = Real::new(
+            "en",
+            Via::Ai {
+                ai: crate::actions::ask::tests::local_setup(url).cfg,
+                key: None,
+            },
+        );
+        let done = real.lines(&["Hello".into()], "fr", "");
+        assert!(!matches!(done, Err(AiError::BadResponse(_))), "{done:?}");
+        assert!(done.is_ok() || real.missing().is_some(), "{done:?}");
     }
 
     /// #107: one-shot translate reads with Windows OCR where it reads the

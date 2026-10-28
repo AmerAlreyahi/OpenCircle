@@ -1256,6 +1256,7 @@ fn live_interval_is_checked_against_its_range() {
 fn engine_choice_says_what_offline_means() {
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::Translate));
+    update(&mut s, Message::Engine(Engine::Ai));
     let texts = shot::texts(view(&s));
     for want in [
         "Engine",

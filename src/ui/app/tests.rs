@@ -2615,6 +2615,25 @@ fn shortcuts(messages: &[Message]) -> String {
         .collect()
 }
 
+/// No key (Google AI Mode): Ask AI only hands off to the browser and closes the
+/// overlay; no chat card, no pinned chat (the owner, 2026-10-28).
+#[test]
+fn in_browser_mode_asking_opens_no_chat() {
+    super::results::HAND_OFF.set(true);
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    assert_eq!(config::current().ai.provider, config::Provider::Browser);
+    let _ = app.open_panel(actions::Panel::Ask, crop, Some("What is this?".into()));
+    super::results::HAND_OFF.set(false);
+    assert!(app.o.panel.is_none() && app.chat.is_none(), "no chat");
+}
+
 /// An open overlay with a selection and a ready Ask AI panel (browser provider).
 fn app_with_ask_panel() -> (App, u32) {
     let mut app = open_app(800, 600, 1.0);
@@ -3303,24 +3322,37 @@ fn chips_go_under_the_box_else_above_never_on_it() {
     let screen = Rectangle::with_size(Size::new(1920.0, 1080.0));
     let size = Size::new(280.0, 44.0);
     let area = Rectangle::new(Point::new(400.0, 300.0), Size::new(500.0, 200.0));
-    let at = chips_at(area, size, screen);
+    let at = chips_at(area, size, screen, None);
     assert_eq!(at, Point::new(510.0, 512.0), "centred, 12 px under the box");
     // no room below: above
     let low = Rectangle::new(Point::new(400.0, 900.0), Size::new(500.0, 150.0));
-    let at = chips_at(low, size, screen);
+    let at = chips_at(low, size, screen, None);
     assert_eq!(at.y, 900.0 - CHIP_SPACE - 44.0);
     for a in [area, low] {
-        let chips = Rectangle::new(chips_at(a, size, screen), size);
+        let chips = Rectangle::new(chips_at(a, size, screen, None), size);
         assert!(chips.intersection(&a).is_none(), "{a:?} -> {chips:?}");
     }
     // beside a card: kept in the free part
     let room = Rectangle::new(Point::ORIGIN, Size::new(1112.0, 1080.0));
     let edge = Rectangle::new(Point::new(950.0, 300.0), Size::new(150.0, 100.0));
-    let at = chips_at(edge, size, room);
+    let at = chips_at(edge, size, room, None);
     assert!(at.x + size.width <= room.width - bar::GAP);
     // the whole screen selected: on it, at the bottom, still on screen
-    let all = chips_at(screen, size, screen);
+    let all = chips_at(screen, size, screen, None);
     assert_eq!(all.y, 1080.0 - bar::GAP - 44.0);
+    // gate 0.1.2 bug 1: the bar docked at the top, a box (the address bar)
+    // just above it: the chip goes past the bar, never under it
+    let url = Rectangle::new(Point::new(106.0, 50.0), Size::new(266.0, 22.0));
+    let dock = Rectangle::new(Point::new(20.0, 84.0), Size::new(900.0, 56.0));
+    let chip = Rectangle::new(chips_at(url, size, screen, Some(dock)), size);
+    assert!(chip.intersection(&dock).is_none(), "{chip:?} under the bar");
+    assert!(chip.intersection(&url).is_none() && chip.y >= dock.y + dock.height);
+    // a bar elsewhere changes nothing
+    let far = Rectangle::new(Point::new(500.0, 1000.0), Size::new(900.0, 56.0));
+    assert_eq!(
+        chips_at(area, size, screen, Some(far)),
+        Point::new(510.0, 512.0)
+    );
 }
 
 #[test]
@@ -3642,25 +3674,41 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
 fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     let (mut app, id) = app_with_ask_panel(); // 800 x 600, a selection at the left
     let at = app.card_at();
-    let d = card::docked(app.o.screen, card::Side::Right, app.o.work_inset);
+    let d = app.chat_dock(app.o.screen, card::Side::Right, app.o.work_inset);
     assert_eq!(
         (at.x, at.width, at.height),
         (d.x.round(), d.width.round(), d.height.round())
     );
-    // held: it follows the pointer, by fractions of a px too, drawn on whole px
+    // held: it follows the pointer 1:1, by fractions of a px too, drawn on
+    // whole px, picked up (scaled, accent edge)
     let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Move));
     let _ = app.update(Message::Panel(id, grab));
     let _ = app.update(Message::CardMoved(Point::new(700.0, 30.0)));
-    let _ = app.update(Message::CardMoved(Point::new(200.3, 40.6)));
+    let _ = app.update(Message::CardMoved(Point::new(500.3, 40.6)));
     let held = app.card_at();
     assert_eq!(
         held.position(),
-        Point::new((at.x - 499.7).round(), (at.y + 10.6).round())
+        Point::new((at.x - 199.7).round(), (at.y + 10.6).round())
     );
+    assert!(app.o.panel.as_ref().unwrap().1.held);
+    // ... but never past 6 px from the screen's edge (design 3.4)
+    let _ = app.update(Message::CardMoved(Point::new(-400.0, 40.6)));
+    let held = app.card_at();
+    assert_eq!(held.x, motion::DRAG_EDGE);
     // let go left of the middle: it glides to the left dock, and stays there
     let _ = app.update(Message::CardReleased);
     assert!(app.o.chat_glide.is_some() && app.animating());
     let began = app.o.chat_glide.unwrap().0;
+    // the frame strip (OPENCIRCLE_RENDER_DIR): let go, then every 60 ms
+    if std::env::var_os("OPENCIRCLE_RENDER_DIR").is_some() {
+        let long_ago = began - std::time::Duration::from_secs(2);
+        let _ = app.update(Message::Frame(long_ago)); // the card opened long before
+        for k in 0..4u32 {
+            let _ = app.update(Message::Frame(began + motion::DOCK * k / 4));
+            let name = format!("chat-glide-{k}");
+            shot::save(&name, app.view(app.overlay), app.o.screen);
+        }
+    }
     let _ = app.update(Message::Frame(began + motion::DOCK / 3));
     let mid = app.card_at();
     assert!(
@@ -3669,6 +3717,8 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     );
     let _ = app.update(Message::Frame(began + motion::DOCK));
     assert!(app.o.chat_glide.is_none());
+    assert!(!app.o.panel.as_ref().unwrap().1.held, "let go: scale 1");
+    shot::save("chat-glide-4", app.view(app.overlay), app.o.screen);
     assert_eq!(app.card_at().x, 16.0);
     assert_eq!(app.chat_side, Some(card::Side::Left));
     // the next chat in this run opens on that side
@@ -3676,6 +3726,81 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     let crop = app.crop().unwrap();
     let _ = app.open_panel(actions::Panel::Ask, crop, None);
     assert_eq!(app.card_at().x, 16.0);
+}
+
+/// The chat never covers the bar: for every bar anchor and either side,
+/// the docked chat and the bar at its spot don't meet (owner, 2026-10-28).
+#[test]
+fn the_docked_chat_never_covers_the_bar() {
+    use crate::config::BarAnchor;
+    use crate::ui::screens::bar::geometry::anchor_at;
+    for (w, h) in [(800, 600), (1920, 1080), (1280, 720)] {
+        let mut app = open_app(w, h, 1.0);
+        app.o.work_inset = 48.0;
+        for anchor in [
+            BarAnchor::Bottom,
+            BarAnchor::Top,
+            BarAnchor::BottomLeft,
+            BarAnchor::BottomRight,
+        ] {
+            app.o.bar_anchor = anchor;
+            let (_, size) = app.bar_size();
+            let bar = Rectangle::new(anchor_at(anchor, app.o.screen, size, 48.0), size);
+            for side in [card::Side::Left, card::Side::Right] {
+                let chat = app.chat_dock(app.o.screen, side, 48.0);
+                assert!(
+                    !chat.intersects(&bar),
+                    "{w}x{h} {anchor:?} {side:?}: {chat:?} {bar:?}"
+                );
+                assert!(chat.height > 200.0, "still a chat: {chat:?}");
+            }
+        }
+    }
+}
+
+/// The pinned chat's own window, let go mid-screen, glides to its dock frame
+/// by frame (`motion::DOCK`, standard-out) and ends exactly on it.
+#[test]
+fn a_pinned_chat_window_glides_to_its_dock() {
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_panel(actions::Panel::Ask, crop, None));
+    let id = app.o.panel.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    chat_turn(&mut app, id, "What is this?", "A chart.");
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    let _ = app.update(Message::Escape);
+    let window = app
+        .chat
+        .as_ref()
+        .and_then(|c| c.window)
+        .expect("its own window");
+    // the OS dragged it to the middle-left, then it stopped
+    let _ = app.update(Message::ChatMoved(window, Point::new(150.0, 100.0)));
+    let moves = app.chat.as_ref().unwrap().moves;
+    let _ = app.update(Message::ChatSettle(moves));
+    let (began, from, to) = app
+        .chat
+        .as_ref()
+        .unwrap()
+        .glide
+        .expect("a glide, not a jump");
+    let (origin, screen, inset) = app.chat.as_ref().unwrap().home;
+    let dock = app.chat_dock(screen, card::Side::Left, inset);
+    assert_eq!(to, origin + Vector::new(dock.x, dock.y));
+    let _ = app.update(Message::ChatFrame(began + motion::DOCK / 3));
+    let mid = app.chat.as_ref().unwrap().at;
+    assert!(mid.x < from.x && mid.x > to.x, "on its way: {mid:?}");
+    let _ = app.update(Message::ChatFrame(began + motion::DOCK));
+    let chat = app.chat.as_ref().unwrap();
+    assert_eq!(chat.at, to, "exactly on the dock");
+    assert!(chat.glide.is_none(), "the frames stop");
 }
 
 /// Copy text (the key T, `opencircle run text`) on picked words copies exactly
@@ -3777,7 +3902,8 @@ fn a_link_in_the_selected_words_gets_a_click_only_chip() {
     // nothing is opened by showing it; its click asks for the link
     let size = Size::new(LINK_WIDTH, bar::HEIGHT);
     let area = app.o.view.rect_to_screen(app.o.selection.unwrap().area);
-    let at = chips_at(area, size, app.room()) + Vector::new(LINK_WIDTH / 2.0, bar::HEIGHT / 2.0);
+    let at = chips_at(area, size, app.room(), app.chip_bar())
+        + Vector::new(LINK_WIDTH / 2.0, bar::HEIGHT / 2.0);
     let clicks = crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, at);
     assert!(
         clicks

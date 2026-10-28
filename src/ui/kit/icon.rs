@@ -35,8 +35,10 @@ pub enum Icon {
     Replay,
     /// lucide "screen-share": the AI field's Include screen.
     Screen,
-    /// lucide "pin" (the AI chat stays open) and "arrow-left" (a drawer's back).
+    /// lucide "pin" (the AI chat stays open), "pin-off" (a pinned chat's
+    /// unpin) and "arrow-left" (a drawer's back).
     Pin,
+    Unpin,
     Back,
     /// lucide "grip-vertical": a drag-out handle (the Drag chip's dots).
     Grip,
@@ -44,7 +46,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 17] = [
+    pub const ALL: [Icon; 18] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -60,6 +62,7 @@ impl Icon {
         Icon::Replay,
         Icon::Screen,
         Icon::Pin,
+        Icon::Unpin,
         Icon::Back,
         Icon::Grip,
     ];
@@ -81,6 +84,7 @@ impl Icon {
             Icon::Replay => '\u{e14b}',
             Icon::Screen => '\u{e152}',
             Icon::Pin => '\u{e258}',
+            Icon::Unpin => '\u{e2b5}',
             Icon::Back => '\u{e04c}',
             Icon::Grip => '\u{e0ee}',
         }

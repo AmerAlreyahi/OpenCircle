@@ -214,6 +214,38 @@ pub fn action<'a, Message: Clone + 'a>(label: String, on_press: Message) -> Elem
         .into()
 }
 
+/// A chip floating over the screen on its own (a selection's Select text or
+/// link): ONE pill on the widget surface, `height` tall, never a pill inside
+/// another frame.
+pub fn floating<'a, Message: Clone + 'a>(
+    label: String,
+    on_press: Message,
+    height: f32,
+    pad: f32,
+) -> Element<'a, Message> {
+    use iced::widget::button;
+    button(container(text(label).size(12).font(weight(Weight::Normal))).center_y(iced::Fill))
+        .height(height)
+        .padding([0.0, pad])
+        .on_press(on_press)
+        .style(|_, status| button::Style {
+            background: Some(
+                match status {
+                    button::Status::Hovered | button::Status::Pressed => c().elevated_hover,
+                    _ => c().widget,
+                }
+                .into(),
+            ),
+            text_color: c().text,
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(1)
+                .color(c().rim),
+            ..button::Style::default()
+        })
+        .into()
+}
+
 /// The editing toolbar's Drag chip (`SnipDragHandle`: `.oc-btn`, 63x30, radius
 /// 12): the grip dots in `accent` and "Drag". A press starts the OS drag of the
 /// image (a button reacts on release, too late); the edge turns `accent`

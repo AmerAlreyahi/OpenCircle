@@ -179,6 +179,8 @@ pub struct Panel {
     queued: bool,
     /// Pinned: outside clicks and Esc no longer close it (`App::chat`).
     pinned: bool,
+    /// Picked up and dragged by its header (the App sets it).
+    pub held: bool,
     /// The drawer's open tab, its History list and its model field.
     drawer: Option<Tab>,
     listed: Vec<chats::Entry>,
@@ -327,6 +329,7 @@ impl Panel {
             input: text_editor::Content::new(),
             queued: false,
             pinned: false,
+            held: false,
             drawer: None,
             listed: Vec::new(),
             model: String::new(),
@@ -860,6 +863,23 @@ fn copy(text: String) -> Task<Msg> {
             .map_err(|e| format!("Could not copy: {e}"));
         let _ = tx.unbounded_send(Msg::Acted(done));
     })
+}
+
+/// Browser provider (no key): Ask AI only hands the question to Google AI Mode
+/// in the user's browser, with the selection's text when Include screen is on
+/// and the text reader is here; no chat, no chat history (the owner,
+/// 2026-10-28). Blocking: the pill's text, or why not.
+pub fn hand_off(crop: &Crop, question: Option<String>, include: bool) -> Result<String, String> {
+    let target = config::current().translate.target;
+    let prompt = question
+        .filter(|q| !q.trim().is_empty())
+        .unwrap_or_else(|| PRESETS[0].text(&target));
+    let read = (include && text::models_present()).then(|| text::read(crop, |_| {}));
+    let (question, _) = browser_turn(&prompt, read);
+    ai::browser::ask(&question)?;
+    let url = ai::browser::url(&question).0;
+    crate::history::search::keep("ai", &prompt, &url, Some(crop));
+    Ok("Opened in your browser".into())
 }
 
 /// Browser provider: the question to open in AI Mode and the line to add to the

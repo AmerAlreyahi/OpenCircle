@@ -266,6 +266,18 @@ impl App {
         self.o.screen_text.iter().chain(others)
     }
 
+    /// Each monitor's area (image px) while text is read on several, else none.
+    pub(in crate::ui) fn screen_areas(&self) -> Vec<Rectangle> {
+        if !self.screens_text() {
+            return Vec::new();
+        }
+        let start = self.o.place();
+        let others = (self.o.screens.iter()).map(|s| area_of(start, s.place));
+        std::iter::once(Rectangle::with_size(self.o.screen))
+            .chain(others)
+            .collect()
+    }
+
     /// Every line read so far in reading order: screen by screen, left to
     /// right (then top to bottom), so a selection across a seam runs from the
     /// end of one screen's text into the start of the next's.

@@ -218,7 +218,7 @@ impl App {
                 if let Some(chat) = &mut self.chat {
                     chat.panel.tick(now);
                 }
-                Task::none()
+                self.chat_glide(now)
             }
             Message::Run(action) => self.run(action),
             Message::Tapped(what, read) => self.on_tapped(what, read),
@@ -281,6 +281,13 @@ impl App {
             }
             // Let go: the card stays where the user put it, until the overlay closes.
             Message::CardReleased => {
+                // let go: back to scale 1 and the plain edge
+                if let Some((_, p)) = &mut self.o.panel {
+                    p.held = false;
+                }
+                if let Some(chat) = &mut self.chat {
+                    chat.panel.held = false;
+                }
                 match self.o.card_drag.take() {
                     Some((card::Drag::Move, _)) if self.o.card_chat => {
                         self.dock_chat(Instant::now());

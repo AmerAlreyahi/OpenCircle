@@ -116,6 +116,7 @@ struct Strings {
     pick_title: &'static str,
     uninstall_title: &'static str,
     uninstall_intro: &'static str,
+    uninstall_intro_remove: &'static str,
     uninstall: &'static str,
     your_data: &'static str,
     keep: &'static str,
@@ -160,6 +161,7 @@ const EN: Strings = Strings {
     pick_title: "Choose where to install OpenCircle",
     uninstall_title: "Uninstall OpenCircle",
     uninstall_intro: "Removes OpenCircle from this PC. Your settings can stay for a later install.",
+    uninstall_intro_remove: "Removes OpenCircle from this PC, with its settings, models and keys.",
     uninstall: "Uninstall",
     your_data: "Settings, models and keys",
     keep: "Keep",
@@ -688,6 +690,21 @@ impl State {
         .into()
     }
 
+    /// The line under the title; the uninstall's follows the Keep / Remove
+    /// choice.
+    fn intro(&self) -> String {
+        let (uninstall, finished) = (self.uninstall.is_some(), self.step == Step::Finish);
+        match (&self.launch_error, finished) {
+            _ if uninstall && finished && self.remove_data => EN.removed_all.to_string(),
+            _ if uninstall && finished => EN.removed_kept.to_string(),
+            _ if uninstall && self.remove_data => EN.uninstall_intro_remove.to_string(),
+            _ if uninstall => EN.uninstall_intro.to_string(),
+            (Some(why), true) => why.clone(),
+            (None, true) => fill(EN.installed, &self.shortcut),
+            (_, false) => EN.intro.to_string(),
+        }
+    }
+
     fn body(&self) -> Element<'_, Message> {
         let finished = self.step == Step::Finish;
         let uninstall = self.uninstall.is_some();
@@ -704,14 +721,7 @@ impl State {
         .spacing(TITLE_GAP)
         .align_y(Center)
         .height(TITLE_H);
-        let intro = match (&self.launch_error, finished) {
-            _ if uninstall && finished && self.remove_data => EN.removed_all.to_string(),
-            _ if uninstall && finished => EN.removed_kept.to_string(),
-            _ if uninstall => EN.uninstall_intro.to_string(),
-            (Some(why), true) => why.clone(),
-            (None, true) => fill(EN.installed, &self.shortcut),
-            (_, false) => EN.intro.to_string(),
-        };
+        let intro = self.intro();
         let intro = match self.launch_error.is_some() && finished {
             true => ktext::error(Role::NOTE, intro),
             false => ktext::sub(Role::NOTE, intro),
@@ -1254,7 +1264,13 @@ mod tests {
         s.uninstall = Some("{046BC980-BD0C-45D2-B990-202898DD0BAD}".into());
         s.finish = |_, _, _, _| panic!("the uninstall keeps no choice and starts nothing");
         assert!(!s.remove_data, "keeps the data unless asked");
+        assert_eq!(s.intro(), EN.uninstall_intro);
         let _ = s.update(Message::RemoveData(true));
+        assert!(
+            !s.intro().contains("can stay"),
+            "the line follows Remove: {}",
+            s.intro()
+        );
         assert!(
             s.remove_data && !s.data_glide.0,
             "the thumb glides from Keep"
