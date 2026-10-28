@@ -169,6 +169,9 @@ production systems.
 - Showcase placement (owner, 2026-10-27, refines "Feature showcase"): no separate showcase page, tab
   or onboarding step: a compact live preview at the top of each feature's Settings page, hideable per
   page, a still frame with reduced motion.
+- Appearance (owner, 2026-10-28): no "OS mode" and no "Logo colour" rows in Settings. The theme cards
+  decide: picking a card sets that theme and its light/dark mode; until a card is picked the app follows
+  Windows (System). Config keys `theme` and `[appearance].logo` stay (frozen format).
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.
