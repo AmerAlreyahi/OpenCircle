@@ -5,6 +5,7 @@
 //! `opencircle ocr-worker` process that runs `Engine` (one per call, or one
 //! warm one while a `Hold` lives: `session`).
 pub(crate) mod models;
+pub mod screen;
 pub(crate) mod session;
 pub mod system;
 pub(crate) mod worker;

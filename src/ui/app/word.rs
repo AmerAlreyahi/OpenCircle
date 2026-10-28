@@ -8,7 +8,8 @@
 //! to the caret on the last. All boxes are image px (the overlay at 1x).
 use iced::{Point, Rectangle, Size, Vector};
 
-use crate::ocr::TextBlock;
+use crate::ocr::screen::{self, Band, Next, Rows, Wants};
+use crate::ocr::{self, TextBlock};
 
 /// What OCR reads around a tap (image px): wide enough for the line around a word.
 const REGION: Size = Size::new(720.0, 160.0);
@@ -525,39 +526,37 @@ impl Picked {
     }
 }
 
-/// The height (image px) of the full-width band read where the user touches
-/// text (#123): the line under the pointer, with a margin. Small, as the
-/// user waits for it: OCR reads every line in it (~0.1 CPU-s each).
-const TOUCHED: f32 = 96.0;
-/// The height of the bands that read the rest, in the background.
-const BAND: f32 = 144.0;
-/// Only lines wholly inside a band are kept (one cut by its edge is read
-/// again by the next band), so a band knows its rows this far in from a cut
-/// edge. Lines up to twice as tall are always whole in one band.
-// ponytail: a line over 48 image px tall (a big heading) can be lost
-// between two bands; a taller TOUCHED/BAND/EDGE if that shows up.
-const EDGE: f32 = 24.0;
-
 /// Main mode's text, read on demand band by band (#123): never at open; the
 /// band the user touches first, then (once text was used) the rest, nearest
-/// the pointer first. Only the rows a band knows for sure count as read.
+/// the pointer first. Which rows are read and what comes next is
+/// `ocr::screen`; this keeps the lines.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Screen {
     /// The lines of each read stretch of rows, by its first row: top to bottom.
     parts: Vec<(f32, Vec<Line>)>,
-    /// The rows read (image px), as sorted, separate (top, bottom) ranges.
-    known: Vec<(f32, f32)>,
+    rows: Rows,
+}
+
+fn rect(b: Band, screen: Size) -> Rectangle {
+    Rectangle::new(Point::new(0.0, b.top), Size::new(screen.width, b.height))
+}
+
+fn band_of(r: Rectangle) -> Band {
+    Band {
+        top: r.y,
+        height: r.height,
+    }
 }
 
 impl Screen {
     /// Row `y` (image px) was read: the lines there (or none) are known.
     pub fn knows(&self, y: f32) -> bool {
-        self.known.iter().any(|&(a, b)| a <= y && y < b)
+        self.rows.knows(y)
     }
 
     /// Every row of a screen `height` tall was read.
     pub fn is_whole(&self, height: f32) -> bool {
-        matches!(self.known[..], [(a, b)] if a <= 0.0 && b >= height)
+        self.rows.is_whole(height)
     }
 
     /// The lines read so far, in reading order.
@@ -571,92 +570,66 @@ impl Screen {
 
     /// The band to read first for row `y` (touched) on a `screen`-sized
     /// overlay: centred on it.
+    #[cfg(test)]
     pub fn band(y: f32, screen: Size) -> Rectangle {
-        let h = TOUCHED.min(screen.height);
-        let top = (y - h / 2.0).clamp(0.0, screen.height - h);
-        Rectangle::new(Point::new(0.0, top), Size::new(screen.width, h))
+        rect(Rows::touched(y, screen.height), screen)
     }
 
     /// The next band to read, the unread row nearest `y` first; `None` once
-    /// all is read. Next to rows already read it overlaps them by `EDGE` (a
-    /// line cut there is read whole) and reaches away from them.
+    /// all is read.
+    #[cfg(test)]
     pub fn next(&self, y: f32, screen: Size) -> Option<Rectangle> {
-        let mut gaps = Vec::new();
-        let mut from = 0.0;
-        for &(a, b) in &self.known {
-            if a > from {
-                gaps.push((from, a));
-            }
-            from = b;
-        }
-        if from < screen.height {
-            gaps.push((from, screen.height));
-        }
-        let off = |&(a, b): &(f32, f32)| (a - y).max(y - b).max(0.0);
-        let (a, b) = gaps.into_iter().min_by(|p, q| off(p).total_cmp(&off(q)))?;
-        let h = BAND.min(screen.height);
-        let top = match () {
-            _ if a <= y && y < b => y - h / 2.0,
-            _ if a >= y => a - EDGE, // below: down from its top
-            _ => b + EDGE - h,       // above: up from its bottom
-        };
-        let top = top.clamp(0.0, screen.height - h);
-        Some(Rectangle::new(
-            Point::new(0.0, top),
-            Size::new(screen.width, h),
-        ))
+        Some(rect(self.rows.next_band(y, screen.height)?, screen))
     }
 
-    /// The rows of `band` it knows for sure and that weren't read yet, as
-    /// separate (top, bottom) ranges (image px).
-    fn new_rows(&self, band: Rectangle, screen: Size) -> Vec<(f32, f32)> {
-        let bottom = band.y + band.height;
-        let top = if band.y <= 0.5 { 0.0 } else { band.y + EDGE };
-        let bottom = match bottom >= screen.height - 0.5 {
-            true => screen.height,
-            false => bottom - EDGE,
-        };
-        let mut new = vec![(top, bottom)];
-        for &(a, b) in &self.known {
-            new = (new.into_iter())
-                .flat_map(|(x, y)| [(x, y.min(a)), (x.max(b), y)])
-                .filter(|(x, y)| x < y)
-                .collect();
+    /// What the user wants read now (`ocr::screen::next`): `None` = nothing;
+    /// else the band (`None` inside: the whole screen) and whether gently.
+    pub fn schedule(&self, screen: Size, w: &Wants) -> Option<(Option<Rectangle>, bool)> {
+        match screen::next(&self.rows, screen.height, w) {
+            Next::Idle => None,
+            Next::Whole => Some((None, false)),
+            Next::Band { band, gently } => Some((Some(rect(band, screen)), gently)),
         }
-        new.retain(|(x, y)| x < y);
-        new
     }
 
     /// The rows OCR needs to read in `band` (top, bottom; image px): only
     /// lines with their middle in them are kept (`add`). `None`: nothing new.
     pub fn unread(&self, band: Rectangle, screen: Size) -> Option<(f32, f32)> {
-        let new = self.new_rows(band, screen);
-        Some((new.first()?.0, new.last()?.1))
+        self.rows.unread(band_of(band), screen.height)
     }
 
     /// OCR read `lines` (image px) in `band`: the rows it knows for sure that
     /// weren't read yet take their lines from it.
+    #[cfg(test)]
     pub fn add(&mut self, band: Rectangle, lines: Vec<Line>, screen: Size) {
-        let new = self.new_rows(band, screen);
-        let Some((&(top, _), &(_, bottom))) = new.first().zip(new.last()) else {
-            return;
-        };
+        let new = self.rows.mark(band_of(band), screen.height);
+        self.keep(new, lines);
+    }
+
+    /// `add` for a read by `source`: Windows OCR's closer read replaces its
+    /// quick one. Returns whether this is the first read.
+    pub fn add_read(
+        &mut self,
+        source: ocr::Source,
+        band: Rectangle,
+        lines: Vec<Line>,
+        screen: Size,
+    ) -> bool {
+        let (new, first) = self.rows.mark_read(source, band_of(band), screen.height);
+        if source == ocr::Source::System {
+            self.parts.clear();
+        }
+        self.keep(new, lines);
+        first
+    }
+
+    fn keep(&mut self, new: Vec<(f32, f32)>, lines: Vec<Line>) {
         for (a, b) in new {
             let centre = |l: &&Line| (a..b).contains(&l.bounds.center_y());
             self.parts
                 .push((a, lines.iter().filter(centre).cloned().collect()));
         }
         self.parts.sort_by(|p, q| p.0.total_cmp(&q.0));
-        self.known.push((top, bottom));
-        self.known.sort_by(|p, q| p.0.total_cmp(&q.0));
-        let mut merged: Vec<(f32, f32)> = Vec::new();
-        for (a, b) in self.known.drain(..) {
-            match merged.last_mut() {
-                Some(last) if a <= last.1 => last.1 = last.1.max(b),
-                _ => merged.push((a, b)),
-            }
-        }
-        self.known = merged;
     }
 }
 

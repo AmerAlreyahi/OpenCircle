@@ -12,9 +12,9 @@ use crate::labs::{self};
 use crate::ocr::{self};
 
 use crate::ui::app::background::background;
+use crate::ui::app::keys;
 use crate::ui::app::message::{Hiding, Message, Purpose};
 use crate::ui::app::quick::Quick;
-use crate::ui::app::{keys, word};
 use crate::ui::edit::Editing;
 use crate::ui::kit::motion;
 use crate::ui::widgets::card;
@@ -393,13 +393,10 @@ impl App {
                 match read {
                     Ok(lines) => {
                         let system = self.o.text_by == Some(ocr::Source::System);
-                        if system {
-                            // Windows OCR's closer read replaces its quick one
-                            self.o.screen_text = word::Screen::default();
-                        }
-                        let first = self.o.screen_text == word::Screen::default();
+                        let source = self.o.text_by.unwrap_or(ocr::Source::Helper);
                         let screen = self.o.screen;
-                        self.o.screen_text.add(band, lines, screen);
+                        // (Windows OCR's closer read replaces its quick one)
+                        let first = self.o.screen_text.add_read(source, band, lines, screen);
                         // (the helper: its first band and its last, the VM's timings)
                         let whole = self.o.screen_text.is_whole(self.o.screen.height);
                         if system || first || whole {

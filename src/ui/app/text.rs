@@ -7,6 +7,7 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Task, Vector};
 
 use crate::actions::{self, Crop, copy, text};
+use crate::ocr::screen::Wants;
 use crate::ocr::{self, TextBlock};
 
 use crate::ui::app::background::background;
@@ -181,35 +182,37 @@ impl App {
         if self.o.reading.is_some() || !self.reads_text() {
             return Task::none();
         }
-        // Windows OCR: the whole screen at once, the first time (from the
-        // capture, `open`; else after the opening animation, `warm`)
-        if self.system_text() {
-            if self.o.text_by.is_some() {
-                return Task::none(); // read (or being read)
-            }
-            self.o.text_by = Some(ocr::Source::System);
-            return self.read_band(Rectangle::with_size(self.o.screen), false);
-        }
-        self.o.text_by = Some(ocr::Source::Helper);
-        let text = &self.o.screen_text;
         let pressed = (self.o.drawing && !self.o.adding)
             .then(|| self.o.stroke.first().copied())
             .flatten();
         let dragged = self.o.text_press.as_ref().and_then(|s| s.last().copied());
-        let touched = [dragged, pressed, self.o.awaits.map(|(p, _)| p)]
+        let touches: Vec<f32> = [dragged, pressed, self.o.awaits.map(|(p, _)| p)]
             .into_iter()
             .flatten()
-            .find(|p| !text.knows(p.y));
-        let (band, gently) = match touched {
-            Some(p) => (word::Screen::band(p.y, self.o.screen), false),
-            None if self.o.want_all || self.o.text_used => {
-                match text.next(self.o.pointer.y, self.o.screen) {
-                    Some(band) => (band, !self.o.want_all), // (Ctrl+A: the user waits)
-                    None => return Task::none(),
-                }
-            }
-            None => return Task::none(),
+            .map(|p| p.y)
+            .collect();
+        let source = match self.system_text() {
+            true => ocr::Source::System,
+            false => ocr::Source::Helper,
         };
+        let wants = Wants {
+            source,
+            started: self.o.text_by.is_some(),
+            touches: &touches,
+            waits: self.o.want_all,
+            text_used: self.o.text_used,
+            pointer: self.o.pointer.y,
+        };
+        let next = self.o.screen_text.schedule(self.o.screen, &wants);
+        if source == ocr::Source::Helper || next.is_some() {
+            self.o.text_by = Some(source);
+        }
+        let Some((band, gently)) = next else {
+            return Task::none();
+        };
+        // Windows OCR: the whole screen at once, the first time (from the
+        // capture, `open`; else after the opening animation, `warm`)
+        let band = band.unwrap_or(Rectangle::with_size(self.o.screen));
         self.read_band(band, gently)
     }
 
