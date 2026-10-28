@@ -29,6 +29,10 @@ pub(in crate::ui) enum Message {
     /// Capture number `.0` has waited `CAPTURE_TIMEOUT`.
     CaptureTimedOut(u32),
     Overlay(overlay::Event),
+    /// Another monitor's frame of capture number `.0` landed (`app::screens`).
+    Screen(u32, snip::Place, image::Handle),
+    /// From another monitor's overlay window (its logical px).
+    ScreenEvent(window::Id, overlay::Event),
     /// Esc, wherever the focus is.
     Escape,
     /// Esc that a widget took (a field let go of the focus; the editor): it

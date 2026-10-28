@@ -112,8 +112,11 @@ impl App {
             // Cancelled or timed out meanwhile: the frame is dropped (the portal's
             // file is already deleted).
             Message::Captured(n, ..) if self.capturing != Some(n) => Task::none(),
-            Message::Captured(_, at, shot) => {
+            Message::Captured(n, at, shot) => {
                 let opened = self.open(at, shot);
+                if self.o.is_some() {
+                    self.o.capture = n; // its other monitors' frames are this one's
+                }
                 Task::batch([opened, self.check_song_key()])
             }
             Message::SongKey => Task::none(), // remembered by `music::check_key`
@@ -138,6 +141,8 @@ impl App {
                 Task::none()
             }
             Message::Overlay(event) => self.on_overlay(event),
+            Message::Screen(n, place, frame) => self.add_screen(n, place, frame),
+            Message::ScreenEvent(window, event) => self.on_screen_event(window, event),
             Message::Escape if self.o.is_none() => Task::none(),
             Message::Escape if let Some(scroll) = self.scroll() => {
                 scroll.stop(); // what was gathered opens in the editor

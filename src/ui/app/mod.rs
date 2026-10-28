@@ -31,8 +31,6 @@ pub(in crate::ui) mod bar;
 pub(in crate::ui) mod capture;
 pub(in crate::ui) mod editing;
 pub(in crate::ui) mod results;
-// (41a: the model; its windows come with 41c)
-#[allow(dead_code)]
 pub(in crate::ui) mod screens;
 pub(in crate::ui) mod selection;
 pub(in crate::ui) mod snip;

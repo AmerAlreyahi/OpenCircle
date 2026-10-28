@@ -36,6 +36,9 @@ impl App {
             return (chat.panel.view(Rectangle::with_size(size), size, false))
                 .map(move |msg| Message::Panel(id, msg));
         }
+        if let Some(screen) = self.o.screens.iter().find(|s| s.window == window) {
+            return self.screen_view(screen);
+        }
         let Some(frame) = &self.o.frame else {
             return space().into();
         };

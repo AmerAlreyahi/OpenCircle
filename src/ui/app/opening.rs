@@ -14,6 +14,7 @@ use crate::config::{After, BarAnchor, SearchWith, SelectStyle, SelectionConfig, 
 use crate::labs::{BarButton, Labs};
 use crate::ocr;
 use crate::ui::app::message::{Await, BarKeys, Grab, Purpose};
+use crate::ui::app::screens::Screen;
 use crate::ui::app::word;
 use crate::ui::app::{Reader, TextMode};
 use crate::ui::kit::motion;
@@ -166,6 +167,11 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) chat_glide: Option<(Instant, Rectangle, f32)>,
     /// Song search on this overlay, and its number.
     pub(in crate::ui) song: Option<(u32, song::Session)>,
+    /// The capture this opening shows (its other monitors' frames carry it).
+    pub(in crate::ui) capture: u32,
+    /// Circle to Search: every other monitor, each in its own window, as its
+    /// frame lands (`app::screens`); freed with the opening.
+    pub(in crate::ui) screens: Vec<Screen>,
 }
 
 impl Default for Opening {
@@ -242,6 +248,8 @@ impl Default for Opening {
             chat_off: Vector::ZERO,
             chat_glide: None,
             song: None,
+            capture: 0,
+            screens: Vec::new(),
         }
     }
 }

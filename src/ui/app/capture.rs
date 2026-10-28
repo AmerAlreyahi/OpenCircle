@@ -45,14 +45,16 @@ impl App {
             let _ = tx.unbounded_send(());
         })
         .map(move |()| Message::CaptureTimedOut(n));
+        // Circle to Search freezes every monitor (`app::screens`).
+        let all = snip.is_none() && matches!(self.next, Purpose::Search);
         let shot = background(move |tx| {
-            let shot = match snip {
-                Some(kind) => Self::snip_shot(kind),
-                // The monitor of the window the user is in (else the pointer's).
-                None => {
-                    let mut shot = None;
-                    capture::active_first(false, |frame| {
-                        shot.get_or_insert(frame.map(|frame| {
+            let Some(kind) = snip else {
+                // The monitor of the window the user is in (else the pointer's)
+                // first: its overlay opens on it; then the others.
+                let mut first = true;
+                capture::active_first(all, |frame| {
+                    let grabbed = match (std::mem::take(&mut first), frame) {
+                        (true, frame) => Grabbed::Active(frame.map(|frame| {
                             let (place, image) = snip::screen_of(frame);
                             Shot {
                                 origin: place.logical_origin(),
@@ -61,14 +63,23 @@ impl App {
                                 scale: place.scale,
                                 snip: None,
                             }
-                        }));
-                    });
-                    shot.unwrap_or_else(|| Err("no monitor found".into()))
-                }
+                        })),
+                        (false, Ok(frame)) => {
+                            let (place, image) = snip::screen_of(frame);
+                            Grabbed::Other(place, image)
+                        }
+                        (false, Err(_)) => return, // (`active_first` hands over none)
+                    };
+                    let _ = tx.unbounded_send(grabbed);
+                });
+                return;
             };
-            let _ = tx.unbounded_send(shot);
+            let _ = tx.unbounded_send(Grabbed::Active(Self::snip_shot(kind)));
         })
-        .map(move |shot| Message::Captured(n, at, shot));
+        .map(move |grabbed| match grabbed {
+            Grabbed::Active(shot) => Message::Captured(n, at, shot),
+            Grabbed::Other(place, image) => Message::Screen(n, place, image),
+        });
         Task::batch([shot, timeout])
     }
 
@@ -328,6 +339,8 @@ impl App {
         let Some(opening) = self.o.take() else {
             return Task::none(); // closed already
         };
+        // the other monitors' windows go with it, at once
+        let chat = Task::batch([chat, super::screens::close_all(&opening.screens)]);
         opening.finish();
         // hidden or closed alike: the editor's glyphs go with the opening
         crate::editor::free_glyphs();
@@ -347,6 +360,12 @@ impl App {
         crate::sys::mem::trim_heap();
         chat.chain(window::close(self.overlay))
     }
+}
+
+/// What a capture's thread hands over: the overlay's monitor, then each other one.
+enum Grabbed {
+    Active(Result<Shot, CaptureError>),
+    Other(snip::Place, image::Handle),
 }
 
 /// The overlay window: hidden (pre-created), or full-screen at `size`. Never on
