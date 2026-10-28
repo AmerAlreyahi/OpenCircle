@@ -172,6 +172,9 @@ production systems.
 - Appearance (owner, 2026-10-28): no "OS mode" and no "Logo colour" rows in Settings. The theme cards
   decide: picking a card sets that theme and its light/dark mode; until a card is picked the app follows
   Windows (System). Config keys `theme` and `[appearance].logo` stay (frozen format).
+- No Text panel (owner, 2026-10-28): "Copy text" and Ctrl+C copy the text straight to the clipboard
+  with the Copied pill; the Text result card (review/edit, link chips, Search/Translate from it) is
+  removed. Translate and Search stay on the bar.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.
