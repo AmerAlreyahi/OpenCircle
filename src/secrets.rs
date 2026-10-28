@@ -5,6 +5,7 @@
 use std::fmt;
 
 use crate::config::Provider;
+use crate::music::Service;
 
 const SERVICE: &str = "opencircle";
 
@@ -124,6 +125,98 @@ pub fn set(provider: Provider, key: &Secret) -> Result<(), SecretsError> {
 /// Deleting a key that does not exist is fine.
 pub fn delete(provider: Provider) -> Result<(), SecretsError> {
     by_name::delete(&ai_entry(provider))
+}
+
+// ---- the keyring behind a trait, so UI tests never touch the real one ----
+
+/// `K` = whose key: an AI provider, or a song-search service. Blocking (the OS
+/// keyring can take a while or ask to unlock): callers run it off the UI thread.
+pub trait KeyStore<K = Provider>: Send + Sync {
+    fn is_set(&self, owner: K) -> Result<bool, SecretsError>;
+    fn set(&self, owner: K, key: &Secret) -> Result<(), SecretsError>;
+    fn delete(&self, owner: K) -> Result<(), SecretsError>;
+}
+
+/// The real thing (Windows Credential Manager / Secret Service).
+pub struct Keyring;
+
+impl KeyStore for Keyring {
+    fn is_set(&self, provider: Provider) -> Result<bool, SecretsError> {
+        get(provider).map(|k| k.is_some())
+    }
+    fn set(&self, provider: Provider, key: &Secret) -> Result<(), SecretsError> {
+        set(provider, key)
+    }
+    fn delete(&self, provider: Provider) -> Result<(), SecretsError> {
+        delete(provider)
+    }
+}
+
+impl KeyStore<Service> for Keyring {
+    /// Finds the entry without reading the key (no unlock prompt).
+    fn is_set(&self, service: Service) -> Result<bool, SecretsError> {
+        by_name::exists(service.key_entry())
+    }
+    fn set(&self, service: Service, key: &Secret) -> Result<(), SecretsError> {
+        by_name::set(service.key_entry(), key)
+    }
+    fn delete(&self, service: Service) -> Result<(), SecretsError> {
+        by_name::delete(service.key_entry())
+    }
+}
+
+/// In-memory keyring for tests.
+#[cfg(test)]
+#[derive(Default)]
+pub struct MemoryStore(std::sync::Mutex<std::collections::HashMap<&'static str, String>>);
+
+#[cfg(test)]
+impl MemoryStore {
+    pub fn is_empty(&self) -> bool {
+        self.0.lock().unwrap().is_empty()
+    }
+    pub fn get(&self, id: &str) -> Option<String> {
+        self.0.lock().unwrap().get(id).cloned()
+    }
+    fn put(&self, id: &'static str, key: &Secret) {
+        self.0.lock().unwrap().insert(id, key.expose().to_string());
+    }
+    fn has(&self, id: &str) -> bool {
+        self.0.lock().unwrap().contains_key(id)
+    }
+    fn del(&self, id: &str) {
+        self.0.lock().unwrap().remove(id);
+    }
+}
+
+#[cfg(test)]
+impl KeyStore for MemoryStore {
+    fn is_set(&self, p: Provider) -> Result<bool, SecretsError> {
+        Ok(self.has(p.id()))
+    }
+    fn set(&self, p: Provider, key: &Secret) -> Result<(), SecretsError> {
+        self.put(p.id(), key);
+        Ok(())
+    }
+    fn delete(&self, p: Provider) -> Result<(), SecretsError> {
+        self.del(p.id());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl KeyStore<Service> for MemoryStore {
+    fn is_set(&self, s: Service) -> Result<bool, SecretsError> {
+        Ok(self.has(s.key_entry()))
+    }
+    fn set(&self, s: Service, key: &Secret) -> Result<(), SecretsError> {
+        self.put(s.key_entry(), key);
+        Ok(())
+    }
+    fn delete(&self, s: Service) -> Result<(), SecretsError> {
+        self.del(s.key_entry());
+        Ok(())
+    }
 }
 
 #[cfg(test)]

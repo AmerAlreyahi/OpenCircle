@@ -16,7 +16,7 @@
 
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use iced::widget::image::Handle;
@@ -33,7 +33,7 @@ use crate::hotkey::{DesktopKey, managed};
 use crate::labs::{Feature, Labs};
 use crate::mt;
 use crate::music::{self, SERVICE, Service};
-use crate::secrets::{self, Secret, SecretsError};
+use crate::secrets::{KeyStore, Keyring, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES, Language};
 use crate::ui::about;
 use crate::ui::theme;
@@ -78,49 +78,41 @@ pub fn window_limits(work: Size) -> (Size, Size) {
     (size, min)
 }
 
-// ---- the OS keyring, behind a trait so tests never touch the real one ----
-
-/// `K` = whose key: an AI provider, or a song-search service.
-pub trait KeyStore<K = Provider> {
-    fn is_set(&self, provider: K) -> Result<bool, SecretsError>;
-    fn set(&self, provider: K, key: &Secret) -> Result<(), SecretsError>;
-    fn delete(&self, provider: K) -> Result<(), SecretsError>;
+/// A key store bound to one owner (a provider or a service), so the field and
+/// its worker-thread jobs need not know which kind it is.
+pub trait Bound: Send + Sync {
+    fn is_set(&self) -> Result<bool, SecretsError>;
+    fn set(&self, key: &Secret) -> Result<(), SecretsError>;
+    fn delete(&self) -> Result<(), SecretsError>;
 }
 
-/// The real thing: `secrets` (Windows Credential Manager / Secret Service).
-pub struct Keyring;
+struct Of<K>(Arc<dyn KeyStore<K>>, K);
 
-impl KeyStore for Keyring {
-    fn is_set(&self, provider: Provider) -> Result<bool, SecretsError> {
-        secrets::get(provider).map(|k| k.is_some())
+impl<K: Clone + Send + Sync> Bound for Of<K> {
+    fn is_set(&self) -> Result<bool, SecretsError> {
+        self.0.is_set(self.1.clone())
     }
-    fn set(&self, provider: Provider, key: &Secret) -> Result<(), SecretsError> {
-        secrets::set(provider, key)
+    fn set(&self, key: &Secret) -> Result<(), SecretsError> {
+        self.0.set(self.1.clone(), key)
     }
-    fn delete(&self, provider: Provider) -> Result<(), SecretsError> {
-        secrets::delete(provider)
+    fn delete(&self) -> Result<(), SecretsError> {
+        self.0.delete(self.1.clone())
     }
 }
 
-impl KeyStore<Service> for Keyring {
-    /// Finds the entry without reading the key (no unlock prompt).
-    fn is_set(&self, service: Service) -> Result<bool, SecretsError> {
-        secrets::by_name::exists(service.key_entry())
-    }
-    fn set(&self, service: Service, key: &Secret) -> Result<(), SecretsError> {
-        secrets::by_name::set(service.key_entry(), key)
-    }
-    fn delete(&self, service: Service) -> Result<(), SecretsError> {
-        secrets::by_name::delete(service.key_entry())
-    }
+pub fn bind<K: Clone + Send + Sync + 'static>(
+    store: &Arc<dyn KeyStore<K>>,
+    owner: K,
+) -> Arc<dyn Bound> {
+    Arc::new(Of(store.clone(), owner))
 }
 
 /// Song search's key store: tests get an in-memory one (never the real keyring).
-fn song_keyring() -> Box<dyn KeyStore<Service>> {
+fn song_keyring() -> Arc<dyn KeyStore<Service>> {
     #[cfg(test)]
-    return Box::<tests::MemoryStore>::default();
+    return Arc::<crate::secrets::MemoryStore>::default();
     #[cfg(not(test))]
-    Box::new(Keyring)
+    Arc::new(Keyring)
 }
 
 // ---- the write-only API key control (also used by onboarding) ----
@@ -141,6 +133,75 @@ pub enum KeyMessage {
     Replace,
     Cancel,
     Remove,
+    /// A `KeyJob`'s answer (tagged with the job's number; an old one is ignored).
+    Done(u32, KeyDone),
+}
+
+/// What a keyring call answered: the status now, or why it failed. Never the key.
+#[derive(Debug, Clone)]
+pub enum KeyDone {
+    Status(KeyStatus),
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Busy {
+    Checking,
+    Saving,
+    Removing,
+}
+
+impl Busy {
+    fn label(self) -> &'static str {
+        match self {
+            Busy::Checking => "Checking…",
+            Busy::Saving => "Saving…",
+            Busy::Removing => "Removing…",
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+enum Work {
+    Check,
+    Save(Secret),
+    Remove,
+}
+
+/// A keyring call for a worker thread: `run` it there and send the answer back
+/// as `KeyMessage::Done`, so the UI never waits on the keyring.
+#[derive(Clone)]
+pub struct KeyJob {
+    slot: Arc<dyn Bound>,
+    work: Work,
+    id: u32,
+}
+
+impl KeyJob {
+    pub fn run(self) -> KeyMessage {
+        let done = match self.work {
+            Work::Check => KeyDone::Status(match self.slot.is_set() {
+                Ok(true) => KeyStatus::Saved,
+                Ok(false) => KeyStatus::NotSet,
+                Err(e) => KeyStatus::Unavailable(e.to_string()),
+            }),
+            Work::Save(key) => match self.slot.set(&key) {
+                Ok(()) => KeyDone::Status(KeyStatus::Saved),
+                Err(e) => KeyDone::Failed(e.to_string()),
+            },
+            Work::Remove => match self.slot.delete() {
+                Ok(()) => KeyDone::Status(KeyStatus::NotSet),
+                Err(e) => KeyDone::Failed(e.to_string()),
+            },
+        };
+        KeyMessage::Done(self.id, done)
+    }
+}
+
+impl fmt::Debug for KeyJob {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "KeyJob({})", self.id)
+    }
 }
 
 #[derive(Debug)]
@@ -150,6 +211,9 @@ pub struct KeyField {
     replacing: bool,
     error: Option<String>,
     labels: KeyLabels,
+    /// The keyring call in flight, and the number of the latest one.
+    busy: Option<Busy>,
+    job: u32,
 }
 
 /// What a key field calls its key (tooltips are the controls' names).
@@ -182,15 +246,25 @@ const SONG_KEY: KeyLabels = KeyLabels {
 };
 
 impl KeyField {
-    pub fn new<K>(store: &dyn KeyStore<K>, provider: K) -> Self {
+    /// A field whose status is still being asked: run the job.
+    pub fn pending(slot: Arc<dyn Bound>) -> (Self, KeyJob) {
         let mut f = KeyField {
             status: KeyStatus::NotSet,
             input: Secret::new(""),
             replacing: false,
             error: None,
             labels: API_KEY,
+            busy: None,
+            job: 0,
         };
-        f.refresh(store, provider);
+        let job = f.refresh(slot);
+        (f, job)
+    }
+
+    /// Asks the keyring on this thread (a window opening); `update` never does.
+    pub fn new(slot: Arc<dyn Bound>) -> Self {
+        let (mut f, job) = Self::pending(slot.clone());
+        f.update(slot, job.run());
         f
     }
 
@@ -200,22 +274,34 @@ impl KeyField {
     }
 
     /// Ask the keyring again (after the provider changed).
-    pub fn refresh<K>(&mut self, store: &dyn KeyStore<K>, provider: K) {
+    pub fn refresh(&mut self, slot: Arc<dyn Bound>) -> KeyJob {
         self.input = Secret::new("");
         self.replacing = false;
         self.error = None;
-        self.status = match store.is_set(provider) {
-            Ok(true) => KeyStatus::Saved,
-            Ok(false) => KeyStatus::NotSet,
-            Err(e) => KeyStatus::Unavailable(e.to_string()),
-        };
+        self.start(slot, Busy::Checking, Work::Check)
+    }
+
+    fn start(&mut self, slot: Arc<dyn Bound>, busy: Busy, work: Work) -> KeyJob {
+        self.job += 1;
+        self.busy = Some(busy);
+        KeyJob {
+            slot,
+            work,
+            id: self.job,
+        }
     }
 
     pub fn status(&self) -> &KeyStatus {
         &self.status
     }
 
-    pub fn update<K>(&mut self, store: &dyn KeyStore<K>, provider: K, message: KeyMessage) {
+    /// True while the keyring is being asked (the status is not known yet).
+    pub fn busy(&self) -> bool {
+        self.busy.is_some()
+    }
+
+    /// Save / Remove start a job for the caller to run off the UI thread.
+    pub fn update(&mut self, slot: Arc<dyn Bound>, message: KeyMessage) -> Option<KeyJob> {
         self.error = None;
         match message {
             KeyMessage::Input(key) => self.input = key,
@@ -224,53 +310,71 @@ impl KeyField {
                 self.replacing = false;
                 self.input = Secret::new("");
             }
+            KeyMessage::Save | KeyMessage::Remove if self.busy.is_some() => {}
             KeyMessage::Save if self.input.is_empty() => {
                 self.error = Some("Paste your key first".into())
             }
-            KeyMessage::Save => match store.set(provider, &self.input) {
-                Ok(()) => {
-                    self.status = KeyStatus::Saved;
-                    self.replacing = false;
-                    self.input = Secret::new("");
+            KeyMessage::Save => {
+                let work = Work::Save(self.input.clone());
+                return Some(self.start(slot, Busy::Saving, work));
+            }
+            KeyMessage::Remove => return Some(self.start(slot, Busy::Removing, Work::Remove)),
+            KeyMessage::Done(id, done) if id == self.job => {
+                let was = self.busy.take();
+                match done {
+                    KeyDone::Status(status) => {
+                        if was == Some(Busy::Saving) {
+                            self.replacing = false;
+                            self.input = Secret::new("");
+                        }
+                        self.status = status;
+                    }
+                    KeyDone::Failed(e) => self.error = Some(e),
                 }
-                Err(e) => self.error = Some(e.to_string()),
-            },
-            KeyMessage::Remove => match store.delete(provider) {
-                Ok(()) => self.status = KeyStatus::NotSet,
-                Err(e) => self.error = Some(e.to_string()),
-            },
+            }
+            KeyMessage::Done(..) => {} // the provider changed meanwhile
         }
+        None
     }
 
     pub fn view(&self) -> Element<'_, KeyMessage> {
         let l = self.labels;
         let mut col = column![].spacing(8).width(FORM_WIDTH);
+        let wait = self.busy.map(Busy::label);
         match (&self.status, self.replacing) {
             (KeyStatus::Unavailable(why), _) => col = col.push(error_text(why.as_str())),
             (KeyStatus::Saved, false) => {
                 let saved = value_field("Saved in your keyring", true);
                 let replace = form_button("Replace", false, Some(KeyMessage::Replace));
                 let remove = form_button("Remove", false, Some(KeyMessage::Remove));
-                col = col.push(saved).push(button_row([
-                    tip(replace, l.replace, Position::Bottom),
-                    tip(remove, l.remove, Position::Bottom),
-                ]));
+                col = col.push(saved);
+                col = match wait {
+                    Some(w) => col.push(caption(w)),
+                    None => col.push(button_row([
+                        tip(replace, l.replace, Position::Bottom),
+                        tip(remove, l.remove, Position::Bottom),
+                    ])),
+                };
             }
             _ => {
-                let field = text_field(l.placeholder, self.input.expose(), false, |s| {
+                let mut field = text_field(l.placeholder, self.input.expose(), false, |s| {
                     KeyMessage::Input(Secret::new(s))
                 })
-                .secure(true)
-                .on_submit(KeyMessage::Save);
+                .secure(true);
+                if wait.is_none() {
+                    field = field.on_submit(KeyMessage::Save);
+                }
                 let save = form_button("Save key", true, Some(KeyMessage::Save));
                 let mut buttons = vec![tip(save, l.save, Position::Bottom)];
                 if self.replacing {
                     let cancel = form_button("Cancel", false, Some(KeyMessage::Cancel));
                     buttons.push(tip(cancel, l.keep, Position::Bottom));
                 }
-                col = col
-                    .push(tip(field, l.field, Position::Top))
-                    .push(button_row(buttons));
+                col = col.push(tip(field, l.field, Position::Top));
+                col = match wait {
+                    Some(w) => col.push(caption(w)),
+                    None => col.push(button_row(buttons)),
+                };
             }
         }
         if let Some(e) = &self.error {
@@ -535,14 +639,17 @@ pub struct State {
     saved: Config,
     /// `None` = the real config path.
     path: Option<PathBuf>,
-    store: Box<dyn KeyStore>,
+    store: Arc<dyn KeyStore>,
     recording: Option<Slot>,
     shortcut_error: Option<(Slot, String)>,
     key: KeyField,
     /// Song search's key: the store, and its field once the section was opened
     /// (the keyring is asked only then).
-    song_store: Box<dyn KeyStore<Service>>,
+    song_store: Arc<dyn KeyStore<Service>>,
     song_key: Option<KeyField>,
+    /// Keyring calls started by the last message; the shell runs them off the UI
+    /// thread (`take_key_jobs`) and sends each answer back as a `KeyMessage::Done`.
+    key_jobs: Vec<(bool, KeyJob)>,
     quick_text: Vec<SlotText>,
     /// What the live-interval field shows (kept as typed).
     interval: String,
@@ -842,6 +949,11 @@ impl State {
         s
     }
 
+    /// The keyring calls the last message started (`true` = song search's key).
+    pub fn take_key_jobs(&mut self) -> Vec<(bool, KeyJob)> {
+        std::mem::take(&mut self.key_jobs)
+    }
+
     /// `path: None` = `Config::path()`. `warnings` come from `Config::load`.
     pub fn new(
         config: Config,
@@ -850,7 +962,8 @@ impl State {
         store: Box<dyn KeyStore>,
     ) -> Self {
         theme::apply(config.theme);
-        let key = KeyField::new(&*store, config.ai.provider.clone());
+        let store: Arc<dyn KeyStore> = store.into();
+        let key = KeyField::new(bind(&store, config.ai.provider.clone()));
         let quick_text = config
             .quick_actions
             .iter()
@@ -876,6 +989,7 @@ impl State {
             key,
             song_store: song_keyring(),
             song_key: None,
+            key_jobs: Vec::new(),
             quick_text,
             interval,
             problems: Vec::new(),
@@ -1108,16 +1222,22 @@ fn apply(state: &mut State, message: Message) -> Outcome {
             state.recording = None;
             state.shortcut_error = None;
             if s == Section::Song && state.song_key.is_none() {
-                let field = KeyField::new(&*state.song_store, SERVICE).labelled(SONG_KEY);
-                music::remember_key(field.status == KeyStatus::Saved);
-                state.song_key = Some(field);
+                let (field, job) = KeyField::pending(bind(&state.song_store, SERVICE));
+                state.song_key = Some(field.labelled(SONG_KEY));
+                state.key_jobs.push((true, job));
             }
         }
         Message::SongKey(k) => {
             if let Some(field) = &mut state.song_key {
-                field.update(&*state.song_store, SERVICE, k);
+                let answer = matches!(k, KeyMessage::Done(..));
+                let slot = bind(&state.song_store, SERVICE);
+                state
+                    .key_jobs
+                    .extend(field.update(slot, k).map(|j| (true, j)));
                 // The overlay's music button shows from now on (or hides).
-                music::remember_key(field.status == KeyStatus::Saved);
+                if answer || !field.busy() {
+                    music::remember_key(field.status == KeyStatus::Saved);
+                }
             }
         }
         Message::SongSource(source) => state.draft.song.source = source,
@@ -1159,7 +1279,8 @@ fn apply(state: &mut State, message: Message) -> Outcome {
                 Provider::OpenaiCompatible => {}
                 Provider::Invalid(_) | Provider::Unreadable => {} // never offered: only a bad file has it
             }
-            state.key.refresh(&*state.store, p);
+            let job = state.key.refresh(bind(&state.store, p));
+            state.key_jobs.push((false, job));
         }
         Message::Provider(_) => {}
         Message::Preset(p) => {
@@ -1172,7 +1293,10 @@ fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Model(s) => state.draft.ai.model = s.trim().to_string(),
         Message::ApiKey(k) => {
             let provider = state.draft.ai.provider.clone();
-            state.key.update(&*state.store, provider, k);
+            let slot = bind(&state.store, provider);
+            state
+                .key_jobs
+                .extend(state.key.update(slot, k).map(|j| (false, j)));
         }
         Message::Source(l) => state.draft.translate.source = l.code.to_string(),
         Message::Target(l) => state.draft.translate.target = l.code.to_string(),
@@ -2563,55 +2687,34 @@ fn footer(state: &State) -> Element<'_, Message> {
 
 #[cfg(test)]
 pub(super) mod tests {
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-
     use super::*;
+    use crate::secrets::MemoryStore;
 
     /// `update` with its disk write done at once (the shell does it on a thread).
     fn update(state: &mut State, message: Message) -> Outcome {
         let mut out = super::update(state, message);
-        while let Outcome::Write(w) = out {
-            out = super::update(state, Message::Written(w.run()));
+        loop {
+            // The shell runs these off the UI thread; here, at once.
+            let jobs = state.take_key_jobs();
+            let ran = !jobs.is_empty();
+            for (song, job) in jobs {
+                let k = job.run();
+                let answer = if song {
+                    Message::SongKey(k)
+                } else {
+                    Message::ApiKey(k)
+                };
+                out = super::update(state, answer);
+            }
+            if let Outcome::Write(w) = out {
+                out = super::update(state, Message::Written(w.run()));
+            } else if !ran {
+                return out;
+            }
         }
-        out
     }
     use crate::ui::widgets::tests_support::{assert_tips_add_something, shown};
     use crate::ui::widgets::{TIPS, shot};
-
-    /// In-memory keyring.
-    #[derive(Default)]
-    pub struct MemoryStore(pub RefCell<HashMap<&'static str, String>>);
-
-    impl KeyStore for MemoryStore {
-        fn is_set(&self, p: Provider) -> Result<bool, SecretsError> {
-            Ok(self.0.borrow().contains_key(p.id()))
-        }
-        fn set(&self, p: Provider, key: &Secret) -> Result<(), SecretsError> {
-            self.0.borrow_mut().insert(p.id(), key.expose().to_string());
-            Ok(())
-        }
-        fn delete(&self, p: Provider) -> Result<(), SecretsError> {
-            self.0.borrow_mut().remove(p.id());
-            Ok(())
-        }
-    }
-
-    impl KeyStore<Service> for MemoryStore {
-        fn is_set(&self, s: Service) -> Result<bool, SecretsError> {
-            Ok(self.0.borrow().contains_key(s.key_entry()))
-        }
-        fn set(&self, s: Service, key: &Secret) -> Result<(), SecretsError> {
-            self.0
-                .borrow_mut()
-                .insert(s.key_entry(), key.expose().to_string());
-            Ok(())
-        }
-        fn delete(&self, s: Service) -> Result<(), SecretsError> {
-            self.0.borrow_mut().remove(s.key_entry());
-            Ok(())
-        }
-    }
 
     #[test]
     fn general_has_the_start_with_the_os_switch_on_by_default() {
@@ -2679,7 +2782,7 @@ pub(super) mod tests {
     }
 
     /// Shares a `MemoryStore` between the test and the state.
-    struct Shared(std::rc::Rc<MemoryStore>);
+    struct Shared(Arc<MemoryStore>);
     impl KeyStore for Shared {
         fn is_set(&self, p: Provider) -> Result<bool, SecretsError> {
             self.0.is_set(p)
@@ -2698,8 +2801,8 @@ pub(super) mod tests {
         d.join("config.toml")
     }
 
-    fn state(path: Option<PathBuf>) -> (State, std::rc::Rc<MemoryStore>) {
-        let store = std::rc::Rc::new(MemoryStore::default());
+    fn state(path: Option<PathBuf>) -> (State, Arc<MemoryStore>) {
+        let store = Arc::new(MemoryStore::default());
         let s = State::new(
             Config::default(),
             vec![],
@@ -3198,7 +3301,7 @@ pub(super) mod tests {
         update(&mut s, Message::Provider(Provider::OpenaiCompatible));
         update(&mut s, Message::Provider(Provider::Browser));
         assert!(s.problems.is_empty(), "{:?}", s.problems);
-        assert!(store.0.borrow().is_empty(), "no keyring entry for it");
+        assert!(store.is_empty(), "no keyring entry for it");
     }
 
     #[test]
@@ -3257,6 +3360,109 @@ pub(super) mod tests {
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
+    /// A keyring that blocks `set` until released (or fails it).
+    struct Slow {
+        open: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+        fail: bool,
+    }
+    impl KeyStore for Slow {
+        fn is_set(&self, _: Provider) -> Result<bool, SecretsError> {
+            Ok(false)
+        }
+        fn set(&self, _: Provider, _: &Secret) -> Result<(), SecretsError> {
+            let (lock, cv) = &*self.open;
+            let (_open, timeout) = cv
+                .wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(10), |open| !*open)
+                .unwrap();
+            assert!(!timeout.timed_out(), "never released");
+            match self.fail {
+                true => Err(SecretsError::Failed("keyring refused".into())),
+                false => Ok(()),
+            }
+        }
+        fn delete(&self, _: Provider) -> Result<(), SecretsError> {
+            Ok(())
+        }
+    }
+
+    /// A state on the AI page with `Slow` keys and a fake key typed (built at run time).
+    fn slow_state(
+        fail: bool,
+    ) -> (
+        State,
+        Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+        String,
+    ) {
+        let open: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)> = Arc::default();
+        let store = Slow {
+            open: open.clone(),
+            fail,
+        };
+        let mut s = State::new(Config::default(), vec![], None, Box::new(store));
+        update(&mut s, Message::Provider(Provider::Anthropic));
+        update(&mut s, Message::Section(Section::Ai));
+        let fake = format!("test-{:x}", std::process::id());
+        update(
+            &mut s,
+            Message::ApiKey(KeyMessage::Input(Secret::new(&fake))),
+        );
+        (s, open, fake)
+    }
+
+    fn release(open: &(std::sync::Mutex<bool>, std::sync::Condvar)) {
+        *open.0.lock().unwrap() = true;
+        open.1.notify_all();
+    }
+
+    #[test]
+    fn a_slow_keyring_never_blocks_update_and_the_answer_sets_saved() {
+        let (mut s, open, fake) = slow_state(false);
+        let t = Instant::now();
+        super::update(&mut s, Message::ApiKey(KeyMessage::Save));
+        assert!(
+            t.elapsed() < Duration::from_secs(1),
+            "update waited for the keyring"
+        );
+        let texts = shot::texts(view(&s));
+        assert!(texts.iter().any(|t| t == "Saving…"), "{texts:?}");
+        assert_eq!(*s.key.status(), KeyStatus::NotSet, "not saved yet");
+        assert!(!format!("{s:?}{texts:?}").contains(&fake), "the key leaked");
+        let mut jobs = s.take_key_jobs();
+        assert_eq!(jobs.len(), 1);
+        let (_, job) = jobs.pop().unwrap();
+        let worker = std::thread::spawn(move || job.run());
+        release(&open);
+        super::update(&mut s, Message::ApiKey(worker.join().unwrap()));
+        assert_eq!(*s.key.status(), KeyStatus::Saved);
+        let texts = shot::texts(view(&s));
+        assert!(!texts.iter().any(|t| t == "Saving…"), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t == "Saved in your keyring"),
+            "{texts:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_save_shows_the_error_and_keeps_the_field() {
+        let (mut s, open, fake) = slow_state(true);
+        super::update(&mut s, Message::ApiKey(KeyMessage::Save));
+        let (_, job) = s.take_key_jobs().pop().unwrap();
+        release(&open);
+        super::update(&mut s, Message::ApiKey(job.run()));
+        assert_eq!(*s.key.status(), KeyStatus::NotSet);
+        let texts = shot::texts(view(&s));
+        assert!(
+            texts.iter().any(|t| t.contains("keyring refused")),
+            "{texts:?}"
+        );
+        assert!(!texts.iter().any(|t| t == "Saving…"), "{texts:?}");
+        assert_eq!(
+            s.key.input.expose(),
+            fake,
+            "the typed key stays for a retry"
+        );
+    }
+
     #[test]
     fn the_api_key_is_write_only() {
         let (mut s, store) = state(None);
@@ -3271,8 +3477,8 @@ pub(super) mod tests {
         update(&mut s, Message::Section(Section::Ai));
         update(&mut s, Message::ApiKey(KeyMessage::Save));
         assert_eq!(
-            store.0.borrow()["anthropic"],
-            FAKE_KEY,
+            store.get("anthropic").as_deref(),
+            Some(FAKE_KEY),
             "went to the keyring"
         );
         assert_eq!(*s.key.status(), KeyStatus::Saved);
@@ -3291,7 +3497,7 @@ pub(super) mod tests {
         assert!(!texts.iter().any(|t| t.contains("FAKE")), "{texts:?}");
         update(&mut s, Message::ApiKey(KeyMessage::Cancel));
         update(&mut s, Message::ApiKey(KeyMessage::Remove));
-        assert!(store.0.borrow().is_empty());
+        assert!(store.is_empty());
         assert_eq!(*s.key.status(), KeyStatus::NotSet);
         // The key never reaches the config file either.
         let path = tmp("nokey");

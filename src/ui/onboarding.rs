@@ -14,13 +14,15 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use iced::widget::tooltip::Position;
 use iced::widget::{column, container, row, space};
 use iced::{Element, Length, Size};
 
-use super::settings::{KeyField, KeyMessage, KeyStatus, KeyStore, Keyring, PRESETS, key_labels};
+use super::settings::{KeyField, KeyJob, KeyMessage, KeyStatus, PRESETS, bind, key_labels};
 use crate::config::{Config, Provider, Theme};
+use crate::secrets::{KeyStore, Keyring};
 use crate::ui::theme;
 use crate::ui::widgets::{
     self, FORM_WIDTH, body, caption, divider, error_text, key_cap, label_button, segmented, tip,
@@ -119,7 +121,9 @@ pub struct State {
     theme: Theme,
     choice: Choice,
     key: KeyField,
-    store: Box<dyn KeyStore>,
+    store: Arc<dyn KeyStore>,
+    /// Keyring calls the last message started (`take_key_jobs`).
+    key_jobs: Vec<KeyJob>,
     /// `None` = the real config path.
     path: Option<PathBuf>,
     error: Option<String>,
@@ -186,13 +190,20 @@ impl State {
         }
     }
 
+    /// The keyring calls the last message started: the shell runs them off the UI
+    /// thread and sends each answer back as `Message::ApiKey(KeyMessage::Done)`.
+    pub fn take_key_jobs(&mut self) -> Vec<KeyJob> {
+        std::mem::take(&mut self.key_jobs)
+    }
+
     fn steps(&self) -> &'static [Step] {
         if self.wayland { &WAYLAND_STEPS } else { &STEPS }
     }
 
     pub fn new(base: Config, path: Option<PathBuf>, store: Box<dyn KeyStore>) -> Self {
         theme::apply(base.theme);
-        let key = KeyField::new(&*store, Provider::Anthropic);
+        let store: Arc<dyn KeyStore> = store.into();
+        let key = KeyField::new(bind(&store, Provider::Anthropic));
         State {
             step: Step::Welcome,
             theme: base.theme,
@@ -200,6 +211,7 @@ impl State {
             choice: Choice::Browser,
             key,
             store,
+            key_jobs: Vec::new(),
             path,
             error: None,
             wayland: false,
@@ -245,7 +257,8 @@ impl State {
         // The browser needs no key: nothing to look up.
         let keyed = choice.provider().filter(|p| *p != Provider::Browser);
         if let Some(p) = keyed.filter(|p| Some(p) != before.as_ref()) {
-            self.key.refresh(&*self.store, p);
+            let job = self.key.refresh(bind(&self.store, p));
+            self.key_jobs.push(job);
         }
     }
 
@@ -286,8 +299,11 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         }
         Message::Choose(c) => state.choose(c),
         Message::ApiKey(k) => {
-            if let Some(p) = state.choice.provider().filter(|p| *p != Provider::Browser) {
-                state.key.update(&*state.store, p, k);
+            let p = state.choice.provider().filter(|p| *p != Provider::Browser);
+            // An answer still lands after the user moved to a keyless choice.
+            if p.is_some() || matches!(k, KeyMessage::Done(..)) {
+                let slot = bind(&state.store, p.unwrap_or(Provider::Anthropic));
+                state.key_jobs.extend(state.key.update(slot, k));
             }
         }
         Message::Updates(on) => state.updates = on,
@@ -554,8 +570,18 @@ fn footer(state: &State) -> Element<'_, Message> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::settings::tests::{MemoryStore, tmp};
+    use super::super::settings::tests::tmp;
     use super::*;
+    use crate::secrets::MemoryStore;
+
+    /// `update` with the keyring calls run at once (the shell runs them on a thread).
+    fn update(state: &mut State, message: Message) -> Outcome {
+        let out = super::update(state, message);
+        for job in state.take_key_jobs() {
+            super::update(state, Message::ApiKey(job.run()));
+        }
+        out
+    }
     use crate::secrets::Secret;
     use crate::ui::widgets::tests_support::assert_tips_add_something;
     use crate::ui::widgets::{TIPS, shot};

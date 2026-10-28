@@ -403,32 +403,49 @@ impl Windows {
                     let id = *id;
                     let outcome = settings::update(state, msg);
                     let leaving = state.leaving();
+                    let keys = state.take_key_jobs();
+                    let keys = Task::batch(keys.into_iter().map(|(song, job)| {
+                        super::background(move |tx| {
+                            let _ = tx.unbounded_send(job.run());
+                        })
+                        .map(move |k| {
+                            Msg::Settings(match song {
+                                true => settings::Message::SongKey(k),
+                                false => settings::Message::ApiKey(k),
+                            })
+                        })
+                    }));
                     match outcome {
                         settings::Outcome::Saved(_) => {} // applied above, when the write landed
                         settings::Outcome::Write(w) => {
-                            return super::background(move |tx| {
-                                let _ = tx.unbounded_send(w.run());
-                            })
-                            .map(|d| Msg::Settings(settings::Message::Written(d)));
+                            return Task::batch([
+                                keys,
+                                super::background(move |tx| {
+                                    let _ = tx.unbounded_send(w.run());
+                                })
+                                .map(|d| Msg::Settings(settings::Message::Written(d))),
+                            ]);
                         }
-                        settings::Outcome::Browse => return pick_folder(),
+                        settings::Outcome::Browse => return Task::batch([keys, pick_folder()]),
                         settings::Outcome::OpenLink(url) => open_url(&url),
                         settings::Outcome::CopyDiagnostics => {
                             let report = crate::diagnostics::report(&crate::config::current());
-                            return match crate::actions::copy::text(report) {
+                            let toast = match crate::actions::copy::text(report) {
                                 Ok(()) => self.toast("Diagnostics copied", true, None, TOAST_MS),
                                 Err(e) => {
                                     crate::log!("[opencircle] copy diagnostics failed: {e}");
                                     self.toast("Couldn't copy", false, None, TOAST_MS)
                                 }
                             };
+                            return Task::batch([keys, toast]);
                         }
                         settings::Outcome::CheckUpdate => crate::update::check_now(),
                         settings::Outcome::None => {}
                     }
                     if leaving {
-                        return window::close(id);
+                        return Task::batch([keys, window::close(id)]);
                     }
+                    return keys;
                 }
             }
             Msg::Folder(dir) => {
@@ -456,21 +473,30 @@ impl Windows {
             }
             Msg::Onboarding(msg) => {
                 if let Some((id, state)) = &mut self.onboarding {
-                    match onboarding::update(state, msg) {
+                    let outcome = onboarding::update(state, msg);
+                    let keys = state.take_key_jobs();
+                    let keys = Task::batch(keys.into_iter().map(|job| {
+                        super::background(move |tx| {
+                            let _ = tx.unbounded_send(job.run());
+                        })
+                        .map(|k| Msg::Onboarding(onboarding::Message::ApiKey(k)))
+                    }));
+                    match outcome {
                         onboarding::Outcome::Finished(cfg) => {
                             let id = *id;
                             self.onboarding = None;
                             let notice = tray_notice(&cfg.shortcut);
                             apply(cfg);
                             return Task::batch([
+                                keys,
                                 window::close(id),
                                 self.toast(&notice, Tone::Neutral, None, NOTICE_MS),
                             ]);
                         }
                         onboarding::Outcome::AskScreenshot => {
-                            return ask_screenshot(Msg::Onboarding);
+                            return Task::batch([keys, ask_screenshot(Msg::Onboarding)]);
                         }
-                        onboarding::Outcome::None => {}
+                        onboarding::Outcome::None => return keys,
                     }
                 }
             }
@@ -968,7 +994,7 @@ mod tests {
     use crate::ui::widgets::shot;
 
     struct NoKeys;
-    impl settings::KeyStore for NoKeys {
+    impl crate::secrets::KeyStore for NoKeys {
         fn is_set(&self, _: Provider) -> Result<bool, SecretsError> {
             Ok(false)
         }
