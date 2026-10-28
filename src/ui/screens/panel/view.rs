@@ -279,10 +279,11 @@ impl Panel {
             self.composer(include, streaming)
         };
         let privacy = match (browser, include) {
-            (true, _) => {
+            (true, true) => {
                 "When you send, your question and the text read from the selection go to \
                  Google AI Mode. The image is not uploaded unless you choose Lens."
             }
+            (true, false) => "When you send, only your question goes to Google AI Mode.",
             (false, true) => "Only this selection is sent, and only to the provider you chose.",
             (false, false) => "Only your question is sent, to the provider you chose.",
         };

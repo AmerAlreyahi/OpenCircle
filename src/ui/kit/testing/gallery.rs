@@ -761,15 +761,19 @@ fn button_compact_sheet() {
     sheet("button_compact", Size::new(160.0, 44.0), &rows);
 }
 
-/// `field::slots` with its logo and badge (the bar's AI field).
+/// `field::slots` with its logo, Include screen switch and badge (the bar's
+/// AI field); typed: the switch off.
 #[test]
 fn field_slots_sheet() {
-    use field::{badge, logo, slots};
+    use field::{badge, logo, slots, toggle};
     let view = |typed: bool, focused| {
         move |ar| {
             let parts = (
                 logo(crate::ui::widgets::chrome::logo_handle(), false, ()),
-                badge("AI", false, ()),
+                field::pair(
+                    toggle(super::super::icon::Icon::Screen, !typed, false, ()),
+                    badge("AI", false, ()),
+                ),
             );
             let hint = s(ar, "Ask AI about your screen…", "اسأل عن شاشتك…");
             let value = match typed {

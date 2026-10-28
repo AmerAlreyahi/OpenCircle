@@ -86,11 +86,12 @@ pub fn field<'a, Message: Clone + 'a>(
 }
 
 /// The slotted field's height, the focus ring round it, and its text's room
-/// left and right of the slots (`pl-8 pr-14`).
+/// left and right of the slots (`pl-8`; right: the Include screen switch and
+/// the badge).
 pub const SLOTS_H: f32 = 30.0;
 pub const RING: f32 = 2.0;
 pub const SLOTS_LEFT: f32 = 32.0;
-pub const SLOTS_RIGHT: f32 = 56.0;
+pub const SLOTS_RIGHT: f32 = 80.0;
 /// Its text size.
 pub const SLOTS_TEXT: f32 = 12.0;
 
@@ -216,6 +217,46 @@ pub fn badge<'a, Message: Clone + 'a>(
             border: slot_edge(focused),
             ..button::Style::default()
         })
+        .into()
+}
+
+/// A slot's switch (the AI field's Include screen): `glyph` at 14 px in 20x20,
+/// radius 6; `accent` while `on`, `text_sub` at 45 % while off; `hover`
+/// under the cursor; Tab's focus an `accent` edge.
+pub fn toggle<'a, Message: Clone + 'a>(
+    glyph: super::icon::Icon,
+    on: bool,
+    focused: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use iced::widget::{button, container};
+    let colour = match on {
+        true => c().accent,
+        false => faded(c().text_sub, 0.45),
+    };
+    let glyph = super::icon::icon(glyph, super::tokens::size::ICON_SMALL).color(colour);
+    button(container(glyph).center(20))
+        .padding(0)
+        .on_press(on_press)
+        .style(move |_, status| button::Style {
+            background: match status {
+                button::Status::Hovered | button::Status::Pressed => Some(c().hover.into()),
+                _ => None,
+            },
+            border: slot_edge(focused),
+            ..button::Style::default()
+        })
+        .into()
+}
+
+/// Two slot parts side by side in one slot (the switch, then the badge), 4 px apart.
+pub fn pair<'a, Message: 'a>(
+    first: Element<'a, Message>,
+    second: Element<'a, Message>,
+) -> Element<'a, Message> {
+    iced::widget::row![first, second]
+        .spacing(4)
+        .align_y(iced::Center)
         .into()
 }
 

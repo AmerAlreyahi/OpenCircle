@@ -1842,7 +1842,7 @@ fn hidden_features_have_no_bar_button_key_or_editor_and_turning_them_on_brings_t
     let names = bar_names(&app);
     assert_eq!(
         names,
-        ["Ask AI", "Open OpenCircle AI chat"],
+        ["Ask AI", "Open OpenCircle AI chat", "Screen included"],
         "the design's bar, no Live translate, no Song search, no Edit"
     );
     let texts = overlay_texts(&app);
@@ -1978,6 +1978,7 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
             "Edit image",
             "Live translate (Beta)",
             "Open OpenCircle AI chat",
+            "Screen included",
             "Song search",
         ],
         "{tips:?}"
@@ -2777,11 +2778,12 @@ fn tab_walks_the_bar_in_the_designs_order_and_enter_or_space_press() {
         let _ = app.on_overlay(overlay::Event::Tab { back });
         app.o.bar_focus
     };
-    use bar::Stop::{Badge, Button, Field, Logo};
-    let forward: Vec<_> = (0..8).map(|_| tab(&mut app, false)).collect();
+    use bar::Stop::{Badge, Button, Field, Include, Logo};
+    let forward: Vec<_> = (0..9).map(|_| tab(&mut app, false)).collect();
     let order = [
         Logo,
         Field,
+        Include,
         Badge,
         Button(BarButton::Translate), // Search in browser and Copy text are dimmed
         Button(BarButton::Live),
@@ -3909,4 +3911,34 @@ fn select_text_mode_picks_the_words_windows_ocr_read() {
     assert_eq!(picked.text(), EMAIL);
     assert_eq!(picked.rects(), normal);
     text::MODELS_HERE.set(None);
+}
+
+/// The AI field's Include screen (on by default): Tab reaches it after the
+/// field, Space switches it; it is the chat's switch too (one state both
+/// ways), and off a question goes without the screen.
+#[test]
+fn the_ai_fields_include_screen_is_the_chats_switch() {
+    let mut app = open_app(1280, 720, 1.0);
+    assert!(app.o.include, "on by default");
+    for _ in 0..3 {
+        let _ = app.tab_bar(false);
+    }
+    assert_eq!(app.o.bar_focus, Some(bar::Stop::Include));
+    let _ = app.on_overlay(overlay::Event::Space);
+    assert!(!app.o.include);
+    let _ = app.on_overlay(overlay::Event::Space);
+    assert!(app.o.include, "and back");
+    let _ = app.on_overlay(overlay::Event::Space);
+    // its look follows: accent on, dimmed off (the golden images show both)
+    let _ = app.update(Message::AskInput("what is this?".into()));
+    let _ = app.update(Message::AskSubmit);
+    let (id, panel) = app.o.panel.as_ref().expect("Ask AI opens");
+    assert_eq!(panel.include(), Some(false), "the chat starts off too");
+    // the chat's switch is the field's
+    let id = *id;
+    let _ = app.update(Message::Panel(id, panel::Msg::IncludeScreen));
+    assert!(app.o.include);
+    // a new opening starts on
+    let app = open_app(1280, 720, 1.0);
+    assert!(app.o.include);
 }

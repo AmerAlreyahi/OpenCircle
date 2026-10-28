@@ -11,6 +11,7 @@ use crate::labs::{self, BarButton};
 use crate::ui::app::keys;
 use crate::ui::app::message::Message;
 use crate::ui::app::{ASK_INPUT, ASK_PLACEHOLDERS, App, LIVE, Reader};
+use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::error;
@@ -40,9 +41,19 @@ impl App {
         );
         let badge = field::badge("AI", kbd(Stop::Badge), Message::AskSubmit);
         let top = iced::widget::tooltip::Position::Top;
+        // Include screen: accent while on, dimmed while off (the chat's own switch)
+        let on = self.o.include;
+        let include = field::toggle(Icon::Screen, on, kbd(Stop::Include), Message::IncludeScreen);
+        let named = match on {
+            true => "Screen included",
+            false => "Question only",
+        };
         let slots = (
             widgets::hint(logo, "Open OpenCircle AI chat", Why::Icon, top),
-            widgets::hint(badge, "Ask AI", Why::Keys("Enter"), top),
+            field::pair(
+                widgets::hint(include, named, Why::Icon, top),
+                widgets::hint(badge, "Ask AI", Why::Keys("Enter"), top),
+            ),
         );
         let field = field::slots(
             ASK_INPUT,
@@ -346,6 +357,10 @@ mod tests {
         shoot(&app, "focused");
         app.o.ask = "ما هذا الخطأ؟ what is it".into();
         shoot(&app, "arabic");
+        // Include screen off (dimmed), Tab on it
+        app.o.include = false;
+        app.o.bar_focus = Some(Stop::Include);
+        shoot(&app, "question-only");
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
     }

@@ -136,6 +136,7 @@ impl App {
     pub(in crate::ui) fn activate(&mut self, stop: bar::Stop) -> Task<Message> {
         match stop {
             bar::Stop::Logo => self.update(Message::AskButton),
+            bar::Stop::Include => self.update(Message::IncludeScreen),
             bar::Stop::Badge => self.update(Message::AskSubmit),
             bar::Stop::Button(which) => match self.bar_message(which) {
                 Some(message) => self.update(message),

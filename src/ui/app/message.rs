@@ -75,6 +75,8 @@ pub(in crate::ui) enum Message {
     /// The bottom bar: its ask field's text, Enter in it, its Translate button.
     AskInput(String),
     AskSubmit,
+    /// The AI field's Include screen switch.
+    IncludeScreen,
     /// The bottom bar's buttons: Ask AI (Enter, or the presets with an empty
     /// field), Translate the screen, Live translate, the whole screen in the editor.
     AskButton,

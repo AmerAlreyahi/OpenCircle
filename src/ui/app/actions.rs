@@ -435,7 +435,7 @@ impl App {
                 Some((crop, chat)) => {
                     self.panels = self.panels.wrapping_add(1);
                     let id = self.panels;
-                    let (panel, task) = panel::Panel::open_chat(crop, chat);
+                    let (panel, task) = panel::Panel::open_chat(crop, chat, self.o.include);
                     self.o.panel = Some((id, panel));
                     task.map(move |msg| Message::Panel(id, msg))
                 }

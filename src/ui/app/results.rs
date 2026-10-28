@@ -22,7 +22,7 @@ impl App {
     ) -> Task<Message> {
         self.panels = self.panels.wrapping_add(1);
         let id = self.panels;
-        let (panel, task) = panel::Panel::open(kind, crop, question);
+        let (panel, task) = panel::Panel::open(kind, crop, question, self.o.include);
         self.o.panel = Some((id, panel));
         task.map(move |msg| Message::Panel(id, msg))
     }
@@ -66,7 +66,14 @@ impl App {
                 };
                 return self.open_panel(actions::Panel::Ask, crop, Some(question));
             }
-            msg => return panel.update(msg).map(move |msg| Message::Panel(id, msg)),
+            msg => {
+                let task = panel.update(msg);
+                // the chat's Include screen is the AI field's (one state)
+                if let Some(on) = panel.include() {
+                    self.o.include = on;
+                }
+                return task.map(move |msg| Message::Panel(id, msg));
+            }
         }
         Task::none()
     }

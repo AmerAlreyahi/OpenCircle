@@ -41,11 +41,13 @@ pub enum Icon {
     Arrow,
     Radio,
     Crop,
+    /// lucide "screen-share": the AI field's Include screen.
+    Screen,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 19] = [
+    pub const ALL: [Icon; 20] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -65,6 +67,7 @@ impl Icon {
         Icon::Arrow,
         Icon::Radio,
         Icon::Crop,
+        Icon::Screen,
     ];
 
     pub const fn glyph(self) -> char {
@@ -88,6 +91,7 @@ impl Icon {
             Icon::Arrow => '\u{e497}',
             Icon::Radio => '\u{e145}',
             Icon::Crop => '\u{e0af}',
+            Icon::Screen => '\u{e152}',
         }
     }
 }

@@ -286,6 +286,10 @@ impl App {
             // The AI field (the new design): Enter, its logo or its "AI ↵" badge.
             // A question asks about the selection (before one: the whole
             // screen); an empty field opens Ask AI with its presets.
+            Message::IncludeScreen => {
+                self.o.include = !self.o.include;
+                Task::none()
+            }
             Message::AskSubmit | Message::AskButton => {
                 let question = std::mem::take(&mut self.o.ask);
                 let question = (!question.trim().is_empty()).then_some(question);

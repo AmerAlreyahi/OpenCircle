@@ -114,10 +114,16 @@ enum Browse {
 
 impl Panel {
     /// Opens `kind` for `crop`. `question` (Ask AI only) is sent once ready:
-    /// the user already pressed Enter on it elsewhere (Lens follow-up).
+    /// the user already pressed Enter on it elsewhere (Lens follow-up, the
+    /// bar's AI field); `include`: its Include screen starts on.
     /// Search (Lens) hands the crop to the user's browser at once: the user
     /// picked it.
-    pub fn open(kind: actions::Panel, crop: Crop, question: Option<String>) -> (Panel, Task<Msg>) {
+    pub fn open(
+        kind: actions::Panel,
+        crop: Crop,
+        question: Option<String>,
+        include: bool,
+    ) -> (Panel, Task<Msg>) {
         let crop = Arc::new(crop);
         let mut panel = Panel {
             crop: crop.clone(),
@@ -133,6 +139,9 @@ impl Panel {
             }),
             actions::Panel::Ask => {
                 panel.state = State::ask(Chat::default());
+                if let State::Ask { include: on, .. } = &mut panel.state {
+                    *on = include;
+                }
                 // No key (Google AI Mode): nothing to load (no keyring, no PNG), so
                 // the question goes at once, never "Getting ready…" before it.
                 if crate::config::current().ai.provider == crate::config::Provider::Browser {
@@ -149,14 +158,22 @@ impl Panel {
     }
 
     /// Ask AI, continuing `chat` (e.g. the translate word card's explanation).
-    pub fn open_chat(crop: Crop, mut chat: Chat) -> (Panel, Task<Msg>) {
+    pub fn open_chat(crop: Crop, mut chat: Chat, include: bool) -> (Panel, Task<Msg>) {
         chat.cancel(); // a stream still running belonged to the card; it stopped
-        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None);
+        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None, include);
         if let State::Ask { chat: open, .. } = &mut panel.state {
             *open = chat;
         }
         panel.sync();
         (panel, task)
+    }
+
+    /// Ask AI's Include screen (`None`: not Ask AI).
+    pub fn include(&self) -> Option<bool> {
+        match self.state {
+            State::Ask { include, .. } => Some(include),
+            State::Lens(_) => None,
+        }
     }
 
     pub fn kind(&self) -> actions::Panel {
@@ -374,6 +391,9 @@ impl Panel {
             let question = question.trim();
             if question.is_empty() || chat.status == Status::Streaming {
                 return Task::none();
+            }
+            if !*include {
+                return self.browse(question.into(), false); // the question only
             }
             if !text::models_present() {
                 *browse = Browse::Consent(question.into());

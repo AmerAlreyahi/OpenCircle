@@ -242,6 +242,21 @@ fn an_error_says_why_and_offers_retry() {
     assert_eq!(chat(&panel).turns.len(), 1);
 }
 
+/// Opened with Include screen off (the bar's AI field switched it off): the
+/// question the field handed over goes without the picture.
+#[test]
+fn opened_with_include_screen_off_the_question_goes_alone() {
+    let (mut panel, _) = Panel::open(actions::Panel::Ask, sample_crop(), None, false);
+    assert_eq!(panel.include(), Some(false));
+    let _ = panel.update(Msg::Input("What is this?".into()));
+    let setup = ask::tests::local_setup("http://127.0.0.1:9/v1".into());
+    let _ = panel.update(Msg::Ready(Ok(Arc::new(setup))));
+    let turns = &chat(&panel).turns;
+    assert_eq!(turns.len(), 1, "sent once ready");
+    assert!(!turns[0].screen, "no image in the request");
+    assert_eq!(panel.include(), Some(false));
+}
+
 #[test]
 fn the_screen_goes_only_while_include_screen_is_on() {
     let mut panel = api_chat();

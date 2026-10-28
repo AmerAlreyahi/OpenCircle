@@ -57,6 +57,8 @@ pub enum Stop {
     Logo,
     /// The AI field.
     Field,
+    /// The Include screen switch.
+    Include,
     /// The "AI ↵" badge.
     Badge,
     Button(BarButton),
@@ -70,7 +72,7 @@ pub fn stops(selected: bool, shown: &[BarButton]) -> Vec<Stop> {
     let live = |b: &BarButton| selected || !matches!(b, BarButton::Search | BarButton::CopyText);
     let pills = shown.iter().filter(|b| b.is_pill() && live(b));
     let icons = shown.iter().filter(|b| !b.is_pill());
-    [Stop::Logo, Stop::Field, Stop::Badge]
+    [Stop::Logo, Stop::Field, Stop::Include, Stop::Badge]
         .into_iter()
         .chain(pills.chain(icons).map(|b| Stop::Button(*b)))
         .collect()
@@ -323,6 +325,7 @@ mod tests {
             [
                 Stop::Logo,
                 Stop::Field,
+                Stop::Include,
                 Stop::Badge,
                 b(BarButton::Translate),
                 b(BarButton::Live),
@@ -331,7 +334,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            order(true)[3..6],
+            order(true)[4..7],
             [
                 b(BarButton::Search),
                 b(BarButton::CopyText),

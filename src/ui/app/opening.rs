@@ -94,6 +94,9 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) clicks: Option<(Instant, Point, u8)>,
     /// The ask bar's text.
     pub(in crate::ui) ask: String,
+    /// Include screen (the AI field's switch and the chat's, one state): a
+    /// question goes with the selection or the screen; off, the question only.
+    pub(in crate::ui) include: bool,
     /// Shown but still fully clear (`show`): fades in once its first full
     /// frame is drawn (`first_draw` taken), or after `REVEAL_WAIT` anyway.
     pub(in crate::ui) reveal: Option<Instant>,
@@ -196,6 +199,7 @@ impl Default for Opening {
             labs: Labs::default(),
             clicks: None,
             ask: String::new(),
+            include: true,
             reveal: None,
             panel: None,
             lens_pages: Vec::new(),
