@@ -182,6 +182,11 @@ production systems.
 - AI marks and loading (owner, 2026-10-28): no generic AI icons (sparkles etc.); every AI marker
   uses the OpenCircle logo. Loading = the logo's circle spinning (kit spinner; frame clock only while
   it spins; reduced motion = still logo).
+- Pinned AI chat (owner, 2026-10-28): a quick question behaves as today (outside click / Esc closes);
+  a follow-up pins the chat (outside clicks no longer close it; it stays docked above other apps after the
+  overlay closes; a new capture asks into the SAME chat with its crop). A header pin button pins by hand
+  and, when pinned, unpins and closes (the only exit; no x). Settings > AI "AI chat stays open":
+  After a follow-up (default) | Always. Designed by Codex first; owner approves the screenshots.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.
