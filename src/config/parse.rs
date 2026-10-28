@@ -229,6 +229,18 @@ impl Config {
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
         }
+        // Schema 4: translate is on-device unless the user chose AI for it.
+        // Before, "ai" was the default and only ever ran with an API provider
+        // (the browser one fell back to on-device); kept that way, picking a
+        // chat provider later would start sending page text to it.
+        if file_version < Some(4)
+            && !matches!(
+                c.ai.provider,
+                Provider::Anthropic | Provider::OpenaiCompatible
+            )
+        {
+            c.translate.engine = Engine::Offline;
+        }
 
         // One physical shortcut = one job: the first user of a combination keeps it.
         let mut taken: HashSet<HotKey> = HashSet::new();
