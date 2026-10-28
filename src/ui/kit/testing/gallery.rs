@@ -263,7 +263,7 @@ fn segmented_sheet() {
         row("3, hover", Act::Hover, three),
         row("3, pressed", Act::Press, three),
     ];
-    sheet("segmented", Size::new(240.0, 48.0), &rows);
+    sheet("segmented", Size::new(320.0, 48.0), &rows);
 }
 
 #[test]
@@ -373,23 +373,14 @@ fn scroll_sheet() {
 fn setting_row_sheet() {
     use segmented::boolean;
     let off_on = |ar| [s(ar, "Off", "إيقاف"), s(ar, "On", "تشغيل")];
-    let rows = vec![
-        row("row", Act::Rest, move |ar| {
-            setting_row::row(
-                setting_row::title(s(ar, "Start with Windows", "التشغيل مع ويندوز")),
-                s(ar, "Waits in the tray", "ينتظر في شريط المهام"),
-                boolean(off_on(ar), true, true, 1.0, |_| ()),
-            )
-        }),
-        row("wide", Act::Rest, move |ar| {
-            setting_row::wide(
-                setting_row::title(s(ar, "Default action", "الإجراء الافتراضي")),
-                s(ar, "What Enter does", "ما يفعله Enter"),
-                boolean(off_on(ar), false, false, 1.0, |_| ()),
-            )
-        }),
-    ];
-    sheet("setting_row", Size::new(360.0, 120.0), &rows);
+    let rows = vec![row("row", Act::Rest, move |ar| {
+        setting_row::row(
+            setting_row::title(s(ar, "Start with Windows", "التشغيل مع ويندوز")),
+            s(ar, "Waits in the tray", "ينتظر في شريط المهام"),
+            boolean(off_on(ar), true, true, 1.0, |_| ()),
+        )
+    })];
+    sheet("setting_row", Size::new(560.0, 120.0), &rows);
 }
 
 #[test]

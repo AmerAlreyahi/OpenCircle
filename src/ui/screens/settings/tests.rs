@@ -1258,12 +1258,7 @@ fn the_text_reading_page_is_windows_only_and_saves() {
     // listed on Windows only (Linux has the one reader); the page holds the engine
     assert_eq!(sidebar(&s).contains(&"Text reading"), cfg!(windows));
     let texts = page(&mut s, Section::TextReading);
-    for want in [
-        "Engine",
-        "Auto",
-        "Fast (Windows built-in)",
-        "Accurate (PaddleOCR)",
-    ] {
+    for want in ["Engine", "Auto", "Fast", "Accurate"] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
     let look = page(&mut s, Section::Look);
@@ -1513,6 +1508,41 @@ fn the_header_reports_its_caption_buttons() {
         Outcome::None
     );
     assert!(!s.dirty());
+}
+
+/// Settings harmony (owner, 2026-10-28): on every page, every row's control
+/// has the same left edge and width, laid out as the window draws it (every
+/// Labs feature on, the AI page with a server of your own and its key rows).
+#[test]
+fn every_rows_control_shares_one_column_on_every_page() {
+    use crate::ui::kit::setting_row::CONTROL;
+    use crate::ui::kit::tokens::size;
+    let (mut s, _) = state(None);
+    s.draft.labs = Labs::all_on();
+    s.draft.look.theme = LookTheme::Custom;
+    update(&mut s, Message::Provider(Provider::OpenaiCompatible));
+    update(
+        &mut s,
+        Message::BaseUrl("http://192.168.1.2:8080/v1".into()),
+    );
+    let mut columns = Vec::new();
+    let shown: Vec<_> = pages::visible(&s.draft.labs).collect();
+    for page in shown {
+        update(&mut s, Message::Section(page.id));
+        let found = shot::containers(view(&s), WINDOW_SIZE, CONTROL);
+        if !matches!(page.id, Section::Privacy) {
+            assert!(!found.is_empty(), "{}: no rows", page.title);
+        }
+        columns.extend(found.into_iter().map(|b| (page.title, b.x, b.width)));
+    }
+    let (_, x, width) = columns[0];
+    assert_eq!(width, size::CONTROL_COLUMN);
+    for (page, at, w) in columns {
+        assert!(
+            (at - x).abs() < 0.5 && (w - width).abs() < 0.5,
+            "{page}: a control at x {at}, {w} wide; the column is x {x}, {width} wide"
+        );
+    }
 }
 
 /// The ported pages (General, About, Labs) as drawn, in Sapphire and

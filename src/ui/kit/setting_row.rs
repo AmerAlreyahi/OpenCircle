@@ -1,22 +1,23 @@
 //! `SettingRow`: a title (13 px / 500, `title`) and a description (11.5 px,
 //! `text_sub`) on the left, the control on the right, a hairline under it.
-//! `wide` (a long segmented control) puts the control under the text, at the
-//! right, as the design's row wraps it.
-use iced::widget::{Space, column, container};
-use iced::{Element, Fill, Length, Padding};
+//! Every row's control sits in one column (owner, 2026-10-28): the same left
+//! edge and width (`size::CONTROL_COLUMN`) on every page, centred on the
+//! row, which is at least `size::ROW_MIN` tall inside the same padding.
+use iced::widget::{Id, Space, column, container};
+use iced::{Element, Fill, Padding};
 
 use super::divider::divider;
-use super::tokens::{Role, space};
+use super::tokens::{Role, size, space};
 
 /// The description's gap under the title (`mt-0.5`).
 const DESC_GAP: f32 = 2.0;
 /// Between the text and the control (`gap-x-4`), and its right pad (`pr-2`).
 const GAP: f32 = 16.0;
 const TEXT_PAD: f32 = 8.0;
-/// A wide row's gap between the text and the control under it (`gap-y-2.5`).
-const WIDE_GAP: f32 = 10.0;
 /// A block's gap between the text and its cards (`space-y-2`).
 const BLOCK_GAP: f32 = 8.0;
+/// The control column's container (the layout test finds every row's).
+pub const CONTROL: &str = "setting-row-control";
 
 /// A row's title: `ROW_TITLE` text.
 pub fn title<'a, Message: 'a>(s: &'a str) -> Element<'a, Message> {
@@ -34,14 +35,11 @@ fn text_block<'a, Message: 'a>(
     block
 }
 
-fn ruled<'a, Message: 'a>(
-    content: impl Into<Element<'a, Message>>,
-    pad: f32,
-) -> Element<'a, Message> {
-    column![container(content).padding([pad, 0.0]), divider()].into()
+fn ruled<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    column![container(content).padding([space::ROW_Y, 0.0]), divider()].into()
 }
 
-/// A row 10 px top and bottom.
+/// The text, then the control in the page's control column.
 pub fn row<'a, Message: 'a>(
     title: Element<'a, Message>,
     desc: &'a str,
@@ -50,11 +48,18 @@ pub fn row<'a, Message: 'a>(
     let text = container(text_block(title, desc))
         .width(Fill)
         .padding(Padding::ZERO.right(TEXT_PAD));
+    let control = container(control)
+        .id(Id::new(CONTROL))
+        .width(size::CONTROL_COLUMN);
     ruled(
-        iced::widget::row![text, control.into()]
-            .spacing(GAP)
-            .align_y(iced::Center),
-        space::ROW_Y,
+        // (the strut keeps a short row at the least height)
+        iced::widget::row![
+            Space::new().height(size::ROW_MIN),
+            text,
+            Space::new().width(GAP),
+            control
+        ]
+        .align_y(iced::Center),
     )
 }
 
@@ -65,23 +70,5 @@ pub fn block<'a, Message: 'a>(
     desc: &'a str,
     content: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    ruled(
-        column![text_block(title, desc), content.into()].spacing(BLOCK_GAP),
-        space::ROW_Y,
-    )
-}
-
-/// A row 12 px top and bottom with the control under the text, at the right.
-pub fn wide<'a, Message: 'a>(
-    title: Element<'a, Message>,
-    desc: &'a str,
-    control: impl Into<Element<'a, Message>>,
-) -> Element<'a, Message> {
-    let control = iced::widget::row![Space::new().width(Fill), control.into()];
-    ruled(
-        column![text_block(title, desc), control]
-            .spacing(WIDE_GAP)
-            .width(Length::Fill),
-        space::ROW_Y_WIDE,
-    )
+    ruled(column![text_block(title, desc), content.into()].spacing(BLOCK_GAP))
 }

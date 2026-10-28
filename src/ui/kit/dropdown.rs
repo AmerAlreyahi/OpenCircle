@@ -1,6 +1,6 @@
-//! A dropdown: the design's language selector (`.oc-input w-[190px]`, the
-//! value and "▾") and its menu (`.oc-dropdown-menu`: the `dropdown` material,
-//! a `rim` edge, radius 14; the item under the cursor on `elevated`). The
+//! A dropdown: the design's language selector (`.oc-input`, as wide as a
+//! settings row's control column; the value and "▾") and its menu
+//! (`.oc-dropdown-menu`: the `dropdown` material, a `rim` edge, radius 14; the item under the cursor on `elevated`). The
 //! design only cycles its selectors; this one opens iced's list (no fly-in:
 //! the list can't animate, and its rows can't round their corners).
 use iced::widget::pick_list::{self, Handle, Icon, PickList};
@@ -9,10 +9,8 @@ use iced::{Border, Element, Shadow};
 
 use super::text::{MONO, font};
 use super::themes::c;
-use super::tokens::{Role, radius};
+use super::tokens::{Role, radius, size};
 
-/// `w-[190px]`.
-pub const WIDTH: f32 = 190.0;
 /// The list draws its rows with the field's line and padding: 12 px text on
 /// iced's 1.3 line, 7x11 px round it (32 px with the edge, as `.oc-input`).
 const LINE: f32 = 1.3;
@@ -33,7 +31,7 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
         .text_size(role.size)
         .text_line_height(LINE)
         .padding(PAD)
-        .width(WIDTH)
+        .width(size::CONTROL_COLUMN)
         .handle(Handle::Static(Icon {
             font: MONO,
             code_point: '▾',

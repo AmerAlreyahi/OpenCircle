@@ -34,7 +34,6 @@ pub mod space {
     pub const TRACK_PAD: f32 = 3.0;
     pub const TRACK_GAP: f32 = 2.0;
     pub const ROW_Y: f32 = 10.0;
-    pub const ROW_Y_WIDE: f32 = 12.0;
     pub const PAGE: [f32; 2] = [16.0, 20.0];
     pub const CARD: [f32; 2] = [9.0, 10.0];
     pub const SIDEBAR_PAD: f32 = 10.0;
@@ -50,7 +49,13 @@ pub mod size {
     pub const CAPTION_BUTTON: f32 = 46.0;
     pub const SIDEBAR: f32 = 168.0;
     pub const NAV_ITEM: f32 = 36.0;
-    pub const SHORTCUT: Size = Size::new(224.0, 36.0);
+    /// A settings page's control column (owner, 2026-10-28: every row's
+    /// control has this one left edge and width; `setting_row`).
+    pub const CONTROL_COLUMN: f32 = 300.0;
+    /// A settings row's least height inside its padding (a one-line
+    /// description beside a 36 px control).
+    pub const ROW_MIN: f32 = 38.0;
+    pub const SHORTCUT: Size = Size::new(CONTROL_COLUMN, 36.0);
     pub const KEYCAP_H: f32 = 24.0;
     pub const CTA_H: f32 = 44.0;
     pub const ICON: f32 = 16.0;

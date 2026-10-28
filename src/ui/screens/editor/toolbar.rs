@@ -379,7 +379,7 @@ fn colour_popover(e: &Editor) -> Element<'_, Message> {
         (Width::Medium, "Medium"),
         (Width::Thick, "Thick"),
     ];
-    let weight = segmented::segmented(&weights, e.width, e.width, 1.0, Message::Width);
+    let weight = segmented::inline(&weights, e.width, e.width, 1.0, Message::Width);
     let eyedropper = hinted(
         icon_button::square(PIPETTE, State::default(), Some(Message::Eyedropper)),
         "Pick a colour from the image",

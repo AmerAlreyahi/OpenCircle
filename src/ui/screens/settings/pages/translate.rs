@@ -17,9 +17,6 @@ use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::widgets::tip;
 
-/// The live refresh's field (`w-[120px]`).
-const INTERVAL_WIDTH: f32 = 120.0;
-
 pub fn view(state: &State) -> Element<'_, Message> {
     let t = &state.draft.translate;
     let (from, glide) = state.thumb(t.engine, |p| match p {
@@ -66,12 +63,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
     // Live translate is a Labs feature (until 0.3.0): its row only while on.
     if state.draft.labs.has(Feature::Live) {
         let problem = issue(&state.problems, "translate.live_interval_ms");
-        let field = input("1500", &state.interval, true, problem.is_some())
-            .on_input(Message::LiveInterval)
-            .width(INTERVAL_WIDTH);
+        let field =
+            input("1500", &state.interval, true, problem.is_some()).on_input(Message::LiveInterval);
         let mut control = column![tip(field, "Live translate refresh interval", Position::Top)]
-            .spacing(space::GAP)
-            .align_x(iced::Right);
+            .spacing(space::GAP);
         if let Some(e) = problem {
             control = control.push(error(Role::ROW_DESC, e));
         }
@@ -90,9 +85,7 @@ fn language_row<'a>(
     picker: Element<'a, Message>,
     key: &str,
 ) -> Element<'a, Message> {
-    let mut control = column![tip(picker, name, Position::Top)]
-        .spacing(space::GAP)
-        .align_x(iced::Right);
+    let mut control = column![tip(picker, name, Position::Top)].spacing(space::GAP);
     if let Some(e) = issue(&state.problems, key) {
         control = control.push(error(Role::ROW_DESC, e));
     }

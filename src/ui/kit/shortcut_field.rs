@@ -1,5 +1,6 @@
-//! `.oc-shortcut-box`: a shortcut as one keycap per key, 224x36 for every
-//! shortcut (owner rule: every shortcut field the same width), `track` with a
+//! `.oc-shortcut-box`: a shortcut as one keycap per key, as wide as a
+//! settings row's control column and 36 px tall for every shortcut (owner
+//! rule: every shortcut field the same width), `track` with a
 //! `rim` edge, radius 10. Three cells (more for a longer shortcut), the keys
 //! at the right, the rest `keycap::empty`; no keys = "Not set". Under the
 //! cursor the edge is `accent`; recording (the design has no look for it) is

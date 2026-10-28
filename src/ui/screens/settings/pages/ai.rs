@@ -18,11 +18,6 @@ use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::widgets::tip;
 
-/// A URL, model or key field (the design's `w-[260px]`).
-pub(super) const FIELD_WIDTH: f32 = 260.0;
-/// The key field with its buttons beside it.
-const KEY_WIDTH: f32 = 340.0;
-
 pub fn view(state: &State) -> Element<'_, Message> {
     let ai = &state.draft.ai;
     let compat = ai.provider == Provider::OpenaiCompatible;
@@ -77,12 +72,11 @@ pub fn provider_row(state: &State) -> Element<'_, Message> {
     let mut provider = column![segmented(&options, now, now, 1.0, |c: Choice| {
         Message::Provider(c.provider())
     })]
-    .spacing(space::GAP)
-    .align_x(iced::Right);
+    .spacing(space::GAP);
     if let Some(e) = issue(&state.problems, "ai.provider") {
         provider = provider.push(error(Role::ROW_DESC, e));
     }
-    setting_row::wide(
+    setting_row::row(
         title("Provider"),
         match ai.provider {
             Provider::Browser => "Google AI Mode in your browser. No key",
@@ -157,12 +151,8 @@ fn text_row<'a>(
     on_input: fn(String) -> Message,
 ) -> Element<'a, Message> {
     let problem = issue(&state.problems, key);
-    let field = input(placeholder, value, true, problem.is_some())
-        .on_input(on_input)
-        .width(FIELD_WIDTH);
-    let mut control = column![tip(field, name, Position::Top)]
-        .spacing(space::GAP)
-        .width(FIELD_WIDTH);
+    let field = input(placeholder, value, true, problem.is_some()).on_input(on_input);
+    let mut control = column![tip(field, name, Position::Top)].spacing(space::GAP);
     if let Some(e) = problem {
         control = control.push(error(Role::ROW_DESC, e));
     }
@@ -214,7 +204,7 @@ impl KeyField {
         if wait.is_none() {
             line = line.extend(buttons);
         }
-        let mut col = column![line].spacing(space::GAP).width(KEY_WIDTH);
+        let mut col = column![line].spacing(space::GAP);
         if let Some(w) = wait {
             col = col.push(row![Space::new().width(Fill), sub(Role::ROW_DESC, w)]);
         }

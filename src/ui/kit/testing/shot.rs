@@ -349,6 +349,31 @@ pub fn texts<Message>(view: Element<'_, Message>) -> Vec<String> {
     collect.0
 }
 
+/// The bounds of every container of `view` (laid out in `size`) whose id is `id`.
+pub fn containers<Message>(
+    view: Element<'_, Message>,
+    size: Size,
+    id: &'static str,
+) -> Vec<Rectangle> {
+    use iced::advanced::widget::{Id, Operation};
+    struct Find(Id, Vec<Rectangle>);
+    impl Operation for Find {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+        fn container(&mut self, id: Option<&Id>, bounds: Rectangle) {
+            if id == Some(&self.0) {
+                self.1.push(bounds);
+            }
+        }
+    }
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut find = Find(Id::new(id), Vec::new());
+    ui.operate(&renderer, &mut find);
+    find.1
+}
+
 /// The texts of `view` laid out in `size` that the user can't bring into
 /// view: squeezed to nothing, or outside the window and not in a scroll area.
 pub fn out_of_reach<Message>(view: Element<'_, Message>, size: Size) -> Vec<String> {

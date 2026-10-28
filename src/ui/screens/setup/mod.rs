@@ -784,7 +784,7 @@ impl State {
                 let data = row![
                     ktext::sub(Role::ROW_DESC, EN.your_data),
                     Space::new().width(Fill),
-                    segmented::boolean(
+                    segmented::inline_boolean(
                         [EN.keep, EN.remove],
                         self.remove_data,
                         self.data_glide.0,
@@ -907,7 +907,7 @@ impl State {
                 let start = row![
                     ktext::sub(Role::ROW_DESC, EN.start_with_windows),
                     Space::new().width(Fill),
-                    segmented::boolean(
+                    segmented::inline_boolean(
                         [EN.off, EN.on],
                         self.autostart,
                         self.autostart_glide.0,

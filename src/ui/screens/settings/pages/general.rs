@@ -15,8 +15,6 @@ use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::widgets::{Why, hint, tip};
 
-/// The save folder's field (`w-[260px]`).
-const FOLDER_WIDTH: f32 = 260.0;
 const OFF_ON: [&str; 2] = ["Off", "On"];
 
 pub fn view(state: &State) -> Element<'_, Message> {
@@ -32,7 +30,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         (DefaultAction::Text, "Text"),
         (DefaultAction::Copy, "Copy"),
     ];
-    let mut rows = column![setting_row::wide(
+    let mut rows = column![setting_row::row(
         title("Default action"),
         "What Enter does after you select something",
         segmented(
@@ -139,7 +137,7 @@ fn folder(state: &State) -> Element<'_, Message> {
         None::<fn(String) -> Message>,
         Message::BrowseFolder,
     ))
-    .width(FOLDER_WIDTH);
+    .width(Fill);
     let value = if folder.is_empty() || shorten(folder) == folder {
         tip(value, "Save folder", Position::Top)
     } else {
@@ -164,8 +162,7 @@ fn folder(state: &State) -> Element<'_, Message> {
         ]
         .spacing(space::GAP),
     ]
-    .spacing(space::GAP)
-    .width(FOLDER_WIDTH);
+    .spacing(space::GAP);
     if let Some(e) = issue(&state.problems, "general.save_folder") {
         col = col.push(error(Role::ROW_DESC, e));
     }

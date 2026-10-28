@@ -48,8 +48,7 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
         };
         let mut control =
             column![row![dot(0, "First colour"), dot(1, "Second colour")].spacing(space::GAP)]
-                .spacing(space::GAP)
-                .align_x(iced::Right);
+                .spacing(space::GAP);
         if let Some(i) = state.picker {
             control = control.push(picker(
                 &theme::ANNOTATION,

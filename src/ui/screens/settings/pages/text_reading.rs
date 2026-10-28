@@ -24,16 +24,15 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let mut control = column![segmented(
         &[
             (TextReader::Auto, "Auto"),
-            (TextReader::Windows, "Fast (Windows built-in)"),
-            (TextReader::PpOcr, "Accurate (PaddleOCR)"),
+            (TextReader::Windows, "Fast"),
+            (TextReader::PpOcr, "Accurate"),
         ],
         reader,
         from,
         t,
         Message::TextReader,
     )]
-    .spacing(space::GAP)
-    .align_x(iced::Right);
+    .spacing(space::GAP);
     if let Some(note) = state.reader_note() {
         let add = button(
             label("Add in Windows"),
@@ -44,9 +43,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
             .push(sub(Role::ROW_DESC, note))
             .push(row![Space::new().width(iced::Fill), add]);
     }
-    setting_row::wide(
+    setting_row::row(
         title("Engine"),
-        "Auto picks the best engine for the language on screen",
+        "Auto picks the best for the language on screen. Fast: Windows' own; Accurate: PaddleOCR",
         control,
     )
 }

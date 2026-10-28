@@ -61,7 +61,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         "Recent songs, kept only on this PC. Off deletes them",
         boolean(["Off", "On"], song.history, from, t, Message::SongHistory),
     ));
-    rows.push(Space::new().height(space::ROW_Y_WIDE))
+    rows.push(Space::new().height(space::ROW_Y))
         .push(card(sub(Role::NOTE, SONG_PRIVACY)))
         .into()
 }

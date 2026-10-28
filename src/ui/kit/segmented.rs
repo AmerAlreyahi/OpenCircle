@@ -4,7 +4,7 @@ use iced::widget::{Space, button, container, row, stack, text};
 use iced::{Border, Element, Fill};
 
 use super::themes::c;
-use super::tokens::{Role, radius, space};
+use super::tokens::{Role, radius, size, space};
 
 /// A pill's width: its label (12 px / 500) and 12 px each side, at least 42 px
 /// (the design's Off / On are 45 / 42 px) and 7 px a letter (the design's
@@ -16,8 +16,30 @@ fn pill_width(label: &str) -> f32 {
 
 /// Radius 10 track (`track`, divider edge, 3 px inside), 7.5 px pills; the
 /// thumb (`elevated`) slides from `from` to `chosen` as `glide` goes 0 → 1
-/// (the caller's clock: `motion::GLIDE`, standard).
+/// (the caller's clock: `motion::GLIDE`, standard). As wide as a settings
+/// row's control column (`size::CONTROL_COLUMN`): the room left over is
+/// shared out equally between the pills.
 pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
+    options: &[(T, &'a str)],
+    chosen: T,
+    from: T,
+    glide: f32,
+    on: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message> {
+    let mut widths: Vec<f32> = options.iter().map(|&(_, l)| pill_width(l)).collect();
+    let n = widths.len().max(1) as f32;
+    let room = size::CONTROL_COLUMN
+        - 2.0 * space::TRACK_PAD
+        - space::TRACK_GAP * (n - 1.0)
+        - widths.iter().sum::<f32>();
+    for w in &mut widths {
+        *w += (room / n).max(0.0);
+    }
+    track(options, &widths, Role::CONTROL, chosen, from, glide, on)
+}
+
+/// `segmented` only as wide as its labels (a toolbar, the installer).
+pub fn inline<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     options: &[(T, &'a str)],
     chosen: T,
     from: T,
@@ -139,6 +161,23 @@ pub fn boolean<'a, Message: Clone + 'a>(
     pick: impl Fn(bool) -> Message + 'a,
 ) -> Element<'a, Message> {
     segmented(
+        &[(false, labels[0]), (true, labels[1])],
+        on,
+        from,
+        glide,
+        pick,
+    )
+}
+
+/// `boolean` only as wide as its labels (the installer).
+pub fn inline_boolean<'a, Message: Clone + 'a>(
+    labels: [&'a str; 2],
+    on: bool,
+    from: bool,
+    glide: f32,
+    pick: impl Fn(bool) -> Message + 'a,
+) -> Element<'a, Message> {
+    inline(
         &[(false, labels[0]), (true, labels[1])],
         on,
         from,
