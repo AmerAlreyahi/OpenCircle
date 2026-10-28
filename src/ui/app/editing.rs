@@ -1,6 +1,19 @@
 //! The editor on a capture: opening it, its messages, the bar swap.
 
-use crate::ui::*;
+use iced::widget::image;
+use iced::{Task, Vector};
+
+use crate::actions::{self, Crop, copy, save};
+use crate::editor::{self, Output};
+use crate::labs::{self};
+
+use crate::ui::app::message::{Message, Purpose};
+use crate::ui::edit::Editing;
+use crate::ui::kit::motion;
+use crate::ui::snip;
+
+use super::capture::TEST_SHOT;
+use super::{App, work_area};
 
 impl App {
     /// Edit in place: the selection's pixels become the editor's canvas, at their

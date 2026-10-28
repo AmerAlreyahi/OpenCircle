@@ -13,9 +13,10 @@ use crate::labs::{BarButton, Labs};
 use crate::ocr;
 use crate::ui::app::message::{Await, BarKeys, Grab, Purpose};
 use crate::ui::app::word;
+use crate::ui::app::{Reader, TextMode};
 use crate::ui::edit::Editing;
 use crate::ui::kit::motion;
-use crate::ui::{Reader, TextMode, bar, overlay, panel, song, translate, widgets};
+use crate::ui::{bar, overlay, panel, song, translate, widgets};
 
 pub(in crate::ui) struct Opening {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.

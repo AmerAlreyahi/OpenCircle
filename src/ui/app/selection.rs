@@ -1,6 +1,19 @@
 //! The selection: overlay events, grabbing, moving, snapping, remembering.
 
-use crate::ui::*;
+use std::time::{Duration, Instant};
+
+use iced::{Point, Rectangle, Size, Task, Vector};
+
+use crate::actions::{self};
+use crate::config::{self, SelectStyle};
+
+use crate::ui::app::background::background;
+use crate::ui::app::message::{Grab, Message, Purpose};
+use crate::ui::app::word;
+use crate::ui::edit::Editing;
+use crate::ui::{overlay, snip, translate};
+
+use super::App;
 
 impl App {
     pub(in crate::ui) fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {

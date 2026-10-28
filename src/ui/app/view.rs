@@ -1,6 +1,19 @@
 //! The overlay's view (moves to ui/screens with the UI plan).
 
-use crate::ui::*;
+use iced::widget::{canvas, container, image, opaque, space, stack};
+use iced::window::{self};
+use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Vector};
+
+use crate::actions::qr;
+use crate::config::{self};
+
+use crate::ui::app::message::{Message, Purpose};
+use crate::ui::app::word;
+use crate::ui::kit::motion;
+use crate::ui::widgets::card;
+use crate::ui::{bar, border, glass, overlay, widgets};
+
+use super::{App, CHIP_SPACE, HINT, PROTECTED, QR_WIDTH, SLIDE, TextMode};
 
 impl App {
     pub(in crate::ui) fn view(&self, window: window::Id) -> Element<'_, Message> {
@@ -241,4 +254,43 @@ impl App {
         }
         layers.into()
     }
+}
+
+/// The card at `at`, `grown` of the way open: from `motion::OPEN_SCALE` to its
+/// size, about its own middle (the design's open, without its fade: the CPU
+/// renderer has no alpha for a group of widgets). Plain once open.
+pub(in crate::ui) fn grow(
+    card: Element<'_, Message>,
+    at: Rectangle,
+    grown: f32,
+) -> Element<'_, Message> {
+    if grown >= 1.0 {
+        return card;
+    }
+    let s = motion::OPEN_SCALE + (1.0 - motion::OPEN_SCALE) * grown;
+    let middle = at.center();
+    iced::widget::float(card)
+        .scale(s)
+        .translate(move |bounds, _| (middle - bounds.center()) * (1.0 - s))
+        .into()
+}
+
+/// Where the chips (`size`) go: centred under the box `area`, `CHIP_SPACE`
+/// below it, else above it; inside `room` (logical px), never on the box
+/// unless it fills the screen.
+pub(in crate::ui) fn chips_at(area: Rectangle, size: Size, room: Rectangle) -> Point {
+    let x = (area.center_x() - size.width / 2.0)
+        .min(room.x + room.width - bar::GAP - size.width)
+        .max(room.x + bar::GAP);
+    let (top, bottom) = (room.y + bar::GAP, room.y + room.height - bar::GAP);
+    let below = area.y + area.height + CHIP_SPACE;
+    let above = area.y - CHIP_SPACE - size.height;
+    let y = if below + size.height <= bottom {
+        below
+    } else if above >= top {
+        above
+    } else {
+        bottom - size.height // the box fills the screen: on it, at the bottom
+    };
+    Point::new(x, y)
 }

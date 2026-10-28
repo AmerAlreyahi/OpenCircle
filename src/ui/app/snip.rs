@@ -1,6 +1,24 @@
 //! Snip mode: its pill, timer, capture routing and scrolling capture.
 
-use crate::ui::*;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
+
+use iced::widget::image;
+use iced::window::{self, Mode};
+use iced::{Point, Rectangle, Task, Vector};
+
+use crate::actions::{self, Crop, Run, copy};
+use crate::capture;
+use crate::config::{self};
+use crate::labs::{self};
+
+use crate::ui::app::background::background;
+use crate::ui::app::message::{Message, Purpose};
+use crate::ui::edit::Editing;
+use crate::ui::{bar, snip, widgets, windows};
+
+use super::{ASK_MARGIN, App, work_area};
 
 impl App {
     pub(in crate::ui) fn on_snip(&mut self, msg: snip::Msg) -> Task<Message> {

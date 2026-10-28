@@ -1,6 +1,19 @@
 //! The result panel and card, and the crops they take.
 
-use crate::ui::*;
+use iced::futures::channel::mpsc::UnboundedSender;
+use iced::widget::image;
+use iced::{Rectangle, Task};
+
+use crate::actions::{self, Crop, lens, stack_crops};
+
+use crate::ui::app::background::background;
+use crate::ui::app::keys;
+use crate::ui::app::message::Message;
+use crate::ui::kit::motion;
+use crate::ui::widgets::card;
+use crate::ui::{panel, widgets};
+
+use super::App;
 
 impl App {
     pub(in crate::ui) fn open_panel(

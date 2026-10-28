@@ -1,6 +1,20 @@
 //! Text selection on the frozen screen: taps, drags, reading the screen's words.
 
-use crate::ui::*;
+use std::sync::Arc;
+use std::time::Instant;
+
+use iced::widget::image;
+use iced::{Point, Rectangle, Task, Vector};
+
+use crate::actions::{self, Crop, copy, text};
+use crate::ocr::{self, TextBlock};
+
+use crate::ui::app::background::background;
+use crate::ui::app::message::{Await, Message, PickAct, Purpose, WordRead};
+use crate::ui::app::word;
+use crate::ui::overlay;
+
+use super::{App, DOUBLE_CLICK, Reader, TextMode, WARM_AFTER};
 
 impl App {
     /// A tap at `at` (image px): the word there becomes the selection. Lines read

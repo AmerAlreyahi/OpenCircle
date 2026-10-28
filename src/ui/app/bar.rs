@@ -1,6 +1,20 @@
 //! The bottom bar: size, dock, glide, keys and its view.
 
-use crate::ui::*;
+use iced::futures::channel::mpsc::UnboundedSender;
+use iced::widget::{container, opaque, operation, space};
+use iced::{Element, Point, Rectangle, Size, Task};
+
+use crate::actions::{self, lens, text};
+use crate::config::{self};
+use crate::labs::{self, BarButton};
+
+use crate::ui::app::background::background;
+use crate::ui::app::keys;
+use crate::ui::app::message::{Message, Purpose};
+use crate::ui::edit::Editing;
+use crate::ui::{bar, song, widgets};
+
+use super::{ASK_INPUT, ASK_PLACEHOLDERS, App, LIVE, Reader};
 
 impl App {
     /// The bottom bar shows in main mode from the first frame, through drawing
@@ -329,4 +343,28 @@ impl App {
         let shape = widgets::surface(space().width(inner.width).height(inner.height));
         iced::widget::pin(opaque(shape)).position(at).into()
     }
+}
+
+/// The placeholder that fits a field `width` wide, in the UI font.
+pub(in crate::ui) fn ask_placeholder(width: f32) -> &'static str {
+    let room = width - widgets::AI_FIELD_LEFT - widgets::AI_FIELD_RIGHT;
+    widgets::fitting(&ASK_PLACEHOLDERS, 14.0, room)
+}
+
+/// A round button of the bottom bar, named `label` (its tooltip adds `keys`);
+/// `message: None` = dimmed (nothing to act on yet).
+pub(in crate::ui) fn bar_button<'a>(
+    glyph: char,
+    label: &'a str,
+    keys: &'a str,
+    active: bool,
+    message: Option<Message>,
+    kbd: bool,
+) -> Element<'a, Message> {
+    let why = match keys.is_empty() {
+        true => widgets::Why::Icon,
+        false => widgets::Why::Keys(keys),
+    };
+    let button = widgets::round_button(glyph, active, message, kbd);
+    widgets::hint(button, label, why, iced::widget::tooltip::Position::Top)
 }

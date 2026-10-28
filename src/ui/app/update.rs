@@ -1,6 +1,27 @@
 //! Message dispatch: every message to its handler.
 
-use crate::ui::*;
+use std::time::{Duration, Instant};
+
+use iced::window::{self, Mode};
+use iced::{Point, Rectangle, Size, Task};
+
+use crate::Trigger;
+use crate::actions::{self, text};
+use crate::config::{self};
+use crate::labs::{self};
+use crate::ocr::{self};
+
+use crate::ui::app::background::background;
+use crate::ui::app::message::{Hiding, Message, Purpose};
+use crate::ui::app::quick::Quick;
+use crate::ui::app::{keys, word};
+use crate::ui::edit::Editing;
+use crate::ui::kit::motion;
+use crate::ui::widgets::card;
+use crate::ui::{bar, overlay, snip, translate, update_card, widgets, windows};
+
+use super::capture::{TEST_SHOT, save_test_shot};
+use super::{App, BAR_MORPH, CAPTURE_TIMEOUT, GLIDE, REVEAL_WAIT, Reader, SHRINK_FRAMES, SHRUNK};
 
 impl App {
     pub(in crate::ui) fn update(&mut self, message: Message) -> Task<Message> {

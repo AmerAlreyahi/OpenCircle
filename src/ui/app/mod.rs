@@ -8,7 +8,23 @@ pub(in crate::ui) mod opening;
 pub(in crate::ui) mod quick;
 pub(in crate::ui) mod word;
 
-use crate::ui::*;
+use std::cell::{Cell, RefCell};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use iced::keyboard::{self, key::Named};
+use iced::window::{self};
+use iced::{Point, Rectangle, Size, Subscription, Task};
+
+use crate::translate::pipeline::Cache;
+
+use self::background::triggers;
+use self::capture::overlay_window;
+use self::message::{Hiding, Message, Purpose};
+use self::opening::Opening;
+use crate::ui::kit::motion;
+use crate::ui::platform::monitor::can_hide_windows;
+use crate::ui::{live_layer, overlay, update_card, windows};
 
 pub(in crate::ui) mod actions;
 pub(in crate::ui) mod bar;
@@ -17,9 +33,165 @@ pub(in crate::ui) mod editing;
 pub(in crate::ui) mod results;
 pub(in crate::ui) mod selection;
 pub(in crate::ui) mod snip;
+#[cfg(test)]
+pub(in crate::ui) mod tests;
 pub(in crate::ui) mod text;
 pub(in crate::ui) mod update;
 pub(in crate::ui) mod view;
+
+pub(in crate::ui) const HINT: &str = "Circle, drag or tap anything · Esc to close";
+
+/// Shown over a selection that came out black (DRM / protected windows).
+pub(in crate::ui) const PROTECTED: &str = "This window is protected; it can't be captured";
+
+/// The ask bar at the bottom of the overlay: its text field, width, and the
+/// height kept free for it (the action bar stays above it).
+pub(in crate::ui) const ASK_INPUT: &str = "overlay-ask";
+
+/// The bottom bar (the new design's search bar, owner 2026-10-26: "circle, then
+/// choose"): grip, the AI field, the pills Search in browser · Copy text ·
+/// Translate (`labs::bar`), then Live translate (Beta) and, while their Labs
+/// switch is on, Song search and Edit. All there in every state, so it never
+/// changes size; Search in browser and Copy text are dimmed until something is
+/// selected. Nothing is sent until the user picks one (`[selection] after`).
+/// The field's placeholder.
+pub(in crate::ui) const ASK_PLACEHOLDER: &str = "Ask OpenCircle AI about your screen…";
+
+/// Shorter ones where the font or a narrow screen leaves the field too little
+/// room for it (#144): never cut off mid-word.
+pub(in crate::ui) const ASK_PLACEHOLDERS: [&str; 4] = [
+    ASK_PLACEHOLDER,
+    "Ask AI about your screen…",
+    "Ask OpenCircle AI…",
+    "Ask AI…",
+];
+
+/// How long the bar takes to turn into the editing toolbar (and back),
+/// and to settle on a new spot after a drag (the design's drag release).
+pub(in crate::ui) const BAR_MORPH: Duration = motion::MORPH;
+
+pub(in crate::ui) const GLIDE: Duration = motion::DOCK;
+
+/// A QR code's chip under a selection (its room; the chip is centred in it).
+pub(in crate::ui) const QR_WIDTH: f32 = 520.0;
+
+/// The bottom bar's Live translate icon (lucide "radio").
+pub(in crate::ui) const LIVE: char = '\u{e145}';
+
+pub(in crate::ui) const ASK_MARGIN: f32 = 24.0;
+
+/// A capture still unanswered after this is given up (a Wayland portal may wait
+/// on a dialog; its late answer is dropped).
+pub(in crate::ui) const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Snip reads the controls (UI Automation) of this many topmost windows at
+/// once, of any other when the pointer first goes over it.
+pub(in crate::ui) const UIA_WINDOWS: usize = 4;
+
+/// How far (logical px) the hint and the bottom bar slide in as the overlay opens.
+pub(in crate::ui) const SLIDE: f32 = 80.0;
+
+/// Presses this close together are a double (triple) click.
+// (Windows' default; also forgiving when a busy machine delays the second press.)
+pub(in crate::ui) const DOUBLE_CLICK: Duration = Duration::from_millis(500);
+
+/// The text reader's helper starts this long after the opening animation.
+pub(in crate::ui) const WARM_AFTER: Duration = Duration::from_millis(400);
+
+/// The overlay fades in at most this long after it was shown, its first
+/// full frame drawn or not (never left invisible over the screen).
+pub(in crate::ui) const REVEAL_WAIT: Duration = Duration::from_millis(400);
+
+/// Select-text mode on a snapped box: its words (`None` while OCR reads them)
+/// and the ones picked by a press-drag over them.
+pub(in crate::ui) struct TextMode {
+    lines: Option<Vec<word::Line>>,
+    boxes: Vec<Rectangle>,
+    picked: Option<word::Picked>,
+    picking: bool,
+}
+
+/// The text reader (OCR) behind text selection in main mode, as the note over
+/// the bar tells it: without its models a press on text can only draw.
+#[derive(Debug, Clone, PartialEq)]
+pub(in crate::ui) enum Reader {
+    /// Nothing to say: the screen's text is read (or nothing reads it).
+    Idle,
+    /// Its models aren't downloaded (this many bytes to go): the note offers
+    /// the download (one click).
+    Missing(u64),
+    /// Downloading them (0..=1), after that click.
+    Downloading(f32),
+    /// The download failed (why); the note offers it again.
+    Failed(String),
+}
+
+pub(in crate::ui) const CHIP_SPACE: f32 = 12.0;
+
+/// Below this (logical px) the window counts as shrunk.
+pub(in crate::ui) const SHRUNK: f32 = 64.0;
+
+/// Hide anyway after this many frames without the shrink (a WM may refuse it): a
+/// window left on top of the screen would be far worse than unshrunk buffers.
+// ponytail: fixed frame count, not a timer; frames come back to back while closing.
+pub(in crate::ui) const SHRINK_FRAMES: u8 = 10;
+
+/// The toast pill's gap to the screen's right edge and to the taskbar (design: 16).
+pub(in crate::ui) const TOAST_MARGIN: f32 = 16.0;
+
+pub(in crate::ui) struct App {
+    /// Everything one capture holds (`Opening`), reset as a whole by `close`.
+    pub(in crate::ui) o: Opening,
+    /// The overlay window's id; a closed window's while `overlay_open` is false.
+    pub(in crate::ui) overlay: window::Id,
+    /// The overlay window exists: always where it is pre-created and hidden
+    /// (`can_hide`), else only while it is shown.
+    pub(in crate::ui) overlay_open: bool,
+    /// `can_hide_windows()`, read once at boot.
+    pub(in crate::ui) can_hide: bool,
+    /// The number of the capture running on its thread. Cleared by Esc or the
+    /// timeout: that capture's late answer is then dropped.
+    pub(in crate::ui) capturing: Option<u32>,
+    /// Captures started (numbers them).
+    pub(in crate::ui) captures: u32,
+    /// The latest word tap's number (a tap still reading is stale after it).
+    pub(in crate::ui) taps: u32,
+    /// When the overlay drew each frame since the last `log_frames` (the
+    /// VM frame budget: the opening, a bar or card drag, the glide after).
+    pub(in crate::ui) frame_times: RefCell<Vec<Instant>>,
+    /// Bumped on every open (resets the overlay's pointer state).
+    pub(in crate::ui) opening: u32,
+    /// Trigger time + expected size of the full-screen frame not drawn yet (latency log).
+    pub(in crate::ui) first_draw: Cell<Option<(Instant, Size)>>,
+    pub(in crate::ui) hiding: Hiding,
+    /// Result panels opened (numbers them).
+    pub(in crate::ui) panels: u32,
+    pub(in crate::ui) windows: windows::Windows,
+    /// The last selection per monitor, for `last_region` (memory only).
+    pub(in crate::ui) regions: Vec<(Point, Rectangle)>,
+    /// Translate sessions started (numbers them).
+    pub(in crate::ui) translates: u32,
+    /// Translations by text, shared by one-shot and live mode.
+    pub(in crate::ui) cache: Arc<Cache>,
+    /// Live translate, while on.
+    pub(in crate::ui) live: Option<live_layer::Live>,
+    /// The next snip capture is the one a timer waited for: no timer again.
+    pub(in crate::ui) timed: bool,
+    /// Where the user moved / sized the result card (this run of the app).
+    pub(in crate::ui) card: Option<Rectangle>,
+    /// Song searches started (numbers them).
+    pub(in crate::ui) songs: u32,
+    /// A verified update waiting until nothing is open (`is_idle`).
+    pub(in crate::ui) update: Option<crate::update::Staged>,
+}
+
+/// Translations kept for reuse (each a short text).
+pub(in crate::ui) const CACHE_SIZE: usize = 512;
+
+/// The part of a `screen` above the taskbar (`inset` px of its bottom).
+pub(in crate::ui) fn work_area(screen: Size, inset: f32) -> Size {
+    Size::new(screen.width, screen.height - inset)
+}
 
 impl App {
     pub(in crate::ui) fn boot() -> (Self, Task<Message>) {

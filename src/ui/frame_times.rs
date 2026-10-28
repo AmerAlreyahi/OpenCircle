@@ -4,8 +4,22 @@
 //! animation (`animation_frame_times`, by hand in release) and checks that a
 //! moving widget redraws only around itself.
 
-use super::tests::{drag, open_app, settle_bar};
-use super::*;
+use super::app::tests::{drag, open_app, settle_bar};
+use super::app::{App, GLIDE};
+use std::time::{Duration, Instant};
+
+use iced::window::{self};
+use iced::{Element, Point, Rectangle, Size, Vector};
+
+use crate::actions::{self, text};
+use crate::ocr::{self, TextBlock};
+
+use super::app::message::Message;
+use super::app::word;
+use crate::ui::kit::motion;
+use crate::ui::widgets::card;
+use crate::ui::{panel, theme, widgets};
+
 use iced::advanced::graphics::{Viewport, damage};
 use iced::{Color, Theme};
 use iced_runtime::user_interface::{Cache, UserInterface};

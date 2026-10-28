@@ -1,6 +1,24 @@
 //! Running actions on a selection: pills, quick actions, auto-search, QR, translate, song.
 
-use crate::ui::*;
+use std::time::Instant;
+
+use iced::futures::channel::mpsc::UnboundedSender;
+use iced::widget::image;
+use iced::{Point, Rectangle, Size, Task};
+
+use crate::Trigger;
+use crate::actions::{self, Action, Crop, Run, copy, lens, qr, text};
+use crate::config::{self, After, QuickAction, SearchWith, SelectionConfig, Target};
+use crate::labs::BarButton;
+
+use crate::ui::app::background::background;
+use crate::ui::app::message::{Message, PickAct, Purpose};
+use crate::ui::app::quick::Quick;
+use crate::ui::platform::monitor::taskbar_inset;
+use crate::ui::widgets::card;
+use crate::ui::{live_layer, overlay, panel, settings, song, translate, windows};
+
+use super::{App, TOAST_MARGIN};
 
 impl App {
     /// Scans the new selection for a QR code and a black (protected) capture, on a
@@ -430,5 +448,15 @@ impl App {
             live: false,
         };
         self.update(Message::Trigger(Trigger::Quick(at, once)))
+    }
+}
+
+/// The actions a selection runs by itself under `behaviour`.
+pub(in crate::ui) fn auto_targets(behaviour: SelectionConfig) -> &'static [&'static Action] {
+    match (behaviour.after, behaviour.search_with) {
+        (After::Wait, _) => &[],
+        (After::Search, SearchWith::Lens) => &[&lens::ACTION],
+        (After::Search, SearchWith::Ai) => &[&actions::ask::ACTION],
+        (After::Search, SearchWith::Both) => &[&lens::ACTION, &actions::ask::ACTION],
     }
 }

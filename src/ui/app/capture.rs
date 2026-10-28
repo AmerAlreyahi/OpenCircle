@@ -1,6 +1,29 @@
 //! Opening an overlay: the capture, the frame, showing and closing the window.
 
-use crate::ui::*;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use iced::widget::image;
+use iced::window::{self, Level, Mode};
+use iced::{Point, Size, Task};
+
+use crate::actions::{self, Action, Run, text};
+use crate::capture;
+use crate::config::{self};
+use crate::labs::BarButton;
+use crate::ocr::{self};
+
+use crate::ui::app::background::background;
+use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot};
+use crate::ui::app::quick;
+use crate::ui::app::quick::{Quick, Start};
+use crate::ui::kit::motion;
+use crate::ui::platform::monitor::{place_window, taskbar_inset};
+use crate::ui::platform::shape;
+use crate::ui::snip::Snip;
+use crate::ui::{glass, overlay, snip, windows};
+
+use super::{App, CAPTURE_TIMEOUT, UIA_WINDOWS};
 
 impl App {
     /// Captures on a thread: a Wayland portal may wait minutes for the user's OK.
@@ -286,5 +309,41 @@ impl App {
         crate::log!("[opencircle] overlay window closed");
         crate::sys::mem::trim_heap();
         window::close(self.overlay)
+    }
+}
+
+/// The overlay window: hidden (pre-created), or full-screen at `size`. Never on
+/// the taskbar (Windows): it leaves full-screen visible while it closes (`Hiding`).
+pub(in crate::ui) fn overlay_window(shown: Option<Size>) -> window::Settings {
+    #[cfg(windows)]
+    let platform_specific = window::settings::PlatformSpecific {
+        skip_taskbar: true,
+        ..Default::default()
+    };
+    #[cfg(not(windows))]
+    let platform_specific = Default::default();
+    window::Settings {
+        platform_specific,
+        size: shown.unwrap_or(window::Settings::default().size),
+        visible: shown.is_some(),
+        fullscreen: shown.is_some(),
+        decorations: false,
+        resizable: false,
+        level: Level::AlwaysOnTop,
+        exit_on_close_request: false,
+        ..window::Settings::default()
+    }
+}
+
+/// Test hook: on Esc, save what the overlay shows before closing (WSLg can't grab it).
+pub(in crate::ui) const TEST_SHOT: &str = "OPENCIRCLE_TEST_SHOT";
+
+pub(in crate::ui) fn save_test_shot(shot: &window::Screenshot) {
+    let Some(path) = std::env::var_os(TEST_SHOT) else {
+        return;
+    };
+    let result = actions::write_png(path.as_ref(), shot.size.width, shot.size.height, &shot.rgba);
+    if let Err(e) = result {
+        crate::log!("test shot failed: {e}");
     }
 }
