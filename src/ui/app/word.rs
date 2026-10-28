@@ -359,17 +359,26 @@ fn line_at(lines: &[Line], p: Point) -> Option<usize> {
 /// The line and caret for a drag at `p`: `p` need not be on a line, only within
 /// a line's height of one (the line nearest by height, then by distance along
 /// it), so a drag past the end of a line or into the gap between two follows.
-fn reach(lines: &[Line], p: Point) -> Option<(usize, usize)> {
+/// A line in the `column` the drag started in (sideways over that line's box)
+/// comes first: a drag into the gap between two paragraphs stays in its
+/// column instead of jumping to a sidebar line at that height (gate 0.1.2).
+fn reach(lines: &[Line], p: Point, column: Option<Rectangle>) -> Option<(usize, usize)> {
     let off = |l: &Line| {
         let b = l.bounds;
         let along = (b.x - p.x).max(p.x - b.x - b.width).max(0.0);
         ((b.y - p.y).max(p.y - b.y - b.height).max(0.0), along)
     };
-    let (line, (across, _)) = (lines.iter().enumerate())
-        .filter(|(_, l)| !l.text.trim().is_empty())
-        .map(|(i, l)| (i, off(l)))
-        .min_by(|(_, a), (_, b)| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)))?;
-    (across <= lines[line].bounds.height).then(|| (line, caret_at(&lines[line], p.x)))
+    let nearest = |keep: &dyn Fn(&Line) -> bool| {
+        let (line, (across, _)) = (lines.iter().enumerate())
+            .filter(|(_, l)| !l.text.trim().is_empty() && keep(l))
+            .map(|(i, l)| (i, off(l)))
+            .min_by(|(_, a), (_, b)| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)))?;
+        (across <= lines[line].bounds.height).then(|| (line, caret_at(&lines[line], p.x)))
+    };
+    let within = |l: &Line| {
+        column.is_some_and(|c| l.bounds.x < c.x + c.width && c.x < l.bounds.x + l.bounds.width)
+    };
+    nearest(&within).or_else(|| nearest(&|_| true))
 }
 
 /// What a press selects at first: nothing yet (a caret: one click), the word
@@ -451,7 +460,8 @@ impl Picked {
     /// nearest to it, on any line. `false` = no known line there (read the
     /// lines anew if `p` is outside `covers`).
     pub fn extend(&mut self, p: Point) -> bool {
-        let Some(at) = reach(&self.lines, p) else {
+        let column = self.lines[self.anchor.0].bounds;
+        let Some(at) = reach(&self.lines, p, Some(column)) else {
             return false;
         };
         (self.end, self.to, self.all) = (at, p, false);
@@ -462,7 +472,7 @@ impl Picked {
     /// same text, found again. If it is not there any more nothing changes.
     pub fn reread(&mut self, lines: Vec<Line>, covered: Rectangle) {
         let remap = |(_, caret): (usize, usize), p: Point| {
-            let (line, _) = reach(&lines, p)?;
+            let (line, _) = reach(&lines, p, None)?;
             Some((line, caret.min(lines[line].text.chars().count())))
         };
         if let (Some(anchor), Some(end)) = (remap(self.anchor, self.from), remap(self.end, self.to))
@@ -865,6 +875,25 @@ mod tests {
         let mut p = press(lines, Point::new(100.0, 110.0), Unit::Caret).unwrap();
         assert!(p.extend(Point::new(200.0, 158.0)));
         assert_eq!(p.text(), "left one\nleft two\nleft three");
+    }
+
+    /// Gate 0.1.2 bug 2: a drag down an article into the gap between two of its
+    /// paragraphs, a sidebar line at that height: the sidebar stays out.
+    #[test]
+    fn a_drag_into_a_paragraph_gap_never_takes_the_sidebar() {
+        let mut lines = Vec::new();
+        for (i, y) in [100.0, 124.0, 172.0, 196.0].into_iter().enumerate() {
+            lines.push(line(&format!("article {i} long words here"), 575.0, y));
+        }
+        for i in 0..5 {
+            lines.push(line(&format!("link {i}"), 369.0, 100.0 + 24.0 * i as f32));
+        }
+        lines.sort_by(|a, b| a.bounds.y.total_cmp(&b.bounds.y)); // OCR: row by row
+        let mut p = press(lines, Point::new(600.0, 110.0), Unit::Caret).unwrap();
+        assert!(p.extend(Point::new(1045.0, 154.0))); // the gap; "link 2" is at this height
+        let text = p.text();
+        assert!(!text.contains("link"), "{text}");
+        assert!(text.contains("article 1"), "{text}");
     }
 
     #[test]
