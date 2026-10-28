@@ -29,22 +29,26 @@ Nothing opens in your browser by itself: only Send does it.
 
 ## Providers with your own key
 
-Two kinds, set in **Settings → AI** (choose **Anthropic** or **OpenAI-like**):
+In **Settings → AI**, choose **AI provider**, then pick your provider from the
+**Provider** list. OpenCircle picks the right way to talk to each one and fills
+in its server; you set the model id (a suggestion is filled in) and your key.
 
-| Provider | Covers |
-|---|---|
-| Anthropic | Claude (default model `claude-sonnet-5-5`) |
-| OpenAI-compatible | OpenAI, Gemini (its OpenAI-compatible endpoint), OpenRouter, Ollama, LM Studio, or any server that speaks the OpenAI chat-completions API |
-
-For OpenAI-compatible providers, pick a preset to fill in the server URL, or
-type your own, and set the model id.
-
-| Preset | Server URL | Example model |
+| Provider | Server | Suggested model |
 |---|---|---|
+| OpenRouter | `https://openrouter.ai/api/v1` | a free model |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
-| OpenRouter | `https://openrouter.ai/api/v1` | `openrouter/auto` |
-| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` |
+| Anthropic | Anthropic's own | `claude-sonnet-5-5` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` |
+| Groq | `https://api.groq.com/openai/v1` | `meta-llama/llama-4-scout-17b-16e-instruct` |
+| Mistral | `https://api.mistral.ai/v1` | `mistral-small-latest` |
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| xAI | `https://api.x.ai/v1` | `grok-4` |
 | Ollama (local) | `http://localhost:11434/v1` | `llama3.2-vision` |
+| LM Studio (local) | `http://localhost:1234/v1` | `local-model` |
+| Custom server | the URL you type | yours |
+
+**Custom server** is any server that speaks the OpenAI chat-completions API;
+it is the only choice that asks for a URL.
 
 The model must accept images to answer about a selection.
 

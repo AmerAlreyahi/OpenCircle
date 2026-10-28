@@ -28,7 +28,7 @@ pub use general::START_LABEL;
 /// The rows onboarding shows: the same functions as Settings' pages (one
 /// source of truth for every setting's words and control).
 pub mod rows {
-    pub use super::ai::{key_row, keyed, preset_row, provider_row};
+    pub use super::ai::{key_row, keyed, preset_row, provider_row, url_row};
     pub use super::appearance::themes_row;
     pub use super::general::{start_row, update_row};
     pub use super::look::{after_row, selection_row};

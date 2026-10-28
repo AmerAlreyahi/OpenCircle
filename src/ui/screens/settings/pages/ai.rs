@@ -1,12 +1,16 @@
-//! AI (`settings-window.js` "AI"): who answers, and for a provider of your
-//! own its server, model and key (the design's "Use your own key" fields:
-//! key + Save, model; mono where a value is code). The design's sign-in,
-//! local-model and answer-style parts belong to 0.2.0 and are not drawn.
+//! AI (`settings-window.js` "AI"): who answers (Browser | AI provider), and
+//! for an AI provider its name (one dropdown of real services; the API each
+//! speaks is chosen inside, never shown: owner, 2026-10-28), a Custom
+//! server's URL, the model and the key (key + Save; mono where a value is
+//! code). The design's sign-in, local-model and answer-style parts belong to
+//! 0.2.0 and are not drawn.
 use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, container, row};
 use iced::{Element, Fill};
 
-use super::super::state::{Busy, KeyField, KeyMessage, KeyStatus, Message, PRESETS, State, issue};
+use super::super::state::{
+    Busy, KeyField, KeyMessage, KeyStatus, Message, PRESETS, Preset, State, issue,
+};
 use crate::config::Provider;
 use crate::secrets::Secret;
 use crate::ui::kit::button::{Kind, button, label};
@@ -20,37 +24,26 @@ use crate::ui::widgets::tip;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let ai = &state.draft.ai;
-    let compat = ai.provider == Provider::OpenaiCompatible;
     let mut rows = column![provider_row(state)];
-    if !keyed(state) {
+    let Some(preset) = Preset::of(ai).filter(|_| keyed(state)) else {
         return rows.into(); // no model, server or key: the browser, or nothing chosen yet
-    }
-    if compat {
-        rows = rows.push(preset_row(state));
-        rows = rows.push(text_row(
-            state,
-            ("Server URL", "Your own server or any compatible API"),
-            ("https://api.openai.com/v1", &ai.base_url, "ai.base_url"),
-            Message::BaseUrl,
-        ));
-    }
-    let example = match () {
-        _ if compat && ai.base_url.contains("openrouter.ai") => {
-            "e.g. anthropic/claude-haiku-5.5 (fast, paid)"
-        }
-        _ if compat => "e.g. gpt-4o-mini",
-        _ => "claude-sonnet-5-5",
+    };
+    rows = rows.push(preset_row(state)).push(url_row(state));
+    let example = match preset.name {
+        "OpenRouter" => "e.g. anthropic/claude-haiku-5.5 (fast, paid)".to_string(),
+        _ if preset.custom() => "e.g. gpt-4o-mini".to_string(),
+        _ => format!("e.g. {}", preset.model),
     };
     rows = rows.push(text_row(
         state,
         ("Model", "The model id sent to the provider"),
-        (example, &ai.model, "ai.model"),
+        (&example, &ai.model, "ai.model"),
         Message::Model,
     ));
     rows.push(key_row(state)).into()
 }
 
-/// A provider with a model, a server and a key (not the browser, not an
+/// An AI provider with a model, a server and a key (not the browser, not an
 /// unreadable value from the file).
 pub fn keyed(state: &State) -> bool {
     !matches!(
@@ -59,25 +52,34 @@ pub fn keyed(state: &State) -> bool {
     )
 }
 
-/// Who answers (Settings, and onboarding's AI step).
+/// Browser | AI provider (Settings, and onboarding's AI step).
 pub fn provider_row(state: &State) -> Element<'_, Message> {
     let ai = &state.draft.ai;
-    let options = [
-        (Choice::Browser, "Browser"),
-        (Choice::Anthropic, "Anthropic"),
-        (Choice::Compatible, "OpenAI-like"),
-    ];
+    let options = [(Choice::Browser, "Browser"), (Choice::Ai, "AI provider")];
     // An unknown value from the file: none is chosen until a pick.
-    let now = Choice::of(&ai.provider);
-    let mut provider = column![segmented(&options, now, now, 1.0, |c: Choice| {
-        Message::Provider(c.provider())
+    let now = match ai.provider {
+        Provider::Browser => Choice::Browser,
+        Provider::Anthropic | Provider::OpenaiCompatible => Choice::Ai,
+        Provider::Invalid(_) | Provider::Unreadable => Choice::None,
+    };
+    // AI provider from the browser: the first in the list; once chosen, a
+    // press keeps the one picked
+    let ai_pick = match now {
+        Choice::Ai => Message::Provider(ai.provider.clone()),
+        _ => Message::Preset(PRESETS[0]),
+    };
+    let mut provider = column![segmented(&options, now, now, 1.0, move |c: Choice| {
+        match c {
+            Choice::Ai => ai_pick.clone(),
+            Choice::Browser | Choice::None => Message::Provider(Provider::Browser),
+        }
     })]
     .spacing(space::GAP);
     if let Some(e) = issue(&state.problems, "ai.provider") {
         provider = provider.push(error(Role::ROW_DESC, e));
     }
     setting_row::row(
-        title("Provider"),
+        title("Answers from"),
         match ai.provider {
             Provider::Browser => "Google AI Mode in your browser. No key",
             _ => "Who answers your questions",
@@ -86,25 +88,36 @@ pub fn provider_row(state: &State) -> Element<'_, Message> {
     )
 }
 
-/// An OpenAI-compatible server's preset (Settings, and onboarding's AI step).
+/// The AI provider, by name (Settings, and onboarding's AI step).
 pub fn preset_row(state: &State) -> Element<'_, Message> {
-    let url = &state.draft.ai.base_url;
-    let preset = PRESETS.iter().find(|p| p.base_url == *url).copied();
+    let preset = Preset::of(&state.draft.ai);
     setting_row::row(
-        title("Preset"),
-        "Fills in the server URL",
+        title("Provider"),
+        "The service that answers, with your key",
         tip(
-            dropdown(PRESETS, preset, "Choose a preset", Message::Preset),
-            "Server preset",
+            dropdown(PRESETS, preset, "Choose a provider", Message::Preset),
+            "AI provider",
             Position::Top,
         ),
     )
 }
 
+/// A Custom server's URL; nothing for any other provider (Settings, and
+/// onboarding's AI step).
+pub fn url_row(state: &State) -> Option<Element<'_, Message>> {
+    let ai = &state.draft.ai;
+    Preset::of(ai).filter(Preset::custom)?;
+    Some(text_row(
+        state,
+        ("Server URL", "Your own server or any compatible API"),
+        ("https://my-server.example/v1", &ai.base_url, "ai.base_url"),
+        Message::BaseUrl,
+    ))
+}
+
 /// The write-only key (Settings, and onboarding's AI step).
 pub fn key_row(state: &State) -> Element<'_, Message> {
-    let url = &state.draft.ai.base_url;
-    let local = PRESETS.iter().any(|p| p.local && p.base_url == *url);
+    let local = Preset::of(&state.draft.ai).is_some_and(|p| p.local);
     setting_row::row(
         title("API key"),
         match local {
@@ -115,39 +128,19 @@ pub fn key_row(state: &State) -> Element<'_, Message> {
     )
 }
 
-/// The provider segments (`Provider` holds data: no `Copy`).
+/// The Answers from segments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Choice {
     Browser,
-    Anthropic,
-    Compatible,
+    Ai,
     None,
-}
-
-impl Choice {
-    fn of(p: &Provider) -> Self {
-        match p {
-            Provider::Browser => Choice::Browser,
-            Provider::Anthropic => Choice::Anthropic,
-            Provider::OpenaiCompatible => Choice::Compatible,
-            Provider::Invalid(_) | Provider::Unreadable => Choice::None,
-        }
-    }
-
-    fn provider(self) -> Provider {
-        match self {
-            Choice::Browser | Choice::None => Provider::Browser,
-            Choice::Anthropic => Provider::Anthropic,
-            Choice::Compatible => Provider::OpenaiCompatible,
-        }
-    }
 }
 
 /// A row with a mono text field (its problem, if any, under it).
 fn text_row<'a>(
     state: &'a State,
     (name, desc): (&'a str, &'a str),
-    (placeholder, value, key): (&'a str, &'a str, &str),
+    (placeholder, value, key): (&str, &'a str, &str),
     on_input: fn(String) -> Message,
 ) -> Element<'a, Message> {
     let problem = issue(&state.problems, key);

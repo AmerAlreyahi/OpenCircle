@@ -277,7 +277,8 @@ fn every_step_fits_the_fixed_window() {
         &mut s,
         settings::Message::Provider(Provider::OpenaiCompatible),
     );
-    row(&mut s, settings::Message::Preset(PRESETS[0]));
+    // the tallest: a Custom server's URL row too
+    row(&mut s, settings::Message::Preset(settings::CUSTOM));
     for page in STEPS {
         s.step = page.id;
         let lost = out_of_reach((page.view)(&s), BODY);

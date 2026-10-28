@@ -521,7 +521,7 @@ fn a_valid_change_saves_itself() {
         Provider::OpenaiCompatible
     );
     assert!(!s.close_requested());
-    update(&mut s, Message::Preset(PRESETS[3]));
+    update(&mut s, Message::Preset(preset("Ollama (local)")));
     update(&mut s, Message::Model("llama3:8b".into()));
     assert!(!s.dirty(), "{:?}", s.problems);
     assert_eq!(Config::load_from(&path).0.ai.model, "llama3:8b");
@@ -540,7 +540,7 @@ fn save_round_trips_through_a_temp_config() {
     let (mut s, _) = state(Some(path.clone()));
     update(&mut s, Message::Theme(Theme::Light));
     update(&mut s, Message::Provider(Provider::OpenaiCompatible));
-    update(&mut s, Message::Preset(PRESETS[3]));
+    update(&mut s, Message::Preset(preset("Ollama (local)")));
     update(&mut s, Message::Model("llama3:8b".into()));
     update(&mut s, Message::Target(LANGUAGES[1]));
     update(&mut s, Message::Source(SOURCES[2]));
@@ -620,7 +620,7 @@ fn invalid_values_block_save_with_a_reason() {
 fn switching_provider_keeps_the_model_sensible() {
     let (mut s, _) = state(None);
     update(&mut s, Message::Provider(Provider::OpenaiCompatible));
-    update(&mut s, Message::Preset(PRESETS[0]));
+    update(&mut s, Message::Preset(preset("OpenAI")));
     assert_eq!(
         s.draft.ai.model, "gpt-4o-mini",
         "preset fills an empty model"
@@ -632,14 +632,195 @@ fn switching_provider_keeps_the_model_sensible() {
 
 const FAKE_KEY: &str = "sk-ant-FAKE-0123456789";
 
+/// The Provider dropdown's entry called `name`.
+fn preset(name: &str) -> Preset {
+    *PRESETS.iter().find(|p| p.name == name).expect("a preset")
+}
+
+/// Each provider in the dropdown writes the API it speaks and its server:
+/// Anthropic its own endpoint, the rest the OpenAI-compatible client at
+/// their URL, Custom server the URL typed; the key row follows the provider.
+#[test]
+fn each_provider_writes_its_api_and_server() {
+    let want = [
+        (
+            "OpenRouter",
+            Provider::OpenaiCompatible,
+            "https://openrouter.ai/api/v1",
+        ),
+        (
+            "OpenAI",
+            Provider::OpenaiCompatible,
+            "https://api.openai.com/v1",
+        ),
+        ("Anthropic", Provider::Anthropic, ""),
+        (
+            "Google Gemini",
+            Provider::OpenaiCompatible,
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        ),
+        (
+            "Groq",
+            Provider::OpenaiCompatible,
+            "https://api.groq.com/openai/v1",
+        ),
+        (
+            "Mistral",
+            Provider::OpenaiCompatible,
+            "https://api.mistral.ai/v1",
+        ),
+        (
+            "DeepSeek",
+            Provider::OpenaiCompatible,
+            "https://api.deepseek.com/v1",
+        ),
+        ("xAI", Provider::OpenaiCompatible, "https://api.x.ai/v1"),
+        (
+            "Ollama (local)",
+            Provider::OpenaiCompatible,
+            "http://localhost:11434/v1",
+        ),
+        (
+            "LM Studio (local)",
+            Provider::OpenaiCompatible,
+            "http://localhost:1234/v1",
+        ),
+        ("Custom server", Provider::OpenaiCompatible, ""),
+    ];
+    let names: Vec<_> = PRESETS.iter().map(|p| p.name).collect();
+    assert_eq!(
+        names,
+        want.clone().map(|w| w.0),
+        "the owner's list, in order"
+    );
+    for (name, provider, url) in want {
+        // from the browser, and from each other provider
+        for from in [None, Some("Anthropic"), Some("OpenRouter")] {
+            let (mut s, _) = state(None);
+            if let Some(from) = from {
+                update(&mut s, Message::Preset(preset(from)));
+            }
+            update(&mut s, Message::Preset(preset(name)));
+            let ai = &s.draft.ai;
+            assert_eq!(
+                (&ai.provider, ai.base_url.as_str()),
+                (&provider, url),
+                "{name}"
+            );
+            assert_eq!(Preset::of(ai), Some(preset(name)), "{name} shows as itself");
+            assert!(!ai.model.is_empty() || name == "Custom server", "{name}");
+            update(&mut s, Message::Section(Section::Ai));
+            let texts = shot::texts(view(&s));
+            let url_row = texts.iter().any(|t| t == "Server URL");
+            assert_eq!(url_row, name == "Custom server", "{name}: {texts:?}");
+        }
+    }
+    // A Custom server keeps the URL typed when picked again.
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Preset(preset("Custom server")));
+    update(&mut s, Message::BaseUrl("https://my.example/v1".into()));
+    update(&mut s, Message::Preset(preset("Custom server")));
+    assert_eq!(s.draft.ai.base_url, "https://my.example/v1");
+}
+
+/// A config from before the Provider dropdown reads as the same provider and
+/// is written back unchanged (the config format is frozen).
+#[test]
+fn old_configs_show_as_the_same_provider_and_save_unchanged() {
+    let cases = [
+        ("anthropic", "", "Anthropic"),
+        ("openai_compatible", "https://api.openai.com/v1", "OpenAI"),
+        (
+            "openai_compatible",
+            "https://openrouter.ai/api/v1/",
+            "OpenRouter",
+        ),
+        (
+            "openai_compatible",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            "Google Gemini",
+        ),
+        (
+            "openai_compatible",
+            "http://localhost:11434/v1",
+            "Ollama (local)",
+        ),
+        (
+            "openai_compatible",
+            "http://localhost:1234/v1",
+            "LM Studio (local)",
+        ),
+        (
+            "openai_compatible",
+            "http://192.168.1.2:8080/v1",
+            "Custom server",
+        ),
+    ];
+    for (provider, url, name) in cases {
+        let path = tmp("old-provider");
+        let file =
+            format!("[ai]\nprovider = \"{provider}\"\nbase_url = \"{url}\"\nmodel = \"m\"\n");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &file).unwrap();
+        let (config, warnings) = Config::load_from(&path);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let before = config.ai.clone();
+        let mut s = State::new(
+            config,
+            vec![],
+            Some(path.clone()),
+            Box::new(MemoryStore::default()),
+        );
+        assert_eq!(
+            Preset::of(&s.draft.ai),
+            Some(preset(name)),
+            "{provider} {url}"
+        );
+        update(&mut s, Message::Section(Section::Ai));
+        let texts = shot::texts(view(&s));
+        assert!(texts.iter().any(|t| t == "AI provider"), "{texts:?}");
+        // a change elsewhere saves; [ai] is written as it was
+        update(&mut s, Message::DefaultAction(DefaultAction::Copy));
+        assert!(
+            matches!(update(&mut s, Message::Save), Outcome::Saved(_)),
+            "{name}: {:?}",
+            s.problems
+        );
+        assert_eq!(Config::load_from(&path).0.ai, before, "{name}");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+/// Settings never offers an API protocol as a choice (owner, 2026-10-28).
+#[test]
+fn the_ai_page_never_names_a_protocol() {
+    let banned = [
+        "OpenAI-like",
+        "OpenAI-compatible",
+        "OpenAI compatible",
+        "Anthropic API",
+    ];
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    let mut seen: Vec<String> = PRESETS.iter().map(|p| p.name.to_string()).collect();
+    seen.extend(shot::texts(view(&s)));
+    for p in PRESETS {
+        update(&mut s, Message::Preset(*p));
+        seen.extend(shot::texts(view(&s)));
+    }
+    for t in &seen {
+        assert!(!banned.iter().any(|b| t.contains(b)), "{t}");
+    }
+}
+
 #[test]
 fn the_browser_provider_needs_no_key_model_or_server() {
     let (mut s, store) = state(None);
     update(&mut s, Message::Section(Section::Ai));
     assert_eq!(s.draft.ai.provider, Provider::Browser, "the default");
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Provider"), "{texts:?}");
-    for hidden in ["API key", "Model", "Server URL", "Preset"] {
+    assert!(texts.iter().any(|t| t == "Answers from"), "{texts:?}");
+    for hidden in ["API key", "Model", "Server URL", "Provider"] {
         assert!(!texts.iter().any(|t| t == hidden), "{hidden}: {texts:?}");
     }
     // Back from a half-filled server form: hidden fields do not block Save.
@@ -1369,7 +1550,7 @@ fn renders_every_section_in_both_themes() {
         s.draft.labs = Labs::all_on();
         update(&mut s, Message::Theme(theme_choice));
         update(&mut s, Message::Provider(Provider::OpenaiCompatible));
-        update(&mut s, Message::Preset(PRESETS[0]));
+        update(&mut s, Message::Preset(preset("OpenAI")));
         for page in &PAGES {
             let (section, label) = (page.id, page.title);
             update(&mut s, Message::Section(section));
@@ -1589,7 +1770,7 @@ fn the_step_33_pages_match_their_golden_images() {
     let cases: [(&str, Section, f32, Setup); 11] = [
         ("ai", Section::Ai, 0.0, |s| {
             update(s, Message::Provider(Provider::OpenaiCompatible));
-            update(s, Message::Preset(PRESETS[1]));
+            update(s, Message::Preset(preset("OpenRouter")));
         }),
         ("ai-key-saved", Section::Ai, 0.0, |s| {
             update(s, Message::Provider(Provider::Anthropic));
