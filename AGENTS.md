@@ -65,8 +65,12 @@ the first code):
     cargo packager --release
 
 Run tests with EMPTY app data/config dirs (as above): CI has no downloaded
-models or config, and a machine with them can hide a failure. After every push,
-check CI on main (`gh run list -b main`) before building on it.
+models or config, and a machine with them can hide a failure. The local gate
+(above + `cargo xwin clippy --target x86_64-pc-windows-msvc --all-targets -- -D
+warnings`) decides merges; CI runs in the background as the safety net (owner,
+2026-10-28): check `gh run list -b main` in every batch of merges (a red run is
+the next item to fix) and always before a release. Don't push notes while CI is
+checking a fix (a new push cancels it).
 
 (Exact scripts are created with the scaffold; update this block then.)
 

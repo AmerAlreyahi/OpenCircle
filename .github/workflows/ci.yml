@@ -110,6 +110,7 @@ jobs:
           [ "$setup" -gt "$msi" ] || { echo "::error::the setup does not carry the MSI"; exit 1; }
       - name: Install, run, uninstall with the setup exe, silently
         shell: pwsh
+        timeout-minutes: 10   # a hung runner fails in minutes, not after ~50
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
