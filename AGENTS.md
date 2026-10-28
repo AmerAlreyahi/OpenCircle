@@ -205,6 +205,14 @@ production systems.
 - Settings harmony (owner, 2026-10-28): on every page all controls share one column (same left edge, same
   width), every row has the same box height/padding, controls centred vertically; enforced by the kit
   setting_row and a test.
+- Feature preview videos (owner, 2026-10-28, refines "Showcase placement"): the Settings previews are REAL
+  recordings of each feature (about 5 s, from the real app on the test VM, clean screen, owner approves each),
+  bundled as animated WebP (~600x340, 15-24 fps, ~3 MB for all), decoded frame by frame only while playing and
+  freed when Settings closes; still frame with reduced motion. The OWNER makes the clips (2026-10-28); until then
+  a quiet placeholder ("Preview") replaces the drawn previews. Files: assets/previews/<feature>.webp (circle, text,
+  translate, ai, snip, live, song), bundled at build (a missing file = the placeholder); never loaded from the
+  internet (privacy, offline). Lead proposal pending owner OK: 1200x680 (2x the stage), 15-20 fps, ~1 MB each.
+  The Settings speed fixes (instant pages, scroll, preview redraw) are owner-approved.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.
