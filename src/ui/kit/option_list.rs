@@ -4,11 +4,16 @@
 //! `option` is one row of the open list: 12 px / 500 `text`, 6.5x10 px in,
 //! radius 8, `hover` under the cursor, `active` (the current one) raised on
 //! `elevated` with its edge; a `badge` at its end. States change colour only.
-use iced::widget::{button, container, row, text};
-use iced::{Border, Center, Element, Fill};
+//! A menu (`menu`, `item`, `separator`: the tray menu) is the same kind of
+//! list: plain rows with a shortcut hint.
+use iced::widget::{Space, button, column, container, row, text};
+use iced::{Border, Center, Element, Fill, Padding};
 
 use super::button::faded;
 use super::chip::badge as tag;
+use super::divider::divider;
+use super::icon::{Icon, icon};
+use super::surface::{Material, surface};
 use super::text::{font, mono};
 use super::themes::c;
 use super::tokens::{Role, radius, space};
@@ -62,6 +67,93 @@ pub fn opener<'a, Message: Clone + 'a>(
                     .rounded(radius::CARD)
                     .width(1)
                     .color(c().divider),
+                ..button::Style::default()
+            }
+        })
+        .into()
+}
+
+/// A menu (the design's tray menu): `MENU_WIDTH` wide, its `items` and
+/// `separator`s on the widget surface with `radius::MENU` corners, 4 px in
+/// (`p-1`, inside the 1 px edge). As tall as `menu_height` says.
+pub fn menu<'a, Message: 'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    surface(Material::Widget, radius::MENU, column(items))
+        .padding(MENU_PAD)
+        .width(MENU_WIDTH)
+        .into()
+}
+
+/// The menu's width, a row's height, the room around the rows (edge + `p-1`)
+/// and a separator's height (1 px, `my-1`).
+pub const MENU_WIDTH: f32 = 240.0;
+pub const ITEM_H: f32 = 32.0;
+const MENU_PAD: f32 = 5.0;
+const SEPARATOR_PAD: [f32; 2] = [4.0, 8.0];
+const SEPARATOR_H: f32 = 9.0;
+/// The room before the check mark (`ml-1`), before the hint (`pl-2`) and in a
+/// row (`px-2`); the check's size (`w-3`).
+const CHECK_GAP: f32 = 4.0;
+const HINT_GAP: f32 = 8.0;
+const ITEM_PAD: f32 = 8.0;
+const CHECK: f32 = 12.0;
+
+/// A menu of `items` rows and `separators` lines: its height.
+pub fn menu_height(items: usize, separators: usize) -> f32 {
+    2.0 * MENU_PAD + items as f32 * ITEM_H + separators as f32 * SEPARATOR_H
+}
+
+/// A menu's hairline between groups (`h-px my-1 mx-2`).
+pub fn separator<'a, Message: 'a>() -> Element<'a, Message> {
+    container(divider()).padding(SEPARATOR_PAD).into()
+}
+
+/// A menu row: `label` (13 px `text`), a muted ✓ after it when `checked`
+/// (a toggle that is on), the muted `hint` (its shortcut) at the end; the
+/// whole menu wide, `ITEM_H` tall, `hover` under the cursor or when
+/// `focused` (the keyboard's row). Quit is no different (not red).
+pub fn item<'a, Message: Clone + 'a>(
+    label: &'a str,
+    checked: bool,
+    hint: Option<String>,
+    focused: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use button::Status;
+    let (role, small) = (Role::MENU, Role::MENU_HINT);
+    let check = checked.then(|| {
+        container(icon(Icon::Check, CHECK).color(c().text_muted)).padding(Padding {
+            left: CHECK_GAP,
+            ..Padding::ZERO
+        })
+    });
+    let hint = hint.map(|h| {
+        container(
+            text(h)
+                .size(small.size)
+                .font(font(small))
+                .color(c().text_muted),
+        )
+        .padding(Padding {
+            left: HINT_GAP,
+            ..Padding::ZERO
+        })
+    });
+    let content = row![text(label).size(role.size).font(font(role))]
+        .push(check)
+        .push(Space::new().width(Fill))
+        .push(hint)
+        .align_y(Center);
+    button(container(content).center_y(Fill))
+        .width(Fill)
+        .height(ITEM_H)
+        .padding([0.0, ITEM_PAD])
+        .on_press(on_press)
+        .style(move |_, status| {
+            let hot = focused || matches!(status, Status::Hovered | Status::Pressed);
+            button::Style {
+                background: hot.then(|| c().hover.into()),
+                text_color: c().text,
+                border: Border::default().rounded(radius::MENU_ITEM),
                 ..button::Style::default()
             }
         })

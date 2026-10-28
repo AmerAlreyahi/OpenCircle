@@ -8,6 +8,9 @@ use iced::font::Weight;
 /// Corner radii.
 pub mod radius {
     pub const KEYCAP: f32 = 6.0;
+    /// A menu's row (`rounded-md`) and the menu itself (`rounded-lg`, the tray menu).
+    pub const MENU_ITEM: f32 = 6.0;
+    pub const MENU: f32 = 8.0;
     pub const PILL: f32 = 7.5;
     /// Button, icon button, nav item.
     pub const CONTROL: f32 = 9.0;
@@ -94,6 +97,9 @@ impl Role {
     pub const META_STRONG: Role = role(11.0, Weight::Semibold);
     pub const BAR_PILL: Role = role(11.5, Weight::Medium);
     pub const CHAT: Role = role(13.0, Weight::Normal);
+    /// A menu row's label and its shortcut hint (the tray menu).
+    pub const MENU: Role = role(13.0, Weight::Normal);
+    pub const MENU_HINT: Role = role(10.5, Weight::Normal);
     /// A card's note and a toast's line (`.as-note`, `.oc-toast`).
     pub const NOTE: Role = role(12.0, Weight::Normal);
     pub const CARD_TITLE: Role = role(11.5, Weight::Semibold);

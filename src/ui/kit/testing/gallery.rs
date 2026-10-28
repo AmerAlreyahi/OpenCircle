@@ -573,10 +573,23 @@ fn panel_frame_card_sheet() {
 }
 
 /// `option_list`: the opener (the source's look, the target's in the accent)
-/// and an option at rest, under the cursor, current, with a badge.
+/// and an option at rest, under the cursor, current, with a badge; a menu
+/// item at rest, under the cursor, keyboard-focused, checked.
 #[test]
 fn option_list_sheet() {
-    use super::super::option_list::{opener, option};
+    use super::super::option_list::{item, opener, option};
+    let menu_item = |focused, checked| {
+        move |ar| {
+            let hint = Some("Ctrl+Shift+L".to_string());
+            item(
+                s(ar, "Live translate", "ترجمة حية"),
+                checked,
+                hint,
+                focused,
+                (),
+            )
+        }
+    };
     let open =
         |accent| move |ar| opener(s(ar, "English", "العربية").into(), accent, 140.0, 32.0, ());
     let pick = |active, badge| {
@@ -598,6 +611,10 @@ fn option_list_sheet() {
         row("option hover", Act::Hover, pick(false, None)),
         row("option current", Act::Rest, pick(true, None)),
         row("option badge", Act::Rest, pick(false, Some("AI"))),
+        row("menu item", Act::Rest, menu_item(false, false)),
+        row("menu item hover", Act::Hover, menu_item(false, false)),
+        row("menu item focused", Act::Rest, menu_item(true, false)),
+        row("menu item checked", Act::Rest, menu_item(false, true)),
     ];
     sheet("option_list", Size::new(200.0, 44.0), &rows);
 }

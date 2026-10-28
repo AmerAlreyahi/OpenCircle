@@ -13,6 +13,7 @@ use super::kit::header::Caption;
 use super::platform;
 use super::screens::onboarding;
 use super::screens::toast::{self, Tone};
+use super::screens::tray_menu;
 use super::widgets::chrome;
 use super::{settings, shape, theme, update_card, widgets};
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
@@ -63,6 +64,12 @@ pub enum Msg {
     UpdateCard(update_card::Msg),
     /// The result of Settings > Check now.
     UpdateStatus(String),
+    /// From the tray menu's window.
+    TrayMenu(tray_menu::Msg),
+    /// A window lost the keyboard focus (the tray menu closes then).
+    Unfocused(window::Id),
+    /// A tray menu row was chosen and the menu is gone: `ui::App` runs it as if it came from the tray.
+    Run(crate::Trigger),
 }
 
 #[derive(Default)]
@@ -75,6 +82,8 @@ pub struct Windows {
     toasts: Vec<(window::Id, String, Tone)>,
     /// The update card (release notes), at most one.
     update_card: Option<(window::Id, update_card::Card)>,
+    /// The tray menu (Windows), at most one.
+    tray_menu: Option<(window::Id, tray_menu::Menu)>,
     /// What each normal window's header knows (see `Chrome`).
     chrome: HashMap<window::Id, Chrome>,
 }
@@ -256,6 +265,29 @@ fn pin_keys() -> Subscription<Msg> {
     })
 }
 
+/// While the tray menu is open: its keys (it has the focus; it closes when it loses it) and
+/// any window's focus loss.
+fn tray_menu_events() -> Subscription<Msg> {
+    use keyboard::key::Named;
+    iced::event::listen_with(|event, _status, window| match event {
+        iced::Event::Window(window::Event::Unfocused) => Some(Msg::Unfocused(window)),
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(named),
+            ..
+        }) => {
+            let key = match named {
+                Named::ArrowUp => tray_menu::Key::Up,
+                Named::ArrowDown => tray_menu::Key::Down,
+                Named::Enter => tray_menu::Key::Enter,
+                Named::Escape => tray_menu::Key::Escape,
+                _ => return None,
+            };
+            Some(Msg::TrayMenu(tray_menu::Msg::Key(key)))
+        }
+        _ => None,
+    })
+}
+
 impl Windows {
     /// Call from `boot`: applies the saved theme, reads the OS theme, and opens
     /// the onboarding when there is no config file yet (first run).
@@ -364,6 +396,62 @@ impl Windows {
         );
         self.update_card = Some((id, card));
         open.discard()
+    }
+
+    /// The tray menu at the tray icon (`icon`: physical px), with the keyboard; `live_on` = live
+    /// translate runs (its row's ✓). An open one goes first (a second right-click).
+    pub fn tray_menu(&mut self, icon: [i32; 4], live_on: bool) -> Task<Msg> {
+        let cfg = config::current();
+        let menu = tray_menu::Menu::new(&cfg.labs, &cfg, live_on);
+        let size = menu.size();
+        let place = platform::tray::menu_place(icon, size);
+        let before = match self.tray_menu.take() {
+            Some((id, _)) => window::close(id),
+            None => Task::none(),
+        };
+        let (id, open) = floating(
+            window::Settings {
+                size,
+                position: Position::Specific(place.logical_origin()),
+                resizable: false,
+                ..window::Settings::default()
+            },
+            tray_menu::RADIUS,
+            POPUP,
+        );
+        self.tray_menu = Some((id, menu));
+        // the exact place in physical px, whatever scale iced moved the window at
+        let placed = platform::monitor::place_window(id, place);
+        Task::batch([
+            before,
+            open.discard().chain(placed).chain(window::gain_focus(id)),
+        ])
+    }
+
+    /// The tray menu leaves; a chosen `entry` runs once it is off the screen (a capturing one
+    /// after the screen redrew what it covered too).
+    fn leave_tray_menu(&mut self, entry: Option<platform::tray::Entry>) -> Task<Msg> {
+        let Some((id, _)) = self.tray_menu.take() else {
+            return Task::none();
+        };
+        let Some(entry) = entry else {
+            return close(id);
+        };
+        let trigger = entry.trigger(std::time::Instant::now());
+        let settle = match entry.captures() {
+            true => platform::tray::SETTLE,
+            false => Duration::ZERO,
+        };
+        // after the fade-out (`close` waits for it); a thread sleeps, the UI never waits
+        close(id).chain(Task::future(async move {
+            let (done, wait) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                std::thread::sleep(settle);
+                let _ = done.send(());
+            });
+            let _ = wait.await;
+            Msg::Run(trigger)
+        }))
     }
 
     /// Something the user is in the middle of lives in a window: Settings,
@@ -539,6 +627,21 @@ impl Windows {
                     }
                 }
             }
+            Msg::TrayMenu(msg) => {
+                let outcome = self.tray_menu.as_mut().and_then(|(_, m)| m.update(msg));
+                return match outcome {
+                    Some(tray_menu::Outcome::Run(entry)) => self.leave_tray_menu(Some(entry)),
+                    Some(tray_menu::Outcome::Close) => self.leave_tray_menu(None),
+                    None => Task::none(),
+                };
+            }
+            // A click outside it (or Alt+Tab): the menu goes, like the OS's.
+            Msg::Unfocused(id) if self.tray_menu.as_ref().is_some_and(|(m, _)| *m == id) => {
+                return self.leave_tray_menu(None);
+            }
+            Msg::Unfocused(_) => {}
+            // `ui::App` takes it before here.
+            Msg::Run(_) => {}
             Msg::Chrome(id, event) => return self.on_chrome(id, event),
             Msg::Resized(id) => {
                 if self.chrome.contains_key(&id) {
@@ -562,6 +665,9 @@ impl Windows {
                 self.toasts.retain(|(t, ..)| *t != id);
                 if self.update_card.as_ref().is_some_and(|(c, _)| *c == id) {
                     self.update_card = None;
+                }
+                if self.tray_menu.as_ref().is_some_and(|(m, _)| *m == id) {
+                    self.tray_menu = None;
                 }
                 self.pins.retain(|p| p.id != id); // the OS closed it: free the pixels
                 if self.id(Kind::Permission) == Some(id) {
@@ -687,6 +793,9 @@ impl Windows {
             let radius = shape::radius(update_card::RADIUS);
             return Some(update_card::view(card, radius).map(Msg::UpdateCard));
         }
+        if let Some((_, menu)) = self.tray_menu.as_ref().filter(|(m, _)| *m == window) {
+            return Some(tray_menu::view(menu).map(Msg::TrayMenu));
+        }
         if let Some((_, text, tone)) = self.toasts.iter().find(|(t, ..)| *t == window) {
             return Some(toast::view(text, *tone, shape::radius(toast::RADIUS)));
         }
@@ -730,6 +839,9 @@ impl Windows {
         if self.update_card.as_ref().is_some_and(|(c, _)| *c == window) {
             return "OpenCircle update";
         }
+        if self.tray_menu.as_ref().is_some_and(|(m, _)| *m == window) {
+            return "OpenCircle menu";
+        }
         match (self.id(Kind::Settings), self.id(Kind::Onboarding)) {
             (Some(id), _) if id == window => "OpenCircle Settings",
             (_, Some(id)) if id == window => "Welcome to OpenCircle",
@@ -757,6 +869,10 @@ impl Windows {
                 Subscription::none()
             } else {
                 pin_keys()
+            },
+            match self.tray_menu {
+                Some(_) => tray_menu_events(),
+                None => Subscription::none(),
             },
         ])
     }

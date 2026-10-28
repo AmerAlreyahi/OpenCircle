@@ -37,6 +37,12 @@ impl App {
                 .windows
                 .open(windows::Kind::Settings)
                 .map(Message::Windows),
+            Message::Trigger(Trigger::TrayMenu(icon)) => self
+                .windows
+                .tray_menu(icon, self.live.is_some())
+                .map(Message::Windows),
+            // a tray menu row: as if it came from the tray
+            Message::Windows(windows::Msg::Run(trigger)) => self.update(Message::Trigger(trigger)),
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
             // A hidden (Labs) feature does nothing, whoever asks (no shortcut or tray
             // item reaches here; this is the one place that also covers a late trigger).

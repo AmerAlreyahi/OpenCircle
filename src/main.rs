@@ -40,6 +40,9 @@ pub enum Trigger {
     Quick(Instant, config::QuickAction),
     /// Tray "Settings…": open the Settings window, or focus it if it is open.
     OpenSettings,
+    /// Windows, a right-click on the tray icon: open our tray menu at the icon
+    /// (`[left, top, right, bottom]`, physical desktop px).
+    TrayMenu([i32; 4]),
     /// From the update thread (`update::Event`).
     Update(update::Event),
     Quit,

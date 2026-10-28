@@ -1,70 +1,257 @@
-//! Tray icon with "Circle to search", "Snip", "Live translate on/off", "Settings…" and "Quit". A missing tray is not
-//! an error: the app keeps working through its shortcut and `opencircle capture`. The capturing items wait until the
-//! menu is off the screen, so it is never captured.
+//! The tray icon and its menu's entries (`entries`, the design's widgets/tray-menu.js). Windows shows our own
+//! popup for them (`ui::screens::tray_menu`, opened at the icon by `Trigger::TrayMenu`); Linux the desktop's
+//! own menu (AppIndicator) with the same rows. A missing tray is not an error: the app keeps working through
+//! its shortcut and `opencircle capture`. The capturing entries wait until the menu is off the screen, so it
+//! is never captured.
 use std::time::{Duration, Instant};
 
-use tray_icon::menu::{IsMenuItem, Menu, MenuEvent, MenuItem};
+#[cfg(target_os = "linux")]
+use tray_icon::menu::{IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
-use crate::labs::{self, Feature, Labs};
+use super::monitor::Place;
+use crate::config::{Config, Target};
+use crate::labs::{Feature, Labs};
 use crate::{Trigger, Triggers};
 
 /// The tray menu's entries, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Entry {
+pub enum Entry {
     Circle,
+    Translate,
     Snip,
     Live,
+    Song,
     Settings,
     Quit,
 }
 
-/// The entries shown with these Labs switches: Snip only when it is on.
-fn entries(labs: &Labs) -> Vec<Entry> {
-    [
+impl Entry {
+    const ALL: [Entry; 7] = [
         Entry::Circle,
+        Entry::Translate,
         Entry::Snip,
         Entry::Live,
+        Entry::Song,
         Entry::Settings,
         Entry::Quit,
-    ]
-    .into_iter()
-    .filter(|e| *e != Entry::Snip || labs.has(Feature::Snip))
-    .filter(|e| *e != Entry::Live || labs.has(Feature::Live))
-    .collect()
+    ];
+
+    /// Its row's text (also its accessible name).
+    pub fn label(self) -> &'static str {
+        match self {
+            Entry::Circle => "Circle to Search",
+            Entry::Translate => "Translate screen",
+            Entry::Snip => "Snip",
+            Entry::Live => "Live translate",
+            Entry::Song => "Song search",
+            Entry::Settings => "Settings…",
+            Entry::Quit => "Quit",
+        }
+    }
+
+    /// A separator goes above it.
+    pub fn separated(self) -> bool {
+        self == Entry::Settings
+    }
+
+    /// The Labs switch that shows it (`None` = always shown).
+    fn feature(self) -> Option<Feature> {
+        match self {
+            Entry::Snip => Some(Feature::Snip),
+            Entry::Live => Some(Feature::Live),
+            Entry::Song => Some(Feature::Song),
+            _ => None,
+        }
+    }
+
+    /// The user's own shortcut for it in `cfg` (the hint at the row's end), when one is bound.
+    pub fn shortcut(self, cfg: &Config) -> Option<String> {
+        let quick = |action: &str, live: bool, target: Option<Target>| {
+            (cfg.quick_actions.iter())
+                .find(|q| {
+                    q.action == action
+                        && q.live == live
+                        && target.is_none_or(|t| q.target == t)
+                        && !q.shortcut.is_empty()
+                })
+                .map(|q| q.shortcut.clone())
+        };
+        match self {
+            Entry::Circle => Some(cfg.shortcut.clone()).filter(|s| !s.is_empty()),
+            Entry::Translate => quick("translate", false, Some(Target::FullScreen)),
+            Entry::Snip => quick("snip", false, None),
+            Entry::Live => quick("translate", true, None),
+            Entry::Song => quick("song_search", false, None),
+            Entry::Settings | Entry::Quit => None,
+        }
+    }
+
+    /// It captures the screen, so it waits until the menu is off it.
+    pub fn captures(self) -> bool {
+        !matches!(self, Entry::Settings | Entry::Quit)
+    }
+
+    /// What choosing it does.
+    pub fn trigger(self, at: Instant) -> Trigger {
+        let run = |action: &str, target| {
+            let run = crate::hotkey::Command::Run {
+                action: action.into(),
+                target,
+            };
+            crate::hotkey::trigger(&run, at)
+        };
+        match self {
+            Entry::Circle => Trigger::Capture(at),
+            // the one-shot translate, never the live one bound to the same action
+            Entry::Translate => run("translate", Some(Target::FullScreen)),
+            Entry::Snip => run("snip", None),
+            Entry::Live => Trigger::Quick(
+                at,
+                crate::config::QuickAction {
+                    action: "translate".into(),
+                    shortcut: String::new(),
+                    target: Target::FullScreen,
+                    live: true,
+                },
+            ),
+            Entry::Song => run("song_search", None),
+            Entry::Settings => Trigger::OpenSettings,
+            Entry::Quit => Trigger::Quit,
+        }
+    }
 }
 
-/// The menu and its items, on the thread that owns the icon (they are not `Send`).
+/// The entries shown with these Labs switches: a Labs feature's only while it is on.
+pub fn entries(labs: &Labs) -> Vec<Entry> {
+    (Entry::ALL.into_iter())
+        .filter(|e| e.feature().is_none_or(|f| labs.has(f)))
+        .collect()
+}
+
+/// After the menu is gone: the screen redraws what it covered.
+pub const SETTLE: Duration = Duration::from_millis(150);
+
+/// Where the menu (`menu` px) opens for the tray icon at `icon` on a monitor whose work area is `work` (both
+/// `[left, top, right, bottom]`, physical desktop px), `gap` px off the taskbar: above a bottom taskbar, below
+/// a top one, beside a left or right one, centred on the icon along it. An icon inside the work area (the
+/// overflow flyout, a hidden taskbar): above it, else below. Always inside the work area.
+pub fn place(icon: [i32; 4], work: [i32; 4], menu: (i32, i32), gap: i32) -> (i32, i32) {
+    let [left, top, right, bottom] = icon;
+    let [w_left, w_top, w_right, w_bottom] = work;
+    let (w, h) = menu;
+    let (cx, cy) = ((left + right - w) / 2, (top + bottom - h) / 2);
+    let (x, y) = if top >= w_bottom {
+        (cx, w_bottom - gap - h)
+    } else if bottom <= w_top {
+        (cx, w_top + gap)
+    } else if right <= w_left {
+        (w_left + gap, cy)
+    } else if left >= w_right {
+        (w_right - gap - w, cy)
+    } else if top - gap - h >= w_top {
+        (cx, top - gap - h)
+    } else {
+        (cx, bottom + gap)
+    };
+    let inside = |v: i32, lo: i32, hi: i32| v.min(hi).max(lo);
+    (
+        inside(x, w_left + gap, w_right - gap - w),
+        inside(y, w_top + gap, w_bottom - gap - h),
+    )
+}
+
+/// The menu's window (`Place`: physical px at the icon monitor's scale) for the icon at `icon` and a menu
+/// of `size` logical px, 8 logical px off the taskbar.
+pub fn menu_place(icon: [i32; 4], size: iced::Size) -> Place {
+    let (work, scale) = monitor_of(icon);
+    let px = (
+        (size.width * scale).round() as i32,
+        (size.height * scale).round() as i32,
+    );
+    Place {
+        origin: place(icon, work, px, (8.0 * scale).round() as i32),
+        px: (px.0 as u32, px.1 as u32),
+        scale,
+    }
+}
+
+/// The work area (`[left, top, right, bottom]`, physical px) and the scale of the monitor the icon is on.
+#[cfg(windows)]
+fn monitor_of(icon: [i32; 4]) -> ([i32; 4], f32) {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect,
+    };
+    use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    let [left, top, right, bottom] = icon;
+    let rect = RECT {
+        left,
+        top,
+        right,
+        bottom,
+    };
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..MONITORINFO::default()
+    };
+    let (mut dpi, mut unused) = (96, 96);
+    // SAFETY: plain Win32 queries; `info` is sized as cbSize says.
+    unsafe {
+        let monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
+        let _ = GetMonitorInfoW(monitor, &mut info);
+        let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused);
+    }
+    let w = info.rcWork;
+    ([w.left, w.top, w.right, w.bottom], dpi as f32 / 96.0)
+}
+
+/// Elsewhere the desktop draws the menu itself: never asked.
+#[cfg(not(windows))]
+fn monitor_of(icon: [i32; 4]) -> ([i32; 4], f32) {
+    (icon, 1.0)
+}
+
+/// Linux: the desktop's menu and its items, on the thread that owns the icon (they are not `Send`).
+#[cfg(target_os = "linux")]
 struct Built {
     menu: Menu,
-    items: [(Entry, MenuItem); 5],
+    items: Vec<(Entry, MenuItem)>,
+    separator: PredefinedMenuItem,
 }
 
+#[cfg(target_os = "linux")]
 thread_local! {
     static BUILT: std::cell::RefCell<Option<Built>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Shows exactly `entries(labs)` in the menu.
+/// Shows exactly `entries(labs)` in the menu, the separator above Settings.
+#[cfg(target_os = "linux")]
 fn fill(built: &Built, labs: &Labs) {
     for (_, item) in &built.items {
         let _ = built.menu.remove(item);
     }
+    let _ = built.menu.remove(&built.separator);
     let shown = entries(labs);
     for (entry, item) in &built.items {
         if shown.contains(entry) {
+            if entry.separated() {
+                let _ = built.menu.append(&built.separator as &dyn IsMenuItem);
+            }
             let _ = built.menu.append(item as &dyn IsMenuItem);
         }
     }
 }
 
-/// Labs changed: rebuild the menu now (on the tray's own thread: the GTK one on Linux).
+/// Labs changed: Linux rebuilds the menu now, on the tray's own (GTK) thread. Windows builds its popup at
+/// each opening.
 pub fn refresh() {
-    let labs = crate::config::current().labs;
-    let apply = move || BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs)));
     #[cfg(target_os = "linux")]
-    gtk::glib::idle_add_once(apply);
-    #[cfg(not(target_os = "linux"))]
-    apply();
+    {
+        let labs = crate::config::current().labs;
+        let apply = move || BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs)));
+        gtk::glib::idle_add_once(apply);
+    }
 }
 
 /// The tray icon's identity for the exe at `path`: a hash of the lower-cased path (FNV-1a, 128 bit, so it never
@@ -190,72 +377,73 @@ fn linux_tray_missing() -> Option<&'static str> {
         .then_some("GTK could not start (no display?)")
 }
 
-fn build(tx: Triggers) -> Option<TrayIcon> {
-    let item = |label| MenuItem::new(label, true, None);
-    let items = [
-        (Entry::Circle, item("Circle to search")),
-        (Entry::Snip, item("Snip")),
-        (Entry::Live, item("Live translate on/off (Beta)")),
-        (Entry::Settings, item("Settings…")),
-        (Entry::Quit, item("Quit")),
-    ];
-    let id = |entry| {
-        items
-            .iter()
-            .find(|(e, _)| *e == entry)
-            .map(|(_, i)| i.id().clone())
-    };
-    let (circle, snip, live, settings, quit) = (
-        id(Entry::Circle)?,
-        id(Entry::Snip)?,
-        id(Entry::Live)?,
-        id(Entry::Settings)?,
-        id(Entry::Quit)?,
-    );
+/// Linux: the desktop's menu with `entries`; a choice goes to `tx` (a capturing one once the menu had time
+/// to leave the screen: GTK's menu lives in the shell, no handle here, so the settle delay only).
+#[cfg(target_os = "linux")]
+fn desktop_menu(tx: Triggers) -> Menu {
+    let items: Vec<_> = (Entry::ALL.into_iter())
+        .map(|e| (e, MenuItem::new(e.label(), true, None)))
+        .collect();
+    let ids: Vec<_> = (items.iter()).map(|(e, i)| (*e, i.id().clone())).collect();
     let built = Built {
         menu: Menu::new(),
         items,
+        separator: PredefinedMenuItem::separator(),
     };
     fill(&built, &crate::config::current().labs);
     let menu = built.menu.clone();
     BUILT.set(Some(built));
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        let trigger = if event.id == circle {
-            Trigger::Capture(Instant::now())
-        } else if event.id == snip && labs::has(Feature::Snip) {
-            let run = crate::hotkey::Command::Run {
-                action: "snip".into(),
-                target: None,
-            };
-            crate::hotkey::trigger(&run, Instant::now())
-        } else if event.id == live {
-            let toggle = crate::config::QuickAction {
-                action: "translate".into(),
-                shortcut: String::new(),
-                target: crate::config::Target::FullScreen,
-                live: true,
-            };
-            Trigger::Quick(Instant::now(), toggle)
-        } else if event.id == settings {
-            Trigger::OpenSettings
-        } else if event.id == quit {
-            Trigger::Quit
-        } else {
+        let Some(entry) = (ids.iter()).find_map(|(e, id)| (*id == event.id).then_some(*e)) else {
             return;
         };
-        // Circle, Snip and Live capture the screen: not while our menu (or
-        // its fade-out) is still on it, or it is captured and translated.
-        let captures = !matches!(trigger, Trigger::OpenSettings | Trigger::Quit);
+        // turned off in Labs meanwhile: nothing
+        if !entries(&crate::config::current().labs).contains(&entry) {
+            return;
+        }
+        let trigger = entry.trigger(Instant::now());
         let tx = tx.clone();
         let send = move || {
             let _ = tx.unbounded_send(trigger);
         };
-        if captures {
-            std::thread::spawn(|| after_menu(menu_shown, MENU_WAIT, send));
-        } else {
-            send();
+        match entry.captures() {
+            true => drop(std::thread::spawn(move || {
+                std::thread::sleep(SETTLE);
+                send();
+            })),
+            false => send(),
         }
     }));
+    menu
+}
+
+/// Windows: no menu of the shell's; a right-click (let go) on the icon asks the app for our popup there.
+#[cfg(windows)]
+fn on_right_click(tx: Triggers) {
+    use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
+    TrayIconEvent::set_event_handler(Some(move |event| {
+        if let TrayIconEvent::Click {
+            button: MouseButton::Right,
+            button_state: MouseButtonState::Up,
+            rect,
+            ..
+        } = event
+        {
+            let (x, y) = (
+                rect.position.x.round() as i32,
+                rect.position.y.round() as i32,
+            );
+            let (w, h) = (rect.size.width as i32, rect.size.height as i32);
+            let _ = tx.unbounded_send(Trigger::TrayMenu([x, y, x + w, y + h]));
+        }
+    }));
+}
+
+fn build(tx: Triggers) -> Option<TrayIcon> {
+    #[cfg(target_os = "linux")]
+    let menu = desktop_menu(tx);
+    #[cfg(windows)]
+    on_right_click(tx);
     let icon = icon();
     let exe = std::env::current_exe().unwrap_or_default();
     #[cfg(windows)]
@@ -263,13 +451,15 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
     #[cfg(not(windows))]
     let clear = |_| {};
     let tray = add_with_fallback(guid_for(&exe), clear, |guid| {
-        let mut builder = TrayIconBuilder::new()
-            .with_menu(Box::new(menu.clone()))
+        let builder = TrayIconBuilder::new()
             .with_tooltip("OpenCircle")
             .with_icon(icon.clone());
-        if let Some(guid) = guid {
-            builder = builder.with_guid(guid);
-        }
+        #[cfg(target_os = "linux")]
+        let builder = builder.with_menu(Box::new(menu.clone()));
+        let builder = match guid {
+            Some(guid) => builder.with_guid(guid),
+            None => builder,
+        };
         let tray = builder.build().map_err(|e| e.to_string())?;
         // tray-icon ignores a refused add (Windows: GUID bound to another exe path), so ask the shell
         // whether the icon exists (the ghost under our GUID was deleted first, so it is ours).
@@ -289,41 +479,6 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
         let _ = HELD_GUID.set(guid);
     }
     Some(tray.0)
-}
-
-/// The longest wait for the menu to go (then the capture goes ahead).
-const MENU_WAIT: Duration = Duration::from_secs(1);
-/// After the menu is gone: the screen redraws what it covered.
-const SETTLE: Duration = Duration::from_millis(150);
-
-/// Runs `then` once `shown` says the menu is off the screen (polled, at most
-/// `wait`) and the screen had `SETTLE` to redraw.
-fn after_menu(shown: impl Fn() -> bool, wait: Duration, then: impl FnOnce()) {
-    let start = Instant::now();
-    while shown() && start.elapsed() < wait {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    std::thread::sleep(SETTLE);
-    then();
-}
-
-/// A popup menu (ours, from the tray) or its fade-out is on the screen.
-#[cfg(windows)]
-fn menu_shown() -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindowVisible};
-    use windows::core::w;
-    // SAFETY: lookups of top-level windows by class; nothing is changed.
-    [w!("#32768"), w!("SysFader")]
-        .into_iter()
-        .any(|class| unsafe {
-            FindWindowW(class, None).is_ok_and(|h| IsWindowVisible(h).as_bool())
-        })
-}
-
-/// GTK's menu lives in the shell (no handle here): the settle delay only.
-#[cfg(not(windows))]
-fn menu_shown() -> bool {
-    false
 }
 
 /// Adds the icon under `guid`, after `clear` deleted what a killed run left under it: the shell refuses to add
@@ -361,55 +516,90 @@ fn icon() -> Icon {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_with_fallback, guid_for};
+    use super::{Entry, add_with_fallback, entries, guid_for, place};
+    use crate::config::Config;
+    use crate::labs::{Feature, Labs};
     use std::path::Path;
 
-    /// Started from the tray menu, a capture waits until the menu (and its
-    /// fade-out) is gone and the screen settled. Before: the menu was
-    /// captured and its translation stayed over the page.
+    /// The design's rows in its order: a Labs feature's row only while it is on (Snip, Live translate, Song
+    /// search); Translate screen always. Before: no Translate screen, Song search never.
     #[test]
-    fn a_capture_from_the_menu_waits_for_it_to_close() {
-        use super::{SETTLE, after_menu};
-        use std::cell::Cell;
-        use std::time::{Duration, Instant};
-        let start = Instant::now();
-        let polls = Cell::new(0);
-        let shown = || {
-            polls.set(polls.get() + 1);
-            start.elapsed() < Duration::from_millis(100) // closes after 100 ms
-        };
-        let sent = Cell::new(None);
-        after_menu(shown, Duration::from_secs(1), || {
-            sent.set(Some(start.elapsed()))
-        });
-        let at = sent.get().expect("sent");
-        assert!(at >= Duration::from_millis(100) + SETTLE, "{at:?}");
-        assert!(polls.get() > 1);
-        // a menu that never reports closed does not hold the capture forever
-        let start = Instant::now();
-        after_menu(|| true, Duration::from_millis(50), || {});
-        assert!(start.elapsed() < Duration::from_millis(50) + SETTLE + Duration::from_millis(100));
-    }
-
-    #[test]
-    fn a_hidden_feature_has_no_tray_item() {
-        use super::{Entry, entries};
-        use crate::labs::{Feature, Labs};
-        let off = entries(&Labs::default());
-        assert_eq!(off, [Entry::Circle, Entry::Settings, Entry::Quit]);
+    fn the_menu_shows_a_labs_row_only_while_it_is_on() {
+        use Entry::*;
+        assert_eq!(
+            entries(&Labs::default()),
+            [Circle, Translate, Settings, Quit]
+        );
         let mut on = Labs::default();
         on.set(Feature::Live, true);
+        assert_eq!(entries(&on), [Circle, Translate, Live, Settings, Quit]);
+        on.set(Feature::Editor, true); // no row of its own
+        on.set(Feature::Song, true);
+        on.set(Feature::Snip, true);
         assert_eq!(
             entries(&on),
-            [Entry::Circle, Entry::Live, Entry::Settings, Entry::Quit]
+            [Circle, Translate, Snip, Live, Song, Settings, Quit]
         );
-        on.set(Feature::Live, false);
-        on.set(Feature::Song, true);
-        on.set(Feature::Editor, true);
-        assert_eq!(entries(&on), off, "only Snip has a tray item");
-        on.set(Feature::Snip, true);
-        assert_eq!(entries(&on).len(), 4);
-        assert_eq!(entries(&on)[1], Entry::Snip);
+        assert_eq!(
+            Entry::ALL
+                .iter()
+                .filter(|e| e.separated())
+                .collect::<Vec<_>>(),
+            [&Settings]
+        );
+    }
+
+    /// The hints are the user's own shortcuts, and Translate screen runs the one-shot translate even when the
+    /// live one is bound to the same action.
+    #[test]
+    fn hints_are_the_users_shortcuts_and_translate_is_one_shot() {
+        let mut cfg = Config::default();
+        assert_eq!(
+            Entry::Translate.shortcut(&cfg).as_deref(),
+            Some("Ctrl+Shift+T")
+        );
+        assert_eq!(Entry::Live.shortcut(&cfg).as_deref(), Some("Ctrl+Shift+L"));
+        assert_eq!(Entry::Song.shortcut(&cfg), None, "unbound: no hint");
+        assert_eq!(Entry::Quit.shortcut(&cfg), None);
+        cfg.shortcut = "Alt+Q".into();
+        assert_eq!(Entry::Circle.shortcut(&cfg).as_deref(), Some("Alt+Q"));
+        cfg.quick_actions
+            .retain(|q| !(q.action == "translate" && !q.live));
+        assert_eq!(Entry::Translate.shortcut(&cfg), None);
+        match Entry::Translate.trigger(std::time::Instant::now()) {
+            crate::Trigger::Quick(_, q) => assert!(q.action == "translate" && !q.live),
+            other => panic!("{other:?}"),
+        }
+        assert!(!Entry::Settings.captures() && !Entry::Quit.captures());
+        assert!(Entry::Circle.captures() && Entry::Translate.captures());
+    }
+
+    /// The menu opens off the taskbar on whichever edge it is, centred on the icon along it, and never
+    /// leaves the work area. 1280x720 monitor, a 40 px taskbar, a 240x200 menu, gap 8.
+    #[test]
+    fn the_menu_opens_beside_the_icon_on_every_taskbar_edge() {
+        let menu = (240, 200);
+        // bottom: above the taskbar, centred on the icon
+        let work = [0, 0, 1280, 680];
+        assert_eq!(place([600, 684, 624, 708], work, menu, 8), (492, 472));
+        // ... and an icon at the corner keeps it inside
+        assert_eq!(place([1250, 684, 1274, 708], work, menu, 8), (1032, 472));
+        // top
+        let work = [0, 40, 1280, 720];
+        assert_eq!(place([600, 8, 624, 32], work, menu, 8), (492, 48));
+        // left
+        let work = [40, 0, 1280, 720];
+        assert_eq!(place([8, 600, 32, 624], work, menu, 8), (48, 512));
+        // right
+        let work = [0, 0, 1240, 720];
+        assert_eq!(place([1248, 600, 1272, 624], work, menu, 8), (992, 512));
+        // inside the work area (the overflow flyout): above the icon, else below
+        let work = [0, 0, 1280, 680];
+        assert_eq!(place([600, 600, 624, 624], work, menu, 8), (492, 392));
+        assert_eq!(place([600, 20, 624, 44], work, menu, 8), (492, 52));
+        // a second monitor at negative coordinates
+        let work = [-1920, 0, 0, 1040];
+        assert_eq!(place([-100, 1044, -76, 1068], work, menu, 8), (-248, 832));
     }
 
     /// A killed run's icon (a ghost) still holds our GUID and the shell refuses to add it again, so it is
