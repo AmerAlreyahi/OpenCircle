@@ -861,6 +861,9 @@ fn caret(i: usize, c: f32) -> Point {
 /// An overlay on a 960x420 frame with `TEXT` drawn on it.
 fn text_app() -> App {
     use iced::widget::{column, text};
+    // the bundled fonts first, whatever ran before: "monospace" then means the
+    // same font in every run (it used to depend on test order)
+    crate::ui::kit::text::load();
     let lines = TEXT.map(|t| -> Element<'_, Message> {
         let line = text(t).size(22).font(iced::Font::MONOSPACE);
         line.line_height(iced::Pixels(32.0)).into()
@@ -3776,7 +3779,13 @@ fn a_link_in_the_selected_words_gets_a_click_only_chip() {
         app
     };
     let app = pick("see https://shop.example/track now");
-    let entity = app.chip_entity().expect("the link");
+    let entity = app.chip_entity().unwrap_or_else(|| {
+        panic!(
+            "the link: word {:?}, selection {:?}",
+            app.o.word.as_ref().map(word::Picked::text),
+            app.o.selection
+        )
+    });
     let texts = overlay_texts(&app);
     assert!(
         texts.contains(&"Open shop.example".to_string()),
