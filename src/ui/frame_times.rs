@@ -18,7 +18,7 @@ use super::app::message::Message;
 use super::app::word;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
-use crate::ui::screens::settings;
+use crate::ui::screens::{onboarding, settings};
 use crate::ui::{panel, theme, widgets};
 
 use iced::advanced::graphics::{Viewport, damage};
@@ -863,4 +863,65 @@ fn a_replayed_preview_leaves_no_ghost_of_its_last_frame() {
         "{} pixels left over from the last frame, {lo:?}..{hi:?}",
         off.len()
     );
+}
+
+/// The onboarding window as drawn.
+fn onboarding_view(s: &onboarding::State) -> Element<'_, onboarding::Message> {
+    onboarding::view(s)
+}
+
+/// The frames after Next on the first step (drawn in real time).
+fn next_frames(k: f32, pixels: bool, frames: u32) -> Vec<Drawn> {
+    let mut s = onboarding::State::new(
+        crate::config::Config::default(),
+        None,
+        Box::new(crate::secrets::MemoryStore::default()),
+    );
+    std::thread::sleep(Duration::from_millis(250));
+    let _ = onboarding::update(&mut s, onboarding::Message::Tick);
+    let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+    drawn(
+        &mut s,
+        onboarding::WINDOW_SIZE,
+        k,
+        onboarding_view,
+        frames,
+        pixels,
+        |s, i, _| {
+            if i == 1 {
+                let _ = onboarding::update(s, onboarding::Message::Next);
+            }
+            std::thread::sleep(Duration::from_millis(16)); // the motion runs on the real clock
+            let _ = onboarding::update(s, onboarding::Message::Tick);
+        },
+        still,
+    )
+}
+
+/// Onboarding's step change at the fixed window size, scale 2 and 2.5 (a 4K
+/// screen at 200 / 250 %); run in release:
+/// `cargo test --release onboarding_frame_times -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn onboarding_frame_times() {
+    for k in [2.0, 2.5] {
+        let t = next_frames(k, false, 14);
+        report("onboarding step", onboarding::WINDOW_SIZE, k, &t);
+    }
+}
+
+/// A step change moves only the step track's thumb: the page switches at once
+/// (its rise redrew the whole window every frame on the CPU renderer).
+#[test]
+fn an_onboarding_step_change_redraws_only_the_track() {
+    let frames: Vec<_> = next_frames(1.0, false, 5)
+        .into_iter()
+        .skip(1)
+        .map(|d| d.damage)
+        .collect();
+    assert!(frames.iter().any(|d| !d.is_empty()), "the thumb glides");
+    // the track sits above the page: below it nothing is redrawn
+    for r in frames.iter().flatten() {
+        assert!(r.y + r.height <= 120.0, "{r:?} below the track");
+    }
 }

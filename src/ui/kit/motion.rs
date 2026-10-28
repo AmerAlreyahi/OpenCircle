@@ -19,10 +19,8 @@ use std::time::{Duration, Instant};
 pub const OPEN: Duration = Duration::from_millis(210);
 /// Closing: a little faster, eased in.
 pub const CLOSE: Duration = Duration::from_millis(150);
-/// The bar's body swapped in place (actions <-> editor), a page rising.
+/// The bar's body swapped in place (actions <-> editor).
 pub const MORPH: Duration = Duration::from_millis(190);
-/// How far a page rises as it comes in (`MORPH`, `Curve::Out`).
-pub const PAGE_RISE: f32 = 14.0;
 /// Something gliding to a new place (a thumb, a snapped box).
 pub const GLIDE: Duration = Duration::from_millis(200);
 /// A dragged widget let go: it settles into its place.

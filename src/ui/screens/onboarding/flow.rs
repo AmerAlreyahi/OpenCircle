@@ -1,5 +1,5 @@
 //! Onboarding's state and logic (`State`, `update`, the `STEPS` list) and its
-//! shell: the header, the step track (its thumb glides, the step rises in),
+//! shell: the header, the step track (its thumb glides; the step itself switches at once: its rise redrew the whole window each frame on the CPU renderer, it returns with the GPU renderer, 0.1.3),
 //! the step and the footer (Back, Skip on the AI step, Next or Finish).
 //!
 //! ```ignore
@@ -22,7 +22,7 @@ use crate::secrets::{KeyStore, Keyring};
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::divider::divider;
 use crate::ui::kit::header::{Caption, regular};
-use crate::ui::kit::motion::{self, Curve, PAGE_RISE};
+use crate::ui::kit::motion::{self, Curve};
 use crate::ui::kit::segmented::spread;
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::error;
@@ -100,7 +100,7 @@ pub struct State {
     pub(super) wayland: bool,
     pub(super) access: Access,
     pub(super) error: Option<String>,
-    /// The last step change (the step it left, and when): the thumb glides, the step rises.
+    /// The last step change (the step it left, and when): the thumb glides.
     moved: Option<(Step, Instant)>,
     /// The track's labels, numbered ("1. Welcome").
     labels: Vec<(Step, String)>,
@@ -230,15 +230,13 @@ impl State {
         }
     }
 
-    /// A step change under way: (the step it left, the glide's and the rise's
-    /// progress); `None` at rest.
-    fn moving(&self) -> Option<(Step, f32, f32)> {
+    /// A step change under way: (the step it left, the glide's progress);
+    /// `None` at rest.
+    fn moving(&self) -> Option<(Step, f32)> {
         let (from, t) = self.moved?;
-        let now = Instant::now();
         Some((
             from,
-            motion::progress(t, now, motion::GLIDE, Curve::Standard),
-            motion::progress(t, now, motion::MORPH, Curve::Out),
+            motion::progress(t, Instant::now(), motion::GLIDE, Curve::Standard),
         ))
     }
 }
@@ -314,9 +312,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
         false,
         Message::Caption,
     );
-    let (from, glide, rise) = match state.moving() {
-        Some((from, glide, rise)) => (from, glide, (1.0 - rise) * PAGE_RISE),
-        None => (state.step, 1.0, 0.0),
+    let (from, glide) = match state.moving() {
+        Some((from, glide)) => (from, glide),
+        None => (state.step, 1.0),
     };
     let options: Vec<(Step, &str)> = (state.labels.iter())
         .map(|(s, l)| (*s, l.as_str()))
@@ -328,7 +326,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .find(|p| p.id == state.step)
         .expect("every step has a page");
     // fixed size, nothing scrolls: the design's `overflow-hidden`
-    let body = container(column![Space::new().height(rise), (page.view)(state)])
+    let body = container(column![(page.view)(state)])
         .height(Fill)
         .clip(true);
     let content = column![track, body, footer(state)]
