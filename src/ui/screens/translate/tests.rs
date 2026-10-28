@@ -579,6 +579,45 @@ fn explain_streams_into_the_card() {
     assert!(s.explain().units() == 0);
 }
 
+/// What the AI answers with the chat's Markdown-allowing system prompt.
+const EXPLANATION: &str = "**Inventory** means the *stock* of goods.\n\n- in a shop: items on shelves\n- in a game: your `bag`\n\nSee [the docs](https://example.com/inventory).";
+
+/// Streams `answer` into the open word card, as Explain's thread does.
+fn explained(s: &mut Session, answer: &str) {
+    let card = s.card.as_mut().unwrap();
+    card.chat
+        .ask(&explain_question(&card.block, "ar"), &[])
+        .unwrap();
+    for piece in answer.as_bytes().chunks(7) {
+        let _ = s.update(Msg::Delta(String::from_utf8_lossy(piece).into()));
+    }
+    let _ = s.update(Msg::Explained(Ok(())));
+}
+
+/// The explanation is Markdown, shown as formatted text: no `**`, `-` or
+/// backticks on the card, and a link acts only on a click.
+#[test]
+fn the_explanation_is_shown_as_markdown() {
+    let mut s = session(true);
+    let _ = s.update(shown(vec![block(
+        "Inventory",
+        "المخزون",
+        [0.0, 0.0, 100.0, 40.0],
+    )]));
+    s.click(Point::new(50.0, 20.0));
+    explained(&mut s, EXPLANATION);
+    // parsed: a paragraph, a list (its markers are drawn), a paragraph
+    let items = s.card.as_ref().unwrap().answer.items();
+    assert_eq!(items.len(), 3, "{items:?}");
+    assert!(matches!(
+        items[1],
+        iced::widget::markdown::Item::List { .. }
+    ));
+    let size = Size::new(1280.0, 720.0);
+    let texts = widgets::shot::texts(s.view(size, card::place(size, None, None), false));
+    assert!(!texts.join(" ").contains("**"), "raw Markdown: {texts:?}");
+}
+
 #[test]
 fn paste_puts_the_area_back_in_place() {
     let mut f = vec![0u8; 4 * 3 * 4];
@@ -607,6 +646,12 @@ fn every_translate_state_matches_its_golden_image() {
                 let _ = s.update(shown(Vec::new()));
                 s.picker.update(picker::Msg::Open(picker::Side::Target));
             }
+            "word-explained" => {
+                let blocks = vec![block("Inventory", "المخزون", [0.0, 0.0, 100.0, 40.0])];
+                let _ = s.update(shown(blocks));
+                s.click(Point::new(50.0, 20.0));
+                explained(&mut s, EXPLANATION);
+            }
             "word" => {
                 let blocks = vec![block("Inventory", "المخزون", [0.0, 0.0, 100.0, 40.0])];
                 let _ = s.update(shown(blocks));
@@ -624,6 +669,7 @@ fn every_translate_state_matches_its_golden_image() {
         "failed",
         "picker",
         "word",
+        "word-explained",
     ];
     let mut failed = Vec::new();
     for theme in [&SAPPHIRE, &DAYLIGHT] {

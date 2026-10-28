@@ -5,7 +5,7 @@
 //! Explain (an explicit click) asks the AI; `A` continues as an Ask AI chat.
 use std::sync::Arc;
 
-use iced::widget::image;
+use iced::widget::{image, markdown};
 use iced::{Point, Rectangle, Size, Task, task};
 
 use crate::actions::ask::{self, Chat, Status};
@@ -49,6 +49,8 @@ pub enum Msg {
     Explain,
     Delta(String),
     Explained(Result<(), String>),
+    /// A click in the explanation: a link, or a code block's Copy.
+    Answer(crate::ui::kit::markdown::Act),
     /// The word card's Ask AI (or `A`): continue as a chat.
     Ask,
     /// The AI is not set up: open Settings.
@@ -125,6 +127,9 @@ struct Card {
     /// The block (with a little context) from the original frame: what Explain sends.
     crop: Arc<Crop>,
     chat: Chat,
+    /// The AI's explanation parsed as Markdown (it shares the chat's system
+    /// prompt, which allows it).
+    answer: markdown::Content,
     work: Option<task::Handle>,
     /// The target language is right-to-left: the answer is right-aligned.
     rtl: bool,
@@ -264,7 +269,30 @@ impl Session {
             Msg::Delta(piece) => {
                 if let Some(card) = &mut self.card {
                     card.chat.delta(&piece);
+                    card.answer.push_str(&piece);
                 }
+            }
+            Msg::Answer(act) => {
+                use crate::ui::kit::markdown::Act;
+                // Only on a click, and only a web link (`open_link`).
+                return match act {
+                    Act::Link(url) => background(
+                        move |_: &iced::futures::channel::mpsc::UnboundedSender<Msg>| {
+                            if let Err(e) = crate::sys::open::open_link(&url) {
+                                crate::log!("explanation link not opened: {e}");
+                            }
+                        },
+                    )
+                    .discard(),
+                    Act::Copy(code) => background(
+                        move |_: &iced::futures::channel::mpsc::UnboundedSender<Msg>| {
+                            if let Err(e) = actions::copy::text(code) {
+                                crate::log!("copy failed: {e}");
+                            }
+                        },
+                    )
+                    .discard(),
+                };
             }
             Msg::Explained(result) => {
                 if let Some(card) = &mut self.card {
@@ -309,6 +337,7 @@ impl Session {
                 block,
                 crop: Arc::new(crop),
                 chat: Chat::default(),
+                answer: markdown::Content::new(),
                 work: None,
                 rtl: pipeline::is_rtl(&self.picker.target),
             });
@@ -341,6 +370,7 @@ impl Session {
         let question = explain_question(&card.block, &self.picker.target);
         // The card keeps the turn; the thread sends it with the image.
         card.chat.ask(&question, &[]);
+        card.answer = markdown::Content::new();
         let crop = card.crop.clone();
         let (task, handle) = background(move |tx| {
             let result = ask::setup(&crop).and_then(|setup| {

@@ -7,9 +7,10 @@ use iced::{Center, Element, Fill, Rectangle, Size};
 use super::{Card, Msg, PICKER_LIST, Phase, Session};
 use crate::actions::ask::Status;
 use crate::actions::{self};
+use crate::ui::kit::markdown;
 use crate::ui::kit::panel_frame::{self as frame, Header};
 use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::{error, sub, text as label};
+use crate::ui::kit::text::{error, text as label};
 use crate::ui::kit::tokens::{Role, radius};
 use crate::ui::panel::{actions, card, note};
 use crate::ui::picker;
@@ -116,11 +117,11 @@ impl Session {
 /// The word card (the design's "Word explanation", titled "translation ·
 /// original"): its body (the translation, the AI's explanation) and actions
 /// (Explain = E, Ask AI = A).
-fn card_view(card: &Card) -> (Element<'static, Msg>, Element<'static, Msg>) {
+fn card_view(card: &Card) -> (Element<'_, Msg>, Element<'_, Msg>) {
     // Mixed lines ("«name» ...") would each pick their own side: a
     // right-to-left target's lines are laid at the right as a block. (A
     // `Fill` text aligned right drew nothing in the card.)
-    let side = |line: iced::widget::Text<'static>| -> Element<'static, Msg> {
+    let side = |line: iced::widget::Text<'static>| -> Element<'_, Msg> {
         match card.rtl {
             true => container(line).align_right(Fill).into(),
             false => line.width(Fill).into(),
@@ -135,7 +136,8 @@ fn card_view(card: &Card) -> (Element<'static, Msg>, Element<'static, Msg>) {
         body = body.push(
             match turn.answer.is_empty() && card.chat.status == Status::Streaming {
                 true => note("Thinking…").width(Fill).into(),
-                false => side(sub(Role::CHAT, turn.answer.clone())),
+                // Markdown, as the chat shows it (lines shape by their own direction)
+                false => markdown::markdown(card.answer.items()).map(Msg::Answer),
             },
         );
     }
