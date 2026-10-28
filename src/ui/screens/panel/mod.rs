@@ -1,4 +1,4 @@
-//! Result panels (DESIGN.md Flow step 5): Search (Lens), Text and Ask AI (the
+//! Result panels (DESIGN.md Flow step 5): Search (Lens) and Ask AI (the
 //! AI chat: docked, its answers as Markdown). One floating card (`kit::panel_frame::card`: on the side away from the
 //! selection, a card at the bottom on narrow screens; dragged and resized by
 //! its frame) over the frozen frame, so the selection stays visible. Slow work
@@ -7,11 +7,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use iced::widget::{markdown, operation, text_editor};
+use iced::widget::{markdown, operation};
 use iced::{Task, task};
 
 use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
-use crate::actions::entities::{self, Entity, Kind};
 use crate::actions::text::{self, Progress};
 use crate::actions::{self, Crop, lens};
 use crate::ai;
@@ -49,19 +48,10 @@ pub enum Msg {
     Download,
     /// Browser provider: send the question without the selection's text.
     SendWithoutText,
-    Cancel,
     Progress(Progress),
-    Read(Result<String, String>),
-    Edit(text_editor::Action),
-    CopyText,
-    /// Search the crop with Lens (from the Text panel).
+    /// Search the crop with Lens (the chat's "Search the image with Lens").
     Search,
-    /// Translate the read text (Text panel), shown under it.
-    Translate,
-    Translated(Result<String, String>),
-    /// A link, email or phone chip under the text (index into `entities`).
-    Chip(usize),
-    /// What that chip's click did (its note).
+    /// What a link's click did (its note).
     Acted(Result<&'static str, String>),
     /// A focused field gave a key back (`keys`); the App handles it.
     Key(keys::Keyed),
@@ -85,13 +75,9 @@ pub struct Panel {
     state: State,
     /// The follow-up input's text.
     input: String,
-    /// The running stream, OCR or translation; dropping the handle aborts it.
+    /// The running stream; dropping the handle aborts it.
     work: Option<task::Handle>,
-    /// The Text panel's translation of the read text, once asked for.
-    translation: Option<Result<String, String>>,
-    /// Links, emails and phone numbers in the Text panel's text; a click acts on one.
-    entities: Vec<Entity>,
-    /// What the last chip click did (or why it could not).
+    /// What the last link click did (or why it could not).
     note: Option<Result<&'static str, String>>,
     /// The logo spinner while the AI has not answered yet: since when, and
     /// how far through its turn at the latest frame (`tick`).
@@ -101,7 +87,6 @@ pub struct Panel {
 enum State {
     /// `None` while the page is being written.
     Lens(Option<Result<(), String>>),
-    Text(Reading),
     Ask {
         /// `None` while loading the config and key.
         setup: Option<Result<Arc<Setup>, String>>,
@@ -127,17 +112,6 @@ enum Browse {
     Downloading(f32),
 }
 
-enum Reading {
-    /// No models yet: ask before downloading.
-    Consent,
-    Downloading(f32),
-    /// Just downloaded, reading now (the download card's Done).
-    Installed,
-    Busy,
-    Done(text_editor::Content),
-    Failed(String),
-}
-
 impl Panel {
     /// Opens `kind` for `crop`. `question` (Ask AI only) is sent once ready:
     /// the user already pressed Enter on it elsewhere (Lens follow-up).
@@ -150,8 +124,6 @@ impl Panel {
             state: State::Lens(None),
             input: question.unwrap_or_default(),
             work: None,
-            translation: None,
-            entities: Vec::new(),
             note: None,
             spin: None,
         };
@@ -159,14 +131,6 @@ impl Panel {
             actions::Panel::Lens => background(move |tx| {
                 let _ = tx.unbounded_send(Msg::LensOpened(lens::open(&crop)));
             }),
-            actions::Panel::Text if text::models_present() => {
-                panel.state = State::Text(Reading::Busy);
-                panel.read()
-            }
-            actions::Panel::Text => {
-                panel.state = State::Text(Reading::Consent);
-                Task::none()
-            }
             actions::Panel::Ask => {
                 panel.state = State::ask(Chat::default());
                 // No key (Google AI Mode): nothing to load (no keyring, no PNG), so
@@ -198,7 +162,6 @@ impl Panel {
     pub fn kind(&self) -> actions::Panel {
         match self.state {
             State::Lens(_) => actions::Panel::Lens,
-            State::Text(_) => actions::Panel::Text,
             State::Ask { .. } => actions::Panel::Ask,
         }
     }
@@ -234,15 +197,7 @@ impl Panel {
         std::mem::take(&mut self.input)
     }
 
-    /// The Text panel's (edited) text.
-    pub fn text(&self) -> Option<String> {
-        match &self.state {
-            State::Text(Reading::Done(content)) => Some(content.text()),
-            _ => None,
-        }
-    }
-
-    /// Messages for the panel itself (the App handles Cancel, CopyText, Search
+    /// Messages for the panel itself (the App handles Search
     /// and the Lens follow-up first).
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         let task = self.on(msg);
@@ -397,79 +352,10 @@ impl Panel {
                 *browse = Browse::Idle;
                 self.work = None;
             }
-            (State::Text(reading @ (Reading::Consent | Reading::Failed(_))), Msg::Download) => {
-                *reading = Reading::Downloading(0.0);
-                return self.read();
-            }
-            (State::Text(reading), Msg::Progress(progress)) => match (progress, &reading) {
-                (Progress::Download(done), Reading::Downloading(_)) => {
-                    *reading = Reading::Downloading(done)
-                }
-                (Progress::Reading, Reading::Downloading(_)) => *reading = Reading::Installed,
-                (Progress::Reading, _) => *reading = Reading::Busy,
-                _ => {}
-            },
-            (State::Text(reading), Msg::Read(result)) => {
-                self.work = None;
-                *reading = match result {
-                    Ok(text) if text.trim().is_empty() => {
-                        Reading::Failed("No text found in the selection.".into())
-                    }
-                    Ok(text) => {
-                        self.entities = entities::find(&text);
-                        Reading::Done(text_editor::Content::with_text(&text))
-                    }
-                    Err(e) => Reading::Failed(e),
-                };
-            }
-            (State::Text(Reading::Done(content)), Msg::Edit(action)) => {
-                let edits = action.is_edit();
-                content.perform(action);
-                if edits {
-                    self.entities = entities::find(&content.text());
-                }
-            }
-            // Only here, on a click: nothing is ever opened by itself.
-            (State::Text(Reading::Done(_)), Msg::Chip(i)) => {
-                // (on a thread: launching the browser or mail app takes a while)
-                if let Some(entity) = self.entities.get(i).cloned() {
-                    return background(move |tx| {
-                        let _ = tx.unbounded_send(Msg::Acted(act_on(&entity)));
-                    });
-                }
-            }
             (_, Msg::Acted(note)) => self.note = Some(note),
-            (State::Text(Reading::Done(content)), Msg::Translate) if self.work.is_none() => {
-                let text = content.text();
-                self.translation = None;
-                let (task, handle) = background(move |tx| {
-                    let _ = tx.unbounded_send(Msg::Translated(actions::translate::text(&text)));
-                })
-                .abortable();
-                self.work = Some(handle.abort_on_drop());
-                return task;
-            }
-            (State::Text(_), Msg::Translated(result)) => {
-                self.work = None;
-                self.translation = Some(result);
-            }
             _ => {}
         }
         Task::none()
-    }
-
-    /// Starts OCR (with the model download first if needed) on a thread.
-    fn read(&mut self) -> Task<Msg> {
-        let crop = self.crop.clone();
-        let (task, handle) = background(move |tx| {
-            let result = text::read(&crop, |progress| {
-                let _ = tx.unbounded_send(Msg::Progress(progress));
-            });
-            let _ = tx.unbounded_send(Msg::Read(result));
-        })
-        .abortable();
-        self.work = Some(handle.abort_on_drop());
-        task
     }
 
     /// Asks `question`; the answer streams in on a thread. Nothing is sent before this.
@@ -586,21 +472,6 @@ fn copy(text: String) -> Task<Msg> {
             .map_err(|e| format!("Could not copy: {e}"));
         let _ = tx.unbounded_send(Msg::Acted(done));
     })
-}
-
-/// What a chip click does: open the link or a new message, or copy the number.
-fn act_on(entity: &Entity) -> Result<&'static str, String> {
-    match entity.kind {
-        Kind::Link => crate::sys::open::open_link(&entity.text)
-            .map(|()| "Opened in your browser.")
-            .map_err(|e| format!("Could not open the link: {e}")),
-        Kind::Email => crate::sys::open::open_mailto(&entity.text)
-            .map(|()| "Opened your mail app.")
-            .map_err(|e| format!("Could not open the mail app: {e}")),
-        Kind::Phone => actions::copy::text(entity.text.clone())
-            .map(|()| "Number copied.")
-            .map_err(|e| format!("Could not copy: {e}")),
-    }
 }
 
 /// Browser provider: the question to open in AI Mode and the line to add to the

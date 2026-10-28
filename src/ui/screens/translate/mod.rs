@@ -84,8 +84,8 @@ pub struct Problem {
 
 #[derive(Debug)]
 enum Phase {
-    /// No OCR models for the source yet: ask first (the Text panel's
-    /// prompt). `Some`: an offline pair's models (and OCR's, if missing)
+    /// No OCR models for the source yet: ask first (the download
+    /// card). `Some`: an offline pair's models (and OCR's, if missing)
     /// instead, with the bytes to download.
     Consent(Option<(&'static Pair, u64)>),
     Downloading(f32),

@@ -14,7 +14,7 @@ use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::{border, glass, overlay, widgets};
 
-use super::{App, CHIP_SPACE, HINT, PROTECTED, QR_WIDTH, SLIDE, TextMode};
+use super::{App, CHIP_SPACE, HINT, LINK_WIDTH, PROTECTED, QR_WIDTH, SLIDE, TextMode};
 
 impl App {
     pub(in crate::ui) fn view(&self, window: window::Id) -> Element<'_, Message> {
@@ -269,6 +269,16 @@ impl App {
             let size = Size::new(QR_WIDTH, bar::HEIGHT);
             let at = chips_at(below, size, room);
             let chip = container(chip).center_x(QR_WIDTH);
+            below = below.union(&Rectangle::new(at, size));
+            layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
+        }
+        // A link or email in the selected words: a click-only chip to open it.
+        if let Some(entity) = self.chip_entity() {
+            let open = Message::OpenEntity(entity.clone());
+            let chip = crate::ui::screens::bar::view::link_chip(&entity, open);
+            let size = Size::new(LINK_WIDTH, bar::HEIGHT);
+            let at = chips_at(below, size, room);
+            let chip = container(chip).center_x(LINK_WIDTH);
             layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
         }
         layers.into()

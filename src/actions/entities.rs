@@ -26,15 +26,6 @@ pub struct Entity {
 }
 
 impl Entity {
-    /// What the chip does.
-    pub fn label(&self) -> &'static str {
-        match self.kind {
-            Kind::Link => "Open link",
-            Kind::Email => "Write email",
-            Kind::Phone => "Copy number",
-        }
-    }
-
     /// The value, short enough for a chip. A link shows its whole host, never cut,
     /// so the chip names the site it opens (the path could be made to look like one).
     /// Every entity is plain ASCII (the scanners only take ASCII bytes), so there
@@ -44,11 +35,6 @@ impl Entity {
             Kind::Link => crate::sys::open::web_host(&self.text).unwrap_or_default(),
             _ => shorten(&self.text, 28),
         }
-    }
-
-    /// The chip's text, e.g. "Open link · example.com".
-    pub fn chip(&self) -> String {
-        format!("{} · {}", self.label(), self.shown())
     }
 }
 
@@ -578,22 +564,15 @@ mod tests {
 
     #[test]
     fn chip_text_is_short() {
-        let e = of(
-            Kind::Link,
-            "https://example.com/a/very/long/path/that/goes/on",
-        );
-        assert_eq!(e.label(), "Open link");
-        assert_eq!(e.chip(), "Open link · example.com");
         // The whole host, never cut: the part that says where the link goes.
         let long = of(
             Kind::Link,
             "https://login.accounts.example-bank.co.uk.evil.example.com/x",
         );
         assert_eq!(
-            long.chip(),
-            "Open link · login.accounts.example-bank.co.uk.evil.example.com"
+            long.shown(),
+            "login.accounts.example-bank.co.uk.evil.example.com"
         );
-        assert_eq!(of(Kind::Email, "a@b.com").chip(), "Write email · a@b.com");
         assert_eq!(shorten("héllo wörld", 5), "héllo…");
     }
 }

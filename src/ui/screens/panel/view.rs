@@ -7,7 +7,7 @@ use iced::widget::tooltip::Position;
 use iced::widget::{column, container, markdown as md, row};
 use iced::{Center, Element, Fill, Rectangle, Right, Size};
 
-use super::{Browse, LOG, Msg, Panel, Reading, State};
+use super::{Browse, LOG, Msg, Panel, State};
 use crate::actions;
 use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
 use crate::ui::keys;
@@ -24,7 +24,6 @@ use crate::ui::kit::spinner;
 use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::{chip, field, progress};
-use crate::ui::screens::model_download::{self, On, Stage};
 use crate::ui::widgets::{self, Why};
 
 /// A card's body and its footer.
@@ -93,26 +92,6 @@ pub fn actions<'a, M: Clone + 'a>(
     line.into()
 }
 
-/// The OCR download card (`model_download`) for the Text card's download
-/// question, progress, done and failure; `None` once it reads (or failed to
-/// read with the models here).
-fn download_card(reading: &Reading) -> Option<Element<'_, Msg>> {
-    let stage = match reading {
-        Reading::Consent => Stage::Ask,
-        Reading::Downloading(done) => Stage::at(*done),
-        Reading::Installed => Stage::Done,
-        Reading::Failed(e) if !crate::actions::text::models_present() => Stage::Failed(e),
-        _ => return None,
-    };
-    let on = On {
-        download: Msg::Download,
-        dismiss: Some(Msg::Cancel),
-        provider: None,
-    };
-    let bytes = crate::ocr::models::full_size();
-    Some(model_download::card(&model_download::OCR, bytes, stage, on))
-}
-
 /// A download's line, its bar and its share (`.as-progress-label` +
 /// `.as-progress`): the Ask card's OCR download for its question.
 fn downloading<'a, M: 'a>(what: &'a str, done: f32) -> Element<'a, M> {
@@ -128,21 +107,11 @@ impl Panel {
     /// The panel as the floating result card at `at` on a `screen`;
     /// `hover`: the pointer is on its resize edge.
     pub fn view(&self, at: Rectangle, screen: Size, hover: bool) -> Element<'_, Msg> {
-        if let State::Text(reading) = &self.state
-            && let Some(card) = download_card(reading)
-        {
-            return model_download::placed(card, at, screen);
-        }
         let (glyph, title, (body, footer)) = match &self.state {
             State::Lens(status) => (
                 actions::lens::ACTION.icon,
                 actions::lens::ACTION.label,
                 self.lens_view(status.as_ref()),
-            ),
-            State::Text(reading) => (
-                actions::text::ACTION.icon,
-                "Text from your selection",
-                self.text_view(reading),
             ),
             State::Ask {
                 setup,
@@ -175,12 +144,6 @@ impl Panel {
             chip,
             docked: chatting,
             logo: chatting.then(widgets::chrome::logo_handle),
-        };
-        // the Text card's download question, progress and error are short
-        // cards, as tall as their text and buttons, not a slab (#127)
-        let at = match &self.state {
-            State::Text(Reading::Failed(e)) => frame::short(at, screen, e.chars().count(), 0.0),
-            _ => at,
         };
         if chatting {
             // the header's end: a new chat, then close
@@ -426,49 +389,5 @@ impl Panel {
             .spacing(space::GAP)
             .align_y(Center)
             .into()
-    }
-
-    /// The Text card (`Recognised text`): the note, the text to edit, then
-    /// Copy, Search and Translate.
-    fn text_view<'a>(&'a self, reading: &'a Reading) -> Part<'a> {
-        let body = match reading {
-            // (the download card shows these: `download_card`)
-            Reading::Consent | Reading::Downloading(_) | Reading::Installed | Reading::Busy => {
-                note("Reading the text…").into()
-            }
-            Reading::Done(content) => {
-                let edit = keys::guard(field::editor(content, Msg::Edit), Msg::Key);
-                let mut body =
-                    column![note("Review or edit before using this text"), edit].spacing(STACK);
-                body = match &self.translation {
-                    _ if self.work.is_some() => body.push(note("Translating…")),
-                    Some(Ok(text)) => {
-                        body.push(scroll(sub(Role::CHAT, text.as_str()).width(Fill)).height(Fill))
-                    }
-                    Some(Err(e)) => body.push(error(Role::NOTE, e)),
-                    None => body,
-                };
-                if !self.entities.is_empty() {
-                    let chips = (self.entities.iter().enumerate())
-                        .map(|(i, e)| chip::action(e.chip(), Msg::Chip(i)));
-                    body = body.push(row(chips).spacing(CHIPS_GAP).wrap());
-                }
-                body = match &self.note {
-                    Some(Ok(done)) => body.push(note(*done)),
-                    Some(Err(e)) => body.push(error(Role::NOTE, e)),
-                    None => body,
-                };
-                let buttons = actions(
-                    ("Copy", Msg::CopyText),
-                    [
-                        ("Search", Msg::Search),
-                        (actions::translate::ACTION.label, Msg::Translate),
-                    ],
-                );
-                return (body.into(), Some(buttons));
-            }
-            Reading::Failed(e) => error(Role::NOTE, e).into(),
-        };
-        (body, None)
     }
 }

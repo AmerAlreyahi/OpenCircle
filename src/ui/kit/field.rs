@@ -49,38 +49,6 @@ pub fn input<'a, Message: Clone + 'a>(
         })
 }
 
-/// `.as-textarea`: `.oc-input` over several lines (the Text card's text):
-/// 12 px on `track`, line 1.65, 12 px in, radius 10, a `rim` edge that turns
-/// `accent` while focused; as tall as its place.
-pub fn editor<'a, Message: Clone + 'a>(
-    content: &'a iced::widget::text_editor::Content,
-    on_action: impl Fn(iced::widget::text_editor::Action) -> Message + 'a,
-) -> Element<'a, Message> {
-    use super::tokens::Role;
-    use iced::widget::text_editor;
-    text_editor(content)
-        .on_action(on_action)
-        .font(super::text::font(Role::NOTE))
-        .size(Role::NOTE.size)
-        .line_height(1.65)
-        .padding(12)
-        .height(iced::Fill)
-        .style(|_, status| text_editor::Style {
-            background: c().track.into(),
-            border: Border::default()
-                .rounded(radius::TRACK)
-                .width(1)
-                .color(match status {
-                    text_editor::Status::Focused { .. } => c().accent,
-                    _ => c().rim,
-                }),
-            placeholder: c().text_muted,
-            value: c().text,
-            selection: c().accent_soft,
-        })
-        .into()
-}
-
 /// Mono 10.5 px on `track`, a rim edge that turns `accent` while focused. No
 /// `on_input` = read-only.
 pub fn field<'a, Message: Clone + 'a>(

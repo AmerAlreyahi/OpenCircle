@@ -2007,12 +2007,8 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         app.o.panel.as_ref().map(|(_, p)| p.kind()),
         Some(actions::Panel::Lens)
     );
-    // the keys still work: T reads the text, A asks, L searches
-    for (letter, kind) in [
-        ('t', actions::Panel::Text),
-        ('a', actions::Panel::Ask),
-        ('l', actions::Panel::Lens),
-    ] {
+    // the keys still work: A asks, L searches
+    for (letter, kind) in [('a', actions::Panel::Ask), ('l', actions::Panel::Lens)] {
         app.o.panel = None;
         event(
             &mut app,
@@ -2596,22 +2592,6 @@ fn app_with_ask_panel() -> (App, u32) {
     (app, id)
 }
 
-/// An open overlay with a selection and a Text panel that has read `text`.
-fn app_with_text_panel(text: &str) -> App {
-    let mut app = open_app(800, 600, 1.0);
-    drag(
-        &mut app,
-        Point::new(50.0, 50.0),
-        Point::new(150.0, 120.0),
-        false,
-    );
-    let crop = app.crop().unwrap();
-    let _ = app.open_panel(actions::Panel::Text, crop, None);
-    let id = app.o.panel.as_ref().map(|(id, _)| *id).unwrap();
-    let _ = app.update(Message::Panel(id, panel::Msg::Read(Ok(text.into()))));
-    app
-}
-
 fn feed(
     app: &App,
     focus: Focus,
@@ -2658,19 +2638,6 @@ fn typing_in_the_ask_panels_input_runs_no_shortcut() {
 }
 
 #[test]
-fn typing_in_the_text_panels_editor_runs_no_shortcut() {
-    let app = app_with_text_panel("hello");
-    let (messages, _) = feed(&app, Focus::First, &shot::typing("real estate"));
-    assert_eq!(shortcuts(&messages), "", "{messages:?}");
-    let edits = (messages.iter())
-        .filter(|m| matches!(m, Message::Panel(_, panel::Msg::Edit(_))))
-        .count();
-    assert!(edits >= "real estate".len(), "{messages:?}");
-    let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("aterl"));
-    assert_eq!(shortcuts(&messages), "aterl");
-}
-
-#[test]
 fn a_translation_has_no_field_to_take_the_letters() {
     let mut app = open_app(800, 600, 1.0);
     let frame = app.o.frame.clone().unwrap();
@@ -2712,7 +2679,7 @@ fn esc_leaves_a_focused_field_and_the_second_closes() {
     assert_eq!(status[1], iced::event::Status::Ignored);
     let _ = app.update(Message::Escape);
     assert!(app.o.frame.is_none());
-    // the Ask panel's input and the Text panel's editor (which lets Esc through)
+    // the Ask panel's input
     let (app, _) = app_with_ask_panel();
     let (messages, status) = feed(&app, Focus::Id(panel::INPUT), &esc);
     assert!(
@@ -2721,18 +2688,6 @@ fn esc_leaves_a_focused_field_and_the_second_closes() {
             .any(|m| matches!(m, Message::Panel(_, panel::Msg::Key(keys::Keyed::Left))))
     );
     assert_eq!(status[1], iced::event::Status::Captured);
-    let app = app_with_text_panel("hello");
-    let (messages, status) = feed(&app, Focus::First, &esc);
-    assert!(
-        messages
-            .iter()
-            .any(|m| matches!(m, Message::Panel(_, panel::Msg::Key(keys::Keyed::Left))))
-    );
-    assert_eq!(
-        status[1],
-        iced::event::Status::Captured,
-        "Esc must not also close the overlay"
-    );
 }
 
 #[test]
@@ -3257,7 +3212,7 @@ fn select_text_highlights_every_word_and_a_drag_picks_some() {
     // Done leaves the mode; a press outside the box starts over
     let _ = app.update(Message::SelectText);
     assert!(app.o.text_mode.is_none());
-    let _ = app.update(Message::SelectText); // no OCR models here: the Text panel asks
+    let _ = app.update(Message::SelectText); // no OCR models here: the download card asks
     drag(
         &mut app,
         Point::new(700.0, 300.0),
@@ -3290,7 +3245,7 @@ fn ctrl_c_in_select_text_mode_copies_the_boxs_text_not_its_picture() {
     early.o.text_mode.as_mut().unwrap().lines = None;
     let task = early.update(Message::Overlay(ctrl_c));
     let reading = early.o.toast == Some("Reading text…");
-    let asking = early.o.panel.as_ref().map(|(_, p)| p.kind()) == Some(actions::Panel::Text);
+    let asking = early.o.copy_after; // no models: the download card, then it copies
     assert!(reading || asking, "reads the box (or asks for its model)");
     run_task(&mut early, task);
     assert_eq!(copy::copied::image(), None, "not the picture");
@@ -3331,7 +3286,7 @@ fn nothing_floats_over_the_result_card() {
         Point::new(940.0, 500.0),
         false,
     );
-    let _ = app.update(Message::Run(&text::ACTION));
+    let _ = app.update(Message::Run(&lens::ACTION));
     let card = app.card_at();
     let room = app.room();
     assert!(room.intersection(&card).is_none(), "{room:?} vs {card:?}");
@@ -3384,7 +3339,7 @@ fn the_result_card_opens_off_the_selection_and_moves_by_its_grip() {
         Point::new(400.0, 300.0),
         false,
     );
-    let _ = app.update(Message::Run(&text::ACTION)); // no models: the consent card
+    let _ = app.update(Message::Run(&lens::ACTION)); // the Lens card
     assert!(app.o.panel.is_some());
     let at = app.card_at();
     assert_eq!(at.x + at.width, 1920.0 - card::GAP, "right");
@@ -3458,7 +3413,7 @@ fn look_shots() {
     shot(&app, "look-1-snap-morphing.png");
     app.o.morph = None;
     shot(&app, "look-2-snapped-chips.png");
-    let _ = app.update(Message::Run(&text::ACTION)); // no models here: the consent card
+    let _ = app.update(Message::Run(&lens::ACTION)); // the Lens card
     shot(&app, "look-6-result-card.png");
     // Ask AI beside a selection at 1440x900, the bar kept out of the card,
     // the resize grip showing (hovered)
@@ -3597,7 +3552,7 @@ fn close_leaves_a_fresh_opening() {
     read_back(&mut app, at_word(1, 7.0), page(), false);
     assert!(app.o.word.is_some() && app.o.selection.is_some());
     let crop = app.crop().unwrap();
-    let _ = app.open_panel(actions::Panel::Text, crop, None);
+    let _ = app.open_panel(actions::Panel::Lens, crop, None);
     let frame = app.o.frame.clone().unwrap();
     let (session, _) =
         translate::Session::start(frame, [0, 0, 40, 20], 1.0, app.cache.clone(), false);
@@ -3646,7 +3601,7 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
     assert!(app.o.is_some() && app.o.tiles.is_some());
     app.select(Rectangle::new(Point::new(4.0, 4.0), Size::new(40.0, 30.0)));
     let crop = app.crop().unwrap();
-    let _ = app.open_panel(actions::Panel::Text, crop, None);
+    let _ = app.open_panel(actions::Panel::Lens, crop, None);
     assert!(app.o.panel.is_some());
     let _ = app.start_translate(); // (the panel goes)
     assert!(app.o.translate.is_some());
@@ -3664,7 +3619,7 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
         extend: false,
     };
     let late = [
-        Message::Panel(panel, panel::Msg::Read(Ok("late".into()))),
+        Message::Panel(panel, panel::Msg::Delta("late".into())),
         Message::Translate(translation, translate::Msg::Close),
         Message::ScreenText(opening, band, Ok(Vec::new())),
         Message::Tapped(read, Ok(Vec::new())),
@@ -3721,4 +3676,109 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     let crop = app.crop().unwrap();
     let _ = app.open_panel(actions::Panel::Ask, crop, None);
     assert_eq!(app.card_at().x, 16.0);
+}
+
+/// Copy text (the key T, `opencircle run text`) on picked words copies exactly
+/// those words and shows the Copied pill: no Text card ever opens.
+#[test]
+fn copy_text_copies_the_picked_words_and_opens_no_card() {
+    let mut app = read_app();
+    app.taps += 1;
+    read_back(&mut app, at_word(1, 7.0), page(), false);
+    let want = picked_text(&app).expect("a word is picked");
+    let _ = copy::copied::text();
+    let task = app.update(Message::Run(&text::ACTION));
+    assert!(app.o.panel.is_none(), "no Text card");
+    run_task(&mut app, task);
+    assert_eq!(copy::copied::text().as_deref(), Some(want.as_str()));
+    assert_eq!(copy::copied::image(), None, "never the picture");
+}
+
+/// Without the OCR models Copy text shows the download card in place (the
+/// bar's), downloads only on its button, then copies once it is Done.
+#[test]
+fn copy_text_without_models_shows_the_download_card_then_copies() {
+    text::MODELS_HERE.set(Some(false));
+    let mut app = open_app(1280, 800, 1.0);
+    drag(
+        &mut app,
+        Point::new(200.0, 150.0),
+        Point::new(500.0, 350.0),
+        false,
+    );
+    app.o.panel = None;
+    let _ = app.update(Message::Run(&text::ACTION));
+    assert!(app.o.panel.is_none(), "no Text card");
+    assert!(app.o.copy_after && matches!(app.o.reader, Reader::Missing(_)));
+    let texts = overlay_texts(&app);
+    assert!(texts.contains(&"Download".to_string()), "{texts:?}");
+    assert!(app.o.toast.is_none(), "nothing is read before the download");
+    // Done: the models are here now, so it reads and copies
+    text::MODELS_HERE.set(Some(true));
+    let _ = app.update(Message::ReaderDownload);
+    let opening = app.opening;
+    let _ = app.update(Message::Reader(opening, Ok(text::Progress::Reading)));
+    assert!(!app.o.copy_after);
+    assert_eq!(app.o.toast, Some("Reading text…"));
+    // Not now: nothing is copied afterwards
+    text::MODELS_HERE.set(Some(false));
+    let mut app = open_app(1280, 800, 1.0);
+    drag(
+        &mut app,
+        Point::new(200.0, 150.0),
+        Point::new(500.0, 350.0),
+        false,
+    );
+    let _ = app.update(Message::Run(&text::ACTION));
+    assert!(app.o.copy_after);
+    let _ = app.update(Message::ReaderDismiss);
+    assert!(!app.o.copy_after && app.o.reader == Reader::Idle);
+    text::MODELS_HERE.set(None);
+}
+
+/// A link or email in the selected words gets a chip beside the selection;
+/// plain text gets none; a click (only) asks for it to be opened.
+#[test]
+fn a_link_in_the_selected_words_gets_a_click_only_chip() {
+    let pick = |line: &str| {
+        let mut app = reader_app();
+        app.taps += 1;
+        let block = TextBlock {
+            text: line.into(),
+            bounds: [60.0, 43.0, line.len() as f32 * CHAR, 26.0],
+            confidence: 1.0,
+        };
+        let what = WordRead {
+            id: app.taps,
+            at: at_word(0, 12.0),
+            origin: [0, 0],
+            region: page(),
+            extend: false,
+        };
+        let _ = app.on_tapped(what, Ok(vec![block]));
+        app
+    };
+    let app = pick("see https://shop.example/track now");
+    let entity = app.chip_entity().expect("the link");
+    let texts = overlay_texts(&app);
+    assert!(
+        texts.contains(&"Open shop.example".to_string()),
+        "{texts:?}"
+    );
+    // nothing is opened by showing it; its click asks for the link
+    let size = Size::new(LINK_WIDTH, bar::HEIGHT);
+    let area = app.o.view.rect_to_screen(app.o.selection.unwrap().area);
+    let at = chips_at(area, size, app.room()) + Vector::new(LINK_WIDTH / 2.0, bar::HEIGHT / 2.0);
+    let clicks = widgets::shot::click(app.view(app.overlay), app.o.screen, at);
+    assert!(
+        clicks
+            .iter()
+            .any(|m| matches!(m, Message::OpenEntity(e) if *e == entity)),
+        "{clicks:?}"
+    );
+    let app = pick("mail help@shop.example please");
+    assert!(overlay_texts(&app).contains(&"Write help@shop.example".to_string()));
+    let app = pick("just some plain words here");
+    assert!(app.chip_entity().is_none());
+    assert!(!overlay_texts(&app).iter().any(|t| t.starts_with("Open ")));
 }

@@ -1,7 +1,7 @@
 //! The model download card (`newdesing/widgets/model-download.js`, #127):
 //! the one question before an on-device model is downloaded, its progress, its
 //! check, done, and why it failed. Every place that needs a model shows it:
-//! the bar's text-reader note, the Text panel, translate. Nothing downloads
+//! the bar's text-reader note (also Copy text), translate. Nothing downloads
 //! without its Download click (the callers start the download on that message
 //! only). What each model says is data (`OCR`, `TRANSLATION`).
 use iced::widget::{Space, column, container, pin, row, text};
@@ -59,6 +59,9 @@ pub enum Stage<'a> {
     Downloading(f32),
     /// All fetched: checked and set up.
     Verifying,
+    // ponytail: the design's Done stage; the callers go straight on to their
+    // work once it is Done, so only the gallery and tests show it.
+    #[cfg_attr(not(test), allow(dead_code))]
     Done,
     /// Why it stopped.
     Failed(&'a str),

@@ -18,7 +18,7 @@ use crate::ui::kit::panel_frame as card;
 use crate::ui::platform::monitor::taskbar_inset;
 use crate::ui::{live_layer, overlay, panel, settings, song, translate, windows};
 
-use super::{App, TOAST_MARGIN};
+use super::{App, Reader, TOAST_MARGIN};
 
 impl App {
     /// Scans the new selection for a QR code and a black (protected) capture, on a
@@ -57,6 +57,34 @@ impl App {
                 None => Task::none(),
             },
         }
+    }
+
+    /// The link / email chip beside the selection was clicked: open it in the
+    /// user's browser or mail app (on this click only), then give them the screen.
+    pub(in crate::ui) fn open_entity(
+        &mut self,
+        entity: actions::entities::Entity,
+    ) -> Task<Message> {
+        use actions::entities::Kind;
+        background(move |tx| {
+            let opened = match entity.kind {
+                Kind::Link => crate::sys::open::open_link(&entity.text),
+                Kind::Email => crate::sys::open::open_mailto(&entity.text),
+                Kind::Phone => return, // (no chip)
+            };
+            let pill = opened.err().map(|e| {
+                crate::log!("link chip failed: {e}");
+                "That didn't work"
+            });
+            let _ = tx.unbounded_send(Message::ThenClose(pill));
+        })
+    }
+
+    /// The first link or email in the selected words' text (the chip's).
+    pub(in crate::ui) fn chip_entity(&self) -> Option<actions::entities::Entity> {
+        use actions::entities::{Kind, find};
+        let text = self.picked_text()?;
+        find(&text).into_iter().find(|e| e.kind != Kind::Phone)
     }
 
     /// What runs by itself once a selection is made.
@@ -144,7 +172,7 @@ impl App {
             // mode with nothing picked: all the box's text, never its picture
             // (read first if it isn't yet).
             Run::Finish(_)
-                if action.id == copy::ACTION.id
+                if (action.id == copy::ACTION.id || action.id == text::ACTION.id)
                     && self.o.edit.is_none()
                     && (self.o.word.is_some() || self.o.text_mode.is_some()) =>
             {
@@ -153,14 +181,15 @@ impl App {
                     None => self.run_quick(Quick::CopyText),
                 };
             }
+            // Copy text (key T, `run text`): the text straight to the clipboard.
+            Run::Finish(_) if action.id == text::ACTION.id => {
+                return self.run_quick(Quick::CopyText);
+            }
             _ => {}
         }
-        // Several selections: Ask AI and Text get each of them (stacked), the
-        // rest the box around all of them.
-        let all = matches!(
-            action.run,
-            Run::Panel(actions::Panel::Ask | actions::Panel::Text)
-        );
+        // Several selections: Ask AI gets each of them (stacked), the rest the
+        // box around all of them.
+        let all = matches!(action.run, Run::Panel(actions::Panel::Ask));
         let Some(crop) = (if all { self.stacked() } else { self.crop() }) else {
             return Task::none();
         };
@@ -230,10 +259,15 @@ impl App {
         self.o.purpose = Purpose::Search;
         match quick {
             Quick::Action(action) => self.run(action),
-            // No OCR models yet: the Text panel asks before downloading them.
-            Quick::CopyText if !text::models_present() => self.run(&text::ACTION),
+            // No OCR models yet: the download card asks first (in place), then
+            // the text is copied once it is Done (`Reader` in update.rs).
+            Quick::CopyText if !text::models_present() => {
+                self.o.copy_after = true;
+                self.o.reader = Reader::Missing(crate::ocr::download_size());
+                Task::none()
+            }
             Quick::CopyText => {
-                let Some(crop) = self.crop() else {
+                let Some(crop) = self.stacked() else {
                     return Task::none();
                 };
                 self.o.toast = Some("Reading text…");

@@ -1,18 +1,28 @@
-//! Text: read the text in the crop. OCR runs in a helper process (`crate::ocr`);
-//! its models are downloaded once, only after the user agrees in the panel.
-use super::{Action, Crop, Key, Panel, Run};
+//! Text (Copy text): read the text in the crop and copy it. OCR runs in a helper
+//! process (`crate::ocr`); its models are downloaded once, only after the user
+//! agrees (the download card; the app asks before it ever gets here).
+use super::{Action, Crop, Key, Run};
 use crate::ocr::{self, TextBlock};
 
 pub const ACTION: Action = Action {
     id: "text",
-    label: "Text",
+    label: "Copy text",
     key: Key {
         ctrl: false,
         letter: 't',
     },
     icon: '\u{e197}', // lucide "type"
-    run: Run::Panel(Panel::Text),
+    run: Run::Finish(copy_read),
 };
+
+/// Reads `crop`'s text and copies it (the pill's text, or why not).
+fn copy_read(crop: Crop) -> Result<String, String> {
+    let text = read(&crop, |_| {})?;
+    if text.trim().is_empty() {
+        return Err("No text found in the selection.".into());
+    }
+    super::copy::text(text).map(|()| super::copy::COPIED_PILL.to_string())
+}
 
 /// How reading is going.
 #[derive(Debug, Clone, Copy, PartialEq)]

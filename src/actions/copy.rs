@@ -1,5 +1,5 @@
 //! Copy: the crop to the clipboard as an image only, scaled for AI chats
-//! (`snip.max_edge`). Text is copied only by selecting it (or the Text panel).
+//! (`snip.max_edge`). Text is copied only by selecting it (or Copy text).
 use std::borrow::Cow;
 use std::sync::Mutex;
 
@@ -45,7 +45,7 @@ fn run(crop: Crop) -> Result<String, String> {
 /// The confirmation pill's text, for the image and for text alike.
 pub const COPIED_PILL: &str = "Copied";
 
-/// Puts `text` on the clipboard (the Text panel's Copy).
+/// Puts `text` on the clipboard (Copy text).
 pub fn text(text: String) -> Result<(), String> {
     #[cfg(test)]
     copied::set_text(text.clone());

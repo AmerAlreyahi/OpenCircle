@@ -496,14 +496,15 @@ impl App {
     }
 
     /// The "Select text" chip: OCR reads the box (the warm helper) and every
-    /// word in it becomes pickable. Without the OCR models the Text panel asks
-    /// before downloading them.
+    /// word in it becomes pickable. Without the OCR models the download card
+    /// asks before downloading them.
     pub(in crate::ui) fn select_text(&mut self) -> Task<Message> {
         if self.o.text_mode.take().is_some() {
             return Task::none(); // "Done"
         }
         if !text::models_present() {
-            return self.run(&text::ACTION);
+            self.o.reader = Reader::Missing(ocr::download_size());
+            return Task::none();
         }
         let area = self.area();
         let Some(image::Handle::Rgba {

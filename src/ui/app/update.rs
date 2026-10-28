@@ -203,6 +203,7 @@ impl App {
                 Task::none()
             }
             Message::Qr(act) => self.on_qr(act),
+            Message::OpenEntity(entity) => self.open_entity(entity),
             Message::ToastDone if self.o.toast.is_some() => self.close(),
             Message::ToastDone => Task::none(),
             Message::Panel(id, msg) => self.on_panel(id, msg),
@@ -496,6 +497,10 @@ impl App {
                     Ok(text::Progress::Reading) => {
                         (self.o.ocr_ready, self.o.reader) = (text::models_present(), Reader::Idle);
                         self.note_reader();
+                        // Copy text was waiting for the models: now copy.
+                        if std::mem::take(&mut self.o.copy_after) {
+                            return self.run_quick(Quick::CopyText);
+                        }
                         return self.warm();
                     }
                     Err(e) => self.o.reader = Reader::Failed(e),
@@ -503,6 +508,7 @@ impl App {
                 Task::none()
             }
             Message::ReaderDismiss => {
+                self.o.copy_after = false;
                 self.o.reader = Reader::Idle;
                 Task::none()
             }

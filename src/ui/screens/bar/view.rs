@@ -271,7 +271,7 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
     }
     let host = qr::web_url(text).and_then(crate::sys::open::web_host);
     if let (Some(open), Some(host)) = (open, host) {
-        // The whole host on the button (like the Text panel's link chips): the
+        // The whole host on the button (like the selection's link chips): the
         // site it really opens, never cut.
         chips = chips.push(chip::action(format!("Open link · {host}"), open));
     }
@@ -279,6 +279,28 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
         Material::Widget,
         radius::WINDOW,
         container(chips).center_y(iced::Fill),
+    )
+    .height(bar::HEIGHT)
+    .padding([0.0, bar::QR_PAD])
+    .into()
+}
+
+/// The chip for a link or email read in the selected words: "Open <host>" /
+/// "Write <address>". It opens only on its click (`open`).
+pub fn link_chip<'a, Message: Clone + 'a>(
+    entity: &crate::actions::entities::Entity,
+    open: Message,
+) -> Element<'a, Message> {
+    use crate::actions::entities::Kind;
+    let verb = match entity.kind {
+        Kind::Email => "Write",
+        _ => "Open",
+    };
+    let shown = entity.shown();
+    surface(
+        Material::Widget,
+        radius::WINDOW,
+        container(chip::action(format!("{verb} {shown}"), open)).center_y(iced::Fill),
     )
     .height(bar::HEIGHT)
     .padding([0.0, bar::QR_PAD])
@@ -361,5 +383,34 @@ mod tests {
         );
         assert!(texts.contains(&"Hidden text-direction marks".to_string()));
         assert!(!texts.iter().any(|t| t.contains('\u{202e}')));
+    }
+
+    /// The link and email chips beside a selection, in both themes.
+    #[test]
+    fn link_chips_match_their_golden_images() {
+        use crate::actions::entities::{Entity, Kind};
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for (name, kind, text) in [
+                ("link", Kind::Link, "https://shop.example/track/4412"),
+                ("email", Kind::Email, "help@shop.example"),
+            ] {
+                let entity = Entity {
+                    kind,
+                    text: text.into(),
+                };
+                let file = format!("chip-{name}-{}", theme.id);
+                failed.extend(golden::check(
+                    "screens",
+                    &file,
+                    Size::new(300.0, bar::HEIGHT),
+                    &[1.0],
+                    || link_chip(&entity, ()),
+                ));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
     }
 }

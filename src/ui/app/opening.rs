@@ -72,6 +72,8 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) ocr_ready: bool,
     /// How that read is going (the note over the bar).
     pub(in crate::ui) reader: Reader,
+    /// Copy text asked for the OCR models: copy once they are downloaded.
+    pub(in crate::ui) copy_after: bool,
     /// Who reads this opening's text (`ocr::route`), once its first read
     /// started: Windows OCR (the whole screen at once) or the helper (bands).
     pub(in crate::ui) text_by: Option<ocr::Source>,
@@ -185,6 +187,7 @@ impl Default for Opening {
             pointer: Point::ORIGIN,
             ocr_ready: false,
             reader: Reader::Idle,
+            copy_after: false,
             text_by: None,
             text_press: None,
             appear: None,

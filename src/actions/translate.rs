@@ -20,15 +20,9 @@ pub const ACTION: Action = Action {
     run: Run::Translate,
 };
 
-/// The pipeline's OCR + translation engine from the running config and the
-/// keyring, and the target language. Blocking (keyring): call off the UI
-/// thread. `Err` = what to tell the user: its first line is the short reason.
-pub fn deps() -> Result<(Real, String), String> {
-    let cfg = config::current();
-    deps_for(&cfg.translate.source, &cfg.translate.target)
-}
-
-/// `deps` for another source / target than the config's (a picker's).
+/// The pipeline's OCR + translation engine and the target for `source` -> `target`.
+/// Blocking (keyring): call off the UI thread. `Err` = what to tell the user: its
+/// first line is the short reason.
 pub fn deps_for(source: &str, target: &str) -> Result<(Real, String), String> {
     let cfg = config::current();
     let via = choose(
@@ -119,16 +113,6 @@ fn choose(
         Err(_) if offline => Ok(Via::Offline),
         Err(e) => Err(e),
     }
-}
-
-/// The Text panel's Translate: `text` line by line into the configured
-/// language (one call; empty lines stay empty). Blocking (keyring, HTTP or
-/// the helper process).
-pub fn text(text: &str) -> Result<String, String> {
-    let (deps, target) = deps()?;
-    let lines: Vec<String> = text.lines().map(str::to_string).collect();
-    let out = deps.lines(&lines, &target, "").map_err(|e| e.to_string())?;
-    Ok(out.join("\n"))
 }
 
 #[cfg(test)]

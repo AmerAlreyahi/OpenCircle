@@ -56,7 +56,7 @@ pub fn web_host(url: &str) -> Option<String> {
     tail_ok.then(|| crate::actions::entities::host_name(authority))?
 }
 
-/// Open a link the user clicked (Text panel chip, QR chip) in the default
+/// Open a link the user clicked (link chip, QR chip) in the default
 /// browser. Only http(s): never a file, a script or another app's scheme.
 pub fn open_link(url: &str) -> io::Result<()> {
     if web_host(url).is_none() {
@@ -65,7 +65,7 @@ pub fn open_link(url: &str) -> io::Result<()> {
     spawn(std::ffi::OsStr::new(url))
 }
 
-/// Open a new message to `address` (the Text panel's email chip) in the default
+/// Open a new message to `address` (the email chip) in the default
 /// mail app. `address` must be a plain address: no `?subject=`, `&`/`=` headers,
 /// `%` escapes that could smuggle them in, or anything but printable ASCII.
 pub fn open_mailto(address: &str) -> io::Result<()> {

@@ -74,6 +74,8 @@ pub(in crate::ui) const GLIDE: Duration = motion::DOCK;
 
 /// A QR code's chip under a selection (its room; the chip is centred in it).
 pub(in crate::ui) const QR_WIDTH: f32 = 520.0;
+/// The width the link / email chip is centred in.
+pub(in crate::ui) const LINK_WIDTH: f32 = 400.0;
 
 /// The bottom bar's Live translate icon (lucide "radio").
 pub(in crate::ui) const LIVE: char = '\u{e145}';

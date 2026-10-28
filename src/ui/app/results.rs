@@ -1,12 +1,10 @@
 //! The result panel and card, and the crops they take.
 
-use iced::futures::channel::mpsc::UnboundedSender;
 use iced::widget::image;
 use iced::{Point, Rectangle, Task};
 
 use crate::actions::{self, Crop, lens, stack_crops};
 
-use crate::ui::app::background::background;
 use crate::ui::app::keys;
 use crate::ui::app::message::Message;
 use crate::ui::kit::motion;
@@ -52,22 +50,12 @@ impl App {
             panel::Msg::Card(card::Event::Hover(on)) => self.o.card_hover = on,
             panel::Msg::Card(card::Event::Reset) => self.card = None,
             panel::Msg::Card(card::Event::Close) => self.o.panel = None,
-            panel::Msg::Cancel => self.o.panel = None,
             panel::Msg::Search => return self.run(&lens::ACTION),
             // A card's focused field gave Ctrl+C back (nothing selected in it).
             panel::Msg::Key(keys::Keyed::Copy) => {
                 return self.update(Message::Field(keys::Keyed::Copy));
             }
             panel::Msg::Key(_) => {}
-            panel::Msg::CopyText => {
-                let text = panel.text().unwrap_or_default();
-                let copy = background(move |_: &UnboundedSender<()>| {
-                    if let Err(e) = actions::copy::text(text) {
-                        crate::log!("copy text failed: {e}");
-                    }
-                });
-                return Task::batch([self.close(), copy.discard()]);
-            }
             // Lens follow-up: hand the question over to Ask AI.
             panel::Msg::Submit if panel.kind() == actions::Panel::Lens => {
                 let question = panel.take_input();
@@ -107,7 +95,7 @@ impl App {
     }
 
     /// Every selection's crop, in the order made, stacked top to bottom on white
-    /// (one image: the Text panel reads them in that order, Ask AI sees them all).
+    /// (one image: Copy text reads them in that order, Ask AI sees them all).
     /// One selection: just its crop.
     // ponytail: one stacked image, not one image per selection: the Ask panel
     // (panel.rs) sends one; give `ai::Message` several images when it can.

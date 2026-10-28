@@ -1,4 +1,4 @@
-//! The result cards' behaviour and looks (Search, Text, Ask AI).
+//! The result cards' behaviour and looks (Search, Ask AI).
 use super::*;
 use crate::ui::kit::panel_frame;
 use crate::ui::widgets;
@@ -38,8 +38,6 @@ fn unknown_provider_shows_the_fix_and_sends_nothing() {
         crop: Arc::new(crop),
         input: "Explain".into(), // e.g. the Lens follow-up, sent once ready
         work: None,
-        translation: None,
-        entities: Vec::new(),
         note: None,
         spin: None,
     };
@@ -60,51 +58,6 @@ fn unknown_provider_shows_the_fix_and_sends_nothing() {
     assert!(texts.contains(&msg), "{texts:?}");
 }
 
-/// The Text panel's download question, progress and error are short
-/// cards: every text and button inside the window, no empty slab (#127).
-#[test]
-fn text_prompts_are_short_cards_on_small_screens() {
-    let backdrop = iced::Color::from_rgb8(240, 240, 240);
-    for (name, reading) in [
-        ("consent", Reading::Consent),
-        ("downloading", Reading::Downloading(0.4)),
-        (
-            "failed",
-            Reading::Failed("The model could not be downloaded (offline).".into()),
-        ),
-    ] {
-        let panel = panel_in(State::Text(reading));
-        for (w, h) in [
-            (1097.0, 617.0),
-            (1125.0, 575.0),
-            (700.0, 500.0),
-            (1920.0, 1080.0),
-        ] {
-            let size = Size::new(w, h);
-            let lost = widgets::shot::out_of_reach(panel.view(at(size), size, false), size);
-            assert!(lost.is_empty(), "{name} at {w}x{h}: out of reach {lost:?}");
-            let view = iced::widget::container(panel.view(at(size), size, false))
-                .style(move |_| iced::widget::container::Style::default().background(backdrop));
-            let px = widgets::shot::save(&format!("text-{name}-{w}x{h}"), view.into(), size);
-            let a = at(size);
-            // near its left edge: the download card is narrower than the spot
-            let x = a.x + 10.0;
-            let dark = |y: usize| {
-                px[((y * w as usize) + x as usize) * 4..][..3]
-                    .iter()
-                    .all(|&v| v < 100)
-            };
-            let rows: Vec<usize> = (0..h as usize).filter(|&y| dark(y)).collect();
-            assert!(!rows.is_empty(), "{name} at {w}x{h}: no card");
-            let tall = rows[rows.len() - 1] - rows[0];
-            assert!(
-                tall < 330 && (tall as f32) < 0.7 * h,
-                "{name} at {w}x{h}: a slab {tall}px tall"
-            );
-        }
-    }
-}
-
 fn sample_crop() -> Crop {
     let rgba = (0..120u32)
         .flat_map(|y| (0..240u32).flat_map(move |x| [x as u8, (y * 2) as u8, 160, 255]))
@@ -122,8 +75,6 @@ fn panel_in(state: State) -> Panel {
         crop: Arc::new(sample_crop()),
         input: String::new(),
         work: None,
-        translation: None,
-        entities: Vec::new(),
         note: None,
         spin: None,
     }
@@ -157,62 +108,7 @@ fn ask_panel_offers_the_six_presets() {
     assert!(!texts.iter().any(|t| t == "Fact-check"), "{texts:?}");
 }
 
-fn text_panel(text: &str) -> Panel {
-    let mut panel = panel_in(State::Text(Reading::Busy));
-    let _ = panel.update(Msg::Read(Ok(text.into())));
-    panel
-}
-
-const SAMPLE: &str = "Order #2026102412 shipped\n\
-    Questions? Call +1 (555) 123-4567 or write to help@shop.example.\n\
-    Track it: https://shop.example/track/4412. Total $1,299.99 on 2026-10-24.";
-
-#[test]
-fn text_panel_shows_chips_for_links_emails_and_numbers_only() {
-    let mut panel = text_panel(SAMPLE);
-    let kinds: Vec<_> = panel.entities.iter().map(|e| e.kind).collect();
-    assert_eq!(kinds, [Kind::Link, Kind::Email, Kind::Phone]);
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
-    for chip in [
-        "Open link · shop.example",
-        "Write email · help@shop.example",
-        "Copy number · +1 (555) 123-4567",
-    ] {
-        assert!(texts.iter().any(|t| t == chip), "{chip}: {texts:?}");
-    }
-    assert!(
-        !texts
-            .iter()
-            .any(|t| t.contains("1,299.99") && t.contains(": "))
-    );
-    // Reading the text does nothing with the chips: no click, no action, no note.
-    assert!(panel.note.is_none());
-    assert!(not_blank(&widgets::shot::save(
-        "panel-text-chips",
-        panel.view(at(SCREEN), SCREEN, false),
-        SCREEN
-    )));
-
-    // Editing the text updates the chips.
-    let paste = text_editor::Edit::Paste(Arc::new("new@site.io ".into()));
-    let _ = panel.update(Msg::Edit(text_editor::Action::Edit(paste)));
-    assert!(panel.entities.iter().any(|e| e.text == "new@site.io"));
-    // A click outside the list does nothing.
-    let _ = panel.update(Msg::Chip(99));
-    assert!(panel.note.is_none());
-}
-
-#[test]
-fn text_without_entities_has_no_chips() {
-    let panel = text_panel("Just some words, 3.50 and e.g. a note");
-    assert!(panel.entities.is_empty());
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
-    assert!(!texts.iter().any(|t| t.starts_with("Open link")));
-}
-
-/// The result cards in Sapphire and Daylight: Search (Lens), Text (Latin and
-/// Arabic OCR text, with its link chips; the download question and its
-/// progress) and Ask AI's suggestions.
+/// The result cards in Sapphire and Daylight: Search (Lens) and Ask AI's suggestions.
 #[test]
 fn every_result_card_matches_its_golden_image() {
     use crate::ui::kit::testing::golden;
@@ -222,19 +118,6 @@ fn every_result_card_matches_its_golden_image() {
     type Make = Box<dyn Fn() -> Panel>;
     let states: Vec<(&str, Make)> = vec![
         ("lens", Box::new(|| panel_in(State::Lens(Some(Ok(())))))),
-        ("text", Box::new(|| text_panel(SAMPLE))),
-        (
-            "text-arabic",
-            Box::new(|| text_panel("مرحبا بك في المتجر\nاتصل بنا: help@shop.example")),
-        ),
-        (
-            "text-consent",
-            Box::new(|| panel_in(State::Text(Reading::Consent))),
-        ),
-        (
-            "text-downloading",
-            Box::new(|| panel_in(State::Text(Reading::Downloading(0.4)))),
-        ),
         (
             "ask",
             Box::new(move || {

@@ -59,6 +59,8 @@ pub(in crate::ui) enum Message {
     Scanned(Rectangle, qr::Scan),
     /// The QR chip's Copy / Open link.
     Qr(qr::Act),
+    /// The selection's link or email chip was clicked (the only thing that opens it).
+    OpenEntity(crate::actions::entities::Entity),
     /// From the translate session with this number (stale numbers are ignored).
     Translate(u32, translate::Msg),
     /// Alt went down / up (peek at the original under a translation).

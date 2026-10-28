@@ -299,8 +299,6 @@ pub enum Focus {
     Nothing,
     /// The field with this id.
     Id(&'static str),
-    /// The first focusable widget (by a click on it, as a user would).
-    First,
 }
 
 /// Feeds key/mouse `events` to `view` (after `focus`) and returns the messages
@@ -313,35 +311,14 @@ pub fn feed<Message>(
     events: &[iced::Event],
     clipboard: &mut dyn iced::advanced::Clipboard,
 ) -> (Vec<Message>, Vec<iced::event::Status>) {
-    use iced::advanced::widget::{Id, Operation, operation::Focusable, operation::focusable};
-    use iced::{Event, mouse::Button, mouse::Event as Mouse};
-    struct First(Option<Rectangle>);
-    impl Operation for First {
-        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-            operate(self);
-        }
-        fn focusable(&mut self, _: Option<&Id>, bounds: Rectangle, _: &mut dyn Focusable) {
-            self.0.get_or_insert(bounds);
-        }
-    }
+    use iced::advanced::widget::{Id, operation::focusable};
     let mut renderer = renderer();
     let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
     let mut all = Vec::new();
-    let mut cursor = mouse::Cursor::Unavailable;
+    let cursor = mouse::Cursor::Unavailable;
     match focus {
         Focus::Nothing => {}
         Focus::Id(id) => ui.operate(&renderer, &mut focusable::focus::<()>(Id::new(id))),
-        Focus::First => {
-            let mut first = First(None);
-            ui.operate(&renderer, &mut first);
-            let at = first.0.expect("a field").center();
-            cursor = mouse::Cursor::Available(at);
-            all.extend([
-                Event::Mouse(Mouse::CursorMoved { position: at }),
-                Event::Mouse(Mouse::ButtonPressed(Button::Left)),
-                Event::Mouse(Mouse::ButtonReleased(Button::Left)),
-            ]);
-        }
     }
     all.extend_from_slice(events);
     let mut messages = Vec::new();

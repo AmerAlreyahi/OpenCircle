@@ -53,7 +53,6 @@ pub enum Run {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
     Lens,
-    Text,
     Ask,
 }
 
