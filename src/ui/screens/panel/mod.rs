@@ -19,7 +19,7 @@ use crate::ui::keys;
 use crate::ui::kit::panel_frame;
 
 mod view;
-pub use view::{card, consent};
+pub use view::{actions, card, consent, downloading, note};
 
 /// The follow-up input. Never focused by itself: until it is clicked, letters
 /// are the overlay's action shortcuts.

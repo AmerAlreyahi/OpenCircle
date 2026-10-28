@@ -550,6 +550,36 @@ fn panel_frame_card_sheet() {
     sheet("panel_frame_card", CELL, &rows);
 }
 
+/// `option_list`: the opener (the source's look, the target's in the accent)
+/// and an option at rest, under the cursor, current, with a badge.
+#[test]
+fn option_list_sheet() {
+    use super::super::option_list::{opener, option};
+    let open =
+        |accent| move |ar| opener(s(ar, "English", "العربية").into(), accent, 140.0, 32.0, ());
+    let pick = |active, badge| {
+        move |ar| {
+            option(
+                s(ar, "Japanese", "اليابانية").into(),
+                badge,
+                active,
+                (160.0, 32.0),
+                (),
+            )
+        }
+    };
+    let rows = vec![
+        row("opener", Act::Rest, open(false)),
+        row("opener hover", Act::Hover, open(false)),
+        row("opener target", Act::Rest, open(true)),
+        row("option", Act::Rest, pick(false, None)),
+        row("option hover", Act::Hover, pick(false, None)),
+        row("option current", Act::Rest, pick(true, None)),
+        row("option badge", Act::Rest, pick(false, Some("AI"))),
+    ];
+    sheet("option_list", Size::new(200.0, 44.0), &rows);
+}
+
 /// `bubble`: the user's message in a chat.
 #[test]
 fn bubble_sheet() {

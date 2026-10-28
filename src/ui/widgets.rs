@@ -5,8 +5,8 @@
 //! behind each surface (no nested/live blur).
 use iced::widget::text::IntoFragment;
 use iced::widget::{
-    Button, Container, Text, TextInput, Tooltip, button, container, progress_bar, row, scrollable,
-    space, text, text_input, tooltip,
+    Button, Container, Text, Tooltip, button, container, progress_bar, row, scrollable, space,
+    text, tooltip,
 };
 use iced::{Background, Border, Color, Element, gradient};
 
@@ -34,6 +34,7 @@ pub fn fitting<'a>(texts: &[&'a str], size: f32, room: f32) -> &'a str {
 /// A line of text is this many times its font size tall wherever its box
 /// clips it (text fields): Arabic with every vowel mark stays inside
 /// (Noto Sans Arabic inks about 1.6 times its size).
+#[cfg(test)]
 pub const LINE: f32 = 1.7;
 /// Glyphs of the icon font used outside the action registry.
 pub const STOP: char = '\u{e16a}'; // lucide "square"
@@ -83,18 +84,6 @@ pub fn surface<'a, Message: 'a>(
         .padding(SURFACE_PADDING)
         .style(move |_| glass(20.0, blurred));
     glassed(inner, 20.0)
-}
-
-/// A `surface` docked over busy content (the result panel over the frozen
-/// frame): the same glass, but solid, so nothing behind shows through.
-pub fn docked<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
-    container(content).padding(SURFACE_PADDING).style(|_| {
-        let glass = glass(20.0, false);
-        container::Style {
-            background: Some(theme::floating().panel_solid.into()),
-            ..glass
-        }
-    })
 }
 
 /// A `surface` for a colour-keyed window (the live controller): opaque and
@@ -280,32 +269,6 @@ pub fn float_chip<'a, Message: Clone + 'a>(
     )
 }
 
-/// One-line text field, `CONTROL` tall.
-pub fn input<'a, Message: Clone + 'a>(
-    id: &'static str,
-    placeholder: &str,
-    value: &str,
-    on_input: impl Fn(String) -> Message + 'a,
-    on_submit: Message,
-) -> TextInput<'a, Message> {
-    let palette = theme::floating();
-    text_input(placeholder, value)
-        .id(id)
-        .on_input(on_input)
-        .on_submit(on_submit)
-        .size(14)
-        .line_height(LINE)
-        .padding([(CONTROL - 14.0 * LINE) / 2.0, 14.0])
-        .style(move |_, status| text_input::Style {
-            background: palette.hover.into(),
-            border: field_border(matches!(status, text_input::Status::Focused { .. })),
-            icon: palette.muted,
-            placeholder: palette.muted,
-            value: palette.text,
-            selection: theme::SELECTION,
-        })
-}
-
 /// Progress bar, `value` in 0..=1.
 pub fn progress<'a, Message: 'a>(value: f32) -> Element<'a, Message> {
     let palette = theme::floating();
@@ -340,19 +303,6 @@ pub fn scroll<'a, Message: 'a>(
             };
             style
         })
-}
-
-fn field_border(focused: bool) -> Border {
-    let palette = theme::floating();
-    Border {
-        color: if focused {
-            theme::accent().0
-        } else {
-            palette.border
-        },
-        width: 1.0,
-        radius: 14.0.into(),
-    }
 }
 
 /// Button background: accent gradient for `primary`, else clear until hovered.

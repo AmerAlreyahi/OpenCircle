@@ -13,16 +13,15 @@ mod kit;
 mod live_controller;
 mod live_layer;
 mod overlay;
-mod picker;
 mod platform;
 mod sapphire;
 mod screens;
-use screens::{panel, settings};
+use screens::common::language_picker as picker;
+use screens::{panel, settings, translate};
 pub(crate) mod setup;
 mod snip;
 mod song;
 pub mod theme;
-mod translate;
 pub(crate) mod widgets;
 mod windows;
 

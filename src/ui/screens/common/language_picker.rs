@@ -1,17 +1,20 @@
 //! The compact language picker (source → target) of live translate's
 //! controller and of the one-shot translation's pill: two chips; a press on
 //! one opens that side's list under them, recently picked first, with a
-//! search field for the rest. Built from the shared widgets only. Picks last
-//! for the session (and are remembered as recent); Settings › Translate keeps
-//! the defaults.
+//! search field for the rest. From kit parts only (`kit::option_list`: the
+//! openers and the rows; the tray menu reuses it). Picks last for the session
+//! (and are remembered as recent); Settings › Translate keeps the defaults.
 use std::cell::RefCell;
 
 use iced::widget::{column, container, row};
 use iced::{Center, Element, Fill, Length};
 
-use super::widgets;
 use crate::mt;
 use crate::translate::lang::{self, AUTO, LANGUAGES};
+use crate::ui::kit::field;
+use crate::ui::kit::option_list::{opener, option};
+use crate::ui::kit::text::sub;
+use crate::ui::kit::tokens::Role;
 
 /// Chip height and the gaps (the controller's sizes).
 pub const CHIP_HEIGHT: f32 = 32.0;
@@ -21,12 +24,15 @@ pub const SIDE_WIDTH: f32 = 112.0;
 /// Width of the closed picker: two chips and the arrow between them.
 pub const WIDTH: f32 = 2.0 * SIDE_WIDTH + ARROW + 2.0 * SPACING;
 const ARROW: f32 = 16.0;
+/// The search field's height (`kit::field::input`: 12 px on a 1.5 line, 6 px
+/// in, its edge).
+const SEARCH_H: f32 = 32.0;
 /// Choices the open list shows (two columns), after filtering.
 const SHOWN: usize = 8;
 const COLUMNS: usize = 2;
 /// What the open list adds under the chips: the search field and the rows.
 pub const LIST_HEIGHT: f32 =
-    SPACING + widgets::CONTROL + (SHOWN / COLUMNS) as f32 * (CHIP_HEIGHT + SPACING);
+    SPACING + SEARCH_H + (SHOWN / COLUMNS) as f32 * (CHIP_HEIGHT + SPACING);
 /// The search field's widget id.
 const SEARCH: &str = "language-search";
 
@@ -183,7 +189,8 @@ impl Picker {
         }
     }
 
-    /// The two chips: source → target. `height` = the chips' height.
+    /// The two openers: source → target (the target in the accent).
+    /// `height` = their height.
     pub fn chips(&self, height: f32) -> Element<'_, Msg> {
         let chip = |side: Side, code: &str| {
             // "Chinese (Simplified)" -> "Chinese": one line in the chip (the
@@ -193,13 +200,12 @@ impl Picker {
                 c => lang::name(c).split(" (").next().unwrap_or_default(),
             }
             .to_string();
-            widgets::chip(label, Msg::Open(side))
-                .width(SIDE_WIDTH)
-                .height(height)
+            let open = Msg::Open(side);
+            opener(label, side == Side::Target, SIDE_WIDTH, height, open)
         };
         row![
             chip(Side::Source, &self.source),
-            container(widgets::caption("→")).center_x(ARROW),
+            container(sub(Role::NOTE, "→")).center_x(ARROW),
             chip(Side::Target, &self.target),
         ]
         .spacing(SPACING)
@@ -211,28 +217,29 @@ impl Picker {
     /// `width` wide. Nothing when closed.
     pub fn list(&self, width: f32) -> Option<Element<'_, Msg>> {
         self.open?;
-        let search = widgets::input(
-            SEARCH,
-            "Search languages",
-            &self.query,
-            Msg::Query,
-            Msg::First,
-        )
-        .width(Fill);
+        let search = field::input("Search languages", &self.query, false, false)
+            .id(SEARCH)
+            .on_input(Msg::Query)
+            .on_submit(Msg::First)
+            .width(Fill);
         let cell = (width - SPACING * (COLUMNS - 1) as f32) / COLUMNS as f32;
         let choices = self.choices();
         let mut rows = column![].spacing(SPACING);
         for pair in choices.chunks(COLUMNS) {
             let cells = pair.iter().map(|(code, label)| {
-                widgets::chip(label.clone(), Msg::Pick(code.clone()))
-                    .width(cell)
-                    .height(CHIP_HEIGHT)
-                    .into()
+                // "German · AI": the name, and a badge for what needs AI
+                let (name, badge) = match label.strip_suffix(" · AI") {
+                    Some(name) => (name, Some("AI")),
+                    None => (label.as_str(), None),
+                };
+                let pick = Msg::Pick(code.clone());
+                option(name.to_string(), badge, false, (cell, CHIP_HEIGHT), pick)
             });
             rows = rows.push(row(cells).spacing(SPACING));
         }
         if choices.is_empty() {
-            rows = rows.push(widgets::caption("No language matches").height(CHIP_HEIGHT));
+            let none = sub(Role::NOTE, "No language matches");
+            rows = rows.push(container(none).center_y(CHIP_HEIGHT));
         }
         let list = column![search, rows]
             .spacing(SPACING)
