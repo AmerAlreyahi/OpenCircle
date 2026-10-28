@@ -9,7 +9,7 @@ use iced::widget::{Space, column, container, row};
 use iced::{Element, Fill};
 
 use super::super::state::{
-    Busy, KeyField, KeyMessage, KeyStatus, Message, PRESETS, Preset, State, issue,
+    Busy, KEY_MASK, KeyField, KeyMessage, KeyStatus, Message, PRESETS, Preset, State, issue,
 };
 use crate::config::Provider;
 use crate::secrets::Secret;
@@ -153,8 +153,9 @@ fn text_row<'a>(
 }
 
 impl KeyField {
-    /// The write-only key: a secure field and Save; once saved, only "Saved in
-    /// your keyring" with Replace / Remove (also in onboarding).
+    /// The write-only key: a secure field and Save (its hint "Paste your API
+    /// key"); once saved, only dots (`KEY_MASK`) with Replace / Remove, never
+    /// a character of the key (also in onboarding).
     pub fn view(&self) -> Element<'_, KeyMessage> {
         let l = self.labels;
         let wait = self.busy.map(Busy::label);
@@ -165,7 +166,7 @@ impl KeyField {
                     (error(Role::ROW_DESC, why.clone()).into(), vec![])
                 }
                 (KeyStatus::Saved, false) => (
-                    input("", "Saved in your keyring", false, false).into(),
+                    tip(input("", KEY_MASK, false, false), l.field, Position::Top),
                     vec![
                         tip(
                             b("Replace", KeyMessage::Replace),

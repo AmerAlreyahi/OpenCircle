@@ -112,7 +112,7 @@ fn song_search_section_saves_a_write_only_token_and_its_choices() {
     assert_eq!(music::key_known(), Some(true), "the music button shows");
     let texts = shot::texts(view(&s));
     assert!(!texts.iter().any(|t| t.contains("FAKE")), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "Saved in your keyring"));
+    assert!(texts.iter().any(|t| t == KEY_MASK));
     shot::save("settings-song-saved", view(&s), WINDOW_SIZE);
     update(&mut s, Message::SongKey(KeyMessage::Remove));
     assert_eq!(music::key_known(), Some(false), "and hides again");
@@ -632,6 +632,50 @@ fn switching_provider_keeps_the_model_sensible() {
 
 const FAKE_KEY: &str = "sk-ant-FAKE-0123456789";
 
+/// A saved key shows as dots only, the same for every key: no view text
+/// holds any part of it (not its last characters either), and nothing offers
+/// to reveal it; with no key the field asks for one.
+#[test]
+fn a_saved_key_shows_as_dots_only() {
+    // built at run time: no key-shaped literal in the source
+    let key: String = [
+        "sk",
+        "-test-",
+        &format!("{:x}", std::process::id()),
+        "Q9z7Wm4V",
+    ]
+    .concat();
+    let (mut s, store) = state(None);
+    update(&mut s, Message::Preset(preset("OpenAI")));
+    update(&mut s, Message::Section(Section::Ai));
+    assert_eq!(super::state::API_KEY.placeholder, "Paste your API key");
+    update(
+        &mut s,
+        Message::ApiKey(KeyMessage::Input(Secret::new(key.clone()))),
+    );
+    update(&mut s, Message::ApiKey(KeyMessage::Save));
+    assert_eq!(
+        store.get("openai_compatible").as_deref(),
+        Some(key.as_str())
+    );
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == KEY_MASK), "{texts:?}");
+    assert!(KEY_MASK.chars().all(|c| c == '•'));
+    for want in ["Replace", "Remove"] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    let chars: Vec<char> = key.chars().collect();
+    for t in &texts {
+        assert!(!t.contains(&key), "{t}");
+        // no 4 characters of the key in a row (its last 4 included)
+        for part in chars.windows(4) {
+            let part: String = part.iter().collect();
+            assert!(!t.contains(&part), "{t} holds {part}");
+        }
+        assert!(!["Reveal", "Show key"].iter().any(|r| t.contains(r)), "{t}");
+    }
+}
+
 /// The Provider dropdown's entry called `name`.
 fn preset(name: &str) -> Preset {
     *PRESETS.iter().find(|p| p.name == name).expect("a preset")
@@ -962,10 +1006,7 @@ fn a_slow_keyring_never_blocks_update_and_the_answer_sets_saved() {
     assert_eq!(*s.key.status(), KeyStatus::Saved);
     let texts = shot::texts(view(&s));
     assert!(!texts.iter().any(|t| t == "Saving…"), "{texts:?}");
-    assert!(
-        texts.iter().any(|t| t == "Saved in your keyring"),
-        "{texts:?}"
-    );
+    assert!(texts.iter().any(|t| t == KEY_MASK), "{texts:?}");
 }
 
 #[test]
@@ -1010,10 +1051,7 @@ fn the_api_key_is_write_only() {
     assert_eq!(*s.key.status(), KeyStatus::Saved);
     // After saving no view text and no Debug output holds the key.
     let texts = shot::texts(view(&s));
-    assert!(
-        texts.iter().any(|t| t == "Saved in your keyring"),
-        "{texts:?}"
-    );
+    assert!(texts.iter().any(|t| t == KEY_MASK), "{texts:?}");
     assert!(!texts.iter().any(|t| t.contains("FAKE")), "{texts:?}");
     assert!(!format!("{s:?}").contains("FAKE"));
     assert!(!format!("{:?}", s.key).contains("FAKE"));

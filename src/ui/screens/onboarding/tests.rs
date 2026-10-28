@@ -254,7 +254,7 @@ fn the_key_never_shows_up() {
     row(&mut s, typing);
     row(&mut s, settings::Message::ApiKey(KeyMessage::Save));
     s.step = Step::Ai;
-    assert!(texts(&s).iter().any(|t| t == "Saved in your keyring"));
+    assert!(texts(&s).iter().any(|t| t == settings::KEY_MASK));
     for page in STEPS {
         s.step = page.id;
         let t = texts(&s);

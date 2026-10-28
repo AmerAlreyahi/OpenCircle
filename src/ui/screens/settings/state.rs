@@ -209,6 +209,11 @@ pub struct KeyField {
     pub(super) job: u32,
 }
 
+/// A saved key as the field shows it (owner, 2026-10-28): dots only, the
+/// same for every key. Nothing of the key is read to draw it (only that one
+/// exists: `Bound::is_set`), and there is no way to reveal it.
+pub const KEY_MASK: &str = "••••••••••••";
+
 /// What a key field calls its key (tooltips are the controls' names).
 #[derive(Debug, Clone, Copy)]
 pub struct KeyLabels {
