@@ -414,16 +414,19 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
         .get(steps.len() / 2)
         .map_or(2.0, |&s| (s as f32).max(2.0));
     let (filled, unsure) = fill(&win, &mask, w, grain, &bg);
-    // Not text at all: the "glyphs" cover most of the box (a picture or a
-    // dark band crossing it), or their colour is the background's.
+    // Not text at all: the glyphs themselves cover most of the box (a
+    // picture or a dark band crossing it), or their colour is the
+    // background's. (The hole, grown for anti-aliasing, covers most of a
+    // small label's tight box: that is still text.)
     let inner = (0..w * h).filter(|&i| !on_ring(i)).count().max(1);
+    let glyphs = glyph.iter().filter(|&&g| g).count();
     let ring_mid = [0, 1, 2].map(|k| {
         let mut v: Vec<u8> = ring.iter().map(|&i| px(i)[k]).collect();
         v.sort_unstable();
         v[v.len() / 2]
     });
     let like_bg = (0..3).all(|k| color[k].abs_diff(ring_mid[k]) < 30);
-    let lost = filled.is_empty() || filled.len() * 4 > inner * 3 || like_bg;
+    let lost = filled.is_empty() || glyphs * 4 > inner * 3 || like_bg;
     // fine texture (grain) is smoothed away inside the hole: a smear
     let residual = if lost { 255.0 } else { unsure.max(3.0 * grain) };
     let mut undo = Vec::with_capacity(filled.len());

@@ -1131,54 +1131,58 @@ impl canvas::Program<Event> for Overlay<'_> {
             pointer.drawn.clear();
             *pointer.shown.borrow_mut() = Some(shown);
         }
-        vec![pointer.drawn.draw(renderer, bounds.size(), |frame| {
-            let screen = Rectangle::with_size(bounds.size());
-            let on_screen =
-                |s: &[Point]| -> Vec<Point> { s.iter().map(|&p| self.view.to_screen(p)).collect() };
-            let current = on_screen(self.stroke);
-            let kind = shown_kind(&current, self.selection, self.live_drag);
-            let others: Vec<(Kind, Vec<Point>)> = (self.others.iter())
-                .map(|(s, stroke)| (s.kind, on_screen(stroke)))
-                .collect();
+        let screen = Rectangle::with_size(bounds.size());
+        let on_screen =
+            |s: &[Point]| -> Vec<Point> { s.iter().map(|&p| self.view.to_screen(p)).collect() };
+        let current = on_screen(self.stroke);
+        let kind = shown_kind(&current, self.selection, self.live_drag);
+        let others: Vec<(Kind, Vec<Point>)> = (self.others.iter())
+            .map(|(s, stroke)| (s.kind, on_screen(stroke)))
+            .collect();
 
-            // A snapped box on its way from the drawn stroke: the outline between.
-            // At full from the first frame: the window fades in as a whole
-            // (`windows::opacity`), never the dim over the whole screen.
-            let (dim_idle, dim_outside) = theme::dims(&self.look);
-            let snapped = (self.selection).filter(|s| s.kind == Kind::Snap);
-            let box_on_screen = snapped.map(|s| self.view.rect_to_screen(s.area));
-            let morph = match (box_on_screen, self.morph, morph_t) {
-                (Some(r), Some((from, _)), Some(t)) => Some((t, morph(&on_screen(from), r, t))),
-                _ => None,
-            };
+        // A snapped box on its way from the drawn stroke: the outline between.
+        // At full from the first frame: the window fades in as a whole
+        // (`windows::opacity`), never the dim over the whole screen.
+        let (dim_idle, dim_outside) = theme::dims(&self.look);
+        let snapped = (self.selection).filter(|s| s.kind == Kind::Snap);
+        let box_on_screen = snapped.map(|s| self.view.rect_to_screen(s.area));
+        let morph = match (box_on_screen, self.morph, morph_t) {
+            (Some(r), Some((from, _)), Some(t)) => Some((t, morph(&on_screen(from), r, t))),
+            _ => None,
+        };
 
-            // After release, the clear region is the drawn shape itself (closed), not its
-            // bounding box.
-            // ponytail: even-odd re-dims areas circled twice (or two overlapping
-            // selections); trim the stroke at its first self-crossing if users mind.
-            let closed = self.selection.is_some();
-            if closed || !others.is_empty() {
-                let mut holes: Vec<&[Point]> = others.iter().map(|(_, s)| &s[..]).collect();
+        // After release, the clear region is the drawn shape itself (closed), not its
+        // bounding box.
+        // ponytail: even-odd re-dims areas circled twice (or two overlapping
+        // selections); trim the stroke at its first self-crossing if users mind.
+        // The dim is its own drawings, one per tile (`dim`), out of the
+        // cache: a stroke being drawn, a box moved, redraw only the tiles
+        // they change, not the screen (the box across two screens).
+        let closed = self.selection.is_some();
+        let mut drawings = if closed || !others.is_empty() {
+            let mut holes: Vec<&[Point]> = others.iter().map(|(_, s)| &s[..]).collect();
+            match &morph {
+                Some((_, outline)) => holes.push(outline),
+                None if closed => holes.push(&current),
+                None => {}
+            }
+            let holes: Vec<Rectangle> = holes.into_iter().filter_map(self::bounds).collect();
+            dim(renderer, screen, &holes, dim_outside, self.zooming, |p| {
+                for (kind, s) in &others {
+                    shape(p, *kind, s, true);
+                }
                 match &morph {
-                    Some((_, outline)) => holes.push(outline),
-                    None if closed => holes.push(&current),
+                    Some((_, outline)) => shape(p, Kind::Scribble, outline, true),
+                    None if closed => shape(p, kind, &current, true),
                     None => {}
                 }
-                let holes: Vec<Rectangle> = holes.into_iter().filter_map(self::bounds).collect();
-                dim(frame, screen, &holes, dim_outside, self.zooming, |p| {
-                    for (kind, s) in &others {
-                        shape(p, *kind, s, true);
-                    }
-                    match &morph {
-                        Some((_, outline)) => shape(p, Kind::Scribble, outline, true),
-                        None if closed => shape(p, kind, &current, true),
-                        None => {}
-                    }
-                });
-            } else if self.dim {
-                dim(frame, screen, &[], dim_idle, self.zooming, |_| {});
-            }
-
+            })
+        } else if self.dim {
+            dim(renderer, screen, &[], dim_idle, self.zooming, |_| {})
+        } else {
+            Vec::new()
+        };
+        drawings.push(pointer.drawn.draw(renderer, bounds.size(), |frame| {
             let accent = theme::accent_of(&self.look);
             for (kind, s) in &others {
                 glow(frame, *kind, s, true, screen, accent, 1.0);
@@ -1240,7 +1244,8 @@ impl canvas::Program<Event> for Overlay<'_> {
                     });
                 }
             }
-        })]
+        }));
+        drawings
     }
 
     fn mouse_interaction(
@@ -1323,22 +1328,55 @@ fn gradient_style(span: Rectangle, alpha: f32, (start, end): (Color, Color)) -> 
 const TILE: u32 = 256;
 
 /// Dims `screen` in `colour` but for the `cut` shapes (even-odd), which lie
-/// within `holes` (their bounds). As one rectangle per `TILE`, and one path
-/// for the tiles the holes touch: a small redraw then fills only the dim
-/// under it (tiny-skia fills a clipped path over its whole size). `whole` (the wheel zoom easing: every frame redraws all of
-/// it): a row's untouched tiles side by side as one rectangle (the renderer
-/// blends a big one on all its cores).
+/// within `holes` (their bounds). One drawing per `TILE`, clipped to it: a
+/// stroke drawn or a box moved changes only the tiles it touches, so only
+/// those are redrawn (one drawing for all of it redrew the whole window on
+/// every pointer move). `whole` (the wheel zoom easing: every frame redraws
+/// all of it): one drawing, a row's untouched tiles side by side as one
+/// rectangle (the renderer blends a big one on all its cores), one path for
+/// the touched tiles.
 fn dim(
-    frame: &mut canvas::Frame,
+    renderer: &Renderer,
     screen: Rectangle,
     holes: &[Rectangle],
     colour: Color,
     whole: bool,
     cut: impl Fn(&mut canvas::path::Builder),
-) {
+) -> Vec<Geometry> {
     // a smoothed loop may bulge a little past its points
     let holes: Vec<Rectangle> = holes.iter().map(|h| h.expand(16.0)).collect();
     let side = TILE as f32;
+    let rule = fill::Rule::EvenOdd;
+    if !whole {
+        // one drawing per tile, clipped to it, always the same tiles in the
+        // same order: an unchanged tile is no damage
+        let mut out = Vec::new();
+        let mut y = 0.0;
+        while y < screen.height {
+            let mut x = 0.0;
+            while x < screen.width {
+                let size = Size::new(side.min(screen.width - x), side.min(screen.height - y));
+                let tile = Rectangle::new(Point::new(x, y), size);
+                let mut frame = canvas::Frame::with_bounds(renderer, tile);
+                match holes.iter().any(|h| h.intersects(&tile)) {
+                    true => {
+                        let path = Path::new(|p| {
+                            p.rectangle(tile.position(), size);
+                            cut(p);
+                        });
+                        let style = canvas::Style::Solid(colour);
+                        frame.fill(&path, Fill { style, rule });
+                    }
+                    false => frame.fill_rectangle(tile.position(), size, colour),
+                }
+                out.push(frame.into_geometry());
+                x += side;
+            }
+            y += side;
+        }
+        return out;
+    }
+    let mut frame = canvas::Frame::new(renderer, screen.size());
     let mut touched = Vec::new();
     let mut y = 0.0;
     while y < screen.height {
@@ -1349,12 +1387,11 @@ fn dim(
             let tile = Rectangle::new(Point::new(x, y), size);
             match holes.iter().any(|h| h.intersects(&tile)) {
                 true => touched.push(tile),
-                false if whole => {
+                false => {
                     run = Some(run.map_or(tile, |r| r.union(&tile)));
                     x += side;
                     continue;
                 }
-                false => frame.fill_rectangle(tile.position(), size, colour),
             }
             if let Some(r) = run.take() {
                 frame.fill_rectangle(r.position(), r.size(), colour);
@@ -1374,9 +1411,9 @@ fn dim(
             cut(p);
         });
         let style = canvas::Style::Solid(colour);
-        let rule = fill::Rule::EvenOdd;
         frame.fill(&path, Fill { style, rule });
     }
+    vec![frame.into_geometry()]
 }
 
 /// The frozen frame filling the canvas pixel for pixel (`scale` device px

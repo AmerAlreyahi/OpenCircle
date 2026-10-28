@@ -313,20 +313,27 @@ impl App {
     /// (the VM frame budget, #23: p95 <= 16 ms, none over 25 ms); then forgets
     /// them.
     pub(in crate::ui) fn log_frames(&self, what: &str) {
-        let drawn = std::mem::take(&mut *self.frame_times.borrow_mut());
-        let mut gaps: Vec<u128> = (drawn.windows(2))
-            .map(|w| (w[1] - w[0]).as_millis())
-            .collect();
-        gaps.sort_unstable();
-        if let Some(&max) = gaps.last() {
-            let p95 = gaps[(gaps.len() * 95).div_ceil(100) - 1];
-            crate::log!(
-                "[opencircle] {what}: {} frames, p95 {p95} ms, max {max} ms apart",
-                gaps.len() + 1
-            );
-        }
+        log_gaps(what, &self.frame_times);
     }
+}
 
+/// The gaps between the frames in `times`, as `what`; then forgets them.
+pub(in crate::ui) fn log_gaps(what: &str, times: &RefCell<Vec<Instant>>) {
+    let drawn = std::mem::take(&mut *times.borrow_mut());
+    let mut gaps: Vec<u128> = (drawn.windows(2))
+        .map(|w| (w[1] - w[0]).as_millis())
+        .collect();
+    gaps.sort_unstable();
+    if let Some(&max) = gaps.last() {
+        let p95 = gaps[(gaps.len() * 95).div_ceil(100) - 1];
+        crate::log!(
+            "[opencircle] {what}: {} frames, p95 {p95} ms, max {max} ms apart",
+            gaps.len() + 1
+        );
+    }
+}
+
+impl App {
     /// How far the opening animation is (0..1, eased out); 0 on its first frame.
     pub(in crate::ui) fn appeared(&self) -> f32 {
         self.o

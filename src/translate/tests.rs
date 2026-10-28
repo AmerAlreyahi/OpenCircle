@@ -949,6 +949,13 @@ fn real_frames() {
         let ocr_path = out.join(format!("{name}.ocr.json"));
         let found: Vec<TextBlock> = match std::fs::read(&ocr_path) {
             Ok(b) => serde_json::from_slice(&b).unwrap(),
+            // OC_WINOCR=1 (Windows): read as one-shot translate does there
+            Err(_) if std::env::var_os("OC_WINOCR").is_some() => {
+                let k = *ocr::system::passes(1.0, f.width, f.height).last().unwrap();
+                let got = ocr::system::recognize(&f.rgba, f.width, f.height, k).unwrap();
+                std::fs::write(&ocr_path, serde_json::to_vec_pretty(&got).unwrap()).unwrap();
+                got
+            }
             Err(_) => {
                 let e =
                     engine.get_or_insert_with(|| ocr::Engine::load(&ocr::models_dir()).unwrap());
@@ -1444,6 +1451,7 @@ mod real {
         let png = match name {
             "popup" => &include_bytes!("fixtures/popup.png")[..],
             "infobox" => &include_bytes!("fixtures/infobox.png")[..],
+            "solar" => &include_bytes!("fixtures/solar.png")[..],
             _ => &include_bytes!("fixtures/caption2.png")[..],
         };
         let (img, dims) = image(png);
@@ -1511,6 +1519,51 @@ mod real {
             }
         }
         assert_eq!(busy, 0, "blocks left English as 'busy'");
+    }
+
+    /// Wikipedia's Solar System page at 100 % (Windows OCR lines, real
+    /// offline MT; the 0.1.2 gate's page): a block is erased only where its
+    /// translation is drawn, and a long paragraph gets all of it. Before: the
+    /// infobox's small labels were "lost" (the anti-aliasing hole covers most
+    /// of a tight label box) and stayed English, and a paragraph whose stops
+    /// all carried citations ("planets.[12] Four ...") went to MT as one
+    /// input, came back as its first sentence, and 8 of its 11 erased lines
+    /// stayed blank.
+    #[test]
+    fn every_erased_block_gets_its_whole_translation() {
+        let (img, (w, h), blocks, tr) = moon("solar");
+        let mut out = img.clone();
+        let d = render(&mut out, w as u32, h as u32, &blocks, &tr, true);
+        assert_eq!(d.busy, 0, "blocks left English as 'busy'");
+        let inked = |x: usize, y: usize| d.ink.iter().any(|r| inside((x, y), *r, 1.0));
+        for (i, b) in blocks.iter().enumerate() {
+            if tr[i].is_empty() {
+                continue;
+            }
+            if d.ink[i][2] == 0.0 {
+                // left as it was: its lines are the original, pixel for pixel
+                for l in &b.lines {
+                    let [x0, y0, lw, lh] = l.bounds.map(|v| v as usize);
+                    for (x, y) in (y0..y0 + lh).flat_map(|y| (x0..x0 + lw).map(move |x| (x, y))) {
+                        let at = (y * w + x) * 4;
+                        assert!(
+                            inked(x, y) || out[at..at + 3] == img[at..at + 3],
+                            "{:?} erased at {x},{y} but not drawn",
+                            b.text
+                        );
+                    }
+                }
+            }
+            // about as long as the original (Arabic runs ~0.8x the letters)
+            let (en, ar) = (b.text.chars().count(), tr[i].chars().count());
+            assert!(
+                en < 150 || ar * 2 > en,
+                "{} letters translated into {ar}: {:?}",
+                en,
+                tr[i]
+            );
+        }
+        assert!(d.drawn >= 20, "{d:?}");
     }
 }
 
