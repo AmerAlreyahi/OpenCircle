@@ -417,26 +417,46 @@ fn desktop_menu(tx: Triggers) -> Menu {
     menu
 }
 
-/// Windows: no menu of the shell's; a right-click (let go) on the icon asks the app for our popup there.
+/// Windows: no menu of the shell's: a right-click (let go) on the icon asks the
+/// app for our popup there; a left-click opens Settings (owner, 2026-10-28).
 #[cfg(windows)]
 fn on_right_click(tx: Triggers) {
-    use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
+    use tray_icon::TrayIconEvent;
     TrayIconEvent::set_event_handler(Some(move |event| {
         if let TrayIconEvent::Click {
-            button: MouseButton::Right,
-            button_state: MouseButtonState::Up,
+            button,
+            button_state,
             rect,
             ..
         } = event
         {
-            let (x, y) = (
+            let at = [
                 rect.position.x.round() as i32,
                 rect.position.y.round() as i32,
-            );
-            let (w, h) = (rect.size.width as i32, rect.size.height as i32);
-            let _ = tx.unbounded_send(Trigger::TrayMenu([x, y, x + w, y + h]));
+                rect.size.width as i32,
+                rect.size.height as i32,
+            ];
+            if let Some(trigger) = on_click(button, button_state, at) {
+                let _ = tx.unbounded_send(trigger);
+            }
         }
     }));
+}
+
+/// What a click on the tray icon does: let go of the right button = our menu at
+/// the icon (`at` = x, y, width, height); of the left button = Settings.
+#[cfg(windows)]
+fn on_click(
+    button: tray_icon::MouseButton,
+    state: tray_icon::MouseButtonState,
+    [x, y, w, h]: [i32; 4],
+) -> Option<Trigger> {
+    use tray_icon::{MouseButton, MouseButtonState};
+    match (button, state) {
+        (MouseButton::Right, MouseButtonState::Up) => Some(Trigger::TrayMenu([x, y, x + w, y + h])),
+        (MouseButton::Left, MouseButtonState::Up) => Some(Trigger::OpenSettings),
+        _ => None,
+    }
 }
 
 fn build(tx: Triggers) -> Option<TrayIcon> {
@@ -648,5 +668,24 @@ mod tests {
         // not holding the GUID: a crash path must not delete it (the shell then drops the plain icon too)
         assert_eq!(r, Ok(("plain", None)));
         assert_eq!(tried, [Some(7), None]);
+    }
+
+    /// A left-click on the tray icon opens Settings; a right-click our menu at
+    /// the icon; a press alone does nothing (owner, 2026-10-28).
+    #[test]
+    #[cfg(windows)]
+    fn a_left_click_opens_settings_and_a_right_click_the_menu() {
+        use super::Trigger;
+        use tray_icon::{MouseButton, MouseButtonState};
+        let at = [10, 20, 30, 40];
+        assert!(matches!(
+            super::on_click(MouseButton::Left, MouseButtonState::Up, at),
+            Some(Trigger::OpenSettings)
+        ));
+        assert!(matches!(
+            super::on_click(MouseButton::Right, MouseButtonState::Up, at),
+            Some(Trigger::TrayMenu([10, 20, 40, 60]))
+        ));
+        assert!(super::on_click(MouseButton::Left, MouseButtonState::Down, at).is_none());
     }
 }
