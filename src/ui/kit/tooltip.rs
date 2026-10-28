@@ -6,6 +6,10 @@ use iced::widget::tooltip::Position;
 
 /// The pill's distance from its control.
 const GAP: f32 = 10.0;
+/// The pill's least distance from the window's edge: iced snaps a tooltip
+/// to the window, flush against its edge, where the window's own border and
+/// rounding cut it; a clear margin keeps it whole.
+const EDGE: f32 = 8.0;
 
 /// Why a control shows a visible tooltip at all. A tooltip that only repeats
 /// what the control already says is noise, so these are the only three reasons.
@@ -36,8 +40,9 @@ pub fn hint<'a, Message: 'a>(
     };
     #[cfg(test)]
     tests_support::record_shown(&mut content, label, why, &shown);
-    iced::widget::tooltip(content, super::surface::hint(shown), side)
-        .gap(GAP)
+    let pill = iced::widget::container(super::surface::hint(shown)).padding(EDGE);
+    iced::widget::tooltip(content, pill, side)
+        .gap(GAP - EDGE)
         .into()
 }
 
@@ -55,6 +60,45 @@ pub fn tip<'a, Message: 'a>(
     #[cfg(not(test))]
     let _ = label;
     content.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::kit::testing::shot;
+    use iced::{Point, Size, mouse};
+
+    /// A control at the window's left edge: its tooltip stays `EDGE` inside
+    /// the window (the drawer's back button, gate 0.1.2 bug 10).
+    #[test]
+    fn a_tooltip_keeps_clear_of_the_window_edge() {
+        let size = Size::new(240.0, 80.0);
+        let view = || {
+            use crate::ui::kit::icon_button::{State, icon_button};
+            let back = icon_button('\u{e048}', State::default(), Some(()));
+            hint(back, "Back to the chat", Why::Icon, Position::Bottom)
+        };
+        let at = Point::new(10.0, 10.0);
+        let moved = [iced::Event::Mouse(mouse::Event::CursorMoved {
+            position: at,
+        })];
+        let plain = shot::render_with(view(), size, None, &[]);
+        let shown = shot::render_with(view(), size, Some(at), &moved);
+        let w = size.width as usize;
+        // below the (hovered) button: only the pill differs there
+        let below = (crate::ui::kit::tokens::size::ICON_BUTTON as usize + 2) * w;
+        let left = (plain
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(shown.as_chunks::<4>().0))
+        .enumerate()
+        .filter(|(i, (a, b))| *i >= below && a != b)
+        .map(|(i, _)| i % w)
+        .min()
+        .expect("the tooltip shows");
+        assert!(left as f32 >= EDGE - 1.0, "the pill starts at x {left}");
+    }
 }
 
 #[cfg(test)]
