@@ -486,3 +486,91 @@ fn panel_frame_sheet() {
     ];
     sheet("panel_frame", Size::new(300.0, 200.0), &rows);
 }
+
+#[test]
+fn grip_sheet() {
+    use super::super::grip::grip;
+    let rows = vec![
+        row("rest", Act::Rest, |_| grip(())),
+        row("hover", Act::Hover, |_| grip(())),
+    ];
+    sheet("grip", Size::new(80.0, 36.0), &rows);
+}
+
+#[test]
+fn icon_button_sheet() {
+    use super::super::icon_button::{State, icon_button};
+    const LIVE: char = '\u{e145}';
+    let view = |active, focused, live: bool| {
+        move |_| icon_button(LIVE, State { active, focused }, live.then_some(()))
+    };
+    let rows = vec![
+        row("rest", Act::Rest, view(false, false, true)),
+        row("hover", Act::Hover, view(false, false, true)),
+        row("pressed", Act::Press, view(false, false, true)),
+        row("active", Act::Rest, view(true, false, true)),
+        row("focused", Act::Rest, view(false, true, true)),
+        row("disabled", Act::Rest, view(false, false, false)),
+    ];
+    sheet("icon_button", Size::new(80.0, 44.0), &rows);
+}
+
+/// `button::compact`, the bar's pills (a sheet of its own).
+#[test]
+fn button_compact_sheet() {
+    use button::compact;
+    const GLYPH: char = crate::actions::translate::ACTION.icon;
+    let view = |active, focused, live: bool| {
+        move |ar| {
+            let label = Some(s(ar, "Translate", "ترجمة"));
+            compact(GLYPH, label, 104.0, (active, focused), live.then_some(()))
+        }
+    };
+    let rows = vec![
+        row("rest", Act::Rest, view(false, false, true)),
+        row("hover", Act::Hover, view(false, false, true)),
+        row("pressed", Act::Press, view(false, false, true)),
+        row("active", Act::Rest, view(true, false, true)),
+        row("focused", Act::Rest, view(false, true, true)),
+        row("disabled", Act::Rest, view(false, false, false)),
+        row("icon only", Act::Rest, |_| {
+            compact(GLYPH, None, 36.0, (false, false), Some(()))
+        }),
+    ];
+    sheet("button_compact", Size::new(160.0, 44.0), &rows);
+}
+
+/// `field::slots` with its logo and badge (the bar's AI field).
+#[test]
+fn field_slots_sheet() {
+    use field::{badge, logo, slots};
+    let view = |typed: bool, focused| {
+        move |ar| {
+            let parts = (
+                logo(crate::ui::widgets::chrome::logo_handle(), false, ()),
+                badge("AI", false, ()),
+            );
+            let hint = s(ar, "Ask AI about your screen…", "اسأل عن شاشتك…");
+            let value = match typed {
+                true => s(ar, "What is this error?", "ما هذا الخطأ؟"),
+                false => "",
+            };
+            slots("gallery", hint, value, |_| (), (), 244.0, focused, parts)
+        }
+    };
+    let rows = vec![
+        row("rest", Act::Rest, view(false, false)),
+        row("hover", Act::Hover, view(false, false)),
+        row("focused", Act::Rest, view(false, true)),
+        row("typed", Act::Rest, view(true, true)),
+    ];
+    sheet("field_slots", Size::new(276.0, 44.0), &rows);
+}
+
+/// `chip::action`, a chip that acts (the QR code's).
+#[test]
+fn chip_action_sheet() {
+    let view = |ar| chip::action(s(ar, "Open link · example.com", "افتح الرابط").into(), ());
+    let rows = vec![row("rest", Act::Rest, view), row("hover", Act::Hover, view)];
+    sheet("chip_action", Size::new(220.0, 44.0), &rows);
+}

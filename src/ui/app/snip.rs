@@ -16,7 +16,8 @@ use crate::labs::{self};
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::edit::Editing;
-use crate::ui::{bar, snip, widgets, windows};
+use crate::ui::screens::bar::geometry as bar;
+use crate::ui::{snip, widgets, windows};
 
 use super::{ASK_MARGIN, App, work_area};
 

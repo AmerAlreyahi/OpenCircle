@@ -18,14 +18,16 @@ use crate::ui::app::opening::Opening;
 use crate::ui::app::quick::Quick;
 use crate::ui::app::{keys, word};
 use crate::ui::edit::Editing;
+use crate::ui::screens::bar::geometry as bar;
 use crate::ui::snip::Snip;
 use crate::ui::widgets::card;
-use crate::ui::{bar, border, glass, overlay, panel, snip, song, translate, widgets, windows};
+use crate::ui::{border, glass, overlay, panel, snip, song, translate, widgets, windows};
 
 use super::actions::auto_targets;
-use super::bar::ask_placeholder;
 use super::view::chips_at;
 use super::*;
+use crate::ui::kit::field;
+use crate::ui::screens::bar::view::ask_placeholder;
 
 use crate::actions::crop::STACK_GAP;
 use crate::config::{BarAnchor, TextReader};
@@ -1291,9 +1293,9 @@ fn the_bottom_bar_is_there_from_the_first_frame() {
 fn bar_row(app: &App) -> (f32, f32) {
     let (field, size) = app.bar_size();
     let at = app.bar_at();
-    let x = at.x + widgets::SURFACE_PADDING + bar::HANDLE + bar::SPACING + field;
+    let x = at.x + bar::PAD + bar::HANDLE + bar::SPACING + field;
     (
-        x + bar::SPACING + 1.0 + bar::SPACING,
+        x + bar::SPACING + bar::DIVIDER + bar::SPACING,
         at.y + size.height / 2.0,
     )
 }
@@ -1312,7 +1314,7 @@ fn pill_widths(app: &App) -> [f32; 3] {
 fn bar_pill(app: &App, k: usize) -> Point {
     let (x, y) = bar_row(app);
     let widths = pill_widths(app);
-    let before: f32 = widths[..k].iter().map(|w| w + bar::SPACING).sum();
+    let before: f32 = widths[..k].iter().map(|w| w + bar::PILL_GAP).sum();
     Point::new(x + before + widths[k] / 2.0, y)
 }
 
@@ -1320,9 +1322,9 @@ fn bar_pill(app: &App, k: usize) -> Point {
 /// then Song search and Edit when on), after the pills and their divider.
 fn bar_button(app: &App, k: usize) -> Point {
     let (x, y) = bar_row(app);
-    let pills: f32 = pill_widths(app).iter().map(|w| w + bar::SPACING).sum();
-    let first = x + pills + 1.0 + bar::SPACING;
-    let x = first + k as f32 * (widgets::BUBBLE + bar::SPACING) + widgets::BUBBLE / 2.0;
+    let pills: f32 = pill_widths(app).iter().sum::<f32>() + 2.0 * bar::PILL_GAP;
+    let first = x + pills + bar::SPACING + bar::DIVIDER + bar::SPACING;
+    let x = first + k as f32 * (bar::BUBBLE + bar::SPACING) + bar::BUBBLE / 2.0;
     Point::new(x, y)
 }
 
@@ -1330,7 +1332,7 @@ fn bar_button(app: &App, k: usize) -> Point {
 fn bar_field(app: &App) -> Point {
     let (_, size) = app.bar_size();
     let at = app.bar_at();
-    let x = at.x + widgets::SURFACE_PADDING + bar::HANDLE + bar::SPACING + 60.0;
+    let x = at.x + bar::PAD + bar::HANDLE + bar::SPACING + 60.0;
     Point::new(x, at.y + size.height / 2.0)
 }
 
@@ -1390,8 +1392,7 @@ fn a_selection_brings_its_actions_into_the_bottom_bar_not_a_second_bar() {
 fn note_clicks(app: &App) -> Vec<Message> {
     let (_, size) = app.bar_size();
     let at = app.bar_at();
-    let height = widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING;
-    let y = at.y - bar::SPACING - height / 2.0;
+    let y = at.y - bar::SPACING - bar::HEIGHT / 2.0;
     (0..(size.width as usize / 8))
         .flat_map(|i| {
             let p = Point::new(at.x + 8.0 * i as f32, y);
@@ -1863,7 +1864,7 @@ fn hidden_features_have_no_bar_button_key_or_editor_and_turning_them_on_brings_t
     app.o.labs.set(labs::Feature::Song, true);
     assert!(bar_names(&app).iter().any(|n| n == "Song search"));
     // (the first icon also brings the divider before the icons)
-    assert!(app.bar_size().1.width >= small.width + widgets::BUBBLE + bar::SPACING);
+    assert!(app.bar_size().1.width >= small.width + bar::BUBBLE + bar::SPACING);
     // Live translate on: its button is back.
     app.o.labs.set(labs::Feature::Live, true);
     assert!(bar_names(&app).iter().any(|n| n == "Live translate (Beta)"));
@@ -1919,15 +1920,15 @@ fn ask_placeholder_always_fits_its_field() {
     for icons in 0..=5 {
         for screen in (600..=3840).step_by(40) {
             let (field, _) = bar::bottom_size(screen as f32, icons as f32);
-            let room = field - widgets::AI_FIELD_LEFT - widgets::AI_FIELD_RIGHT;
+            let room = bar::text_room(field);
             let p = ask_placeholder(field);
             assert!(
-                p == "Ask AI…" || widgets::text_width(p, 14.0) <= room,
+                p == "Ask AI…" || widgets::text_width(p, field::SLOTS_TEXT) <= room,
                 "{p:?} is cut in a {field} px field"
             );
         }
     }
-    // the design's 320 px field keeps the sentence's meaning
+    // the design's 270 px field keeps the sentence's meaning
     assert!(ask_placeholder(bar::FIELD).ends_with("screen…"));
 }
 
@@ -2183,11 +2184,7 @@ fn the_bar_drags_by_its_handle_and_docks_at_the_nearest_spot() {
     app.o.work_inset = 40.0; // a taskbar
     let (_, size) = app.bar_size();
     assert_eq!(app.bar_at().y + size.height, 800.0 - 40.0 - bar::BOTTOM_GAP);
-    let handle = app.bar_at()
-        + Vector::new(
-            widgets::SURFACE_PADDING + bar::HANDLE / 2.0,
-            size.height / 2.0,
-        );
+    let handle = app.bar_at() + Vector::new(bar::PAD + bar::HANDLE / 2.0, size.height / 2.0);
     let grabbed = widgets::shot::click(app.view(app.overlay), app.o.screen, handle);
     assert!(grabbed.iter().any(|m| matches!(m, Message::BarGrab)));
     // the field and the buttons don't drag it
@@ -2198,7 +2195,28 @@ fn the_bar_drags_by_its_handle_and_docks_at_the_nearest_spot() {
     let _ = app.update(Message::BarGrab);
     let _ = app.update(Message::BarMoved(handle));
     let _ = app.update(Message::BarMoved(handle - Vector::new(100.0, 560.0)));
-    assert_eq!(app.bar_at(), before - Vector::new(100.0, 560.0));
+    let held = before - Vector::new(100.0, 560.0);
+    assert_eq!(app.bar_target(), held);
+    // ...eased there on the frame clock, never jumping per mouse event
+    assert_eq!(app.bar_at(), before, "no jump before a frame");
+    assert!(app.animating(), "frames while it is behind the pointer");
+    let now = Instant::now();
+    let _ = app.update(Message::Frame(now));
+    let first = app.bar_at();
+    assert!(first.y < before.y && first.y > held.y, "{first:?}");
+    let _ = app.update(Message::Frame(now + bar::FOLLOW));
+    let off = app.bar_at().distance(held) / before.distance(held);
+    assert!(off < 0.06, "95 % of the way in FOLLOW: {off}");
+    for i in 1..=6 {
+        let _ = app.update(Message::Frame(
+            now + bar::FOLLOW + Duration::from_millis(16 * i),
+        ));
+    }
+    assert_eq!(app.bar_at(), held, "there");
+    assert!(
+        !app.animating(),
+        "caught up: no more frames while held still"
+    );
     // let go near the top: it glides to the top spot, remembered
     let _ = app.update(Message::BarReleased);
     assert_eq!(app.o.bar_anchor, BarAnchor::Top);

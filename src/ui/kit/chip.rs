@@ -129,3 +129,29 @@ pub fn status<'a, Message: 'a>(label: impl Into<String>, tone: Tone) -> Element<
         })
         .into()
 }
+
+/// A chip that acts (a QR code's "QR code: …" and "Open link · host"): a
+/// 12 px line in `text` on `hover`, a divider edge, round, 6x12 px; lighter
+/// under the cursor.
+pub fn action<'a, Message: Clone + 'a>(label: String, on_press: Message) -> Element<'a, Message> {
+    use iced::widget::button;
+    button(text(label).size(12).font(weight(Weight::Normal)))
+        .padding([6, 12])
+        .on_press(on_press)
+        .style(|_, status| button::Style {
+            background: Some(
+                match status {
+                    button::Status::Hovered | button::Status::Pressed => c().elevated_hover,
+                    _ => c().hover,
+                }
+                .into(),
+            ),
+            text_color: c().text,
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(1)
+                .color(c().divider),
+            ..button::Style::default()
+        })
+        .into()
+}

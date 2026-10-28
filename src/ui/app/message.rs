@@ -12,8 +12,9 @@ use crate::editor;
 use crate::labs::BarButton;
 use crate::ocr::TextBlock;
 use crate::ui::app::{keys, quick::Quick, word};
+use crate::ui::screens::bar::geometry as bar;
 use crate::ui::snip::{self, Snip};
-use crate::ui::{bar, live_layer, overlay, panel, song, translate, windows};
+use crate::ui::{live_layer, overlay, panel, song, translate, windows};
 
 #[derive(Debug, Clone)]
 pub(in crate::ui) enum Message {

@@ -17,8 +17,9 @@ use crate::ui::app::message::{Hiding, Message, Purpose};
 use crate::ui::app::quick::Quick;
 use crate::ui::edit::Editing;
 use crate::ui::kit::motion;
+use crate::ui::screens::bar::geometry as bar;
 use crate::ui::widgets::card;
-use crate::ui::{bar, overlay, snip, translate, update_card, widgets, windows};
+use crate::ui::{overlay, snip, translate, update_card, widgets, windows};
 
 use super::capture::{TEST_SHOT, save_test_shot};
 use super::{App, BAR_MORPH, CAPTURE_TIMEOUT, GLIDE, REVEAL_WAIT, Reader, SHRINK_FRAMES, SHRUNK};
@@ -207,11 +208,14 @@ impl App {
                 Task::none()
             }
             Message::BarGrab => {
-                self.o.bar_drag = Some((None, self.bar_at()));
+                let at = self.bar_at();
+                self.o.bar_drag = Some((None, at));
+                (self.o.bar_now, self.o.bar_glide, self.o.bar_eased) = (Some(at), None, None);
                 self.frame_times.borrow_mut().clear();
                 Task::none()
             }
-            // While held it follows the pointer (kept on screen).
+            // While held its target follows the pointer (kept on screen); the
+            // frames ease it there (`Frame`), never a jump per mouse event.
             Message::BarMoved(p) => {
                 if let Some((last, at)) = self.o.bar_drag {
                     let size = self.dock_size();
@@ -227,7 +231,6 @@ impl App {
                         None => at,
                     };
                     self.o.bar_drag = Some((Some(p), at));
-                    self.o.bar_now = Some(at);
                 }
                 Task::none()
             }
@@ -238,7 +241,7 @@ impl App {
                     self.o.bar_anchor = bar::nearest(at, self.o.screen, size, self.o.work_inset);
                     crate::log!("[opencircle] bar docked: {:?}", self.o.bar_anchor);
                     self.log_frames("bar drag");
-                    self.o.bar_now = Some(at);
+                    self.o.bar_eased = None; // the glide goes on from where it is drawn
                     self.remember_bar()
                 }
                 None => Task::none(),
@@ -353,7 +356,13 @@ impl App {
                         self.o.swap_at = None;
                     }
                 }
-                if self.o.bar_drag.is_none() {
+                if let Some((_, to)) = self.o.bar_drag {
+                    let since = self.o.bar_eased.map_or(motion::FRAME, |t| now - t);
+                    let at = bar::follow(self.bar_at(), to, since);
+                    // caught up, the frames stop: the next move starts a fresh beat
+                    self.o.bar_eased = (at != to).then_some(now);
+                    self.o.bar_now = Some(at);
+                } else {
                     let to = self.bar_target();
                     self.o.bar_now = Some(match (self.o.bar_now, self.o.bar_glide) {
                         // turning into the toolbar (or back): it stays on its spot

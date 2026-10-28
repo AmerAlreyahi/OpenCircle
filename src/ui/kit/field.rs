@@ -5,6 +5,7 @@ use iced::widget::text::LineHeight;
 use iced::widget::text_input;
 use iced::{Border, Element};
 
+use super::button::faded;
 use super::text::mono;
 use super::themes::c;
 use super::tokens::radius;
@@ -43,4 +44,146 @@ pub fn field<'a, Message: Clone + 'a>(
         input = input.on_input(on_input);
     }
     input.into()
+}
+
+/// The slotted field's height, the focus ring round it, and its text's room
+/// left and right of the slots (`pl-8 pr-14`).
+pub const SLOTS_H: f32 = 30.0;
+pub const RING: f32 = 2.0;
+pub const SLOTS_LEFT: f32 = 32.0;
+pub const SLOTS_RIGHT: f32 = 56.0;
+/// Its text size.
+pub const SLOTS_TEXT: f32 = 12.0;
+
+/// The field with slots (the bar's AI field, `.oc-input` in the bar): 12 px
+/// text on `track`, a rim edge, radius 12, `width` wide with its ring (the
+/// field itself `2 * RING` less), `SLOTS_H` tall; `left` and `right` (a logo
+/// button, a badge) sit on it, 8 and 6 px in from its ends. `focused` (or iced's
+/// own focus) = an `accent` edge and a 2 px `accent_soft` ring round it; the
+/// ring's room is kept at rest, so focus never moves anything.
+#[allow(clippy::too_many_arguments)]
+pub fn slots<'a, Message: Clone + 'a>(
+    id: &'static str,
+    placeholder: &str,
+    value: &str,
+    on_input: impl Fn(String) -> Message + 'a,
+    on_submit: Message,
+    width: f32,
+    focused: bool,
+    (left, right): (Element<'a, Message>, Element<'a, Message>),
+) -> Element<'a, Message> {
+    use iced::widget::{container, row, space, stack};
+    use iced::{Center, Padding};
+    // Arabic with all its marks inside the box (the UI's `LINE`)
+    const LINE: f32 = 1.7;
+    let inner = width - 2.0 * RING;
+    let input = text_input(placeholder, value)
+        .id(id)
+        .on_input(on_input)
+        .on_submit(on_submit)
+        .size(SLOTS_TEXT)
+        .font(super::text::weight(Weight::Normal))
+        .line_height(LINE)
+        .width(inner)
+        .padding(
+            Padding::new((SLOTS_H - SLOTS_TEXT * LINE) / 2.0)
+                .left(SLOTS_LEFT)
+                .right(SLOTS_RIGHT),
+        )
+        .style(move |_, status| {
+            let on = focused || matches!(status, text_input::Status::Focused { .. });
+            text_input::Style {
+                background: c().track.into(),
+                border: Border::default()
+                    .rounded(radius::CARD)
+                    .width(1)
+                    .color(if on { c().accent } else { c().rim }),
+                icon: c().text_sub,
+                placeholder: c().text_sub,
+                value: c().text,
+                selection: c().accent_soft,
+            }
+        });
+    let over = row![left, space::horizontal(), right]
+        .padding(Padding::ZERO.left(8).right(6))
+        .width(inner)
+        .height(SLOTS_H)
+        .align_y(Center);
+    container(stack![input, over])
+        .padding(RING)
+        .style(move |_| container::Style {
+            border: Border::default()
+                .rounded(radius::CARD + RING)
+                .width(RING)
+                .color(match focused {
+                    true => c().accent_soft,
+                    false => iced::Color::TRANSPARENT,
+                }),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// A slot's logo button (`#mainBarOpenAiBtn`): `logo` at 16 px in 20x20,
+/// radius 6, `hover` under the cursor; Tab's focus an `accent` edge.
+pub fn logo<'a, Message: Clone + 'a>(
+    logo: iced::widget::image::Handle,
+    focused: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use iced::widget::{button, container, image};
+    let picture = image(logo).width(16).height(16);
+    button(container(picture).center(20))
+        .padding(0)
+        .on_press(on_press)
+        .style(move |_, status| button::Style {
+            background: match status {
+                button::Status::Hovered | button::Status::Pressed => Some(c().hover.into()),
+                _ => None,
+            },
+            border: slot_edge(focused),
+            ..button::Style::default()
+        })
+        .into()
+}
+
+/// A slot's badge (`#mainBarAiSubmitBadge`): "AI ↵" (the arrow at 75 %),
+/// mono 10 px / 600 in `accent` on `accent_soft`, 2x6 px, radius 6; stronger
+/// under the cursor; Tab's focus an `accent` edge.
+pub fn badge<'a, Message: Clone + 'a>(
+    label: &'a str,
+    focused: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use iced::widget::{button, row, text};
+    let font = mono(Weight::Semibold);
+    let line = row![
+        text(label).size(10).font(font),
+        text("↵").size(10).font(font).color(faded(c().accent, 0.75)),
+    ]
+    .spacing(4);
+    button(line)
+        .padding([2, 6])
+        .on_press(on_press)
+        .style(move |_, status| button::Style {
+            background: Some(
+                match status {
+                    button::Status::Hovered | button::Status::Pressed => faded(c().accent, 0.28),
+                    _ => c().accent_soft,
+                }
+                .into(),
+            ),
+            text_color: c().accent,
+            border: slot_edge(focused),
+            ..button::Style::default()
+        })
+        .into()
+}
+
+/// A slot's corners (6 px) and its edge: `accent` while Tab is on it.
+fn slot_edge(focused: bool) -> Border {
+    Border::default().rounded(6).width(1).color(match focused {
+        true => c().accent,
+        false => iced::Color::TRANSPARENT,
+    })
 }

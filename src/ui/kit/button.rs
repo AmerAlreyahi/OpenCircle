@@ -191,3 +191,65 @@ pub(super) fn faded(c: Color, alpha: f32) -> Color {
         ..c
     }
 }
+
+/// A compact pill's height (`.oc-btn !py-1.5 !px-2.5 !rounded-xl`).
+pub const COMPACT_H: f32 = 30.0;
+
+/// The compact pill (the bar's Search in browser, Copy text, Translate): a
+/// 14 px glyph and an 11.5 px label (`label: None` = the glyph alone, narrow
+/// screens), centred in `width` x `COMPACT_H`, radius 12. `.oc-btn`'s look:
+/// `elevated` with its edge, lighter under the cursor, a 2 px inset edge while
+/// pressed. `active` (the current choice) is `accent_soft` with `accent` text;
+/// Tab's focus an `accent` edge; no `on_press` = dimmed, same size and place.
+pub fn compact<'a, Message: Clone + 'a>(
+    glyph: char,
+    label: Option<&'a str>,
+    width: f32,
+    (active, focused): (bool, bool),
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::tokens::{Role, space};
+    use iced_button::Status;
+    let live = on_press.is_some();
+    let content = row![text(glyph).font(super::icon::FONT).size(size::ICON_SMALL)]
+        .push(label.map(|l| {
+            text(l)
+                .size(Role::BAR_PILL.size)
+                .font(super::text::font(Role::BAR_PILL))
+        }))
+        .spacing(space::GAP)
+        .align_y(Center);
+    iced_button(container(content).center(Fill))
+        .width(width)
+        .height(COMPACT_H)
+        .padding(0)
+        .on_press_maybe(on_press)
+        .style(move |_, status| {
+            let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+            let fill = match () {
+                _ if active && live => c().accent_soft,
+                _ if hot => c().elevated_hover,
+                _ => c().elevated,
+            };
+            let text_color = match () {
+                _ if !live => c().text_muted,
+                _ if active => c().accent,
+                _ => c().text,
+            };
+            let (width, edge) = match () {
+                _ if live && status == Status::Pressed => (2.0, c().widget),
+                _ if focused => (1.0, c().accent),
+                _ => (1.0, c().elevated_border),
+            };
+            iced_button::Style {
+                background: Some(fill.into()),
+                text_color,
+                border: Border::default()
+                    .rounded(radius::CARD)
+                    .width(width)
+                    .color(edge),
+                ..iced_button::Style::default()
+            }
+        })
+        .into()
+}

@@ -10,8 +10,9 @@ use crate::config::{self};
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::word;
 use crate::ui::kit::motion;
+use crate::ui::screens::bar::geometry as bar;
 use crate::ui::widgets::card;
-use crate::ui::{bar, border, glass, overlay, widgets};
+use crate::ui::{border, glass, overlay, widgets};
 
 use super::{App, CHIP_SPACE, HINT, PROTECTED, QR_WIDTH, SLIDE, TextMode};
 
@@ -246,8 +247,9 @@ impl App {
         }
         if let Some(text) = self.o.scan.as_ref().and_then(|s| s.qr.as_deref()) {
             let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
-            let chip = bar::qr_chip(text, Message::Qr(qr::Act::Copy), open);
-            let size = Size::new(QR_WIDTH, widgets::CONTROL + 2.0 * widgets::SURFACE_PADDING);
+            let chip =
+                crate::ui::screens::bar::view::qr_chip(text, Message::Qr(qr::Act::Copy), open);
+            let size = Size::new(QR_WIDTH, bar::HEIGHT);
             let at = chips_at(below, size, room);
             let chip = container(chip).center_x(QR_WIDTH);
             layers = layers.push(iced::widget::pin(opaque(chip)).position(at));

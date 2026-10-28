@@ -8,7 +8,7 @@ use iced::widget::canvas::{self, Action, Frame, Geometry, Path, Stroke, fill};
 use iced::widget::{container, image, mouse_area, pin, stack};
 use iced::{Color, ContentFit, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
 
-use super::bar::{BOTTOM_GAP, GAP};
+use super::screens::bar::geometry::{BOTTOM_GAP, GAP};
 use super::{theme, widgets};
 use crate::actions::Crop;
 use crate::editor::{self, Editor, Image, Message, Output};

@@ -81,7 +81,6 @@ const NOT_SCREENS: [&str; 8] = [
 /// Screen files that still style in place. A ratchet: a port removes its file
 /// here, and the list only shrinks.
 const LEGACY: &[&str] = &[
-    "bar.rs",
     "border.rs",
     "edit.rs",
     "live_layer.rs",

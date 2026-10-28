@@ -1,66 +1,58 @@
-//! The overlay's action bar geometry (the one action hub, built in `ui::App`):
-//! its size and its docking spots (anchors) inside the work area: bottom
-//! centre (default), top centre, bottom left, bottom right. A drag ends at the
+//! The overlay's bottom bar geometry (the one action hub, `view`): its size
+//! and its docking spots (anchors) inside the work area: bottom centre
+//! (default), top centre, bottom left, bottom right. A drag ends at the
 //! nearest one; a selection under it sends it to the nearest free one. Also
-//! the QR chip and placing small things beside a selection.
-use iced::widget::row;
-use iced::{Center, Element, Fill, Point, Rectangle, Size};
+//! placing small things beside a selection, and the Tab order.
+use iced::{Point, Rectangle, Size};
 
-use super::widgets::{self, CONTROL, SURFACE_PADDING};
-use crate::actions::{Key, qr};
+use crate::actions::Key;
 use crate::config::BarAnchor;
 use crate::labs::BarButton;
+use crate::ui::kit::tokens::{size, space};
+use crate::ui::kit::{field, grip};
 
 /// Between a bar or chip and the selection, and the minimum distance to screen edges.
-pub(super) const GAP: f32 = 16.0;
+pub(in crate::ui) const GAP: f32 = 16.0;
 
-/// The bar: its gap to the work area's edges (above the taskbar), its top
-/// spot's distance from the top (clear of the hint pill), the space between
-/// its controls, its drag handle's and AI field's widths, and its three pills'
-/// widths (Search in browser, Copy text, Translate: fixed, so the bar never
-/// changes size).
-pub(super) const BOTTOM_GAP: f32 = 28.0;
-pub(super) const TOP: f32 = 84.0;
-pub(super) const SPACING: f32 = 6.0;
-pub(super) const HANDLE: f32 = 24.0;
-pub(super) const FIELD: f32 = 320.0;
+/// The bar (the design's search bar, solid): its gap to the work area's edges
+/// (above the taskbar), its top spot's distance from the top (clear of the
+/// hint pill), its padding (the design's 6 px inside its 1 px edge), the
+/// space between its controls and between its pills, its grip's width, its AI
+/// field's width with the focus ring, its three pills' widths (Search in
+/// browser, Copy text, Translate: fixed, so the bar never changes size), and
+/// a pill's width with its icon alone (narrow screens).
+pub(in crate::ui) const BOTTOM_GAP: f32 = 28.0;
+pub(in crate::ui) const TOP: f32 = 84.0;
+pub(in crate::ui) const PAD: f32 = space::BAR_PAD + 1.0;
+pub(in crate::ui) const SPACING: f32 = space::GAP;
+pub(in crate::ui) const PILL_GAP: f32 = 4.0;
+pub(in crate::ui) const HANDLE: f32 = grip::SIZE.width;
+pub(in crate::ui) const FIELD: f32 = 270.0 + 2.0 * field::RING;
 const MIN_FIELD: f32 = 160.0;
-pub(super) const PILLS: [f32; 3] = [160.0, 106.0, 106.0];
-/// The thin line between the field, the pills and the icon buttons.
-const DIVIDER: f32 = 1.0;
+pub(in crate::ui) const PILLS: [f32; 3] = [132.0, 88.0, 88.0];
+pub(in crate::ui) const ICON_PILL: f32 = 36.0;
+/// The round lab buttons after the pills.
+pub(in crate::ui) const BUBBLE: f32 = size::ICON_BUTTON;
+/// The thin line between the field, the pills and the icon buttons (16 px
+/// tall), and the room it takes (2 px either side).
+pub(in crate::ui) const DIVIDER_H: f32 = 16.0;
+pub(in crate::ui) const DIVIDER: f32 = 5.0;
+/// The bar's height: its tallest control (the icon buttons) and its padding.
+pub(in crate::ui) const HEIGHT: f32 = BUBBLE + 2.0 * PAD;
+/// A note beside the bar (the text reader's) is as tall as the bar; its
+/// line's padding and the space between what it says and its button.
+pub(in crate::ui) const NOTE_PAD: f32 = 10.0;
+pub(in crate::ui) const NOTE_GAP: f32 = 12.0;
+pub(in crate::ui) const NOTE_PROGRESS: f32 = 120.0;
+/// The QR code chip: as tall as the bar; its padding across and the space
+/// between its parts; the longest QR text it shows, in characters.
+pub(in crate::ui) const QR_PAD: f32 = 14.0;
+pub(in crate::ui) const QR_GAP: f32 = 10.0;
+pub(in crate::ui) const QR_SHOWN: usize = 36;
 
-/// The longest QR text the chip shows, in characters.
-const QR_SHOWN: usize = 36;
-
-/// The chip for a QR code found in the selection: its text (made safe to show, see
-/// [`qr::shown`]) copies it, and "Open link · host" (the link's whole host)
-/// (only offered for an http(s) link) opens it. Neither happens by itself.
-pub fn qr_chip<'a, Message: Clone + 'a>(
-    text: &str,
-    copy: Message,
-    open: Option<Message>,
-) -> Element<'a, Message> {
-    let shown = qr::shown(text, QR_SHOWN);
-    let mut chips = row![
-        widgets::icon(crate::actions::copy::ACTION.icon),
-        widgets::chip(format!("QR code: {}", shown.text), copy),
-    ]
-    .spacing(10)
-    .height(Fill)
-    .align_y(Center);
-    if shown.warn {
-        chips = chips.push(widgets::error("Hidden text-direction marks"));
-    }
-    let host = qr::web_url(text).and_then(crate::sys::open::web_host);
-    if let (Some(open), Some(host)) = (open, host) {
-        // The whole host on the button (like the Text panel's link chips): the
-        // site it really opens, never cut.
-        chips = chips.push(widgets::chip(format!("Open link · {host}"), open));
-    }
-    widgets::surface(chips)
-        .height(CONTROL + 2.0 * SURFACE_PADDING)
-        .padding([0.0, 14.0])
-        .into()
+/// The room the field's text has, `field` wide (its slots and ring aside).
+pub(in crate::ui) fn text_room(field: f32) -> f32 {
+    field - 2.0 * field::RING - field::SLOTS_LEFT - field::SLOTS_RIGHT
 }
 
 /// What Tab can land on in the bar.
@@ -103,7 +95,7 @@ pub fn tab(stops: &[Stop], at: Option<Stop>, back: bool) -> Option<Stop> {
 }
 
 /// A shortcut as a tooltip shows it, e.g. "Ctrl+C".
-pub(super) fn key_hint(key: Key) -> String {
+pub(in crate::ui) fn key_hint(key: Key) -> String {
     let letter = key.letter.to_ascii_uppercase();
     if key.ctrl {
         format!("Ctrl+{letter}")
@@ -112,21 +104,23 @@ pub(super) fn key_hint(key: Key) -> String {
     }
 }
 
-/// The bar without its field: handle, dividers, `pills` and `bubbles` round buttons.
+/// The bar without its field: grip, dividers, `pills` and `bubbles` round buttons.
 fn fixed(pills: [f32; 3], bubbles: f32) -> f32 {
-    let pills: f32 = pills.iter().map(|w| w + SPACING).sum();
-    let buttons = bubbles * (widgets::BUBBLE + SPACING);
-    let dividers = (1.0 + f32::from(bubbles > 0.0)) * (DIVIDER + SPACING);
-    HANDLE + SPACING + dividers + pills + buttons + 2.0 * SURFACE_PADDING
+    let pills: f32 = pills.iter().sum::<f32>() + 2.0 * PILL_GAP;
+    let buttons = match bubbles > 0.0 {
+        true => SPACING + DIVIDER + bubbles * (BUBBLE + SPACING),
+        false => 0.0,
+    };
+    2.0 * PAD + HANDLE + 3.0 * SPACING + DIVIDER + pills + buttons
 }
 
 /// The pills' widths on a screen `width` wide: labelled (`PILLS`), or icons
-/// only (`BUBBLE` each) where the labelled bar would not fit (the design hides
-/// their labels on narrow screens).
-pub(super) fn pill_widths(width: f32, bubbles: f32) -> [f32; 3] {
+/// only (`ICON_PILL` each) where the labelled bar would not fit (the design
+/// hides their labels on narrow screens).
+pub(in crate::ui) fn pill_widths(width: f32, bubbles: f32) -> [f32; 3] {
     match fixed(PILLS, bubbles) + MIN_FIELD <= width - 2.0 * GAP {
         true => PILLS,
-        false => [widgets::BUBBLE; 3],
+        false => [ICON_PILL; 3],
     }
 }
 
@@ -134,15 +128,31 @@ pub(super) fn pill_widths(width: f32, bubbles: f32) -> [f32; 3] {
 /// wide, with the three pills (`pill_widths`) and `bubbles` round buttons
 /// after them: the field gives up width on a narrow screen, then the pills
 /// their labels; the buttons never shrink.
-pub(super) fn bottom_size(width: f32, bubbles: f32) -> (f32, Size) {
+pub(in crate::ui) fn bottom_size(width: f32, bubbles: f32) -> (f32, Size) {
     let fixed = fixed(pill_widths(width, bubbles), bubbles);
     let field = (width - 2.0 * GAP - fixed).clamp(MIN_FIELD, FIELD);
-    let height = CONTROL.max(widgets::BUBBLE) + 2.0 * SURFACE_PADDING;
-    (field, Size::new(fixed + field, height))
+    (field, Size::new(fixed + field, HEIGHT))
+}
+
+/// How long a held bar takes to catch up with the pointer (95 % of the way).
+pub(in crate::ui) const FOLLOW: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// A held bar drawn at `at`, `since` the last frame, eased toward `to` (where
+/// the pointer holds it): critically damped, no overshoot, by the time passed
+/// (a late frame catches up more), so uneven mouse events still draw an even
+/// glide; within half a pixel it is there.
+pub(in crate::ui) fn follow(at: Point, to: Point, since: std::time::Duration) -> Point {
+    // 95 % in FOLLOW: e^-3 = 5 %
+    let left = (-3.0 * since.as_secs_f32() / FOLLOW.as_secs_f32()).exp();
+    let p = to + (at - to) * left;
+    match p.distance(to) < 0.5 {
+        true => to,
+        false => p,
+    }
 }
 
 /// Every spot the bar docks at.
-pub(super) const ANCHORS: [BarAnchor; 4] = [
+pub(in crate::ui) const ANCHORS: [BarAnchor; 4] = [
     BarAnchor::Bottom,
     BarAnchor::Top,
     BarAnchor::BottomLeft,
@@ -151,7 +161,7 @@ pub(super) const ANCHORS: [BarAnchor; 4] = [
 
 /// The bar's top-left at `anchor` on `screen` (`size`), inside the work area
 /// (`inset`: how much of the screen's bottom the taskbar takes).
-pub(super) fn anchor_at(anchor: BarAnchor, screen: Size, size: Size, inset: f32) -> Point {
+pub(in crate::ui) fn anchor_at(anchor: BarAnchor, screen: Size, size: Size, inset: f32) -> Point {
     let bottom = screen.height - inset - BOTTOM_GAP - size.height;
     let centre = (screen.width - size.width) / 2.0;
     let (x, y) = match anchor {
@@ -164,7 +174,7 @@ pub(super) fn anchor_at(anchor: BarAnchor, screen: Size, size: Size, inset: f32)
 }
 
 /// The anchor nearest to a bar let go at top-left `at`.
-pub(super) fn nearest(at: Point, screen: Size, size: Size, inset: f32) -> BarAnchor {
+pub(in crate::ui) fn nearest(at: Point, screen: Size, size: Size, inset: f32) -> BarAnchor {
     let off = |a: BarAnchor| anchor_at(a, screen, size, inset).distance(at);
     let mut all = ANCHORS;
     all.sort_by(|a, b| off(*a).total_cmp(&off(*b)));
@@ -173,7 +183,7 @@ pub(super) fn nearest(at: Point, screen: Size, size: Size, inset: f32) -> BarAnc
 
 /// Where the bar goes: `chosen`, unless it would cover something `blocked`
 /// (the selection): then the free anchor nearest to it; none free, `chosen`.
-pub(super) fn free(
+pub(in crate::ui) fn free(
     chosen: BarAnchor,
     blocked: &[Rectangle],
     screen: Size,
@@ -194,7 +204,7 @@ pub(super) fn free(
 /// Top-left corner for a `bar`: centred under the selection, else above it, else
 /// over its bottom edge (selection fills the screen). Always inside the screen,
 /// `GAP` from its edges, unless the bar is bigger than the screen.
-pub(super) fn place(selection: Rectangle, bar: Size, screen: Size) -> Point {
+pub(in crate::ui) fn place(selection: Rectangle, bar: Size, screen: Size) -> Point {
     let x = (selection.center_x() - bar.width / 2.0)
         .min(screen.width - GAP - bar.width)
         .max(GAP);
@@ -301,46 +311,11 @@ mod tests {
             BarAnchor::Top
         );
         // a narrow screen: the field gives up width, the buttons keep theirs
-        let (field, s) = bottom_size(900.0, 3.0);
+        let (field, s) = bottom_size(760.0, 3.0);
         assert!(
-            field < FIELD && s.width <= 900.0 - 2.0 * GAP,
+            field < FIELD && s.width <= 760.0 - 2.0 * GAP,
             "{field} {s:?}"
         );
-    }
-
-    #[test]
-    fn qr_chip_offers_copy_and_open_only_for_links() {
-        let screen = Size::new(1200.0, 420.0);
-        let link = "https://example.com/a-long-link/that/goes/on/and/on/forever";
-        let with_link = || qr_chip(link, (), Some(()));
-        let texts = widgets::shot::texts(with_link());
-        assert!(
-            texts.contains(
-                &"QR code: https://example.com/a-long-link/that… (copies 59 chars)".to_string()
-            ),
-            "{texts:?}"
-        );
-        // The whole host, never cut, on the button that opens it.
-        assert!(
-            texts.contains(&"Open link · example.com".to_string()),
-            "{texts:?}"
-        );
-        let px = widgets::shot::save("bar-qr-chip", with_link(), screen);
-        assert!(px.as_chunks::<4>().0.iter().any(|p| p[..] != px[..4]));
-
-        let wifi = qr_chip("WIFI:S:cafe;T:WPA;P:secret;;", (), None);
-        let texts = widgets::shot::texts(wifi);
-        assert!(texts.iter().any(|t| t.starts_with("QR code: WIFI:S:cafe")));
-        assert!(!texts.iter().any(|t| t.starts_with("Open link")));
-        // Text-direction controls: dropped from the chip, and a warning beside it.
-        let rlo = qr_chip("https://evil.com/\u{202e}moc.elgoog", (), None);
-        let texts = widgets::shot::texts(rlo);
-        assert!(
-            texts.contains(&"QR code: https://evil.com/moc.elgoog… (copies 28 chars)".to_string()),
-            "{texts:?}"
-        );
-        assert!(texts.contains(&"Hidden text-direction marks".to_string()));
-        assert!(!texts.iter().any(|t| t.contains('\u{202e}')));
     }
 
     #[test]
@@ -376,6 +351,30 @@ mod tests {
         assert_eq!(tab(&s, Some(Stop::Logo), true), Some(b(BarButton::Edit)));
         // a stop that is gone (a pill dimmed meanwhile) starts over
         assert_eq!(tab(&s, Some(b(BarButton::Search)), false), Some(Stop::Logo));
+    }
+
+    #[test]
+    fn a_held_bar_eases_to_the_pointer_by_the_clock() {
+        use std::time::Duration;
+        let (at, to) = (Point::new(0.0, 0.0), Point::new(100.0, -40.0));
+        let ms = |n| Duration::from_millis(n);
+        // most of the way in one frame, never past it, there by FOLLOW
+        let one = follow(at, to, ms(16));
+        assert!(
+            one.x > 50.0 && one.x < 100.0 && one.y < -20.0 && one.y > -40.0,
+            "{one:?}"
+        );
+        let mut p = at;
+        for _ in 0..3 {
+            p = follow(p, to, ms(16));
+            assert!(p.x <= to.x && p.y >= to.y, "{p:?}");
+        }
+        assert!(p.distance(to) < 0.06 * at.distance(to), "{p:?}");
+        // a late frame catches up as far as the frames it stood for
+        let two = follow(follow(at, to, ms(16)), to, ms(16));
+        assert!(follow(at, to, ms(32)).distance(two) < 0.01);
+        // close enough: there, so the frame clock stops
+        assert_eq!(follow(to + iced::Vector::new(0.3, 0.0), to, ms(16)), to);
     }
 
     #[test]

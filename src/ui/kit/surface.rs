@@ -13,6 +13,9 @@ pub enum Material {
     Recessed,
     /// A floating widget or card (`.oc-widget`: `--app-widget-solid`, rim edge).
     Widget,
+    /// A floating widget while it is held and dragged (`.oc-dragging`): the
+    /// widget with an `accent` edge.
+    Held,
 }
 
 /// `content` on `material` with corners of `radius` and a 1 px edge. The
@@ -27,6 +30,7 @@ pub fn surface<'a, Message: 'a>(
             Material::Window => (c().bg, c().rim),
             Material::Recessed => (c().track_glass, c().divider),
             Material::Widget => (c().widget, c().rim),
+            Material::Held => (c().widget, c().accent),
         };
         container::Style {
             background: Some(fill.into()),

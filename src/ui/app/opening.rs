@@ -18,7 +18,8 @@ use crate::ui::app::word;
 use crate::ui::app::{Reader, TextMode};
 use crate::ui::edit::Editing;
 use crate::ui::kit::motion;
-use crate::ui::{bar, overlay, panel, song, translate, widgets};
+use crate::ui::screens::bar::geometry as bar;
+use crate::ui::{overlay, panel, song, translate, widgets};
 
 pub(in crate::ui) struct Opening {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
@@ -138,6 +139,8 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) bar_now: Option<Point>,
     /// Its glide to a new spot: since when, from and to where.
     pub(in crate::ui) bar_glide: Option<(Instant, Point, Point)>,
+    /// While held: the last frame it was eased toward the pointer on.
+    pub(in crate::ui) bar_eased: Option<Instant>,
     pub(in crate::ui) work_inset: f32,
     /// The card's grip or corner is held, and the pointer's last position.
     pub(in crate::ui) card_drag: Option<(widgets::card::Drag, Option<Point>)>,
@@ -211,6 +214,7 @@ impl Default for Opening {
             bar_anchor: BarAnchor::Bottom,
             bar_drag: None,
             bar_now: None,
+            bar_eased: None,
             bar_glide: None,
             work_inset: 0.0,
             card_drag: None,
