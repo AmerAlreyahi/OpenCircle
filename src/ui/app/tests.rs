@@ -3682,3 +3682,43 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
     assert!(pixels.is_unique());
     assert!(app.is_idle() || app.hiding != Hiding::No);
 }
+
+#[test]
+fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
+    let (mut app, id) = app_with_ask_panel(); // 800 x 600, a selection at the left
+    let at = app.card_at();
+    let d = card::docked(app.o.screen, card::Side::Right, app.o.work_inset);
+    assert_eq!(
+        (at.x, at.width, at.height),
+        (d.x.round(), d.width.round(), d.height.round())
+    );
+    // held: it follows the pointer, by fractions of a px too, drawn on whole px
+    let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Move));
+    let _ = app.update(Message::Panel(id, grab));
+    let _ = app.update(Message::CardMoved(Point::new(700.0, 30.0)));
+    let _ = app.update(Message::CardMoved(Point::new(200.3, 40.6)));
+    let held = app.card_at();
+    assert_eq!(
+        held.position(),
+        Point::new((at.x - 499.7).round(), (at.y + 10.6).round())
+    );
+    // let go left of the middle: it glides to the left dock, and stays there
+    let _ = app.update(Message::CardReleased);
+    assert!(app.o.chat_glide.is_some() && app.animating());
+    let began = app.o.chat_glide.unwrap().0;
+    let _ = app.update(Message::Frame(began + motion::DOCK / 3));
+    let mid = app.card_at();
+    assert!(
+        mid.x > held.x && mid.x < 16.0 && mid.x == mid.x.round(),
+        "{mid:?}"
+    );
+    let _ = app.update(Message::Frame(began + motion::DOCK));
+    assert!(app.o.chat_glide.is_none());
+    assert_eq!(app.card_at().x, 16.0);
+    assert_eq!(app.chat_side, Some(card::Side::Left));
+    // the next chat in this run opens on that side
+    let _ = app.update(Message::Panel(id, panel::Msg::Card(card::Event::Close)));
+    let crop = app.crop().unwrap();
+    let _ = app.open_panel(actions::Panel::Ask, crop, None);
+    assert_eq!(app.card_at().x, 16.0);
+}

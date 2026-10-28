@@ -2,7 +2,7 @@
 
 use iced::futures::channel::mpsc::UnboundedSender;
 use iced::widget::image;
-use iced::{Rectangle, Task};
+use iced::{Point, Rectangle, Task};
 
 use crate::actions::{self, Crop, lens, stack_crops};
 
@@ -156,13 +156,16 @@ impl App {
             .chat_side
             .unwrap_or_else(|| card::dock_side(card::place(screen, selection, None), screen));
         let dock = card::docked(screen, side, self.o.work_inset);
-        match self.o.chat_glide {
-            Some((_, from, t)) => Rectangle::new(
-                from.position() + (dock.position() - from.position()) * t,
-                dock.size(),
-            ),
-            None => dock + self.o.chat_off,
-        }
+        let at = match self.o.chat_glide {
+            Some((_, from, t)) => from.position() + (dock.position() - from.position()) * t,
+            None => dock.position() + self.o.chat_off,
+        };
+        // on whole px: a card moved by fractions of a px left thin ghosts of
+        // its edge on the frame (VM, 2026-10-28)
+        Rectangle::new(
+            Point::new(at.x.round(), at.y.round()),
+            iced::Size::new(dock.width.round(), dock.height.round()),
+        )
     }
 
     /// The chat card let go: it docks to the side its middle is on, gliding there.
