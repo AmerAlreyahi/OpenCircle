@@ -8,7 +8,39 @@ use std::path::Path;
 
 use rusqlite::params;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use super::{Result, err, open, write};
+
+/// Bumped by every "forget everything" (`forget_all`): a save that began
+/// before it (its `generation` older) writes nothing, even if it gets the
+/// write lock after the clear. (Tests: one per test thread, so parallel tests
+/// don't move each other's.)
+#[cfg(not(test))]
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+thread_local! {
+    static GENERATION: AtomicU64 = const { AtomicU64::new(0) };
+}
+
+fn with_generation<T>(f: impl FnOnce(&AtomicU64) -> T) -> T {
+    #[cfg(not(test))]
+    return f(&GENERATION);
+    #[cfg(test)]
+    GENERATION.with(f)
+}
+
+/// The generation a save starting now belongs to (`save`).
+pub fn generation() -> u64 {
+    with_generation(|g| g.load(Ordering::SeqCst))
+}
+
+/// After a delete: the WAL is emptied into the file, so no deleted text
+/// stays in it.
+fn flush(db: &rusqlite::Connection) -> Result<()> {
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .map_err(err)
+}
 
 /// Chats kept; older ones are deleted on the next save.
 pub const KEEP: usize = 100;
@@ -82,8 +114,12 @@ pub fn new_id() -> String {
 }
 
 /// Writes `chat` (its rows replaced), then keeps the newest `KEEP` chats.
-pub fn save(path: &Path, chat: &Saved) -> Result<()> {
+/// Nothing when history was forgotten since `generation` (`forget_all`).
+pub fn save(path: &Path, chat: &Saved, generation: u64) -> Result<()> {
     let _w = write();
+    if generation != self::generation() {
+        return Ok(()); // Keep chat history went off (or Clear all) meanwhile
+    }
     let mut db = open(path)?;
     let tx = db.transaction().map_err(err)?;
     let (summary, at) = match &chat.summary {
@@ -125,7 +161,8 @@ pub fn save(path: &Path, chat: &Saved) -> Result<()> {
         [],
     )
     .map_err(err)?;
-    tx.commit().map_err(err)
+    tx.commit().map_err(err)?;
+    flush(&db)
 }
 
 /// Every saved chat, newest first (none when there is no database).
@@ -203,7 +240,7 @@ pub fn delete(path: &Path, id: &str) -> Result<()> {
         .map_err(err)?;
     db.execute("DELETE FROM chats WHERE id = ?1", [id])
         .map_err(err)?;
-    Ok(())
+    flush(&db)
 }
 
 /// "Clear all history", and Keep chat history turned off: every row goes, and
@@ -221,8 +258,10 @@ pub fn clear(path: &Path) -> Result<()> {
     .map_err(err)
 }
 
-/// Keep chat history turned off: every saved chat goes, on a thread of its own.
+/// Keep chat history turned off, or "Clear all history": every saved chat
+/// goes, on a thread of its own; a save still on its way writes nothing.
 pub fn forget_all() {
+    with_generation(|g| g.fetch_add(1, Ordering::SeqCst));
     let Some(path) = super::path() else {
         return;
     };
@@ -276,9 +315,9 @@ mod tests {
             list(&db).is_empty() && !db.exists(),
             "nothing written by reading"
         );
-        save(&db, &chat("1-0", 10)).unwrap();
-        save(&db, &chat("2-0", 30)).unwrap();
-        save(&db, &chat("3-0", 20)).unwrap();
+        save(&db, &chat("1-0", 10), generation()).unwrap();
+        save(&db, &chat("2-0", 30), generation()).unwrap();
+        save(&db, &chat("3-0", 20), generation()).unwrap();
         let ids: Vec<_> = list(&db).into_iter().map(|c| c.id).collect();
         assert_eq!(ids, ["2-0", "3-0", "1-0"]);
         assert_eq!(load(&db, "2-0").unwrap(), chat("2-0", 30));
@@ -286,7 +325,7 @@ mod tests {
         // saved again: replaced, not doubled
         let mut c = chat("2-0", 40);
         c.turns.pop();
-        save(&db, &c).unwrap();
+        save(&db, &c, generation()).unwrap();
         assert_eq!(load(&db, "2-0").unwrap().turns.len(), 1);
         delete(&db, "3-0").unwrap();
         assert_eq!(list(&db).len(), 2);
@@ -299,7 +338,7 @@ mod tests {
     fn only_the_newest_hundred_are_kept() {
         let db = tmp("cap");
         for i in 0..(KEEP as u64 + 3) {
-            save(&db, &chat(&format!("{i}-0"), i)).unwrap();
+            save(&db, &chat(&format!("{i}-0"), i), generation()).unwrap();
         }
         let all = list(&db);
         assert_eq!(all.len(), KEEP);
@@ -312,7 +351,7 @@ mod tests {
     #[test]
     fn the_database_holds_no_image_bytes() {
         let db = tmp("text");
-        save(&db, &chat("1-0", 1)).unwrap();
+        save(&db, &chat("1-0", 1), generation()).unwrap();
         let conn = Connection::open(&db).unwrap();
         let mut q = conn
             .prepare("SELECT name FROM pragma_table_info('messages')")
@@ -340,7 +379,7 @@ mod tests {
     #[test]
     fn forgetting_clears_every_saved_chat() {
         let db = tmp("forget");
-        save(&db, &chat("1-0", 1)).unwrap();
+        save(&db, &chat("1-0", 1), generation()).unwrap();
         crate::store::test_path(Some(db.clone()));
         forget_all();
         let gone = (0..200).any(|_| {
@@ -349,6 +388,57 @@ mod tests {
         });
         crate::store::test_path(None);
         assert!(gone);
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    /// A deleted chat's words are gone from the file and its WAL (secure
+    /// delete, checkpoint), and so are a pruned one's.
+    #[test]
+    fn deleted_text_does_not_stay_in_the_file() {
+        let db = tmp("secure");
+        let mut secret = chat("1-0", 1);
+        secret.turns[0].question = "MARKER-zq81x my bank pin".into();
+        save(&db, &secret, generation()).unwrap();
+        save(&db, &chat("2-0", 2), generation()).unwrap();
+        let bytes = |db: &Path| {
+            let mut all = std::fs::read(db).unwrap();
+            all.extend(std::fs::read(db.with_extension("db-wal")).unwrap_or_default());
+            all
+        };
+        let marker = b"MARKER-zq81x";
+        assert!(
+            bytes(&db).windows(marker.len()).any(|w| w == marker),
+            "the test sees it"
+        );
+        delete(&db, "1-0").unwrap();
+        assert!(
+            !bytes(&db).windows(marker.len()).any(|w| w == marker),
+            "deleted for good"
+        );
+        // pruned past the cap: gone too
+        save(&db, &secret, generation()).unwrap();
+        for i in 0..KEEP as u64 {
+            save(&db, &chat(&format!("{}-1", i + 10), i + 10), generation()).unwrap();
+        }
+        assert!(load(&db, "1-0").is_err());
+        assert!(
+            !bytes(&db).windows(marker.len()).any(|w| w == marker),
+            "pruned for good"
+        );
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    /// A save that began before Keep chat history went off, and gets the lock
+    /// only after, writes nothing.
+    #[test]
+    fn a_save_from_before_forgetting_writes_nothing() {
+        let db = tmp("race");
+        let began = generation();
+        forget_all(); // (no database set: only the generation moves)
+        save(&db, &chat("1-0", 1), began).unwrap();
+        assert!(!db.exists(), "nothing written");
+        save(&db, &chat("2-0", 2), generation()).unwrap();
+        assert_eq!(list(&db).len(), 1, "a new save goes on");
         let _ = std::fs::remove_dir_all(db.parent().unwrap());
     }
 

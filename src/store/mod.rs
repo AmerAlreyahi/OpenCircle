@@ -69,6 +69,8 @@ pub(crate) fn open(path: &Path) -> Result<Connection> {
     db.busy_timeout(std::time::Duration::from_secs(2))
         .map_err(err)?;
     db.pragma_update(None, "journal_mode", "WAL").map_err(err)?;
+    // deleted rows are overwritten, never left readable in free pages
+    db.pragma_update(None, "secure_delete", "ON").map_err(err)?;
     let version: usize = db
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(err)?;

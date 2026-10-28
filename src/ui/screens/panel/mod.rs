@@ -819,9 +819,9 @@ fn keep_in(db: Option<std::path::PathBuf>, on: bool, chat: &mut Chat) -> Task<Ms
     let Some(db) = db.filter(|_| on) else {
         return Task::none();
     };
-    let saved = chat.saved();
+    let (saved, generation) = (chat.saved(), chats::generation());
     background(move |_| {
-        if let Err(e) = chats::save(&db, &saved) {
+        if let Err(e) = chats::save(&db, &saved, generation) {
             crate::log!("[opencircle] {e}");
         }
     })
@@ -837,17 +837,10 @@ fn list_saved() -> Task<Msg> {
     })
 }
 
-/// Every saved chat goes ("Clear all history").
+/// Every saved chat goes ("Clear all history"); a save on its way writes nothing.
 fn clear_saved() -> Task<Msg> {
-    let Some(db) = store::path() else {
-        return Task::none();
-    };
-    background(move |tx| {
-        if let Err(e) = chats::clear(&db) {
-            crate::log!("[opencircle] {e}");
-        }
-        let _ = tx.unbounded_send(Msg::Listed(Vec::new()));
-    })
+    chats::forget_all();
+    Task::done(Msg::Listed(Vec::new()))
 }
 
 /// Saves a drawer setting (`edit` on the config as it is now, on a thread);
