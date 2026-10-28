@@ -93,7 +93,6 @@ const LEGACY: &[&str] = &[
     "snip.rs",
     "song.rs",
     "translate.rs",
-    "update_card.rs",
 ];
 
 #[test]

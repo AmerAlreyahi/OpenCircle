@@ -10,8 +10,9 @@ use iced::window::{self, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
 use super::platform;
+use super::screens::toast::{self, Tone};
 use super::widgets::chrome;
-use super::{onboarding, settings, theme, update_card, widgets};
+use super::{onboarding, settings, shape, theme, update_card, widgets};
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
 #[cfg(test)]
 pub use super::platform::windows::CLEARED;
@@ -69,7 +70,7 @@ pub struct Windows {
     permission: Option<(window::Id, onboarding::Access)>,
     pins: Vec<Pin>,
     /// Small message windows (a pill each) and their text.
-    toasts: Vec<(window::Id, String, bool)>,
+    toasts: Vec<(window::Id, String, Tone)>,
     /// The update card (release notes), at most one.
     update_card: Option<(window::Id, update_card::Card)>,
     /// What each normal window's header knows (see `Chrome`).
@@ -301,12 +302,18 @@ impl Windows {
         open.discard()
     }
 
-    /// A small message window: the toast pill (`widgets::toast_pill`) with `text`,
+    /// A small message window: the toast pill (`screens::toast`) with `text`,
     /// floating over everything for `ms`, at `at` (logical desktop px) or centred.
-    /// `ok` = the green dot; an error has none. The window is exactly the pill (see
-    /// `floating`), so nothing shows around it.
-    pub fn toast(&mut self, text: &str, ok: bool, at: Option<Point>, ms: u64) -> Task<Msg> {
-        let size = toast_size(text, ok);
+    /// `tone` colours its dot (`true` = done, `false` = failed). The window is
+    /// exactly the pill (see `floating`), so nothing shows around it.
+    pub fn toast(
+        &mut self,
+        text: &str,
+        tone: impl Into<Tone>,
+        at: Option<Point>,
+        ms: u64,
+    ) -> Task<Msg> {
+        let size = toast_size(text);
         let (id, open) = floating(
             window::Settings {
                 size,
@@ -314,10 +321,10 @@ impl Windows {
                 resizable: false,
                 ..window::Settings::default()
             },
-            widgets::TOAST_RADIUS,
+            toast::RADIUS,
             TOAST,
         );
-        self.toasts.push((id, text.to_string(), ok));
+        self.toasts.push((id, text.to_string(), tone.into()));
         // gone after `ms` (a thread sleeps, the UI never waits): fades out
         let (done, wait) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
@@ -328,11 +335,11 @@ impl Windows {
             .chain(Task::future(wait).then(move |_| close(id)))
     }
 
-    /// The open toasts' text and dot (tests).
+    /// The open toasts' text and whether each says done (tests).
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn toasts(&self) -> Vec<(String, bool)> {
         (self.toasts.iter())
-            .map(|(_, text, ok)| (text.clone(), *ok))
+            .map(|(_, text, tone)| (text.clone(), *tone == Tone::Ok))
             .collect()
     }
 
@@ -349,7 +356,7 @@ impl Windows {
                 resizable: false,
                 ..window::Settings::default()
             },
-            widgets::SURFACE_RADIUS,
+            update_card::RADIUS,
             POPUP,
         );
         self.update_card = Some((id, card));
@@ -428,15 +435,8 @@ impl Windows {
                 };
                 let id = *id;
                 match msg {
-                    update_card::Msg::Card(widgets::card::Event::Grab(
-                        widgets::card::Drag::Move,
-                    )) => {
-                        return window::drag(id);
-                    }
-                    update_card::Msg::Card(widgets::card::Event::Close) => {
-                        return close(id);
-                    }
-                    update_card::Msg::Card(_) => {}
+                    update_card::Msg::Drag => return window::drag(id),
+                    update_card::Msg::Close => return close(id),
                     update_card::Msg::Link(url) => open_url(&url),
                     update_card::Msg::Page => open_url(&card.url),
                 }
@@ -451,7 +451,7 @@ impl Windows {
                             apply(cfg);
                             return Task::batch([
                                 window::close(id),
-                                self.toast(&notice, true, None, NOTICE_MS),
+                                self.toast(&notice, Tone::Neutral, None, NOTICE_MS),
                             ]);
                         }
                         onboarding::Outcome::AskScreenshot => {
@@ -620,16 +620,11 @@ impl Windows {
             return Some(pin_view(pin).map(move |msg| Msg::Pin(id, msg)));
         }
         if let Some((_, card)) = self.update_card.as_ref().filter(|(c, _)| *c == window) {
-            return Some(update_card::view(card).map(Msg::UpdateCard));
+            let radius = shape::radius(update_card::RADIUS);
+            return Some(update_card::view(card, radius).map(Msg::UpdateCard));
         }
-        if let Some((_, text, ok)) = self.toasts.iter().find(|(t, ..)| *t == window) {
-            return Some(
-                widgets::toast_pill(text.as_str(), *ok)
-                    .width(Fill)
-                    .height(Fill)
-                    .center(Fill)
-                    .into(),
-            );
+        if let Some((_, text, tone)) = self.toasts.iter().find(|(t, ..)| *t == window) {
+            return Some(toast::view(text, *tone, shape::radius(toast::RADIUS)));
         }
         let page = if let Some((id, state)) = &self.settings
             && *id == window
@@ -698,13 +693,32 @@ impl Windows {
     }
 
     /// Test hook, `OPENCIRCLE_TEST_OPEN=settings,shot,settings,shot`: one step every
-    /// 1.5 s. `settings` = the tray's Settings item, `permission` / `toast` = those windows, `max` = maximise or restore Settings, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `problem` = an unsaveable edit, `shot` = save the open window as
+    /// 1.5 s. `settings` = the tray's Settings item, `permission` / `toast` / `toast-error` / `notice` / `update` / `whatsnew` = those windows (`close-card` closes the card), `max` = maximise or restore Settings, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `problem` = an unsaveable edit, `shot` = save the open window as
     /// `$OPENCIRCLE_TEST_DIR/<kind>-<step>.png`, `quit`.
     fn test_step(&mut self, step: usize, what: &str) -> Task<Msg> {
         match what {
             "settings" => self.open(Kind::Settings),
             "permission" => self.open(Kind::Permission),
             "toast" => self.toast("Copied", true, None, TOAST_MS),
+            "toast-error" => self.toast("Couldn't save the picture", false, None, TOAST_MS),
+            "notice" => self.toast(
+                &tray_notice("Ctrl+Shift+Space"),
+                Tone::Neutral,
+                None,
+                TOAST_MS,
+            ),
+            "update" | "whatsnew" => {
+                const NOTES: &str = "## Fixed\n- [A crash](https://example.com) when the screen sleeps\n- Text selection on a second screen";
+                let url = "https://example.com";
+                self.update_card(match what {
+                    "update" => update_card::Card::available("9.9.9", NOTES, url),
+                    _ => update_card::Card::installed("9.9.9", NOTES, url),
+                })
+            }
+            "close-card" => self
+                .update_card
+                .as_ref()
+                .map_or_else(Task::none, |(id, _)| close(*id)),
             "max" => self
                 .id(Kind::Settings)
                 .map_or_else(Task::none, window::toggle_maximize),
@@ -866,10 +880,9 @@ pub fn tray_notice(shortcut: &str) -> String {
     format!("OpenCircle is running in the tray. Press {keys}.")
 }
 
-/// A toast's window size (logical px): padding 14x8, a 12 px line, the dot.
-pub fn toast_size(text: &str, ok: bool) -> Size {
-    let dot = if ok { 16.0 } else { 0.0 };
-    Size::new(30.0 + dot + 6.6 * text.chars().count() as f32, 34.0)
+/// A toast's window size (logical px): the pill's (`screens::toast::size`).
+pub fn toast_size(text: &str) -> Size {
+    toast::size(text)
 }
 
 /// One screenshot request on its own thread (Wayland), sent while the window asking

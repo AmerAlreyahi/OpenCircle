@@ -15,10 +15,12 @@ pub mod divider;
 pub mod field;
 pub mod header;
 pub mod icon;
+pub mod panel_frame;
 pub mod progress;
 pub mod segmented;
 pub mod surface;
 pub mod text;
+pub mod toast;
 
 #[cfg(test)]
 pub mod testing;

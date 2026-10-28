@@ -8,7 +8,7 @@ use iced::widget::{
     Button, Container, Text, TextInput, Tooltip, button, container, progress_bar, row, scrollable,
     space, text, text_editor, text_input, tooltip,
 };
-use iced::{Background, Border, Color, Element, Font, gradient};
+use iced::{Background, Border, Color, Element, gradient};
 
 use super::theme;
 use crate::config::BarStyle;
@@ -73,38 +73,6 @@ fn glassed<'a, Message: 'a>(inner: Container<'a, Message>, radius: f32) -> Conta
         Some(back) => container(super::glass::frosted(inner, back, radius)),
         None => inner,
     }
-}
-
-/// The confirmation toast (design `.oc-toast`): radius 12, padding 14x8, 12 px
-/// text, an 8 px green dot before it (none for an error). Opaque, no shadow: it
-/// lives in a floating window (Windows keys the live layer by colour).
-pub const TOAST_RADIUS: f32 = 12.0;
-pub fn toast_pill<'a, Message: 'a>(label: &'a str, ok: bool) -> Container<'a, Message> {
-    let palette = theme::floating();
-    let dot = container(space().width(8).height(8)).style(move |_| container::Style {
-        background: Some(theme::ANNOTATION[3].into()),
-        border: Border::default().rounded(4),
-        ..container::Style::default()
-    });
-    let content = row![text(label).size(12).color(palette.text)]
-        .spacing(8)
-        .align_y(iced::Center);
-    let content = if ok {
-        row![dot, content].spacing(8).align_y(iced::Center)
-    } else {
-        content
-    };
-    container(content)
-        .padding([8, 14])
-        .style(move |_| container::Style {
-            background: Some(palette.window.into()),
-            border: Border {
-                color: palette.border,
-                width: 1.0,
-                radius: super::shape::radius(TOAST_RADIUS).into(),
-            },
-            ..container::Style::default()
-        })
 }
 
 /// Glass panel (20 px radius): action bar, toolbars, popovers, side panels.
@@ -603,7 +571,7 @@ pub mod card {
 }
 
 /// A `surface` for a colour-keyed window (the live controller): opaque and
-/// without a shadow, like `toast_pill`.
+/// without a shadow.
 pub fn solid_surface<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
@@ -710,30 +678,6 @@ pub fn caption<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
 /// An error message.
 pub fn error<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
     text(label).size(14).color(theme::floating().danger)
-}
-
-/// Running text with links in it (`parts` = text, link): links in the accent,
-/// underlined; a click on one sends `on_link(url)`, nothing opens by itself.
-pub fn linked<'a, Message: 'a>(
-    parts: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
-    size: f32,
-    on_link: impl Fn(String) -> Message + 'a,
-) -> Element<'a, Message> {
-    let palette = theme::floating();
-    let spans: Vec<iced::widget::text::Span<'a, String, Font>> = parts
-        .into_iter()
-        .map(|(label, link)| match link {
-            Some(url) => iced::widget::span(label)
-                .color(theme::accent().0)
-                .underline(true)
-                .link(url.to_string()),
-            None => iced::widget::span(label).color(palette.text),
-        })
-        .collect();
-    iced::widget::rich_text(spans)
-        .size(size)
-        .on_link_click(on_link)
-        .into()
 }
 
 /// A suggestion (e.g. a prompt): small, fully rounded, outlined, quiet.

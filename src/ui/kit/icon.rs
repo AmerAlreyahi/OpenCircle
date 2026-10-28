@@ -11,15 +11,21 @@ pub const FONT: Font = Font::with_name("lucide");
 pub enum Icon {
     /// lucide "x".
     Close,
+    /// lucide "download" (an update to get).
+    Download,
+    /// lucide "check" (done: an update installed).
+    Check,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 1] = [Icon::Close];
+    pub const ALL: [Icon; 3] = [Icon::Close, Icon::Download, Icon::Check];
 
     pub const fn glyph(self) -> char {
         match self {
             Icon::Close => '\u{e1b1}',
+            Icon::Download => '\u{e0b6}',
+            Icon::Check => '\u{e070}',
         }
     }
 }

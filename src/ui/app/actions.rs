@@ -209,7 +209,7 @@ impl App {
             Ok(text) => (text, true),
             Err(text) => (text, false),
         };
-        let size = windows::toast_size(&text, ok);
+        let size = windows::toast_size(&text);
         let inset = taskbar_inset(origin, screen, scale);
         let at = Point::new(
             origin.x + screen.width - size.width - TOAST_MARGIN,

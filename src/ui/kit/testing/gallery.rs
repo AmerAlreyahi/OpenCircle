@@ -8,7 +8,9 @@ use iced::{Element, Event, Fill, Point, Size, mouse};
 
 use super::super::themes::{self, DAYLIGHT, SAPPHIRE, c};
 use super::super::tokens::{Role, radius};
-use super::super::{button, chip, divider, field, header, progress, segmented, surface};
+use super::super::{
+    button, chip, divider, field, header, panel_frame, progress, segmented, surface, toast,
+};
 use super::{golden, shot};
 
 /// The state names' column.
@@ -168,6 +170,7 @@ fn surface_sheet() {
     let rows: Vec<_> = [
         ("window", Material::Window),
         ("recessed", Material::Recessed),
+        ("widget", Material::Widget),
     ]
     .into_iter()
     .map(|(state, m)| {
@@ -323,4 +326,47 @@ fn header_sheet() {
         },
     ];
     sheet("header", SIZE, &rows);
+}
+
+#[test]
+fn toast_sheet() {
+    use toast::{Tone, toast};
+    let rows: Vec<_> = [
+        ("ok", Tone::Ok),
+        ("error", Tone::Error),
+        ("neutral", Tone::Neutral),
+    ]
+    .into_iter()
+    .map(|(state, tone)| {
+        row(state, Act::Rest, move |ar| {
+            toast(s(ar, "Copied", "تم النسخ"), tone, radius::CARD)
+        })
+    })
+    .collect();
+    sheet("toast", Size::new(160.0, 48.0), &rows);
+}
+
+#[test]
+fn panel_frame_sheet() {
+    use super::super::icon::Icon;
+    let view = |glyph, ar, long: bool| {
+        let line =
+            || super::super::text::text(Role::NOTE, s(ar, "A refreshed look.", "مظهر جديد."));
+        let body: Element<'static, ()> = match long {
+            true => iced::widget::column((0..12).map(|_| line().into())).into(),
+            false => line().into(),
+        };
+        let later = button::label(s(ar, "Later", "لاحقاً"));
+        let actions = button::button(later, button::Kind::Quiet, Some(()));
+        panel_frame::frame(glyph, "OpenCircle 0.1.2", body, actions, radius::DRAWER, ())
+    };
+    let rows = vec![
+        row("download", Act::Rest, move |ar| {
+            view(Icon::Download, ar, false)
+        }),
+        row("check, long", Act::Rest, move |ar| {
+            view(Icon::Check, ar, true)
+        }),
+    ];
+    sheet("panel_frame", Size::new(300.0, 200.0), &rows);
 }

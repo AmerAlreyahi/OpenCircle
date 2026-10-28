@@ -20,13 +20,13 @@ mod panel;
 mod picker;
 mod platform;
 mod sapphire;
+mod screens;
 mod settings;
 pub(crate) mod setup;
 mod snip;
 mod song;
 pub mod theme;
 mod translate;
-mod update_card;
 pub(crate) mod widgets;
 mod windows;
 
@@ -38,6 +38,7 @@ use iced::futures::channel::mpsc::UnboundedReceiver;
 use platform::monitor::taskbar_inset;
 use platform::shape;
 pub use platform::tray::{refresh as refresh_tray, start as start_tray};
+use screens::update_card;
 
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     app::background::set_triggers(triggers);

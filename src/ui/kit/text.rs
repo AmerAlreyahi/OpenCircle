@@ -156,6 +156,35 @@ pub fn text<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
         .color(colour)
 }
 
+/// Text with links, in `role`: `parts` are (text, link); a link is the
+/// accent, underlined, and reaches `on_link` only when clicked. `sub` = the
+/// secondary text colour (a card's notes), else the main one.
+pub fn linked<'a, Message: 'a>(
+    parts: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+    role: Role,
+    sub: bool,
+    on_link: impl Fn(String) -> Message + 'a,
+) -> iced::Element<'a, Message> {
+    use iced::widget::{rich_text, span};
+    let c = &themes::current().c;
+    let plain = if sub { c.text_sub } else { c.text };
+    let spans: Vec<iced::widget::text::Span<'a, String>> = (parts.into_iter())
+        .map(|(s, link)| match link {
+            Some(url) => span(s)
+                .color(c.accent)
+                .underline(true)
+                .link(url.to_string()),
+            None => span(s).color(plain),
+        })
+        .collect();
+    rich_text(spans)
+        .size(role.size)
+        .font(font(role))
+        .line_height(1.65)
+        .on_link_click(on_link)
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
     use iced::advanced::graphics::text::cosmic_text::{

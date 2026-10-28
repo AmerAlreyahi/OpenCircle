@@ -80,6 +80,8 @@ impl Role {
     pub const CONTROL: Role = role(12.0, Weight::Medium);
     pub const BAR_PILL: Role = role(11.5, Weight::Medium);
     pub const CHAT: Role = role(13.0, Weight::Normal);
+    /// A card's note and a toast's line (`.as-note`, `.oc-toast`).
+    pub const NOTE: Role = role(12.0, Weight::Normal);
     pub const CARD_TITLE: Role = role(11.5, Weight::Semibold);
     pub const CARD_DESC: Role = role(10.5, Weight::Normal);
     pub const BADGE: Role = role(10.0, Weight::Semibold);

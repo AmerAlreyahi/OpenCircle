@@ -352,11 +352,23 @@ thread_local! {
 /// The Light / Dark / System choice from Settings; System follows `set_os`.
 pub fn apply(theme: Theme) {
     SETTING.with(|s| s.set(theme));
+    to_kit();
 }
 
 /// What the OS reports (at start, then on every change). "No preference" counts as dark.
 pub fn set_os(mode: iced::theme::Mode) {
     OS_DARK.with(|d| d.set(mode != iced::theme::Mode::Light));
+    to_kit();
+}
+
+/// The kit's theme (the screens ported to it) follows the same choice: dark =
+/// Sapphire, light = Daylight, until the theme picks of config v4 (plan step 32).
+fn to_kit() {
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    themes::set(match std::ptr::eq(current(), &LIGHT) {
+        true => &DAYLIGHT,
+        false => &SAPPHIRE,
+    });
 }
 
 fn palette(setting: Theme, os_dark: bool) -> &'static Palette {
@@ -495,5 +507,21 @@ mod tests {
         assert_eq!(current().text, DARK.text);
         apply(Theme::Light);
         assert_eq!(current().text, LIGHT.text);
+    }
+
+    /// The kit's screens (toast, update card) follow the same choice.
+    #[test]
+    fn the_kit_follows_light_and_dark() {
+        use crate::ui::kit::themes;
+        let kit = || themes::current().id;
+        apply(Theme::Light);
+        assert_eq!(kit(), "daylight");
+        apply(Theme::System);
+        set_os(Mode::Dark);
+        assert_eq!(kit(), "sapphire");
+        set_os(Mode::Light);
+        assert_eq!(kit(), "daylight");
+        apply(Theme::Dark);
+        assert_eq!(kit(), "sapphire");
     }
 }

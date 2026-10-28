@@ -56,7 +56,7 @@ pub fn setup_window(size: Size, radius: f32) -> (window::Id, Task<window::Id>) {
 /// rectangle of at most `radius` logical px (`shape`): where the window has no
 /// per-pixel alpha (Windows, X11 without a compositor) nothing outside the shape
 /// exists, so no box shows behind a pill. Nothing in a floating window may paint
-/// outside its content (no shadow: use `widgets::solid_surface` / `toast_pill`).
+/// outside its content (no shadow: a solid surface, e.g. `kit::toast`).
 /// After a `window::resize` nothing is needed: the resize event reshapes it.
 /// It comes and goes by `how` (`Motion`): faded in once its shape is cut,
 /// faded out by `close`.

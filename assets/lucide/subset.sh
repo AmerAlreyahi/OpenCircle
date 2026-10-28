@@ -12,6 +12,7 @@ curl -sfL "https://unpkg.com/lucide-static@$VERSION/font/lucide.ttf" -o "$tmp/lu
 ICONS=$(printf '%s,' \
   U+E0A2 `# copy` \
   U+E0B6 `# download` \
+  U+E070 `# check (update installed)` \
   U+E154 `# search` \
   U+E416 `# sparkles` \
   U+E197 `# type` \

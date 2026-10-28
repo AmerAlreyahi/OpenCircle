@@ -11,6 +11,8 @@ pub enum Material {
     Window,
     /// A recessed panel laid over a window (`--app-track-glass`, divider edge).
     Recessed,
+    /// A floating widget or card (`.oc-widget`: `--app-widget-solid`, rim edge).
+    Widget,
 }
 
 /// `content` on `material` with corners of `radius` and a 1 px edge. The
@@ -24,6 +26,7 @@ pub fn surface<'a, Message: 'a>(
         let (fill, edge) = match material {
             Material::Window => (c().bg, c().rim),
             Material::Recessed => (c().track_glass, c().divider),
+            Material::Widget => (c().widget, c().rim),
         };
         container::Style {
             background: Some(fill.into()),
