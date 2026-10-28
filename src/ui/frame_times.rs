@@ -1176,6 +1176,33 @@ fn a_stroke_across_screens_redraws_only_round_itself() {
     }
 }
 
+/// The AI chat card dragged in the overlay by its header (picked up), at the
+/// VM's screen and a 4K one at 250 % (run in release:
+/// `cargo test --release chat_drag_frame_times -- --ignored --nocapture`).
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn chat_drag_frame_times() {
+    for (w, h, k) in [(1716, 1271, 1.0), (3840, 2160, 2.5)] {
+        let mut app = open_app(w, h, k);
+        let (a, b) = (Point::new(100.0, 100.0), Point::new(400.0, 300.0));
+        drag(&mut app, a, b, false);
+        let _ = app.update(Message::AskInput("what is this?".into()));
+        let _ = app.update(Message::AskSubmit);
+        settle_bar(&mut app);
+        let id = app.o.panel.as_ref().expect("a chat").0;
+        let t = frames(&mut app, 30, false, |app, i, _| {
+            if i == 0 {
+                let grab = card::Event::Grab(card::Drag::Move);
+                let _ = app.update(Message::Panel(id, panel::Msg::Card(grab)));
+                let _ = app.update(Message::CardMoved(Point::new(600.0, 300.0)));
+            }
+            let p = Point::new(600.0 - 12.0 * i as f32, 300.0 + 4.0 * i as f32);
+            let _ = app.update(Message::CardMoved(p));
+        });
+        report("chat drag", app.o.screen, k, &t);
+    }
+}
+
 /// Every window the app changed for draws with the one that draws (the
 /// vendored iced_winit, `Window::stale`): on Windows a window draws on
 /// WM_PAINT, which only the topmost window needing it gets while input keeps
