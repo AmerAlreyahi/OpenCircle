@@ -1624,13 +1624,14 @@ fn a_theme_card_picks_for_its_mode_and_shows_at_once() {
         (s.draft.theme, themes::current().id),
         (Theme::Light, "sandstone")
     );
-    // System on a light OS: a light card keeps System, a dark one switches to Dark
+    // From System (never picked: follows the OS), a card sets its own mode,
+    // even the mode the OS shows (owner, 2026-10-28: the cards decide)
     theme::set_os(iced::theme::Mode::Light);
     update(&mut s, Message::Theme(Theme::System));
     update(&mut s, Message::ThemeCard("frost"));
     assert_eq!(
         (s.draft.theme, themes::current().id),
-        (Theme::System, "frost")
+        (Theme::Light, "frost")
     );
     update(&mut s, Message::ThemeCard("midnight"));
     assert_eq!(
@@ -1638,10 +1639,13 @@ fn a_theme_card_picks_for_its_mode_and_shows_at_once() {
         (Theme::Dark, "midnight")
     );
     theme::set_os(iced::theme::Mode::Dark);
-    // the OS mode alone shows that mode's pick
-    update(&mut s, Message::Theme(Theme::Light));
-    assert_eq!(themes::current().id, "frost");
-    update(&mut s, Message::Logo(config::Logo::Purple));
+    update(&mut s, Message::ThemeCard("frost"));
+    // no OS mode or logo rows; the logo key is kept as it is
+    update(&mut s, Message::Section(Section::Appearance));
+    let texts = shot::texts(view(&s));
+    for gone in ["OS mode", "Logo colour", "System", "Purple"] {
+        assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
+    }
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
         panic!("not saved: {:?}", s.notice)
     };
@@ -1649,7 +1653,8 @@ fn a_theme_card_picks_for_its_mode_and_shows_at_once() {
     assert_eq!(back, cfg);
     let a = &back.appearance;
     assert_eq!((a.dark.as_str(), a.light.as_str()), ("midnight", "frost"));
-    assert_eq!((back.theme, a.logo), (Theme::Light, config::Logo::Purple));
+    assert_eq!((back.theme, a.logo), (Theme::Light, config::Logo::Theme));
+    assert!(std::fs::read_to_string(&path).unwrap().contains("logo"));
     theme::apply(Theme::Dark);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

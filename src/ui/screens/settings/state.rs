@@ -23,7 +23,7 @@ use iced::{Color, Size, Subscription, event, keyboard};
 
 use crate::config::{
     self, After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
-    EdgeStyle, Engine, Logo, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
+    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
     SnipConfig, SongSource, Target, TextReader, Theme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
@@ -621,8 +621,6 @@ pub enum Pick {
     History(bool),
     Update(bool),
     Lab(Feature, bool),
-    Mode(Theme),
-    Logo(Logo),
     Engine(Engine),
     SongSource(SongSource),
     SongHistory(bool),
@@ -668,7 +666,6 @@ pub enum Message {
     Theme(Theme),
     /// A theme card (a `kit::themes` id): its mode's pick, shown at once.
     ThemeCard(&'static str),
-    Logo(Logo),
     Record(Slot),
     Key(Chord),
     Provider(Provider),
@@ -1127,8 +1124,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::SearchHistory(_) => Some(Pick::History(state.draft.general.search_history)),
         Message::AutoUpdate(_) => Some(Pick::Update(state.draft.update.auto == Some(true))),
         Message::Labs(f, _) => Some(Pick::Lab(*f, state.draft.labs.has(*f))),
-        Message::Theme(_) | Message::ThemeCard(_) => Some(Pick::Mode(state.draft.theme)),
-        Message::Logo(_) => Some(Pick::Logo(state.draft.appearance.logo)),
         Message::Engine(_) => Some(Pick::Engine(state.draft.translate.engine)),
         Message::SongSource(_) => Some(Pick::SongSource(state.draft.song.source)),
         Message::SongHistory(_) => Some(Pick::SongHistory(state.draft.song.history)),
@@ -1177,7 +1172,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             theme::preview(t, &state.draft.appearance);
         }
         Message::ThemeCard(id) => pick_theme(state, id),
-        Message::Logo(logo) => state.draft.appearance.logo = logo,
         Message::Record(slot) => {
             state.recording = (state.recording != Some(slot)).then_some(slot);
             state.shortcut_error = None;
@@ -1351,8 +1345,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
     Outcome::None
 }
 
-/// A theme card: the pick of its mode (dark or light). When the other mode
-/// is showing, the OS mode switches to the card's, so the pick shows at once.
+/// A theme card: that theme, and its mode (owner, 2026-10-28: the cards
+/// decide; a config that never picked one keeps "system", following the OS).
 fn pick_theme(state: &mut State, id: &str) {
     let Some(t) = THEMES.into_iter().find(|t| t.id == id) else {
         return;
@@ -1362,14 +1356,7 @@ fn pick_theme(state: &mut State, id: &str) {
         true => d.appearance.light = t.id.into(),
         false => d.appearance.dark = t.id.into(),
     }
-    let light_now = match d.theme {
-        Theme::Light => true,
-        Theme::Dark => false,
-        Theme::System => !theme::os_dark(),
-    };
-    if light_now != t.light {
-        d.theme = if t.light { Theme::Light } else { Theme::Dark };
-    }
+    d.theme = if t.light { Theme::Light } else { Theme::Dark };
     theme::preview(d.theme, &d.appearance);
 }
 
