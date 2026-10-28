@@ -335,6 +335,10 @@ impl App {
                     }
                     (None, _) => None,
                 };
+                // the chat's logo spinner turning while the AI has not answered
+                if let Some((_, panel)) = &mut self.o.panel {
+                    panel.tick(now);
+                }
                 // the chat card docking where it was let go
                 if let Some((began, from, _)) = self.o.chat_glide {
                     let t = motion::progress(began, now, motion::DOCK, motion::Curve::Standard);

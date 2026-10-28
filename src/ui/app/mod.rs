@@ -289,6 +289,7 @@ impl App {
             || self.bar_gliding()
             || self.card_opening()
             || self.o.chat_glide.is_some()
+            || (self.o.panel.as_ref()).is_some_and(|(_, p)| p.spinning())
             || self.o.bar_now.is_none()
     }
 

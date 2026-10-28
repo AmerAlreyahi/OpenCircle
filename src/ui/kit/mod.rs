@@ -32,6 +32,7 @@ pub mod setting_row;
 pub mod shortcut_field;
 pub mod sidebar;
 pub mod slider;
+pub mod spinner;
 pub mod surface;
 pub mod text;
 pub mod toast;

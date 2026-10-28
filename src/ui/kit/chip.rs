@@ -106,25 +106,40 @@ pub fn status<'a, Message: 'a>(label: impl Into<String>, tone: Tone) -> Element<
         Tone::Busy => c().accent,
         Tone::Error => fixed::DANGER,
     };
+    marked(self::dot(dot), label)
+}
+
+/// The status pill with the OpenCircle `logo` (14 px) for its dot: an AI
+/// marker ("Thought for 1.2 s"); never a generic AI glyph.
+pub fn logo<'a, Message: 'a>(
+    label: impl Into<String>,
+    logo: iced::widget::image::Handle,
+) -> Element<'a, Message> {
+    let mark = iced::widget::image(logo)
+        .width(size::ICON_SMALL)
+        .height(size::ICON_SMALL);
+    marked(mark, label)
+}
+
+fn marked<'a, Message: 'a>(
+    mark: impl Into<Element<'a, Message>>,
+    label: impl Into<String>,
+) -> Element<'a, Message> {
     let line = text(label.into())
         .size(11)
         .font(weight(Weight::Normal))
         .color(faded(c().text, 0.85));
-    container(
-        row![self::dot(dot), line]
-            .spacing(space::GAP)
-            .align_y(Center),
-    )
-    .padding([2, 10])
-    .style(|_| container::Style {
-        background: Some(c().hover.into()),
-        border: Border::default()
-            .rounded(radius::FULL)
-            .width(1)
-            .color(c().divider),
-        ..container::Style::default()
-    })
-    .into()
+    container(row![mark.into(), line].spacing(space::GAP).align_y(Center))
+        .padding([2, 10])
+        .style(|_| container::Style {
+            background: Some(c().hover.into()),
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(1)
+                .color(c().divider),
+            ..container::Style::default()
+        })
+        .into()
 }
 
 /// A 6 px round dot of `colour` (a status: the setup's "for everyone").
@@ -199,18 +214,8 @@ pub fn action<'a, Message: Clone + 'a>(label: String, on_press: Message) -> Elem
         .into()
 }
 
-/// A 6 px dot: `accent` when `on`, `text_muted` when off (the chat's
-/// Include screen).
-pub fn dot<'a, Message: 'a>(on: bool) -> Element<'a, Message> {
-    let fill = match on {
-        true => c().accent,
-        false => c().text_muted,
-    };
-    container(Space::new().width(size::DOT).height(size::DOT))
-        .style(move |_| container::Style {
-            background: Some(fill.into()),
-            border: Border::default().rounded(radius::FULL),
-            ..container::Style::default()
-        })
-        .into()
+/// The dot of an on / off choice: `accent` when `on`, `text_muted` when off
+/// (the chat's Include screen).
+pub fn switch_dot<'a, Message: 'a>(on: bool) -> Element<'a, Message> {
+    dot(if on { c().accent } else { c().text_muted })
 }

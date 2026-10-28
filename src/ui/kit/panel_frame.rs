@@ -300,10 +300,13 @@ pub fn free(screen: Size, at: Option<Rectangle>) -> Rectangle {
     }
 }
 
-/// The card's heading: the action's glyph (accent, 20 px) and name
-/// (`PAGE_TITLE`), and an optional pill (the AI model).
+/// The card's heading: the action's glyph (accent, 20 px) or, for AI, the
+/// OpenCircle `logo` in its place, its name (`PAGE_TITLE`), and an optional
+/// pill (the AI model).
 pub struct Header<'a> {
     pub glyph: char,
+    /// AI cards: the logo instead of the glyph (never a generic AI glyph).
+    pub logo: Option<iced::widget::image::Handle>,
     pub title: &'a str,
     pub chip: Option<&'a str>,
     /// A docked card (the AI chat, `docked`): no resize edge.
@@ -328,10 +331,14 @@ pub fn card<'a, Message: Clone + 'a>(
     hover: bool,
     on: impl Fn(Event) -> Message,
 ) -> Element<'a, Message> {
-    let glyph = iced::widget::text(header.glyph)
-        .font(super::icon::FONT)
-        .size(ICON)
-        .color(c().accent);
+    let glyph: Element<'a, Message> = match header.logo {
+        Some(logo) => iced::widget::image(logo).width(ICON).height(ICON).into(),
+        None => iced::widget::text(header.glyph)
+            .font(super::icon::FONT)
+            .size(ICON)
+            .color(c().accent)
+            .into(),
+    };
     let heading = row![glyph, text(Role::PAGE_TITLE, header.title)]
         .push(header.chip.map(|chip| super::chip::pill(chip, false, None)))
         .spacing(ICON_GAP)

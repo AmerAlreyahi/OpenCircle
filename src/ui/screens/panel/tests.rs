@@ -41,6 +41,7 @@ fn unknown_provider_shows_the_fix_and_sends_nothing() {
         translation: None,
         entities: Vec::new(),
         note: None,
+        spin: None,
     };
     let msg = ask::tests::invalid_provider_error();
     let _ = panel.update(Msg::Ready(Err(msg.clone())));
@@ -124,6 +125,7 @@ fn panel_in(state: State) -> Panel {
         translation: None,
         entities: Vec::new(),
         note: None,
+        spin: None,
     }
 }
 
@@ -410,7 +412,26 @@ fn the_chat_matches_its_golden_images() {
         ("empty", Box::new(api_chat)),
         (
             "answer",
-            Box::new(move || answered("What are the keys?", ANSWER, Some(Ok(())))),
+            Box::new(move || {
+                let mut p = answered("What are the keys?", "", None);
+                p.state = State::ask(Chat::default());
+                let setup = ask::tests::local_setup("http://127.0.0.1:9/v1".into());
+                let _ = p.update(Msg::Ready(Ok(Arc::new(setup))));
+                ask(&mut p, "What are the keys?");
+                let _ = p.update(Msg::Delta(String::new())); // it thinks: the logo chip
+                let _ = p.update(Msg::Delta(ANSWER.into()));
+                let _ = p.update(Msg::Answered(Ok(())));
+                p
+            }),
+        ),
+        (
+            "waiting",
+            Box::new(move || {
+                let mut p = api_chat();
+                ask(&mut p, "What are the keys?");
+                p.spin = Some((Instant::now(), 0.125)); // an eighth of a turn
+                p
+            }),
         ),
         (
             "arabic",
@@ -446,4 +467,37 @@ fn the_chat_matches_its_golden_images() {
     }
     themes::set(&SAPPHIRE);
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+#[test]
+fn the_logo_spins_until_the_first_words_then_stops() {
+    let mut panel = api_chat();
+    assert!(!panel.spinning(), "nothing asked");
+    ask(&mut panel, "Explain");
+    assert!(panel.waiting() && panel.spinning());
+    let t0 = Instant::now();
+    panel.tick(t0);
+    panel.tick(t0 + spinner::TURN / 2);
+    let (_, turn) = panel.spin.unwrap();
+    assert!((turn - 0.5).abs() < 1e-3, "steady: {turn}");
+    // thinking (an empty piece) keeps it turning; the first words stop it
+    let _ = panel.update(Msg::Delta(String::new()));
+    assert!(panel.spinning());
+    let _ = panel.update(Msg::Delta("Hello".into()));
+    assert!(!panel.waiting() && !panel.spinning(), "no frames wanted");
+    panel.tick(t0 + spinner::TURN);
+    assert!(panel.spin.is_none());
+}
+
+#[test]
+fn with_reduced_motion_the_logo_stands_still() {
+    motion::set_reduced(true);
+    let mut panel = api_chat();
+    ask(&mut panel, "Explain");
+    assert!(panel.waiting() && !panel.spinning(), "no frame clock");
+    panel.tick(Instant::now());
+    assert!(panel.spin.is_none());
+    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    assert!(texts.iter().any(|t| t == "Thinking…"), "{texts:?}");
+    motion::set_reduced(false);
 }

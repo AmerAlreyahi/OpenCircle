@@ -542,6 +542,7 @@ fn panel_frame_card_sheet() {
                 title: s(ar, "Text", "النص"),
                 chip: Some("model"),
                 docked: false,
+                logo: None,
             };
             let close = icon_button(Icon::Close.glyph(), State::default(), Some(()));
             let body =
@@ -664,6 +665,32 @@ fn markdown_sheet() {
         ),
     ];
     sheet("markdown", Size::new(340.0, 150.0), &rows);
+}
+
+/// `spinner`: the logo at 24 px at rest, an eighth and three eighths of a
+/// turn, still (reduced motion), and the chat's thinking row.
+#[test]
+fn spinner_sheet() {
+    use super::super::spinner::{spinner, thinking};
+    let logo = crate::ui::widgets::chrome::logo_handle;
+    let rows = vec![
+        row("turn 0", Act::Rest, move |_| {
+            spinner(logo(), 24.0, 0.0, false)
+        }),
+        row("turn 1/8", Act::Rest, move |_| {
+            spinner(logo(), 24.0, 0.125, false)
+        }),
+        row("turn 3/8", Act::Rest, move |_| {
+            spinner(logo(), 24.0, 0.375, false)
+        }),
+        row("still", Act::Rest, move |_| {
+            spinner(logo(), 24.0, 0.375, true)
+        }),
+        row("thinking", Act::Rest, move |ar| {
+            thinking(logo(), 0.125, false, s(ar, "Thinking…", "يفكر…"))
+        }),
+    ];
+    sheet("spinner", Size::new(200.0, 44.0), &rows);
 }
 
 #[test]

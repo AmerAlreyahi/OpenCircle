@@ -17,8 +17,10 @@ use crate::ui::kit::chip::Tone;
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::markdown;
+use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame::{self as frame, Event, Header};
 use crate::ui::kit::scroll::scroll;
+use crate::ui::kit::spinner;
 use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::{chip, field, progress};
@@ -172,6 +174,7 @@ impl Panel {
             title,
             chip,
             docked: chatting,
+            logo: chatting.then(widgets::chrome::logo_handle),
         };
         // the Text card's download question, progress and error are short
         // cards, as tall as their text and buttons, not a slab (#127)
@@ -239,7 +242,7 @@ impl Panel {
             let mut answer = column![].spacing(STACK).width(Fill);
             if let Some(thought) = turn.thought {
                 let line = format!("Thought for {:.1} s", thought.as_secs_f32());
-                answer = answer.push(chip::status(line, Tone::Busy));
+                answer = answer.push(chip::logo(line, widgets::chrome::logo_handle()));
             }
             let busy = last && streaming;
             if let (false, Some((_, parsed))) = (turn.answer.is_empty(), answers.get(i)) {
@@ -250,7 +253,12 @@ impl Panel {
                         downloading("Downloading the text-recognition model…", *done)
                     }
                     _ if browser => note("Opening Google AI Mode…").into(),
-                    _ => note("Thinking…").into(),
+                    _ => spinner::thinking(
+                        widgets::chrome::logo_handle(),
+                        self.spin.map_or(0.0, |(_, turn)| turn),
+                        motion::reduced(),
+                        "Thinking…",
+                    ),
                 });
             }
             if !turn.answer.is_empty() && !busy && !browser {
@@ -361,7 +369,7 @@ impl Panel {
     /// Include screen switch.
     fn composer(&self, include: bool, streaming: bool) -> Element<'_, Msg> {
         let toggle = button(
-            row![chip::dot(include), label("Include screen")]
+            row![chip::switch_dot(include), label("Include screen")]
                 .spacing(space::GAP)
                 .align_y(Center),
             Kind::Elevated,

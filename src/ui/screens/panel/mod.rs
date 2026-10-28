@@ -5,6 +5,7 @@
 //! runs on its own thread (`background`); its results arrive as `Msg`s.
 //! Dropping a panel stops its running work. What it shows: `view`.
 use std::sync::Arc;
+use std::time::Instant;
 
 use iced::widget::{markdown, operation, text_editor};
 use iced::{Task, task};
@@ -18,6 +19,7 @@ use crate::ui::background;
 use crate::ui::keys;
 use crate::ui::kit::markdown::Act;
 use crate::ui::kit::panel_frame;
+use crate::ui::kit::{motion, spinner};
 
 mod view;
 pub use view::{actions, card, note};
@@ -91,6 +93,9 @@ pub struct Panel {
     entities: Vec<Entity>,
     /// What the last chip click did (or why it could not).
     note: Option<Result<&'static str, String>>,
+    /// The logo spinner while the AI has not answered yet: since when, and
+    /// how far through its turn at the latest frame (`tick`).
+    spin: Option<(Instant, f32)>,
 }
 
 enum State {
@@ -148,6 +153,7 @@ impl Panel {
             translation: None,
             entities: Vec::new(),
             note: None,
+            spin: None,
         };
         let task = match kind {
             actions::Panel::Lens => background(move |tx| {
@@ -195,6 +201,32 @@ impl Panel {
             State::Text(_) => actions::Panel::Text,
             State::Ask { .. } => actions::Panel::Ask,
         }
+    }
+
+    /// Asked, and the AI has not written anything yet (thinking, or waiting
+    /// for its first words): the logo spinner shows.
+    pub fn waiting(&self) -> bool {
+        matches!(&self.state, State::Ask { chat, setup: Some(Ok(setup)), .. }
+            if !setup.browser()
+                && chat.status == Status::Streaming
+                && chat.turns.last().is_some_and(|t| t.answer.is_empty()))
+    }
+
+    /// The spinner turns (frames wanted): waiting, and motion not reduced.
+    pub fn spinning(&self) -> bool {
+        self.waiting() && !motion::reduced()
+    }
+
+    /// A frame at `now`: the spinner's turn (one per `spinner::TURN`,
+    /// steady), or none once the answer streams.
+    pub fn tick(&mut self, now: Instant) {
+        self.spin = match (self.spinning(), self.spin) {
+            (false, _) => None,
+            (true, None) => Some((now, 0.0)),
+            (true, Some((start, _))) => {
+                Some((start, spinner::turn(now.saturating_duration_since(start))))
+            }
+        };
     }
 
     /// Empties the follow-up input and returns what was in it.
