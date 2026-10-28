@@ -33,8 +33,8 @@ use crate::labs::Labs;
 
 fn closing_app() -> App {
     let mut app = App::idle(window::Id::unique());
-    let _ = app.close();
-    app.o.labs = Labs::all_on(); // (read at open: close forgets them)
+    app.o.start(Opening::default()); // open (each test sets what it shows)
+    app.o.labs = Labs::all_on(); // (read at open)
     app
 }
 
@@ -61,7 +61,6 @@ fn an_update_waits_until_nothing_is_open() {
         url: String::new(),
     };
     let mut app = App::idle(window::Id::unique());
-    app.o.labs = Labs::all_on();
     assert!(app.is_idle());
     let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
     assert!(!app.is_idle(), "a capture is out");
@@ -106,7 +105,6 @@ fn a_shortcut_while_open_brings_the_overlay_back_and_says_so() {
 #[test]
 fn a_timed_out_capture_frees_the_trigger_and_its_late_answer_is_dropped() {
     let mut app = App::idle(window::Id::unique());
-    app.o.labs = Labs::all_on();
     let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
     let first = app.capturing.expect("pending");
     // A second press while it is out does nothing.
@@ -132,7 +130,6 @@ fn a_timed_out_capture_frees_the_trigger_and_its_late_answer_is_dropped() {
 #[test]
 fn esc_cancels_a_pending_capture() {
     let mut app = App::idle(window::Id::unique());
-    app.o.labs = Labs::all_on();
     let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
     let n = app.capturing.expect("pending");
     let _ = app.update(Message::Escape);
@@ -205,6 +202,7 @@ fn esc_clears_the_overlay_before_its_last_frames() {
 #[test]
 fn close_shrinks_then_hides() {
     let mut app = closing_app();
+    let _ = app.close();
     let _ = app.update(Message::Drawn);
     let _ = app.update(Message::Drawn); // a full-size frame before the resize lands
     let _ = app.update(Message::Resized(Size::new(3440.0, 1440.0)));
@@ -217,6 +215,7 @@ fn close_shrinks_then_hides() {
 #[test]
 fn close_hides_even_if_the_window_never_shrinks() {
     let mut app = closing_app();
+    let _ = app.close();
     for _ in 0..=SHRINK_FRAMES {
         let _ = app.update(Message::Drawn);
     }
@@ -406,6 +405,7 @@ fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
 /// [x % 256, y % 256, x / 256, 255].
 pub(in crate::ui) fn open_app(w: u32, h: u32, scale: f32) -> App {
     let mut app = App::idle(window::Id::unique());
+    app.o.start(Opening::default());
     app.o.labs = Labs::all_on();
     let rgba: Vec<u8> = (0..h)
         .flat_map(|y| (0..w).flat_map(move |x| [x as u8, y as u8, (x >> 8) as u8, 255]))
@@ -607,7 +607,6 @@ fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
     };
     with_delay(3);
     let mut app = App::idle(window::Id::unique());
-    app.o.labs = Labs::all_on();
     let _ = app.open(Instant::now(), shot());
     assert!(app.snip_pill(), "counting down, the overlay is only a pill");
     // the capture the timer waited for opens plain
@@ -617,7 +616,6 @@ fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
     // no timer in Settings: no pill
     with_delay(0);
     let mut app = App::idle(window::Id::unique());
-    app.o.labs = Labs::all_on();
     let _ = app.open(Instant::now(), shot());
     assert!(!app.snip_pill());
 }
@@ -1521,7 +1519,6 @@ fn the_screen_is_read_on_demand_the_touched_band_first() {
     text::MODELS_HERE.set(Some(true));
     let page = text_app();
     let mut app = App::idle(window::Id::unique());
-    app.o.labs = Labs::all_on();
     let shot = Shot {
         image: page.o.frame.clone().unwrap(),
         scale: 1.0,
@@ -1615,7 +1612,6 @@ fn windows_ocr_reads_the_whole_screen_from_the_capture() {
     ocr::system::LANGUAGE_HERE.set(Some(Some("en-US")));
     let page = text_app();
     let mut app = App::idle(window::Id::unique());
-    app.o.labs = Labs::all_on();
     let shot = Shot {
         image: page.o.frame.clone().unwrap(),
         scale: 1.0,
@@ -3554,6 +3550,7 @@ fn close_leaves_a_fresh_opening() {
     app.o.clicks = Some((Instant::now(), Point::ORIGIN, 2));
     assert!(app.o.panel.is_some());
     let _ = app.close();
+    assert!(app.o.is_none(), "nothing of the opening is kept");
     let (o, fresh) = (&app.o, Opening::default());
     assert!(o.frame.is_none() && o.tiles.is_none() && o.selection.is_none());
     assert!(o.stroke.is_empty() && o.others.is_empty() && o.word.is_none());
@@ -3564,4 +3561,65 @@ fn close_leaves_a_fresh_opening() {
     assert!(matches!(o.purpose, Purpose::Search));
     assert_eq!(o.bar_focus, None, "the old reset forgot it");
     assert!(o.clicks.is_none(), "the old reset forgot it");
+}
+
+/// Close drops the opening whole (the frozen frame's pixels have no other
+/// owner left), and answers that arrive after it (a panel's, a translation's,
+/// the screen's text, a tapped word, a frame) change nothing: no opening comes
+/// back from them.
+#[test]
+fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
+    let (w, h) = (64, 48);
+    let frame = image::Handle::from_rgba(w, h, vec![200; (w * h * 4) as usize]);
+    let image::Handle::Rgba { pixels, .. } = &frame else {
+        unreachable!()
+    };
+    let pixels = pixels.clone();
+    let mut app = App::idle(window::Id::unique());
+    let shot = Shot {
+        image: frame,
+        scale: 1.0,
+        origin: Point::ORIGIN,
+        size: Size::new(w as f32, h as f32),
+        snip: None,
+    };
+    let _ = app.open(Instant::now(), Ok(shot));
+    assert!(app.o.is_some() && app.o.tiles.is_some());
+    app.select(Rectangle::new(Point::new(4.0, 4.0), Size::new(40.0, 30.0)));
+    let crop = app.crop().unwrap();
+    let _ = app.open_panel(actions::Panel::Text, crop, None);
+    assert!(app.o.panel.is_some());
+    let _ = app.start_translate(); // (the panel goes)
+    assert!(app.o.translate.is_some());
+    assert!(!pixels.is_unique(), "the opening holds the frame");
+    let (opening, panel, translation, tap) = (app.opening, app.panels, app.translates, app.taps);
+    let _ = app.close();
+    assert!(app.o.is_none());
+    assert!(pixels.is_unique(), "nothing holds the frame after close");
+    let band = Rectangle::new(Point::ORIGIN, Size::new(w as f32, h as f32));
+    let read = WordRead {
+        id: tap,
+        at: Point::new(10.0, 10.0),
+        origin: [0, 0],
+        region: band,
+        extend: false,
+    };
+    let late = [
+        Message::Panel(panel, panel::Msg::Read(Ok("late".into()))),
+        Message::Translate(translation, translate::Msg::Close),
+        Message::ScreenText(opening, band, Ok(Vec::new())),
+        Message::Tapped(read, Ok(Vec::new())),
+        Message::Frame(Instant::now()),
+        Message::Overlay(overlay::Event::Press {
+            at: Point::new(5.0, 5.0),
+            shift: false,
+        }),
+        Message::AskInput("late".into()),
+    ];
+    for message in late {
+        let _ = app.update(message);
+        assert!(app.o.is_none(), "a late answer brought an opening back");
+    }
+    assert!(pixels.is_unique());
+    assert!(app.is_idle() || app.hiding != Hiding::No);
 }

@@ -57,7 +57,8 @@ impl App {
         if matches!(msg, editor::Message::Back) && std::env::var_os(TEST_SHOT).is_some() {
             return self.test_shot();
         }
-        let Some(edit) = &mut self.o.edit else {
+        let o = &mut *self.o;
+        let Some(edit) = &mut o.edit else {
             return Task::none();
         };
         let out = edit.update(msg);
@@ -68,15 +69,15 @@ impl App {
                 height,
                 pixels,
                 ..
-            }) = &self.o.frame
-            && let Some(crop) = actions::crop(pixels, *width, *height, self.o.scale, area)
+            }) = &o.frame
+            && let Some(crop) = actions::crop(pixels, *width, *height, o.scale, area)
         {
-            edit.add(crop, work_area(self.o.screen, self.o.work_inset));
+            edit.add(crop, work_area(o.screen, o.work_inset));
         }
         match out {
             None => Task::none(),
             // Snip has no action bar: back to picking an area.
-            Some(Output::Back) if matches!(self.o.purpose, Purpose::Snip(_)) => {
+            Some(Output::Back) if matches!(o.purpose, Purpose::Snip(_)) => {
                 self.o.edit = None;
                 self.o.selection = None;
                 self.o.stroke.clear();

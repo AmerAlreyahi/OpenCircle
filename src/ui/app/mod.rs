@@ -21,7 +21,7 @@ use crate::translate::pipeline::Cache;
 use self::background::triggers;
 use self::capture::overlay_window;
 use self::message::{Hiding, Message, Purpose};
-use self::opening::Opening;
+use self::opening::Open;
 use crate::ui::kit::motion;
 use crate::ui::platform::monitor::can_hide_windows;
 use crate::ui::{live_layer, overlay, update_card, windows};
@@ -140,8 +140,11 @@ pub(in crate::ui) const SHRINK_FRAMES: u8 = 10;
 pub(in crate::ui) const TOAST_MARGIN: f32 = 16.0;
 
 pub(in crate::ui) struct App {
-    /// Everything one capture holds (`Opening`), reset as a whole by `close`.
-    pub(in crate::ui) o: Opening,
+    /// Everything one capture holds, while the overlay is open (`Open`);
+    /// `close` drops it whole.
+    pub(in crate::ui) o: Open,
+    /// What the capture on its way opens for (`Opening::purpose` at `open`).
+    pub(in crate::ui) next: Purpose,
     /// The overlay window's id; a closed window's while `overlay_open` is false.
     pub(in crate::ui) overlay: window::Id,
     /// The overlay window exists: always where it is pre-created and hidden
@@ -226,7 +229,8 @@ impl App {
     /// Nothing open yet (the overlay window `overlay` pre-created, hidden).
     pub(in crate::ui) fn idle(overlay: window::Id) -> App {
         App {
-            o: Opening::default(),
+            o: Open::default(),
+            next: Purpose::Search,
             overlay,
             overlay_open: true,
             can_hide: true,
@@ -356,7 +360,7 @@ impl App {
             Some(_) => Subscription::batch([triggers, escape()]),
             None => triggers,
         };
-        if self.o.frame.is_some() {
+        if self.o.is_some() {
             let escape = escape();
             // Alt held = the original under a translation.
             let alt = iced::event::listen_with(|event, _, _| match event {

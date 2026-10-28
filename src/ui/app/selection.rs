@@ -99,7 +99,8 @@ impl App {
         };
         // Over a translation: a tap opens a block's word card, E / A are the
         // card's; a new selection leaves the translation.
-        if let Some((id, session)) = &mut self.o.translate {
+        let o = &mut *self.o;
+        if let Some((id, session)) = &mut o.translate {
             let id = *id;
             match event {
                 overlay::Event::Key {
@@ -117,9 +118,9 @@ impl App {
                 overlay::Event::Key { .. } | overlay::Event::Enter | overlay::Event::Space => {
                     return Task::none();
                 }
-                overlay::Event::Release if overlay::select(&self.o.stroke, 1.0).is_none() => {
-                    let at = self.o.stroke.last().copied().unwrap_or(Point::ORIGIN);
-                    session.click(Point::new(at.x * self.o.scale, at.y * self.o.scale));
+                overlay::Event::Release if overlay::select(&o.stroke, 1.0).is_none() => {
+                    let at = o.stroke.last().copied().unwrap_or(Point::ORIGIN);
+                    session.click(Point::new(at.x * o.scale, at.y * o.scale));
                     self.o.drawing = false;
                     self.o.stroke.clear();
                     return Task::none();
@@ -187,9 +188,8 @@ impl App {
                 self.o.adding = shift && matches!(self.o.purpose, Purpose::Search);
                 match self.o.selection.take() {
                     Some(sel) if self.o.adding => {
-                        self.o
-                            .others
-                            .push((sel, std::mem::take(&mut self.o.stroke)));
+                        let o = &mut *self.o;
+                        o.others.push((sel, std::mem::take(&mut o.stroke)));
                     }
                     _ => self.o.others.clear(),
                 }
@@ -429,8 +429,9 @@ impl App {
     /// never off the screen. A freehand loop scales with its box; anything
     /// else becomes that box.
     pub(in crate::ui) fn drag_grab(&mut self, p: Point) {
-        let Some(grab) = &mut self.o.grab else { return };
-        let zoom = self.o.view.zoom();
+        let o = &mut *self.o;
+        let Some(grab) = &mut o.grab else { return };
+        let zoom = o.view.zoom();
         grab.moved |= !overlay::is_tap(&[grab.from, p], zoom);
         if !grab.moved {
             return;
@@ -440,8 +441,8 @@ impl App {
         let delta = p - grab.from;
         let on = |to: Point| {
             Point::new(
-                to.x.clamp(0.0, self.o.screen.width),
-                to.y.clamp(0.0, self.o.screen.height),
+                to.x.clamp(0.0, o.screen.width),
+                to.y.clamp(0.0, o.screen.height),
             )
         };
         let area = match grab.grip {
@@ -459,16 +460,16 @@ impl App {
                 on(overlay::corner(start.area, e) + delta),
                 min,
             ),
-            None => overlay::keep_inside(start.area + delta, self.o.screen),
+            None => overlay::keep_inside(start.area + delta, o.screen),
         };
         let kind = match start.kind {
             overlay::Kind::Loop | overlay::Kind::Scribble | overlay::Kind::Snap => start.kind,
             overlay::Kind::Drag | overlay::Kind::Word => overlay::Kind::Drag,
         };
-        self.o.morph = None;
-        self.o.stroke = overlay::refit(stroke, start.area, area);
-        self.o.selection = Some(overlay::Selection { area, kind });
-        self.o.word = None; // the words are no longer what is selected
+        o.morph = None;
+        o.stroke = overlay::refit(stroke, start.area, area);
+        o.selection = Some(overlay::Selection { area, kind });
+        o.word = None; // the words are no longer what is selected
     }
 
     /// An arrow key on the box (`overlay::Event::Arrow`): 1 px (Shift: 10) on

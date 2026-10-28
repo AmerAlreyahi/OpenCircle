@@ -328,8 +328,9 @@ impl App {
     /// Translate in place: the selection (or, with no selection left, the whole
     /// frame) is translated on a thread, then swapped in.
     pub(in crate::ui) fn start_translate(&mut self) -> Task<Message> {
+        let frame = self.o.frame.clone();
         let (Some(frame @ image::Handle::Rgba { width, height, .. }), Some(selection)) =
-            (&self.o.frame, self.o.selection)
+            (&frame, self.o.selection)
         else {
             return Task::none();
         };

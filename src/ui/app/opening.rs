@@ -1,6 +1,8 @@
-//! `Opening`: everything one capture holds, from `open` to `close`. Closing
-//! takes it whole (`std::mem::take`), so no field can outlive its opening.
+//! `Opening`: everything one capture holds, from `open` to `close`; `App::o`
+//! holds it only while the overlay is open (`Open`). Closing takes it whole,
+//! so no field (the frame, its tiles, the text read) outlives its opening.
 
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -224,5 +226,55 @@ impl Opening {
     /// translate, song, helper, frame) stops or frees itself when dropped.
     pub(in crate::ui) fn finish(self) {
         self.lens_pages.into_iter().for_each(lens::Held::release);
+    }
+}
+
+/// `App::o`: the open overlay's `Opening`, `None` while closed. `update` drops
+/// every message that needs it while closed (`works_closed`), so handlers use
+/// it straight (`self.o.frame`); read while closed it is an empty `Opening`.
+#[derive(Default)]
+pub(in crate::ui) struct Open(Option<Opening>);
+
+thread_local! {
+    /// What a closed overlay reads (nothing captured). Leaked once per thread
+    /// (it is small and never changes) so `deref` can lend it.
+    static CLOSED: &'static Opening = Box::leak(Box::default());
+}
+
+impl Open {
+    pub(in crate::ui) fn is_some(&self) -> bool {
+        self.0.is_some()
+    }
+
+    pub(in crate::ui) fn is_none(&self) -> bool {
+        self.0.is_none()
+    }
+
+    /// A new opening (`App::open`).
+    pub(in crate::ui) fn start(&mut self, opening: Opening) {
+        self.0 = Some(opening);
+    }
+
+    /// Closing: the opening goes (`App::close`).
+    pub(in crate::ui) fn take(&mut self) -> Option<Opening> {
+        self.0.take()
+    }
+}
+
+impl Deref for Open {
+    type Target = Opening;
+
+    fn deref(&self) -> &Opening {
+        self.0.as_ref().unwrap_or_else(|| CLOSED.with(|c| *c))
+    }
+}
+
+impl DerefMut for Open {
+    /// Only while open (`works_closed` guards `update`). A path that slips
+    /// through gets an empty opening (as before `Open`), never a crash; tests
+    /// catch it.
+    fn deref_mut(&mut self) -> &mut Opening {
+        debug_assert!(self.0.is_some(), "the overlay's state changed while closed");
+        self.0.get_or_insert_default()
     }
 }

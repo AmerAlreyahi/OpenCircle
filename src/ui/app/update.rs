@@ -25,6 +25,11 @@ use super::{App, BAR_MORPH, CAPTURE_TIMEOUT, GLIDE, REVEAL_WAIT, Reader, SHRINK_
 
 impl App {
     pub(in crate::ui) fn update(&mut self, message: Message) -> Task<Message> {
+        // Late answers for an overlay closed meanwhile (a panel, translate, OCR,
+        // song, a frame...) are dropped: nothing of a closed opening comes back.
+        if self.o.is_none() && !works_closed(&message) {
+            return Task::none();
+        }
         match message {
             Message::Trigger(Trigger::Quit) => iced::exit(),
             Message::Trigger(Trigger::OpenSettings) => self
@@ -83,16 +88,16 @@ impl App {
                 window::gain_focus(self.overlay)
             }
             Message::Trigger(Trigger::Capture(at)) => {
-                self.o.purpose = Purpose::Search;
+                self.next = Purpose::Search;
                 self.capture(at, None)
             }
             Message::Trigger(Trigger::Quick(at, qa)) => {
-                self.o.purpose = Purpose::Search;
+                self.next = Purpose::Search;
                 if qa.action == "snip" {
                     return self.capture(at, Some(snip::Kind::for_target(qa.target)));
                 }
                 match Quick::for_id(&qa.action) {
-                    Some(q) => self.o.purpose = Purpose::Quick(q, qa.target),
+                    Some(q) => self.next = Purpose::Quick(q, qa.target),
                     None => crate::log!("unknown action {}; opening the overlay", qa.action),
                 }
                 self.capture(at, None)
@@ -115,18 +120,18 @@ impl App {
                     CAPTURE_TIMEOUT.as_secs()
                 );
                 self.capturing = None;
-                self.o.purpose = Purpose::Search;
+                self.next = Purpose::Search;
                 Task::none()
             }
             Message::CaptureTimedOut(_) => Task::none(),
             Message::Escape if self.capturing.is_some() => {
                 crate::log!("[opencircle] capture cancelled");
                 self.capturing = None;
-                self.o.purpose = Purpose::Search;
+                self.next = Purpose::Search;
                 Task::none()
             }
             Message::Overlay(event) => self.on_overlay(event),
-            Message::Escape if self.o.frame.is_none() => Task::none(),
+            Message::Escape if self.o.is_none() => Task::none(),
             Message::Escape if let Some(scroll) = self.scroll() => {
                 scroll.stop(); // what was gathered opens in the editor
                 Task::none()
@@ -393,7 +398,8 @@ impl App {
                             self.o.screen_text = word::Screen::default();
                         }
                         let first = self.o.screen_text == word::Screen::default();
-                        self.o.screen_text.add(band, lines, self.o.screen);
+                        let screen = self.o.screen;
+                        self.o.screen_text.add(band, lines, screen);
                         // (the helper: its first band and its last, the VM's timings)
                         let whole = self.o.screen_text.is_whole(self.o.screen.height);
                         if system || first || whole {
@@ -546,7 +552,7 @@ impl App {
     /// Nothing of OpenCircle is in use: no overlay (editor, snip, panel), capture,
     /// live translate, Settings, onboarding or pinned image.
     pub(in crate::ui) fn is_idle(&self) -> bool {
-        self.o.frame.is_none()
+        self.o.is_none()
             && self.capturing.is_none()
             && self.live.is_none()
             && self.hiding == Hiding::No
@@ -584,4 +590,27 @@ impl App {
             }
         }
     }
+}
+
+/// The messages that mean something while no overlay is open (a trigger, a
+/// capture's answer, the other windows, live translate, the hide steps, a
+/// Copy / Save pill, a snip timer's shot); every other one needs the opening.
+pub(in crate::ui) fn works_closed(message: &Message) -> bool {
+    matches!(
+        message,
+        Message::Trigger(_)
+            | Message::Captured(..)
+            | Message::CaptureTimedOut(_)
+            | Message::Escape
+            | Message::EscapeTaken
+            | Message::Windows(_)
+            | Message::Live(_)
+            | Message::Drawn
+            | Message::Resized(_)
+            | Message::Confirm(..)
+            | Message::SongKey
+            | Message::UpdateTick
+            | Message::TestShot(_)
+            | Message::Snip(snip::Msg::Shoot(_))
+    )
 }

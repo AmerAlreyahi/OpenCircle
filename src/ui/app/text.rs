@@ -71,11 +71,12 @@ impl App {
     /// there, unless the stroke loops, which makes it a circle after all.
     /// Into rows not read yet: they are read first (`read_more`).
     pub(in crate::ui) fn drag_text(&mut self, p: Point) -> Task<Message> {
+        let zoom = self.o.view.zoom();
         let Some(stroke) = &mut self.o.text_press else {
             return Task::none();
         };
         stroke.push(p);
-        if overlay::winds(stroke, self.o.view.zoom()) {
+        if overlay::winds(stroke, zoom) {
             self.o.stroke = self.o.text_press.take().unwrap_or_default();
             self.o.drawing = true;
             self.o.word = None;
@@ -302,9 +303,10 @@ impl App {
     /// done.
     pub(in crate::ui) fn more_text(&mut self) -> Task<Message> {
         let all = Rectangle::with_size(self.o.screen);
-        if let Some(word) = &mut self.o.word {
-            word.reread(self.o.screen_text.lines(), all);
-            if let Some(&p) = self.o.text_press.as_ref().and_then(|s| s.last()) {
+        let o = &mut *self.o;
+        if let Some(word) = &mut o.word {
+            word.reread(o.screen_text.lines(), all);
+            if let Some(&p) = o.text_press.as_ref().and_then(|s| s.last()) {
                 word.extend(p);
             }
             self.select_word();
@@ -366,11 +368,12 @@ impl App {
             self.o.awaits = Some((at, Await::Extend));
             return self.read_more();
         }
+        let screen = self.o.screen;
         let Some(word) = &mut self.o.word else {
             return Task::none();
         };
         if !word.covers(at) {
-            let band = word.band(at, self.o.screen);
+            let band = word.band(at, screen);
             return self.read_words(band, at, true);
         }
         if word.extend(at) {
@@ -469,15 +472,16 @@ impl App {
     /// (the stroke holds a top-left / bottom-right pair for each). Nothing
     /// selected yet (a caret): no selection.
     pub(in crate::ui) fn select_word(&mut self) {
-        self.o.others.clear();
-        self.o.selection = None;
-        self.o.stroke.clear();
-        if let Some(word) = self.o.word.as_ref().filter(|w| !w.is_empty()) {
-            self.o.selection = Some(overlay::Selection {
+        let o = &mut *self.o;
+        o.others.clear();
+        o.selection = None;
+        o.stroke.clear();
+        if let Some(word) = o.word.as_ref().filter(|w| !w.is_empty()) {
+            o.selection = Some(overlay::Selection {
                 area: word.area(),
                 kind: overlay::Kind::Word,
             });
-            self.o.stroke = (word.rects().iter())
+            o.stroke = (word.rects().iter())
                 .flat_map(|r| [r.position(), r.position() + Vector::from(r.size())])
                 .collect();
         }
@@ -514,6 +518,7 @@ impl App {
         ) else {
             return Task::none();
         };
+        let (scale, frame) = (self.o.scale, (*width, *height, pixels.clone()));
         self.o.panel = None;
         self.o.text_mode = Some(TextMode {
             lines: None,
@@ -521,7 +526,6 @@ impl App {
             picked: None,
             picking: false,
         });
-        let (scale, frame) = (self.o.scale, (*width, *height, pixels.clone()));
         background(move |tx| {
             let read = ocr::recognize_in_child(&crop.rgba, crop.width, crop.height);
             let lines = read.map(|blocks| {

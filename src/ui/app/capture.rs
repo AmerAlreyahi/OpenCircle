@@ -15,6 +15,7 @@ use crate::ocr::{self};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot};
+use crate::ui::app::opening::Opening;
 use crate::ui::app::quick;
 use crate::ui::app::quick::{Quick, Start};
 use crate::ui::kit::motion;
@@ -94,7 +95,7 @@ impl App {
             Ok(shot) => shot,
             Err(e) => {
                 crate::log!("capture failed: {e}");
-                self.o.purpose = Purpose::Search;
+                self.next = Purpose::Search;
                 if !capture::refused(&e) {
                     return Task::none();
                 }
@@ -112,6 +113,11 @@ impl App {
             at.elapsed().as_millis()
         );
         let size = shot.size;
+        let purpose = std::mem::replace(&mut self.next, Purpose::Search);
+        self.o.start(Opening {
+            purpose,
+            ..Opening::default()
+        });
         self.set_frame(shot.image, shot.scale, shot.origin, size);
         self.o.helper = Some(Arc::new(ocr::hold()));
         self.o.ocr_ready = text::models_present();
@@ -293,7 +299,10 @@ impl App {
         }
         // Everything the opening held goes at once (the panel, translate and
         // song stop; the next show clears the window again).
-        std::mem::take(&mut self.o).finish();
+        let Some(opening) = self.o.take() else {
+            return Task::none(); // closed already
+        };
+        opening.finish();
         // hidden or closed alike: the editor's glyphs go with the opening
         crate::editor::free_glyphs();
         glass::set_frame(None, 1.0);

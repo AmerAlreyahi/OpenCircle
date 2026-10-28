@@ -31,7 +31,8 @@ impl App {
             self.timed = true;
             return self.capture(Instant::now(), Some(kind));
         }
-        let Purpose::Snip(snip) = &mut self.o.purpose else {
+        let o = &mut *self.o;
+        let Purpose::Snip(snip) = &mut o.purpose else {
             return Task::none();
         };
         match msg {
@@ -70,8 +71,8 @@ impl App {
                     return Task::none();
                 };
                 let foreground = snip.foreground;
-                self.o.selection = None;
-                self.o.stroke.clear();
+                o.selection = None;
+                o.stroke.clear();
                 if !self.can_hide {
                     // Wayland: no pill (the window can't shrink or hide), so it
                     // closes, waits, and captures again.
@@ -135,7 +136,7 @@ impl App {
             // monitor's frame was frozen with this one), unless a drag, the
             // editor or a pill holds this one.
             snip::Msg::Left => {
-                if self.o.drawing || self.o.edit.is_some() {
+                if o.drawing || o.edit.is_some() {
                     return Task::none();
                 }
                 let Some((place, image)) = capture::pointer().and_then(|p| snip.follow(p)) else {
@@ -341,22 +342,17 @@ impl App {
     /// Auto-scrolls and stitches `area` on a thread. The overlay shrinks to the
     /// progress pill beside the area, so it is in none of the frames.
     pub(in crate::ui) fn start_scroll(&mut self, area: Rectangle) -> Task<Message> {
+        let o = &mut *self.o;
         let (Some(image::Handle::Rgba { width, height, .. }), Purpose::Snip(snip)) =
-            (&self.o.frame, &mut self.o.purpose)
+            (&o.frame, &mut o.purpose)
         else {
             return Task::none();
         };
-        let Some([x0, y0, x1, y1]) = actions::crop_bounds(*width, *height, self.o.scale, area)
-        else {
+        let Some([x0, y0, x1, y1]) = actions::crop_bounds(*width, *height, o.scale, area) else {
             return Task::none();
         };
-        let at = |v: f32, offset: u32| (v * self.o.scale).round() as i32 + offset as i32;
-        let region = (
-            at(self.o.origin.x, x0),
-            at(self.o.origin.y, y0),
-            x1 - x0,
-            y1 - y0,
-        );
+        let at = |v: f32, offset: u32| (v * o.scale).round() as i32 + offset as i32;
+        let region = (at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0);
         let stop = Arc::new(AtomicBool::new(false));
         snip.scroll = Some(snip::Scroll::new(x1 - x0, stop.clone()));
         let work = background(move |tx| {
