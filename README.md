@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/cover.png" alt="OpenCircle: circle anything on your screen to search, read, translate or ask AI" width="100%"></p>
+<p align="center"><img src="gallery/OpenCircleCoverIMG.png" alt="OpenCircle: circle anything on your screen to search, read, translate or ask AI" width="100%"></p>
 
 <h1 align="center">OpenCircle</h1>
 
@@ -19,7 +19,10 @@ licensed, and has no account and no telemetry.
   <img alt="Platforms: Windows and Linux (preview)" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20(preview)-4fc9e0">
 </p>
 
-## See it in action
+## See v0.1.1 in action
+
+Real recordings of the default v0.1.1 features on Windows. These clips show the
+released app, with Labs features off. [v0.1.1 release notes](https://github.com/AmerAlreyahi/OpenCircle/releases/tag/v0.1.1).
 
 <table>
   <tr>
@@ -36,19 +39,15 @@ licensed, and has no account and no telemetry.
   </tr>
 </table>
 
-More screenshots and the full-size videos: [gallery](gallery/README.md).
+Full-size MP4 videos and feature guides: [gallery](gallery/README.md).
 
-<p align="center">
-  <img src="docs/images/translate-before-after.png" alt="Full-screen translate: the Arabic page before, and after OpenCircle erased the English text and drew the translation in its place." width="900"><br>
-  <sub>Translate in place: the text is erased and redrawn where it stood.</sub>
-</p>
+## What works by default in v0.1.1
 
-## What it does
-
-- **Translate in place, built for games.** Press `Ctrl+Shift+T` to translate
+- **Translate in place.** Press `Ctrl+Shift+T` to translate
   the whole screen. The original text is erased and the translation is drawn in
-  its place, with matching colour and size. Live mode keeps going while you play.
-  Runs offline by default. Arabic is the default target.
+  its place, with matching colour and size. This translates one captured screen;
+  run it again after the page changes. Runs offline by default after a one-time
+  model download. Arabic is the default target.
 - **Circle, then choose.** Press `Ctrl+Shift+Space`, draw a circle or a box
   around anything, then pick what to do: Search in browser (the picture goes to
   Google Lens, selected text to a Google search), Copy text, Translate, or ask
@@ -66,21 +65,21 @@ More screenshots and the full-size videos: [gallery](gallery/README.md).
   once you turn them on in Settings > Labs. `Ctrl+C` copies the selection as an
   image (or the picked words as text), `Ctrl+S` saves it; a small pill confirms.
   Drag the bar to any edge.
-- **Labs.** Unfinished features (Snip, the image editor, song search, search
-  history, pins, live translate) are off by default and hidden until you switch
-  them on in Settings > Labs. Live translate is unfinished (planned for 0.3.0).
-- **Snip and annotate** (Labs). Region, window, full screen or scrolling capture.
-  Arrows, shapes, text, numbered steps, spotlight, a soft blur, and a solid
-  Redact (use Redact, not Blur, to hide passwords). Copy puts the picture on the
-  clipboard, ready for an AI chat.
 - **Ask AI about your selection.** No key needed: the question opens in Google
   AI Mode in your browser. Or add your own key for answers inside OpenCircle: Claude, OpenAI, or
   any OpenAI-compatible server, including a local model.
 - **Shortcuts for everything.** Give any action its own key and skip the bar.
-- **Themes.** Light, dark or system colours, and seven live looks for the screen
+- **Themes.** Light, dark or system colours, and seven looks for the screen
   while OpenCircle is active.
 - **Updates that check a signature.** Quiet, opt-in on first run, with release
   notes after each update.
+
+### Optional Labs features
+
+Snip, the image editor, song search, search history, pins and live translate are
+unfinished, off by default and hidden until enabled in **Settings > Labs**.
+They are not part of the default v0.1.1 gallery above. Live translate is planned
+for v0.3.0.
 
 ## Private by design
 
@@ -92,11 +91,6 @@ More screenshots and the full-size videos: [gallery](gallery/README.md).
   picture goes from your browser to Lens; OpenCircle uploads it nowhere else.
 
 Details: [Privacy](docs/privacy.md).
-
-<p align="center">
-  <img src="docs/images/select-text.png" alt="Desktop-style text selection: words are highlighted on a Wikipedia page, and the bottom bar sits under the selection." width="900"><br>
-  <sub>Select text: drag over words, then copy, translate or search them.</sub>
-</p>
 
 ## How it compares
 
@@ -182,7 +176,11 @@ All of them change in Settings. Full list and details: [Shortcuts](docs/shortcut
   the screen capture; live translate runs once per press, and window and
   scrolling snips are not offered. See [Linux notes](docs/linux-notes.md).
 
-Games must run in borderless or windowed mode for live translate.
+Games must run in borderless or windowed mode for live translate (Labs,
+unfinished). Linux text reading is slower than Windows OCR; on Wayland the
+overlay can take about half a second to appear and popups are square.
+AI-provider translation can be slower than the offline engine and may show the
+whole result at once.
 
 ## Lightweight
 
@@ -212,9 +210,9 @@ sudo apt-get install libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev l
 [Getting started](docs/getting-started.md) ·
 [Shortcuts](docs/shortcuts.md) ·
 [Translate](docs/translate.md) ·
-[Snip and annotate](docs/snip-and-annotate.md) ·
+[Snip and annotate (Labs)](docs/snip-and-annotate.md) ·
 [AI setup](docs/ai-setup.md) ·
-[Song search](docs/song-search.md) ·
+[Song search (Labs)](docs/song-search.md) ·
 [Privacy](docs/privacy.md) ·
 [Linux notes](docs/linux-notes.md) ·
 [Signing](docs/signing.md)
