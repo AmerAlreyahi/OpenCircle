@@ -96,7 +96,9 @@ capture the screen and show it.
 6. **Close**: Esc (any focus) or a finishing action: `close()` takes the whole per-capture
    state (`ui/app/opening.rs`: add new per-capture fields THERE, never to `App`): the panel and the
    frame go, and `Opening::finish` releases Lens pages (deleted at once, or once 10 s old so the browser
-   has read them); the window shrinks, then hides (`Hiding`). A press outside the
+   has read them); the window shrinks, then hides (`Hiding`). `App::o` is `None` while closed
+   (`opening::Open`); `update` drops every message that needs an opening then (`update::works_closed`:
+   a new message that must work with no overlay open goes in that list). A press outside the
    panel starts a new selection and drops the panel.
 
 ## Change recipes
