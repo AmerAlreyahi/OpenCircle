@@ -46,10 +46,34 @@ pub fn shorten(s: &str, max: usize) -> String {
     }
 }
 
+/// OCR words come back apart ("https : //shop. example/ track/4412"): glues the
+/// pieces of one link or address together again (a space next to `@`, or
+/// next to `:` `/` and after `.` inside a link), so the scanners see it whole. Other text is kept.
+fn unspace(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let (mut word, mut linky) = (0, false); // the current word's start; is it a link/address
+    for (i, tok) in text.split(' ').enumerate() {
+        if i > 0 {
+            let joins = tok.starts_with('@')
+                || out.ends_with('@')
+                || (linky && (tok.starts_with([':', '/']) || out.ends_with([':', '/', '.'])));
+            if !joins {
+                out.push(' ');
+                (word, linky) = (out.len(), false);
+            }
+        }
+        out.push_str(tok);
+        let now = out[word..].to_ascii_lowercase();
+        linky |= now.starts_with("http") || now.starts_with("www") || now.contains('@');
+    }
+    out
+}
+
 /// Links, then emails, then phone numbers in `text`, each once, at most [`MAX`].
 pub fn find(text: &str) -> Vec<Entity> {
     // Each pass blanks what it took, so a number inside a link is not a phone.
-    let mut bytes = text.as_bytes().to_vec();
+    let text = unspace(text);
+    let mut bytes = text.into_bytes();
     let mut out = Vec::new();
     for (kind, scan) in [
         (Kind::Link, links as fn(&mut [u8]) -> Vec<String>),
@@ -560,6 +584,26 @@ mod tests {
         let many: String = (0..20).map(|i| format!("u{i}@site.com ")).collect();
         assert_eq!(find(&many).len(), MAX);
         assert!(find("").is_empty() && find("   \n").is_empty());
+    }
+
+    /// Windows OCR reads a link as separate words; the chip still finds it.
+    #[test]
+    fn a_link_or_address_split_by_ocr_is_found_whole() {
+        let found = find(
+            "Track it at https : //shop. example/ track/4412 today. Questions? help @shop. example now",
+        );
+        let texts: Vec<_> = found.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            ["https://shop.example/track/4412", "help@shop.example"]
+        );
+        // sentences next to a link are not glued to it
+        assert_eq!(
+            unspace("end. Next one. See www. site.com/x for more"),
+            "end. Next one. See www.site.com/x for more"
+        );
+        assert!(find("one. two three. four").is_empty());
+        assert_eq!(unspace("Note: Questions? a / b"), "Note: Questions? a / b");
     }
 
     #[test]
