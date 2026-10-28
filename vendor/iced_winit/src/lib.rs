@@ -924,8 +924,14 @@ async fn run_instance<P>(
                                         continue;
                                     }
 
-                                    window.stale = true; // OpenCircle patch
-                                    window.raw.request_redraw();
+                                    // OpenCircle patch: drawn right after
+                                    // this one (`stale`); a WM_PAINT asked
+                                    // for too drew it twice, the second a
+                                    // whole-window copy with nothing new
+                                    window.stale = true;
+                                    if window.raw.is_visible() == Some(false) {
+                                        window.raw.request_redraw();
+                                    }
                                 }
 
                                 let Some(next_compositor) = compositor.as_mut()
@@ -1280,11 +1286,16 @@ async fn run_instance<P>(
                             }
 
                             for (_id, window) in window_manager.iter_mut() {
-                                window.raw.request_redraw();
                                 // OpenCircle patch: drawn now, not on a
-                                // WM_PAINT that waits for the input to stop
+                                // WM_PAINT that waits for the input to stop;
+                                // and only now: a WM_PAINT asked for as well
+                                // drew it again with nothing new, a copy of
+                                // the whole window each time (a box across
+                                // two screens: 2-3 ms a move on the VM)
                                 if window.raw.is_visible() != Some(false) {
                                     redraws.push(window.raw.id());
+                                } else {
+                                    window.raw.request_redraw();
                                 }
                             }
                         }

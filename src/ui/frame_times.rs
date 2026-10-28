@@ -1278,6 +1278,42 @@ fn a_box_resized_across_screens_redraws_only_its_moving_edges() {
     assert!(t.last().unwrap().rgba == fresh[0].rgba, "as drawn afresh");
 }
 
+/// A box resized by a corner redraws round its edges, never its middle (VM,
+/// a box across two screens resized on one: the starting screen's frames p95
+/// 23-31 ms against 25, as its four brackets were one path and every frame
+/// redrew the whole box, 46 % of the screen).
+#[test]
+fn a_resized_box_redraws_its_edges_not_its_middle() {
+    let mut app = open_app(1280, 720, 1.0);
+    settle_bar(&mut app);
+    let (a, b) = (Point::new(100.0, 150.0), Point::new(1100.0, 600.0));
+    drag(&mut app, a, b, false);
+    settle_bar(&mut app);
+    app.o.morph = None;
+    let r = app
+        .o
+        .view
+        .rect_to_screen(app.o.selection.expect("a box").area);
+    let middle = r.center();
+    let t = frames(&mut app, 12, false, |app, i, _| {
+        let at = crate::ui::overlay::corner(r, 2) + Vector::new(-4.0, 3.0) * i as f32;
+        let e = match i {
+            0 => crate::ui::overlay::Event::Press { at, shift: false },
+            _ => crate::ui::overlay::Event::Move(at),
+        };
+        let _ = app.on_overlay(e);
+    });
+    let now = app
+        .o
+        .view
+        .rect_to_screen(app.o.selection.expect("a box").area);
+    assert!(now != r, "resized: {r:?} -> {now:?}");
+    for (i, d) in t.iter().enumerate() {
+        let hit = d.damage.iter().find(|d| d.contains(middle));
+        assert!(hit.is_none(), "frame {i} redrew the middle: {hit:?}");
+    }
+}
+
 /// The AI chat card dragged in the overlay by its header (picked up), at the
 /// VM's screen and a 4K one at 250 % (run in release:
 /// `cargo test --release chat_drag_frame_times -- --ignored --nocapture`).
@@ -1316,6 +1352,14 @@ fn other_windows_draw_with_the_one_that_draws() {
     let shell = include_str!("../../vendor/iced_winit/src/lib.rs");
     assert!(shell.contains("redraws.push(other.raw.id())"));
     assert!(shell.contains("if let Some(window_id) = redraws.pop()"));
+    // ... and only then: a WM_PAINT asked for as well drew each window a
+    // second time with nothing new, a whole-window copy (VM: 35 of 61 draws
+    // of the other screen in a resize)
+    assert!(
+        shell
+            .contains("} else {\n                                    window.raw.request_redraw();")
+    );
+    assert!(shell.contains("if window.raw.is_visible() == Some(false) {\n                                        window.raw.request_redraw();"));
     let cargo = include_str!("../../Cargo.toml");
     assert!(cargo.contains("iced_winit = { path = \"vendor/iced_winit\" }"));
 }

@@ -279,12 +279,12 @@ impl Layer {
             // a cached canvas's too (upstream: the whole canvas, so any change
             // to the overlay's full-window canvas redrew the window)
             |item| match item {
-                Item::Live(primitive) => vec![drawn_primitive(primitive)],
+                Item::Live(primitive) => drawn_primitive(primitive),
                 Item::Group(_, group_bounds, transformation)
                 | Item::Cached(_, group_bounds, transformation) => item
                     .as_slice()
                     .iter()
-                    .map(drawn_primitive)
+                    .flat_map(drawn_primitive)
                     .map(|bounds| bounds * *transformation)
                     .filter_map(|bounds| bounds.intersection(group_bounds))
                     .collect(),
@@ -324,15 +324,68 @@ impl Layer {
 
 /// OpenCircle patch (#89): where `primitive` draws: its path's bounds, a
 /// pixel more for anti-aliasing, and a stroke's reach past its path (half
-/// its width, a mitred corner up to its miter limit times that).
-fn drawn_primitive(primitive: &Primitive) -> Rectangle {
-    let reach = match primitive {
-        Primitive::Fill { .. } => 0.0,
-        Primitive::Stroke { stroke, .. } => {
-            stroke.width / 2.0 * stroke.miter_limit.max(1.0)
+/// its width, a mitred corner up to its miter limit times that). A stroke
+/// draws only along its path: the bounds of its runs of segments
+/// (`stroke_runs`), not of all of it (a selection box's outline covered the
+/// whole box, so any change to it redrew the box's inside too).
+fn drawn_primitive(primitive: &Primitive) -> Vec<Rectangle> {
+    match primitive {
+        Primitive::Fill { .. } => vec![primitive.visible_bounds().expand(1.0)],
+        Primitive::Stroke { path, stroke, .. } => {
+            let reach = stroke.width / 2.0 * stroke.miter_limit.max(1.0);
+            stroke_runs(path)
+                .into_iter()
+                .map(|run| run.expand(reach + 1.0))
+                .collect()
         }
+    }
+}
+
+/// The bounds of `path`'s segments (a curve's control points included, which
+/// bound it), runs of them in path order as one while that wastes at most
+/// `damage::group`'s area: a box's sides apart, a curve's neighbours as one.
+fn stroke_runs(path: &tiny_skia::Path) -> Vec<Rectangle> {
+    use tiny_skia::PathSegment;
+    const WASTE: f32 = 20_000.0;
+    let bounds = |points: &[tiny_skia::Point]| {
+        let (mut x0, mut y0) = (f32::INFINITY, f32::INFINITY);
+        let (mut x1, mut y1) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for p in points {
+            (x0, y0) = (x0.min(p.x), y0.min(p.y));
+            (x1, y1) = (x1.max(p.x), y1.max(p.y));
+        }
+        Rectangle::new(Point::new(x0, y0), core::Size::new(x1 - x0, y1 - y0))
     };
-    primitive.visible_bounds().expand(reach + 1.0)
+    let mut runs: Vec<Rectangle> = Vec::new();
+    let mut start = tiny_skia::Point::zero();
+    let mut at = start;
+    for segment in path.segments() {
+        let seg = match segment {
+            PathSegment::MoveTo(p) => {
+                start = p;
+                bounds(&[p]) // a lone point still draws its caps
+            }
+            PathSegment::LineTo(p) => bounds(&[at, p]),
+            PathSegment::QuadTo(c, p) => bounds(&[at, c, p]),
+            PathSegment::CubicTo(c, d, p) => bounds(&[at, c, d, p]),
+            PathSegment::Close => bounds(&[at, start]),
+        };
+        at = match segment {
+            PathSegment::MoveTo(p)
+            | PathSegment::LineTo(p)
+            | PathSegment::QuadTo(_, p)
+            | PathSegment::CubicTo(_, _, p) => p,
+            PathSegment::Close => start,
+        };
+        let union = runs.last().map(|run| (run.union(&seg), run.area()));
+        match union {
+            Some((union, run)) if union.area() - run - seg.area() <= WASTE => {
+                *runs.last_mut().expect("a run") = union;
+            }
+            _ => runs.push(seg),
+        }
+    }
+    runs
 }
 
 /// OpenCircle patch (#89): `a` and `b` are the same picture drawn the same
