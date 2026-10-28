@@ -1,10 +1,12 @@
 //! Search in browser: the crop in Google Lens in the user's own browser (see
-//! `crate::lens`; a text selection searches its text instead: `ui::App::run`).
+//! `page`; a text selection searches its text instead: `ui::App::run`).
+pub mod page;
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::{Action, Crop, Key, Panel, Run};
-use crate::lens::LensPage;
+use page::LensPage;
 
 pub const ACTION: Action = Action {
     id: "lens",
@@ -42,7 +44,7 @@ pub fn lens_png(crop: &Crop) -> Result<Vec<u8>, String> {
 /// Blocking (PNG encode, file write, process spawn): call off the UI thread.
 pub fn open(crop: &Crop) -> Result<Held, String> {
     let png = lens_png(crop)?;
-    let page = crate::lens::open(&png, crop.width, crop.height).map_err(|e| {
+    let page = page::open(&png, crop.width, crop.height).map_err(|e| {
         crate::log!("[lens] browser not opened: {e}");
         "Couldn't open your browser. Check that a default browser is set, then try again."
             .to_string()
@@ -67,7 +69,7 @@ impl Held {
     #[cfg(test)]
     pub fn for_test() -> Held {
         Held {
-            _page: Arc::new(crate::lens::LensPage::none()),
+            _page: Arc::new(LensPage::none()),
             opened: Instant::now(),
         }
     }

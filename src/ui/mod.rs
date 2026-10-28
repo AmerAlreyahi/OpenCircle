@@ -40,7 +40,7 @@ use screens::update_card;
 
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     app::background::set_triggers(triggers);
-    crate::lens::sweep_stale(); // pages left by a crash
+    crate::actions::lens::page::sweep_stale(); // pages left by a crash
     let logo = widgets::chrome::logo();
     platform::windows::set_icon(logo.rgba.clone(), logo.width, logo.height);
     let mut app = iced::daemon(App::boot, App::update, App::view);

@@ -13,7 +13,6 @@ mod editor;
 mod history;
 mod hotkey;
 mod labs;
-mod lens;
 mod live;
 mod log;
 mod mt;
