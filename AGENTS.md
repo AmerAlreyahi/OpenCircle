@@ -186,13 +186,25 @@ production systems.
   a follow-up pins the chat (outside clicks no longer close it; it stays docked above other apps after the
   overlay closes; a new capture asks into the SAME chat with its crop). A header pin button pins by hand
   and, when pinned, unpins and closes (the only exit; no x). Settings > AI "AI chat stays open":
-  After a follow-up (default) | Always. Designed by Codex first; owner approves the screenshots.
+  After a follow-up (default) | Always. Design approved by the owner 2026-10-28 (.claude/artifacts/design/
+  newdesing/pinned-chat-demo.html), plus: one-line composer, Shift/Ctrl+Enter = new line, "Thought for" only
+  when the model reasons, drawer = "AI chat stays open" + provider/model picker, a warning for safety-classifier
+  models; History = this session only, never on disk (lead default; owner may choose saved history later).
 - Smooth on the CPU (owner, 2026-10-28): the GPU renderer stays in 0.1.3. 0.1.2 must feel smooth on the
   CPU renderer, also on weak laptops and 4K/120 Hz screens: Settings pages switch instantly (the page rise
   returns with the GPU), scrolling copies the already-drawn pixels and redraws only the newly shown strip.
   In 0.1.3 the original motion returns, and a Power saver setting (Settings > General: Auto | On | Off;
   Auto = on while Windows battery saver is on) brings back this light behaviour (instant pages, scroll by
   copy, minimal motion). In 0.1.2 the light behaviour is the default for everyone.
+- AI provider wording (owner, 2026-10-28): Settings > AI shows "Browser" | "AI provider" and then one
+  Provider dropdown of real service names (OpenRouter, OpenAI, Anthropic, Gemini, Groq, Mistral, DeepSeek,
+  xAI, Ollama, LM Studio, Custom server); never "OpenAI-like"/"OpenAI-compatible"/protocol names in the UI
+  (misleading); the API protocol is chosen per provider internally; only Custom server shows a URL.
+  A saved key shows masked: dots only (owner chose no last 4, 2026-10-28), e.g. ••••••••••••; no reveal
+  button; the full key never appears on screen, in logs or diagnostics.
+- Settings harmony (owner, 2026-10-28): on every page all controls share one column (same left edge, same
+  width), every row has the same box height/padding, controls centred vertically; enforced by the kit
+  setting_row and a test.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.
