@@ -818,6 +818,9 @@ fn a_replayed_preview_leaves_no_ghost_of_its_last_frame() {
         },
         still,
     );
+    // the preview's clock is the wall clock: replayed again, the fresh draw
+    // shows the same step (a busy test run took over 1 s between the two
+    // draws: the caption had moved on to the next step)
     let fresh = drawn(
         &mut s,
         size,
@@ -825,7 +828,11 @@ fn a_replayed_preview_leaves_no_ghost_of_its_last_frame() {
         settings_view,
         1,
         true,
-        |_, _, _| {},
+        |s, i, _| {
+            if i == 0 {
+                let _ = settings::update(s, M::Replay);
+            }
+        },
         still,
     );
     let (a, b) = (&drawn_on[0].rgba, &fresh[0].rgba);
