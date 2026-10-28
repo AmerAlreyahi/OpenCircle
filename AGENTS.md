@@ -211,7 +211,7 @@ production systems.
   freed when Settings closes; still frame with reduced motion. The OWNER makes the clips (2026-10-28); until then
   a quiet placeholder ("Preview") replaces the drawn previews. Files: assets/previews/<feature>.webp (circle, text,
   translate, ai, snip, live, song), bundled at build (a missing file = the placeholder); never loaded from the
-  internet (privacy, offline). Lead proposal pending owner OK: 1200x680 (2x the stage), 15-20 fps, ~1 MB each.
+  internet (privacy, offline). Clip spec approved by the owner: 1200x680 (2x the stage), 15-20 fps, ~1 MB each (~+7 MB).
   The Settings speed fixes (instant pages, scroll, preview redraw) are owner-approved.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
