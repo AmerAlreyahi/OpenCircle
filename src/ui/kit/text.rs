@@ -188,7 +188,9 @@ mod tests {
                 assert!(!glyphs.is_empty());
                 for id in glyphs {
                     let name = fs.db().face(id).unwrap().families[0].0.clone();
-                    if name != super::ARABIC {
+                    // Windows' Segoe UI has its own shaped Arabic; the bug was a
+                    // fallback without Arabic shaping (DejaVu on Linux).
+                    if name != super::ARABIC && name != "Segoe UI" {
                         wrong.push(format!("{family} at {weight}: {name}"));
                     }
                 }
