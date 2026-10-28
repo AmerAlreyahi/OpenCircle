@@ -15,6 +15,8 @@ const GAP: f32 = 16.0;
 const TEXT_PAD: f32 = 8.0;
 /// A wide row's gap between the text and the control under it (`gap-y-2.5`).
 const WIDE_GAP: f32 = 10.0;
+/// A block's gap between the text and its cards (`space-y-2`).
+const BLOCK_GAP: f32 = 8.0;
 
 /// A row's title: `ROW_TITLE` text.
 pub fn title<'a, Message: 'a>(s: &'a str) -> Element<'a, Message> {
@@ -52,6 +54,19 @@ pub fn row<'a, Message: 'a>(
         iced::widget::row![text, control.into()]
             .spacing(GAP)
             .align_y(iced::Center),
+        space::ROW_Y,
+    )
+}
+
+/// A block of cards (`py-2.5 space-y-2`): the text, then `content` across
+/// the row under it.
+pub fn block<'a, Message: 'a>(
+    title: Element<'a, Message>,
+    desc: &'a str,
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    ruled(
+        column![text_block(title, desc), content.into()].spacing(BLOCK_GAP),
         space::ROW_Y,
     )
 }

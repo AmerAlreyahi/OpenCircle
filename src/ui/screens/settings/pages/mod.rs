@@ -8,8 +8,13 @@ use super::state::{Message, Section, State};
 use crate::labs::{Feature, Labs};
 
 pub mod about;
+mod appearance;
 mod general;
 mod labs;
+mod look;
+
+#[cfg(test)]
+pub use look::picks as look_picks;
 
 pub struct Page {
     pub id: Section,
@@ -42,8 +47,8 @@ const fn page(
 /// In the design's order.
 pub const PAGES: [Page; 10] = [
     page(Section::General, "General", general::view),
-    page(Section::Appearance, "Appearance", legacy::rows),
-    page(Section::Look, "Look & behaviour", legacy::rows),
+    page(Section::Appearance, "Appearance", appearance::view),
+    page(Section::Look, "Look & behaviour", look::view),
     page(Section::Ai, "AI", legacy::rows),
     page(Section::Translate, "Translate", legacy::rows),
     page(Section::Shortcuts, "Shortcuts", legacy::rows),

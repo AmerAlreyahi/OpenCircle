@@ -1,15 +1,14 @@
 //! Today's Settings pages, drawn by the old form widgets inside the new shell
-//! (ported to the kit page by page, the UI plan's steps 32-33).
+//! (ported to the kit page by page, the UI plan's step 33), and the custom
+//! look's rows (Look & behaviour, until the kit has a slider and a picker).
 
-use iced::widget::image::Handle;
+use iced::widget::column;
 use iced::widget::tooltip::Position;
-use iced::widget::{column, row};
 use iced::{Color, Element};
 
 use crate::config::{
-    After, BarStyle, BracketColour, BracketStyle, ColourSet, EdgeMode, EdgeStyle, Engine, Format,
-    Look, LookTheme, Provider, SearchWith, SelectStyle, SnipAfter, SnipConfig, SongSource,
-    TextReader, Theme, WidgetTheme,
+    BracketColour, BracketStyle, ColourSet, EdgeMode, EdgeStyle, Engine, Format, Provider,
+    SnipAfter, SnipConfig, SongSource, TextReader,
 };
 use crate::labs::{Feature, Labs};
 use crate::mt;
@@ -19,8 +18,7 @@ use crate::translate::lang::{self, LANGUAGES};
 use crate::ui::theme;
 use crate::ui::widgets::{
     self, FORM_WIDTH, FieldState, button_row, caption, colour_swatch, divider, error_text,
-    form_button, form_row, look_tile, segmented, shortcut_field, slider, text_field, tip,
-    value_field,
+    form_button, form_row, segmented, shortcut_field, slider, text_field, tip, value_field,
 };
 
 use super::*;
@@ -81,43 +79,9 @@ pub(super) fn rows(state: &State) -> Element<'_, Message> {
     let d = &state.draft;
     // (the page's name: `pages::PAGES` gives the title)
     let (_, rows): (&str, Vec<Element<'_, Message>>) = match state.section {
-        Section::General | Section::About | Section::Labs => {
+        Section::General | Section::About | Section::Labs | Section::Appearance | Section::Look => {
             unreachable!("ported: settings/pages")
         }
-        Section::Look => ("Look & behaviour", look_rows(state)),
-        Section::Appearance => (
-            "Appearance",
-            vec![
-                form_row(
-                    "Theme",
-                    "System follows your OS",
-                    segmented(
-                        &[
-                            (Theme::System, "System", "Follow the system theme"),
-                            (Theme::Light, "Light", "Use the light theme"),
-                            (Theme::Dark, "Dark", "Use the dark theme"),
-                        ],
-                        d.theme,
-                        Message::Theme,
-                    ),
-                    None,
-                ),
-                form_row(
-                    "Floating widgets",
-                    "The bar, cards and toolbar",
-                    segmented(
-                        &[
-                            (WidgetTheme::Default, "Default", "Follow the app theme"),
-                            (WidgetTheme::Frost, "Frost", "A pale, solid look"),
-                            (WidgetTheme::Graphite, "Graphite", "Calm dark graphite"),
-                        ],
-                        d.widget_theme,
-                        Message::WidgetTheme,
-                    ),
-                    None,
-                ),
-            ],
-        ),
         Section::Shortcuts => ("Shortcuts", shortcut_rows(state)),
         Section::Snip => ("Snip", snip_rows(&state.draft.snip)),
         Section::Ai => ("AI", ai_rows(state)),
@@ -254,117 +218,6 @@ pub(super) fn edge_modes(labs: &Labs) -> Vec<(EdgeMode, &'static str, &'static s
     modes
 }
 
-pub(super) fn look_rows(state: &State) -> Vec<Element<'_, Message>> {
-    let sel = state.draft.selection;
-    let look = &state.draft.look;
-    let mut rows = vec![
-        form_row(
-            "Selection",
-            "Snap: a rounded box with corners to drag",
-            segmented(
-                &[
-                    (
-                        SelectStyle::Snap,
-                        "Snap to box",
-                        "Selections snap to a rounded box",
-                    ),
-                    (
-                        SelectStyle::Shape,
-                        "As drawn",
-                        "Selections keep the drawn shape",
-                    ),
-                ],
-                sel.style,
-                Message::SelectStyle,
-            ),
-            None,
-        ),
-        form_row(
-            "Auto action",
-            match sel.after {
-                After::Wait => "Nothing is sent until you pick an action",
-                After::Search => "Sends each selection at once, as Search with says",
-            },
-            segmented(
-                &[
-                    (After::Wait, "Wait for me", "Wait until you pick an action"),
-                    (
-                        After::Search,
-                        "Run at once",
-                        "Run Search with as soon as you select",
-                    ),
-                ],
-                sel.after,
-                Message::After,
-            ),
-            None,
-        ),
-        form_row(
-            "Search with",
-            "What searching a selection opens",
-            segmented(
-                &[
-                    (
-                        SearchWith::Lens,
-                        "Lens",
-                        "Search with Google Lens in your browser",
-                    ),
-                    (SearchWith::Ai, "Ask AI", "Ask the AI about the selection"),
-                    (SearchWith::Both, "Both", "Open Lens and ask the AI"),
-                ],
-                sel.search_with,
-                Message::SearchWith,
-            ),
-            None,
-        ),
-    ];
-    rows.extend(text_reader_row(state));
-    // The looks, as a grid of previews (4 per row).
-    let tiles: Vec<Element<'_, Message>> = (LOOKS.iter().zip(&state.previews))
-        .map(|(&(theme, label, hint), preview)| {
-            let tile = look_tile(
-                preview.clone(),
-                label,
-                look.theme == theme,
-                Message::Look(theme),
-            );
-            tip(tile, hint, Position::Top)
-        })
-        .collect();
-    let mut grid = column![].spacing(8);
-    let mut tiles = tiles.into_iter();
-    loop {
-        let line: Vec<_> = tiles.by_ref().take(4).collect();
-        if line.is_empty() {
-            break;
-        }
-        grid = grid.push(row(line).spacing(8));
-    }
-    let hint = match look.theme {
-        LookTheme::Custom => "Your own look: change it below",
-        _ => "How the screen looks while OpenCircle is open. Custom changes every part",
-    };
-    rows.push(
-        column![
-            column![
-                iced::widget::text("Active look")
-                    .size(14)
-                    .color(theme::current().text),
-                caption(hint)
-            ]
-            .spacing(2),
-            grid
-        ]
-        .spacing(12)
-        .padding([12, 0])
-        .into(),
-    );
-    if look.theme == LookTheme::Custom {
-        rows.extend(custom_rows(state));
-    }
-    rows
-}
-
 /// Windows' language settings (never installs anything itself).
 pub(super) fn open_language_settings() {
     #[cfg(windows)]
@@ -400,49 +253,6 @@ impl State {
             names.join(", ")
         ))
     }
-}
-
-/// Who reads the screen's text. Windows only: elsewhere there is one reader.
-pub(super) fn text_reader_row(state: &State) -> Option<Element<'_, Message>> {
-    if !cfg!(windows) {
-        return None;
-    }
-    let mut control = column![segmented(
-        &[
-            (
-                TextReader::Auto,
-                "Auto",
-                "Windows OCR when it has your language, else the downloaded reader",
-            ),
-            (
-                TextReader::Windows,
-                "Windows",
-                "Read with Windows' own text recognition",
-            ),
-            (
-                TextReader::PpOcr,
-                "Downloaded",
-                "Always read with the downloaded text reader",
-            ),
-        ],
-        state.draft.selection.text_reader,
-        Message::TextReader,
-    )]
-    .spacing(8);
-    if let Some(note) = state.reader_note() {
-        control = control.push(caption(note)).push(button_row([form_button(
-            "Add in Windows",
-            false,
-            Some(Message::OpenLanguageSettings),
-        )
-        .into()]));
-    }
-    Some(form_row(
-        "Text reader",
-        "Who reads the screen's text, so you can select it",
-        control,
-        None,
-    ))
 }
 
 /// The custom look's controls.
@@ -596,71 +406,6 @@ pub(super) fn custom_rows(state: &State) -> Vec<Element<'_, Message>> {
         ),
     ]);
     rows
-}
-
-/// A small picture of `look` over a sample screen: the dim, a snapped box
-/// with its corners, the screen edge and a pill in the bar style.
-pub(super) fn preview(look: &Look) -> Handle {
-    let (w, h) = (
-        widgets::TILE.width as u32 * 2,
-        widgets::TILE.height as u32 * 2,
-    );
-    // a sample screen: a dark page with lines of "text" (ours, made up)
-    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
-    for y in 0..h {
-        for x in 0..w {
-            let line = (y % 22) < 6 && y > 20 && x > 30 && x < w - 30 - (y * 7 % 60);
-            let c = if line { [120, 128, 150] } else { [34, 38, 52] };
-            rgba.extend([c[0], c[1], c[2], 255]);
-        }
-    }
-    // dim outside a snapped box, its corners (or frame) 3 px outside it
-    let (_, outside) = theme::dims(look);
-    let corner = theme::bracket(look).into_rgba8();
-    let (bx, by) = (80..160u32, 40..96u32);
-    let frame = look.bracket_style == BracketStyle::Frame;
-    for y in 0..h {
-        for x in 0..w {
-            let i = ((y * w + x) * 4) as usize;
-            if bx.contains(&x) && by.contains(&y) {
-                continue;
-            }
-            let ring = (77..163).contains(&x) && (37..99).contains(&y);
-            let near_corner = !(94..=145).contains(&x) && !(52..=83).contains(&y);
-            if ring && (frame || near_corner) {
-                rgba[i..i + 4].copy_from_slice(&corner);
-            } else {
-                for c in &mut rgba[i..i + 3] {
-                    *c = (f32::from(*c) * (1.0 - outside.a)) as u8;
-                }
-            }
-        }
-    }
-    crate::ui::border::paint(&mut rgba, w, h, 0.3, look, EdgeMode::Overlay);
-    // a pill in the bar style at the bottom
-    let (start, _) = theme::accent_of(look);
-    let fill = match look.bar {
-        BarStyle::GlassLight => Color::from_rgb8(0xf2, 0xf2, 0xf6),
-        BarStyle::Outline => Color::from_rgb8(0x22, 0x24, 0x30),
-        _ => Color::from_rgb8(0x1c, 0x1d, 0x2a),
-    }
-    .into_rgba8();
-    let edge = start.into_rgba8();
-    let (px0, px1, py0, py1) = (w / 2 - 40, w / 2 + 40, h - 26, h - 12);
-    for y in py0..py1 {
-        for x in px0..px1 {
-            let border = x == px0 || x == px1 - 1 || y == py0 || y == py1 - 1;
-            let i = ((y * w + x) * 4) as usize;
-            let button = x > px0 + 6 && x < px0 + 30 && y > py0 + 4 && y < py1 - 4;
-            let c = if (border && look.bar == BarStyle::Outline) || button {
-                edge // the outline, and the accent button
-            } else {
-                fill
-            };
-            rgba[i..i + 4].copy_from_slice(&c);
-        }
-    }
-    Handle::from_rgba(w, h, rgba)
 }
 
 /// Snip: what a capture does, the size and file it is copied and saved as,

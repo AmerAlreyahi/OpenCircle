@@ -19,13 +19,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
-use iced::widget::image::Handle;
 use iced::{Color, Size, Subscription, event, keyboard};
 
 use crate::config::{
     self, After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
-    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
-    SnipConfig, SongSource, Target, TextReader, Theme, WidgetTheme, parse_shortcut,
+    EdgeStyle, Engine, Logo, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
+    SnipConfig, SongSource, Target, TextReader, Theme, parse_shortcut,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::labs::Feature;
@@ -34,10 +33,11 @@ use crate::secrets::{KeyStore, Keyring, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES, Language};
 use crate::ui::kit::header::Caption;
 use crate::ui::kit::motion::{self, Curve};
+use crate::ui::kit::themes::THEMES;
 use crate::ui::kit::tokens::{size, space};
 use crate::ui::theme;
 
-use super::legacy::{open_language_settings, preview};
+use super::legacy::open_language_settings;
 use super::pages::{self, PAGES};
 
 /// The size the Settings window prefers (logical px), the design's 820 x 560.
@@ -577,12 +577,10 @@ pub struct State {
     /// The desktop's own say on a running key (`hotkey::desktop_key`; tests swap it).
     pub(super) desktop: fn(&str) -> Option<DesktopKey>,
     /// Look & behaviour: whose screen edge the custom look edits, which of its
-    /// two colours has the picker open (and the hex typed there), and the
-    /// preview of each look (presets, then custom).
+    /// two colours has the picker open (and the hex typed there).
     pub(super) edge_mode: EdgeMode,
     pub(super) picker: Option<usize>,
     pub(super) hex: String,
-    pub(super) previews: Vec<Handle>,
     /// The last Check now's result (`None` = not checked in this window).
     pub(super) update_status: Option<String>,
     /// Windows OCR's recognizers and the Windows display language, asked when
@@ -621,6 +619,12 @@ pub enum Pick {
     History(bool),
     Update(bool),
     Lab(Feature, bool),
+    Mode(Theme),
+    Logo(Logo),
+    Select(SelectStyle),
+    After(After),
+    SearchWith(SearchWith),
+    Reader(TextReader),
 }
 
 /// How long the footer pill says "Saved" after a change (the design's 1.8 s).
@@ -655,8 +659,11 @@ pub enum Message {
     /// About: put the diagnostics on the clipboard / open the pre-filled issue.
     CopyDiagnostics,
     ReportProblem,
+    /// The OS mode: System / Light / Dark.
     Theme(Theme),
-    WidgetTheme(WidgetTheme),
+    /// A theme card (a `kit::themes` id): its mode's pick, shown at once.
+    ThemeCard(&'static str),
+    Logo(Logo),
     Record(Slot),
     Key(Chord),
     Provider(Provider),
@@ -761,42 +768,6 @@ pub(super) const BARS: [BarChoice; 5] = [
     BarChoice(BarStyle::GlassLight),
     BarChoice(BarStyle::Solid),
     BarChoice(BarStyle::Outline),
-];
-
-/// The looks in the grid: the presets, then Custom.
-pub(super) const LOOKS: [(LookTheme, &str, &str); 8] = [
-    (
-        LookTheme::Spectrum,
-        "Spectrum",
-        "Spectrum look: soft glow in many colours",
-    ),
-    (
-        LookTheme::Aurora,
-        "Aurora",
-        "Aurora look: thin violet to cyan line",
-    ),
-    (
-        LookTheme::Sunset,
-        "Sunset",
-        "Sunset look: orange to pink glow",
-    ),
-    (LookTheme::Ocean, "Ocean", "Ocean look: teal to blue glow"),
-    (
-        LookTheme::Neon,
-        "Neon",
-        "Neon look: strong cyan and pink glow",
-    ),
-    (
-        LookTheme::Mono,
-        "Mono",
-        "Mono look: white and grey, minimal",
-    ),
-    (
-        LookTheme::Calm,
-        "Calm",
-        "Calm look: no glow, thin line, light dim",
-    ),
-    (LookTheme::Custom, "Custom", "Custom look: your own choices"),
 ];
 
 // One short-lived value per message: a boxed Config would buy nothing.
@@ -937,7 +908,6 @@ impl State {
             edge_mode: EdgeMode::Overlay,
             picker: None,
             hex: String::new(),
-            previews: Vec::new(),
             update_status: None,
             recognizers,
             profile,
@@ -951,7 +921,6 @@ impl State {
             moved: None,
             picked: None,
         };
-        s.previews = LOOKS.iter().map(|(t, ..)| preview(&s.look(*t))).collect();
         s.revalidate();
         s
     }
@@ -975,14 +944,6 @@ impl State {
     /// The footer's question was answered with Save (done) or Discard.
     pub fn leaving(&self) -> bool {
         self.leaving
-    }
-
-    /// The custom look changed: its preview again.
-    pub(super) fn refresh_custom(&mut self) {
-        let custom = self.look(LookTheme::Custom);
-        if let Some(last) = self.previews.last_mut() {
-            *last = preview(&custom);
-        }
     }
 
     pub(super) fn revalidate(&mut self) {
@@ -1161,6 +1122,12 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::SearchHistory(_) => Some(Pick::History(state.draft.general.search_history)),
         Message::AutoUpdate(_) => Some(Pick::Update(state.draft.update.auto == Some(true))),
         Message::Labs(f, _) => Some(Pick::Lab(*f, state.draft.labs.has(*f))),
+        Message::Theme(_) | Message::ThemeCard(_) => Some(Pick::Mode(state.draft.theme)),
+        Message::Logo(_) => Some(Pick::Logo(state.draft.appearance.logo)),
+        Message::SelectStyle(_) => Some(Pick::Select(state.draft.selection.style)),
+        Message::After(_) => Some(Pick::After(state.draft.selection.after)),
+        Message::SearchWith(_) => Some(Pick::SearchWith(state.draft.selection.search_with)),
+        Message::TextReader(_) => Some(Pick::Reader(state.draft.selection.text_reader)),
         _ => None,
     };
     if let Some(p) = picked {
@@ -1199,9 +1166,10 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Labs(feature, on) => return set_lab(state, feature, on),
         Message::Theme(t) => {
             state.draft.theme = t;
-            theme::apply(t);
+            theme::preview(t, &state.draft.appearance);
         }
-        Message::WidgetTheme(t) => state.draft.widget_theme = t,
+        Message::ThemeCard(id) => pick_theme(state, id),
+        Message::Logo(logo) => state.draft.appearance.logo = logo,
         Message::Record(slot) => {
             state.recording = (state.recording != Some(slot)).then_some(slot);
             state.shortcut_error = None;
@@ -1284,7 +1252,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             }
             look.theme = t;
             state.picker = None;
-            state.refresh_custom();
         }
         Message::EdgeMode(m) => state.edge_mode = m,
         Message::Picker(i) => {
@@ -1294,7 +1261,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Hex(hex) => {
             if let (Some(i), Some(c)) = (state.picker, Rgb::parse(&hex)) {
                 state.draft.look.custom.colours[i] = c;
-                state.refresh_custom();
             }
             state.hex = hex;
         }
@@ -1303,7 +1269,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 let [r, g, b, _] = c.into_rgba8();
                 state.draft.look.custom.colours[i] = Rgb([r, g, b]);
                 state.hex = Rgb([r, g, b]).hex();
-                state.refresh_custom();
             }
         }
         Message::Palette(_)
@@ -1325,7 +1290,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 Message::EdgeStyle(v) => state.draft.look.edge_mut(mode).style = v,
                 _ => {}
             }
-            state.refresh_custom();
         }
         Message::Snip(snip) => state.draft.snip = snip,
         Message::BrowseFolder => return Outcome::Browse,
@@ -1377,6 +1341,28 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
     }
     state.revalidate();
     Outcome::None
+}
+
+/// A theme card: the pick of its mode (dark or light). When the other mode
+/// is showing, the OS mode switches to the card's, so the pick shows at once.
+fn pick_theme(state: &mut State, id: &str) {
+    let Some(t) = THEMES.into_iter().find(|t| t.id == id) else {
+        return;
+    };
+    let d = &mut state.draft;
+    match t.light {
+        true => d.appearance.light = t.id.into(),
+        false => d.appearance.dark = t.id.into(),
+    }
+    let light_now = match d.theme {
+        Theme::Light => true,
+        Theme::Dark => false,
+        Theme::System => !theme::os_dark(),
+    };
+    if light_now != t.light {
+        d.theme = if t.light { Theme::Light } else { Theme::Dark };
+    }
+    theme::preview(d.theme, &d.appearance);
 }
 
 /// A Labs switch writes at once, and only itself: the saved config with this one

@@ -1466,49 +1466,6 @@ mod forms {
         .into()
     }
 
-    /// One choice in a grid of looks: its preview image over its name; the
-    /// chosen one is outlined in the accent. Every tile is `TILE` wide.
-    pub fn look_tile<'a, Message: Clone + 'a>(
-        preview: iced::widget::image::Handle,
-        label: &'a str,
-        selected: bool,
-        on_press: Message,
-    ) -> Button<'a, Message> {
-        let picture = iced::widget::image(preview)
-            .width(TILE.width)
-            .height(TILE.height)
-            .border_radius(8.0);
-        let name = text(label).size(13).color(theme::current().text);
-        button(column![picture, name].spacing(6).align_x(iced::Center))
-            .padding(4)
-            .on_press(on_press)
-            .style(move |_, status| {
-                let palette = theme::current();
-                button::Style {
-                    background: match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(palette.field_focus.into())
-                        }
-                        _ => None,
-                    },
-                    text_color: palette.text,
-                    border: Border {
-                        color: if selected {
-                            theme::accent().0
-                        } else {
-                            Color::TRANSPARENT
-                        },
-                        width: 2.0,
-                        radius: 12.0.into(),
-                    },
-                    ..button::Style::default()
-                }
-            })
-    }
-
-    /// A look tile's preview size.
-    pub const TILE: iced::Size = iced::Size::new(120.0, 68.0);
-
     /// Single-line text field. Focus (and hover) = a softer fill, never a ring.
     pub fn text_field<'a, Message: Clone + 'a>(
         placeholder: &str,

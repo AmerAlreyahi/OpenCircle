@@ -104,7 +104,8 @@ pub fn mask(rgba: &mut [u8], w: u32, h: u32, scale: f32) -> Vec<[u32; 4]> {
 }
 
 /// `mode`'s edge in `look`, laid over `rgba` (`w` x `h`, straight alpha) as if
-/// the screen were `w / scale` logical px wide: Settings' previews.
+/// the screen were `w / scale` logical px wide (the tests' pictures).
+#[cfg(test)]
 pub fn paint(rgba: &mut [u8], w: u32, h: u32, scale: f32, look: &Look, mode: Mode) {
     let Some((geo, table)) = edge(look, mode, w, h, scale, false, 0.0) else {
         return;

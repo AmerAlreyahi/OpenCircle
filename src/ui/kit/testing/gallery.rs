@@ -314,7 +314,27 @@ fn card_sheet() {
             s(ar, "Made by others", "صنعه آخرون"),
         ))
     })];
-    sheet("card", Size::new(240.0, 72.0), &rows);
+    let theme = |selected| move |_| card::theme_card(&super::super::themes::EMERALD, selected, ());
+    let look = |selected, on: Option<()>| {
+        move |ar| {
+            let l = &super::super::looks::SPECTRUM;
+            let name = s(ar, l.name, "طيف");
+            card::look_card(name, l.badge, l.desc, l.preview, selected, on)
+        }
+    };
+    let rows = rows
+        .into_iter()
+        .chain([
+            row("theme", Act::Rest, theme(false)),
+            row("theme hover", Act::Hover, theme(false)),
+            row("theme selected", Act::Rest, theme(true)),
+            row("look", Act::Rest, look(false, Some(()))),
+            row("look hover", Act::Hover, look(false, Some(()))),
+            row("look selected", Act::Rest, look(true, Some(()))),
+            row("look not offered", Act::Rest, look(false, None)),
+        ])
+        .collect::<Vec<_>>();
+    sheet("card", Size::new(260.0, 84.0), &rows);
 }
 
 #[test]

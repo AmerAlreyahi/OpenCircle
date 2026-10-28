@@ -351,8 +351,18 @@ thread_local! {
 
 /// The Light / Dark / System choice from Settings; System follows `set_os`.
 pub fn apply(theme: Theme) {
+    preview(theme, &config::appearance());
+}
+
+/// `apply` with `[appearance]` picks not saved yet (Settings shows a pick at once).
+pub fn preview(theme: Theme, picks: &config::AppearanceConfig) {
     SETTING.with(|s| s.set(theme));
-    to_kit();
+    crate::ui::kit::themes::set(kit_theme(theme, os_dark(), picks));
+}
+
+/// The OS is in dark mode (or says nothing).
+pub fn os_dark() -> bool {
+    OS_DARK.with(Cell::get)
 }
 
 /// What the OS reports (at start, then on every change). "No preference" counts as dark.
@@ -389,8 +399,6 @@ fn kit_theme(
 /// The design look a stored look shows (names and cards come from it): "aurora"
 /// is the design's Prism, "mono" its Frost, "calm" Prism's colours without the
 /// glow. `None` = the user's own (`custom`). Stored values never change.
-// ponytail: read once the edge and the Looks page draw kit looks; only tests until then.
-#[allow(dead_code)]
 pub fn kit_look(theme: config::LookTheme) -> Option<&'static crate::ui::kit::looks::Look> {
     use crate::config::LookTheme as T;
     use crate::ui::kit::looks::*;

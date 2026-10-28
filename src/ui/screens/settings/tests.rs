@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use iced::widget::image::Handle;
 use iced::{Color, Element, Length, Size};
 
 use super::legacy::*;
@@ -12,7 +11,6 @@ use super::*;
 use crate::config::{
     self, After, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
     LookTheme, Provider, Rgb, SearchWith, SelectStyle, SnipAfter, SongSource, TextReader, Theme,
-    WidgetTheme,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::labs::{Feature, Labs};
@@ -1170,8 +1168,9 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
     for want in [
         "Active look",
         "Spectrum",
-        "Neon",
-        "Calm",
+        "Cyber Neon",
+        "Liquid Prism",
+        "Stealth Frost",
         "Custom",
         "Snap to box",
     ] {
@@ -1181,17 +1180,6 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
         !texts.iter().any(|t| t == "Edge style"),
         "a preset has no custom rows"
     );
-    assert_eq!(s.previews.len(), LOOKS.len());
-    // every preset's preview differs from the others
-    for (i, a) in s.previews.iter().enumerate().take(7) {
-        for b in &s.previews[i + 1..7] {
-            assert_ne!(a.id(), b.id());
-            let (Handle::Rgba { pixels: a, .. }, Handle::Rgba { pixels: b, .. }) = (a, b) else {
-                panic!("rgba previews")
-            };
-            assert_ne!(a, b);
-        }
-    }
     update(&mut s, Message::SelectStyle(SelectStyle::Shape));
     update(&mut s, Message::After(After::Wait));
     update(&mut s, Message::SearchWith(SearchWith::Both));
@@ -1202,7 +1190,6 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
         s.draft.look.custom,
         LookTheme::Neon.look(&s.draft.look.custom)
     );
-    let before = s.previews.last().unwrap().id();
     update(&mut s, Message::Glow(55));
     update(&mut s, Message::Dim(30));
     update(&mut s, Message::EdgeMode(EdgeMode::Live));
@@ -1217,11 +1204,6 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
     update(&mut s, Message::Hex("#123456".into()));
     update(&mut s, Message::Picker(0));
     update(&mut s, Message::PickColour(Color::from_rgb8(255, 0, 0)));
-    assert_ne!(
-        s.previews.last().unwrap().id(),
-        before,
-        "the preview follows"
-    );
     let texts = shot::texts(view(&s));
     for want in [
         "Edge style",
@@ -1305,20 +1287,12 @@ fn a_missing_recognizer_gets_one_quiet_note() {
 }
 
 #[test]
-fn renders_about_in_default_and_frost() {
-    for widgets_theme in [WidgetTheme::Default, WidgetTheme::Frost] {
-        for (name, theme_choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
-            let (mut s, _) = state(None);
-            update(&mut s, Message::Theme(theme_choice));
-            update(&mut s, Message::WidgetTheme(widgets_theme));
-            update(&mut s, Message::Section(Section::About));
-            let w = format!("{widgets_theme:?}").to_lowercase();
-            shot::save(
-                &format!("about-{w}-{name}"),
-                view(&s),
-                Size::new(820.0, 1450.0),
-            );
-        }
+fn renders_about_in_both_modes() {
+    for (name, theme_choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::Theme(theme_choice));
+        update(&mut s, Message::Section(Section::About));
+        shot::save(&format!("about-{name}"), view(&s), Size::new(820.0, 1450.0));
     }
     theme::apply(Theme::Dark);
 }
@@ -1535,6 +1509,125 @@ fn the_ported_pages_match_their_golden_images() {
             failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
                 view(&s)
             }));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A theme card is its own mode's pick. When the other mode is showing, the OS
+/// mode switches with it; the app re-themes at once, before the write.
+#[test]
+fn a_theme_card_picks_for_its_mode_and_shows_at_once() {
+    use crate::ui::kit::themes;
+    let path = tmp("themes");
+    let (mut s, _) = state(Some(path.clone()));
+    update(&mut s, Message::Theme(Theme::Dark));
+    update(&mut s, Message::ThemeCard("emerald"));
+    assert_eq!(s.draft.appearance.dark, "emerald");
+    assert_eq!(
+        (s.draft.theme, themes::current().id),
+        (Theme::Dark, "emerald")
+    );
+    // a light card while dark shows: light mode, the dark pick kept
+    update(&mut s, Message::ThemeCard("sandstone"));
+    assert_eq!(s.draft.appearance.light, "sandstone");
+    assert_eq!(s.draft.appearance.dark, "emerald");
+    assert_eq!(
+        (s.draft.theme, themes::current().id),
+        (Theme::Light, "sandstone")
+    );
+    // System on a light OS: a light card keeps System, a dark one switches to Dark
+    theme::set_os(iced::theme::Mode::Light);
+    update(&mut s, Message::Theme(Theme::System));
+    update(&mut s, Message::ThemeCard("frost"));
+    assert_eq!(
+        (s.draft.theme, themes::current().id),
+        (Theme::System, "frost")
+    );
+    update(&mut s, Message::ThemeCard("midnight"));
+    assert_eq!(
+        (s.draft.theme, themes::current().id),
+        (Theme::Dark, "midnight")
+    );
+    theme::set_os(iced::theme::Mode::Dark);
+    // the OS mode alone shows that mode's pick
+    update(&mut s, Message::Theme(Theme::Light));
+    assert_eq!(themes::current().id, "frost");
+    update(&mut s, Message::Logo(config::Logo::Purple));
+    let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+        panic!("not saved: {:?}", s.notice)
+    };
+    let back = Config::load_from(&path).0;
+    assert_eq!(back, cfg);
+    let a = &back.appearance;
+    assert_eq!((a.dark.as_str(), a.light.as_str()), ("midnight", "frost"));
+    assert_eq!((back.theme, a.logo), (Theme::Light, config::Logo::Purple));
+    theme::apply(Theme::Dark);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// The look cards write the stored names config v4 keeps: Prism as "aurora",
+/// Frost as "mono"; picking the shown card again keeps "calm"; the design
+/// look the config has no value for can't be picked.
+#[test]
+fn look_cards_write_the_stored_look_names() {
+    use crate::ui::kit::looks;
+    let (mut s, _) = state(None);
+    s.draft.look.theme = LookTheme::Calm;
+    update(&mut s, Message::Section(Section::Look));
+    let texts = shot::texts(view(&s));
+    for l in looks::LOOKS {
+        assert!(texts.iter().any(|t| t == l.name), "{}: {texts:?}", l.name);
+    }
+    let of = |s: &State, id: &str| {
+        let picks = pages::look_picks(s);
+        picks.into_iter().find(|(l, _)| *l == id).unwrap().1
+    };
+    assert_eq!(
+        of(&s, "prism"),
+        Some(LookTheme::Calm),
+        "the shown card keeps calm"
+    );
+    assert_eq!(of(&s, "frost"), Some(LookTheme::Mono));
+    assert_eq!(of(&s, "horizon"), Some(LookTheme::Horizon));
+    assert_eq!(of(&s, "aurora"), None);
+    s.draft.look.theme = LookTheme::Spectrum;
+    assert_eq!(of(&s, "prism"), Some(LookTheme::Aurora));
+    assert_eq!(of(&s, "spectrum"), Some(LookTheme::Spectrum));
+}
+
+/// Every theme card draws its three swatch dots.
+#[test]
+fn every_theme_card_renders_its_swatches() {
+    use crate::ui::kit::card::theme_card;
+    use crate::ui::kit::themes::{self, SAPPHIRE, THEMES};
+    for t in THEMES {
+        themes::set(t);
+        let px = shot::render(theme_card::<()>(t, false, ()), 200, 48);
+        for dot in t.swatch {
+            let [r, g, b, _] = dot.into_rgba8();
+            let near = |p: &[u8]| p.iter().zip([r, g, b]).all(|(&a, b)| a.abs_diff(b) <= 6);
+            assert!(px.chunks(4).any(near), "{}: no {dot:?} dot", t.id);
+        }
+    }
+    themes::set(&SAPPHIRE);
+}
+
+/// Appearance and Look & behaviour as drawn, in Sapphire and Daylight.
+#[test]
+fn appearance_and_look_match_their_golden_images() {
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        for (name, section) in [("appearance", Section::Appearance), ("look", Section::Look)] {
+            let (mut s, _) = state(None);
+            update(&mut s, Message::Section(section));
+            themes::set(theme);
+            let file = format!("settings-{name}-{}", theme.id);
+            let size = Size::new(WINDOW_SIZE.width, 900.0);
+            failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
         }
     }
     themes::set(&SAPPHIRE);
