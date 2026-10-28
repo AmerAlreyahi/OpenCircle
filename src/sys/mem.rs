@@ -21,6 +21,29 @@ pub fn trim_heap() {
     unsafe {
         libc::malloc_trim(0);
     }
+    // Windows: the heap hands its free pages back, then the working set drops
+    // what nothing uses now (a closed window's pages, a freed frame); what the
+    // app touches again faults back in.
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Memory::{
+            GetProcessHeap, HEAP_FLAGS, HeapCompact, SetProcessWorkingSetSizeEx,
+        };
+        use windows::Win32::System::Threading::GetCurrentProcess;
+        // SAFETY: HeapCompact and SetProcessWorkingSetSizeEx only release unused pages
+        // (usize::MAX twice = trim the working set).
+        unsafe {
+            if let Ok(heap) = GetProcessHeap() {
+                HeapCompact(heap, HEAP_FLAGS(0));
+            }
+            let _ = SetProcessWorkingSetSizeEx(
+                GetCurrentProcess(),
+                usize::MAX,
+                usize::MAX,
+                Default::default(),
+            );
+        }
+    }
 }
 
 /// For a long-lived worker: freed memory stays in the heap (no mmap'd chunks

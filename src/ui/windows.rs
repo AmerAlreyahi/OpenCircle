@@ -689,6 +689,15 @@ impl Windows {
                 if ours {
                     // Closed without saving: undo the live theme preview.
                     theme::apply(config::current().theme);
+                    // the window's state, glyphs and pixels are freed: give them back
+                    // (a beat later, once the renderer has dropped its buffers)
+                    return Task::future(async {
+                        std::thread::spawn(|| {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            crate::sys::mem::trim_heap();
+                        });
+                    })
+                    .discard();
                 }
             }
             Msg::OsTheme(mode) => theme::set_os(mode),
