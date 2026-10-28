@@ -84,7 +84,6 @@ const LEGACY: &[&str] = &[
     "border.rs",
     "edit.rs",
     "live_layer.rs",
-    "onboarding.rs",
     "overlay.rs",
     "panel.rs",
     "setup.rs",

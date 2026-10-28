@@ -6,6 +6,8 @@ mod state;
 pub(crate) mod tests;
 mod window;
 
+#[cfg(test)]
 pub use pages::START_LABEL;
+pub use pages::rows;
 pub use state::*;
 pub use window::view;

@@ -282,6 +282,7 @@ impl KeyField {
         }
     }
 
+    #[cfg(test)]
     pub fn status(&self) -> &KeyStatus {
         &self.status
     }
@@ -946,6 +947,26 @@ impl State {
     /// The footer's question was answered with Save (done) or Discard.
     pub fn leaving(&self) -> bool {
         self.leaving
+    }
+
+    /// The edited config (onboarding writes it on Finish).
+    pub fn draft(&self) -> &Config {
+        &self.draft
+    }
+
+    /// What is wrong with the draft, as "key: reason" lines.
+    pub fn problems(&self) -> &[String] {
+        &self.problems
+    }
+
+    /// Puts `ai` back (onboarding's Skip), its key looked up again.
+    pub fn set_ai(&mut self, ai: config::AiConfig) {
+        if ai.provider != self.draft.ai.provider {
+            let job = self.key.refresh(bind(&self.store, ai.provider.clone()));
+            self.key_jobs.push((false, job));
+        }
+        self.draft.ai = ai;
+        self.revalidate();
     }
 
     pub(super) fn revalidate(&mut self) {

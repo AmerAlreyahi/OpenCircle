@@ -43,28 +43,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
             Message::DefaultAction
         ),
     )];
-    let switch = |on: bool, pick: fn(Pick) -> Option<bool>, m: fn(bool) -> Message| {
-        let (from, glide) = state.thumb(on, pick);
-        boolean(OFF_ON, on, from, glide, m)
-    };
-    rows = rows.push(setting_row::row(
-        title(START_LABEL),
-        "OpenCircle waits in the tray, with no window",
-        switch(
-            general.autostart,
-            |p| match p {
-                Pick::Autostart(v) => Some(v),
-                _ => None,
-            },
-            Message::Autostart,
-        ),
-    ));
+    rows = rows.push(start_row(state));
     // Search history is a Labs feature: its row exists only while it is on.
     if d.labs.has(Feature::History) {
         rows = rows.push(setting_row::row(
             title("Search history"),
             "Only on this PC: what you searched, a small picture, the time",
             switch(
+                state,
                 general.search_history,
                 |p| match p {
                     Pick::History(v) => Some(v),
@@ -79,18 +65,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         "Where Save starts. Files are OpenCircle-date-time.png",
         folder(state),
     ));
-    rows = rows.push(setting_row::row(
-        title("Keep OpenCircle up to date"),
-        UPDATE_PRIVACY,
-        switch(
-            d.update.auto == Some(true),
-            |p| match p {
-                Pick::Update(v) => Some(v),
-                _ => None,
-            },
-            Message::AutoUpdate,
-        ),
-    ));
+    rows = rows.push(update_row(state));
     let status = state.update_status.as_deref();
     rows = rows.push(setting_row::row(
         title("Updates"),
@@ -102,6 +77,50 @@ pub fn view(state: &State) -> Element<'_, Message> {
         ),
     ));
     rows.into()
+}
+
+fn switch<'a>(
+    state: &'a State,
+    on: bool,
+    pick: fn(Pick) -> Option<bool>,
+    m: fn(bool) -> Message,
+) -> Element<'a, Message> {
+    let (from, glide) = state.thumb(on, pick);
+    boolean(OFF_ON, on, from, glide, m)
+}
+
+/// Start with the OS (Settings, and onboarding's last step).
+pub fn start_row(state: &State) -> Element<'_, Message> {
+    setting_row::row(
+        title(START_LABEL),
+        "OpenCircle waits in the tray, with no window",
+        switch(
+            state,
+            state.draft.general.autostart,
+            |p| match p {
+                Pick::Autostart(v) => Some(v),
+                _ => None,
+            },
+            Message::Autostart,
+        ),
+    )
+}
+
+/// Keep OpenCircle up to date (Settings, and onboarding's first step).
+pub fn update_row(state: &State) -> Element<'_, Message> {
+    setting_row::row(
+        title("Keep OpenCircle up to date"),
+        UPDATE_PRIVACY,
+        switch(
+            state,
+            state.draft.update.auto == Some(true),
+            |p| match p {
+                Pick::Update(v) => Some(v),
+                _ => None,
+            },
+            Message::AutoUpdate,
+        ),
+    )
 }
 
 /// The folder (cut in the middle when long: the tooltip shows it whole), and

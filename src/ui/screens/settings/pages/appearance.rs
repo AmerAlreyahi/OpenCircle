@@ -33,22 +33,13 @@ pub fn view(state: &State) -> Element<'_, Message> {
         true => ("On", Tone::Ok),
         false => ("Off", Tone::Busy),
     };
-    // the chosen card: the theme showing now
-    let shown = theme::kit_theme(d.theme, theme::os_dark(), &d.appearance).id;
-    let cards = THEMES
-        .into_iter()
-        .map(|t| theme_card(t, t.id == shown, Message::ThemeCard(t.id)));
     let mut rows = column![
         setting_row::row(
             title("Reduce animations"),
             MOTION_DESC,
             status(reduced.0, reduced.1)
         ),
-        setting_row::block(
-            title("App and widget themes (12 palettes)"),
-            "The Settings window and every floating widget; a light card turns light mode on",
-            grid(COLUMNS, cards),
-        ),
+        themes_row(state),
     ];
     rows = rows.push(setting_row::block(
         title("Active look screen borders"),
@@ -59,6 +50,21 @@ pub fn view(state: &State) -> Element<'_, Message> {
         rows = rows.extend(custom::rows(state));
     }
     rows.into()
+}
+
+/// The 12 theme cards (Settings, and onboarding's Look step).
+pub fn themes_row(state: &State) -> Element<'_, Message> {
+    let d = &state.draft;
+    // the chosen card: the theme showing now
+    let shown = theme::kit_theme(d.theme, theme::os_dark(), &d.appearance).id;
+    let cards = THEMES
+        .into_iter()
+        .map(|t| theme_card(t, t.id == shown, Message::ThemeCard(t.id)));
+    setting_row::block(
+        title("App and widget themes (12 palettes)"),
+        "The Settings window and every floating widget; a light card turns light mode on",
+        grid(COLUMNS, cards),
+    )
 }
 
 /// What each design look's card writes (by look id): the stored value of the

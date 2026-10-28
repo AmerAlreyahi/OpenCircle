@@ -9,10 +9,12 @@ use iced::widget::{container, image, mouse_area, row, stack};
 use iced::window::{self, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
+use super::kit::header::Caption;
 use super::platform;
+use super::screens::onboarding;
 use super::screens::toast::{self, Tone};
 use super::widgets::chrome;
-use super::{onboarding, settings, shape, theme, update_card, widgets};
+use super::{settings, shape, theme, update_card, widgets};
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
 #[cfg(test)]
 pub use super::platform::windows::CLEARED;
@@ -476,6 +478,13 @@ impl Windows {
                     update_card::Msg::Page => open_url(&card.url),
                 }
             }
+            // The design's maximise does nothing for this fixed-size window.
+            Msg::Onboarding(onboarding::Message::Caption(Caption::Maximise)) => {}
+            Msg::Onboarding(onboarding::Message::Caption(caption)) => {
+                if let Some(id) = self.id(Kind::Onboarding) {
+                    return self.on_chrome(id, chrome::Event::from(caption));
+                }
+            }
             Msg::Onboarding(msg) => {
                 if let Some((id, state)) = &mut self.onboarding {
                     let outcome = onboarding::update(state, msg);
@@ -484,7 +493,11 @@ impl Windows {
                         super::background(move |tx| {
                             let _ = tx.unbounded_send(job.run());
                         })
-                        .map(|k| Msg::Onboarding(onboarding::Message::ApiKey(k)))
+                        .map(|k| {
+                            Msg::Onboarding(onboarding::Message::Settings(
+                                settings::Message::ApiKey(k),
+                            ))
+                        })
                     }));
                     match outcome {
                         onboarding::Outcome::Finished(cfg) => {
@@ -603,9 +616,7 @@ impl Windows {
     /// What the header offers this window.
     fn mode(&self, id: window::Id) -> chrome::Mode {
         chrome::Mode {
-            resizable: [Kind::Settings, Kind::Onboarding]
-                .into_iter()
-                .any(|kind| self.id(kind) == Some(id)),
+            resizable: self.id(Kind::Settings) == Some(id),
             maximised: self.chrome.get(&id).is_some_and(|c| c.maximised),
         }
     }
@@ -680,30 +691,24 @@ impl Windows {
                 Msg::Chrome(window, e)
             }));
         }
-        let page = if let Some((id, state)) = &self.onboarding
+        if let Some((id, state)) = &self.onboarding
             && *id == window
         {
-            onboarding::view(state).map(Msg::Onboarding)
-        } else if let Some((id, access)) = &self.permission
-            && *id == window
-        {
-            onboarding::prompt_view(access).map(Msg::Permission)
-        } else {
-            return None;
-        };
-        let title = self.header_title(window);
-        Some(chrome::frame(title, self.mode(window), page, move |e| {
-            Msg::Chrome(window, e)
-        }))
-    }
-
-    /// The header's title (the OS title, `title`, is the longer name for the taskbar).
-    fn header_title(&self, window: window::Id) -> &'static str {
-        match (self.id(Kind::Settings), self.id(Kind::Onboarding)) {
-            // Settings draws its own header (`settings::view`)
-            (_, Some(id)) if id == window => "Welcome to OpenCircle",
-            _ => "Screenshot permission",
+            // Onboarding draws the design's own header too (fixed size: no edges).
+            return Some(onboarding::view(state).map(Msg::Onboarding));
         }
+        let page = match &self.permission {
+            Some((id, access)) if *id == window => {
+                onboarding::prompt_view(access).map(Msg::Permission)
+            }
+            _ => return None,
+        };
+        Some(chrome::frame(
+            "Screenshot permission",
+            self.mode(window),
+            page,
+            move |e| Msg::Chrome(window, e),
+        ))
     }
 
     pub fn title(&self, window: window::Id) -> &'static str {
@@ -728,7 +733,12 @@ impl Windows {
             Some((_, state)) => settings::subscription(state).map(Msg::Settings),
             None => Subscription::none(),
         };
+        let welcome = match &self.onboarding {
+            Some((_, state)) => onboarding::subscription(state).map(Msg::Onboarding),
+            None => Subscription::none(),
+        };
         Subscription::batch([
+            welcome,
             window::close_events().map(Msg::Closed),
             window::close_requests().map(Msg::CloseRequest),
             window::resize_events().map(|(id, _)| Msg::Resized(id)),
@@ -870,7 +880,7 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
             position = at.map_or(position, Position::Specific);
             (size, Some(min), true)
         }
-        Kind::Onboarding => (onboarding::WINDOW_SIZE, Some(onboarding::MIN_SIZE), true),
+        Kind::Onboarding => (onboarding::WINDOW_SIZE, None, false),
         Kind::Permission => (onboarding::PROMPT_SIZE, None, false),
     };
     let settings = window::Settings {
@@ -1278,11 +1288,15 @@ mod tests {
         windows.chrome.insert(id, Chrome::default());
         let _ = windows.update(Msg::Maximised(id, true));
         assert!(windows.mode(id).maximised);
-        // Onboarding resizes too (#53: a short screen); the fixed-size
-        // permission prompt cannot be maximised.
+        // Onboarding has the design's fixed size, its own header; nor can the
+        // permission prompt be maximised.
         windows.onboarding = Some((other, onboarding::State::open()));
-        assert!(windows.mode(other).resizable);
-        assert_eq!(windows.header_title(other), "Welcome to OpenCircle");
+        assert!(!windows.mode(other).resizable);
+        let texts = shot::texts(windows.view(other).unwrap());
+        assert!(
+            texts.iter().any(|t| t == "Welcome to OpenCircle"),
+            "{texts:?}"
+        );
         let prompt = window::Id::unique();
         windows.permission = Some((prompt, onboarding::Access::Unasked));
         assert!(!windows.mode(prompt).resizable);
@@ -1307,10 +1321,7 @@ mod tests {
                 );
                 // The header is the window's own colour all the way across (no gray strip).
                 let w = size.width as usize;
-                let bg = match what {
-                    "settings" => crate::ui::kit::themes::c().bg,
-                    _ => theme::current().window,
-                };
+                let bg = crate::ui::kit::themes::c().bg;
                 let bg = [bg.r, bg.g, bg.b].map(|c| (c * 255.0).round() as u8);
                 let row = &px[(10 * w) * 4..(11 * w) * 4];
                 let plain = row.chunks(4).filter(|p| p[..3] == bg).count();

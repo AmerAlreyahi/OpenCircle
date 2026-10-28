@@ -12,7 +12,6 @@ mod glass;
 mod kit;
 mod live_controller;
 mod live_layer;
-mod onboarding;
 mod overlay;
 mod panel;
 mod picker;

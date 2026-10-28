@@ -66,7 +66,7 @@ fn general_has_the_start_with_the_os_switch_on_by_default() {
     let (mut s, _) = state(Some(path.clone()));
     assert!(s.draft.general.autostart);
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == START_LABEL), "{texts:?}");
+    assert!(texts.iter().any(|t| t == pages::START_LABEL), "{texts:?}");
     update(&mut s, Message::Autostart(false));
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
         panic!("not saved: {:?}", s.problems);

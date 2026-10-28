@@ -67,3 +67,27 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
         })
         .into()
 }
+
+#[cfg(test)]
+mod tests {
+    /// Changing a dropdown's value leaves no part of the old text on screen
+    /// (#53): each change redrawn only where it differs, as the window does,
+    /// equals the same view drawn whole, at 100 % and 150 %.
+    #[test]
+    fn a_changed_dropdown_leaves_no_ghost_text() {
+        const LANGS: [&str; 6] = ["Arabic", "English", "Japanese", "العربية", "Hindi", "Wolof"];
+        for scale in [1.0, 1.5] {
+            let view = |i: usize| {
+                (i <= 20).then(|| {
+                    let field =
+                        super::dropdown(&LANGS[..], Some(LANGS[i % LANGS.len()]), "", |_| ());
+                    iced::widget::container(field).padding(20).into()
+                })
+            };
+            let size = iced::Size::new(360.0, 80.0);
+            let (window, fresh) = super::super::testing::shot::redrawn(view, size, scale);
+            let differ = window.iter().zip(&fresh).filter(|(a, b)| a != b).count();
+            assert_eq!(differ, 0, "{differ} stale bytes at {scale}x");
+        }
+    }
+}

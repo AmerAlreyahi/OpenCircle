@@ -26,46 +26,12 @@ const KEY_WIDTH: f32 = 340.0;
 pub fn view(state: &State) -> Element<'_, Message> {
     let ai = &state.draft.ai;
     let compat = ai.provider == Provider::OpenaiCompatible;
-    let options = [
-        (Choice::Browser, "Browser"),
-        (Choice::Anthropic, "Anthropic"),
-        (Choice::Compatible, "OpenAI-like"),
-    ];
-    // An unknown value from the file: none is chosen until a pick.
-    let now = Choice::of(&ai.provider);
-    let mut provider = column![segmented(&options, now, now, 1.0, |c: Choice| {
-        Message::Provider(c.provider())
-    })]
-    .spacing(space::GAP)
-    .align_x(iced::Right);
-    if let Some(e) = issue(&state.problems, "ai.provider") {
-        provider = provider.push(error(Role::ROW_DESC, e));
-    }
-    let mut rows = column![setting_row::wide(
-        title("Provider"),
-        match ai.provider {
-            Provider::Browser => "Google AI Mode in your browser. No key",
-            _ => "Who answers your questions",
-        },
-        provider,
-    )];
-    if matches!(
-        ai.provider,
-        Provider::Browser | Provider::Invalid(_) | Provider::Unreadable
-    ) {
+    let mut rows = column![provider_row(state)];
+    if !keyed(state) {
         return rows.into(); // no model, server or key: the browser, or nothing chosen yet
     }
     if compat {
-        let preset = PRESETS.iter().find(|p| p.base_url == ai.base_url).copied();
-        rows = rows.push(setting_row::row(
-            title("Preset"),
-            "Fills in the server URL",
-            tip(
-                dropdown(PRESETS, preset, "Choose a preset", Message::Preset),
-                "Server preset",
-                Position::Top,
-            ),
-        ));
+        rows = rows.push(preset_row(state));
         rows = rows.push(text_row(
             state,
             ("Server URL", "Your own server or any compatible API"),
@@ -86,16 +52,73 @@ pub fn view(state: &State) -> Element<'_, Message> {
         (example, &ai.model, "ai.model"),
         Message::Model,
     ));
-    let local = PRESETS.iter().any(|p| p.local && p.base_url == ai.base_url);
-    rows = rows.push(setting_row::row(
+    rows.push(key_row(state)).into()
+}
+
+/// A provider with a model, a server and a key (not the browser, not an
+/// unreadable value from the file).
+pub fn keyed(state: &State) -> bool {
+    !matches!(
+        state.draft.ai.provider,
+        Provider::Browser | Provider::Invalid(_) | Provider::Unreadable
+    )
+}
+
+/// Who answers (Settings, and onboarding's AI step).
+pub fn provider_row(state: &State) -> Element<'_, Message> {
+    let ai = &state.draft.ai;
+    let options = [
+        (Choice::Browser, "Browser"),
+        (Choice::Anthropic, "Anthropic"),
+        (Choice::Compatible, "OpenAI-like"),
+    ];
+    // An unknown value from the file: none is chosen until a pick.
+    let now = Choice::of(&ai.provider);
+    let mut provider = column![segmented(&options, now, now, 1.0, |c: Choice| {
+        Message::Provider(c.provider())
+    })]
+    .spacing(space::GAP)
+    .align_x(iced::Right);
+    if let Some(e) = issue(&state.problems, "ai.provider") {
+        provider = provider.push(error(Role::ROW_DESC, e));
+    }
+    setting_row::wide(
+        title("Provider"),
+        match ai.provider {
+            Provider::Browser => "Google AI Mode in your browser. No key",
+            _ => "Who answers your questions",
+        },
+        provider,
+    )
+}
+
+/// An OpenAI-compatible server's preset (Settings, and onboarding's AI step).
+pub fn preset_row(state: &State) -> Element<'_, Message> {
+    let url = &state.draft.ai.base_url;
+    let preset = PRESETS.iter().find(|p| p.base_url == *url).copied();
+    setting_row::row(
+        title("Preset"),
+        "Fills in the server URL",
+        tip(
+            dropdown(PRESETS, preset, "Choose a preset", Message::Preset),
+            "Server preset",
+            Position::Top,
+        ),
+    )
+}
+
+/// The write-only key (Settings, and onboarding's AI step).
+pub fn key_row(state: &State) -> Element<'_, Message> {
+    let url = &state.draft.ai.base_url;
+    let local = PRESETS.iter().any(|p| p.local && p.base_url == *url);
+    setting_row::row(
         title("API key"),
         match local {
             true => "Not needed for a server on this PC",
             false => "Kept in your system keyring, never in a file",
         },
         state.key.view().map(Message::ApiKey),
-    ));
-    rows.into()
+    )
 }
 
 /// The provider segments (`Provider` holds data: no `Copy`).

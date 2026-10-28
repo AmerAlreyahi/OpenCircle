@@ -11,42 +11,7 @@ use crate::ui::kit::setting_row::{self, title};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let sel = state.draft.selection;
-    let (from, t) = state.thumb(sel.style, |p| match p {
-        Pick::Select(v) => Some(v),
-        _ => None,
-    });
-    let mut rows = column![setting_row::row(
-        title("Selection"),
-        "Snap: a rounded box with corners to drag",
-        segmented(
-            &[
-                (SelectStyle::Snap, "Snap to box"),
-                (SelectStyle::Shape, "As drawn")
-            ],
-            sel.style,
-            from,
-            t,
-            Message::SelectStyle,
-        ),
-    )];
-    let (from, t) = state.thumb(sel.after, |p| match p {
-        Pick::After(v) => Some(v),
-        _ => None,
-    });
-    rows = rows.push(setting_row::row(
-        title("Auto action"),
-        match sel.after {
-            After::Wait => "Nothing is sent until you pick an action",
-            After::Search => "Sends each selection at once, as Search with says",
-        },
-        segmented(
-            &[(After::Wait, "Wait for me"), (After::Search, "Run at once")],
-            sel.after,
-            from,
-            t,
-            Message::After,
-        ),
-    ));
+    let mut rows = column![selection_row(state), after_row(state)];
     let (from, t) = state.thumb(sel.search_with, |p| match p {
         Pick::SearchWith(v) => Some(v),
         _ => None,
@@ -77,4 +42,50 @@ pub fn view(state: &State) -> Element<'_, Message> {
         ),
     ));
     rows.into()
+}
+
+/// Snap to box / As drawn (Settings, and onboarding's first step).
+pub fn selection_row(state: &State) -> Element<'_, Message> {
+    let style = state.draft.selection.style;
+    let (from, t) = state.thumb(style, |p| match p {
+        Pick::Select(v) => Some(v),
+        _ => None,
+    });
+    setting_row::row(
+        title("Selection"),
+        "Snap: a rounded box with corners to drag",
+        segmented(
+            &[
+                (SelectStyle::Snap, "Snap to box"),
+                (SelectStyle::Shape, "As drawn"),
+            ],
+            style,
+            from,
+            t,
+            Message::SelectStyle,
+        ),
+    )
+}
+
+/// Wait for me / Run at once (Settings, and onboarding's first step).
+pub fn after_row(state: &State) -> Element<'_, Message> {
+    let after = state.draft.selection.after;
+    let (from, t) = state.thumb(after, |p| match p {
+        Pick::After(v) => Some(v),
+        _ => None,
+    });
+    setting_row::row(
+        title("Auto action"),
+        match after {
+            After::Wait => "Nothing is sent until you pick an action",
+            After::Search => "Sends each selection at once, as Search with says",
+        },
+        segmented(
+            &[(After::Wait, "Wait for me"), (After::Search, "Run at once")],
+            after,
+            from,
+            t,
+            Message::After,
+        ),
+    )
 }

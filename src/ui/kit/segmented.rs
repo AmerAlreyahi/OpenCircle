@@ -24,15 +24,44 @@ pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     glide: f32,
     on: impl Fn(T) -> Message + 'a,
 ) -> Element<'a, Message> {
+    let widths: Vec<f32> = options.iter().map(|&(_, l)| pill_width(l)).collect();
+    track(options, &widths, Role::CONTROL, chosen, from, glide, on)
+}
+
+/// The full-width track (onboarding's steps, `oc-track w-full` with `flex-1`
+/// pills, 11 px): `width` across, the pills sharing it equally.
+pub fn spread<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
+    width: f32,
+    options: &[(T, &'a str)],
+    chosen: T,
+    from: T,
+    glide: f32,
+    on: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message> {
+    let n = options.len().max(1) as f32;
+    let inner = width - 2.0 * (space::TRACK_PAD + 1.0) - space::TRACK_GAP * (n - 1.0);
+    let widths = vec![inner / n; options.len()];
+    track(options, &widths, Role::STEP, chosen, from, glide, on)
+}
+
+fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
+    options: &[(T, &'a str)],
+    widths: &[f32],
+    role: Role,
+    chosen: T,
+    from: T,
+    glide: f32,
+    on: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message> {
     const GAP: f32 = space::TRACK_GAP;
     const PILL: f32 = 27.0; // 12 px x 1.25 and 6 px above and below
     let at = |value: T| {
         let mut x = 0.0;
-        for &(v, label) in options {
+        for (&(v, _), &w) in options.iter().zip(widths) {
             if v == value {
-                return (x, pill_width(label));
+                return (x, w);
             }
-            x += pill_width(label) + GAP;
+            x += w + GAP;
         }
         (0.0, 0.0)
     };
@@ -51,30 +80,24 @@ pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
         }),
     ]
     // the base layer of the stack sets its size: as wide as all the pills
-    .width(
-        options
-            .iter()
-            .map(|&(_, l)| pill_width(l) + GAP)
-            .sum::<f32>()
-            - GAP,
-    );
-    let pills = options.iter().map(|&(value, label)| {
+    .width(widths.iter().map(|w| w + GAP).sum::<f32>() - GAP);
+    let pills = options.iter().zip(widths).map(|(&(value, label), &w)| {
         let active = value == chosen;
         // centred by its box, the text exactly as wide as drawn: a wider box
         // lays a right-to-left line out from its right edge (Arabic sat right
         // of the thumb on Windows), and the text's own centring shifts it too
-        let drawn = super::text::width(label, Role::CONTROL.size, super::text::font(Role::CONTROL));
+        let drawn = super::text::width(label, role.size, super::text::font(role));
         button(
             container(
                 text(label)
-                    .size(Role::CONTROL.size)
-                    .font(super::text::font(Role::CONTROL))
+                    .size(role.size)
+                    .font(super::text::font(role))
                     .line_height(1.25)
                     .width(drawn.ceil()),
             )
             .center_x(Fill),
         )
-        .width(pill_width(label))
+        .width(w)
         .padding([6, 0])
         .height(PILL)
         .on_press(on(value))

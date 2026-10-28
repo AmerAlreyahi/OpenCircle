@@ -21,11 +21,6 @@ pub struct Palette {
     pub pressed: Color,
     /// Settings / onboarding window background.
     pub window: Color,
-    /// Input fields, segmented tracks (quiet fill); `field_focus` = hovered, focused or recording.
-    pub field: Color,
-    pub field_focus: Color,
-    /// One key inside a shortcut field.
-    pub keycap: Color,
     /// Error text and invalid-field outline.
     pub danger: Color,
 }
@@ -58,9 +53,6 @@ const DARK: Palette = Palette {
     hover: Color::from_rgba8(255, 255, 255, 0.08),
     pressed: Color::from_rgba8(255, 255, 255, 0.14),
     window: DARK_WINDOW,
-    field: Color::from_rgba8(255, 255, 255, 0.06),
-    field_focus: Color::from_rgba8(255, 255, 255, 0.12),
-    keycap: Color::from_rgba8(255, 255, 255, 0.10),
     danger: Color::from_rgb8(0xff, 0x8a, 0x8a),
 };
 
@@ -74,9 +66,6 @@ const LIGHT: Palette = Palette {
     hover: Color::from_rgba8(16, 16, 40, 0.06),
     pressed: Color::from_rgba8(16, 16, 40, 0.11),
     window: LIGHT_WINDOW,
-    field: Color::from_rgba8(16, 16, 40, 0.05),
-    field_focus: Color::from_rgba8(16, 16, 40, 0.10),
-    keycap: Color::from_rgba8(255, 255, 255, 0.95),
     danger: Color::from_rgb8(0xc6, 0x28, 0x28),
 };
 
@@ -97,9 +86,6 @@ const FROST: Palette = Palette {
     hover: Color::from_rgba8(255, 255, 255, 0.45),
     pressed: Color::from_rgba8(255, 255, 255, 0.70),
     window: FROST_WINDOW,
-    field: Color::from_rgba8(16, 24, 48, 0.06),
-    field_focus: Color::from_rgba8(16, 24, 48, 0.12),
-    keycap: Color::from_rgba8(255, 255, 255, 0.80),
     danger: Color::from_rgb8(0xb3, 0x26, 0x26),
 };
 
@@ -116,9 +102,6 @@ const GRAPHITE: Palette = Palette {
     hover: Color::from_rgba8(255, 255, 255, 0.07),
     pressed: Color::from_rgba8(255, 255, 255, 0.12),
     window: GRAPHITE_WINDOW,
-    field: Color::from_rgba8(255, 255, 255, 0.05),
-    field_focus: Color::from_rgba8(255, 255, 255, 0.10),
-    keycap: Color::from_rgba8(255, 255, 255, 0.09),
     danger: Color::from_rgb8(0xf0, 0x8c, 0x8c),
 };
 
