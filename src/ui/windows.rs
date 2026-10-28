@@ -393,6 +393,15 @@ impl Windows {
     }
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
+        let task = self.handle(msg);
+        // A shortcut field that records gets the keys: the global shortcuts are
+        // held off until it stops (a key set, Esc, another page, the window closed).
+        let recording = self.settings.as_ref().is_some_and(|(_, s)| s.recording());
+        crate::hotkey::suspend(recording);
+        task
+    }
+
+    fn handle(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::Settings(settings::Message::Caption(caption)) => {
                 if let Some(id) = self.id(Kind::Settings) {
@@ -1029,6 +1038,40 @@ mod tests {
 
     fn settings_state() -> settings::State {
         settings::State::new(Config::default(), vec![], None, Box::new(NoKeys))
+    }
+
+    /// While a shortcut field records, the app's own shortcuts are held off
+    /// (Ctrl+Shift+X opened the overlay instead of being recorded); back on
+    /// when it stops: Esc, a key set, or the window closed mid-recording.
+    #[test]
+    fn global_shortcuts_are_held_off_while_a_shortcut_field_records() {
+        use settings::{Chord, Slot};
+        let key = |key: &str, ctrl: bool| {
+            let chord = Chord {
+                ctrl,
+                alt: false,
+                shift: ctrl,
+                logo: false,
+                key: key.into(),
+            };
+            Msg::Settings(settings::Message::Key(chord))
+        };
+        let record = Msg::Settings(settings::Message::Record(Slot::Capture));
+        let mut windows = Windows::default();
+        let id = window::Id::unique();
+        windows.settings = Some((id, settings_state()));
+        assert!(!crate::hotkey::suspended());
+        let _ = windows.update(record.clone());
+        assert!(crate::hotkey::suspended(), "recording: held off");
+        let _ = windows.update(key("Escape", false));
+        assert!(!crate::hotkey::suspended(), "Esc: back on");
+        let _ = windows.update(record.clone());
+        let _ = windows.update(key("KeyK", true));
+        assert!(!crate::hotkey::suspended(), "a key set: back on");
+        let _ = windows.update(record);
+        assert!(crate::hotkey::suspended());
+        let _ = windows.update(Msg::Closed(id));
+        assert!(!crate::hotkey::suspended(), "the window closed: back on");
     }
 
     #[test]

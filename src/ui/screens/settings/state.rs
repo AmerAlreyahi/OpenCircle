@@ -969,6 +969,11 @@ impl State {
         self.revalidate();
     }
 
+    /// A shortcut field is recording (the global shortcuts are held off meanwhile).
+    pub fn recording(&self) -> bool {
+        self.recording.is_some()
+    }
+
     pub(super) fn revalidate(&mut self) {
         self.problems = problems(&self.draft, self.key.status == KeyStatus::Saved);
     }

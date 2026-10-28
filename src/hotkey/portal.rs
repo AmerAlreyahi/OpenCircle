@@ -88,7 +88,9 @@ fn serve(tx: Triggers) -> Result<(), String> {
             {
                 let session = session.clone();
                 move |_, _, _, _, _, params| {
-                    let id = activated_id(params, &session.borrow());
+                    // a shortcut field is recording: the press is its, not ours
+                    let id =
+                        activated_id(params, &session.borrow()).filter(|_| !super::suspended());
                     let trigger = id.and_then(|id| route_id(&bindings(), &id, Instant::now()));
                     if let Some(trigger) = trigger {
                         let _ = tx.unbounded_send(trigger);

@@ -13,6 +13,7 @@ pub use quick_id::QuickId;
 pub use socket::{Command, forward, forward_or_start, is_older, listen, running, running_version};
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
@@ -379,7 +380,7 @@ pub fn start(tx: Triggers, cfg: &Config) {
     }
 
     GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
-        if event.state == HotKeyState::Pressed {
+        if event.state == HotKeyState::Pressed && !suspended() {
             let trigger = route_hotkey(&bindings(), event.id, Instant::now());
             if let Some(trigger) = trigger {
                 let _ = tx.unbounded_send(trigger);
@@ -415,9 +416,41 @@ pub fn reload(cfg: &Config) {
         return;
     }
     GRAB.with_borrow_mut(|slot| match slot {
+        Some(_) if suspended() => {} // `suspend(false)` grabs the new ones
         Some(grab) => regrab(grab, &bindings()),
         None => crate::log!("[opencircle] shortcuts were not started here; reload skipped"),
     });
+}
+
+/// Set while a shortcut field records (`suspend`).
+static SUSPENDED: AtomicBool = AtomicBool::new(false);
+
+/// Holds every global shortcut off while `on`, back on after: a shortcut field
+/// that is recording must get the keys, never start an action with them.
+/// Windows / X11 let go of the grab (the press then reaches the focused
+/// window); Wayland's portal can't, so its presses are dropped. Only a change
+/// does anything. Call from the thread that called `start`.
+pub fn suspend(on: bool) {
+    if SUSPENDED.swap(on, Ordering::SeqCst) == on {
+        return;
+    }
+    crate::log!(
+        "[opencircle] global shortcuts {}",
+        if on { "held off" } else { "back on" }
+    );
+    GRAB.with_borrow_mut(|slot| match slot {
+        Some(grab) if on => {
+            let _ = grab.manager.unregister_all(&grab.held);
+            grab.held.clear();
+        }
+        Some(grab) => regrab(grab, &bindings()),
+        None => {} // Wayland, or no grab: presses are dropped while suspended
+    });
+}
+
+/// Whether the global shortcuts are held off (`suspend`).
+pub fn suspended() -> bool {
+    SUSPENDED.load(Ordering::SeqCst)
 }
 
 /// Replaces what the grab holds with `planned`. A shortcut another app already owns is
