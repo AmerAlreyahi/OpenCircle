@@ -6,8 +6,10 @@
 //! for the stable ids the Wayland portal needs.
 #[cfg(target_os = "linux")]
 mod portal;
+mod quick_id;
 mod socket;
 
+pub use quick_id::QuickId;
 pub use socket::{Command, forward, forward_or_start, is_older, listen, running, running_version};
 
 use std::cell::RefCell;
@@ -20,13 +22,9 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use crate::config::{Config, QuickAction, Target, parse_shortcut};
 use crate::{Trigger, Triggers};
 
-/// Ids `opencircle run` takes that are not in the action registry (`ui/quick.rs`
-/// runs ai_explain, copy_text and song_search; snip opens Snip mode).
-const PLANNED_ACTIONS: &[&str] = &["ai_explain", "copy_text", "snip", "song_search"];
-
 /// Is `id` an action `opencircle run` may start?
 fn known_action(id: &str) -> bool {
-    PLANNED_ACTIONS.contains(&id) || crate::actions::ACTIONS.iter().any(|a| a.id == id)
+    QuickId::from_name(id).is_known()
 }
 
 /// The config/CLI spelling of a target.
@@ -180,7 +178,7 @@ fn plan(cfg: &Config) -> (Vec<Binding>, Vec<String>) {
 
 /// "Translate (full screen, live)" from the action id and target.
 fn describe(qa: &QuickAction) -> String {
-    let mut name = qa.action.replace('_', " ");
+    let mut name = qa.action.as_str().replace('_', " ");
     if let Some(rest) = name.strip_prefix("ai ") {
         name = format!("AI {rest}");
     }
@@ -336,11 +334,11 @@ pub fn trigger(command: &Command, at: Instant) -> Trigger {
         Command::Version => unreachable!("answered by the socket, never a trigger"),
         Command::Run { action, target } => {
             let configured = bindings().iter().find_map(|b| match &b.what {
-                What::Quick(qa) if qa.action == *action => Some(qa.clone()),
+                What::Quick(qa) if qa.action == action.as_str() => Some(qa.clone()),
                 _ => None,
             });
             let mut qa = configured.unwrap_or_else(|| QuickAction {
-                action: action.clone(),
+                action: QuickId::from_name(action),
                 shortcut: String::new(),
                 target: Target::default(),
                 live: false,

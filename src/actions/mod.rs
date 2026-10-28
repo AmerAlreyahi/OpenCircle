@@ -71,7 +71,9 @@ pub fn for_key(labs: &crate::labs::Labs, letter: char, ctrl: bool) -> Option<&'s
     let key = Key { ctrl, letter };
     (ACTIONS.iter())
         .find(|action| action.key == key)
-        .filter(|action| crate::labs::action_on(labs, action.id))
+        .filter(|action| {
+            crate::labs::action_on(labs, &crate::hotkey::QuickId::from_name(action.id))
+        })
 }
 
 /// The action Enter runs: the config's `general.default_action` (the first

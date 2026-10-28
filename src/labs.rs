@@ -7,6 +7,8 @@
 //! Live translate is hidden here until 0.3.0 (owner, 2026-10-27).
 use serde::Serialize;
 
+use crate::hotkey::QuickId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Feature {
     /// Snip mode: its shortcuts (Print Screen ...), tray item and Settings page.
@@ -113,17 +115,17 @@ pub fn has(f: Feature) -> bool {
 }
 
 /// The Labs feature an action id (registry, quick action or `opencircle run`) belongs to.
-pub fn action_feature(id: &str) -> Option<Feature> {
+pub fn action_feature(id: &QuickId) -> Option<Feature> {
     match id {
-        "snip" => Some(Feature::Snip),
-        "edit" => Some(Feature::Editor),
-        "song_search" => Some(Feature::Song),
+        QuickId::Snip => Some(Feature::Snip),
+        QuickId::Edit => Some(Feature::Editor),
+        QuickId::SongSearch => Some(Feature::Song),
         _ => None,
     }
 }
 
 /// Is the action `id` available with these switches?
-pub fn action_on(labs: &Labs, id: &str) -> bool {
+pub fn action_on(labs: &Labs, id: &QuickId) -> bool {
     action_feature(id).is_none_or(|f| labs.has(f))
 }
 
@@ -135,7 +137,7 @@ pub fn quick_on(labs: &Labs, q: &crate::config::QuickAction) -> bool {
 /// The CLI's answer for a hidden feature's target (`opencircle run snip`): this
 /// message on stderr and exit status 2, the same as any refused command.
 pub fn command_allowed(labs: &Labs, action: &str) -> Result<(), String> {
-    match action_feature(action).filter(|f| !labs.has(*f)) {
+    match action_feature(&QuickId::from_name(action)).filter(|f| !labs.has(*f)) {
         Some(f) => Err(format!(
             "\"{action}\" is off: turn on {} in Settings > Labs",
             f.title()

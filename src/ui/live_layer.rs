@@ -146,13 +146,15 @@ impl Live {
             ..Live::new(cache, &cfg.translate.source, &cfg.translate.target)
         };
         let (task, handle) = background(|tx| {
-            let monitor = capture::monitor_under_cursor().map(|f| Monitor {
-                x: f.x,
-                y: f.y,
-                width: f.width,
-                height: f.height,
-                scale: f.scale,
-            });
+            let monitor = capture::monitor_under_cursor()
+                .map(|f| Monitor {
+                    x: f.x,
+                    y: f.y,
+                    width: f.width,
+                    height: f.height,
+                    scale: f.scale,
+                })
+                .map_err(|e| e.to_string());
             let _ = tx.unbounded_send(Msg::Monitor(monitor));
         })
         .abortable();

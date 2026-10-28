@@ -8,6 +8,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
 use crate::actions::{self, Crop, copy, lens, qr, text};
+use crate::capture::CaptureError;
 use crate::config::{self, After, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target};
 use crate::editor::{self};
 use crate::labs::{self, BarButton};
@@ -40,7 +41,7 @@ fn closing_app() -> App {
     app
 }
 
-fn a_shot() -> Result<Shot, String> {
+fn a_shot() -> Result<Shot, CaptureError> {
     Ok(Shot {
         image: image::Handle::from_rgba(4, 4, vec![9; 4 * 4 * 4]),
         scale: 1.0,

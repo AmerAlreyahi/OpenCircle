@@ -8,7 +8,7 @@ use iced::window::{self, Level, Mode};
 use iced::{Point, Size, Task};
 
 use crate::actions::{self, Action, Run, text};
-use crate::capture;
+use crate::capture::{self, CaptureError};
 use crate::config::{self};
 use crate::labs::BarButton;
 use crate::ocr::{self};
@@ -68,7 +68,7 @@ impl App {
 
     /// Snip: every monitor at once (the overlay shows the pointer's, then follows
     /// the pointer) and every window, while the overlay is still hidden.
-    pub(in crate::ui) fn snip_shot(kind: snip::Kind) -> Result<Shot, String> {
+    pub(in crate::ui) fn snip_shot(kind: snip::Kind) -> Result<Shot, CaptureError> {
         let capture::snip::Snapshot {
             frames,
             on,
@@ -89,14 +89,18 @@ impl App {
         })
     }
 
-    pub(in crate::ui) fn open(&mut self, at: Instant, shot: Result<Shot, String>) -> Task<Message> {
+    pub(in crate::ui) fn open(
+        &mut self,
+        at: Instant,
+        shot: Result<Shot, CaptureError>,
+    ) -> Task<Message> {
         self.capturing = None;
         let shot = match shot {
             Ok(shot) => shot,
             Err(e) => {
                 crate::log!("capture failed: {e}");
                 self.next = Purpose::Search;
-                if !capture::refused(&e) {
+                if !e.is_refused() {
                     return Task::none();
                 }
                 // Wayland: the desktop asks for permission only while we are in front.

@@ -21,6 +21,7 @@ use iced::widget::{column, container, row, space};
 use iced::{Element, Length, Size};
 
 use super::settings::{KeyField, KeyJob, KeyMessage, KeyStatus, PRESETS, bind, key_labels};
+use crate::capture::CaptureError;
 use crate::config::{Config, Provider, Theme};
 use crate::secrets::{KeyStore, Keyring};
 use crate::ui::theme;
@@ -65,7 +66,7 @@ pub enum Access {
     /// A request is out: the desktop's dialog is up.
     Asking,
     Allowed,
-    Failed(String),
+    Failed(CaptureError),
 }
 
 /// What the user picks on the AI step. "Skip" is the footer button.
@@ -159,7 +160,7 @@ pub enum Message {
     /// The Allow screenshots button.
     Allow,
     /// The desktop's answer to the screenshot request.
-    Allowed(Result<(), String>),
+    Allowed(Result<(), CaptureError>),
     Updates(bool),
     Autostart(bool),
 }
@@ -393,7 +394,7 @@ fn access_control(access: &Access) -> Element<'_, Message> {
         Access::Unasked => caption("A test picture is taken and deleted at once.").into(),
         Access::Asking => caption("Answer the dialog your desktop shows.").into(),
         Access::Allowed => caption("OpenCircle can capture your screen now.").into(),
-        Access::Failed(e) if crate::capture::refused(e) => {
+        Access::Failed(e) if e.is_refused() => {
             error_text("Your desktop said no. Try again, or allow it later.").into()
         }
         Access::Failed(e) => {
@@ -639,7 +640,7 @@ mod tests {
         );
         #[cfg(target_os = "linux")]
         {
-            let refused = crate::capture::portal::REFUSED.to_string();
+            let refused = CaptureError::Refused("refused by the desktop".into());
             update(&mut s, Message::Allowed(Err(refused)));
             let texts = shot::texts(view(&s));
             assert!(

@@ -4,6 +4,7 @@ use iced::{Rectangle, Size};
 
 use crate::actions::{self, Action};
 use crate::config::Target;
+use crate::hotkey::QuickId;
 
 /// What a quick action runs once it has its area.
 #[derive(Debug, Clone, Copy)]
@@ -20,14 +21,14 @@ pub enum Quick {
 
 impl Quick {
     /// `None` = not a quick action here (snip is its own mode) or an unknown id.
-    pub fn for_id(id: &str) -> Option<Quick> {
+    pub fn for_id(id: &QuickId) -> Option<Quick> {
         match id {
-            "copy_text" => Some(Quick::CopyText),
-            "ai_explain" => Some(Quick::Explain),
-            "song_search" => Some(Quick::Song),
+            QuickId::CopyText => Some(Quick::CopyText),
+            QuickId::AiExplain => Some(Quick::Explain),
+            QuickId::SongSearch => Some(Quick::Song),
             id => actions::ACTIONS
                 .iter()
-                .find(|a| a.id == id)
+                .find(|a| id == a.id)
                 .map(Quick::Action),
         }
     }
@@ -96,17 +97,26 @@ mod tests {
 
     #[test]
     fn quick_ids_map_to_what_they_run() {
-        assert!(matches!(Quick::for_id("copy_text"), Some(Quick::CopyText)));
-        assert!(matches!(Quick::for_id("ai_explain"), Some(Quick::Explain)));
-        assert!(matches!(Quick::for_id("song_search"), Some(Quick::Song)));
+        assert!(matches!(
+            Quick::for_id(&QuickId::from_name("copy_text")),
+            Some(Quick::CopyText)
+        ));
+        assert!(matches!(
+            Quick::for_id(&QuickId::from_name("ai_explain")),
+            Some(Quick::Explain)
+        ));
+        assert!(matches!(
+            Quick::for_id(&QuickId::from_name("song_search")),
+            Some(Quick::Song)
+        ));
         for id in ["lens", "ai", "text", "translate", "edit", "copy", "save"] {
             assert!(
-                matches!(Quick::for_id(id), Some(Quick::Action(a)) if a.id == id),
+                matches!(Quick::for_id(&QuickId::from_name(id)), Some(Quick::Action(a)) if a.id == id),
                 "{id}"
             );
         }
         // Snip is its own mode.
-        assert!(Quick::for_id("snip").is_none());
-        assert!(Quick::for_id("").is_none());
+        assert!(Quick::for_id(&QuickId::from_name("snip")).is_none());
+        assert!(Quick::for_id(&QuickId::from_name("")).is_none());
     }
 }

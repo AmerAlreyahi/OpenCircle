@@ -23,6 +23,51 @@ mod win;
 #[cfg(windows)]
 use win as platform;
 
+/// Why a capture failed. `Refused` is the one the UI acts on: the desktop said no
+/// (Wayland wants permission, and GNOME asks only while one of our windows has the
+/// focus), so the permission prompt opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureError {
+    // Only the Wayland portal refuses.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Refused(String),
+    Failed(String),
+}
+
+impl CaptureError {
+    pub fn is_refused(&self) -> bool {
+        matches!(self, CaptureError::Refused(_))
+    }
+}
+
+impl std::fmt::Display for CaptureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CaptureError::Refused(why) | CaptureError::Failed(why) => f.write_str(why),
+        }
+    }
+}
+
+impl std::error::Error for CaptureError {}
+
+impl From<String> for CaptureError {
+    fn from(why: String) -> Self {
+        CaptureError::Failed(why)
+    }
+}
+
+impl From<&str> for CaptureError {
+    fn from(why: &str) -> Self {
+        CaptureError::Failed(why.into())
+    }
+}
+
+impl From<CaptureError> for String {
+    fn from(e: CaptureError) -> String {
+        e.to_string()
+    }
+}
+
 /// A captured monitor: RGBA pixels plus where the monitor sits on the desktop.
 pub struct Frame {
     pub rgba: Vec<u8>,
@@ -49,19 +94,19 @@ pub fn monitor_list() -> Vec<Monitor> {
 }
 
 /// Captures the monitor under the cursor (the primary one if the cursor is unknown).
-pub fn monitor_under_cursor() -> Result<Frame, String> {
+pub fn monitor_under_cursor() -> Result<Frame, CaptureError> {
     monitor_of(None)
 }
 
 /// Captures the monitor of the active window (most of it), for Circle to Search,
 /// translate and the quick actions; the pointer's monitor when no real window is
 /// active (the desktop, the taskbar, one of ours).
-pub fn active_monitor() -> Result<Frame, String> {
+pub fn active_monitor() -> Result<Frame, CaptureError> {
     monitor_of(window_rect::active_rect())
 }
 
 /// Snip: every monitor at once (frozen together), and which one the pointer is on.
-pub fn every_monitor() -> Result<(Vec<Frame>, usize), String> {
+pub fn every_monitor() -> Result<(Vec<Frame>, usize), CaptureError> {
     if let Some(frame) = whole_desktop() {
         return Ok((vec![frame?], 0));
     }
@@ -96,11 +141,11 @@ fn whole_desktop_only() -> bool {
     std::env::var_os("OPENCIRCLE_TEST_FRAME").is_some()
 }
 
-fn whole_desktop() -> Option<Result<Frame, String>> {
+fn whole_desktop() -> Option<Result<Frame, CaptureError>> {
     // ponytail: test hook. WSLg and headless CI can't capture the screen, so a PNG
     // stands in; keep it for UI snapshot tests, never document it for users.
     if let Some(path) = std::env::var_os("OPENCIRCLE_TEST_FRAME") {
-        return Some(from_png(&path));
+        return Some(from_png(&path).map_err(CaptureError::from));
     }
     #[cfg(target_os = "linux")]
     if wayland_session() {
@@ -110,13 +155,13 @@ fn whole_desktop() -> Option<Result<Frame, String>> {
 }
 
 /// The monitor holding most of `area` (physical desktop px), else the pointer's, captured.
-pub fn monitor_of(area: Option<WinRect>) -> Result<Frame, String> {
+pub fn monitor_of(area: Option<WinRect>) -> Result<Frame, CaptureError> {
     if let Some(frame) = whole_desktop() {
         return frame;
     }
     let monitors = platform::monitors()?;
     let at = choose(&monitors, area, platform::pointer()).ok_or("no monitor found")?;
-    platform::grab(&monitors[at])
+    Ok(platform::grab(&monitors[at])?)
 }
 
 /// The monitor holding most of the `active` window, else the one under the
@@ -149,18 +194,6 @@ pub fn choose(
         .or_else(by_pointer)
         .or_else(|| monitors.iter().position(|m| m.primary))
         .or((!monitors.is_empty()).then_some(0))
-}
-
-/// The desktop refused the capture (`monitor_under_cursor`'s error): on Wayland it
-/// wants permission, and GNOME asks only while one of our windows has the focus.
-pub fn refused(error: &str) -> bool {
-    #[cfg(target_os = "linux")]
-    return error.contains(portal::REFUSED);
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = error;
-        false
-    }
 }
 
 #[cfg(target_os = "linux")]

@@ -377,7 +377,7 @@ pub(super) fn parse_quick_actions(v: &Value, w: &mut Vec<String>) -> Vec<QuickAc
             }
         });
         out.push(QuickAction {
-            action,
+            action: QuickId::from_name(&action),
             shortcut,
             target: get(t, &prefix, "target", Target::FullScreen, w),
             live: get(t, &prefix, "live", false, w),

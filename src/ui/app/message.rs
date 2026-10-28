@@ -7,6 +7,7 @@ use iced::{Point, Rectangle, Size, window};
 
 use crate::Trigger;
 use crate::actions::{self, Action, lens, qr, text};
+use crate::capture::CaptureError;
 use crate::config::{self, Target};
 use crate::editor;
 use crate::labs::BarButton;
@@ -20,7 +21,7 @@ use crate::ui::{live_layer, overlay, panel, song, translate, windows};
 pub(in crate::ui) enum Message {
     Trigger(Trigger),
     /// Capture number `.0`'s thread is done (`Instant` = trigger time, latency log).
-    Captured(u32, Instant, Result<Shot, String>),
+    Captured(u32, Instant, Result<Shot, CaptureError>),
     /// Capture number `.0` has waited `CAPTURE_TIMEOUT`.
     CaptureTimedOut(u32),
     Overlay(overlay::Event),

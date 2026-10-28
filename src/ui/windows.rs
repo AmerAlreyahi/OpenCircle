@@ -1072,7 +1072,9 @@ mod tests {
         assert_eq!(windows.title(id), "OpenCircle needs screenshot permission");
         assert!(windows.view(id).is_some());
         let _ = windows.update(Msg::Permission(onboarding::Message::Allow));
-        let refused = Err("refused by the desktop".to_string());
+        let refused = Err(crate::capture::CaptureError::Refused(
+            "refused by the desktop".into(),
+        ));
         let _ = windows.update(Msg::Permission(onboarding::Message::Allowed(refused)));
         assert_eq!(windows.id(Kind::Permission), Some(id), "stays to try again");
         let _ = windows.update(Msg::Permission(onboarding::Message::Allow));

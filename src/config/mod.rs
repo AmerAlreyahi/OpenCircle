@@ -115,6 +115,7 @@ use global_hotkey::hotkey::{Code, HotKey, HotKeyParseError, Modifiers};
 use serde::{Deserialize, Serialize};
 use toml::Table;
 
+use crate::hotkey::QuickId;
 use crate::labs::Labs;
 
 mod look;
@@ -318,7 +319,7 @@ pub enum Target {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct QuickAction {
-    pub action: String,
+    pub action: QuickId,
     /// "" = not bound.
     pub shortcut: String,
     pub target: Target,
@@ -781,7 +782,7 @@ impl Default for TranslateConfig {
 impl Default for Config {
     fn default() -> Self {
         let qa = |action: &str, shortcut: &str, target, live| QuickAction {
-            action: action.to_string(),
+            action: action.into(),
             shortcut: shortcut.to_string(),
             target,
             live,
@@ -1110,6 +1111,33 @@ mod tests {
         c.theme = Theme::Light;
         set_current(c.clone());
         assert_eq!(current(), c, "the next save replaces it");
+    }
+
+    #[test]
+    fn quick_ids_round_trip_byte_equal() {
+        let c = Config {
+            quick_actions: QuickId::KNOWN
+                .into_iter()
+                .chain([QuickId::from_name("future_thing")])
+                .map(|action| QuickAction {
+                    action,
+                    shortcut: String::new(),
+                    target: Target::Circle,
+                    live: false,
+                })
+                .collect(),
+            ..Config::default()
+        };
+        let text = toml::to_string_pretty(&c).unwrap();
+        // The names in the file are the ones every version wrote.
+        for id in QuickId::KNOWN {
+            assert!(text.contains(&format!("action = \"{id}\"")), "{id}");
+        }
+        assert!(text.contains("action = \"future_thing\""));
+        let (back, w) = Config::parse(&text);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back, c);
+        assert_eq!(toml::to_string_pretty(&back).unwrap(), text);
     }
 
     #[test]

@@ -15,7 +15,7 @@ use std::time::Duration;
 use gtk::gio::{self, Cancellable, DBusCallFlags, DBusConnection, DBusSignalFlags};
 use gtk::glib::{self, ToVariant, Variant, VariantDict};
 
-use super::Frame;
+use super::{CaptureError, Frame};
 
 pub const DESKTOP: &str = "org.freedesktop.portal.Desktop";
 pub const PATH: &str = "/org/freedesktop/portal/desktop";
@@ -25,22 +25,18 @@ pub const PATH: &str = "/org/freedesktop/portal/desktop";
 /// an app whose desktop file is `APP_ID.desktop`.
 pub const APP_ID: &str = "com.opencircle.app";
 
-/// In a refused request's error: the desktop said no (GNOME also says no when it
-/// would have to ask while another app has the focus).
-pub const REFUSED: &str = "refused by the desktop";
-
 /// The full desktop, without asking the user to pick (`interactive` = false). The
 /// desktop may still ask once for permission (GNOME does), hence the long wait.
-pub fn capture() -> Result<Frame, String> {
-    read_and_delete(&screenshot()?)
+pub fn capture() -> Result<Frame, CaptureError> {
+    Ok(read_and_delete(&screenshot()?)?)
 }
 
 /// One screenshot request just for its permission dialog: call while one of our
 /// windows has the focus (GNOME won't ask otherwise). The image is deleted unread.
-pub fn allow() -> Result<(), String> {
+pub fn allow() -> Result<(), CaptureError> {
     forget_refusal();
     let path = screenshot()?;
-    std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))
+    Ok(std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?)
 }
 
 /// After "Deny" GNOME refuses silently for good, and its Settings has no switch for
@@ -79,7 +75,7 @@ fn forget_refusal() {
 }
 
 /// Asks the portal for a screenshot; returns the file it wrote.
-fn screenshot() -> Result<PathBuf, String> {
+fn screenshot() -> Result<PathBuf, CaptureError> {
     let err = |e: String| format!("Wayland screenshot portal: {e}");
     let conn = session_bus().map_err(err)?;
     let results = request(
@@ -94,7 +90,10 @@ fn screenshot() -> Result<PathBuf, String> {
             ("", options).to_variant()
         },
     )
-    .map_err(err)?;
+    .map_err(|e| match e {
+        CaptureError::Refused(why) => CaptureError::Refused(err(why)),
+        CaptureError::Failed(why) => CaptureError::Failed(err(why)),
+    })?;
     let uri: String = results
         .lookup("uri")
         .ok()
@@ -348,7 +347,7 @@ pub fn request(
     method: &str,
     wait: Duration,
     args: impl FnOnce(&str) -> Variant,
-) -> Result<VariantDict, String> {
+) -> Result<VariantDict, CaptureError> {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let token = format!("opencircle{}", NEXT.fetch_add(1, Ordering::Relaxed));
     let sender = conn
@@ -429,11 +428,15 @@ pub fn request(
 }
 
 /// org.freedesktop.portal.Request::Response codes.
-fn response(code: u32) -> Result<(), String> {
+fn response(code: u32) -> Result<(), CaptureError> {
     match code {
         0 => Ok(()),
         1 => Err("cancelled by the user".into()),
-        _ => Err(format!("{REFUSED} (permission denied?)")),
+        // The desktop said no (GNOME also says no when it would have to ask while
+        // another app has the focus).
+        _ => Err(CaptureError::Refused(
+            "refused by the desktop (permission denied?)".into(),
+        )),
     }
 }
 
@@ -463,8 +466,9 @@ mod tests {
     #[test]
     fn maps_response_codes() {
         assert!(response(0).is_ok());
-        assert!(response(1).unwrap_err().contains("cancelled"));
-        assert!(response(2).unwrap_err().contains("refused"));
+        assert!(!response(1).unwrap_err().is_refused());
+        assert!(response(1).unwrap_err().to_string().contains("cancelled"));
+        assert!(response(2).unwrap_err().is_refused());
     }
 
     #[test]
