@@ -152,6 +152,8 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) work_inset: f32,
     /// The card's grip or corner is held, and the pointer's last position.
     pub(in crate::ui) card_drag: Option<(card::Drag, Option<Point>)>,
+    /// The card held is the AI chat (it docks when let go).
+    pub(in crate::ui) card_chat: bool,
     /// The result card opening (`motion::WIDGET`): which panel, its motion,
     /// and how open it was at the latest frame (it grows from `OPEN_SCALE`).
     pub(in crate::ui) card_open: Option<(u32, motion::Shown, f32)>,
@@ -233,6 +235,7 @@ impl Default for Opening {
             bar_glide: None,
             work_inset: 0.0,
             card_drag: None,
+            card_chat: false,
             card_open: None,
             card_hover: false,
             chat_off: Vector::ZERO,

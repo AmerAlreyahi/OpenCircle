@@ -4,20 +4,27 @@
 //! its frame) over the frozen frame, so the selection stays visible. Slow work
 //! runs on its own thread (`background`); its results arrive as `Msg`s.
 //! Dropping a panel stops its running work. What it shows: `view`.
+//!
+//! The AI chat pins itself after a follow-up (or at once: `chat.stays_open`),
+//! or by its pin button: the App then keeps it across overlays (`App::chat`).
+//! Each answered chat is saved, text only (`store::chats`), while Keep chat
+//! history is on; its drawer (`Tab`) holds History and the chat's settings.
 use std::sync::Arc;
 use std::time::Instant;
 
-use iced::widget::{markdown, operation};
+use iced::widget::{markdown, operation, text_editor};
 use iced::{Task, task};
 
 use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::actions::text::{self, Progress};
 use crate::actions::{self, Crop, lens};
 use crate::ai;
+use crate::config::{self, Provider, StaysOpen};
+use crate::store::{self, chats};
 use crate::ui::background;
 use crate::ui::keys;
 use crate::ui::kit::markdown::Act;
-use crate::ui::kit::panel_frame;
+use crate::ui::kit::panel_frame::{self, Event};
 use crate::ui::kit::{motion, spinner};
 
 mod view;
@@ -29,13 +36,86 @@ pub(in crate::ui) const INPUT: &str = "panel-input";
 /// The Ask AI conversation (scrolled to the end as the answer grows).
 const LOG: &str = "panel-log";
 
+/// The chat drawer's tabs (the design's "Workspace").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    History,
+    Settings,
+}
+
+/// A provider the drawer's quick picker offers: Settings' own list (the
+/// browser, Anthropic, then its server presets), so it follows Settings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pick {
+    name: &'static str,
+    provider: Provider,
+    base_url: &'static str,
+    model: &'static str,
+}
+
+impl std::fmt::Display for Pick {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name)
+    }
+}
+
+/// The picker's choices, built once from Settings' list.
+pub(super) static PICKS: std::sync::LazyLock<Vec<Pick>> = std::sync::LazyLock::new(|| {
+    let mut all = vec![
+        Pick {
+            name: "Browser (Google AI Mode)",
+            provider: Provider::Browser,
+            base_url: "",
+            model: "",
+        },
+        Pick {
+            name: "Anthropic",
+            provider: Provider::Anthropic,
+            base_url: "",
+            model: ai::DEFAULT_ANTHROPIC_MODEL,
+        },
+    ];
+    all.extend(crate::ui::screens::settings::PRESETS.iter().map(|p| Pick {
+        name: p.name,
+        provider: Provider::OpenaiCompatible,
+        base_url: p.base_url,
+        model: p.model,
+    }));
+    all
+});
+
+/// The pick the running config is (`None`: a server of the user's own).
+pub(super) fn picked(cfg: &config::AiConfig) -> Option<Pick> {
+    (PICKS.iter())
+        .find(|p| {
+            p.provider == cfg.provider
+                && (p.provider != Provider::OpenaiCompatible || p.base_url == cfg.base_url)
+        })
+        .cloned()
+}
+
+/// "AI chat stays open: Always": a chat is pinned from its first question.
+pub(super) fn starts_pinned(stays: StaysOpen) -> bool {
+    stays == StaysOpen::Always
+}
+
+/// A model id that names a safety / moderation classifier: it rates messages
+/// instead of answering them (the drawer warns).
+pub fn classifier(model: &str) -> bool {
+    let m = model.to_lowercase();
+    ["safety", "guard", "moderation"]
+        .iter()
+        .any(|w| m.contains(w))
+}
+
 #[derive(Debug, Clone)]
 pub enum Msg {
     /// The card's grip or corner was pressed (the App moves / resizes it).
     Card(panel_frame::Event),
     /// The Lens page is written and the browser launched (the App holds the page).
     LensOpened(Result<lens::Held, String>),
-    Input(String),
+    /// An edit in the composer (typing, a new line, a paste).
+    Edit(text_editor::Action),
     /// Enter / send in the follow-up input.
     Submit,
     /// A suggestion chip (index into `PRESETS`).
@@ -68,13 +148,46 @@ pub enum Msg {
     EditTurn(usize),
     /// Ask the last question again (also Retry after an error).
     Regenerate,
+    /// The header's pin: pins the chat; on a pinned one, closes it (the App).
+    Pin,
+    /// The drawer opens on a tab, or closes (`None`).
+    Drawer(Option<Tab>),
+    /// The drawer's "AI chat stays open".
+    StaysOpen(StaysOpen),
+    /// The drawer's quick provider picker, its model field and Enter in it.
+    Pick(Pick),
+    Model(String),
+    SaveModel,
+    /// "Open AI settings →" (the App opens Settings > AI).
+    OpenAiSettings,
+    /// The History tab's list of saved chats (newest first).
+    Listed(Vec<chats::Entry>),
+    /// Open a saved chat, delete one, or all.
+    OpenSaved(String),
+    Loaded(Result<chats::Saved, String>),
+    DeleteSaved(String),
+    ClearHistory,
+    /// A summary of the chat's older messages, written at this many messages.
+    Summarized(usize, Result<String, String>),
+    /// A setting was saved (redraws the drawer).
+    Saved,
 }
 
 pub struct Panel {
     crop: Arc<Crop>,
     state: State,
-    /// The follow-up input's text.
-    input: String,
+    /// The follow-up input's text (one line, more with Shift / Ctrl+Enter).
+    input: text_editor::Content,
+    /// The input holds a question asked elsewhere: sent once ready.
+    queued: bool,
+    /// Pinned: outside clicks and Esc no longer close it (`App::chat`).
+    pinned: bool,
+    /// The drawer's open tab, its History list and its model field.
+    drawer: Option<Tab>,
+    listed: Vec<chats::Entry>,
+    model: String,
+    /// The older messages' summary being written; dropping it stops that.
+    summarizing: Option<task::Handle>,
     /// The running stream; dropping the handle aborts it.
     work: Option<task::Handle>,
     /// What the last link click did (or why it could not).
@@ -126,12 +239,9 @@ impl Panel {
     ) -> (Panel, Task<Msg>) {
         let crop = Arc::new(crop);
         let mut panel = Panel {
-            crop: crop.clone(),
-            state: State::Lens(None),
-            input: question.unwrap_or_default(),
-            work: None,
-            note: None,
-            spin: None,
+            input: text_editor::Content::with_text(question.as_deref().unwrap_or_default()),
+            queued: question.is_some(),
+            ..Panel::new(crop.clone(), State::Lens(None))
         };
         let task = match kind {
             actions::Panel::Lens => background(move |tx| {
@@ -142,19 +252,92 @@ impl Panel {
                 if let State::Ask { include: on, .. } = &mut panel.state {
                     *on = include;
                 }
-                // No key (Google AI Mode): nothing to load (no keyring, no PNG), so
-                // the question goes at once, never "Getting ready…" before it.
-                if crate::config::current().ai.provider == crate::config::Provider::Browser {
-                    let ready = ask::setup(&crop).map(Arc::new);
-                    let task = panel.update(Msg::Ready(ready));
-                    return (panel, task);
-                }
-                background(move |tx| {
-                    let _ = tx.unbounded_send(Msg::Ready(ask::setup(&crop).map(Arc::new)));
-                })
+                panel.pinned = starts_pinned(config::current().chat.stays_open);
+                return {
+                    let task = panel.load();
+                    (panel, task)
+                };
             }
         };
         (panel, task)
+    }
+
+    /// Reads the config and key and encodes the crop (`Ready`). No key (Google
+    /// AI Mode): nothing to load (no keyring, no PNG), so a question goes at
+    /// once, never "Getting ready…" before it.
+    fn load(&mut self) -> Task<Msg> {
+        let crop = self.crop.clone();
+        if config::current().ai.provider == Provider::Browser {
+            let ready = ask::setup(&crop).map(Arc::new);
+            return self.update(Msg::Ready(ready));
+        }
+        background(move |tx| {
+            let _ = tx.unbounded_send(Msg::Ready(ask::setup(&crop).map(Arc::new)));
+        })
+    }
+
+    /// A new capture while this chat stays open: its crop is what the next
+    /// question asks about, and `question` (asked in the bar) goes into this
+    /// same chat once the crop is ready. `include`: the bar's Include screen.
+    pub fn ask_about(&mut self, crop: Crop, question: Option<String>, include: bool) -> Task<Msg> {
+        self.crop = Arc::new(crop);
+        if let State::Ask { include: on, .. } = &mut self.state {
+            *on = include;
+        }
+        if let Some(question) = question {
+            self.input = text_editor::Content::with_text(&question);
+            self.queued = true;
+        }
+        self.drawer = None;
+        // always on a thread: the chat keeps its setup until the new one is ready
+        let crop = self.crop.clone();
+        background(move |tx| {
+            let _ = tx.unbounded_send(Msg::Ready(ask::setup(&crop).map(Arc::new)));
+        })
+    }
+
+    /// The chat (tests).
+    #[cfg(test)]
+    pub fn chat(&self) -> Option<&Chat> {
+        match &self.state {
+            State::Ask { chat, .. } => Some(chat),
+            State::Lens(_) => None,
+        }
+    }
+
+    /// Pinned: it stays open over other apps until its pin closes it.
+    pub fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    /// The App's chat takes in another (the translate word card's): its turns
+    /// follow this chat's (one chat only).
+    pub fn append(&mut self, mut other: Chat) {
+        other.cancel();
+        if let State::Ask { chat, .. } = &mut self.state
+            && chat.status != Status::Streaming
+        {
+            chat.turns.append(&mut other.turns);
+        }
+        self.sync();
+    }
+
+    /// A panel in `state` on `crop`, nothing typed, nothing running.
+    fn new(crop: Arc<Crop>, state: State) -> Panel {
+        Panel {
+            crop,
+            state,
+            input: text_editor::Content::new(),
+            queued: false,
+            pinned: false,
+            drawer: None,
+            listed: Vec::new(),
+            model: String::new(),
+            summarizing: None,
+            work: None,
+            note: None,
+            spin: None,
+        }
     }
 
     /// Ask AI, continuing `chat` (e.g. the translate word card's explanation).
@@ -211,7 +394,7 @@ impl Panel {
 
     /// Empties the follow-up input and returns what was in it.
     pub fn take_input(&mut self) -> String {
-        std::mem::take(&mut self.input)
+        std::mem::replace(&mut self.input, text_editor::Content::new()).text()
     }
 
     /// Messages for the panel itself (the App handles Search
@@ -245,7 +428,106 @@ impl Panel {
     fn on(&mut self, msg: Msg) -> Task<Msg> {
         match (&mut self.state, msg) {
             (State::Lens(status), Msg::LensOpened(result)) => *status = Some(result.map(drop)),
-            (_, Msg::Input(value)) => self.input = value,
+            (_, Msg::Edit(action)) => self.input.perform(action),
+            (_, Msg::Pin) => self.pinned = true,
+            (State::Ask { .. }, Msg::Card(Event::Menu)) => {
+                let tab = match self.drawer {
+                    Some(_) => None,
+                    None => Some(Tab::History),
+                };
+                return self.on(Msg::Drawer(tab));
+            }
+            (State::Ask { .. }, Msg::Drawer(tab)) => {
+                self.drawer = tab;
+                self.model = config::current().ai.model;
+                if tab == Some(Tab::History) {
+                    return list_saved();
+                }
+            }
+            (_, Msg::Listed(all)) => self.listed = all,
+            (_, Msg::OpenSaved(id)) => {
+                let Some(db) = store::path() else {
+                    return Task::none();
+                };
+                return background(move |tx| {
+                    let _ = tx.unbounded_send(Msg::Loaded(chats::load(&db, &id)));
+                });
+            }
+            (
+                State::Ask {
+                    chat,
+                    browse,
+                    editing,
+                    ..
+                },
+                Msg::Loaded(Ok(saved)),
+            ) => {
+                (*chat, *browse, *editing) = (Chat::from_saved(saved), Browse::Idle, None);
+                (self.work, self.summarizing, self.drawer) = (None, None, None);
+            }
+            (_, Msg::Loaded(Err(e))) => self.note = Some(Err(e)),
+            (_, Msg::DeleteSaved(id)) => {
+                let Some(db) = store::path() else {
+                    return Task::none();
+                };
+                if let State::Ask { chat, .. } = &mut self.state
+                    && chat.id.as_deref() == Some(id.as_str())
+                {
+                    chat.id = None; // this chat, if saved again, is a new one
+                }
+                return background(move |tx| {
+                    if let Err(e) = chats::delete(&db, &id) {
+                        crate::log!("[opencircle] {e}");
+                    }
+                    let _ = tx.unbounded_send(Msg::Listed(chats::list(&db)));
+                });
+            }
+            (_, Msg::ClearHistory) => {
+                self.listed.clear();
+                if let State::Ask { chat, .. } = &mut self.state {
+                    chat.id = None;
+                }
+                return clear_saved();
+            }
+            (State::Ask { .. }, Msg::StaysOpen(how)) => {
+                self.pinned |= how == StaysOpen::Always;
+                return save_config(move |c| c.chat.stays_open = how, None);
+            }
+            (State::Ask { .. }, Msg::Pick(pick)) => {
+                let model = (pick.model.to_string(), self.model.clone());
+                let crop = self.crop.clone();
+                return save_config(
+                    move |c| {
+                        let (preset, typed) = model;
+                        let preset_model = PICKS.iter().any(|p| p.model == typed);
+                        c.ai.provider = pick.provider;
+                        c.ai.base_url = pick.base_url.into();
+                        if !preset.is_empty() && (typed.trim().is_empty() || preset_model) {
+                            c.ai.model = preset;
+                        }
+                    },
+                    Some(crop),
+                );
+            }
+            (_, Msg::Model(model)) => self.model = model,
+            (State::Ask { .. }, Msg::SaveModel) => {
+                let model = self.model.trim().to_string();
+                if model.is_empty() {
+                    return Task::none();
+                }
+                return save_config(move |c| c.ai.model = model, Some(self.crop.clone()));
+            }
+            (State::Ask { chat, .. }, Msg::Summarized(at, result)) => {
+                self.summarizing = None;
+                match result {
+                    Ok(text) if !text.is_empty() => {
+                        chat.summary = Some(chats::Summary { text, at });
+                        return keep(chat);
+                    }
+                    Ok(_) => {}
+                    Err(e) => crate::log!("[opencircle] chat summary: {e}"),
+                }
+            }
             // Not ready or still answering: the question stays in the input.
             (
                 State::Ask {
@@ -276,8 +558,8 @@ impl Panel {
                 Msg::NewChat,
             ) => {
                 (*chat, *browse, *editing) = (Chat::default(), Browse::Idle, None);
-                self.work = None;
-                self.input.clear();
+                (self.work, self.summarizing, self.drawer) = (None, None, None);
+                self.input = text_editor::Content::new();
                 self.note = None;
             }
             (State::Ask { .. }, Msg::Answer(act)) => {
@@ -304,7 +586,7 @@ impl Panel {
                 if chat.status != Status::Streaming =>
             {
                 if let Some(turn) = chat.turns.get(i) {
-                    self.input = turn.question.clone();
+                    self.input = text_editor::Content::with_text(&turn.question);
                     *editing = Some(i);
                     return operation::focus(INPUT);
                 }
@@ -354,7 +636,9 @@ impl Panel {
             (State::Ask { setup, .. }, Msg::Ready(result)) => {
                 let ready = result.is_ok();
                 *setup = Some(result);
-                if ready && !self.input.trim().is_empty() {
+                // only a question asked elsewhere, never a draft in the composer
+                if ready && std::mem::take(&mut self.queued) && !self.input.text().trim().is_empty()
+                {
                     let question = self.take_input();
                     return self.send(&question);
                 }
@@ -368,6 +652,7 @@ impl Panel {
                 chat.finish(result);
                 *browse = Browse::Idle;
                 self.work = None;
+                return self.answered();
             }
             (_, Msg::Acted(note)) => self.note = Some(note),
             _ => {}
@@ -375,8 +660,45 @@ impl Panel {
         Task::none()
     }
 
+    /// An answer came: the chat is saved (text only), and once it is long its
+    /// older messages' summary is written (`ask::summary_due`) by the same
+    /// provider, with the user's own key.
+    fn answered(&mut self) -> Task<Msg> {
+        let State::Ask {
+            chat,
+            setup: Some(Ok(setup)),
+            ..
+        } = &mut self.state
+        else {
+            return Task::none();
+        };
+        if setup.browser() {
+            return Task::none(); // a hand-off to the browser: no conversation to keep
+        }
+        let mut tasks = vec![keep(chat)];
+        if let (None, Some((at, messages))) = (&self.summarizing, chat.summary_request()) {
+            let setup = setup.clone();
+            let (task, handle) = background(move |tx| {
+                let summary = ask::summarize(&setup, &messages);
+                let _ = tx.unbounded_send(Msg::Summarized(at, summary));
+            })
+            .abortable();
+            self.summarizing = Some(handle.abort_on_drop());
+            tasks.push(task);
+        }
+        Task::batch(tasks)
+    }
+
     /// Asks `question`; the answer streams in on a thread. Nothing is sent before this.
     fn send(&mut self, question: &str) -> Task<Msg> {
+        // a second question in the same chat pins it
+        if let State::Ask { chat, .. } = &self.state
+            && !chat.turns.is_empty()
+            && !question.trim().is_empty()
+        {
+            self.pinned = true;
+        }
+        let size = (self.crop.width, self.crop.height);
         let State::Ask {
             setup: Some(Ok(setup)),
             chat,
@@ -406,6 +728,9 @@ impl Panel {
         let Some(messages) = chat.ask(question, png) else {
             return Task::none();
         };
+        if let Some(turn) = chat.turns.last_mut().filter(|t| t.screen) {
+            turn.shot = Some(size);
+        }
         let setup = setup.clone();
         let (task, handle) = background(move |tx| {
             let result = ask::stream(&setup, &messages, |piece| {
@@ -484,6 +809,64 @@ impl State {
     }
 }
 
+/// Saves `chat` (text only) while Keep chat history is on; nothing otherwise.
+fn keep(chat: &mut Chat) -> Task<Msg> {
+    keep_in(store::path(), config::current().chat.keep_history, chat)
+}
+
+/// `keep` into the database `db`, if any, when `on`.
+fn keep_in(db: Option<std::path::PathBuf>, on: bool, chat: &mut Chat) -> Task<Msg> {
+    let Some(db) = db.filter(|_| on) else {
+        return Task::none();
+    };
+    let saved = chat.saved();
+    background(move |_| {
+        if let Err(e) = chats::save(&db, &saved) {
+            crate::log!("[opencircle] {e}");
+        }
+    })
+}
+
+/// The saved chats, newest first (`Listed`).
+fn list_saved() -> Task<Msg> {
+    let Some(db) = store::path() else {
+        return Task::none();
+    };
+    background(move |tx| {
+        let _ = tx.unbounded_send(Msg::Listed(chats::list(&db)));
+    })
+}
+
+/// Every saved chat goes ("Clear all history").
+fn clear_saved() -> Task<Msg> {
+    let Some(db) = store::path() else {
+        return Task::none();
+    };
+    background(move |tx| {
+        if let Err(e) = chats::clear(&db) {
+            crate::log!("[opencircle] {e}");
+        }
+        let _ = tx.unbounded_send(Msg::Listed(Vec::new()));
+    })
+}
+
+/// Saves a drawer setting (`edit` on the config as it is now, on a thread);
+/// with `crop`, the chat then reloads its provider and key for it (`Ready`).
+fn save_config(
+    edit: impl FnOnce(&mut config::Config) + Send + 'static,
+    crop: Option<Arc<Crop>>,
+) -> Task<Msg> {
+    background(move |tx| {
+        if let Err(e) = config::update(edit) {
+            crate::log!("[opencircle] settings not saved: {e}");
+        }
+        let _ = tx.unbounded_send(Msg::Saved);
+        if let Some(crop) = crop {
+            let _ = tx.unbounded_send(Msg::Ready(ask::setup(&crop).map(Arc::new)));
+        }
+    })
+}
+
 /// Puts `text` on the clipboard (on a thread); its note says so.
 fn copy(text: String) -> Task<Msg> {
     background(move |tx| {
@@ -515,4 +898,4 @@ fn browser_turn(prompt: &str, read: Option<Result<String, String>>) -> (String, 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

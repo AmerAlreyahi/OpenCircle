@@ -8,6 +8,7 @@ use super::{Action, Crop, Key, Panel, Run};
 use crate::ai::{self, Role};
 use crate::config::{AiConfig, Config, Provider};
 use crate::secrets::{self, Secret};
+use crate::store::chats as history;
 
 pub const ACTION: Action = Action {
     id: "ai",
@@ -219,8 +220,14 @@ pub struct Turn {
     pub answer: String,
     /// The selection went with this question (Include screen was on).
     pub screen: bool,
-    /// How long the model thought before answering, if it said it did.
+    /// The picture first sent with this question (a pinned chat asks about
+    /// several captures, each going once, with the question it came with).
+    pub image: Option<std::sync::Arc<[u8]>>,
+    /// How long the model thought before answering, if it sent its reasoning.
     pub thought: Option<Duration>,
+    /// The crop's size (physical px) when one went; `None` for a chat opened
+    /// from History (its screenshots were not kept).
+    pub shot: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -234,6 +241,16 @@ pub enum Status {
     Cancelled,
 }
 
+/// How many earlier messages (questions and answers) go with a question in
+/// full; anything older goes as ONE short summary (`Summary`), never whole.
+pub const WINDOW: usize = 20;
+/// A summary is written once a chat has more than `WINDOW` messages, then
+/// again every `REFRESH` messages.
+pub const REFRESH: usize = 10;
+
+const SUMMARY_SYSTEM: &str = "Summarize the conversation below in a few short sentences: \
+the topics, facts and decisions the user may refer back to. Plain text, no preamble.";
+
 /// The conversation in the Ask AI panel.
 #[derive(Debug, Default)]
 pub struct Chat {
@@ -241,33 +258,128 @@ pub struct Chat {
     pub status: Status,
     /// The model began thinking (no text yet).
     thinking: Option<Instant>,
+    /// Its saved file's name (`history::chat`), once saved or opened from History.
+    pub id: Option<String>,
+    /// The older messages' summary (`WINDOW`), from the provider.
+    pub summary: Option<history::Summary>,
+}
+
+/// A summary is due for a chat of `messages` messages, the last written at `last`.
+pub fn summary_due(messages: usize, last: Option<usize>) -> bool {
+    messages > WINDOW && last.is_none_or(|at| messages >= at + REFRESH)
 }
 
 impl Chat {
-    /// Starts a turn and returns the conversation to send (the crop `png`, if any, goes with the
-    /// first question). `None` while an answer streams, or for a blank question.
+    /// The answered turns: what was really asked and answered (and is sent again).
+    fn answered(&self) -> impl Iterator<Item = &Turn> {
+        self.turns.iter().filter(|t| !t.answer.is_empty())
+    }
+
+    /// Starts a turn and returns the conversation to send: the last `WINDOW` messages,
+    /// the summary of any older ones, and the question. The crop `png`, if any, goes
+    /// with this question unless an earlier answered one already took it. `None` while
+    /// an answer streams, or for a blank question.
     pub fn ask(&mut self, question: &str, png: &[u8]) -> Option<Vec<ai::Message>> {
         let question = question.trim();
         if question.is_empty() || self.status == Status::Streaming {
             return None;
         }
         // Earlier turns without an answer (failed at once) are shown, not sent.
+        let answered: Vec<&Turn> = self.answered().collect();
         let mut messages = vec![ai::Message::new(Role::System, SYSTEM)];
-        for turn in self.turns.iter().filter(|t| !t.answer.is_empty()) {
-            messages.push(ai::Message::user(&turn.question));
+        let skip = answered.len().saturating_sub(WINDOW / 2);
+        if let (true, Some(summary)) = (skip > 0, &self.summary) {
+            let text = format!("Summary of the earlier conversation:\n{}", summary.text);
+            messages.push(ai::Message::new(Role::System, text));
+        }
+        for turn in &answered[skip..] {
+            let mut asked = ai::Message::user(&turn.question);
+            asked.image_png = turn.image.as_deref().map(<[u8]>::to_vec);
+            messages.push(asked);
             messages.push(ai::Message::new(Role::Assistant, &turn.answer));
         }
-        messages.push(ai::Message::user(question));
-        messages[1].image_png = (!png.is_empty()).then(|| png.to_vec()); // none: a plain question
+        // (again once the turn that took it left the window)
+        let new = !png.is_empty()
+            && !answered[skip..]
+                .iter()
+                .any(|t| t.image.as_deref() == Some(png));
+        let mut asked = ai::Message::user(question);
+        asked.image_png = new.then(|| png.to_vec()); // none: a plain question, or sent already
+        messages.push(asked);
         self.turns.push(Turn {
             question: question.into(),
             answer: String::new(),
             screen: !png.is_empty(),
+            image: new.then(|| png.into()),
             thought: None,
+            shot: None,
         });
         self.status = Status::Streaming;
         self.thinking = None;
         Some(messages)
+    }
+
+    /// A summary is due (`summary_due`): the chat's message count and the request
+    /// that writes it (text only: the messages before the last `WINDOW`, and the
+    /// summary so far). Not while an answer streams.
+    pub fn summary_request(&self) -> Option<(usize, Vec<ai::Message>)> {
+        let answered: Vec<&Turn> = self.answered().collect();
+        let count = 2 * answered.len();
+        if self.status == Status::Streaming
+            || !summary_due(count, self.summary.as_ref().map(|s| s.at))
+        {
+            return None;
+        }
+        let mut text = String::new();
+        if let Some(summary) = &self.summary {
+            text += &format!("Earlier summary: {}\n\n", summary.text);
+        }
+        for turn in &answered[..answered.len() - WINDOW / 2] {
+            text += &format!("User: {}\nAssistant: {}\n\n", turn.question, turn.answer);
+        }
+        let messages = vec![
+            ai::Message::new(Role::System, SUMMARY_SYSTEM),
+            ai::Message::user(text),
+        ];
+        Some((count, messages))
+    }
+
+    /// The chat as History keeps it: text only (a screenshot leaves only its marker).
+    /// Gets its id on the first save.
+    pub fn saved(&mut self) -> history::Saved {
+        let id = self.id.get_or_insert_with(history::new_id).clone();
+        history::Saved {
+            id,
+            updated: history::now(),
+            turns: (self.turns.iter())
+                .map(|t| history::Turn {
+                    question: t.question.clone(),
+                    answer: t.answer.clone(),
+                    screen: t.screen,
+                })
+                .collect(),
+            summary: self.summary.clone(),
+        }
+    }
+
+    /// A chat opened from History, to go on with (its screenshots were not kept).
+    pub fn from_saved(saved: history::Saved) -> Chat {
+        Chat {
+            turns: (saved.turns.into_iter())
+                .map(|t| Turn {
+                    question: t.question,
+                    answer: t.answer,
+                    screen: t.screen,
+                    image: None,
+                    thought: None,
+                    shot: None,
+                })
+                .collect(),
+            status: Status::Done,
+            thinking: None,
+            id: Some(saved.id),
+            summary: saved.summary,
+        }
     }
 
     /// A piece of the answer; an empty one = the model is thinking (`ai::ask_stream`).
@@ -306,6 +418,19 @@ impl Chat {
             self.status = Status::Cancelled;
         }
     }
+}
+
+/// Writes a chat's summary (`Chat::summary_request`) with the user's own provider:
+/// one normal request, text only. Blocking (network): call off the UI thread.
+pub fn summarize(setup: &Setup, messages: &[ai::Message]) -> Result<String, String> {
+    if setup.browser() {
+        return Err("no API provider".into());
+    }
+    ai::ask_stream(&setup.cfg, setup.key.as_ref(), messages, |_| {
+        ControlFlow::Continue(())
+    })
+    .map(|text| text.trim().to_string())
+    .map_err(|e| e.to_string())
 }
 
 /// Streams the answer to `messages`; `on_delta` gets each piece and returns
@@ -516,6 +641,74 @@ pub(crate) mod tests {
         let sent = chat.ask("And now?", b"png").unwrap();
         assert_eq!(sent.iter().filter(|m| m.image_png.is_some()).count(), 1);
         assert!(chat.turns[1].screen && chat.turns[1].thought.is_none());
+    }
+
+    /// `n` answered turns ("Q i" / "A i"), the first with the picture.
+    fn long_chat(n: usize) -> Chat {
+        let mut chat = Chat::default();
+        for i in 0..n {
+            chat.ask(&format!("Q {i}"), b"png").unwrap();
+            chat.delta(&format!("A {i}"));
+            chat.finish(Ok(()));
+        }
+        chat
+    }
+
+    /// Never the whole conversation: the last `WINDOW` messages in full and ONE
+    /// summary of the older ones (once written), then the question.
+    #[test]
+    fn a_long_chat_sends_the_last_twenty_messages_and_one_summary() {
+        let mut chat = long_chat(15); // 30 messages
+        chat.summary = Some(history::Summary {
+            text: "They talked about Q 0 to Q 4.".into(),
+            at: 22,
+        });
+        let sent = chat.ask("Next?", b"png").unwrap();
+        let talk: Vec<_> = sent.iter().filter(|m| m.role != Role::System).collect();
+        assert_eq!(
+            talk.len(),
+            WINDOW + 1,
+            "20 earlier messages and the question"
+        );
+        assert_eq!(talk[0].text, "Q 5");
+        let summaries: Vec<_> = sent[1..]
+            .iter()
+            .filter(|m| m.role == Role::System)
+            .collect();
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].text.contains("Q 0 to Q 4"));
+        // the picture once: with a turn still in the window (it went again
+        // when the first turn holding it left the window)
+        assert_eq!(talk.iter().filter(|m| m.image_png.is_some()).count(), 1);
+        // short chats: everything, no summary
+        let mut short = long_chat(3);
+        let sent = short.ask("Next?", b"png").unwrap();
+        assert_eq!(sent.len(), 1 + 6 + 1);
+    }
+
+    /// The summary is written once a chat passes 20 messages, then every 10.
+    #[test]
+    fn the_summary_is_due_past_twenty_then_every_ten_messages() {
+        assert!(!summary_due(20, None));
+        assert!(summary_due(22, None));
+        assert!(!summary_due(30, Some(22)));
+        assert!(summary_due(32, Some(22)));
+        let chat = long_chat(10);
+        assert!(
+            chat.summary_request().is_none(),
+            "20 messages: all go in full"
+        );
+        let mut chat = long_chat(11);
+        let (at, request) = chat.summary_request().unwrap();
+        assert_eq!(at, 22);
+        // text only: the older turns, never a picture
+        assert!(request.iter().all(|m| m.image_png.is_none()));
+        assert!(request[1].text.contains("User: Q 0") && !request[1].text.contains("Q 1\n"));
+        chat.summary = Some(history::Summary {
+            text: "s".into(),
+            at,
+        });
+        assert!(chat.summary_request().is_none(), "not again until 10 more");
     }
 
     /// A one-shot OpenAI-compatible server on 127.0.0.1 that streams `pieces`.

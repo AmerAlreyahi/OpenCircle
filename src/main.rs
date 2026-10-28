@@ -22,6 +22,7 @@ mod ocr;
 mod paths;
 mod secrets;
 mod setup;
+mod store;
 mod sys;
 mod translate;
 mod ui;

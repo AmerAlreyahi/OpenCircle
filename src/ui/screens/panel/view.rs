@@ -4,24 +4,29 @@
 use std::sync::Arc;
 
 use iced::widget::tooltip::Position;
-use iced::widget::{column, container, markdown as md, row};
-use iced::{Center, Element, Fill, Rectangle, Right, Size};
+use iced::widget::{column, container, markdown as md, row, stack};
+use iced::{Bottom, Center, Element, Fill, Rectangle, Right, Size};
 
-use super::{Browse, LOG, Msg, Panel, State};
+use super::{Browse, LOG, Msg, PICKS, Panel, State, Tab, classifier, picked};
 use crate::actions;
 use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
+use crate::config::{self, StaysOpen};
 use crate::ui::keys;
 use crate::ui::kit::bubble::bubble;
 use crate::ui::kit::button::{Kind, button, cta_label, label};
 use crate::ui::kit::chip::Tone;
+use crate::ui::kit::dropdown::dropdown;
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::markdown;
 use crate::ui::kit::motion;
+use crate::ui::kit::option_list;
 use crate::ui::kit::panel_frame::{self as frame, Event, Header};
 use crate::ui::kit::scroll::scroll;
+use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::spinner;
 use crate::ui::kit::text::{error, sub};
+use crate::ui::kit::text_area::text_area;
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::{chip, field, progress};
 use crate::ui::widgets::{self, Why};
@@ -134,14 +139,26 @@ impl Panel {
             chip,
             docked: chatting,
             logo: chatting.then(widgets::chrome::logo_handle),
+            menu: chatting,
         };
         if chatting {
-            // the header's end: a new chat (no close button: Esc closes)
+            // the header's end: a new chat and the pin (no close button: Esc
+            // or a click outside closes an unpinned chat; a pinned one, its pin)
             let new = button(label("+ New"), Kind::Elevated, Some(Msg::NewChat));
             let new = widgets::hint(new, "New chat", Why::Icon, Position::Bottom);
-            return frame::card(
+            let state = icon_button::State {
+                active: self.pinned,
+                ..Default::default()
+            };
+            let pin = icon_button(Icon::Pin.glyph(), state, Some(Msg::Pin));
+            let pin = match self.pinned {
+                true => widgets::hint(pin, "Unpin and close", Why::Icon, Position::Bottom),
+                false => widgets::hint(pin, "Keep open", Why::Icon, Position::Bottom),
+            };
+            let ends = row![new, pin].spacing(space::GAP).align_y(Center);
+            let card = frame::card(
                 header,
-                Some(new),
+                Some(ends.into()),
                 body,
                 footer,
                 at,
@@ -149,6 +166,13 @@ impl Panel {
                 hover,
                 Msg::Card,
             );
+            return match self.drawer {
+                Some(tab) => stack![card, frame::drawer(self.drawer_view(tab), at)]
+                    .width(Fill)
+                    .height(Fill)
+                    .into(),
+                None => card,
+            };
         }
         card(header, body, footer, at, screen, hover, Msg::Card)
     }
@@ -163,7 +187,10 @@ impl Panel {
             Some(Err(e)) => column![error(Role::NOTE, e)],
         }
         .spacing(STACK);
-        (body.into(), Some(self.follow_up("Ask AI about it…", false)))
+        (
+            body.into(),
+            Some(self.follow_up("Ask AI about it…", false, None)),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -274,7 +301,7 @@ impl Panel {
             .spacing(STACK)
             .into()
         } else if browser {
-            self.follow_up("Ask a follow-up…", streaming)
+            self.follow_up("Ask a follow-up…", streaming, None)
         } else {
             self.composer(include, streaming)
         };
@@ -298,7 +325,10 @@ impl Panel {
         let mut side = column![].spacing(STACK).align_x(Right).width(Fill);
         if turn.screen {
             side = side.push(chip::status(
-                self.crop_size("Selected screen region"),
+                match turn.shot {
+                    Some((w, h)) => format!("Selected screen region · {w}×{h} px"),
+                    None => "Screenshot not kept".to_string(),
+                },
                 Tone::Busy,
             ));
         }
@@ -310,41 +340,30 @@ impl Panel {
         side.push(tools).into()
     }
 
-    /// "`what` · W×H px" (the crop, physical px).
-    fn crop_size(&self, what: &str) -> String {
-        format!("{what} · {}×{} px", self.crop.width, self.crop.height)
-    }
-
-    /// The chat's composer: the attached selection's chip (while Include
-    /// screen is on), the field with Send (Stop while answering), and the
-    /// Include screen switch.
+    /// The chat's composer, on one row: the field (more lines with Shift /
+    /// Ctrl+Enter), the Include screen switch, and Send (Stop while answering).
     fn composer(&self, include: bool, streaming: bool) -> Element<'_, Msg> {
-        let toggle = button(
-            row![chip::switch_dot(include), label("Include screen")]
-                .spacing(space::GAP)
-                .align_y(Center),
-            Kind::Elevated,
-            Some(Msg::IncludeScreen),
-        );
-        let toggle = widgets::hint(
-            toggle,
-            "Send the selection with your question",
+        let switch = field::toggle(Icon::Screen, include, false, Msg::IncludeScreen);
+        let switch = widgets::hint(
+            switch,
+            match include {
+                true => "Include screen: on (the selection goes with your question)",
+                false => "Include screen: off (only your question goes)",
+            },
             Why::Icon,
             Position::Top,
         );
-        let mut parts = column![].spacing(STACK);
-        if include {
-            let attached = self.crop_size("Screen selection attached");
-            parts = parts.push(chip::status(attached, Tone::Busy));
-        }
-        parts
-            .push(self.follow_up("Message OpenCircle AI…", streaming))
-            .push(toggle)
-            .into()
+        self.follow_up("Message OpenCircle AI…", streaming, Some(switch))
     }
 
-    /// The field with its send (or, while streaming, stop) button.
-    fn follow_up(&self, placeholder: &str, streaming: bool) -> Element<'_, Msg> {
+    /// The field, `extra` beside it (the composer's switch), and its send
+    /// (or, while streaming, stop) button.
+    fn follow_up<'a>(
+        &'a self,
+        placeholder: &'a str,
+        streaming: bool,
+        extra: Option<Element<'a, Msg>>,
+    ) -> Element<'a, Msg> {
         let top = Position::Top;
         let button = match streaming {
             true => widgets::hint(
@@ -368,14 +387,141 @@ impl Panel {
                 top,
             ),
         };
-        let input = field::input(placeholder, &self.input, false, false)
-            .id(super::INPUT)
-            .on_input(Msg::Input)
-            .on_submit(Msg::Submit)
-            .width(Fill);
-        row![keys::guard(input, Msg::Key), button]
+        let input = text_area(
+            super::INPUT,
+            placeholder,
+            &self.input,
+            Msg::Edit,
+            Msg::Submit,
+        );
+        row![container(keys::guard(input, Msg::Key)).width(Fill)]
+            .push(extra)
+            .push(button)
             .spacing(space::GAP)
-            .align_y(Center)
+            .align_y(Bottom)
             .into()
+    }
+
+    /// The drawer (the design's "Workspace"): back, its title and the tabs, then
+    /// the tab.
+    fn drawer_view(&self, tab: Tab) -> Element<'_, Msg> {
+        let back = icon_button(
+            Icon::Back.glyph(),
+            icon_button::State::default(),
+            Some(Msg::Drawer(None)),
+        );
+        let back = widgets::hint(back, "Back to the chat", Why::Icon, Position::Bottom);
+        let tabs = segmented(
+            &[(Tab::History, "History"), (Tab::Settings, "Settings")],
+            tab,
+            tab,
+            1.0,
+            |t| Msg::Drawer(Some(t)),
+        );
+        let top = row![
+            back,
+            container(crate::ui::kit::text::text(Role::CARD_HEADING, "Workspace")).width(Fill),
+            tabs
+        ]
+        .spacing(space::GAP)
+        .align_y(Center);
+        let body = match tab {
+            Tab::History => self.history_view(),
+            Tab::Settings => self.settings_view(),
+        };
+        column![top, scroll(body).height(Fill)]
+            .spacing(STACK)
+            .into()
+    }
+
+    /// This PC's saved chats, newest first: open one, delete one, or all.
+    fn history_view(&self) -> Element<'_, Msg> {
+        let new = button(label("+ New chat"), Kind::Elevated, Some(Msg::NewChat));
+        let mut list = column![new].spacing(STACK).width(Fill);
+        if !config::current().chat.keep_history {
+            return list
+                .push(note(
+                    "Chat history is off (Settings > AI). Nothing is saved.",
+                ))
+                .into();
+        }
+        if self.listed.is_empty() {
+            return list.push(note("No saved chats yet.")).into();
+        }
+        let open = match &self.state {
+            State::Ask { chat, .. } => chat.id.clone(),
+            State::Lens(_) => None,
+        };
+        let mut rows = column![].width(Fill);
+        for entry in &self.listed {
+            let current = open.as_deref() == Some(entry.id.as_str());
+            let item = option_list::item(
+                &entry.title,
+                current,
+                Some(crate::log::date(entry.updated)),
+                false,
+                Msg::OpenSaved(entry.id.clone()),
+            );
+            let delete = icon_button(
+                Icon::Close.glyph(),
+                icon_button::State::default(),
+                Some(Msg::DeleteSaved(entry.id.clone())),
+            );
+            let delete = widgets::hint(delete, "Delete this chat", Why::Icon, Position::Left);
+            rows = rows.push(row![container(item).width(Fill), delete].align_y(Center));
+        }
+        list = list.push(rows).push(button(
+            label("Clear all history"),
+            Kind::Quiet,
+            Some(Msg::ClearHistory),
+        ));
+        list.push(note(
+            "Saved on this PC only, text only: screenshots are never kept.",
+        ))
+        .into()
+    }
+
+    /// "AI chat stays open", the quick provider / model picker, and the way to
+    /// the full AI settings.
+    fn settings_view(&self) -> Element<'_, Msg> {
+        let cfg = config::current();
+        let stays = segmented(
+            &[
+                (StaysOpen::FollowUp, "After a follow-up"),
+                (StaysOpen::Always, "Always"),
+            ],
+            cfg.chat.stays_open,
+            cfg.chat.stays_open,
+            1.0,
+            Msg::StaysOpen,
+        );
+        let provider = dropdown(&PICKS[..], picked(&cfg.ai), "Your own server", Msg::Pick);
+        let mut part = column![
+            sub(Role::ROW_TITLE, "AI chat stays open"),
+            stays,
+            sub(Role::ROW_TITLE, "Provider"),
+            provider,
+        ]
+        .spacing(STACK)
+        .width(Fill);
+        if cfg.ai.provider != config::Provider::Browser {
+            let model = field::input("Model id", &self.model, true, false)
+                .on_input(Msg::Model)
+                .on_submit(Msg::SaveModel);
+            part = part.push(sub(Role::ROW_TITLE, "Model")).push(model);
+            if classifier(&self.model) {
+                part = part.push(error(
+                    Role::NOTE,
+                    "This looks like a safety classifier: it rates messages instead of \
+                     answering them. Pick a chat model.",
+                ));
+            }
+        }
+        part.push(button(
+            label("Open AI settings →"),
+            Kind::Elevated,
+            Some(Msg::OpenAiSettings),
+        ))
+        .into()
     }
 }

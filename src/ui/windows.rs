@@ -20,8 +20,8 @@ use super::{settings, shape, theme, update_card, widgets};
 #[cfg(test)]
 pub use super::platform::windows::CLEARED;
 pub use super::platform::windows::{
-    POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, hide_from_capture,
-    is_floating, opacity, reshape, screen, setup_window, uncut,
+    POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, forget,
+    hide_from_capture, is_floating, opacity, reshape, screen, setup_window, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::config::{self, Config, Theme};
@@ -1015,6 +1015,10 @@ fn apply_from(old: &Config, cfg: Config) {
         crate::hotkey::reload(&cfg);
     }
     crate::autostart::apply(&cfg);
+    // Keep chat history turned off: what was kept goes now, nothing more is written
+    if old.chat.keep_history && !cfg.chat.keep_history {
+        crate::store::chats::forget_all();
+    }
     let labs_changed = old.labs != cfg.labs;
     config::set_current(cfg);
     if labs_changed {

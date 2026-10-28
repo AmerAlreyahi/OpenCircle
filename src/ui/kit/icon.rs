@@ -35,11 +35,14 @@ pub enum Icon {
     Replay,
     /// lucide "screen-share": the AI field's Include screen.
     Screen,
+    /// lucide "pin" (the AI chat stays open) and "arrow-left" (a drawer's back).
+    Pin,
+    Back,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 14] = [
+    pub const ALL: [Icon; 16] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -54,6 +57,8 @@ impl Icon {
         Icon::Star,
         Icon::Replay,
         Icon::Screen,
+        Icon::Pin,
+        Icon::Back,
     ];
 
     pub const fn glyph(self) -> char {
@@ -72,6 +77,8 @@ impl Icon {
             Icon::Star => '\u{e179}',
             Icon::Replay => '\u{e14b}',
             Icon::Screen => '\u{e152}',
+            Icon::Pin => '\u{e258}',
+            Icon::Back => '\u{e04c}',
         }
     }
 }

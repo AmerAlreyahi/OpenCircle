@@ -409,6 +409,12 @@ fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
 /// [x % 256, y % 256, x / 256, 255].
 pub(in crate::ui) fn open_app(w: u32, h: u32, scale: f32) -> App {
     let mut app = App::idle(window::Id::unique());
+    reopen(&mut app, w, h, scale);
+    app
+}
+
+/// `app`'s overlay opened again on a fresh `w` x `h` frame (as `open_app`).
+pub(in crate::ui) fn reopen(app: &mut App, w: u32, h: u32, scale: f32) {
     app.o.start(Opening::default());
     app.o.labs = Labs::all_on();
     let rgba: Vec<u8> = (0..h)
@@ -422,7 +428,6 @@ pub(in crate::ui) fn open_app(w: u32, h: u32, scale: f32) -> App {
     app.o.view = overlay::View::new(w, h, app.o.screen);
     app.o.bar_keys = BarKeys::of(&config::Config::default());
     app.o.appear = Some((Instant::now(), 1.0)); // opened
-    app
 }
 
 fn event(app: &mut App, e: overlay::Event) {
@@ -2642,7 +2647,7 @@ fn typing_in_the_ask_panels_input_runs_no_shortcut() {
     let (app, _) = app_with_ask_panel();
     let (messages, _) = feed(&app, Focus::Id(panel::INPUT), &shot::typing("real estate"));
     assert_eq!(shortcuts(&messages), "", "{messages:?}");
-    let typed = (messages.iter()).filter(|m| matches!(m, Message::Panel(_, panel::Msg::Input(_))));
+    let typed = (messages.iter()).filter(|m| matches!(m, Message::Panel(_, panel::Msg::Edit(_))));
     assert_eq!(typed.count(), "real estate".len());
     let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("aterl"));
     assert_eq!(
@@ -4018,4 +4023,133 @@ fn the_overlay_hint_matches_the_bar_in_every_theme() {
     }
     themes::set(&SAPPHIRE);
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+// --- The pinned AI chat (owner, 2026-10-28) ---
+
+/// Ask `question` in the chat `id` and answer it (an API provider that is
+/// never called: the answer is fed in, as its thread would send it).
+fn chat_turn(app: &mut App, id: u32, question: &str, answer: &str) {
+    let _ = app.update(Message::Panel(
+        id,
+        panel::Msg::Edit(iced::widget::text_editor::Action::SelectAll),
+    ));
+    let _ = app.update(Message::Panel(
+        id,
+        crate::ui::screens::panel::tests::typed(question),
+    ));
+    let _ = app.update(Message::Panel(id, panel::Msg::Submit));
+    let _ = app.update(Message::Panel(id, panel::Msg::Delta(answer.into())));
+    let _ = app.update(Message::Panel(id, panel::Msg::Answered(Ok(()))));
+}
+
+fn api_ready(app: &mut App, id: u32, png: &[u8]) {
+    let mut setup = actions::ask::tests::local_setup("http://127.0.0.1:9/v1".into());
+    setup.png = png.to_vec();
+    let _ = app.update(Message::Panel(id, panel::Msg::Ready(Ok(Arc::new(setup)))));
+}
+
+/// A quick question closes on a click outside; a follow-up pins the chat: it
+/// survives clicks, the overlay closing (its own window) and the next capture,
+/// whose question goes into the SAME chat with its crop. One chat only; its
+/// pin closes it.
+#[test]
+fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_panel(actions::Panel::Ask, crop, None));
+    let id = app.o.panel.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    chat_turn(&mut app, id, "What is this?", "A chart.");
+    assert!(app.chat.is_none(), "one answer: not pinned");
+    // quick: a click outside closes it
+    event(
+        &mut app,
+        overlay::Event::Press {
+            at: Point::new(600.0, 500.0),
+            shift: false,
+        },
+    );
+    event(&mut app, overlay::Event::Release);
+    assert!(app.o.panel.is_none(), "the click outside closed it");
+
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_panel(actions::Panel::Ask, crop, None));
+    let id = app.o.panel.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    chat_turn(&mut app, id, "What is this?", "A chart.");
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    assert!(
+        app.o.panel.is_none() && app.chat.is_some(),
+        "the follow-up pinned it"
+    );
+    // clicks outside no longer close it
+    drag(
+        &mut app,
+        Point::new(300.0, 300.0),
+        Point::new(400.0, 380.0),
+        false,
+    );
+    assert!(app.chat.is_some());
+    // the overlay closes: the chat goes on in its own window
+    let _ = app.update(Message::Escape);
+    assert!(app.o.is_none());
+    let window = app
+        .chat
+        .as_ref()
+        .and_then(|c| c.window)
+        .expect("its own window");
+    assert!(
+        windows::is_floating(window),
+        "a floating window (cut, on top)"
+    );
+    let shown = app.view(window);
+    let texts = widgets::shot::texts(shown);
+    assert!(texts.iter().any(|t| t == "And the trend?"), "{texts:?}");
+    // its composer works while the overlay is closed (messages reach it)
+    let _ = app.update(Message::Panel(
+        id,
+        panel::Msg::Edit(iced::widget::text_editor::Action::SelectAll),
+    ));
+
+    // the next capture: the overlay opens, the chat on it, and the bar's
+    // question goes into the same chat with the new crop
+    reopen(&mut app, 800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(400.0, 300.0),
+        Point::new(432.0, 316.0),
+        false,
+    );
+    let new_crop = app.crop().unwrap();
+    let size = (new_crop.width, new_crop.height);
+    app.o.ask = "Is this the same?".into();
+    drop(app.update(Message::AskSubmit));
+    assert!(app.o.panel.is_none(), "never a second chat");
+    api_ready(&mut app, id, b"second");
+    let turns = &app.chat.as_ref().unwrap().panel.chat().unwrap().turns;
+    assert_eq!(turns.len(), 3, "the same chat");
+    assert_eq!(turns[2].shot, Some(size), "with the new crop");
+    assert_eq!(turns[2].image.as_deref(), Some(&b"second"[..]));
+    let texts = widgets::shot::texts(app.view(app.overlay));
+    assert!(
+        texts.iter().any(|t| t == "Is this the same?"),
+        "drawn on the overlay: {texts:?}"
+    );
+    let _ = app.update(Message::Panel(id, panel::Msg::Answered(Ok(()))));
+    // the pin closes it
+    let _ = app.update(Message::Panel(id, panel::Msg::Pin));
+    assert!(app.chat.is_none());
 }

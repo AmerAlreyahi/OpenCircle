@@ -433,11 +433,19 @@ impl App {
             }
             // The word card goes on as an Ask AI chat (its crop, its explanation).
             translate::Msg::Ask => match session.take_chat() {
+                // one chat: the explanation goes on in the pinned one
+                Some((_, chat)) if self.chat.is_some() => {
+                    if let Some(open) = &mut self.chat {
+                        open.panel.append(chat);
+                    }
+                    Task::none()
+                }
                 Some((crop, chat)) => {
                     self.panels = self.panels.wrapping_add(1);
                     let id = self.panels;
                     let (panel, task) = panel::Panel::open_chat(crop, chat, self.o.include);
                     self.o.panel = Some((id, panel));
+                    self.keep_chat();
                     task.map(move |msg| Message::Panel(id, msg))
                 }
                 None => Task::none(),

@@ -185,6 +185,10 @@ impl Config {
             c.song.source = get(t, "song.", "source", d.song.source, &mut w);
             c.song.history = get(t, "song.", "history", d.song.history, &mut w);
         }
+        if let Some(t) = section(&root, "chat", &mut w) {
+            c.chat.stays_open = get(t, "chat.", "stays_open", d.chat.stays_open, &mut w);
+            c.chat.keep_history = get(t, "chat.", "keep_history", d.chat.keep_history, &mut w);
+        }
         if let Some(t) = section(&root, "update", &mut w) {
             c.update.auto = get(t, "update.", "auto", None, &mut w);
         }

@@ -263,9 +263,3 @@ pub fn sample<'a, Message: 'a>(ring: bool, fill: bool) -> Element<'a, Message> {
         })
         .into()
 }
-
-/// The dot of an on / off choice: `accent` when `on`, `text_muted` when off
-/// (the chat's Include screen).
-pub fn switch_dot<'a, Message: 'a>(on: bool) -> Element<'a, Message> {
-    dot(if on { c().accent } else { c().text_muted })
-}

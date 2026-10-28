@@ -38,6 +38,11 @@ pub(in crate::ui) enum Message {
     Field(keys::Keyed),
     /// From the panel with this number (stale numbers are ignored).
     Panel(u32, panel::Msg),
+    /// The pinned chat's own window moved (dragged) to here; it stopped
+    /// moving after this many moves (it docks); a frame of its spinner.
+    ChatMoved(iced::window::Id, iced::Point),
+    ChatSettle(u32),
+    ChatFrame(std::time::Instant),
     /// Run an action on the selection (action bar button or its key).
     Run(&'static Action),
     TestShot(window::Screenshot),

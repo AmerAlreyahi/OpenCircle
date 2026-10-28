@@ -36,6 +36,7 @@ pub mod slider;
 pub mod spinner;
 pub mod surface;
 pub mod text;
+pub mod text_area;
 pub mod toast;
 
 #[cfg(test)]

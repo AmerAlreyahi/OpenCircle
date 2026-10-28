@@ -177,6 +177,7 @@ impl Session {
             title: "Song search",
             chip: None,
             docked: false,
+            menu: false,
             logo: None,
         };
         super::panel::card(

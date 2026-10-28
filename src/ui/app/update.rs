@@ -207,6 +207,14 @@ impl App {
             Message::ToastDone if self.o.toast.is_some() => self.close(),
             Message::ToastDone => Task::none(),
             Message::Panel(id, msg) => self.on_panel(id, msg),
+            Message::ChatMoved(id, at) => self.chat_moved(id, at),
+            Message::ChatSettle(moves) => self.chat_settle(moves),
+            Message::ChatFrame(now) => {
+                if let Some(chat) = &mut self.chat {
+                    chat.panel.tick(now);
+                }
+                Task::none()
+            }
             Message::Run(action) => self.run(action),
             Message::Tapped(what, read) => self.on_tapped(what, read),
             Message::SelectText => self.select_text(),
@@ -255,7 +263,7 @@ impl App {
             },
             Message::CardMoved(p) => {
                 if let Some((how, last)) = self.o.card_drag {
-                    if let (Some(from), true) = (last, self.chatting()) {
+                    if let (Some(from), true) = (last, self.o.card_chat) {
                         self.o.chat_off += p - from;
                         self.o.chat_glide = None;
                     } else if let Some(from) = last {
@@ -269,7 +277,7 @@ impl App {
             // Let go: the card stays where the user put it, until the overlay closes.
             Message::CardReleased => {
                 match self.o.card_drag.take() {
-                    Some((card::Drag::Move, _)) if self.chatting() => {
+                    Some((card::Drag::Move, _)) if self.o.card_chat => {
                         self.dock_chat(Instant::now());
                         self.log_frames("chat drag");
                     }
@@ -333,7 +341,8 @@ impl App {
                     self.o.reveal = None;
                     self.o.appear = None;
                     self.frame_times.borrow_mut().clear();
-                    revealed = windows::fade(self.overlay, true, windows::POPUP, false);
+                    revealed = windows::fade(self.overlay, true, windows::POPUP, false)
+                        .chain(self.unfloat_chat());
                 }
                 // a new result card grows open from its first frame
                 self.o.card_open = match (&self.o.panel, self.o.card_open) {
@@ -351,6 +360,9 @@ impl App {
                     panel.tick(now);
                 }
                 self.step_zoom(now);
+                if let Some(chat) = &mut self.chat {
+                    chat.panel.tick(now);
+                }
                 // the chat card docking where it was let go
                 if let Some((began, from, _)) = self.o.chat_glide {
                     let t = motion::progress(began, now, motion::DOCK, motion::Curve::Standard);
@@ -596,6 +608,7 @@ impl App {
     /// live translate, Settings, onboarding or pinned image.
     pub(in crate::ui) fn is_idle(&self) -> bool {
         self.o.is_none()
+            && self.chat.is_none()
             && self.capturing.is_none()
             && self.live.is_none()
             && self.hiding == Hiding::No
@@ -646,6 +659,10 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
             | Message::CaptureTimedOut(_)
             | Message::Escape
             | Message::EscapeTaken
+            | Message::Panel(..)
+            | Message::ChatMoved(..)
+            | Message::ChatSettle(_)
+            | Message::ChatFrame(_)
             | Message::Windows(_)
             | Message::Live(_)
             | Message::Drawn

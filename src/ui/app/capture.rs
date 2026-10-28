@@ -244,7 +244,8 @@ impl App {
             let (id, open) = windows::screen(overlay_window(Some(self.o.screen)));
             crate::log!("[opencircle] overlay window opened");
             (self.overlay, self.overlay_open) = (id, true);
-            return open.discard().chain(window::gain_focus(id));
+            let chat = self.unfloat_chat();
+            return open.discard().chain(window::gain_focus(id)).chain(chat);
         }
         // Shown fully clear: it fades in as a whole once its first full frame
         // is drawn (`Message::Frame`), so the CPU never redraws a fade.
@@ -256,7 +257,12 @@ impl App {
                 }
                 windows::opacity(self.overlay, 0.0)
             }
+            // no fade to wait for: the chat's window goes once the overlay is up
             false => Task::none(),
+        };
+        let chat = match shape::can_fade() {
+            true => Task::none(), // at the reveal (`Message::Frame`)
+            false => self.unfloat_chat(),
         };
         // Place and size the window to cover the monitor BEFORE set_mode shows it:
         // iced makes it visible before going full-screen, so whatever is shown
@@ -266,7 +272,8 @@ impl App {
             .chain(clear)
             .chain(place_window(self.overlay, self.place()))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
-            .chain(window::gain_focus(self.overlay));
+            .chain(window::gain_focus(self.overlay))
+            .chain(chat);
         // A hand-off to the browser drops the overlay out of the topmost band
         // behind iced's back (`lens::hand_off_foreground`): Normal then
         // AlwaysOnTop makes it apply again.
@@ -308,6 +315,8 @@ impl App {
         }
         // Everything the opening held goes at once (the panel, translate and
         // song stop; the next show clears the window again).
+        // a pinned chat goes on in its own window
+        let chat = self.float_chat();
         let Some(opening) = self.o.take() else {
             return Task::none(); // closed already
         };
@@ -321,14 +330,14 @@ impl App {
             // and fades it in again).
             windows::clear_now(self.overlay);
             self.hiding = Hiding::Empty;
-            return Task::none();
+            return chat;
         }
         if !std::mem::take(&mut self.overlay_open) {
-            return Task::none(); // never shown (Copy, Save)
+            return chat; // never shown (Copy, Save)
         }
         crate::log!("[opencircle] overlay window closed");
         crate::sys::mem::trim_heap();
-        window::close(self.overlay)
+        chat.chain(window::close(self.overlay))
     }
 }
 

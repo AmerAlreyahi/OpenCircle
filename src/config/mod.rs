@@ -723,12 +723,51 @@ pub struct Config {
     pub look: LookConfig,
     pub editor: EditorConfig,
     pub ai: AiConfig,
+    /// Written only once changed (the default file stays as frozen).
+    #[serde(skip_serializing_if = "ChatConfig::is_default")]
+    pub chat: ChatConfig,
     pub translate: TranslateConfig,
     pub snip: SnipConfig,
     pub quick_actions: Vec<QuickAction>,
     pub song: SongConfig,
     pub update: UpdateConfig,
     pub labs: Labs,
+}
+
+/// `[chat]`: the AI chat card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ChatConfig {
+    /// When the chat pins itself: it then stays open (docked above other
+    /// apps after the overlay closes) until its pin button closes it.
+    pub stays_open: StaysOpen,
+    /// Chats are saved on this PC (text only, `history::chat`); off = none kept.
+    pub keep_history: bool,
+}
+
+impl ChatConfig {
+    fn is_default(&self) -> bool {
+        *self == ChatConfig::default()
+    }
+}
+
+impl Default for ChatConfig {
+    fn default() -> Self {
+        ChatConfig {
+            stays_open: StaysOpen::FollowUp,
+            keep_history: true,
+        }
+    }
+}
+
+/// Settings > AI "AI chat stays open".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StaysOpen {
+    /// After a follow-up question (one answer alone closes as before).
+    #[default]
+    FollowUp,
+    /// From the first question.
+    Always,
 }
 
 /// `[update]`: automatic updates from GitHub Releases (`crate::update`).
@@ -800,6 +839,7 @@ impl Default for Config {
             look: LookConfig::default(),
             editor: EditorConfig::default(),
             ai: AiConfig::default(),
+            chat: ChatConfig::default(),
             translate: TranslateConfig::default(),
             snip: SnipConfig::default(),
             // DESIGN.md "Quick actions".
@@ -1073,6 +1113,28 @@ mod tests {
             .collect();
         assert_eq!(files.len(), 1, "{files:?}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn chat_settings_round_trip_and_default_to_follow_up_with_history() {
+        let d = Config::default();
+        assert_eq!(d.chat.stays_open, StaysOpen::FollowUp);
+        assert!(d.chat.keep_history);
+        let mut c = d.clone();
+        c.chat = ChatConfig {
+            stays_open: StaysOpen::Always,
+            keep_history: false,
+        };
+        let dir = tmp_dir("chat-roundtrip");
+        let path = dir.join("config.toml");
+        c.save_to(&path).unwrap();
+        let (back, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back.chat, c.chat);
+        let _ = std::fs::remove_dir_all(dir);
+        let (c, w) = Config::parse("version = 4\n[chat]\nstays_open = \"sometimes\"\n");
+        assert_eq!(c.chat.stays_open, StaysOpen::FollowUp);
+        assert_eq!(w.len(), 1, "{w:?}");
     }
 
     #[test]

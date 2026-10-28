@@ -28,6 +28,8 @@ keyring = "4.2"
 png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Saved AI chats (history::chat): SQLite compiled into the exe (no DLL). Text only.
+rusqlite = { version = "0.37", features = ["bundled"] }
 toml = "1"
 # Save dialog. xdg-portal on Linux (the tray owns the GTK thread, so no gtk3 backend).
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }

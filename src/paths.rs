@@ -49,6 +49,11 @@ pub fn recent() -> Option<PathBuf> {
     lower().map(|d| d.join("recent"))
 }
 
+/// `<data>/opencircle/opencircle.db`: the app's one database (`store`).
+pub fn database() -> Option<PathBuf> {
+    lower().map(|d| d.join("opencircle.db"))
+}
+
 /// `<data>/opencircle/update`: where a download is staged.
 pub fn update_stage() -> Option<PathBuf> {
     lower().map(|d| d.join("update"))
@@ -105,6 +110,7 @@ mod tests {
             (search_history().unwrap(), "OpenCircle/search_history.json"),
             (song_history().unwrap(), "opencircle/song_history.json"),
             (recent().unwrap(), "opencircle/recent"),
+            (database().unwrap(), "opencircle/opencircle.db"),
             (update_stage().unwrap(), "opencircle/update"),
             (update_marker().unwrap(), "opencircle/update.json"),
         ] {

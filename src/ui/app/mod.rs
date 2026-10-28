@@ -187,6 +187,8 @@ pub(in crate::ui) struct App {
     pub(in crate::ui) card: Option<Rectangle>,
     /// The side the user docked the AI chat to (this run of the app).
     pub(in crate::ui) chat_side: Option<crate::ui::kit::panel_frame::Side>,
+    /// The AI chat once pinned: it outlives the overlay (`results::Resident`).
+    pub(in crate::ui) chat: Option<results::Resident>,
     /// Song searches started (numbers them).
     pub(in crate::ui) songs: u32,
     /// A verified update waiting until nothing is open (`is_idle`).
@@ -255,6 +257,7 @@ impl App {
             timed: false,
             card: None,
             chat_side: None,
+            chat: None,
             songs: 0,
             update: None,
         }
@@ -266,6 +269,9 @@ impl App {
         }
         if self.live.as_ref().and_then(live_layer::Live::controller) == Some(window) {
             return "OpenCircle live translate controls".into();
+        }
+        if self.chat.as_ref().and_then(|c| c.window) == Some(window) {
+            return "OpenCircle AI".into();
         }
         self.windows.title(window).to_string()
     }
@@ -294,6 +300,7 @@ impl App {
             || self.o.chat_glide.is_some()
             || self.o.zoom.is_some()
             || (self.o.panel.as_ref()).is_some_and(|(_, p)| p.spinning())
+            || self.chat.as_ref().is_some_and(|c| c.panel.spinning())
             || self.o.bar_now.is_none()
     }
 
@@ -345,10 +352,28 @@ impl App {
             }),
             None => Subscription::none(),
         };
+        // The pinned chat in its own window: where it was dragged, and its
+        // spinner's frames while the AI thinks.
+        let chat = match self.chat.as_ref().filter(|c| c.window.is_some()) {
+            Some(chat) => Subscription::batch([
+                iced::event::listen_with(|event, _, id| match event {
+                    iced::Event::Window(window::Event::Moved(at)) => {
+                        Some(Message::ChatMoved(id, at))
+                    }
+                    _ => None,
+                }),
+                match chat.panel.spinning() {
+                    true => motion::frames().map(Message::ChatFrame),
+                    false => Subscription::none(),
+                },
+            ]),
+            None => Subscription::none(),
+        };
         let triggers = Subscription::batch([
             Subscription::run(triggers).map(Message::Trigger),
             self.windows.subscription().map(Message::Windows),
             moved,
+            chat,
         ]);
         // Also when a widget took the key: a text field only lets go of the
         // focus on Esc, and the overlay stays (`EscapeTaken`).

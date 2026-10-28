@@ -532,6 +532,7 @@ fn panel_frame_card_sheet() {
                 title: s(ar, "Text", "النص"),
                 chip: Some("model"),
                 docked: false,
+                menu: false,
                 logo: None,
             };
             let body =
@@ -956,4 +957,41 @@ fn hero_sheet() {
         row("hidden", Act::Rest, move |ar| view(ar, false, false)),
     ];
     sheet("hero", Size::new(420.0, 340.0), &rows);
+}
+
+/// `text_area`, the AI chat's composer: empty, one line, focused, and seven
+/// lines (it stops growing at five and scrolls).
+#[test]
+fn text_area_sheet() {
+    use super::super::text_area::text_area;
+    use iced::widget::text_editor::Content;
+    // the rows draw again per theme: the text lives as long as the test
+    fn content(text: String) -> &'static Content {
+        Box::leak(Box::new(Content::with_text(&text)))
+    }
+    fn line(ar: bool) -> &'static str {
+        s(ar, "What does this error mean?", "ماذا يعني هذا الخطأ؟")
+    }
+    let many = |ar: bool| {
+        (1..=7)
+            .map(|i| format!("{} {i}", line(ar)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let rows = vec![
+        row("placeholder", Act::Rest, |ar| {
+            let hint = s(ar, "Message OpenCircle AI…", "راسل OpenCircle AI…");
+            text_area("t", hint, content(String::new()), |_| (), ())
+        }),
+        row("one line", Act::Rest, |ar| {
+            text_area("t", "", content(line(ar).into()), |_| (), ())
+        }),
+        row("focused", Act::Click, |ar| {
+            text_area("t", "", content(line(ar).into()), |_| (), ())
+        }),
+        row("seven lines", Act::Rest, move |ar| {
+            text_area("t", "", content(many(ar)), |_| (), ())
+        }),
+    ];
+    sheet("text_area", Size::new(300.0, 110.0), &rows);
 }

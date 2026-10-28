@@ -111,6 +111,8 @@ pub enum Event {
     Hover(bool),
     /// Double-click on the inner edge: back to the default place and size.
     Reset,
+    /// The logo was pressed (`Header::menu`: the AI chat's drawer).
+    Menu,
 }
 
 /// The card's edge facing the rest of the screen (the one that resizes).
@@ -289,6 +291,8 @@ pub struct Header<'a> {
     pub chip: Option<&'a str>,
     /// A docked card (the AI chat, `docked`): no resize edge.
     pub docked: bool,
+    /// The logo is a button (`Event::Menu`): the AI chat's drawer.
+    pub menu: bool,
 }
 
 /// The result card at `at` on a `screen` (`.as-card`: the widget surface,
@@ -311,6 +315,10 @@ pub fn card<'a, Message: Clone + 'a>(
     on: impl Fn(Event) -> Message,
 ) -> Element<'a, Message> {
     let glyph: Element<'a, Message> = match header.logo {
+        Some(logo) if header.menu => mouse_area(iced::widget::image(logo).width(ICON).height(ICON))
+            .on_press(on(Event::Menu))
+            .interaction(mouse::Interaction::Pointer)
+            .into(),
         Some(logo) => iced::widget::image(logo).width(ICON).height(ICON).into(),
         None => iced::widget::text(header.glyph)
             .font(super::icon::FONT)
@@ -388,6 +396,31 @@ pub fn card<'a, Message: Clone + 'a>(
     let layers = container(layers).width(at.width).height(at.height);
     pin(layers.clip(true)).position(at.position()).into()
 }
+
+/// The slide-over drawer on the card at `at` (the AI chat's "Workspace"): the
+/// widget surface, `DRAWER_SHARE` of the card wide, inset `DRAWER_INSET` from
+/// its left, top and bottom edges, `content` padded in it. Presses stay on it.
+pub fn drawer<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    at: Rectangle,
+) -> Element<'a, Message> {
+    let size = Size::new(
+        (at.width * DRAWER_SHARE).max(MIN.width.min(at.width) - 2.0 * DRAWER_INSET),
+        (at.height - 2.0 * DRAWER_INSET).max(0.0),
+    );
+    let panel = surface(Material::Widget, CARD_RADIUS, content)
+        .padding(DRAWER_PAD)
+        .width(size.width)
+        .height(size.height);
+    pin(opaque(panel))
+        .position(at.position() + Vector::new(DRAWER_INSET, DRAWER_INSET))
+        .into()
+}
+
+/// The drawer's share of the card's width, its inset and padding (the design's).
+const DRAWER_SHARE: f32 = 0.75;
+const DRAWER_INSET: f32 = 8.0;
+const DRAWER_PAD: f32 = 14.0;
 
 #[cfg(test)]
 mod tests {

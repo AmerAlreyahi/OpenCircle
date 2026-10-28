@@ -1,6 +1,8 @@
 //! The result cards' behaviour and looks (Search, Ask AI).
 use super::*;
+use crate::ui::kit::icon::Icon;
 use crate::ui::kit::panel_frame;
+use crate::ui::kit::panel_frame::Event;
 use crate::ui::widgets;
 use iced::{Rectangle, Size};
 
@@ -34,12 +36,9 @@ fn unknown_provider_shows_the_fix_and_sends_nothing() {
         rgba: vec![0; 4],
     };
     let mut panel = Panel {
-        state: State::ask(Chat::default()),
-        crop: Arc::new(crop),
-        input: "Explain".into(), // e.g. the Lens follow-up, sent once ready
-        work: None,
-        note: None,
-        spin: None,
+        input: text_editor::Content::with_text("Explain"), // e.g. the Lens follow-up, sent once ready
+        queued: true,
+        ..Panel::new(Arc::new(crop), State::ask(Chat::default()))
     };
     let msg = ask::tests::invalid_provider_error();
     let _ = panel.update(Msg::Ready(Err(msg.clone())));
@@ -70,14 +69,14 @@ fn sample_crop() -> Crop {
 }
 
 fn panel_in(state: State) -> Panel {
-    Panel {
-        state,
-        crop: Arc::new(sample_crop()),
-        input: String::new(),
-        work: None,
-        note: None,
-        spin: None,
-    }
+    Panel::new(Arc::new(sample_crop()), state)
+}
+
+/// The composer's text set to `text` (as a paste).
+pub(crate) fn typed(text: &str) -> Msg {
+    Msg::Edit(text_editor::Action::Edit(text_editor::Edit::Paste(
+        Arc::new(text.into()),
+    )))
 }
 
 const SCREEN: Size = Size::new(1000.0, 700.0);
@@ -152,7 +151,8 @@ fn api_chat() -> Panel {
 }
 
 fn ask(panel: &mut Panel, question: &str) {
-    let _ = panel.update(Msg::Input(question.into()));
+    let _ = panel.update(Msg::Edit(text_editor::Action::SelectAll));
+    let _ = panel.update(typed(question));
     let _ = panel.update(Msg::Submit);
 }
 
@@ -219,7 +219,7 @@ fn edit_resends_and_regenerate_asks_again() {
     let _ = panel.update(Msg::Answered(Ok(())));
     // Edit the first: back in the input; sending replaces it and what followed.
     let _ = panel.update(Msg::EditTurn(0));
-    assert_eq!(panel.input, "One?");
+    assert_eq!(panel.input.text(), "One?");
     assert_eq!(chat(&panel).turns.len(), 2, "nothing goes before Send");
     ask(&mut panel, "One, edited?");
     let turns = &chat(&panel).turns;
@@ -246,9 +246,9 @@ fn an_error_says_why_and_offers_retry() {
 /// question the field handed over goes without the picture.
 #[test]
 fn opened_with_include_screen_off_the_question_goes_alone() {
-    let (mut panel, _) = Panel::open(actions::Panel::Ask, sample_crop(), None, false);
+    let question = Some("What is this?".to_string());
+    let (mut panel, _) = Panel::open(actions::Panel::Ask, sample_crop(), question, false);
     assert_eq!(panel.include(), Some(false));
-    let _ = panel.update(Msg::Input("What is this?".into()));
     let setup = ask::tests::local_setup("http://127.0.0.1:9/v1".into());
     let _ = panel.update(Msg::Ready(Ok(Arc::new(setup))));
     let turns = &chat(&panel).turns;
@@ -260,12 +260,7 @@ fn opened_with_include_screen_off_the_question_goes_alone() {
 #[test]
 fn the_screen_goes_only_while_include_screen_is_on() {
     let mut panel = api_chat();
-    let shown = |panel: &Panel| {
-        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
-        texts
-            .iter()
-            .any(|t| t.starts_with("Screen selection attached"))
-    };
+    let shown = |panel: &Panel| panel.include() == Some(true);
     assert!(shown(&panel), "on by default");
     ask(&mut panel, "With");
     let _ = panel.update(Msg::Answered(Ok(())));
@@ -398,4 +393,198 @@ fn with_reduced_motion_the_logo_stands_still() {
     let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     assert!(texts.iter().any(|t| t == "Thinking…"), "{texts:?}");
     motion::set_reduced(false);
+}
+
+/// One answer and its end.
+fn answer(panel: &mut Panel, text: &str) {
+    let _ = panel.update(Msg::Delta(text.into()));
+    let _ = panel.update(Msg::Answered(Ok(())));
+}
+
+/// A quick question stays unpinned (Esc / a click outside close it); a
+/// follow-up pins it; "Always" pins from the start.
+#[test]
+fn a_follow_up_pins_the_chat_and_always_pins_at_once() {
+    let mut panel = api_chat();
+    ask(&mut panel, "One?");
+    answer(&mut panel, "1");
+    assert!(!panel.pinned(), "one answer: closes as before");
+    ask(&mut panel, "And two?");
+    assert!(panel.pinned(), "a follow-up pins it");
+    // editing the only question again is no follow-up
+    let mut panel = api_chat();
+    ask(&mut panel, "One?");
+    answer(&mut panel, "1");
+    let _ = panel.update(Msg::EditTurn(0));
+    ask(&mut panel, "One, edited?");
+    assert!(!panel.pinned());
+    // the header's pin pins by hand
+    let _ = panel.update(Msg::Pin);
+    assert!(panel.pinned());
+    assert!(super::starts_pinned(StaysOpen::Always));
+    assert!(!super::starts_pinned(StaysOpen::FollowUp));
+}
+
+/// "Thought for N s" only when the model sent reasoning (an empty piece from
+/// the stream), never for the wait alone.
+#[test]
+fn the_thought_chip_shows_only_when_the_model_reasoned() {
+    let thought = |panel: &Panel| {
+        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+        texts.iter().any(|t| t.starts_with("Thought for"))
+    };
+    let mut panel = api_chat();
+    ask(&mut panel, "Hi");
+    std::thread::sleep(std::time::Duration::from_millis(20)); // a slow first word
+    answer(&mut panel, "Hello");
+    assert!(chat(&panel).turns[0].thought.is_none());
+    assert!(!thought(&panel), "no reasoning: no chip");
+    ask(&mut panel, "Why?");
+    let _ = panel.update(Msg::Delta(String::new())); // reasoning
+    answer(&mut panel, "Because");
+    assert!(thought(&panel));
+}
+
+/// The next capture asks into the same chat: its crop goes with that question.
+#[test]
+fn a_new_crop_goes_with_the_next_question_into_the_same_chat() {
+    let mut panel = api_chat();
+    ask(&mut panel, "First?");
+    answer(&mut panel, "1");
+    let other = Crop {
+        width: 32,
+        height: 16,
+        rgba: vec![9; 32 * 16 * 4],
+    };
+    let _ = panel.ask_about(other, Some("About this one?".into()), true);
+    assert_eq!(
+        chat(&panel).turns.len(),
+        1,
+        "nothing goes before the crop is ready"
+    );
+    let mut setup = ask::tests::local_setup("http://127.0.0.1:9/v1".into());
+    setup.png = b"second png".to_vec();
+    let _ = panel.update(Msg::Ready(Ok(Arc::new(setup))));
+    let turns = &chat(&panel).turns;
+    assert_eq!(turns.len(), 2, "the same chat");
+    assert_eq!(turns[1].question, "About this one?");
+    assert_eq!(turns[1].shot, Some((32, 16)));
+    assert_eq!(turns[1].image.as_deref(), Some(&b"second png"[..]));
+    // a draft in the composer is never sent by a reload
+    let _ = panel.update(Msg::Answered(Ok(())));
+    let _ = panel.update(typed("draft"));
+    let setup = ask::tests::local_setup("http://127.0.0.1:9/v1".into());
+    let _ = panel.update(Msg::Ready(Ok(Arc::new(setup))));
+    assert_eq!(chat(&panel).turns.len(), 2);
+}
+
+/// The composer is one row: field, Include screen, Send.
+#[test]
+fn the_composer_is_one_row() {
+    let panel = api_chat();
+    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    assert!(
+        !texts
+            .iter()
+            .any(|t| t.starts_with("Screen selection attached")),
+        "{texts:?}"
+    );
+    // the field (its text is the editor's), then the switch and Send, last
+    let glyph = |i: crate::ui::kit::icon::Icon| i.glyph().to_string();
+    let n = texts.len();
+    assert_eq!(
+        texts[n - 3..n - 1],
+        [glyph(Icon::Screen), glyph(Icon::Send)],
+        "{texts:?}"
+    );
+}
+
+/// The drawer opens from the logo on History, switches to Settings, closes.
+#[test]
+fn the_drawer_opens_on_history_and_shows_the_chat_settings() {
+    let mut panel = api_chat();
+    let _ = panel.update(Msg::Card(Event::Menu));
+    assert_eq!(panel.drawer, Some(Tab::History));
+    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    assert!(texts.iter().any(|t| t == "Workspace"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "+ New chat"), "{texts:?}");
+    let _ = panel.update(Msg::Drawer(Some(Tab::Settings)));
+    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    for want in [
+        "AI chat stays open",
+        "After a follow-up",
+        "Always",
+        "Open AI settings →",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    let _ = panel.update(Msg::Card(Event::Menu));
+    assert_eq!(panel.drawer, None, "the logo again closes it");
+}
+
+#[test]
+fn safety_classifier_models_are_flagged() {
+    for m in [
+        "meta-llama/llama-guard-4-12b",
+        "openai/gpt-oss-safeguard-20b",
+        "omni-moderation-latest",
+        "ShieldGemma-Safety",
+    ] {
+        assert!(super::classifier(m), "{m}");
+    }
+    for m in ["gpt-4o-mini", "claude-sonnet-5-5", "llama3.2-vision"] {
+        assert!(!super::classifier(m), "{m}");
+    }
+}
+
+/// The picker lists Settings' providers (browser, Anthropic, every preset).
+#[test]
+fn the_picker_follows_settings_list() {
+    assert_eq!(PICKS.len(), 2 + crate::ui::screens::settings::PRESETS.len());
+    let mut cfg = config::AiConfig::default();
+    assert_eq!(picked(&cfg).map(|p| p.provider), Some(Provider::Browser));
+    cfg.provider = Provider::OpenaiCompatible;
+    cfg.base_url = "https://openrouter.ai/api/v1".into();
+    assert_eq!(picked(&cfg).map(|p| p.name), Some("OpenRouter"));
+    cfg.base_url = "http://my-own:9/v1".into();
+    assert!(picked(&cfg).is_none(), "a server of one's own");
+}
+
+/// An answered chat is saved, text only: the database holds no image bytes,
+/// and Keep chat history off writes nothing at all.
+#[test]
+fn answered_chats_are_saved_as_text_only_and_off_writes_nothing() {
+    let dir = std::env::temp_dir().join(format!("oc-panel-keep-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("opencircle.db");
+    let mut panel = api_chat();
+    ask(&mut panel, "What is this?");
+    let _ = panel.update(Msg::Delta("A cat".into()));
+    let State::Ask { chat, .. } = &mut panel.state else {
+        unreachable!()
+    };
+    chat.finish(Ok(()));
+    assert!(chat.turns[0].image.is_some(), "the picture went with it");
+    drop(super::keep_in(Some(db.clone()), false, chat));
+    assert!(!dir.exists(), "off: nothing written");
+    drop(super::keep_in(Some(db.clone()), true, chat));
+    let saved = (0..200)
+        .find_map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            chats::list(&db).into_iter().next()
+        })
+        .expect("saved on its thread");
+    assert_eq!(saved.title, "What is this?");
+    let back = chats::load(&db, &saved.id).unwrap();
+    assert!(back.turns[0].screen && back.turns[0].answer == "A cat");
+    let mut bytes = std::fs::read(&db).unwrap();
+    bytes.extend(std::fs::read(db.with_extension("db-wal")).unwrap_or_default());
+    assert!(
+        !bytes.windows(3).any(|w| w == b"png"),
+        "no image bytes on disk"
+    );
+    // opened again: the marker stays, the picture is gone
+    let restored = Chat::from_saved(back);
+    assert!(restored.turns[0].screen && restored.turns[0].shot.is_none());
+    let _ = std::fs::remove_dir_all(dir);
 }

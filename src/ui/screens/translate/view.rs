@@ -40,6 +40,7 @@ impl Session {
                 title,
                 chip: None,
                 docked: false,
+                menu: false,
                 logo: None,
             };
             card(header, body, footer, at, screen, hover, Msg::Card)

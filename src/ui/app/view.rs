@@ -30,6 +30,12 @@ impl App {
                 return live.controller_view().map(Message::Live);
             }
         }
+        // the pinned chat in its own window (the overlay is closed)
+        if let Some(chat) = self.chat.as_ref().filter(|c| c.window == Some(window)) {
+            let (id, size) = (chat.id, chat.size);
+            return (chat.panel.view(Rectangle::with_size(size), size, false))
+                .map(move |msg| Message::Panel(id, msg));
+        }
         let Some(frame) = &self.o.frame else {
             return space().into();
         };
@@ -232,6 +238,12 @@ impl App {
         ) {
             layers = layers.push(self.selection_ui(selection));
         }
+        // The pinned chat over everything on its side.
+        if let Some(chat) = &self.chat {
+            let id = chat.id;
+            let card = chat.panel.view(self.chat_rect(), self.o.screen, false);
+            layers = layers.push(card.map(move |msg| Message::Panel(id, msg)));
+        }
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
         if self.o.selection.is_some() && self.o.scan.as_ref().is_some_and(|s| s.protected) {
             let room = self.room();
@@ -246,7 +258,12 @@ impl App {
     /// The part of the overlay a result card leaves free (all of it without
     /// one): the bar, chips, popup and pills go there.
     pub(in crate::ui) fn room(&self) -> Rectangle {
-        card::free(self.o.screen, self.o.panel.as_ref().map(|_| self.card_at()))
+        let card = match (&self.o.panel, &self.chat) {
+            (Some(_), _) => Some(self.card_at()),
+            (None, Some(_)) => Some(self.chat_rect()),
+            (None, None) => None,
+        };
+        card::free(self.o.screen, card)
     }
 
     /// What floats around `selection`: only small chips ("Select text" under a
