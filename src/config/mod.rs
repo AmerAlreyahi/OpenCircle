@@ -47,8 +47,8 @@
 //! text_reader = "auto"              # who reads text to select: auto | windows (Windows OCR) | pp_ocr
 //!
 //! [look]                            # how the screen looks while OpenCircle is active
-//! theme = "spectrum"                # prism | spectrum | aurora | horizon | sunset | ocean | neon
-//!                                   # | solar | hud | frost | mono | calm | custom
+//! theme = "spectrum"                # spectrum | aurora | sunset | ocean | neon | mono | calm | custom
+//!                                   # | horizon | solar | hud (aurora = the design's Prism, mono = its Frost)
 //! [look.custom]                     # theme = "custom" only (a copy of a preset to edit)
 //! palette = "spectrum"              # spectrum | aurora | sunset | ocean | neon | mono | two_colour
 //! colours = ["#8f80ff", "#4fc9e0"]  # palette = two_colour: from, to
@@ -101,9 +101,9 @@
 //!
 //! Versions: 1 = v0.1.0; 2 adds `[labs]`; 3 sets `selection.after` to "wait" (nothing
 //! is sent before the user picks an action) and drops `[results]` (the web view card
-//! is gone: its keys are ignored); 4 adds `[appearance]` and the design's looks: an older
-//! file's look `aurora` and `calm` become `prism`, `mono` becomes `frost`, and without
-//! `[appearance]` its `widget_theme` frost / graphite becomes the light / dark pick. A file older than `VERSION` is copied to
+//! is gone: its keys are ignored); 4 adds `[appearance]` and the looks horizon, solar and
+//! hud (stored look values never change); without `[appearance]` an older file's
+//! `widget_theme` frost / graphite becomes the light / dark pick. A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -505,21 +505,19 @@ pub enum TextReader {
 pub enum LookTheme {
     #[default]
     Spectrum,
-    /// Schema 1-3's thin violet-to-cyan line; schema 4 writes `Prism` for it.
+    /// The thin violet-to-cyan line: the design's Prism (stored as "aurora").
     Aurora,
     Sunset,
     Ocean,
     Neon,
-    /// Schema 1-3's white and grey; schema 4 writes `Frost` for it.
+    /// White and grey: the design's Frost (stored as "mono").
     Mono,
     Calm,
     Custom,
-    /// Schema 4: the design's looks (`ui::kit::looks`).
-    Prism,
+    /// Schema 4: the design's other looks (`ui::kit::looks`), written only when picked.
     Horizon,
     Solar,
     Hud,
-    Frost,
 }
 
 /// The edge / accent colours: a preset palette (its colours live in
@@ -1180,7 +1178,7 @@ mod tests {
         for (theme, _) in PRESETS {
             assert_ne!(theme, LookTheme::Custom);
         }
-        assert_eq!(PRESETS.len(), 12);
+        assert_eq!(PRESETS.len(), 10);
         // a custom look and a selection setting survive a save
         let mut c = Config {
             selection: SelectionConfig {
@@ -1811,33 +1809,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Schema 4: each v3 look and widget theme lands on the design's equivalent;
-    /// a v4 file keeps what it says.
+    /// Schema 4 never changes a stored look: every v3 value is read and written as
+    /// it is, so an older OpenCircle (which knows only the v3 values) keeps the
+    /// user's look in a v4 file. Only the widget theme maps to an `[appearance]` pick.
     #[test]
-    fn v3_looks_and_widget_themes_map_to_schema_4() {
-        use LookTheme::*;
-        for (old, new, same) in [
-            ("spectrum", Spectrum, Spectrum),
-            ("aurora", Prism, Aurora),
-            ("sunset", Sunset, Sunset),
-            ("ocean", Ocean, Ocean),
-            ("neon", Neon, Neon),
-            ("mono", Frost, Mono),
-            ("calm", Prism, Calm),
-            ("custom", Custom, Custom),
-        ] {
-            for v in ["", "version = 1\n", "version = 3\n"] {
+    fn v3_looks_are_kept_and_widget_themes_map_to_schema_4() {
+        const V3_LOOKS: [&str; 8] = [
+            "spectrum", "aurora", "sunset", "ocean", "neon", "mono", "calm", "custom",
+        ];
+        for old in V3_LOOKS {
+            for v in ["", "version = 1\n", "version = 3\n", "version = 4\n"] {
                 let (c, w) = Config::parse(&format!("{v}[look]\ntheme = \"{old}\"\n"));
                 assert!(w.is_empty(), "{w:?}");
-                assert_eq!(c.look.theme, new, "{v}{old}");
+                // What an older OpenCircle reads back from the file this writes.
+                let saved: Table = toml::to_string_pretty(&c).unwrap().parse().unwrap();
+                let stored = saved["look"]["theme"].as_str().unwrap();
+                assert_eq!(stored, old, "{v}");
+                assert!(V3_LOOKS.contains(&stored));
             }
-            let (c, _) = Config::parse(&format!("version = 4\n[look]\ntheme = \"{old}\"\n"));
-            assert_eq!(c.look.theme, same, "v4 {old}");
         }
-        // Prism and Frost are v3's Aurora and Mono exactly (no visible change).
-        let d = LookConfig::default().custom;
-        assert_eq!(Prism.look(&d), Aurora.look(&d));
-        assert_eq!(Frost.look(&d), Mono.look(&d));
         for (widget, dark, light) in [
             ("default", "sapphire", "daylight"),
             ("frost", "sapphire", "frost"),
@@ -1866,12 +1856,15 @@ mod tests {
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(fs_text(&dir.join("config.toml.bak-v3")), old);
+        // The stored look comes back byte-equal.
+        let look = |text: &str| text.parse::<Table>().unwrap()["look"]["theme"].clone();
+        assert_eq!(look(&fs_text(&path)), look(old));
         let text = fs_text(&path);
         for want in [
             "version = 4",
             "widget_theme = \"graphite\"",
             "glass_effect = false",
-            "theme = \"prism\"",
+            "theme = \"aurora\"",
             "[appearance]",
             "dark = \"graphite\"",
             "hidden_previews = []",

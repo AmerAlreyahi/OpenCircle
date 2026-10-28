@@ -41,7 +41,7 @@ const fn two(a: u32, b: u32) -> Look {
 }
 
 /// The presets: one table (their colours: `ui::theme::palette`).
-pub const PRESETS: [(LookTheme, Look); 12] = {
+pub const PRESETS: [(LookTheme, Look); 10] = {
     let thin = edge(EdgeStyle::Thin, 3, true);
     let still = edge(EdgeStyle::Thin, 2, false);
     // Today's look: the thin violet → cyan line with its sweep.
@@ -89,9 +89,6 @@ pub const PRESETS: [(LookTheme, Look); 12] = {
                 ..preset(ColourSet::Aurora, 0, 6, false, BarStyle::Glass)
             },
         ),
-        // Schema 4: `prism` and `frost` are schema 3's `aurora` and `mono`.
-        (LookTheme::Prism, aurora),
-        (LookTheme::Frost, mono),
         (LookTheme::Horizon, two(0x38bdf8, 0x818cf8)),
         (LookTheme::Solar, two(0xfbbf24, 0xf59e0b)),
         (LookTheme::Hud, two(0xffffff, 0x7dd3fc)),

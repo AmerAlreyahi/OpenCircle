@@ -386,6 +386,28 @@ fn kit_theme(
     themes::resolve(mode, &picks.dark, &picks.light, os_dark)
 }
 
+/// The design look a stored look shows (names and cards come from it): "aurora"
+/// is the design's Prism, "mono" its Frost, "calm" Prism's colours without the
+/// glow. `None` = the user's own (`custom`). Stored values never change.
+// ponytail: read once the edge and the Looks page draw kit looks; only tests until then.
+#[allow(dead_code)]
+pub fn kit_look(theme: config::LookTheme) -> Option<&'static crate::ui::kit::looks::Look> {
+    use crate::config::LookTheme as T;
+    use crate::ui::kit::looks::*;
+    Some(match theme {
+        T::Spectrum => &SPECTRUM,
+        T::Aurora | T::Calm => &PRISM,
+        T::Sunset => &SUNSET,
+        T::Ocean => &OCEAN,
+        T::Neon => &NEON,
+        T::Mono => &FROST,
+        T::Horizon => &HORIZON,
+        T::Solar => &SOLAR,
+        T::Hud => &HUD,
+        T::Custom => return None,
+    })
+}
+
 fn palette(setting: Theme, os_dark: bool) -> &'static Palette {
     match (setting, os_dark) {
         (Theme::Dark, _) | (Theme::System, true) => &DARK,
@@ -542,6 +564,28 @@ mod tests {
 
     /// The kit shows the `[appearance]` pick of the mode in use, the OS's under
     /// System; config's id lists are the kit's.
+    #[test]
+    fn stored_looks_read_as_the_design_looks() {
+        use config::LookTheme as T;
+        let id = |t| kit_look(t).map(|l| l.id);
+        assert_eq!(id(T::Aurora), Some("prism"));
+        assert_eq!(id(T::Mono), Some("frost"));
+        assert_eq!(id(T::Calm), Some("prism"));
+        assert_eq!(id(T::Hud), Some("hud"));
+        assert_eq!(id(T::Custom), None);
+        // Every preset shows its design look's colours.
+        for (t, look) in config::PRESETS {
+            let kit = kit_look(t).unwrap();
+            match look.palette {
+                ColourSet::TwoColour => {
+                    let rgb = |c: Color| Rgb([c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8));
+                    assert_eq!(look.colours, kit.solid.map(rgb), "{}", kit.id);
+                }
+                p => assert_eq!(colours(p).glow, kit.glow, "{}", kit.id),
+            }
+        }
+    }
+
     #[test]
     fn the_kit_shows_the_appearance_picks() {
         use crate::ui::kit::themes::THEMES;

@@ -121,14 +121,6 @@ impl Config {
         }
         if let Some(t) = section(&root, "look", &mut w) {
             c.look.theme = get(t, "look.", "theme", d.look.theme, &mut w);
-            // Schema 4: the design's looks with the same colours (calm: owner to check).
-            if file_version < Some(4) {
-                c.look.theme = match c.look.theme {
-                    LookTheme::Aurora | LookTheme::Calm => LookTheme::Prism,
-                    LookTheme::Mono => LookTheme::Frost,
-                    other => other,
-                };
-            }
             if let Some(custom) = sub_section(t, "look.", "custom", &mut w) {
                 c.look.custom = read_look(custom, d.look.custom, &mut w);
             }
