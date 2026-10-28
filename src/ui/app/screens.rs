@@ -917,4 +917,44 @@ mod text_tests {
         assert!(screen.read && !screen.reading, "failed: read, with no text");
         assert!(app.text_known(Point::new(700.0, 30.0)));
     }
+
+    #[test]
+    fn the_chat_hole_and_the_protected_windows_are_judged_per_screen() {
+        let (mut app, _) = two_screens();
+        // the pinned chat on the right screen: desktop px 700..800 x 50..150
+        app.o.chat_hole = Some(Rectangle::new(
+            Point::new(700.0, 50.0),
+            Size::new(100.0, 100.0),
+        ));
+        let select = |app: &mut App, area: Rectangle| {
+            app.o.selection = Some(overlay::Selection {
+                area,
+                kind: overlay::Kind::Drag,
+            });
+        };
+        // a box across the seam: one image from desktop x 600, y 20
+        select(
+            &mut app,
+            Rectangle::new(Point::new(600.0, 20.0), Size::new(200.0, 200.0)),
+        );
+        assert_eq!(app.chat_hole(), Some([100, 30, 200, 130]));
+        // wholly on the right screen: its crop starts at desktop (700, 50)
+        select(
+            &mut app,
+            Rectangle::new(Point::new(700.0, 50.0), Size::new(50.0, 50.0)),
+        );
+        assert_eq!(app.chat_hole(), Some([0, 0, 50, 50]));
+        let origin = app.crop_origin(app.crop_area().unwrap()).unwrap();
+        assert_eq!(origin, (700, 50));
+        // a protected window of the right screen (desktop px), in that crop
+        let windows = actions::qr::crop_rects(origin, (50, 50), &[(690, 60, 100, 100)]);
+        assert_eq!(windows, vec![[0, 10, 50, 50]]);
+        // the starting screen's crop: its own origin, the chat not in it
+        select(
+            &mut app,
+            Rectangle::new(Point::new(10.0, 10.0), Size::new(50.0, 50.0)),
+        );
+        assert_eq!(app.chat_hole(), None);
+        assert_eq!(app.crop_origin(app.crop_area().unwrap()), Some((10, 10)));
+    }
 }

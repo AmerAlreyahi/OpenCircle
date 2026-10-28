@@ -28,11 +28,12 @@ impl App {
             return Task::none();
         };
         let hole = self.chat_hole();
+        let size = (crop.width, crop.height);
         let origin = self.crop_area().and_then(|a| self.crop_origin(a));
         background(move |tx| {
             // the windows their apps keep out of captures, where the crop is
             let windows = origin.map_or_else(Vec::new, |o| {
-                qr::crop_rects(o, &crate::capture::window_rect::protected())
+                qr::crop_rects(o, size, &crate::capture::window_rect::protected())
             });
             let _ = tx.unbounded_send(qr::scan_around(&crop, hole, &windows));
         })

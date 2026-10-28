@@ -4,7 +4,6 @@
 
 use std::time::Duration;
 
-use iced::widget::image;
 use iced::window;
 use iced::{Point, Rectangle, Size, Task};
 
@@ -297,22 +296,31 @@ impl App {
         Some((self.o.others.iter()).fold(selection.area, |all, (s, _)| all.union(&s.area)))
     }
 
-    /// The pinned chat's spot on this frame (`Opening::chat_hole`) in the
-    /// selection's crop px, if the crop meets it (not on an edited capture).
+    /// The pinned chat's spot (`Opening::chat_hole`) in the selection's crop px,
+    /// if the crop meets it, on whichever screen (through desktop px, as the
+    /// crop is cut: a crop across screens is one image); not on an edited capture.
     pub(in crate::ui) fn chat_hole(&self) -> Option<[u32; 4]> {
-        let (Some(image::Handle::Rgba { width, height, .. }), None) = (&self.o.frame, &self.o.edit)
-        else {
+        if self.o.edit.is_some() || self.o.frame.is_none() {
             return None;
-        };
-        let bounds = |r| actions::crop_bounds(*width, *height, self.o.scale, r);
-        let [cx, cy, ..] = bounds(self.crop_area()?)?;
-        let [x0, y0, x1, y1] = bounds(self.o.chat_hole?)?;
-        Some([
-            x0.saturating_sub(cx),
-            y0.saturating_sub(cy),
-            x1.saturating_sub(cx),
-            y1.saturating_sub(cy),
-        ])
+        }
+        let area = self.crop_area()?;
+        let origin = self.crop_origin(area)?;
+        let size = self.crop_of(area).map(|c| (c.width, c.height))?;
+        let (start, hole) = (self.o.place(), self.o.chat_hole?);
+        let a = super::screens::to_desktop(start, hole.position());
+        let b =
+            super::screens::to_desktop(start, hole.position() + iced::Vector::from(hole.size()));
+        // the edges round outwards
+        let (x, y) = (a.x.floor(), a.y.floor());
+        let rect = (
+            x as i32,
+            y as i32,
+            (b.x.ceil() - x) as u32,
+            (b.y.ceil() - y) as u32,
+        );
+        actions::qr::crop_rects(origin, size, &[rect])
+            .first()
+            .copied()
     }
 
     /// Every selection's crop, in the order made, stacked top to bottom on white

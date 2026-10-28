@@ -56,19 +56,23 @@ pub fn scan_around(crop: &Crop, hole: Option<[u32; 4]>, windows: &[[u32; 4]]) ->
 }
 
 /// Window rects (physical desktop px: x, y, w, h) in the crop px of a crop whose
-/// top-left is at `origin` (desktop px): cut at the crop's top-left, empty ones
-/// dropped.
-pub fn crop_rects(origin: (i32, i32), rects: &[(i32, i32, u32, u32)]) -> Vec<[u32; 4]> {
-    let to = |v: i64, o: i32| (v - i64::from(o)).clamp(0, i64::from(u32::MAX)) as u32;
+/// top-left is at `origin` (desktop px) and that is `size` big: cut to the crop,
+/// empty ones dropped.
+pub fn crop_rects(
+    origin: (i32, i32),
+    size: (u32, u32),
+    rects: &[(i32, i32, u32, u32)],
+) -> Vec<[u32; 4]> {
+    let to = |v: i64, o: i32, max: u32| (v - i64::from(o)).clamp(0, i64::from(max)) as u32;
     rects
         .iter()
         .map(|&(x, y, w, h)| {
             let (x, y) = (i64::from(x), i64::from(y));
             [
-                to(x, origin.0),
-                to(y, origin.1),
-                to(x + i64::from(w), origin.0),
-                to(y + i64::from(h), origin.1),
+                to(x, origin.0, size.0),
+                to(y, origin.1, size.1),
+                to(x + i64::from(w), origin.0, size.0),
+                to(y + i64::from(h), origin.1, size.1),
             ]
         })
         .filter(|[x0, y0, x1, y1]| x1 > x0 && y1 > y0)
@@ -307,11 +311,14 @@ pub(crate) mod tests {
         // a crop whose top-left is at desktop (100, 50)
         let r = crop_rects(
             (100, 50),
+            (100, 100),
             &[(90, 60, 30, 20), (0, 0, 10, 10), (150, 70, 40, 40)],
         );
         assert_eq!(r, vec![[0, 10, 20, 30], [50, 20, 90, 60]]);
         // a window left of a negative-origin crop
-        assert!(crop_rects((-1920, 0), &[(-2000, 0, 50, 50)]).is_empty());
+        assert!(crop_rects((-1920, 0), (100, 100), &[(-2000, 0, 50, 50)]).is_empty());
+        // and one right of the crop
+        assert!(crop_rects((0, 0), (100, 100), &[(100, 0, 50, 50)]).is_empty());
     }
 
     #[test]
