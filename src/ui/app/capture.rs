@@ -308,6 +308,7 @@ impl App {
             return Task::none(); // never shown (Copy, Save)
         }
         crate::log!("[opencircle] overlay window closed");
+        crate::editor::free_glyphs();
         crate::sys::mem::trim_heap();
         window::close(self.overlay)
     }

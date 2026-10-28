@@ -172,7 +172,7 @@ pub fn render(
             .collect();
         todo.push((i, t, styles, undo));
     }
-    let mut fonts = draw::FONTS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut fonts = draw::Fonts::new();
     let mut fits = Vec::new();
     let mut restore = Vec::new();
     for (i, t, styles, undo) in todo {

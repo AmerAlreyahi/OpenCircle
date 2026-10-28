@@ -12,6 +12,11 @@ use super::document::{Layer, halo, rounded};
 
 static GLYPHS: LazyLock<Mutex<SwashCache>> = LazyLock::new(|| Mutex::new(SwashCache::new()));
 
+/// Empties the glyph cache (the overlay closed).
+pub fn free_glyphs() {
+    *GLYPHS.lock().unwrap_or_else(|e| e.into_inner()) = SwashCache::new();
+}
+
 /// Line height for a font size.
 pub fn line_height(size: f32) -> f32 {
     (size * 1.25).ceil()

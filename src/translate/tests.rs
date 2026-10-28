@@ -1,7 +1,7 @@
 //! Synthetic game panels with a text-free ground truth: erase error, block
 //! grouping, render bounds, and the full-frame budget (ignored bench).
 
-use super::draw::{FONTS, parse_marked};
+use super::draw::{Fonts, parse_marked};
 use super::*;
 use cosmic_text::Align;
 
@@ -113,7 +113,7 @@ fn text(
     color: [u8; 3],
     fx: Fx,
 ) -> Line {
-    let mut f = FONTS.lock().unwrap();
+    let mut f = Fonts::new();
     let spans = parse_marked(s, color, GOLD);
     let m = cosmic_text::Metrics::new(size, size * 1.25);
     let buf = f.layout(&spans, false, m, weight, None, Align::Left);

@@ -459,16 +459,13 @@ pub fn translate(texts: &[String], pair: &'static Pair) -> Result<Vec<String>, O
     ocr::translate_in_child(texts, pair)
 }
 
-/// glibc: no ORT memory arena (~350 MB less in a warm helper at the same
-/// speed). Each run allocates ~200 MB; the helper's malloc settings
-/// (`ocr::worker`) keep that memory between runs instead of the arena.
-/// Elsewhere (not measured; without those settings a run was 4x slower) the
-/// arena stays.
+/// No ORT memory arena. glibc: ~350 MB less in a warm helper at the same
+/// speed (each run allocates ~200 MB; the helper's malloc settings in
+/// `ocr::worker` keep that memory between runs instead of the arena).
+/// Windows (Win10 VM, dense page, 3 runs each): helper 437 -> 418 MB working
+/// set (-4 %), total time 1.85 -> 1.84 s (no change).
 fn without_arena(b: SessionBuilder) -> ort::Result<SessionBuilder> {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    return (b.with_execution_providers([ort::ep::CPU::default().build()])).map_err(Into::into);
-    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
-    Ok(b)
+    (b.with_execution_providers([ort::ep::CPU::default().build()])).map_err(Into::into)
 }
 
 fn engine_err(e: impl std::fmt::Display) -> OcrError {

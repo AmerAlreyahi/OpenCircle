@@ -8,7 +8,6 @@ use cosmic_text::{
     Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Weight, Wrap,
     fontdb,
 };
-use std::sync::{LazyLock, Mutex};
 
 const LATIN: &str = "Inter";
 const ARABIC: &str = "Noto Sans Arabic";
@@ -34,18 +33,23 @@ fn bundled(c: char) -> bool {
     matches!(c, '\0'..='\u{00FF}' | '\u{2000}'..='\u{206F}' | '\u{0600}'..='\u{08FF}' | '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
 }
 
-/// Loaded on first use only, so idle memory does not pay for it.
-pub static FONTS: LazyLock<Mutex<Fonts>> = LazyLock::new(|| {
-    let mut db = fontdb::Database::new();
-    for f in FONT_DATA {
-        db.load_font_data(f.to_vec());
+impl Fonts {
+    /// A font system of only the bundled fonts (the system's are added on the
+    /// first text that needs them). One per render, dropped with it: the
+    /// fonts, the system face list and the glyph cache are not kept while
+    /// idle (#145). Cheap: faces are parsed on use.
+    pub fn new() -> Self {
+        let mut db = fontdb::Database::new();
+        for f in FONT_DATA {
+            db.load_font_data(f.to_vec());
+        }
+        Fonts {
+            fs: FontSystem::new_with_locale_and_db("en-US".into(), db),
+            cache: SwashCache::new(),
+            system: false,
+        }
     }
-    Mutex::new(Fonts {
-        fs: FontSystem::new_with_locale_and_db("en-US".into(), db),
-        cache: SwashCache::new(),
-        system: false,
-    })
-});
+}
 
 /// One run of text with its own colour (accent words are separate spans).
 pub type Span = (String, [u8; 3]);
@@ -352,7 +356,7 @@ mod tests {
     /// Glyph pixels drawn into a blank image: their bounding box.
     fn ink_box(text: &str, p: &Placement, dims: (usize, usize)) -> [i32; 4] {
         let mut img = vec![0u8; dims.0 * dims.1 * 4];
-        let mut fonts = FONTS.lock().unwrap();
+        let mut fonts = Fonts::new();
         let fit = fit(&mut fonts, text, p).expect("fits");
         draw_block(&mut fonts, &mut img, dims, p, fit);
         let mut e = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
@@ -405,7 +409,7 @@ mod tests {
     /// that does not fit legibly is not drawn (`render` keeps the original).
     #[test]
     fn size_stays_between_70_and_100_percent_of_the_original() {
-        let mut fonts = FONTS.lock().unwrap();
+        let mut fonts = Fonts::new();
         // "Bring the Sunstone": ink 26 px with capitals and a descender = 27.7 px em
         let p = placement([100.0, 50.0, 900.0, 40.0], 1, true);
         let (_, _, size) = fit(&mut fonts, "خروج", &p).unwrap();
@@ -442,7 +446,7 @@ mod tests {
             e[0] >= bounds[0] as i32 && e[1] >= bounds[1] as i32 && e[2] <= x1 && e[3] <= y1,
             "ink {e:?} outside block {bounds:?}"
         );
-        let (buf, _, size) = fit(&mut FONTS.lock().unwrap(), long, &p).unwrap();
+        let (buf, _, size) = fit(&mut Fonts::new(), long, &p).unwrap();
         assert!(buf.layout_runs().count() > 1, "paragraph wraps");
         assert!(
             size >= 27.7 * MIN_SCALE,
@@ -486,7 +490,7 @@ mod tests {
 
     #[test]
     fn arabic_joins_and_mixed_line_runs_right_to_left() {
-        let mut f = FONTS.lock().unwrap();
+        let mut f = Fonts::new();
         let mut shape = |s: &str| {
             let b = f.layout(
                 &[(s.into(), [255; 3])],

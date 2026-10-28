@@ -35,7 +35,7 @@ mod toolbar;
 
 pub use document::{Document, Edit, Image, Item, Shape, render, span};
 pub use style::PRESETS;
-pub use text::Style as TextStyle;
+pub use text::{Style as TextStyle, free_glyphs};
 pub use toolbar::size as toolbar_size;
 
 #[cfg(test)]
