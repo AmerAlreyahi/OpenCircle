@@ -108,12 +108,13 @@ fn stage<'a, Message: Clone + 'a>(frame: Option<Handle>, replay: Message) -> Ele
     let again = row![icon(Icon::Replay, size::ICON_SMALL), label("Replay")]
         .spacing(space::GAP)
         .align_y(Center);
-    let top = row![
-        chip,
-        Space::new().width(Fill),
-        button(again, Kind::Elevated, Some(replay))
-    ]
-    .align_y(Center);
+    // Replay only with a clip to play again (the placeholder has none)
+    let replay = frame
+        .is_some()
+        .then(|| button(again, Kind::Elevated, Some(replay)));
+    let top = row![chip, Space::new().width(Fill)]
+        .push(replay)
+        .align_y(Center);
     let media: Element<'a, Message> = match frame {
         Some(frame) => Image::new(frame)
             .width(Fill)

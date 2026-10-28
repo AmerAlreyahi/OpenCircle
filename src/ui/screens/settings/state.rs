@@ -258,6 +258,19 @@ impl KeyField {
         (f, job)
     }
 
+    /// No provider with a key (the browser): nothing to ask.
+    pub fn idle() -> Self {
+        KeyField {
+            status: KeyStatus::NotSet,
+            input: Secret::new(""),
+            replacing: false,
+            error: None,
+            labels: API_KEY,
+            busy: None,
+            job: 0,
+        }
+    }
+
     /// Asks the keyring on this thread (a window opening); `update` never does.
     pub fn new(slot: Arc<dyn Bound>) -> Self {
         let (mut f, job) = Self::pending(slot.clone());
@@ -338,136 +351,7 @@ impl KeyField {
 
 // ---- data: presets, languages, action names ----
 
-/// The API a provider speaks: chosen here, never shown (owner, 2026-10-28:
-/// protocol names mislead).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Api {
-    /// The Anthropic Messages API (`provider = "anthropic"`).
-    Anthropic,
-    /// The OpenAI-compatible client (`provider = "openai_compatible"`).
-    OpenAi,
-}
-
-/// An AI provider in the Provider dropdown, by its real name: what it writes
-/// to `[ai]` (the config format is unchanged: `provider` and `base_url`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Preset {
-    pub name: &'static str,
-    pub api: Api,
-    /// "" for Anthropic (its default) and for Custom server (typed by the user).
-    pub base_url: &'static str,
-    /// Suggested model, used only while the model field is empty.
-    pub model: &'static str,
-    /// Runs on this machine: no API key needed.
-    pub local: bool,
-}
-
-impl Preset {
-    /// The provider this preset writes.
-    pub fn provider(&self) -> Provider {
-        match self.api {
-            Api::Anthropic => Provider::Anthropic,
-            Api::OpenAi => Provider::OpenaiCompatible,
-        }
-    }
-
-    /// Custom server: the one that shows the Server URL row.
-    pub fn custom(&self) -> bool {
-        *self == CUSTOM
-    }
-
-    /// The preset a stored `[ai]` shows as (`None`: the browser, or a value
-    /// the file can't give): Anthropic; an OpenAI-compatible server by its
-    /// URL (a trailing `/` or the letter case aside); any other URL is a
-    /// Custom server.
-    pub fn of(ai: &crate::config::AiConfig) -> Option<Preset> {
-        let same = |a: &str, b: &str| a.trim_end_matches('/').eq_ignore_ascii_case(b);
-        match ai.provider {
-            Provider::Anthropic => Some(ANTHROPIC),
-            Provider::OpenaiCompatible => Some(
-                (PRESETS.iter())
-                    .find(|p| p.api == Api::OpenAi && !p.custom() && same(&ai.base_url, p.base_url))
-                    .copied()
-                    .unwrap_or(CUSTOM),
-            ),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for Preset {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name)
-    }
-}
-
-const fn openai(name: &'static str, base_url: &'static str, model: &'static str) -> Preset {
-    Preset {
-        name,
-        api: Api::OpenAi,
-        base_url,
-        model,
-        local: false,
-    }
-}
-
-const fn local(name: &'static str, base_url: &'static str, model: &'static str) -> Preset {
-    Preset {
-        local: true,
-        ..openai(name, base_url, model)
-    }
-}
-
-pub const ANTHROPIC: Preset = Preset {
-    name: "Anthropic",
-    api: Api::Anthropic,
-    base_url: "",
-    model: crate::ai::DEFAULT_ANTHROPIC_MODEL,
-    local: false,
-};
-
-pub const CUSTOM: Preset = openai("Custom server", "", "");
-
-/// The Provider dropdown, in the owner's order (2026-10-28).
-pub const PRESETS: &[Preset] = &[
-    // Free, correct Arabic, ~3 s when measured. Fast paid option: anthropic/claude-haiku-5.5
-    // (shown as the placeholder while the model field is empty).
-    openai(
-        "OpenRouter",
-        "https://openrouter.ai/api/v1",
-        "nvidia/nemotron-3-ultra-550b-a55b:free",
-    ),
-    openai("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"),
-    ANTHROPIC,
-    openai(
-        "Google Gemini",
-        "https://generativelanguage.googleapis.com/v1beta/openai",
-        "gemini-2.0-flash",
-    ),
-    openai(
-        "Groq",
-        "https://api.groq.com/openai/v1",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-    ),
-    openai(
-        "Mistral",
-        "https://api.mistral.ai/v1",
-        "mistral-small-latest",
-    ),
-    openai("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
-    openai("xAI", "https://api.x.ai/v1", "grok-4"),
-    local(
-        "Ollama (local)",
-        "http://localhost:11434/v1",
-        "llama3.2-vision",
-    ),
-    local(
-        "LM Studio (local)",
-        "http://localhost:1234/v1",
-        "local-model",
-    ),
-    CUSTOM,
-];
+pub use crate::ai::providers::{CUSTOM, PRESETS, Preset};
 
 /// The Source dropdown: "Detect automatically", then what OCR can read.
 pub(super) static SOURCES: LazyLock<Vec<Language>> = LazyLock::new(|| {
@@ -646,6 +530,8 @@ pub struct State {
     /// `None` = the real config path.
     pub(super) path: Option<PathBuf>,
     pub(super) store: Arc<dyn KeyStore>,
+    /// Whose key the field shows (`ai::providers::key_of` of the draft).
+    pub(super) key_owner: Option<crate::secrets::AiKey>,
     pub(super) recording: Option<Slot>,
     pub(super) shortcut_error: Option<(Slot, String)>,
     pub(super) key: KeyField,
@@ -968,7 +854,11 @@ impl State {
     ) -> Self {
         theme::apply(config.theme);
         let store: Arc<dyn KeyStore> = store.into();
-        let key = KeyField::new(bind(&store, config.ai.provider.clone()));
+        let key_owner = crate::ai::providers::key_of(&config.ai);
+        let key = match key_owner {
+            Some(owner) => KeyField::new(bind(&store, owner)),
+            None => KeyField::idle(),
+        };
         let quick_text = config
             .quick_actions
             .iter()
@@ -992,6 +882,7 @@ impl State {
             recording: None,
             shortcut_error: None,
             key,
+            key_owner,
             song_store: song_keyring(),
             song_key: None,
             key_jobs: Vec::new(),
@@ -1058,12 +949,27 @@ impl State {
 
     /// Puts `ai` back (onboarding's Skip), its key looked up again.
     pub fn set_ai(&mut self, ai: config::AiConfig) {
-        if ai.provider != self.draft.ai.provider {
-            let job = self.key.refresh(bind(&self.store, ai.provider.clone()));
-            self.key_jobs.push((false, job));
-        }
         self.draft.ai = ai;
+        self.sync_key();
         self.revalidate();
+    }
+
+    /// The key field follows the provider the draft sends to: that
+    /// provider's own keyring entry, asked again when it changes (another
+    /// provider's key is never shown as saved, nor used).
+    fn sync_key(&mut self) {
+        let owner = crate::ai::providers::key_of(&self.draft.ai);
+        if owner == self.key_owner {
+            return;
+        }
+        self.key_owner = owner;
+        match owner {
+            Some(owner) => {
+                let job = self.key.refresh(bind(&self.store, owner));
+                self.key_jobs.push((false, job));
+            }
+            None => self.key = KeyField::idle(),
+        }
     }
 
     /// A shortcut field is recording (the global shortcuts are held off meanwhile).
@@ -1306,16 +1212,26 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 state.on_chord(slot, chord);
             }
         }
-        Message::Provider(p) => set_provider(state, p),
-        Message::Preset(p) => pick_preset(state, p),
-        Message::BaseUrl(s) => state.draft.ai.base_url = s.trim().to_string(),
+        Message::Provider(p) => {
+            set_provider(state, p);
+            state.sync_key();
+        }
+        Message::Preset(p) => {
+            pick_preset(state, p);
+            state.sync_key();
+        }
+        Message::BaseUrl(s) => {
+            state.draft.ai.base_url = s.trim().to_string();
+            state.sync_key();
+        }
         Message::Model(s) => state.draft.ai.model = s.trim().to_string(),
         Message::ApiKey(k) => {
-            let provider = state.draft.ai.provider.clone();
-            let slot = bind(&state.store, provider);
-            state
-                .key_jobs
-                .extend(state.key.update(slot, k).map(|j| (false, j)));
+            if let Some(owner) = state.key_owner {
+                let slot = bind(&state.store, owner);
+                state
+                    .key_jobs
+                    .extend(state.key.update(slot, k).map(|j| (false, j)));
+            }
         }
         Message::Source(l) => state.draft.translate.source = l.code.to_string(),
         Message::Target(l) => state.draft.translate.target = l.code.to_string(),
@@ -1493,8 +1409,6 @@ fn set_provider(state: &mut State, p: Provider) {
         Provider::OpenaiCompatible => {}
         Provider::Invalid(_) | Provider::Unreadable => {} // never offered: only a bad file has it
     }
-    let job = state.key.refresh(bind(&state.store, p));
-    state.key_jobs.push((false, job));
 }
 
 /// A Provider dropdown pick: its API's provider, its server (Custom server

@@ -138,19 +138,19 @@ fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> 
     if cfg.provider == Provider::Browser {
         return Err(
             "This needs an AI provider with an API key: Google AI Mode in your \
-            browser cannot send text back.\n\nIn Settings > AI choose Anthropic or \
-            OpenAI-compatible and add your key."
+            browser cannot send text back.\n\nIn Settings > AI choose AI provider, \
+            pick yours and add your key."
                 .into(),
         );
     }
-    let key = match secrets::get(cfg.provider.clone()) {
-        Ok(key) => key.filter(|key| !key.is_empty()),
+    let key = match key_for(&secrets::Keyring, &cfg) {
+        Ok(key) => key,
         // A local OpenAI-compatible server needs no key: go on without the keyring.
         Err(e) if cfg.provider == Provider::OpenaiCompatible => {
             crate::log!("keyring: {e}");
             None
         }
-        Err(e) => return Err(format!("{e}\n\n{}", steps(&cfg.provider))),
+        Err(e) => return Err(format!("{e}\n\n{}", steps(&cfg))),
     };
     let missing = match cfg.provider {
         Provider::Anthropic if key.is_none() => Some("no API key is saved"),
@@ -163,18 +163,30 @@ fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> 
     if let Some(missing) = missing {
         return Err(format!(
             "AI is not set up yet: {missing}.\n\n{}",
-            steps(&cfg.provider)
+            steps(&cfg)
         ));
     }
     Ok((cfg, key))
 }
 
+/// The key of the provider `cfg` sends to, from its own keyring entry (never
+/// another provider's: a key goes only where it was saved for).
+fn key_for(
+    store: &dyn secrets::KeyStore,
+    cfg: &AiConfig,
+) -> Result<Option<Secret>, secrets::SecretsError> {
+    let Some(owner) = crate::ai::providers::key_of(cfg) else {
+        return Ok(None);
+    };
+    Ok(store.read(owner)?.filter(|key| !key.is_empty()))
+}
+
 /// The exact steps to set the AI up by hand (until the Settings window does it).
-fn steps(provider: &Provider) -> String {
+fn steps(cfg: &AiConfig) -> String {
     let path = Config::path().map_or("the OpenCircle config file".into(), |p| {
         p.display().to_string()
     });
-    let account = format!("ai-key-{}", provider.id());
+    let account = crate::ai::providers::key_of(cfg).map_or_else(String::new, |k| k.entry());
     #[cfg(target_os = "linux")]
     let keyring = format!(
         "In a terminal: secret-tool store --label=OpenCircle service opencircle username {account}\n\
@@ -325,6 +337,49 @@ pub fn stream(
         Ok(_) if stopped => Err("Stopped.".into()),
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+    use crate::secrets::{AiKey, KeyStore, MemoryStore};
+
+    fn cfg(provider: Provider, base_url: &str) -> AiConfig {
+        AiConfig {
+            provider,
+            base_url: base_url.into(),
+            model: "m".into(),
+        }
+    }
+
+    /// A request carries only the key of the provider it goes to: another
+    /// provider's, or a Custom server's URL, never gets OpenRouter's.
+    #[test]
+    fn a_request_only_ever_carries_its_own_providers_key() {
+        let store = MemoryStore::default();
+        // built at run time: no key-shaped literal in the source
+        let key = Secret::new(format!("fake-openrouter-{:x}", std::process::id()));
+        store.set(AiKey("openrouter"), &key).unwrap();
+        let openrouter = cfg(Provider::OpenaiCompatible, "https://openrouter.ai/api/v1");
+        let got = key_for(&store, &openrouter).unwrap();
+        assert_eq!(got.as_ref().map(Secret::expose), Some(key.expose()));
+        for other in [
+            cfg(
+                Provider::OpenaiCompatible,
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+            ),
+            cfg(Provider::OpenaiCompatible, "https://api.openai.com/v1"),
+            cfg(Provider::OpenaiCompatible, "https://evil.example/v1"),
+            cfg(
+                Provider::OpenaiCompatible,
+                "https://openrouter.ai.evil.example/api/v1",
+            ),
+            cfg(Provider::Anthropic, ""),
+            cfg(Provider::Browser, ""),
+        ] {
+            assert!(key_for(&store, &other).unwrap().is_none(), "{other:?}");
+        }
     }
 }
 

@@ -11,6 +11,7 @@
 pub mod anthropic;
 pub mod browser;
 pub mod openai;
+pub mod providers;
 
 use std::fmt;
 use std::io::BufRead;

@@ -15,7 +15,7 @@ use crate::config::{
 use crate::hotkey::{DesktopKey, managed};
 use crate::labs::{Feature, Labs};
 use crate::music::{self};
-use crate::secrets::{KeyStore, Secret, SecretsError};
+use crate::secrets::{AiKey, KeyStore, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES};
 use crate::ui::kit::header::Caption;
 use crate::ui::kit::motion;
@@ -38,6 +38,11 @@ fn update(state: &mut State, message: Message) -> Outcome {
 fn moving_update(state: &mut State, message: Message) -> Outcome {
     let mut out = super::update(state, message);
     loop {
+        // a write first: a key job's answer must not drop it
+        if let Outcome::Write(w) = out {
+            out = super::update(state, Message::Written(w.run()));
+            continue;
+        }
         // The shell runs these off the UI thread; here, at once.
         let jobs = state.take_key_jobs();
         let ran = !jobs.is_empty();
@@ -128,13 +133,16 @@ fn song_search_section_saves_a_write_only_token_and_its_choices() {
 /// Shares a `MemoryStore` between the test and the state.
 struct Shared(Arc<MemoryStore>);
 impl KeyStore for Shared {
-    fn is_set(&self, p: Provider) -> Result<bool, SecretsError> {
+    fn is_set(&self, p: AiKey) -> Result<bool, SecretsError> {
         self.0.is_set(p)
     }
-    fn set(&self, p: Provider, k: &Secret) -> Result<(), SecretsError> {
+    fn read(&self, p: AiKey) -> Result<Option<Secret>, SecretsError> {
+        self.0.read(p)
+    }
+    fn set(&self, p: AiKey, k: &Secret) -> Result<(), SecretsError> {
         self.0.set(p, k)
     }
-    fn delete(&self, p: Provider) -> Result<(), SecretsError> {
+    fn delete(&self, p: AiKey) -> Result<(), SecretsError> {
         self.0.delete(p)
     }
 }
@@ -653,10 +661,7 @@ fn a_saved_key_shows_as_dots_only() {
         Message::ApiKey(KeyMessage::Input(Secret::new(key.clone()))),
     );
     update(&mut s, Message::ApiKey(KeyMessage::Save));
-    assert_eq!(
-        store.get("openai_compatible").as_deref(),
-        Some(key.as_str())
-    );
+    assert_eq!(store.get("openai").as_deref(), Some(key.as_str()));
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == KEY_MASK), "{texts:?}");
     assert!(KEY_MASK.chars().all(|c| c == '•'));
@@ -673,6 +678,42 @@ fn a_saved_key_shows_as_dots_only() {
         }
         assert!(!["Reveal", "Show key"].iter().any(|r| t.contains(r)), "{t}");
     }
+}
+
+/// Each provider has its own key (lead review, 2026-10-28): after a pick the
+/// field shows "no key" until that provider's key is saved, a Custom server
+/// never shows another's, and going back shows the first one's again.
+#[test]
+fn each_provider_shows_only_its_own_key() {
+    let fake = |tag: &str| Secret::new(format!("fake-{tag}-{:x}", std::process::id()));
+    let (mut s, store) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    let saved = |s: &State| shot::texts(view(s)).iter().any(|t| t == KEY_MASK);
+    update(&mut s, Message::Preset(preset("OpenRouter")));
+    update(
+        &mut s,
+        Message::ApiKey(KeyMessage::Input(fake("openrouter"))),
+    );
+    update(&mut s, Message::ApiKey(KeyMessage::Save));
+    assert_eq!(*s.key.status(), KeyStatus::Saved);
+    assert!(saved(&s));
+    for other in ["Google Gemini", "OpenAI", "Custom server", "Anthropic"] {
+        update(&mut s, Message::Preset(preset(other)));
+        assert_eq!(*s.key.status(), KeyStatus::NotSet, "{other}");
+        assert!(!saved(&s), "{other} shows no key");
+    }
+    // a Custom server's typed URL changes nothing
+    update(&mut s, Message::Preset(preset("Custom server")));
+    update(&mut s, Message::BaseUrl("https://my.example/v1".into()));
+    assert_eq!(*s.key.status(), KeyStatus::NotSet);
+    update(&mut s, Message::Preset(preset("Google Gemini")));
+    update(&mut s, Message::ApiKey(KeyMessage::Input(fake("gemini"))));
+    update(&mut s, Message::ApiKey(KeyMessage::Save));
+    update(&mut s, Message::Preset(preset("OpenRouter")));
+    assert_eq!(*s.key.status(), KeyStatus::Saved, "its own key again");
+    let mine = |id| store.get(id).unwrap_or_default();
+    assert!(mine("openrouter").contains("openrouter") && mine("gemini").contains("gemini"));
+    assert!(store.get("openai_compatible").is_none() && store.get("custom").is_none());
 }
 
 /// The Provider dropdown's entry called `name`.
@@ -935,10 +976,13 @@ struct Slow {
     fail: bool,
 }
 impl KeyStore for Slow {
-    fn is_set(&self, _: Provider) -> Result<bool, SecretsError> {
+    fn is_set(&self, _: AiKey) -> Result<bool, SecretsError> {
         Ok(false)
     }
-    fn set(&self, _: Provider, _: &Secret) -> Result<(), SecretsError> {
+    fn read(&self, _: AiKey) -> Result<Option<Secret>, SecretsError> {
+        Ok(None)
+    }
+    fn set(&self, _: AiKey, _: &Secret) -> Result<(), SecretsError> {
         let (lock, cv) = &*self.open;
         let (_open, timeout) = cv
             .wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(10), |open| !*open)
@@ -949,7 +993,7 @@ impl KeyStore for Slow {
             false => Ok(()),
         }
     }
-    fn delete(&self, _: Provider) -> Result<(), SecretsError> {
+    fn delete(&self, _: AiKey) -> Result<(), SecretsError> {
         Ok(())
     }
 }
@@ -2026,6 +2070,10 @@ fn a_preview_without_a_clip_is_a_placeholder_with_no_clock() {
     assert!(s.players.is_empty() && !s.animating(), "nothing plays");
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Preview"), "{texts:?}");
+    assert!(
+        !texts.iter().any(|t| t == "Replay"),
+        "nothing to replay: {texts:?}"
+    );
     assert!(texts.iter().any(|t| t == "Translate"), "{texts:?}");
     // a page without a preview starts no clock
     moving_update(&mut s, Message::Section(Section::Privacy));
@@ -2041,7 +2089,9 @@ fn a_preview_plays_once_then_rests_and_the_clock_stops() {
     update(&mut s, Message::Section(Section::Ai));
     with_clip(&mut s);
     assert!(s.animating(), "playing");
-    assert!(!shot::texts(view(&s)).iter().any(|t| t == "Preview"));
+    let texts = shot::texts(view(&s));
+    assert!(!texts.iter().any(|t| t == "Preview"));
+    assert!(texts.iter().any(|t| t == "Replay"), "{texts:?}");
     // the clip's time (1.5 s) has passed
     s.played = Some(Instant::now() - Duration::from_millis(1600));
     moving_update(&mut s, Message::Tick);

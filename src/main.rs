@@ -205,6 +205,13 @@ fn main() -> ExitCode {
     #[cfg(target_os = "linux")]
     capture::portal::repair_user_launcher();
     std::thread::spawn(|| remove_old_webview(&paths::app_data()));
+    // once: the key all OpenAI-compatible providers shared goes to the one chosen
+    let ai = config.ai.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = secrets::migrate_shared(&secrets::Keyring, &ai) {
+            crate::log!("[opencircle] keyring: {e}");
+        }
+    });
     config::set_current(config);
     let _tray = ui::start_tray(tx.clone());
     update::start(tx.clone());

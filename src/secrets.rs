@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use crate::config::Provider;
+use crate::config::AiConfig;
 use crate::music::Service;
 
 const SERVICE: &str = "opencircle";
@@ -109,30 +109,63 @@ fn map_err(e: keyring::Error) -> SecretsError {
     }
 }
 
-fn ai_entry(provider: Provider) -> String {
-    format!("ai-key-{}", provider.id())
+/// Whose AI key: an AI provider's own entry (`ai::providers::Preset::id`):
+/// one per provider, so a key is only ever sent to the one it was saved for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AiKey(pub &'static str);
+
+impl AiKey {
+    /// The one entry every OpenAI-compatible provider shared before 0.1.2
+    /// (`migrate_shared` moves it once).
+    pub const SHARED: AiKey = AiKey("openai_compatible");
+
+    /// The keyring entry's name (`ai-key-anthropic`, `ai-key-openrouter`, ...).
+    pub fn entry(self) -> String {
+        format!("ai-key-{}", self.0)
+    }
 }
 
 /// The stored key, or `None` if none was saved.
-pub fn get(provider: Provider) -> Result<Option<Secret>, SecretsError> {
-    by_name::get(&ai_entry(provider))
+pub fn get(owner: AiKey) -> Result<Option<Secret>, SecretsError> {
+    by_name::get(&owner.entry())
 }
 
-pub fn set(provider: Provider, key: &Secret) -> Result<(), SecretsError> {
-    by_name::set(&ai_entry(provider), key)
+pub fn set(owner: AiKey, key: &Secret) -> Result<(), SecretsError> {
+    by_name::set(&owner.entry(), key)
 }
 
 /// Deleting a key that does not exist is fine.
-pub fn delete(provider: Provider) -> Result<(), SecretsError> {
-    by_name::delete(&ai_entry(provider))
+pub fn delete(owner: AiKey) -> Result<(), SecretsError> {
+    by_name::delete(&owner.entry())
+}
+
+/// Once: the key every OpenAI-compatible provider shared moves to the
+/// provider `ai` selects now, if it speaks that API (read, write, then delete
+/// the old entry); otherwise nobody gets it and it is deleted. A key already
+/// saved for that provider stays.
+pub fn migrate_shared(store: &dyn KeyStore, ai: &AiConfig) -> Result<(), SecretsError> {
+    let Some(key) = store.read(AiKey::SHARED)? else {
+        return Ok(());
+    };
+    let to = (crate::ai::providers::Preset::of(ai))
+        .filter(|p| p.api == crate::ai::providers::Api::OpenAi)
+        .map(|p| AiKey(p.id));
+    if let Some(to) = to
+        && !store.is_set(to)?
+    {
+        store.set(to, &key)?;
+    }
+    store.delete(AiKey::SHARED)
 }
 
 // ---- the keyring behind a trait, so UI tests never touch the real one ----
 
 /// `K` = whose key: an AI provider, or a song-search service. Blocking (the OS
 /// keyring can take a while or ask to unlock): callers run it off the UI thread.
-pub trait KeyStore<K = Provider>: Send + Sync {
+pub trait KeyStore<K = AiKey>: Send + Sync {
     fn is_set(&self, owner: K) -> Result<bool, SecretsError>;
+    /// The key itself (only the migration and a request read it, never a view).
+    fn read(&self, owner: K) -> Result<Option<Secret>, SecretsError>;
     fn set(&self, owner: K, key: &Secret) -> Result<(), SecretsError>;
     fn delete(&self, owner: K) -> Result<(), SecretsError>;
 }
@@ -141,14 +174,17 @@ pub trait KeyStore<K = Provider>: Send + Sync {
 pub struct Keyring;
 
 impl KeyStore for Keyring {
-    fn is_set(&self, provider: Provider) -> Result<bool, SecretsError> {
-        get(provider).map(|k| k.is_some())
+    fn is_set(&self, owner: AiKey) -> Result<bool, SecretsError> {
+        get(owner).map(|k| k.is_some())
     }
-    fn set(&self, provider: Provider, key: &Secret) -> Result<(), SecretsError> {
-        set(provider, key)
+    fn read(&self, owner: AiKey) -> Result<Option<Secret>, SecretsError> {
+        get(owner)
     }
-    fn delete(&self, provider: Provider) -> Result<(), SecretsError> {
-        delete(provider)
+    fn set(&self, owner: AiKey, key: &Secret) -> Result<(), SecretsError> {
+        set(owner, key)
+    }
+    fn delete(&self, owner: AiKey) -> Result<(), SecretsError> {
+        delete(owner)
     }
 }
 
@@ -156,6 +192,9 @@ impl KeyStore<Service> for Keyring {
     /// Finds the entry without reading the key (no unlock prompt).
     fn is_set(&self, service: Service) -> Result<bool, SecretsError> {
         by_name::exists(service.key_entry())
+    }
+    fn read(&self, service: Service) -> Result<Option<Secret>, SecretsError> {
+        by_name::get(service.key_entry())
     }
     fn set(&self, service: Service, key: &Secret) -> Result<(), SecretsError> {
         by_name::set(service.key_entry(), key)
@@ -191,15 +230,18 @@ impl MemoryStore {
 
 #[cfg(test)]
 impl KeyStore for MemoryStore {
-    fn is_set(&self, p: Provider) -> Result<bool, SecretsError> {
-        Ok(self.has(p.id()))
+    fn is_set(&self, p: AiKey) -> Result<bool, SecretsError> {
+        Ok(self.has(p.0))
     }
-    fn set(&self, p: Provider, key: &Secret) -> Result<(), SecretsError> {
-        self.put(p.id(), key);
+    fn read(&self, p: AiKey) -> Result<Option<Secret>, SecretsError> {
+        Ok(self.get(p.0).map(Secret::new))
+    }
+    fn set(&self, p: AiKey, key: &Secret) -> Result<(), SecretsError> {
+        self.put(p.0, key);
         Ok(())
     }
-    fn delete(&self, p: Provider) -> Result<(), SecretsError> {
-        self.del(p.id());
+    fn delete(&self, p: AiKey) -> Result<(), SecretsError> {
+        self.del(p.0);
         Ok(())
     }
 }
@@ -208,6 +250,9 @@ impl KeyStore for MemoryStore {
 impl KeyStore<Service> for MemoryStore {
     fn is_set(&self, s: Service) -> Result<bool, SecretsError> {
         Ok(self.has(s.key_entry()))
+    }
+    fn read(&self, s: Service) -> Result<Option<Secret>, SecretsError> {
+        Ok(self.get(s.key_entry()).map(Secret::new))
     }
     fn set(&self, s: Service, key: &Secret) -> Result<(), SecretsError> {
         self.put(s.key_entry(), key);
@@ -236,6 +281,58 @@ mod tests {
             assert!(text.contains("redacted"));
         }
         assert_eq!(s.expose(), "sk-ant-FAKE-1234567890");
+    }
+
+    fn fake(tag: &str) -> Secret {
+        // built at run time: no key-shaped literal in the source
+        Secret::new(format!("fake-{tag}-{:x}", std::process::id()))
+    }
+
+    fn ai(provider: crate::config::Provider, base_url: &str) -> AiConfig {
+        AiConfig {
+            provider,
+            base_url: base_url.into(),
+            model: "m".into(),
+        }
+    }
+
+    /// The one shared OpenAI-compatible key moves once to the provider the
+    /// config selects; nobody else gets it, and a key saved there stays.
+    #[test]
+    fn the_shared_key_moves_once_to_the_selected_provider_only() {
+        use crate::config::Provider::{Anthropic, Browser, OpenaiCompatible};
+        let old = fake("old");
+        let shared = || {
+            let s = MemoryStore::default();
+            s.set(AiKey::SHARED, &old).unwrap();
+            s
+        };
+        // OpenRouter selected: it gets the key, the shared entry is gone
+        let s = shared();
+        migrate_shared(&s, &ai(OpenaiCompatible, "https://openrouter.ai/api/v1")).unwrap();
+        assert_eq!(s.get("openrouter").as_deref(), Some(old.expose()));
+        assert!(!s.has("openai_compatible"));
+        assert_eq!(s.0.lock().unwrap().len(), 1, "nobody else got it");
+        // run again: nothing left to move
+        migrate_shared(&s, &ai(OpenaiCompatible, "https://api.openai.com/v1")).unwrap();
+        assert!(!s.has("openai"));
+        // a custom server's URL: its own entry
+        let s = shared();
+        migrate_shared(&s, &ai(OpenaiCompatible, "http://10.0.0.2:8000/v1")).unwrap();
+        assert_eq!(s.get("custom").as_deref(), Some(old.expose()));
+        // the browser or Anthropic selected: nobody gets it
+        for other in [ai(Browser, ""), ai(Anthropic, "")] {
+            let s = shared();
+            migrate_shared(&s, &other).unwrap();
+            assert!(s.is_empty(), "{other:?}");
+        }
+        // a key already saved for that provider stays
+        let s = shared();
+        let mine = fake("mine");
+        s.set(AiKey("openrouter"), &mine).unwrap();
+        migrate_shared(&s, &ai(OpenaiCompatible, "https://openrouter.ai/api/v1")).unwrap();
+        assert_eq!(s.get("openrouter").as_deref(), Some(mine.expose()));
+        assert!(!s.has("openai_compatible"));
     }
 
     #[test]

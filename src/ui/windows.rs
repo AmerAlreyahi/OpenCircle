@@ -1163,20 +1163,22 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Provider;
-    use crate::secrets::{Secret, SecretsError};
+    use crate::secrets::{AiKey, Secret, SecretsError};
     use crate::ui::kit::motion;
     use crate::ui::widgets::shot;
 
     struct NoKeys;
     impl crate::secrets::KeyStore for NoKeys {
-        fn is_set(&self, _: Provider) -> Result<bool, SecretsError> {
+        fn is_set(&self, _: AiKey) -> Result<bool, SecretsError> {
             Ok(false)
         }
-        fn set(&self, _: Provider, _: &Secret) -> Result<(), SecretsError> {
+        fn read(&self, _: AiKey) -> Result<Option<Secret>, SecretsError> {
+            Ok(None)
+        }
+        fn set(&self, _: AiKey, _: &Secret) -> Result<(), SecretsError> {
             Ok(())
         }
-        fn delete(&self, _: Provider) -> Result<(), SecretsError> {
+        fn delete(&self, _: AiKey) -> Result<(), SecretsError> {
             Ok(())
         }
     }

@@ -54,7 +54,10 @@ The model must accept images to answer about a selection.
 
 ## Your key
 
-Paste the key in **Settings → AI**. It is stored in your operating system's
+Paste the key in **Settings → AI**. Each provider keeps its own key: a key
+saved for one provider is never sent to another (or to a Custom server's
+URL); after switching provider, paste that provider's key. It is stored in
+your operating system's
 keyring (Windows Credential Manager; Secret Service, such as GNOME Keyring or
 KWallet, on Linux). It is never written to the config file, logs or crash
 output. If no keyring is available OpenCircle says so rather than saving the

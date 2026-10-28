@@ -417,9 +417,9 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
 /// The user's settings, downloaded models, histories and saved keys: gone.
 pub fn remove_user_data() {
     remove_dirs(&user_data());
-    use crate::config::Provider;
-    for provider in [Provider::Anthropic, Provider::OpenaiCompatible] {
-        let _ = crate::secrets::delete(provider);
+    let owners = (crate::ai::providers::PRESETS.iter()).map(|p| crate::secrets::AiKey(p.id));
+    for owner in owners.chain([crate::secrets::AiKey::SHARED]) {
+        let _ = crate::secrets::delete(owner);
     }
     let _ = crate::secrets::by_name::delete(crate::music::SERVICE.key_entry());
 }
