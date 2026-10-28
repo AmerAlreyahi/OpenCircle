@@ -17,9 +17,9 @@ use crate::ui::app::message::{Hiding, Message, Purpose};
 use crate::ui::app::quick::Quick;
 use crate::ui::edit::Editing;
 use crate::ui::kit::motion;
+use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::widgets::card;
-use crate::ui::{overlay, snip, translate, update_card, widgets, windows};
+use crate::ui::{overlay, snip, translate, update_card, windows};
 
 use super::capture::{TEST_SHOT, save_test_shot};
 use super::{App, BAR_MORPH, CAPTURE_TIMEOUT, GLIDE, REVEAL_WAIT, Reader, SHRINK_FRAMES, SHRUNK};
@@ -250,7 +250,7 @@ impl App {
                 if let Some((how, last)) = self.o.card_drag {
                     if let Some(from) = last {
                         let at = self.card_at();
-                        self.card = Some(widgets::card::drag(at, how, p - from, self.o.screen));
+                        self.card = Some(card::drag(at, how, p - from, self.o.screen));
                     }
                     self.o.card_drag = Some((how, Some(p)));
                 }

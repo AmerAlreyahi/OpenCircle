@@ -3,6 +3,7 @@
 //! time from `ui/` (the UI plan's phase 5).
 pub mod bar;
 pub mod onboarding;
+pub mod panel;
 pub mod settings;
 pub mod toast;
 pub mod update_card;

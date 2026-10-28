@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use iced::widget::{column, container, image, opaque, row};
 use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 
-use super::widgets::card;
 use super::{background, widgets};
 use crate::config;
 use crate::history::song as history;
 use crate::music::{self, LISTEN_SECS, Song};
+use crate::ui::kit::panel_frame as card;
 
 /// Lucide "music" (in the subset font).
 pub const MUSIC: char = '\u{e125}';
@@ -157,11 +157,11 @@ impl Session {
             }
         };
         let header = card::Header {
-            icon: MUSIC,
+            glyph: MUSIC,
             title: "Song search",
             chip: None,
         };
-        card::frame(
+        super::panel::card(
             header,
             body,
             footer,
@@ -172,13 +172,15 @@ impl Session {
         )
     }
 
-    /// Bottom centre, `card::WIDTH` wide (narrower screens: inset by `card::GAP`).
+    /// Bottom centre, `card::SIDE_WIDTH` wide (narrower screens: inset by `card::GAP`).
     fn card_at(&self, screen: Size) -> Rectangle {
         let extra = match &self.state {
             State::Found(..) => self.recent.len().min(RECENT) as f32 * RECENT_LINE,
             _ => 0.0,
         };
-        let width = card::WIDTH.min(screen.width - 2.0 * card::GAP).max(0.0);
+        let width = card::SIDE_WIDTH
+            .min(screen.width - 2.0 * card::GAP)
+            .max(0.0);
         let height = (CARD_HEIGHT + extra).min(screen.height - 2.0 * card::GAP);
         Rectangle::new(
             Point::new(

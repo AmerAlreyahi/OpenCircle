@@ -18,8 +18,9 @@ use crate::ui::app::word;
 use crate::ui::app::{Reader, TextMode};
 use crate::ui::edit::Editing;
 use crate::ui::kit::motion;
+use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::{overlay, panel, song, translate, widgets};
+use crate::ui::{overlay, panel, song, translate};
 
 pub(in crate::ui) struct Opening {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
@@ -143,7 +144,7 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) bar_eased: Option<Instant>,
     pub(in crate::ui) work_inset: f32,
     /// The card's grip or corner is held, and the pointer's last position.
-    pub(in crate::ui) card_drag: Option<(widgets::card::Drag, Option<Point>)>,
+    pub(in crate::ui) card_drag: Option<(card::Drag, Option<Point>)>,
     /// The result card opening (`motion::WIDGET`): which panel, its motion,
     /// and how open it was at the latest frame (it grows from `OPEN_SCALE`).
     pub(in crate::ui) card_open: Option<(u32, motion::Shown, f32)>,

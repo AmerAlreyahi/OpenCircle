@@ -9,6 +9,7 @@ pub mod motion;
 pub mod themes;
 pub mod tokens;
 
+pub mod bubble;
 pub mod button;
 pub mod card;
 pub mod chip;

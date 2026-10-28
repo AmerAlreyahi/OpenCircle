@@ -10,8 +10,8 @@ use crate::ui::app::background::background;
 use crate::ui::app::keys;
 use crate::ui::app::message::Message;
 use crate::ui::kit::motion;
-use crate::ui::widgets::card;
-use crate::ui::{panel, widgets};
+use crate::ui::kit::panel_frame as card;
+use crate::ui::panel;
 
 use super::App;
 
@@ -133,10 +133,10 @@ impl App {
     }
 
     /// Where the result card shows: where the user left it, else away from
-    /// the selection (`widgets::card::place`).
+    /// the selection (`card::place`).
     pub(in crate::ui) fn card_at(&self) -> Rectangle {
         let selection = self.o.selection.map(|s| self.o.view.rect_to_screen(s.area));
-        widgets::card::place(self.o.screen, selection, self.card)
+        card::place(self.o.screen, selection, self.card)
     }
 
     /// How open the result card is (0..1; 0 before its first frame, 1 at once

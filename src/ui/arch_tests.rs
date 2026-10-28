@@ -54,6 +54,8 @@ fn styles(line: &str) -> bool {
         ".rounded(",
         "Weight::",
     ];
+    // (an image made from pixels, `Handle::from_rgba`, is no colour)
+    let line = &line.replace("Handle::from_rgba", "Handle::");
     WORDS.iter().any(|w| line.contains(w))
         || [".padding(", ".spacing(", ".size(", ".width(", ".height("]
             .iter()
@@ -67,11 +69,12 @@ fn styles(line: &str) -> bool {
 
 /// Not screens: the kit, the palettes and components the kit replaces (step
 /// 5 / 23), OS glue (platform/), state and logic (app/), and tests.
-const NOT_SCREENS: [&str; 8] = [
+const NOT_SCREENS: [&str; 9] = [
     "arch_tests.rs",
     "frame_times.rs",
     "glass.rs",
     "sapphire.rs",
+    "screens/panel/tests.rs",
     "screens/settings/tests.rs",
     "theme.rs",
     "widgets.rs",
@@ -85,7 +88,6 @@ const LEGACY: &[&str] = &[
     "edit.rs",
     "live_layer.rs",
     "overlay.rs",
-    "panel.rs",
     "setup.rs",
     "snip.rs",
     "song.rs",
@@ -203,6 +205,7 @@ fn the_style_scan_finds_styles() {
         ".padding(PAGE)",
         ".width(Fill)",
         "let colour = theme.c.text;",
+        "image::Handle::from_rgba(w, h, px)",
     ] {
         assert!(!styles(line), "{line}");
     }

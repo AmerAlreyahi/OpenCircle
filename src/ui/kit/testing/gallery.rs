@@ -507,6 +507,58 @@ fn panel_frame_sheet() {
     sheet("panel_frame", Size::new(300.0, 200.0), &rows);
 }
 
+/// `panel_frame::card`, the result card on the overlay: at rest and with its
+/// resize grip shown (`hover`), a model pill in the heading.
+#[test]
+fn panel_frame_card_sheet() {
+    use super::super::icon::Icon;
+    use super::super::icon_button::{State, icon_button};
+    use iced::Rectangle;
+    const CELL: Size = Size::new(300.0, 200.0);
+    let view = |grip: bool| {
+        move |ar| {
+            let header = panel_frame::Header {
+                glyph: Icon::Check.glyph(),
+                title: s(ar, "Text", "النص"),
+                chip: Some("model"),
+            };
+            let close = icon_button(Icon::Close.glyph(), State::default(), Some(()));
+            let body =
+                super::super::text::text(Role::NOTE, s(ar, "A refreshed look.", "مظهر جديد."));
+            let footer = button::button(
+                button::label(s(ar, "Later", "لاحقاً")),
+                button::Kind::Quiet,
+                Some(()),
+            );
+            let at = Rectangle::new(Point::new(4.0, 4.0), Size::new(260.0, 190.0));
+            panel_frame::card(
+                header,
+                close,
+                body,
+                Some(footer),
+                at,
+                Size::new(1920.0, 1080.0),
+                grip,
+                |_| (),
+            )
+        }
+    };
+    let rows = vec![
+        row("rest", Act::Rest, view(false)),
+        row("resize grip", Act::Rest, view(true)),
+    ];
+    sheet("panel_frame_card", CELL, &rows);
+}
+
+/// `bubble`: the user's message in a chat.
+#[test]
+fn bubble_sheet() {
+    use super::super::bubble::bubble;
+    let view = |ar| bubble(s(ar, "What is this?", "ما هذا؟"));
+    let rows = [row("rest", Act::Rest, view)];
+    sheet("bubble", Size::new(220.0, 52.0), &rows);
+}
+
 #[test]
 fn grip_sheet() {
     use super::super::grip::grip;

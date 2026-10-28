@@ -19,9 +19,9 @@ use crate::ui::app::opening::Opening;
 use crate::ui::app::quick::Quick;
 use crate::ui::app::{keys, word};
 use crate::ui::edit::Editing;
+use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::snip::Snip;
-use crate::ui::widgets::card;
 use crate::ui::{border, glass, overlay, panel, snip, song, translate, widgets, windows};
 
 use super::actions::auto_targets;
@@ -3374,7 +3374,7 @@ fn the_result_card_opens_off_the_selection_and_moves_by_its_grip() {
         Point::new(1800.0, 300.0),
         false,
     );
-    assert_eq!(app.card_at().x, widgets::card::GAP);
+    assert_eq!(app.card_at().x, card::GAP);
 }
 
 /// `OPENCIRCLE_LOOK_PNG=<dir> cargo test ui::tests::look_shots -- --ignored`:

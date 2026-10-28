@@ -14,8 +14,8 @@ use crate::labs::BarButton;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, PickAct, Purpose};
 use crate::ui::app::quick::Quick;
+use crate::ui::kit::panel_frame as card;
 use crate::ui::platform::monitor::taskbar_inset;
-use crate::ui::widgets::card;
 use crate::ui::{live_layer, overlay, panel, settings, song, translate, windows};
 
 use super::{App, TOAST_MARGIN};

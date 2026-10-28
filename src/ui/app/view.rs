@@ -10,8 +10,8 @@ use crate::config::{self};
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::word;
 use crate::ui::kit::motion;
+use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::widgets::card;
 use crate::ui::{border, glass, overlay, widgets};
 
 use super::{App, CHIP_SPACE, HINT, PROTECTED, QR_WIDTH, SLIDE, TextMode};

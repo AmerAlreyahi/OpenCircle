@@ -17,7 +17,7 @@ use crate::ocr::{self, TextBlock};
 use super::app::message::Message;
 use super::app::word;
 use crate::ui::kit::motion;
-use crate::ui::widgets::card;
+use crate::ui::kit::panel_frame as card;
 use crate::ui::{panel, theme, widgets};
 
 use iced::advanced::graphics::{Viewport, damage};

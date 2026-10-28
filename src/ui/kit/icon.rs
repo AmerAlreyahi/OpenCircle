@@ -20,17 +20,22 @@ pub enum Icon {
     Minimise,
     Maximise,
     Restore,
+    /// lucide "arrow-up" and "square": a question's Send and Stop.
+    Send,
+    Stop,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 6] = [
+    pub const ALL: [Icon; 8] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
         Icon::Minimise,
         Icon::Maximise,
         Icon::Restore,
+        Icon::Send,
+        Icon::Stop,
     ];
 
     pub const fn glyph(self) -> char {
@@ -41,6 +46,8 @@ impl Icon {
             Icon::Minimise => '\u{e11f}',
             Icon::Maximise => '\u{e16a}',
             Icon::Restore => '\u{e0a2}',
+            Icon::Send => '\u{e04e}',
+            Icon::Stop => '\u{e16a}',
         }
     }
 }

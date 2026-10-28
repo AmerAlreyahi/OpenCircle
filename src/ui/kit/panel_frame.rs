@@ -4,8 +4,13 @@
 //! is long, and an actions row (a call to action's height). Fills its window,
 //! padding 22; `height` sizes the window to its body (`.as-card` grows with
 //! its content).
-use iced::widget::{column, container, mouse_area, row, scrollable};
-use iced::{Border, Center, Element, Fill};
+//!
+//! The result card on the overlay (Search, Text, Ask AI, Translate, Song) is
+//! the same `.as-card` floating over the frozen frame (`card`): where it goes,
+//! how a drag moves or resizes it, the room it leaves free, and its frame. One
+//! place, so every card floats, opens and moves the same way.
+use iced::widget::{Space, column, container, mouse_area, opaque, pin, row, scrollable, stack};
+use iced::{Border, Center, Element, Fill, Length, Point, Rectangle, Size, Vector, mouse};
 
 use super::icon::{Icon, icon};
 use super::surface::{Material, surface};
@@ -83,4 +88,389 @@ pub fn frame<'a, Message: Clone + 'a>(
         .width(Fill)
         .height(Fill)
         .into()
+}
+
+/// Distance to the screen edges, the side card's least width, the smallest
+/// a resize makes it, and below which width (or on a portrait screen) it
+/// floats at the bottom instead.
+pub const GAP: f32 = 20.0;
+pub const SIDE_WIDTH: f32 = 420.0;
+/// The side card's share of the screen width; the bottom card's width and
+/// least height.
+const SHARE: f32 = 0.4;
+const BOTTOM_WIDTH: f32 = 640.0;
+const BOTTOM_MIN: f32 = 260.0;
+/// How far a card may overlap the selection before it opens on the other side.
+const COVER_SLACK: f32 = 8.0;
+pub const MIN: Size = Size::new(320.0, 220.0);
+pub const NARROW: f32 = 900.0;
+/// The resize strip along the inner edge, and its grip.
+const EDGE: f32 = 10.0;
+const GRIP: f32 = 40.0;
+const GRIP_GIRTH: f32 = 4.0;
+/// The result card's corners (`.as-card`).
+pub const CARD_RADIUS: f32 = super::tokens::radius::DRAWER;
+/// Its top row: the heading and the close button.
+const TOP: f32 = super::tokens::size::ICON_BUTTON;
+/// The close button reaches this far into the card's padding (top, right).
+const CLOSE_IN: f32 = 8.0;
+
+/// What a press on the card's frame does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Drag {
+    /// The heading: move it.
+    Move,
+    /// The inner edge: resize it.
+    Resize,
+}
+
+/// What the card's frame reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Event {
+    Grab(Drag),
+    /// The pointer is over the inner edge (its grip shows) or left it.
+    Hover(bool),
+    /// Double-click on the inner edge: back to the default place and size.
+    Reset,
+    Close,
+}
+
+/// The card's edge facing the rest of the screen (the one that resizes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+    Top,
+}
+
+/// Narrow or portrait: the card floats at the bottom.
+fn bottom(screen: Size) -> bool {
+    screen.width < NARROW || screen.height > screen.width
+}
+
+/// Where the card goes on a `screen`-sized overlay (logical px): where the
+/// user holds it (`user`, kept on screen), else full height on the right, on
+/// the left when the right would cover the `selection` and the left would
+/// not; on a narrow / portrait screen at the bottom.
+pub fn place(screen: Size, selection: Option<Rectangle>, user: Option<Rectangle>) -> Rectangle {
+    let inner = Size::new(
+        (screen.width - 2.0 * GAP).max(0.0),
+        (screen.height - 2.0 * GAP).max(0.0),
+    );
+    if let Some(r) = user {
+        let size = Size::new(
+            r.width.clamp(MIN.width.min(inner.width), inner.width),
+            r.height.clamp(MIN.height.min(inner.height), inner.height),
+        );
+        return keep_on(Rectangle::new(r.position(), size), screen);
+    }
+    if bottom(screen) {
+        let width = inner.width.min(BOTTOM_WIDTH);
+        let height = (screen.height / 2.0).max(BOTTOM_MIN).min(inner.height);
+        let at = Point::new((screen.width - width) / 2.0, screen.height - GAP - height);
+        return Rectangle::new(at, Size::new(width, height));
+    }
+    let width = (screen.width * SHARE).max(SIDE_WIDTH).min(inner.width);
+    let size = Size::new(width, inner.height);
+    let right = Rectangle::new(Point::new(screen.width - GAP - width, GAP), size);
+    let left = Rectangle::new(Point::new(GAP, GAP), size);
+    let covers = |card: Rectangle| {
+        selection.is_some_and(|s| {
+            let overlap = (card.x + card.width).min(s.x + s.width) - card.x.max(s.x);
+            overlap > COVER_SLACK
+        })
+    };
+    if covers(right) && !covers(left) {
+        left
+    } else {
+        right
+    }
+}
+
+/// A short prompt's card (a download question, a progress bar, an error):
+/// `at`'s width and place, but only as tall as `chars` of body text wrapped
+/// to it plus `below` px (buttons, a bar) need, never a slab of empty card.
+/// A card at the bottom keeps its bottom edge.
+// ponytail: estimated (7.2 px per character, generous for the 12-13 px card
+// text, 20 px a line), not measured; generous by a line. Measure if prompts grow.
+pub fn short(at: Rectangle, screen: Size, chars: usize, below: f32) -> Rectangle {
+    // the padding, the top row and the gap under it
+    const CHROME: f32 = 2.0 * PAD - CLOSE_IN + TOP + UNDER_HEADING;
+    let lines = (chars as f32 * 7.2 / (at.width - 2.0 * PAD).max(1.0))
+        .ceil()
+        .max(1.0)
+        + 1.0;
+    let height = (CHROME + lines * 20.0 + below).min(at.height);
+    let y = match side(at, screen) {
+        Side::Top => at.y + at.height - height,
+        _ => at.y,
+    };
+    Rectangle::new(Point::new(at.x, y), Size::new(at.width, height))
+}
+
+/// Which edge of the card `at` resizes it: the one facing the screen's middle.
+pub fn side(at: Rectangle, screen: Size) -> Side {
+    if bottom(screen) {
+        Side::Top
+    } else if at.center_x() > screen.width / 2.0 {
+        Side::Left
+    } else {
+        Side::Right
+    }
+}
+
+/// `r` moved, or resized by its inner edge, by `by`; kept on the screen and
+/// at least `MIN` big.
+pub fn drag(r: Rectangle, how: Drag, by: Vector, screen: Size) -> Rectangle {
+    if how == Drag::Move {
+        return keep_on(r + by, screen);
+    }
+    let (x0, y0) = (r.x, r.y);
+    let (x1, y1) = (r.x + r.width, r.y + r.height);
+    let (x0, x1, y0) = match side(r, screen) {
+        Side::Left => ((x0 + by.x).clamp(GAP, x1 - MIN.width), x1, y0),
+        Side::Right => (
+            x0,
+            (x1 + by.x).clamp(x0 + MIN.width, screen.width - GAP),
+            y0,
+        ),
+        Side::Top => (x0, x1, (y0 + by.y).clamp(GAP, y1 - MIN.height)),
+    };
+    Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0))
+}
+
+/// `r` moved inside the screen, `GAP` from its edges where it fits.
+fn keep_on(r: Rectangle, screen: Size) -> Rectangle {
+    let x = r.x.min(screen.width - GAP - r.width).max(GAP);
+    let y = r.y.min(screen.height - GAP - r.height).max(GAP);
+    Rectangle::new(Point::new(x, y), r.size())
+}
+
+/// The part of the screen the card at `at` leaves free (with `GAP` to it):
+/// beside it, or above a card at the bottom. Floating bars and pills go there.
+pub fn free(screen: Size, at: Option<Rectangle>) -> Rectangle {
+    let all = Rectangle::with_size(screen);
+    let Some(at) = at else { return all };
+    match side(at, screen) {
+        Side::Left => Rectangle::new(
+            Point::ORIGIN,
+            Size::new((at.x - GAP).max(0.0), screen.height),
+        ),
+        Side::Right => {
+            let x = (at.x + at.width + GAP).min(screen.width);
+            Rectangle::new(
+                Point::new(x, 0.0),
+                Size::new(screen.width - x, screen.height),
+            )
+        }
+        Side::Top => Rectangle::new(
+            Point::ORIGIN,
+            Size::new(screen.width, (at.y - GAP).max(0.0)),
+        ),
+    }
+}
+
+/// The card's heading: the action's glyph (accent, 20 px) and name
+/// (`PAGE_TITLE`), and an optional pill (the AI model).
+pub struct Header<'a> {
+    pub glyph: char,
+    pub title: &'a str,
+    pub chip: Option<&'a str>,
+}
+
+/// The result card at `at` on a `screen` (`.as-card`: the widget surface,
+/// radius 18, 22 px in): `header` (pressing it moves the card), `close` at
+/// its end (the screen's close button, with its tooltip), `body`, and
+/// `footer` 18 px under it (`.as-actions`). The inner edge resizes it: its
+/// grip shows while `hover`; a double-click there resets the card. Solid and
+/// without a shadow (glass joins with the GPU renderer). Presses never reach
+/// the canvas below.
+#[allow(clippy::too_many_arguments)]
+pub fn card<'a, Message: Clone + 'a>(
+    header: Header<'a>,
+    close: Element<'a, Message>,
+    body: impl Into<Element<'a, Message>>,
+    footer: Option<Element<'a, Message>>,
+    at: Rectangle,
+    screen: Size,
+    hover: bool,
+    on: impl Fn(Event) -> Message,
+) -> Element<'a, Message> {
+    let glyph = iced::widget::text(header.glyph)
+        .font(super::icon::FONT)
+        .size(ICON)
+        .color(c().accent);
+    let heading = row![glyph, text(Role::PAGE_TITLE, header.title)]
+        .push(header.chip.map(|chip| super::chip::pill(chip, false, None)))
+        .spacing(ICON_GAP)
+        .align_y(Center);
+    let heading = mouse_area(container(heading).width(Fill).center_y(TOP))
+        .on_press(on(Event::Grab(Drag::Move)))
+        .interaction(mouse::Interaction::Grab);
+    let top = row![heading, close].align_y(Center);
+    let mut parts = column![top, container(body).height(Fill)].spacing(UNDER_HEADING);
+    if let Some(footer) = footer {
+        let above = ABOVE_ACTIONS - UNDER_HEADING;
+        parts = parts.push(container(footer).padding(iced::Padding::ZERO.top(above)));
+    }
+    let pad = iced::Padding::new(PAD)
+        .top(PAD - CLOSE_IN)
+        .right(PAD - CLOSE_IN);
+    let card = surface(Material::Widget, CARD_RADIUS, parts)
+        .padding(pad)
+        .width(at.width)
+        .height(at.height);
+    // the inner edge: a thin strip, its grip only while hovered
+    let side = side(at, screen);
+    let (strip, grip, cursor, place) = match side {
+        Side::Left | Side::Right => (
+            Size::new(EDGE, at.height - 2.0 * CARD_RADIUS),
+            Size::new(GRIP_GIRTH, GRIP),
+            mouse::Interaction::ResizingHorizontally,
+            match side {
+                Side::Left => Point::new(0.0, CARD_RADIUS),
+                _ => Point::new(at.width - EDGE, CARD_RADIUS),
+            },
+        ),
+        Side::Top => (
+            Size::new(at.width - 2.0 * CARD_RADIUS, EDGE),
+            Size::new(GRIP, GRIP_GIRTH),
+            mouse::Interaction::ResizingVertically,
+            Point::new(CARD_RADIUS, 0.0),
+        ),
+    };
+    let grip: Element<'a, Message> = match hover {
+        true => container(Space::new().width(grip.width).height(grip.height))
+            .style(|_| container::Style {
+                background: Some(c().text_muted.into()),
+                border: Border::default().rounded(GRIP_GIRTH / 2.0),
+                ..container::Style::default()
+            })
+            .into(),
+        false => Space::new().into(),
+    };
+    let edge = mouse_area(
+        container(grip)
+            .center_x(Length::Fixed(strip.width))
+            .center_y(Length::Fixed(strip.height)),
+    )
+    .on_press(on(Event::Grab(Drag::Resize)))
+    .on_double_click(on(Event::Reset))
+    .on_enter(on(Event::Hover(true)))
+    .on_exit(on(Event::Hover(false)))
+    .interaction(cursor);
+    // In layers of its own bounds (an empty first child: a stack draws the
+    // rest in layers clipped to its container): dragged, the card redraws as
+    // its old and new place, not as each of its parts.
+    let layers = stack![Space::new(), opaque(card), pin(edge).position(place)]
+        .width(at.width)
+        .height(at.height);
+    let layers = container(layers).width(at.width).height(at.height);
+    pin(layers.clip(true)).position(at.position()).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SCREEN: Size = Size::new(1920.0, 1080.0);
+
+    fn inside(r: Rectangle, screen: Size) -> bool {
+        r.x >= GAP - 0.01
+            && r.y >= GAP - 0.01
+            && r.x + r.width <= screen.width - GAP + 0.01
+            && r.y + r.height <= screen.height - GAP + 0.01
+    }
+
+    fn sel(x: f32) -> Option<Rectangle> {
+        Some(Rectangle::new(
+            Point::new(x, 300.0),
+            Size::new(200.0, 100.0),
+        ))
+    }
+
+    #[test]
+    fn it_floats_on_the_users_side_unless_it_would_cover_the_selection() {
+        // the default side (right), 40 % wide, inset all round
+        let r = place(SCREEN, sel(200.0), None);
+        assert_eq!(r.width, 768.0);
+        assert_eq!(r.x, SCREEN.width - GAP - 768.0);
+        assert_eq!((r.y, r.height), (GAP, SCREEN.height - 2.0 * GAP));
+        assert!(inside(r, SCREEN));
+        assert_eq!(side(r, SCREEN), Side::Left, "it resizes by its inner edge");
+        // right of the middle but clear of the card: still right (as Google's card)
+        assert_eq!(place(SCREEN, sel(860.0), None).x, r.x);
+        // under the card: the other side, for this one only
+        assert_eq!(place(SCREEN, sel(1100.0), None).x, GAP);
+        assert_eq!(place(SCREEN, sel(1500.0), None).x, GAP);
+        assert_eq!(side(place(SCREEN, sel(1500.0), None), SCREEN), Side::Right);
+        // a small screen: at least SIDE_WIDTH wide
+        let small = Size::new(1000.0, 700.0);
+        assert_eq!(place(small, None, None).width, SIDE_WIDTH);
+    }
+
+    #[test]
+    fn narrow_or_portrait_screens_get_a_card_at_the_bottom() {
+        for screen in [
+            Size::new(600.0, 1000.0),
+            Size::new(1080.0, 1920.0),
+            Size::new(800.0, 400.0),
+            Size::new(300.0, 200.0),
+        ] {
+            let r = place(screen, sel(100.0), None);
+            assert!(inside(r, screen), "{screen:?} -> {r:?}");
+            assert!((r.y + r.height - (screen.height - GAP)).abs() < 0.01);
+            assert!((r.center_x() - screen.width / 2.0).abs() < 0.01, "centred");
+            assert!(r.width <= 640.0);
+            assert_eq!(side(r, screen), Side::Top);
+        }
+    }
+
+    #[test]
+    fn a_moved_or_resized_card_stays_where_put_and_on_screen() {
+        let r = place(SCREEN, None, None); // right side: resizes by its left edge
+        let moved = drag(r, Drag::Move, Vector::new(-300.0, -10.0), SCREEN);
+        assert!(inside(moved, SCREEN));
+        assert_eq!(place(SCREEN, sel(1500.0), Some(moved)), moved, "remembered");
+        let far = drag(r, Drag::Move, Vector::new(5000.0, 5000.0), SCREEN);
+        assert!(inside(far, SCREEN), "{far:?}");
+        // the left edge out: wider, the right edge stays
+        let wider = drag(r, Drag::Resize, Vector::new(-100.0, 0.0), SCREEN);
+        assert_eq!((wider.x, wider.width), (r.x - 100.0, r.width + 100.0));
+        assert_eq!(wider.x + wider.width, r.x + r.width);
+        // never under MIN, never past the screen
+        let thin = drag(r, Drag::Resize, Vector::new(5000.0, 0.0), SCREEN);
+        assert_eq!(thin.width, MIN.width);
+        let huge = drag(r, Drag::Resize, Vector::new(-5000.0, 0.0), SCREEN);
+        assert!(inside(huge, SCREEN), "{huge:?}");
+        // a card on the left grows by its right edge; one at the bottom by its top
+        let left = place(SCREEN, sel(1500.0), None);
+        let grown = drag(left, Drag::Resize, Vector::new(50.0, 0.0), SCREEN);
+        assert_eq!((grown.x, grown.width), (left.x, left.width + 50.0));
+        let phone = Size::new(600.0, 1000.0);
+        let b = place(phone, None, None);
+        let taller = drag(b, Drag::Resize, Vector::new(0.0, -100.0), phone);
+        assert_eq!((taller.y, taller.height), (b.y - 100.0, b.height + 100.0));
+        // a remembered card on a smaller screen shrinks to fit
+        let small_screen = Size::new(1280.0, 600.0);
+        let fit = place(small_screen, None, Some(huge));
+        assert!(inside(fit, small_screen), "{fit:?}");
+    }
+
+    #[test]
+    fn the_free_part_is_beside_or_above_the_card() {
+        assert_eq!(free(SCREEN, None), Rectangle::with_size(SCREEN));
+        let right = place(SCREEN, sel(200.0), None);
+        let f = free(SCREEN, Some(right));
+        assert_eq!((f.x, f.width), (0.0, right.x - GAP));
+        assert!(f.intersection(&right).is_none());
+        let left = place(SCREEN, sel(1500.0), None);
+        let f = free(SCREEN, Some(left));
+        assert_eq!(f.x, left.x + left.width + GAP);
+        assert!(f.intersection(&left).is_none());
+        let phone = Size::new(600.0, 1000.0);
+        let b = place(phone, None, None);
+        let f = free(phone, Some(b));
+        assert_eq!(f.height, b.y - GAP);
+    }
 }
