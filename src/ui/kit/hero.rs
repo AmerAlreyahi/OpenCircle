@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use iced::mouse::Cursor;
 use iced::widget::canvas::{self, Frame, Geometry, LineDash, Path, Stroke};
-use iced::widget::{Space, canvas as draw, column, container, row, text};
+use iced::widget::{Space, canvas as draw, column, container, row, stack, text};
 use iced::{Border, Center, Color, Element, Fill, Length, Point, Rectangle, Renderer, Theme};
 
 use super::button::{Kind, button, label};
@@ -105,7 +105,13 @@ pub fn hero<'a, Message: Clone + 'a>(h: Hero<'a, Message>) -> Element<'a, Messag
     .spacing(space::GAP * 2.0);
     let mut body = column![heading].spacing(STAGE_PAD);
     if h.shown {
-        body = body.push(stage(h.at, h.caption, h.scene, h.replay));
+        // the stage on its own layer (a stack draws each part after the first
+        // on one): a part coming or going in the scene leaves the page's
+        // primitives in their places (in one list the rest shifted: the whole
+        // page redrew at each step)
+        // (the stack is as big as its first part: the stage's place)
+        let place = Space::new().width(Fill).height(STAGE_H);
+        body = body.push(stack![place, stage(h.at, h.caption, h.scene, h.replay)]);
     }
     container(body)
         .padding(PAD)
@@ -179,6 +185,7 @@ fn stage<'a, Message: Clone + 'a>(
     .padding(STAGE_PAD)
     .width(Fill)
     .height(STAGE_H)
+    .clip(true)
     .style(|_| container::Style {
         background: Some(c().track_glass.into()),
         border: Border::default()

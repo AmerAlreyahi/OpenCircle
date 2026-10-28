@@ -77,6 +77,27 @@ impl Renderer {
 
         self.layers.flush();
 
+        // OpenCircle patch: many rectangles that cover much of their bounding
+        // box (a scrolled page: dozens of overlapping ones) are drawn as that
+        // box, once. Each rectangle draws every layer's primitives it meets,
+        // so overlapping ones drew the same quads and text over and over (a
+        // scroll frame of Settings: ~90 rectangles, 6000 quad draws, 150 ms
+        // at 4K). Far apart ones (a sidebar glide and a preview) stay apart.
+        let merged;
+        let damage = match damage {
+            [_, _, ..] => {
+                let all = damage.iter().skip(1).fold(damage[0], |a, r| a.union(r));
+                let sum: f32 = damage.iter().map(|r| r.width * r.height).sum();
+                merged = [all];
+                if sum * 2.0 >= all.width * all.height {
+                    &merged[..]
+                } else {
+                    damage
+                }
+            }
+            _ => damage,
+        };
+
         for &damage_bounds in damage {
             let damage_bounds = damage_bounds * scale_factor;
 
@@ -87,14 +108,15 @@ impl Renderer {
             let c = engine::into_color(background_color)
                 .premultiply()
                 .to_color_u8();
-            let c = [c.red(), c.green(), c.blue(), c.alpha()];
-            for row in pixels.data_mut().chunks_exact_mut(w as usize * 4)
+            // (a whole pixel at a time: byte by byte cost ~3 ms a 4K frame)
+            let c = u32::from_ne_bytes([c.red(), c.green(), c.blue(), c.alpha()]);
+            let data: &mut [u32] = bytemuck::cast_slice_mut(pixels.data_mut());
+            for row in data
+                .chunks_exact_mut(w as usize)
                 .skip(y0 as usize)
                 .take((y1 - y0) as usize)
             {
-                for px in row[x0 as usize * 4..x1 as usize * 4].chunks_exact_mut(4) {
-                    px.copy_from_slice(&c);
-                }
+                row[x0 as usize..x1 as usize].fill(c);
             }
 
             for layer in self.layers.iter() {

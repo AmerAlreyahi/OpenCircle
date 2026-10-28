@@ -144,6 +144,56 @@ impl Engine {
             }
         }
 
+        // OpenCircle patch: a solid quad reaching past its clip with none of
+        // its round corners in it (a window's or a page's background under a
+        // small redraw) is, inside the clip, exactly the rectangle they share:
+        // fill only that. tiny-skia rasterizes a path over its whole area and
+        // masks each pixel after, so a 4K window's background cost ~6 ms for
+        // a sidebar highlight's few pixels.
+        let inside = match (background, clip_mask) {
+            (Background::Color(color), Some(_)) => {
+                let (w, h) = (pixels.width(), pixels.height());
+                let [x0, y0, x1, y1] = pixel_rect(clip_bounds, w, h);
+                let clip = Rectangle::new(
+                    crate::core::Point::new(x0 as f32, y0 as f32),
+                    Size::new((x1 - x0) as f32, (y1 - y0) as f32),
+                );
+                let s = transformation.scale_factor();
+                let b = physical_bounds;
+                let [tl, tr, br, bl] = fill_border_radius.map(|r| r * s);
+                let corners = [
+                    (b.x, b.y, tl),
+                    (b.x + b.width - tr, b.y, tr),
+                    (b.x + b.width - br, b.y + b.height - br, br),
+                    (b.x, b.y + b.height - bl, bl),
+                ];
+                let clear = corners.iter().all(|&(x, y, r)| {
+                    r <= 0.0
+                        || !Rectangle::new(crate::core::Point::new(x, y), Size::new(r, r))
+                            .intersects(&clip)
+                });
+                clear
+                    .then(|| b.intersection(&clip))
+                    .flatten()
+                    .and_then(|r| {
+                        tiny_skia::Rect::from_xywh(r.x, r.y, r.width, r.height)
+                    })
+                    .map(|r| (r, *color))
+            }
+            _ => None,
+        };
+        if let Some((rect, color)) = inside {
+            pixels.fill_rect(
+                rect,
+                &tiny_skia::Paint {
+                    shader: tiny_skia::Shader::SolidColor(into_color(color)),
+                    anti_alias: true,
+                    ..tiny_skia::Paint::default()
+                },
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        } else {
         pixels.fill_path(
             &path,
             &tiny_skia::Paint {
@@ -200,6 +250,7 @@ impl Engine {
             transform,
             clip_mask,
         );
+        }
 
         if border_width > 0.0 {
             // Border path is offset by half the border width

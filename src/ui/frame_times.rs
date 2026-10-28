@@ -18,6 +18,7 @@ use super::app::message::Message;
 use super::app::word;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
+use crate::ui::screens::settings;
 use crate::ui::{panel, theme, widgets};
 
 use iced::advanced::graphics::{Viewport, damage};
@@ -28,7 +29,10 @@ use iced_runtime::user_interface::{Cache, UserInterface};
 /// redrawn, and the pixels after it (RGBA).
 pub struct Drawn {
     pub took: Duration,
-    /// Of it: rasterizing the damage.
+    /// Of it: the view built and laid out, and its events (scroll) handled;
+    /// then drawing it into layers (`took - layout - raster`); then
+    /// rasterizing the damage.
+    pub layout: Duration,
     pub raster: Duration,
     pub damage: Vec<Rectangle>,
     pub rgba: Vec<u8>,
@@ -43,14 +47,32 @@ pub fn frames(
     app: &mut App,
     frames: u32,
     pixels: bool,
-    mut step: impl FnMut(&mut App, u32, Instant),
+    step: impl FnMut(&mut App, u32, Instant),
 ) -> Vec<Drawn> {
-    let k = app.o.scale;
+    fn view(app: &App) -> Element<'_, Message> {
+        app.view(app.overlay)
+    }
+    let (size, k) = (app.o.screen, app.o.scale);
+    let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+    drawn(app, size, k, view, frames, pixels, step, still)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// `frames` of any window: `view` of `state`, `size` logical px at scale `k`.
+pub fn drawn<S, M>(
+    state: &mut S,
+    size: Size,
+    k: f32,
+    view: for<'a> fn(&'a S) -> Element<'a, M>,
+    frames: u32,
+    pixels: bool,
+    mut step: impl FnMut(&mut S, u32, Instant),
+    mut input: impl FnMut(u32) -> (iced::mouse::Cursor, Vec<iced::Event>),
+) -> Vec<Drawn> {
     let (w, h) = (
-        (app.o.screen.width * k).round() as u32,
-        (app.o.screen.height * k).round() as u32,
+        (size.width * k).round() as u32,
+        (size.height * k).round() as u32,
     );
-    let size = app.o.screen;
     let mut renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0));
     let mut pixmap = tiny_skia::Pixmap::new(w, h).unwrap();
     let mut mask = tiny_skia::Mask::new(w, h).unwrap();
@@ -60,14 +82,14 @@ pub fn frames(
     let mut out = Vec::new();
     for i in 0..=frames {
         let now = start + Duration::from_millis(16 * u64::from(i));
-        step(app, i, now);
+        step(state, i, now);
         let began = Instant::now();
-        let mut ui = UserInterface::build(app.view(app.overlay), size, cache, &mut renderer);
-        let redraw = iced::Event::Window(window::Event::RedrawRequested(now));
-        let cursor = iced::mouse::Cursor::Unavailable;
+        let mut ui = UserInterface::build(view(state), size, cache, &mut renderer);
+        let (cursor, mut events) = input(i);
+        events.push(iced::Event::Window(window::Event::RedrawRequested(now)));
         let mut clipboard = iced::advanced::clipboard::Null;
         let (state, _) = ui.update(
-            &[redraw],
+            &events,
             cursor,
             &mut renderer,
             &mut clipboard,
@@ -77,6 +99,7 @@ pub fn frames(
             iced_runtime::user_interface::State::Updated { redraw_request, .. } => redraw_request,
             iced_runtime::user_interface::State::Outdated => window::RedrawRequest::NextFrame,
         };
+        let layout = began.elapsed();
         let style = iced::advanced::renderer::Style {
             text_color: Color::WHITE,
         };
@@ -104,6 +127,7 @@ pub fn frames(
         if i > 0 {
             out.push(Drawn {
                 took,
+                layout,
                 raster: rastering.elapsed(),
                 damage: changed,
                 next,
@@ -599,4 +623,166 @@ fn a_pixel_for_pixel_image_is_drawn_as_tiny_skia_draws_it() {
     reference.draw_pixmap(10, 7, picture.as_ref(), &paint, at, None);
     let off = (drawn.iter().zip(reference.data())).filter(|(a, b)| a.abs_diff(**b) > 1);
     assert_eq!(off.count(), 0);
+}
+
+/// A Settings window as drawn, `size` logical px at scale `k`.
+fn settings_view(s: &settings::State) -> Element<'_, settings::Message> {
+    settings::view(s, false)
+}
+
+fn settings_at(section: settings::Section) -> settings::State {
+    let mut s = settings::State::new(
+        crate::config::Config::default(),
+        vec![],
+        None,
+        Box::new(crate::secrets::MemoryStore::default()),
+    );
+    let _ = settings::update(&mut s, settings::Message::Section(section));
+    s
+}
+
+/// One line per motion: mean / worst frame, where the time goes, how much is redrawn.
+fn report(name: &str, size: Size, k: f32, t: &[Drawn]) {
+    let ms = |d: Duration| d.as_secs_f64() * 1e3;
+    let n = t.len() as f64;
+    let mean = t.iter().map(|d| ms(d.took)).sum::<f64>() / n;
+    let worst = t.iter().map(|d| ms(d.took)).fold(0.0, f64::max);
+    let layout = t.iter().map(|d| ms(d.layout)).sum::<f64>() / n;
+    let raster = t.iter().map(|d| ms(d.raster)).sum::<f64>() / n;
+    let px = (size.width * k) * (size.height * k);
+    let area = t
+        .iter()
+        .flat_map(|d| d.damage.iter().map(|r| r.width * k * r.height * k))
+        .sum::<f32>()
+        / (t.len() as f32 * px);
+    println!(
+        "{name:<22} {}x{} @{k}: mean {mean:5.1} ms, worst {worst:5.1} ms | layout {layout:4.1}, \
+         draw {:4.1}, raster {raster:4.1} ms | redrawn {:3.0}%",
+        (size.width * k) as u32,
+        (size.height * k) as u32,
+        mean - layout - raster,
+        area * 100.0
+    );
+}
+
+/// Settings' page switch and the Appearance page's scroll, timed at the
+/// design's size and maximised on a 3840x2160 screen at 200 and 250 % (run in release:
+/// `cargo test --release settings_frame_times -- --ignored --nocapture`).
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn settings_frame_times() {
+    use settings::{Message as M, Section};
+    // 3840x2160 at 200 % and 250 % (the owner's 4K laptop, 120 Hz: 8.3 ms a
+    // frame): the window at its size, and maximised (the work area)
+    for (k, size) in [
+        (2.0, settings::WINDOW_SIZE),
+        (2.0, Size::new(1920.0, 1032.0)),
+        (2.5, settings::WINDOW_SIZE),
+        (2.5, Size::new(1536.0, 816.0)),
+    ] {
+        // General -> Appearance on frame 1, then the glide's frames (real time)
+        let mut s = settings_at(Section::General);
+        std::thread::sleep(Duration::from_millis(300));
+        let _ = settings::update(&mut s, M::Tick);
+        let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+        let t = drawn(
+            &mut s,
+            size,
+            k,
+            settings_view,
+            12,
+            false,
+            |s, i, _| {
+                if i == 1 {
+                    let _ = settings::update(s, M::Section(Section::Appearance));
+                }
+                let _ = settings::update(s, M::Tick);
+            },
+            still,
+        );
+        report("page switch", size, k, &t);
+        // the Appearance page at rest, scrolled 40 px a frame
+        let mut s = settings_at(Section::Appearance);
+        std::thread::sleep(Duration::from_millis(300));
+        let _ = settings::update(&mut s, M::Tick);
+        let at = Point::new(size.width * 0.6, size.height * 0.5);
+        let wheel = |i: u32| {
+            let e = iced::mouse::Event::WheelScrolled {
+                delta: iced::mouse::ScrollDelta::Pixels { x: 0.0, y: -40.0 },
+            };
+            let moved = iced::mouse::Event::CursorMoved { position: at };
+            let events = match i {
+                0 => vec![iced::Event::Mouse(moved)],
+                _ => vec![iced::Event::Mouse(e)],
+            };
+            (iced::mouse::Cursor::Available(at), events)
+        };
+        let t = drawn(
+            &mut s,
+            size,
+            k,
+            settings_view,
+            12,
+            false,
+            |_, _, _| {},
+            wheel,
+        );
+        report("appearance scroll", size, k, &t);
+    }
+}
+
+/// The frames after a Settings page switch: their damage (logical px).
+fn switch_damage(to: settings::Section) -> Vec<Vec<Rectangle>> {
+    use settings::Message as M;
+    let mut s = settings_at(settings::Section::General);
+    std::thread::sleep(Duration::from_millis(250));
+    let _ = settings::update(&mut s, M::Tick);
+    let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+    let t = drawn(
+        &mut s,
+        settings::WINDOW_SIZE,
+        1.0,
+        settings_view,
+        4,
+        false,
+        |s, i, _| {
+            if i == 1 {
+                let _ = settings::update(s, M::Section(to));
+            }
+            let _ = settings::update(s, M::Tick);
+        },
+        still,
+    );
+    // after the switch's own frame (the new page, drawn whole)
+    t.into_iter().skip(1).map(|d| d.damage).collect()
+}
+
+/// The sidebar's column (its highlight glides there).
+const SIDEBAR_RIGHT: f32 = crate::ui::kit::tokens::size::SIDEBAR + 2.0;
+
+/// A page switch moves only the sidebar's highlight: the page itself switches
+/// at once (its rise redrew the whole window every frame on the CPU renderer).
+#[test]
+fn a_settings_page_switch_redraws_only_the_sidebar_glide() {
+    let frames = switch_damage(settings::Section::Privacy);
+    assert!(frames.iter().any(|d| !d.is_empty()), "the glide redraws");
+    for r in frames.iter().flatten() {
+        assert!(r.x + r.width <= SIDEBAR_RIGHT, "{r:?} outside the sidebar");
+    }
+}
+
+/// A playing feature preview redraws only its stage (and the glide).
+#[test]
+fn a_playing_preview_redraws_only_its_stage() {
+    let frames = switch_damage(settings::Section::Translate);
+    let stage = |r: &Rectangle| r.x >= SIDEBAR_RIGHT && r.y >= 150.0 && r.y + r.height <= 330.0;
+    assert!(frames.iter().flatten().any(stage), "the preview plays");
+    for r in frames.iter().flatten() {
+        // the stage: under the preview's heading, above the page's rows
+        let sidebar = r.x + r.width <= SIDEBAR_RIGHT;
+        assert!(
+            sidebar || stage(r),
+            "{r:?} outside the sidebar and the stage"
+        );
+    }
 }

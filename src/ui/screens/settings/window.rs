@@ -1,6 +1,9 @@
 //! The Settings window's shell (`settings-window.js`): our own header (logo,
 //! title, the auto-save pill, the caption buttons), the sidebar of `PAGES`
-//! with its gliding highlight, and the page, rising in as it changes.
+//! with its gliding highlight, and the page. The page switches at once: the
+//! design's rise (the whole page moving 14 px over 190 ms) redrew the whole
+//! window every frame on the CPU renderer (laggy on a 4K screen); it returns
+//! with the GPU renderer (0.1.3).
 use iced::widget::{Space, column, container, row};
 use iced::{Center, Element, Fill, Padding};
 
@@ -9,7 +12,6 @@ use super::{pages, previews};
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::chip::{Tone, status};
 use crate::ui::kit::header::regular;
-use crate::ui::kit::motion::PAGE_RISE;
 use crate::ui::kit::scroll::scroll;
 use crate::ui::kit::sidebar::{Item, sidebar};
 use crate::ui::kit::surface::{Material, surface};
@@ -107,16 +109,9 @@ fn page(state: &State) -> Element<'_, Message> {
     if let Some(note) = page.note {
         title = title.push(sub(Role::ROW_DESC, note));
     }
-    let rise = state
-        .moving()
-        .map_or(0.0, |(.., rise)| (1.0 - rise) * PAGE_RISE);
-    let body = column![
-        Space::new().height(rise),
-        title,
-        Space::new().height(TITLE_GAP),
-    ]
-    .push(previews::view(state))
-    .push((page.view)(state));
+    let body = column![title, Space::new().height(TITLE_GAP),]
+        .push(previews::view(state))
+        .push((page.view)(state));
     scroll(container(body).padding(space::PAGE).width(Fill))
         .width(Fill)
         .height(Fill)
