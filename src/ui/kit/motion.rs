@@ -30,6 +30,12 @@ pub const TOAST: Duration = Duration::from_millis(200);
 pub const TOAST_RISE: f32 = 8.0;
 /// A widget's scale when closed (it grows to 1 as it opens).
 pub const OPEN_SCALE: f32 = 0.93;
+/// A dragged widget, picked up (`scale(1.012)`, design 3.4); back to 1 on release.
+pub const DRAG_SCALE: f32 = 1.012;
+/// How near a dragged widget may come to the screen's left, right and top
+/// edges, and to its bottom (the taskbar strip), design 3.4.
+pub const DRAG_EDGE: f32 = 6.0;
+pub const DRAG_EDGE_BOTTOM: f32 = 54.0;
 
 /// The design's easing curves (cubic Béziers).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

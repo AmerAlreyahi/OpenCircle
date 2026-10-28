@@ -179,6 +179,8 @@ pub struct Panel {
     queued: bool,
     /// Pinned: outside clicks and Esc no longer close it (`App::chat`).
     pinned: bool,
+    /// Picked up and dragged by its header (the App sets it).
+    pub held: bool,
     /// The drawer's open tab, its History list and its model field.
     drawer: Option<Tab>,
     listed: Vec<chats::Entry>,
@@ -327,6 +329,7 @@ impl Panel {
             input: text_editor::Content::new(),
             queued: false,
             pinned: false,
+            held: false,
             drawer: None,
             listed: Vec::new(),
             model: String::new(),

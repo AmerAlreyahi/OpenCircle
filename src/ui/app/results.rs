@@ -38,6 +38,25 @@ pub(in crate::ui) struct Resident {
     pub moves: u32,
     /// Its window's size (logical px).
     pub size: Size,
+    /// Its window gliding to its dock: since when, from and to (desktop px).
+    pub glide: Option<(std::time::Instant, Point, Point)>,
+}
+
+/// `t` (0..1, eased) of the way from `from` to `to`, on whole px; exactly
+/// `to` at the end.
+pub(in crate::ui) fn glided(from: Point, to: Point, t: f32) -> Point {
+    let at = from + (to - from) * t;
+    Point::new(at.x.round(), at.y.round())
+}
+
+/// A dragged widget's top-left `at` (`size`) held inside the `screen`: 6 px
+/// from its left, right and top, 54 px from its bottom (design 3.4).
+pub(in crate::ui) fn held_in(at: Point, size: Size, screen: Size) -> Point {
+    let (e, b) = (motion::DRAG_EDGE, motion::DRAG_EDGE_BOTTOM);
+    Point::new(
+        at.x.clamp(e, (screen.width - e - size.width).max(e)),
+        at.y.clamp(e, (screen.height - b - size.height).max(e)),
+    )
 }
 
 /// Test hook: the chat's own window is not hidden from screen capture.
@@ -106,6 +125,7 @@ impl App {
             at: Point::ORIGIN,
             moves: 0,
             size: Size::ZERO,
+            glide: None,
         });
     }
 
@@ -202,19 +222,38 @@ impl App {
             return Task::none();
         };
         let (origin, screen, inset) = chat.home;
-        let here = Rectangle::new(
-            chat.at - iced::Vector::new(origin.x, origin.y),
-            card::docked(screen, card::Side::Right, inset).size(),
-        );
+        let here = Rectangle::new(chat.at - iced::Vector::new(origin.x, origin.y), chat.size);
         let side = card::dock_side(here, screen);
         self.chat_side = Some(side);
-        let dock = card::docked(screen, side, inset);
-        let to = origin + iced::Vector::new(dock.x, dock.y);
+        let dock = self.chat_dock(screen, side, inset);
+        let Some(chat) = self.chat.as_mut() else {
+            return Task::none();
+        };
+        let to = origin + iced::Vector::new(dock.x.round(), dock.y.round());
         if (to.x - chat.at.x).abs() < 1.0 && (to.y - chat.at.y).abs() < 1.0 {
             return Task::none();
         }
-        // ponytail: a jump to the dock, not the overlay's glide; animate the move if it shows
-        window::move_to(id, to)
+        if motion::reduced() {
+            return window::move_to(id, to);
+        }
+        // the overlay card's glide (`motion::DOCK`), the window moved frame by frame
+        chat.glide = Some((std::time::Instant::now(), chat.at, to));
+        Task::none()
+    }
+
+    /// A frame of the pinned chat window's glide to its dock: where it is now.
+    pub(in crate::ui) fn chat_glide(&mut self, now: std::time::Instant) -> Task<Message> {
+        let Some(chat) = self.chat.as_mut() else {
+            return Task::none();
+        };
+        let (Some((began, from, to)), Some(id)) = (chat.glide, chat.window) else {
+            return Task::none();
+        };
+        let t = motion::progress(began, now, motion::DOCK, motion::Curve::Standard);
+        let at = glided(from, to, t);
+        chat.glide = (t < 1.0).then_some((began, from, to));
+        chat.at = at;
+        window::move_to(id, at)
     }
 
     pub(in crate::ui) fn on_panel(&mut self, id: u32, msg: panel::Msg) -> Task<Message> {
@@ -254,6 +293,7 @@ impl App {
             }
             panel::Msg::Card(card::Event::Grab(how)) if open => {
                 let chat = panel.kind() == actions::Panel::Ask;
+                panel.held = chat && how == card::Drag::Move; // picked up (design 3.4)
                 self.o.card_drag = Some((how, None));
                 self.o.card_chat = chat;
                 self.frame_times.borrow_mut().clear();
@@ -383,10 +423,10 @@ impl App {
         let side = self
             .chat_side
             .unwrap_or_else(|| card::dock_side(card::place(screen, selection, None), screen));
-        let dock = card::docked(screen, side, self.o.work_inset);
+        let dock = self.chat_dock(screen, side, self.o.work_inset);
         let at = match self.o.chat_glide {
             Some((_, from, t)) => from.position() + (dock.position() - from.position()) * t,
-            None => dock.position() + self.o.chat_off,
+            None => held_in(dock.position() + self.o.chat_off, dock.size(), screen),
         };
         // on whole px: a card moved by fractions of a px left thin ghosts of
         // its edge on the frame (VM, 2026-10-28)
@@ -394,6 +434,16 @@ impl App {
             Point::new(at.x.round(), at.y.round()),
             iced::Size::new(dock.width.round(), dock.height.round()),
         )
+    }
+
+    /// The chat docked on `side` of a `screen` (taskbar `inset`), clear of
+    /// the bar at its spot (the bar's own anchor; it never hides the bar).
+    // ponytail: the bar's anchor, not where it moved aside from a selection to.
+    pub(in crate::ui) fn chat_dock(&self, screen: Size, side: card::Side, inset: f32) -> Rectangle {
+        let (_, size) = self.bar_size_on(screen.width);
+        let bar =
+            crate::ui::screens::bar::geometry::anchor_at(self.o.bar_anchor, screen, size, inset);
+        card::clear_of(card::docked(screen, side, inset), Rectangle::new(bar, size))
     }
 
     /// The AI chat's card on the overlay (the pinned one or the overlay's).

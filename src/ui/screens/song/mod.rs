@@ -178,6 +178,7 @@ impl Session {
             chip: None,
             docked: false,
             menu: false,
+            held: false,
             logo: None,
         };
         super::panel::card(

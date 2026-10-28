@@ -366,7 +366,7 @@ impl App {
                     }
                     _ => None,
                 }),
-                match chat.panel.spinning() {
+                match chat.panel.spinning() || chat.glide.is_some() {
                     true => motion::frames().map(Message::ChatFrame),
                     false => Subscription::none(),
                 },

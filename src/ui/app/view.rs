@@ -204,7 +204,7 @@ impl App {
             let card = panel
                 .view(at, self.o.screen, self.o.card_hover)
                 .map(move |msg| Message::Panel(id, msg));
-            grow(card, at, self.card_grown())
+            lifted(grow(card, at, self.card_grown()), at, panel.held)
         } else if let Some((id, session)) = &self.o.translate {
             let id = *id;
             session
@@ -252,8 +252,10 @@ impl App {
         // The pinned chat over everything on its side.
         if let Some(chat) = &self.chat {
             let id = chat.id;
-            let card = chat.panel.view(self.chat_rect(), self.o.screen, false);
-            layers = layers.push(card.map(move |msg| Message::Panel(id, msg)));
+            let at = self.chat_rect();
+            let card = chat.panel.view(at, self.o.screen, false);
+            let card = card.map(move |msg| Message::Panel(id, msg));
+            layers = layers.push(lifted(card, at, chat.panel.held));
         }
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
         if self.o.selection.is_some() && self.o.scan.as_ref().is_some_and(|s| s.protected) {
@@ -343,6 +345,23 @@ pub(in crate::ui) fn grow(
     }
     let s = motion::OPEN_SCALE + (1.0 - motion::OPEN_SCALE) * grown;
     let middle = at.center();
+    iced::widget::float(card)
+        .scale(s)
+        .translate(move |bounds, _| (middle - bounds.center()) * (1.0 - s))
+        .into()
+}
+
+/// A card at `at` picked up (`held`): `motion::DRAG_SCALE` about its middle
+/// while dragged, 1 once let go (or with reduced motion).
+pub(in crate::ui) fn lifted<'a>(
+    card: Element<'a, Message>,
+    at: Rectangle,
+    held: bool,
+) -> Element<'a, Message> {
+    if !held || motion::reduced() {
+        return card;
+    }
+    let (s, middle) = (motion::DRAG_SCALE, at.center());
     iced::widget::float(card)
         .scale(s)
         .translate(move |bounds, _| (middle - bounds.center()) * (1.0 - s))

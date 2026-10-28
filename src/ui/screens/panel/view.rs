@@ -140,6 +140,7 @@ impl Panel {
             docked: chatting,
             logo: chatting.then(|| crate::ui::kit::logo::logo(16)),
             menu: chatting,
+            held: self.held,
         };
         if chatting {
             // the header's end: a new chat and the pin (no close button: Esc

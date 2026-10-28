@@ -31,11 +31,16 @@ impl App {
     /// The bottom bar's field width and size: the same in every state (no
     /// selection, a selection, after a card), so it never jumps.
     pub(in crate::ui) fn bar_size(&self) -> (f32, Size) {
+        self.bar_size_on(self.o.screen.width)
+    }
+
+    /// The bar's field width and size on a screen `width` wide.
+    pub(in crate::ui) fn bar_size_on(&self, width: f32) -> (f32, Size) {
         let icons = labs::bar(&self.o.labs)
             .iter()
             .filter(|b| !b.is_pill())
             .count();
-        bar::bottom_size(self.o.screen.width, icons as f32)
+        bar::bottom_size(width, icons as f32)
     }
 
     /// The size of what is docked at the bar's spot now: the bar, the editing

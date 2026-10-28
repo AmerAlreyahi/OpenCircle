@@ -3674,21 +3674,27 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
 fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     let (mut app, id) = app_with_ask_panel(); // 800 x 600, a selection at the left
     let at = app.card_at();
-    let d = card::docked(app.o.screen, card::Side::Right, app.o.work_inset);
+    let d = app.chat_dock(app.o.screen, card::Side::Right, app.o.work_inset);
     assert_eq!(
         (at.x, at.width, at.height),
         (d.x.round(), d.width.round(), d.height.round())
     );
-    // held: it follows the pointer, by fractions of a px too, drawn on whole px
+    // held: it follows the pointer 1:1, by fractions of a px too, drawn on
+    // whole px, picked up (scaled, accent edge)
     let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Move));
     let _ = app.update(Message::Panel(id, grab));
     let _ = app.update(Message::CardMoved(Point::new(700.0, 30.0)));
-    let _ = app.update(Message::CardMoved(Point::new(200.3, 40.6)));
+    let _ = app.update(Message::CardMoved(Point::new(500.3, 40.6)));
     let held = app.card_at();
     assert_eq!(
         held.position(),
-        Point::new((at.x - 499.7).round(), (at.y + 10.6).round())
+        Point::new((at.x - 199.7).round(), (at.y + 10.6).round())
     );
+    assert!(app.o.panel.as_ref().unwrap().1.held);
+    // ... but never past 6 px from the screen's edge (design 3.4)
+    let _ = app.update(Message::CardMoved(Point::new(-400.0, 40.6)));
+    let held = app.card_at();
+    assert_eq!(held.x, motion::DRAG_EDGE);
     // let go left of the middle: it glides to the left dock, and stays there
     let _ = app.update(Message::CardReleased);
     assert!(app.o.chat_glide.is_some() && app.animating());
@@ -3701,6 +3707,7 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     );
     let _ = app.update(Message::Frame(began + motion::DOCK));
     assert!(app.o.chat_glide.is_none());
+    assert!(!app.o.panel.as_ref().unwrap().1.held, "let go: scale 1");
     assert_eq!(app.card_at().x, 16.0);
     assert_eq!(app.chat_side, Some(card::Side::Left));
     // the next chat in this run opens on that side
@@ -3708,6 +3715,81 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     let crop = app.crop().unwrap();
     let _ = app.open_panel(actions::Panel::Ask, crop, None);
     assert_eq!(app.card_at().x, 16.0);
+}
+
+/// The chat never covers the bar: for every bar anchor and either side,
+/// the docked chat and the bar at its spot don't meet (owner, 2026-10-28).
+#[test]
+fn the_docked_chat_never_covers_the_bar() {
+    use crate::config::BarAnchor;
+    use crate::ui::screens::bar::geometry::anchor_at;
+    for (w, h) in [(800, 600), (1920, 1080), (1280, 720)] {
+        let mut app = open_app(w, h, 1.0);
+        app.o.work_inset = 48.0;
+        for anchor in [
+            BarAnchor::Bottom,
+            BarAnchor::Top,
+            BarAnchor::BottomLeft,
+            BarAnchor::BottomRight,
+        ] {
+            app.o.bar_anchor = anchor;
+            let (_, size) = app.bar_size();
+            let bar = Rectangle::new(anchor_at(anchor, app.o.screen, size, 48.0), size);
+            for side in [card::Side::Left, card::Side::Right] {
+                let chat = app.chat_dock(app.o.screen, side, 48.0);
+                assert!(
+                    !chat.intersects(&bar),
+                    "{w}x{h} {anchor:?} {side:?}: {chat:?} {bar:?}"
+                );
+                assert!(chat.height > 200.0, "still a chat: {chat:?}");
+            }
+        }
+    }
+}
+
+/// The pinned chat's own window, let go mid-screen, glides to its dock frame
+/// by frame (`motion::DOCK`, standard-out) and ends exactly on it.
+#[test]
+fn a_pinned_chat_window_glides_to_its_dock() {
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_panel(actions::Panel::Ask, crop, None));
+    let id = app.o.panel.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    chat_turn(&mut app, id, "What is this?", "A chart.");
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    let _ = app.update(Message::Escape);
+    let window = app
+        .chat
+        .as_ref()
+        .and_then(|c| c.window)
+        .expect("its own window");
+    // the OS dragged it to the middle-left, then it stopped
+    let _ = app.update(Message::ChatMoved(window, Point::new(150.0, 100.0)));
+    let moves = app.chat.as_ref().unwrap().moves;
+    let _ = app.update(Message::ChatSettle(moves));
+    let (began, from, to) = app
+        .chat
+        .as_ref()
+        .unwrap()
+        .glide
+        .expect("a glide, not a jump");
+    let (origin, screen, inset) = app.chat.as_ref().unwrap().home;
+    let dock = app.chat_dock(screen, card::Side::Left, inset);
+    assert_eq!(to, origin + Vector::new(dock.x, dock.y));
+    let _ = app.update(Message::ChatFrame(began + motion::DOCK / 3));
+    let mid = app.chat.as_ref().unwrap().at;
+    assert!(mid.x < from.x && mid.x > to.x, "on its way: {mid:?}");
+    let _ = app.update(Message::ChatFrame(began + motion::DOCK));
+    let chat = app.chat.as_ref().unwrap();
+    assert_eq!(chat.at, to, "exactly on the dock");
+    assert!(chat.glide.is_none(), "the frames stop");
 }
 
 /// Copy text (the key T, `opencircle run text`) on picked words copies exactly
