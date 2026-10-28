@@ -8,6 +8,7 @@ use iced::window;
 use iced::{Point, Rectangle, Size, Task};
 
 use crate::actions::{self, Crop, lens, stack_crops};
+use crate::config::{self, Provider};
 
 use crate::ui::app::background::background;
 use crate::ui::app::keys;
@@ -46,6 +47,21 @@ const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
 /// it: no release is reported).
 const SETTLE: Duration = Duration::from_millis(250);
 
+/// Ask AI only opens the browser: the provider is Google AI Mode (no key).
+fn hands_off() -> bool {
+    #[cfg(test)]
+    if !HAND_OFF.get() {
+        return false; // most tests drive the chat with the browser provider's setup
+    }
+    config::current().ai.provider == Provider::Browser
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: `hands_off` asks the config (else the chat opens, as with a key).
+    pub(in crate::ui) static HAND_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 impl App {
     pub(in crate::ui) fn open_panel(
         &mut self,
@@ -58,6 +74,12 @@ impl App {
             let id = chat.id;
             return (chat.panel.ask_about(crop, question, self.o.include))
                 .map(move |msg| Message::Panel(id, msg));
+        }
+        // No key (Google AI Mode): the browser opens, a pill says so, the
+        // overlay closes; the chat is for an AI provider only.
+        if kind == actions::Panel::Ask && hands_off() {
+            let include = self.o.include;
+            return self.confirm_after(move || panel::hand_off(&crop, question, include));
         }
         self.panels = self.panels.wrapping_add(1);
         let id = self.panels;

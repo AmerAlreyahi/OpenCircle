@@ -2615,6 +2615,25 @@ fn shortcuts(messages: &[Message]) -> String {
         .collect()
 }
 
+/// No key (Google AI Mode): Ask AI only hands off to the browser and closes the
+/// overlay; no chat card, no pinned chat (the owner, 2026-10-28).
+#[test]
+fn in_browser_mode_asking_opens_no_chat() {
+    super::results::HAND_OFF.set(true);
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    assert_eq!(config::current().ai.provider, config::Provider::Browser);
+    let _ = app.open_panel(actions::Panel::Ask, crop, Some("What is this?".into()));
+    super::results::HAND_OFF.set(false);
+    assert!(app.o.panel.is_none() && app.chat.is_none(), "no chat");
+}
+
 /// An open overlay with a selection and a ready Ask AI panel (browser provider).
 fn app_with_ask_panel() -> (App, u32) {
     let mut app = open_app(800, 600, 1.0);

@@ -862,6 +862,23 @@ fn copy(text: String) -> Task<Msg> {
     })
 }
 
+/// Browser provider (no key): Ask AI only hands the question to Google AI Mode
+/// in the user's browser, with the selection's text when Include screen is on
+/// and the text reader is here; no chat, no chat history (the owner,
+/// 2026-10-28). Blocking: the pill's text, or why not.
+pub fn hand_off(crop: &Crop, question: Option<String>, include: bool) -> Result<String, String> {
+    let target = config::current().translate.target;
+    let prompt = question
+        .filter(|q| !q.trim().is_empty())
+        .unwrap_or_else(|| PRESETS[0].text(&target));
+    let read = (include && text::models_present()).then(|| text::read(crop, |_| {}));
+    let (question, _) = browser_turn(&prompt, read);
+    ai::browser::ask(&question)?;
+    let url = ai::browser::url(&question).0;
+    crate::history::search::keep("ai", &prompt, &url, Some(crop));
+    Ok("Opened in your browser".into())
+}
+
 /// Browser provider: the question to open in AI Mode and the line to add to the
 /// answer. `read` is the OCR result (`None` = the user declined to read text).
 fn browser_turn(prompt: &str, read: Option<Result<String, String>>) -> (String, String) {
