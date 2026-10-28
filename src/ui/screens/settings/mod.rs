@@ -1,6 +1,8 @@
 //! The Settings window: its state and logic (`state`), the shell (`window`:
-//! header, sidebar, the page), and one file per page (`pages`, one list).
+//! header, sidebar, the page), one file per page (`pages`, one list) and one preview per feature
+//! (`previews`, one list).
 mod pages;
+mod previews;
 mod state;
 #[cfg(test)]
 pub(crate) mod tests;

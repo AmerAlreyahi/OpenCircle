@@ -57,6 +57,7 @@ ICONS=$(printf '%s,' \
   U+E4D6 `# gallery-vertical-end (editor: scrolling capture)` \
   U+E0A5 `# corner-down-left (the AI badge's Enter)` \
   U+E179 `# star (About: Star OpenCircle)` \
+  U+E14B `# rotate-ccw (a feature preview's Replay)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

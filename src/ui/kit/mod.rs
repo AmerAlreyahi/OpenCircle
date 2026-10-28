@@ -19,6 +19,7 @@ pub mod dropdown;
 pub mod field;
 pub mod grip;
 pub mod header;
+pub mod hero;
 pub mod icon;
 pub mod icon_button;
 pub mod keycap;

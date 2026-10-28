@@ -31,11 +31,21 @@ pub enum Icon {
     /// (About's Star button): bundled, so no system font draws them.
     Enter,
     Star,
+    /// lucide "rotate-ccw" (a feature preview's Replay); "search", "copy",
+    /// "music", "move-up-right" (an arrow), "radio" (live translate): the
+    /// previews' scenes; "crop" (a capture attached).
+    Replay,
+    Search,
+    Copy,
+    Music,
+    Arrow,
+    Radio,
+    Crop,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 12] = [
+    pub const ALL: [Icon; 19] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -48,6 +58,13 @@ impl Icon {
         Icon::Translate,
         Icon::Enter,
         Icon::Star,
+        Icon::Replay,
+        Icon::Search,
+        Icon::Copy,
+        Icon::Music,
+        Icon::Arrow,
+        Icon::Radio,
+        Icon::Crop,
     ];
 
     pub const fn glyph(self) -> char {
@@ -64,6 +81,13 @@ impl Icon {
             Icon::Translate => '\u{e103}',
             Icon::Enter => '\u{e0a5}',
             Icon::Star => '\u{e179}',
+            Icon::Replay => '\u{e14b}',
+            Icon::Search => '\u{e154}',
+            Icon::Copy => '\u{e0a2}',
+            Icon::Music => '\u{e125}',
+            Icon::Arrow => '\u{e497}',
+            Icon::Radio => '\u{e145}',
+            Icon::Crop => '\u{e0af}',
         }
     }
 }

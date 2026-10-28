@@ -923,3 +923,44 @@ fn field_input_sheet() {
     ];
     sheet("field_input", Size::new(260.0, 44.0), &rows);
 }
+
+#[test]
+fn hero_sheet() {
+    use super::super::hero::{Hero, hero, pill, ring, screen, step};
+    use super::super::icon::Icon;
+    use iced::widget::stack;
+    let view = |ar: bool, at: f32, shown: bool| -> Element<'static, ()> {
+        let circled = stack![screen(container(text("")).center(Fill)), ring(at / 2.0)]
+            .width(120)
+            .height(48);
+        let lit = step(at) >= 3;
+        hero(Hero {
+            title: s(ar, "Circle to Search", "دائرة للبحث"),
+            desc: s(
+                ar,
+                "Circle anything and search.",
+                "ضع دائرة حول أي شيء وابحث.",
+            ),
+            lab: ar,
+            keys: vec!["Ctrl".into(), "Shift".into(), "Space".into()],
+            shown,
+            toggle: (),
+            replay: (),
+            at,
+            caption: s(ar, "Ready to explore", "جاهز"),
+            scene: container(
+                iced::widget::row![circled, pill(Icon::Search, s(ar, "Search", "بحث"), lit)]
+                    .spacing(12)
+                    .align_y(iced::Center),
+            )
+            .center(Fill)
+            .into(),
+        })
+    };
+    let rows = vec![
+        row("playing 1 s", Act::Rest, move |ar| view(ar, 1.0, true)),
+        row("rest", Act::Rest, move |ar| view(ar, 5.0, true)),
+        row("hidden", Act::Rest, move |ar| view(ar, 5.0, false)),
+    ];
+    sheet("hero", Size::new(420.0, 260.0), &rows);
+}

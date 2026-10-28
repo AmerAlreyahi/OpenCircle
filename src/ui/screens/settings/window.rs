@@ -4,8 +4,8 @@
 use iced::widget::{Space, column, container, row};
 use iced::{Center, Element, Fill, Padding};
 
-use super::pages;
 use super::state::{Message, State};
+use super::{pages, previews};
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::chip::{Tone, status};
 use crate::ui::kit::header::regular;
@@ -114,8 +114,9 @@ fn page(state: &State) -> Element<'_, Message> {
         Space::new().height(rise),
         title,
         Space::new().height(TITLE_GAP),
-        (page.view)(state),
-    ];
+    ]
+    .push(previews::view(state))
+    .push((page.view)(state));
     scroll(container(body).padding(space::PAGE).width(Fill))
         .width(Fill)
         .height(Fill)

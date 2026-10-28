@@ -32,6 +32,7 @@ use crate::music::{self, SERVICE, Service};
 use crate::secrets::{KeyStore, Keyring, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES, Language};
 use crate::ui::kit::header::Caption;
+use crate::ui::kit::hero;
 use crate::ui::kit::motion::{self, Curve};
 use crate::ui::kit::themes::THEMES;
 use crate::ui::kit::tokens::{size, space};
@@ -39,6 +40,7 @@ use crate::ui::theme;
 
 use super::pages::text_reading::open_language_settings;
 use super::pages::{self, PAGES};
+use super::previews;
 
 /// The size the Settings window prefers (logical px), the design's 820 x 560.
 /// Screenshots and tests render at this size.
@@ -612,6 +614,9 @@ pub struct State {
     /// The last pick in a ported segmented control (its old value, and when):
     /// its thumb glides.
     pub(super) picked: Option<(Pick, Instant)>,
+    /// When the page's feature preview began playing (`previews`); `None` =
+    /// at rest on its last frame.
+    pub(super) played: Option<Instant>,
 }
 
 /// A segmented control's value before a pick (`State::thumb`).
@@ -715,6 +720,10 @@ pub enum Message {
     Written(Box<Done>),
     /// The "Saved" pill's clock.
     Tick,
+    /// A feature preview's Hide (`false`) / Show (`true`), by its
+    /// `hidden_previews` name; and Replay.
+    Preview(&'static str, bool),
+    Replay,
     /// The footer's question when the window is closed with unsaved changes (#136).
     CloseSave,
     CloseDiscard,
@@ -923,6 +932,7 @@ impl State {
             closing: false,
             moved: None,
             picked: None,
+            played: None,
         };
         s.revalidate();
         s
@@ -1127,6 +1137,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         Message::Save
             | Message::Written(_)
             | Message::Tick
+            | Message::Replay
             | Message::Caption(_)
             | Message::CloseSave
             | Message::CloseDiscard
@@ -1169,6 +1180,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 state.moved = Some((state.section, Instant::now()));
             }
             state.section = s;
+            state.play();
             state.recording = None;
             state.shortcut_error = None;
             if s == Section::Song && state.song_key.is_none() {
@@ -1337,9 +1349,24 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::UpdateStatus(status) => state.update_status = Some(status),
         Message::Save => return save(state),
         Message::Written(done) => return written(state, done),
+        Message::Preview(key, show) => {
+            let hidden = &mut state.draft.appearance.hidden_previews;
+            hidden.retain(|k| k != key);
+            if !show {
+                hidden.push(key.to_string());
+            }
+            // a hidden preview stops; shown again, it plays from the start
+            if show || !previews::plays(state, state.section) {
+                state.play();
+            }
+        }
+        Message::Replay => state.play(),
         Message::Tick => {
             if state.saved_at.is_some_and(|t| t.elapsed() >= SAVED_FOR) {
                 state.saved_at = None;
+            }
+            if state.played.is_some_and(|t| t.elapsed() >= hero::LENGTH) {
+                state.played = None;
             }
             // the longest of them: the glide (the page rises in `MORPH`)
             if state
@@ -1480,8 +1507,7 @@ pub(super) fn written(state: &mut State, done: Box<Done>) -> Outcome {
 /// The frame clock while something moves or the pill says "Saved"; key
 /// presses only while a shortcut field is recording.
 pub fn subscription(state: &State) -> Subscription<Message> {
-    let moving = state.saved_at.is_some() || state.moved.is_some() || state.picked.is_some();
-    let clock = match moving {
+    let clock = match state.animating() {
         true => motion::frames().map(|_| Message::Tick),
         false => Subscription::none(),
     };
@@ -1500,6 +1526,30 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 }
 
 impl State {
+    /// Something moves by the clock: a glide, the "Saved" pill, a preview.
+    pub fn animating(&self) -> bool {
+        self.saved_at.is_some()
+            || self.moved.is_some()
+            || self.picked.is_some()
+            || self.played.is_some()
+    }
+
+    /// The page's previews play from the start (none shown, or reduced
+    /// motion: they rest on their last frame, and the clock stays off).
+    fn play(&mut self) {
+        let plays = !motion::reduced() && previews::plays(self, self.section);
+        self.played = plays.then(Instant::now);
+    }
+
+    /// Seconds into the page's previews (`hero::LENGTH` = the last frame).
+    pub(super) fn preview_at(&self) -> f32 {
+        let length = hero::LENGTH.as_secs_f32();
+        match self.played {
+            Some(t) if !motion::reduced() => t.elapsed().as_secs_f32().min(length),
+            _ => length,
+        }
+    }
+
     /// A ported segmented control's thumb: (where it glides from, how far),
     /// `old` reading the control's own pick out of the last one.
     pub(super) fn thumb<T: Copy>(&self, now: T, old: impl Fn(Pick) -> Option<T>) -> (T, f32) {

@@ -1222,6 +1222,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Closing Settings mid-preview drops its state: the clock (its
+    /// subscription) stops and the preview's memory is freed.
+    #[test]
+    fn closing_settings_stops_a_playing_preview() {
+        let mut windows = Windows::default();
+        let id = window::Id::unique();
+        windows.settings = Some((id, settings_state()));
+        let section = settings::Message::Section(settings::Section::Translate);
+        let _ = windows.update(Msg::Settings(section));
+        assert!(
+            windows
+                .settings
+                .as_ref()
+                .is_some_and(|(_, s)| s.animating())
+        );
+        let _ = windows.update(Msg::Closed(id));
+        assert!(windows.settings.is_none());
+    }
+
     #[test]
     fn one_settings_window_at_a_time() {
         let mut windows = Windows::default();

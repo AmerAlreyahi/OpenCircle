@@ -18,6 +18,7 @@ use crate::music::{self};
 use crate::secrets::{KeyStore, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES};
 use crate::ui::kit::header::Caption;
+use crate::ui::kit::hero;
 use crate::ui::kit::motion;
 use crate::ui::theme;
 
@@ -31,7 +32,7 @@ use crate::secrets::MemoryStore;
 /// and its motion over (the shots show the window at rest).
 fn update(state: &mut State, message: Message) -> Outcome {
     let out = moving_update(state, message);
-    (state.moved, state.picked) = (None, None);
+    (state.moved, state.picked, state.played) = (None, None, None);
     out
 }
 
@@ -1724,4 +1725,178 @@ fn appearance_and_look_match_their_golden_images() {
     }
     themes::set(&SAPPHIRE);
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+// ---- feature previews (`previews`, `kit::hero`) ----
+
+/// A page's preview plays once from the visit, then rests on its last frame
+/// and the clock stops; Replay plays it again.
+#[test]
+fn a_preview_plays_once_then_rests_and_the_clock_stops() {
+    let (mut s, _) = state(None);
+    moving_update(&mut s, Message::Section(Section::Translate));
+    (s.moved, s.picked) = (None, None);
+    assert!(s.animating(), "playing");
+    assert!(s.preview_at() < 1.0);
+    // the preview's time has passed
+    s.played = Some(Instant::now() - hero::LENGTH - Duration::from_millis(10));
+    moving_update(&mut s, Message::Tick);
+    assert!(!s.animating(), "rests: no clock");
+    assert_eq!(s.preview_at(), hero::LENGTH.as_secs_f32());
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Read it in place"), "{texts:?}");
+    moving_update(&mut s, Message::Replay);
+    assert!(s.animating(), "Replay plays again");
+    // a page without a preview starts no clock
+    let (mut s, _) = state(None);
+    moving_update(&mut s, Message::Section(Section::Privacy));
+    s.moved = None;
+    assert!(!s.animating());
+}
+
+/// Reduced motion: the last frame at once, and no clock for it.
+#[test]
+fn with_reduced_motion_a_preview_shows_its_last_frame() {
+    motion::set_reduced(true);
+    let (mut s, _) = state(None);
+    moving_update(&mut s, Message::Section(Section::Ai));
+    s.moved = None;
+    assert!(s.played.is_none() && !s.animating());
+    assert_eq!(s.preview_at(), hero::LENGTH.as_secs_f32());
+    let texts = shot::texts(view(&s));
+    assert!(
+        texts.iter().any(|t| t == "Keep the conversation going"),
+        "{texts:?}"
+    );
+    assert!(
+        texts.iter().any(|t| t.starts_with("The blue line")),
+        "{texts:?}"
+    );
+    motion::set_reduced(false);
+}
+
+/// Hide / Show preview write `[appearance].hidden_previews`; hidden, the
+/// stage is gone and nothing plays.
+#[test]
+fn hiding_a_preview_writes_its_key_and_showing_removes_it() {
+    let path = tmp("previews");
+    let (mut s, _) = state(Some(path.clone()));
+    update(&mut s, Message::Section(Section::Ai));
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide preview"));
+    moving_update(&mut s, Message::Preview("ai", false));
+    assert!(!s.animating(), "hidden: no clock");
+    update(&mut s, Message::Save);
+    let saved = Config::load_from(&path).0.appearance.hidden_previews;
+    assert_eq!(saved, ["ai"]);
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Show preview"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "5 s preview" || t == "Replay"));
+    moving_update(&mut s, Message::Preview("ai", true));
+    assert!(s.animating(), "shown again: it plays");
+    update(&mut s, Message::Save);
+    assert!(
+        Config::load_from(&path)
+            .0
+            .appearance
+            .hidden_previews
+            .is_empty()
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// Every preview is on its feature's page; a Labs one only while its switch
+/// is on (Live translate's on Translate's page).
+#[test]
+fn labs_previews_show_only_while_their_switch_is_on() {
+    use super::previews::{HEROES, on};
+    let (mut s, _) = state(None);
+    let live = |t: &Vec<String>| t.iter().any(|t| t == "Live translate");
+    assert!(!live(&page(&mut s, Section::Translate)));
+    s.draft.labs.live = true;
+    let texts = page(&mut s, Section::Translate);
+    assert!(
+        live(&texts) && texts.iter().any(|t| t == "Translate"),
+        "{texts:?}"
+    );
+    for h in HEROES.iter().filter(|h| h.lab.is_some()) {
+        let mut labs = Labs::default();
+        assert!(
+            !on(&with_labs(labs), h.page).any(|o| o.key == h.key),
+            "{}",
+            h.key
+        );
+        labs.set(h.lab.unwrap(), true);
+        assert!(
+            on(&with_labs(labs), h.page).any(|o| o.key == h.key),
+            "{}",
+            h.key
+        );
+    }
+    // a preview shows its feature's real shortcut
+    let texts = page(&mut s, Section::Look);
+    let at = texts.iter().position(|t| t == "Circle to Search").unwrap();
+    let keys = key_labels(&s.draft.shortcut);
+    assert!(
+        texts[at..].windows(keys.len()).any(|w| w == keys),
+        "{texts:?}"
+    );
+}
+
+fn with_labs(labs: Labs) -> State {
+    let (mut s, _) = state(None);
+    s.draft.labs = labs;
+    s
+}
+
+/// Each page's previews on their last frame, in Sapphire and Daylight.
+#[test]
+fn previews_last_frames_match_their_golden_images() {
+    use crate::ui::kit::surface::{Material, surface};
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        for (name, section, height) in [
+            ("look", Section::Look, 280.0),
+            ("text-reading", Section::TextReading, 280.0),
+            ("translate-live", Section::Translate, 540.0),
+            ("ai", Section::Ai, 280.0),
+            ("snip", Section::Snip, 280.0),
+            ("song", Section::Song, 280.0),
+        ] {
+            let (mut s, _) = state(None);
+            s.draft.labs = Labs::all_on();
+            update(&mut s, Message::Section(section));
+            themes::set(theme);
+            let file = format!("preview-{name}-{}", theme.id);
+            let size = Size::new(640.0, height);
+            failed.extend(golden::check("screens", &file, size, &[1.0], || {
+                surface(Material::Window, 0.0, super::previews::view(&s).unwrap())
+                    .padding(16)
+                    .width(iced::Fill)
+                    .height(iced::Fill)
+                    .into()
+            }));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Every preview draws each of its steps (`OPENCIRCLE_RENDER_DIR` keeps the
+/// frames: a look at the motion without a window).
+#[test]
+fn every_preview_draws_each_step() {
+    use super::previews::HEROES;
+    for h in &HEROES {
+        for tenth in [5, 15, 22, 28, 35, 45] {
+            let at = tenth as f32 / 10.0;
+            let px = shot::save(
+                &format!("preview-{}-{tenth:02}", h.key),
+                (h.scene)(at),
+                Size::new(560.0, 90.0),
+            );
+            assert!(px.chunks(4).any(|p| p[3] > 0), "{} at {at}", h.key);
+        }
+    }
 }
