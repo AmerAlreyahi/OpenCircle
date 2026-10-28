@@ -106,28 +106,55 @@ pub fn status<'a, Message: 'a>(label: impl Into<String>, tone: Tone) -> Element<
         Tone::Busy => c().accent,
         Tone::Error => fixed::DANGER,
     };
-    let dot = container(Space::new().width(size::DOT).height(size::DOT)).style(move |_| {
-        container::Style {
-            background: Some(dot.into()),
-            border: Border::default().rounded(radius::FULL),
-            ..container::Style::default()
-        }
-    });
     let line = text(label.into())
         .size(11)
         .font(weight(Weight::Normal))
         .color(faded(c().text, 0.85));
-    container(row![dot, line].spacing(space::GAP).align_y(Center))
-        .padding([2, 10])
-        .style(|_| container::Style {
-            background: Some(c().hover.into()),
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(1)
-                .color(c().divider),
+    container(
+        row![self::dot(dot), line]
+            .spacing(space::GAP)
+            .align_y(Center),
+    )
+    .padding([2, 10])
+    .style(|_| container::Style {
+        background: Some(c().hover.into()),
+        border: Border::default()
+            .rounded(radius::FULL)
+            .width(1)
+            .color(c().divider),
+        ..container::Style::default()
+    })
+    .into()
+}
+
+/// A 6 px round dot of `colour` (a status: the setup's "for everyone").
+pub fn dot<'a, Message: 'a>(colour: Color) -> Element<'a, Message> {
+    container(Space::new().width(size::DOT).height(size::DOT))
+        .style(move |_| container::Style {
+            background: Some(colour.into()),
+            border: Border::default().rounded(radius::FULL),
             ..container::Style::default()
         })
         .into()
+}
+
+/// The done badge: a mono 600 ✓ on a 20 px `SUCCESS` disc (the setup's
+/// emblem once installed).
+pub fn done<'a, Message: 'a>() -> Element<'a, Message> {
+    const D: f32 = 20.0;
+    container(
+        text("✓")
+            .font(mono(Weight::Semibold))
+            .size(11)
+            .color(fixed::ON_ACCENT),
+    )
+    .center(D)
+    .style(|_| container::Style {
+        background: Some(fixed::SUCCESS.into()),
+        border: Border::default().rounded(D / 2.0),
+        ..container::Style::default()
+    })
+    .into()
 }
 
 /// A chip that acts (a QR code's "QR code: …" and "Open link · host"): a

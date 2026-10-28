@@ -80,6 +80,13 @@ impl Role {
     pub const CONTROL: Role = role(12.0, Weight::Medium);
     /// A pill of onboarding's step track (`!text-[11px]`).
     pub const STEP: Role = role(11.0, Weight::Medium);
+    /// A call to action's label (`button::cta_label`, the setup's "→").
+    pub const CTA: Role = role(13.0, Weight::Semibold);
+    /// A figure in mono (the setup's progress percent).
+    pub const FIGURE: Role = Role {
+        mono: true,
+        ..role(12.0, Weight::Semibold)
+    };
     pub const BAR_PILL: Role = role(11.5, Weight::Medium);
     pub const CHAT: Role = role(13.0, Weight::Normal);
     /// A card's note and a toast's line (`.as-note`, `.oc-toast`).

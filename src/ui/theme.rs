@@ -383,29 +383,6 @@ fn palette(setting: Theme, os_dark: bool) -> &'static Palette {
     }
 }
 
-/// The setup's view of the kit's themes (`kit::themes`): Sapphire for a dark OS,
-/// Daylight for a light one (`set_light`, from the OS). Goes when the setup is on
-/// the kit (plan step 21); `scripts/installer-art.py` repeats a few colours for
-/// the setup's baked images.
-pub mod sapphire {
-    use crate::ui::kit::themes::{self, Colours, DAYLIGHT, SAPPHIRE};
-    pub use crate::ui::kit::tokens::fixed::{DANGER, ON_ACCENT, SUCCESS};
-
-    /// What the OS reports: light = Daylight, dark (or no preference) = Sapphire.
-    pub fn set_light(light: bool) {
-        themes::set(if light { &DAYLIGHT } else { &SAPPHIRE });
-    }
-
-    pub fn is_light() -> bool {
-        themes::current().light
-    }
-
-    /// The token set in use.
-    pub fn t() -> &'static Colours {
-        themes::c()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

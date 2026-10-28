@@ -7,6 +7,7 @@ pub mod live;
 pub mod onboarding;
 pub mod panel;
 pub mod settings;
+pub mod setup;
 pub mod song;
 pub mod toast;
 pub mod translate;

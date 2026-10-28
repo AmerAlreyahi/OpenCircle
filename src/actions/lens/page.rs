@@ -18,7 +18,7 @@ const SWEEP_AGE: Duration = Duration::from_secs(60);
 // The hand-off page: it posts the crop the moment it is parsed (the script runs
 // before anything below it is drawn), and while Lens answers it shows a calm
 // card in our design (Sapphire on a dark OS, Daylight on a light one, the
-// tokens of `ui::theme::sapphire`): our logo, one line and a soft loading
+// tokens of the kit's Sapphire theme): our logo, one line and a soft loading
 // sweep (still when the OS asks for less motion). Everything is inline: no
 // font, script or image from anywhere. The button is a fallback that appears
 // after 2 s (CSS, no script needed), in case the post did not go.

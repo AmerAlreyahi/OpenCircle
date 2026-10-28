@@ -22,7 +22,7 @@ pub fn set_icon(rgba: Vec<u8>, width: u32, height: u32) {
     }
 }
 
-/// The setup's window (`ui::setup`): a fixed-size normal window (taskbar entry,
+/// The setup's window (`ui::screens::setup`): a fixed-size normal window (taskbar entry,
 /// our own header), centred, cut to the design's rounded corners (`radius`, as
 /// a floating window: nothing shows outside them, and it fades in and out by
 /// `POPUP`). After a `window::resize`, `reshape` cuts it again.
