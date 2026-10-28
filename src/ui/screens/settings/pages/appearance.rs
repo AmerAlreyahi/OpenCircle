@@ -1,20 +1,26 @@
 //! Appearance (`settings-window.js` "APPEARANCE"): the OS mode, the logo's
-//! colour, reduced animations, and the 12 theme cards (one pick per mode).
-//! No Glass row until glass exists (0.1.3).
+//! colour, reduced animations, the 12 theme cards (one pick per mode) and the
+//! active look cards (the design's 10, or the user's own: its rows under the
+//! cards). No Glass row until glass exists (0.1.3).
 use iced::Element;
 use iced::widget::column;
 
+use super::super::legacy::custom_rows;
 use super::super::state::{Message, Pick, State};
-use crate::config::{Logo, Theme};
-use crate::ui::kit::card::{grid, theme_card};
+use crate::config::{Logo, LookTheme, PRESETS, Theme};
+use crate::ui::kit::card::{grid, look_card, theme_card};
 use crate::ui::kit::chip::{Tone, status};
+use crate::ui::kit::divider::divider;
+use crate::ui::kit::looks::{LOOKS, Look};
 use crate::ui::kit::motion;
 use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::themes::THEMES;
+use crate::ui::theme;
 
-/// The theme cards' columns (`sm:grid-cols-3`).
+/// The theme cards' columns (`sm:grid-cols-3`), the look cards' (`grid-cols-2`).
 const COLUMNS: usize = 3;
+const LOOK_COLUMNS: usize = 2;
 
 const MODE_DESC: &str = if cfg!(windows) {
     "System follows your Windows light or dark mode"
@@ -54,7 +60,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let cards = THEMES
         .into_iter()
         .map(|t| theme_card(t, picked(t.id), Message::ThemeCard(t.id)));
-    column![
+    let mut rows = column![
         setting_row::row(
             title("OS mode"),
             MODE_DESC,
@@ -75,6 +81,57 @@ pub fn view(state: &State) -> Element<'_, Message> {
             "One for dark mode, one for light: the Settings window and every floating widget",
             grid(COLUMNS, cards),
         ),
-    ]
-    .into()
+    ];
+    rows = rows.push(setting_row::block(
+        title("Active look screen borders"),
+        "The screen edge and the accent while OpenCircle is open",
+        grid(LOOK_COLUMNS, look_cards(state)),
+    ));
+    if d.look.theme == LookTheme::Custom {
+        for r in custom_rows(state) {
+            rows = rows.push(r).push(divider());
+        }
+    }
+    rows.into()
+}
+
+/// What each design look's card writes (by look id): the stored value of the
+/// look shown, kept as it is when its card is picked again ("calm" too), else
+/// the first preset showing it (Prism is written "aurora", Frost "mono", as
+/// before schema 4). `None`: the config has no value for that look yet.
+pub fn picks(state: &State) -> Vec<(&'static str, Option<LookTheme>)> {
+    let now = state.draft.look.theme;
+    let shows = |t: LookTheme, look: &Look| theme::kit_look(t).is_some_and(|l| l.id == look.id);
+    LOOKS
+        .into_iter()
+        .map(|look| {
+            let pick = match shows(now, look) {
+                true => Some(now),
+                false => (PRESETS.iter()).map(|&(t, _)| t).find(|&t| shows(t, look)),
+            };
+            (look.id, pick)
+        })
+        .collect()
+}
+
+/// The design's looks, then the user's own.
+fn look_cards(state: &State) -> Vec<Element<'_, Message>> {
+    let now = state.draft.look.theme;
+    let mut cards: Vec<_> = (LOOKS.into_iter().zip(picks(state)))
+        .map(|(look, (_, pick))| {
+            let chosen = pick == Some(now);
+            let on = pick.map(Message::Look);
+            look_card(look.name, look.badge, look.desc, look.preview, chosen, on)
+        })
+        .collect();
+    let (a, b) = theme::accent_of(&state.look(LookTheme::Custom));
+    cards.push(look_card(
+        "Custom",
+        "Yours",
+        "Your own colours, glow, dim, corners and edges",
+        &[a, b],
+        now == LookTheme::Custom,
+        Some(Message::Look(LookTheme::Custom)),
+    ));
+    cards
 }

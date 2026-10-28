@@ -81,7 +81,7 @@ pub const PRISM: Look = Look {
 pub const SPECTRUM: Look = Look {
     id: "spectrum",
     name: "Spectrum",
-    desc: "Multi-colour Google-style rainbow glow",
+    desc: "Multi-colour rainbow glow",
     badge: "Default",
     kind: Kind::Glow,
     solid: [hex(0xff6b5e), hex(0x4aa8ff)],

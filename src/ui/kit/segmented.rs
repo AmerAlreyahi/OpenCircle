@@ -126,6 +126,43 @@ pub fn boolean<'a, Message: Clone + 'a>(
 
 #[cfg(test)]
 mod tests {
+    /// The width a pill gives its label is at least what the text widget lays
+    /// out for it, so a label never wraps ("Wait for me" broke on Windows:
+    /// measured kerned, drawn unkerned).
+    #[test]
+    fn a_label_measures_as_the_text_widget_lays_it_out() {
+        use super::super::text::{font, width};
+        use super::super::tokens::Role;
+        use iced::advanced::text::{self, Paragraph as _};
+        type P = <iced::Renderer as text::Renderer>::Paragraph;
+        let _ = super::super::text::ui_font_name(); // the fonts loaded
+        for label in [
+            "Wait for me",
+            "Run at once",
+            "Snap to box",
+            "AVA Wave",
+            "Off",
+        ] {
+            let laid = P::with_text(text::Text {
+                content: label,
+                bounds: iced::Size::INFINITE,
+                size: iced::Pixels(Role::CONTROL.size),
+                line_height: text::LineHeight::Relative(1.25),
+                font: font(Role::CONTROL),
+                align_x: text::Alignment::Default,
+                align_y: iced::alignment::Vertical::Top,
+                shaping: text::Shaping::default(),
+                wrapping: text::Wrapping::default(),
+            })
+            .min_width();
+            let ours = width(label, Role::CONTROL.size, font(Role::CONTROL));
+            assert!(
+                ours.ceil() >= laid,
+                "{label}: measured {ours}, laid out {laid}"
+            );
+        }
+    }
+
     /// Every pill holds its label as drawn, Arabic too (7 px a letter was
     /// too narrow for Arabic: the labels ran into each other).
     #[test]

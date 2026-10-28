@@ -14,7 +14,7 @@ mod labs;
 mod look;
 
 #[cfg(test)]
-pub use look::picks as look_picks;
+pub use appearance::picks as look_picks;
 
 pub struct Page {
     pub id: Section,

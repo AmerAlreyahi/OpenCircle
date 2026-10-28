@@ -48,7 +48,7 @@
 //!
 //! [look]                            # how the screen looks while OpenCircle is active
 //! theme = "spectrum"                # spectrum | aurora | sunset | ocean | neon | mono | calm | custom
-//!                                   # | horizon | solar | hud (aurora = the design's Prism, mono = its Frost)
+//!                                   # | horizon | solar | hud | borealis (aurora = the design's Prism, mono = its Frost)
 //! [look.custom]                     # theme = "custom" only (a copy of a preset to edit)
 //! palette = "spectrum"              # spectrum | aurora | sunset | ocean | neon | mono | two_colour
 //! colours = ["#8f80ff", "#4fc9e0"]  # palette = two_colour: from, to
@@ -101,8 +101,8 @@
 //!
 //! Versions: 1 = v0.1.0; 2 adds `[labs]`; 3 sets `selection.after` to "wait" (nothing
 //! is sent before the user picks an action) and drops `[results]` (the web view card
-//! is gone: its keys are ignored); 4 adds `[appearance]` and the looks horizon, solar and
-//! hud (stored look values never change); without `[appearance]` an older file's
+//! is gone: its keys are ignored); 4 adds `[appearance]` and the looks horizon, solar,
+//! hud and borealis (written only when picked; stored look values never change); without `[appearance]` an older file's
 //! `widget_theme` frost / graphite becomes the light / dark pick. A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
@@ -518,6 +518,8 @@ pub enum LookTheme {
     Horizon,
     Solar,
     Hud,
+    /// The design's Aurora Borealis ("aurora" is its Prism).
+    Borealis,
 }
 
 /// The edge / accent colours: a preset palette (its colours live in
@@ -1178,7 +1180,7 @@ mod tests {
         for (theme, _) in PRESETS {
             assert_ne!(theme, LookTheme::Custom);
         }
-        assert_eq!(PRESETS.len(), 10);
+        assert_eq!(PRESETS.len(), 11);
         // a custom look and a selection setting survive a save
         let mut c = Config {
             selection: SelectionConfig {
@@ -1912,5 +1914,24 @@ mod tests {
         let (back, w) = Config::parse(&toml::to_string_pretty(&c).unwrap());
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(back, c);
+    }
+
+    /// The design's Aurora Borealis is stored as "borealis", written only when
+    /// picked; a value a version doesn't know (as an older one reads
+    /// "borealis") falls back to the default look with a warning.
+    #[test]
+    fn borealis_is_stored_only_when_picked() {
+        let default = toml::to_string_pretty(&Config::default()).unwrap();
+        assert!(!default.contains("borealis"));
+        let mut c = Config::default();
+        c.look.theme = LookTheme::Borealis;
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert!(text.contains("theme = \"borealis\""), "{text}");
+        let (back, w) = Config::parse(&text);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back.look.theme, LookTheme::Borealis);
+        let (old, w) = Config::parse("version = 4\n[look]\ntheme = \"glimmer\"\n");
+        assert_eq!(old.look.theme, LookTheme::Spectrum);
+        assert_eq!(w.len(), 1, "{w:?}");
     }
 }

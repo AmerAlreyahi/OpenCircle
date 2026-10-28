@@ -41,7 +41,7 @@ const fn two(a: u32, b: u32) -> Look {
 }
 
 /// The presets: one table (their colours: `ui::theme::palette`).
-pub const PRESETS: [(LookTheme, Look); 10] = {
+pub const PRESETS: [(LookTheme, Look); 11] = {
     let thin = edge(EdgeStyle::Thin, 3, true);
     let still = edge(EdgeStyle::Thin, 2, false);
     // Today's look: the thin violet → cyan line with its sweep.
@@ -92,6 +92,7 @@ pub const PRESETS: [(LookTheme, Look); 10] = {
         (LookTheme::Horizon, two(0x38bdf8, 0x818cf8)),
         (LookTheme::Solar, two(0xfbbf24, 0xf59e0b)),
         (LookTheme::Hud, two(0xffffff, 0x7dd3fc)),
+        (LookTheme::Borealis, two(0x34d399, 0x8b5cf6)),
     ]
 };
 

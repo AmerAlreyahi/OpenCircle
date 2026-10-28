@@ -139,7 +139,14 @@ fn laid_out(s: &str, size: f32, font: Font, wrap: Option<f32>) -> (usize, f32) {
     let mut buf = Buffer::new(fs, Metrics::new(size, size * 1.5));
     buf.set_size(fs, wrap, None);
     let attrs = Attrs::new().family(family).weight(W(weight));
-    buf.set_text(fs, s, &attrs, Shaping::Advanced, None);
+    // shaped as the text widget shapes it (iced's `Shaping::Auto`): ASCII
+    // unkerned, anything else advanced; kerned Latin measured narrower than
+    // drawn, and a pill's label wrapped
+    let shaping = match s.is_ascii() {
+        true => Shaping::Basic,
+        false => Shaping::Advanced,
+    };
+    buf.set_text(fs, s, &attrs, shaping, None);
     buf.shape_until_scroll(fs, false);
     (buf.layout_runs()).fold((0, 0.0), |(n, w), r| (n + 1, f32::max(w, r.line_w)))
 }

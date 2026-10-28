@@ -1,24 +1,15 @@
-//! Look & behaviour (`settings-window.js` "LOOK & BEHAVIOUR" and the active
-//! look cards): how a selection behaves, who reads the text, and the screen
-//! edge's look (the design's 10, or the user's own: its rows under the cards).
+//! Look & behaviour (`settings-window.js` "LOOK & BEHAVIOUR"): how a
+//! selection behaves and who reads the text; the looks are in Appearance.
 use iced::Element;
 use iced::widget::{Space, column, row};
 
-use super::super::legacy::custom_rows;
-use super::super::state::{Message, Pick, State};
-use crate::config::{After, LookTheme, PRESETS, SearchWith, SelectStyle, TextReader};
+use super::super::state::{Message, Pick, Section, State};
+use crate::config::{After, SearchWith, SelectStyle, TextReader};
 use crate::ui::kit::button::{Kind, button, label};
-use crate::ui::kit::card::{grid, look_card};
-use crate::ui::kit::divider::divider;
-use crate::ui::kit::looks::{LOOKS, Look};
 use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::text::sub;
 use crate::ui::kit::tokens::{Role, space};
-use crate::ui::theme;
-
-/// The look cards' columns (`grid-cols-2`).
-const COLUMNS: usize = 2;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let sel = state.draft.selection;
@@ -80,58 +71,17 @@ pub fn view(state: &State) -> Element<'_, Message> {
     if cfg!(windows) {
         rows = rows.push(text_reader(state));
     }
-    rows = rows.push(setting_row::block(
-        title("Active look"),
-        "The screen edge and the accent while OpenCircle is open",
-        grid(COLUMNS, cards(state)),
+    // the design's pointer to where the looks went
+    rows = rows.push(setting_row::row(
+        title("Themes and screen borders"),
+        "All 12 themes and the screen border looks live in Appearance",
+        button(
+            label("Open Appearance →"),
+            Kind::Elevated,
+            Some(Message::Section(Section::Appearance)),
+        ),
     ));
-    if state.draft.look.theme == LookTheme::Custom {
-        for r in custom_rows(state) {
-            rows = rows.push(r).push(divider());
-        }
-    }
     rows.into()
-}
-
-/// What each design look's card writes (by look id): the stored value of the
-/// look shown, kept as it is when its card is picked again ("calm" too), else
-/// the first preset showing it (Prism is written "aurora", Frost "mono", as
-/// before schema 4). `None`: the config has no value for that look yet.
-pub fn picks(state: &State) -> Vec<(&'static str, Option<LookTheme>)> {
-    let now = state.draft.look.theme;
-    let shows = |t: LookTheme, look: &Look| theme::kit_look(t).is_some_and(|l| l.id == look.id);
-    LOOKS
-        .into_iter()
-        .map(|look| {
-            let pick = match shows(now, look) {
-                true => Some(now),
-                false => (PRESETS.iter()).map(|&(t, _)| t).find(|&t| shows(t, look)),
-            };
-            (look.id, pick)
-        })
-        .collect()
-}
-
-/// The design's looks, then the user's own.
-fn cards(state: &State) -> Vec<Element<'_, Message>> {
-    let now = state.draft.look.theme;
-    let mut cards: Vec<_> = (LOOKS.into_iter().zip(picks(state)))
-        .map(|(look, (_, pick))| {
-            let chosen = pick == Some(now);
-            let on = pick.map(Message::Look);
-            look_card(look.name, look.badge, look.desc, look.preview, chosen, on)
-        })
-        .collect();
-    let (a, b) = theme::accent_of(&state.look(LookTheme::Custom));
-    cards.push(look_card(
-        "Custom",
-        "Yours",
-        "Your own colours, glow, dim, corners and edges",
-        &[a, b],
-        now == LookTheme::Custom,
-        Some(Message::Look(LookTheme::Custom)),
-    ));
-    cards
 }
 
 /// Who reads the screen's text (Windows: Windows OCR or the downloaded

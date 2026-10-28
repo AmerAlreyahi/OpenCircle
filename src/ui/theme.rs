@@ -412,6 +412,7 @@ pub fn kit_look(theme: config::LookTheme) -> Option<&'static crate::ui::kit::loo
         T::Horizon => &HORIZON,
         T::Solar => &SOLAR,
         T::Hud => &HUD,
+        T::Borealis => &AURORA,
         T::Custom => return None,
     })
 }
