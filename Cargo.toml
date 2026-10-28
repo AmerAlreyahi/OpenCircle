@@ -67,6 +67,11 @@ windows = { version = "0.62", features = ["Globalization", "Graphics_Imaging", "
 
 [profile.release]
 strip = true
+# Win10 VM, full rebuild: exe 20.64 -> 18.48 MB (-10 %), build 283 -> 230 s,
+# start to tray 247 -> 239 ms. panic stays "unwind" (a worker thread's panic
+# must not kill the app).
+lto = "thin"
+codegen-units = 1
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
