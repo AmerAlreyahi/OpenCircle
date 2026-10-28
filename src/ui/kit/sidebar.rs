@@ -78,12 +78,12 @@ pub fn sidebar<'a, Message: Clone + 'a>(
     ];
     let body = container(column![nav, foot].spacing(GAP))
         .padding(space::SIDEBAR_PAD)
-        .width(size::SIDEBAR - 1.0)
+        .width(size::SIDEBAR - super::divider::WIDTH)
         .height(Fill)
         .style(|_| container::Style::default().background(c().sidebar));
-    let edge = container(Space::new().width(1).height(Fill))
-        .style(|_| container::Style::default().background(c().divider));
-    row![body, edge].height(Fill).into()
+    row![body, super::divider::vertical(Fill)]
+        .height(Fill)
+        .into()
 }
 
 fn nav_item<'a, Message: Clone + 'a>(

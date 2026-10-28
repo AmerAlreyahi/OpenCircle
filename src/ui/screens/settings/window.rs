@@ -1,5 +1,7 @@
 //! The Settings window's shell (`settings-window.js`): our own header (logo,
-//! title, the auto-save pill, the caption buttons), the sidebar of `PAGES`
+//! title, the auto-save pill, the caption buttons) across the window, the
+//! one hairline under it (the sidebar's edge, also `kit::divider`, starts
+//! there; owner, 2026-10-28), the sidebar of `PAGES`
 //! with its gliding highlight, and the page. The page switches at once: the
 //! design's rise (the whole page moving 14 px over 190 ms) redrew the whole
 //! window every frame on the CPU renderer (laggy on a 4K screen); it returns
@@ -11,6 +13,7 @@ use super::state::{Message, State};
 use super::{pages, previews};
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::chip::{Tone, status};
+use crate::ui::kit::divider::divider;
 use crate::ui::kit::header::regular;
 use crate::ui::kit::scroll::scroll;
 use crate::ui::kit::sidebar::{Item, sidebar};
@@ -43,7 +46,7 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
         main = main.push(close_question());
     }
     let rim = if maximised { 0.0 } else { RIM };
-    surface(Material::Window, 0.0, column![header, main])
+    surface(Material::Window, 0.0, column![header, divider(), main])
         .padding(rim)
         .width(Fill)
         .height(Fill)

@@ -1728,6 +1728,40 @@ fn the_header_reports_its_caption_buttons() {
     assert!(!s.dirty());
 }
 
+/// The hairline under the header and the sidebar's edge are one line
+/// (owner, 2026-10-28): the same colour, both 1 px, in both themes; the
+/// edge starts at the line under the header.
+#[test]
+fn the_header_line_and_the_sidebar_edge_are_the_same_hairline() {
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::ui::kit::tokens::size;
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        themes::set(theme);
+        let (mut s, _) = state(None);
+        update(&mut s, Message::Section(Section::Privacy));
+        let (w, h) = (WINDOW_SIZE.width as usize, WINDOW_SIZE.height as usize);
+        let px = shot::render(view(&s), w as u32, h as u32);
+        let at = |x: usize, y: usize| px[(y * w + x) * 4..][..3].to_vec();
+        // 1 px rim, then the header; the sidebar's last column is its edge
+        let (line_y, edge_x) = (1 + size::HEADER as usize, size::SIDEBAR as usize);
+        let line = at(w / 2, line_y);
+        assert_eq!(at(edge_x, h / 2), line, "{}: the same colour", theme.id);
+        assert_eq!(
+            at(edge_x, line_y + 1),
+            line,
+            "{}: the edge starts there",
+            theme.id
+        );
+        for (x, y) in [(w / 2, line_y - 1), (w / 2, line_y + 1)] {
+            assert_ne!(at(x, y), line, "{}: the line is 1 px tall", theme.id);
+        }
+        for x in [edge_x - 1, edge_x + 1] {
+            assert_ne!(at(x, h / 2), line, "{}: the edge is 1 px wide", theme.id);
+        }
+    }
+    themes::set(&SAPPHIRE);
+}
+
 /// Settings harmony (owner, 2026-10-28): on every page, every row's control
 /// has the same left edge and width, laid out as the window draws it (every
 /// Labs feature on, the AI page with a server of your own and its key rows).
