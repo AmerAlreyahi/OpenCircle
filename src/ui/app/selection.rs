@@ -142,6 +142,14 @@ impl App {
                 _ => {}
             }
         }
+        // With other screens: each screen's frames during a press (the log's
+        // "drag" lines; one screen far behind the other was the lag of a box
+        // across two screens).
+        match event {
+            overlay::Event::Press { .. } => self.clear_screen_frames(),
+            overlay::Event::Release => self.log_screen_frames(),
+            _ => {}
+        }
         match event {
             // Select-text mode: a press on the box picks words, a drag stretches them.
             overlay::Event::Press {

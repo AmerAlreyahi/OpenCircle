@@ -1082,3 +1082,138 @@ fn zoom_frame_times() {
         report("pan", app.o.screen, k, &t);
     }
 }
+
+/// Each window's frames (the starting screen's, then the other screen's) of
+/// a stroke drawn from the starting screen (`w` x `h` at `k`) onto `side`,
+/// then (`moved`) of the box it made, moved by its middle.
+fn across_screens(
+    (w, h, k): (u32, u32, f32),
+    side: super::platform::monitor::Place,
+    moved: bool,
+) -> [Vec<Drawn>; 2] {
+    use super::app::screens::Screen;
+    use crate::ui::overlay::Event;
+    fn other(app: &App) -> Element<'_, Message> {
+        app.view(app.o.screens[0].window)
+    }
+    let stroke = |app: &mut App, i: u32| {
+        let s = app.o.screen;
+        // from 70 % across the starting screen on into the other
+        let x = s.width * (0.7 + 0.02 * i as f32);
+        let at = Point::new(x, s.height * (0.5 + 0.1 * (i as f32 * 0.4).sin()));
+        let e = match i {
+            0 => Event::Press { at, shift: false },
+            _ => Event::Move(at),
+        };
+        let _ = app.on_overlay(e);
+    };
+    let from = std::cell::Cell::new(Point::ORIGIN);
+    let step = |app: &mut App, i: u32| {
+        if !moved {
+            return stroke(app, i);
+        }
+        if i == 0 {
+            (0..=30).for_each(|i| stroke(app, i));
+            let _ = app.on_overlay(Event::Release);
+            settle_bar(app);
+            let r = app.o.selection.expect("a selection").area;
+            from.set(app.o.view.to_screen(r.center()));
+        }
+        let at = from.get() + Vector::new(12.0, 5.0) * i as f32;
+        let e = match i {
+            0 => Event::Press { at, shift: false },
+            _ => Event::Move(at),
+        };
+        let _ = app.on_overlay(e);
+    };
+    let make = || {
+        let mut app = open_app(w, h, k);
+        settle_bar(&mut app);
+        let (pw, ph) = side.px;
+        let rgba = vec![90; (pw * ph * 4) as usize];
+        let frame = iced::widget::image::Handle::from_rgba(pw, ph, rgba);
+        let start = app.o.place();
+        let id = window::Id::unique();
+        app.o.screens.push(Screen::new(id, start, side, frame));
+        app
+    };
+    let mut app = make();
+    let first = frames(&mut app, 30, false, |app, i, _| step(app, i));
+    let mut app = make();
+    let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+    let size = side.size();
+    let on = |app: &mut App, i, _| step(app, i);
+    let second = drawn(&mut app, size, side.scale, other, 30, false, on, still);
+    [first, second]
+}
+
+/// A stroke drawn across two screens, then its box moved: each window
+/// redraws only round it. Before: the dim and the stroke were one drawing,
+/// and every pointer move redrew both windows whole (102-153 % of each).
+#[test]
+fn a_stroke_across_screens_redraws_only_round_itself() {
+    use super::platform::monitor::Place;
+    let side = Place {
+        origin: (1920, 0),
+        px: (1920, 1080),
+        scale: 1.5,
+    };
+    let screens = [Size::new(1920.0, 1080.0), side.size()];
+    for moved in [false, true] {
+        let windows = across_screens((1920, 1080, 1.0), side, moved);
+        for (t, size) in windows.iter().zip(screens) {
+            // (frame 0 of the move holds the whole stroke and its release)
+            for (i, d) in t.iter().enumerate().skip(1) {
+                let area: f32 = d.damage.iter().map(|r| r.width * r.height).sum();
+                let whole = size.width * size.height;
+                assert!(
+                    area < 0.75 * whole,
+                    "moved {moved}, frame {i}: {:.0} % redrawn",
+                    100.0 * area / whole
+                );
+            }
+        }
+    }
+}
+
+/// Every window the app changed for draws with the one that draws (the
+/// vendored iced_winit, `Window::stale`): on Windows a window draws on
+/// WM_PAINT, which only the topmost window needing it gets while input keeps
+/// coming, and a box drawn across two screens moved on the other screen only
+/// after the drag (VM, 1 s drag at 60 Hz: 2 frames there against 60 on the
+/// starting screen). Needs a real event loop to time; this keeps the fix in.
+#[test]
+fn other_windows_draw_with_the_one_that_draws() {
+    let shell = include_str!("../../vendor/iced_winit/src/lib.rs");
+    assert!(shell.contains("redraws.push(other.raw.id())"));
+    assert!(shell.contains("if let Some(window_id) = redraws.pop()"));
+    let cargo = include_str!("../../Cargo.toml");
+    assert!(cargo.contains("iced_winit = { path = \"vendor/iced_winit\" }"));
+}
+
+/// The bench of it at real sizes (run in release:
+/// `cargo test --release stroke_across_screens_frame_times -- --ignored --nocapture`).
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn stroke_across_screens_frame_times() {
+    use super::platform::monitor::Place;
+    let place = |origin, px, scale| Place { origin, px, scale };
+    for (start, side) in [
+        ((1920, 1080, 1.0), place((1920, 0), (1920, 1080), 1.5)),
+        ((3440, 1440, 1.0), place((3440, 0), (1920, 1080), 1.0)),
+        ((3840, 2160, 2.5), place((3840, 0), (1920, 1080), 1.0)),
+    ] {
+        let k = start.2;
+        let size = Size::new(start.0 as f32 / k, start.1 as f32 / k);
+        for (what, moved) in [("stroke", false), ("box move", true)] {
+            let [a, b] = across_screens(start, side, moved);
+            report(&format!("{what}, starting screen"), size, k, &a);
+            report(
+                &format!("{what}, other screen"),
+                side.size(),
+                side.scale,
+                &b,
+            );
+        }
+    }
+}

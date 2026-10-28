@@ -399,6 +399,29 @@ impl App {
         self.show_screen(place, frame)
     }
 
+    /// A press with other screens open: every screen's frame log starts over.
+    pub(in crate::ui) fn clear_screen_frames(&self) {
+        if self.o.screens.is_empty() {
+            return;
+        }
+        self.frame_times.borrow_mut().clear();
+        for s in &self.o.screens {
+            s.frame_times.borrow_mut().clear();
+        }
+    }
+
+    /// Its release: each screen's frames since the press.
+    pub(in crate::ui) fn log_screen_frames(&self) {
+        if self.o.screens.is_empty() {
+            return;
+        }
+        super::log_gaps("drag, starting screen", &self.frame_times);
+        for s in &self.o.screens {
+            let what = format!("drag, screen at {:?}", s.place.origin);
+            super::log_gaps(&what, &s.frame_times);
+        }
+    }
+
     /// The frames that waited for the opening (`add_screen`), shown now.
     pub(in crate::ui) fn show_waiting(&mut self) -> Task<Message> {
         let waiting = std::mem::take(&mut self.o.waiting);

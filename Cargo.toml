@@ -186,3 +186,9 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std", "si
 # pipeline, and only the redrawn rectangles presented on Windows (each marked
 # "OpenCircle patch" in the source; ARCHITECTURE.md). Drop each upstream fix.
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
+# iced 0.14's window shell with one fix: a window that draws also draws every
+# other window the app changed for, at once. On Windows a window draws on
+# WM_PAINT, which only the topmost window needing it gets while input keeps
+# coming: a box drawn across two screens moved on the other screen only after
+# the drag (2 frames in a second's drag). "OpenCircle patch" in its src/lib.rs.
+iced_winit = { path = "vendor/iced_winit" }
