@@ -443,6 +443,12 @@ impl Pair {
         models::missing_bytes(&self.files())
     }
 
+    /// Bytes of everything this pair needs, present or not: what `ensure`'s
+    /// progress counts to.
+    pub fn full_size(&'static self) -> u64 {
+        self.files().iter().map(|(_, f)| f.size).sum()
+    }
+
     /// Downloads and verifies whatever is missing (OCR's files too), with
     /// one `progress(done, total)`. Only after the user agreed.
     pub fn ensure(&'static self, progress: impl FnMut(u64, u64)) -> Result<(), OcrError> {

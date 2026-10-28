@@ -157,6 +157,22 @@ pub fn done<'a, Message: 'a>() -> Element<'a, Message> {
     .into()
 }
 
+/// An emblem: `icon` (20 px, `accent`) centred on a 42 px `accent_soft`
+/// tile, radius 13 (the model download card's heading).
+pub fn emblem<'a, Message: 'a>(icon: super::icon::Icon) -> Element<'a, Message> {
+    const SIZE: f32 = 42.0;
+    const GLYPH: f32 = 20.0;
+    const CORNER: f32 = 13.0;
+    container(super::icon::icon(icon, GLYPH).color(c().accent))
+        .center(SIZE)
+        .style(|_| container::Style {
+            background: Some(c().accent_soft.into()),
+            border: Border::default().rounded(CORNER),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 /// A chip that acts (a QR code's "QR code: …" and "Open link · host"): a
 /// 12 px line in `text` on `hover`, a divider edge, round, 6x12 px; lighter
 /// under the cursor.

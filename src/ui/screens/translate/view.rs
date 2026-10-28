@@ -7,13 +7,13 @@ use iced::{Center, Element, Fill, Rectangle, Size};
 use super::{Card, Msg, PICKER_LIST, Phase, Session};
 use crate::actions::ask::Status;
 use crate::actions::{self};
-use crate::mt::Pair;
 use crate::ui::kit::panel_frame::{self as frame, Header};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{error, sub, text as label};
 use crate::ui::kit::tokens::{Role, radius};
-use crate::ui::panel::{actions, card, consent, downloading, note};
+use crate::ui::panel::{actions, card, note};
 use crate::ui::picker;
+use crate::ui::screens::model_download::{self, OCR, Stage, TRANSLATION};
 
 /// The pill's padding and its gap (`.as-language-pill`: 10 px, gap 10), and
 /// its distance to the top of the screen.
@@ -47,28 +47,28 @@ impl Session {
             let pill = container(self.languages(None)).width(free.width);
             stack![pin(pill).position(free.position()), card].into()
         };
+        // the download card (`model_download`): asks, its progress, why it failed
+        let download = |model, bytes, stage, provider| {
+            let on = model_download::On {
+                download: Msg::Download,
+                dismiss: Some(Msg::Close),
+                provider,
+            };
+            let card = model_download::card(model, bytes, stage, on);
+            with_pill(model_download::placed(card, at, screen))
+        };
+        // what is (being) fetched: the pair's models, else OCR's
+        let fetched = |stage| match self.offline {
+            Some(pair) => download(&TRANSLATION, pair.full_size(), stage, None),
+            None => download(&OCR, crate::ocr::models::full_size(), stage, None),
+        };
         match &self.phase {
-            Phase::Consent(None) => card(
-                consent(Msg::Download, Msg::Close),
-                None,
-                Some((90, 60.0)),
-                None,
-            ),
-            Phase::Consent(Some((pair, bytes))) => {
-                card(offline_consent(pair, *bytes), None, Some((175, 60.0)), None)
+            Phase::Consent(None) => fetched(Stage::Ask),
+            Phase::Consent(Some((_, bytes))) => {
+                download(&TRANSLATION, *bytes, Stage::Ask, Some(Msg::OpenSettings))
             }
-            Phase::Downloading(done) => card(
-                downloading(
-                    match self.offline.is_some() {
-                        true => "Downloading offline translation…",
-                        false => "Downloading the text-recognition model…",
-                    },
-                    *done,
-                ),
-                None,
-                Some((45, 16.0)),
-                None,
-            ),
+            Phase::Downloading(done) => fetched(Stage::at(*done)),
+            Phase::DownloadFailed(why) => fetched(Stage::Failed(why)),
             Phase::Translating => self.languages(Some("Translating…")),
             Phase::Failed(problem) => {
                 let buttons = match problem.setup {
@@ -109,25 +109,6 @@ impl Session {
             .padding(PILL_TOP)
             .into()
     }
-}
-
-/// The offline download question (`panel::consent`'s layout, plus Set up AI
-/// as the other way to translate).
-fn offline_consent(pair: &Pair, bytes: u64) -> Element<'static, Msg> {
-    let mb = bytes.div_ceil(10_000_000) * 10; // "about 120 MB"
-    column![
-        note(format!(
-            "Download {} (about {mb} MB) from Hugging Face and GitHub? \
-             It needs no key and nothing you translate leaves your PC.",
-            pair.label()
-        )),
-        actions(
-            ("Download", Msg::Download),
-            [("Set up AI", Msg::OpenSettings), ("Cancel", Msg::Close)]
-        ),
-    ]
-    .spacing(STACK)
-    .into()
 }
 
 /// The word card (the design's "Word explanation", titled "translation ·

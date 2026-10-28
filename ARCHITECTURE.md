@@ -136,7 +136,7 @@ iced primitives and styles it only with `theme.rs` tokens (add tokens there for
 both palettes). Screens call the function; they never set a style themselves.
 A screen in the new design takes its controls from the kit (`ui/kit/`: one file per
 control, styled only from `kit::tokens` / `kit::themes`, no config or clock, motion as an
-`f32` progress); the setup still reaches them through the thin `ui/sapphire.rs`. A new kit
+`f32` progress). A new kit
 control lands with its first user and gets a gallery sheet in `kit/testing/gallery.rs`
 (states as rows, Latin + Arabic, Sapphire + Daylight; `tests/fixtures/kit/`,
 `arch_tests::every_kit_component_has_a_gallery_sheet`).

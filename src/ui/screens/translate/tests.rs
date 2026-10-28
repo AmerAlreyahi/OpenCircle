@@ -121,7 +121,8 @@ fn the_prompts_are_short_cards_on_small_screens() {
             let at_px = |x: f32, y: f32| &px[((y as usize * w as usize) + x as usize) * 4..][..3];
             let dark = |p: &[u8]| p.iter().all(|&v| v < 100);
             // the card's rows: dark panel at a point right of its middle
-            let x = at.x + at.width * 0.9;
+            // near its left edge: the download card is narrower than the spot
+            let x = at.x + 10.0;
             let rows: Vec<f32> = (0..h as usize)
                 .map(|y| y as f32)
                 .filter(|&y| dark(at_px(x, y)))
@@ -253,10 +254,10 @@ fn offline_models_are_asked_for_with_their_size() {
     assert!(
         texts
             .iter()
-            .any(|t| t.starts_with("Download English → Arabic offline translation (about 120 MB)")),
+            .any(|t| t == "Offline translation · 118 MB · from Hugging Face"),
         "{texts:?}"
     );
-    for button in ["Download", "Set up AI", "Cancel"] {
+    for button in ["Download", "Use an AI provider instead", "Not now"] {
         assert!(texts.iter().any(|t| t == button), "{button}: {texts:?}");
     }
     // Download: that pair is the one fetched
@@ -267,10 +268,36 @@ fn offline_models_are_asked_for_with_their_size() {
         card::place(Size::new(1920.0, 1080.0), None, None),
         false,
     ));
+    assert!(texts.iter().any(|t| t == "Downloading offline translation"));
+}
+
+/// A download that failed says why on the download card and offers Try
+/// again, which fetches the same models (not a translate error card).
+#[test]
+fn a_failed_download_offers_try_again() {
+    let mut s = session(true);
+    s.offline = Some(en_ar());
+    s.phase = Phase::Downloading(0.3);
+    let _ = s.update(Msg::DownloadFailed("No internet connection.".into()));
     assert!(
-        texts
-            .iter()
-            .any(|t| t == "Downloading offline translation…")
+        matches!(&s.phase, Phase::DownloadFailed(_)),
+        "{:?}",
+        s.phase
+    );
+    let size = Size::new(1920.0, 1080.0);
+    let texts = widgets::shot::texts(s.view(size, card::place(size, None, None), false));
+    for want in [
+        "Download could not finish",
+        "No internet connection.",
+        "Try again",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    let _ = s.update(Msg::Download);
+    assert!(matches!(s.phase, Phase::Downloading(_)));
+    assert!(
+        s.offline.is_some_and(|p| std::ptr::eq(p, en_ar())),
+        "the same pair again"
     );
 }
 

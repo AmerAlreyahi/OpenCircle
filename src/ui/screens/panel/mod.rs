@@ -19,7 +19,7 @@ use crate::ui::keys;
 use crate::ui::kit::panel_frame;
 
 mod view;
-pub use view::{actions, card, consent, downloading, note};
+pub use view::{actions, card, note};
 
 /// The follow-up input. Never focused by itself: until it is clicked, letters
 /// are the overlay's action shortcuts.
@@ -107,6 +107,8 @@ enum Reading {
     /// No models yet: ask before downloading.
     Consent,
     Downloading(f32),
+    /// Just downloaded, reading now (the download card's Done).
+    Installed,
     Busy,
     Done(text_editor::Content),
     Failed(String),
@@ -262,7 +264,7 @@ impl Panel {
                 *browse = Browse::Idle;
                 self.work = None;
             }
-            (State::Text(reading @ Reading::Consent), Msg::Download) => {
+            (State::Text(reading @ (Reading::Consent | Reading::Failed(_))), Msg::Download) => {
                 *reading = Reading::Downloading(0.0);
                 return self.read();
             }
@@ -270,6 +272,7 @@ impl Panel {
                 (Progress::Download(done), Reading::Downloading(_)) => {
                     *reading = Reading::Downloading(done)
                 }
+                (Progress::Reading, Reading::Downloading(_)) => *reading = Reading::Installed,
                 (Progress::Reading, _) => *reading = Reading::Busy,
                 _ => {}
             },

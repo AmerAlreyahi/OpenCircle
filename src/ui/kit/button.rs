@@ -173,6 +173,55 @@ pub fn label<'a>(label: &'a str) -> iced::widget::Text<'a> {
         .line_height(1.5)
 }
 
+/// `.oc-btn` at its own size (6x13 px, radius 9, `label`'s 12 px / 500):
+/// `elevated` with its edge, lighter under the cursor; `accent` (a card's
+/// primary action, `.oc-model-primary`) the accent with the window's colour
+/// as text, 600, brighter under the cursor. A 2 px inset edge while pressed;
+/// no `on_press` = dimmed (`opacity .45`), same size and place.
+pub fn regular<'a, Message: Clone + 'a>(
+    label: &'a str,
+    accent: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::tokens::Role;
+    use iced_button::Status;
+    let live = on_press.is_some();
+    let font = match accent {
+        true => weight(Weight::Semibold),
+        false => super::text::font(Role::CONTROL),
+    };
+    iced_button(text(label).size(Role::CONTROL.size).font(font))
+        .padding([6.0, 13.0])
+        .on_press_maybe(on_press)
+        .style(move |_, status| {
+            let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+            let (fill, ink, edge) = match accent {
+                true => (c().accent, c().bg, c().accent),
+                false => (c().elevated, c().text, c().elevated_border),
+            };
+            let fill = match () {
+                _ if hot && accent => brighter(fill),
+                _ if hot => c().elevated_hover,
+                _ => fill,
+            };
+            let dim = |v: Color| if live { v } else { faded(v, 0.45) };
+            let (width, edge) = match () {
+                _ if live && status == Status::Pressed => (2.0, c().widget),
+                _ => (1.0, edge),
+            };
+            iced_button::Style {
+                background: Some(dim(fill).into()),
+                text_color: dim(ink),
+                border: Border::default()
+                    .rounded(radius::CONTROL)
+                    .width(width)
+                    .color(dim(edge)),
+                ..iced_button::Style::default()
+            }
+        })
+        .into()
+}
+
 /// `c` as CSS `brightness(1.1)` draws it.
 fn brighter(c: Color) -> Color {
     let up = |v: f32| (v * 1.1).min(1.0);

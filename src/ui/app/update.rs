@@ -480,6 +480,10 @@ impl App {
                 }
                 Task::none()
             }
+            Message::ReaderDismiss => {
+                self.o.reader = Reader::Idle;
+                Task::none()
+            }
             Message::ReaderDownload | Message::Reader(..) => Task::none(),
             // Leave full-screen while still shown (on Windows, leaving it while hidden
             // restores a placement saved while visible: shows it again), then shrink.

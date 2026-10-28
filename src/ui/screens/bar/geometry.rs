@@ -39,11 +39,6 @@ pub(in crate::ui) const DIVIDER_H: f32 = 16.0;
 pub(in crate::ui) const DIVIDER: f32 = 5.0;
 /// The bar's height: its tallest control (the icon buttons) and its padding.
 pub(in crate::ui) const HEIGHT: f32 = BUBBLE + 2.0 * PAD;
-/// A note beside the bar (the text reader's) is as tall as the bar; its
-/// line's padding and the space between what it says and its button.
-pub(in crate::ui) const NOTE_PAD: f32 = 10.0;
-pub(in crate::ui) const NOTE_GAP: f32 = 12.0;
-pub(in crate::ui) const NOTE_PROGRESS: f32 = 120.0;
 /// The QR code chip: as tall as the bar; its padding across and the space
 /// between its parts; the longest QR text it shows, in characters.
 pub(in crate::ui) const QR_PAD: f32 = 14.0;

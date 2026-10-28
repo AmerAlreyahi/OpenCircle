@@ -36,6 +36,8 @@ pub enum Msg {
     Close,
     /// Model download, 0..=1.
     Progress(f32),
+    /// The download failed (why).
+    DownloadFailed(String),
     /// The models are in place; translating now.
     Translating,
     /// What is translated so far (the rest still shows the original).
@@ -87,6 +89,8 @@ enum Phase {
     /// instead, with the bytes to download.
     Consent(Option<(&'static Pair, u64)>),
     Downloading(f32),
+    /// The download stopped (why); the card offers it again.
+    DownloadFailed(String),
     Translating,
     Shown(Shown),
     Failed(Problem),
@@ -215,10 +219,12 @@ impl Session {
     /// The App handles `Close`, `OpenSettings` and `Ask` first.
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
-            Msg::Download if matches!(self.phase, Phase::Consent(_)) => {
+            Msg::Download if matches!(self.phase, Phase::Consent(_) | Phase::DownloadFailed(_)) => {
+                // Try again fetches what was asked for before
                 self.offline = match self.phase {
                     Phase::Consent(Some((pair, _))) => Some(pair),
-                    _ => None,
+                    Phase::Consent(None) => None,
+                    _ => self.offline,
                 };
                 self.phase = Phase::Downloading(0.0);
                 return self.run(true);
@@ -236,6 +242,10 @@ impl Session {
             }
             Msg::Progress(done) if matches!(self.phase, Phase::Downloading(_)) => {
                 self.phase = Phase::Downloading(done);
+            }
+            Msg::DownloadFailed(why) if matches!(self.phase, Phase::Downloading(_)) => {
+                self.work = None;
+                self.phase = Phase::DownloadFailed(why);
             }
             Msg::Translating => self.phase = Phase::Translating,
             Msg::Partial(shown) if matches!(self.phase, Phase::Translating) => {
@@ -367,12 +377,7 @@ impl Session {
                     let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
                 };
                 if let Err(e) = actions::translate::download(&source, agreed, progress) {
-                    let problem = Problem {
-                        message: e,
-                        setup: false,
-                    };
-                    let _ = tx.unbounded_send(Msg::Translating);
-                    let _ = tx.unbounded_send(Msg::Done(Err(problem)));
+                    let _ = tx.unbounded_send(Msg::DownloadFailed(e));
                     return;
                 }
                 let _ = tx.unbounded_send(Msg::Translating);

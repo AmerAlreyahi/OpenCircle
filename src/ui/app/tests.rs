@@ -1388,12 +1388,13 @@ fn a_selection_brings_its_actions_into_the_bottom_bar_not_a_second_bar() {
     assert!(words.picked_text().is_some_and(|t| !t.trim().is_empty()));
 }
 
-/// What a click on the reader's note (over the bottom bar, on a row across
-/// its width) sends.
+/// What a click on the reader's download card (over the bottom bar, on the
+/// row of its buttons, across the bar's width) sends.
 fn note_clicks(app: &App) -> Vec<Message> {
     let (_, size) = app.bar_size();
     let at = app.bar_at();
-    let y = at.y - bar::SPACING - bar::HEIGHT / 2.0;
+    // the buttons' middle: the card's 20 px padding and half a button up
+    let y = at.y - bar::SPACING - 20.0 - 14.0;
     (0..(size.width as usize / 8))
         .flat_map(|i| {
             let p = Point::new(at.x + 8.0 * i as f32, y);
@@ -1403,11 +1404,13 @@ fn note_clicks(app: &App) -> Vec<Message> {
 }
 
 /// A fresh install has no text reader (OCR models): a drag on text can only
-/// draw. The overlay says so over the bar, with the size, and downloads
-/// only on its button; then its progress, a failure to try again, and
-/// "Reading text…" while the screen is read.
+/// draw. The download card over the bar says so, with the size, and
+/// downloads only on its button; then its progress, a failure to try again;
+/// Not now hides it for this opening.
 #[test]
 fn without_the_text_reader_the_bar_offers_its_download() {
+    // no models, whatever another test leaves in the shared data folder
+    text::MODELS_HERE.set(Some(false));
     let mut app = open_app(1280, 800, 1.0);
     app.note_reader(); // as at open (the tests have no models)
     let Reader::Missing(bytes) = app.o.reader else {
@@ -1416,7 +1419,7 @@ fn without_the_text_reader_the_bar_offers_its_download() {
     assert!(bytes > 1_000_000, "{bytes}");
     let texts = overlay_texts(&app);
     let mb = bytes.div_ceil(1_000_000);
-    let say = format!("Text selection needs the text reader (~{mb} MB).");
+    let say = format!("Text recognition · {mb} MB · from GitHub");
     assert!(texts.contains(&say), "{texts:?}");
     assert!(texts.contains(&"Download".to_string()), "{texts:?}");
     widgets::shot::save("reader-missing", app.view(app.overlay), app.o.screen);
@@ -1441,9 +1444,10 @@ fn without_the_text_reader_the_bar_offers_its_download() {
     let step = move |p| Message::Reader(opening, p);
     let _ = app.update(step(Ok(text::Progress::Download(0.42))));
     let texts = overlay_texts(&app);
+    assert!(texts.contains(&"42%".to_string()), "{texts:?}");
     assert!(
-        texts.contains(&"Downloading the text reader… 42%".to_string()),
-        "{texts:?}"
+        !texts.contains(&"Cancel".to_string()),
+        "it runs on: {texts:?}"
     );
     widgets::shot::save("reader-downloading", app.view(app.overlay), app.o.screen);
     // another opening's download says nothing here
@@ -1452,10 +1456,7 @@ fn without_the_text_reader_the_bar_offers_its_download() {
     assert_eq!(app.o.reader, Reader::Downloading(0.42));
     let _ = app.update(step(Err("no network".into())));
     let texts = overlay_texts(&app);
-    assert!(
-        texts.contains(&"The text reader didn't download: no network".to_string()),
-        "{texts:?}"
-    );
+    assert!(texts.contains(&"no network".to_string()), "{texts:?}");
     assert!(
         note_clicks(&app)
             .iter()
@@ -1468,6 +1469,16 @@ fn without_the_text_reader_the_bar_offers_its_download() {
         "{:?}",
         app.o.reader
     );
+    // Not now: no card for this opening
+    assert!(
+        note_clicks(&app)
+            .iter()
+            .any(|m| matches!(m, Message::ReaderDismiss))
+    );
+    let _ = app.update(Message::ReaderDismiss);
+    assert_eq!(app.o.reader, Reader::Idle);
+    assert!(app.reader_note().is_none());
+    text::MODELS_HERE.set(None);
 }
 
 /// A drag on text that began before the screen's text was read becomes a

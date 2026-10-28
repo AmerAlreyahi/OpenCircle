@@ -20,6 +20,7 @@ use crate::ui::kit::scroll::scroll;
 use crate::ui::kit::text::{error, sub, text};
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::{chip, field, progress};
+use crate::ui::screens::model_download::{self, On, Stage};
 use crate::ui::widgets::{self, Why};
 
 /// A card's body and its footer.
@@ -76,20 +77,29 @@ pub fn actions<'a, M: Clone + 'a>(
     line.into()
 }
 
-/// Asks before the one-time OCR model download (Text card, translate).
-pub fn consent<'a, M: Clone + 'a>(download: M, cancel: M) -> Element<'a, M> {
-    column![
-        note(
-            "Download the text-recognition model (about 20 MB) from GitHub? Nothing else is sent."
-        ),
-        actions(("Download", download), [("Cancel", cancel)]),
-    ]
-    .spacing(STACK)
-    .into()
+/// The OCR download card (`model_download`) for the Text card's download
+/// question, progress, done and failure; `None` once it reads (or failed to
+/// read with the models here).
+fn download_card(reading: &Reading) -> Option<Element<'_, Msg>> {
+    let stage = match reading {
+        Reading::Consent => Stage::Ask,
+        Reading::Downloading(done) => Stage::at(*done),
+        Reading::Installed => Stage::Done,
+        Reading::Failed(e) if !crate::actions::text::models_present() => Stage::Failed(e),
+        _ => return None,
+    };
+    let on = On {
+        download: Msg::Download,
+        dismiss: Some(Msg::Cancel),
+        provider: None,
+    };
+    let bytes = crate::ocr::models::full_size();
+    Some(model_download::card(&model_download::OCR, bytes, stage, on))
 }
 
-/// A download's line, its bar and its share (`.as-progress-label` + `.as-progress`).
-pub fn downloading<'a, M: 'a>(what: &'a str, done: f32) -> Element<'a, M> {
+/// A download's line, its bar and its share (`.as-progress-label` +
+/// `.as-progress`): the Ask card's OCR download for its question.
+fn downloading<'a, M: 'a>(what: &'a str, done: f32) -> Element<'a, M> {
     let label = row![
         container(note(what)).width(Fill),
         note(format!("{:.0} %", done * 100.0))
@@ -102,6 +112,11 @@ impl Panel {
     /// The panel as the floating result card at `at` on a `screen`;
     /// `hover`: the pointer is on its resize edge.
     pub fn view(&self, at: Rectangle, screen: Size, hover: bool) -> Element<'_, Msg> {
+        if let State::Text(reading) = &self.state
+            && let Some(card) = download_card(reading)
+        {
+            return model_download::placed(card, at, screen);
+        }
         let (glyph, title, (body, footer)) = match &self.state {
             State::Lens(status) => (
                 actions::lens::ACTION.icon,
@@ -139,8 +154,6 @@ impl Panel {
         // the Text card's download question, progress and error are short
         // cards, as tall as their text and buttons, not a slab (#127)
         let at = match &self.state {
-            State::Text(Reading::Consent) => frame::short(at, screen, 90, 60.0),
-            State::Text(Reading::Downloading(_)) => frame::short(at, screen, 45, 40.0),
             State::Text(Reading::Failed(e)) => frame::short(at, screen, e.chars().count(), 0.0),
             // thumbnail, question bubble, buttons and the privacy line under the text
             State::Ask {
@@ -300,11 +313,10 @@ impl Panel {
     /// Copy, Search and Translate.
     fn text_view<'a>(&'a self, reading: &'a Reading) -> Part<'a> {
         let body = match reading {
-            Reading::Consent => consent(Msg::Download, Msg::Cancel),
-            Reading::Downloading(done) => {
-                downloading("Downloading the text-recognition model…", *done)
+            // (the download card shows these: `download_card`)
+            Reading::Consent | Reading::Downloading(_) | Reading::Installed | Reading::Busy => {
+                note("Reading the text…").into()
             }
-            Reading::Busy => note("Reading the text…").into(),
             Reading::Done(content) => {
                 let edit = keys::guard(field::editor(content, Msg::Edit), Msg::Key);
                 let mut body =

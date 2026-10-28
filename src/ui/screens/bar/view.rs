@@ -13,9 +13,9 @@ use crate::ui::app::message::Message;
 use crate::ui::app::{ASK_INPUT, ASK_PLACEHOLDERS, App, LIVE, Reader};
 use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::{error, sub};
+use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, radius, size};
-use crate::ui::kit::{button, chip, divider, field, grip, progress};
+use crate::ui::kit::{button, chip, divider, field, grip};
 use crate::ui::song;
 use crate::ui::widgets::{self, Why};
 
@@ -165,58 +165,49 @@ impl App {
         opaque(bar)
     }
 
-    /// The note on the text reader (`Reader`): its download offered with its
-    /// size, its progress, a failure to try again, or "Reading text…".
+    /// The text reader's download card (`model_download`) over the bar: its
+    /// question with its size, its progress, a failure to try again.
     pub(in crate::ui) fn reader_note(&self) -> Option<Element<'_, Message>> {
-        // what it says, then its button or progress bar
-        let (say, then): (Element<'_, Message>, Element<'_, Message>) = match &self.o.reader {
+        use crate::ui::screens::model_download::{self as download, On, Stage};
+        let (bytes, stage) = match &self.o.reader {
             Reader::Idle => return None,
-            Reader::Missing(bytes) => {
-                let mb = bytes.div_ceil(1_000_000).max(1);
-                let say = format!("Text selection needs the text reader (~{mb} MB).");
-                let download = chip::action("Download".into(), Message::ReaderDownload);
-                (sub(Role::NOTE, say).into(), download)
-            }
-            Reader::Downloading(done) => {
-                let percent = (done * 100.0).round();
-                let say = sub(
-                    Role::NOTE,
-                    format!("Downloading the text reader… {percent}%"),
-                );
-                let bar = container(progress::bar(*done)).width(bar::NOTE_PROGRESS);
-                (say.into(), bar.into())
-            }
-            Reader::Failed(e) => {
-                let say = error(Role::NOTE, format!("The text reader didn't download: {e}"));
-                let again = chip::action("Try again".into(), Message::ReaderDownload);
-                (say.into(), again)
-            }
+            Reader::Missing(bytes) => (*bytes, Stage::Ask),
+            Reader::Downloading(done) => (crate::ocr::models::full_size(), Stage::at(*done)),
+            Reader::Failed(e) => (crate::ocr::models::full_size(), Stage::Failed(e)),
         };
-        let row = iced::widget::row![say, then]
-            .spacing(bar::NOTE_GAP)
-            .padding([0.0, bar::NOTE_PAD])
-            .align_y(iced::Center);
-        let note = surface(Material::Widget, radius::WINDOW, row)
-            .padding(bar::PAD)
-            .height(bar::HEIGHT);
-        Some(note.into())
+        // ponytail: a started download can't be stopped (it runs on unseen)
+        let dismiss = match self.o.reader {
+            Reader::Downloading(_) => None,
+            _ => Some(Message::ReaderDismiss),
+        };
+        let on = On {
+            download: Message::ReaderDownload,
+            dismiss,
+            provider: None,
+        };
+        Some(download::card(&download::OCR, bytes, stage, on))
     }
 
     /// `note` centred on the bar at `at`: above it, or below it when the bar
-    /// is at the top; opaque, so a press on it never starts a selection.
+    /// is at the top, as tall as it is; opaque, so a press on it never
+    /// starts a selection.
     pub(in crate::ui) fn beside_bar<'a>(
         &self,
         note: Element<'a, Message>,
         at: Point,
     ) -> Element<'a, Message> {
         let (_, size) = self.bar_size();
-        let (y, align) = match at.y > self.o.screen.height / 2.0 {
-            true => (at.y - bar::SPACING - bar::HEIGHT, iced::Bottom),
-            false => (at.y + size.height + bar::SPACING, iced::Top),
+        let screen = self.o.screen.height;
+        let (y, room, align) = match at.y > screen / 2.0 {
+            true => (0.0, at.y - bar::SPACING, iced::Bottom),
+            false => {
+                let y = at.y + size.height + bar::SPACING;
+                (y, screen - y, iced::Top)
+            }
         };
         let note = container(opaque(note))
             .center_x(size.width)
-            .height(bar::HEIGHT)
+            .height(room.max(0.0))
             .align_y(align);
         iced::widget::pin(note).position(Point::new(at.x, y)).into()
     }

@@ -172,6 +172,7 @@ fn surface_sheet() {
         ("window", Material::Window),
         ("recessed", Material::Recessed),
         ("widget", Material::Widget),
+        ("tile", Material::Tile),
     ]
     .into_iter()
     .map(|(state, m)| {
@@ -221,6 +222,18 @@ fn button_sheet() {
                 button(content(kind, ar), kind, enabled.then_some(()))
             }));
         }
+    }
+    for (state, act, accent, enabled) in [
+        ("regular", Act::Rest, false, true),
+        ("  hover", Act::Hover, false, true),
+        ("  disabled", Act::Rest, false, false),
+        ("regular accent", Act::Rest, true, true),
+        ("  hover", Act::Hover, true, true),
+        ("  disabled", Act::Rest, true, false),
+    ] {
+        rows.push(row(state, act, move |ar| {
+            button::regular(s(ar, "Download", "تنزيل"), accent, enabled.then_some(()))
+        }));
     }
     sheet("button", Size::new(260.0, 60.0), &rows);
 }
@@ -302,8 +315,15 @@ fn chip_sheet() {
         row("status ok", Act::Rest, status(Tone::Ok)),
         row("status busy", Act::Rest, status(Tone::Busy)),
         row("status error", Act::Rest, status(Tone::Error)),
+        row("dot", Act::Rest, |_| {
+            chip::dot(super::super::tokens::fixed::SUCCESS)
+        }),
+        row("done", Act::Rest, |_| chip::done()),
+        row("emblem", Act::Rest, |_| {
+            chip::emblem(super::super::icon::Icon::Translate)
+        }),
     ];
-    sheet("chip", Size::new(200.0, 40.0), &rows);
+    sheet("chip", Size::new(200.0, 48.0), &rows);
 }
 
 #[test]

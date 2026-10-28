@@ -23,11 +23,15 @@ pub enum Icon {
     /// lucide "arrow-up" and "square": a question's Send and Stop.
     Send,
     Stop,
+    /// lucide "type" (text recognition) and "languages" (translation): the
+    /// model download card's emblems.
+    Text,
+    Translate,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 8] = [
+    pub const ALL: [Icon; 10] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -36,6 +40,8 @@ impl Icon {
         Icon::Restore,
         Icon::Send,
         Icon::Stop,
+        Icon::Text,
+        Icon::Translate,
     ];
 
     pub const fn glyph(self) -> char {
@@ -48,6 +54,8 @@ impl Icon {
             Icon::Restore => '\u{e0a2}',
             Icon::Send => '\u{e04e}',
             Icon::Stop => '\u{e16a}',
+            Icon::Text => '\u{e197}',
+            Icon::Translate => '\u{e103}',
         }
     }
 }

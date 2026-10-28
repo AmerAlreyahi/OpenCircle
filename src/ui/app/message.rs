@@ -87,6 +87,8 @@ pub(in crate::ui) enum Message {
     /// The note over the bar's Download (the text reader's models), and how
     /// that download for this opening goes (`Reading` = done).
     ReaderDownload,
+    /// The download card's Not now / Cancel: no note for this opening.
+    ReaderDismiss,
     Reader(u32, Result<text::Progress, String>),
     /// The "Select text" chip under a snapped box, and the lines OCR read in it.
     SelectText,

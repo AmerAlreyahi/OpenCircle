@@ -4,6 +4,7 @@
 pub mod bar;
 pub mod common;
 pub mod live;
+pub mod model_download;
 pub mod onboarding;
 pub mod panel;
 pub mod settings;

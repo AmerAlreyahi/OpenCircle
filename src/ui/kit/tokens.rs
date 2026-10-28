@@ -87,6 +87,11 @@ impl Role {
         mono: true,
         ..role(12.0, Weight::Semibold)
     };
+    /// A card's title (the model download card's, `.oc-model-title`).
+    pub const CARD_HEADING: Role = role(14.0, Weight::Semibold);
+    /// A small line beside a title (`.oc-model-meta`), and its strong part.
+    pub const META: Role = role(11.0, Weight::Normal);
+    pub const META_STRONG: Role = role(11.0, Weight::Semibold);
     pub const BAR_PILL: Role = role(11.5, Weight::Medium);
     pub const CHAT: Role = role(13.0, Weight::Normal);
     /// A card's note and a toast's line (`.as-note`, `.oc-toast`).

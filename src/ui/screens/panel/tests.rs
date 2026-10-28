@@ -91,7 +91,8 @@ fn text_prompts_are_short_cards_on_small_screens() {
                 .style(move |_| iced::widget::container::Style::default().background(backdrop));
             let px = widgets::shot::save(&format!("text-{name}-{w}x{h}"), view.into(), size);
             let a = at(size);
-            let x = a.x + a.width * 0.9;
+            // near its left edge: the download card is narrower than the spot
+            let x = a.x + 10.0;
             let dark = |y: usize| {
                 px[((y * w as usize) + x as usize) * 4..][..3]
                     .iter()

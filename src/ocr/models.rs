@@ -268,6 +268,15 @@ pub fn download_size() -> u64 {
     missing_bytes(&ocr_files(current_recognizer()))
 }
 
+/// Bytes of the app's whole OCR download (every file, present or not): what
+/// `ensure_models`' progress counts to (the model download card's size).
+pub fn full_size() -> u64 {
+    ocr_files(current_recognizer())
+        .iter()
+        .map(|(_, f)| f.size)
+        .sum()
+}
+
 /// `ensure_models` for any list of pinned files (OCR's plus offline
 /// translation's: one download, one progress).
 pub(crate) fn ensure(
