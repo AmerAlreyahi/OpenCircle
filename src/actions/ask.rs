@@ -309,7 +309,7 @@ impl Chat {
         self.turns.push(Turn {
             question: question.into(),
             answer: String::new(),
-            screen: !png.is_empty(),
+            screen: new, // only the message that carries the picture gets its chip
             image: new.then(|| png.into()),
             thought: None,
             shot: None,
@@ -641,6 +641,13 @@ pub(crate) mod tests {
         let sent = chat.ask("And now?", b"png").unwrap();
         assert_eq!(sent.iter().filter(|m| m.image_png.is_some()).count(), 1);
         assert!(chat.turns[1].screen && chat.turns[1].thought.is_none());
+        chat.delta("A crop");
+        chat.finish(Ok(()));
+        // A follow-up on the same crop: the picture went already, so no chip
+        // (and History saves no "had an image" for it).
+        let sent = chat.ask("And then?", b"png").unwrap();
+        assert!(sent.last().unwrap().image_png.is_none());
+        assert!(!chat.turns[2].screen);
     }
 
     /// `n` answered turns ("Q i" / "A i"), the first with the picture.
