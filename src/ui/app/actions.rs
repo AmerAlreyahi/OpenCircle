@@ -27,8 +27,9 @@ impl App {
         let Some(crop) = self.crop() else {
             return Task::none();
         };
+        let hole = self.chat_hole();
         background(move |tx| {
-            let _ = tx.unbounded_send(qr::scan(&crop));
+            let _ = tx.unbounded_send(qr::scan_around(&crop, hole));
         })
         .map(move |scan| Message::Scanned(area, scan))
     }

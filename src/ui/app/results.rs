@@ -288,20 +288,40 @@ impl App {
         if let Some(edit) = &self.o.edit {
             return Some(edit.image());
         }
-        let (
-            Some(image::Handle::Rgba {
-                width,
-                height,
-                pixels,
-                ..
-            }),
-            Some(selection),
-        ) = (&self.o.frame, self.o.selection)
+        let Some(image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        }) = &self.o.frame
         else {
             return None;
         };
-        let all = (self.o.others.iter()).fold(selection.area, |all, (s, _)| all.union(&s.area));
-        actions::crop(pixels, *width, *height, self.o.scale, all)
+        actions::crop(pixels, *width, *height, self.o.scale, self.crop_area()?)
+    }
+
+    /// What `crop` cuts out (logical px): every selection's union.
+    pub(in crate::ui) fn crop_area(&self) -> Option<Rectangle> {
+        let selection = self.o.selection?;
+        Some((self.o.others.iter()).fold(selection.area, |all, (s, _)| all.union(&s.area)))
+    }
+
+    /// The pinned chat's spot on this frame (`Opening::chat_hole`) in the
+    /// selection's crop px, if the crop meets it (not on an edited capture).
+    pub(in crate::ui) fn chat_hole(&self) -> Option<[u32; 4]> {
+        let (Some(image::Handle::Rgba { width, height, .. }), None) = (&self.o.frame, &self.o.edit)
+        else {
+            return None;
+        };
+        let bounds = |r| actions::crop_bounds(*width, *height, self.o.scale, r);
+        let [cx, cy, ..] = bounds(self.crop_area()?)?;
+        let [x0, y0, x1, y1] = bounds(self.o.chat_hole?)?;
+        Some([
+            x0.saturating_sub(cx),
+            y0.saturating_sub(cy),
+            x1.saturating_sub(cx),
+            y1.saturating_sub(cy),
+        ])
     }
 
     /// Every selection's crop, in the order made, stacked top to bottom on white

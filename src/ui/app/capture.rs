@@ -123,6 +123,9 @@ impl App {
             ..Opening::default()
         });
         self.set_frame(shot.image, shot.scale, shot.origin, size);
+        self.o.chat_hole = (self.chat.as_ref())
+            .filter(|c| c.window.is_some())
+            .map(|c| iced::Rectangle::new(c.at - (shot.origin - Point::ORIGIN), c.size));
         self.o.helper = Some(Arc::new(ocr::hold()));
         self.o.ocr_ready = text::models_present();
         self.frame_times.borrow_mut().clear();

@@ -4153,3 +4153,61 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
     let _ = app.update(Message::Panel(id, panel::Msg::Pin));
     assert!(app.chat.is_none());
 }
+
+/// The pinned chat's window is kept out of captures: where it was, the frame
+/// may be black. That part is not judged; a black app elsewhere still is.
+#[test]
+fn the_pinned_chats_black_spot_is_no_protected_app() {
+    let (w, h) = (600u32, 360u32);
+    let chat = Rectangle::new(Point::new(400.0, 0.0), Size::new(200.0, 360.0));
+    let mut rgba = [90, 90, 90, 255].repeat((w * h) as usize);
+    for y in 0..h {
+        for x in 400..w {
+            rgba[((y * w + x) * 4) as usize..][..3].fill(0);
+        }
+    }
+    let frame = Crop {
+        width: w,
+        height: h,
+        rgba,
+    };
+    let (mut app, _) = selected_app(&frame);
+    app.o.chat_hole = Some(chat);
+    // a selection over the chat's black spot and a sliver of grey (98.5 %
+    // black): no pill
+    let area = Rectangle::new(Point::new(397.0, 50.0), Size::new(203.0, 200.0));
+    app.o.selection = Some(overlay::Selection {
+        area,
+        kind: overlay::Kind::Drag,
+    });
+    assert!(
+        qr::scan(&app.crop().unwrap()).protected,
+        "judged whole, it looks protected"
+    );
+    app.o.selection = Some(overlay::Selection {
+        area,
+        kind: overlay::Kind::Drag,
+    });
+    let scan = qr::scan_around(&app.crop().unwrap(), app.chat_hole());
+    assert!(!scan.protected, "only our own chat was there");
+    // wholly under it: judged as usual (black)
+    let area = Rectangle::new(Point::new(450.0, 50.0), Size::new(100.0, 100.0));
+    app.o.selection = Some(overlay::Selection {
+        area,
+        kind: overlay::Kind::Drag,
+    });
+    assert!(qr::scan_around(&app.crop().unwrap(), app.chat_hole()).protected);
+    // a real black window elsewhere still says so
+    let black = Crop {
+        width: w,
+        height: h,
+        rgba: [0, 0, 0, 255].repeat((w * h) as usize),
+    };
+    let (mut app, area) = selected_app(&black);
+    app.o.chat_hole = Some(chat);
+    let _ = app.update(Message::Scanned(
+        area,
+        qr::scan_around(&app.crop().unwrap(), app.chat_hole()),
+    ));
+    assert!(overlay_texts(&app).contains(&PROTECTED.to_string()));
+}

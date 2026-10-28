@@ -26,8 +26,16 @@ pub enum Act {
     Open,
 }
 
+#[cfg(test)]
 pub fn scan(crop: &Crop) -> Scan {
-    let protected = is_protected(crop);
+    scan_around(crop, None)
+}
+
+/// `scan`, not judging the pixels in `hole` (crop px, x0 y0 x1 y1): what our own
+/// pinned AI chat covered (its window is kept out of captures, so the OS may leave
+/// that part black). A crop lying wholly in the hole is judged as usual.
+pub fn scan_around(crop: &Crop, hole: Option<[u32; 4]>) -> Scan {
+    let protected = is_protected_around(crop, hole);
     Scan {
         // All black: nothing to decode, and the scan below would be wasted time.
         qr: if protected { None } else { decode(crop) },
@@ -36,16 +44,38 @@ pub fn scan(crop: &Crop) -> Scan {
 }
 
 /// Whether (almost) every pixel of `crop` is black.
+#[cfg(test)]
 pub fn is_protected(crop: &Crop) -> bool {
-    let pixels = crop.rgba.len() / 4;
-    let black = crop
-        .rgba
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .filter(|p| p[..3].iter().all(|&c| c <= BLACK))
-        .count();
-    pixels > 0 && black as f64 >= pixels as f64 * PROTECTED_SHARE
+    is_protected_around(crop, None)
+}
+
+/// `is_protected` over the pixels outside `hole` (all of them when none is).
+fn is_protected_around(crop: &Crop, hole: Option<[u32; 4]>) -> bool {
+    let w = crop.width.max(1) as usize;
+    let inside = |i: usize| {
+        hole.is_some_and(|[x0, y0, x1, y1]| {
+            let (x, y) = ((i % w) as u32, (i / w) as u32);
+            (x0..x1).contains(&x) && (y0..y1).contains(&y)
+        })
+    };
+    let pixels = crop.rgba.as_chunks::<4>().0;
+    let count = |skip: bool| {
+        let judged = pixels
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !(skip && inside(*i)));
+        let (mut all, mut black) = (0usize, 0usize);
+        for (_, p) in judged {
+            all += 1;
+            black += usize::from(p[..3].iter().all(|&c| c <= BLACK));
+        }
+        (all, black)
+    };
+    let (all, black) = match count(true) {
+        (0, _) => count(false), // only under the chat: as usual
+        counted => counted,
+    };
+    all > 0 && black as f64 >= all as f64 * PROTECTED_SHARE
 }
 
 /// The text of the first QR code in `crop` (dark code on a light ground).
@@ -198,6 +228,37 @@ pub(crate) mod tests {
             rgba: vec![0; 40],
         };
         assert_eq!(decode(&short), None);
+    }
+
+    #[test]
+    fn the_pinned_chats_hole_is_not_judged() {
+        // black everywhere but one grey column: protected, unless the black is
+        // where our chat was
+        let mut rgba = [0, 0, 0, 255].repeat(64 * 64);
+        for y in 0..64 {
+            rgba[(y * 64) * 4..][..3].fill(90);
+        }
+        let crop = Crop {
+            width: 64,
+            height: 64,
+            rgba,
+        };
+        let hole = Some([1, 0, 64, 64]);
+        assert!(is_protected_around(&crop, None), "98 % black");
+        assert!(
+            !is_protected_around(&crop, hole),
+            "the black is only our chat"
+        );
+        assert!(!scan_around(&crop, hole).protected);
+        let black = solid([0, 0, 0, 255], 64, 64);
+        assert!(
+            is_protected_around(&black, Some([32, 0, 64, 64])),
+            "a black app beside it"
+        );
+        assert!(
+            is_protected_around(&black, Some([0, 0, 64, 64])),
+            "wholly under it: as usual"
+        );
     }
 
     #[test]

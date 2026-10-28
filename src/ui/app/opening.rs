@@ -154,6 +154,9 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) card_drag: Option<(card::Drag, Option<Point>)>,
     /// The card held is the AI chat (it docks when let go).
     pub(in crate::ui) card_chat: bool,
+    /// Where the pinned chat's own window was when this frame was captured
+    /// (logical px): it is kept out of captures, so the frame may be black there.
+    pub(in crate::ui) chat_hole: Option<Rectangle>,
     /// The result card opening (`motion::WIDGET`): which panel, its motion,
     /// and how open it was at the latest frame (it grows from `OPEN_SCALE`).
     pub(in crate::ui) card_open: Option<(u32, motion::Shown, f32)>,
@@ -236,6 +239,7 @@ impl Default for Opening {
             work_inset: 0.0,
             card_drag: None,
             card_chat: false,
+            chat_hole: None,
             card_open: None,
             card_hover: false,
             chat_off: Vector::ZERO,
