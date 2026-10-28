@@ -18,7 +18,6 @@ use crate::music::{self};
 use crate::secrets::{KeyStore, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES};
 use crate::ui::kit::header::Caption;
-use crate::ui::kit::hero;
 use crate::ui::kit::motion;
 use crate::ui::theme;
 
@@ -1978,49 +1977,64 @@ fn appearance_and_look_match_their_golden_images() {
 
 // ---- feature previews (`previews`, `kit::hero`) ----
 
-/// A page's preview plays once from the visit, then rests on its last frame
-/// and the clock stops; Replay plays it again.
+/// `s`'s page with the fixture as its clips (no clip is bundled yet).
+fn with_clip(s: &mut State) {
+    s.play_clip(super::previews::player::TINY, Duration::ZERO);
+}
+
+/// Until the owner's clips exist, a preview is a quiet placeholder: no
+/// frame, no clock.
 #[test]
-fn a_preview_plays_once_then_rests_and_the_clock_stops() {
+fn a_preview_without_a_clip_is_a_placeholder_with_no_clock() {
     let (mut s, _) = state(None);
     moving_update(&mut s, Message::Section(Section::Translate));
     (s.moved, s.picked) = (None, None);
-    assert!(s.animating(), "playing");
-    assert!(s.preview_at() < 1.0);
-    // the preview's time has passed
-    s.played = Some(Instant::now() - hero::LENGTH - Duration::from_millis(10));
-    moving_update(&mut s, Message::Tick);
-    assert!(!s.animating(), "rests: no clock");
-    assert_eq!(s.preview_at(), hero::LENGTH.as_secs_f32());
+    assert!(s.players.is_empty() && !s.animating(), "nothing plays");
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Read it in place"), "{texts:?}");
-    moving_update(&mut s, Message::Replay);
-    assert!(s.animating(), "Replay plays again");
+    assert!(texts.iter().any(|t| t == "Preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Translate"), "{texts:?}");
     // a page without a preview starts no clock
-    let (mut s, _) = state(None);
     moving_update(&mut s, Message::Section(Section::Privacy));
     s.moved = None;
     assert!(!s.animating());
 }
 
-/// Reduced motion: the last frame at once, and no clock for it.
+/// A clip plays once from the visit, then rests on its last frame and the
+/// clock stops; Replay plays it again; leaving the page drops it.
 #[test]
-fn with_reduced_motion_a_preview_shows_its_last_frame() {
+fn a_preview_plays_once_then_rests_and_the_clock_stops() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    with_clip(&mut s);
+    assert!(s.animating(), "playing");
+    assert!(!shot::texts(view(&s)).iter().any(|t| t == "Preview"));
+    // the clip's time (1.5 s) has passed
+    s.played = Some(Instant::now() - Duration::from_millis(1600));
+    moving_update(&mut s, Message::Tick);
+    assert!(!s.animating(), "rests: no clock");
+    assert!(
+        s.players.iter().all(|(_, p)| !p.playing()),
+        "on its last frame"
+    );
+    assert_eq!(s.players.len(), 1, "the last frame stays shown");
+    // Replay: from the bundled clips again (none yet: the placeholder)
+    moving_update(&mut s, Message::Replay);
+    assert!(s.players.is_empty() && !s.animating());
+    with_clip(&mut s);
+    moving_update(&mut s, Message::Section(Section::General));
+    assert!(s.players.is_empty(), "left the page: freed");
+}
+
+/// Reduced motion: the first frame at once, and no clock for it.
+#[test]
+fn with_reduced_motion_a_preview_shows_its_first_frame() {
     motion::set_reduced(true);
     let (mut s, _) = state(None);
     moving_update(&mut s, Message::Section(Section::Ai));
+    with_clip(&mut s);
     s.moved = None;
     assert!(s.played.is_none() && !s.animating());
-    assert_eq!(s.preview_at(), hero::LENGTH.as_secs_f32());
-    let texts = shot::texts(view(&s));
-    assert!(
-        texts.iter().any(|t| t == "Keep the conversation going"),
-        "{texts:?}"
-    );
-    assert!(
-        texts.iter().any(|t| t.starts_with("The blue line")),
-        "{texts:?}"
-    );
+    assert!(s.players.iter().all(|(_, p)| !p.playing()));
     motion::set_reduced(false);
 }
 
@@ -2041,7 +2055,7 @@ fn hiding_a_preview_writes_its_key_and_showing_removes_it() {
     assert!(texts.iter().any(|t| t == "Show preview"), "{texts:?}");
     assert!(!texts.iter().any(|t| t == "5 s preview" || t == "Replay"));
     moving_update(&mut s, Message::Preview("ai", true));
-    assert!(s.animating(), "shown again: it plays");
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide preview"));
     update(&mut s, Message::Save);
     assert!(
         Config::load_from(&path)
@@ -2097,7 +2111,8 @@ fn with_labs(labs: Labs) -> State {
     s
 }
 
-/// Each page's previews on their last frame, in Sapphire and Daylight.
+/// Each page's previews (the placeholders until the clips exist), in
+/// Sapphire and Daylight.
 #[test]
 fn previews_last_frames_match_their_golden_images() {
     use crate::ui::kit::surface::{Material, surface};
@@ -2130,22 +2145,4 @@ fn previews_last_frames_match_their_golden_images() {
     }
     themes::set(&SAPPHIRE);
     assert!(failed.is_empty(), "{failed:#?}");
-}
-
-/// Every preview draws each of its steps (`OPENCIRCLE_RENDER_DIR` keeps the
-/// frames: a look at the motion without a window).
-#[test]
-fn every_preview_draws_each_step() {
-    use super::previews::HEROES;
-    for h in &HEROES {
-        for tenth in [5, 15, 22, 28, 35, 45] {
-            let at = tenth as f32 / 10.0;
-            let px = shot::save(
-                &format!("preview-{}-{tenth:02}", h.key),
-                (h.scene)(at),
-                Size::new(560.0, 90.0),
-            );
-            assert!(px.chunks(4).any(|p| p[3] > 0), "{} at {at}", h.key);
-        }
-    }
 }

@@ -38,7 +38,7 @@ tray-icon = "0.26"
 oar-ocr = { version = "0.10.1", default-features = false, features = ["simd"] }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic"] }
 # jpeg: Save as JPEG (already built for arboard / iced: no new crate).
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "webp"] }
 # Same version iced_tiny_skia already builds: the editor flattens annotations with it.
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 hmac-sha256 = "1.1"

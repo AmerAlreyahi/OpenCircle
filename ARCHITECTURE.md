@@ -148,13 +148,14 @@ beside it that composes kit parts (`setting_row`, `segmented`, `card`, …); a g
 `the_ported_pages_match_their_golden_images` (Sapphire + Daylight).
 
 **Add a feature preview** (the hero at the top of a feature's Settings page, only for a
-feature that ships; owner 2026-10-27): one `Hero` entry in
+feature that ships; owner 2026-10-27/28): one `Hero` entry in
 `ui/screens/settings/previews/mod.rs` `HEROES` (its page, `hidden_previews` key, title, line,
-optional Labs feature, shortcut, five step captions) and one scene file beside it: `scene(at)`
-draws the frame `at` seconds in (0..`kit::hero::LENGTH`) from kit parts (`kit::hero`'s
-`screen`, `ring`, `pill`, `mark`, …). It plays once per page visit (`State::played`, the clock
-runs only meanwhile: `State::animating`), then rests on its last frame (reduced motion: at
-once); a golden in `previews_last_frames_match_their_golden_images`.
+optional Labs feature, shortcut, clip name), the clip's name in `build.rs` `CLIPS`, and the
+owner's clip at `assets/previews/<clip>.webp` (spec: docs/previews.md; missing = the
+placeholder). `previews::player` decodes it frame by frame while it plays, once per page
+visit (`State::players`, `State::played`: the clock runs only meanwhile), then rests on the
+last frame with its decoder dropped (reduced motion: the first frame). Tests play
+`tests/fixtures/previews/tiny.webp` (`State::play_clip`).
 
 **Animate a widget**: keep its motion in `ui::kit::motion` terms: a `Shown` (open/close by
 `WIDGET` or `TOAST_PACE`) or the time it began plus a token (`OPEN`, `CLOSE`, `MORPH`,

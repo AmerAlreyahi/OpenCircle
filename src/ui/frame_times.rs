@@ -772,37 +772,58 @@ fn a_settings_page_switch_redraws_only_the_sidebar_glide() {
     }
 }
 
-/// A playing feature preview redraws only its stage (and the glide).
+/// The preview player's fixture clip (`scripts/make-preview-fixture.py`).
+const CLIP: &[u8] = include_bytes!("../../tests/fixtures/previews/tiny.webp");
+
+/// The settings page `section` with its previews playing the fixture clip,
+/// a frame of it (300 ms each) further at every drawn frame: their damage.
+fn clip_damage(section: settings::Section) -> Vec<Vec<Rectangle>> {
+    use settings::Message as M;
+    let mut s = settings_at(section);
+    std::thread::sleep(Duration::from_millis(250));
+    let _ = settings::update(&mut s, M::Tick); // the page's glide is over
+    let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+    let clip = CLIP;
+    let t = drawn(
+        &mut s,
+        settings::WINDOW_SIZE,
+        1.0,
+        settings_view,
+        4,
+        false,
+        |s, i, _| {
+            s.play_clip(clip, Duration::from_millis(300 * u64::from(i)));
+            let _ = settings::update(s, M::Tick);
+        },
+        still,
+    );
+    t.into_iter().skip(1).map(|d| d.damage).collect()
+}
+
+/// A playing feature preview redraws only its stage's clip.
 #[test]
 fn a_playing_preview_redraws_only_its_stage() {
-    let frames = switch_damage(settings::Section::Translate);
-    let band = |r: &Rectangle| r.y >= 150.0 && r.y + r.height <= 330.0;
-    // reaches past the sidebar (maybe joined with the glide, see below)
-    let stage = |r: &Rectangle| r.x + r.width > SIDEBAR_RIGHT && band(r);
-    assert!(frames.iter().flatten().any(stage), "the preview plays");
+    let frames = clip_damage(settings::Section::Ai);
+    // the clip's place: past the sidebar, under the preview's heading and
+    // above the page's rows
+    let stage = |r: &Rectangle| r.x > SIDEBAR_RIGHT && r.y >= 150.0 && r.y + r.height <= 460.0;
+    assert!(frames.iter().all(|d| !d.is_empty()), "the clip plays");
     for r in frames.iter().flatten() {
-        // the stage: under the preview's heading, above the page's rows
-        // damage::group joins the glide with the stage when their rows meet
-        // (the sidebar's row heights and page count differ per OS): such a
-        // union still lies inside the stage's band
-        let sidebar = r.x + r.width <= SIDEBAR_RIGHT;
-        assert!(
-            sidebar || band(r),
-            "{r:?} outside the sidebar and the stage"
-        );
+        assert!(stage(r), "{r:?} outside the stage");
     }
 }
 
-/// Replay on Translate's preview: the Arabic line at rest gives way to the
-/// English one; nothing of it stays on screen (its dots under the line did:
-/// a paragraph's damage was its bare box).
+/// Replay on a preview resting on its last frame: drawn over it, the first
+/// frame leaves nothing of the last on screen (as drawn whole).
 #[test]
 fn a_replayed_preview_leaves_no_ghost_of_its_last_frame() {
-    use settings::Message as M;
     let size = settings::WINDOW_SIZE;
     let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
-    motion::set_reduced(true);
-    let mut s = settings_at(settings::Section::Translate);
+    let clip = CLIP;
+    let mut s = settings_at(settings::Section::Ai);
+    // at rest on the last frame
+    s.play_clip(clip, Duration::from_secs(9));
+    let _ = settings::update(&mut s, settings::Message::Tick);
     let drawn_on = drawn(
         &mut s,
         size,
@@ -812,15 +833,11 @@ fn a_replayed_preview_leaves_no_ghost_of_its_last_frame() {
         true,
         |s, i, _| {
             if i == 1 {
-                motion::set_reduced(false);
-                let _ = settings::update(s, M::Replay);
+                s.play_clip(clip, Duration::ZERO);
             }
         },
         still,
     );
-    // the preview's clock is the wall clock: replayed again, the fresh draw
-    // shows the same step (a busy test run took over 1 s between the two
-    // draws: the caption had moved on to the next step)
     let fresh = drawn(
         &mut s,
         size,
@@ -828,41 +845,17 @@ fn a_replayed_preview_leaves_no_ghost_of_its_last_frame() {
         settings_view,
         1,
         true,
-        |s, i, _| {
-            if i == 0 {
-                let _ = settings::update(s, M::Replay);
-            }
-        },
+        |_, _, _| {},
         still,
     );
-    let (a, b) = (&drawn_on[0].rgba, &fresh[0].rgba);
-    // the page (the timeline moves between the two, the sidebar's highlight
-    // glides: left out)
+    let (a, b) = (&drawn_on.last().unwrap().rgba, &fresh.last().unwrap().rgba);
     let w = size.width as usize;
     let page = SIDEBAR_RIGHT as usize;
     let off = (0..size.height as usize)
-        .filter(|y| !(295..330).contains(y))
         .flat_map(|y| (page..w).map(move |x| (y * w + x) * 4))
-        // (a channel off by more than 24: glyphs' anti-aliasing may differ a
-        // little between a first and a later draw, as in the golden images)
         .filter(|&i| (a[i..i + 4].iter().zip(&b[i..i + 4])).any(|(x, y)| x.abs_diff(*y) > 24))
-        .collect::<Vec<_>>();
-    let xy: Vec<_> = off.iter().map(|i| (i / 4 % w, i / 4 / w)).collect();
-    let lo = xy
-        .iter()
-        .fold((9999, 9999), |m, p| (m.0.min(p.0), m.1.min(p.1)));
-    let hi = xy.iter().fold((0, 0), |m, p| (m.0.max(p.0), m.1.max(p.1)));
-    if let (false, Some(dir)) = (off.is_empty(), std::env::var_os("OPENCIRCLE_GOLDEN_OUT")) {
-        let dir = std::path::Path::new(&dir);
-        let (pw, ph) = (size.width as u32, size.height as u32);
-        let _ = crate::actions::write_png(&dir.join("ghost-incremental.png"), pw, ph, a);
-        let _ = crate::actions::write_png(&dir.join("ghost-fresh.png"), pw, ph, b);
-    }
-    assert!(
-        off.is_empty(),
-        "{} pixels left over from the last frame, {lo:?}..{hi:?}",
-        off.len()
-    );
+        .count();
+    assert_eq!(off, 0, "pixels left over from the last frame");
 }
 
 /// The onboarding window as drawn.

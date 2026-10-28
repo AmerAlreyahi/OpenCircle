@@ -32,7 +32,6 @@ use crate::music::{self, SERVICE, Service};
 use crate::secrets::{KeyStore, Keyring, Secret, SecretsError};
 use crate::translate::lang::{self, LANGUAGES, Language};
 use crate::ui::kit::header::Caption;
-use crate::ui::kit::hero;
 use crate::ui::kit::motion::{self, Curve};
 use crate::ui::kit::themes::THEMES;
 use crate::ui::kit::tokens::{size, space};
@@ -698,9 +697,12 @@ pub struct State {
     /// The last pick in a ported segmented control (its old value, and when):
     /// its thumb glides.
     pub(super) picked: Option<(Pick, Instant)>,
-    /// When the page's feature preview began playing (`previews`); `None` =
-    /// at rest on its last frame.
+    /// When the page's preview clips began playing (`previews`); `None` =
+    /// at rest (each on its last frame, or its first with reduced motion).
     pub(super) played: Option<Instant>,
+    /// The page's preview clips, by `hidden_previews` name: made at each
+    /// visit, dropped with the page (and with Settings).
+    pub(super) players: Vec<(&'static str, previews::player::Player)>,
 }
 
 /// A segmented control's value before a pick (`State::thumb`).
@@ -1017,6 +1019,7 @@ impl State {
             moved: None,
             picked: None,
             played: None,
+            players: Vec::new(),
         };
         s.revalidate();
         s
@@ -1410,8 +1413,12 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 hidden.push(key.to_string());
             }
             // a hidden preview stops; shown again, it plays from the start
-            if show || !previews::plays(state, state.section) {
-                state.play();
+            match show {
+                true => state.play(),
+                false => state.players.retain(|(k, _)| *k != key),
+            }
+            if !state.players.iter().any(|(_, p)| p.playing()) {
+                state.played = None;
             }
         }
         Message::Replay => state.play(),
@@ -1419,8 +1426,15 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             if state.saved_at.is_some_and(|t| t.elapsed() >= SAVED_FOR) {
                 state.saved_at = None;
             }
-            if state.played.is_some_and(|t| t.elapsed() >= hero::LENGTH) {
-                state.played = None;
+            if let Some(t) = state.played {
+                let at = t.elapsed();
+                let mut playing = false;
+                for (_, p) in &mut state.players {
+                    playing |= p.advance(at);
+                }
+                if !playing {
+                    state.played = None;
+                }
             }
             // the longest of them: the glide (the page rises in `MORPH`)
             if state
@@ -1635,20 +1649,28 @@ impl State {
             || self.played.is_some()
     }
 
-    /// The page's previews play from the start (none shown, or reduced
-    /// motion: they rest on their last frame, and the clock stays off).
-    fn play(&mut self) {
-        let plays = !motion::reduced() && previews::plays(self, self.section);
-        self.played = plays.then(Instant::now);
+    /// The page's previews playing `clip` as if they began `ago` (no clip is
+    /// bundled until the owner makes them).
+    #[cfg(test)]
+    pub fn play_clip(&mut self, clip: &'static [u8], ago: std::time::Duration) {
+        let still = motion::reduced();
+        let keys: Vec<_> = previews::on(self, self.section).map(|h| h.key).collect();
+        self.players = (keys.into_iter())
+            .filter_map(|k| Some((k, previews::player::Player::new(clip, still)?)))
+            .collect();
+        let plays = self.players.iter().any(|(_, p)| p.playing());
+        self.played = plays.then(|| Instant::now() - ago);
     }
 
-    /// Seconds into the page's previews (`hero::LENGTH` = the last frame).
-    pub(super) fn preview_at(&self) -> f32 {
-        let length = hero::LENGTH.as_secs_f32();
-        match self.played {
-            Some(t) if !motion::reduced() => t.elapsed().as_secs_f32().min(length),
-            _ => length,
-        }
+    /// The page's preview clips play from their first frame (reduced motion:
+    /// they stay there, and the clock stays off; none: the placeholder).
+    fn play(&mut self) {
+        let still = motion::reduced();
+        self.players = previews::clips(self, self.section)
+            .filter_map(|(key, clip)| Some((key, previews::player::Player::new(clip, still)?)))
+            .collect();
+        let plays = self.players.iter().any(|(_, p)| p.playing());
+        self.played = plays.then(Instant::now);
     }
 
     /// A ported segmented control's thumb: (where it glides from, how far),

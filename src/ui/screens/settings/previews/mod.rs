@@ -1,9 +1,10 @@
 //! Each feature's preview at the top of its Settings page (`settings-window.js`
 //! `featurePreviews`; owner, 2026-10-27: only features that ship today, a Labs
 //! one only while its switch is on). One list, `HEROES`; a new preview = one
-//! entry here + one scene file. A scene is drawn live from kit parts for the
-//! seconds into the preview (`kit::hero`): it plays once per page visit, then
-//! rests on its last frame (`State::preview_at`); the clock runs only meanwhile.
+//! entry here + its clip (owner, 2026-10-28: a real recording, made by the
+//! owner, `assets/previews/<clip>.webp`, docs/previews.md). A clip plays once
+//! per page visit (`player`), then rests on its last frame; the clock runs
+//! only meanwhile. No clip yet: a quiet placeholder.
 use iced::widget::column;
 use iced::{Element, Padding};
 
@@ -13,13 +14,7 @@ use crate::hotkey::QuickId;
 use crate::labs::Feature;
 use crate::ui::kit::hero::{self, hero};
 
-mod ai;
-mod circle;
-mod live;
-mod snip;
-mod song;
-mod text;
-mod translate;
+pub mod player;
 
 /// Under each preview (`margin-bottom: 12px`).
 const BELOW: f32 = 12.0;
@@ -34,10 +29,8 @@ pub struct Hero {
     pub lab: Option<Feature>,
     /// The feature's shortcut in `config` ("" = not set).
     pub shortcut: fn(&Config) -> &str,
-    /// The caption, one a second.
-    pub steps: [&'static str; 5],
-    /// The scene, `at` seconds in.
-    pub scene: fn(f32) -> Element<'static, Message>,
+    /// Its clip's name: `assets/previews/<clip>.webp`.
+    pub clip: &'static str,
 }
 
 /// In the design's order.
@@ -49,8 +42,7 @@ pub const HEROES: [Hero; 7] = [
         desc: "Circle anything and search in your browser.",
         lab: None,
         shortcut: capture,
-        steps: circle::STEPS,
-        scene: circle::scene,
+        clip: "circle",
     },
     Hero {
         page: Section::TextReading,
@@ -59,8 +51,7 @@ pub const HEROES: [Hero; 7] = [
         desc: "Select screen text and copy it into any app.",
         lab: None,
         shortcut: copy_text,
-        steps: text::STEPS,
-        scene: text::scene,
+        clip: "text",
     },
     Hero {
         page: Section::Translate,
@@ -69,8 +60,7 @@ pub const HEROES: [Hero; 7] = [
         desc: "Read your screen in your language, in place.",
         lab: None,
         shortcut: translate,
-        steps: translate::STEPS,
-        scene: translate::scene,
+        clip: "translate",
     },
     Hero {
         page: Section::Ai,
@@ -79,8 +69,7 @@ pub const HEROES: [Hero; 7] = [
         desc: "Ask a question about what is on your screen.",
         lab: None,
         shortcut: ask,
-        steps: ai::STEPS,
-        scene: ai::scene,
+        clip: "ai",
     },
     Hero {
         page: Section::Snip,
@@ -89,8 +78,7 @@ pub const HEROES: [Hero; 7] = [
         desc: "Capture, mark up and copy a picture.",
         lab: Some(Feature::Snip),
         shortcut: snip,
-        steps: snip::STEPS,
-        scene: snip::scene,
+        clip: "snip",
     },
     // Live translate has no page of its own: its rows are on Translate's.
     Hero {
@@ -100,8 +88,7 @@ pub const HEROES: [Hero; 7] = [
         desc: "Follow game and video dialogue in your language.",
         lab: Some(Feature::Live),
         shortcut: live,
-        steps: live::STEPS,
-        scene: live::scene,
+        clip: "live",
     },
     Hero {
         page: Section::Song,
@@ -110,8 +97,7 @@ pub const HEROES: [Hero; 7] = [
         desc: "Name a song playing on your PC or microphone.",
         lab: Some(Feature::Song),
         shortcut: song,
-        steps: song::STEPS,
-        scene: song::scene,
+        clip: "song",
     },
 ];
 
@@ -161,17 +147,19 @@ fn hidden(state: &State, h: &Hero) -> bool {
     (state.draft.appearance.hidden_previews.iter()).any(|k| k == h.key)
 }
 
-/// A preview on `page` is shown (so it plays).
-pub fn plays(state: &State, page: Section) -> bool {
-    on(state, page).any(|h| !hidden(state, h))
+/// The page's shown previews that have a clip: (its `hidden_previews` name,
+/// the clip).
+pub fn clips(state: &State, page: Section) -> impl Iterator<Item = (&'static str, &'static [u8])> {
+    (on(state, page).filter(|h| !hidden(state, h)))
+        .filter_map(|h| Some((h.key, player::clip(h.clip)?)))
 }
 
 /// The page's previews, `None` when it has none.
 pub fn view(state: &State) -> Option<Element<'_, Message>> {
-    let at = state.preview_at();
     let heroes: Vec<_> = on(state, state.section)
         .map(|h| {
             let shown = !hidden(state, h);
+            let frame = (state.players.iter()).find(|(k, _)| *k == h.key);
             hero(hero::Hero {
                 title: h.title,
                 desc: h.desc,
@@ -180,9 +168,7 @@ pub fn view(state: &State) -> Option<Element<'_, Message>> {
                 shown,
                 toggle: Message::Preview(h.key, !shown),
                 replay: Message::Replay,
-                at,
-                caption: h.steps[hero::step(at)],
-                scene: (h.scene)(at),
+                frame: frame.map(|(_, p)| p.frame().clone()),
             })
         })
         .collect();
