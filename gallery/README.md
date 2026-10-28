@@ -9,6 +9,15 @@ features are off. See the [v0.1.1 release notes](https://github.com/AmerAlreyahi
 
 ![OpenCircle banner](OpenCircleCoverIMG.png)
 
+### Short feature showcase
+
+[Watch or download the feature showcase (MP4)](clips/OpenCircle-v0.1.1-feature-showcase.mp4)
+— 42 seconds, 1.13 MB, with feature titles and smooth transitions. Circle to
+Search, select/copy text, offline translation, selection adjustment, and
+copy/save images. No installer, audio, or Labs features.
+
+### Individual clips
+
 | | |
 |---|---|
 | [![Circle anything, then choose Search](clips/clip-1-circle.webp)](../docs/features/circle-to-search.md)<br>[Circle anything, then choose Search](../docs/features/circle-to-search.md) ([MP4](clips/clip-1-circle.mp4)) | [![Select text. Copy. Paste.](clips/clip-2-text.webp)](../docs/features/select-text.md)<br>[Select text. Copy. Paste.](../docs/features/select-text.md) ([MP4](clips/clip-2-text.mp4)) |
