@@ -288,16 +288,7 @@ impl App {
         if let Some(edit) = &self.o.edit {
             return Some(edit.image());
         }
-        let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
-        else {
-            return None;
-        };
-        actions::crop(pixels, *width, *height, self.o.scale, self.crop_area()?)
+        self.crop_of(self.crop_area()?)
     }
 
     /// What `crop` cuts out (logical px): every selection's union.
@@ -333,20 +324,9 @@ impl App {
         if self.o.others.is_empty() || self.o.edit.is_some() {
             return self.crop();
         }
-        let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
-        else {
-            return None;
-        };
         let areas =
             (self.o.others.iter().map(|(s, _)| s.area)).chain(self.o.selection.map(|s| s.area));
-        let crops: Vec<Crop> = areas
-            .filter_map(|area| actions::crop(pixels, *width, *height, self.o.scale, area))
-            .collect();
+        let crops: Vec<Crop> = areas.filter_map(|area| self.crop_of(area)).collect();
         stack_crops(&crops)
     }
 

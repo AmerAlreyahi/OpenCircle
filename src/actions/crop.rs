@@ -117,10 +117,88 @@ pub fn stack_crops(crops: &[Crop]) -> Option<Crop> {
     })
 }
 
+/// A monitor's frozen frame for `stitch`: its origin (physical desktop px),
+/// width, height and RGBA.
+pub type Part<'a> = ((i32, i32), u32, u32, &'a [u8]);
+
+/// `area` (physical desktop px `[x0, y0, x1, y1]`, ends exclusive) cut out of
+/// every frame it meets, pixel for pixel: the desktop's physical px are one
+/// grid on every monitor whatever its scale, so nothing is resampled. Where no
+/// monitor is (screens offset), white, as between stacked crops. `None`: empty.
+pub fn stitch(frames: &[Part<'_>], area: [i32; 4]) -> Option<Crop> {
+    let [x0, y0, x1, y1] = area;
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let (width, height) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    let mut rgba = vec![255; width * height * 4];
+    for &((fx, fy), fw, fh, px) in frames {
+        let (fw, fh) = (fw as i32, fh as i32);
+        let (left, top) = (x0.max(fx), y0.max(fy));
+        let (right, bottom) = (x1.min(fx + fw), y1.min(fy + fh));
+        if right <= left || bottom <= top || px.len() < fw as usize * fh as usize * 4 {
+            continue;
+        }
+        let n = (right - left) as usize * 4;
+        for y in top..bottom {
+            let from = ((y - fy) as usize * fw as usize + (left - fx) as usize) * 4;
+            let to = ((y - y0) as usize * width + (left - x0) as usize) * 4;
+            rgba[to..to + n].copy_from_slice(&px[from..from + n]);
+        }
+    }
+    Some(Crop {
+        width: width as u32,
+        height: height as u32,
+        rgba,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use iced::{Point, Size};
+
+    /// A `w` x `h` frame of one colour.
+    fn plain(w: u32, h: u32, c: u8) -> Vec<u8> {
+        [c, c, c, 255].repeat((w * h) as usize)
+    }
+
+    /// The stitched crop as one letter per pixel: its colour's frame ('a' = 10,
+    /// 'b' = 20, ...), '.' = white.
+    fn letters(c: &Crop) -> Vec<String> {
+        let (px, _) = c.rgba.as_chunks::<4>();
+        (px.chunks(c.width as usize))
+            .map(|row| {
+                (row.iter())
+                    .map(|p| match p[0] {
+                        255 => '.',
+                        v => (b'a' + v / 10 - 1) as char,
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_crop_across_screens_is_stitched_pixel_for_pixel() {
+        // side by side: 4x2 'a' at the origin, 3x2 'b' right of it
+        let (a, b) = (plain(4, 2, 10), plain(3, 2, 20));
+        let side = [((0, 0), 4, 2, &a[..]), ((4, 0), 3, 2, &b[..])];
+        let c = stitch(&side, [2, 0, 6, 2]).unwrap();
+        assert_eq!(letters(&c), ["aabb", "aabb"]);
+        // stacked: 'b' under 'a'
+        let stacked = [((0, 0), 4, 2, &a[..]), ((0, 2), 3, 2, &b[..])];
+        let c = stitch(&stacked, [1, 1, 4, 3]).unwrap();
+        assert_eq!(letters(&c), ["aaa", "bb."]);
+        // offset, a screen of another scale left of and above the primary
+        // (its frame is in desktop px like any other: a 150 % screen is just
+        // more px); the gap between them white
+        let big = plain(3, 3, 30);
+        let offset = [((0, 0), 4, 2, &a[..]), ((-3, -2), 3, 3, &big[..])];
+        let c = stitch(&offset, [-2, -1, 2, 2]).unwrap();
+        assert_eq!(letters(&c), ["cc..", "ccaa", "..aa"]);
+        assert!(stitch(&side, [3, 0, 3, 2]).is_none());
+    }
 
     /// 4x3 frame, pixel (x, y) = [x, y, 0, 255].
     fn frame() -> Vec<u8> {

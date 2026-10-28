@@ -14,6 +14,7 @@ use crate::ui::screens::editor::Editing;
 use crate::ui::{overlay, snip, translate};
 
 use super::App;
+use super::screens::keep_on;
 
 impl App {
     pub(in crate::ui) fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {
@@ -261,7 +262,7 @@ impl App {
                 self.o.drawing = false;
                 let mut settle = Task::none();
                 let zoom = self.o.view.zoom();
-                let mut settled = overlay::settle(&self.o.stroke, zoom, self.o.screen);
+                let mut settled = self.settle_on_desk(zoom);
                 // Snap: the stroke becomes a rounded box (it morphs there).
                 if let Some((sel, kept)) = &mut settled
                     && self.snaps()
@@ -443,6 +444,7 @@ impl App {
     /// else becomes that box.
     pub(in crate::ui) fn drag_grab(&mut self, p: Point) {
         let o = &mut *self.o;
+        let desk = o.desk();
         let Some(grab) = &mut o.grab else { return };
         let zoom = o.view.zoom();
         grab.moved |= !overlay::is_tap(&[grab.from, p], zoom);
@@ -454,8 +456,8 @@ impl App {
         let delta = p - grab.from;
         let on = |to: Point| {
             Point::new(
-                to.x.clamp(0.0, o.screen.width),
-                to.y.clamp(0.0, o.screen.height),
+                to.x.clamp(desk.x, desk.x + desk.width),
+                to.y.clamp(desk.y, desk.y + desk.height),
             )
         };
         let area = match grab.grip {
@@ -473,7 +475,7 @@ impl App {
                 on(overlay::corner(start.area, e) + delta),
                 min,
             ),
-            None => overlay::keep_inside(start.area + delta, o.screen),
+            None => keep_on(desk, start.area + delta),
         };
         let kind = match start.kind {
             overlay::Kind::Loop | overlay::Kind::Scribble | overlay::Kind::Snap => start.kind,
@@ -499,17 +501,18 @@ impl App {
         let by = Vector::new(dx as f32 * one.x, dy as f32 * one.y) * if big { 10.0 } else { 1.0 };
         let min = overlay::MIN_SIDE / self.o.view.zoom();
         let a = sel.area;
+        let desk = self.o.desk();
         let area = if resize {
             let fit = |len: f32, at: f32, max: f32| (len).min(max - at).max(min);
             Rectangle::new(
                 a.position(),
                 Size::new(
-                    fit(a.width + by.x, a.x, self.o.screen.width),
-                    fit(a.height + by.y, a.y, self.o.screen.height),
+                    fit(a.width + by.x, a.x, desk.x + desk.width),
+                    fit(a.height + by.y, a.y, desk.y + desk.height),
                 ),
             )
         } else {
-            overlay::keep_inside(a + by, self.o.screen)
+            keep_on(desk, a + by)
         };
         self.o.morph = None;
         self.o.panel = None;

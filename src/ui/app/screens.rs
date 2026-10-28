@@ -17,9 +17,11 @@ use iced::widget::{canvas, image, stack};
 use iced::window::{self, Mode};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
+use crate::actions::{self, Crop};
 use crate::config;
 use crate::ui::app::capture::overlay_window;
 use crate::ui::app::message::{Message, Purpose};
+use crate::ui::app::opening::Opening;
 use crate::ui::app::word;
 use crate::ui::platform::monitor::{Place, place_window};
 use crate::ui::{overlay, windows};
@@ -61,7 +63,6 @@ impl Screen {
 }
 
 /// A point in the starting screen's image px (`start`) in desktop physical px.
-#[cfg_attr(not(test), allow(dead_code))] // (41d)
 pub(in crate::ui) fn to_desktop(start: Place, u: Point) -> Point {
     Point::new(
         start.origin.0 as f32 + u.x * start.scale,
@@ -70,7 +71,6 @@ pub(in crate::ui) fn to_desktop(start: Place, u: Point) -> Point {
 }
 
 /// A desktop physical px point in the starting screen's image px.
-#[cfg_attr(not(test), allow(dead_code))] // (41d)
 pub(in crate::ui) fn from_desktop(start: Place, d: Point) -> Point {
     Point::new(
         (d.x - start.origin.0 as f32) / start.scale,
@@ -79,7 +79,6 @@ pub(in crate::ui) fn from_desktop(start: Place, d: Point) -> Point {
 }
 
 /// The monitor at `place` in the starting screen's image px.
-#[cfg_attr(not(test), allow(dead_code))] // (41d)
 pub(in crate::ui) fn area_of(start: Place, place: Place) -> Rectangle {
     let at = from_desktop(
         start,
@@ -103,6 +102,33 @@ pub(in crate::ui) fn view_of(start: Place, place: Place) -> overlay::View {
     overlay::View::mapped(place.size(), k, at)
 }
 
+impl Opening {
+    /// The starting screen in physical desktop px.
+    pub(in crate::ui) fn place(&self) -> Place {
+        let px = |v: f32| (v * self.scale).round();
+        Place {
+            origin: (px(self.origin.x) as i32, px(self.origin.y) as i32),
+            px: (px(self.screen.width) as u32, px(self.screen.height) as u32),
+            scale: self.scale,
+        }
+    }
+
+    /// Where a selection may go (image px): the starting screen, or the box
+    /// round every screen (a stroke, box or text drag crosses between them).
+    pub(in crate::ui) fn desk(&self) -> Rectangle {
+        let start = self.place();
+        (self.screens.iter()).fold(Rectangle::with_size(self.screen), |all, s| {
+            all.union(&area_of(start, s.place))
+        })
+    }
+}
+
+/// `area` slid back inside `desk` (`overlay::keep_inside`, which keeps to a box at 0, 0).
+pub(in crate::ui) fn keep_on(desk: Rectangle, area: Rectangle) -> Rectangle {
+    let at = Vector::new(desk.x, desk.y);
+    overlay::keep_inside(area - at, desk.size()) + at
+}
+
 /// Closing: every other monitor's window goes at once (cleared now, so no
 /// frame of it shows while it closes). Their frames go with the opening.
 // ponytail: opened and closed per opening, no pool of hidden windows; add one
@@ -116,6 +142,73 @@ pub(in crate::ui) fn close_all<T: Send + 'static>(screens: &[Screen]) -> Task<T>
 }
 
 impl App {
+    /// `area` (image px) cut out of the frozen frames: the starting screen's
+    /// alone, as with one screen, unless it reaches another screen; then
+    /// stitched from every frame it meets in desktop px (`actions::stitch`), at
+    /// each screen's own pixels: one image whose text reads in order across.
+    pub(in crate::ui) fn crop_of(&self, area: Rectangle) -> Option<Crop> {
+        let Some(image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        }) = &self.o.frame
+        else {
+            return None;
+        };
+        let start = self.o.place();
+        let meets = |s: &&Screen| {
+            (area_of(start, s.place).intersection(&area)).is_some_and(|r| r.width * r.height > 0.0)
+        };
+        if !self.o.screens.iter().any(|s| meets(&s)) {
+            return actions::crop(pixels, *width, *height, self.o.scale, area);
+        }
+        // the edges round outwards, as `crop` does (past a mapping's float
+        // error), kept on the screens
+        let desk = self.o.desk().intersection(&area)?;
+        let a = to_desktop(start, desk.position());
+        let b = to_desktop(start, desk.position() + Vector::from(desk.size()));
+        let (down, up) = (
+            |v: f32| (v + 0.01).floor() as i32,
+            |v: f32| (v - 0.01).ceil() as i32,
+        );
+        let bounds = [down(a.x), down(a.y), up(b.x), up(b.y)];
+        fn part(at: (i32, i32), frame: &image::Handle) -> Option<actions::crop::Part<'_>> {
+            match frame {
+                image::Handle::Rgba {
+                    width,
+                    height,
+                    pixels,
+                    ..
+                } => Some((at, *width, *height, &pixels[..])),
+                _ => None,
+            }
+        }
+        let others = (self.o.screens.iter().filter(meets)).map(|s| part(s.place.origin, &s.frame));
+        let parts: Vec<_> = (std::iter::once(Some((start.origin, *width, *height, &pixels[..]))))
+            .chain(others)
+            .flatten()
+            .collect();
+        actions::stitch(&parts, bounds)
+    }
+
+    /// `overlay::settle` on the desk (`Opening::desk`): a scribble's hull is
+    /// kept to the screens, not to the starting one.
+    pub(in crate::ui) fn settle_on_desk(
+        &self,
+        zoom: f32,
+    ) -> Option<(overlay::Selection, Vec<Point>)> {
+        let desk = self.o.desk();
+        let at = Vector::new(desk.x, desk.y);
+        let stroke: Vec<Point> = self.o.stroke.iter().map(|&p| p - at).collect();
+        let (sel, kept) = overlay::settle(&stroke, zoom, desk.size())?;
+        let sel = overlay::Selection {
+            area: sel.area + at,
+            ..sel
+        };
+        Some((sel, kept.into_iter().map(|p| p + at).collect()))
+    }
+
     /// Another monitor's frame of capture `n` landed: its window opens over it
     /// (no focus: the keys stay with the starting screen). Dropped when it is
     /// late (closed, another capture's) or this opening isn't Circle to Search.
@@ -294,6 +387,65 @@ mod tests {
         let rgba = shot::render(app.view(app.overlay), 640, 400);
         let (pixels, _) = rgba.as_chunks::<4>();
         assert!(pixels.iter().any(|p| *p != pixels[320 * 640 + 200]));
+    }
+
+    /// The crop's pixels as runs of one grey: (grey, how many) per row.
+    fn runs(c: &Crop) -> Vec<Vec<(u8, u32)>> {
+        let (px, _) = c.rgba.as_chunks::<4>();
+        (px.chunks(c.width as usize))
+            .map(|row| {
+                let mut out: Vec<(u8, u32)> = Vec::new();
+                for p in row {
+                    match out.last_mut() {
+                        Some((g, n)) if *g == p[0] => *n += 1,
+                        _ => out.push((p[0], 1)),
+                    }
+                }
+                out
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_box_drawn_across_screens_is_one_crop_of_both() {
+        use overlay::Event::{Move, Press, Release};
+        let (mut app, n) = opened();
+        // right of it, a screen at 150 % (320 x 200 logical px)
+        let right = place((640, 0), (480, 300), 1.5);
+        let _ = app.update(Message::Screen(n, right, solid(right, 90)));
+        let id = app.o.screens[0].window;
+        // From the starting screen onto the other (its window keeps the
+        // pointer: the points go on past its edge).
+        let press = |at: Point| Press { at, shift: false };
+        for event in [
+            press(Point::new(600.0, 100.0)),
+            Move(Point::new(700.0, 150.0)),
+        ] {
+            let _ = app.update(Message::Overlay(event));
+        }
+        let _ = app.update(Message::Overlay(Release));
+        let crop = app.crop().expect("a crop");
+        assert_eq!((crop.width, crop.height), (100, 50));
+        assert!(runs(&crop).iter().all(|r| *r == [(200, 40), (90, 60)]));
+        // From the other screen (its logical px) back onto the starting one:
+        // desktop px (700, 30) to (600, 90).
+        let local = |x: f32, y: f32| Point::new((x - 640.0) / 1.5, y / 1.5);
+        for event in [press(local(700.0, 30.0)), Move(local(600.0, 90.0)), Release] {
+            let _ = app.update(Message::ScreenEvent(id, event));
+        }
+        let area = app.o.selection.expect("selected").area;
+        assert!(
+            (area.x - 600.0).abs() < 0.01 && (area.y - 30.0).abs() < 0.01,
+            "{area:?}"
+        );
+        let crop = app.crop().expect("a crop");
+        assert_eq!((crop.width, crop.height), (100, 60));
+        assert!(runs(&crop).iter().all(|r| *r == [(200, 40), (90, 60)]));
+        // a box moved onto the other screen stays there (the desk, not the start)
+        let desk = app.o.desk();
+        assert_eq!((desk.width, desk.height), (1120.0, 400.0)); // 640 + 480 px
+        let moved = keep_on(desk, Rectangle::new(Point::new(1100.0, 10.0), area.size()));
+        assert!((moved.x + area.width - 1120.0).abs() < 0.01, "{moved:?}");
     }
 
     #[test]

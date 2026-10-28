@@ -245,15 +245,7 @@ impl App {
 
     /// The shown monitor in physical desktop px.
     pub(in crate::ui) fn place(&self) -> snip::Place {
-        let px = |v: f32| (v * self.o.scale).round();
-        snip::Place {
-            origin: (px(self.o.origin.x) as i32, px(self.o.origin.y) as i32),
-            px: (
-                px(self.o.screen.width) as u32,
-                px(self.o.screen.height) as u32,
-            ),
-            scale: self.o.scale,
-        }
+        self.o.place()
     }
 
     /// Shows the (hidden or pill-sized) window over the whole monitor, or opens

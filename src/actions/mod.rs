@@ -82,7 +82,7 @@ pub fn default_for(cfg: &crate::config::Config) -> &'static Action {
     ACTIONS.iter().find(|a| a.id == id).unwrap_or(&ACTIONS[0])
 }
 
-pub use crop::{Crop, crop, crop_bounds, encode, fit_long_edge, stack_crops};
+pub use crop::{Crop, crop, crop_bounds, encode, fit_long_edge, stack_crops, stitch};
 
 /// Writes an RGBA image as an 8-bit PNG.
 pub fn write_png(
