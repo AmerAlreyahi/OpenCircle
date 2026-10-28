@@ -366,7 +366,8 @@ pub(crate) fn same_look(a: &core::Image, b: &core::Image) -> bool {
 /// vertically centred text sits half a line higher), so when the text changed
 /// the part above the anchor kept the old glyphs on screen (ghost text in
 /// every `pick_list`). A quarter of the font size wider on every side: glyphs
-/// overhang their box (a "J" reaches left of its origin, accents above).
+/// overhang their box (a "J" reaches left of its origin, accents above);
+/// a paragraph's too (below).
 fn drawn_bounds(text: &Text) -> Option<Rectangle> {
     use crate::core::{alignment::Vertical, text::Alignment};
     let Text::Cached {
@@ -378,7 +379,22 @@ fn drawn_bounds(text: &Text) -> Option<Rectangle> {
         ..
     } = text
     else {
-        return text.visible_bounds();
+        // A paragraph's `min_bounds` is its advance box: a glyph overhangs it
+        // too (the "J" of a dropdown's value at 150 % left a stale column), by
+        // up to a quarter of the line height.
+        return match text {
+            Text::Paragraph {
+                position,
+                paragraph,
+                clip_bounds,
+                transformation,
+                ..
+            } => Rectangle::new(*position, paragraph.min_bounds)
+                .expand(paragraph.min_bounds.height / 4.0)
+                .intersection(clip_bounds)
+                .map(|bounds| bounds * *transformation),
+            _ => text.visible_bounds(),
+        };
     };
     let x = match align_x {
         Alignment::Center => bounds.x - bounds.width / 2.0,
