@@ -59,6 +59,7 @@ impl App {
                     self.o.view = self.o.view.panned(iced::Vector::ZERO);
                 }
                 self.o.pan = self.can_zoom().then_some((at, self.o.view));
+                self.frame_times.borrow_mut().clear(); // the log's "pan" line
                 return Task::none();
             }
             overlay::Event::PanMove(at) => {
@@ -69,7 +70,9 @@ impl App {
             }
             // drawn with its usual filter again (`App::view_moving`)
             overlay::Event::PanEnd => {
-                self.o.pan = None;
+                if self.o.pan.take().is_some() {
+                    self.log_frames("pan");
+                }
                 return Task::none();
             }
             overlay::Event::ZoomReset => {
