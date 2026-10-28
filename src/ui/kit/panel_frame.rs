@@ -1,7 +1,9 @@
 //! A floating card (the design's `.as-card` on `.oc-widget`: the update card,
 //! later the model download and error cards): a heading (an accent icon and
 //! a 16 px title; pressing it drags the window), a body that scrolls when it
-//! is long, and an actions row. Fills its window, padding 22.
+//! is long, and an actions row (a call to action's height). Fills its window,
+//! padding 22; `height` sizes the window to its body (`.as-card` grows with
+//! its content).
 use iced::widget::{column, container, mouse_area, row, scrollable};
 use iced::{Border, Center, Element, Fill};
 
@@ -16,9 +18,22 @@ const PAD: f32 = 22.0;
 const UNDER_HEADING: f32 = 14.0;
 const ABOVE_ACTIONS: f32 = 18.0;
 const ICON: f32 = 20.0;
+/// The heading row (the 20 px icon, the 16 px title).
+const HEADING: f32 = 24.0;
+/// The card's width (`.as-card`: `min(100%, 480px)`).
+pub const WIDTH: f32 = 480.0;
 const ICON_GAP: f32 = 10.0;
 /// The scroller: 4 px, no rail.
 const SCROLLER: f32 = 4.0;
+
+/// The body's width (to wrap its text at).
+pub const BODY_WIDTH: f32 = WIDTH - 2.0 * PAD;
+
+/// The card's height for a body `body` px tall, at most `max` (then the body scrolls).
+pub fn height(body: f32, max: f32) -> f32 {
+    let chrome = 2.0 * PAD + HEADING + UNDER_HEADING + ABOVE_ACTIONS + super::tokens::size::CTA_H;
+    (chrome + body).ceil().min(max)
+}
 
 /// The card with corners of `radius` (the window's cut).
 pub fn frame<'a, Message: Clone + 'a>(
@@ -34,6 +49,7 @@ pub fn frame<'a, Message: Clone + 'a>(
         text(Role::PAGE_TITLE, title)
     ]
     .spacing(ICON_GAP)
+    .height(HEADING)
     .align_y(Center);
     let heading = mouse_area(container(heading).width(Fill).padding(iced::Padding {
         bottom: UNDER_HEADING,

@@ -103,6 +103,16 @@ pub fn mono(weight: Weight) -> Font {
 
 /// How wide `s` is on one line at `size` px in `font`.
 pub fn width(s: &str, size: f32, font: Font) -> f32 {
+    laid_out(s, size, font, None).1
+}
+
+/// How many lines `s` takes at `size` px in `font`, wrapped at `wrap` px.
+pub fn lines(s: &str, size: f32, font: Font, wrap: f32) -> usize {
+    laid_out(s, size, font, Some(wrap)).0
+}
+
+/// `s` laid out (wrapped at `wrap`, else on one line): its line count and widest line.
+fn laid_out(s: &str, size: f32, font: Font, wrap: Option<f32>) -> (usize, f32) {
     use iced::advanced::graphics::text::cosmic_text::{
         Attrs, Buffer, Family, Metrics, Shaping, Weight as W,
     };
@@ -127,11 +137,11 @@ pub fn width(s: &str, size: f32, font: Font) -> f32 {
         .expect("font system");
     let fs = fonts.raw();
     let mut buf = Buffer::new(fs, Metrics::new(size, size * 1.5));
-    buf.set_size(fs, None, None);
+    buf.set_size(fs, wrap, None);
     let attrs = Attrs::new().family(family).weight(W(weight));
     buf.set_text(fs, s, &attrs, Shaping::Advanced, None);
     buf.shape_until_scroll(fs, false);
-    buf.layout_runs().map(|r| r.line_w).fold(0.0, f32::max)
+    (buf.layout_runs()).fold((0, 0.0), |(n, w), r| (n + 1, f32::max(w, r.line_w)))
 }
 
 /// The font of `role`.
@@ -155,6 +165,9 @@ pub fn text<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
         .font(font(role))
         .color(colour)
 }
+
+/// The line height of `linked` text (times its size).
+pub const LINKED_LINE: f32 = 1.65;
 
 /// Text with links, in `role`: `parts` are (text, link); a link is the
 /// accent, underlined, and reaches `on_link` only when clicked. `sub` = the
@@ -180,7 +193,7 @@ pub fn linked<'a, Message: 'a>(
     rich_text(spans)
         .size(role.size)
         .font(font(role))
-        .line_height(1.65)
+        .line_height(LINKED_LINE)
         .on_link_click(on_link)
         .into()
 }

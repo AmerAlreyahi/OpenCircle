@@ -7,13 +7,13 @@ use iced::{Center, Element, Size};
 
 use crate::ui::kit::button::{Kind, button, cta_label, label};
 use crate::ui::kit::icon::Icon;
-use crate::ui::kit::panel_frame::frame;
-use crate::ui::kit::text::linked;
+use crate::ui::kit::panel_frame::{BODY_WIDTH, WIDTH, frame, height};
+use crate::ui::kit::text::{LINKED_LINE, font, lines, linked, width};
 use crate::ui::kit::tokens::{Role, radius, space};
 use crate::update::{NoteKind, NoteLine, parse_notes};
 
-/// The card's window (logical px).
-pub const SIZE: Size = Size::new(460.0, 440.0);
+/// The tallest the card grows (logical px); longer notes scroll.
+const MAX_HEIGHT: f32 = 440.0;
 /// The corners the window is cut to (`.as-card`).
 pub const RADIUS: f32 = radius::DRAWER;
 /// Between the notes' lines, and between the call to action and "Later".
@@ -65,6 +65,24 @@ impl Card {
             url: url.to_string(),
             installed,
         }
+    }
+
+    /// The card's window (logical px): as tall as its notes, up to `MAX_HEIGHT`.
+    pub fn size(&self) -> Size {
+        let bullet = width("•", Role::NOTE.size, font(Role::NOTE)) + LINE_GAP;
+        let notes: f32 = (self.lines.iter())
+            .map(|line| {
+                let (role, wrap) = match line.kind {
+                    NoteKind::Heading => (Role::ROW_TITLE, BODY_WIDTH),
+                    NoteKind::Text => (Role::NOTE, BODY_WIDTH),
+                    NoteKind::Bullet => (Role::NOTE, BODY_WIDTH - bullet),
+                };
+                let text: String = line.spans.iter().map(|s| s.text.as_str()).collect();
+                let n = lines(&text, role.size, font(role), wrap).max(1);
+                n as f32 * role.size * LINKED_LINE + LINE_GAP
+            })
+            .sum();
+        Size::new(WIDTH, height(notes, MAX_HEIGHT))
     }
 }
 
@@ -146,11 +164,30 @@ mod tests {
     #[test]
     fn its_buttons_close_open_the_page_and_drag() {
         let c = Card::available("9.9.9", NOTES, "https://e.x/r");
-        let at = |x: f32, y: f32| shot::click(view(&c, RADIUS), SIZE, iced::Point::new(x, y));
+        let size = c.size();
+        let at = |x: f32, y: f32| shot::click(view(&c, RADIUS), size, iced::Point::new(x, y));
         assert!(matches!(at(100.0, 34.0)[..], [Msg::Drag]));
-        let bottom = SIZE.height - 22.0 - 22.0;
+        let bottom = size.height - 22.0 - 22.0;
         assert!(matches!(at(150.0, bottom)[..], [Msg::Page]));
-        assert!(matches!(at(SIZE.width - 40.0, bottom)[..], [Msg::Close]));
+        assert!(matches!(at(size.width - 40.0, bottom)[..], [Msg::Close]));
+    }
+
+    /// The card is as tall as its notes (no empty space under them): every
+    /// note line adds its height; long notes stop at `MAX_HEIGHT` and scroll.
+    #[test]
+    fn the_card_grows_with_its_notes() {
+        let short = Card::available("9.9.9", NOTES, "https://e.x/r").size();
+        let one = Card::available("9.9.9", "One line.", "https://e.x/r").size();
+        assert_eq!(short.width, 480.0);
+        // header 24 + 14, actions 18 + 44, padding 2 x 22: 144 px around the notes
+        assert!(one.height < 144.0 + 30.0, "{one:?}");
+        // three more lines (heading, two bullets) of about 20-21 px + gaps
+        let grew = short.height - one.height;
+        assert!((70.0..100.0).contains(&grew), "{short:?} {one:?}");
+        let long =
+            "- a note that is long enough to wrap onto a second line in the card\n".repeat(30);
+        let long = Card::available("9.9.9", &long, "https://e.x/r").size();
+        assert_eq!(long.height, MAX_HEIGHT);
     }
 
     /// Both states in Sapphire and Daylight.
@@ -170,7 +207,8 @@ mod tests {
                 ),
             ] {
                 let file = format!("update-card-{name}-{}", theme.id);
-                failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                // the golden's height is the content's: a card taller than its notes fails
+                failed.extend(golden::check("screens", &file, c.size(), &[1.0], || {
                     view(&c, RADIUS)
                 }));
             }

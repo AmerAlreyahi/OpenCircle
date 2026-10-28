@@ -345,13 +345,14 @@ impl Windows {
 
     /// The update card (release notes) with `card`; replaces an open one's content.
     pub fn update_card(&mut self, card: update_card::Card) -> Task<Msg> {
-        if let Some((_, open)) = &mut self.update_card {
+        let size = card.size();
+        if let Some((id, open)) = &mut self.update_card {
             *open = card;
-            return Task::none();
+            return window::resize(*id, size);
         }
         let (id, open) = floating(
             window::Settings {
-                size: update_card::SIZE,
+                size,
                 position: Position::Centered,
                 resizable: false,
                 ..window::Settings::default()
