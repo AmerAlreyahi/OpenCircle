@@ -311,19 +311,12 @@ pub fn link_chip<'a, Message: Clone + 'a>(
 }
 
 /// One acting chip floating beside a selection (a link's Open, Select text):
-/// `chip::action` on the bar's surface, the bar's height.
+/// one `chip::floating` pill, the bar's height.
 pub fn action_chip<'a, Message: Clone + 'a>(
     label: String,
     on_press: Message,
 ) -> Element<'a, Message> {
-    surface(
-        Material::Widget,
-        radius::WINDOW,
-        container(chip::action(label, on_press)).center_y(iced::Fill),
-    )
-    .height(bar::HEIGHT)
-    .padding([0.0, bar::QR_PAD])
-    .into()
+    chip::floating(label, on_press, bar::HEIGHT, bar::QR_PAD)
 }
 
 #[cfg(test)]
@@ -409,6 +402,23 @@ mod tests {
     }
 
     /// The link and email chips beside a selection, in both themes.
+    /// A floating chip is ONE pill: down its middle from the top, one edge
+    /// and then its fill (a pill inside a frame crosses two edges).
+    #[test]
+    fn a_floating_chip_draws_one_outline() {
+        let (w, h) = (200u32, bar::HEIGHT as u32);
+        let chip = container(action_chip("Select text".into(), ())).center(iced::Fill);
+        let px = crate::ui::kit::testing::shot::render(chip.into(), w, h);
+        let at = |y: u32| &px[((y * w + w / 2) * 4) as usize..][..3];
+        let mut edges = 0;
+        for y in 1..h / 2 - 6 {
+            if at(y).iter().zip(at(y - 1)).any(|(a, b)| a.abs_diff(*b) > 8) {
+                edges += 1;
+            }
+        }
+        assert_eq!(edges, 1, "{edges} changes: a frame around the pill");
+    }
+
     #[test]
     fn link_chips_match_their_golden_images() {
         use crate::actions::entities::{Entity, Kind};
