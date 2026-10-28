@@ -862,7 +862,7 @@ fn dropdown_sheet() {
             dropdown(&LATIN, None, s(ar, "Choose", "اختر"), |_| ())
         }),
     ];
-    sheet("dropdown", Size::new(222.0, 48.0), &rows);
+    sheet("dropdown", Size::new(332.0, 48.0), &rows);
 }
 
 #[test]

@@ -7,7 +7,7 @@
 //! direction (cosmic-text bidi); the layout stays left to right.
 use iced::font::Weight;
 use iced::widget::markdown::{self, HeadingLevel, Item, Settings, Style, Text, Viewer};
-use iced::widget::{column, container, rich_text, row, scrollable, text};
+use iced::widget::{column, container, rich_text, row, text};
 use iced::{Border, Element, Fill, Padding, Pixels};
 
 use super::button::{Kind, button, label};
@@ -36,7 +36,6 @@ const HEADINGS: [f32; 3] = [17.0, 15.0, 13.5];
 /// Inline code's padding (`px-1.5 py-0.5`, laid on the line's height).
 const INLINE_X: f32 = 3.0;
 const INLINE_RADIUS: f32 = 4.0;
-const SCROLLER: f32 = 4.0;
 
 fn settings() -> Settings {
     let size = Pixels(Role::CHAT.size);
@@ -135,17 +134,7 @@ impl<'a> Viewer<'a, Act> for Answer {
                 .color(ink)
                 .into()
         }));
-        let bar = scrollable::Scrollbar::new()
-            .width(SCROLLER)
-            .scroller_width(SCROLLER);
-        let code = scrollable(container(code).padding(CODE_PAD))
-            .direction(scrollable::Direction::Horizontal(bar))
-            .style(|theme, status| {
-                let mut style = scrollable::default(theme, status);
-                style.horizontal_rail.background = None;
-                style.horizontal_rail.scroller.background = c().rim.into();
-                style
-            });
+        let code = super::scroll::across(container(code).padding(CODE_PAD));
         container(column![strip, code])
             .width(Fill)
             .clip(true)

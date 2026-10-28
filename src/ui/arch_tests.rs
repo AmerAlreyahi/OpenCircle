@@ -238,3 +238,31 @@ fn backend_never_imports_ui() {
         );
     }
 }
+
+/// One scrollbar and one dropdown (owner, 2026-10-28: one design per object):
+/// only `kit/scroll.rs` makes an iced scroll area (every other one is
+/// `kit::scroll`), and nothing uses iced's pick list or combo box (their
+/// menus bring iced's own scrollbar): `kit::dropdown` is built from kit parts.
+#[test]
+fn one_scrollbar_and_one_dropdown() {
+    const IRON: [&str; 5] = [
+        "scrollable(",
+        "scrollable::default",
+        "Scrollable::new",
+        "pick_list",
+        "combo_box",
+    ];
+    let mut found = Vec::new();
+    for (name, src) in sources("") {
+        if name == "kit/scroll.rs" || name == "arch_tests.rs" {
+            continue;
+        }
+        for line in code(&src) {
+            // (an `Operation`'s `fn scrollable` only looks at one)
+            if IRON.iter().any(|w| line.contains(w)) && !line.contains("fn scrollable(") {
+                found.push(format!("{name}: {}", line.trim()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "{found:#?}");
+}

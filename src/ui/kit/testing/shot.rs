@@ -202,6 +202,104 @@ pub fn click<Message>(view: Element<'_, Message>, size: Size, at: iced::Point) -
     messages
 }
 
+/// The messages of left clicks at `points`, one after another in one window
+/// (`view` built anew for each, its widgets' state kept, as a window does).
+pub fn clicks<'a, Message>(
+    view: impl Fn() -> Element<'a, Message>,
+    size: Size,
+    points: &[iced::Point],
+) -> Vec<Message> {
+    use iced::advanced::clipboard;
+    use iced::{Event, mouse::Button, mouse::Event as Mouse};
+    let mut renderer = renderer();
+    let mut cache = Cache::default();
+    let mut messages = Vec::new();
+    for &at in points {
+        let mut ui = UserInterface::build(view(), size, cache, &mut renderer);
+        let events = [
+            Event::Mouse(Mouse::CursorMoved { position: at }),
+            Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+            Event::Mouse(Mouse::ButtonReleased(Button::Left)),
+        ];
+        // each event on its own, as a window delivers them (an overlay opened
+        // by one sees the next)
+        for e in events {
+            let _ = ui.update(
+                &[e],
+                mouse::Cursor::Available(at),
+                &mut renderer,
+                &mut clipboard::Null,
+                &mut messages,
+            );
+        }
+        cache = ui.into_cache();
+    }
+    messages
+}
+
+/// `view` drawn (RGBA) after left clicks at `points` (an opened overlay, a
+/// dropdown's menu, drawn too), the cursor resting on the last point.
+pub fn after_clicks<'a, Message>(
+    view: impl Fn() -> Element<'a, Message>,
+    size: Size,
+    points: &[iced::Point],
+) -> Vec<u8> {
+    use iced::advanced::clipboard;
+    use iced::{Event, mouse::Button, mouse::Event as Mouse, window};
+    let mut renderer = renderer();
+    let mut cache = Cache::default();
+    let mut messages = Vec::new();
+    let last = points.last().copied().unwrap_or_default();
+    let mut steps: Vec<(iced::Point, Event)> = Vec::new();
+    for &at in points {
+        steps.push((at, Event::Mouse(Mouse::CursorMoved { position: at })));
+        steps.push((at, Event::Mouse(Mouse::ButtonPressed(Button::Left))));
+        steps.push((at, Event::Mouse(Mouse::ButtonReleased(Button::Left))));
+    }
+    // a redraw last: the overlay opened meanwhile is laid out for it
+    steps.push((
+        last,
+        Event::Window(window::Event::RedrawRequested(std::time::Instant::now())),
+    ));
+    for (at, e) in steps {
+        let mut ui = UserInterface::build(view(), size, cache, &mut renderer);
+        let _ = ui.update(
+            &[e],
+            mouse::Cursor::Available(at),
+            &mut renderer,
+            &mut clipboard::Null,
+            &mut messages,
+        );
+        cache = ui.into_cache();
+    }
+    let mut ui = UserInterface::build(view(), size, cache, &mut renderer);
+    let cursor = mouse::Cursor::Available(last);
+    let _ = ui.update(
+        &[],
+        cursor,
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    ui.draw(&mut renderer, &Theme::Dark, &style, cursor);
+    let (w, h) = (size.width as u32, size.height as u32);
+    let mut pixmap = tiny_skia::Pixmap::new(w, h).unwrap();
+    let mut mask = tiny_skia::Mask::new(w, h).unwrap();
+    renderer.draw(
+        &mut pixmap.as_mut(),
+        &mut mask,
+        &Viewport::with_physical_size(Size::new(w, h), 1.0),
+        &[Rectangle::with_size(size)],
+        crate::ui::theme::current().window,
+    );
+    (pixmap.data().as_chunks::<4>().0.iter())
+        .flat_map(|p| [p[2], p[1], p[0], p[3]])
+        .collect()
+}
+
 /// A clipboard that remembers what was written to it.
 #[derive(Default)]
 pub struct Clip(pub Vec<String>);

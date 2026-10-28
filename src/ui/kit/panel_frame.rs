@@ -9,7 +9,7 @@
 //! the same `.as-card` floating over the frozen frame (`card`): where it goes,
 //! how a drag moves or resizes it, the room it leaves free, and its frame. One
 //! place, so every card floats, opens and moves the same way.
-use iced::widget::{Space, column, container, mouse_area, opaque, pin, row, scrollable, stack};
+use iced::widget::{Space, column, container, mouse_area, opaque, pin, row, stack};
 use iced::{Border, Center, Element, Fill, Length, Point, Rectangle, Size, Vector, mouse};
 
 use super::icon::{Icon, icon};
@@ -28,8 +28,6 @@ const HEADING: f32 = 24.0;
 /// The card's width (`.as-card`: `min(100%, 480px)`).
 pub const WIDTH: f32 = 480.0;
 const ICON_GAP: f32 = 10.0;
-/// The scroller: 4 px, no rail.
-const SCROLLER: f32 = 4.0;
 
 /// The body's width (to wrap its text at).
 pub const BODY_WIDTH: f32 = WIDTH - 2.0 * PAD;
@@ -61,24 +59,7 @@ pub fn frame<'a, Message: Clone + 'a>(
         ..iced::Padding::ZERO
     }))
     .on_press(on_drag);
-    let bar = scrollable::Scrollbar::new()
-        .width(SCROLLER)
-        .scroller_width(SCROLLER);
-    let body = scrollable(body)
-        .direction(scrollable::Direction::Vertical(bar))
-        .height(Fill)
-        .style(|theme, status| {
-            let mut style = scrollable::default(theme, status);
-            style.vertical_rail = scrollable::Rail {
-                background: None,
-                border: Border::default(),
-                scroller: scrollable::Scroller {
-                    background: c().rim.into(),
-                    border: Border::default().rounded(SCROLLER / 2.0),
-                },
-            };
-            style
-        });
+    let body = super::scroll::scroll(body).height(Fill);
     let actions = container(actions).padding(iced::Padding {
         top: ABOVE_ACTIONS,
         ..iced::Padding::ZERO
