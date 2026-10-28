@@ -55,7 +55,7 @@ the first code):
 | `src/translate/` | OCR → erase → translate → redraw pipeline; live layer |
 | `src/ai/` | Two API clients only: Anthropic Messages, OpenAI-compatible (covers OpenAI, Gemini, Ollama, LM Studio, OpenRouter); plus the no-key browser provider (Google AI Mode in the user's browser, default) |
 | `src/ui/` | iced windows: overlay, action bar, panels, snip editor (one file per annotation tool), settings, onboarding; `theme.rs` = the only colour tokens |
-| `src/config.rs` | The one config reader/validator (TOML) |
+| `src/config/` | The one config reader/validator (TOML): mod.rs types, parse, migrate, look, store (the one writer) |
 
 ## Commands
 

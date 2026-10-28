@@ -102,7 +102,7 @@ capture the screen and show it.
 ## Change recipes
 
 **Hide or show an unfinished feature (Labs):** `src/labs.rs` is the one place: a `Feature`, its `[labs]` switch
-(`Labs`, parsed in `config.rs`, all off by default), and the data the rest reads: `action_feature` (which action id
+(`Labs`, parsed in `config/parse.rs`, all off by default), and the data the rest reads: `action_feature` (which action id
 belongs to it: shortcuts in `hotkey::plan`, `opencircle run`, `actions::for_key`), `bar()` (the bottom bar's buttons),
 `tray::entries`, `settings::sections` / `slots`. Never an `if` on a feature elsewhere: add it to that data. A hidden
 feature keeps its settings in the file. Schema changes: bump `config::VERSION`; a step that changes a value goes in
