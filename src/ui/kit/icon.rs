@@ -27,11 +27,15 @@ pub enum Icon {
     /// model download card's emblems.
     Text,
     Translate,
+    /// lucide "corner-down-left" (the AI field's "AI ↵" badge) and "star"
+    /// (About's Star button): bundled, so no system font draws them.
+    Enter,
+    Star,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 10] = [
+    pub const ALL: [Icon; 12] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -42,6 +46,8 @@ impl Icon {
         Icon::Stop,
         Icon::Text,
         Icon::Translate,
+        Icon::Enter,
+        Icon::Star,
     ];
 
     pub const fn glyph(self) -> char {
@@ -56,6 +62,8 @@ impl Icon {
             Icon::Stop => '\u{e16a}',
             Icon::Text => '\u{e197}',
             Icon::Translate => '\u{e103}',
+            Icon::Enter => '\u{e0a5}',
+            Icon::Star => '\u{e179}',
         }
     }
 }

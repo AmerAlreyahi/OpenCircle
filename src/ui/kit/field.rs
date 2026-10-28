@@ -230,7 +230,7 @@ pub fn badge<'a, Message: Clone + 'a>(
     let font = mono(Weight::Semibold);
     let line = row![
         text(label).size(10).font(font),
-        text("↵").size(10).font(font).color(faded(c().accent, 0.75)),
+        super::icon::icon(super::icon::Icon::Enter, 10.0).color(faded(c().accent, 0.75)),
     ]
     .spacing(4);
     button(line)

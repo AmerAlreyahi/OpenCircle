@@ -20,6 +20,7 @@ use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{accent, sub, text};
 use crate::ui::kit::tokens::{Role, radius, space};
+use crate::ui::kit::{icon, themes};
 use crate::ui::widgets::chrome::{logo_handle, png_handle};
 
 pub const PROJECT: &str = "https://github.com/AmerAlreyahi/OpenCircle";
@@ -160,7 +161,12 @@ fn developer<'a>() -> Element<'a, Message> {
     .spacing(TILE_GAP)
     .align_y(Center);
     let star = fill(
-        accent(Role::CONTROL, "★ Star OpenCircle").line_height(1.5),
+        row![
+            icon::icon(icon::Icon::Star, 12.0).color(themes::current().c.accent),
+            accent(Role::CONTROL, "Star OpenCircle").line_height(1.5),
+        ]
+        .spacing(space::GAP)
+        .align_y(Center),
         Some(Message::OpenLink(PROJECT.into())),
     );
     let links = row![
