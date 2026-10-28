@@ -882,7 +882,7 @@ fn text_moves_on_drag_and_edits_on_click() {
 /// undo puts it back, Delete removes it. Shapes keep their frame.
 #[test]
 fn freehand_strokes_have_no_frame_and_move_by_the_stroke() {
-    let canvas_px = |e: &Editor| crate::ui::widgets::shot::save("", e.canvas(), e.size());
+    let canvas_px = |e: &Editor| crate::ui::kit::testing::shot::save("", e.canvas(), e.size());
     let wave = |y: f32| -> Vec<Point> {
         (0..40)
             .map(|i| pt(40.0 + 5.0 * i as f32, y + 12.0 * (i as f32 / 3.0).sin()))
@@ -1224,7 +1224,7 @@ fn every_icon_is_in_the_subset_font() {
         .iter()
         .map(|t| t.icon)
         .chain(toolbar::GLYPHS.iter().copied())
-        .chain(['\u{e13e}', crate::ui::widgets::DRAG]);
+        .chain(['\u{e13e}', crate::ui::kit::icon::Icon::Grip.glyph()]);
     for icon in icons {
         let code = format!("U+{:04X}", icon as u32);
         assert!(script.contains(&code), "add {code} to subset.sh");
@@ -2246,7 +2246,7 @@ fn snapshots_popovers_at_the_bottom() {
 #[test]
 #[ignore = "writes PNGs to look at"]
 fn snapshots() {
-    use crate::ui::{theme, widgets};
+    use crate::ui::theme;
     let dir = std::path::PathBuf::from(
         std::env::var("OPENCIRCLE_EDITOR_PNG").expect("OPENCIRCLE_EDITOR_PNG=<dir>"),
     );
@@ -2254,7 +2254,7 @@ fn snapshots() {
     iced::advanced::graphics::text::font_system()
         .write()
         .unwrap()
-        .load_font(std::borrow::Cow::Borrowed(widgets::ICON_FONT_BYTES));
+        .load_font(std::borrow::Cow::Borrowed(crate::ui::kit::icon::FONT_BYTES));
 
     let mut e = demo_editor();
     e.update(Message::Picker);
@@ -2292,7 +2292,7 @@ fn snapshots() {
 /// them repeats words already on the button.
 #[test]
 fn toolbar_tooltips_are_for_icon_only_buttons() {
-    use crate::ui::widgets::tests_support::{assert_tips_add_something, shown};
+    use crate::ui::kit::tooltip::tests_support::{assert_tips_add_something, shown};
     let e = Editor::new(checker(200, 100), 1.0);
     let _ = e.toolbar();
     let tips = shown();
@@ -2310,9 +2310,7 @@ fn png_dir() -> std::path::PathBuf {
     iced::advanced::graphics::text::font_system()
         .write()
         .unwrap()
-        .load_font(std::borrow::Cow::Borrowed(
-            crate::ui::widgets::ICON_FONT_BYTES,
-        ));
+        .load_font(std::borrow::Cow::Borrowed(crate::ui::kit::icon::FONT_BYTES));
     dir
 }
 

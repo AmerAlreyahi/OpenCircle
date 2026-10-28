@@ -777,13 +777,13 @@ mod tests {
             !l.stepping && l.paused.load(Ordering::Relaxed),
             "no step thread"
         );
-        let texts = crate::ui::widgets::shot::texts(l.controller_view());
+        let texts = crate::ui::kit::testing::shot::texts(l.controller_view());
         let ask = "Live translate needs the English text-recognition model (about 40 MB). \
                    Download it? Nothing you translate leaves your PC.";
         for want in [ask, "Download", "Cancel"] {
             assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
         }
-        crate::ui::widgets::shot::save(
+        crate::ui::kit::testing::shot::save(
             "live-controller-consent",
             l.controller_view(),
             l.ctl.size(),
@@ -793,7 +793,7 @@ mod tests {
         assert!(l.download.is_some() && !l.stepping);
         let _ = l.update(Msg::Progress(0.4));
         assert_eq!(l.ctl.ask.as_ref().unwrap().progress, Some(0.4));
-        crate::ui::widgets::shot::save(
+        crate::ui::kit::testing::shot::save(
             "live-controller-downloading",
             l.controller_view(),
             l.ctl.size(),

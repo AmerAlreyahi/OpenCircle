@@ -23,7 +23,7 @@ use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::editor::Editing;
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::snip::Snip;
-use crate::ui::{overlay, panel, snip, song, translate, widgets, windows};
+use crate::ui::{overlay, panel, snip, song, translate, windows};
 
 use super::actions::auto_targets;
 use super::view::chips_at;
@@ -270,7 +270,7 @@ fn selected_app(frame: &Crop) -> (App, Rectangle) {
 }
 
 fn overlay_texts(app: &App) -> Vec<String> {
-    widgets::shot::texts(app.view(app.overlay))
+    crate::ui::kit::testing::shot::texts(app.view(app.overlay))
 }
 
 #[test]
@@ -316,7 +316,7 @@ fn a_qr_code_in_the_selection_gets_a_chip_and_nothing_opens() {
         "nothing happened by itself"
     );
     let size = app.o.screen;
-    widgets::shot::save("overlay-qr-chip", app.view(app.overlay), size);
+    crate::ui::kit::testing::shot::save("overlay-qr-chip", app.view(app.overlay), size);
 
     // A new press forgets the old code.
     let _ = app.update(Message::Overlay(overlay::Event::Press {
@@ -394,7 +394,7 @@ fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
     assert!(texts.contains(&PROTECTED.to_string()), "{texts:?}");
     let texts = overlay_texts(&app);
     assert!(texts.contains(&lens::ACTION.icon.to_string()), "{texts:?}");
-    widgets::shot::save("overlay-protected", app.view(app.overlay), area.size());
+    crate::ui::kit::testing::shot::save("overlay-protected", app.view(app.overlay), area.size());
     // An ordinary capture shows no such pill.
     let grey = Crop {
         rgba: [90, 90, 90, 255].repeat(600 * 360),
@@ -874,7 +874,7 @@ fn text_app() -> App {
         line.line_height(iced::Pixels(32.0)).into()
     });
     let page = container(column(lines)).padding([40, 60]);
-    let rgba = widgets::shot::render(Element::from(page), 960, 420);
+    let rgba = crate::ui::kit::testing::shot::render(Element::from(page), 960, 420);
     let mut app = open_app(960, 420, 1.0);
     app.o.frame = Some(image::Handle::from_rgba(960, 420, rgba));
     app
@@ -1028,7 +1028,7 @@ fn selection_shots() {
         std::env::var("OPENCIRCLE_SELECTION_PNG").expect("OPENCIRCLE_SELECTION_PNG=<dir>"),
     );
     let shot = |app: &App, name: &str| {
-        let rgba = widgets::shot::render(app.view(app.overlay), 960, 420);
+        let rgba = crate::ui::kit::testing::shot::render(app.view(app.overlay), 960, 420);
         actions::write_png(&dir.join(name), 960, 420, &rgba).unwrap();
     };
     let mut app = text_app();
@@ -1074,7 +1074,7 @@ fn the_ask_bar_shows_with_a_selection_and_opens_ask_ai() {
         false,
     );
     let _ = app.update(Message::AskInput("what is this?".into()));
-    let texts = widgets::shot::texts(app.view(app.overlay));
+    let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
     assert!(texts.contains(&"what is this?".to_string()), "{texts:?}");
     // The design: an empty field opens Ask AI (its presets), asking nothing.
     let _ = app.update(Message::AskInput("   ".into()));
@@ -1211,7 +1211,7 @@ fn selected_text_gets_the_text_actions_shift_extends_ctrl_a_takes_all() {
         !texts.contains(&"Copy".to_string()),
         "no floating pill: {texts:?}"
     );
-    let click = |p| widgets::shot::click(app.view(app.overlay), app.o.screen, p);
+    let click = |p| crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, p);
     let copy = click(bar_pill(&app, 1));
     assert!(
         copy.iter()
@@ -1262,7 +1262,11 @@ fn the_bottom_bar_is_there_from_the_first_frame() {
     let _ = app.update(Message::AskInput("what is on my screen?".into()));
     let has_field = |app: &App| overlay_texts(app).contains(&app.o.ask);
     assert!(has_field(&app), "before any selection");
-    let clicked = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_pill(&app, 2));
+    let clicked = crate::ui::kit::testing::shot::click(
+        app.view(app.overlay),
+        app.o.screen,
+        bar_pill(&app, 2),
+    );
     assert!(
         clicked
             .iter()
@@ -1351,8 +1355,9 @@ fn bar_field(app: &App) -> Point {
 #[test]
 fn a_selection_brings_its_actions_into_the_bottom_bar_not_a_second_bar() {
     let mut app = open_app(1280, 800, 1.0);
-    let pill =
-        |app: &App, k| widgets::shot::click(app.view(app.overlay), app.o.screen, bar_pill(app, k));
+    let pill = |app: &App, k| {
+        crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, bar_pill(app, k))
+    };
     // before a selection: Search in browser and Copy text are dimmed
     let pressed = |got: Vec<Message>| got.iter().any(|m| matches!(m, Message::Pill(_)));
     assert!(!pressed(pill(&app, 0)) && !pressed(pill(&app, 1)));
@@ -1385,7 +1390,11 @@ fn a_selection_brings_its_actions_into_the_bottom_bar_not_a_second_bar() {
             "{which:?}: {sent:?}"
         );
     }
-    let live = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_button(&app, 0));
+    let live = crate::ui::kit::testing::shot::click(
+        app.view(app.overlay),
+        app.o.screen,
+        bar_button(&app, 0),
+    );
     assert!(live.iter().any(|m| matches!(m, Message::LiveToggle)));
     // the pressed pill is the highlighted one; Translate takes the selection
     let _ = app.update(Message::Pill(BarButton::Translate));
@@ -1407,7 +1416,7 @@ fn note_clicks(app: &App) -> Vec<Message> {
     (0..(size.width as usize / 8))
         .flat_map(|i| {
             let p = Point::new(at.x + 8.0 * i as f32, y);
-            widgets::shot::click(app.view(app.overlay), app.o.screen, p)
+            crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, p)
         })
         .collect()
 }
@@ -1431,7 +1440,7 @@ fn without_the_text_reader_the_bar_offers_its_download() {
     let say = format!("Text recognition · {mb} MB · from GitHub");
     assert!(texts.contains(&say), "{texts:?}");
     assert!(texts.contains(&"Download".to_string()), "{texts:?}");
-    widgets::shot::save("reader-missing", app.view(app.overlay), app.o.screen);
+    crate::ui::kit::testing::shot::save("reader-missing", app.view(app.overlay), app.o.screen);
     // nothing fetched by itself: drawing, selecting, frames leave it offered
     drag(
         &mut app,
@@ -1458,7 +1467,7 @@ fn without_the_text_reader_the_bar_offers_its_download() {
         !texts.contains(&"Cancel".to_string()),
         "it runs on: {texts:?}"
     );
-    widgets::shot::save("reader-downloading", app.view(app.overlay), app.o.screen);
+    crate::ui::kit::testing::shot::save("reader-downloading", app.view(app.overlay), app.o.screen);
     // another opening's download says nothing here
     let stale = Message::Reader(app.opening.wrapping_add(1), Err("x".into()));
     let _ = app.update(stale);
@@ -1823,9 +1832,9 @@ fn taps_shift_clicks_and_ctrl_a_wait_for_their_band() {
 /// is the search, and the field says so.
 /// The names of the bottom bar's buttons (their tooltips' first words).
 fn bar_names(app: &App) -> Vec<String> {
-    let _ = widgets::tests_support::shown();
+    let _ = crate::ui::kit::tooltip::tests_support::shown();
     let _ = overlay_texts(app);
-    let mut names: Vec<String> = widgets::tests_support::shown()
+    let mut names: Vec<String> = crate::ui::kit::tooltip::tests_support::shown()
         .iter()
         .map(|t| t.split(" · ").next().unwrap_or_default().to_string())
         .collect();
@@ -1944,7 +1953,12 @@ fn ask_placeholder_always_fits_its_field() {
             let room = bar::text_room(field);
             let p = ask_placeholder(field);
             assert!(
-                p == "Ask AI…" || widgets::text_width(p, field::SLOTS_TEXT) <= room,
+                p == "Ask AI…"
+                    || crate::ui::kit::text::width(
+                        p,
+                        field::SLOTS_TEXT,
+                        crate::ui::kit::text::ui_font()
+                    ) <= room,
                 "{p:?} is cut in a {field} px field"
             );
         }
@@ -1969,9 +1983,9 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
     assert!(app.auto_actions().is_empty(), "nothing runs by itself");
     assert!(app.o.panel.is_none(), "no Lens, no Ask AI before a choice");
     assert!(app.o.lens_pages.is_empty(), "nothing handed to the browser");
-    let _ = widgets::tests_support::shown();
+    let _ = crate::ui::kit::tooltip::tests_support::shown();
     let texts = overlay_texts(&app);
-    let tips = widgets::tests_support::shown();
+    let tips = crate::ui::kit::tooltip::tests_support::shown();
     let labels = |t: &String| t.split(" · ").next().unwrap_or_default().to_string();
     let mut names: Vec<String> = tips.iter().map(labels).collect();
     names.sort();
@@ -2043,7 +2057,11 @@ pub(in crate::ui) fn settle_bar(app: &mut App) {
 /// The bar's bounds, and whether its Edit slot (the last) is Edit, once settled.
 fn bar_box(app: &mut App) -> (Rectangle, bool) {
     settle_bar(app);
-    let edit = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_button(app, 2));
+    let edit = crate::ui::kit::testing::shot::click(
+        app.view(app.overlay),
+        app.o.screen,
+        bar_button(app, 2),
+    );
     let is_edit = |m: &Message| match m {
         Message::EditScreen => true,
         Message::Run(a) => a.id == actions::edit::ACTION.id,
@@ -2064,7 +2082,7 @@ fn the_bottom_bar_never_changes_size() {
     // nothing selected: Search in browser and Copy text are there but do nothing
     for k in 0..=1 {
         let at = bar_pill(&app, k);
-        let got = widgets::shot::click(app.view(app.overlay), app.o.screen, at);
+        let got = crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, at);
         assert!(
             !got.iter().any(|m| matches!(m, Message::Pill(_))),
             "{k}: {got:?}"
@@ -2133,7 +2151,7 @@ fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
     // ...drawn at its whole size (inside it differs from just outside it)
     // (over a plain frame)
     app.o.frame = Some(image::Handle::from_rgba(4, 4, vec![9; 4 * 4 * 4]));
-    let px = widgets::shot::save("bar-morph", app.view(app.overlay), app.o.screen);
+    let px = crate::ui::kit::testing::shot::save("bar-morph", app.view(app.overlay), app.o.screen);
     let at = app.bar_at();
     let y = (at.y + mid.height / 2.0) as usize;
     let pixel = |x: f32| {
@@ -2157,7 +2175,8 @@ fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
     let row = pad + crate::ui::kit::tokens::size::ICON_BUTTON / 2.0;
     // the grip, then Back
     let back = at + Vector::new(row + bar::HANDLE + bar::SPACING, row);
-    let hit = |app: &App, p| widgets::shot::click(app.view(app.overlay), app.o.screen, p);
+    let hit =
+        |app: &App, p| crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, p);
     assert!(
         hit(&app, back)
             .iter()
@@ -2212,10 +2231,11 @@ fn the_bar_drags_by_its_handle_and_docks_at_the_nearest_spot() {
     let (_, size) = app.bar_size();
     assert_eq!(app.bar_at().y + size.height, 800.0 - 40.0 - bar::BOTTOM_GAP);
     let handle = app.bar_at() + Vector::new(bar::PAD + bar::HANDLE / 2.0, size.height / 2.0);
-    let grabbed = widgets::shot::click(app.view(app.overlay), app.o.screen, handle);
+    let grabbed = crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, handle);
     assert!(grabbed.iter().any(|m| matches!(m, Message::BarGrab)));
     // the field and the buttons don't drag it
-    let field = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_field(&app));
+    let field =
+        crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, bar_field(&app));
     assert!(!field.iter().any(|m| matches!(m, Message::BarGrab)));
     // held, it follows the pointer
     let before = app.bar_at();
@@ -2298,8 +2318,9 @@ fn the_bar_drags_by_its_handle_and_docks_at_the_nearest_spot() {
 fn the_bottom_bar_has_every_main_action_on_any_screen() {
     for (w, h) in [(1280, 800), (800, 600), (640, 480)] {
         let app = open_app(w, h, 1.0);
-        let _ = widgets::tests_support::shown(); // drop older records
-        let click = |at| widgets::shot::click(app.view(app.overlay), app.o.screen, at);
+        let _ = crate::ui::kit::tooltip::tests_support::shown(); // drop older records
+        let click =
+            |at| crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, at);
         let translate = click(bar_pill(&app, 2));
         let messages: Vec<Vec<Message>> = (0..3).map(|k| click(bar_button(&app, k))).collect();
         let is = |k: usize, f: fn(&Message) -> bool| messages[k].iter().any(f);
@@ -2314,7 +2335,7 @@ fn the_bottom_bar_has_every_main_action_on_any_screen() {
         );
         assert!(is(2, |m| matches!(m, Message::EditScreen)), "{w}: Edit");
         // each names itself (icons) and its shortcut in its tooltip
-        let tips = widgets::tests_support::shown();
+        let tips = crate::ui::kit::tooltip::tests_support::shown();
         for want in [
             "Live translate (Beta) · Ctrl+Shift+L",
             "Song search",
@@ -2322,7 +2343,7 @@ fn the_bottom_bar_has_every_main_action_on_any_screen() {
         ] {
             assert!(tips.iter().any(|t| t == want), "{want}: {tips:?}");
         }
-        widgets::tests_support::assert_tips_add_something("bottom bar");
+        crate::ui::kit::tooltip::tests_support::assert_tips_add_something("bottom bar");
     }
 }
 
@@ -2397,7 +2418,7 @@ fn the_opening_is_one_eased_animation_from_its_first_frame() {
     // (`windows::fade`), the dim never fades over the whole screen
     let first = opening_at(None);
     assert_eq!(first.appeared(), 0.0);
-    let shot = |app: &App| widgets::shot::render(app.view(app.overlay), 960, 420);
+    let shot = |app: &App| crate::ui::kit::testing::shot::render(app.view(app.overlay), 960, 420);
     let bright = |rgba: &[u8]| {
         let at = (300 * 960 + 700) * 4; // an empty part of the page
         u32::from(rgba[at]) + u32::from(rgba[at + 1]) + u32::from(rgba[at + 2])
@@ -2455,19 +2476,19 @@ fn opening_frames() {
     for ms in (0..=300).step_by(25) {
         let app = opening_at(Some(ms));
         let name = format!("opening-{ms:03}ms");
-        widgets::shot::save(&name, app.view(app.overlay), Size::new(960.0, 420.0));
+        crate::ui::kit::testing::shot::save(&name, app.view(app.overlay), Size::new(960.0, 420.0));
     }
     let mut app = open_app(3440, 1440, 1.0);
     app.o.appear = None;
     app.o.appear = Some((Instant::now(), 0.4));
     let t = Instant::now();
     for _ in 0..5 {
-        widgets::shot::render(app.view(app.overlay), 3440, 1440);
+        crate::ui::kit::testing::shot::render(app.view(app.overlay), 3440, 1440);
     }
     println!("3440x1440 opening frame: {:?}", t.elapsed() / 5);
     let t = Instant::now();
     for _ in 0..5 {
-        widgets::shot::render(Element::<'_, Message>::from(space()), 3440, 1440);
+        crate::ui::kit::testing::shot::render(Element::<'_, Message>::from(space()), 3440, 1440);
     }
     println!("3440x1440 empty frame (the harness): {:?}", t.elapsed() / 5);
     let frame = app.o.frame.clone().unwrap();
@@ -2477,7 +2498,7 @@ fn opening_frames() {
             .width(Fill)
             .height(Fill)
             .filter_method(image::FilterMethod::Nearest);
-        widgets::shot::render(Element::<'_, Message>::from(only), 3440, 1440);
+        crate::ui::kit::testing::shot::render(Element::<'_, Message>::from(only), 3440, 1440);
     }
     println!("3440x1440 the frame alone: {:?}", t.elapsed() / 5);
 }
@@ -2579,7 +2600,7 @@ fn letters_stay_shortcuts_with_a_result_card_open() {
 // --- #101: one focus rule. A focused text field takes the typed letters; the
 // single-letter shortcuts run only when none has focus. ---
 
-use widgets::shot::{self, Clip, Focus};
+use crate::ui::kit::testing::shot::{self, Clip, Focus};
 
 /// The shortcut letters that reached the overlay.
 fn shortcuts(messages: &[Message]) -> String {
@@ -3109,7 +3130,11 @@ fn the_selections_actions_wait_for_the_snap_to_finish() {
     let mut app = open_app(1280, 800, 1.0);
     app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
     let pill = |app: &App| {
-        let got = widgets::shot::click(app.view(app.overlay), app.o.screen, bar_pill(app, 0));
+        let got = crate::ui::kit::testing::shot::click(
+            app.view(app.overlay),
+            app.o.screen,
+            bar_pill(app, 0),
+        );
         got.iter().any(|m| matches!(m, Message::Pill(_)))
     };
     let ring = ring(300.0, 250.0, 80.0);
@@ -3188,7 +3213,7 @@ fn select_text_app() -> App {
 #[test]
 fn select_text_highlights_every_word_and_a_drag_picks_some() {
     let mut app = select_text_app();
-    let texts = widgets::shot::texts(app.view(app.overlay));
+    let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
     assert!(texts.contains(&"Done".to_string()), "{texts:?}");
     let mode = app.o.text_mode.as_ref().unwrap();
     assert_eq!(mode.boxes.len(), 17, "every word of lines 1-3");
@@ -3203,12 +3228,14 @@ fn select_text_highlights_every_word_and_a_drag_picks_some() {
     assert!(!mode.picking);
     assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Snap);
     // the bottom bar's text actions take the picked words; no pill, no second bar
-    let texts = widgets::shot::texts(app.view(app.overlay));
+    let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
     assert!(
         !texts.iter().any(|t| t == "Copy" || t == "Edit"),
         "{texts:?}"
     );
-    let click = |k| widgets::shot::click(app.view(app.overlay), app.o.screen, bar_pill(&app, k));
+    let click = |k| {
+        crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, bar_pill(&app, k))
+    };
     assert!(
         click(1)
             .iter()
@@ -3402,7 +3429,7 @@ fn look_shots() {
         std::env::var("OPENCIRCLE_LOOK_PNG").expect("OPENCIRCLE_LOOK_PNG=<dir>"),
     );
     let shot = |app: &App, name: &str| {
-        let rgba = widgets::shot::render(app.view(app.overlay), 960, 420);
+        let rgba = crate::ui::kit::testing::shot::render(app.view(app.overlay), 960, 420);
         actions::write_png(&dir.join(name), 960, 420, &rgba).unwrap();
     };
     let glowing_at = |app: &mut App, w: u32, h: u32| {
@@ -3454,7 +3481,7 @@ fn look_shots() {
     );
     let _ = wide.update(Message::Run(&actions::ask::ACTION));
     wide.o.card_hover = true;
-    let rgba = widgets::shot::render(wide.view(wide.overlay), 1440, 900);
+    let rgba = crate::ui::kit::testing::shot::render(wide.view(wide.overlay), 1440, 900);
     actions::write_png(&dir.join("look-7-ask-card-1440.png"), 1440, 900, &rgba).unwrap();
     let mut app = select_text_app();
     glowing(&mut app);
@@ -3751,7 +3778,7 @@ fn a_link_in_the_selected_words_gets_a_click_only_chip() {
     let size = Size::new(LINK_WIDTH, bar::HEIGHT);
     let area = app.o.view.rect_to_screen(app.o.selection.unwrap().area);
     let at = chips_at(area, size, app.room()) + Vector::new(LINK_WIDTH / 2.0, bar::HEIGHT / 2.0);
-    let clicks = widgets::shot::click(app.view(app.overlay), app.o.screen, at);
+    let clicks = crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, at);
     assert!(
         clicks
             .iter()
@@ -3869,7 +3896,7 @@ fn select_text_mode_picks_the_words_windows_ocr_read() {
     let line = label(LINE).size(22.0 * s).font(iced::Font::MONOSPACE);
     let page: iced::widget::Container<Message> =
         container(line.line_height(iced::Pixels(32.0 * s))).padding([40.0 * s, 60.0 * s]);
-    let rgba = widgets::shot::render(Element::from(page), 1680, 700);
+    let rgba = crate::ui::kit::testing::shot::render(Element::from(page), 1680, 700);
     let mut app = open_app(1680, 700, s);
     app.o.frame = Some(image::Handle::from_rgba(1680, 700, rgba));
     // Windows OCR's read of the whole screen (frame px)
@@ -4115,7 +4142,7 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
         "a floating window (cut, on top)"
     );
     let shown = app.view(window);
-    let texts = widgets::shot::texts(shown);
+    let texts = crate::ui::kit::testing::shot::texts(shown);
     assert!(texts.iter().any(|t| t == "And the trend?"), "{texts:?}");
     // its composer works while the overlay is closed (messages reach it)
     let _ = app.update(Message::Panel(
@@ -4142,7 +4169,7 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
     assert_eq!(turns.len(), 3, "the same chat");
     assert_eq!(turns[2].shot, Some(size), "with the new crop");
     assert_eq!(turns[2].image.as_deref(), Some(&b"second"[..]));
-    let texts = widgets::shot::texts(app.view(app.overlay));
+    let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
     assert!(
         texts.iter().any(|t| t == "Is this the same?"),
         "drawn on the overlay: {texts:?}"

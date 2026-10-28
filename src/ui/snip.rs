@@ -13,13 +13,20 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
-use iced::mouse::Cursor;
-use iced::widget::canvas::{Geometry, Stroke};
+use iced::widget::tooltip::Position;
 use iced::widget::{canvas, column, container, image, row};
-use iced::{Center, Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
+use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
-use super::widgets::{self, CLOSE, STOP};
-use super::{overlay, theme};
+use super::kit::button;
+use super::kit::icon::Icon;
+use super::kit::icon_button::{self, State, icon_button};
+use super::kit::keycap::keycap;
+use super::kit::loupe::Loupe;
+use super::kit::surface::{self, Material, surface};
+use super::kit::text::{sub, text};
+use super::kit::tokens::{Role, radius, space};
+use super::kit::tooltip::tip;
+use super::overlay;
 use crate::actions::Crop;
 use crate::capture::window_rect::WinRect;
 use crate::config::{SnipAfter, Target};
@@ -29,10 +36,6 @@ const SNAP: f32 = 8.0;
 /// The toast offers Edit this long, then the overlay closes.
 pub const TOAST_SECS: u64 = 4;
 pub const COPIED: &str = "Copied: paste it into your AI chat";
-/// The loupe: physical px each side of the one under the pointer, and the
-/// logical size each is drawn at (8x zoom).
-const LOUPE_RADIUS: i32 = 7;
-const LOUPE_CELL: f32 = 8.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -242,6 +245,8 @@ impl Scroll {
 
 /// The pill window's size (logical px): scrolling progress, countdown, toast.
 pub const PILL: Size = Size::new(500.0, 68.0);
+/// Its corners (the window is cut to them).
+pub const PILL_RADIUS: f32 = radius::WINDOW;
 
 impl Snip {
     /// `windows`: every window, physical desktop px, topmost first (none = no
@@ -578,30 +583,29 @@ impl Snip {
         // No mode switch: hover + click picks a control or a window, a drag an
         // area, the wheel walks up to the screen (quick actions still start in
         // Window or Full mode).
-        let mut top = column![].spacing(12).align_x(Center);
+        let mut top = column![].spacing(space::PAGE[0]).align_x(Center);
         if !self.recent.is_empty() {
             let shots = (self.recent.iter()).map(|(path, picture)| {
-                let open = widgets::thumbnail(picture.clone(), Msg::OpenRecent(path.clone()));
-                widgets::tip(
-                    open,
-                    "A recent capture",
-                    iced::widget::tooltip::Position::Bottom,
-                )
+                let shown = image(picture.clone()).content_fit(iced::ContentFit::Contain);
+                let open =
+                    icon_button::option(shown, State::default(), Msg::OpenRecent(path.clone()));
+                tip(open, "A recent capture", Position::Bottom)
             });
-            let clear = widgets::icon_button(CLOSE, false, Msg::ClearRecent);
+            let clear = icon_button(
+                Icon::Close.glyph(),
+                State::default(),
+                Some(Msg::ClearRecent),
+            );
             let strip = row![
-                widgets::caption("Recent"),
-                row(shots).spacing(4),
-                widgets::tip(
-                    clear,
-                    "Clear recent captures",
-                    iced::widget::tooltip::Position::Bottom
-                ),
+                sub(Role::META, "Recent"),
+                row(shots).spacing(space::GAP),
+                tip(clear, "Clear recent captures", Position::Bottom),
             ]
-            .spacing(8)
-            .padding([0, 8])
+            .spacing(space::GAP)
+            .padding([0.0, space::GAP])
             .align_y(Center);
-            top = top.push(widgets::surface(strip));
+            top =
+                top.push(surface(Material::Widget, radius::WINDOW, strip).padding(space::BAR_PAD));
         }
         let hint = match self.kind {
             Kind::Region if self.desktop.is_empty() => {
@@ -610,17 +614,18 @@ impl Snip {
             kind => kind.hint(),
         };
         if !hint.is_empty() {
-            top = top.push(widgets::pill(hint));
+            top = top.push(surface::hint(hint));
         }
-        container(top).center_x(Fill).padding(24).into()
+        container(top).center_x(Fill).padding(space::PAGE[1]).into()
     }
 
     /// When the window is only a pill (scrolling, the timer, the toast): its view.
     pub fn pill_view(&self) -> Option<Element<'_, Msg>> {
         let bar = if let Some(s) = &self.scroll {
             row![
-                widgets::body(&s.label),
-                widgets::text_button(STOP, "Stop", "Esc".into(), true, Msg::Stop),
+                text(Role::NOTE, &s.label),
+                keycap("Esc"),
+                button::regular("Stop", true, Some(Msg::Stop)),
             ]
         } else if let Some((_, left)) = self.countdown {
             let label = match left {
@@ -628,21 +633,24 @@ impl Snip {
                 n => format!("Capturing in {n} s · open a menu now"),
             };
             row![
-                widgets::body(label),
-                widgets::text_button(CLOSE, "Cancel", String::new(), false, Msg::Cancel),
+                text(Role::NOTE, label),
+                button::regular("Cancel", false, Some(Msg::Cancel)),
             ]
         } else if self.toast.is_some() {
             row![
-                widgets::body(COPIED),
-                widgets::text_button(EDIT, "Edit", String::new(), true, Msg::Edit),
+                text(Role::NOTE, COPIED),
+                button::regular("Edit", true, Some(Msg::Edit)),
             ]
         } else {
             return None;
         };
-        let bar = bar.spacing(16).padding([0, 12]).align_y(Center);
+        let bar = bar
+            .spacing(space::PAGE[0])
+            .padding(space::PAGE)
+            .align_y(Center);
         // Exactly the window's size when it is only this pill (`windows::cut` shapes the
         // window to it); over the frame (Wayland) it is the same flat pill, centred.
-        let pill = widgets::solid_surface(bar)
+        let pill = surface(Material::Widget, PILL_RADIUS, bar)
             .width(PILL.width)
             .height(PILL.height)
             .align_x(Center)
@@ -685,9 +693,6 @@ impl Snip {
         Some(canvas(loupe).width(Fill).height(Fill).into())
     }
 }
-
-/// The editor's glyph (lucide "pencil", as the action bar's Edit).
-const EDIT: char = '\u{e1f8}';
 
 /// `targets` cut to the screen; those off it go.
 fn clip(targets: Vec<Pick>, screen: Size) -> Vec<Pick> {
@@ -744,159 +749,6 @@ pub fn desktop_rect((x, y, w, h): WinRect) -> Rectangle {
 fn local(r: Rectangle, origin: (i32, i32), scale: f32) -> Rectangle {
     let at = Point::new(r.x - origin.0 as f32, r.y - origin.1 as f32);
     Rectangle::new(at, r.size()) * (1.0 / scale)
-}
-
-/// The `2 * radius + 1` square of pixels around `centre` (frame px), row by row;
-/// outside the frame = transparent.
-fn sample(rgba: &[u8], width: u32, height: u32, centre: (i32, i32), radius: i32) -> Vec<[u8; 4]> {
-    let mut out = Vec::with_capacity(((2 * radius + 1) * (2 * radius + 1)) as usize);
-    for y in centre.1 - radius..=centre.1 + radius {
-        for x in centre.0 - radius..=centre.0 + radius {
-            let inside = (0..width as i32).contains(&x) && (0..height as i32).contains(&y);
-            let i = (y.max(0) as usize * width as usize + x.max(0) as usize) * 4;
-            out.push(match rgba.get(i..i + 4) {
-                Some(&[r, g, b, a]) if inside => [r, g, b, a],
-                _ => [0; 4],
-            });
-        }
-    }
-    out
-}
-
-/// The magnifier: the pixels around the pointer at 8x, the one under it framed,
-/// its coordinates (frame px) and colour.
-struct Loupe<'a> {
-    pixels: &'a [u8],
-    width: u32,
-    height: u32,
-    scale: f32,
-    /// The pointer, logical px.
-    at: Point,
-    /// What a click would capture, and its label.
-    outline: Option<(Rectangle, String)>,
-}
-
-impl canvas::Program<Msg> for Loupe<'_> {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let palette = theme::current();
-        // ponytail: square corners; Windows 11 rounds its windows by 8 px (DWM
-        // corner preference) and the outline could follow.
-        if let Some((r, label)) = &self.outline {
-            let border = canvas::Path::rectangle(
-                Point::new(r.x + 1.0, r.y + 1.0),
-                Size::new((r.width - 2.0).max(0.0), (r.height - 2.0).max(0.0)),
-            );
-            frame.stroke(
-                &border,
-                Stroke::default()
-                    .with_color(theme::STROKE_START)
-                    .with_width(2.0),
-            );
-            // The label above the outline, or inside it at the top of the screen.
-            let width = 7.2 * label.chars().count() as f32 + 16.0;
-            let y = if r.y >= 30.0 { r.y - 28.0 } else { r.y + 4.0 };
-            let x = r.x.clamp(0.0, (bounds.width - width).max(0.0));
-            let tag = canvas::Path::rounded_rectangle(
-                Point::new(x, y),
-                Size::new(width, 24.0),
-                6.0.into(),
-            );
-            frame.fill(&tag, palette.panel);
-            frame.fill_text(canvas::Text {
-                content: label.clone(),
-                position: Point::new(x + 8.0, y + 5.0),
-                color: palette.text,
-                size: 12.0.into(),
-                ..canvas::Text::default()
-            });
-        }
-        let centre = (
-            (self.at.x * self.scale).floor() as i32,
-            (self.at.y * self.scale).floor() as i32,
-        );
-        let cells = sample(self.pixels, self.width, self.height, centre, LOUPE_RADIUS);
-        let n = 2 * LOUPE_RADIUS + 1;
-        let side = n as f32 * LOUPE_CELL;
-        let label = 24.0;
-        // Below-right of the pointer; flipped where it would leave the screen.
-        let gap = 24.0;
-        let x = if self.at.x + gap + side < bounds.width {
-            self.at.x + gap
-        } else {
-            self.at.x - gap - side
-        };
-        let y = if self.at.y + gap + side + label < bounds.height {
-            self.at.y + gap
-        } else {
-            self.at.y - gap - side - label
-        };
-        let body = canvas::Path::rectangle(
-            Point::new(x - 2.0, y - 2.0),
-            Size::new(side + 4.0, side + label + 4.0),
-        );
-        frame.fill(&body, palette.panel);
-        frame.stroke(
-            &body,
-            Stroke::default().with_color(palette.border).with_width(1.0),
-        );
-        for (i, &[r, g, b, a]) in cells.iter().enumerate() {
-            let (col, row) = (i as i32 % n, i as i32 / n);
-            let at = Point::new(x + col as f32 * LOUPE_CELL, y + row as f32 * LOUPE_CELL);
-            let colour = Color::from_rgba8(r, g, b, f32::from(a) / 255.0);
-            frame.fill_rectangle(at, Size::new(LOUPE_CELL, LOUPE_CELL), colour);
-        }
-        // The crosshair: a thin line through the middle row and column, the
-        // pixel itself framed.
-        let mid = LOUPE_RADIUS as f32 * LOUPE_CELL;
-        let line = Stroke::default()
-            .with_color(Color {
-                a: 0.5,
-                ..theme::ACCENT_START
-            })
-            .with_width(1.0);
-        let half = LOUPE_CELL / 2.0;
-        frame.stroke(
-            &canvas::Path::line(
-                Point::new(x, y + mid + half),
-                Point::new(x + side, y + mid + half),
-            ),
-            line,
-        );
-        frame.stroke(
-            &canvas::Path::line(
-                Point::new(x + mid + half, y),
-                Point::new(x + mid + half, y + side),
-            ),
-            line,
-        );
-        let pixel = canvas::Path::rectangle(
-            Point::new(x + mid, y + mid),
-            Size::new(LOUPE_CELL, LOUPE_CELL),
-        );
-        frame.stroke(
-            &pixel,
-            Stroke::default().with_color(Color::WHITE).with_width(2.0),
-        );
-        let [r, g, b, _] = cells[cells.len() / 2];
-        frame.fill_text(canvas::Text {
-            content: format!("{}, {}   #{r:02X}{g:02X}{b:02X}", centre.0, centre.1),
-            position: Point::new(x + 6.0, y + side + 5.0),
-            color: palette.text,
-            size: 12.0.into(),
-            ..canvas::Text::default()
-        });
-        vec![frame.into_geometry()]
-    }
 }
 
 #[cfg(test)]
@@ -1010,7 +862,7 @@ mod tests {
             let first = s.start(Kind::for_target(target), SCREEN);
             // Hover picks a window or a control, a drag an area, the wheel
             // the screen: no Region / Window / Full switch.
-            let texts = widgets::shot::texts(s.view());
+            let texts = crate::ui::kit::testing::shot::texts(s.view());
             for mode in ["Region", "Window", "Full"] {
                 assert!(!texts.iter().any(|t| t == mode), "{target:?}: {texts:?}");
             }
@@ -1069,15 +921,19 @@ mod tests {
         assert!(s.pill_view().is_none());
         let first = s.toast(crop.clone(), true);
         assert!(s.toast_showing(first) && s.pill_view().is_some());
-        let texts = widgets::shot::texts(s.pill_view().unwrap());
+        let texts = crate::ui::kit::testing::shot::texts(s.pill_view().unwrap());
         assert!(texts.iter().any(|t| t == COPIED), "{texts:?}");
-        widgets::shot::save("snip-toast", s.pill_view().unwrap(), PILL);
+        crate::ui::kit::testing::shot::save("snip-toast", s.pill_view().unwrap(), PILL);
         let second = s.toast(crop, false);
         assert!(!s.toast_showing(first), "an older toast's timeout is stale");
         let t = s.take_toast().unwrap();
         assert!(!t.in_place && (t.crop.width, t.crop.height) == (2, 1));
         assert!(!s.toast_showing(second) && !s.has_toast());
-        assert!(widgets::shot::texts(s.view()).iter().all(|t| t != COPIED));
+        assert!(
+            crate::ui::kit::testing::shot::texts(s.view())
+                .iter()
+                .all(|t| t != COPIED)
+        );
     }
 
     #[test]
@@ -1087,12 +943,12 @@ mod tests {
         assert!(!s.is_pill());
         let id = s.delay(3).unwrap();
         assert!(s.is_pill());
-        let texts = widgets::shot::texts(s.pill_view().unwrap());
+        let texts = crate::ui::kit::testing::shot::texts(s.pill_view().unwrap());
         assert!(
             texts.iter().any(|t| t.contains("Capturing in 3 s")),
             "{texts:?}"
         );
-        widgets::shot::save("snip-countdown", s.pill_view().unwrap(), PILL);
+        crate::ui::kit::testing::shot::save("snip-countdown", s.pill_view().unwrap(), PILL);
         assert_eq!(s.tick(id, 2), Some(false));
         assert_eq!(s.tick(id, 1), Some(false));
         assert!(!s.shoot(id), "not before zero");
@@ -1175,7 +1031,7 @@ mod tests {
         let frame: Vec<u8> = (0..3u8)
             .flat_map(|y| (0..4u8).flat_map(move |x| [x, y, 7, 255]))
             .collect();
-        let cells = sample(&frame, 4, 3, (1, 1), 1);
+        let cells = crate::ui::kit::loupe::sample(&frame, 4, 3, (1, 1), 1);
         assert_eq!(cells.len(), 9);
         assert_eq!(
             cells[4],
@@ -1185,12 +1041,13 @@ mod tests {
         assert_eq!(cells[0], [0, 0, 7, 255]);
         assert_eq!(cells[8], [2, 2, 7, 255]);
         // At the corner: outside the frame is transparent.
-        let cells = sample(&frame, 4, 3, (0, 0), 1);
+        let cells = crate::ui::kit::loupe::sample(&frame, 4, 3, (0, 0), 1);
         assert_eq!(cells[0], [0; 4]);
         assert_eq!(cells[4], [0, 0, 7, 255]);
         assert_eq!(cells[8], [1, 1, 7, 255]);
         // Full size: 15x15 cells of 8 px = a 120 px loupe.
-        let cells = sample(&frame, 4, 3, (3, 2), LOUPE_RADIUS);
+        let cells =
+            crate::ui::kit::loupe::sample(&frame, 4, 3, (3, 2), crate::ui::kit::loupe::RADIUS);
         assert_eq!(cells.len(), 15 * 15);
         assert_eq!(cells[cells.len() / 2], [3, 2, 7, 255]);
         // It shows while picking an area by hand, not in Full.
@@ -1213,13 +1070,13 @@ mod tests {
             true,
             None,
         );
-        let texts = widgets::shot::texts(s.view());
+        let texts = crate::ui::kit::testing::shot::texts(s.view());
         assert!(!texts.iter().any(|t| t == "Recent"), "{texts:?}");
         let picture = image::Handle::from_rgba(2, 1, vec![200; 8]);
         s.set_recent(vec![(PathBuf::from("a.png"), picture)]);
-        let texts = widgets::shot::texts(s.view());
+        let texts = crate::ui::kit::testing::shot::texts(s.view());
         assert!(texts.iter().any(|t| t == "Recent"), "{texts:?}");
-        widgets::shot::save("snip-switch", s.view(), Size::new(1280.0, 260.0));
+        crate::ui::kit::testing::shot::save("snip-switch", s.view(), Size::new(1280.0, 260.0));
     }
 
     /// A browser at the back, an editor in front with a toolbar and a button
@@ -1265,7 +1122,7 @@ mod tests {
         assert_eq!(outlined.rect, rect(110.0, 135.0, 30.0, 30.0));
         let frame = image::Handle::from_rgba(4, 4, vec![90; 64]);
         let guides = s.guides(&frame, 1.0, false).unwrap();
-        widgets::shot::save("snip-outline", guides, SCREEN);
+        crate::ui::kit::testing::shot::save("snip-outline", guides, SCREEN);
         // A click there captures the button exactly.
         let at = Point::new(120.0, 150.0);
         assert_eq!(s.pick(None, at, SCREEN), Some(Next::Edit(outlined.rect)));
@@ -1276,7 +1133,7 @@ mod tests {
         let mut w = Snip::new(Vec::new(), flat(SCREEN), false, None);
         w.hover(at);
         assert!(w.outlined().is_none() && w.pick(None, at, SCREEN).is_none());
-        let texts = widgets::shot::texts(w.view());
+        let texts = crate::ui::kit::testing::shot::texts(w.view());
         assert!(
             texts.iter().any(|t| t.contains("no window picking")),
             "{texts:?}"

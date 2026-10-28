@@ -16,9 +16,9 @@ use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, radius, size};
+use crate::ui::kit::tooltip::{Why, hint};
 use crate::ui::kit::{button, chip, divider, field, grip};
 use crate::ui::song;
-use crate::ui::widgets::{self, Why};
 
 impl App {
     /// The bottom bar, the one action hub, as the new design's search bar: a
@@ -49,10 +49,10 @@ impl App {
             false => "Question only",
         };
         let slots = (
-            widgets::hint(logo, "Open OpenCircle AI chat", Why::Icon, top),
+            hint(logo, "Open OpenCircle AI chat", Why::Icon, top),
             field::pair(
-                widgets::hint(include, named, Why::Icon, top),
-                widgets::hint(badge, "Ask AI", Why::Keys("Enter"), top),
+                hint(include, named, Why::Icon, top),
+                hint(badge, "Ask AI", Why::Keys("Enter"), top),
             ),
         );
         let field = field::slots(
@@ -111,7 +111,7 @@ impl App {
                 true => Why::Icon,
                 false => Why::Keys(keys),
             };
-            widgets::hint(pill, label, why, top)
+            hint(pill, label, why, top)
         });
         let pills = iced::widget::row(pills)
             .spacing(bar::PILL_GAP)
@@ -238,7 +238,7 @@ impl App {
 
 /// The placeholder that fits a field `width` wide, in the UI font.
 pub(in crate::ui) fn ask_placeholder(width: f32) -> &'static str {
-    widgets::fitting(&ASK_PLACEHOLDERS, field::SLOTS_TEXT, bar::text_room(width))
+    crate::ui::kit::text::fitting(&ASK_PLACEHOLDERS, field::SLOTS_TEXT, bar::text_room(width))
 }
 
 /// A round button of the bottom bar, named `label` (its tooltip adds `keys`);
@@ -255,7 +255,7 @@ pub(in crate::ui) fn bar_button<'a>(
         false => Why::Keys(keys),
     };
     let button = icon_button(glyph, state, on_press);
-    widgets::hint(button, label, why, iced::widget::tooltip::Position::Top)
+    hint(button, label, why, iced::widget::tooltip::Position::Top)
 }
 
 /// The chip for a QR code found in the selection: its text (made safe to show, see
@@ -307,11 +307,19 @@ pub fn link_chip<'a, Message: Clone + 'a>(
         Kind::Email => "Write",
         _ => "Open",
     };
-    let shown = entity.shown();
+    action_chip(format!("{verb} {}", entity.shown()), open)
+}
+
+/// One acting chip floating beside a selection (a link's Open, Select text):
+/// `chip::action` on the bar's surface, the bar's height.
+pub fn action_chip<'a, Message: Clone + 'a>(
+    label: String,
+    on_press: Message,
+) -> Element<'a, Message> {
     surface(
         Material::Widget,
         radius::WINDOW,
-        container(chip::action(format!("{verb} {shown}"), open)).center_y(iced::Fill),
+        container(chip::action(label, on_press)).center_y(iced::Fill),
     )
     .height(bar::HEIGHT)
     .padding([0.0, bar::QR_PAD])
@@ -370,7 +378,7 @@ mod tests {
         let screen = Size::new(1200.0, 420.0);
         let link = "https://example.com/a-long-link/that/goes/on/and/on/forever";
         let with_link = || qr_chip(link, (), Some(()));
-        let texts = widgets::shot::texts(with_link());
+        let texts = crate::ui::kit::testing::shot::texts(with_link());
         assert!(
             texts.contains(
                 &"QR code: https://example.com/a-long-link/that… (copies 59 chars)".to_string()
@@ -382,16 +390,16 @@ mod tests {
             texts.contains(&"Open link · example.com".to_string()),
             "{texts:?}"
         );
-        let px = widgets::shot::save("bar-qr-chip", with_link(), screen);
+        let px = crate::ui::kit::testing::shot::save("bar-qr-chip", with_link(), screen);
         assert!(px.as_chunks::<4>().0.iter().any(|p| p[..] != px[..4]));
 
         let wifi = qr_chip("WIFI:S:cafe;T:WPA;P:secret;;", (), None);
-        let texts = widgets::shot::texts(wifi);
+        let texts = crate::ui::kit::testing::shot::texts(wifi);
         assert!(texts.iter().any(|t| t.starts_with("QR code: WIFI:S:cafe")));
         assert!(!texts.iter().any(|t| t.starts_with("Open link")));
         // Text-direction controls: dropped from the chip, and a warning beside it.
         let rlo = qr_chip("https://evil.com/\u{202e}moc.elgoog", (), None);
-        let texts = widgets::shot::texts(rlo);
+        let texts = crate::ui::kit::testing::shot::texts(rlo);
         assert!(
             texts.contains(&"QR code: https://evil.com/moc.elgoog… (copies 28 chars)".to_string()),
             "{texts:?}"

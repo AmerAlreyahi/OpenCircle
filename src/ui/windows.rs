@@ -9,13 +9,18 @@ use iced::widget::{container, image, mouse_area, row, stack};
 use iced::window::{self, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
-use super::kit::header::Caption;
+use super::kit::chip;
+use super::kit::header::{self as chrome, Caption};
+use super::kit::icon::Icon;
+use super::kit::icon_button::{self, State};
+use super::kit::surface::{Material, surface};
+use super::kit::tokens::{radius, space};
+use super::kit::tooltip::{Why, hint};
 use super::platform;
 use super::screens::onboarding;
 use super::screens::toast::{self, Tone};
 use super::screens::tray_menu;
-use super::widgets::chrome;
-use super::{settings, shape, theme, update_card, widgets};
+use super::{settings, shape, theme, update_card};
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
 #[cfg(test)]
 pub use super::platform::windows::CLEARED;
@@ -199,41 +204,45 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
     let mut layers = stack![picture];
     let size = pin.size();
     if pin.hover && size.width >= PIN_BAR_ROOM.width && size.height >= PIN_BAR_ROOM.height {
+        // the editing toolbar's Copy, Save and Drag chip: one look for one action
         let button = |glyph, message, label, keys| {
-            widgets::hint(
-                widgets::icon_button(glyph, false, message),
+            hint(
+                icon_button::square(glyph, State::default(), Some(message)),
                 label,
-                widgets::Why::Keys(keys),
+                Why::Keys(keys),
                 Side::Bottom,
             )
         };
-        let drag = dragout::SUPPORTED.then(|| {
-            widgets::hint(
-                widgets::drag_handle(widgets::DRAG, PinMsg::DragOut),
-                "Drag the image into another app",
-                widgets::Why::Icon,
-                Side::Bottom,
-            )
-        });
-        let bar = widgets::surface(
+        // its word "Drag" says it: no tooltip (owner rule: only when it adds)
+        let drag = dragout::SUPPORTED.then(|| chip::drag_out(PinMsg::DragOut));
+        let bar = surface(
+            Material::Widget,
+            radius::WINDOW,
             row![
                 drag,
                 button(COPY, PinMsg::Copy, "Copy", "Ctrl+C"),
                 button(SAVE, PinMsg::Save, "Save", "Ctrl+S"),
-                button(widgets::CLOSE, PinMsg::Close, "Close", "Esc"),
+                button(Icon::Close.glyph(), PinMsg::Close, "Close", "Esc"),
             ]
-            .spacing(4),
-        );
+            .spacing(space::GAP)
+            .align_y(iced::Center),
+        )
+        .padding(space::BAR_PAD);
         layers = layers.push(
             container(bar)
                 .width(Fill)
                 .height(Fill)
                 .align_x(iced::alignment::Horizontal::Right)
                 .align_y(iced::alignment::Vertical::Top)
-                .padding(8),
+                .padding(space::PAGE[0] / 2.0),
         );
     }
-    mouse_area(widgets::pinned(layers))
+    // a thin rim around the picture (a pin window has no title bar)
+    let pinned = surface(Material::Widget, 0.0, layers)
+        .width(Fill)
+        .height(Fill)
+        .padding(1);
+    mouse_area(pinned)
         .on_press(PinMsg::Drag)
         .on_double_click(PinMsg::Close)
         .on_scroll(PinMsg::Zoom)
@@ -739,7 +748,7 @@ impl Windows {
         let resizable = self.mode(id).resizable;
         let c = self.chrome.entry(id).or_default();
         match event {
-            chrome::Event::Press => {
+            chrome::Event::Caption(Caption::Drag) => {
                 let now = Instant::now();
                 if resizable && is_double_click(c.last_press, now) {
                     c.last_press = None;
@@ -749,9 +758,10 @@ impl Windows {
                     window::drag(id)
                 }
             }
-            chrome::Event::Minimise => window::minimize(id, true),
-            chrome::Event::Maximise => window::toggle_maximize(id),
-            chrome::Event::Close => self.close_window(id),
+            chrome::Event::Caption(Caption::Minimise) => window::minimize(id, true),
+            chrome::Event::Caption(Caption::Maximise) if resizable => window::toggle_maximize(id),
+            chrome::Event::Caption(Caption::Maximise) => Task::none(),
+            chrome::Event::Caption(Caption::Close) => self.close_window(id),
             chrome::Event::Resize(direction) if !c.maximised => window::drag_resize(id, direction),
             chrome::Event::Resize(_) => Task::none(),
         }
@@ -851,6 +861,7 @@ impl Windows {
             _ => return None,
         };
         Some(chrome::frame(
+            super::kit::logo::logo(16),
             "Screenshot permission",
             self.mode(window),
             page,
@@ -1029,7 +1040,7 @@ fn apply_from(old: &Config, cfg: Config) {
 // ---- the normal window; the others and `open` are in `platform::windows` (a test forbids any other opener) ----
 
 /// A normal window (Settings, Onboarding, the permission prompt): no OS title bar,
-/// our own header (`widgets::chrome`), centred, our logo as its icon.
+/// our own header (`kit::header`), centred, our logo as its icon.
 fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
     let mut position = Position::Centered;
     let (size, min_size, resizable) = match kind {
@@ -1169,7 +1180,7 @@ mod tests {
     use super::*;
     use crate::secrets::{AiKey, Secret, SecretsError};
     use crate::ui::kit::motion;
-    use crate::ui::widgets::shot;
+    use crate::ui::kit::testing::shot;
 
     struct NoKeys;
     impl crate::secrets::KeyStore for NoKeys {
@@ -1457,7 +1468,7 @@ mod tests {
             let _ = windows.update(Msg::Pin(id, PinMsg::Hover(hover)));
             let px = shot::save(name, windows.view(id).unwrap(), Size::new(420.0, 260.0));
             // The picture fills the window: no window-colour background shows.
-            let bg = theme::current().window;
+            let bg = crate::ui::kit::themes::c().bg;
             let bg = [bg.r, bg.g, bg.b].map(|c| (c * 255.0).round() as u8);
             let background = px.chunks(4).filter(|p| p[..3] == bg).count();
             assert!(background < 100, "{name}: {background} background pixels");
@@ -1471,18 +1482,14 @@ mod tests {
 
     #[test]
     fn the_pin_bar_adds_the_shortcuts_to_its_icons() {
-        use crate::ui::widgets::tests_support::{assert_tips_add_something, shown};
+        use crate::ui::kit::tooltip::tests_support::{assert_tips_add_something, shown};
         let mut windows = Windows::default();
         let _ = windows.pin(picture(300, 200), None, 1.0);
         let id = windows.pins[0].id;
         let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
         let _ = windows.view(id).unwrap();
-        // Drag-out is Windows-only, so its handle (and hint) is too.
-        let mut expected = vec!["Copy · Ctrl+C", "Save · Ctrl+S", "Close · Esc"];
-        if cfg!(windows) {
-            expected.insert(0, "Drag the image into another app");
-        }
-        assert_eq!(shown(), expected);
+        // Drag-out (Windows only) is the editor's Drag chip: its word says it, no tooltip.
+        assert_eq!(shown(), ["Copy · Ctrl+C", "Save · Ctrl+S", "Close · Esc"]);
         assert_tips_add_something("pin bar");
     }
 
@@ -1608,8 +1615,8 @@ mod tests {
         let mut windows = Windows::default();
         theme::apply(Theme::System);
         let _ = windows.update(Msg::OsTheme(iced::theme::Mode::Light));
-        let light = theme::current().text;
+        let light = crate::ui::kit::themes::c().text;
         let _ = windows.update(Msg::OsTheme(iced::theme::Mode::Dark));
-        assert_ne!(theme::current().text, light);
+        assert_ne!(crate::ui::kit::themes::c().text, light);
     }
 }

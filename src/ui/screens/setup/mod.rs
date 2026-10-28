@@ -20,14 +20,15 @@ use crate::setup::{self as setup_core, BadFolder, Installed};
 use crate::ui::kit::button::{self, Kind, cta_label};
 use crate::ui::kit::divider::divider;
 use crate::ui::kit::field::field;
+use crate::ui::kit::logo::png_handle;
 use crate::ui::kit::motion::{self, Curve};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text as ktext;
+use crate::ui::kit::text::{FONTS, ui_font};
 use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 use crate::ui::kit::tokens::fixed::{DANGER, ON_ACCENT, SUCCESS};
 use crate::ui::kit::tokens::{Role, radius, space};
 use crate::ui::kit::{chip, header, progress, segmented};
-use crate::ui::widgets::{self, chrome::png_handle};
 use crate::ui::windows;
 
 /// The window: 420 logical px wide (`max-w-[420px]`), its height per step.
@@ -338,10 +339,10 @@ fn show(make: impl Fn() -> State + 'static) -> iced::Result {
         )
     };
     let mut app = iced::daemon(boot, State::update, State::view);
-    for font in widgets::FONTS {
+    for font in FONTS {
         app = app.font(font);
     }
-    app.default_font(widgets::ui_font())
+    app.default_font(ui_font())
         .title(|s: &State, _| match s.uninstall {
             Some(_) => EN.uninstall_title.to_string(),
             None => EN.window_title.to_string(),

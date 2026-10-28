@@ -222,6 +222,33 @@ pub fn regular<'a, Message: Clone + 'a>(
         .into()
 }
 
+/// A round button in the accent with nothing on it, `side` across (a control
+/// minimised to a dot: the live controller); brighter under the cursor, a
+/// 2 px inset edge of the widget colour while pressed.
+pub fn dot<'a, Message: Clone + 'a>(side: f32, on_press: Message) -> Element<'a, Message> {
+    use iced_button::Status;
+    iced_button(iced::widget::Space::new())
+        .width(side)
+        .height(side)
+        .padding(0)
+        .on_press(on_press)
+        .style(|_, status| iced_button::Style {
+            background: Some(
+                match status {
+                    Status::Hovered | Status::Pressed => brighter(c().accent),
+                    _ => c().accent,
+                }
+                .into(),
+            ),
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(if status == Status::Pressed { 2 } else { 0 })
+                .color(c().widget),
+            ..iced_button::Style::default()
+        })
+        .into()
+}
+
 /// `c` as CSS `brightness(1.1)` draws it.
 fn brighter(c: Color) -> Color {
     let up = |v: f32| (v * 1.1).min(1.0);

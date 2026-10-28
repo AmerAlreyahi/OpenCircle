@@ -1,11 +1,14 @@
 //! A window's own header (no OS title bar): the regular one, 40 px (Settings:
 //! logo, title, a status slot, minimise / maximise / close), and the compact
-//! one, 36 px (the setup: a mono title and close).
+//! one, 36 px (the setup: a mono title and close). `frame` puts a page under
+//! the regular header with the resize strips along the edges.
 use iced::font::Weight;
-use iced::widget::{Space, button, container, image, mouse_area, row, text};
-use iced::{Center, Element, Fill};
+use iced::widget::{Space, button, column, container, image, mouse_area, row, stack, text};
+use iced::window::Direction;
+use iced::{Center, Element, Fill, Length, mouse};
 
 use super::icon::{Icon, icon};
+use super::surface::{Material, surface};
 use super::text::{mono, weight};
 use super::themes::c;
 use super::tokens::{fixed, size};
@@ -120,4 +123,159 @@ fn caption<'a, Message: Clone + 'a>(
             }
         })
         .into()
+}
+
+/// The resize strip along each edge of a normal window (logical px).
+pub const EDGE: f32 = 6.0;
+
+/// What a window's frame reports: its header's captions, and a press on an
+/// edge or corner (the OS resizes from that side).
+#[derive(Debug, Clone, Copy)]
+pub enum Event {
+    Caption(Caption),
+    Resize(Direction),
+}
+
+impl From<Caption> for Event {
+    fn from(caption: Caption) -> Event {
+        Event::Caption(caption)
+    }
+}
+
+/// What the window can do now: a fixed-size or maximised one has no edges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mode {
+    pub resizable: bool,
+    pub maximised: bool,
+}
+
+/// `content` under the regular header (`logo`, `title`, no status), on the
+/// window's surface, with the resize edges on top.
+pub fn frame<'a, Message: Clone + 'a>(
+    logo: image::Handle,
+    title: &'a str,
+    mode: Mode,
+    content: impl Into<Element<'a, Message>>,
+    on: impl Fn(Event) -> Message + Clone + 'a,
+) -> Element<'a, Message> {
+    let to = on.clone();
+    let header = regular(logo, title, Space::new(), mode.maximised, move |c| {
+        to(c.into())
+    });
+    let page = column![header, container(content).width(Fill).height(Fill)];
+    let window = surface(Material::Window, 0.0, page)
+        .width(Fill)
+        .height(Fill)
+        .padding(1);
+    with_edges(window, mode, on)
+}
+
+/// `window` with the resize edges on top (only when it can resize now).
+pub fn with_edges<'a, Message: Clone + 'a>(
+    window: impl Into<Element<'a, Message>>,
+    mode: Mode,
+    on: impl Fn(Event) -> Message,
+) -> Element<'a, Message> {
+    if mode.resizable && !mode.maximised {
+        stack![window.into(), edges(&on)].into()
+    } else {
+        window.into()
+    }
+}
+
+/// The invisible strips along the edges and corners.
+fn edges<'a, Message: Clone + 'a>(on: &impl Fn(Event) -> Message) -> Element<'a, Message> {
+    use mouse::Interaction::{
+        ResizingDiagonallyDown as Down, ResizingDiagonallyUp as Up,
+        ResizingHorizontally as Horizontal, ResizingVertically as Vertical,
+    };
+    let zone = |direction, interaction, width: Length, height: Length| {
+        mouse_area(Space::new().width(width).height(height))
+            .on_press(on(Event::Resize(direction)))
+            .interaction(interaction)
+    };
+    let corner = |direction, interaction| zone(direction, interaction, EDGE.into(), EDGE.into());
+    let top = row![
+        corner(Direction::NorthWest, Down),
+        zone(Direction::North, Vertical, Fill, EDGE.into()),
+        corner(Direction::NorthEast, Up),
+    ];
+    let middle = row![
+        zone(Direction::West, Horizontal, EDGE.into(), Fill),
+        Space::new().width(Fill),
+        zone(Direction::East, Horizontal, EDGE.into(), Fill),
+    ]
+    .height(Fill);
+    let bottom = row![
+        corner(Direction::SouthWest, Up),
+        zone(Direction::South, Vertical, Fill, EDGE.into()),
+        corner(Direction::SouthEast, Down),
+    ];
+    column![top, middle, bottom].into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::kit::testing::shot;
+    use iced::Size;
+
+    /// What one click at `at` reports, by name.
+    fn pressing(at: (f32, f32), mode: Mode) -> Vec<String> {
+        let page: Element<'_, Event> = text("page").into();
+        let logo = crate::ui::kit::logo::logo(16);
+        let view = frame(logo, "Settings", mode, page, |e| e);
+        let size = Size::new(400.0, 300.0);
+        let events = shot::click(view, size, iced::Point::new(at.0, at.1));
+        events.iter().map(|e| format!("{e:?}")).collect()
+    }
+
+    fn is(got: Vec<String>, want: &[&str]) {
+        assert_eq!(got, want);
+    }
+
+    const FREE: Mode = Mode {
+        resizable: true,
+        maximised: false,
+    };
+
+    #[test]
+    fn header_hit_zones_drag_buttons_and_edges() {
+        // Free header area: drag; the three caption buttons at the right end.
+        is(pressing((200.0, 20.0), FREE), &["Caption(Drag)"]);
+        is(pressing((284.0, 20.0), FREE), &["Caption(Minimise)"]);
+        is(pressing((330.0, 20.0), FREE), &["Caption(Maximise)"]);
+        is(pressing((380.0, 20.0), FREE), &["Caption(Close)"]);
+        // The page below does nothing.
+        is(pressing((200.0, 150.0), FREE), &[]);
+        // Edges and corners resize from their side.
+        let edge = |x, y| pressing((x, y), FREE);
+        is(edge(2.0, 150.0), &["Resize(West)"]);
+        is(edge(397.0, 150.0), &["Resize(East)"]);
+        is(edge(200.0, 297.0), &["Resize(South)"]);
+        is(edge(200.0, 2.0), &["Resize(North)"]);
+        is(edge(2.0, 2.0), &["Resize(NorthWest)"]);
+        is(edge(397.0, 2.0), &["Resize(NorthEast)"]);
+        is(edge(2.0, 297.0), &["Resize(SouthWest)"]);
+        is(edge(397.0, 297.0), &["Resize(SouthEast)"]);
+    }
+
+    #[test]
+    fn a_fixed_or_maximised_window_has_no_edges() {
+        for mode in [
+            Mode {
+                resizable: true,
+                maximised: true,
+            },
+            Mode {
+                resizable: false,
+                maximised: false,
+            },
+        ] {
+            is(pressing((2.0, 150.0), mode), &[]);
+            is(pressing((200.0, 297.0), mode), &[]);
+            is(pressing((200.0, 20.0), mode), &["Caption(Drag)"]);
+            is(pressing((380.0, 20.0), mode), &["Caption(Close)"]);
+        }
+    }
 }

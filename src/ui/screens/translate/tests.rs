@@ -1,7 +1,6 @@
 //! Translate in place: its sessions, partials, cards and picker pill.
 use super::*;
 use crate::ocr;
-use crate::ui::widgets;
 use iced::widget::container as c;
 
 fn block(text: &str, tr: &str, bounds: [f32; 4]) -> Translation {
@@ -59,8 +58,12 @@ fn a_partial_redraw_leaves_the_rest_of_the_download_prompt() {
         let at = card::place(size, None, None);
         // the Download button's row
         let damage = Rectangle::new(Point::new(at.x + 20.0, 150.0), Size::new(140.0, 60.0));
-        let (first, again) =
-            widgets::shot::render_twice(s.view(size, at, false), w as u32, h as u32, Some(damage));
+        let (first, again) = crate::ui::kit::testing::shot::render_twice(
+            s.view(size, at, false),
+            w as u32,
+            h as u32,
+            Some(damage),
+        );
         let outside = |i: usize| {
             let p = Point::new((i % w as usize) as f32, (i / w as usize) as f32);
             !damage.expand(1.0).contains(p)
@@ -109,11 +112,11 @@ fn the_prompts_are_short_cards_on_small_screens() {
         ] {
             let size = Size::new(w, h);
             let at = card::place(size, None, None);
-            let lost = widgets::shot::out_of_reach(s.view(size, at, false), size);
+            let lost = crate::ui::kit::testing::shot::out_of_reach(s.view(size, at, false), size);
             assert!(lost.is_empty(), "{name} at {w}x{h}: out of reach {lost:?}");
             let view =
                 c(s.view(size, at, false)).style(move |_| c::Style::default().background(backdrop));
-            let px = widgets::shot::save(
+            let px = crate::ui::kit::testing::shot::save(
                 &format!("prompt-{}-{w}x{h}", name.replace(' ', "-")),
                 view.into(),
                 size,
@@ -246,7 +249,7 @@ fn offline_models_are_asked_for_with_their_size() {
     let _ = s.update(Msg::Offline(en_ar(), 117_600_822));
     assert!(matches!(&s.phase, Phase::Consent(Some((_, 117_600_822)))));
     assert!(s.work.is_none(), "the thread is done");
-    let texts = widgets::shot::texts(s.view(
+    let texts = crate::ui::kit::testing::shot::texts(s.view(
         Size::new(1920.0, 1080.0),
         card::place(Size::new(1920.0, 1080.0), None, None),
         false,
@@ -263,7 +266,7 @@ fn offline_models_are_asked_for_with_their_size() {
     // Download: that pair is the one fetched
     s.offline = Some(en_ar());
     s.phase = Phase::Downloading(0.3);
-    let texts = widgets::shot::texts(s.view(
+    let texts = crate::ui::kit::testing::shot::texts(s.view(
         Size::new(1920.0, 1080.0),
         card::place(Size::new(1920.0, 1080.0), None, None),
         false,
@@ -285,7 +288,8 @@ fn a_failed_download_offers_try_again() {
         s.phase
     );
     let size = Size::new(1920.0, 1080.0);
-    let texts = widgets::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts =
+        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
     for want in [
         "Download could not finish",
         "No internet connection.",
@@ -308,8 +312,10 @@ fn a_failed_download_offers_try_again() {
 fn notes_are_opaque_in_the_light_theme() {
     use iced::widget::container as c;
     crate::ui::theme::set_light(true);
-    let palette = crate::ui::theme::current();
-    let (text, solid) = (palette.text, crate::ui::kit::themes::c().widget);
+    let (text, solid) = (
+        crate::ui::kit::themes::c().text,
+        crate::ui::kit::themes::c().widget,
+    );
     let mut s = session(false);
     for phase in [Phase::Consent(None), Phase::Downloading(0.5)] {
         s.phase = phase;
@@ -319,7 +325,7 @@ fn notes_are_opaque_in_the_light_theme() {
             false,
         ))
         .style(|_| c::Style::default().background(iced::Color::from_rgb8(10, 12, 30)));
-        let px = widgets::shot::render(dark.into(), 720, 300);
+        let px = crate::ui::kit::testing::shot::render(dark.into(), 720, 300);
         let at = |x: usize, y: usize| &px[(y * 720 + x) * 4..][..3];
         let want = solid.into_rgba8();
         assert_eq!(at(360, 262), &want[..3], "the panel is solid");
@@ -339,29 +345,32 @@ fn the_pill_picks_languages_and_translates_again() {
     use crate::ui::picker::{Msg as P, Side};
     let mut s = session(true);
     let size = Size::new(720.0, 420.0);
-    let texts = widgets::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts =
+        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
     for t in ["Detect", "Arabic", "Translating…"] {
         assert!(texts.iter().any(|x| x == t), "{t}: {texts:?}");
     }
-    widgets::shot::save(
+    crate::ui::kit::testing::shot::save(
         "translate-pill",
         s.view(size, card::place(size, None, None), false),
         size,
     );
     let _ = s.update(Msg::Picker(P::Open(Side::Target)));
-    widgets::shot::save(
+    crate::ui::kit::testing::shot::save(
         "translate-pill-picker",
         s.view(size, card::place(size, None, None), false),
         size,
     );
-    let texts = widgets::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts =
+        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
     assert!(texts.iter().any(|t| t == "English"), "{texts:?}");
     // the same target again: nothing restarts
     let _ = s.update(Msg::Picker(P::Pick("ar".into())));
     assert!(matches!(s.phase, Phase::Translating));
     // a shown translation keeps the pill; a new target starts over
     let _ = s.update(shown(vec![block("Quit", "خروج", [10.0, 10.0, 50.0, 20.0])]));
-    let texts = widgets::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts =
+        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
     assert!(texts.iter().any(|t| t == "Arabic") && !texts.iter().any(|t| t == "Translating…"));
     let _ = s.update(Msg::Picker(P::Open(Side::Source)));
     let _ = s.update(Msg::Picker(P::Query("kyr".into())));
@@ -544,12 +553,12 @@ fn clicks_hit_translated_blocks_only() {
     // the word card is the shared floating card, the pill beside it
     let size = Size::new(1280.0, 720.0);
     let view = s.view(size, card::place(size, None, None), false);
-    let texts = widgets::shot::texts(view);
+    let texts = crate::ui::kit::testing::shot::texts(view);
     for t in ["المخزون · Inventory", "Inventory", "المخزون", "Explain"] {
         assert!(texts.iter().any(|x| x == t), "{t}: {texts:?}");
     }
     let view = s.view(size, card::place(size, None, None), false);
-    widgets::shot::save("translate-word-card", view, size);
+    crate::ui::kit::testing::shot::save("translate-word-card", view, size);
     s.click(Point::new(150.0, 90.0));
     assert!(!s.has_card(), "a click elsewhere closes the card");
 }
@@ -614,7 +623,8 @@ fn the_explanation_is_shown_as_markdown() {
         iced::widget::markdown::Item::List { .. }
     ));
     let size = Size::new(1280.0, 720.0);
-    let texts = widgets::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts =
+        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
     assert!(!texts.join(" ").contains("**"), "raw Markdown: {texts:?}");
 }
 
@@ -702,7 +712,8 @@ fn a_changed_language_leaves_no_ghost_text() {
                 c(chips).padding(20).into()
             })
         };
-        let (window, fresh) = widgets::shot::redrawn(view, Size::new(320.0, 80.0), scale);
+        let (window, fresh) =
+            crate::ui::kit::testing::shot::redrawn(view, Size::new(320.0, 80.0), scale);
         let differ = window.iter().zip(&fresh).filter(|(a, b)| a != b).count();
         assert_eq!(differ, 0, "{differ} stale bytes at {scale}x");
     }

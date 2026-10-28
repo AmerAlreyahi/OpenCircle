@@ -38,11 +38,13 @@ pub enum Icon {
     /// lucide "pin" (the AI chat stays open) and "arrow-left" (a drawer's back).
     Pin,
     Back,
+    /// lucide "grip-vertical": a drag-out handle (the Drag chip's dots).
+    Grip,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 16] = [
+    pub const ALL: [Icon; 17] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -59,6 +61,7 @@ impl Icon {
         Icon::Screen,
         Icon::Pin,
         Icon::Back,
+        Icon::Grip,
     ];
 
     pub const fn glyph(self) -> char {
@@ -79,6 +82,7 @@ impl Icon {
             Icon::Screen => '\u{e152}',
             Icon::Pin => '\u{e258}',
             Icon::Back => '\u{e04c}',
+            Icon::Grip => '\u{e0ee}',
         }
     }
 }

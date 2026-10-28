@@ -62,8 +62,9 @@ fn moving_update(state: &mut State, message: Message) -> Outcome {
         }
     }
 }
-use crate::ui::widgets::tests_support::{assert_tips_add_something, shown};
-use crate::ui::widgets::{TIPS, shot};
+use crate::ui::kit::testing::shot;
+use crate::ui::kit::tooltip::TIPS;
+use crate::ui::kit::tooltip::tests_support::{assert_tips_add_something, shown};
 
 #[test]
 fn general_has_the_start_with_the_os_switch_on_by_default() {
@@ -1674,7 +1675,7 @@ fn renders_every_section_in_both_themes() {
             let slug = label.to_lowercase().replace(" & ", "-");
             let file = format!("settings-{slug}-{name}");
             let px = shot::save(&file, view(&s), WINDOW_SIZE);
-            let window = theme::current().window;
+            let window = crate::ui::kit::themes::c().bg;
             // Not blank: more than the window colour is on screen.
             let bg = [window.r, window.g, window.b].map(|c| (c * 255.0).round() as u8);
             let other = px

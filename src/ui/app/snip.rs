@@ -17,7 +17,7 @@ use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::editor::Editing;
-use crate::ui::{snip, widgets, windows};
+use crate::ui::{snip, windows};
 
 use super::{ASK_MARGIN, App, work_area};
 
@@ -212,7 +212,7 @@ impl App {
                 self.o.origin + Vector::new(at.x, at.y),
             ))
             // The window is exactly the pill: cut it to the pill's shape (no box).
-            .chain(windows::cut(self.overlay, widgets::SURFACE_RADIUS).map(Message::Windows))
+            .chain(windows::cut(self.overlay, snip::PILL_RADIUS).map(Message::Windows))
     }
 
     /// `Shoot(kind)` after `wait` (the overlay is gone by then).

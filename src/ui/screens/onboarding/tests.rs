@@ -294,8 +294,8 @@ const BODY: Size = Size::new(638.0, 355.0);
 
 #[test]
 fn every_control_has_its_own_label() {
-    use crate::ui::widgets::TIPS;
-    use crate::ui::widgets::tests_support::assert_tips_add_something;
+    use crate::ui::kit::tooltip::TIPS;
+    use crate::ui::kit::tooltip::tests_support::assert_tips_add_something;
     let mut s = state(None).on_wayland(true);
     row(
         &mut s,

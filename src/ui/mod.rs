@@ -6,7 +6,7 @@ mod arch_tests;
 /// Frames as the window draws them (damage), and the animations' timing.
 #[cfg(test)]
 mod frame_times;
-mod kit;
+pub(crate) mod kit;
 mod live_layer;
 mod overlay;
 mod platform;
@@ -17,7 +17,6 @@ pub(crate) use screens::setup;
 use screens::{panel, settings, song, translate};
 mod snip;
 pub mod theme;
-pub(crate) mod widgets;
 mod windows;
 
 use crate::Trigger;
@@ -33,13 +32,13 @@ use screens::update_card;
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     app::background::set_triggers(triggers);
     crate::actions::lens::page::sweep_stale(); // pages left by a crash
-    let logo = widgets::chrome::logo();
+    let logo = kit::logo::window_icon();
     platform::windows::set_icon(logo.rgba.clone(), logo.width, logo.height);
     let mut app = iced::daemon(App::boot, App::update, App::view);
-    for font in widgets::FONTS {
+    for font in kit::text::FONTS {
         app = app.font(font);
     }
-    app.default_font(widgets::ui_font())
+    app.default_font(kit::text::ui_font())
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)

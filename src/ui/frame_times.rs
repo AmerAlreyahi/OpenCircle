@@ -18,8 +18,8 @@ use super::app::message::Message;
 use super::app::word;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
+use crate::ui::panel;
 use crate::ui::screens::{onboarding, settings};
-use crate::ui::{panel, theme, widgets};
 
 use iced::advanced::graphics::{Viewport, damage};
 use iced::{Color, Theme};
@@ -634,10 +634,10 @@ fn a_pixel_for_pixel_image_is_drawn_as_tiny_skia_draws_it() {
         .filter_method(image::FilterMethod::Nearest);
     let view: Element<'_, Message> = container(picture).padding([7, 10]).into();
     let damage = Rectangle::new(Point::new(20.3, 9.6), Size::new(30.45, 20.5));
-    let (drawn, again) = widgets::shot::render_twice(view, 100, 60, Some(damage));
+    let (drawn, again) = crate::ui::kit::testing::shot::render_twice(view, 100, 60, Some(damage));
     assert_eq!(drawn, again, "a part redrawn is the same");
     // tiny-skia's own: the background, the image drawn over it
-    let [r, g, b, a] = theme::current().window.into_rgba8();
+    let [r, g, b, a] = crate::ui::kit::themes::c().bg.into_rgba8();
     let mut reference = tiny_skia::Pixmap::new(100, 60).unwrap();
     reference.fill(tiny_skia::Color::from_rgba8(r, g, b, a));
     let mut picture = tiny_skia::Pixmap::new(iw, ih).unwrap();

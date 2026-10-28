@@ -24,6 +24,7 @@ pub mod icon;
 pub mod icon_button;
 pub mod keycap;
 pub mod logo;
+pub mod loupe;
 pub mod markdown;
 pub mod option_list;
 pub mod panel_frame;
@@ -39,6 +40,7 @@ pub mod surface;
 pub mod text;
 pub mod text_area;
 pub mod toast;
+pub mod tooltip;
 
 #[cfg(test)]
 pub mod testing;

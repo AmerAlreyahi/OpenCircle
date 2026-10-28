@@ -37,7 +37,7 @@ pub fn render_twice<Message>(
     let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
     let mut mask = tiny_skia::Mask::new(width, height).unwrap();
     let viewport = Viewport::with_physical_size(Size::new(width, height), 1.0);
-    let background = crate::ui::theme::current().window;
+    let background = crate::ui::kit::themes::c().bg;
     // iced draws B, G, R, A.
     let rgba = |p: &tiny_skia::Pixmap| -> Vec<u8> {
         (p.data().as_chunks::<4>().0.iter())
@@ -103,7 +103,7 @@ pub fn render_with<Message>(
         &mut mask,
         &Viewport::with_physical_size(Size::new(w, h), 1.0),
         &[Rectangle::with_size(size)],
-        crate::ui::theme::current().window,
+        crate::ui::kit::themes::c().bg,
     );
     // iced draws B, G, R, A.
     (pixmap.data().as_chunks::<4>().0.iter())
@@ -128,7 +128,7 @@ pub fn redrawn<'a, Message: 'a>(
     );
     let viewport = Viewport::with_physical_size(Size::new(w, h), scale);
     let mut mask = tiny_skia::Mask::new(w, h).unwrap();
-    let background = crate::ui::theme::current().window;
+    let background = crate::ui::kit::themes::c().bg;
     let all = Rectangle::with_size(size);
     let style = renderer::Style {
         text_color: Color::WHITE,
@@ -293,7 +293,7 @@ pub fn after_clicks<'a, Message>(
         &mut mask,
         &Viewport::with_physical_size(Size::new(w, h), 1.0),
         &[Rectangle::with_size(size)],
-        crate::ui::theme::current().window,
+        crate::ui::kit::themes::c().bg,
     );
     (pixmap.data().as_chunks::<4>().0.iter())
         .flat_map(|p| [p[2], p[1], p[0], p[3]])

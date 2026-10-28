@@ -8,8 +8,8 @@ use crate::config::Config;
 use crate::labs::Labs;
 use crate::ui::kit::option_list::{MENU_WIDTH, item, menu, menu_height, separator};
 use crate::ui::kit::tokens::radius;
+use crate::ui::kit::tooltip::tip;
 use crate::ui::platform::tray::{Entry, entries};
-use crate::ui::widgets::tip;
 
 /// The corners the window is cut to (`platform::windows::floating`).
 pub const RADIUS: f32 = radius::MENU;

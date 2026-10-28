@@ -221,7 +221,7 @@ pub fn action<'a, Message: Clone + 'a>(label: String, on_press: Message) -> Elem
 pub fn drag_out<'a, Message: Clone + 'a>(on_down: Message) -> Element<'a, Message> {
     use iced::widget::{hover, mouse_area};
     let look = |edge: Color, ink: Color| {
-        let dots = text('\u{e0ee}')
+        let dots = text(super::icon::Icon::Grip.glyph())
             .font(super::icon::FONT)
             .size(14)
             .color(c().accent);

@@ -17,12 +17,12 @@ use crate::ui::kit::card::card;
 use crate::ui::kit::chip::{chip, pill};
 use crate::ui::kit::divider::divider;
 use crate::ui::kit::logo::logo;
+use crate::ui::kit::logo::png_handle;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{accent, sub, text};
 use crate::ui::kit::tokens::{Role, radius, space};
 use crate::ui::kit::{icon, themes};
-use crate::ui::widgets::chrome::png_handle;
 
 pub const PROJECT: &str = "https://github.com/AmerAlreyahi/OpenCircle";
 pub const LICENSE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSE";

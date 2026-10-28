@@ -14,8 +14,8 @@ use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::slider::slider;
 use crate::ui::kit::tokens::space;
+use crate::ui::kit::tooltip::{Why, hint, tip};
 use crate::ui::theme;
-use crate::ui::widgets::{Why, hint, tip};
 
 pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
     let c = &state.draft.look.custom;

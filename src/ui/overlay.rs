@@ -16,7 +16,8 @@ use iced::widget::image::{FilterMethod, Handle};
 use iced::widget::text::Alignment;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, Vector};
 
-use super::{kit::motion, theme};
+use super::kit::{motion, tokens::fixed};
+use super::theme;
 use crate::config::{BracketStyle, Look};
 
 /// A selection smaller than this (screen px, either side) is a tap, not a circle.
@@ -666,7 +667,7 @@ pub fn grip_at(kind: Kind, area: Rectangle, p: Point) -> Option<Grip> {
 /// The four corner brackets of the snapped box `r` (screen px), `alpha` shown.
 fn brackets(frame: &mut canvas::Frame, r: Rectangle, look: &Look, alpha: f32) {
     let colour = theme::bracket(look).scale_alpha(alpha);
-    let shadow = Color::from_rgba(0.0, 0.0, 0.0, 0.35 * alpha);
+    let shadow = fixed::BRACKET_SHADOW.scale_alpha(alpha);
     let line = |colour, width| Stroke {
         style: canvas::Style::Solid(colour),
         width,
@@ -1203,8 +1204,8 @@ impl canvas::Program<Event> for Overlay<'_> {
 
             // Select-text mode: every word, the picked ones stronger.
             for (rects, colour) in [
-                (self.words, theme::WORD),
-                (&self.picked[..], theme::WORD_PICKED),
+                (self.words, fixed::WORD),
+                (&self.picked[..], fixed::WORD_PICKED),
             ] {
                 for r in rects {
                     let r = self.view.rect_to_screen(*r);
@@ -1219,7 +1220,7 @@ impl canvas::Program<Event> for Overlay<'_> {
                 if self.handles && !matches!(sel.kind, Kind::Snap | Kind::Word) {
                     for c in corners(r) {
                         let dot = Path::circle(c, HANDLE);
-                        frame.fill(&dot, Color::WHITE);
+                        frame.fill(&dot, fixed::HANDLE);
                         let ring = Stroke::default().with_color(accent.0);
                         frame.stroke(&dot, ring.with_width(2.0));
                     }
@@ -1231,7 +1232,7 @@ impl canvas::Program<Event> for Overlay<'_> {
                     frame.fill_text(canvas::Text {
                         content: (self.others.len() + 1).to_string(),
                         position: at,
-                        color: theme::ON_ACCENT,
+                        color: fixed::ON_ACCENT,
                         size: 13.0.into(),
                         align_x: Alignment::Center,
                         align_y: Vertical::Center,
@@ -1301,7 +1302,7 @@ fn glow(
         ..Stroke::default()
     };
     if kind == Kind::Word {
-        frame.fill(&path, theme::SELECTION); // flat, like a document's selection
+        frame.fill(&path, fixed::TEXT_SELECTION); // flat, like a document's selection
         return;
     }
     // Soft glow = the same stroke, wider and fainter, under the core line.
@@ -1438,7 +1439,7 @@ impl<M> canvas::Program<M> for Zoomed<'_> {
         _cursor: Cursor,
     ) -> Vec<Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        frame.fill_rectangle(Point::ORIGIN, bounds.size(), Color::BLACK);
+        frame.fill_rectangle(Point::ORIGIN, bounds.size(), fixed::BACKDROP);
         let image = canvas::Image::new(self.picture.clone())
             .filter_method(FilterMethod::Nearest)
             .opacity(1.0 - self.dim);
@@ -2244,7 +2245,7 @@ mod tests {
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
             .height(iced::Fill);
-        crate::ui::widgets::shot::render(canvas.into(), 960, 540)
+        crate::ui::kit::testing::shot::render(canvas.into(), 960, 540)
     }
 
     /// Selected text is drawn like a document's selection: flat boxes with
@@ -2285,7 +2286,7 @@ mod tests {
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
             .height(iced::Fill);
-        let rgba = crate::ui::widgets::shot::render(canvas.into(), 960, 540);
+        let rgba = crate::ui::kit::testing::shot::render(canvas.into(), 960, 540);
         let fill = px(&rgba, Point::new(200.0, 112.0));
         // the very corners are the same flat colour as the middle
         for corner in [

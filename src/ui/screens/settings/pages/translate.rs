@@ -15,7 +15,7 @@ use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, space};
-use crate::ui::widgets::tip;
+use crate::ui::kit::tooltip::tip;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let t = &state.draft.translate;

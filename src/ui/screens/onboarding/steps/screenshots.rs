@@ -10,7 +10,7 @@ use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{error, sub, text};
 use crate::ui::kit::tokens::{Role, space};
-use crate::ui::widgets::tip;
+use crate::ui::kit::tooltip::tip;
 
 /// Logical size of the prompt shown after a refused capture.
 pub const PROMPT_SIZE: Size = Size::new(500.0, 270.0);

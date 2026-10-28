@@ -947,7 +947,7 @@ mod tests {
             .font(iced::Font::DEFAULT);
         let page = container(line).padding([12.0 * scale, 30.0 * scale]);
         let view: iced::Element<'_, ()> = page.into();
-        crate::ui::widgets::shot::render(view, (960.0 * scale) as u32, (60.0 * scale) as u32)
+        crate::ui::kit::testing::shot::render(view, (960.0 * scale) as u32, (60.0 * scale) as u32)
     }
 
     /// The columns (frame px) with ink in `rgba` (960 x 60 at `scale`).

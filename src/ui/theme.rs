@@ -1,76 +1,16 @@
-//! Design tokens: the ONLY place colours live (DESIGN.md "Themes").
+//! The glue between the config and the kit: the Light / Dark / System choice
+//! and the `[appearance]` picks set the kit's theme (`kit::themes`); a stored
+//! `[look]` gives its edge glow, accent pair, dims and bracket colour. Every
+//! UI colour itself lives in the kit (`kit::themes`, `kit::looks`, `kit::tokens`).
 use std::cell::Cell;
 
 use iced::Color;
 
-use crate::config::{self, BarStyle, BracketColour, ColourSet, Look, Rgb, Theme};
+use crate::config::{self, BracketColour, ColourSet, Look, Rgb, Theme};
 
-/// One theme's surface colours.
-pub struct Palette {
-    pub panel: Color,
-    pub border: Color,
-    pub text: Color,
-    /// Secondary text: key hints, captions.
-    pub muted: Color,
-    /// Quiet button under the cursor / pressed.
-    pub hover: Color,
-    pub pressed: Color,
-    /// Settings / onboarding window background.
-    pub window: Color,
-}
-
-/// `over` (with its alpha) laid on `under`, as one opaque colour.
-const fn solid(over: Color, under: Color) -> Color {
-    Color {
-        r: over.r * over.a + under.r * (1.0 - over.a),
-        g: over.g * over.a + under.g * (1.0 - over.a),
-        b: over.b * over.a + under.b * (1.0 - over.a),
-        a: 1.0,
-    }
-}
-
-const DARK_PANEL: Color = Color::from_rgba8(22, 22, 34, 0.86);
-const DARK_WINDOW: Color = Color::from_rgb8(0x12, 0x13, 0x1f);
-const LIGHT_PANEL: Color = Color::from_rgba8(255, 255, 255, 0.90);
-const LIGHT_WINDOW: Color = Color::from_rgb8(0xf6, 0xf6, 0xfa);
-
-const DARK_SOLID: Color = solid(DARK_PANEL, DARK_WINDOW);
-const LIGHT_SOLID: Color = solid(LIGHT_PANEL, LIGHT_WINDOW);
-
-const DARK: Palette = Palette {
-    panel: DARK_SOLID,
-    border: Color::from_rgba8(255, 255, 255, 0.09),
-    text: Color::from_rgb8(0xec, 0xec, 0xf4),
-    muted: Color::from_rgb8(0xa3, 0xa3, 0xb8),
-    hover: Color::from_rgba8(255, 255, 255, 0.08),
-    pressed: Color::from_rgba8(255, 255, 255, 0.14),
-    window: DARK_WINDOW,
-};
-
-const LIGHT: Palette = Palette {
-    panel: LIGHT_SOLID,
-    border: Color::from_rgba8(16, 16, 40, 0.10),
-    text: Color::from_rgb8(0x1a, 0x1a, 0x24),
-    muted: Color::from_rgb8(0x5b, 0x5b, 0x6e),
-    hover: Color::from_rgba8(16, 16, 40, 0.06),
-    pressed: Color::from_rgba8(16, 16, 40, 0.11),
-    window: LIGHT_WINDOW,
-};
-
-/// Selection stroke and screen border gradient (both themes): violet → cyan.
-pub const STROKE_START: Color = Color::from_rgb8(0xa9, 0x9b, 0xff);
-
-/// Accent gradient (both themes): primary buttons, active tools.
-pub const ACCENT_START: Color = Color::from_rgb8(0x8f, 0x80, 0xff);
-pub const ACCENT_END: Color = Color::from_rgb8(0x4f, 0xc9, 0xe0);
-/// Selected text in inputs (both themes): the accent, see-through.
-pub const SELECTION: Color = Color::from_rgba8(0x8f, 0x80, 0xff, 0.35);
-/// Text and icons on the accent gradient.
-pub const ON_ACCENT: Color = Color::from_rgb8(0x10, 0x10, 0x1c);
-
-/// The window header's close button under the cursor, and its glyph (both themes).
-pub const CLOSE_HOVER: Color = Color::from_rgb8(0xc4, 0x2b, 0x1c);
-pub const ON_CLOSE_HOVER: Color = Color::WHITE;
+/// The accent gradient of the Aurora / Spectrum looks (the selection stroke).
+const ACCENT_START: Color = Color::from_rgb8(0x8f, 0x80, 0xff);
+const ACCENT_END: Color = Color::from_rgb8(0x4f, 0xc9, 0xe0);
 
 // ---- Active looks (config `[look]`): the presets' colours, one table ----
 
@@ -179,11 +119,7 @@ pub fn edge_glow(look: &Look) -> [Color; 2] {
     }
 }
 
-/// The accent gradient of the active look (buttons, handles, the stroke).
-pub fn accent() -> (Color, Color) {
-    accent_of(&config::look())
-}
-
+/// The accent gradient of `look` (handles, the stroke).
 pub fn accent_of(look: &Look) -> (Color, Color) {
     match look.palette {
         ColourSet::TwoColour => (rgb(look.colours[0]), rgb(look.colours[1])),
@@ -209,20 +145,6 @@ pub fn bracket(look: &Look) -> Color {
     }
 }
 
-/// Text highlighted in select-text mode: every word, and the picked ones.
-pub const WORD: Color = Color::from_rgba8(0x9b, 0xb4, 0xff, 0.22);
-pub const WORD_PICKED: Color = Color::from_rgba8(0x5a, 0x8c, 0xff, 0.55);
-
-/// The palette floating surfaces (bar, pills, panels) use under the active
-/// look's bar style: glass dark / light force one; the rest follow the app.
-pub fn floating() -> &'static Palette {
-    match config::look().bar {
-        BarStyle::GlassDark => &DARK,
-        BarStyle::GlassLight => &LIGHT,
-        _ => current(),
-    }
-}
-
 /// The live-translate layer's background: see-through where no patch is.
 /// Windows keys out `live::COLOUR_KEY`; elsewhere the window is transparent.
 #[cfg(windows)]
@@ -237,15 +159,10 @@ pub const LAYER_CLEAR: Color = Color::TRANSPARENT;
 /// not the UI); re-exported for the Settings colour field.
 pub use crate::editor::style::ANNOTATION;
 
-/// Light palette instead of dark on this thread (the editor's snapshot test).
-#[allow(dead_code)]
+/// Light instead of dark on this thread (snapshot tests).
+#[cfg(test)]
 pub fn set_light(light: bool) {
     apply(if light { Theme::Light } else { Theme::Dark });
-}
-
-/// The palette in use.
-pub fn current() -> &'static Palette {
-    palette(SETTING.with(Cell::get), OS_DARK.with(Cell::get))
 }
 
 thread_local! {
@@ -323,13 +240,6 @@ pub fn kit_look(theme: config::LookTheme) -> Option<&'static crate::ui::kit::loo
     })
 }
 
-fn palette(setting: Theme, os_dark: bool) -> &'static Palette {
-    match (setting, os_dark) {
-        (Theme::Dark, _) | (Theme::System, true) => &DARK,
-        (Theme::Light, _) | (Theme::System, false) => &LIGHT,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,39 +269,17 @@ mod tests {
         assert_eq!(custom, edge);
     }
 
+    /// What the OS reports reaches the kit under System; "no preference" is dark.
     #[test]
-    fn light_and_dark_differ() {
-        assert_ne!(DARK.text, LIGHT.text);
-    }
-
-    #[test]
-    fn every_widget_surface_is_opaque() {
-        for p in [&DARK, &LIGHT] {
-            assert_eq!((p.panel.a, p.window.a), (1.0, 1.0));
-        }
-        // the setup's Sapphire / Daylight: kit::tests::every_surface_is_opaque_in_every_theme
-    }
-
-    #[test]
-    fn system_follows_the_os_and_the_others_force() {
-        let text = |setting, os_dark| palette(setting, os_dark).text;
-        assert_eq!(text(Theme::System, true), DARK.text);
-        assert_eq!(text(Theme::System, false), LIGHT.text);
-        assert_eq!(text(Theme::Light, true), LIGHT.text);
-        assert_eq!(text(Theme::Dark, false), DARK.text);
-    }
-
-    #[test]
-    fn os_mode_reaches_current() {
+    fn os_mode_reaches_the_kit() {
+        use crate::ui::kit::themes;
         apply(Theme::System);
         set_os(Mode::Light);
-        assert_eq!(current().text, LIGHT.text);
-        set_os(Mode::Dark);
-        assert_eq!(current().text, DARK.text);
+        assert!(themes::current().light);
         set_os(Mode::None);
-        assert_eq!(current().text, DARK.text);
+        assert!(!themes::current().light);
         apply(Theme::Light);
-        assert_eq!(current().text, LIGHT.text);
+        assert!(themes::current().light);
     }
 
     /// The kit's screens (toast, update card) follow the same choice.

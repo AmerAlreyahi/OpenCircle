@@ -111,6 +111,17 @@ pub fn width(s: &str, size: f32, font: Font) -> f32 {
     laid_out(s, size, font, None).1
 }
 
+/// The first of `texts` (longest first) that fits `room` px on one line at
+/// `size` in the UI font, else the last: a placeholder is never cut off.
+pub fn fitting<'a>(texts: &[&'a str], size: f32, room: f32) -> &'a str {
+    let fits = |t: &&str| width(t, size, ui_font()) <= room;
+    texts
+        .iter()
+        .copied()
+        .find(fits)
+        .unwrap_or(texts[texts.len() - 1])
+}
+
 /// How many lines `s` takes at `size` px in `font`, wrapped at `wrap` px.
 pub fn lines(s: &str, size: f32, font: Font, wrap: f32) -> usize {
     laid_out(s, size, font, Some(wrap)).0

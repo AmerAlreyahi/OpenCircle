@@ -146,4 +146,16 @@ pub mod fixed {
     );
     /// The dim behind a drawer (`bg-black/35`).
     pub const SCRIM: Color = Color::from_rgba8(0, 0, 0, 0.35);
+
+    /// The overlay's own marks over the frozen frame (the same over any
+    /// picture, so no theme): text found in select-text mode, every word and
+    /// the picked ones; a selected word (flat, like a document's selection);
+    /// a selection's handles, and the shadow under its corner brackets; the
+    /// black behind a zoomed-out frame.
+    pub const WORD: Color = Color::from_rgba8(0x9b, 0xb4, 0xff, 0.22);
+    pub const WORD_PICKED: Color = Color::from_rgba8(0x5a, 0x8c, 0xff, 0.55);
+    pub const TEXT_SELECTION: Color = Color::from_rgba8(0x8f, 0x80, 0xff, 0.35);
+    pub const HANDLE: Color = Color::WHITE;
+    pub const BRACKET_SHADOW: Color = Color::from_rgba8(0, 0, 0, 0.35);
+    pub const BACKDROP: Color = Color::BLACK;
 }

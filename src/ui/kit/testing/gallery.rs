@@ -1025,3 +1025,73 @@ fn text_area_sheet() {
     ];
     sheet("text_area", Size::new(300.0, 110.0), &rows);
 }
+
+/// `tooltip::hint`: the hint pill under an icon button, shown while hovered.
+#[test]
+fn tooltip_sheet() {
+    use super::super::icon_button::{State, icon_button};
+    use super::super::tooltip::{Why, hint};
+    use iced::widget::tooltip::Position;
+    const COPY: char = '\u{e0a2}';
+    let view = |ar| {
+        let button = icon_button(COPY, State::default(), Some(()));
+        let label = s(ar, "Copy", "نسخ");
+        let hinted = hint(button, label, Why::Keys("Ctrl+C"), Position::Bottom);
+        // the cursor sits mid-cell: the button there, its pill below
+        let top = iced::Padding::ZERO.top(48);
+        container(hinted)
+            .center_x(Fill)
+            .height(Fill)
+            .padding(top)
+            .into()
+    };
+    let rows = vec![row("rest", Act::Rest, view), row("hover", Act::Hover, view)];
+    sheet("tooltip", Size::new(180.0, 130.0), &rows);
+}
+
+/// `button::dot`: a control minimised to a dot (the live controller).
+#[test]
+fn button_dot_sheet() {
+    let rows = vec![
+        row("rest", Act::Rest, |_| button::dot(28.0, ())),
+        row("hover", Act::Hover, |_| button::dot(28.0, ())),
+        row("pressed", Act::Press, |_| button::dot(28.0, ())),
+    ];
+    sheet("button_dot", Size::new(80.0, 44.0), &rows);
+}
+
+/// `loupe::Loupe` over a small striped frame: the cells, the crosshair, its
+/// line; with an outline and its label.
+#[test]
+fn loupe_sheet() {
+    use super::super::loupe::Loupe;
+    use iced::widget::canvas;
+    let pixels: &'static [u8] = Box::leak(
+        (0..32u32)
+            .flat_map(|y| (0..32u32).flat_map(move |x| [(x * 8) as u8, (y * 8) as u8, 160, 255]))
+            .collect::<Vec<u8>>()
+            .into_boxed_slice(),
+    );
+    let view = move |outline: bool| {
+        move |_| {
+            let outline = outline.then(|| {
+                let r = iced::Rectangle::new(Point::new(8.0, 34.0), Size::new(70.0, 40.0));
+                (r, "Window · 70 × 40 px".to_string())
+            });
+            let loupe = Loupe {
+                pixels,
+                width: 32,
+                height: 32,
+                scale: 1.0,
+                at: Point::new(16.0, 16.0),
+                outline,
+            };
+            canvas(loupe).width(Fill).height(Fill).into()
+        }
+    };
+    let rows = vec![
+        row("loupe", Act::Rest, view(false)),
+        row("outline", Act::Rest, view(true)),
+    ];
+    sheet("loupe", Size::new(240.0, 190.0), &rows);
+}

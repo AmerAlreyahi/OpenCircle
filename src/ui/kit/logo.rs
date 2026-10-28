@@ -117,9 +117,52 @@ pub fn logo(px: u32) -> Handle {
     })
 }
 
+/// The fixed window icon (taskbar, Alt+Tab), decoded once.
+pub struct WindowIcon {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+pub fn window_icon() -> &'static WindowIcon {
+    static ICON: std::sync::LazyLock<WindowIcon> = std::sync::LazyLock::new(|| {
+        let (width, height, rgba) = decode(include_bytes!("../../../assets/icons/64x64.png"));
+        WindowIcon {
+            width,
+            height,
+            rgba,
+        }
+    });
+    &ICON
+}
+
+/// A bundled RGBA PNG as an image (decode it once: keep the handle).
+pub fn png_handle(bytes: &[u8]) -> Handle {
+    let (w, h, rgba) = decode(bytes);
+    Handle::from_rgba(w, h, rgba)
+}
+
+fn decode(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
+        .read_info()
+        .expect("a bundled PNG");
+    let mut rgba = vec![0; reader.output_buffer_size().expect("sized")];
+    let info = reader.next_frame(&mut rgba).expect("the PNG decodes");
+    rgba.truncate(info.buffer_size());
+    (info.width, info.height, rgba)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_icon_decodes() {
+        let l = window_icon();
+        assert_eq!((l.width, l.height), (64, 64));
+        assert_eq!(l.rgba.len(), 64 * 64 * 4);
+        assert!(l.rgba.chunks(4).any(|p| p[3] > 0), "not blank");
+    }
 
     fn by_id(id: &str) -> &'static themes::Theme {
         themes::THEMES.into_iter().find(|t| t.id == id).unwrap()

@@ -12,7 +12,7 @@ use crate::ui::kit::setting_row;
 use crate::ui::kit::shortcut_field::{self, shortcut_field};
 use crate::ui::kit::text::{error, text};
 use crate::ui::kit::tokens::Role;
-use crate::ui::widgets::tip;
+use crate::ui::kit::tooltip::tip;
 
 /// The page's note (`PAGES`).
 pub const NOTE: &str = "Click any box to record keys";

@@ -11,11 +11,13 @@ use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::word;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::kit::{motion, surface};
+use crate::ui::overlay;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::overlay::edge as border;
-use crate::ui::{overlay, widgets};
 
-use super::{App, CHIP_SPACE, HINT, LINK_WIDTH, PROTECTED, QR_WIDTH, SLIDE, TextMode};
+use super::{
+    App, CHIP_SPACE, HINT, LINK_WIDTH, PROTECTED, QR_WIDTH, SELECT_WIDTH, SLIDE, TextMode,
+};
 
 impl App {
     pub(in crate::ui) fn view(&self, window: window::Id) -> Element<'_, Message> {
@@ -188,7 +190,7 @@ impl App {
         let top = if let Some(pill) = snip.and_then(|s| s.pill_view()) {
             pill.map(Message::Snip) // Wayland only (above)
         } else if let Some(toast) = self.o.toast {
-            container(widgets::pill(toast))
+            container(surface::hint(toast))
                 .center_x(Fill)
                 .padding(24)
                 .into()
@@ -291,10 +293,12 @@ impl App {
                 Some(TextMode { lines: None, .. }) => "Reading text…",
                 Some(_) => "Done",
             };
-            let size = Size::new(widgets::TEXT_BUTTON_WIDTH, widgets::CONTROL);
+            let size = Size::new(SELECT_WIDTH, bar::HEIGHT);
             let at = chips_at(area, size, room);
             below = area.union(&Rectangle::new(at, size));
-            let chip = widgets::float_chip(label, Message::SelectText);
+            let chip =
+                crate::ui::screens::bar::view::action_chip(label.into(), Message::SelectText);
+            let chip = container(chip).center_x(SELECT_WIDTH);
             layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
         }
         if let Some(text) = self.o.scan.as_ref().and_then(|s| s.qr.as_deref()) {

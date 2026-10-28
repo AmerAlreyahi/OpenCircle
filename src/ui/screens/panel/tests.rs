@@ -3,7 +3,6 @@ use super::*;
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::panel_frame;
 use crate::ui::kit::panel_frame::Event;
-use crate::ui::widgets;
 use iced::{Rectangle, Size};
 
 /// Where a panel shows on a `screen` (no selection).
@@ -49,7 +48,7 @@ fn unknown_provider_shows_the_fix_and_sends_nothing() {
     };
     assert!(chat.turns.is_empty() && chat.status == Status::Idle);
     assert!(matches!(browse, Browse::Idle) && panel.work.is_none());
-    let texts = widgets::shot::texts(panel.view(
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(
         at(Size::new(1920.0, 1080.0)),
         Size::new(1920.0, 1080.0),
         false,
@@ -89,11 +88,11 @@ fn not_blank(px: &[u8]) -> bool {
 fn ask_panel_offers_the_six_presets() {
     let mut panel = panel_in(State::ask(Chat::default()));
     let _ = panel.update(Msg::Ready(Ok(Arc::new(ask::tests::browser_setup()))));
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     for preset in PRESETS {
         assert!(texts.iter().any(|t| t == preset.label), "{texts:?}");
     }
-    assert!(not_blank(&widgets::shot::save(
+    assert!(not_blank(&crate::ui::kit::testing::shot::save(
         "panel-ask-presets",
         panel.view(at(SCREEN), SCREEN, false),
         SCREEN
@@ -103,7 +102,7 @@ fn ask_panel_offers_the_six_presets() {
         unreachable!()
     };
     chat.ask("Explain", &[]);
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     assert!(!texts.iter().any(|t| t == "Fact-check"), "{texts:?}");
 }
 
@@ -185,7 +184,7 @@ fn a_streamed_answer_is_markdown_and_stop_keeps_the_part_so_far() {
     let (first, rest) = ANSWER.split_at(30);
     let _ = panel.update(Msg::Delta(first.into()));
     assert_eq!(parsed(&panel), [30]);
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     let stop = crate::ui::kit::icon::Icon::Stop.glyph().to_string();
     assert!(texts.contains(&stop), "the Stop button: {texts:?}");
     // Stop mid-stream: no panic, the part so far stays, a late piece is dropped.
@@ -195,7 +194,7 @@ fn a_streamed_answer_is_markdown_and_stop_keeps_the_part_so_far() {
     assert_eq!(chat(&panel).status, Status::Cancelled);
     assert_eq!(chat(&panel).turns[0].answer, first);
     assert!(panel.work.is_none());
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     assert!(texts.iter().any(|t| t == "Stopped."), "{texts:?}");
     assert_eq!(parsed(&panel), [30], "the part so far stays as Markdown");
 }
@@ -234,7 +233,7 @@ fn an_error_says_why_and_offers_retry() {
     ask(&mut panel, "Hi");
     let why = ai::AiError::Auth(401).to_string();
     let _ = panel.update(Msg::Answered(Err(why.clone())));
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     assert!(texts.contains(&why), "{texts:?}");
     assert!(texts.iter().any(|t| t == "Retry"), "{texts:?}");
     let _ = panel.update(Msg::Regenerate);
@@ -390,7 +389,7 @@ fn with_reduced_motion_the_logo_stands_still() {
     assert!(panel.waiting() && !panel.spinning(), "no frame clock");
     panel.tick(Instant::now());
     assert!(panel.spin.is_none());
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     assert!(texts.iter().any(|t| t == "Thinking…"), "{texts:?}");
     motion::set_reduced(false);
 }
@@ -430,7 +429,7 @@ fn a_follow_up_pins_the_chat_and_always_pins_at_once() {
 #[test]
 fn the_thought_chip_shows_only_when_the_model_reasoned() {
     let thought = |panel: &Panel| {
-        let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+        let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
         texts.iter().any(|t| t.starts_with("Thought for"))
     };
     let mut panel = api_chat();
@@ -482,7 +481,7 @@ fn a_new_crop_goes_with_the_next_question_into_the_same_chat() {
 #[test]
 fn the_composer_is_one_row() {
     let panel = api_chat();
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     assert!(
         !texts
             .iter()
@@ -505,11 +504,11 @@ fn the_drawer_opens_on_history_and_shows_the_chat_settings() {
     let mut panel = api_chat();
     let _ = panel.update(Msg::Card(Event::Menu));
     assert_eq!(panel.drawer, Some(Tab::History));
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     assert!(texts.iter().any(|t| t == "Workspace"), "{texts:?}");
     assert!(texts.iter().any(|t| t == "+ New chat"), "{texts:?}");
     let _ = panel.update(Msg::Drawer(Some(Tab::Settings)));
-    let texts = widgets::shot::texts(panel.view(at(SCREEN), SCREEN, false));
+    let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     for want in [
         "AI chat stays open",
         "After a follow-up",

@@ -280,7 +280,6 @@ fn status<'a>(text_line: String) -> Element<'a, Msg> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::widgets;
     use iced::Size;
 
     const SCREEN: Size = Size::new(1280.0, 720.0);
@@ -322,21 +321,24 @@ mod tests {
     #[test]
     fn listening_counts_down_then_shows_the_song() {
         let mut s = session(State::Listening(0));
-        let texts = widgets::shot::texts(s.view(SCREEN));
+        let texts = crate::ui::kit::testing::shot::texts(s.view(SCREEN));
         assert!(texts.iter().any(|t| t == "Listening… 10 s"), "{texts:?}");
         s.update(Msg::Heard(2));
-        let texts = widgets::shot::texts(s.view(SCREEN));
+        let texts = crate::ui::kit::testing::shot::texts(s.view(SCREEN));
         assert!(texts.iter().any(|t| t == "Listening… 8 s"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "Cancel"));
-        widgets::shot::save("song-listening", s.view(SCREEN), SCREEN);
+        crate::ui::kit::testing::shot::save("song-listening", s.view(SCREEN), SCREEN);
         s.update(Msg::Sent);
-        assert!(widgets::shot::texts(s.view(SCREEN)).contains(&"Identifying…".to_string()));
+        assert!(
+            crate::ui::kit::testing::shot::texts(s.view(SCREEN))
+                .contains(&"Identifying…".to_string())
+        );
         let recent = vec![history::Entry {
             title: "Carefree".into(),
             artist: "Kevin MacLeod".into(),
         }];
         assert_eq!(s.update(Msg::Done(Ok(song()), recent)), Outcome::None);
-        let texts = widgets::shot::texts(s.view(SCREEN));
+        let texts = crate::ui::kit::testing::shot::texts(s.view(SCREEN));
         for t in [
             "Wallpaper",
             "Kevin MacLeod",
@@ -350,7 +352,7 @@ mod tests {
             texts.iter().any(|t| t == "Carefree · Kevin MacLeod"),
             "recent"
         );
-        widgets::shot::save("song-card", s.view(SCREEN), SCREEN);
+        crate::ui::kit::testing::shot::save("song-card", s.view(SCREEN), SCREEN);
         // A late Heard doesn't undo the result.
         s.update(Msg::Heard(9));
         assert!(matches!(s.state, State::Found(..)));
@@ -363,13 +365,13 @@ mod tests {
     fn errors_show_with_try_again_and_cancel_stops_the_capture() {
         let mut s = session(State::Listening(3));
         s.update(Msg::Done(Err(music::Error::Silent), Vec::new()));
-        let texts = widgets::shot::texts(s.view(SCREEN));
+        let texts = crate::ui::kit::testing::shot::texts(s.view(SCREEN));
         assert!(
             texts.iter().any(|t| t.starts_with("No sound is playing")),
             "{texts:?}"
         );
         assert!(texts.iter().any(|t| t == "Try again"));
-        widgets::shot::save("song-error", s.view(SCREEN), SCREEN);
+        crate::ui::kit::testing::shot::save("song-error", s.view(SCREEN), SCREEN);
         assert_eq!(s.update(Msg::Retry), Outcome::Retry);
         assert_eq!(s.update(Msg::Cancel), Outcome::Close);
         let flag = s.cancel.clone();

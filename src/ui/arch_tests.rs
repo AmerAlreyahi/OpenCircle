@@ -67,22 +67,21 @@ fn styles(line: &str) -> bool {
             })
 }
 
-/// Not screens: the kit, the palettes and components the kit replaces (step
-/// 5 / 23), OS glue (platform/), state and logic (app/), and tests.
-const NOT_SCREENS: [&str; 8] = [
+/// Not screens: the kit, the config-to-kit glue (theme.rs), OS glue
+/// (platform/, windows.rs), state and logic (app/), and tests.
+const NOT_SCREENS: [&str; 7] = [
     "arch_tests.rs",
     "frame_times.rs",
     "screens/panel/tests.rs",
     "screens/translate/tests.rs",
     "screens/settings/tests.rs",
     "theme.rs",
-    "widgets.rs",
     "windows.rs",
 ];
 
 /// Screen files that still style in place. A ratchet: a port removes its file
 /// here, and the list only shrinks.
-const LEGACY: &[&str] = &["overlay.rs", "snip.rs"];
+const LEGACY: &[&str] = &[];
 
 #[test]
 fn screens_never_style() {
@@ -115,8 +114,7 @@ fn screens_never_style() {
 
 #[test]
 fn kit_depends_only_on_tokens() {
-    // ponytail: the test harness renders every screen (legacy ones too) on the
-    // old palette's window colour and writes PNGs; exempt until theme.rs goes (step 38)
+    // the test harness (goldens, gallery) writes PNGs with `actions::write_png`
     for (name, src) in sources("kit") {
         if name.starts_with("kit/testing/") {
             continue;

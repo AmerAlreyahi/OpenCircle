@@ -519,7 +519,7 @@ mod tests {
     use super::*;
     use crate::Trigger;
     use crate::ui::app::message::Shot;
-    use crate::ui::widgets::shot;
+    use crate::ui::kit::testing::shot;
 
     fn place(origin: (i32, i32), px: (u32, u32), scale: f32) -> Place {
         Place { origin, px, scale }

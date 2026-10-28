@@ -20,7 +20,6 @@ use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, radius};
 use crate::ui::panel::note;
 use crate::ui::picker::{self, CHIP_HEIGHT, Picker, SPACING};
-use crate::ui::widgets;
 
 /// The window's corners (`rounded-2xl`) and the room inside its edge (`p-2`).
 pub const RADIUS: f32 = radius::WINDOW;
@@ -163,7 +162,7 @@ impl Controller {
 
     pub fn view<'a>(&'a self) -> Element<'a, Msg> {
         if self.minimised {
-            return widgets::accent_dot(DOT, Msg::Restore).into();
+            return crate::ui::kit::button::dot(DOT, Msg::Restore);
         }
         let controls = row![
             container(grip(Msg::Drag)).center_y(CHIP_HEIGHT),
@@ -252,7 +251,6 @@ pub fn mask(rgba: &mut [u8], width: u32, height: u32, rect: [u32; 4]) {
 mod tests {
     use super::*;
     use crate::ui::picker::Side;
-    use crate::ui::widgets;
 
     fn open(c: &mut Controller, side: Side) {
         c.update(Msg::Picker(picker::Msg::Open(side)));
@@ -284,19 +282,19 @@ mod tests {
     fn the_language_picker_switches_source_and_target() {
         let mut c = Controller::new("auto", "ar", false);
         let closed = c.size();
-        widgets::shot::save("live-controller", c.view(), closed);
+        crate::ui::kit::testing::shot::save("live-controller", c.view(), closed);
         open(&mut c, Side::Target);
         assert!(c.size().height > closed.height, "the list needs room");
         assert_eq!(c.size().width, closed.width, "never wider");
-        let texts = widgets::shot::texts(c.view());
+        let texts = crate::ui::kit::testing::shot::texts(c.view());
         assert!(texts.iter().any(|t| t == "English"), "{texts:?}");
         let arabic = texts.iter().filter(|t| *t == "Arabic").count();
         assert_eq!(arabic, 1, "the chip only, not in the list: {texts:?}");
         let size = c.size();
-        let px = widgets::shot::save("live-controller-picker", c.view(), size);
+        let px = crate::ui::kit::testing::shot::save("live-controller-picker", c.view(), size);
         assert!(px.chunks(4).any(|p| p != &px[..4]), "something drawn");
         c.update(Msg::Picker(picker::Msg::Query("fren".into())));
-        widgets::shot::save("live-controller-search", c.view(), size);
+        crate::ui::kit::testing::shot::save("live-controller-search", c.view(), size);
         c.update(Msg::Picker(picker::Msg::First));
         assert_eq!(c.picker.target, "fr");
         assert_eq!(c.picker.label(), "Auto → FR");
@@ -328,12 +326,12 @@ mod tests {
         c.minimised = true;
         c.notice = None;
         states.push(("dot", c.clone()));
-        let bg = crate::ui::theme::current().window;
+        let bg = crate::ui::kit::themes::c().bg;
         let bg = [bg.r, bg.g, bg.b, bg.a].map(|v| (v * 255.0).round() as u8);
         for (name, c) in states {
             let size = c.size();
             let (w, h) = (size.width as u32 + 40, size.height as u32 + 40);
-            let px = widgets::shot::render(c.view(), w, h);
+            let px = crate::ui::kit::testing::shot::render(c.view(), w, h);
             let at = |x: u32, y: u32| px[((y * w + x) * 4) as usize..][..4].to_vec();
             let (sw, sh) = (size.width as u32, size.height as u32);
             let (mx, my) = (sw / 2, sh / 2);

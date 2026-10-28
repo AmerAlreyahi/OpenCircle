@@ -28,8 +28,8 @@ use crate::ui::kit::spinner;
 use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::text_area::text_area;
 use crate::ui::kit::tokens::{Role, space};
+use crate::ui::kit::tooltip::{Why, hint};
 use crate::ui::kit::{chip, field, progress};
-use crate::ui::widgets::{self, Why};
 
 /// A card's body and its footer.
 type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
@@ -145,15 +145,15 @@ impl Panel {
             // the header's end: a new chat and the pin (no close button: Esc
             // or a click outside closes an unpinned chat; a pinned one, its pin)
             let new = button(label("+ New"), Kind::Elevated, Some(Msg::NewChat));
-            let new = widgets::hint(new, "New chat", Why::Icon, Position::Bottom);
+            let new = hint(new, "New chat", Why::Icon, Position::Bottom);
             let state = icon_button::State {
                 active: self.pinned,
                 ..Default::default()
             };
             let pin = icon_button(Icon::Pin.glyph(), state, Some(Msg::Pin));
             let pin = match self.pinned {
-                true => widgets::hint(pin, "Unpin and close", Why::Icon, Position::Bottom),
-                false => widgets::hint(pin, "Keep open", Why::Icon, Position::Bottom),
+                true => hint(pin, "Unpin and close", Why::Icon, Position::Bottom),
+                false => hint(pin, "Keep open", Why::Icon, Position::Bottom),
             };
             let ends = row![new, pin].spacing(space::GAP).align_y(Center);
             let card = frame::card(
@@ -344,7 +344,7 @@ impl Panel {
     /// Ctrl+Enter), the Include screen switch, and Send (Stop while answering).
     fn composer(&self, include: bool, streaming: bool) -> Element<'_, Msg> {
         let switch = field::toggle(Icon::Screen, include, false, Msg::IncludeScreen);
-        let switch = widgets::hint(
+        let switch = hint(
             switch,
             match include {
                 true => "Include screen: on (the selection goes with your question)",
@@ -366,7 +366,7 @@ impl Panel {
     ) -> Element<'a, Msg> {
         let top = Position::Top;
         let button = match streaming {
-            true => widgets::hint(
+            true => hint(
                 icon_button(
                     Icon::Stop.glyph(),
                     icon_button::State::default(),
@@ -376,7 +376,7 @@ impl Panel {
                 Why::Icon,
                 top,
             ),
-            false => widgets::hint(
+            false => hint(
                 icon_button(
                     Icon::Send.glyph(),
                     icon_button::State::default(),
@@ -410,7 +410,7 @@ impl Panel {
             icon_button::State::default(),
             Some(Msg::Drawer(None)),
         );
-        let back = widgets::hint(back, "Back to the chat", Why::Icon, Position::Bottom);
+        let back = hint(back, "Back to the chat", Why::Icon, Position::Bottom);
         let tabs = segmented(
             &[(Tab::History, "History"), (Tab::Settings, "Settings")],
             tab,
@@ -467,7 +467,7 @@ impl Panel {
                 icon_button::State::default(),
                 Some(Msg::DeleteSaved(entry.id.clone())),
             );
-            let delete = widgets::hint(delete, "Delete this chat", Why::Icon, Position::Left);
+            let delete = hint(delete, "Delete this chat", Why::Icon, Position::Left);
             rows = rows.push(row![container(item).width(Fill), delete].align_y(Center));
         }
         list = list.push(rows).push(button(

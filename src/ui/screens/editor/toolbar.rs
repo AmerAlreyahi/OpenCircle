@@ -14,9 +14,9 @@ use crate::ui::kit::icon_button::{self, State};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{self as kit_text, text as caption};
 use crate::ui::kit::tokens::{Role, radius, size};
+use crate::ui::kit::tooltip::{Why, hint};
 use crate::ui::kit::{chip, colour, divider, grip, segmented};
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::widgets::{self, Why};
 
 const SPACING: f32 = bar::SPACING;
 /// A button's side.
@@ -133,7 +133,7 @@ pub fn view_at(
 
 /// A button, named (and given its key) in a tooltip under it.
 fn hinted<'a>(button: Element<'a, Message>, label: &'a str, why: Why<'a>) -> Element<'a, Message> {
-    widgets::hint(button, label, why, tooltip::Position::Bottom)
+    hint(button, label, why, tooltip::Position::Bottom)
 }
 
 /// A square icon button with its tooltip.

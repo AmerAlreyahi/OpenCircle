@@ -13,7 +13,7 @@ use crate::ui::kit::segmented::{boolean, segmented};
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, space};
-use crate::ui::widgets::{Why, hint, tip};
+use crate::ui::kit::tooltip::{Why, hint, tip};
 
 const OFF_ON: [&str; 2] = ["Off", "On"];
 
