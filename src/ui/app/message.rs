@@ -17,6 +17,10 @@ use crate::ui::screens::bar::geometry as bar;
 use crate::ui::snip::{self, Snip};
 use crate::ui::{live_layer, overlay, panel, song, translate, windows};
 
+/// Where the overlay was when a Copy / Save ran: its origin, size and scale
+/// (logical px), and what its pill goes beside (overlay px; `actions::pill_at`).
+pub(in crate::ui) type PillPlace = (Point, Size, f32, Option<Rectangle>);
+
 #[derive(Debug, Clone)]
 pub(in crate::ui) enum Message {
     Trigger(Trigger),
@@ -48,8 +52,8 @@ pub(in crate::ui) enum Message {
     /// The copy-text quick action read the text and copied it (or why not).
     TextRead(Result<(), String>),
     /// A Copy / Save run off the UI thread is done: its pill, where the
-    /// overlay was (its origin, size and scale).
-    Confirm((Point, Size, f32), Result<String, String>),
+    /// overlay was (`PillPlace`).
+    Confirm(PillPlace, Result<String, String>),
     /// A link opened (or text copied) off the UI thread: the overlay closes,
     /// after this pill if any.
     ThenClose(Option<&'static str>),

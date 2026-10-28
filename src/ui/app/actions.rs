@@ -12,10 +12,10 @@ use crate::config::{self, After, QuickAction, SearchWith, SelectionConfig, Targe
 use crate::labs::BarButton;
 
 use crate::ui::app::background::background;
-use crate::ui::app::message::{Message, PickAct, Purpose};
+use crate::ui::app::message::{Message, PickAct, PillPlace, Purpose};
 use crate::ui::app::quick::Quick;
 use crate::ui::kit::panel_frame as card;
-use crate::ui::platform::monitor::taskbar_inset;
+use crate::ui::platform::monitor::{self, taskbar_inset};
 use crate::ui::{live_layer, overlay, panel, settings, song, translate, windows};
 
 use super::{App, Reader, TOAST_MARGIN};
@@ -216,15 +216,15 @@ impl App {
     }
 
     /// Closes the overlay and tells the user how Copy / Save went: the toast pill
-    /// in its own window (bottom right, above the taskbar), so the screen is the
-    /// user's again at once and the pill outlives the overlay. `work`
+    /// in its own window beside the selection (else the bar), so the screen is
+    /// the user's again at once and the pill outlives the overlay. `work`
     /// (encoding, the clipboard, a file) runs on a thread: the pill comes when
     /// it is done (#123).
     pub(in crate::ui) fn confirm_after(
         &mut self,
         work: impl FnOnce() -> Result<String, String> + Send + 'static,
     ) -> Task<Message> {
-        let place = (self.o.origin, self.o.screen, self.o.scale);
+        let place = (self.o.origin, self.o.screen, self.o.scale, self.pill_near());
         let done = background(move |tx| {
             let _ = tx.unbounded_send(work());
         })
@@ -232,10 +232,20 @@ impl App {
         Task::batch([self.close(), done])
     }
 
-    /// The Copy / Save pill for an overlay at `place` (origin, size, scale).
+    /// What the Copy / Save pill goes beside (overlay px): the selection as
+    /// shown, else the bottom bar; `None`: neither shows.
+    pub(in crate::ui) fn pill_near(&self) -> Option<Rectangle> {
+        let selected = (self.o.selection.as_ref()).map(|s| self.o.view.rect_to_screen(s.area));
+        let bar = (self.bottom_bar_shown() && self.o.edit.is_none())
+            .then(|| Rectangle::new(self.bar_at(), self.bar_size().1));
+        selected.or(bar)
+    }
+
+    /// The Copy / Save pill for an overlay at `place` (origin, size, scale,
+    /// what it goes beside).
     pub(in crate::ui) fn toast_for(
         &mut self,
-        (origin, screen, scale): (Point, Size, f32),
+        place: PillPlace,
         result: Result<String, String>,
     ) -> Task<Message> {
         let (text, ok) = match result {
@@ -243,11 +253,9 @@ impl App {
             Err(text) => (text, false),
         };
         let size = windows::toast_size(&text);
+        let (origin, screen, scale, _) = place;
         let inset = taskbar_inset(origin, screen, scale);
-        let at = Point::new(
-            origin.x + screen.width - size.width - TOAST_MARGIN,
-            origin.y + screen.height - size.height - TOAST_MARGIN - inset,
-        );
+        let at = pill_at(place, size, inset);
         self.windows
             .toast(&text, ok, Some(at), windows::TOAST_MS)
             .map(Message::Windows)
@@ -493,5 +501,39 @@ pub(in crate::ui) fn auto_targets(behaviour: SelectionConfig) -> &'static [&'sta
         (After::Search, SearchWith::Lens) => &[&lens::ACTION],
         (After::Search, SearchWith::Ai) => &[&actions::ask::ACTION],
         (After::Search, SearchWith::Both) => &[&lens::ACTION, &actions::ask::ACTION],
+    }
+}
+
+/// Where the Copy / Save pill of `size` goes for an overlay at `place`
+/// (its origin, size and scale, logical px; what it goes beside, overlay px),
+/// `inset` px of taskbar under it: centred below what it goes beside, else
+/// above it, kept `TOAST_MARGIN` inside the screen; nothing to go beside:
+/// bottom right. In physical desktop px, so it lands there at any scale and
+/// on any monitor (#149).
+pub(in crate::ui) fn pill_at(
+    (origin, screen, scale, near): PillPlace,
+    size: Size,
+    inset: f32,
+) -> monitor::Place {
+    let m = TOAST_MARGIN;
+    let bottom = screen.height - inset - m - size.height;
+    let right = screen.width - m - size.width;
+    let at = match near {
+        Some(r) => {
+            let below = r.y + r.height + m;
+            let y = match below <= bottom {
+                true => below,
+                false => r.y - m - size.height,
+            };
+            Point::new(r.center_x() - size.width / 2.0, y)
+        }
+        None => Point::new(right, bottom),
+    };
+    let (x, y) = (at.x.clamp(m, right.max(m)), at.y.clamp(m, bottom.max(m)));
+    let px = |v: f32| (v * scale).round() as i32;
+    monitor::Place {
+        origin: (px(origin.x + x), px(origin.y + y)),
+        px: (px(size.width) as u32, px(size.height) as u32),
+        scale,
     }
 }

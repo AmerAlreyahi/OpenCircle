@@ -580,7 +580,7 @@ fn ctrl_c_and_ctrl_s_confirm_with_a_pill_and_failures_say_so() {
     );
     // an error: the same pill, the error text, no dot
     let mut app = selected();
-    let place = (app.o.origin, app.o.screen, app.o.scale);
+    let place = (app.o.origin, app.o.screen, app.o.scale, None);
     let failed = Err("Couldn't save. Pick a folder you can write to.".into());
     let _ = app.update(Message::Confirm(place, failed));
     assert_eq!(
@@ -3790,4 +3790,59 @@ fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
     let crop = lens.crop().unwrap();
     let _ = lens.open_panel(actions::Panel::Lens, crop, None);
     assert!(!overlay_texts(&lens).contains(&close));
+}
+
+/// #149: the Copy / Save pill goes beside the selection (below it, else above
+/// it), else above the bar, never mid-screen; in physical px, so it lands there
+/// at 100, 175 and 250 % and on a second monitor.
+#[test]
+fn the_copied_pill_goes_beside_the_selection_at_any_scale() {
+    use super::actions::pill_at;
+    let size = windows::toast_size("Copied");
+    let screen = Size::new(1280.0, 720.0);
+    let sel = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let low = Rectangle::new(Point::new(600.0, 560.0), Size::new(200.0, 120.0));
+    for scale in [1.0, 1.75, 2.5] {
+        // the primary monitor, and one right of a 3840 px wide one
+        for (px0, py0) in [(0, 0), (3840, -200)] {
+            let origin = Point::new(px0 as f32 / scale, py0 as f32 / scale);
+            let local = |near| {
+                let p = pill_at((origin, screen, scale, near), size, 40.0);
+                assert_eq!(p.scale, scale);
+                let px = |v: f32| (v * scale).round() as u32;
+                assert_eq!(p.px, (px(size.width), px(size.height)), "{scale}");
+                let back = |v: i32, o: i32| (v - o) as f32 / scale;
+                Point::new(back(p.origin.0, px0), back(p.origin.1, py0))
+            };
+            let near = |a: Point, b: Point| a.distance(b) <= 1.0;
+            let centre = |r: Rectangle| r.center_x() - size.width / 2.0;
+            // below the selection, centred on it
+            let at = local(Some(sel));
+            let want = Point::new(centre(sel), 280.0 + TOAST_MARGIN);
+            assert!(near(at, want), "{scale} {px0}: {at:?} != {want:?}");
+            // no room below (the taskbar): above it
+            let at = local(Some(low));
+            let want = Point::new(centre(low), 560.0 - TOAST_MARGIN - size.height);
+            assert!(near(at, want), "{scale} {px0}: {at:?} != {want:?}");
+            // nothing beside: bottom right, above the taskbar
+            let at = local(None);
+            let want = Point::new(
+                1280.0 - TOAST_MARGIN - size.width,
+                720.0 - 40.0 - TOAST_MARGIN - size.height,
+            );
+            assert!(near(at, want), "{scale} {px0}: {at:?} != {want:?}");
+        }
+    }
+    // what it goes beside: the selection as shown, else the bar
+    let mut app = open_app(1280, 720, 1.0);
+    let bar = Rectangle::new(app.bar_at(), app.bar_size().1);
+    assert_eq!(app.pill_near(), Some(bar));
+    app.select(sel);
+    assert_eq!(app.pill_near(), Some(sel));
+    // above the bar, not over it
+    let at = pill_at((Point::ORIGIN, screen, 1.0, Some(bar)), size, 0.0);
+    assert!(
+        (at.origin.1 as f32) + size.height <= bar.y,
+        "{at:?} {bar:?}"
+    );
 }

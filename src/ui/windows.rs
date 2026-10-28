@@ -20,7 +20,7 @@ use super::{settings, shape, theme, update_card, widgets};
 #[cfg(test)]
 pub use super::platform::windows::CLEARED;
 pub use super::platform::windows::{
-    POPUP, TOAST, clear_now, clear_theme, close, cut, fade, floating, hide_from_capture,
+    POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, hide_from_capture,
     is_floating, opacity, reshape, screen, setup_window, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};
@@ -337,27 +337,44 @@ impl Windows {
     }
 
     /// A small message window: the toast pill (`screens::toast`) with `text`,
-    /// floating over everything for `ms`, at `at` (logical desktop px) or centred.
-    /// `tone` colours its dot (`true` = done, `false` = failed). The window is
-    /// exactly the pill (see `floating`), so nothing shows around it.
+    /// floating over everything for `ms`, at `at` (physical desktop px, its
+    /// monitor's scale) or centred. `tone` colours its dot (`true` = done,
+    /// `false` = failed). The window is exactly the pill (see `floating`), so
+    /// nothing shows around it.
     pub fn toast(
         &mut self,
         text: &str,
         tone: impl Into<Tone>,
-        at: Option<Point>,
+        at: Option<platform::monitor::Place>,
         ms: u64,
     ) -> Task<Msg> {
         let size = toast_size(text);
         let (id, open) = floating(
             window::Settings {
                 size,
-                position: at.map_or(Position::Centered, Position::Specific),
+                position: match at {
+                    Some(place) => Position::Specific(place.logical_origin()),
+                    None => Position::Centered,
+                },
+                // placed first, then faded in (below)
+                visible: at.is_none(),
                 resizable: false,
                 ..window::Settings::default()
             },
             toast::RADIUS,
             TOAST,
         );
+        // At its exact place in physical px before it fades in (its rise moves
+        // from there): iced places a new window in logical px at the scale of
+        // the monitor it opens on, not the one it goes to (#149).
+        let open = match at {
+            Some(place) => open
+                .then(move |id| {
+                    platform::monitor::place_window::<()>(id, place).chain(appear(id, TOAST))
+                })
+                .discard(),
+            None => open.discard(),
+        };
         self.toasts.push((id, text.to_string(), tone.into()));
         // gone after `ms` (a thread sleeps, the UI never waits): fades out
         let (done, wait) = iced::futures::channel::oneshot::channel();
@@ -365,8 +382,7 @@ impl Windows {
             std::thread::sleep(Duration::from_millis(ms));
             let _ = done.send(());
         });
-        open.discard()
-            .chain(Task::future(wait).then(move |_| close(id)))
+        open.chain(Task::future(wait).then(move |_| close(id)))
     }
 
     /// The open toasts' text and whether each says done (tests).
