@@ -223,7 +223,7 @@ pub fn colours(palette: ColourSet) -> &'static Colours {
     }
 }
 
-fn rgb(c: Rgb) -> Color {
+pub fn rgb(c: Rgb) -> Color {
     let [r, g, b] = c.0;
     Color::from_rgb8(r, g, b)
 }
@@ -382,7 +382,7 @@ fn to_kit() {
     ));
 }
 
-fn kit_theme(
+pub fn kit_theme(
     setting: Theme,
     os_dark: bool,
     picks: &config::AppearanceConfig,

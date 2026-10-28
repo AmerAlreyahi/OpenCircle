@@ -4,7 +4,6 @@ use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, container, row};
 use iced::{Element, Fill};
 
-use super::super::legacy::{START_LABEL, shorten};
 use super::super::state::{Message, Pick, State, UPDATE_PRIVACY, issue};
 use crate::config::DefaultAction;
 use crate::labs::Feature;
@@ -153,3 +152,21 @@ fn folder(state: &State) -> Element<'_, Message> {
     }
     col.into()
 }
+
+/// A long folder path cut in the middle so it fits its field.
+fn shorten(path: &str) -> String {
+    const MAX: usize = 38;
+    let n = path.chars().count();
+    if n <= MAX {
+        return path.to_string();
+    }
+    let tail: String = path.chars().skip(n - (MAX - 1)).collect();
+    format!("…{tail}")
+}
+
+/// The Start-with-the-OS switch's label (Settings and onboarding).
+pub const START_LABEL: &str = if cfg!(windows) {
+    "Start OpenCircle when Windows starts"
+} else {
+    "Start OpenCircle when you log in"
+};

@@ -87,7 +87,6 @@ const LEGACY: &[&str] = &[
     "onboarding.rs",
     "overlay.rs",
     "panel.rs",
-    "screens/settings/legacy.rs",
     "setup.rs",
     "snip.rs",
     "song.rs",

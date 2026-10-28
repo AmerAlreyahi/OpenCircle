@@ -3,18 +3,28 @@
 //! `PAGES`. A new page = one entry here + one view file.
 use iced::Element;
 
-use super::legacy;
 use super::state::{Message, Section, State};
 use crate::labs::{Feature, Labs};
 
 pub mod about;
+mod ai;
 mod appearance;
+mod custom;
 mod general;
 mod labs;
 mod look;
+mod privacy;
+mod shortcuts;
+mod snip;
+mod song;
+pub mod text_reading;
+mod translate;
 
 #[cfg(test)]
 pub use appearance::picks as look_picks;
+pub use general::START_LABEL;
+#[cfg(test)]
+pub use song::SONG_PRIVACY;
 
 pub struct Page {
     pub id: Section,
@@ -45,20 +55,28 @@ const fn page(
 }
 
 /// In the design's order.
-pub const PAGES: [Page; 10] = [
+pub const PAGES: [Page; 12] = [
     page(Section::General, "General", general::view),
     page(Section::Appearance, "Appearance", appearance::view),
     page(Section::Look, "Look & behaviour", look::view),
-    page(Section::Ai, "AI", legacy::rows),
-    page(Section::Translate, "Translate", legacy::rows),
-    page(Section::Shortcuts, "Shortcuts", legacy::rows),
+    page(Section::Ai, "AI", ai::view),
+    page(Section::TextReading, "Text reading", text_reading::view),
+    page(Section::Translate, "Translate", translate::view),
+    Page {
+        note: Some(shortcuts::NOTE),
+        ..page(Section::Shortcuts, "Shortcuts", shortcuts::view)
+    },
     Page {
         lab: Some(Feature::Snip),
-        ..page(Section::Snip, "Snip", legacy::rows)
+        ..page(Section::Snip, "Snip", snip::view)
     },
     Page {
         lab: Some(Feature::Song),
-        ..page(Section::Song, "Song search", legacy::rows)
+        ..page(Section::Song, "Song search", song::view)
+    },
+    Page {
+        note: Some(privacy::NOTE),
+        ..page(Section::Privacy, "Privacy", privacy::view)
     },
     page(Section::About, "About", about::view),
     Page {
@@ -68,12 +86,13 @@ pub const PAGES: [Page; 10] = [
     },
 ];
 
-/// The pages the sidebar lists.
+/// The pages the sidebar lists (Text reading: Windows only, Linux has one reader).
 pub fn visible(labs: &Labs) -> impl Iterator<Item = &'static Page> {
     let labs = *labs;
     PAGES
         .iter()
         .filter(move |p| p.lab.is_none_or(|f| labs.has(f)))
+        .filter(|p| cfg!(windows) || p.id != Section::TextReading)
 }
 
 /// `id`'s page.

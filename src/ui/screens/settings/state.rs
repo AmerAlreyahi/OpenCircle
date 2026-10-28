@@ -37,7 +37,7 @@ use crate::ui::kit::themes::THEMES;
 use crate::ui::kit::tokens::{size, space};
 use crate::ui::theme;
 
-use super::legacy::open_language_settings;
+use super::pages::text_reading::open_language_settings;
 use super::pages::{self, PAGES};
 
 /// The size the Settings window prefers (logical px), the design's 820 x 560.
@@ -528,8 +528,10 @@ pub enum Section {
     Shortcuts,
     Snip,
     Ai,
+    TextReading,
     Translate,
     Song,
+    Privacy,
     Labs,
     About,
 }
@@ -621,6 +623,9 @@ pub enum Pick {
     Lab(Feature, bool),
     Mode(Theme),
     Logo(Logo),
+    Engine(Engine),
+    SongSource(SongSource),
+    SongHistory(bool),
     Select(SelectStyle),
     After(After),
     SearchWith(SearchWith),
@@ -1124,6 +1129,9 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Labs(f, _) => Some(Pick::Lab(*f, state.draft.labs.has(*f))),
         Message::Theme(_) | Message::ThemeCard(_) => Some(Pick::Mode(state.draft.theme)),
         Message::Logo(_) => Some(Pick::Logo(state.draft.appearance.logo)),
+        Message::Engine(_) => Some(Pick::Engine(state.draft.translate.engine)),
+        Message::SongSource(_) => Some(Pick::SongSource(state.draft.song.source)),
+        Message::SongHistory(_) => Some(Pick::SongHistory(state.draft.song.history)),
         Message::SelectStyle(_) => Some(Pick::Select(state.draft.selection.style)),
         Message::After(_) => Some(Pick::After(state.draft.selection.after)),
         Message::SearchWith(_) => Some(Pick::SearchWith(state.draft.selection.search_with)),

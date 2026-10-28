@@ -5,12 +5,11 @@
 use iced::Element;
 use iced::widget::column;
 
-use super::super::legacy::custom_rows;
 use super::super::state::{Message, Pick, State};
+use super::custom;
 use crate::config::{Logo, LookTheme, PRESETS, Theme};
 use crate::ui::kit::card::{grid, look_card, theme_card};
 use crate::ui::kit::chip::{Tone, status};
-use crate::ui::kit::divider::divider;
 use crate::ui::kit::looks::{LOOKS, Look};
 use crate::ui::kit::motion;
 use crate::ui::kit::segmented::segmented;
@@ -88,9 +87,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         grid(LOOK_COLUMNS, look_cards(state)),
     ));
     if d.look.theme == LookTheme::Custom {
-        for r in custom_rows(state) {
-            rows = rows.push(r).push(divider());
-        }
+        rows = rows.extend(custom::rows(state));
     }
     rows.into()
 }

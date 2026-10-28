@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use iced::{Color, Element, Length, Size};
 
-use super::legacy::*;
+use super::pages::SONG_PRIVACY;
 use super::pages::{self, PAGES};
 use super::*;
 use crate::config::{
@@ -20,7 +20,6 @@ use crate::translate::lang::{self, LANGUAGES};
 use crate::ui::kit::header::Caption;
 use crate::ui::kit::motion;
 use crate::ui::theme;
-use crate::ui::widgets::{FORM_WIDTH, segmented, slider, text_field, value_field};
 
 /// The window as drawn, not maximised.
 fn view(s: &State) -> Element<'_, Message> {
@@ -871,13 +870,13 @@ fn every_control_has_its_own_label() {
         let _ = view(&s);
         all.extend(TIPS.with(|t| t.borrow().clone()));
     }
-    // (The sidebar items are named by their own text.)
+    // (The sidebar items and segment pills are named by their own text.)
     all.sort();
     all.retain(|t| t != "Save settings");
     let mut unique = all.clone();
     unique.dedup();
     assert_eq!(all, unique, "duplicate control labels");
-    assert!(all.len() >= 24, "{all:?}");
+    assert!(all.len() >= 22, "{all:?}");
 }
 
 #[test]
@@ -1252,12 +1251,22 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
 }
 
 #[test]
-fn the_text_reader_row_is_windows_only_and_saves() {
+fn the_text_reading_page_is_windows_only_and_saves() {
     let path = tmp("reader");
     let (mut s, _) = state(Some(path.clone()));
-    let texts = page(&mut s, Section::Look);
-    let shown = texts.iter().any(|t| t == "Text reader");
-    assert_eq!(shown, cfg!(windows), "{texts:?}");
+    // listed on Windows only (Linux has the one reader); the page holds the engine
+    assert_eq!(sidebar(&s).contains(&"Text reading"), cfg!(windows));
+    let texts = page(&mut s, Section::TextReading);
+    for want in [
+        "Engine",
+        "Auto",
+        "Fast (Windows built-in)",
+        "Accurate (PaddleOCR)",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    let look = page(&mut s, Section::Look);
+    assert!(!look.iter().any(|t| t == "Engine"), "moved: {look:?}");
     update(&mut s, Message::TextReader(TextReader::PpOcr));
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
         panic!("not saved: {:?}", s.notice)
@@ -1279,10 +1288,10 @@ fn a_missing_recognizer_gets_one_quiet_note() {
     s.draft.translate.source = "ja".into();
     let note = "Windows has no text recognition for Japanese. Using the downloaded reader.";
     assert_eq!(s.reader_note().as_deref(), Some(note));
-    // the note and its button are in the row (Windows only)
-    let texts = page(&mut s, Section::Look);
-    assert_eq!(texts.iter().any(|t| t == note), cfg!(windows), "{texts:?}");
-    assert_eq!(texts.iter().any(|t| t == "Add in Windows"), cfg!(windows));
+    // the note and its button are in the engine row
+    let texts = page(&mut s, Section::TextReading);
+    assert!(texts.iter().any(|t| t == note), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Add in Windows"));
     // the downloaded reader chosen: nothing to say
     s.draft.selection.text_reader = TextReader::PpOcr;
     assert_eq!(s.reader_note(), None);
@@ -1304,39 +1313,50 @@ fn renders_about_in_both_modes() {
     theme::apply(Theme::Dark);
 }
 
-/// Every control is FORM_WIDTH wide and every button in a group fills an equal
-/// share, so no row can drift from the column (owner, 2026-10-25).
+/// Every shortcut box is the same size, however many keys it holds or what
+/// state it is in (owner, 2026-10-23: every shortcut field the same width).
 #[test]
-fn controls_and_button_rows_share_the_one_column_width() {
-    use crate::ui::widgets::{button_row, colour_swatch, form_button};
-    let width = |e: &Element<'_, Message>| e.as_widget().size().width;
-    let col = Length::Fixed(FORM_WIDTH);
-    let b = |l| form_button(l, false, Some(Message::Save)).into();
-    let two = button_row([b("Browse…"), b("Reset")]);
-    let one = button_row([b("Check now")]);
-    assert_eq!(width(&two), col);
-    assert_eq!(width(&one), col);
-    for e in [
-        b("x"),
-        colour_swatch(Color::WHITE, false, Message::Save).into(),
+fn every_shortcut_field_is_the_same_size() {
+    use crate::ui::kit::shortcut_field::{State as Field, shortcut_field};
+    use crate::ui::kit::tokens::size;
+    let keys = |s: &str| key_labels(s);
+    for (shortcut, field) in [
+        ("", Field::Rest),
+        ("F9", Field::Rest),
+        ("Ctrl+Shift+Space", Field::Rest),
+        ("Ctrl+Alt+Shift+K", Field::Rest),
+        ("Ctrl+C", Field::Recording),
+        ("Ctrl+Shift+T", Field::Conflict),
     ] {
-        assert_eq!(width(&e), Length::Fill, "a group button fills its share");
+        let e: Element<'_, Message> =
+            shortcut_field(keys(shortcut), field, "Press keys…", Message::Save);
+        let got = e.as_widget().size();
+        assert_eq!(
+            (got.width, got.height),
+            (
+                Length::Fixed(size::SHORTCUT.width),
+                Length::Fixed(size::SHORTCUT.height)
+            ),
+            "{shortcut:?} {field:?}"
+        );
     }
-    let seg: Element<'_, Message> = segmented(&[(1, "a", "a")], 1, |_| Message::Save);
-    assert_eq!(width(&seg), col);
-    let val: Element<'_, Message> = value_field("v", false).into();
-    assert_eq!(width(&val), col);
-    let txt: Element<'_, Message> = text_field("p", "", false, |_| Message::Save).into();
-    assert_eq!(width(&txt), col);
-    let sl: Element<'_, Message> = slider(0..=10, 1, "", |_| Message::Save);
-    assert_eq!(width(&sl), col);
-    let (s, _) = state(None);
-    assert_eq!(width(&s.key.view().map(Message::ApiKey)), col);
-    // No old page builds its own fixed-width button.
-    assert_eq!(
-        include_str!("legacy.rs").matches("label_button(").count(),
-        0
-    );
+}
+
+/// The shortcut page draws one keycap per key: "Ctrl+Shift+Space" is three
+/// caps and two keys leave one dimmed "—" cap at the left (the design's box).
+#[test]
+fn shortcut_boxes_pad_to_three_caps_from_the_left() {
+    let (mut s, _) = state(None);
+    s.draft.quick_actions[0].shortcut = "Ctrl+T".into();
+    let texts = page(&mut s, Section::Shortcuts);
+    let at = texts.iter().position(|t| t == "Ctrl").unwrap();
+    assert_eq!(texts[at..at + 3], ["Ctrl", "Shift", "Space"]);
+    let two = texts.iter().position(|t| t == "—").expect("an empty cap");
+    assert_eq!(texts[two..two + 3], ["—", "Ctrl", "T"]);
+    // a cleared quick action says so
+    s.draft.quick_actions[0].shortcut.clear();
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Not set"), "{texts:?}");
 }
 
 #[test]
@@ -1411,7 +1431,10 @@ fn renders_every_section_in_both_themes() {
 fn labs_pages_are_hidden_while_their_switch_is_off() {
     let path = tmp("labs-pages");
     let (mut s, _) = state(Some(path.clone()));
-    let side = sidebar(&s);
+    let mut side = sidebar(&s);
+    if cfg!(windows) {
+        assert_eq!(side.remove(4), "Text reading");
+    }
     assert_eq!(
         side,
         [
@@ -1421,6 +1444,7 @@ fn labs_pages_are_hidden_while_their_switch_is_off() {
             "AI",
             "Translate",
             "Shortcuts",
+            "Privacy",
             "About",
             "Labs"
         ]
@@ -1516,6 +1540,62 @@ fn the_ported_pages_match_their_golden_images() {
             failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
                 view(&s)
             }));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The pages of the UI plan's step 33 as drawn, in Sapphire and Daylight:
+/// AI (a server of your own; a saved key), Text reading, Translate (Live on),
+/// Shortcuts at rest, recording and with a conflict, Snip, Song search,
+/// Privacy, and Appearance's custom look rows with a colour picker open.
+#[test]
+fn the_step_33_pages_match_their_golden_images() {
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    type Setup = fn(&mut State);
+    let cases: [(&str, Section, f32, Setup); 11] = [
+        ("ai", Section::Ai, 0.0, |s| {
+            update(s, Message::Provider(Provider::OpenaiCompatible));
+            update(s, Message::Preset(PRESETS[1]));
+        }),
+        ("ai-key-saved", Section::Ai, 0.0, |s| {
+            update(s, Message::Provider(Provider::Anthropic));
+            update(s, Message::ApiKey(KeyMessage::Input(Secret::new("k"))));
+            update(s, Message::ApiKey(KeyMessage::Save));
+        }),
+        ("text-reading", Section::TextReading, 0.0, |_| {}),
+        ("translate", Section::Translate, 0.0, |_| {}),
+        ("shortcuts", Section::Shortcuts, 0.0, |_| {}),
+        ("shortcuts-recording", Section::Shortcuts, 0.0, |s| {
+            update(s, Message::Record(Slot::Quick(1)));
+        }),
+        ("shortcuts-conflict", Section::Shortcuts, 0.0, |s| {
+            update(s, Message::Record(Slot::Quick(0)));
+            press(s, chord(true, true, "Space"));
+        }),
+        ("snip", Section::Snip, 0.0, |_| {}),
+        ("song", Section::Song, 0.0, |_| {}),
+        ("privacy", Section::Privacy, 0.0, |_| {}),
+        ("appearance-custom", Section::Appearance, 1500.0, |s| {
+            update(s, Message::Look(LookTheme::Custom));
+            update(s, Message::Palette(PaletteChoice(ColourSet::TwoColour)));
+            update(s, Message::Picker(0));
+        }),
+    ];
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        for (name, section, height, setup) in cases {
+            let (mut s, _) = state(None);
+            s.draft.labs = Labs::all_on();
+            s.recognizers = vec!["en-US".into()];
+            update(&mut s, Message::Section(section));
+            setup(&mut s);
+            themes::set(theme);
+            let size = Size::new(WINDOW_SIZE.width, height.max(WINDOW_SIZE.height));
+            let file = format!("settings-{name}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
         }
     }
     themes::set(&SAPPHIRE);

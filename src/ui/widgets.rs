@@ -1019,17 +1019,6 @@ pub fn colour_popover<'a, Message: Clone + 'a>(
     )
 }
 
-/// `colour_popover` without stroke widths (a colour only: Settings' look colours).
-pub fn colour_picker<'a, Message: Clone + 'a>(
-    colours: &[Color],
-    current: Color,
-    hex: &'a str,
-    on_colour: impl Fn(Color) -> Message,
-    on_hex: impl Fn(String) -> Message + 'a,
-) -> Container<'a, Message> {
-    picker(colours, current, None, hex, on_colour, on_hex, None)
-}
-
 /// The colour swatches, `extra` (stroke widths), a custom colour as hex and,
 /// with `pick`, an eyedropper beside it and its `more` below.
 fn picker<'a, Message: Clone + 'a>(
@@ -1215,22 +1204,19 @@ fn glass(radius: f32, blurred: bool) -> container::Style {
 
 mod forms {
     use iced::widget::{
-        Button, Container, PickList, Text, TextInput, button, column, container, pick_list, row,
-        space, text, text_input, tooltip,
+        Button, Container, PickList, Text, button, container, pick_list, row, space, text, tooltip,
     };
-    use iced::{Border, Color, Element, Length, Shadow};
+    use iced::{Border, Element, Length, Shadow};
 
-    use super::{CONTROL, LINE, TEXT_BUTTON_WIDTH, accent, theme};
+    use super::{CONTROL, TEXT_BUTTON_WIDTH, accent, theme};
 
-    // ---- Forms: Settings and Onboarding. Every form control is CONTROL tall and
-    // FORM_WIDTH wide (segmented, text field, dropdown, shortcut field), so rows align. ----
+    // ---- Forms: Onboarding (until it moves to the kit, the UI plan's step 34).
+    // Every form control is CONTROL tall and FORM_WIDTH wide, so rows align. ----
 
     pub const FORM_WIDTH: f32 = 320.0;
     const FIELD_RADIUS: f32 = 14.0;
-    /// The text size inside a field; its line is `LINE` times this, and padding
-    /// (CONTROL - line) / 2 makes the field CONTROL tall.
+    /// The text size inside a field.
     const FIELD_TEXT: f32 = 14.0;
-    const FIELD_PAD: f32 = (CONTROL - FIELD_TEXT * LINE) / 2.0;
     /// A dropdown's line: iced's default, the one its open list always uses
     /// (it can't be given another), so the field and each list row share the
     /// padding and are both CONTROL tall. Neither clips its text.
@@ -1240,11 +1226,6 @@ mod forms {
     /// Screen title text.
     pub fn title<'a>(label: impl text::IntoFragment<'a>) -> Text<'a> {
         text(label).size(22).color(theme::current().text)
-    }
-
-    /// Muted small text (captions, hints).
-    pub fn caption<'a>(label: impl text::IntoFragment<'a>) -> Text<'a> {
-        text(label).size(12).color(theme::current().muted)
     }
 
     /// Error text, same size as a caption.
@@ -1262,25 +1243,6 @@ mod forms {
             .style(|_| container::Style {
                 background: Some(theme::current().window.into()),
                 text_color: Some(theme::current().text),
-                ..container::Style::default()
-            })
-    }
-
-    /// A read-only value shown like a field: same size and fill as the other form
-    /// controls, `muted` text for "nothing chosen" values.
-    pub fn value_field<'a, Message: 'a>(
-        value: impl text::IntoFragment<'a>,
-        muted: bool,
-    ) -> Container<'a, Message> {
-        let palette = theme::current();
-        let colour = if muted { palette.muted } else { palette.text };
-        container(text(value).size(14).color(colour))
-            .padding([0, 14])
-            .center_y(CONTROL)
-            .width(FORM_WIDTH)
-            .style(|_| container::Style {
-                background: Some(theme::current().field.into()),
-                border: Border::default().rounded(FIELD_RADIUS),
                 ..container::Style::default()
             })
     }
@@ -1311,68 +1273,6 @@ mod forms {
                 },
                 ..container::Style::default()
             })
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum FieldState {
-        Idle,
-        /// Waiting for the user to press the keys.
-        Recording,
-        Invalid,
-    }
-
-    /// A shortcut: fixed width, one `key_cap` per key, right-aligned. Empty `keys` =
-    /// "Not set"; `Recording` shows `recording_hint` instead of the keys.
-    pub fn shortcut_field<'a, Message: Clone + 'a>(
-        keys: Vec<String>,
-        state: FieldState,
-        recording_hint: &'a str,
-        on_press: Message,
-    ) -> Button<'a, Message> {
-        let palette = theme::current();
-        let inner: Element<'a, Message> = match state {
-            FieldState::Recording => text(recording_hint).size(13).color(palette.muted).into(),
-            _ if keys.is_empty() => text("Not set").size(13).color(palette.muted).into(),
-            _ => row(keys.into_iter().map(|k| key_cap(k).into()))
-                .spacing(4)
-                .into(),
-        };
-        button(
-            row![space::horizontal(), inner]
-                .height(Length::Fill)
-                .align_y(iced::Center),
-        )
-        .width(FORM_WIDTH)
-        .height(CONTROL)
-        .padding([0, 12])
-        .on_press(on_press)
-        .style(move |_, status| field_button(state, status))
-    }
-
-    fn field_button(state: FieldState, status: button::Status) -> button::Style {
-        let palette = theme::current();
-        let soft = state == FieldState::Recording || status == button::Status::Hovered;
-        button::Style {
-            background: Some(
-                if soft {
-                    palette.field_focus
-                } else {
-                    palette.field
-                }
-                .into(),
-            ),
-            text_color: palette.text,
-            border: Border {
-                color: if state == FieldState::Invalid {
-                    palette.danger
-                } else {
-                    Color::TRANSPARENT
-                },
-                width: 1.0,
-                radius: FIELD_RADIUS.into(),
-            },
-            ..button::Style::default()
-        }
     }
 
     /// Pick one of a few options; the selected one is the accent gradient. Each option
@@ -1413,103 +1313,6 @@ mod forms {
                 ..container::Style::default()
             })
             .into()
-    }
-
-    /// A whole number in `range`, dragged; its value with `unit` beside it. The
-    /// whole control is `FORM_WIDTH` wide and `CONTROL` tall, like the others.
-    pub fn slider<'a, Message: Clone + 'a>(
-        range: std::ops::RangeInclusive<u8>,
-        value: u8,
-        unit: &'a str,
-        on_change: impl Fn(u8) -> Message + 'a,
-    ) -> Element<'a, Message> {
-        use iced::widget::slider as track;
-        let bar = track(range, value, on_change).style(|_, status| {
-            let palette = theme::current();
-            let (start, _) = theme::accent();
-            let rail = track::Rail {
-                backgrounds: (start.into(), palette.field_focus.into()),
-                width: 4.0,
-                border: Border::default().rounded(2),
-            };
-            let handle = track::Handle {
-                shape: track::HandleShape::Circle { radius: 8.0 },
-                background: match status {
-                    track::Status::Active => palette.text.into(),
-                    _ => start.into(),
-                },
-                border_width: 0.0,
-                border_color: Color::TRANSPARENT,
-            };
-            track::Style { rail, handle }
-        });
-        container(
-            row![
-                bar,
-                text(format!("{value}{unit}"))
-                    .size(13)
-                    .color(theme::current().muted)
-                    .width(48)
-                    .align_x(iced::alignment::Horizontal::Right),
-            ]
-            .spacing(12)
-            .align_y(iced::Center),
-        )
-        .padding([0, 14])
-        .center_y(CONTROL)
-        .width(FORM_WIDTH)
-        .style(|_| container::Style {
-            background: Some(theme::current().field.into()),
-            border: Border::default().rounded(FIELD_RADIUS),
-            ..container::Style::default()
-        })
-        .into()
-    }
-
-    /// Single-line text field. Focus (and hover) = a softer fill, never a ring.
-    pub fn text_field<'a, Message: Clone + 'a>(
-        placeholder: &str,
-        value: &str,
-        invalid: bool,
-        on_input: impl Fn(String) -> Message + 'a,
-    ) -> TextInput<'a, Message> {
-        text_input(placeholder, value)
-            .on_input(on_input)
-            .size(FIELD_TEXT)
-            .line_height(LINE)
-            .padding([FIELD_PAD, 14.0])
-            .width(FORM_WIDTH)
-            .style(move |_, status| {
-                let palette = theme::current();
-                let soft = matches!(
-                    status,
-                    text_input::Status::Hovered | text_input::Status::Focused { .. }
-                );
-                text_input::Style {
-                    background: if soft {
-                        palette.field_focus
-                    } else {
-                        palette.field
-                    }
-                    .into(),
-                    border: Border {
-                        color: if invalid {
-                            palette.danger
-                        } else {
-                            Color::TRANSPARENT
-                        },
-                        width: 1.0,
-                        radius: FIELD_RADIUS.into(),
-                    },
-                    icon: palette.muted,
-                    placeholder: palette.muted,
-                    value: palette.text,
-                    selection: Color {
-                        a: 0.35,
-                        ..theme::accent().0
-                    },
-                }
-            })
     }
 
     /// Dropdown list, same size and fill as the other form controls.
@@ -1591,71 +1394,6 @@ mod forms {
                 border: Border::default().rounded(FIELD_RADIUS),
                 ..button::Style::default()
             })
-    }
-
-    /// A button for a `button_row`: `label_button`'s look, filling its share of the
-    /// control column instead of a fixed width.
-    pub fn form_button<'a, Message: Clone + 'a>(
-        label: &'a str,
-        primary: bool,
-        on_press: Option<Message>,
-    ) -> Button<'a, Message> {
-        label_button(label, primary, on_press).width(Length::Fill)
-    }
-
-    /// A colour swatch for a `button_row`: the colour in a field-looking button.
-    pub fn colour_swatch<'a, Message: Clone + 'a>(
-        colour: Color,
-        open: bool,
-        on_press: Message,
-    ) -> Button<'a, Message> {
-        let palette = theme::current();
-        button(container(super::dot(colour, 22.0, true)).center(Length::Fill))
-            .width(Length::Fill)
-            .height(CONTROL)
-            .padding(0)
-            .on_press(on_press)
-            .style(move |_, status| button::Style {
-                background: Some(match (open, status) {
-                    (true, _) => accent(status),
-                    (false, button::Status::Hovered) => palette.field_focus.into(),
-                    (false, button::Status::Pressed) => palette.pressed.into(),
-                    (false, _) => palette.field.into(),
-                }),
-                border: Border::default().rounded(FIELD_RADIUS),
-                ..button::Style::default()
-            })
-    }
-
-    /// The ONE button group of a form: the buttons (`form_button` / `colour_swatch`)
-    /// split the control column (`FORM_WIDTH`) into equal parts, as tall as any control.
-    pub fn button_row<'a, Message: 'a>(
-        buttons: impl IntoIterator<Item = Element<'a, Message>>,
-    ) -> Element<'a, Message> {
-        row(buttons).spacing(8).width(FORM_WIDTH).into()
-    }
-
-    /// One settings row: label (+ caption) on the left, the control on the right,
-    /// an optional error under the control.
-    pub fn form_row<'a, Message: 'a>(
-        label: &'a str,
-        hint: &'a str,
-        control: impl Into<Element<'a, Message>>,
-        error: Option<String>,
-    ) -> Element<'a, Message> {
-        let palette = theme::current();
-        let mut right = column![control.into()].spacing(8).width(FORM_WIDTH);
-        if let Some(e) = error {
-            right = right.push(error_text(e));
-        }
-        let mut left = column![text(label).size(14).color(palette.text)].spacing(2);
-        if !hint.is_empty() {
-            left = left.push(caption(hint));
-        }
-        row![left.width(Length::Fill), right]
-            .spacing(24)
-            .padding([12, 0])
-            .into()
     }
 
     /// A control's accessible name (iced has no a11y tree): what automation calls it,

@@ -1,5 +1,6 @@
-//! `.oc-input`: a one-line text field, the installer's small mono size (sizes
-//! join with their first user).
+//! `.oc-input`: a one-line text field. `input` is the design's (Settings'
+//! URL, model and key fields), `field` the installer's small mono one, `slots`
+//! the bar's AI field.
 use iced::font::Weight;
 use iced::widget::text::LineHeight;
 use iced::widget::text_input;
@@ -9,6 +10,44 @@ use super::button::faded;
 use super::text::mono;
 use super::themes::c;
 use super::tokens::radius;
+
+/// `.oc-input`: 12 px (`mono`: the mono font) on `track`, 6x11 px, radius 10,
+/// a `rim` edge that turns `accent` while focused and `DANGER` when `invalid`
+/// (the design's 2 px focus ring is left out: a text field can't draw outside
+/// itself). The caller adds `on_input`, `secure`, `on_submit` and its width.
+pub fn input<'a, Message: Clone + 'a>(
+    placeholder: &str,
+    value: &str,
+    mono_font: bool,
+    invalid: bool,
+) -> text_input::TextInput<'a, Message> {
+    use super::tokens::{Role, fixed};
+    let role = Role::NOTE;
+    let font = match mono_font {
+        true => mono(role.weight),
+        false => super::text::font(role),
+    };
+    text_input(placeholder, value)
+        .font(font)
+        .size(role.size)
+        .line_height(1.5)
+        .padding([6, 11])
+        .style(move |_, status| text_input::Style {
+            background: c().track.into(),
+            border: Border::default()
+                .rounded(radius::TRACK)
+                .width(1)
+                .color(match status {
+                    _ if invalid => fixed::DANGER,
+                    text_input::Status::Focused { .. } => c().accent,
+                    _ => c().rim,
+                }),
+            icon: c().text_sub,
+            placeholder: c().text_muted,
+            value: c().text,
+            selection: c().accent_soft,
+        })
+}
 
 /// Mono 10.5 px on `track`, a rim edge that turns `accent` while focused. No
 /// `on_input` = read-only.

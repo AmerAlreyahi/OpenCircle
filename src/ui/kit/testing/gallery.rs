@@ -594,3 +594,131 @@ fn chip_action_sheet() {
     let rows = vec![row("rest", Act::Rest, view), row("hover", Act::Hover, view)];
     sheet("chip_action", Size::new(220.0, 44.0), &rows);
 }
+
+#[test]
+fn keycap_sheet() {
+    use super::super::keycap::{empty, keycap};
+    use iced::widget::row as line;
+    let rows = vec![
+        row("keys", Act::Rest, |ar| {
+            line![keycap("Ctrl"), keycap(s(ar, "Space", "مسافة"))]
+                .spacing(5)
+                .into()
+        }),
+        row("empty", Act::Rest, |_| {
+            line![empty(), keycap("T")].spacing(5).into()
+        }),
+    ];
+    sheet("keycap", Size::new(200.0, 40.0), &rows);
+}
+
+#[test]
+fn shortcut_field_sheet() {
+    use super::super::shortcut_field::{State, shortcut_field};
+    let view = |k: &'static [&'static str], state| {
+        move |ar| {
+            let hint = s(ar, "Press keys…", "اضغط المفاتيح…");
+            let keys = k.iter().map(|k| k.to_string()).collect();
+            shortcut_field(keys, state, hint, ())
+        }
+    };
+    let rows = vec![
+        row(
+            "three keys",
+            Act::Rest,
+            view(&["Ctrl", "Shift", "Space"], State::Rest),
+        ),
+        row("two keys", Act::Rest, view(&["Ctrl", "C"], State::Rest)),
+        row("not set", Act::Rest, view(&[], State::Rest)),
+        row("hover", Act::Hover, view(&["Alt", "A"], State::Rest)),
+        row(
+            "recording",
+            Act::Rest,
+            view(&["Ctrl", "T"], State::Recording),
+        ),
+        row(
+            "conflict",
+            Act::Rest,
+            view(&["Ctrl", "Shift", "T"], State::Conflict),
+        ),
+        row(
+            "four keys",
+            Act::Rest,
+            view(&["Ctrl", "Alt", "Shift", "K"], State::Rest),
+        ),
+    ];
+    sheet("shortcut_field", Size::new(256.0, 48.0), &rows);
+}
+
+#[test]
+fn dropdown_sheet() {
+    use super::super::dropdown::dropdown;
+    const LATIN: [&str; 2] = ["Arabic", "English"];
+    const ARABIC: [&str; 2] = ["العربية", "الإنجليزية"];
+    let view = |ar: bool| {
+        let options: &'static [&'static str] = if ar { &ARABIC } else { &LATIN };
+        dropdown(options, Some(options[0]), "", |_| ())
+    };
+    let rows = vec![
+        row("rest", Act::Rest, view),
+        row("hover", Act::Hover, view),
+        row("nothing chosen", Act::Rest, |ar| {
+            dropdown(&LATIN, None, s(ar, "Choose", "اختر"), |_| ())
+        }),
+    ];
+    sheet("dropdown", Size::new(222.0, 48.0), &rows);
+}
+
+#[test]
+fn slider_sheet() {
+    use super::super::slider::slider;
+    let rows = vec![
+        row("rest", Act::Rest, |_| slider(0..=100, 40, " %", |_| ())),
+        row("hover", Act::Hover, |_| slider(0..=100, 40, " %", |_| ())),
+        row("full", Act::Rest, |_| slider(0..=100, 100, " %", |_| ())),
+    ];
+    sheet("slider", Size::new(252.0, 40.0), &rows);
+}
+
+#[test]
+fn colour_sheet() {
+    use super::super::colour::{picker, swatch};
+    use iced::Color;
+    const RED: Color = Color::from_rgb(0.94, 0.27, 0.27);
+    const BLUE: Color = Color::from_rgb(0.23, 0.51, 0.96);
+    let rows = vec![
+        row("swatch", Act::Rest, |_| swatch(RED, false, ())),
+        row("hover", Act::Hover, |_| swatch(RED, false, ())),
+        row("open", Act::Rest, |_| swatch(RED, true, ())),
+        row("picker", Act::Rest, |_| {
+            picker(&[RED, BLUE, Color::WHITE], RED, "#EF4444", |_| (), |_| ())
+        }),
+    ];
+    sheet("colour", Size::new(220.0, 110.0), &rows);
+}
+
+/// `field::input`, the design's `.oc-input` (Settings' URL, model and key).
+#[test]
+fn field_input_sheet() {
+    use field::input;
+    let value = |ar| s(ar, "https://api.openai.com/v1", "نموذج محلي");
+    let rows = vec![
+        row("rest", Act::Rest, move |ar| {
+            input("", value(ar), true, false).on_input(|_| ()).into()
+        }),
+        row("placeholder", Act::Rest, move |ar| {
+            let hint = s(ar, "Paste your API key", "الصق مفتاحك");
+            input(hint, "", false, false).on_input(|_| ()).into()
+        }),
+        row("focused", Act::Click, move |ar| {
+            input("", value(ar), true, false).on_input(|_| ()).into()
+        }),
+        row("invalid", Act::Rest, move |ar| {
+            input("", value(ar), true, true).on_input(|_| ()).into()
+        }),
+        row("read-only", Act::Rest, |ar| {
+            input("", s(ar, "Saved in your keyring", "محفوظ"), false, false).into()
+        }),
+    ];
+    sheet("field_input", Size::new(260.0, 44.0), &rows);
+}

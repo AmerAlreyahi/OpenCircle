@@ -1,15 +1,13 @@
 //! Look & behaviour (`settings-window.js` "LOOK & BEHAVIOUR"): how a
-//! selection behaves and who reads the text; the looks are in Appearance.
+//! selection behaves; the looks are in Appearance, the reader in Text reading.
 use iced::Element;
-use iced::widget::{Space, column, row};
+use iced::widget::column;
 
 use super::super::state::{Message, Pick, Section, State};
-use crate::config::{After, SearchWith, SelectStyle, TextReader};
+use crate::config::{After, SearchWith, SelectStyle};
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::text::sub;
-use crate::ui::kit::tokens::{Role, space};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let sel = state.draft.selection;
@@ -68,9 +66,6 @@ pub fn view(state: &State) -> Element<'_, Message> {
             Message::SearchWith,
         ),
     ));
-    if cfg!(windows) {
-        rows = rows.push(text_reader(state));
-    }
     // the design's pointer to where the looks went
     rows = rows.push(setting_row::row(
         title("Themes and screen borders"),
@@ -82,42 +77,4 @@ pub fn view(state: &State) -> Element<'_, Message> {
         ),
     ));
     rows.into()
-}
-
-/// Who reads the screen's text (Windows: Windows OCR or the downloaded
-/// reader), with a note and a way to add a missing language.
-fn text_reader(state: &State) -> Element<'_, Message> {
-    let reader = state.draft.selection.text_reader;
-    let (from, t) = state.thumb(reader, |p| match p {
-        Pick::Reader(v) => Some(v),
-        _ => None,
-    });
-    let mut control = column![segmented(
-        &[
-            (TextReader::Auto, "Auto"),
-            (TextReader::Windows, "Windows"),
-            (TextReader::PpOcr, "Downloaded"),
-        ],
-        reader,
-        from,
-        t,
-        Message::TextReader,
-    )]
-    .spacing(space::GAP)
-    .align_x(iced::Right);
-    if let Some(note) = state.reader_note() {
-        let add = button(
-            label("Add in Windows"),
-            Kind::Elevated,
-            Some(Message::OpenLanguageSettings),
-        );
-        control = control
-            .push(sub(Role::ROW_DESC, note))
-            .push(row![Space::new().width(iced::Fill), add]);
-    }
-    setting_row::wide(
-        title("Text reader"),
-        "Who reads the screen's text, so you can select it",
-        control,
-    )
 }
