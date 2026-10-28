@@ -204,6 +204,11 @@ pub fn error<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
     text(role, s).color(super::tokens::fixed::DANGER)
 }
 
+/// A line of text is this many times its font size tall wherever its box
+/// clips it (text fields): Arabic with every vowel mark stays inside
+/// (Noto Sans Arabic inks about 1.6 times its size).
+pub const LINE: f32 = 1.7;
+
 /// The line height of `linked` text (times its size).
 pub const LINKED_LINE: f32 = 1.65;
 
@@ -241,6 +246,55 @@ mod tests {
     use iced::advanced::graphics::text::cosmic_text::{
         Attrs, Buffer, Family, Metrics, Shaping, Weight as W,
     };
+
+    /// The ink of `sample` in `family` at `size` px laid out in one `LINE` line:
+    /// (top, bottom) in px from the line's top.
+    fn ink(sample: &str, family: &str, size: f32) -> (f32, f32) {
+        use iced::advanced::graphics::text::cosmic_text::{FontSystem, SwashCache, fontdb};
+        let mut db = fontdb::Database::new();
+        for f in super::FONTS {
+            db.load_font_data(f.to_vec());
+        }
+        let mut fs = FontSystem::new_with_locale_and_db("en-US".into(), db);
+        let mut buf = Buffer::new(&mut fs, Metrics::new(size, size * super::LINE));
+        let attrs = Attrs::new().family(Family::Name(family));
+        buf.set_text(&mut fs, sample, &attrs, Shaping::Advanced, None);
+        buf.shape_until_scroll(&mut fs, false);
+        let mut cache = SwashCache::new();
+        let (mut top, mut bottom) = (f32::MAX, f32::MIN);
+        for run in buf.layout_runs() {
+            for glyph in run.glyphs {
+                let p = glyph.physical((0.0, 0.0), 1.0);
+                let Some(img) = cache.get_image(&mut fs, p.cache_key) else {
+                    continue;
+                };
+                if img.placement.height == 0 {
+                    continue;
+                }
+                let y = run.line_y + p.y as f32 - img.placement.top as f32;
+                top = top.min(y);
+                bottom = bottom.max(y + img.placement.height as f32);
+            }
+        }
+        (top, bottom)
+    }
+
+    /// A field's line holds the tallest Latin and Arabic text (accents, Arabic
+    /// marks above and below): a text field clips to its line (#53).
+    #[test]
+    fn a_line_holds_latin_and_arabic_marks() {
+        let line = 14.0 * super::LINE;
+        for (sample, family) in [
+            ("ÅÉÎÕÛ jgpqy ÇŞ", "Inter"),
+            ("إِنَّ الْعِلْمَ نُورٌ ضِّ", "Noto Sans Arabic"),
+        ] {
+            let (top, bottom) = ink(sample, family, 14.0);
+            assert!(
+                top >= 0.0 && bottom <= line,
+                "{family}: ink {top}..{bottom} outside the {line} px line"
+            );
+        }
+    }
 
     /// Arabic is drawn by the bundled Arabic face at every weight a role uses,
     /// in the UI font and in `MONO` (it fell to another face at 500 and in

@@ -112,10 +112,9 @@ pub fn slots<'a, Message: Clone + 'a>(
     focused: bool,
     (left, right): (Element<'a, Message>, Element<'a, Message>),
 ) -> Element<'a, Message> {
+    use super::text::LINE;
     use iced::widget::{container, row, space, stack};
     use iced::{Center, Padding};
-    // Arabic with all its marks inside the box (the UI's `LINE`)
-    const LINE: f32 = 1.7;
     let inner = width - 2.0 * RING;
     let input = text_input(placeholder, value)
         .id(id)

@@ -112,6 +112,30 @@ fn screens_never_style() {
     );
 }
 
+/// No `iced::Shadow` with a blur anywhere: tiny-skia draws it outside the
+/// part being redrawn, so it piles up into black blocks (and a floating
+/// window can't show one: no alpha there).
+#[test]
+fn no_drawn_shadows() {
+    fn scan(dir: &Path, found: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                scan(&p, found);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                let src = std::fs::read_to_string(&p).unwrap();
+                let n = src.matches(concat!("blur", "_radius:")).count();
+                if n > 0 {
+                    found.push(format!("{} ({n})", p.display()));
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    scan(Path::new("src"), &mut found);
+    assert!(found.is_empty(), "drawn shadows in {found:?}");
+}
+
 #[test]
 fn kit_depends_only_on_tokens() {
     // the test harness (goldens, gallery) writes PNGs with `actions::write_png`

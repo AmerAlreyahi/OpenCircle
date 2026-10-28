@@ -604,8 +604,6 @@ impl Windows {
                     update_card::Msg::Page => open_url(&card.url),
                 }
             }
-            // The design's maximise does nothing for this fixed-size window.
-            Msg::Onboarding(onboarding::Message::Caption(Caption::Maximise)) => {}
             Msg::Onboarding(onboarding::Message::Caption(caption)) => {
                 if let Some(id) = self.id(Kind::Onboarding) {
                     return self.on_chrome(id, chrome::Event::from(caption));

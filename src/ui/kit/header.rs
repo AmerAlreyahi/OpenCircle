@@ -27,12 +27,13 @@ pub enum Caption {
 
 /// The Settings window's header (`h-10 pl-3.5`): the 16 px `logo` and `title`
 /// (12 px / 600) drag the window; `status` (a header pill) sits 8 px left of
-/// the caption buttons.
+/// the caption buttons. `maximise`: `None` = a fixed-size window, no Maximise
+/// button (Close takes its place); `Some(maximised now)` = Maximise / Restore.
 pub fn regular<'a, Message: Clone + 'a>(
     logo: image::Handle,
     title: &'a str,
     status: impl Into<Element<'a, Message>>,
-    maximised: bool,
+    maximise: Option<bool>,
     on: impl Fn(Caption) -> Message,
 ) -> Element<'a, Message> {
     const H: f32 = size::HEADER;
@@ -49,20 +50,20 @@ pub fn regular<'a, Message: Clone + 'a>(
     ]
     .spacing(LOGO_GAP)
     .align_y(Center);
-    let restore = if maximised {
-        Icon::Restore
-    } else {
-        Icon::Maximise
-    };
+    let restore = maximise.map(|maximised| match maximised {
+        true => Icon::Restore,
+        false => Icon::Maximise,
+    });
+    let restore = restore.map(|glyph| caption(glyph, GLYPH, H, false, on(Caption::Maximise)));
     row![
         mouse_area(container(name).padding([0.0, PAD]).center_y(H).width(Fill))
             .on_press(on(Caption::Drag)),
         status.into(),
         Space::new().width(STATUS_GAP),
         caption(Icon::Minimise, GLYPH, H, false, on(Caption::Minimise)),
-        caption(restore, GLYPH, H, false, on(Caption::Maximise)),
-        caption(Icon::Close, GLYPH, H, true, on(Caption::Close)),
     ]
+    .push(restore)
+    .push(caption(Icon::Close, GLYPH, H, true, on(Caption::Close)))
     .height(H)
     .align_y(Center)
     .into()
@@ -159,9 +160,8 @@ pub fn frame<'a, Message: Clone + 'a>(
     on: impl Fn(Event) -> Message + Clone + 'a,
 ) -> Element<'a, Message> {
     let to = on.clone();
-    let header = regular(logo, title, Space::new(), mode.maximised, move |c| {
-        to(c.into())
-    });
+    let maximise = mode.resizable.then_some(mode.maximised);
+    let header = regular(logo, title, Space::new(), maximise, move |c| to(c.into()));
     let page = column![header, container(content).width(Fill).height(Fill)];
     let window = surface(Material::Window, 0.0, page)
         .width(Fill)
@@ -261,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fixed_or_maximised_window_has_no_edges() {
+    fn a_fixed_or_maximised_window_has_no_edges_and_a_fixed_one_no_maximise() {
         for mode in [
             Mode {
                 resizable: true,
@@ -275,7 +275,13 @@ mod tests {
             is(pressing((2.0, 150.0), mode), &[]);
             is(pressing((200.0, 297.0), mode), &[]);
             is(pressing((200.0, 20.0), mode), &["Caption(Drag)"]);
-            is(pressing((380.0, 20.0), mode), &["Caption(Close)"]);
         }
+        // Fixed: close sits where maximise would be, one slot over.
+        let fixed = Mode {
+            resizable: false,
+            maximised: false,
+        };
+        is(pressing((380.0, 20.0), fixed), &["Caption(Close)"]);
+        is(pressing((330.0, 20.0), fixed), &["Caption(Minimise)"]);
     }
 }

@@ -450,7 +450,13 @@ fn header_sheet() {
     let regular = move |ar| {
         let status = chip::status(s(ar, "Saved", "تم الحفظ"), chip::Tone::Ok);
         let logo = crate::ui::kit::logo::logo(16);
-        header::regular(logo, s(ar, "Settings", "الإعدادات"), status, false, |_| ())
+        header::regular(
+            logo,
+            s(ar, "Settings", "الإعدادات"),
+            status,
+            Some(false),
+            |_| (),
+        )
     };
     let rows = vec![
         row("regular", Act::Rest, regular),

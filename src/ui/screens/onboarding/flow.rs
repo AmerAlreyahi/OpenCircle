@@ -309,7 +309,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         logo,
         "Welcome to OpenCircle",
         Space::new(),
-        false,
+        None,
         Message::Caption,
     );
     let (from, glide) = match state.moving() {

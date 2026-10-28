@@ -38,7 +38,7 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
         logo,
         "OpenCircle Settings",
         pill(state),
-        maximised,
+        Some(maximised),
         Message::Caption,
     );
     let mut main = column![row![nav(state), page(state)].height(Fill)];
