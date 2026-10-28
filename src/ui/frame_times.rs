@@ -776,13 +776,18 @@ fn a_settings_page_switch_redraws_only_the_sidebar_glide() {
 #[test]
 fn a_playing_preview_redraws_only_its_stage() {
     let frames = switch_damage(settings::Section::Translate);
-    let stage = |r: &Rectangle| r.x >= SIDEBAR_RIGHT && r.y >= 150.0 && r.y + r.height <= 330.0;
+    let band = |r: &Rectangle| r.y >= 150.0 && r.y + r.height <= 330.0;
+    // reaches past the sidebar (maybe joined with the glide, see below)
+    let stage = |r: &Rectangle| r.x + r.width > SIDEBAR_RIGHT && band(r);
     assert!(frames.iter().flatten().any(stage), "the preview plays");
     for r in frames.iter().flatten() {
         // the stage: under the preview's heading, above the page's rows
+        // damage::group joins the glide with the stage when their rows meet
+        // (the sidebar's row heights and page count differ per OS): such a
+        // union still lies inside the stage's band
         let sidebar = r.x + r.width <= SIDEBAR_RIGHT;
         assert!(
-            sidebar || stage(r),
+            sidebar || band(r),
             "{r:?} outside the sidebar and the stage"
         );
     }
