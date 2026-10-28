@@ -49,7 +49,7 @@ use iced::widget::{canvas, container, image, opaque, operation, space, stack};
 use iced::window::{self, Level, Mode};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, Vector};
 
-use crate::actions::{self, Action, Crop, Run, copy, lens, qr, save, text};
+use crate::actions::{self, Action, Crop, Run, copy, lens, qr, save, stack_crops, text};
 use crate::config::{self, After, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target};
 use crate::editor::{self, Output};
 use crate::labs::{self, BarButton};
@@ -122,9 +122,6 @@ const WARM_AFTER: Duration = Duration::from_millis(400);
 /// The overlay fades in at most this long after it was shown, its first
 /// full frame drawn or not (never left invisible over the screen).
 const REVEAL_WAIT: Duration = Duration::from_millis(400);
-
-/// Between stacked crops (several selections sent as one image).
-const STACK_GAP: u32 = 16;
 
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     app::background::set_triggers(triggers);
@@ -4133,32 +4130,10 @@ fn save_test_shot(shot: &window::Screenshot) {
     }
 }
 
-/// `crops` one under the other, left-aligned, `STACK_GAP` px of white between
-/// them and right of the narrower ones. `None` for no crops.
-fn stack_crops(crops: &[Crop]) -> Option<Crop> {
-    let width = crops.iter().map(|c| c.width).max()?;
-    let gaps = STACK_GAP * (crops.len() as u32 - 1);
-    let height = crops.iter().map(|c| c.height).sum::<u32>() + gaps;
-    let mut rgba = vec![255; width as usize * height as usize * 4];
-    let mut y = 0;
-    for c in crops {
-        let row = c.width as usize * 4;
-        for (i, line) in c.rgba.chunks_exact(row).enumerate() {
-            let at = (y + i) * width as usize * 4;
-            rgba[at..at + row].copy_from_slice(line);
-        }
-        y += (c.height + STACK_GAP) as usize;
-    }
-    Some(Crop {
-        width,
-        height,
-        rgba,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::crop::STACK_GAP;
     use crate::config::{BarAnchor, TextReader};
     use crate::labs::Labs;
 
@@ -6970,28 +6945,6 @@ mod tests {
             shift: false,
         });
         assert_eq!(app.o.bar_focus, None);
-    }
-
-    #[test]
-    fn stacked_crops_keep_their_pixels() {
-        let red = Crop {
-            width: 2,
-            height: 1,
-            rgba: vec![255, 0, 0, 255, 255, 0, 0, 255],
-        };
-        let blue = Crop {
-            width: 1,
-            height: 2,
-            rgba: vec![0, 0, 255, 255, 0, 0, 255, 255],
-        };
-        let s = stack_crops(&[red, blue]).unwrap();
-        assert_eq!((s.width, s.height), (2, 1 + STACK_GAP + 2));
-        let px = |x: u32, y: u32| &s.rgba[((y * 2 + x) * 4) as usize..][..4];
-        assert_eq!(px(1, 0), [255, 0, 0, 255]);
-        assert_eq!(px(0, 1), [255; 4], "the gap");
-        assert_eq!(px(0, 1 + STACK_GAP), [0, 0, 255, 255]);
-        assert_eq!(px(1, 1 + STACK_GAP), [255; 4], "beside the narrow one");
-        assert!(stack_crops(&[]).is_none());
     }
 
     fn behaviour(style: SelectStyle, after: After, search_with: SearchWith) -> SelectionConfig {
