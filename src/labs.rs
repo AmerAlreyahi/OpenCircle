@@ -60,20 +60,6 @@ impl Feature {
     }
 }
 
-impl Feature {
-    /// The accessible names of the Off / On segments in Settings.
-    pub fn switch_tips(self) -> (&'static str, &'static str) {
-        match self {
-            Feature::Snip => ("Hide Snip", "Show Snip"),
-            Feature::Editor => ("Hide the image editor", "Show the image editor"),
-            Feature::Song => ("Hide song search", "Show song search"),
-            Feature::History => ("Hide search history", "Show search history"),
-            Feature::Pins => ("Hide pins", "Show pins"),
-            Feature::Live => ("Hide live translate", "Show live translate"),
-        }
-    }
-}
-
 /// `[labs]`: which unfinished features are on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct Labs {

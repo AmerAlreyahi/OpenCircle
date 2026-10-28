@@ -1863,44 +1863,6 @@ mod forms {
         row(buttons).spacing(8).width(FORM_WIDTH).into()
     }
 
-    /// `button_row` for a wider container (a card): the same equal split, filling it.
-    pub fn button_group<'a, Message: 'a>(
-        buttons: impl IntoIterator<Item = Element<'a, Message>>,
-    ) -> Element<'a, Message> {
-        row(buttons).spacing(8).width(Length::Fill).into()
-    }
-
-    /// Sidebar entry (Settings sections).
-    pub fn nav_item<'a, Message: Clone + 'a>(
-        label: &'a str,
-        selected: bool,
-        on_press: Message,
-    ) -> Button<'a, Message> {
-        button(
-            text(label)
-                .size(14)
-                .height(Length::Fill)
-                .align_y(iced::alignment::Vertical::Center),
-        )
-        .width(Length::Fill)
-        .height(CONTROL)
-        .padding([0, 14])
-        .on_press(on_press)
-        .style(move |_, status| {
-            let palette = theme::current();
-            button::Style {
-                background: match (selected, status) {
-                    (true, _) => Some(palette.field_focus.into()),
-                    (false, button::Status::Hovered) => Some(palette.hover.into()),
-                    _ => None,
-                },
-                text_color: palette.text,
-                border: Border::default().rounded(FIELD_RADIUS),
-                ..button::Style::default()
-            }
-        })
-    }
-
     /// One settings row: label (+ caption) on the left, the control on the right,
     /// an optional error under the control.
     pub fn form_row<'a, Message: 'a>(
@@ -1938,18 +1900,6 @@ mod forms {
         #[cfg(not(test))]
         let _ = label;
         content.into()
-    }
-
-    /// 1 px vertical rule.
-    pub fn vertical_divider<'a, Message: 'a>() -> Element<'a, Message> {
-        container(space::horizontal())
-            .width(1)
-            .height(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(theme::current().border.into()),
-                ..container::Style::default()
-            })
-            .into()
     }
 }
 #[allow(unused_imports)]
@@ -2021,6 +1971,17 @@ pub mod chrome {
             }
         });
         &LOGO
+    }
+
+    /// A bundled RGBA PNG as an image (decode it once: keep the handle).
+    pub(crate) fn png_handle(bytes: &[u8]) -> image::Handle {
+        let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
+            .read_info()
+            .expect("a bundled PNG");
+        let mut rgba = vec![0; reader.output_buffer_size().expect("sized")];
+        let info = reader.next_frame(&mut rgba).expect("the PNG decodes");
+        rgba.truncate(info.buffer_size());
+        image::Handle::from_rgba(info.width, info.height, rgba)
     }
 
     pub(crate) fn logo_handle() -> image::Handle {
@@ -2165,10 +2126,31 @@ pub mod chrome {
                 },
                 ..container::Style::default()
             });
+        with_edges(window, mode, on)
+    }
+
+    /// `window` with the resize edges on top (only when it can resize now).
+    pub fn with_edges<'a, Message: Clone + 'a>(
+        window: impl Into<Element<'a, Message>>,
+        mode: Mode,
+        on: impl Fn(Event) -> Message,
+    ) -> Element<'a, Message> {
         if mode.resizable && !mode.maximised {
-            stack![window, edges(&on)].into()
+            stack![window.into(), edges(&on)].into()
         } else {
             window.into()
+        }
+    }
+
+    impl From<crate::ui::kit::header::Caption> for Event {
+        fn from(caption: crate::ui::kit::header::Caption) -> Event {
+            use crate::ui::kit::header::Caption;
+            match caption {
+                Caption::Drag => Event::Press,
+                Caption::Minimise => Event::Minimise,
+                Caption::Maximise => Event::Maximise,
+                Caption::Close => Event::Close,
+            }
         }
     }
 

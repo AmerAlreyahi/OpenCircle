@@ -166,6 +166,21 @@ pub fn text<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
         .color(colour)
 }
 
+/// `s` in `role`, in the secondary text colour (a description, a note).
+pub fn sub<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
+    text(role, s).color(themes::current().c.text_sub)
+}
+
+/// `s` in `role`, in the theme's accent (a handle, a link-like name).
+pub fn accent<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
+    text(role, s).color(themes::current().c.accent)
+}
+
+/// `s` in `role`, in `DANGER` (what is wrong with a value).
+pub fn error<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
+    text(role, s).color(super::tokens::fixed::DANGER)
+}
+
 /// The line height of `linked` text (times its size).
 pub const LINKED_LINE: f32 = 1.65;
 

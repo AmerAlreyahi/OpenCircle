@@ -60,13 +60,17 @@ pub fn segmented<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     );
     let pills = options.iter().map(|&(value, label)| {
         let active = value == chosen;
-        // centred by its box: a centred Arabic line is drawn off to the right
+        // centred by its box, the text exactly as wide as drawn: a wider box
+        // lays a right-to-left line out from its right edge (Arabic sat right
+        // of the thumb on Windows), and the text's own centring shifts it too
+        let drawn = super::text::width(label, Role::CONTROL.size, super::text::font(Role::CONTROL));
         button(
             container(
                 text(label)
                     .size(Role::CONTROL.size)
                     .font(super::text::font(Role::CONTROL))
-                    .line_height(1.25),
+                    .line_height(1.25)
+                    .width(drawn.ceil()),
             )
             .center_x(Fill),
         )

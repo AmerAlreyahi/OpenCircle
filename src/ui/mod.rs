@@ -1,6 +1,5 @@
 //! The iced daemon: owns the overlay window (pre-created and hidden between uses
 //! where windows can hide, see `can_hide_windows`) and its state.
-mod about;
 mod app;
 #[cfg(test)]
 mod arch_tests;
@@ -21,7 +20,7 @@ mod picker;
 mod platform;
 mod sapphire;
 mod screens;
-mod settings;
+use screens::settings;
 pub(crate) mod setup;
 mod snip;
 mod song;

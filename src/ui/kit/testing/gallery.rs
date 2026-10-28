@@ -9,7 +9,8 @@ use iced::{Element, Event, Fill, Point, Size, mouse};
 use super::super::themes::{self, DAYLIGHT, SAPPHIRE, c};
 use super::super::tokens::{Role, radius};
 use super::super::{
-    button, chip, divider, field, header, panel_frame, progress, segmented, surface, toast,
+    button, card, chip, divider, field, header, panel_frame, progress, scroll, segmented,
+    setting_row, sidebar, surface, toast,
 };
 use super::{golden, shot};
 
@@ -281,10 +282,111 @@ fn field_sheet() {
 
 #[test]
 fn chip_sheet() {
-    let rows = vec![row("accent", Act::Rest, |ar| {
-        chip::chip(s(ar, "v0.2.0", "الإصدار 0.2.0").to_string())
+    use chip::Tone;
+    let status =
+        |tone| move |ar| chip::status(s(ar, "Auto-save active", "الحفظ التلقائي يعمل"), tone);
+    let rows = vec![
+        row("accent", Act::Rest, |ar| {
+            chip::chip(s(ar, "v0.2.0", "الإصدار 0.2.0").to_string())
+        }),
+        row("tag", Act::Rest, |ar| {
+            chip::tag(s(ar, "Experimental", "تجريبي"))
+        }),
+        row("badge", Act::Rest, |ar| chip::badge(s(ar, "Exp", "تجريبي"))),
+        row("pill", Act::Rest, |ar| {
+            chip::pill(s(ar, "Pure Rust · iced", "رست خالص"), false, None)
+        }),
+        row("pill, mono 155", Act::Rest, |ar| {
+            chip::pill(s(ar, "Apache-2.0", "أباتشي 2.0"), true, Some(155.0))
+        }),
+        row("status ok", Act::Rest, status(Tone::Ok)),
+        row("status busy", Act::Rest, status(Tone::Busy)),
+        row("status error", Act::Rest, status(Tone::Error)),
+    ];
+    sheet("chip", Size::new(200.0, 40.0), &rows);
+}
+
+#[test]
+fn card_sheet() {
+    let rows = vec![row("info", Act::Rest, |ar| {
+        card::card(super::super::text::text(
+            Role::ROW_TITLE,
+            s(ar, "Made by others", "صنعه آخرون"),
+        ))
     })];
-    sheet("chip", Size::new(160.0, 40.0), &rows);
+    sheet("card", Size::new(240.0, 72.0), &rows);
+}
+
+#[test]
+fn scroll_sheet() {
+    let lines = |ar| {
+        let line = move |_| super::super::text::text(Role::ROW_DESC, s(ar, "A line", "سطر"));
+        scroll::scroll(iced::widget::column((0..8).map(|i| line(i).into())))
+            .height(Fill)
+            .into()
+    };
+    let rows = vec![row("overflowing", Act::Rest, lines)];
+    sheet("scroll", Size::new(160.0, 72.0), &rows);
+}
+
+#[test]
+fn setting_row_sheet() {
+    use segmented::boolean;
+    let off_on = |ar| [s(ar, "Off", "إيقاف"), s(ar, "On", "تشغيل")];
+    let rows = vec![
+        row("row", Act::Rest, move |ar| {
+            setting_row::row(
+                setting_row::title(s(ar, "Start with Windows", "التشغيل مع ويندوز")),
+                s(ar, "Waits in the tray", "ينتظر في شريط المهام"),
+                boolean(off_on(ar), true, true, 1.0, |_| ()),
+            )
+        }),
+        row("wide", Act::Rest, move |ar| {
+            setting_row::wide(
+                setting_row::title(s(ar, "Default action", "الإجراء الافتراضي")),
+                s(ar, "What Enter does", "ما يفعله Enter"),
+                boolean(off_on(ar), false, false, 1.0, |_| ()),
+            )
+        }),
+    ];
+    sheet("setting_row", Size::new(360.0, 120.0), &rows);
+}
+
+#[test]
+fn sidebar_sheet() {
+    use sidebar::{Item, sidebar};
+    let view = |active: usize, from: usize, glide: f32| {
+        move |ar| {
+            let items = [
+                Item {
+                    label: s(ar, "General", "عام"),
+                    badge: None,
+                },
+                Item {
+                    label: s(ar, "About", "حول"),
+                    badge: None,
+                },
+                Item {
+                    label: s(ar, "Labs", "مختبرات"),
+                    badge: Some(s(ar, "Exp", "تجريبي")),
+                },
+            ];
+            iced::widget::row![
+                sidebar(&items, active, from, glide, |_| (), ["v0.1.2", "Windows"]),
+                iced::widget::Space::new().width(Fill),
+            ]
+            .into()
+        }
+    };
+    let rows = vec![
+        row("first", Act::Rest, view(0, 0, 1.0)),
+        row("glide 0.5", Act::Rest, view(2, 0, 0.5)),
+        Row {
+            x: Some(60.0),
+            ..row("hover", Act::Hover, view(0, 0, 1.0))
+        },
+    ];
+    sheet("sidebar", Size::new(200.0, 180.0), &rows);
 }
 
 #[test]
@@ -314,7 +416,21 @@ fn header_sheet() {
     };
     let view = move |ar| header::compact(title(ar), (), ());
     let close = SIZE.width - 16.0 - 23.0;
+    let regular = move |ar| {
+        let status = chip::status(s(ar, "Saved", "تم الحفظ"), chip::Tone::Ok);
+        let logo = crate::ui::widgets::chrome::logo_handle();
+        header::regular(logo, s(ar, "Settings", "الإعدادات"), status, false, |_| ())
+    };
     let rows = vec![
+        row("regular", Act::Rest, regular),
+        Row {
+            x: Some(close),
+            ..row("regular close hover", Act::Hover, regular)
+        },
+        Row {
+            x: Some(close - 46.0),
+            ..row("regular max hover", Act::Hover, regular)
+        },
         row("compact", Act::Rest, view),
         Row {
             x: Some(close),

@@ -67,11 +67,12 @@ fn styles(line: &str) -> bool {
 
 /// Not screens: the kit, the palettes and components the kit replaces (step
 /// 5 / 23), OS glue (platform/), state and logic (app/), and tests.
-const NOT_SCREENS: [&str; 7] = [
+const NOT_SCREENS: [&str; 8] = [
     "arch_tests.rs",
     "frame_times.rs",
     "glass.rs",
     "sapphire.rs",
+    "screens/settings/tests.rs",
     "theme.rs",
     "widgets.rs",
     "windows.rs",
@@ -80,7 +81,6 @@ const NOT_SCREENS: [&str; 7] = [
 /// Screen files that still style in place. A ratchet: a port removes its file
 /// here, and the list only shrinks.
 const LEGACY: &[&str] = &[
-    "about.rs",
     "bar.rs",
     "border.rs",
     "edit.rs",
@@ -88,7 +88,7 @@ const LEGACY: &[&str] = &[
     "onboarding.rs",
     "overlay.rs",
     "panel.rs",
-    "settings.rs",
+    "screens/settings/legacy.rs",
     "setup.rs",
     "snip.rs",
     "song.rs",

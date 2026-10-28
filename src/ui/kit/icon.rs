@@ -15,17 +15,32 @@ pub enum Icon {
     Download,
     /// lucide "check" (done: an update installed).
     Check,
+    /// lucide "minus", "square", "copy": a window's minimise, maximise and
+    /// restore caption buttons.
+    Minimise,
+    Maximise,
+    Restore,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 3] = [Icon::Close, Icon::Download, Icon::Check];
+    pub const ALL: [Icon; 6] = [
+        Icon::Close,
+        Icon::Download,
+        Icon::Check,
+        Icon::Minimise,
+        Icon::Maximise,
+        Icon::Restore,
+    ];
 
     pub const fn glyph(self) -> char {
         match self {
             Icon::Close => '\u{e1b1}',
             Icon::Download => '\u{e0b6}',
             Icon::Check => '\u{e070}',
+            Icon::Minimise => '\u{e11f}',
+            Icon::Maximise => '\u{e16a}',
+            Icon::Restore => '\u{e0a2}',
         }
     }
 }

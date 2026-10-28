@@ -392,6 +392,11 @@ impl Windows {
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
+            Msg::Settings(settings::Message::Caption(caption)) => {
+                if let Some(id) = self.id(Kind::Settings) {
+                    return self.on_chrome(id, chrome::Event::from(caption));
+                }
+            }
             Msg::Settings(msg) => {
                 // A landed write takes effect even if the window was closed meanwhile.
                 if let settings::Message::Written(done) = &msg
@@ -665,11 +670,17 @@ impl Windows {
         if let Some((_, text, tone)) = self.toasts.iter().find(|(t, ..)| *t == window) {
             return Some(toast::view(text, *tone, shape::radius(toast::RADIUS)));
         }
-        let page = if let Some((id, state)) = &self.settings
+        if let Some((id, state)) = &self.settings
             && *id == window
         {
-            settings::view(state).map(Msg::Settings)
-        } else if let Some((id, state)) = &self.onboarding
+            // Settings draws the design's own header (logo, title, auto-save pill).
+            let mode = self.mode(window);
+            let page = settings::view(state, mode.maximised).map(Msg::Settings);
+            return Some(chrome::with_edges(page, mode, move |e| {
+                Msg::Chrome(window, e)
+            }));
+        }
+        let page = if let Some((id, state)) = &self.onboarding
             && *id == window
         {
             onboarding::view(state).map(Msg::Onboarding)
@@ -689,7 +700,7 @@ impl Windows {
     /// The header's title (the OS title, `title`, is the longer name for the taskbar).
     fn header_title(&self, window: window::Id) -> &'static str {
         match (self.id(Kind::Settings), self.id(Kind::Onboarding)) {
-            (Some(id), _) if id == window => "Settings",
+            // Settings draws its own header (`settings::view`)
             (_, Some(id)) if id == window => "Welcome to OpenCircle",
             _ => "Screenshot permission",
         }
@@ -1256,8 +1267,10 @@ mod tests {
         let (id, other) = (window::Id::unique(), window::Id::unique());
         windows.settings = Some((id, settings_state()));
         let texts = shot::texts(windows.view(id).unwrap());
-        assert!(texts.iter().any(|t| t == "Settings"), "{texts:?}");
-        assert_eq!(windows.header_title(id), "Settings");
+        assert!(
+            texts.iter().any(|t| t == "OpenCircle Settings"),
+            "{texts:?}"
+        );
         assert!(windows.mode(id).resizable && !windows.mode(id).maximised);
         // Maximised once the OS says so; edges are gone, restore shows.
         windows.chrome.insert(id, Chrome::default());
@@ -1292,7 +1305,10 @@ mod tests {
                 );
                 // The header is the window's own colour all the way across (no gray strip).
                 let w = size.width as usize;
-                let bg = theme::current().window;
+                let bg = match what {
+                    "settings" => crate::ui::kit::themes::c().bg,
+                    _ => theme::current().window,
+                };
                 let bg = [bg.r, bg.g, bg.b].map(|c| (c * 255.0).round() as u8);
                 let row = &px[(10 * w) * 4..(11 * w) * 4];
                 let plain = row.chunks(4).filter(|p| p[..3] == bg).count();

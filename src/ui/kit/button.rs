@@ -89,9 +89,10 @@ pub fn button<'a, Message: Clone + 'a>(
                         }
                         .into(),
                     ),
-                    text_color: match status {
-                        Status::Disabled => c().text_muted,
-                        _ => c().text,
+                    // a status not yet known (before the first redraw) is at rest
+                    text_color: match enabled {
+                        false => c().text_muted,
+                        true => c().text,
                     },
                     border: Border::default().rounded(radius::CONTROL),
                     ..iced_button::Style::default()
@@ -109,6 +110,36 @@ pub fn button<'a, Message: Clone + 'a>(
             }),
     };
     b.on_press_maybe(on_press).into()
+}
+
+/// `.oc-btn` across its share of a row (`grid` buttons, 8x13 px): `content`
+/// centred.
+pub fn fill<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use iced_button::Status;
+    let enabled = on_press.is_some();
+    iced_button(container(content).center_x(Fill))
+        .width(Fill)
+        .padding([8.0, 13.0])
+        .on_press_maybe(on_press)
+        .style(move |_, status| iced_button::Style {
+            background: Some(
+                match status {
+                    Status::Hovered | Status::Pressed => c().elevated_hover,
+                    _ => c().elevated,
+                }
+                .into(),
+            ),
+            text_color: match enabled {
+                false => c().text_muted,
+                true => c().text,
+            },
+            border: Border::default().rounded(radius::CONTROL),
+            ..iced_button::Style::default()
+        })
+        .into()
 }
 
 /// A call to action's label: 13 px / 600, and an optional mono note at 75 %

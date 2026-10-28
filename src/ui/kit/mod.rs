@@ -10,6 +10,7 @@ pub mod themes;
 pub mod tokens;
 
 pub mod button;
+pub mod card;
 pub mod chip;
 pub mod divider;
 pub mod field;
@@ -17,7 +18,10 @@ pub mod header;
 pub mod icon;
 pub mod panel_frame;
 pub mod progress;
+pub mod scroll;
 pub mod segmented;
+pub mod setting_row;
+pub mod sidebar;
 pub mod surface;
 pub mod text;
 pub mod toast;
