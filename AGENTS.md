@@ -192,7 +192,8 @@ production systems.
   models. Chat history (owner, 2026-10-28): saved on this PC, TEXT ONLY (screenshots never written; shown as
   "Screenshot not kept"), all past chats in the drawer's History, delete one / clear all, Settings "Keep chat
   history" (on by default), newest 100 kept; stored in SQLite (rusqlite bundled into the exe, owner-approved
-  dependency) as one chats.db in the app data folder. Context sent to the model: the last 20 messages in full + one short
+  dependency) in opencircle.db, the app's one database for growing records (src/store/: later search/song history,
+  recent captures index, translation cache), one module + migrations; config.toml stays (frozen, not in SQLite). Context sent to the model: the last 20 messages in full + one short
   summary of older ones (written by the user's own provider, refreshed every 10 messages); never the whole chat.
 - Smooth on the CPU (owner, 2026-10-28): the GPU renderer stays in 0.1.3. 0.1.2 must feel smooth on the
   CPU renderer, also on weak laptops and 4K/120 Hz screens: Settings pages switch instantly (the page rise
