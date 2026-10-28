@@ -73,13 +73,14 @@ pub enum Breathe {
     On,
 }
 
-/// Whether the overlay's glow may breathe at all: not when the OS asks for
-/// reduced motion, and not off Windows (#142): there the 12.5 fps redraw goes
-/// through our CPU renderer and a whole-window present each step (~9 % of a
-/// core on the Linux VM); the owner's rule is near 0 % while the overlay is
-/// still. Windows measured 0.10 %. Linux keeps the static glow.
+/// Whether the overlay's glow may breathe at all. Not in 0.1.2 (owner rule:
+/// near 0 % CPU while the overlay is still): on the CPU renderer each breath
+/// step costs ~11 ms, so even the trimmed breath measured 7-9 % of a core on
+/// the Windows VM (perf-2, exact cycle counts). The glow stays static; the
+/// breath returns with the GPU renderer in 0.1.3 (then: `cfg!(windows) &&
+/// !motion::reduced()`).
 fn breathes() -> bool {
-    cfg!(windows) && !crate::ui::kit::motion::reduced()
+    false
 }
 
 /// The edge over a window that shows a whole monitor at `scale` (physical px
@@ -819,7 +820,7 @@ mod tests {
                     for reduced in [false, true] {
                         motion::set_reduced(reduced);
                         let seen = frames(&case, &[0, 16, 200, 2000, 60_000]);
-                        let moves = breathes && !reduced && !still && cfg!(windows);
+                        let moves = breathes && !reduced && !still && super::breathes();
                         let same = seen.windows(2).all(|p| p[0].0 == p[1].0);
                         let asks = seen.iter().any(|f| f.1);
                         let has = edge(&look, mode, 1920, 1080, 1.0, false, 0.0).is_some();
@@ -842,8 +843,8 @@ mod tests {
         for look in [spectrum(), theme(LookTheme::Hud), theme(LookTheme::Horizon)] {
             let b = border(Mode::Overlay, look, Breathe::On);
             let seen = frames(&b, &[0, 1000, 2000, 3000, 4000, 4010]);
-            if !cfg!(windows) {
-                // #142: Linux's glow stays still (near 0 % CPU while untouched)
+            if !super::breathes() {
+                // #142 + 0.1.2: the glow stays still (near 0 % CPU while untouched)
                 assert!(seen.iter().all(|f| !f.1 && f.0 == seen[0].0));
                 continue;
             }

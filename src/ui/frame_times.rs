@@ -512,10 +512,9 @@ fn the_opening_blits_its_images() {
 /// rest), and a frame drawn anyway redraws nothing.
 #[test]
 fn a_still_overlay_asks_for_no_frames() {
-    // Windows: the edge glow's slow breath is its one motion, off with reduced
-    // motion (`the_breath_redraws_only_the_edge`). Linux has none (#142), so
-    // motion stays on there: the still overlay must cost nothing.
-    motion::set_reduced(cfg!(windows));
+    // The edge glow doesn't breathe in 0.1.2 (`edge::breathes`), so motion
+    // stays on everywhere: the still overlay must cost nothing.
+    motion::set_reduced(false);
     let mut app = open_app(1280, 720, 1.0);
     app.o.appear = None;
     let (a, b) = (Point::new(300.0, 200.0), Point::new(600.0, 400.0));
@@ -545,6 +544,7 @@ fn a_still_overlay_asks_for_no_frames() {
 /// Linux's glow stays still, #142.)
 #[test]
 #[cfg(windows)]
+#[ignore = "the breath is off in 0.1.2 (edge::breathes); it returns with the GPU renderer in 0.1.3"]
 fn the_breath_redraws_only_the_edge() {
     let (w, h) = (1920, 1080);
     motion::set_reduced(false);

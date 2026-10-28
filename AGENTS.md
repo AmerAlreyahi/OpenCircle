@@ -229,6 +229,10 @@ production systems.
   opens with the live effect (Active Look edge) and the bar on the screen the MOUSE is on; all screens still freeze and
   stay selectable. Moving the mouse to another screen moves the edge glow there (fade, design timings); the bar stays
   where it opened until dragged.
+- Static edge glow in 0.1.2 (lead, 2026-10-29, recommended default while the owner was away; owner may reverse):
+  the CPU renderer can't breathe near 0 % (each step ~11 ms; trimmed breath still 7-9 % of a core on the VM by
+  cycle count), so the overlay's glow is static in 0.1.2 (`edge::breathes`); the 4 s breath returns with the GPU
+  renderer in 0.1.3, like the other motion ("Smooth on the CPU").
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.
