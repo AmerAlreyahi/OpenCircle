@@ -101,7 +101,7 @@ pub fn resolve(mode: Mode, dark: &str, light: &str, os_dark: bool) -> &'static T
 pub const OBSIDIAN: Theme = Theme {
     id: "obsidian",
     name: "Obsidian",
-    desc: "Smoked dark glass",
+    desc: "Smoked dark charcoal",
     light: false,
     swatch: [
         Color::from_rgb8(0x0f, 0x12, 0x1a),
@@ -138,7 +138,7 @@ pub const OBSIDIAN: Theme = Theme {
 pub const MICA: Theme = Theme {
     id: "mica",
     name: "Mica Slate",
-    desc: "Win11 Mica slate tint",
+    desc: "Cool slate grey",
     light: false,
     swatch: [
         Color::from_rgb8(0x16, 0x1b, 0x28),
@@ -212,7 +212,7 @@ pub const TITANIUM: Theme = Theme {
 pub const SAPPHIRE: Theme = Theme {
     id: "sapphire",
     name: "Sapphire",
-    desc: "Deep cobalt refraction",
+    desc: "Deep cobalt blue",
     light: false,
     swatch: [
         Color::from_rgb8(0x0c, 0x17, 0x2e),
@@ -286,7 +286,7 @@ pub const AMETHYST: Theme = Theme {
 pub const EMERALD: Theme = Theme {
     id: "emerald",
     name: "Emerald",
-    desc: "Deep forest jade glass",
+    desc: "Deep forest jade",
     light: false,
     swatch: [
         Color::from_rgb8(0x0b, 0x1f, 0x1c),
@@ -434,7 +434,7 @@ pub const MIDNIGHT: Theme = Theme {
 pub const FROST: Theme = Theme {
     id: "frost",
     name: "Arctic Frost",
-    desc: "Pale icy translucent",
+    desc: "Pale icy blue",
     light: true,
     swatch: [
         Color::from_rgb8(0xe4, 0xea, 0xf4),
@@ -547,3 +547,25 @@ pub const THEMES: [&Theme; 12] = [
     &SAPPHIRE, &OBSIDIAN, &MICA, &TITANIUM, &AMETHYST, &EMERALD, &ROSE, &GRAPHITE, &MIDNIGHT,
     &FROST, &DAYLIGHT, &SANDSTONE,
 ];
+
+#[cfg(test)]
+mod tests {
+    /// A solid release (glass returns with the GPU renderer, 0.1.3): no card
+    /// promises glass.
+    #[test]
+    fn no_theme_promises_glass() {
+        for t in super::THEMES {
+            let d = t.desc.to_lowercase();
+            for word in [
+                "glass",
+                "translucent",
+                "refraction",
+                "mica",
+                "frost",
+                "blur",
+            ] {
+                assert!(!d.contains(word), "{}: {}", t.name, t.desc);
+            }
+        }
+    }
+}
