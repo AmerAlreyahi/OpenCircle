@@ -172,6 +172,8 @@ pub(in crate::ui) struct Opening {
     /// Circle to Search: every other monitor, each in its own window, as its
     /// frame lands (`app::screens`); freed with the opening.
     pub(in crate::ui) screens: Vec<Screen>,
+    /// Their frames that landed during the opening animation (shown after it).
+    pub(in crate::ui) waiting: Vec<(crate::ui::snip::Place, image::Handle)>,
 }
 
 impl Default for Opening {
@@ -250,6 +252,7 @@ impl Default for Opening {
             song: None,
             capture: 0,
             screens: Vec::new(),
+            waiting: Vec::new(),
         }
     }
 }

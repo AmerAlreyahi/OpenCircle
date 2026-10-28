@@ -303,6 +303,7 @@ impl App {
             || (self.o.panel.as_ref()).is_some_and(|(_, p)| p.spinning())
             || self.chat.as_ref().is_some_and(|c| c.panel.spinning())
             || self.o.bar_now.is_none()
+            || !self.o.waiting.is_empty() // other screens wait for a frame after the opening
     }
 
     /// The gaps between the overlay's frames since the last log, as `what`

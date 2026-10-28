@@ -219,7 +219,9 @@ impl App {
         frame: image::Handle,
     ) -> Task<Message> {
         let start = self.place();
-        let known = self.o.screens.iter().any(|s| s.place == place);
+        let known = (self.o.screens.iter().map(|s| s.place))
+            .chain(self.o.waiting.iter().map(|(p, _)| *p))
+            .any(|p| p == place);
         if self.o.capture != n
             || !matches!(self.o.purpose, Purpose::Search)
             || place.origin == start.origin
@@ -227,6 +229,28 @@ impl App {
         {
             return Task::none();
         }
+        // The starting screen's opening first: a window opened and drawn
+        // meanwhile slows its frames (and its first one) on a small PC.
+        if self.appeared() < 1.0 {
+            self.o.waiting.push((place, frame));
+            return Task::none();
+        }
+        self.show_screen(place, frame)
+    }
+
+    /// The frames that waited for the opening (`add_screen`), shown now.
+    pub(in crate::ui) fn show_waiting(&mut self) -> Task<Message> {
+        let waiting = std::mem::take(&mut self.o.waiting);
+        Task::batch(
+            waiting
+                .into_iter()
+                .map(|(place, frame)| self.show_screen(place, frame)),
+        )
+    }
+
+    /// The monitor at `place`'s window over its `frame`.
+    fn show_screen(&mut self, place: Place, frame: image::Handle) -> Task<Message> {
+        let start = self.place();
         let (id, open) = windows::screen(overlay_window(None));
         self.o.screens.push(Screen::new(id, start, place, frame));
         crate::log!(
@@ -359,6 +383,7 @@ mod tests {
         };
         let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
         assert!(app.o.is_some());
+        app.o.appear = Some((Instant::now(), 1.0)); // its opening is over
         (app, n)
     }
 
@@ -446,6 +471,22 @@ mod tests {
         assert_eq!((desk.width, desk.height), (1120.0, 400.0)); // 640 + 480 px
         let moved = keep_on(desk, Rectangle::new(Point::new(1100.0, 10.0), area.size()));
         assert!((moved.x + area.width - 1120.0).abs() < 0.01, "{moved:?}");
+    }
+
+    #[test]
+    fn the_other_screens_open_once_the_starting_ones_opening_is_over() {
+        let (mut app, n) = opened();
+        app.o.appear = Some((Instant::now(), 0.5)); // still opening
+        let right = place((640, 0), (480, 300), 1.5);
+        let _ = app.update(Message::Screen(n, right, solid(right, 90)));
+        assert!(app.o.screens.is_empty(), "no window during the opening");
+        app.o.appear = Some((Instant::now(), 1.0));
+        // the frame clock keeps going for them once the opening is over
+        (app.o.bar_now, app.o.reveal) = (Some(app.bar_target()), None);
+        assert!(app.animating(), "a frame still comes");
+        let _ = app.update(Message::Frame(Instant::now()));
+        assert_eq!(app.o.screens.len(), 1, "shown after it");
+        assert!(app.o.waiting.is_empty());
     }
 
     #[test]

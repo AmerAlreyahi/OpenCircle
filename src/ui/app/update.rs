@@ -332,6 +332,11 @@ impl App {
                 self.select(Rectangle::with_size(self.o.screen));
                 self.start_translate()
             }
+            // the other monitors' windows once the opening is over
+            Message::Frame(now) if !self.o.waiting.is_empty() && self.appeared() >= 1.0 => {
+                let shown = self.show_waiting();
+                Task::batch([shown, self.update(Message::Frame(now))])
+            }
             Message::Frame(now) => {
                 self.o.esc_back = false;
                 // Shown fully clear: once its first full frame is up (or after
