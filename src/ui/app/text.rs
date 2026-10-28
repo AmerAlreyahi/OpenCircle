@@ -48,6 +48,7 @@ impl App {
         let main = matches!(self.o.purpose, Purpose::Search) && self.o.translate.is_none();
         let read = main && self.text_known(p);
         read.then(|| word::Picked::new(self.all_lines(), self.o.desk(), p, unit))?
+            .map(|picked| picked.on_screens(self.screen_areas()))
     }
 
     /// Counts a press at `p` (image px) as the first, second or third click in
