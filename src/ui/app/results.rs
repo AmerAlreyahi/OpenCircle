@@ -238,6 +238,7 @@ impl App {
         }
         // the overlay card's glide (`motion::DOCK`), the window moved frame by frame
         chat.glide = Some((std::time::Instant::now(), chat.at, to));
+        self.frame_times.borrow_mut().clear(); // its frames, logged at its end
         Task::none()
     }
 
@@ -253,6 +254,13 @@ impl App {
         let at = glided(from, to, t);
         chat.glide = (t < 1.0).then_some((began, from, to));
         chat.at = at;
+        // when each step ran (the overlay is closed: its frame log is the glide's)
+        self.frame_times
+            .borrow_mut()
+            .push(std::time::Instant::now());
+        if t >= 1.0 {
+            self.log_frames("chat glide");
+        }
         window::move_to(id, at)
     }
 
