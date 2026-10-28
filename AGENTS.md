@@ -221,6 +221,10 @@ production systems.
 - Settings window layout (owner, 2026-10-28): the design's full-width header stays, with ONE horizontal hairline
   under it across the window, 100 % identical to the vertical sidebar separator (same kit divider, colour,
   thickness, opacity); the vertical separator starts at that line.
+- Protected-capture pill (owner, 2026-10-28): 0.1.2 shows "This window is protected" only where Windows reports a
+  capture-blocking window (display affinity), so black wallpapers get no false pill. DRM video in a browser (black
+  without a protected window) gets no pill for now; a smarter check (a black area exactly filling a video player
+  while the rest of the window isn't black) is a later follow-up.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.
