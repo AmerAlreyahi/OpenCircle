@@ -12,10 +12,15 @@ static CURRENT: RwLock<Option<Config>> = RwLock::new(None);
 /// The active look, without cloning the whole config (the screen edge reads it
 /// every frame, the widgets on every style).
 pub fn look() -> Look {
+    look_config().active()
+}
+
+/// The stored look choice (which design look, and the user's own).
+pub fn look_config() -> LookConfig {
     if let Some(c) = CURRENT.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        return c.look.active();
+        return c.look;
     }
-    current().look.active()
+    current().look
 }
 
 /// The floating widgets' theme and whether they blur the screen behind them.

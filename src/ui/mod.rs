@@ -3,7 +3,6 @@
 mod app;
 #[cfg(test)]
 mod arch_tests;
-mod border;
 /// Frames as the window draws them (damage), and the animations' timing.
 #[cfg(test)]
 mod frame_times;

@@ -7,6 +7,9 @@ pub mod editor;
 pub mod live;
 pub mod model_download;
 pub mod onboarding;
+pub mod overlay {
+    pub mod edge;
+}
 pub mod panel;
 pub mod settings;
 pub mod setup;

@@ -1,7 +1,7 @@
 //! The design's 10 Active Looks (the screen edge while the overlay is open) as
 //! data (`newdesing/core/theme-context.js` `ACTIVE_LOOKS`), plus the user's own
 //! two colours.
-// ponytail: used from step 13 on (the overlay edge); until then only tests read it.
+// ponytail: `solid` and `Active` wait for their port; the edge reads `kind` and `glow`.
 #![allow(dead_code)]
 
 use iced::Color;

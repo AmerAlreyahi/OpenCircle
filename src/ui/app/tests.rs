@@ -21,8 +21,9 @@ use crate::ui::app::{keys, word};
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::editor::Editing;
+use crate::ui::screens::overlay::edge as border;
 use crate::ui::snip::Snip;
-use crate::ui::{border, glass, overlay, panel, snip, song, translate, widgets, windows};
+use crate::ui::{glass, overlay, panel, snip, song, translate, widgets, windows};
 
 use super::actions::auto_targets;
 use super::view::chips_at;
@@ -3397,14 +3398,21 @@ fn look_shots() {
     let glowing_at = |app: &mut App, w: u32, h: u32| {
         if let Some(image::Handle::Rgba { pixels, .. }) = &app.o.frame {
             let mut rgba = pixels.to_vec();
-            border::paint(&mut rgba, w, h, 1.0, &config::look(), border::Mode::Overlay);
+            border::paint(
+                &mut rgba,
+                w,
+                h,
+                1.0,
+                &config::look_config(),
+                border::Mode::Overlay,
+            );
             app.o.frame = Some(image::Handle::from_rgba(w, h, rgba));
         }
     };
     let glowing = |app: &mut App| {
         if let Some(image::Handle::Rgba { pixels, .. }) = &app.o.frame {
             let mut rgba = pixels.to_vec();
-            let look = config::look();
+            let look = config::look_config();
             border::paint(&mut rgba, 960, 420, 1.0, &look, border::Mode::Overlay);
             app.o.frame = Some(image::Handle::from_rgba(960, 420, rgba));
         }

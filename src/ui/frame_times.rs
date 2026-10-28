@@ -486,7 +486,7 @@ fn a_still_overlay_asks_for_no_frames() {
 }
 
 /// The edge glow's breath (owner, 2026-10-27) redraws only the edge's strips,
-/// once per `border::STEP`, and only after the opening: never the middle of the
+/// once per `edge::STEP`, and only after the opening: never the middle of the
 /// screen, and a few percent of the screen per frame at most. (Windows only:
 /// Linux's glow stays still, #142.)
 #[test]

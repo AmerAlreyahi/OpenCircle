@@ -13,7 +13,8 @@ use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 
 use super::live_controller::{self, Controller, Out};
-use super::{background, border, theme, windows};
+use super::screens::overlay::edge as border;
+use super::{background, theme, windows};
 use crate::capture::{self, window_rect};
 use crate::config;
 use crate::live::{self, LayerError};
