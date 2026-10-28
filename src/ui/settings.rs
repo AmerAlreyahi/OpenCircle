@@ -798,13 +798,27 @@ enum Edit {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Done {
     edit: Edit,
+    /// The config the app was running before the write.
+    before: Config,
     result: Result<Config, String>,
+}
+
+impl Done {
+    /// A write that landed: (the config before, the config now), for the app-level
+    /// effects (shortcuts, theme, tray). They run even when the window is gone.
+    pub fn landed(&self) -> Option<(&Config, &Config)> {
+        self.result.as_ref().ok().map(|now| (&self.before, now))
+    }
 }
 
 impl Write {
     /// Blocks on the disk (fsync): call it off the UI thread.
     pub fn run(self) -> Box<Done> {
         let path = self.path.as_deref();
+        let before = match path {
+            Some(p) => Config::load_from(p).0,
+            None => config::current(),
+        };
         let result = match &self.edit {
             Edit::Save { saved, draft } => config::update_at(path, |c| {
                 *c = config::rebase(c, saved, draft);
@@ -813,6 +827,7 @@ impl Write {
         };
         Box::new(Done {
             edit: self.edit,
+            before,
             result: result.map_err(|e| e.to_string()),
         })
     }
@@ -1316,14 +1331,19 @@ fn save(state: &mut State) -> Outcome {
 /// made since; then the next waiting write, or the answer for the shell.
 fn written(state: &mut State, done: Box<Done>) -> Outcome {
     state.writing = false;
-    let Done { edit, result } = *done;
+    let Done { edit, result, .. } = *done;
     let cfg = match result {
         Ok(cfg) => cfg,
         Err(e) => {
-            state.queued_labs.clear();
+            // The failed edit stays in the draft (auto-save retries it); the switches
+            // flipped meanwhile are still written.
             state.closing = false;
             state.notice = Some(format!("Could not save: {e}"));
-            return Outcome::None;
+            if state.queued_labs.is_empty() {
+                return Outcome::None;
+            }
+            let (feature, on) = state.queued_labs.remove(0);
+            return set_lab(state, feature, on);
         }
     };
     match edit {
@@ -2858,6 +2878,30 @@ pub(super) mod tests {
         }
         // The entries are still in the draft (and so in the file): hidden, not deleted.
         assert!(s.draft.quick_actions.iter().any(|q| q.action == "snip"));
+    }
+
+    #[test]
+    fn a_failed_write_keeps_the_queued_switches_and_the_unsaved_edit() {
+        let path = tmp("write-fails");
+        // A folder where the file should go: every write fails.
+        std::fs::create_dir_all(&path).unwrap();
+        let (mut s, _) = state(Some(path.clone()));
+        s.auto = true;
+        let Outcome::Write(first) = super::update(&mut s, Message::Theme(Theme::Light)) else {
+            panic!("no write")
+        };
+        super::update(&mut s, Message::Labs(Feature::Snip, true));
+        let out = super::update(&mut s, Message::Written(first.run()));
+        assert!(
+            matches!(out, Outcome::Write(_)),
+            "the switch was dropped: {out:?}"
+        );
+        assert!(
+            s.notice
+                .as_deref()
+                .is_some_and(|n| n.contains("Could not save"))
+        );
+        assert!(s.dirty(), "the edit stays unsaved, so auto-save retries it");
     }
 
     #[test]

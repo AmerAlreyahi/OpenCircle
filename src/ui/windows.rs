@@ -393,12 +393,18 @@ impl Windows {
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::Settings(msg) => {
+                // A landed write takes effect even if the window was closed meanwhile.
+                if let settings::Message::Written(done) = &msg
+                    && let Some((before, now)) = done.landed()
+                {
+                    apply_from(before, now.clone());
+                }
                 if let Some((id, state)) = &mut self.settings {
                     let id = *id;
                     let outcome = settings::update(state, msg);
                     let leaving = state.leaving();
                     match outcome {
-                        settings::Outcome::Saved(cfg) => apply(cfg),
+                        settings::Outcome::Saved(_) => {} // applied above, when the write landed
                         settings::Outcome::Write(w) => {
                             return super::background(move |tx| {
                                 let _ = tx.unbounded_send(w.run());
@@ -794,7 +800,12 @@ impl Windows {
 /// on Wayland a re-bind closes and reopens the portal session) and the shared
 /// config every panel reads.
 fn apply(cfg: Config) {
-    let old = config::current();
+    apply_from(&config::current(), cfg);
+}
+
+/// `apply` against the config that was running before (a write has already made
+/// the new one current, so `current()` can no longer tell what changed).
+fn apply_from(old: &Config, cfg: Config) {
     theme::apply(cfg.theme);
     if old.shortcut != cfg.shortcut
         || old.quick_actions != cfg.quick_actions
@@ -971,6 +982,34 @@ mod tests {
 
     fn settings_state() -> settings::State {
         settings::State::new(Config::default(), vec![], None, Box::new(NoKeys))
+    }
+
+    #[test]
+    fn a_saved_config_takes_effect_even_when_the_settings_window_is_gone() {
+        let dir = std::env::temp_dir().join(format!("oc-win-write-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut state = settings::State::new(
+            Config::default(),
+            vec![],
+            Some(dir.join("config.toml")),
+            Box::new(NoKeys),
+        );
+        settings::update(
+            &mut state,
+            settings::Message::Theme(crate::config::Theme::Dark),
+        );
+        let settings::Outcome::Write(w) = settings::update(&mut state, settings::Message::Save)
+        else {
+            panic!("no write")
+        };
+        let done = w.run();
+        drop(state); // the window closed while the write ran
+        let mut windows = Windows::default();
+        let _ = windows.update(Msg::Settings(settings::Message::Written(done)));
+        assert_eq!(config::current().theme, crate::config::Theme::Dark);
+        config::set_current(Config::default());
+        theme::apply(crate::config::Theme::System);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
