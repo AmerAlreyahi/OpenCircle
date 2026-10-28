@@ -155,7 +155,7 @@ pub enum Theme {
 /// The dark themes `[appearance] dark` may name (`ui::kit::themes`; a test there keeps
 /// both lists equal to its own).
 pub const DARK_THEMES: [&str; 9] = [
-    "obsidian", "mica", "titanium", "sapphire", "amethyst", "emerald", "rose", "graphite",
+    "sapphire", "obsidian", "mica", "titanium", "amethyst", "emerald", "rose", "graphite",
     "midnight",
 ];
 /// The light themes `[appearance] light` may name.
@@ -1923,7 +1923,7 @@ mod tests {
         );
         assert_eq!(w.len(), 2, "{w:?}");
         assert!(
-            w[0].starts_with("appearance.dark: expected one of obsidian"),
+            w[0].starts_with("appearance.dark: expected one of sapphire"),
             "{w:?}"
         );
         assert!(w[1].starts_with("appearance.logo:"), "{w:?}");

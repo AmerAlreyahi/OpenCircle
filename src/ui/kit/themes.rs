@@ -542,7 +542,8 @@ pub const SANDSTONE: Theme = Theme {
     },
 };
 
+/// Sapphire first: the default and the owner's pick to lead the list (2026-10-28).
 pub const THEMES: [&Theme; 12] = [
-    &OBSIDIAN, &MICA, &TITANIUM, &SAPPHIRE, &AMETHYST, &EMERALD, &ROSE, &GRAPHITE, &MIDNIGHT,
+    &SAPPHIRE, &OBSIDIAN, &MICA, &TITANIUM, &AMETHYST, &EMERALD, &ROSE, &GRAPHITE, &MIDNIGHT,
     &FROST, &DAYLIGHT, &SANDSTONE,
 ];
