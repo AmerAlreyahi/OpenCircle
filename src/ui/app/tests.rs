@@ -3699,6 +3699,16 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     let _ = app.update(Message::CardReleased);
     assert!(app.o.chat_glide.is_some() && app.animating());
     let began = app.o.chat_glide.unwrap().0;
+    // the frame strip (OPENCIRCLE_RENDER_DIR): let go, then every 60 ms
+    if std::env::var_os("OPENCIRCLE_RENDER_DIR").is_some() {
+        let long_ago = began - std::time::Duration::from_secs(2);
+        let _ = app.update(Message::Frame(long_ago)); // the card opened long before
+        for k in 0..4u32 {
+            let _ = app.update(Message::Frame(began + motion::DOCK * k / 4));
+            let name = format!("chat-glide-{k}");
+            shot::save(&name, app.view(app.overlay), app.o.screen);
+        }
+    }
     let _ = app.update(Message::Frame(began + motion::DOCK / 3));
     let mid = app.card_at();
     assert!(
@@ -3708,6 +3718,7 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     let _ = app.update(Message::Frame(began + motion::DOCK));
     assert!(app.o.chat_glide.is_none());
     assert!(!app.o.panel.as_ref().unwrap().1.held, "let go: scale 1");
+    shot::save("chat-glide-4", app.view(app.overlay), app.o.screen);
     assert_eq!(app.card_at().x, 16.0);
     assert_eq!(app.chat_side, Some(card::Side::Left));
     // the next chat in this run opens on that side
