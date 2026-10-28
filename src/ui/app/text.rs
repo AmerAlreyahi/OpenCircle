@@ -502,11 +502,26 @@ impl App {
         if self.o.text_mode.take().is_some() {
             return Task::none(); // "Done"
         }
+        let area = self.area();
+        // Windows OCR read the screen: its words in the box, the same ones (and
+        // places) a text selection there picks; no second read (#150).
+        if self.o.text_by == Some(ocr::Source::System)
+            && self.o.screen_text.is_whole(self.o.screen.height)
+        {
+            let lines = word::within(self.o.screen_text.iter(), area);
+            self.o.panel = None;
+            self.o.text_mode = Some(TextMode {
+                boxes: word::boxes(&lines),
+                lines: Some(lines),
+                picked: None,
+                picking: false,
+            });
+            return Task::none();
+        }
         if !text::models_present() {
             self.o.reader = Reader::Missing(ocr::download_size());
             return Task::none();
         }
-        let area = self.area();
         let Some(image::Handle::Rgba {
             width,
             height,

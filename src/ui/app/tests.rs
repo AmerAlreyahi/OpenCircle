@@ -3846,3 +3846,67 @@ fn the_copied_pill_goes_beside_the_selection_at_any_scale() {
         "{at:?} {bar:?}"
     );
 }
+
+/// #150: at 175 %, with the screen read by Windows OCR, Select text over an
+/// email offers exactly the words a text selection there has: a double click
+/// picks the whole address, at the same place, and nothing reads the box
+/// again (no PP-OCR models needed).
+#[test]
+fn select_text_mode_picks_the_words_windows_ocr_read() {
+    use iced::widget::text as label;
+    text::MODELS_HERE.set(Some(false));
+    crate::ui::kit::text::load();
+    const LINE: &str = "Write to name.k@example-solutions.com today";
+    const EMAIL: &str = "name.k@example-solutions.com";
+    let s = 1.75;
+    let line = label(LINE).size(22.0 * s).font(iced::Font::MONOSPACE);
+    let page: iced::widget::Container<Message> =
+        container(line.line_height(iced::Pixels(32.0 * s))).padding([40.0 * s, 60.0 * s]);
+    let rgba = widgets::shot::render(Element::from(page), 1680, 700);
+    let mut app = open_app(1680, 700, s);
+    app.o.frame = Some(image::Handle::from_rgba(1680, 700, rgba));
+    // Windows OCR's read of the whole screen (frame px)
+    let block = TextBlock {
+        text: LINE.into(),
+        bounds: [60.0 * s, 43.0 * s, LINE.len() as f32 * CHAR * s, 26.0 * s],
+        confidence: 1.0,
+    };
+    let mut lines = word::lines(vec![block], [0, 0], s);
+    if let Some(image::Handle::Rgba { pixels, .. }) = &app.o.frame {
+        word::measure(&mut lines, pixels, 1680, 700, s);
+    }
+    let whole = Rectangle::with_size(app.o.screen);
+    let screen = app.o.screen;
+    app.o
+        .screen_text
+        .add_read(ocr::Source::System, whole, lines, screen);
+    app.o.text_by = Some(ocr::Source::System);
+    let on_email = Point::new(60.0 + 20.0 * CHAR, 56.0);
+    // normal mode: a double click picks the address
+    click_at(&mut app, on_email, false);
+    click_at(&mut app, on_email, false);
+    assert_eq!(picked_text(&app).as_deref(), Some(EMAIL));
+    let normal = app.o.word.as_ref().unwrap().rects();
+    // select-text mode over it: the same address, in the same place
+    app.o.word = None;
+    app.o.clicks = None;
+    let (sel, stroke) = overlay::snap(Rectangle::new(
+        Point::new(60.0 + 8.5 * CHAR, 30.0),
+        Size::new(29.0 * CHAR, 50.0),
+    ));
+    (app.o.selection, app.o.stroke) = (Some(sel), stroke);
+    let task = app.update(Message::SelectText);
+    assert_eq!(task.units(), 0, "nothing read again");
+    assert_eq!(app.o.reader, Reader::Idle, "no download asked");
+    let mode = app.o.text_mode.as_ref().unwrap();
+    assert_eq!(mode.boxes.len(), 1, "only the address is in the box");
+    for _ in 0..2 {
+        let at = on_email;
+        event(&mut app, overlay::Event::Press { at, shift: false });
+        event(&mut app, overlay::Event::Release);
+    }
+    let picked = app.o.text_mode.as_ref().unwrap().picked.clone().unwrap();
+    assert_eq!(picked.text(), EMAIL);
+    assert_eq!(picked.rects(), normal);
+    text::MODELS_HERE.set(None);
+}

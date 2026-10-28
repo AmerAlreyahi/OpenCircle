@@ -291,6 +291,31 @@ fn words(line: &Line) -> Vec<(Rectangle, &str)> {
         .collect()
 }
 
+/// The words of `lines` whose middle is in `area` (image px), each line cut
+/// to its run of them: select-text mode's box over the screen's text, with
+/// the very boxes and carets a text selection there has (#150).
+pub fn within<'a>(lines: impl IntoIterator<Item = &'a Line>, area: Rectangle) -> Vec<Line> {
+    let mut out = Vec::new();
+    for line in lines {
+        let carets = carets(line);
+        let spans = word_spans(&line.text);
+        let inside: Vec<usize> = (words(line).iter().enumerate())
+            .filter(|(_, (r, _))| area.contains(r.center()))
+            .map(|(k, _)| k)
+            .collect();
+        let (Some(&first), Some(&last)) = (inside.first(), inside.last()) else {
+            continue;
+        };
+        let ((c0, _, b0, _), (_, c1, _, b1)) = (spans[first], spans[last]);
+        out.push(Line {
+            text: line.text[b0..b1].to_string(),
+            bounds: between(line, &carets, c0, c1),
+            carets: carets[c0..=c1].to_vec(),
+        });
+    }
+    out
+}
+
 /// Every word's box in `lines` (select-text mode shows them all).
 pub fn boxes(lines: &[Line]) -> Vec<Rectangle> {
     (lines.iter())
