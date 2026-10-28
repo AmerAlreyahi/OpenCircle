@@ -26,6 +26,12 @@ pub fn widgets() -> (WidgetTheme, bool) {
     })
 }
 
+/// The theme picks, without loading the file (defaults until the app has read it).
+pub fn appearance() -> AppearanceConfig {
+    let c = CURRENT.read().unwrap_or_else(|e| e.into_inner());
+    c.as_ref().map(|c| c.appearance.clone()).unwrap_or_default()
+}
+
 /// The config the running app uses (any thread). Read from disk on first use;
 /// after that only `set_current` changes it (Settings saved, onboarding finished).
 pub fn current() -> Config {

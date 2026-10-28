@@ -46,6 +46,37 @@ impl Config {
         c.shortcut = get_checked(&root, "", "shortcut", d.shortcut, &mut w, |s: &String| {
             parse_shortcut(s).map(drop)
         });
+        // The file's schema (missing = 1): older ones are carried forward below.
+        let file_version = root.get("version").map_or(Some(1), Value::as_integer);
+
+        if let Some(t) = section(&root, "appearance", &mut w) {
+            let (p, d) = ("appearance.", &d.appearance);
+            let one_of = |ids: &'static [&str]| {
+                move |s: &String| match ids.contains(&s.as_str()) {
+                    true => Ok(()),
+                    false => Err(format!("expected one of {}", ids.join(", "))),
+                }
+            };
+            c.appearance.dark =
+                get_checked(t, p, "dark", d.dark.clone(), &mut w, one_of(&DARK_THEMES));
+            c.appearance.light = get_checked(
+                t,
+                p,
+                "light",
+                d.light.clone(),
+                &mut w,
+                one_of(&LIGHT_THEMES),
+            );
+            c.appearance.logo = get(t, p, "logo", d.logo, &mut w);
+            c.appearance.hidden_previews = get(t, p, "hidden_previews", vec![], &mut w);
+        } else if file_version < Some(4) {
+            // Schema 4: the old widget theme becomes that mode's app theme.
+            match c.widget_theme {
+                WidgetTheme::Frost => c.appearance.light = "frost".into(),
+                WidgetTheme::Graphite => c.appearance.dark = "graphite".into(),
+                WidgetTheme::Default => {}
+            }
+        }
 
         if let Some(t) = section(&root, "general", &mut w) {
             c.general.default_action = get(
@@ -82,7 +113,7 @@ impl Config {
             c.selection.after = get(t, p, "after", d.after, &mut w);
             // Schema 3: nothing is sent before the user picks (owner, 2026-10-26).
             // An older file's "search" becomes "wait"; Settings opts back in.
-            if root.get("version").map_or(Some(1), Value::as_integer) < Some(3) {
+            if file_version < Some(3) {
                 c.selection.after = After::Wait;
             }
             c.selection.search_with = get(t, p, "search_with", d.search_with, &mut w);
@@ -90,6 +121,14 @@ impl Config {
         }
         if let Some(t) = section(&root, "look", &mut w) {
             c.look.theme = get(t, "look.", "theme", d.look.theme, &mut w);
+            // Schema 4: the design's looks with the same colours (calm: owner to check).
+            if file_version < Some(4) {
+                c.look.theme = match c.look.theme {
+                    LookTheme::Aurora | LookTheme::Calm => LookTheme::Prism,
+                    LookTheme::Mono => LookTheme::Frost,
+                    other => other,
+                };
+            }
             if let Some(custom) = sub_section(t, "look.", "custom", &mut w) {
                 c.look.custom = read_look(custom, d.look.custom, &mut w);
             }

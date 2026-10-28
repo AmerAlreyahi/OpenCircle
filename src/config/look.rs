@@ -28,24 +28,40 @@ const fn preset(palette: ColourSet, glow: u8, dim: u8, activation: bool, bar: Ba
     }
 }
 
+/// A design look drawn with its two colours (`ui::kit::looks` `solid`) until the
+/// edge draws the design's looks.
+const fn two(a: u32, b: u32) -> Look {
+    const fn rgb(c: u32) -> Rgb {
+        Rgb([(c >> 16) as u8, (c >> 8) as u8, c as u8])
+    }
+    Look {
+        colours: [rgb(a), rgb(b)],
+        ..preset(ColourSet::TwoColour, 100, 12, true, BarStyle::Glass)
+    }
+}
+
 /// The presets: one table (their colours: `ui::theme::palette`).
-pub const PRESETS: [(LookTheme, Look); 7] = {
+pub const PRESETS: [(LookTheme, Look); 12] = {
     let thin = edge(EdgeStyle::Thin, 3, true);
     let still = edge(EdgeStyle::Thin, 2, false);
+    // Today's look: the thin violet → cyan line with its sweep.
+    let aurora = Look {
+        overlay: thin,
+        live: thin,
+        ..preset(ColourSet::Aurora, 100, 12, false, BarStyle::Glass)
+    };
+    let mono = Look {
+        bracket_style: BracketStyle::Frame,
+        overlay: thin,
+        live: thin,
+        ..preset(ColourSet::Mono, 100, 10, false, BarStyle::Solid)
+    };
     [
         (
             LookTheme::Spectrum,
             preset(ColourSet::Spectrum, 100, 12, true, BarStyle::Glass),
         ),
-        // Today's look: the thin violet → cyan line with its sweep.
-        (
-            LookTheme::Aurora,
-            Look {
-                overlay: thin,
-                live: thin,
-                ..preset(ColourSet::Aurora, 100, 12, false, BarStyle::Glass)
-            },
-        ),
+        (LookTheme::Aurora, aurora),
         (
             LookTheme::Sunset,
             preset(ColourSet::Sunset, 100, 15, true, BarStyle::GlassDark),
@@ -63,15 +79,7 @@ pub const PRESETS: [(LookTheme, Look); 7] = {
                 ..preset(ColourSet::Neon, 100, 25, true, BarStyle::Outline)
             },
         ),
-        (
-            LookTheme::Mono,
-            Look {
-                bracket_style: BracketStyle::Frame,
-                overlay: thin,
-                live: thin,
-                ..preset(ColourSet::Mono, 100, 10, false, BarStyle::Solid)
-            },
-        ),
+        (LookTheme::Mono, mono),
         (
             LookTheme::Calm,
             Look {
@@ -81,6 +89,12 @@ pub const PRESETS: [(LookTheme, Look); 7] = {
                 ..preset(ColourSet::Aurora, 0, 6, false, BarStyle::Glass)
             },
         ),
+        // Schema 4: `prism` and `frost` are schema 3's `aurora` and `mono`.
+        (LookTheme::Prism, aurora),
+        (LookTheme::Frost, mono),
+        (LookTheme::Horizon, two(0x38bdf8, 0x818cf8)),
+        (LookTheme::Solar, two(0xfbbf24, 0xf59e0b)),
+        (LookTheme::Hud, two(0xffffff, 0x7dd3fc)),
     ]
 };
 

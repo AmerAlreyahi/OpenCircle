@@ -361,14 +361,29 @@ pub fn set_os(mode: iced::theme::Mode) {
     to_kit();
 }
 
-/// The kit's theme (the screens ported to it) follows the same choice: dark =
-/// Sapphire, light = Daylight, until the theme picks of config v4 (plan step 32).
+/// The kit's theme (the screens ported to it): the one place it is set from the
+/// config, by the same mode choice and the `[appearance]` picks.
 fn to_kit() {
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-    themes::set(match std::ptr::eq(current(), &LIGHT) {
-        true => &DAYLIGHT,
-        false => &SAPPHIRE,
-    });
+    let picks = config::appearance();
+    crate::ui::kit::themes::set(kit_theme(
+        SETTING.with(Cell::get),
+        OS_DARK.with(Cell::get),
+        &picks,
+    ));
+}
+
+fn kit_theme(
+    setting: Theme,
+    os_dark: bool,
+    picks: &config::AppearanceConfig,
+) -> &'static crate::ui::kit::themes::Theme {
+    use crate::ui::kit::themes::{self, Mode};
+    let mode = match setting {
+        Theme::System => Mode::System,
+        Theme::Light => Mode::Light,
+        Theme::Dark => Mode::Dark,
+    };
+    themes::resolve(mode, &picks.dark, &picks.light, os_dark)
 }
 
 fn palette(setting: Theme, os_dark: bool) -> &'static Palette {
@@ -523,5 +538,37 @@ mod tests {
         assert_eq!(kit(), "daylight");
         apply(Theme::Dark);
         assert_eq!(kit(), "sapphire");
+    }
+
+    /// The kit shows the `[appearance]` pick of the mode in use, the OS's under
+    /// System; config's id lists are the kit's.
+    #[test]
+    fn the_kit_shows_the_appearance_picks() {
+        use crate::ui::kit::themes::THEMES;
+        let picks = config::AppearanceConfig {
+            dark: "emerald".into(),
+            light: "sandstone".into(),
+            ..Default::default()
+        };
+        let id = |setting, os_dark| kit_theme(setting, os_dark, &picks).id;
+        for (setting, os_dark, want) in [
+            (Theme::System, true, "emerald"),
+            (Theme::System, false, "sandstone"),
+            (Theme::Dark, false, "emerald"),
+            (Theme::Light, true, "sandstone"),
+        ] {
+            assert_eq!(id(setting, os_dark), want, "{setting:?} os_dark={os_dark}");
+        }
+        let d = config::AppearanceConfig::default();
+        assert_eq!(kit_theme(Theme::Dark, true, &d).id, "sapphire");
+        assert_eq!(kit_theme(Theme::Light, true, &d).id, "daylight");
+        let ids = |light| {
+            THEMES
+                .iter()
+                .filter(move |t| t.light == light)
+                .map(|t| t.id)
+        };
+        assert!(ids(false).eq(config::DARK_THEMES));
+        assert!(ids(true).eq(config::LIGHT_THEMES));
     }
 }

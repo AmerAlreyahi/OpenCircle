@@ -728,7 +728,7 @@ const LOOKS: [(LookTheme, &str, &str); 8] = [
         "Spectrum look: soft glow in many colours",
     ),
     (
-        LookTheme::Aurora,
+        LookTheme::Prism,
         "Aurora",
         "Aurora look: thin violet to cyan line",
     ),
@@ -744,7 +744,7 @@ const LOOKS: [(LookTheme, &str, &str); 8] = [
         "Neon look: strong cyan and pink glow",
     ),
     (
-        LookTheme::Mono,
+        LookTheme::Frost,
         "Mono",
         "Mono look: white and grey, minimal",
     ),

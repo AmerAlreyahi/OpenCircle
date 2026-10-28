@@ -1,13 +1,21 @@
 //! The one config reader/validator: `<user config dir>/opencircle/config.toml`.
 //!
-//! Schema (version 3). Every key is optional; a missing file means defaults.
+//! Schema (version 4). Every key is optional; a missing file means defaults.
 //!
 //! ```toml
-//! version = 3                       # schema version, written by save()
+//! version = 4                       # schema version, written by save()
 //! theme = "system"                  # system | light | dark
 //! widget_theme = "default"          # floating widgets (bar, cards, toolbar): default | frost | graphite
 //! glass_effect = true               # frost / graphite blur the screen behind them (false = solid tint)
+//!                                   # (both kept and written; unused until glass returns)
 //! shortcut = "Ctrl+Shift+Space"     # global capture shortcut
+//!
+//! [appearance]                      # the app's theme picks (ids of the design's themes)
+//! dark = "sapphire"                 # the theme in dark mode: obsidian | mica | titanium | sapphire
+//!                                   # | amethyst | emerald | rose | graphite | midnight
+//! light = "daylight"                # the theme in light mode: frost | daylight | sandstone
+//! logo = "theme"                    # theme (the theme's accent) | purple
+//! hidden_previews = []              # the Settings pages whose feature preview the user hid
 //!
 //! [general]
 //! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
@@ -39,7 +47,8 @@
 //! text_reader = "auto"              # who reads text to select: auto | windows (Windows OCR) | pp_ocr
 //!
 //! [look]                            # how the screen looks while OpenCircle is active
-//! theme = "spectrum"                # spectrum | aurora | sunset | ocean | neon | mono | calm | custom
+//! theme = "spectrum"                # prism | spectrum | aurora | horizon | sunset | ocean | neon
+//!                                   # | solar | hud | frost | mono | calm | custom
 //! [look.custom]                     # theme = "custom" only (a copy of a preset to edit)
 //! palette = "spectrum"              # spectrum | aurora | sunset | ocean | neon | mono | two_colour
 //! colours = ["#8f80ff", "#4fc9e0"]  # palette = two_colour: from, to
@@ -92,7 +101,9 @@
 //!
 //! Versions: 1 = v0.1.0; 2 adds `[labs]`; 3 sets `selection.after` to "wait" (nothing
 //! is sent before the user picks an action) and drops `[results]` (the web view card
-//! is gone: its keys are ignored). A file older than `VERSION` is copied to
+//! is gone: its keys are ignored); 4 adds `[appearance]` and the design's looks: an older
+//! file's look `aurora` and `calm` become `prism`, `mono` becomes `frost`, and without
+//! `[appearance]` its `widget_theme` frost / graphite becomes the light / dark pick. A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -112,11 +123,11 @@ mod parse;
 mod store;
 
 pub use look::PRESETS;
-pub use store::{current, look, rebase, set_current, update, update_at, widgets};
+pub use store::{appearance, current, look, rebase, set_current, update, update_at, widgets};
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
@@ -136,6 +147,48 @@ pub enum Theme {
     System,
     Light,
     Dark,
+}
+
+/// The dark themes `[appearance] dark` may name (`ui::kit::themes`; a test there keeps
+/// both lists equal to its own).
+pub const DARK_THEMES: [&str; 9] = [
+    "obsidian", "mica", "titanium", "sapphire", "amethyst", "emerald", "rose", "graphite",
+    "midnight",
+];
+/// The light themes `[appearance] light` may name.
+pub const LIGHT_THEMES: [&str; 3] = ["frost", "daylight", "sandstone"];
+
+/// `[appearance]` (schema 4): the app theme picked for each OS mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AppearanceConfig {
+    /// A `DARK_THEMES` id.
+    pub dark: String,
+    /// A `LIGHT_THEMES` id.
+    pub light: String,
+    pub logo: Logo,
+    /// The Settings pages whose feature preview is hidden.
+    pub hidden_previews: Vec<String>,
+}
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        AppearanceConfig {
+            dark: "sapphire".into(),
+            light: "daylight".into(),
+            logo: Logo::Theme,
+            hidden_previews: Vec::new(),
+        }
+    }
+}
+
+/// The logo's colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Logo {
+    /// The theme's accent.
+    #[default]
+    Theme,
+    Purple,
 }
 
 /// The look of the floating widgets (bar, cards, toolbar), from `ui/theme.rs`.
@@ -452,13 +505,21 @@ pub enum TextReader {
 pub enum LookTheme {
     #[default]
     Spectrum,
+    /// Schema 1-3's thin violet-to-cyan line; schema 4 writes `Prism` for it.
     Aurora,
     Sunset,
     Ocean,
     Neon,
+    /// Schema 1-3's white and grey; schema 4 writes `Frost` for it.
     Mono,
     Calm,
     Custom,
+    /// Schema 4: the design's looks (`ui::kit::looks`).
+    Prism,
+    Horizon,
+    Solar,
+    Hud,
+    Frost,
 }
 
 /// The edge / accent colours: a preset palette (its colours live in
@@ -654,6 +715,7 @@ pub struct Config {
     /// Blur the screen behind `Frost` / `Graphite` widgets (off = solid tint).
     pub glass_effect: bool,
     pub shortcut: String,
+    pub appearance: AppearanceConfig,
     pub general: GeneralConfig,
     pub bar: BarConfig,
     pub selection: SelectionConfig,
@@ -730,6 +792,7 @@ impl Default for Config {
             widget_theme: WidgetTheme::Default,
             glass_effect: true,
             shortcut: DEFAULT_CAPTURE_SHORTCUT.to_string(),
+            appearance: AppearanceConfig::default(),
             general: GeneralConfig::default(),
             bar: BarConfig::default(),
             selection: SelectionConfig::default(),
@@ -925,7 +988,7 @@ mod tests {
         // The file is the new schema now, with every old value and the Labs switches.
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 3") && text.contains("[labs]"),
+            text.contains("version = 4") && text.contains("[labs]"),
             "{text}"
         );
         let (again, w) = Config::load_from(&path);
@@ -962,13 +1025,13 @@ mod tests {
 
     #[test]
     fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-        let (dir, path) = config_with("current", "version = 3\n[labs]\nsong = true\n");
+        let (dir, path) = config_with("current", "version = 4\n[labs]\nsong = true\n");
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty() && c.labs.song && !c.labs.snip, "{w:?}");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "version = 3\n[labs]\nsong = true\n"
+            "version = 4\n[labs]\nsong = true\n"
         );
         let gone = dir.join("none.toml");
         Config::load_from(&gone);
@@ -1052,7 +1115,7 @@ mod tests {
     #[test]
     fn defaults_match_design() {
         let c = Config::default();
-        assert_eq!(c.version, 3);
+        assert_eq!(c.version, 4);
         assert_eq!(c.labs, Labs::default(), "Labs: everything off");
         assert_eq!(c.theme, Theme::System);
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
@@ -1117,7 +1180,7 @@ mod tests {
         for (theme, _) in PRESETS {
             assert_ne!(theme, LookTheme::Custom);
         }
-        assert_eq!(PRESETS.len(), 7);
+        assert_eq!(PRESETS.len(), 12);
         // a custom look and a selection setting survive a save
         let mut c = Config {
             selection: SelectionConfig {
@@ -1395,7 +1458,7 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
             let text = std::fs::read_to_string(&path).unwrap();
             assert!(
-                text.contains("version = 3") && text.contains("after = \"wait\""),
+                text.contains("version = 4") && text.contains("after = \"wait\""),
                 "{text}"
             );
             assert!(!text.contains("[results]"), "{text}");
@@ -1695,16 +1758,166 @@ mod tests {
         );
     }
 
-    /// The default file is byte-for-byte what it was before `config/` was split
-    /// (the file format is frozen).
+    fn fixture(name: &str) -> String {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config");
+        std::fs::read_to_string(dir.join(name)).unwrap()
+    }
+
+    /// The default file is byte-for-byte the frozen v4 one (the file format is frozen).
     #[test]
     fn the_default_file_is_byte_for_byte_the_frozen_one() {
         let dir = tmp_dir("default-bytes");
         let path = dir.join("config.toml");
         Config::default().save_to(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/config/default-v3.toml");
-        assert_eq!(written, std::fs::read_to_string(&fixture).unwrap());
+        assert_eq!(written, fixture("default-v4.toml"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Additive only: every key of the frozen v3 default file is still written, so
+    /// an older OpenCircle reads a v4 file with its own keys.
+    #[test]
+    fn a_v4_file_still_has_every_v3_key() {
+        use toml::Value;
+        fn paths(t: &Table, prefix: &str, out: &mut Vec<String>) {
+            for (k, v) in t {
+                let key = format!("{prefix}{k}");
+                match v {
+                    Value::Table(t) => paths(t, &format!("{key}."), out),
+                    Value::Array(a) => a
+                        .iter()
+                        .filter_map(Value::as_table)
+                        .for_each(|t| paths(t, &format!("{key}[]."), out)),
+                    _ => {}
+                }
+                out.push(key);
+            }
+        }
+        let keys = |text: &str| {
+            let mut out = Vec::new();
+            paths(&text.parse::<Table>().unwrap(), "", &mut out);
+            out
+        };
+        let v4 = keys(&fixture("default-v4.toml"));
+        for key in keys(&fixture("default-v3.toml")) {
+            assert!(v4.contains(&key), "{key} is gone");
+        }
+        // The v3 default file loads (and migrates) to the v4 defaults.
+        let (dir, path) = config_with("v3-default", &fixture("default-v3.toml"));
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(c, Config::default());
+        assert_eq!(fs_text(&path), fixture("default-v4.toml"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Schema 4: each v3 look and widget theme lands on the design's equivalent;
+    /// a v4 file keeps what it says.
+    #[test]
+    fn v3_looks_and_widget_themes_map_to_schema_4() {
+        use LookTheme::*;
+        for (old, new, same) in [
+            ("spectrum", Spectrum, Spectrum),
+            ("aurora", Prism, Aurora),
+            ("sunset", Sunset, Sunset),
+            ("ocean", Ocean, Ocean),
+            ("neon", Neon, Neon),
+            ("mono", Frost, Mono),
+            ("calm", Prism, Calm),
+            ("custom", Custom, Custom),
+        ] {
+            for v in ["", "version = 1\n", "version = 3\n"] {
+                let (c, w) = Config::parse(&format!("{v}[look]\ntheme = \"{old}\"\n"));
+                assert!(w.is_empty(), "{w:?}");
+                assert_eq!(c.look.theme, new, "{v}{old}");
+            }
+            let (c, _) = Config::parse(&format!("version = 4\n[look]\ntheme = \"{old}\"\n"));
+            assert_eq!(c.look.theme, same, "v4 {old}");
+        }
+        // Prism and Frost are v3's Aurora and Mono exactly (no visible change).
+        let d = LookConfig::default().custom;
+        assert_eq!(Prism.look(&d), Aurora.look(&d));
+        assert_eq!(Frost.look(&d), Mono.look(&d));
+        for (widget, dark, light) in [
+            ("default", "sapphire", "daylight"),
+            ("frost", "sapphire", "frost"),
+            ("graphite", "graphite", "daylight"),
+        ] {
+            let (c, w) = Config::parse(&format!("version = 3\nwidget_theme = \"{widget}\"\n"));
+            assert!(w.is_empty(), "{w:?}");
+            let picks = (c.appearance.dark.as_str(), c.appearance.light.as_str());
+            assert_eq!(picks, (dark, light), "{widget}");
+        }
+        // An [appearance] wins over the old widget theme; a v4 file is taken as is.
+        let (c, _) = Config::parse(
+            "version = 3\nwidget_theme = \"frost\"\n[appearance]\nlight = \"sandstone\"\n",
+        );
+        assert_eq!(c.appearance.light, "sandstone");
+        let (c, _) = Config::parse("version = 4\nwidget_theme = \"graphite\"\n");
+        assert_eq!(c.appearance.dark, "sapphire");
+    }
+
+    /// A v3 file is backed up once as `.bak-v3` and rewritten as v4 with the mapped
+    /// values and its old keys; after that it is left alone.
+    #[test]
+    fn a_v3_file_migrates_once_with_a_bak_v3() {
+        let old = "version = 3\nwidget_theme = \"graphite\"\nglass_effect = false\n[look]\ntheme = \"aurora\"\n";
+        let (dir, path) = config_with("v3-to-v4", old);
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(fs_text(&dir.join("config.toml.bak-v3")), old);
+        let text = fs_text(&path);
+        for want in [
+            "version = 4",
+            "widget_theme = \"graphite\"",
+            "glass_effect = false",
+            "theme = \"prism\"",
+            "[appearance]",
+            "dark = \"graphite\"",
+            "hidden_previews = []",
+        ] {
+            assert!(text.contains(want), "{want}: {text}");
+        }
+        let (again, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(again, c);
+        assert_eq!(fs_text(&path), text, "not rewritten again");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "one backup");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn fs_text(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    /// `[appearance]` is checked field by field, and round-trips.
+    #[test]
+    fn appearance_values_fall_back_one_by_one_and_round_trip() {
+        let (c, w) = Config::parse(
+            "[appearance]\ndark = \"daylight\"\nlight = \"frost\"\nlogo = \"gold\"\nhidden_previews = [\"translate\"]\n",
+        );
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert!(
+            w[0].starts_with("appearance.dark: expected one of obsidian"),
+            "{w:?}"
+        );
+        assert!(w[1].starts_with("appearance.logo:"), "{w:?}");
+        assert_eq!(c.appearance.dark, "sapphire", "a light id is no dark pick");
+        assert_eq!(c.appearance.light, "frost");
+        assert_eq!(c.appearance.logo, Logo::Theme);
+        assert_eq!(c.appearance.hidden_previews, ["translate"]);
+        let mut c = Config {
+            appearance: AppearanceConfig {
+                dark: "midnight".into(),
+                light: "sandstone".into(),
+                logo: Logo::Purple,
+                hidden_previews: vec!["look".into(), "ai".into()],
+            },
+            ..Config::default()
+        };
+        c.look.theme = LookTheme::Hud;
+        let (back, w) = Config::parse(&toml::to_string_pretty(&c).unwrap());
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back, c);
     }
 }

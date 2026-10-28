@@ -1,0 +1,142 @@
+# OpenCircle settings. Invalid values fall back to defaults.
+# API keys are never stored here (OS keyring only).
+
+version = 4
+theme = "system"
+widget_theme = "default"
+glass_effect = true
+shortcut = "Ctrl+Shift+Space"
+
+[appearance]
+dark = "sapphire"
+light = "daylight"
+logo = "theme"
+hidden_previews = []
+
+[general]
+default_action = "lens"
+save_folder = ""
+autostart = true
+
+[bar]
+anchor = "bottom"
+
+[selection]
+style = "snap"
+after = "wait"
+search_with = "lens"
+text_reader = "auto"
+
+[look]
+theme = "spectrum"
+
+[look.custom]
+palette = "spectrum"
+colours = [
+    "#8f80ff",
+    "#4fc9e0",
+]
+glow = 100
+dim = 12
+activation_glow = true
+brackets = "white"
+bracket_style = "corners"
+bar = "glass"
+
+[look.custom.overlay]
+style = "glow"
+thickness = 6
+animate = true
+
+[look.custom.live]
+style = "glow"
+thickness = 6
+animate = true
+
+[look.custom.snip]
+style = "thin"
+thickness = 3
+animate = false
+
+[editor]
+line_assist = true
+
+[ai]
+provider = "browser"
+base_url = ""
+model = "claude-sonnet-5-5"
+
+[translate]
+source = "auto"
+target = "ar"
+engine = "ai"
+live_interval_ms = 1500
+
+[snip]
+after = "copy"
+max_edge = 1568
+format = "png"
+save_original = false
+cursor = false
+history = false
+delay = 0
+
+[[quick_actions]]
+action = "translate"
+shortcut = "Ctrl+Shift+T"
+target = "full_screen"
+
+[[quick_actions]]
+action = "translate"
+shortcut = "Ctrl+Shift+L"
+target = "full_screen"
+live = true
+
+[[quick_actions]]
+action = "ai_explain"
+shortcut = "Ctrl+Shift+E"
+target = "circle"
+
+[[quick_actions]]
+action = "copy_text"
+shortcut = "Ctrl+Shift+X"
+target = "circle"
+
+[[quick_actions]]
+action = "lens"
+shortcut = ""
+target = "circle"
+
+[[quick_actions]]
+action = "snip"
+shortcut = "PrintScreen"
+target = "circle"
+
+[[quick_actions]]
+action = "snip"
+shortcut = "Alt+PrintScreen"
+target = "window"
+
+[[quick_actions]]
+action = "snip"
+shortcut = "Ctrl+PrintScreen"
+target = "full_screen"
+
+[[quick_actions]]
+action = "song_search"
+shortcut = ""
+target = "full_screen"
+
+[song]
+source = "system"
+history = false
+
+[update]
+
+[labs]
+snip = false
+editor = false
+song = false
+history = false
+pins = false
+live = false
