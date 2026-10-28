@@ -774,6 +774,32 @@ impl View {
         (self.shown.width < self.frame.0 || self.shown.height < self.frame.1).then_some(self.shown)
     }
 
+    /// A picture of just `area` of the frame (x0, y0, x1, y1 in frame px), as the
+    /// image widget must draw it over the frame: the part of it inside the view (a
+    /// crop of the picture, in its px) and where that goes on screen. `None`: out of view.
+    pub fn patch_in_view(&self, area: [u32; 4]) -> Option<(Rectangle<u32>, Rectangle)> {
+        let [x0, y0, x1, y1] = area;
+        let (sx, sy) = (self.shown.x, self.shown.y);
+        let (left, top) = (x0.max(sx), y0.max(sy));
+        let right = x1.min(sx + self.shown.width);
+        let bottom = y1.min(sy + self.shown.height);
+        if right <= left || bottom <= top {
+            return None;
+        }
+        let (_, per) = self.ratios();
+        let crop = Rectangle {
+            x: left - x0,
+            y: top - y0,
+            width: right - left,
+            height: bottom - top,
+        };
+        let on_screen = Rectangle::new(
+            Point::new((left - sx) as f32 * per.x, (top - sy) as f32 * per.y),
+            Size::new((right - left) as f32 * per.x, (bottom - top) as f32 * per.y),
+        );
+        Some((crop, on_screen))
+    }
+
     /// Zoomed by `notches` wheel notches (1x–4x) around `at` (screen px): the
     /// frame pixel under the pointer stays under it.
     pub fn zoomed(&self, at: Point, notches: f32) -> View {
@@ -2002,6 +2028,27 @@ mod tests {
         let corner = v.zoomed(Point::new(1919.0, 1079.0), 10.0);
         let c = corner.crop().unwrap();
         assert!(c.x + c.width <= 3840 && c.y + c.height <= 2160);
+    }
+
+    #[test]
+    fn a_patch_goes_where_its_area_is_in_the_view() {
+        // 3840x2160 frame on a 1920x1080 screen: 2 frame px per screen px
+        let v = view();
+        let (crop, at) = v.patch_in_view([200, 100, 1000, 500]).unwrap();
+        assert_eq!((crop.x, crop.y, crop.width, crop.height), (0, 0, 800, 400));
+        assert_eq!(
+            (at.x, at.y, at.width, at.height),
+            (100.0, 50.0, 400.0, 200.0)
+        );
+        // zoomed to the bottom right: only the part in view, cut from the patch
+        let z = v.zoomed(Point::new(1919.0, 1079.0), 50.0); // 4x
+        let shown = z.crop().unwrap();
+        let area = [shown.x - 100, shown.y + 100, shown.x + 100, shown.y + 300];
+        let (crop, at) = z.patch_in_view(area).unwrap();
+        assert_eq!((crop.x, crop.y, crop.width), (100, 0, 100));
+        assert!(at.x.abs() < 0.01 && (at.y - 100.0 * 1920.0 / shown.width as f32).abs() < 0.01);
+        // a patch outside the view is not drawn
+        assert!(z.patch_in_view([0, 0, 100, 100]).is_none());
     }
 
     #[test]

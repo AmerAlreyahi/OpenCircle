@@ -38,7 +38,7 @@ pub enum Msg {
     /// The models are in place; translating now.
     Translating,
     /// What is translated so far (the rest still shows the original).
-    Partial(Shown),
+    Partial(Part),
     Done(Result<Shown, Problem>),
     /// Alt went down (true) or up.
     Peek(bool),
@@ -53,6 +53,15 @@ pub enum Msg {
     /// The card's frame (`widgets::card`): the App moves, resizes and
     /// closes it, as for the other result cards.
     Card(widgets::card::Event),
+}
+
+/// What is translated so far: just the translated area, drawn over the frozen
+/// frame at `area` (frame px: x0, y0, x1, y1). Never a copy of the whole frame
+/// per partial (8 MB at 1080p, up to every 300 ms: audit 12).
+#[derive(Debug, Clone)]
+pub struct Part {
+    image: image::Handle,
+    area: [u32; 4],
 }
 
 /// The translated frame and its blocks (frame pixels).
@@ -102,7 +111,7 @@ pub struct Session {
     /// The monitor's scale (`Real::scale`).
     scale: f32,
     /// While translating: what is translated so far.
-    partial: Option<Shown>,
+    partial: Option<Part>,
 }
 
 /// The card of one clicked block.
@@ -186,7 +195,16 @@ impl Session {
         match &self.phase {
             _ if self.peek => None,
             Phase::Shown(shown) => Some(&shown.image),
-            Phase::Translating => self.partial.as_ref().map(|p| &p.image),
+            _ => None,
+        }
+    }
+
+    /// While translating: the area translated so far and where it goes in the
+    /// frame (px), to draw over the original frame, unless Alt is held.
+    pub fn part(&self) -> Option<(&image::Handle, [u32; 4])> {
+        match &self.phase {
+            _ if self.peek => None,
+            Phase::Translating => self.partial.as_ref().map(|p| (&p.image, p.area)),
             _ => None,
         }
     }
@@ -344,16 +362,9 @@ impl Session {
                 let progress = |done: u64, total: u64| {
                     let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
                 };
-                let fetched = match agreed {
-                    Some(pair) => pair.ensure(progress),
-                    None => {
-                        let files = models::ocr_files(models::recognizer_for(&source));
-                        models::ensure(&files, progress)
-                    }
-                };
-                if let Err(e) = fetched {
+                if let Err(e) = actions::translate::download(&source, agreed, progress) {
                     let problem = Problem {
-                        message: e.to_string(),
+                        message: e,
                         setup: false,
                     };
                     let _ = tx.unbounded_send(Msg::Translating);
@@ -492,14 +503,14 @@ impl Session {
 }
 
 /// Runs the pipeline on `area` of `frame` and pastes the result back into a
-/// copy of the frame; `partial` gets the same for what is translated so far.
+/// copy of the frame; `partial` gets just the translated area so far.
 /// `deps` = `actions::translate::deps()`. Blocking (OCR helper, HTTP).
 fn translate(
     frame: &image::Handle,
     area: [u32; 4],
     cache: &Cache,
     deps: &Result<(impl Deps, String), String>,
-    mut partial: impl FnMut(Shown),
+    mut partial: impl FnMut(Part),
 ) -> Result<Shown, Problem> {
     let image::Handle::Rgba {
         width,
@@ -547,7 +558,12 @@ fn translate(
         target,
         cache,
         deps,
-        |out| partial(shown(out)),
+        |out| {
+            partial(Part {
+                image: image::Handle::from_rgba(crop.width, crop.height, out.rgba.clone()),
+                area,
+            })
+        },
     )
     .map_err(|e| {
         // Offline can't do it (no model, not downloaded): AI is the other way.
@@ -876,19 +892,23 @@ mod tests {
     #[test]
     fn parts_show_while_translating() {
         let mut s = session(true);
-        let part = Shown {
-            image: frame(4, 4),
-            blocks: Vec::new(),
+        let part = Part {
+            image: frame(2, 2),
+            area: [1, 1, 3, 3],
         };
         let _ = s.update(Msg::Partial(part.clone()));
-        assert_eq!(s.image(), Some(&part.image));
+        assert!(
+            s.image().is_none(),
+            "the frame stays; the part goes over it"
+        );
+        assert_eq!(s.part(), Some((&part.image, [1, 1, 3, 3])));
         let _ = s.update(Msg::Peek(true));
-        assert!(s.image().is_none(), "Alt: the original");
+        assert!(s.part().is_none(), "Alt: the original");
         let _ = s.update(Msg::Peek(false));
         let _ = s.update(Msg::Done(Err(problem("helper stopped".into(), false))));
-        assert!(s.image().is_none(), "failed: the original");
+        assert!(s.part().is_none(), "failed: the original");
         let _ = s.update(Msg::Partial(part));
-        assert!(s.image().is_none(), "a late part changes nothing");
+        assert!(s.part().is_none(), "a late part changes nothing");
     }
 
     #[test]
@@ -1127,6 +1147,72 @@ mod tests {
         assert!(!changed.is_empty());
         let inside = |i: &usize| i % 200 >= 100 && i / 200 >= 50;
         assert!(changed.iter().all(inside), "only inside the area");
+    }
+
+    /// Two lines far apart, one sentence per call: the first part is shown
+    /// before the second is translated.
+    struct Two;
+    impl Deps for Two {
+        fn recognize(
+            &self,
+            _: &[u8],
+            _: u32,
+            _: u32,
+        ) -> Result<Vec<ocr::TextBlock>, ocr::OcrError> {
+            Ok(["Quit", "Play"]
+                .into_iter()
+                .zip([10.0, 100.0])
+                .map(|(text, y)| ocr::TextBlock {
+                    text: text.into(),
+                    bounds: [20.0, y, 40.0, 20.0],
+                    confidence: 0.9,
+                })
+                .collect())
+        }
+        fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
+            Ok(texts.iter().map(|_| "خروج".to_string()).collect())
+        }
+        fn batch(&self) -> usize {
+            1
+        }
+    }
+
+    /// Audit 12: a partial is just the translated area (never a copy of the whole
+    /// frame), and it is the same picture the full render has there.
+    #[test]
+    fn a_partial_is_the_area_only_and_matches_the_full_render() {
+        let (w, h) = (300u32, 200u32);
+        let px: Vec<u8> = (0..w * h * 4).map(|i| (i % 251) as u8).collect();
+        let original = image::Handle::from_rgba(w, h, px);
+        let area = [100, 50, 300, 200];
+        let (cw, ch) = (area[2] - area[0], area[3] - area[1]);
+        let mut parts = Vec::new();
+        let deps: Result<(Two, String), String> = Ok((Two, "ar".into()));
+        let done = translate(&original, area, &Cache::new(8), &deps, |p| parts.push(p)).unwrap();
+        assert_eq!(parts.len(), 1, "the first line is shown before the second");
+        let part = &parts[0];
+        assert_eq!(part.area, area);
+        let (frame_len, part_len) = (pixels(&original).len(), pixels(&part.image).len());
+        assert_eq!(part_len, (cw * ch * 4) as usize);
+        assert!(part_len < frame_len, "not a frame-sized picture");
+        // the part is the full render's crop where only the first line differs
+        // (the rows above the second line)
+        let full = pixels(&done.image);
+        let row = (cw * 4) as usize;
+        for y in 0..90usize {
+            let at = ((area[1] as usize + y) * w as usize + area[0] as usize) * 4;
+            assert_eq!(
+                pixels(&part.image)[y * row..(y + 1) * row],
+                full[at..at + row],
+                "row {y}"
+            );
+        }
+        // and the second line is not drawn yet in the part
+        let at = ((area[1] as usize + 100) * w as usize + area[0] as usize) * 4;
+        assert_ne!(
+            pixels(&part.image)[100 * row..110 * row],
+            full[at..at + 10 * row]
+        );
     }
 
     #[test]

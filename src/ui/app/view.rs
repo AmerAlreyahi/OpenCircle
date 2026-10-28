@@ -1,6 +1,6 @@
 //! The overlay's view (moves to ui/screens with the UI plan).
 
-use iced::widget::{canvas, container, image, opaque, space, stack};
+use iced::widget::{canvas, container, image, opaque, pin, space, stack};
 use iced::window::{self};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Vector};
 
@@ -94,8 +94,25 @@ impl App {
             }
             _ => shown.into(),
         };
-        let mut layers = stack![
-            shown,
+        // What is translated so far: only its area, over the frame (no copy of the
+        // whole frame per partial).
+        let part = (self.o.translate.as_ref())
+            .and_then(|(_, s)| s.part())
+            .and_then(|(handle, area)| {
+                let (crop, at) = self.o.view.patch_in_view(area)?;
+                let patch = image(handle.clone())
+                    .width(at.width)
+                    .height(at.height)
+                    .content_fit(ContentFit::Fill)
+                    .crop(crop)
+                    .filter_method(image::FilterMethod::Nearest);
+                Some(Element::from(pin(patch).position(at.position())))
+            });
+        let mut layers = stack![shown];
+        if let Some(part) = part {
+            layers = layers.push(part);
+        }
+        layers = layers.extend([
             Element::from(canvas(overlay).width(Fill).height(Fill)).map(Message::Overlay),
             // static: drawn once, with the window's fade-in
             border::view(
@@ -119,7 +136,7 @@ impl App {
                     _ => border::Breathe::Off,
                 },
             ),
-        ];
+        ]);
         if let Some(edit) = &self.o.edit {
             if edit.is_open() {
                 // the toolbar once the bar has turned into it, in its place
