@@ -68,12 +68,13 @@ impl App {
     /// Snip: every monitor at once (the overlay shows the pointer's, then follows
     /// the pointer) and every window, while the overlay is still hidden.
     pub(in crate::ui) fn snip_shot(kind: snip::Kind) -> Result<Shot, String> {
-        let (mut frames, on) = capture::every_monitor()?;
-        if config::current().snip.cursor {
-            frames.iter_mut().for_each(capture::cursor::draw);
-        }
-        let foreground = capture::window_rect::foreground();
-        let windows = (capture::window_rect::list().into_iter())
+        let capture::snip::Snapshot {
+            frames,
+            on,
+            windows,
+            foreground,
+        } = capture::snip::snapshot(config::current().snip.cursor)?;
+        let windows = (windows.into_iter())
             .map(|w| snip::Pick::window(snip::desktop_rect(w.rect), &w.title, w.handle))
             .collect();
         let screens: Vec<_> = frames.into_iter().map(snip::screen_of).collect();

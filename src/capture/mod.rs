@@ -6,6 +6,7 @@ pub mod cursor;
 #[cfg(target_os = "linux")]
 pub mod portal;
 pub mod scroll;
+pub mod snip;
 pub mod stitch;
 pub mod uia;
 pub mod window_rect;
