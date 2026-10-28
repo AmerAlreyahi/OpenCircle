@@ -724,6 +724,22 @@ impl View {
         }
     }
 
+    /// Another screen's window (`app::screens`), `screen` logical px: image px
+    /// `u` show at `u * k + at`. (A 1x1 "frame" whose shown part is placed so
+    /// the usual mapping is exactly that; never zoomed.)
+    pub fn mapped(screen: Size, k: f32, at: Vector) -> View {
+        View {
+            frame: (1, 1),
+            screen,
+            shown: Rectangle {
+                x: -at.x / (screen.width * k),
+                y: -at.y / (screen.height * k),
+                width: 1.0 / k,
+                height: 1.0 / k,
+            },
+        }
+    }
+
     /// Back to 1x.
     pub fn reset(self) -> View {
         View::new(self.frame.0, self.frame.1, self.screen)
