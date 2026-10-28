@@ -631,6 +631,7 @@ fn settings_view(s: &settings::State) -> Element<'_, settings::Message> {
 }
 
 fn settings_at(section: settings::Section) -> settings::State {
+    crate::ui::kit::text::load(); // the bundled fonts, as the app has them
     let mut s = settings::State::new(
         crate::config::Config::default(),
         vec![],
@@ -785,4 +786,69 @@ fn a_playing_preview_redraws_only_its_stage() {
             "{r:?} outside the sidebar and the stage"
         );
     }
+}
+
+/// Replay on Translate's preview: the Arabic line at rest gives way to the
+/// English one; nothing of it stays on screen (its dots under the line did:
+/// a paragraph's damage was its bare box).
+#[test]
+fn a_replayed_preview_leaves_no_ghost_of_its_last_frame() {
+    use settings::Message as M;
+    let size = settings::WINDOW_SIZE;
+    let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
+    motion::set_reduced(true);
+    let mut s = settings_at(settings::Section::Translate);
+    let drawn_on = drawn(
+        &mut s,
+        size,
+        1.0,
+        settings_view,
+        1,
+        true,
+        |s, i, _| {
+            if i == 1 {
+                motion::set_reduced(false);
+                let _ = settings::update(s, M::Replay);
+            }
+        },
+        still,
+    );
+    let fresh = drawn(
+        &mut s,
+        size,
+        1.0,
+        settings_view,
+        1,
+        true,
+        |_, _, _| {},
+        still,
+    );
+    let (a, b) = (&drawn_on[0].rgba, &fresh[0].rgba);
+    // the page (the timeline moves between the two, the sidebar's highlight
+    // glides: left out)
+    let w = size.width as usize;
+    let page = SIDEBAR_RIGHT as usize;
+    let off = (0..size.height as usize)
+        .filter(|y| !(295..330).contains(y))
+        .flat_map(|y| (page..w).map(move |x| (y * w + x) * 4))
+        // (a channel off by more than 24: glyphs' anti-aliasing may differ a
+        // little between a first and a later draw, as in the golden images)
+        .filter(|&i| (a[i..i + 4].iter().zip(&b[i..i + 4])).any(|(x, y)| x.abs_diff(*y) > 24))
+        .collect::<Vec<_>>();
+    let xy: Vec<_> = off.iter().map(|i| (i / 4 % w, i / 4 / w)).collect();
+    let lo = xy
+        .iter()
+        .fold((9999, 9999), |m, p| (m.0.min(p.0), m.1.min(p.1)));
+    let hi = xy.iter().fold((0, 0), |m, p| (m.0.max(p.0), m.1.max(p.1)));
+    if let (false, Some(dir)) = (off.is_empty(), std::env::var_os("OPENCIRCLE_GOLDEN_OUT")) {
+        let dir = std::path::Path::new(&dir);
+        let (pw, ph) = (size.width as u32, size.height as u32);
+        let _ = crate::actions::write_png(&dir.join("ghost-incremental.png"), pw, ph, a);
+        let _ = crate::actions::write_png(&dir.join("ghost-fresh.png"), pw, ph, b);
+    }
+    assert!(
+        off.is_empty(),
+        "{} pixels left over from the last frame, {lo:?}..{hi:?}",
+        off.len()
+    );
 }
