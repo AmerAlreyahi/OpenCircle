@@ -63,6 +63,20 @@ pub fn row<'a, Message: 'a>(
     )
 }
 
+/// A row control of a field and its buttons on one line, within the
+/// control column (the field takes what the buttons leave): every "field +
+/// buttons" control (the save folder, a key), so its row keeps the normal
+/// height.
+pub fn field_with<'a, Message: 'a>(
+    field: impl Into<Element<'a, Message>>,
+    buttons: impl IntoIterator<Item = Element<'a, Message>>,
+) -> iced::widget::Row<'a, Message> {
+    iced::widget::row![container(field).width(Fill)]
+        .extend(buttons)
+        .spacing(super::tokens::space::GAP)
+        .align_y(iced::Center)
+}
+
 /// A block of cards (`py-2.5 space-y-2`): the text, then `content` across
 /// the row under it.
 pub fn block<'a, Message: 'a>(

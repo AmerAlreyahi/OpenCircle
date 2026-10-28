@@ -5,7 +5,7 @@
 //! code). The design's sign-in, local-model and answer-style parts belong to
 //! 0.2.0 and are not drawn.
 use iced::widget::tooltip::Position;
-use iced::widget::{Space, column, container, row};
+use iced::widget::{Space, column, row};
 use iced::{Element, Fill};
 
 use super::super::state::{
@@ -192,13 +192,8 @@ impl KeyField {
                     (tip(field, l.field, Position::Top), buttons)
                 }
             };
-        let mut line = row![container(field).width(Fill)]
-            .spacing(space::GAP)
-            .align_y(iced::Center);
-        if wait.is_none() {
-            line = line.extend(buttons);
-        }
-        let mut col = column![line].spacing(space::GAP);
+        let buttons = if wait.is_none() { buttons } else { Vec::new() };
+        let mut col = column![setting_row::field_with(field, buttons)].spacing(space::GAP);
         if let Some(w) = wait {
             col = col.push(row![Space::new().width(Fill), sub(Role::ROW_DESC, w)]);
         }

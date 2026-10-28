@@ -1,7 +1,7 @@
 //! General (`settings-window.js` "GENERAL"): what Enter does, start with the
 //! OS, search history (Labs), the save folder, updates.
 use iced::widget::tooltip::Position;
-use iced::widget::{Space, column, container, row};
+use iced::widget::{column, container};
 use iced::{Element, Fill};
 
 use super::super::state::{Message, Pick, State, UPDATE_PRIVACY, issue};
@@ -153,15 +153,13 @@ fn folder(state: &State) -> Element<'_, Message> {
         Kind::Elevated,
         (!folder.is_empty()).then_some(Message::ClearFolder),
     );
-    let mut col = column![
+    let mut col = column![setting_row::field_with(
         value,
-        row![
-            Space::new().width(Fill),
+        [
             tip(browse, "Choose the save folder", Position::Bottom),
             tip(reset, "Use the system's folder", Position::Bottom),
-        ]
-        .spacing(space::GAP),
-    ]
+        ],
+    )]
     .spacing(space::GAP);
     if let Some(e) = issue(&state.problems, "general.save_folder") {
         col = col.push(error(Role::ROW_DESC, e));
@@ -171,7 +169,8 @@ fn folder(state: &State) -> Element<'_, Message> {
 
 /// A long folder path cut in the middle so it fits its field.
 fn shorten(path: &str) -> String {
-    const MAX: usize = 38;
+    // the field beside Browse… and Reset in the control column
+    const MAX: usize = 20;
     let n = path.chars().count();
     if n <= MAX {
         return path.to_string();

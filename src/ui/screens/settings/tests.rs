@@ -1199,7 +1199,7 @@ fn general_section_edits_default_action_and_save_folder() {
     assert!(
         texts
             .iter()
-            .any(|t| t.starts_with('…') && t.chars().count() == 38),
+            .any(|t| t.starts_with('…') && t.chars().count() == 20),
         "{texts:?}"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());

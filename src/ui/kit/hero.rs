@@ -62,18 +62,17 @@ pub fn hero<'a, Message: Clone + 'a>(h: Hero<'a, Message>) -> Element<'a, Messag
         true => "Hide preview",
         false => "Show preview",
     };
+    // one compact line, shown or hidden: the name and line left; Hide / Show
+    // preview, then the keycaps, right
     let heading = row![
         column![name, sub(Role::CARD_DESC, h.desc)]
             .spacing(space::TRACK_GAP)
             .width(Fill),
-        column![
-            keys,
-            button(label(collapse), Kind::Elevated, Some(h.toggle))
-        ]
-        .spacing(space::GAP)
-        .align_x(iced::Right),
+        button(label(collapse), Kind::Elevated, Some(h.toggle)),
+        keys,
     ]
-    .spacing(space::GAP * 2.0);
+    .spacing(space::GAP * 2.0)
+    .align_y(Center);
     let mut body = column![heading].spacing(STAGE_PAD);
     if h.shown {
         body = body.push(stage(h.frame, h.replay));
