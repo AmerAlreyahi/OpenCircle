@@ -241,8 +241,9 @@ fn separate(
     restore: &mut Vec<(usize, Vec<erase::Undo>)>,
     report: &mut Drawn,
 ) {
-    // ponytail: pairwise, a few rounds; a page has hundreds of blocks at most
-    for _ in 0..3 {
+    // ponytail: pairwise, one pair settled per round until none collide; a
+    // page has hundreds of blocks at most
+    for _ in 0..3 + fits.len() {
         let mut hit = None;
         'find: for a in 0..fits.len() {
             for b in a + 1..fits.len() {

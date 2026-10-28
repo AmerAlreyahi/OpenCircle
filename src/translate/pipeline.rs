@@ -207,23 +207,34 @@ pub(crate) fn by_sentence(
         .collect())
 }
 
-/// Sentence ends: `.`, `!` or `?`, then a space and a capital, a digit, a
+/// Sentence ends: `.`, `!` or `?` (and a citation mark after it, "planets.[12]",
+/// OCR's "Sedna.1131" for "[13]"), then a space and a capital, a digit, a
 /// quote or a bracket; not after an initial or a short abbreviation ("T.
 /// Goldsmith", "U.S. Patent", "Dr. Who": a fragment comes back as noise).
+/// A sentence longer than [`LONG`] words is cut at its middle comma: Marian
+/// translates only the start of a long input (a Wikipedia paragraph whose
+/// stops all had citations came back as its first sentence; the rest of the
+/// erased paragraph stayed blank).
 fn sentences(t: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut start = 0;
-    for (i, c) in t.char_indices() {
-        let next = t[i + c.len_utf8()..]
-            .strip_prefix(' ')
-            .and_then(|r| r.chars().next());
-        let word = t[..i].rsplit(' ').next().unwrap_or_default();
-        let short = c == '.' && (word.chars().count() <= 2 || word.contains('.'));
-        if matches!(c, '.' | '!' | '?')
-            && !short
-            && next.is_some_and(|n| n.is_uppercase() || n.is_ascii_digit() || "\"'(“".contains(n))
-        {
-            out.push(t[start..=i].trim().to_string());
+    for (i, _) in t.match_indices(' ') {
+        let next = t[i + 1..].chars().next();
+        if !next.is_some_and(|n| n.is_uppercase() || n.is_ascii_digit() || "\"'(“".contains(n)) {
+            continue;
+        }
+        let word = t[start..i].rsplit(' ').next().unwrap_or_default();
+        let Some(end) = word.rfind(['.', '!', '?']) else {
+            continue;
+        };
+        let (body, tail) = (&word[..end], &word[end + 1..]);
+        let cite = tail.is_empty()
+            || (tail.len() <= 6
+                && (tail.starts_with('[') || tail.bytes().all(|b| b.is_ascii_digit())));
+        let short =
+            word[end..].starts_with('.') && (body.chars().count() <= 2 || body.contains('.'));
+        if cite && !short {
+            out.push(t[start..i].trim().to_string());
             start = i + 1;
         }
     }
@@ -232,7 +243,31 @@ fn sentences(t: &str) -> Vec<String> {
             .filter(|r| !r.is_empty())
             .map(String::from),
     );
-    out
+    out.into_iter().flat_map(|s| halves(&s)).collect()
+}
+
+/// Words in one offline MT input at most (its 200-token cut is ~130 words;
+/// it starts dropping clauses well before that).
+const LONG: usize = 45;
+
+/// `s` cut at the comma (or semicolon, colon) nearest its middle until each
+/// part has at most [`LONG`] words; a part without one stays whole.
+fn halves(s: &str) -> Vec<String> {
+    let words = s.split(' ').count();
+    if words <= LONG {
+        return vec![s.to_string()];
+    }
+    let mid = s.len() / 2;
+    let cut = (s.match_indices([',', ';', ':']).map(|(i, _)| i + 1))
+        .filter(|&i| s[i..].starts_with(' '))
+        .min_by_key(|&i| i.abs_diff(mid));
+    match cut {
+        Some(i) => [&s[..i], &s[i + 1..]]
+            .iter()
+            .flat_map(|p| halves(p.trim()))
+            .collect(),
+        None => vec![s.to_string()],
+    }
 }
 
 #[derive(Debug)]
@@ -866,6 +901,29 @@ pub(super) mod tests {
         let out = translate_frame(&img, 200, 60, "en", &Cache::new(8), &fake).unwrap();
         assert_eq!(out.blocks[0].translation, "");
         assert!(out.rgba == img);
+    }
+
+    /// Stops with a citation after them end a sentence; abbreviations and
+    /// numbers don't; a very long sentence is cut at its middle comma.
+    #[test]
+    fn sentences_end_after_citations_and_long_ones_are_halved() {
+        let t = "Haumea as dwarf planets.[12] Four others: Orcus and Sedna.1131 Less \
+                 massive are clouds.[el The U.S. Patent of Dr. Who is 4.6 Million.";
+        assert_eq!(
+            sentences(t),
+            [
+                "Haumea as dwarf planets.[12]",
+                "Four others: Orcus and Sedna.1131",
+                "Less massive are clouds.[el",
+                "The U.S. Patent of Dr. Who is 4.6 Million."
+            ]
+        );
+        let long = format!("{}, {}.", ["word"; 30].join(" "), ["more"; 30].join(" "));
+        let parts = sentences(&long);
+        assert_eq!(parts.len(), 2, "{parts:?}");
+        assert!(parts[0].ends_with("word,") && parts[1].starts_with("more"));
+        let words = ["word"; 60].join(" ");
+        assert_eq!(sentences(&words), [words], "no comma: whole");
     }
 
     #[test]
