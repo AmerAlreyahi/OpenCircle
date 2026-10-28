@@ -399,6 +399,12 @@ impl Windows {
                     let leaving = state.leaving();
                     match outcome {
                         settings::Outcome::Saved(cfg) => apply(cfg),
+                        settings::Outcome::Write(w) => {
+                            return super::background(move |tx| {
+                                let _ = tx.unbounded_send(w.run());
+                            })
+                            .map(|d| Msg::Settings(settings::Message::Written(d)));
+                        }
                         settings::Outcome::Browse => return pick_folder(),
                         settings::Outcome::OpenLink(url) => open_url(&url),
                         settings::Outcome::CopyDiagnostics => {

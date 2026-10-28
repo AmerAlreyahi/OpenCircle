@@ -574,6 +574,12 @@ pub struct State {
     auto: bool,
     /// When the last auto-save happened: the pill says "Saved" for `SAVED_FOR`.
     saved_at: Option<Instant>,
+    /// A write is on its way (one at a time): later saves wait for its answer.
+    writing: bool,
+    /// Labs switches flipped while a write was on its way, written in turn.
+    queued_labs: Vec<(Feature, bool)>,
+    /// Close was answered with Save: the shell closes once the write lands.
+    closing: bool,
 }
 
 /// How long the footer pill says "Saved" after a change (the design's 1.8 s).
@@ -652,6 +658,8 @@ pub enum Message {
     CheckUpdate,
     UpdateStatus(String),
     Save,
+    /// A write (`Outcome::Write`) finished, on its thread.
+    Written(Box<Done>),
     /// The "Saved" pill's clock.
     Tick,
     /// The footer's question when the window is closed with unsaved changes (#136).
@@ -755,6 +763,9 @@ pub enum Outcome {
     None,
     /// Written to disk: re-bind the shortcuts, re-read the theme.
     Saved(Config),
+    /// Write this on a worker thread (`Write::run`) and send the answer back as
+    /// `Message::Written`: the UI never waits on the disk.
+    Write(Write),
     /// Show the folder picker; the answer comes back as `Message::Folder`.
     Browse,
     /// Open this link in the browser (the user clicked it on the About page).
@@ -763,6 +774,48 @@ pub enum Outcome {
     CopyDiagnostics,
     /// Check for an update now; the answer comes back as `Message::UpdateStatus`.
     CheckUpdate,
+}
+
+/// A config write for a worker thread.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Write {
+    path: Option<PathBuf>,
+    edit: Edit,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Edit {
+    /// The draft's edits (`saved` -> `draft`), over the config as it is now.
+    Save {
+        saved: Box<Config>,
+        draft: Box<Config>,
+    },
+    /// One Labs switch.
+    Lab(Feature, bool),
+}
+
+/// What a write answered.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Done {
+    edit: Edit,
+    result: Result<Config, String>,
+}
+
+impl Write {
+    /// Blocks on the disk (fsync): call it off the UI thread.
+    pub fn run(self) -> Box<Done> {
+        let path = self.path.as_deref();
+        let result = match &self.edit {
+            Edit::Save { saved, draft } => config::update_at(path, |c| {
+                *c = config::rebase(c, saved, draft);
+            }),
+            Edit::Lab(feature, on) => config::update_at(path, |c| c.labs.set(*feature, *on)),
+        };
+        Box::new(Done {
+            edit: self.edit,
+            result: result.map_err(|e| e.to_string()),
+        })
+    }
 }
 
 impl State {
@@ -827,6 +880,9 @@ impl State {
             leaving: false,
             auto: false,
             saved_at: None,
+            writing: false,
+            queued_labs: Vec::new(),
+            closing: false,
         };
         s.previews = LOOKS.iter().map(|(t, ..)| preview(&s.look(*t))).collect();
         s.revalidate();
@@ -1008,12 +1064,12 @@ fn issue(problems: &[String], key: &str) -> Option<String> {
 /// Applies `message`; in the real window (`auto`) a change that leaves the draft
 /// valid is written at once, so nothing is lost on close (#136). A draft with
 /// problems is held back (the footer says why) and closing asks about it.
-/// ponytail: the write runs on the UI thread like the Labs switches do (a tiny
-/// TOML file); move both off it if a slow disk ever shows.
+/// The write itself runs off the UI thread (`Outcome::Write`).
 pub fn update(state: &mut State, message: Message) -> Outcome {
     let change = !matches!(
         message,
         Message::Save
+            | Message::Written(_)
             | Message::Tick
             | Message::CloseSave
             | Message::CloseDiscard
@@ -1195,6 +1251,7 @@ fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::UpdateStatus(status) => state.update_status = Some(status),
         Message::Save => return save(state),
+        Message::Written(done) => return written(state, done),
         Message::Tick => {
             if state.saved_at.is_some_and(|t| t.elapsed() >= SAVED_FOR) {
                 state.saved_at = None;
@@ -1202,7 +1259,11 @@ fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::CloseSave => {
             let saved = save(state);
-            state.leaving = !state.dirty(); // a refused save (problems) stays open
+            if state.writing {
+                state.closing = true; // closes when the write lands
+            } else {
+                state.leaving = !state.dirty(); // a refused save (problems) stays open
+            }
             return saved;
         }
         Message::CloseDiscard => state.leaving = true,
@@ -1215,20 +1276,15 @@ fn apply(state: &mut State, message: Message) -> Outcome {
 /// A Labs switch writes at once, and only itself: the saved config with this one
 /// switch changed (other edits in the draft stay unsaved). A failed write changes nothing.
 fn set_lab(state: &mut State, feature: Feature, on: bool) -> Outcome {
-    let cfg = match config::update_at(state.path.as_deref(), |c| c.labs.set(feature, on)) {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            state.notice = Some(format!("Could not save: {e}"));
-            return Outcome::None;
-        }
-    };
-    // The draft keeps its unsaved edits, on top of what is saved now.
-    state.draft = config::rebase(&cfg, &state.saved, &state.draft);
-    state.saved = cfg.clone();
-    if state.section == Section::Snip && !cfg.labs.has(Feature::Snip) {
-        state.section = Section::Labs;
+    if state.writing {
+        state.queued_labs.push((feature, on));
+        return Outcome::None;
     }
-    Outcome::Saved(cfg)
+    state.writing = true;
+    Outcome::Write(Write {
+        path: state.path.clone(),
+        edit: Edit::Lab(feature, on),
+    })
 }
 
 fn save(state: &mut State) -> Outcome {
@@ -1241,23 +1297,61 @@ fn save(state: &mut State) -> Outcome {
         state.notice = Some("Nothing to save".into());
         return Outcome::None;
     }
+    // A write is on its way: `written` saves again if the draft still differs.
+    if state.writing {
+        return Outcome::None;
+    }
     // Only what was edited here is written, over the config as it is now.
-    // ponytail: the write (fsync) runs on the UI thread; a Task + Outcome round trip if it ever stalls.
-    let (saved, draft) = (state.saved.clone(), state.draft.clone());
-    match config::update_at(state.path.as_deref(), |c| {
-        *c = config::rebase(c, &saved, &draft)
-    }) {
-        Ok(cfg) => {
-            state.draft = cfg.clone();
-            state.saved = cfg;
-            state.saved_at = Some(Instant::now());
-            Outcome::Saved(state.saved.clone())
-        }
+    state.writing = true;
+    Outcome::Write(Write {
+        path: state.path.clone(),
+        edit: Edit::Save {
+            saved: Box::new(state.saved.clone()),
+            draft: Box::new(state.draft.clone()),
+        },
+    })
+}
+
+/// A write landed: the saved config is what it returned, the draft keeps edits
+/// made since; then the next waiting write, or the answer for the shell.
+fn written(state: &mut State, done: Box<Done>) -> Outcome {
+    state.writing = false;
+    let Done { edit, result } = *done;
+    let cfg = match result {
+        Ok(cfg) => cfg,
         Err(e) => {
+            state.queued_labs.clear();
+            state.closing = false;
             state.notice = Some(format!("Could not save: {e}"));
-            Outcome::None
+            return Outcome::None;
+        }
+    };
+    match edit {
+        Edit::Save { draft, .. } => {
+            state.draft = config::rebase(&cfg, &draft, &state.draft);
+            state.saved_at = Some(Instant::now());
+        }
+        Edit::Lab(..) => {
+            // The draft keeps its unsaved edits, on top of what is saved now.
+            state.draft = config::rebase(&cfg, &state.saved, &state.draft);
+            if state.section == Section::Snip && !cfg.labs.has(Feature::Snip) {
+                state.section = Section::Labs;
+            }
         }
     }
+    state.saved = cfg.clone();
+    if !state.queued_labs.is_empty() {
+        let (feature, on) = state.queued_labs.remove(0);
+        return set_lab(state, feature, on);
+    }
+    if state.auto && state.dirty() && state.problems.is_empty() {
+        return save(state); // edited while writing
+    }
+    state.revalidate();
+    if state.closing && !state.dirty() {
+        state.leaving = true;
+    }
+    Outcome::Saved(cfg)
 }
 
 /// Key presses, only while a shortcut field is recording.
@@ -2453,6 +2547,15 @@ pub(super) mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    /// `update` with its disk write done at once (the shell does it on a thread).
+    fn update(state: &mut State, message: Message) -> Outcome {
+        let mut out = super::update(state, message);
+        while let Outcome::Write(w) = out {
+            out = super::update(state, Message::Written(w.run()));
+        }
+        out
+    }
     use crate::ui::widgets::tests_support::{assert_tips_add_something, shown};
     use crate::ui::widgets::{TIPS, shot};
 
@@ -2755,6 +2858,36 @@ pub(super) mod tests {
         }
         // The entries are still in the draft (and so in the file): hidden, not deleted.
         assert!(s.draft.quick_actions.iter().any(|q| q.action == "snip"));
+    }
+
+    #[test]
+    fn writes_go_one_at_a_time_and_a_switch_during_a_write_waits_its_turn() {
+        let path = tmp("write-queue");
+        let (mut s, _) = state(Some(path.clone()));
+        s.auto = true;
+        // The save is handed out, not done: the UI thread never waits on the disk.
+        let Outcome::Write(first) = super::update(&mut s, Message::Theme(Theme::Light)) else {
+            panic!("no write")
+        };
+        assert!(!path.exists());
+        // More edits while it is on its way: held, nothing else starts.
+        assert_eq!(
+            super::update(&mut s, Message::Labs(Feature::Snip, true)),
+            Outcome::None
+        );
+        super::update(&mut s, Message::Autostart(false));
+        let Outcome::Write(second) = super::update(&mut s, Message::Written(first.run())) else {
+            panic!("the queued switch was not written")
+        };
+        let Outcome::Write(third) = super::update(&mut s, Message::Written(second.run())) else {
+            panic!("the edit made during the write was not written")
+        };
+        let Outcome::Saved(cfg) = super::update(&mut s, Message::Written(third.run())) else {
+            panic!("not saved: {:?}", s.notice)
+        };
+        let (back, _) = Config::load_from(&path);
+        assert_eq!(back, cfg);
+        assert!(back.theme == Theme::Light && back.labs.snip && !back.general.autostart);
     }
 
     #[test]
