@@ -71,6 +71,19 @@ pub fn picker<'a, Message: Clone + 'a>(
     on_colour: impl Fn(Color) -> Message,
     on_hex: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
+    picker_with(colours, current, hex, on_colour, on_hex, None)
+}
+
+/// `picker` with more controls under the hex field (the editor's stroke
+/// weight, eyedropper and presets).
+pub fn picker_with<'a, Message: Clone + 'a>(
+    colours: &[Color],
+    current: Color,
+    hex: &str,
+    on_colour: impl Fn(Color) -> Message,
+    on_hex: impl Fn(String) -> Message + 'a,
+    more: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
     let chip = |&colour: &Color| -> Element<'a, Message> {
         let chosen = colour == current;
         button(dot(colour, CHIP))
@@ -89,7 +102,11 @@ pub fn picker<'a, Message: Clone + 'a>(
     let rows =
         (colours.chunks(PER_ROW)).map(|r| row(r.iter().map(chip)).spacing(space::GAP).into());
     let hex = input("#RRGGBB", hex, true, false).on_input(on_hex);
-    container(column(rows).push(hex).spacing(space::GAP))
+    let mut body = column(rows).push(hex).spacing(space::GAP);
+    if let Some(more) = more {
+        body = body.push(more);
+    }
+    container(body)
         .padding(PAD)
         .style(|_| container::Style {
             background: Some(c().dropdown.into()),

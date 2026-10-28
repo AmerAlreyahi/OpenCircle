@@ -15,10 +15,10 @@ use crate::ui::app::background::background;
 use crate::ui::app::keys;
 use crate::ui::app::message::{Hiding, Message, Purpose};
 use crate::ui::app::quick::Quick;
-use crate::ui::edit::Editing;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
+use crate::ui::screens::editor::Editing;
 use crate::ui::{overlay, snip, translate, update_card, windows};
 
 use super::capture::{TEST_SHOT, save_test_shot};

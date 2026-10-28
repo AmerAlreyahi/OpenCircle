@@ -12,11 +12,12 @@ mod arrow;
 pub(crate) mod blur;
 pub mod board;
 mod callout;
-mod canvas;
+mod chrome;
 mod crop;
 mod document;
 pub mod dragout;
 mod highlighter;
+mod input;
 mod label;
 mod legend;
 mod lines;
@@ -31,17 +32,13 @@ pub mod style;
 #[cfg(test)]
 mod tests;
 mod text;
-mod toolbar;
 
 pub use document::{Document, Edit, Image, Item, Shape, render, span};
 pub use style::PRESETS;
-pub use text::{Style as TextStyle, free_glyphs};
-pub use toolbar::size as toolbar_size;
+pub use text::{Back as TextBack, Font as TextFont, Style as TextStyle, free_glyphs};
 
-#[cfg(test)]
-use iced::widget::column;
-use iced::widget::{image, pin, stack};
-use iced::{ContentFit, Element, Point, Rectangle, Size};
+use iced::widget::image;
+use iced::{Point, Rectangle, Size};
 
 use crate::actions::Crop;
 use document::int_rect;
@@ -297,6 +294,9 @@ pub enum Message {
     /// Pin the flattened image to the screen.
     Pin,
     Back,
+    /// A press on the toolbar's grip: the host drags the toolbar (the editor
+    /// ignores it).
+    Grab,
 }
 
 /// What the editor asks of its host.
@@ -350,32 +350,32 @@ const SLOP: f32 = 3.0;
 pub struct Editor {
     pub doc: Document,
     pub tool: Tool,
-    colour: [u8; 4],
-    width: Width,
+    pub(crate) colour: [u8; 4],
+    pub(crate) width: Width,
     /// The Text tool's font size (display px; a weight sets it too) and style.
-    text_size: f32,
-    text_style: TextStyle,
-    menu: Option<Menu>,
-    hex: String,
+    pub(crate) text_size: f32,
+    pub(crate) text_style: TextStyle,
+    pub(crate) menu: Option<Menu>,
+    pub(crate) hex: String,
     /// Display px per image px.
-    zoom: f32,
+    pub(crate) zoom: f32,
     shift: bool,
     /// The next press picks a colour from the image.
-    picking: bool,
+    pub(crate) picking: bool,
     /// Copied style: colour, weight.
     style: Option<([u8; 4], Width)>,
-    base: image::Handle,
+    pub(crate) base: image::Handle,
     /// The legend as the base shows it (placed among the committed items).
     legend: Option<legend::Legend>,
     /// The pending item's region (image px) painted with it.
-    live: Option<(Rectangle, image::Handle)>,
+    pub(crate) live: Option<(Rectangle, image::Handle)>,
     pending: Option<Pending>,
     /// Crop drag: from, to.
     cropping: Option<(Point, Point)>,
     /// The PNG of the last drag-out (deleted with the editor).
     dragged: Option<dragout::DragFile>,
     /// The blur brush keeps to text lines (config `editor.line_assist`).
-    assist: bool,
+    pub(crate) assist: bool,
     /// Scrolling capture can run for this editor (the host sets it; the
     /// toolbar button is dimmed without).
     pub scroll: bool,
@@ -575,69 +575,15 @@ impl Editor {
                 self.commit();
                 return Some(Output::Back);
             }
+            Message::Grab => {}
         }
         None
     }
 
-    /// The canvas (image + annotations, takes the pointer) above the toolbar.
-    #[cfg(test)]
-    pub fn view(&self) -> Element<'_, Message> {
-        column![self.canvas(), self.toolbar()]
-            .spacing(12)
-            .align_x(iced::Center)
-            .into()
-    }
-
-    /// The editing surface alone, `size()` big: for Edit in place, over the selection.
-    pub fn canvas(&self) -> Element<'_, Message> {
-        let size = self.size();
-        let view = self.doc.view();
-        let mut layers: Vec<Element<'_, Message>> = vec![
-            image(self.base.clone())
-                .width(size.width)
-                .height(size.height)
-                .content_fit(ContentFit::Fill)
-                .into(),
-        ];
-        // Always a layer here, live or not: the canvas must keep its index, or iced
-        // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
-        let live = self.live.as_ref().map(|(r, handle)| {
-            let at = Point::new((r.x - view.x) * self.zoom, (r.y - view.y) * self.zoom);
-            pin(image(handle.clone())
-                .width(r.width * self.zoom)
-                .height(r.height * self.zoom)
-                .content_fit(ContentFit::Fill))
-            .position(at)
-        });
-        layers.push(match live {
-            Some(live) => live.into(),
-            None => iced::widget::space().into(),
-        });
-        layers.push(
-            iced::widget::canvas(canvas::Input { editor: self })
-                .width(size.width)
-                .height(size.height)
-                .into(),
-        );
-        stack(layers).width(size.width).height(size.height).into()
-    }
-
-    /// The floating editing toolbar (with the open popover under it).
-    #[cfg(test)]
-    pub fn toolbar(&self) -> Element<'_, Message> {
-        toolbar::view(self, f32::INFINITY)
-    }
-
-    /// The toolbar within `max_width` (two rows when one does not fit; its size:
-    /// `toolbar_size(max_width)`) for the screen rectangle `at`, and its open
-    /// popover: a full-screen layer to put at (0, 0) (it places itself under the
-    /// toolbar, above it when there is no room, always on screen).
-    pub fn toolbar_at(
-        &self,
-        max_width: f32,
-        at: Rectangle,
-    ) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
-        toolbar::view_at(self, max_width, at)
+    /// The annotation colour as an iced colour.
+    pub fn ink(&self) -> iced::Color {
+        let [r, g, b, a] = self.colour;
+        iced::Color::from_rgba8(r, g, b, a as f32 / 255.0)
     }
 
     /// The canvas size, display px (changes with the crop, the board and the

@@ -8,8 +8,8 @@ use crate::editor::{self, Output};
 use crate::labs::{self};
 
 use crate::ui::app::message::{Message, Purpose};
-use crate::ui::edit::Editing;
 use crate::ui::kit::motion;
+use crate::ui::screens::editor::Editing;
 use crate::ui::snip;
 
 use super::capture::TEST_SHOT;

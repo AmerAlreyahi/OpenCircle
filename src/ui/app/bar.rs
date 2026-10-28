@@ -11,8 +11,8 @@ use crate::labs::{self, BarButton};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
-use crate::ui::edit::Editing;
 use crate::ui::screens::bar::geometry as bar;
+use crate::ui::screens::editor::Editing;
 
 use super::{ASK_INPUT, App};
 

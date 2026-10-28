@@ -88,6 +88,11 @@ pub fn ui_font_name() -> &'static str {
     })
 }
 
+/// The UI font in bold (a toggle's "B").
+pub fn bold() -> Font {
+    weight(Weight::Bold)
+}
+
 /// The UI font at a weight (the design's 500 / 600).
 pub fn weight(weight: Weight) -> Font {
     Font {

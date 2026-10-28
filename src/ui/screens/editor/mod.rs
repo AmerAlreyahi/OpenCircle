@@ -3,16 +3,21 @@
 //! places it: same anchors, same drag).
 //! Add capture (board): the editor steps aside and an area is dragged on the
 //! frozen frame; its crop joins the board.
-use iced::mouse::{self, Cursor};
-use iced::widget::canvas::{self, Action, Frame, Geometry, Path, Stroke, fill};
+use iced::mouse;
 use iced::widget::{container, image, mouse_area, pin, stack};
-use iced::{Color, ContentFit, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
+use iced::{ContentFit, Element, Fill, Point, Rectangle, Size};
 
-use super::screens::bar::geometry::{BOTTOM_GAP, GAP};
-use super::{theme, widgets};
+pub mod canvas;
+mod picker;
+pub mod toolbar;
+
 use crate::actions::Crop;
 use crate::editor::{self, Editor, Image, Message, Output};
+use crate::ui::screens::bar::geometry::{BOTTOM_GAP, GAP};
+use crate::ui::widgets;
 
+/// The hint's distance from the edge.
+const HINT_PAD: f32 = 24.0;
 /// Shown while an area for the board is picked.
 const PICK_HINT: &str = "Drag an area to add to the board · Esc to go back";
 
@@ -156,9 +161,9 @@ impl Editing {
         if let Some(drag) = self.picking {
             let hint = container(widgets::pill(PICK_HINT))
                 .center_x(Fill)
-                .padding(24);
+                .padding(HINT_PAD);
             return Element::from(stack![
-                iced::widget::canvas(Picker { drag })
+                iced::widget::canvas(picker::Picker { drag })
                     .width(Fill)
                     .height(Fill),
                 hint,
@@ -166,12 +171,13 @@ impl Editing {
             .map(map);
         }
         let canvas = self.canvas_rect();
-        let mut layers =
-            stack![pin(Element::from(self.editor.canvas()).map(map)).position(canvas.position())];
+        let mut layers = stack![
+            pin(Element::from(canvas::canvas(&self.editor)).map(map)).position(canvas.position())
+        ];
         if let Some(at) = toolbar {
             let room = screen.width - 2.0 * GAP;
             let size = toolbar_size(room);
-            let (toolbar, popover) = self.editor.toolbar_at(room, Rectangle::new(at, size));
+            let (toolbar, popover) = toolbar::view_at(&self.editor, room, Rectangle::new(at, size));
             let toolbar = mouse_area(toolbar.map(map))
                 .on_press(grab)
                 .interaction(mouse::Interaction::Grab);
@@ -197,81 +203,6 @@ impl Editing {
     }
 }
 
-/// The full-screen area picker: dims all but the dragged box.
-struct Picker {
-    drag: Option<(Point, Point)>,
-}
-
-impl canvas::Program<Message> for Picker {
-    type State = ();
-
-    fn update(
-        &self,
-        _state: &mut (),
-        event: &canvas::Event,
-        bounds: Rectangle,
-        cursor: Cursor,
-    ) -> Option<Action<Message>> {
-        use iced::keyboard::{self, Key, key::Named};
-        let message = match event {
-            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                Message::Press(cursor.position_in(bounds)?)
-            }
-            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) if self.drag.is_some() => {
-                Message::Move(cursor.position_in(bounds)?)
-            }
-            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                Message::Release
-            }
-            canvas::Event::Keyboard(keyboard::Event::KeyPressed {
-                key: Key::Named(Named::Escape),
-                ..
-            }) => Message::Back,
-            _ => return None,
-        };
-        Some(Action::publish(message).and_capture())
-    }
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        let keep = self.drag.map(|(a, b)| editor::span(&[a, b]));
-        let outside = Path::new(|p| {
-            p.rectangle(Point::ORIGIN, bounds.size());
-            if let Some(r) = keep {
-                p.rectangle(r.position(), r.size());
-            }
-        });
-        frame.fill(
-            &outside,
-            canvas::Fill {
-                style: canvas::Style::Solid(theme::DIM_OUTSIDE),
-                rule: fill::Rule::EvenOdd,
-            },
-        );
-        if let Some(r) = keep {
-            let edge = Stroke::default().with_color(Color::WHITE).with_width(1.5);
-            frame.stroke(&Path::rectangle(r.position(), r.size()), edge);
-        }
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        _state: &(),
-        _bounds: Rectangle,
-        _cursor: Cursor,
-    ) -> mouse::Interaction {
-        mouse::Interaction::Crosshair
-    }
-}
-
 /// The logical rectangle the frame pixels `[x0, y0, x1, y1]` cover.
 fn on_screen([x0, y0, x1, y1]: [u32; 4], scale: f32) -> Rectangle {
     let px = |v: u32| v as f32 / scale;
@@ -281,7 +212,7 @@ fn on_screen([x0, y0, x1, y1]: [u32; 4], scale: f32) -> Rectangle {
     )
 }
 
-use editor::toolbar_size;
+use toolbar::size as toolbar_size;
 
 /// Where an image of `size` px goes on the work area `screen` and its zoom (at
 /// most `max_zoom`): centred, scaled down to leave room for the toolbar docked

@@ -16,10 +16,10 @@ use crate::ocr;
 use crate::ui::app::message::{Await, BarKeys, Grab, Purpose};
 use crate::ui::app::word;
 use crate::ui::app::{Reader, TextMode};
-use crate::ui::edit::Editing;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
+use crate::ui::screens::editor::Editing;
 use crate::ui::{overlay, panel, song, translate};
 
 pub(in crate::ui) struct Opening {

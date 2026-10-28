@@ -1,5 +1,36 @@
 use super::*;
+use crate::ui::screens::editor::toolbar::{self, size as toolbar_size};
+use iced::Element;
 use iced::keyboard::{Key, Modifiers, key::Named};
+use iced::widget::column;
+
+/// The views of the editor's screen (`ui::screens::editor`), as the tests
+/// look at them.
+impl Editor {
+    fn canvas(&self) -> Element<'_, Message> {
+        crate::ui::screens::editor::canvas::canvas(self)
+    }
+
+    fn toolbar(&self) -> Element<'_, Message> {
+        toolbar::view(self, f32::INFINITY)
+    }
+
+    fn toolbar_at(
+        &self,
+        max_width: f32,
+        at: Rectangle,
+    ) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
+        toolbar::view_at(self, max_width, at)
+    }
+
+    /// The canvas above the toolbar.
+    fn view(&self) -> Element<'_, Message> {
+        column![self.canvas(), self.toolbar()]
+            .spacing(12)
+            .align_x(iced::Center)
+            .into()
+    }
+}
 
 const RED: [u8; 4] = [255, 59, 48, 255];
 
@@ -1423,8 +1454,8 @@ fn toolbar_size_matches_its_layout() {
     let e = editor(100, 100);
     let one = toolbar::size(f32::INFINITY);
     assert_eq!(laid_out(e.toolbar()), one);
-    // A small screen (the 1125 px VM): two rows, both within it.
-    let small = 1125.0 - 48.0;
+    // A narrow screen: two rows, both within it.
+    let small = one.width - 60.0;
     let two = toolbar::size(small);
     assert!(two.width <= small && two.height > one.height, "{two:?}");
     assert_eq!(laid_out(e.toolbar_at(small, Rectangle::default()).0), two);
@@ -2437,7 +2468,7 @@ fn snapshots_board() {
     // A small screen: two rows.
     let mut e = Editor::new(demo_image(), 1.0);
     e.update(Message::Picker);
-    let small = 1125.0 - 48.0;
+    let small = toolbar::size(f32::INFINITY).width - 60.0;
     shoot(
         e.toolbar_at(small, Rectangle::default()).0,
         Size::new(small, 520.0),

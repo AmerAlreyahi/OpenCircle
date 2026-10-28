@@ -4,7 +4,6 @@ mod app;
 #[cfg(test)]
 mod arch_tests;
 mod border;
-mod edit;
 /// Frames as the window draws them (damage), and the animations' timing.
 #[cfg(test)]
 mod frame_times;
@@ -13,7 +12,7 @@ mod kit;
 mod live_layer;
 mod overlay;
 mod platform;
-mod screens;
+pub(crate) mod screens;
 use screens::common::language_picker as picker;
 use screens::live::controller as live_controller;
 pub(crate) use screens::setup;

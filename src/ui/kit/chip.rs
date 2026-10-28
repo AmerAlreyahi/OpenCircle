@@ -214,6 +214,56 @@ pub fn action<'a, Message: Clone + 'a>(label: String, on_press: Message) -> Elem
         .into()
 }
 
+/// The editing toolbar's Drag chip (`SnipDragHandle`: `.oc-btn`, 63x30, radius
+/// 12): the grip dots in `accent` and "Drag". A press starts the OS drag of the
+/// image (a button reacts on release, too late); the edge turns `accent`
+/// under the cursor.
+pub fn drag_out<'a, Message: Clone + 'a>(on_down: Message) -> Element<'a, Message> {
+    use iced::widget::{hover, mouse_area};
+    let look = |edge: Color, ink: Color| {
+        let dots = text('\u{e0ee}')
+            .font(super::icon::FONT)
+            .size(14)
+            .color(c().accent);
+        let label = text("Drag")
+            .size(11)
+            .font(weight(Weight::Medium))
+            .color(ink);
+        container(row![dots, label].spacing(space::GAP).align_y(Center))
+            .center_x(63)
+            .center_y(30)
+            .style(move |_| container::Style {
+                background: Some(c().elevated.into()),
+                border: Border::default().rounded(12).width(1).color(edge),
+                ..container::Style::default()
+            })
+    };
+    mouse_area(hover(
+        look(c().elevated_border, c().text_sub),
+        look(c().accent, c().text),
+    ))
+    .on_press(on_down)
+    .interaction(iced::mouse::Interaction::Grab)
+    .into()
+}
+
+/// A Text backdrop's sample for an option button: an "A" plain, ringed, or on
+/// a fill (the button's colours).
+pub fn sample<'a, Message: 'a>(ring: bool, fill: bool) -> Element<'a, Message> {
+    let ink = if fill { c().widget } else { c().text_sub };
+    container(text("A").size(14).color(ink))
+        .padding([0, 4])
+        .style(move |_| container::Style {
+            background: fill.then(|| c().text_sub.into()),
+            border: Border::default()
+                .rounded(radius::KEYCAP)
+                .width(if ring { 1.5 } else { 0.0 })
+                .color(c().text_sub),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 /// The dot of an on / off choice: `accent` when `on`, `text_muted` when off
 /// (the chat's Include screen).
 pub fn switch_dot<'a, Message: 'a>(on: bool) -> Element<'a, Message> {

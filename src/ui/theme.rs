@@ -109,9 +109,6 @@ pub const ON_ACCENT: Color = Color::from_rgb8(0x10, 0x10, 0x1c);
 pub const CLOSE_HOVER: Color = Color::from_rgb8(0xc4, 0x2b, 0x1c);
 pub const ON_CLOSE_HOVER: Color = Color::WHITE;
 
-/// Dim outside the editor's crop (the overlay's dims follow the look: `dims`).
-pub const DIM_OUTSIDE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
-
 // ---- Active looks (config `[look]`): the presets' colours, one table ----
 
 /// A palette's screen-edge glow (the two colours of the design's look of the

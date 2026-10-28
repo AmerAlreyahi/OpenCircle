@@ -18,9 +18,9 @@ use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot, WordRead}
 use crate::ui::app::opening::Opening;
 use crate::ui::app::quick::Quick;
 use crate::ui::app::{keys, word};
-use crate::ui::edit::Editing;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
+use crate::ui::screens::editor::Editing;
 use crate::ui::snip::Snip;
 use crate::ui::{border, glass, overlay, panel, snip, song, translate, widgets, windows};
 
@@ -2143,9 +2143,10 @@ fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
     assert_eq!(at.y + tool.height, bar_box.y + bar_box.height);
     assert_eq!(at.x + tool.width / 2.0, bar_box.center_x());
     // its first row (two rows where drag-out makes it too wide)
-    let pad = widgets::SURFACE_PADDING;
-    let row = pad + widgets::CONTROL / 2.0;
-    let back = at + Vector::new(row, row);
+    let pad = bar::PAD;
+    let row = pad + crate::ui::kit::tokens::size::ICON_BUTTON / 2.0;
+    // the grip, then Back
+    let back = at + Vector::new(row + bar::HANDLE + bar::SPACING, row);
     let hit = |app: &App, p| widgets::shot::click(app.view(app.overlay), app.o.screen, p);
     assert!(
         hit(&app, back)

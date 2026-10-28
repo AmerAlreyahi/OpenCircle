@@ -10,7 +10,7 @@ use crate::config::{self, SelectStyle};
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Grab, Message, Purpose};
 use crate::ui::app::word;
-use crate::ui::edit::Editing;
+use crate::ui::screens::editor::Editing;
 use crate::ui::{overlay, snip, translate};
 
 use super::App;

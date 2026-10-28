@@ -9,7 +9,7 @@ use iced::{Border, Element, Fill};
 use super::button::faded;
 use super::icon::FONT;
 use super::themes::c;
-use super::tokens::size;
+use super::tokens::{radius, size};
 
 /// What the button shows besides hover and press.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -25,11 +25,42 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     state: State,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    made(glyph_text(glyph), size::ICON_BUTTON / 2.0, state, on_press)
+}
+
+/// The same button with the design's square corners (r9): the editing
+/// toolbar's tools, undo and redo, copy and save.
+pub fn square<'a, Message: Clone + 'a>(
+    glyph: char,
+    state: State,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    made(glyph_text(glyph), radius::CONTROL, state, on_press)
+}
+
+/// A square button around any `content` (a letter, a sample): the text of
+/// `content` takes the button's colours.
+pub fn option<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    state: State,
+    on_press: Message,
+) -> Element<'a, Message> {
+    made(content, radius::CONTROL, state, Some(on_press))
+}
+
+fn glyph_text<'a>(glyph: char) -> iced::widget::Text<'a> {
+    text(glyph).font(FONT).size(size::ICON)
+}
+
+fn made<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    corner: f32,
+    state: State,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
     use button::Status;
     let live = on_press.is_some();
-    // ponytail: round only (the bar); the square r9 one joins with the editor toolbar
-    let corner = size::ICON_BUTTON / 2.0;
-    button(container(text(glyph).font(FONT).size(size::ICON)).center(Fill))
+    button(container(content).center(Fill))
         .width(size::ICON_BUTTON)
         .height(size::ICON_BUTTON)
         .padding(0)

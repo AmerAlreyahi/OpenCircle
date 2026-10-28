@@ -22,6 +22,19 @@ pub const ANNOTATION: [Color; 12] = [
     Color::from_rgb8(0x1c, 0x1c, 0x1e), // black
 ];
 
+/// What the canvas draws over the image (the chrome, the same in both themes):
+/// the dim outside a crop, the handles and crop edge, a step's note pill.
+pub const DIM_OUTSIDE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
+pub const HANDLE: Color = Color::WHITE;
+pub const NOTE_FILL: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.94);
+pub const NOTE_INK: Color = Color::from_rgb8(28, 28, 36);
+pub const NOTE_HINT: Color = Color::from_rgb8(120, 120, 130);
+pub const NOTE_FONT: iced::Font = iced::Font {
+    family: iced::font::Family::SansSerif,
+    weight: iced::font::Weight::Semibold,
+    ..iced::Font::DEFAULT
+};
+
 pub struct Preset {
     /// On its chip.
     pub short: &'static str,
