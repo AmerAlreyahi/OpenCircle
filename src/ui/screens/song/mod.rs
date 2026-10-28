@@ -5,18 +5,35 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use iced::widget::{column, container, image, opaque, row};
+use iced::widget::{column, container, image, opaque, row, text};
 use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 
-use super::{background, widgets};
 use crate::config;
 use crate::history::song as history;
 use crate::music::{self, LISTEN_SECS, Song};
+use crate::ui::background;
+use crate::ui::kit::button::{Kind, button, label};
+use crate::ui::kit::chip;
+use crate::ui::kit::icon::FONT;
 use crate::ui::kit::panel_frame as card;
+use crate::ui::kit::surface::{Material, surface};
+use crate::ui::kit::text::{accent, error, sub, text as line};
+use crate::ui::kit::tokens::{Role, radius, size, space};
+use crate::ui::panel::{actions, note};
 
 /// Lucide "music" (in the subset font).
 pub const MUSIC: char = '\u{e125}';
 const COVER: f32 = 88.0;
+/// The placeholder cover's glyph; the listening pill's room (`.as-toast`:
+/// 10x16), its line's width and the gaps of the card.
+const COVER_GLYPH: f32 = 32.0;
+const PILL_PAD: [f32; 2] = [10.0, 16.0];
+const PILL_LINE: f32 = 150.0;
+const PILL_GAP: f32 = 12.0;
+const STACK: f32 = 16.0;
+/// Between links (`gap-2`), and the pill's distance to the screen's bottom.
+const LINKS_GAP: f32 = 8.0;
+const BOTTOM: f32 = 24.0;
 /// The result card's height: header + cover row + links (+ a line per recent song).
 const CARD_HEIGHT: f32 = 300.0;
 const RECENT_LINE: f32 = 22.0;
@@ -151,9 +168,8 @@ impl Session {
             State::Looking => return pill(status("Identifying…".to_string())),
             State::Found(song, cover) => (self.result(song, cover.as_ref()), None),
             State::Failed(why) => {
-                let retry =
-                    widgets::text_button(MUSIC, "Try again", String::new(), true, Msg::Retry);
-                (widgets::body(why.as_str()).into(), Some(retry.into()))
+                let retry = actions(("Try again", Msg::Retry), []);
+                (error(Role::NOTE, why.as_str()).into(), Some(retry))
             }
         };
         let header = card::Header {
@@ -194,28 +210,30 @@ impl Session {
     fn result<'a>(&'a self, song: &'a Song, cover: Option<&image::Handle>) -> Element<'a, Msg> {
         let art: Element<'a, Msg> = match cover {
             Some(h) => image(h.clone()).width(COVER).height(COVER).into(),
-            None => widgets::surface(
-                container(widgets::icon(MUSIC).size(32))
-                    .center(COVER - 2.0 * widgets::SURFACE_PADDING),
+            None => surface(
+                Material::Recessed,
+                radius::CARD,
+                text(MUSIC).font(FONT).size(COVER_GLYPH),
             )
+            .center(COVER)
             .into(),
         };
         let mut words = column![
-            widgets::heading(song.title.as_str()),
-            widgets::body(song.artist.as_str())
+            line(Role::PAGE_TITLE, song.title.as_str()),
+            sub(Role::ROW_TITLE, song.artist.as_str())
         ]
-        .spacing(4);
+        .spacing(space::GAP);
         let detail = song.detail();
         if !detail.is_empty() {
-            words = words.push(widgets::caption(detail));
+            words = words.push(note(detail));
         }
-        let top = row![art, words.width(Fill)].spacing(16);
+        let top = row![art, words.width(Fill)].spacing(STACK);
         let links = row(song
             .links
             .iter()
-            .map(|(label, url)| widgets::chip(*label, Msg::Open(url.clone())).into()))
-        .spacing(8);
-        let mut body = column![top, links].spacing(16);
+            .map(|(label, url)| chip::action(label.to_string(), Msg::Open(url.clone()))))
+        .spacing(LINKS_GAP);
+        let mut body = column![top, links].spacing(STACK);
         let recent: Vec<_> = self
             .recent
             .iter()
@@ -223,9 +241,9 @@ impl Session {
             .take(RECENT)
             .collect();
         if !recent.is_empty() {
-            body = body.push(widgets::caption("Recent"));
+            body = body.push(line(Role::SECTION, "Recent"));
             for e in recent {
-                body = body.push(widgets::caption(format!("{} · {}", e.title, e.artist)));
+                body = body.push(note(format!("{} · {}", e.title, e.artist)));
             }
         }
         body.into()
@@ -238,29 +256,28 @@ fn pill<'a>(content: Element<'a, Msg>) -> Element<'a, Msg> {
     container(opaque(content))
         .center_x(Fill)
         .align_bottom(Fill)
-        .padding(24)
+        .padding(BOTTOM)
         .into()
 }
 
-/// The listening / identifying pill: a note, the text, Cancel.
-fn status<'a>(label: String) -> Element<'a, Msg> {
-    let cancel = widgets::text_button(widgets::CLOSE, "Cancel", String::new(), false, Msg::Cancel);
-    widgets::surface(
-        row![
-            widgets::icon(MUSIC),
-            widgets::body(label).width(150),
-            cancel
-        ]
-        .spacing(12)
-        .padding([0, 10])
-        .align_y(Center),
-    )
-    .into()
+/// The listening / identifying pill (`.as-toast`): a note, the text, Cancel.
+fn status<'a>(text_line: String) -> Element<'a, Msg> {
+    let cancel = button(label("Cancel"), Kind::Quiet, Some(Msg::Cancel));
+    let glyph = accent(Role::NOTE, MUSIC.to_string())
+        .font(FONT)
+        .size(size::ICON);
+    let content = row![glyph, line(Role::NOTE, text_line).width(PILL_LINE), cancel]
+        .spacing(PILL_GAP)
+        .align_y(Center);
+    surface(Material::Widget, radius::FULL, content)
+        .padding(PILL_PAD)
+        .into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::widgets;
     use iced::Size;
 
     const SCREEN: Size = Size::new(1280.0, 720.0);
@@ -292,7 +309,7 @@ mod tests {
 
     #[test]
     fn the_music_glyph_is_in_the_font() {
-        let script = include_str!("../../assets/lucide/subset.sh");
+        let script = include_str!("../../../../assets/lucide/subset.sh");
         assert!(
             script.contains(&format!("U+{:04X}", MUSIC as u32)),
             "glyph in the font"
@@ -364,5 +381,49 @@ mod tests {
             s.update(Msg::Done(Err(music::Error::Cancelled), Vec::new())),
             Outcome::Close
         );
+    }
+
+    /// Listening, the result card (a Latin and an Arabic song, recent songs
+    /// under it) and an error, in Sapphire and Daylight.
+    #[test]
+    fn every_song_state_matches_its_golden_image() {
+        use crate::ui::kit::testing::golden;
+        use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+        let recent = || {
+            vec![history::Entry {
+                title: "Carefree".into(),
+                artist: "Kevin MacLeod".into(),
+            }]
+        };
+        let arabic = Song {
+            title: "زي الهوا".into(),
+            artist: "عبد الحليم حافظ".into(),
+            ..song()
+        };
+        let states = [
+            ("listening", session(State::Listening(3))),
+            ("found", {
+                let mut s = session(State::Found(song(), None));
+                s.recent = recent();
+                s
+            }),
+            ("found-arabic", session(State::Found(arabic, None))),
+            (
+                "failed",
+                session(State::Failed(music::Error::Silent.to_string())),
+            ),
+        ];
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for (name, s) in &states {
+                let file = format!("song-{name}-{}", theme.id);
+                failed.extend(golden::check("screens", &file, SCREEN, &[1.0], || {
+                    s.view(SCREEN)
+                }));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
     }
 }

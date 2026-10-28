@@ -91,7 +91,6 @@ const LEGACY: &[&str] = &[
     "overlay.rs",
     "setup.rs",
     "snip.rs",
-    "song.rs",
 ];
 
 #[test]

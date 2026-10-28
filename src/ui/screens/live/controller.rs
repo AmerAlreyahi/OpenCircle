@@ -6,22 +6,33 @@
 //! language picker (source → target, `ui/picker.rs`), Pause / Resume, Hide
 //! (collapses to a dot), Stop; and, when the languages' models are missing,
 //! the download question (live mode never steps without them). This file is
-//! its state and view; `live_layer` owns the window.
-use iced::widget::{column, container, mouse_area, row};
-use iced::{Center, Element, Fill, Size, mouse};
+//! its state and view (kit parts only: the widget surface, the grip, the
+//! language picker's openers and list, `.oc-btn`s); `live_layer` owns the
+//! window.
+use iced::widget::{column, container, row};
+use iced::{Center, Element, Fill, Size};
 
-use super::picker::{self, CHIP_HEIGHT, Picker, SPACING};
-use super::widgets;
+use crate::ui::kit::button::{Kind, button, label};
+use crate::ui::kit::grip::{self, grip};
+use crate::ui::kit::progress;
+use crate::ui::kit::surface::{Material, surface};
+use crate::ui::kit::text::error;
+use crate::ui::kit::tokens::{Role, radius};
+use crate::ui::panel::note;
+use crate::ui::picker::{self, CHIP_HEIGHT, Picker, SPACING};
+use crate::ui::widgets;
 
-/// Chip sizes (one width per kind, consistency rule) and the drag grip.
+/// The window's corners (`rounded-2xl`) and the room inside its edge (`p-2`).
+pub const RADIUS: f32 = radius::WINDOW;
+const PAD: f32 = 8.0;
+/// Button cells (one width per kind, consistency rule) and the drag grip.
 const CHIP_WIDTH: f32 = 76.0;
-const GRIP_WIDTH: f32 = 20.0;
+const GRIP_WIDTH: f32 = grip::SIZE.width;
 /// The minimised controller.
 const DOT: f32 = 28.0;
 /// The download question under the controls: two lines, then the buttons.
 const ASK_TEXT: f32 = 40.0;
 const ASK_HEIGHT: f32 = SPACING + ASK_TEXT + SPACING + CHIP_HEIGHT;
-const ASK_BUTTON: f32 = 96.0;
 /// The one-line notice (an error, the first-run note) above the controls.
 const NOTICE_HEIGHT: f32 = 24.0;
 /// Longest notice shown (one line).
@@ -135,7 +146,7 @@ impl Controller {
         if self.minimised {
             return Size::new(DOT, DOT);
         }
-        let pad = 2.0 * widgets::SURFACE_PADDING;
+        let pad = 2.0 * PAD;
         let mut below = match (&self.ask, self.picker.is_open()) {
             (Some(_), _) => ASK_HEIGHT,
             (None, true) => picker::LIST_HEIGHT,
@@ -154,31 +165,19 @@ impl Controller {
         if self.minimised {
             return widgets::accent_dot(DOT, Msg::Restore).into();
         }
-        let chip = |label: &'static str, msg| {
-            widgets::chip(label, msg)
-                .width(CHIP_WIDTH)
-                .height(CHIP_HEIGHT)
-        };
-        let grip = mouse_area(
-            container(widgets::caption("⋮⋮"))
-                .center(GRIP_WIDTH)
-                .height(CHIP_HEIGHT),
-        )
-        .on_press(Msg::Drag)
-        .interaction(mouse::Interaction::Grab);
         let controls = row![
-            grip,
+            container(grip(Msg::Drag)).center_y(CHIP_HEIGHT),
             self.picker.chips(CHIP_HEIGHT).map(Msg::Picker),
-            chip(if self.paused { "Resume" } else { "Pause" }, Msg::Pause),
-            chip("Hide", Msg::Minimise),
-            chip("Stop", Msg::Stop),
+            cell(if self.paused { "Resume" } else { "Pause" }, Msg::Pause),
+            cell("Hide", Msg::Minimise),
+            cell("Stop", Msg::Stop),
         ]
         .spacing(SPACING)
         .align_y(Center);
         // The window grows upward from the controls (it sits at the bottom of
         // the screen), so what opens goes above them.
         let mut body = column![].spacing(SPACING);
-        let width = self.size().width - 2.0 * widgets::SURFACE_PADDING - GRIP_WIDTH - SPACING;
+        let width = self.size().width - 2.0 * PAD - GRIP_WIDTH - SPACING;
         let indent = |e: Element<'a, Msg>| {
             container(e).padding(iced::Padding::ZERO.left(GRIP_WIDTH + SPACING))
         };
@@ -188,41 +187,46 @@ impl Controller {
             body = body.push(indent(list.map(Msg::Picker)));
         }
         if let Some(notice) = &self.notice {
-            let line = container(widgets::caption(notice.clone()))
+            let line = container(note(notice.clone()))
                 .center_y(NOTICE_HEIGHT)
                 .width(width)
                 .clip(true);
             body = body.push(indent(line.into()));
         }
         let body = body.push(controls);
-        widgets::solid_surface(body).into()
+        let size = self.size();
+        surface(Material::Widget, RADIUS, body)
+            .padding(PAD)
+            .width(size.width)
+            .height(size.height)
+            .into()
     }
+}
+
+/// A button (`.oc-btn`) centred in a `CHIP_WIDTH` cell.
+fn cell<'a>(name: &'a str, msg: Msg) -> Element<'a, Msg> {
+    container(button(label(name), Kind::Elevated, Some(msg)))
+        .center_x(CHIP_WIDTH)
+        .center_y(CHIP_HEIGHT)
+        .into()
 }
 
 /// The download question: what and how big, then Download and Cancel (=
 /// Stop), or the progress.
 fn ask_view(ask: &Ask, width: f32) -> Element<'static, Msg> {
-    let line = match &ask.error {
-        Some(e) => widgets::error(format!("Download failed: {e}")),
-        None => widgets::body(format!(
+    let line: Element<'static, Msg> = match &ask.error {
+        Some(e) => error(Role::NOTE, format!("Download failed: {e}")).into(),
+        None => note(format!(
             "Live translate needs {}. Download it? Nothing you translate leaves your PC.",
             ask.what
-        )),
+        ))
+        .into(),
     };
     let below: Element<'static, Msg> = match ask.progress {
-        Some(done) => container(widgets::progress(done))
-            .center_y(CHIP_HEIGHT)
+        Some(done) => container(progress::bar(done)).center_y(CHIP_HEIGHT).into(),
+        None => row![cell("Download", Msg::Download), cell("Cancel", Msg::Stop)]
+            .spacing(SPACING)
             .into(),
-        None => row![
-            widgets::chip("Download", Msg::Download)
-                .width(ASK_BUTTON)
-                .height(CHIP_HEIGHT),
-            widgets::chip("Cancel", Msg::Stop)
-                .width(ASK_BUTTON)
-                .height(CHIP_HEIGHT),
-        ]
-        .spacing(SPACING)
-        .into(),
     };
     column![container(line).height(ASK_TEXT).width(Fill), below]
         .spacing(SPACING)
@@ -248,6 +252,7 @@ pub fn mask(rgba: &mut [u8], width: u32, height: u32, rect: [u32; 4]) {
 mod tests {
     use super::*;
     use crate::ui::picker::Side;
+    use crate::ui::widgets;
 
     fn open(c: &mut Controller, side: Side) {
         c.update(Msg::Picker(picker::Msg::Open(side)));
@@ -351,5 +356,35 @@ mod tests {
         assert!(black(2, 1) && black(3, 2));
         assert!(!black(1, 1) && !black(2, 0));
         mask(&mut rgba, 4, 3, [9, 9, 2, 2]); // off the frame: nothing
+    }
+
+    /// The controller closed, with the target list open, with a notice, and
+    /// asking for its download, in Sapphire and Daylight.
+    #[test]
+    fn every_controller_state_matches_its_golden_image() {
+        use crate::ui::kit::testing::golden;
+        use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+        let mut c = Controller::new("auto", "ar", true);
+        let mut states = vec![("closed", c.clone())];
+        open(&mut c, Side::Target);
+        states.push(("list", c.clone()));
+        c.picker.close();
+        c.set_notice(Some("Nothing to translate on this screen yet.".into()));
+        states.push(("notice", c.clone()));
+        c.notice = None;
+        c.ask("English → Arabic offline translation", 117_600_822);
+        states.push(("ask", c.clone()));
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for (name, c) in &states {
+                let file = format!("live-controller-{name}-{}", theme.id);
+                failed.extend(golden::check("screens", &file, c.size(), &[1.0], || {
+                    c.view()
+                }));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
     }
 }

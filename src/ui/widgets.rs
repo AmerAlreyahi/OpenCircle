@@ -5,8 +5,7 @@
 //! behind each surface (no nested/live blur).
 use iced::widget::text::IntoFragment;
 use iced::widget::{
-    Button, Container, Text, Tooltip, button, container, progress_bar, row, scrollable, space,
-    text, tooltip,
+    Button, Container, Text, Tooltip, button, container, row, scrollable, space, text, tooltip,
 };
 use iced::{Background, Border, Color, Element, gradient};
 
@@ -176,11 +175,6 @@ pub fn icon<'a>(glyph: char) -> Text<'a> {
         .color(theme::floating().text)
 }
 
-/// Panel title.
-pub fn heading<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
-    text(label).size(16).color(theme::floating().text)
-}
-
 /// Running text: answers, messages.
 pub fn body<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
     text(label).size(14).color(theme::floating().text)
@@ -189,20 +183,6 @@ pub fn body<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
 /// Secondary small text: notes, model name, progress.
 pub fn caption<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
     text(label).size(12).color(theme::floating().muted)
-}
-
-/// An error message.
-pub fn error<'a>(label: impl IntoFragment<'a>) -> Text<'a> {
-    text(label).size(14).color(theme::floating().danger)
-}
-
-/// A suggestion (e.g. a prompt): small, fully rounded, outlined, quiet.
-pub fn chip<'a, Message: Clone + 'a>(
-    label: impl IntoFragment<'a>,
-    on_press: Message,
-) -> Button<'a, Message> {
-    let palette = theme::floating();
-    chip_style(button(text(label).size(13).color(palette.text)), on_press)
 }
 
 /// A `chip` that fills its row's share, text centred: a row of choices
@@ -267,19 +247,6 @@ pub fn float_chip<'a, Message: Clone + 'a>(
         container(button).style(move |_| glass(999.0, blurred)),
         999.0,
     )
-}
-
-/// Progress bar, `value` in 0..=1.
-pub fn progress<'a, Message: 'a>(value: f32) -> Element<'a, Message> {
-    let palette = theme::floating();
-    progress_bar(0.0..=1.0, value)
-        .girth(6)
-        .style(move |_| progress_bar::Style {
-            background: palette.hover.into(),
-            bar: accent(button::Status::Active),
-            border: Border::default().rounded(3),
-        })
-        .into()
 }
 
 /// Vertical scroll area with a thin scroller from the palette.

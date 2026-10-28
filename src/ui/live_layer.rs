@@ -13,7 +13,7 @@ use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 
 use super::live_controller::{self, Controller, Out};
-use super::{background, border, theme, widgets, windows};
+use super::{background, border, theme, windows};
 use crate::capture::{self, window_rect};
 use crate::config;
 use crate::live::{self, LayerError};
@@ -280,7 +280,7 @@ impl Live {
                 resizable: false,
                 ..window::Settings::default()
             },
-            widgets::SURFACE_RADIUS,
+            live_controller::RADIUS,
             windows::POPUP,
         );
         self.controller = Some(id);
@@ -776,19 +776,23 @@ mod tests {
             !l.stepping && l.paused.load(Ordering::Relaxed),
             "no step thread"
         );
-        let texts = widgets::shot::texts(l.controller_view());
+        let texts = crate::ui::widgets::shot::texts(l.controller_view());
         let ask = "Live translate needs the English text-recognition model (about 40 MB). \
                    Download it? Nothing you translate leaves your PC.";
         for want in [ask, "Download", "Cancel"] {
             assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
         }
-        widgets::shot::save("live-controller-consent", l.controller_view(), l.ctl.size());
+        crate::ui::widgets::shot::save(
+            "live-controller-consent",
+            l.controller_view(),
+            l.ctl.size(),
+        );
         // Download: progress, still no step
         let _ = l.update(Msg::Controller(C::Download));
         assert!(l.download.is_some() && !l.stepping);
         let _ = l.update(Msg::Progress(0.4));
         assert_eq!(l.ctl.ask.as_ref().unwrap().progress, Some(0.4));
-        widgets::shot::save(
+        crate::ui::widgets::shot::save(
             "live-controller-downloading",
             l.controller_view(),
             l.ctl.size(),
