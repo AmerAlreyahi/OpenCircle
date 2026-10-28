@@ -14,6 +14,8 @@ const DOT: f32 = 18.0;
 const CHIP: f32 = 22.0;
 const PER_ROW: usize = 6;
 const PAD: f32 = 10.0;
+/// `picker_with`'s width: its rows of controls, and the padding.
+const WIDE: f32 = 256.0;
 
 /// A round dot of `colour` with a `rim` edge (white reads on a light page).
 fn dot<'a, Message: 'a>(colour: Color, d: f32) -> Element<'a, Message> {
@@ -103,18 +105,22 @@ pub fn picker_with<'a, Message: Clone + 'a>(
         (colours.chunks(PER_ROW)).map(|r| row(r.iter().map(chip)).spacing(space::GAP).into());
     let hex = input("#RRGGBB", hex, true, false).on_input(on_hex);
     let mut body = column(rows).push(hex).spacing(space::GAP);
+    // The hex field fills its row: with more controls the picker is as wide
+    // as they need (a window floating it would otherwise stretch it).
+    let wide = more.is_some();
     if let Some(more) = more {
         body = body.push(more);
     }
-    container(body)
-        .padding(PAD)
-        .style(|_| container::Style {
-            background: Some(c().dropdown.into()),
-            border: Border::default()
-                .rounded(radius::DROPDOWN)
-                .width(1)
-                .color(c().rim),
-            ..container::Style::default()
-        })
-        .into()
+    let picker = container(body).padding(PAD).style(|_| container::Style {
+        background: Some(c().dropdown.into()),
+        border: Border::default()
+            .rounded(radius::DROPDOWN)
+            .width(1)
+            .color(c().rim),
+        ..container::Style::default()
+    });
+    match wide {
+        true => picker.width(WIDE).into(),
+        false => picker.into(),
+    }
 }
