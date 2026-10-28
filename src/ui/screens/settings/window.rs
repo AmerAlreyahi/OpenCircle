@@ -33,7 +33,7 @@ const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 const OS: &str = if cfg!(windows) { "Windows" } else { "Linux" };
 
 pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
-    let logo = crate::ui::widgets::chrome::logo_handle();
+    let logo = crate::ui::kit::logo::logo(16);
     let header = regular(
         logo,
         "OpenCircle Settings",

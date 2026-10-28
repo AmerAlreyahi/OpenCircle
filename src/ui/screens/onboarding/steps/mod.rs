@@ -24,7 +24,7 @@ fn logo_card<'a>(
     line: &'a str,
     trailing: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let handle = crate::ui::widgets::chrome::logo_handle();
+    let handle = crate::ui::kit::logo::logo(logo as u32);
     let words = column![
         text(Role::ROW_TITLE, title.into()),
         sub(Role::ROW_DESC, line).line_height(1.5)

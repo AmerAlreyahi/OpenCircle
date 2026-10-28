@@ -449,7 +449,7 @@ fn header_sheet() {
     let close = SIZE.width - 16.0 - 23.0;
     let regular = move |ar| {
         let status = chip::status(s(ar, "Saved", "تم الحفظ"), chip::Tone::Ok);
-        let logo = crate::ui::widgets::chrome::logo_handle();
+        let logo = crate::ui::kit::logo::logo(16);
         header::regular(logo, s(ar, "Settings", "الإعدادات"), status, false, |_| ())
     };
     let rows = vec![
@@ -679,7 +679,7 @@ fn markdown_sheet() {
 #[test]
 fn spinner_sheet() {
     use super::super::spinner::{spinner, thinking};
-    let logo = crate::ui::widgets::chrome::logo_handle;
+    let logo = || crate::ui::kit::logo::logo(24);
     let rows = vec![
         row("turn 0", Act::Rest, move |_| {
             spinner(logo(), 24.0, 0.0, false)
@@ -698,6 +698,36 @@ fn spinner_sheet() {
         }),
     ];
     sheet("spinner", Size::new(200.0, 44.0), &rows);
+}
+
+/// `logo`: the themed logo at 16, 24 and 64 px, and in Emerald and Rose
+/// (a coloured theme: the cell builds its handle under that theme, then restores).
+#[test]
+fn logo_sheet() {
+    use super::super::logo::logo;
+    let under = |id: &'static str| {
+        move |_| {
+            let prev = themes::current();
+            themes::set(themes::THEMES.into_iter().find(|t| t.id == id).unwrap());
+            let handle = logo(40);
+            themes::set(prev);
+            iced::widget::image(handle).width(40).height(40).into()
+        }
+    };
+    let rows = vec![
+        row("16 px", Act::Rest, |_| {
+            iced::widget::image(logo(16)).width(16).height(16).into()
+        }),
+        row("24 px", Act::Rest, |_| {
+            iced::widget::image(logo(24)).width(24).height(24).into()
+        }),
+        row("64 px", Act::Rest, |_| {
+            iced::widget::image(logo(64)).width(64).height(64).into()
+        }),
+        row("emerald", Act::Rest, under("emerald")),
+        row("rose", Act::Rest, under("rose")),
+    ];
+    sheet("logo", Size::new(200.0, 72.0), &rows);
 }
 
 #[test]
@@ -761,7 +791,7 @@ fn field_slots_sheet() {
     let view = |typed: bool, focused| {
         move |ar| {
             let parts = (
-                logo(crate::ui::widgets::chrome::logo_handle(), false, ()),
+                logo(crate::ui::kit::logo::logo(16), false, ()),
                 field::pair(
                     toggle(super::super::icon::Icon::Screen, !typed, false, ()),
                     badge("AI", false, ()),

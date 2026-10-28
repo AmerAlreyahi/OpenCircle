@@ -304,7 +304,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    let logo = crate::ui::widgets::chrome::logo_handle();
+    let logo = crate::ui::kit::logo::logo(16);
     let header = regular(
         logo,
         "Welcome to OpenCircle",

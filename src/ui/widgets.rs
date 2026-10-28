@@ -470,15 +470,6 @@ pub mod chrome {
         image::Handle::from_rgba(info.width, info.height, rgba)
     }
 
-    pub(crate) fn logo_handle() -> image::Handle {
-        // One handle, so the renderer's image cache keeps its pixels between frames.
-        static HANDLE: LazyLock<image::Handle> = LazyLock::new(|| {
-            let l = logo();
-            image::Handle::from_rgba(l.width, l.height, l.rgba.clone())
-        });
-        HANDLE.clone()
-    }
-
     /// A caption button: quiet, a hover tint; `close` tints red.
     fn caption<'a, Message: Clone + 'a>(
         glyph: char,
@@ -519,7 +510,7 @@ pub mod chrome {
     ) -> Element<'a, Message> {
         let palette = theme::current();
         let grip = row![
-            image(logo_handle()).width(18).height(18),
+            image(crate::ui::kit::logo::logo(18)).width(18).height(18),
             text(title).size(13).color(palette.text)
         ]
         .spacing(10)

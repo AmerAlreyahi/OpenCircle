@@ -138,7 +138,7 @@ impl Panel {
             title,
             chip,
             docked: chatting,
-            logo: chatting.then(widgets::chrome::logo_handle),
+            logo: chatting.then(|| crate::ui::kit::logo::logo(16)),
             menu: chatting,
         };
         if chatting {
@@ -219,7 +219,7 @@ impl Panel {
             let mut answer = column![].spacing(STACK).width(Fill);
             if let Some(thought) = turn.thought {
                 let line = format!("Thought for {:.1} s", thought.as_secs_f32());
-                answer = answer.push(chip::logo(line, widgets::chrome::logo_handle()));
+                answer = answer.push(chip::logo(line, crate::ui::kit::logo::logo(14)));
             }
             let busy = last && streaming;
             if let (false, Some((_, parsed))) = (turn.answer.is_empty(), answers.get(i)) {
@@ -231,7 +231,7 @@ impl Panel {
                     }
                     _ if browser => note("Opening Google AI Mode…").into(),
                     _ => spinner::thinking(
-                        widgets::chrome::logo_handle(),
+                        crate::ui::kit::logo::logo(16),
                         self.spin.map_or(0.0, |(_, turn)| turn),
                         motion::reduced(),
                         "Thinking…",

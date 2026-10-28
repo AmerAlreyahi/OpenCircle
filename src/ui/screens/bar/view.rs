@@ -35,7 +35,7 @@ impl App {
         let (width, _) = self.bar_size();
         let kbd = |stop| self.o.bar_focus == Some(stop);
         let logo = field::logo(
-            widgets::chrome::logo_handle(),
+            crate::ui::kit::logo::logo(16),
             kbd(Stop::Logo),
             Message::AskButton,
         );

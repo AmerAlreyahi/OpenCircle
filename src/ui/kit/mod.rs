@@ -23,6 +23,7 @@ pub mod hero;
 pub mod icon;
 pub mod icon_button;
 pub mod keycap;
+pub mod logo;
 pub mod markdown;
 pub mod option_list;
 pub mod panel_frame;
