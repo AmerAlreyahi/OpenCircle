@@ -67,7 +67,7 @@ const fn hex(rgb: u32) -> Color {
 pub const PRISM: Look = Look {
     id: "prism",
     name: "Liquid Prism",
-    desc: "Refractive cyan-violet conic beam",
+    desc: "Cyan-violet glow round the screen",
     badge: "Popular",
     kind: Kind::Glow,
     solid: [hex(0x38bdf8), hex(0xa78bfa)],
@@ -115,8 +115,8 @@ pub const AURORA: Look = Look {
 pub const HORIZON: Look = Look {
     id: "horizon",
     name: "Horizon Pulse",
-    desc: "Top & bottom breathing light waves",
-    badge: "Animated",
+    desc: "Soft light along the top & bottom",
+    badge: "Calm",
     kind: Kind::Horizon,
     solid: [hex(0x38bdf8), hex(0x818cf8)],
     glow: [
@@ -199,7 +199,7 @@ pub const HUD: Look = Look {
 pub const FROST: Look = Look {
     id: "frost",
     name: "Stealth Frost",
-    desc: "Monochrome silver frosted bezel",
+    desc: "Thin monochrome silver bezel",
     badge: "Quiet",
     kind: Kind::Bezel,
     solid: [hex(0xe2e8f0), hex(0x94a3b8)],
