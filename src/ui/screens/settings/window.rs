@@ -53,7 +53,8 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
         .into()
 }
 
-/// The auto-save pill: what is wrong, else what the last change did.
+/// The header pill, only when something needs the user (owner, 2026-10-29:
+/// changes save by themselves, so "Auto-save active" / "Saved" say nothing).
 fn pill(state: &State) -> Element<'_, Message> {
     let n = state.problems.len();
     let (line, tone) = if n > 0 {
@@ -63,12 +64,8 @@ fn pill(state: &State) -> Element<'_, Message> {
         (notice.clone(), Tone::Error)
     } else if state.asking_close {
         ("Save your changes before closing?".into(), Tone::Error)
-    } else if state.writing {
-        ("Saving…".into(), Tone::Busy)
-    } else if state.saved_at.is_some() {
-        ("Saved".into(), Tone::Ok)
     } else {
-        ("Auto-save active".into(), Tone::Ok)
+        return Space::new().into();
     };
     status(cut(&line), tone)
 }

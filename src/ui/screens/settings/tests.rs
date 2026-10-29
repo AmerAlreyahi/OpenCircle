@@ -531,7 +531,7 @@ fn saving_keeps_what_changed_elsewhere_meanwhile() {
 }
 
 /// #136: in the real window a valid change is on disk at once; one with a
-/// problem is held back until it is fixed, and the pill's "Saved" fades.
+/// problem is held back until it is fixed.
 #[test]
 fn a_valid_change_saves_itself() {
     let path = tmp("autosave");
@@ -542,7 +542,7 @@ fn a_valid_change_saves_itself() {
     };
     assert_eq!(cfg.theme, Theme::Light);
     assert_eq!(Config::load_from(&path).0.theme, Theme::Light);
-    assert!(!s.dirty() && s.saved_at.is_some());
+    assert!(!s.dirty());
     assert!(
         s.close_requested(),
         "nothing unsaved: closes without asking"
@@ -561,10 +561,9 @@ fn a_valid_change_saves_itself() {
     assert!(!s.dirty(), "{:?}", s.problems);
     assert_eq!(Config::load_from(&path).0.ai.model, "llama3:8b");
 
-    // The pill's "Saved" ends after its moment.
-    s.saved_at = Some(Instant::now() - SAVED_FOR);
-    update(&mut s, Message::Tick);
-    assert!(s.saved_at.is_none());
+    // Saving says nothing (owner, 2026-10-29): no pill, no frame clock.
+    assert!(!shot::texts(view(&s)).iter().any(|t| t == "Saved"));
+    assert!(!s.animating());
     theme::apply(Theme::Dark);
     let _ = std::fs::remove_file(&path);
 }
@@ -1744,9 +1743,6 @@ fn labs_pages_are_hidden_while_their_switch_is_off() {
         update(&mut s, Message::Labs(f, false));
         assert!(!sidebar(&s).contains(&page), "{page} off");
         assert_eq!(s.section, Section::Labs, "{page}: back to Labs");
-        // the pill says the switch was saved
-        assert!(s.saved_at.is_some());
-        assert!(shot::texts(view(&s)).iter().any(|t| t == "Saved"));
     }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

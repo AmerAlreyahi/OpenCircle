@@ -1,7 +1,7 @@
 //! `.oc-sidebar`: a window's page list, 168 px wide on `sidebar` with a
 //! divider at its right. Items (`.oc-nav-item`, 36 px, 12.5 px / 500) are
 //! `text_sub`, `text` on `hover` under the cursor; the active one is `text`
-//! with a 5 px accent dot, over ONE elevated highlight (`.oc-nav-glide`) that
+//! (no dot: owner, 2026-10-29), over ONE elevated highlight (`.oc-nav-glide`) that
 //! glides from item `from` to `active` as `glide` goes 0 → 1 (the caller's
 //! clock: `motion::GLIDE`, standard). A footer line under a hairline.
 use iced::font::Weight;
@@ -24,8 +24,7 @@ pub struct Item<'a> {
 
 /// Between two items (`space-y-0.5`).
 const GAP: f32 = 2.0;
-/// The active item's dot and an item's side padding.
-const DOT: f32 = 5.0;
+/// An item's side padding.
 const ITEM_PAD: f32 = 12.0;
 /// The footer: 10.5 px at half strength, 8 px under its hairline and at its sides.
 const FOOTER: f32 = 10.5;
@@ -94,20 +93,13 @@ fn nav_item<'a, Message: Clone + 'a>(
     let label = text(item.label)
         .size(Role::NAV.size)
         .font(super::text::font(Role::NAV));
-    let dot = container(Space::new().width(DOT).height(DOT)).style(move |_| container::Style {
-        // the active item's; the others keep its room (the badge stays put)
-        background: active.then(|| faded(c().accent, 0.9).into()),
-        border: Border::default().rounded(radius::FULL),
-        ..container::Style::default()
-    });
-    // `justify-between`: the label left, the dot right, a badge between them
+    // the label left, a badge after it
     let mut line = row![label, Space::new().width(Fill)]
         .height(Fill)
         .align_y(Center);
     if let Some(b) = item.badge {
         line = line.push(badge(b)).push(Space::new().width(Fill));
     }
-    let line = line.push(dot);
     button(line)
         .width(Fill)
         .height(size::NAV_ITEM)

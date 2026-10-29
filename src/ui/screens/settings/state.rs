@@ -17,7 +17,7 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use iced::{Color, Size, Subscription, event, keyboard};
 
@@ -569,8 +569,6 @@ pub struct State {
     /// Every valid change is written at once (the real window; `State::new`
     /// keeps it off so tests drive `Message::Save` themselves).
     pub(super) auto: bool,
-    /// When the last auto-save happened: the pill says "Saved" for `SAVED_FOR`.
-    pub(super) saved_at: Option<Instant>,
     /// A write is on its way (one at a time): later saves wait for its answer.
     pub(super) writing: bool,
     /// Labs switches flipped while a write was on its way, written in turn.
@@ -609,9 +607,6 @@ pub enum Pick {
     SearchWith(SearchWith),
     Reader(TextReader),
 }
-
-/// How long the footer pill says "Saved" after a change (the design's 1.8 s).
-pub(super) const SAVED_FOR: Duration = Duration::from_millis(1800);
 
 impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -695,7 +690,7 @@ pub enum Message {
     Save,
     /// A write (`Outcome::Write`) finished, on its thread.
     Written(Box<Done>),
-    /// The "Saved" pill's clock.
+    /// The frame clock (glides, previews).
     Tick,
     /// A feature preview's Hide (`false`) / Show (`true`), by its
     /// `hidden_previews` name; and Replay.
@@ -908,7 +903,6 @@ impl State {
             asking_close: false,
             leaving: false,
             auto: false,
-            saved_at: None,
             writing: false,
             queued_labs: Vec::new(),
             closing: false,
@@ -1348,9 +1342,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::Replay => state.play(),
         Message::Tick => {
-            if state.saved_at.is_some_and(|t| t.elapsed() >= SAVED_FOR) {
-                state.saved_at = None;
-            }
             if let Some(t) = state.played {
                 let at = t.elapsed();
                 let mut playing = false;
@@ -1512,12 +1503,10 @@ pub(super) fn written(state: &mut State, done: Box<Done>) -> Outcome {
     match edit {
         Edit::Save { draft, .. } => {
             state.draft = config::rebase(&cfg, &draft, &state.draft);
-            state.saved_at = Some(Instant::now());
         }
         Edit::Lab(..) => {
             // The draft keeps its unsaved edits, on top of what is saved now.
             state.draft = config::rebase(&cfg, &state.saved, &state.draft);
-            state.saved_at = Some(Instant::now());
             // its page goes with a Labs feature: back to Labs
             if pages::of(state.section)
                 .lab
@@ -1542,7 +1531,7 @@ pub(super) fn written(state: &mut State, done: Box<Done>) -> Outcome {
     Outcome::Saved(cfg)
 }
 
-/// The frame clock while something moves or the pill says "Saved"; key
+/// The frame clock while something moves; key
 /// presses only while a shortcut field is recording.
 pub fn subscription(state: &State) -> Subscription<Message> {
     let clock = match state.animating() {
@@ -1564,12 +1553,9 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 }
 
 impl State {
-    /// Something moves by the clock: a glide, the "Saved" pill, a preview.
+    /// Something moves by the clock: a glide, a preview.
     pub fn animating(&self) -> bool {
-        self.saved_at.is_some()
-            || self.moved.is_some()
-            || self.picked.is_some()
-            || self.played.is_some()
+        self.moved.is_some() || self.picked.is_some() || self.played.is_some()
     }
 
     /// The page's previews playing `clip` as if they began `ago` (no clip is

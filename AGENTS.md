@@ -233,6 +233,9 @@ production systems.
   the CPU renderer can't breathe near 0 % (each step ~11 ms; trimmed breath still 7-9 % of a core on the VM by
   cycle count), so the overlay's glow is static in 0.1.2 (`edge::breathes`); the 4 s breath returns with the GPU
   renderer in 0.1.3, like the other motion ("Smooth on the CPU").
+- Quiet Settings (owner, 2026-10-29): no "Auto-save active"/"Saved"/"Saving" pill (changes save by themselves,
+  as in most apps) and no dot on the active sidebar item; the header pill shows only when something needs the
+  user (a problem to fix). The Copied pill (dot + "Copied") stays as it is.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.
