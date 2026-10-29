@@ -799,7 +799,8 @@ fn answered_chats_are_saved_as_text_only_and_off_writes_nothing() {
     drop(super::keep_in(Some(db.clone()), false, chat));
     assert!(!dir.exists(), "off: nothing written");
     drop(super::keep_in(Some(db.clone()), true, chat));
-    let saved = (0..200)
+    // up to 10 s: a loaded Windows CI runner took over 2 s
+    let saved = (0..1000)
         .find_map(|_| {
             std::thread::sleep(std::time::Duration::from_millis(10));
             chats::list(&db, "").into_iter().next()
