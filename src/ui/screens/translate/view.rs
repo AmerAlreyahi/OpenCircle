@@ -39,7 +39,6 @@ impl Session {
                 glyph: actions::translate::ACTION.icon,
                 title,
                 chip: None,
-                docked: false,
                 menu: false,
                 held: false,
                 logo: None,

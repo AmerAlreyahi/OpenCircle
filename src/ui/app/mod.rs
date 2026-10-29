@@ -190,6 +190,8 @@ pub(in crate::ui) struct App {
     pub(in crate::ui) card: Option<Rectangle>,
     /// The side the user docked the AI chat to (this run of the app).
     pub(in crate::ui) chat_side: Option<crate::ui::kit::panel_frame::Side>,
+    /// The AI chat's width the user set by its inner edge (this run of the app).
+    pub(in crate::ui) chat_width: Option<f32>,
     /// The AI chat once pinned: it outlives the overlay (`results::Resident`).
     pub(in crate::ui) chat: Option<results::Resident>,
     /// Song searches started (numbers them).
@@ -260,6 +262,7 @@ impl App {
             timed: false,
             card: None,
             chat_side: None,
+            chat_width: None,
             chat: None,
             songs: 0,
             update: None,

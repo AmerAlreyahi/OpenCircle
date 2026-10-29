@@ -576,7 +576,6 @@ fn panel_frame_card_sheet() {
                 glyph: Icon::Check.glyph(),
                 title: s(ar, "Text", "النص"),
                 chip: Some("model"),
-                docked: false,
                 menu: false,
                 held: false,
                 logo: None,

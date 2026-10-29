@@ -176,7 +176,6 @@ impl Session {
             glyph: MUSIC,
             title: "Song search",
             chip: None,
-            docked: false,
             menu: false,
             held: false,
             logo: None,

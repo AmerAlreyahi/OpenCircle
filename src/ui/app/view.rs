@@ -261,7 +261,7 @@ impl App {
         if let Some(chat) = &self.chat {
             let id = chat.id;
             let at = self.chat_rect();
-            let card = chat.panel.view(at, self.o.screen, false);
+            let card = chat.panel.view(at, self.o.screen, self.o.card_hover);
             let card = card.map(move |msg| Message::Panel(id, msg));
             layers = layers.push(lifted(card, at, chat.panel.held));
         }

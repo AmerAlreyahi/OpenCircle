@@ -262,7 +262,9 @@ impl App {
             Message::BarReleased => match self.o.bar_drag.take() {
                 Some((_, at)) => {
                     let size = self.dock_size();
-                    self.o.bar_anchor = bar::nearest(at, self.o.screen, size, self.o.work_inset);
+                    let room = self.bar_room();
+                    let at = at - iced::Vector::new(room.x, room.y);
+                    self.o.bar_anchor = bar::nearest(at, room.size(), size, self.o.work_inset);
                     crate::log!("[opencircle] bar docked: {:?}", self.o.bar_anchor);
                     self.log_frames("bar drag");
                     self.o.bar_eased = None; // the glide goes on from where it is drawn
@@ -272,7 +274,10 @@ impl App {
             },
             Message::CardMoved(p) => {
                 if let Some((how, last)) = self.o.card_drag {
-                    if let (Some(from), true) = (last, self.o.card_chat) {
+                    if let (Some(from), true, card::Drag::Resize) = (last, self.o.card_chat, how) {
+                        let at = card::drag(self.chat_rect(), how, p - from, self.o.screen);
+                        self.chat_width = Some(at.width);
+                    } else if let (Some(from), true) = (last, self.o.card_chat) {
                         self.o.chat_off += p - from;
                         self.o.chat_glide = None;
                     } else if let Some(from) = last {

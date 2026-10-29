@@ -22,6 +22,9 @@ const PAD: f32 = 22.0;
 /// Under the heading, above the actions (`.as-heading` 14, `.as-actions` 18).
 const UNDER_HEADING: f32 = 14.0;
 const ABOVE_ACTIONS: f32 = 18.0;
+/// The AI chat's log to its composer: close, the composer is its own box
+/// (owner, 2026-10-29).
+const ABOVE_COMPOSER: f32 = 8.0;
 const ICON: f32 = 20.0;
 /// The heading row (the 20 px icon, the 16 px title).
 const HEADING: f32 = 24.0;
@@ -226,43 +229,28 @@ fn keep_on(r: Rectangle, screen: Size) -> Rectangle {
     Rectangle::new(Point::new(x, y), r.size())
 }
 
-/// The AI chat's card (`#widgetAiContainer`): 35 % of the screen wide
-/// (340..640 px, never past the screen), 95 % of the height above the
-/// taskbar (`taskbar` px at the bottom), 16 px from the `side` (left or
-/// right; `Top` counts as right) and 14 px from the top. It is not resized:
-/// a drag moves it, and where it is let go it docks (`dock_side`).
-pub fn docked(screen: Size, side: Side, taskbar: f32) -> Rectangle {
+/// The AI chat's card (`#widgetAiContainer`): `width` wide (the user's,
+/// by its inner edge), else 35 % of the screen (340..640 px), never past the
+/// screen; 95 % of the height above the taskbar (`taskbar` px at the bottom),
+/// 16 px from the `side` (left or right; `Top` counts as right) and 14 px from
+/// the top. A drag moves it, and where it is let go it docks (`dock_side`).
+pub fn docked(screen: Size, side: Side, taskbar: f32, width: Option<f32>) -> Rectangle {
     const SHARE: f32 = 0.35;
     const WIDE: (f32, f32) = (340.0, 640.0);
     const TALL: f32 = 0.95;
     const SIDE_GAP: f32 = 16.0;
     const TOP_GAP: f32 = 14.0;
     let room = (screen.width - 2.0 * SIDE_GAP).max(0.0);
-    let width = (screen.width * SHARE).clamp(WIDE.0, WIDE.1).min(room);
+    let width = width
+        .unwrap_or((screen.width * SHARE).clamp(WIDE.0, WIDE.1))
+        .max(WIDE.0)
+        .min(room);
     let height = ((screen.height - taskbar) * TALL).min(screen.height - TOP_GAP);
     let x = match side {
         Side::Left => SIDE_GAP,
         _ => screen.width - SIDE_GAP - width,
     };
     Rectangle::new(Point::new(x, TOP_GAP), Size::new(width, height.max(0.0)))
-}
-
-/// The docked chat `dock` kept clear of the `bar` (`GAP` from it): it ends
-/// above a bar at the bottom, starts below one at the top; a bar elsewhere
-/// changes nothing.
-pub fn clear_of(dock: Rectangle, bar: Rectangle) -> Rectangle {
-    if !dock.intersects(&bar) {
-        return dock;
-    }
-    let bottom = dock.y + dock.height;
-    let (top, bottom) = match bar.center_y() < dock.center_y() {
-        true => ((bar.y + bar.height + GAP).max(dock.y), bottom),
-        false => (dock.y, (bar.y - GAP).min(bottom)),
-    };
-    Rectangle::new(
-        Point::new(dock.x, top),
-        Size::new(dock.width, (bottom - top).max(0.0)),
-    )
 }
 
 /// The side a dragged chat card docks to where it is let go: the one its
@@ -307,8 +295,6 @@ pub struct Header<'a> {
     pub logo: Option<iced::widget::image::Handle>,
     pub title: &'a str,
     pub chip: Option<&'a str>,
-    /// A docked card (the AI chat, `docked`): no resize edge.
-    pub docked: bool,
     /// The logo is a button (`Event::Menu`): the AI chat's drawer.
     pub menu: bool,
     /// Picked up and dragged: the widget's accent edge (`Material::Held`,
@@ -357,8 +343,12 @@ pub fn card<'a, Message: Clone + 'a>(
     let top = row![heading].push(ends).align_y(Center);
     let mut parts = column![top, container(body).height(Fill)].spacing(UNDER_HEADING);
     if let Some(footer) = footer {
-        let above = ABOVE_ACTIONS - UNDER_HEADING;
-        parts = parts.push(container(footer).padding(iced::Padding::ZERO.top(above)));
+        // (the chat is the card with the drawer menu)
+        let above = match header.menu {
+            true => ABOVE_COMPOSER,
+            false => ABOVE_ACTIONS,
+        };
+        parts = column![parts.height(Fill), footer].spacing(above);
     }
     let material = match header.held {
         true => Material::Held,
@@ -410,10 +400,8 @@ pub fn card<'a, Message: Clone + 'a>(
     // In layers of its own bounds (an empty first child: a stack draws the
     // rest in layers clipped to its container): dragged, the card redraws as
     // its old and new place, not as each of its parts.
-    let edge = match header.docked {
-        true => None,
-        false => Some(pin(edge).position(place)),
-    };
+    // a card filling its window (the pinned chat's own) is not resized there
+    let edge = (at.size() != screen).then(|| pin(edge).position(place));
     let layers = stack![Space::new(), opaque(card)]
         .push(edge)
         .width(at.width)
@@ -544,22 +532,30 @@ mod tests {
     #[test]
     fn the_chat_docks_left_or_right_at_the_designs_size() {
         // 1920: 35 % = 672, capped at 640; 95 % of the height over a 48 px taskbar
-        let right = docked(SCREEN, Side::Right, 48.0);
+        let right = docked(SCREEN, Side::Right, 48.0, None);
         assert_eq!(right.size(), Size::new(640.0, (1080.0 - 48.0) * 0.95));
         assert_eq!((right.x + right.width, right.y), (1920.0 - 16.0, 14.0));
-        let left = docked(SCREEN, Side::Left, 48.0);
+        let left = docked(SCREEN, Side::Left, 48.0, None);
         assert_eq!((left.x, left.width), (16.0, 640.0));
         // 1440: 504 wide (the design's measure); a small screen: 340, inside it
         assert_eq!(
-            docked(Size::new(1440.0, 900.0), Side::Left, 48.0).width,
+            docked(Size::new(1440.0, 900.0), Side::Left, 48.0, None).width,
             504.0
         );
         assert_eq!(
-            docked(Size::new(800.0, 600.0), Side::Left, 0.0).width,
+            docked(Size::new(800.0, 600.0), Side::Left, 0.0, None).width,
             340.0
         );
-        let tiny = docked(Size::new(300.0, 200.0), Side::Right, 0.0);
+        let tiny = docked(Size::new(300.0, 200.0), Side::Right, 0.0, None);
         assert!(tiny.x >= 0.0 && tiny.y + tiny.height <= 200.0, "{tiny:?}");
+        // the user's width, kept 340 wide and inside the screen
+        let wide = docked(SCREEN, Side::Right, 48.0, Some(900.0));
+        assert_eq!((wide.width, wide.x + wide.width), (900.0, 1920.0 - 16.0));
+        assert_eq!(docked(SCREEN, Side::Left, 48.0, Some(10.0)).width, 340.0);
+        assert_eq!(
+            docked(SCREEN, Side::Left, 48.0, Some(5000.0)).width,
+            1920.0 - 32.0
+        );
         // let go: it docks to the side its middle is on
         let dragged = right + Vector::new(-500.0, 30.0);
         assert_eq!(

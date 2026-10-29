@@ -19,6 +19,17 @@ pub fn scroll<'a, Message: 'a>(
         .style(style)
 }
 
+/// Scrolls down with no scrollbar (the AI chat's log: the wheel and the
+/// keys scroll it; a bar on its edge read as a line in the border, owner
+/// 2026-10-29).
+pub fn quiet<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> scrollable::Scrollable<'a, Message> {
+    iced::widget::scrollable(content)
+        .direction(Direction::Vertical(Scrollbar::hidden()))
+        .style(style)
+}
+
 /// Scrolls across (a code block's long lines).
 pub fn across<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,

@@ -3679,17 +3679,15 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
         (at.x, at.width, at.height),
         (d.x.round(), d.width.round(), d.height.round())
     );
-    // held: it follows the pointer 1:1, by fractions of a px too, drawn on
-    // whole px, picked up (scaled, accent edge)
+    // held: it follows the pointer 1:1 across, by fractions of a px too,
+    // drawn on whole px, picked up (scaled, accent edge); full height, it
+    // moves only across
     let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Move));
     let _ = app.update(Message::Panel(id, grab));
     let _ = app.update(Message::CardMoved(Point::new(700.0, 30.0)));
     let _ = app.update(Message::CardMoved(Point::new(500.3, 40.6)));
     let held = app.card_at();
-    assert_eq!(
-        held.position(),
-        Point::new((at.x - 199.7).round(), (at.y + 10.6).round())
-    );
+    assert_eq!(held.position(), Point::new((at.x - 199.7).round(), at.y));
     assert!(app.o.panel.as_ref().unwrap().1.held);
     // ... but never past 6 px from the screen's edge (design 3.4)
     let _ = app.update(Message::CardMoved(Point::new(-400.0, 40.6)));
@@ -3732,30 +3730,79 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
 /// the docked chat and the bar at its spot don't meet (owner, 2026-10-28).
 #[test]
 fn the_docked_chat_never_covers_the_bar() {
-    use crate::config::BarAnchor;
-    use crate::ui::screens::bar::geometry::anchor_at;
-    for (w, h) in [(800, 600), (1920, 1080), (1280, 720)] {
+    for (w, h) in [(1280, 720), (1920, 1080), (2560, 1440)] {
         let mut app = open_app(w, h, 1.0);
         app.o.work_inset = 48.0;
-        for anchor in [
-            BarAnchor::Bottom,
-            BarAnchor::Top,
-            BarAnchor::BottomLeft,
-            BarAnchor::BottomRight,
-        ] {
-            app.o.bar_anchor = anchor;
-            let (_, size) = app.bar_size();
-            let bar = Rectangle::new(anchor_at(anchor, app.o.screen, size, 48.0), size);
-            for side in [card::Side::Left, card::Side::Right] {
-                let chat = app.chat_dock(app.o.screen, side, 48.0);
+        drag(
+            &mut app,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 120.0),
+            false,
+        );
+        let crop = app.crop().unwrap();
+        drop(app.open_panel(actions::Panel::Ask, crop, None));
+        let id = app.o.panel.as_ref().unwrap().0;
+        api_ready(&mut app, id, b"first");
+        chat_turn(&mut app, id, "What is this?", "A chart.");
+        chat_turn(&mut app, id, "And the trend?", "Up.");
+        assert!(app.chat.is_some(), "pinned");
+        app.o.selection = None;
+        for side in [card::Side::Left, card::Side::Right] {
+            app.chat_side = Some(side);
+            let chat = app.chat_rect();
+            // full height: the chat is never cut short for the bar
+            assert_eq!(chat.height, ((h as f32 - 48.0) * 0.95).round(), "{w}x{h}");
+            for anchor in crate::ui::screens::bar::geometry::ANCHORS {
+                app.o.bar_anchor = anchor;
+                let bar = Rectangle::new(app.bar_target(), app.dock_size());
                 assert!(
                     !chat.intersects(&bar),
                     "{w}x{h} {anchor:?} {side:?}: {chat:?} {bar:?}"
                 );
-                assert!(chat.height > 200.0, "still a chat: {chat:?}");
+                // let go where it is drawn: the same spot (beside a wide
+                // chat, a centre and a corner can be one spot)
+                use crate::ui::screens::bar::geometry::{anchor_at, nearest};
+                let room = app.bar_room();
+                let at = bar.position() - iced::Vector::new(room.x, room.y);
+                let near = nearest(at, room.size(), bar.size(), 48.0);
+                let spot = |a| anchor_at(a, room.size(), bar.size(), 48.0);
+                assert_eq!(spot(near), spot(anchor), "{w}x{h} {anchor:?}");
             }
         }
     }
+}
+
+/// The chat's inner edge sets its width, kept for the next chat; a
+/// double-click on it goes back to the design's width.
+#[test]
+fn the_chats_inner_edge_sets_its_width() {
+    let mut app = open_app(1920, 1080, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_panel(actions::Panel::Ask, crop, None));
+    let id = app.o.panel.as_ref().unwrap().0;
+    let before = app.chat_rect();
+    let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Resize));
+    let _ = app.update(Message::Panel(id, grab));
+    let _ = app.update(Message::CardMoved(Point::new(1000.0, 500.0)));
+    let _ = app.update(Message::CardMoved(Point::new(900.0, 520.0)));
+    let _ = app.update(Message::CardReleased);
+    let after = app.chat_rect();
+    assert_eq!(after.width, before.width + 100.0, "wider by the drag");
+    assert_eq!(after.height, before.height, "only the width");
+    assert_eq!(
+        after.x + after.width,
+        before.x + before.width,
+        "still docked"
+    );
+    let reset = panel::Msg::Card(card::Event::Reset);
+    let _ = app.update(Message::Panel(id, reset));
+    assert_eq!(app.chat_rect(), before);
 }
 
 /// The pinned chat's own window, let go mid-screen, glides to its dock frame

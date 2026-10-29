@@ -149,11 +149,13 @@ pub(in crate::ui) fn follow(at: Point, to: Point, since: std::time::Duration) ->
 }
 
 /// Every spot the bar docks at.
-pub(in crate::ui) const ANCHORS: [BarAnchor; 4] = [
+pub(in crate::ui) const ANCHORS: [BarAnchor; 6] = [
     BarAnchor::Bottom,
     BarAnchor::Top,
     BarAnchor::BottomLeft,
     BarAnchor::BottomRight,
+    BarAnchor::TopLeft,
+    BarAnchor::TopRight,
 ];
 
 /// The bar's top-left at `anchor` on `screen` (`size`), inside the work area
@@ -166,6 +168,8 @@ pub(in crate::ui) fn anchor_at(anchor: BarAnchor, screen: Size, size: Size, inse
         BarAnchor::Top => (centre, TOP),
         BarAnchor::BottomLeft => (BOTTOM_GAP, bottom),
         BarAnchor::BottomRight => (screen.width - BOTTOM_GAP - size.width, bottom),
+        BarAnchor::TopLeft => (BOTTOM_GAP, TOP),
+        BarAnchor::TopRight => (screen.width - BOTTOM_GAP - size.width, TOP),
     };
     Point::new(x.max(GAP), y.max(GAP))
 }
@@ -287,6 +291,8 @@ mod tests {
         assert_eq!(near(800.0, 200.0), BarAnchor::Top);
         assert_eq!(near(10.0, 700.0), BarAnchor::BottomLeft);
         assert_eq!(near(1500.0, 1000.0), BarAnchor::BottomRight);
+        assert_eq!(near(10.0, 100.0), BarAnchor::TopLeft);
+        assert_eq!(near(1500.0, 50.0), BarAnchor::TopRight);
         // a selection where the bar is: the nearest free anchor; none in the way: home
         let home = Rectangle::new(anchor_at(BarAnchor::Bottom, SCREEN, size, 48.0), size);
         let under = Rectangle::new(

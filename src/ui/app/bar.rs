@@ -3,7 +3,7 @@
 
 use iced::futures::channel::mpsc::UnboundedSender;
 use iced::widget::operation;
-use iced::{Point, Rectangle, Size, Task};
+use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::actions;
 use crate::config::{self};
@@ -11,6 +11,7 @@ use crate::labs::{self, BarButton};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
+use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::editor::Editing;
 
@@ -30,8 +31,9 @@ impl App {
 
     /// The bottom bar's field width and size: the same in every state (no
     /// selection, a selection, after a card), so it never jumps.
+    /// Beside a pinned chat, it fits what the chat leaves (a shorter field).
     pub(in crate::ui) fn bar_size(&self) -> (f32, Size) {
-        self.bar_size_on(self.o.screen.width)
+        self.bar_size_on(self.bar_room().width)
     }
 
     /// The bar's field width and size on a screen `width` wide.
@@ -69,19 +71,32 @@ impl App {
         }
         let size = self.dock_size();
         let canvas = self.o.edit.as_ref().map(Editing::canvas_rect);
+        let room = self.bar_room();
+        let off = Vector::new(room.x, room.y);
         let blocked: Vec<Rectangle> = (self.o.selection.iter())
             .chain(self.o.others.iter().map(|(s, _)| s))
             .map(|s| self.o.view.rect_to_screen(s.area))
             .chain(canvas)
+            .map(|r| r - off)
             .collect();
-        let spot = bar::free(
-            self.o.bar_anchor,
-            &blocked,
-            self.o.screen,
-            size,
-            self.o.work_inset,
-        );
-        bar::anchor_at(spot, self.o.screen, size, self.o.work_inset)
+        let inset = self.o.work_inset;
+        let spot = bar::free(self.o.bar_anchor, &blocked, room.size(), size, inset);
+        bar::anchor_at(spot, room.size(), size, inset) + off
+    }
+
+    /// The part of the screen the bar's spots are in: beside the pinned AI
+    /// chat (it never covers the bar; centre = the middle of what it leaves),
+    /// else the whole screen.
+    // ponytail: a chat leaving no room for the shortest bar: the whole screen.
+    pub(in crate::ui) fn bar_room(&self) -> Rectangle {
+        let all = Rectangle::with_size(self.o.screen);
+        let Some(_) = &self.chat else { return all };
+        let room = card::free(self.o.screen, Some(self.chat_rect()));
+        let (_, size) = self.bar_size_on(room.width);
+        match room.width >= size.width + 2.0 * bar::GAP {
+            true => room,
+            false => all,
+        }
     }
 
     /// The bar is on its way somewhere.

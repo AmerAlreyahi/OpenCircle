@@ -136,7 +136,6 @@ impl Panel {
             glyph,
             title,
             chip,
-            docked: chatting,
             logo: chatting.then(|| crate::ui::kit::logo::logo(16)),
             menu: chatting,
             held: self.held,
@@ -315,7 +314,7 @@ impl Panel {
                 }
             }
         };
-        let body = scroll(log).id(LOG).height(Fill);
+        let body = crate::ui::kit::scroll::quiet(log).id(LOG).height(Fill);
         (body.into(), Some(input))
     }
 

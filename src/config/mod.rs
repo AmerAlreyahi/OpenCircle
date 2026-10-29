@@ -447,6 +447,9 @@ pub enum BarAnchor {
     Top,
     BottomLeft,
     BottomRight,
+    /// The top corners, level with `Top` (added 2026-10-29).
+    TopLeft,
+    TopRight,
 }
 
 /// How a finished stroke shows (`[selection] style`).

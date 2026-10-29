@@ -307,7 +307,7 @@ impl App {
                 self.frame_times.borrow_mut().clear();
             }
             panel::Msg::Card(card::Event::Hover(on)) if open => self.o.card_hover = on,
-            panel::Msg::Card(card::Event::Reset) => self.card = None,
+            panel::Msg::Card(card::Event::Reset) => (self.card, self.chat_width) = (None, None),
             panel::Msg::Card(card::Event::Grab(_) | card::Event::Hover(_)) => {}
             panel::Msg::Search if open => return self.run(&lens::ACTION),
             panel::Msg::Search => {}
@@ -434,7 +434,15 @@ impl App {
         let dock = self.chat_dock(screen, side, self.o.work_inset);
         let at = match self.o.chat_glide {
             Some((_, from, t)) => from.position() + (dock.position() - from.position()) * t,
-            None => held_in(dock.position() + self.o.chat_off, dock.size(), screen),
+            None => {
+                let at = held_in(dock.position() + self.o.chat_off, dock.size(), screen);
+                // too tall to move up or down inside the edges: only across,
+                // never a jump up when picked up
+                match dock.height + motion::DRAG_EDGE + motion::DRAG_EDGE_BOTTOM > screen.height {
+                    true => Point::new(at.x, dock.y),
+                    false => at,
+                }
+            }
         };
         // on whole px: a card moved by fractions of a px left thin ghosts of
         // its edge on the frame (VM, 2026-10-28)
@@ -444,14 +452,10 @@ impl App {
         )
     }
 
-    /// The chat docked on `side` of a `screen` (taskbar `inset`), clear of
-    /// the bar at its spot (the bar's own anchor; it never hides the bar).
-    // ponytail: the bar's anchor, not where it moved aside from a selection to.
+    /// The chat docked on `side` of a `screen` (taskbar `inset`), as wide as
+    /// the user made it; full height (the bar moves aside, `bar_room`).
     pub(in crate::ui) fn chat_dock(&self, screen: Size, side: card::Side, inset: f32) -> Rectangle {
-        let (_, size) = self.bar_size_on(screen.width);
-        let bar =
-            crate::ui::screens::bar::geometry::anchor_at(self.o.bar_anchor, screen, size, inset);
-        card::clear_of(card::docked(screen, side, inset), Rectangle::new(bar, size))
+        card::docked(screen, side, inset, self.chat_width)
     }
 
     /// The AI chat's card on the overlay (the pinned one or the overlay's).
