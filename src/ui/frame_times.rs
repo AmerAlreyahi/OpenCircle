@@ -1349,7 +1349,8 @@ fn chat_drag_frame_times() {
 /// starting screen). Needs a real event loop to time; this keeps the fix in.
 #[test]
 fn other_windows_draw_with_the_one_that_draws() {
-    let shell = include_str!("../../vendor/iced_winit/src/lib.rs");
+    // a Windows checkout has CRLF line ends
+    let shell = include_str!("../../vendor/iced_winit/src/lib.rs").replace("\r\n", "\n");
     assert!(shell.contains("redraws.push(other.raw.id())"));
     assert!(shell.contains("if let Some(window_id) = redraws.pop()"));
     // ... and only then: a WM_PAINT asked for as well drew each window a
