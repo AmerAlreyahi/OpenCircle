@@ -845,17 +845,18 @@ pub(super) mod tests {
         let boxes: Vec<[f32; 4]> = lines().iter().map(|b| b.bounds).collect();
         let img = frame(400, 480, &boxes);
         let mut fake = Fake::new(move |_, _, _| lines());
-        (fake.batch, fake.delay) = (1, Duration::from_millis(300));
+        (fake.batch, fake.delay) = (1, Duration::from_millis(600));
         let mut shown = 0;
         let out = translate_progressively(&img, 400, 480, "ar", &Cache::new(8), &fake, |_| {
-            std::thread::sleep(Duration::from_millis(300)); // a slow draw
+            std::thread::sleep(Duration::from_millis(600)); // a slow draw
             shown += 1;
         })
         .unwrap();
         assert_eq!((shown, fake.ai_calls.borrow().len()), (1, 2));
-        // two calls of 300 ms, the 300 ms partial beside the second
+        // two calls of 600 ms, the 600 ms partial beside the second: ~1.2 s;
+        // drawn in turn it would be 1.8 s (wide margin: CI runners are slow)
         let total = out.timings.total;
-        assert!(total < Duration::from_millis(800), "{total:?}");
+        assert!(total < Duration::from_millis(1600), "{total:?}");
     }
 
     /// The one call of a cloud model (and of any `Deps` without a batch):
