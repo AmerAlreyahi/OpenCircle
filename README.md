@@ -21,8 +21,8 @@ licensed, and has no account and no telemetry.
 
 ## See v0.1.1 in action
 
-Real recordings of the default v0.1.1 features on Windows. These clips show the
-released app, with Labs features off. [v0.1.1 release notes](https://github.com/AmerAlreyahi/OpenCircle/releases/tag/v0.1.1).
+Real recordings of the default v0.1.1 features on Windows. These clips show
+v0.1.1: version 0.1.2 has a new look (see below). Labs features are off. [v0.1.1 release notes](https://github.com/AmerAlreyahi/OpenCircle/releases/tag/v0.1.1).
 
 <table>
   <tr>
@@ -41,7 +41,25 @@ released app, with Labs features off. [v0.1.1 release notes](https://github.com/
 
 Full-size MP4 videos and feature guides: [gallery](gallery/README.md).
 
-## What works by default in v0.1.1
+## What works by default in v0.1.2
+
+New in 0.1.2:
+
+- **New look.** 12 themes, picked from cards in Settings (light and dark), in
+  Settings, the bar, the chat, the tray menu and the installer.
+- **Settings with a sidebar.** Pages for General, Appearance, AI, Translate and
+  more; changes save by themselves.
+- **AI chat with markdown.** Ask AI answers in a chat card. A follow-up pins the
+  chat so it stays open above other apps; a new capture asks into the same chat.
+  Saved history (text only, on this PC), and one key per provider, shown as dots.
+- **Circle to Search on all screens.** It opens on the screen your mouse is on.
+- **Smooth wheel zoom and pan** over the frozen screen.
+- **Model download card.** A short card asks before the one-time text reader or
+  translation model download.
+- **A calmer tray menu.** Left-click opens Settings.
+- **Copy text** goes straight to the clipboard (the Text panel is gone).
+
+Also:
 
 - **Translate in place.** Press `Ctrl+Shift+T` to translate
   the whole screen. The original text is erased and the translation is drawn in
@@ -58,7 +76,7 @@ Full-size MP4 videos and feature guides: [gallery](gallery/README.md).
 - **Select text like on a desktop.** Drag over words to copy them, translate
   them, or search them. On Windows the text is readable at once with Windows' own
   text recognition; otherwise (and for Arabic or games) OpenCircle offers a
-  one-time download of about 30 MB. Settings > Look & behaviour > Text reader
+  one-time download of about 30 MB. Settings > Text reading > Engine
   chooses.
 - **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
   browser, Copy text, and Translate; Live translate, Music and Edit appear
@@ -66,11 +84,11 @@ Full-size MP4 videos and feature guides: [gallery](gallery/README.md).
   image (or the picked words as text), `Ctrl+S` saves it; a small pill confirms.
   Drag the bar to any edge.
 - **Ask AI about your selection.** No key needed: the question opens in Google
-  AI Mode in your browser. Or add your own key for answers inside OpenCircle: Claude, OpenAI, or
-  any OpenAI-compatible server, including a local model.
+  AI Mode in your browser. Or add your own key for answers inside OpenCircle: OpenRouter, OpenAI, Anthropic, Gemini, Groq, Mistral, DeepSeek, xAI, a local
+  Ollama or LM Studio, or your own server.
 - **Shortcuts for everything.** Give any action its own key and skip the bar.
-- **Themes.** Light, dark or system colours, and seven looks for the screen
-  while OpenCircle is active.
+- **Themes.** 12 themes (light and dark; System follows Windows) and looks for
+  the screen edge while OpenCircle is active.
 - **Updates that check a signature.** Quiet, opt-in on first run, with release
   notes after each update.
 
@@ -78,7 +96,7 @@ Full-size MP4 videos and feature guides: [gallery](gallery/README.md).
 
 Snip, the image editor, song search, search history, pins and live translate are
 unfinished, off by default and hidden until enabled in **Settings > Labs**.
-They are not part of the default v0.1.1 gallery above. Live translate is planned
+They are not part of the default gallery above. Live translate is planned
 for v0.3.0.
 
 ## Private by design

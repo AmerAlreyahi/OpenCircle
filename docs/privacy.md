@@ -9,10 +9,10 @@ Every network action is something you start.
 |---|---|---|
 | Press **Search in browser** (or turn on **Auto action** in Settings, which runs it after every selection) | The selected area, as an image; for selected text, only the text | Google Lens (or Google Search for text), in your default browser. The image goes straight from your browser to Lens; no image-hosting service is involved. A selection of one plain colour is never sent. |
 | Press **Send** in Ask AI / Explain, with the default **Google AI Mode (no key)** | Your question and the text read from your selection (text only; the screenshot is not uploaded unless you choose Lens) | Google, in your default browser, which opens AI Mode with the question in the address. If you decline the one-time text reader download, only your prompt is sent. |
-| Ask AI / Explain, with an API provider | The selected area and your questions | The AI provider you configured (or your local server) |
-| Translate with AI | The text read from the screen (text only, not the image) | The AI provider you configured |
-| Translate with the **Offline** engine | Nothing. The model runs on your PC | Nobody |
-| Select text for the first time, after you agree (Linux; on Windows only when Windows has no text recognizer for your languages, or for Arabic; Settings > Look & behaviour > Text reader chooses) | Nothing of yours. It downloads the text reader (about 30 MB). On Windows, text is otherwise read by Windows' own built-in OCR, on your PC | GitHub (ONNX Runtime releases and the oar-ocr model release), checked against pinned checksums |
+| Ask AI / Explain, with an API provider | Your question; the selected area as an image only while **Include screen** is on (turn it off and no image is sent). A chat sends the last 20 messages in full plus one short summary of older ones, which your own provider writes. The whole chat is never sent | The AI provider you configured (or your local server) |
+| Translate with AI (only if you pick **AI** in Settings > Translate) | The text read from the screen (text only, not the image) | The AI provider you configured |
+| Translate with the **Offline** engine (the default) | Nothing. The model runs on your PC. A v0.1.1 config that had no API provider set up is moved to Offline when 0.1.2 first starts | Nobody |
+| Select text for the first time, after you agree (Linux; on Windows only when Windows has no text recognizer for your languages, or for Arabic; Settings > Text reading > Engine chooses) | Nothing of yours. It downloads the text reader (about 30 MB). On Windows, text is otherwise read by Windows' own built-in OCR, on your PC | GitHub (ONNX Runtime releases and the oar-ocr model release), checked against pinned checksums |
 | Translate offline for the first time, after you agree | Nothing of yours. It downloads the translation model (about 120 MB, plus the OCR files if missing) | Hugging Face (a pinned commit of the OPUS-MT model) and GitHub, checked against pinned checksums |
 | Press the **music button** (song search, only after you add your own key) | A ~10-second clip of the audio you choose (what this PC plays, or the microphone), plus your key. Then the song's cover image is downloaded | AudD (`api.audd.io`); the cover from Apple's image server (`mzstatic.com`) |
 | Update check (asked on first run, where the switch starts on; you can turn it off there or later in Settings) | Only the request for the latest release: no account, no ID, no screen data | GitHub (the release files and `SHA256SUMS.txt` with its signature) |
@@ -23,10 +23,10 @@ control what they do with what you send.
 
 ## Keys
 
-AI API keys and the song-search key are stored only in the operating system's keyring (Windows
+AI API keys (one per provider) and the song-search key are stored only in the operating system's keyring (Windows
 Credential Manager; Secret Service such as GNOME Keyring or KWallet on Linux).
-They are not written to the config file, logs or any export, and they are sent
-only to the server you configured. A remote server must use `https://`; plain
+They are not written to the config file, logs or any export, a saved key is shown only as dots, and a key is sent
+only to the server of the provider it belongs to. A remote server must use `https://`; plain
 `http://` is accepted only for `localhost`.
 
 ## What stays on disk
@@ -47,6 +47,13 @@ only to the server you configured. A remote server must use `https://`; plain
   version and Windows build; nothing is submitted until you press the button
   on GitHub.
 
+- **AI chat history.** Chats are saved on this PC in `opencircle.db` (SQLite) in
+  your local data folder. Text only: screenshots are never written (a chat shows
+  "Screenshot not kept"), though a crop's size may be kept as text. The newest
+  100 chats are kept. **Settings > AI > Keep chat history** is on by default;
+  turning it off deletes the saved chats. Delete one chat, or **Clear all**, from
+  the chat's History drawer. Nothing in it is sent anywhere except as the
+  context described above.
 - **Captures** are kept in memory. A screenshot is written to disk only when
   you press Save and choose a place.
 - **Lens page.** The temporary web page that carries the image to Lens is

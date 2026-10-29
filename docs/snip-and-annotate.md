@@ -37,7 +37,7 @@ captures again. `Ctrl+C` while pointing at an area copies it at once.
 clipboard, ready to paste into an AI chat, and a toast offers **Edit** for 4
 seconds. Choose *Editor* to open the editor instead, or *Both*. Copy is the
 picture only, so a browser or chat always pastes the image; text is copied by
-selecting it (or the Text panel).
+selecting it.
 
 **Size for AI**: Copy and Save scale the long edge down to 1568 px (Settings →
 Snip: 1024, 1568, 2048 or Original); AI chats shrink bigger images anyway. Save

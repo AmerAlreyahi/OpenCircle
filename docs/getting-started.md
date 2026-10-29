@@ -22,13 +22,13 @@ page (see the [README](../README.md#install)).
 - **Windows, no install:** `OpenCircle-<version>-x64-portable.exe` runs as it is.
 - **Linux (preview):** install the `.deb` or `.rpm`, or run the `.AppImage`.
 
-OpenCircle lives in the system tray. Starting it again while it runs hands the
+OpenCircle lives in the system tray. Left-click its icon to open Settings; right-click for the menu (Circle to Search, Translate screen, Settings, Quit). Starting it again while it runs hands the
 request to the running copy. It starts with Windows by default; turn that off
 in **Settings > General**.
 
 ## First run
 
-A short welcome shows your shortcut, an optional AI provider, a theme and
+A short welcome shows your shortcut, an optional AI provider, a theme (12 to pick from) and
 whether OpenCircle starts with Windows. Skip any of it; everything can change
 later in **Settings** (tray menu). If a second launch finds it already running,
 it opens Settings.
@@ -53,8 +53,7 @@ search as soon as you select (**Auto action**).
 The box can be adjusted before you choose: drag inside it to move it (not over
 text; hold `Alt` to move it over text), drag its edges or corners to resize it,
 and use the arrow keys to nudge it (`Shift` = 10 px; `Ctrl`+arrows resize from
-the bottom-right). It opens on the screen of your active window, or the
-pointer's screen when no window is active.
+the bottom-right). It opens on the screen your mouse is on, so it works with several monitors. Scroll the mouse wheel to zoom the frozen screen and drag with the middle button to pan.
 
 ## The bottom bar
 
@@ -63,9 +62,9 @@ then the rest:
 
 | Control | What it does | Key |
 |---|---|---|
-| Ask OpenCircle AI field | Asks AI about the selection (or the screen). `Enter` or the **AI ↵** badge sends it; with nothing typed, the logo or `Enter` opens Ask AI | Click it first |
+| Ask OpenCircle AI field | Asks AI about the selection (or the screen); the answer opens in a chat card (see [Ask AI](#ask-ai)) | Click it first |
 | Search in browser | Opens the selection in your default browser: a picture goes to Google Lens, selected text to a Google search | `L` |
-| Copy text | Copies the selection's text | |
+| Copy text | Copies the selection's text straight to the clipboard (there is no text panel) | `Ctrl+C` |
 | Translate | Translates the selection in place (no selection: the whole screen) | |
 | Live translate (Labs, unfinished) | Keeps translating the screen while you play | `Ctrl+Shift+L` |
 | Music | Finds a song from a short clip (Settings > Labs; see [Song search](song-search.md)) | |
@@ -92,9 +91,9 @@ highlight. Then:
 
 On Windows, text is read at once by Windows' own text recognition, for the
 languages installed in Windows. Otherwise (Linux, Arabic, or if you choose
-**Settings > Look & behaviour > Text reader > Downloaded**), the first time you
-select text OpenCircle asks before downloading its text reader. It is about 30 MB
-(the app shows the exact size), checked against pinned checksums and stored on
+**Settings > Text reading > Engine > Accurate**), the first time you
+select text OpenCircle shows a small card asking before downloading its text reader. It is about 30 MB
+(the card shows the exact size), checked against pinned checksums and stored on
 your PC:
 
 - Windows: `%LOCALAPPDATA%\OpenCircle\ocr`
@@ -113,6 +112,21 @@ may be needed; OpenCircle tells you if it is.
   <sub>Copy gives exactly the picked words. Translate and live translate work from the same selection.</sub>
 </p>
 
+## Ask AI
+
+Type a question in the bar's AI field and press `Enter`. With **Include screen**
+on (the default) the selected area goes with it; off sends only your question.
+
+- With no key, the question opens in Google AI Mode in your browser.
+- With a provider set up (Settings > AI), the answer streams into a chat card
+  with markdown. Ask a follow-up and the chat pins: it stays open above other
+  apps, and a new capture asks into the same chat. The pin button in the header
+  unpins and closes it. **Settings > AI > AI chat stays open** changes this.
+- Each provider has its own key, kept in the system keyring and shown as dots.
+- Chats are saved on this PC as text (never screenshots). The drawer's History
+  lists them; delete one or clear all. **Settings > AI > Keep chat history**
+  turns saving off and deletes the saved chats. See [AI setup](ai-setup.md).
+
 ## Translate and live translate
 
 - `Ctrl+Shift+T` translates the whole screen once, in place. `Esc` closes it.
@@ -122,7 +136,7 @@ may be needed; OpenCircle tells you if it is.
 - Hold `Alt` to see the original; release to see the translation again.
 
 Pick the languages in **Settings > Translate**. The default target is Arabic.
-Translation runs on your PC by default. See [Translate](translate.md).
+Translation runs on your PC by default (Settings > Translate > Engine: Offline); choose AI there to send page text to your AI provider. See [Translate](translate.md).
 
 ## Snip and annotate
 
@@ -152,16 +166,13 @@ Details: [Snip and annotate](snip-and-annotate.md).
 - **Auto action**: wait for you to choose (the default: nothing is sent), or
   run **Search with** as soon as you select.
 - **Search with**: Lens, Ask AI or both.
-- **Active look**: how the screen looks while OpenCircle is open. Spectrum (the
-  default), Aurora, Sunset, Ocean, Neon, Mono and Calm, or Custom: your own
-  colours, glow, dim, corners and a screen edge per mode.
 
-**Settings > Appearance** sets the app theme (System, Light or Dark).
+**Settings > Appearance** has 12 themes (pick a card: it sets the theme and its light or dark mode; until you pick one, OpenCircle follows Windows) and the screen-border looks shown while OpenCircle is open (Spectrum is the default), or Custom: your own colours, glow, dim, corners and a screen edge per mode.
 
 **Settings > Labs** switches the unfinished features on (Snip, Image editor,
 Song search, Search history, Pins). They are off by default.
 
-Changes apply when you press Save. Nothing needs a restart.
+Changes save by themselves. Nothing needs a restart.
 
 ## Updates
 
@@ -182,8 +193,8 @@ shows the release page instead.
 
 ## Settings and config file
 
-Settings (tray menu) has General, Appearance, Look & behaviour, Shortcuts,
-Snip, AI, Translate, Song search, Labs and About (Snip and Song search appear
+Settings (tray icon, left-click) has a sidebar with General, Appearance, Look & behaviour, AI, Text reading, Translate,
+Shortcuts, Privacy, About and Labs (Snip and Song search appear
 once switched on in Labs). It writes a plain TOML file you may
 also edit by hand:
 
