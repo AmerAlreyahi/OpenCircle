@@ -236,6 +236,9 @@ production systems.
 - Quiet Settings (owner, 2026-10-29): no "Auto-save active"/"Saved"/"Saving" pill (changes save by themselves,
   as in most apps) and no dot on the active sidebar item; the header pill shows only when something needs the
   user (a problem to fix). The Copied pill (dot + "Copied") stays as it is.
+- Hide, don't delete (owner, 2026-10-29): an option for a feature that hasn't arrived (e.g. "Bars and pills" glass
+  styles until 0.1.3; "Screen edge for" Live/Snip until they are on in Labs) is hidden, its code and config key
+  kept, and shown when the feature really ships. A row with a single choice is not shown.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by
   Codex in the design (widgets/tray-menu.js), then ported.

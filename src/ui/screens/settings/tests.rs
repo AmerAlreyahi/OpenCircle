@@ -1502,13 +1502,12 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
     update(&mut s, Message::Picker(0));
     update(&mut s, Message::PickColour(Color::from_rgb8(255, 0, 0)));
     let texts = shot::texts(view(&s));
-    for want in [
-        "Edge style",
-        "Glow strength",
-        "Your two colours",
-        "Bars and pills",
-    ] {
+    for want in ["Edge style", "Glow strength", "Your two colours"] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    // hidden until they do something: glass bars (0.1.3), a one-mode edge row
+    for hidden in ["Bars and pills", "Screen edge for"] {
+        assert!(!texts.iter().any(|t| t == hidden), "{hidden}");
     }
     assert!(s.problems.is_empty(), "{:?}", s.problems);
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {

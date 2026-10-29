@@ -17,6 +17,9 @@ use crate::ui::kit::tokens::space;
 use crate::ui::kit::tooltip::{Why, hint, tip};
 use crate::ui::theme;
 
+/// The bar style row, hidden until glass ships (0.1.3).
+const GLASS_BARS: bool = false;
+
 pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
     let c = &state.draft.look.custom;
     let edge = c.edge(state.edge_mode);
@@ -117,7 +120,11 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
                 Message::BracketStyle,
             ),
         ),
-        row_of(
+    ]);
+    // Glass bars come with the GPU renderer (0.1.3): until then the style
+    // changes nothing, so its row stays hidden (the config key is kept).
+    if GLASS_BARS {
+        rows.push(row_of(
             "Bars and pills",
             "The action bar, chips and panels",
             tip(
@@ -130,8 +137,11 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
                 "Bar style",
                 Position::Top,
             ),
-        ),
-        row_of(
+        ));
+    }
+    // Only Circle has an edge until Live or Snip is on in Labs: no one-choice row.
+    if modes.len() > 1 {
+        rows.push(row_of(
             "Screen edge for",
             "Each mode has its own edge",
             segmented(
@@ -141,28 +151,30 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
                 1.0,
                 Message::EdgeMode,
             ),
+        ));
+    }
+    rows.push(row_of(
+        "Edge style",
+        "A soft glow along the screen edge, or none",
+        segmented(
+            &[(EdgeStyle::Glow, "Glow"), (EdgeStyle::None, "None")],
+            edge_style,
+            edge_style,
+            1.0,
+            Message::EdgeStyle,
         ),
-        row_of(
-            "Edge style",
-            "A soft glow along the screen edge, or none",
-            segmented(
-                &[(EdgeStyle::Glow, "Glow"), (EdgeStyle::None, "None")],
-                edge_style,
-                edge_style,
-                1.0,
-                Message::EdgeStyle,
-            ),
-        ),
-    ]);
+    ));
     rows
 }
 
-/// The Screen edge segments: Live only while live translate is on in Labs.
+/// The Screen edge segments: Live and Snip only while they are on in Labs.
 fn edge_modes(labs: &Labs) -> Vec<(EdgeMode, &'static str)> {
     let mut modes = vec![(EdgeMode::Overlay, "Circle")];
     if labs.has(Feature::Live) {
         modes.push((EdgeMode::Live, "Live"));
     }
-    modes.push((EdgeMode::Snip, "Snip"));
+    if labs.has(Feature::Snip) {
+        modes.push((EdgeMode::Snip, "Snip"));
+    }
     modes
 }
