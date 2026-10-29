@@ -236,6 +236,10 @@ production systems.
 - Quiet Settings (owner, 2026-10-29): no "Auto-save active"/"Saved"/"Saving" pill (changes save by themselves,
   as in most apps) and no dot on the active sidebar item; the header pill shows only when something needs the
   user (a problem to fix). The Copied pill (dot + "Copied") stays as it is.
+- Chat and bar (owner, 2026-10-29): the AI chat keeps its full docked height and its width is set by its
+  inner edge (double-click = design width); it never shrinks for the bar. A pinned chat's free side holds the
+  bar's spots instead (the bar fits there, shorter field if needed). Six bar spots: bottom/top centre and the
+  four corners. The chat's log has no scrollbar; its composer sits 8 px under the log.
 - Hide, don't delete (owner, 2026-10-29): an option for a feature that hasn't arrived (e.g. "Bars and pills" glass
   styles until 0.1.3; "Screen edge for" Live/Snip until they are on in Labs) is hidden, its code and config key
   kept, and shown when the feature really ships. A row with a single choice is not shown.
