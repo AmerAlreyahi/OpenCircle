@@ -225,6 +225,9 @@ mod tests {
             rgba: vec![9; 3000 * 1000 * 4],
         };
         let mut snip = SnipConfig::default();
+        let (c, _) = super::export(crop(), &snip);
+        assert_eq!((c.width, c.height), (3000, 1000), "full size by default");
+        snip.max_edge = 1568;
         let (c, f) = super::export(crop(), &snip);
         assert_eq!((c.width, c.height, f), (1568, 523, Format::Png));
         snip.save_original = true;

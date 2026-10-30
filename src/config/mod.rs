@@ -69,7 +69,7 @@
 //! auto = true                       # keep OpenCircle up to date (unset = not asked yet: off)
 //! [snip]
 //! after = "copy"                    # after a capture: copy | editor | both
-//! max_edge = 1568                   # Copy / Save scale the long edge down to this; 0 = original
+//! max_edge = 0                      # Copy / Save scale the long edge down to this; 0 = original (default)
 //! format = "png"                    # Save writes png | jpeg (quality 85)
 //! save_original = false             # Save ignores max_edge
 //! cursor = false                    # draw the mouse pointer into the capture
@@ -138,7 +138,7 @@ pub const DEFAULT_LIVE_INTERVAL_MS: u32 = 1500;
 pub const LIVE_INTERVAL_MS: std::ops::RangeInclusive<u32> = 500..=5000;
 /// Long edge (px) Copy / Save scale a capture down to: what AI chats take
 /// without shrinking it again themselves. `0` = original size.
-pub const DEFAULT_MAX_EDGE: u32 = 1568;
+pub const DEFAULT_MAX_EDGE: u32 = 0;
 pub const MAX_EDGE: std::ops::RangeInclusive<u32> = 256..=8192;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1581,7 +1581,11 @@ mod tests {
     fn snip_section_defaults_and_checks() {
         let d = Config::default().snip;
         assert_eq!(d.after, SnipAfter::Copy, "copy for the AI chat by default");
-        assert_eq!((d.max_edge, d.format), (1568, Format::Png));
+        assert_eq!(
+            (d.max_edge, d.format),
+            (0, Format::Png),
+            "full size by default"
+        );
         assert!(!d.history, "nothing kept on disk unless turned on");
         assert!(!d.cursor && !d.save_original);
         assert_eq!(d.delay, 0, "no timer unless set");
@@ -1922,8 +1926,12 @@ mod tests {
         let (dir, path) = config_with("v3-default", &fixture("default-v3.toml"));
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
-        assert_eq!(c, Config::default());
-        assert_eq!(fs_text(&path), fixture("default-v4.toml"));
+        // (a value in the file stays: v3 wrote the then-default 1568 px)
+        let mut want = Config::default();
+        want.snip.max_edge = 1568;
+        assert_eq!(c, want);
+        let v4 = fixture("default-v4.toml").replace("max_edge = 0\n", "max_edge = 1568\n");
+        assert_eq!(fs_text(&path), v4);
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -39,9 +39,9 @@ seconds. Choose *Editor* to open the editor instead, or *Both*. Copy is the
 picture only, so a browser or chat always pastes the image; text is copied by
 selecting it.
 
-**Size for AI**: Copy and Save scale the long edge down to 1568 px (Settings →
-Snip: 1024, 1568, 2048 or Original); AI chats shrink bigger images anyway. Save
-writes PNG or JPEG and can keep the original size.
+**Image size**: Copy and Save keep the capture's full size by default (Settings →
+Snip: Original, or scale the long edge down to 1024, 1568 or 2048 px); AI chats
+shrink bigger images anyway. Save writes PNG or JPEG and can keep the original size.
 
 **Recent** (Settings → Snip, off by default): keeps your last 20 captures on
 this PC only (your local app-data folder), shown as a strip under the modes;
