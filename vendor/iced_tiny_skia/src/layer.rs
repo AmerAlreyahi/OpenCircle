@@ -227,9 +227,16 @@ impl Layer {
     }
 
     pub fn damage(previous: &Self, current: &Self) -> Vec<Rectangle> {
-        if previous.bounds != current.bounds {
-            return vec![previous.bounds, current.bounds];
-        }
+        // OpenCircle patch: a layer that moved or changed size (a stack's
+        // upper child: snip's live area canvas, resized or moved with its
+        // area) redraws what changed in it and the strips only one of the two
+        // bounds covers (upstream: both bounds whole, the area's inside every
+        // frame of a resize).
+        let (moved, clip) = match (previous.bounds, current.bounds) {
+            (a, b) if a == b => (Vec::new(), b),
+            (a, b) if finite(a) && finite(b) => (apart(a, b), a.union(&b)),
+            (a, b) => return vec![a, b],
+        };
 
         let mut damage = damage::list(
             &previous.quads,
@@ -237,7 +244,7 @@ impl Layer {
             |(quad, _)| {
                 quad.bounds
                     .expand(1.0)
-                    .intersection(&current.bounds)
+                    .intersection(&clip)
                     .into_iter()
                     .collect()
             },
@@ -318,8 +325,36 @@ impl Layer {
         damage.extend(text);
         damage.extend(primitives);
         damage.extend(images);
+        damage.extend(moved);
         damage
     }
+}
+
+/// OpenCircle patch: `r` is a real rectangle (not a layer's infinite bounds).
+fn finite(r: Rectangle) -> bool {
+    [r.x, r.y, r.width, r.height].iter().all(|v| v.is_finite())
+}
+
+/// OpenCircle patch: what `a` or `b` covers but not both, as rectangles.
+fn apart(a: Rectangle, b: Rectangle) -> Vec<Rectangle> {
+    let Some(both) = a.intersection(&b) else {
+        return vec![a, b];
+    };
+    let mut out = Vec::new();
+    for r in [a, b] {
+        let (x1, y1) = (r.x + r.width, r.y + r.height);
+        let (bx1, by1) = (both.x + both.width, both.y + both.height);
+        let mut add = |x0: f32, y0: f32, x1: f32, y1: f32| {
+            if x1 > x0 && y1 > y0 {
+                out.push(Rectangle::new(Point::new(x0, y0), core::Size::new(x1 - x0, y1 - y0)));
+            }
+        };
+        add(r.x, r.y, x1, both.y); // above
+        add(r.x, by1, x1, y1); // below
+        add(r.x, both.y, both.x, by1); // left
+        add(bx1, both.y, x1, by1); // right
+    }
+    out
 }
 
 /// OpenCircle patch (#89): where `primitive` draws: its path's bounds, a
@@ -332,7 +367,14 @@ fn drawn_primitive(primitive: &Primitive) -> Vec<Rectangle> {
     match primitive {
         Primitive::Fill { .. } => vec![primitive.visible_bounds().expand(1.0)],
         Primitive::Stroke { path, stroke, .. } => {
-            let reach = stroke.width / 2.0 * stroke.miter_limit.max(1.0);
+            // (only a mitred join reaches past half its width)
+            let miter = match stroke.line_join {
+                tiny_skia::LineJoin::Miter | tiny_skia::LineJoin::MiterClip => {
+                    stroke.miter_limit.max(1.0)
+                }
+                tiny_skia::LineJoin::Round | tiny_skia::LineJoin::Bevel => 1.0,
+            };
+            let reach = stroke.width / 2.0 * miter;
             stroke_runs(path)
                 .into_iter()
                 .map(|run| run.expand(reach + 1.0))
@@ -424,9 +466,11 @@ pub(crate) fn same_look(a: &core::Image, b: &core::Image) -> bool {
 fn drawn_bounds(text: &Text) -> Option<Rectangle> {
     use crate::core::{alignment::Vertical, text::Alignment};
     let Text::Cached {
+        content,
         bounds,
         clip_bounds,
         size,
+        line_height,
         align_x,
         align_y,
         ..
@@ -449,6 +493,24 @@ fn drawn_bounds(text: &Text) -> Option<Rectangle> {
             _ => text.visible_bounds(),
         };
     };
+    // OpenCircle patch: a canvas text's box is its max width (often infinite)
+    // and an infinite height, so its damage reached the window's corner from
+    // its anchor (snip's loupe label redrew half the screen on every pointer
+    // move): at most 1.5 em per character, a line per line (or per character
+    // when it may wrap).
+    // ponytail: an advance estimate, not a measure; measure the paragraph if a
+    // glyph wider than 1.5 em ever leaves a stale column.
+    let chars = content.chars().count() as f32;
+    let lines = match bounds.width.is_finite() {
+        true => chars.max(1.0),
+        false => content.lines().count().max(1) as f32,
+    };
+    let bounds = Rectangle {
+        width: bounds.width.min(chars * 1.5 * f32::from(*size)),
+        height: bounds.height.min(lines * f32::from(*line_height)),
+        ..*bounds
+    };
+    let bounds = &bounds;
     let x = match align_x {
         Alignment::Center => bounds.x - bounds.width / 2.0,
         Alignment::Right => bounds.x - bounds.width,

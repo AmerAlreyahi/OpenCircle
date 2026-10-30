@@ -564,13 +564,10 @@ impl Engine {
                 if clip_mask.is_none() && fill_rect(path, paint, physical_bounds, pixels) {
                     return;
                 }
-                pixels.fill_path(
-                    path,
-                    paint,
-                    *rule,
-                    into_transform(transformation),
-                    clip_mask,
-                );
+                let t = into_transform(transformation);
+                within(pixels, clip_mask, clip_bounds, physical_bounds, t, |p, t, m| {
+                    p.fill_path(path, paint, *rule, t, m);
+                });
             }
             Primitive::Stroke {
                 path,
@@ -595,13 +592,10 @@ impl Engine {
                 let clip_mask = (!physical_bounds.is_within(&clip_bounds))
                     .then_some(clip_mask as &_);
 
-                pixels.stroke_path(
-                    path,
-                    paint,
-                    stroke,
-                    into_transform(transformation),
-                    clip_mask,
-                );
+                let t = into_transform(transformation);
+                within(pixels, clip_mask, clip_bounds, physical_bounds, t, |p, t, m| {
+                    p.stroke_path(path, paint, stroke, t, m);
+                });
             }
         }
     }
@@ -1012,6 +1006,43 @@ pub(crate) fn solid_rect(path: &tiny_skia::Path, paint: &tiny_skia::Paint<'_>) -
     }
     let c = color.premultiply().to_color_u8();
     Some(u32::from_ne_bytes([c.red(), c.green(), c.blue(), c.alpha()]))
+}
+
+/// OpenCircle patch: `draw` (a fill or stroke `drawn` over this much, at
+/// `transform`) clipped to `clip` by `mask`. tiny-skia rasterizes a path over
+/// all of it and the mask only drops what is outside, so every damage
+/// rectangle a big path met drew all of it (a selection's glow, its outline
+/// crossed by a dozen strips and tiles: ~10 ms a frame of a snip area's
+/// resize). Much bigger than `clip` (4x), it is drawn into a pixmap of just
+/// the clip's pixels (the mask's, `pixel_rect`), copied in and back out: the
+/// same pixels, rasterized over the clip only.
+fn within(
+    pixels: &mut tiny_skia::PixmapMut<'_>,
+    mask: Option<&tiny_skia::Mask>,
+    clip: Rectangle,
+    drawn: Rectangle,
+    transform: tiny_skia::Transform,
+    draw: impl FnOnce(&mut tiny_skia::PixmapMut<'_>, tiny_skia::Transform, Option<&tiny_skia::Mask>),
+) {
+    let (w, h) = (pixels.width(), pixels.height());
+    let [x0, y0, x1, y1] = pixel_rect(clip, w, h);
+    let (cw, ch) = (x1 - x0, y1 - y0);
+    let small = mask.is_some() && 4.0 * cw as f32 * ch as f32 <= drawn.width * drawn.height;
+    let Some(mut part) = small.then(|| tiny_skia::Pixmap::new(cw, ch)).flatten() else {
+        return draw(pixels, transform, mask);
+    };
+    let (stride, row) = (w as usize * 4, cw as usize * 4);
+    let at = |y: usize| (y0 as usize + y) * stride + x0 as usize * 4;
+    let (src, dst) = (pixels.data_mut(), part.data_mut());
+    for (y, line) in dst.chunks_exact_mut(row).enumerate() {
+        line.copy_from_slice(&src[at(y)..at(y) + row]);
+    }
+    let moved = transform.post_translate(-(x0 as f32), -(y0 as f32));
+    draw(&mut part.as_mut(), moved, None);
+    let src = pixels.data_mut();
+    for (y, line) in part.data().chunks_exact(row).enumerate() {
+        src[at(y)..at(y) + row].copy_from_slice(line);
+    }
 }
 
 /// OpenCircle patch (#23): the whole pixels a clip to `r` (device px) holds,
