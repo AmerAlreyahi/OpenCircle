@@ -4,6 +4,7 @@
 //! One file per platform: `x11.rs` (Linux X11/XWayland), `portal.rs` (Linux Wayland),
 //! `win.rs` (Windows, xcap). Scrolling capture: `stitch.rs` + `scroll.rs`.
 pub mod cursor;
+pub mod live;
 #[cfg(target_os = "linux")]
 pub mod portal;
 pub mod scroll;
