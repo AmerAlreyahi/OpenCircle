@@ -265,9 +265,7 @@ impl App {
         given: Option<Crop>,
         remember: bool,
     ) -> Task<Message> {
-        // (a crop across screens is edited fitted: its other screens' windows
-        // go with the toast)
-        let in_place = given.is_none() && !self.crop_area().is_some_and(|a| self.spans(a));
+        let in_place = given.is_none();
         let Some(crop) = given.or_else(|| self.crop()) else {
             return Task::none();
         };
@@ -307,6 +305,9 @@ impl App {
             ));
             return copied;
         }
+        // (a crop across screens is edited fitted from the toast: the other
+        // screens' windows go with the pill)
+        let in_place = in_place && !self.crop_area().is_some_and(|a| self.spans(a));
         let Purpose::Snip(snip) = &mut self.o.purpose else {
             return Task::none();
         };
