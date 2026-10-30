@@ -78,7 +78,7 @@
 //!
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
 //! snip = false                      # Snip mode, its shortcuts and tray item
-//! editor = false                    # the image editor (Edit image)
+//! editor = false                    # the Snip editor (the bar button)
 //! song = false                      # song search
 //! history = false                   # the local search history
 //! pins = false                      # pinning a capture to the screen

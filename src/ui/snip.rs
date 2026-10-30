@@ -639,7 +639,7 @@ impl Snip {
         } else if self.toast.is_some() {
             row![
                 text(Role::NOTE, COPIED),
-                button::regular("Edit", true, Some(Msg::Edit)),
+                button::regular("Snip", true, Some(Msg::Edit)),
             ]
         } else {
             return None;

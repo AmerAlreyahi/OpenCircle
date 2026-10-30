@@ -135,9 +135,9 @@ impl App {
                 BarButton::Edit,
                 actions::edit::ACTION.icon,
                 if selected {
-                    "Edit image"
+                    "Snip image"
                 } else {
-                    "Edit the screen"
+                    "Snip the screen"
                 },
                 &keys.edit,
                 false,

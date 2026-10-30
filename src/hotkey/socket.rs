@@ -359,7 +359,7 @@ mod tests {
         for (action, title) in [
             ("snip", "Snip"),
             ("song_search", "Song search"),
-            ("edit", "Image editor"),
+            ("edit", "Snip editor"),
         ] {
             let msg = Command::from_args(&args(&["run", action])).unwrap_err();
             assert_eq!(

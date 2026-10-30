@@ -13,7 +13,7 @@ use crate::hotkey::QuickId;
 pub enum Feature {
     /// Snip mode: its shortcuts (Print Screen ...), tray item and Settings page.
     Snip,
-    /// The annotation editor: the bar's Edit image (E), and the editor after a capture.
+    /// The annotation editor: the bar's Snip button (E), and the editor after a capture.
     Editor,
     /// Song search: bar button, shortcut and Settings page.
     Song,
@@ -39,7 +39,7 @@ impl Feature {
     pub fn title(self) -> &'static str {
         match self {
             Feature::Snip => "Snip",
-            Feature::Editor => "Image editor",
+            Feature::Editor => "Snip editor",
             Feature::Song => "Song search",
             Feature::History => "Search history",
             Feature::Pins => "Pins",

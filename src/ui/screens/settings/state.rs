@@ -375,6 +375,7 @@ pub(super) fn action_name(id: &str, live: bool, target: Target) -> String {
         ("translate", true) => "Translate (live, Beta)".into(),
         ("ai_explain", _) => "Explain with AI".into(),
         ("copy_text", _) => "Copy text".into(),
+        ("edit", _) => "Snip".into(),
         ("lens", _) => "Search with Lens".into(),
         (other, _) => {
             let spaced = other.replace('_', " ");

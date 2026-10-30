@@ -34,7 +34,7 @@ counts down in a small pill, so you can open a menu or a tooltip; then it
 captures again. `Ctrl+C` while pointing at an area copies it at once.
 
 **After a capture** (Settings → Snip): by default the snip goes straight to the
-clipboard, ready to paste into an AI chat, and a toast offers **Edit** for 4
+clipboard, ready to paste into an AI chat, and a toast offers **Snip** for 4
 seconds. Choose *Editor* to open the editor instead, or *Both*. Copy is the
 picture only, so a browser or chat always pastes the image; text is copied by
 selecting it.

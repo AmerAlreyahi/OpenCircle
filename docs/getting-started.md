@@ -68,7 +68,7 @@ then the rest:
 | Translate | Translates the selection in place (no selection: the whole screen) | |
 | Live translate (Labs, unfinished) | Keeps translating the screen while you play | `Ctrl+Shift+L` |
 | Music | Finds a song from a short clip (Settings > Labs; see [Song search](song-search.md)) | |
-| Edit | Turns the bar into the annotation toolbar (Settings > Labs). A back arrow returns | `E` |
+| Snip | Turns the bar into the annotation toolbar (Settings > Labs). A back arrow returns | `E` |
 
 `Ctrl+C` copies the selection as an image only (picked words are copied as text) and
 `Ctrl+S` saves it as a PNG or JPEG in your save folder (Settings > General).
@@ -149,7 +149,7 @@ unfinished, and hidden everywhere until you turn them on.
   Copy text from a selection when you want the words.
 - Blur is a soft smoothing and is not made for secrets: use **Redact** (a solid
   box) to hide passwords and similar.
-- Edit opens the annotation toolbar. Move any drawing, change its style and
+- Snip opens the annotation toolbar. Move any drawing, change its style and
   text options, and use the board for notes.
 
 <p align="center">

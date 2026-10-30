@@ -23,7 +23,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     column![
         pick(
             "After a capture",
-            "Copy: ready to paste into an AI chat, Edit a click away",
+            "Copy: ready to paste into an AI chat, Snip a click away",
             segmented(
                 &[
                     (SnipAfter::Copy, "Copy"),

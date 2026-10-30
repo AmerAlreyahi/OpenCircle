@@ -79,7 +79,7 @@ Also:
   one-time download of about 30 MB. Settings > Text reading > Engine
   chooses.
 - **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
-  browser, Copy text, and Translate; Live translate, Music and Edit appear
+  browser, Copy text, and Translate; Live translate, Music and Snip appear
   once you turn them on in Settings > Labs. `Ctrl+C` copies the selection as an
   image (or the picked words as text), `Ctrl+S` saves it; a small pill confirms.
   Drag the bar to any edge.

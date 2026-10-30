@@ -334,7 +334,7 @@ impl Panel {
         side = side.push(bubble(&turn.question));
         let mut tools = row![quiet("Copy", Msg::CopyTurn(i, false))].spacing(ACTIONS_GAP);
         if editable {
-            tools = tools.push(quiet("Edit", Msg::EditTurn(i)));
+            tools = tools.push(quiet("Snip", Msg::EditTurn(i)));
         }
         side.push(tools).into()
     }

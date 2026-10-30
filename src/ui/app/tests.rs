@@ -1857,7 +1857,7 @@ fn hidden_features_have_no_bar_button_key_or_editor_and_turning_them_on_brings_t
     assert_eq!(
         names,
         ["Ask AI", "Open OpenCircle AI chat", "Screen included"],
-        "the design's bar, no Live translate, no Song search, no Edit"
+        "the design's bar, no Live translate, no Song search, no Snip"
     );
     let texts = overlay_texts(&app);
     for pill in ["Search in browser", "Copy text", "Translate"] {
@@ -1900,7 +1900,7 @@ fn hidden_features_have_no_bar_button_key_or_editor_and_turning_them_on_brings_t
     assert!(bar_names(&app).iter().any(|n| n == "Live translate (Beta)"));
     // Editor on: Edit is back, and E opens it.
     app.o.labs.set(labs::Feature::Editor, true);
-    assert!(bar_names(&app).iter().any(|n| n.starts_with("Edit")));
+    assert!(bar_names(&app).iter().any(|n| n.starts_with("Snip")));
     let _ = app.update(Message::Run(&actions::edit::ACTION));
     assert!(app.editing());
 }
@@ -1994,10 +1994,10 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         names,
         [
             "Ask AI",
-            "Edit image",
             "Live translate (Beta)",
             "Open OpenCircle AI chat",
             "Screen included",
+            "Snip image",
             "Song search",
         ],
         "{tips:?}"
@@ -2339,7 +2339,7 @@ fn the_bottom_bar_has_every_main_action_on_any_screen() {
         for want in [
             "Live translate (Beta) · Ctrl+Shift+L",
             "Song search",
-            "Edit the screen · E",
+            "Snip the screen · E",
         ] {
             assert!(tips.iter().any(|t| t == want), "{want}: {tips:?}");
         }
