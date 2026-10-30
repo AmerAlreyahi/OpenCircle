@@ -77,7 +77,8 @@ $work = Join-Path $env:LOCALAPPDATA "oc-update-gate"  # not %TEMP%: an exe run f
 if (Test-Path $work) { Remove-Item -Recurse -Force $work }
 New-Item -ItemType Directory -Force $work | Out-Null
 $base = "http://127.0.0.1:$Port"
-$body = if ($Notes -and (Test-Path $Notes)) { Get-Content -Raw $Notes } else { "## Update test`n- served by the release gate" }
+# a plain string: Get-Content -Raw adds PS* properties that bloat the JSON past the app's limit
+$body = if ($Notes -and (Test-Path $Notes)) { [IO.File]::ReadAllText((Resolve-Path $Notes).Path) } else { "## Update test`n- served by the release gate" }
 $release = [ordered]@{
     tag_name   = "v$($next.Version)"; name = "OpenCircle $($next.Version)"; draft = $false; prerelease = $false
     html_url   = "https://github.com/AmerAlreyahi/OpenCircle/releases/tag/v$($next.Version)"; body = $body
