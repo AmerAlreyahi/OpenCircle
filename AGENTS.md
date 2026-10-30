@@ -280,6 +280,9 @@ production systems.
   The snip area's outline, handles and hover outline take their colours from the chosen Active Look (Settings >
   Appearance "Active look screen borders": Liquid Prism, Spectrum, Aurora Borealis, ..., Custom), the same source
   as the screen edge and main mode's selection line (one place, no snip-only colours).
+  Snip on several screens (lead default 2026-10-30, owner didn't object): Enter = the pointer's screen,
+  Shift+Enter = all screens as one picture; an area may cross screens; the toolbar docks on the screen with the
+  larger part of the area, never across a bezel.
 - Overnight 2026-10-30 (owner asleep, "apply the recommended"): the Snip capture-flow design (canvas v24,
   .claude/artifacts/design/SNIP_FLOW_SPEC.md) is approved with the designer's choices: Ctrl+arrows resize (Shift =
   10 px), the snip toolbar has no Back / Crop / Drag chip (handles crop; drag-out by dragging the picture), Daylight
