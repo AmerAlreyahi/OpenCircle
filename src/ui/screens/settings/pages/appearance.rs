@@ -2,7 +2,7 @@
 //! 12 theme cards (a card is a theme and its mode: owner, 2026-10-28, no OS
 //! mode or logo colour rows; a config that never picked one follows the OS)
 //! and the active look cards (the design's 10, or the user's own: its rows
-//! under the cards). No Glass row until glass exists (0.1.3).
+//! under the cards). No Glass row until glass exists (0.1.4).
 use iced::Element;
 use iced::widget::column;
 

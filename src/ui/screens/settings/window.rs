@@ -1,11 +1,11 @@
 //! The Settings window's shell (`settings-window.js`): our own header (logo,
-//! title, the auto-save pill, the caption buttons) across the window, the
+//! title, the pill when something needs the user, the caption buttons) across the window, the
 //! one hairline under it (the sidebar's edge, also `kit::divider`, starts
 //! there; owner, 2026-10-28), the sidebar of `PAGES`
 //! with its gliding highlight, and the page. The page switches at once: the
 //! design's rise (the whole page moving 14 px over 190 ms) redrew the whole
 //! window every frame on the CPU renderer (laggy on a 4K screen); it returns
-//! with the GPU renderer (0.1.3).
+//! with the GPU renderer (0.1.4).
 use iced::widget::{Space, column, container, row};
 use iced::{Center, Element, Fill, Padding};
 

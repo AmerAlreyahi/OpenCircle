@@ -1509,7 +1509,7 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
     for want in ["Edge style", "Glow strength", "Your two colours"] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
-    // hidden until they do something: glass bars (0.1.3), a one-mode edge row
+    // hidden until they do something: glass bars (0.1.4), a one-mode edge row
     for hidden in ["Bars and pills", "Screen edge for"] {
         assert!(!texts.iter().any(|t| t == hidden), "{hidden}");
     }

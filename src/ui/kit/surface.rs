@@ -1,5 +1,5 @@
 //! `surface(Material, radius, content)`: what every panel and window body sits
-//! on, solid (glass joins with the GPU renderer, 0.1.3).
+//! on, solid (glass joins with the GPU renderer, 0.1.4).
 use iced::widget::{Container, container, text::IntoFragment};
 use iced::{Border, Element};
 

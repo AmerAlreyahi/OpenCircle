@@ -550,7 +550,7 @@ pub const THEMES: [&Theme; 12] = [
 
 #[cfg(test)]
 mod tests {
-    /// A solid release (glass returns with the GPU renderer, 0.1.3): no card
+    /// A solid release (glass returns with the GPU renderer, 0.1.4): no card
     /// promises glass.
     #[test]
     fn no_theme_promises_glass() {

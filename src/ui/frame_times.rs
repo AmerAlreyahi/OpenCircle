@@ -544,7 +544,7 @@ fn a_still_overlay_asks_for_no_frames() {
 /// Linux's glow stays still, #142.)
 #[test]
 #[cfg(windows)]
-#[ignore = "the breath is off in 0.1.2 (edge::breathes); it returns with the GPU renderer in 0.1.3"]
+#[ignore = "the breath is off in 0.1.2 (edge::breathes); it returns with the GPU renderer in 0.1.4"]
 fn the_breath_redraws_only_the_edge() {
     let (w, h) = (1920, 1080);
     motion::set_reduced(false);

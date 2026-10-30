@@ -77,7 +77,7 @@ pub enum Breathe {
 /// near 0 % CPU while the overlay is still): on the CPU renderer each breath
 /// step costs ~11 ms, so even the trimmed breath measured 7-9 % of a core on
 /// the Windows VM (perf-2, exact cycle counts). The glow stays static; the
-/// breath returns with the GPU renderer in 0.1.3 (then: `cfg!(windows) &&
+/// breath returns with the GPU renderer in 0.1.4 (then: `cfg!(windows) &&
 /// !motion::reduced()`).
 fn breathes() -> bool {
     false

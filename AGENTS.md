@@ -101,7 +101,7 @@ production systems.
   source lines). Pass its shots and sections to the UI worker.
   Where the design is silent or buggy (DESIGN_BEHAVIOR.md section 13, e.g. no bar snap
   anchors, no Esc, no focus ring), keep today's behaviour. Owner decisions beat the
-  design (e.g. Live translate is hidden behind Labs until 0.3.0 (owner, 2026-10-27); no widget transparency until glass returns with the GPU renderer in 0.1.3 (owner, 2026-10-27)).
+  design (e.g. Live translate is hidden behind Labs until 0.2.0 (moved 2026-10-30) (owner, 2026-10-27); no widget transparency until glass returns with the GPU renderer in 0.1.4 (moved 2026-10-30) (owner, 2026-10-27)).
 - Overnight / owner away (2026-10-26): continue item by item in Order with the
   recommended defaults; leave each verified item in "Needs your check"; no releases.
 - Board statuses (owner, 2026-10-26): Todo / In Progress / Needs your check / Done.
@@ -146,7 +146,7 @@ production systems.
   static. Must stay near 0 % CPU while the overlay is open and still.
 - v0.1.1 core (owner, 2026-10-27): Circle to Search AND one-shot translate must both
   work properly (translate fast: about 3 s for a page, first lines in about 1 s). Live
-  translate is hidden behind Labs until 0.3.0. No widget transparency until glass (0.1.3).
+  translate is hidden behind Labs until 0.2.0. No widget transparency until glass (0.1.4, moved 2026-10-30).
 - Version plan (owner, 2026-10-27): 0.1.2 new look (solid) + Feature showcase + AI chat
   with markdown; 0.1.3 GPU renderer + glass; 0.2.0 AI online (web search, sign-ins) +
   fast core; 0.3.0 live translation; 0.4.0 snip; 0.5.0 visual search + sound.
@@ -195,10 +195,10 @@ production systems.
   dependency) in opencircle.db, the app's one database for growing records (src/store/: later search/song history,
   recent captures index, translation cache), one module + migrations; config.toml stays (frozen, not in SQLite). Context sent to the model: the last 20 messages in full + one short
   summary of older ones (written by the user's own provider, refreshed every 10 messages); never the whole chat.
-- Smooth on the CPU (owner, 2026-10-28): the GPU renderer stays in 0.1.3. 0.1.2 must feel smooth on the
+- Smooth on the CPU (owner, 2026-10-28): the GPU renderer stays for 0.1.4 (moved 2026-10-30). 0.1.2 must feel smooth on the
   CPU renderer, also on weak laptops and 4K/120 Hz screens: Settings pages switch instantly (the page rise
   returns with the GPU), scrolling copies the already-drawn pixels and redraws only the newly shown strip.
-  In 0.1.3 the original motion returns, and a Power saver setting (Settings > General: Auto | On | Off;
+  In 0.1.4 the original motion returns, and a Power saver setting (Settings > General: Auto | On | Off;
   Auto = on while Windows battery saver is on) brings back this light behaviour (instant pages, scroll by
   copy, minimal motion). In 0.1.2 the light behaviour is the default for everyone.
 - AI provider wording (owner, 2026-10-28): Settings > AI shows "Browser" | "AI provider" and then one
@@ -232,7 +232,7 @@ production systems.
 - Static edge glow in 0.1.2 (lead, 2026-10-29, recommended default while the owner was away; owner may reverse):
   the CPU renderer can't breathe near 0 % (each step ~11 ms; trimmed breath still 7-9 % of a core on the VM by
   cycle count), so the overlay's glow is static in 0.1.2 (`edge::breathes`); the 4 s breath returns with the GPU
-  renderer in 0.1.3, like the other motion ("Smooth on the CPU").
+  renderer in 0.1.4, like the other motion ("Smooth on the CPU").
 - Quiet Settings (owner, 2026-10-29): no "Auto-save active"/"Saved"/"Saving" pill (changes save by themselves,
   as in most apps) and no dot on the active sidebar item; the header pill shows only when something needs the
   user (a problem to fix). The Copied pill (dot + "Copied") stays as it is.
@@ -248,15 +248,19 @@ production systems.
   installed non-Latin recognizer that reads it best (Arabic, Cyrillic, CJK); gently, once per opening; the helper
   isn't started without such a recognizer. Its lines replace Windows OCR's noise lines they overlap.
 - Stealth Frost (owner, 2026-10-30): no card in Settings; a config that has it ("mono") still shows it.
-- Version order (owner, 2026-10-30, supersedes "Version plan" and "Version scope" after 0.1.2): 0.1.2 (in progress,
-  not finalised: owner checks + preview clips) -> 0.1.3 Snip and editor -> 0.2.0 GPU renderer + glass -> 0.3.0 AI
-  online + fast core -> 0.4.0 live translation -> 0.5.0 visual search + sound (lead's order after Snip; owner may
-  reorder). Snip spec (N-73): Print Screen freezes the screen; pick a window (hover outline, click) or drag a region
+- Version plan (owner, 2026-10-30, supersedes "Version plan" and "Version scope" after 0.1.2; the roadmap table has
+  the items): 0.1.2 (in progress, not finalised: owner checks + preview clips) -> 0.1.3 Snip and editor + colour picker,
+  screen ruler, live window pin, share sheet -> 0.1.4 GPU renderer + glass + winget/Scoop/Flathub -> 0.1.5 AI online +
+  faster core + actions on detected things + quick convert + advanced paste -> 0.1.6 speech to text, text to speech,
+  music search, readers for the user's Windows languages -> 0.1.7 writing assist (no chat translation) -> 0.2.0 live
+  translation + all-languages offline model + OCR languages + game glossary + NVIDIA pack (waits until the owner has a
+  reliable approach) -> 0.3.0 visual search alone. PowerToys ideas (MIT) are rebuilt our way: no names, logos, icons.
+  Snip spec (N-73): Print Screen freezes the screen; pick a window (hover outline, click) or drag a region
   with its exact size shown, or full screen, like Windows Snipping Tool; then ONLY the editing toolbar; the picked area
   can be moved and resized; long capture = select an area, the user scrolls BY HAND, OpenCircle stitches until Done;
   copy lands on the clipboard and in Win+V history like main mode's Ctrl+C (bug N-74). Don't start before the owner says.
 - Hide, don't delete (owner, 2026-10-29): an option for a feature that hasn't arrived (e.g. "Bars and pills" glass
-  styles until 0.1.3; "Screen edge for" Live/Snip until they are on in Labs) is hidden, its code and config key
+  styles until 0.1.4; "Screen edge for" Live/Snip until they are on in Labs) is hidden, its code and config key
   kept, and shown when the feature really ships. A row with a single choice is not shown.
 - Tray menu (owner, 2026-10-27): calm and native-quality, not "AI-looking": Circle to Search,
   Translate screen, Labs rows only when on, Settings, Quit; no AI row, no header/status. Redesigned by

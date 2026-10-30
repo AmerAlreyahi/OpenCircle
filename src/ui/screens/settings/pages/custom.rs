@@ -17,7 +17,7 @@ use crate::ui::kit::tokens::space;
 use crate::ui::kit::tooltip::{Why, hint, tip};
 use crate::ui::theme;
 
-/// The bar style row, hidden until glass ships (0.1.3).
+/// The bar style row, hidden until glass ships (0.1.4).
 const GLASS_BARS: bool = false;
 
 pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
@@ -121,7 +121,7 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
             ),
         ),
     ]);
-    // Glass bars come with the GPU renderer (0.1.3): until then the style
+    // Glass bars come with the GPU renderer (0.1.4): until then the style
     // changes nothing, so its row stays hidden (the config key is kept).
     if GLASS_BARS {
         rows.push(row_of(

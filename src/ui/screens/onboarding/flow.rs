@@ -1,5 +1,5 @@
 //! Onboarding's state and logic (`State`, `update`, the `STEPS` list) and its
-//! shell: the header, the step track (its thumb glides; the step itself switches at once: its rise redrew the whole window each frame on the CPU renderer, it returns with the GPU renderer, 0.1.3),
+//! shell: the header, the step track (its thumb glides; the step itself switches at once: its rise redrew the whole window each frame on the CPU renderer, it returns with the GPU renderer, 0.1.4),
 //! the step and the footer (Back, Skip on the AI step, Next or Finish).
 //!
 //! ```ignore
