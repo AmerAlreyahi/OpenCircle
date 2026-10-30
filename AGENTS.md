@@ -261,6 +261,13 @@ production systems.
   with its exact size shown, or full screen, like Windows Snipping Tool; then ONLY the editing toolbar; the picked area
   can be moved and resized; long capture = select an area, the user scrolls BY HAND, OpenCircle stitches until Done;
   copy lands on the clipboard and in Win+V history like main mode's Ctrl+C (bug N-74). Don't start before the owner says.
+- Updater fix now (owner, 2026-10-30, "we should fix it now"): a Setup-exe install lives in Program Files
+  (per-machine MSI), so the in-place exe swap fails ("Access is denied", seen on the VM 0.1.1 -> 0.1.2): no
+  Setup-exe user updates by itself. Fix first, before Snip: such installs update through the release's Setup exe
+  (quiet, elevated). Installed 0.1.1/0.1.2 copies can't be fixed remotely (their updater is fixed code; channel
+  frozen): they install the fixed version by hand once. How it ships is the owner's call (publish rule stands).
+- 0.1.3 go (owner, 2026-10-30): the plan in roadmap 2A is approved as is; Edit becomes Snip starts now (first
+  0.1.3 item, after the updater fix); M2M100 418M is not measured.
 - Edit becomes Snip (owner, 2026-10-30; in 0.1.2, NOT started until the owner says): every "Edit" / "Edit image"
   entry point (bar button, tooltip, Labs row, shortcut name, docs) gets a new Snip icon and Snip text, because Snip
   contains the editor. Icon and text only; behaviour unchanged; the Snipping Tool flow stays 0.1.3.
