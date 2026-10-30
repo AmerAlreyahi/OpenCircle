@@ -289,31 +289,28 @@ impl App {
     ) -> Task<Message> {
         let (copy, edit) = route;
         if edit || !copy {
+            // Both (N-74): copied as well, quietly (the editor opening says it
+            // went; a failure is logged and the capture is in the editor).
+            let copied = match copy {
+                true => copy_snip(crop.clone(), None),
+                false => Task::none(),
+            };
             if in_place {
-                return self.open_editor();
+                return Task::batch([copied, self.open_editor()]);
             }
             self.o.edit = Some(Editing::fitted(
                 crop,
                 work_area(self.o.screen, self.o.work_inset),
                 self.o.scale,
             ));
-            return Task::none();
+            return copied;
         }
         let Purpose::Snip(snip) = &mut self.o.purpose else {
             return Task::none();
         };
         let id = snip.toast(crop.clone(), in_place);
         let foreground = snip.foreground;
-        // The copy runs on a thread (encoding a big capture takes a while);
-        // if it fails, the editor opens, so the capture isn't lost.
-        let copied = background(move |tx| {
-            if let Run::Finish(copy) = copy::ACTION.run
-                && let Err(e) = copy(crop)
-            {
-                crate::log!("copy failed: {e}");
-                let _ = tx.unbounded_send(Message::Snip(snip::Msg::CopyFailed(id)));
-            }
-        });
+        let copied = copy_snip(crop, Some(id));
         let done = background(move |tx| {
             // Once the pill is up, the user's app (their AI chat) gets the focus back.
             std::thread::sleep(Duration::from_millis(150));
@@ -374,4 +371,20 @@ impl App {
             .chain(window::gain_focus(self.overlay))
             .chain(work)
     }
+}
+
+/// Copies a snip on a thread (encoding a big capture takes a while), through
+/// the one copy path. If it fails while toast `toast` shows, the editor opens,
+/// so the capture isn't lost.
+fn copy_snip(crop: Crop, toast: Option<u32>) -> Task<Message> {
+    background(move |tx| {
+        if let Run::Finish(copy) = copy::ACTION.run
+            && let Err(e) = copy(crop)
+        {
+            crate::log!("copy failed: {e}");
+            if let Some(id) = toast {
+                let _ = tx.unbounded_send(Message::Snip(snip::Msg::CopyFailed(id)));
+            }
+        }
+    })
 }

@@ -565,6 +565,21 @@ fn snip_ctrl_c_copies_the_area_under_the_pointer_as_an_image() {
     assert_eq!(copied_image(), Some((800, 600)));
 }
 
+/// N-74: "After a capture: Both" copies the snip AND opens the editor (it
+/// only opened the editor: nothing reached the clipboard or Win+V).
+#[test]
+fn a_snip_routed_to_both_is_copied_and_edited() {
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = snipping(area);
+    app.o.labs = crate::labs::Labs::all_on();
+    app.select(area);
+    let crop = app.crop().unwrap();
+    let _ = copy::copied::image();
+    let _ = app.snip_routed(crop, true, snip::route(config::SnipAfter::Both));
+    assert_eq!(copied_image(), Some((300, 200)), "copied");
+    assert!(app.o.edit.is_some(), "and the editor is open");
+}
+
 /// The two shortcuts of #52: Ctrl+C copies the selection's picture, Ctrl+S saves
 /// it in the save folder, each with a pill; a failure shows the pill without a dot.
 #[test]
