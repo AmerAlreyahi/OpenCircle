@@ -32,6 +32,10 @@ pub trait Deps {
     }
     /// Gets translation into `target` ready while the text is read.
     fn warm(&self, _target: &str) {}
+    /// All the text read, before the first `translate` call: "auto" guesses
+    /// its language once from all of it (a batch of short headings alone
+    /// has no common words to tell Spanish from English).
+    fn read(&self, _texts: &[&str]) {}
 }
 
 /// OCR by Windows OCR where it reads the source (`system_reads`), else in
@@ -46,6 +50,9 @@ pub struct Real {
     /// Offline: the pair a translation needed whose models are missing (the
     /// UI then asks to download it).
     missing: Mutex<Option<&'static mt::Pair>>,
+    /// "auto": the language `read` guessed from all the text (`None` = guess
+    /// from each call's lines).
+    guessed: Mutex<Option<&'static str>>,
 }
 
 pub enum Via {
@@ -65,6 +72,7 @@ impl Real {
             via,
             scale: 1.0,
             missing: Mutex::new(None),
+            guessed: Mutex::new(None),
         }
     }
 
@@ -88,7 +96,10 @@ impl Real {
     /// Err = no way offline (the message offers AI; nothing is sent anywhere).
     fn route_for(&self, texts: &[String], target: &str) -> Result<Vec<&'static mt::Pair>, AiError> {
         let source = match self.source.as_str() {
-            lang::AUTO => lang::guess(texts.iter().map(String::as_str)).unwrap_or("en"),
+            lang::AUTO => match *self.guessed.lock().unwrap_or_else(|e| e.into_inner()) {
+                Some(page) => page,
+                None => lang::guess(texts.iter().map(String::as_str)).unwrap_or("en"),
+            },
             s => s,
         };
         mt::route(source, target).ok_or_else(|| AiError::Offline(mt::unavailable(source, target)))
@@ -172,6 +183,13 @@ impl Deps for Real {
 
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
         self.lines(texts, target, MARKUP)
+    }
+
+    fn read(&self, texts: &[&str]) {
+        if self.source == lang::AUTO {
+            *self.guessed.lock().unwrap_or_else(|e| e.into_inner()) =
+                lang::guess(texts.iter().copied());
+        }
     }
 
     /// Offline: the top lines first, quickly (a cloud model gets one call: a
@@ -387,6 +405,7 @@ pub fn translate_progressively(
         .collect();
     let ocr = start.elapsed();
     let blocks = group_blocks(&lines);
+    deps.read(&blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>());
     let mut tr = vec![String::new(); blocks.len()];
     let mut timings = Timings {
         ocr,
@@ -1038,6 +1057,13 @@ pub(super) mod tests {
             ("ar", "en", 1)
         );
         assert_eq!(pair(&auto, &["メニュー"], "en").unwrap(), ("ja", "en", 1));
+        // a batch of short headings alone reads as English; the whole page doesn't
+        let page = Real::new(lang::AUTO, Via::Offline);
+        page.read(&["Un faro es una torre de señalización luminosa situada en el litoral"]);
+        assert_eq!(
+            pair(&page, &["Artículo", "Discusión"], "en").unwrap().0,
+            "es"
+        );
         let es = ["Un faro es una torre de señalización luminosa situada en el litoral"];
         assert_eq!(pair(&auto, &es, "en").unwrap(), ("es", "en", 1));
         let same = auto
