@@ -207,7 +207,7 @@ mod tests {
 
     use crate::actions::share;
     use crate::config::SnipAfter;
-    use crate::editor::Message as E;
+    use crate::editor::{Message as E, dragout};
     use crate::labs::Labs;
     use crate::ui::app::App;
     use crate::ui::app::message::Hiding;
@@ -314,5 +314,29 @@ mod tests {
         let names = bar_names(&app);
         assert!(names.iter().any(|n| n.starts_with("Undo")), "{names:?}");
         assert!(!names.iter().any(|n| n.starts_with("Pin")), "{names:?}");
+    }
+
+    /// #37: a drag-out an app took closes the overlay with its toolbar (none
+    /// left floating over the desktop); one nothing took keeps the editor.
+    #[test]
+    fn after_a_drag_out_drop_no_toolbar_remains() {
+        for snip in [true, false] {
+            let mut app = if snip {
+                snip_editor()
+            } else {
+                in_place_editor()
+            };
+            dragout::TEST_DROP.set(Some(false));
+            let _ = app.on_editor(E::DragOut);
+            assert!(app.editing() && app.hiding == Hiding::No, "nothing took it");
+            assert!(
+                bar_names(&app).iter().any(|n| n.starts_with("Copy")),
+                "toolbar back"
+            );
+            dragout::TEST_DROP.set(Some(true));
+            let task = app.on_editor(E::DragOut);
+            run_task(&mut app, task);
+            assert!(gone(&app), "dropped (snip: {snip}): no toolbar left");
+        }
     }
 }
