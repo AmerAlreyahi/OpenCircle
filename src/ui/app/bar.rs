@@ -70,6 +70,17 @@ impl App {
             return at;
         }
         let size = self.dock_size();
+        // Snip's live area: the toolbar docks to it (under, above, inside),
+        // clear of the handle being dragged.
+        if let Some(edit) = self.o.edit.as_ref().filter(|e| e.editor.movable) {
+            let area = edit.canvas_rect();
+            let work = Size::new(
+                self.o.screen.width,
+                self.o.screen.height - self.o.work_inset,
+            );
+            let avoid = (edit.editor.area_handle()).map(|p| p + (area.position() - Point::ORIGIN));
+            return bar::dock(area, size, &[Rectangle::with_size(work)], avoid);
+        }
         let canvas = self.o.edit.as_ref().map(Editing::canvas_rect);
         let room = self.bar_room();
         let off = Vector::new(room.x, room.y);

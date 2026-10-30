@@ -8,6 +8,7 @@
 //! Smooth on big crops: the flattened document (`base`) is cached and repainted
 //! once per change; while something is drawn, moved or typed, only its own
 //! region is repainted (`live`) and shown over the base.
+pub(crate) mod area;
 mod arrow;
 pub(crate) mod blur;
 pub mod board;
@@ -38,7 +39,7 @@ pub use style::PRESETS;
 pub use text::{Back as TextBack, Font as TextFont, Style as TextStyle, free_glyphs};
 
 use iced::widget::image;
-use iced::{Point, Rectangle, Size};
+use iced::{Point, Rectangle, Size, Vector};
 
 use crate::actions::Crop;
 use document::int_rect;
@@ -297,6 +298,9 @@ pub enum Message {
     /// A press on the toolbar's grip: the host drags the toolbar (the editor
     /// ignores it).
     Grab,
+    /// An arrow key on Snip's live area (`area::nudge`): direction, Ctrl,
+    /// Shift, Alt.
+    Nudge((i8, i8), (bool, bool, bool)),
 }
 
 /// What the editor asks of its host.
@@ -347,6 +351,15 @@ const GRAB: f32 = 4.0;
 /// A press that moves less than this (display px) is a click.
 const SLOP: f32 = 3.0;
 
+/// Snip's live area being moved or resized: the grip, where the press was
+/// (image px), the area and the items as they were then.
+struct AreaDrag {
+    grip: area::Grip,
+    from: Point,
+    start: Rectangle,
+    items: Vec<Item>,
+}
+
 pub struct Editor {
     pub doc: Document,
     pub tool: Tool,
@@ -383,6 +396,11 @@ pub struct Editor {
     bands: Option<((u32, u32, board::Board), Vec<lines::Band>)>,
     /// The text line the blur stroke being drawn is held on.
     lock: Option<lines::Lock>,
+    /// Snip's live area: the document is the whole frozen monitor and its crop
+    /// is the captured area, which moves and resizes (`area`). The canvas is
+    /// then at the monitor's origin, so window px / zoom = image px.
+    pub movable: bool,
+    area_drag: Option<AreaDrag>,
 }
 
 impl Editor {
@@ -413,6 +431,8 @@ impl Editor {
             scroll: false,
             bands: None,
             lock: None,
+            movable: false,
+            area_drag: None,
         };
         editor.refresh();
         editor
@@ -421,6 +441,9 @@ impl Editor {
     /// Adds `image` (another capture) to the board.
     pub fn append(&mut self, image: Image) {
         self.commit();
+        if std::mem::take(&mut self.movable) {
+            self.doc.bake(); // a board of captures as they are
+        }
         self.doc.append(image);
         self.refresh();
     }
@@ -576,8 +599,52 @@ impl Editor {
                 return Some(Output::Back);
             }
             Message::Grab => {}
+            Message::Nudge(arrow, keys) if self.movable => {
+                self.commit();
+                let view = self.doc.view();
+                let to = whole(area::nudge(
+                    view,
+                    arrow,
+                    keys,
+                    1.0 / self.zoom,
+                    self.frame(),
+                    area::MIN_SIDE,
+                ));
+                self.set_area(view, to, !keys.0);
+            }
+            Message::Nudge(..) => {}
         }
         None
+    }
+
+    /// The whole image (Snip: the frozen monitor), image px.
+    fn frame(&self) -> Rectangle {
+        let i = &self.doc.image;
+        Rectangle::new(Point::ORIGIN, Size::new(i.width as f32, i.height as f32))
+    }
+
+    /// The live area goes from `from` to `to` as one undoable edit: a move
+    /// takes every item with it; a resize leaves them on their pixels.
+    fn set_area(&mut self, from: Rectangle, to: Rectangle, moves: bool) {
+        if to == from {
+            return;
+        }
+        let moved = match moves {
+            true => to.position() - from.position(),
+            false => Vector::ZERO,
+        };
+        self.doc.exec(Edit::Area(from, to, moved));
+        self.refresh();
+    }
+
+    /// Snip's live area on the canvas while it is dragged by a handle: where
+    /// that handle is (canvas px), for the host to keep the toolbar off it.
+    pub fn area_handle(&self) -> Option<Point> {
+        let drag = self
+            .area_drag
+            .as_ref()
+            .filter(|d| d.grip != area::Grip::Move)?;
+        Some(self.to_display_point(drag.grip.at(self.doc.view())))
     }
 
     /// The annotation colour as an iced colour.
@@ -699,6 +766,13 @@ impl Editor {
         }
         let reach = REACH / self.zoom;
         self.commit();
+        // Snip's live area: its handles and edges in every tool.
+        if self.movable
+            && let Some(grip) = area::grip_at(self.doc.view(), p, area::REACH / self.zoom)
+        {
+            self.grab_area(grip, p);
+            return;
+        }
         // The selected item's handles work in every tool.
         if let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) {
             let original = self.doc.items[i].clone();
@@ -714,8 +788,13 @@ impl Editor {
         if self.tool == Tool::Select {
             let hit = select::hit(&self.doc.items, p, reach);
             self.doc.selected = hit;
-            if let Some(i) = hit {
-                self.pick_up(i, false, p);
+            match hit {
+                Some(i) => self.pick_up(i, false, p),
+                // Nothing there: the press inside moves Snip's live area.
+                None if self.movable && self.doc.view().contains(p) => {
+                    self.grab_area(area::Grip::Move, p)
+                }
+                None => {}
             }
             return;
         }
@@ -785,7 +864,43 @@ impl Editor {
         }
     }
 
+    fn grab_area(&mut self, grip: area::Grip, from: Point) {
+        self.area_drag = Some(AreaDrag {
+            grip,
+            from,
+            start: self.doc.view(),
+            items: self.doc.items.clone(),
+        });
+    }
+
+    /// Where the live area is dragged to now (whole image px).
+    fn area_at(&self, drag: &AreaDrag, p: Point) -> Rectangle {
+        let r = area::dragged(
+            drag.grip,
+            drag.start,
+            p - drag.from,
+            self.frame(),
+            area::MIN_SIDE,
+        );
+        whole(r)
+    }
+
     fn drag_to(&mut self, mut p: Point) {
+        // The live area follows the pointer (and its items, for a move); one
+        // undoable edit when let go.
+        if let Some(drag) = &self.area_drag {
+            let to = self.area_at(drag, p);
+            if Some(to) != self.doc.crop {
+                let moved = to.position() - drag.start.position();
+                self.doc.items = drag.items.clone();
+                if drag.grip == area::Grip::Move {
+                    self.doc.shift(moved);
+                }
+                self.doc.crop = Some(to);
+                self.refresh();
+            }
+            return;
+        }
         if let Some((from, _)) = self.cropping {
             self.cropping = Some((from, p));
             return;
@@ -830,6 +945,15 @@ impl Editor {
 
     fn release(&mut self) {
         self.lock = None;
+        if let Some(drag) = self.area_drag.take() {
+            let to = self.doc.view();
+            (self.doc.crop, self.doc.items) = (Some(drag.start), drag.items);
+            self.set_area(drag.start, to, drag.grip == area::Grip::Move);
+            if to == drag.start {
+                self.refresh();
+            }
+            return;
+        }
         if let Some((from, to)) = self.cropping.take() {
             if let Some(area) = crop::area(from, to, self.doc.view()) {
                 self.doc.exec(Edit::Crop(self.doc.crop, Some(area)));
@@ -1039,7 +1163,7 @@ impl Editor {
 
     /// Repaints the base (all items but a hidden pending one, the legend), then
     /// the live layer.
-    fn refresh(&mut self) {
+    pub(crate) fn refresh(&mut self) {
         let hide = self
             .pending
             .as_ref()
@@ -1180,4 +1304,11 @@ fn parse_hex(s: &str) -> Option<[u8; 4]> {
     }
     let byte = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
     Some([byte(0)?, byte(2)?, byte(4)?, 255])
+}
+
+/// `r` on whole image px (the captured pixels are whole).
+fn whole(r: Rectangle) -> Rectangle {
+    let (x0, y0) = (r.x.round(), r.y.round());
+    let (x1, y1) = ((r.x + r.width).round(), (r.y + r.height).round());
+    Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0))
 }

@@ -2566,3 +2566,147 @@ fn pin_hands_over_the_flattened_image() {
     };
     assert!(flat.rgba == copy.rgba);
 }
+
+/// Snip's live area (N-73): a 200x100 frame whose pixel (x, y) = [x, y, 0];
+/// the area starts at (40, 20) 60x30, shown at 1:1, Select tool.
+fn live_area() -> Editor {
+    let frame = image_of(200, 100, |x, y| [x as u8, y as u8, 0, 255]);
+    let mut e = Editor::new(frame, 1.0);
+    e.doc.crop = Some(Rectangle::new(pt(40.0, 20.0), Size::new(60.0, 30.0)));
+    e.movable = true;
+    e.tool = Tool::Select;
+    e.refresh();
+    e
+}
+
+#[test]
+fn snips_live_area_moves_with_its_annotations_and_resizes_without_scaling_them() {
+    let mut e = live_area();
+    // A box drawn in the area (clear of its edges' grips).
+    e.update(Message::Tool(Tool::Rect));
+    e.update(Message::Press(pt(55.0, 30.0)));
+    e.update(Message::Move(pt(70.0, 40.0)));
+    e.update(Message::Release);
+    assert_eq!(e.doc.items.len(), 1);
+    let drawn = e.doc.items[0].clone();
+    // Back to Select: a press on empty space inside drags the area.
+    e.update(Message::Tool(Tool::Select));
+    e.update(Message::Press(pt(90.0, 38.0)));
+    e.update(Message::Move(pt(100.0, 48.0)));
+    // Live while dragged.
+    let moved = Rectangle::new(pt(50.0, 30.0), Size::new(60.0, 30.0));
+    assert_eq!(e.doc.view(), moved);
+    e.update(Message::Release);
+    assert_eq!(e.doc.view(), moved);
+    let mut expect = drawn.clone();
+    expect.shape.transform(|p| p + Vector::new(10.0, 10.0), 1.0);
+    assert_eq!(e.doc.items[0], expect, "the annotation moved with the area");
+    // The capture shows the frame's pixels at the new place.
+    let out = render(&e.doc);
+    assert_eq!((out.width, out.height), (60, 30));
+    assert_eq!(px(&out, 0, 0)[..2], [50, 30]);
+
+    // Resize from the bottom-right handle: the crop grows, the box stays put
+    // and keeps its size (the drawing is never scaled).
+    e.update(Message::Press(pt(110.0, 60.0)));
+    e.update(Message::Move(pt(140.0, 80.0)));
+    e.update(Message::Release);
+    let grown = Rectangle::new(pt(50.0, 30.0), Size::new(90.0, 50.0));
+    assert_eq!(e.doc.view(), grown);
+    assert_eq!(e.doc.items[0], expect);
+    let out = render(&e.doc);
+    assert_eq!((out.width, out.height), (90, 50));
+    assert_eq!(
+        px(&out, 89, 49)[..2],
+        [139, 79],
+        "extended from the frozen frame"
+    );
+
+    // Each is one undo step, back to where it was picked.
+    assert!(e.doc.undo());
+    assert_eq!(e.doc.view(), moved);
+    assert!(e.doc.undo());
+    assert_eq!(
+        e.doc.view(),
+        Rectangle::new(pt(40.0, 20.0), Size::new(60.0, 30.0))
+    );
+    assert_eq!(e.doc.items[0], drawn);
+    assert!(e.doc.redo());
+    assert_eq!(e.doc.items[0], expect);
+}
+
+#[test]
+fn snips_live_area_handles_work_with_any_tool_and_a_drawing_tool_draws_inside() {
+    let mut e = live_area();
+    e.update(Message::Tool(Tool::Pen));
+    // The top-left handle with the pen: a resize, nothing drawn.
+    e.update(Message::Press(pt(41.0, 21.0)));
+    e.update(Message::Move(pt(20.0, 10.0)));
+    e.update(Message::Release);
+    assert!(e.doc.items.is_empty());
+    let r = Rectangle::new(pt(19.0, 9.0), Size::new(81.0, 41.0));
+    assert_eq!(e.doc.view(), r);
+    // Inside, the pen draws (no move).
+    e.update(Message::Press(pt(50.0, 30.0)));
+    e.update(Message::Move(pt(60.0, 35.0)));
+    e.update(Message::Release);
+    assert_eq!(e.doc.items.len(), 1);
+    assert_eq!(e.doc.view(), r);
+    // Never past the frame, never under the minimum.
+    e.update(Message::Press(pt(19.0, 9.0)));
+    e.update(Message::Move(pt(-500.0, -500.0)));
+    e.update(Message::Release);
+    assert_eq!(e.doc.view().position(), Point::ORIGIN);
+    e.update(Message::Press(pt(100.0, 30.0)));
+    e.update(Message::Move(pt(-500.0, 30.0)));
+    e.update(Message::Release);
+    assert_eq!(e.doc.view().width, area::MIN_SIDE);
+}
+
+#[test]
+fn snips_live_area_follows_the_arrow_keys_and_stays_put_once_on_a_board() {
+    let mut e = live_area();
+    let key = |e: &Editor, named, m: Modifiers| e.key(&Key::Named(named), None, m, None);
+    let none = Modifiers::empty();
+    assert!(matches!(
+        key(&e, Named::ArrowRight, none),
+        Some(Message::Nudge((1, 0), (false, false, false)))
+    ));
+    for (named, m) in [
+        (Named::ArrowRight, none),
+        (Named::ArrowDown, Modifiers::SHIFT),
+        (Named::ArrowRight, Modifiers::CTRL),
+        (Named::ArrowLeft, Modifiers::CTRL | Modifiers::ALT),
+    ] {
+        let msg = key(&e, named, m).expect("an arrow nudges the area");
+        e.update(msg);
+    }
+    // +1 x, +10 y, 1 wider on the right, 1 wider on the left.
+    assert_eq!(
+        e.doc.view(),
+        Rectangle::new(pt(40.0, 30.0), Size::new(62.0, 30.0))
+    );
+    // Outside Snip, arrows do nothing to the crop.
+    let plain = Editor::new(checker(20, 20), 1.0);
+    assert!(key(&plain, Named::ArrowRight, none).is_none());
+
+    // Add capture: the area is baked into a fixed capture first.
+    e.update(Message::Tool(Tool::Rect));
+    e.update(Message::Press(pt(50.0, 40.0)));
+    e.update(Message::Move(pt(65.0, 50.0)));
+    e.update(Message::Release);
+    let before = e.doc.items[0].frame().position();
+    e.append(checker(30, 30));
+    assert!(!e.movable);
+    let first = e.doc.tiles()[0];
+    assert_eq!(
+        first.size(),
+        Size::new(62.0, 30.0),
+        "the area, not the frame"
+    );
+    let now = e.doc.items[0].frame().position();
+    assert_eq!(
+        now,
+        before - Vector::new(40.0, 30.0) + Vector::new(first.x, first.y)
+    );
+}

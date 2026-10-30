@@ -42,6 +42,24 @@ impl Editing {
         Self::new(crop, on_screen(bounds, scale).position(), 1.0 / scale)
     }
 
+    /// Snip's live area: the whole frozen monitor `frame` (physical px, shown
+    /// at the monitor's origin) with the frame pixels `bounds` as the area,
+    /// which then moves and resizes (`editor::area`); it starts with Select,
+    /// so a drag inside moves it until a tool is picked.
+    pub fn live(frame: Image, bounds: [u32; 4], scale: f32) -> Self {
+        let mut e = Self::new_image(frame, Point::ORIGIN, 1.0 / scale);
+        let [x0, y0, x1, y1] = bounds;
+        let px = |v: u32| v as f32;
+        e.editor.doc.crop = Some(Rectangle::new(
+            Point::new(px(x0), px(y0)),
+            Size::new(px(x1 - x0), px(y1 - y0)),
+        ));
+        e.editor.movable = true;
+        e.editor.tool = editor::Tool::Select;
+        e.editor.refresh();
+        e
+    }
+
     /// Scaled down to fit the work area `screen` (the screen above the
     /// taskbar), with room for the toolbar docked under it (a scrolling capture).
     pub fn fitted(crop: Crop, screen: Size, scale: f32) -> Self {
@@ -56,6 +74,10 @@ impl Editing {
             height: crop.height,
             rgba: crop.rgba,
         };
+        Self::new_image(image, origin, zoom)
+    }
+
+    fn new_image(image: Image, origin: Point, zoom: f32) -> Self {
         Editing {
             editor: Editor::new(image, zoom),
             origin,
@@ -171,9 +193,10 @@ impl Editing {
             .map(map);
         }
         let canvas = self.canvas_rect();
-        let mut layers = stack![
-            pin(Element::from(canvas::canvas(&self.editor)).map(map)).position(canvas.position())
-        ];
+        let m = canvas::margin(&self.editor);
+        let at = canvas.position() - iced::Vector::new(m, m);
+        let mut layers =
+            stack![pin(Element::from(canvas::canvas(&self.editor)).map(map)).position(at)];
         if let Some(at) = toolbar {
             let room = screen.width - 2.0 * GAP;
             let size = toolbar_size(room);

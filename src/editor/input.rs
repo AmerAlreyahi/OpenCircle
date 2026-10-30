@@ -6,7 +6,7 @@ use iced::mouse;
 use iced::{Point, Rectangle};
 
 use super::{
-    Drag, Editor, Menu, Message, PRESETS, Shape, TOOLS, Tool, callout, label, select, text,
+    Drag, Editor, Menu, Message, PRESETS, Shape, TOOLS, Tool, area, callout, label, select, text,
 };
 
 impl Editor {
@@ -28,6 +28,21 @@ impl Editor {
             Some(Drag::Draw | Drag::Resize(..) | Drag::Bend(_)) => return I::Crosshair,
             Some(Drag::Type) | None => {}
         }
+        // Snip's live area: its handles and edges, and a move inside.
+        if self.movable {
+            let grip = match &self.area_drag {
+                Some(drag) => Some(drag.grip),
+                None => area::grip_at(self.doc.view(), p, area::REACH / self.zoom),
+            };
+            match grip {
+                Some(area::Grip::Move) => return I::Grabbing,
+                Some(area::Grip::Edge(_, 0)) => return I::ResizingHorizontally,
+                Some(area::Grip::Edge(0, _)) => return I::ResizingVertically,
+                Some(area::Grip::Edge(x, y)) if x == y => return I::ResizingDiagonallyDown,
+                Some(area::Grip::Edge(..)) => return I::ResizingDiagonallyUp,
+                None => {}
+            }
+        }
         let reach = super::REACH / self.zoom;
         let handle = (self.doc.selected.and_then(|i| self.doc.items.get(i)))
             .and_then(|item| select::handle_at(item, p, reach));
@@ -36,6 +51,7 @@ impl Editor {
             (Some(select::Handle::Corner(_)), _) => I::ResizingDiagonallyUp,
             (Some(select::Handle::Bend), _) => I::Grab,
             (None, Tool::Select) if select::hit(&self.doc.items, p, reach).is_some() => I::Grab,
+            (None, Tool::Select) if self.movable && self.doc.view().contains(p) => I::Grab,
             (None, Tool::Select) => I::default(),
             (None, _) if self.grabbed(p).is_some() => I::Move,
             (None, Tool::Text | Tool::Label | Tool::Callout) => I::Text,
@@ -87,6 +103,12 @@ impl Editor {
         }
     }
 
+    /// Window px → image px for Snip's live area (the canvas starts at the
+    /// monitor's origin there, wherever the area is now).
+    pub(crate) fn window_to_image(&self, p: Point) -> Point {
+        Point::new(p.x / self.zoom, p.y / self.zoom)
+    }
+
     /// Canvas px → image px.
     pub(crate) fn to_image(&self, p: Point) -> Point {
         let v = self.doc.view();
@@ -124,6 +146,17 @@ impl Editor {
         }
         if self.menu == Some(Menu::Colour) {
             return matches!(key, Key::Named(Named::Escape)).then_some(Message::Picker);
+        }
+        let arrow = match key {
+            Key::Named(Named::ArrowLeft) => Some((-1, 0)),
+            Key::Named(Named::ArrowRight) => Some((1, 0)),
+            Key::Named(Named::ArrowUp) => Some((0, -1)),
+            Key::Named(Named::ArrowDown) => Some((0, 1)),
+            _ => None,
+        };
+        if let Some(arrow) = arrow.filter(|_| self.movable) {
+            let keys = (modifiers.command(), modifiers.shift(), modifiers.alt());
+            return Some(Message::Nudge(arrow, keys));
         }
         match key {
             Key::Named(Named::Escape) if self.picking => Some(Message::Eyedropper),

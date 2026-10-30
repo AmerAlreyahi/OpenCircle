@@ -565,6 +565,51 @@ fn snip_ctrl_c_copies_the_area_under_the_pointer_as_an_image() {
     assert_eq!(copied_image(), Some((800, 600)));
 }
 
+/// N-73: after the pick the area stays live: a handle resizes it on the frozen
+/// frame, the overlay's selection follows, the toolbar docks under it, and
+/// Copy takes the area as it is now. Enter while picking = the whole screen.
+#[test]
+fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
+    use crate::editor::Message as E;
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = snipping(area);
+    app.o.labs = crate::labs::Labs::all_on();
+    app.select(area);
+    let crop = app.crop().unwrap();
+    let _ = app.snip_routed(crop, true, snip::route(config::SnipAfter::Editor));
+    let edit = app.o.edit.as_ref().expect("the editor is open");
+    assert!(edit.editor.movable && edit.editor.tool == crate::editor::Tool::Select);
+    assert_eq!(edit.canvas_rect(), area, "over the picked area");
+    // The bottom-right handle out by (100, 50).
+    let _ = app.on_editor(E::Press(Point::new(400.0, 280.0)));
+    let _ = app.on_editor(E::Move(Point::new(500.0, 330.0)));
+    let grown = Rectangle::new(area.position(), Size::new(400.0, 250.0));
+    assert_eq!(
+        app.o.selection.map(|s| s.area),
+        Some(grown),
+        "followed live"
+    );
+    let _ = app.on_editor(E::Release);
+    // The toolbar docks under the area, on the screen.
+    let at = app.bar_target();
+    assert!(at.y >= grown.y + grown.height, "{at:?}");
+    let _ = copy::copied::image();
+    let task = app.on_editor(E::Copy);
+    run_task(&mut app, task);
+    assert_eq!(
+        copied_image(),
+        Some((400, 250)),
+        "the live area, as it is now"
+    );
+
+    // Enter while picking: the whole screen.
+    let mut app = snipping(area);
+    let _ = copy::copied::image();
+    let task = app.on_overlay(overlay::Event::Enter);
+    run_task(&mut app, task);
+    assert_eq!(copied_image(), Some((800, 600)));
+}
+
 /// N-74: "After a capture: Both" copies the snip AND opens the editor (it
 /// only opened the editor: nothing reached the clipboard or Win+V).
 #[test]

@@ -4,7 +4,7 @@ use iced::widget::image;
 use iced::{Task, Vector};
 
 use crate::actions::{self, Crop, copy, save};
-use crate::editor::{self, Output};
+use crate::editor::{self, Image, Output};
 use crate::labs::{self};
 
 use crate::ui::app::message::{Message, Purpose};
@@ -45,7 +45,18 @@ impl App {
         let bounds = actions::crop_bounds(*width, *height, self.o.scale, selection.area);
         let crop = actions::crop(pixels, *width, *height, self.o.scale, selection.area);
         if let (Some(bounds), Some(crop)) = (bounds, crop) {
-            let mut edit = Editing::in_place(crop, bounds, self.o.scale);
+            // Snip: the area stays live on the whole frozen monitor (N-73).
+            let mut edit = match &self.o.purpose {
+                Purpose::Snip(_) => {
+                    let frame = Image {
+                        width: *width,
+                        height: *height,
+                        rgba: pixels.to_vec(),
+                    };
+                    Editing::live(frame, bounds, self.o.scale)
+                }
+                _ => Editing::in_place(crop, bounds, self.o.scale),
+            };
             // Scrolling capture needs the page under the area: Snip, in place.
             edit.editor.scroll = matches!(&self.o.purpose, Purpose::Snip(s) if s.can_scroll());
             self.o.edit = Some(edit);
@@ -58,11 +69,21 @@ impl App {
         if matches!(msg, editor::Message::Back) && std::env::var_os(TEST_SHOT).is_some() {
             return self.test_shot();
         }
+        // Snip's live area: the frame times of each drag on it (the log).
+        let live = self.o.edit.as_ref().is_some_and(|e| e.editor.movable);
+        match &msg {
+            editor::Message::Press(_) if live => self.frame_times.borrow_mut().clear(),
+            editor::Message::Release if live => self.log_frames("snip area drag"),
+            _ => {}
+        }
         let o = &mut *self.o;
         let Some(edit) = &mut o.edit else {
             return Task::none();
         };
         let out = edit.update(msg);
+        // Snip's live area moved or resized: the selection (the overlay's dim,
+        // scrolling capture, pin) follows it.
+        let live = edit.editor.movable.then(|| edit.canvas_rect());
         // Add capture: the area picked on the frozen frame joins the board.
         if let Some(area) = edit.take_picked()
             && let Some(image::Handle::Rgba {
@@ -75,6 +96,13 @@ impl App {
         {
             edit.add(crop, work_area(o.screen, o.work_inset));
         }
+        if let Some(area) = live.filter(|a| self.o.selection.is_none_or(|s| s.area != *a)) {
+            self.select(area);
+        }
+        let o = &mut *self.o;
+        let Some(edit) = &mut o.edit else {
+            return Task::none();
+        };
         match out {
             None => Task::none(),
             // Snip has no action bar: back to picking an area.

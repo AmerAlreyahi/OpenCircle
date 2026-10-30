@@ -495,6 +495,11 @@ impl Snip {
         self.switch(kind, screen)
     }
 
+    /// Enter: the whole screen shown (the pointer's), whatever is outlined.
+    pub fn full(&self, screen: Size) -> Next {
+        Next::Edit(Rectangle::with_size(screen))
+    }
+
     /// Switches mode; Full picks the whole screen at once.
     pub fn switch(&mut self, kind: Kind, screen: Size) -> Option<Next> {
         self.kind = kind;

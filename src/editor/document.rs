@@ -1,7 +1,7 @@
 //! The document: the image, its annotations (objects until export, never pixels),
 //! the crop, the selection and the undo history (a command stack). `paint` flattens
 //! any region of it with tiny-skia, the same rasteriser iced uses.
-use iced::{Point, Rectangle, Size};
+use iced::{Point, Rectangle, Size, Vector};
 use tiny_skia::{
     FillRule, IntRect, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform,
 };
@@ -226,6 +226,9 @@ pub enum Edit {
     Crop(Option<Rectangle>, Option<Rectangle>),
     /// The board (captures, layout) and everything on it, before and after.
     Board(Box<Sheet>, Box<Sheet>),
+    /// Snip's live area (the crop) before and after, and how far every item
+    /// moved with it (zero for a resize: the drawing stays on its pixels).
+    Area(Rectangle, Rectangle, Vector),
 }
 
 /// A board's state: its layout and the items and crop that go with it.
@@ -244,6 +247,7 @@ impl Edit {
             Edit::Change(i, before, after) => Edit::Change(i, after, before),
             Edit::Crop(before, after) => Edit::Crop(after, before),
             Edit::Board(before, after) => Edit::Board(after, before),
+            Edit::Area(before, after, moved) => Edit::Area(after, before, -moved),
         }
     }
 
@@ -268,6 +272,10 @@ impl Edit {
                 doc.items = after.items.clone();
                 doc.selected = None;
                 doc.compose();
+            }
+            Edit::Area(_, after, moved) => {
+                doc.crop = Some(*after);
+                doc.shift(*moved);
             }
         }
     }
@@ -460,6 +468,44 @@ impl Document {
         edit.apply(self);
         self.done.push(edit);
         true
+    }
+
+    /// Moves every item by `by` (image px).
+    pub fn shift(&mut self, by: Vector) {
+        if by != Vector::ZERO {
+            for item in &mut self.items {
+                item.shape.transform(|p| p + by, 1.0);
+            }
+        }
+    }
+
+    /// The crop becomes the whole image (its pixels cut out, the items moved
+    /// with them): Snip's live area is fixed from here on (a board needs its
+    /// captures as they are). Undo starts again from this state.
+    pub fn bake(&mut self) {
+        let Some(crop) = self.crop.take() else {
+            return;
+        };
+        let whole = Rectangle::new(
+            Point::ORIGIN,
+            Size::new(self.image.width as f32, self.image.height as f32),
+        );
+        let r = int_rect(crop, whole);
+        let (x, y, w, h) = (r.x() as usize, r.y() as usize, r.width(), r.height());
+        let stride = self.image.width as usize * 4;
+        let rgba = (y..y + h as usize)
+            .flat_map(|row| &self.image.rgba[row * stride + x * 4..][..w as usize * 4])
+            .copied()
+            .collect();
+        self.image = Image {
+            width: w,
+            height: h,
+            rgba,
+        };
+        self.shift(Vector::new(-(x as f32), -(y as f32)));
+        self.tiles = vec![Rectangle::new(Point::ORIGIN, Size::new(w as f32, h as f32))];
+        self.done.clear();
+        self.undone.clear();
     }
 
     /// The visible part of the image, image px.

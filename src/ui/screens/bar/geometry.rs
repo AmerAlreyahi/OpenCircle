@@ -221,6 +221,56 @@ pub(in crate::ui) fn place(selection: Rectangle, bar: Size, screen: Size) -> Poi
     Point::new(x, y.max(GAP))
 }
 
+/// Where Snip's editing toolbar (`bar`) docks for the live area `area`
+/// (logical px): centred under it, else above it, else inside its top edge,
+/// else inside its bottom edge; on the screen of `screens` (work areas) where
+/// the area leaves the most room above or below; never off that screen, and
+/// never over `avoid` (the handle being dragged) while another spot is free.
+pub(in crate::ui) fn dock(
+    area: Rectangle,
+    bar: Size,
+    screens: &[Rectangle],
+    avoid: Option<Point>,
+) -> Point {
+    let room = |s: &Rectangle| {
+        let part = area.intersection(s)?;
+        let below = s.y + s.height - (part.y + part.height);
+        let above = part.y - s.y;
+        Some((part, below.max(above)))
+    };
+    let (screen, part) = (screens.iter())
+        .filter_map(|s| room(s).map(|(part, free)| (s, part, free)))
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(s, part, _)| (*s, part))
+        .unwrap_or_else(|| {
+            let s = screens.first().copied().unwrap_or(area);
+            (s, area)
+        });
+    let (top, bottom) = (screen.y + GAP, screen.y + screen.height - GAP - bar.height);
+    let x = (part.center_x() - bar.width / 2.0)
+        .min(screen.x + screen.width - GAP - bar.width)
+        .max(screen.x + GAP);
+    let spots = [
+        part.y + part.height + GAP,
+        part.y - GAP - bar.height,
+        part.y + GAP,
+        part.y + part.height - GAP - bar.height,
+    ];
+    let fits = |y: f32| y >= top && y <= bottom;
+    // The handle's own reach around it stays clear.
+    let clear = |y: f32| {
+        avoid.is_none_or(|p| {
+            let r = Rectangle::new(Point::new(x, y), bar).expand(GAP);
+            !r.contains(p)
+        })
+    };
+    let y = (spots.iter().copied())
+        .find(|&y| fits(y) && clear(y))
+        .or_else(|| spots.iter().copied().find(|&y| fits(y)))
+        .unwrap_or(bottom);
+    Point::new(x, y.min(bottom).max(top))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,5 +436,60 @@ mod tests {
         let key = |ctrl, letter| Key { ctrl, letter };
         assert_eq!(key_hint(key(true, 's')), "Ctrl+S");
         assert_eq!(key_hint(key(false, 'a')), "A");
+    }
+
+    #[test]
+    fn snips_toolbar_docks_below_then_above_then_inside_never_off_screen() {
+        let work = [Rectangle::with_size(SCREEN)];
+        let at = |a: Rectangle| dock(a, BAR, &work, None);
+        // Room below: centred under the area.
+        let a = sel(800.0, 300.0, 200.0, 100.0);
+        assert_eq!(at(a), Point::new(700.0, 416.0));
+        // None below: above.
+        let low = sel(800.0, 950.0, 200.0, 100.0);
+        assert_eq!(at(low).y, 950.0 - GAP - BAR.height);
+        // As tall as the screen: inside its top edge.
+        let tall = sel(100.0, 0.0, 600.0, 1080.0);
+        assert_eq!(at(tall).y, GAP);
+        // Corners and edges: always fully on the screen.
+        for a in [
+            sel(0.0, 0.0, 30.0, 30.0),
+            sel(1890.0, 1050.0, 30.0, 30.0),
+            sel(0.0, 0.0, 1920.0, 1080.0),
+            sel(-300.0, 500.0, 320.0, 40.0),
+        ] {
+            assert!(on_screen(at(a)), "{a:?} -> {:?}", at(a));
+        }
+    }
+
+    #[test]
+    fn snips_toolbar_keeps_off_the_handle_being_dragged() {
+        let work = [Rectangle::with_size(SCREEN)];
+        let a = sel(800.0, 300.0, 200.0, 100.0);
+        let below = dock(a, BAR, &work, None);
+        // Dragging the bottom edge's handle down into where the toolbar sits.
+        let handle = Point::new(900.0, 430.0);
+        let moved = dock(a, BAR, &work, Some(handle));
+        assert!(!Rectangle::new(moved, BAR).expand(GAP).contains(handle));
+        assert_eq!(moved.y, 300.0 - GAP - BAR.height, "above instead");
+        // A handle far away changes nothing.
+        assert_eq!(dock(a, BAR, &work, Some(Point::new(10.0, 10.0))), below);
+    }
+
+    #[test]
+    fn snips_toolbar_goes_to_the_screen_with_the_most_room() {
+        // Two screens side by side; the area spans both, low on the left one
+        // (little room) and high on the right one (lots below).
+        let left = sel(0.0, 0.0, 1920.0, 1080.0);
+        let right = sel(1920.0, -600.0, 1280.0, 1800.0);
+        let a = sel(1500.0, 900.0, 800.0, 150.0);
+        let p = dock(a, BAR, &[left, right], None);
+        let r = Rectangle::new(p, BAR);
+        assert!(r.x >= right.x + GAP && r.x + r.width <= right.x + right.width - GAP);
+        assert_eq!(
+            p.y,
+            900.0 + 150.0 + GAP,
+            "under the area on the right screen"
+        );
     }
 }

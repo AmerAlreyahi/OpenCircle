@@ -145,7 +145,11 @@ impl App {
         // With other screens: each screen's frames during a press (the log's
         // "drag" lines; one screen far behind the other was the lag of a box
         // across two screens).
+        let snip = matches!(self.o.purpose, Purpose::Snip(_));
         match event {
+            // Snip: the frame times of a drag (the 0.1.3 gate: p95 under 16 ms).
+            overlay::Event::Press { .. } if snip => self.frame_times.borrow_mut().clear(),
+            overlay::Event::Release if snip => self.log_frames("snip drag"),
             overlay::Event::Press { .. } => self.clear_screen_frames(),
             overlay::Event::Release => self.log_screen_frames(),
             _ => {}
@@ -333,6 +337,11 @@ impl App {
                 return self.activate(stop);
             }
             overlay::Event::Tab { back } if self.bottom_bar_shown() => return self.tab_bar(back),
+            // Snip: Enter takes the whole screen the pointer is on.
+            overlay::Event::Enter if let Purpose::Snip(snip) = &self.o.purpose => {
+                let next = snip.full(self.o.screen);
+                return self.snip_next(Some(next));
+            }
             overlay::Event::Enter if matches!(self.o.purpose, Purpose::Search) => {
                 return self.run(actions::default_for(&config::current()));
             }

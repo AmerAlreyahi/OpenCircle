@@ -7,27 +7,37 @@ use iced::keyboard;
 use iced::mouse::{self, Cursor};
 use iced::widget::canvas::{self, Action, Fill, Frame, Geometry, LineDash, Path, Stroke, fill};
 use iced::widget::{image, pin, stack};
-use iced::{ContentFit, Element, Point, Rectangle, Renderer, Size, Theme};
+use iced::{ContentFit, Element, Point, Rectangle, Renderer, Size, Theme, Vector};
 
+use crate::editor::area::{Grip, REACH};
 use crate::editor::style::{DIM_OUTSIDE, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK};
 use crate::editor::{Editor, Message};
+
+/// Room around the image for Snip's live area handles (display px; none
+/// otherwise): the canvas is this much bigger on every side.
+pub fn margin(e: &Editor) -> f32 {
+    if e.movable { REACH } else { 0.0 }
+}
 use crate::ui::kit::themes::c;
 
 /// The editing surface, `size()` big: for Edit in place, over the selection.
 pub fn canvas(e: &Editor) -> Element<'_, Message> {
     let size = e.size();
     let view = e.doc.view();
+    let m = margin(e);
+    let outer = Size::new(size.width + 2.0 * m, size.height + 2.0 * m);
     let mut layers: Vec<Element<'_, Message>> = vec![
-        image(e.base.clone())
+        pin(image(e.base.clone())
             .width(size.width)
             .height(size.height)
-            .content_fit(ContentFit::Fill)
-            .into(),
+            .content_fit(ContentFit::Fill))
+        .position(Point::new(m, m))
+        .into(),
     ];
     // Always a layer here, live or not: the canvas must keep its index, or iced
     // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
     let live = e.live.as_ref().map(|(r, handle)| {
-        let at = Point::new((r.x - view.x) * e.zoom, (r.y - view.y) * e.zoom);
+        let at = Point::new((r.x - view.x) * e.zoom + m, (r.y - view.y) * e.zoom + m);
         pin(image(handle.clone())
             .width(r.width * e.zoom)
             .height(r.height * e.zoom)
@@ -40,11 +50,11 @@ pub fn canvas(e: &Editor) -> Element<'_, Message> {
     });
     layers.push(
         iced::widget::canvas(Input { editor: e })
-            .width(size.width)
-            .height(size.height)
+            .width(outer.width)
+            .height(outer.height)
             .into(),
     );
-    stack(layers).width(size.width).height(size.height).into()
+    stack(layers).width(outer.width).height(outer.height).into()
 }
 
 struct Input<'a> {
@@ -71,7 +81,16 @@ impl canvas::Program<Message> for Input<'_> {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?; // None = over the toolbar
                 pointer.down = true;
-                Message::Press(e.to_image(at))
+                match e.movable {
+                    true => Message::Press(e.window_to_image(cursor.position()?)),
+                    false => Message::Press(e.to_image(at)),
+                }
+            }
+            // Snip's live area: from the window's px, as the canvas moves with it.
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position })
+                if pointer.down && e.movable =>
+            {
+                Message::Move(e.window_to_image(*position))
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { position }) if pointer.down => {
                 Message::Move(e.to_image(*position - (bounds.position() - Point::ORIGIN)))
@@ -114,10 +133,23 @@ impl canvas::Program<Message> for Input<'_> {
         let e = self.editor;
         let mut frame = Frame::new(renderer, bounds.size());
         let accent = Stroke::default().with_color(c().accent).with_width(1.5);
+        // Everything below in image-canvas px; the margin holds the area's handles.
+        let m = margin(e);
+        frame.translate(Vector::new(m, m));
+        if e.movable {
+            let r = Rectangle::with_size(e.size());
+            frame.stroke(&Path::rectangle(r.position(), r.size()), accent);
+            for grip in Grip::HANDLES {
+                let at = grip.at(r);
+                let knob = Path::rectangle(at - Vector::new(4.5, 4.5), Size::new(9.0, 9.0));
+                frame.fill(&knob, HANDLE);
+                frame.stroke(&knob, accent);
+            }
+        }
 
         if let Some(keep) = e.crop_preview() {
             let outside = Path::new(|p| {
-                p.rectangle(Point::ORIGIN, bounds.size());
+                p.rectangle(Point::ORIGIN, e.size());
                 p.rectangle(keep.position(), keep.size());
             });
             frame.fill(
@@ -201,6 +233,9 @@ impl canvas::Program<Message> for Input<'_> {
         if e.picking {
             return mouse::Interaction::Crosshair;
         }
-        e.cursor(e.to_image(at))
+        match (e.movable, cursor.position()) {
+            (true, Some(p)) => e.cursor(e.window_to_image(p)),
+            _ => e.cursor(e.to_image(at)),
+        }
     }
 }

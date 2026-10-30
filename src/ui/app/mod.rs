@@ -436,13 +436,13 @@ impl App {
                 }),
                 None => Subscription::none(),
             };
-            // Snip: Shift held = no snapping; the pointer leaving may be for
-            // another monitor.
+            // Snip: Shift or Alt held = no snapping; the pointer leaving may be
+            // for another monitor.
             let shift = match self.o.purpose {
                 Purpose::Snip(_) => iced::event::listen_with(|event, _, _| match event {
-                    iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
-                        Some(Message::Snip(crate::ui::snip::Msg::Shift(m.shift())))
-                    }
+                    iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => Some(
+                        Message::Snip(crate::ui::snip::Msg::Shift(m.shift() || m.alt())),
+                    ),
                     iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
                         Some(Message::Snip(crate::ui::snip::Msg::Left))
                     }
