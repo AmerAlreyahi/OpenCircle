@@ -161,6 +161,8 @@ pub(in crate::ui) struct App {
     /// The number of the capture running on its thread. Cleared by Esc or the
     /// timeout: that capture's late answer is then dropped.
     pub(in crate::ui) capturing: Option<u32>,
+    /// The overlay shows, unseen, for the snip being grabbed (`pre_show`).
+    pub(in crate::ui) pre_shown: bool,
     /// Captures started (numbers them).
     pub(in crate::ui) captures: u32,
     /// The latest word tap's number (a tap still reading is stale after it).
@@ -247,6 +249,7 @@ impl App {
             overlay_open: true,
             can_hide: true,
             capturing: None,
+            pre_shown: false,
             captures: 0,
             taps: 0,
             frame_times: RefCell::default(),

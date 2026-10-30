@@ -127,7 +127,10 @@ impl App {
             // (Settings > Song search) and nothing is recorded.
             Message::SongStart => self.song(self.has_song_key()),
             Message::Song(id, msg) => self.on_song(id, msg),
+            Message::Chosen(n, place) if self.capturing == Some(n) => self.pre_show(place),
+            Message::Chosen(..) => Task::none(),
             Message::CaptureTimedOut(n) if self.capturing == Some(n) => {
+                self.unshow();
                 crate::log!(
                     "capture failed: no screenshot after {} s; try again",
                     CAPTURE_TIMEOUT.as_secs()
@@ -138,6 +141,7 @@ impl App {
             }
             Message::CaptureTimedOut(_) => Task::none(),
             Message::Escape if self.capturing.is_some() => {
+                self.unshow();
                 crate::log!("[opencircle] capture cancelled");
                 self.capturing = None;
                 self.next = Purpose::Search;
@@ -376,8 +380,8 @@ impl App {
                     self.o.reveal = None;
                     self.o.appear = None;
                     self.frame_times.borrow_mut().clear();
-                    revealed = windows::fade(self.overlay, true, windows::POPUP, false)
-                        .chain(self.unfloat_chat());
+                    let fade = windows::fade(self.overlay, true, windows::POPUP, false);
+                    revealed = Task::batch([self.relevel(), fade.chain(self.unfloat_chat())]);
                 }
                 // a new result card grows open from its first frame
                 self.o.card_open = match (&self.o.panel, self.o.card_open) {
@@ -759,6 +763,7 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
         message,
         Message::Trigger(_)
             | Message::Captured(..)
+            | Message::Chosen(..)
             | Message::CaptureTimedOut(_)
             | Message::Escape
             | Message::EscapeTaken

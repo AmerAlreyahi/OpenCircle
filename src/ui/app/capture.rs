@@ -47,6 +47,8 @@ impl App {
         .map(move |()| Message::CaptureTimedOut(n));
         // Circle to Search freezes every monitor (`app::screens`).
         let all = snip.is_none() && matches!(self.next, Purpose::Search);
+        // Snip picking an area at once: the overlay gets ready meanwhile (`pre_show`).
+        let early = snip.is_some_and(|k| k.picks()) && config::current().snip.delay == 0;
         let shot = background(move |tx| {
             let Some(kind) = snip else {
                 // The monitor the mouse is on first: its overlay opens on it;
@@ -74,24 +76,41 @@ impl App {
                 });
                 return;
             };
-            let _ = tx.unbounded_send(Grabbed::Active(Self::snip_shot(kind)));
+            let chosen = |m: &capture::Monitor| {
+                if !early {
+                    return;
+                }
+                let (x, y, w, h) = m.rect;
+                let place = snip::Place {
+                    origin: (x, y),
+                    px: (w, h),
+                    scale: m.scale,
+                };
+                let _ = tx.unbounded_send(Grabbed::Chosen(place));
+            };
+            let _ = tx.unbounded_send(Grabbed::Active(Self::snip_shot(kind, chosen)));
         })
         .map(move |grabbed| match grabbed {
             Grabbed::Active(shot) => Message::Captured(n, at, shot),
             Grabbed::Other(place, image) => Message::Screen(n, place, image),
+            Grabbed::Chosen(place) => Message::Chosen(n, place),
         });
         Task::batch([shot, timeout])
     }
 
     /// Snip: every monitor at once (the overlay shows the pointer's, then follows
-    /// the pointer) and every window, while the overlay is still hidden.
-    pub(in crate::ui) fn snip_shot(kind: snip::Kind) -> Result<Shot, CaptureError> {
+    /// the pointer) and every window; `chosen` gets the pointer's monitor first
+    /// (`App::pre_show`).
+    pub(in crate::ui) fn snip_shot(
+        kind: snip::Kind,
+        chosen: impl FnOnce(&capture::Monitor),
+    ) -> Result<Shot, CaptureError> {
         let capture::snip::Snapshot {
             frames,
             on,
             windows,
             foreground,
-        } = capture::snip::snapshot(config::current().snip.cursor)?;
+        } = capture::snip::snapshot(config::current().snip.cursor, chosen)?;
         let windows = (windows.into_iter())
             .map(|w| snip::Pick::window(snip::desktop_rect(w.rect), &w.title, w.handle))
             .collect();
@@ -115,6 +134,7 @@ impl App {
         let shot = match shot {
             Ok(shot) => shot,
             Err(e) => {
+                self.unshow();
                 crate::log!("capture failed: {e}");
                 self.next = Purpose::Search;
                 if !e.is_refused() {
@@ -198,7 +218,7 @@ impl App {
                 true => self.read_more(),
                 false => Task::none(),
             };
-            return Task::batch([next.chain(self.show()), extras, text]);
+            return Task::batch([next.chain(self.shown()), extras, text]);
         };
         if let Quick::Song = quick {
             let song = self.run_quick(quick); // listens at once, no area
@@ -275,24 +295,81 @@ impl App {
             true => Task::none(), // at the reveal (`Message::Frame`)
             false => self.unfloat_chat(),
         };
+        self.show_steps(self.place(), clear, chat)
+    }
+
+    /// Snip: the overlay shows on the monitor it will open on, fully clear,
+    /// while the screen is grabbed (`Message::Chosen`): showing the window
+    /// (~130 ms on the VM, most of it going full-screen) overlaps the grab
+    /// instead of following it. Only a ready hidden window that fades (Windows):
+    /// a clear layered window is in no GDI grab and our windows are never
+    /// listed. `open` then only fades it in; a capture that ends without
+    /// opening hides it again (`unshow`).
+    pub(in crate::ui) fn pre_show(&mut self, place: snip::Place) -> Task<Message> {
+        let ready = self.can_hide
+            && shape::can_fade()
+            && self.overlay_open
+            && self.hiding == Hiding::No
+            && self.o.is_none()
+            && !self.pre_shown;
+        if !ready {
+            return Task::none();
+        }
+        self.pre_shown = true;
+        let clear = windows::opacity(self.overlay, 0.0);
+        self.show_steps(place, clear, Task::none())
+    }
+
+    /// `show` for the opening, unless `pre_show` did already: then it only
+    /// waits for its first frame to fade in.
+    fn shown(&mut self) -> Task<Message> {
+        if !std::mem::take(&mut self.pre_shown) {
+            return self.show();
+        }
+        self.o.reveal = Some(Instant::now());
+        Task::none()
+    }
+
+    /// A capture ended without opening: the window `pre_show` showed is hidden
+    /// again (the steps `close` takes).
+    pub(in crate::ui) fn unshow(&mut self) {
+        if std::mem::take(&mut self.pre_shown) {
+            windows::clear_now(self.overlay);
+            self.hiding = Hiding::Empty;
+        }
+    }
+
+    /// The steps that show the overlay over the monitor at `place`: `clear`
+    /// (its opacity) first, `chat` last.
+    fn show_steps(
+        &self,
+        place: snip::Place,
+        clear: Task<Message>,
+        chat: Task<Message>,
+    ) -> Task<Message> {
         // Place and size the window to cover the monitor BEFORE set_mode shows it:
         // iced makes it visible before going full-screen, so whatever is shown
         // first must already cover the monitor (no small black box flash).
         let show = windows::uncut(self.overlay)
             .map(Message::Windows)
             .chain(clear)
-            .chain(place_window(self.overlay, self.place()))
+            .chain(place_window(self.overlay, place))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
-            .chain(window::gain_focus(self.overlay))
-            .chain(chat);
-        // A hand-off to the browser drops the overlay out of the topmost band
-        // behind iced's back (`lens::hand_off_foreground`): Normal then
-        // AlwaysOnTop makes it apply again.
+            .chain(window::gain_focus(self.overlay));
+        // (Windows: topmost again once it fades in, `relevel`)
+        show.chain(chat)
+    }
+
+    /// A hand-off to the browser drops the overlay out of the topmost band
+    /// behind iced's back (`lens::hand_off_foreground`): Normal then
+    /// AlwaysOnTop makes it apply again. At the fade-in, not in `show_steps`:
+    /// each step is a round trip the first frame waited for (~30 ms on the VM).
+    pub(in crate::ui) fn relevel(&self) -> Task<Message> {
         #[cfg(windows)]
-        let show = window::set_level(self.overlay, Level::Normal)
-            .chain(window::set_level(self.overlay, Level::AlwaysOnTop))
-            .chain(show);
-        show
+        return window::set_level(self.overlay, Level::Normal)
+            .chain(window::set_level(self.overlay, Level::AlwaysOnTop));
+        #[cfg(not(windows))]
+        Task::none()
     }
 
     /// Shows `message` over the frame for a moment, then closes the overlay.
@@ -354,8 +431,10 @@ impl App {
     }
 }
 
-/// What a capture's thread hands over: the overlay's monitor, then each other one.
+/// What a capture's thread hands over: the overlay's monitor, then each other
+/// one (snip: before them, where the overlay will open).
 enum Grabbed {
+    Chosen(snip::Place),
     Active(Result<Shot, CaptureError>),
     Other(snip::Place, image::Handle),
 }

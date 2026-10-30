@@ -28,6 +28,8 @@ pub(in crate::ui) enum Message {
     Captured(u32, Instant, Result<Shot, CaptureError>),
     /// Capture number `.0` has waited `CAPTURE_TIMEOUT`.
     CaptureTimedOut(u32),
+    /// Snip capture number `.0` will open on this monitor (its grab runs).
+    Chosen(u32, snip::Place),
     Overlay(overlay::Event),
     /// Another monitor's frame of capture number `.0` landed (`app::screens`).
     Screen(u32, snip::Place, image::Handle),

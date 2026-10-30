@@ -155,12 +155,15 @@ fn grab_first(
 }
 
 /// Snip: every monitor at once (frozen together), and which one the pointer is on.
-pub fn every_monitor() -> Result<(Vec<Frame>, usize), CaptureError> {
+/// `chosen` gets the pointer's monitor before any is grabbed (the overlay can
+/// get ready on it meanwhile; not called for the test frame or a portal).
+pub fn every_monitor(chosen: impl FnOnce(&Monitor)) -> Result<(Vec<Frame>, usize), CaptureError> {
     if let Some(frame) = whole_desktop() {
         return Ok((vec![frame?], 0));
     }
     let monitors = platform::monitors()?;
     let on = choose(&monitors, None, platform::pointer()).ok_or("no monitor found")?;
+    chosen(&monitors[on]);
     // A thread each: one capture takes tens of ms.
     let frames = std::thread::scope(|s| {
         let grabs: Vec<_> = (monitors.iter())

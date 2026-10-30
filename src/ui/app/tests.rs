@@ -174,6 +174,42 @@ fn esc_cancels_a_pending_capture() {
     assert_eq!(app.hiding, Hiding::No);
 }
 
+/// A snip's overlay shown early, unseen, while its screen is grabbed
+/// (`App::pre_show`): a capture that fails, times out or is cancelled hides it
+/// again (the close steps); one that opens doesn't show it a second time, it
+/// only waits for its first frame to fade in.
+#[test]
+fn a_snip_shown_while_grabbing_hides_again_unless_it_opens() {
+    let ends: [fn(u32) -> Message; 3] = [
+        |n| Message::Captured(n, Instant::now(), Err(CaptureError::Failed("no".into()))),
+        Message::CaptureTimedOut,
+        |_| Message::Escape,
+    ];
+    for end in ends {
+        let mut app = App::idle(window::Id::unique());
+        app.capturing = Some(7);
+        app.pre_shown = true;
+        let _ = app.update(end(7));
+        assert!(!app.pre_shown && app.capturing.is_none());
+        assert_eq!(app.hiding, Hiding::Empty, "hidden by the close steps");
+        assert!(app.o.frame.is_none());
+    }
+    let mut app = App::idle(window::Id::unique());
+    app.capturing = Some(7);
+    app.pre_shown = true;
+    let shot = Shot {
+        snip: Some((snip::Kind::Region, Vec::new(), None, Vec::new())),
+        ..a_shot().unwrap()
+    };
+    let _ = app.update(Message::Captured(7, Instant::now(), Ok(shot)));
+    assert!(app.o.frame.is_some() && !app.pre_shown);
+    assert!(
+        app.o.reveal.is_some(),
+        "it fades in once its frame is drawn"
+    );
+    assert_eq!(app.hiding, Hiding::No);
+}
+
 /// Trigger, capture, Esc: the overlay's window id while shown, and after.
 fn open_and_escape(app: &mut App) -> (window::Id, window::Id) {
     let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));

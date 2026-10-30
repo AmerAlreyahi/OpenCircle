@@ -14,20 +14,20 @@ pub struct Snapshot {
 }
 
 /// Every monitor and every window; the pointer is drawn on the frames when `cursor`.
-/// The windows are listed on a thread while the monitors are grabbed (the
-/// overlay is still hidden for both): the freeze waits for the slower one only.
-pub fn snapshot(cursor: bool) -> Result<Snapshot, String> {
+/// The windows are listed on a thread while the monitors are grabbed: the
+/// freeze waits for the slower one only. `chosen` gets the pointer's monitor
+/// first (`every_monitor`): the overlay may show on it, unseen, meanwhile, so
+/// the window the user is in is read before anything else (our own windows
+/// are never listed, and a clear layered window is not in a GDI grab).
+pub fn snapshot(cursor: bool, chosen: impl FnOnce(&super::Monitor)) -> Result<Snapshot, String> {
     let start = Instant::now();
-    let (grabbed, (windows, foreground, listed)) = std::thread::scope(|s| {
-        let listing = s.spawn(|| {
-            let foreground = window_rect::foreground();
-            let windows = window_rect::list();
-            (windows, foreground, start.elapsed())
-        });
-        let grabbed = every_monitor().map(|g| (g, start.elapsed()));
+    let foreground = window_rect::foreground();
+    let (grabbed, (windows, listed)) = std::thread::scope(|s| {
+        let listing = s.spawn(|| (window_rect::list(), start.elapsed()));
+        let grabbed = every_monitor(chosen).map(|g| (g, start.elapsed()));
         let listed = listing
             .join()
-            .unwrap_or_else(|_| (Vec::new(), None, start.elapsed()));
+            .unwrap_or_else(|_| (Vec::new(), start.elapsed()));
         (grabbed, listed)
     });
     let ((mut frames, on), grab) = grabbed?;
