@@ -31,9 +31,15 @@ const OCR: u8 = b'o';
 /// read (top, bottom: u32 LE each; a line is read if its middle is in them),
 /// then as `OCR`: width, height, RGBA.
 const BAND: u8 = b'b';
+/// Main mode's second reader (`Engine::recognize_except`): `x`, gently (one
+/// byte), how many known boxes (u32 LE), each as four f32 LE (x, y, w, h;
+/// image px), then as `OCR`: width, height, RGBA.
+const EXCEPT: u8 = b'x';
 /// Load the engine and a recognizer (one byte, as `OCR`'s), gently; reply `null`.
 const WARM: u8 = b'w';
 const TRANSLATE: u8 = b't';
+/// Far more lines than any screen holds.
+const MAX_KNOWN: usize = 100_000;
 /// 1 MB of text is far beyond any screen.
 const MAX_TEXT: usize = 1 << 20;
 /// Idle this long, the helper gives its freed memory back to the OS.
@@ -97,6 +103,37 @@ pub fn recognize_band(
         &height.to_le_bytes(),
     ]
     .concat();
+    parse(session::call(&[&header, rgba])?)
+}
+
+/// Some recognizer for a script Windows OCR doesn't read for the user is on
+/// disk: the second reader has something to read with.
+pub fn reads_other_scripts() -> bool {
+    (models::RECOGNIZERS.iter())
+        .any(|r| r.script() != crate::translate::lang::Script::Latin && models::installed(r))
+}
+
+/// The lines of an RGBA image that aren't in the `known` boxes (Windows
+/// OCR's lines; image px), read in the script that suits each, gently, in
+/// the helper (`Engine::recognize_except`). None without a non-Latin
+/// recognizer on disk (the helper isn't even started).
+pub fn recognize_except(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    known: &[[f32; 4]],
+) -> Result<Vec<TextBlock>, OcrError> {
+    check_image(rgba, width, height)?;
+    if !reads_other_scripts() {
+        return Ok(Vec::new());
+    }
+    let mut header = vec![EXCEPT, 1];
+    header.extend_from_slice(&(known.len() as u32).to_le_bytes());
+    for v in known.iter().flatten() {
+        header.extend_from_slice(&v.to_le_bytes());
+    }
+    header.extend_from_slice(&width.to_le_bytes());
+    header.extend_from_slice(&height.to_le_bytes());
     parse(session::call(&[&header, rgba])?)
 }
 
@@ -211,6 +248,7 @@ pub fn worker_main() -> ExitCode {
         let reply = match request.split_first() {
             Some((&OCR, body)) => json(recognize_here(body, &mut engine)),
             Some((&BAND, body)) => json(band_here(body, &mut engine)),
+            Some((&EXCEPT, body)) => json(except_here(body, &mut engine)),
             Some((&WARM, body)) => {
                 let _gentle = Gentle::begin();
                 json(warm_here(body, &mut engine))
@@ -285,6 +323,26 @@ fn band_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBlock>,
     check_image(rgba, w, h)?;
     let _gentle = (head[1] != 0).then(Gentle::begin);
     loaded(engine)?.recognize_rows(rgba, w, h, read, Some(rows))
+}
+
+fn except_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBlock>, OcrError> {
+    let short = || OcrError::BadImage("short request".into());
+    let (head, body) = body.split_first_chunk::<5>().ok_or_else(short)?;
+    let n = u32::from_le_bytes([head[1], head[2], head[3], head[4]]) as usize;
+    if n > MAX_KNOWN || body.len() < n * 16 {
+        return Err(short());
+    }
+    let (boxes, body) = body.split_at(n * 16);
+    let f = |b: &[u8]| f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    let known: Vec<[f32; 4]> = (boxes.chunks_exact(16))
+        .map(|b| [f(&b[0..]), f(&b[4..]), f(&b[8..]), f(&b[12..])])
+        .collect();
+    let (size, rgba) = body.split_first_chunk::<8>().ok_or_else(short)?;
+    let w = u32::from_le_bytes([size[0], size[1], size[2], size[3]]);
+    let h = u32::from_le_bytes([size[4], size[5], size[6], size[7]]);
+    check_image(rgba, w, h)?;
+    let _gentle = (head[0] != 0).then(Gentle::begin);
+    loaded(engine)?.recognize_except(rgba, w, h, &known)
 }
 
 /// The engine, loaded on first use.

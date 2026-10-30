@@ -490,7 +490,8 @@ impl App {
                         }
                         let done = self.more_text();
                         let released = self.release_held();
-                        Task::batch([done, released, self.read_more()])
+                        let other = self.read_other_scripts();
+                        Task::batch([done, released, self.read_more(), other])
                     }
                     // Windows OCR couldn't (no recognizer, #63): the helper reads
                     Err(e) if self.o.text_by == Some(ocr::Source::System) => {
@@ -508,6 +509,23 @@ impl App {
                 }
             }
             Message::ScreenText(..) => Task::none(), // closed or opened again meanwhile
+            Message::ScreenOther(opening, read)
+                if opening == self.opening && self.o.frame.is_some() =>
+            {
+                match read {
+                    Ok(lines) if !lines.is_empty() => {
+                        crate::log!("[opencircle] the second reader added {} lines", lines.len());
+                        self.o.screen_text.add_extra(lines);
+                        self.more_text()
+                    }
+                    Ok(_) => Task::none(),
+                    Err(e) => {
+                        crate::log!("[opencircle] the second reader didn't read: {e}");
+                        Task::none()
+                    }
+                }
+            }
+            Message::ScreenOther(..) => Task::none(),
             Message::ScreenLines(opening, window, read)
                 if opening == self.opening && self.o.frame.is_some() =>
             {

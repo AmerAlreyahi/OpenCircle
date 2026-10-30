@@ -881,6 +881,41 @@ fn languages_end_to_end() {
     println!("fr->en {:.0?}: {lines:?} -> {out:?}", t.elapsed());
     assert_eq!(out.len(), 3);
     assert!(out.iter().all(|t| !t.is_empty() && t.is_ascii()), "{out:?}");
+
+    // main mode's second reader: Windows OCR read the English line (its box
+    // is known); the Arabic lines are read in Arabic, harakat included
+    let harakat = ["مُحَمَّدٌ رَسُولُ اللَّهِ", "كَتَبَ الطَّالِبُ دَرْسًا"];
+    let (h_img, h_dims) = sample(&harakat);
+    read(
+        "arabic on harakat",
+        &h_img,
+        h_dims,
+        Read::One(index("arabic")),
+    );
+    let mixed = [
+        "Main menu",
+        "القائمة الرئيسية",
+        "مُحَمَّدٌ رَسُولُ اللَّهِ",
+        "ابدأ لعبة جديدة",
+    ];
+    let (img, dims) = sample(&mixed);
+    let known = [[30.0, 20.0, 400.0, 50.0]];
+    let t = Instant::now();
+    let got = engine
+        .recognize_except(&img, dims.0 as u32, dims.1 as u32, &known)
+        .unwrap();
+    let texts: Vec<String> = got.iter().map(|b| b.text.clone()).collect();
+    println!("second reader {:.0?}: {texts:?}", t.elapsed());
+    assert!(
+        !texts.iter().any(|t| t.contains("Main")),
+        "the known line is skipped"
+    );
+    assert!(same(&[texts[0].clone()], &[mixed[1]]), "{texts:?}");
+    assert!(texts.len() >= 3, "the harakat line too: {texts:?}");
+    assert!(
+        same(&[texts[texts.len() - 1].clone()], &[mixed[3]]),
+        "{texts:?}"
+    );
 }
 
 /// Real screenshots (not in CI, needs the models in `ocr::models_dir()`):

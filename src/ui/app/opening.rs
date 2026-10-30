@@ -56,6 +56,8 @@ pub(in crate::ui) struct Opening {
     /// The band OCR reads now (one at a time: the helper serves one request
     /// at a time anyway).
     pub(in crate::ui) reading: Option<Rectangle>,
+    /// The second reader (other scripts than Windows OCR's) was started.
+    pub(in crate::ui) other_read: bool,
     /// A tap or Shift+click waiting for the band under it.
     pub(in crate::ui) awaits: Option<(Point, Await)>,
     /// Ctrl+A waits for the whole screen to be read.
@@ -198,6 +200,7 @@ impl Default for Opening {
             word: None,
             screen_text: word::Screen::default(),
             reading: None,
+            other_read: false,
             awaits: None,
             want_all: false,
             held: None,

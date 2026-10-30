@@ -210,7 +210,8 @@ pub const FROST: Look = Look {
     preview: &[hex(0xe2e8f0), hex(0x64748b)],
 };
 
-/// In the design's order (the Settings cards).
-pub const LOOKS: [&Look; 10] = [
-    &PRISM, &SPECTRUM, &AURORA, &HORIZON, &SUNSET, &OCEAN, &NEON, &SOLAR, &HUD, &FROST,
+/// In the design's order (the Settings cards). Stealth Frost (`FROST`) has
+/// no card (owner, 2026-10-30); a config that has it ("mono") still shows it.
+pub const LOOKS: [&Look; 9] = [
+    &PRISM, &SPECTRUM, &AURORA, &HORIZON, &SUNSET, &OCEAN, &NEON, &SOLAR, &HUD,
 ];

@@ -609,6 +609,14 @@ pub struct Screen {
     /// The lines of each read stretch of rows, by its first row: top to bottom.
     parts: Vec<(f32, Vec<Line>)>,
     rows: Rows,
+    /// Lines the second reader found in other scripts (`ocr::recognize_except`):
+    /// they replace any first-read line they overlap.
+    extra: Vec<Line>,
+}
+
+/// `a`'s middle is in `b`'s box (image px).
+fn over(a: &Line, b: &Line) -> bool {
+    b.bounds.contains(a.bounds.center()) || a.bounds.contains(b.bounds.center())
 }
 
 fn rect(b: Band, screen: Size) -> Rectangle {
@@ -635,11 +643,24 @@ impl Screen {
 
     /// The lines read so far, in reading order.
     pub fn lines(&self) -> Vec<Line> {
-        self.iter().cloned().collect()
+        let mut lines: Vec<Line> = self.iter().cloned().collect();
+        if !self.extra.is_empty() {
+            // top to bottom, then left to right, by their middles
+            let key = |l: &Line| (l.bounds.center_y().round() as i32 / 8, l.bounds.x as i32);
+            lines.sort_by_key(key);
+        }
+        lines
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Line> {
-        self.parts.iter().flat_map(|(_, lines)| lines)
+        let first = (self.parts.iter().flat_map(|(_, lines)| lines))
+            .filter(|l| !self.extra.iter().any(|e| over(l, e)));
+        first.chain(&self.extra)
+    }
+
+    /// The second reader's lines (`extra`).
+    pub fn add_extra(&mut self, lines: Vec<Line>) {
+        self.extra = lines;
     }
 
     /// The band to read first for row `y` (touched) on a `screen`-sized
@@ -758,6 +779,19 @@ mod tests {
         }
         assert!(text.is_whole(1080.0));
         assert_eq!(text.lines(), page, "every line once, top to bottom");
+        // the second reader's lines: in reading order, replacing what they overlap
+        let arabic = line("القائمة", 50.0, 10.0 + 30.0 * 3.0);
+        let beside = line("مرحبا", 900.0, 10.0 + 30.0 * 5.0);
+        text.add_extra(vec![arabic.clone(), beside.clone()]);
+        let all = text.lines();
+        assert_eq!(all.len(), page.len() + 1, "one replaced, one added");
+        assert_eq!(all[3], arabic);
+        assert_eq!(
+            (all[5].text.as_str(), all[6].text.as_str()),
+            ("line 5", "مرحبا")
+        );
+        text.add_extra(Vec::new());
+        assert_eq!(text.lines(), page, "none: as before");
         assert!(reads <= 13, "{reads} bands");
         // a band over rows already read adds nothing twice
         text.add(first, ocr(first), screen);

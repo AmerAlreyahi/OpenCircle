@@ -289,6 +289,57 @@ impl App {
         .map(move |read| Message::ScreenText(opening, band, read))
     }
 
+    /// After Windows OCR's read (one language: the user's Windows language),
+    /// the second reader reads the lines it didn't, in the script that suits
+    /// each (Arabic, Russian, Chinese, ... : whichever recognizers are on
+    /// disk), gently, once per opening (owner, 2026-10-30). Nothing without
+    /// such a recognizer.
+    pub(in crate::ui) fn read_other_scripts(&mut self) -> Task<Message> {
+        if self.o.other_read
+            || self.o.text_by != Some(ocr::Source::System)
+            || !ocr::reads_other_scripts()
+        {
+            return Task::none();
+        }
+        let Some(image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        }) = &self.o.frame
+        else {
+            return Task::none();
+        };
+        let (width, height, pixels) = (*width, *height, pixels.clone());
+        self.o.other_read = true;
+        let scale = self.o.scale;
+        // clean Latin lines are Windows OCR's; one that reads like noise may
+        // be another script it misread: the second reader looks there too
+        let known: Vec<[f32; 4]> = (self.o.screen_text.lines().iter())
+            .filter(|l| plain(&l.text))
+            .map(|l| {
+                let r = l.bounds * scale;
+                [r.x, r.y, r.width, r.height]
+            })
+            .collect();
+        let opening = self.opening;
+        let held = (self.o.helper.as_ref())
+            .map(Arc::downgrade)
+            .unwrap_or_default();
+        background(move |tx| {
+            let Some(_held) = held.upgrade() else {
+                return; // closed meanwhile
+            };
+            let read = ocr::recognize_except(&pixels, width, height, &known).map(|blocks| {
+                let mut lines = word::lines(blocks, [0, 0], scale);
+                word::measure(&mut lines, &pixels, width, height, scale);
+                lines
+            });
+            let _ = tx.unbounded_send(read.map_err(|e| e.to_string()));
+        })
+        .map(move |read| Message::ScreenOther(opening, read))
+    }
+
     /// The held release (and the events after it) go on, now that the band
     /// under the press is read (or failed): a text selection or a stroke.
     pub(in crate::ui) fn release_held(&mut self) -> Task<Message> {
@@ -640,5 +691,29 @@ impl App {
     pub(in crate::ui) fn picked_text(&self) -> Option<String> {
         let picked = (self.o.text_mode.as_ref()).and_then(|m| m.picked.as_ref());
         picked.or(self.o.word.as_ref()).map(word::Picked::text)
+    }
+}
+
+/// A line Windows OCR read cleanly: a run of two Latin letters or digits,
+/// and mostly letters, digits and everyday punctuation. Another script read
+/// as Latin comes out as noise ("i1J .l1").
+// ponytail: a character-share heuristic; Windows OCR gives no confidence.
+fn plain(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
+    let fine = |c: &&char| c.is_alphanumeric() || ".,:;!?'\"()-/&%@#+".contains(**c);
+    let run = text
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| w.chars().count() >= 2);
+    run && chars.iter().filter(fine).count() * 10 >= chars.len() * 8
+}
+
+#[cfg(test)]
+mod plain_tests {
+    #[test]
+    fn noise_is_not_plain() {
+        assert!(super::plain("Activate Windows"));
+        assert!(super::plain("Go to Settings, now!"));
+        assert!(!super::plain("i ^ ~|"));
+        assert!(!super::plain("» ¦ ¬ |"));
     }
 }

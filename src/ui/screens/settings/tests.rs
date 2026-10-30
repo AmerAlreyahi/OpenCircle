@@ -1469,11 +1469,14 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
         "Spectrum",
         "Cyber Neon",
         "Liquid Prism",
-        "Stealth Frost",
         "Custom",
     ] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
+    assert!(
+        !texts.iter().any(|t| t == "Stealth Frost"),
+        "no card (owner, 2026-10-30)"
+    );
     assert!(
         !texts.iter().any(|t| t == "Edge style"),
         "a preset has no custom rows"
@@ -2012,7 +2015,7 @@ fn a_theme_card_picks_for_its_mode_and_shows_at_once() {
 }
 
 /// The look cards write the stored names config v4 keeps: Prism as "aurora",
-/// Frost as "mono", Aurora Borealis as "borealis"; picking the shown card
+/// Aurora Borealis as "borealis" (Frost, "mono", has no card); picking the shown card
 /// again keeps "calm".
 #[test]
 fn look_cards_write_the_stored_look_names() {
@@ -2033,7 +2036,10 @@ fn look_cards_write_the_stored_look_names() {
         Some(LookTheme::Calm),
         "the shown card keeps calm"
     );
-    assert_eq!(of(&s, "frost"), Some(LookTheme::Mono));
+    assert!(
+        pages::look_picks(&s).iter().all(|(l, _)| *l != "frost"),
+        "no card"
+    );
     assert_eq!(of(&s, "horizon"), Some(LookTheme::Horizon));
     assert_eq!(of(&s, "aurora"), Some(LookTheme::Borealis));
     s.draft.look.theme = LookTheme::Spectrum;

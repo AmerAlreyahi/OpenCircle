@@ -243,6 +243,11 @@ production systems.
 - More offline languages (owner, 2026-10-30): offline translate covers every Xenova OPUS-MT model (6 layers, shared
   vocab) for the languages in our table (44 directions, pinned in `mt::PAIRS`); a pair without a direct model goes
   through English (`mt::route`, two models). Detect tells Latin languages (en/es/fr/de) apart by common words.
+- Other scripts in main mode (owner, 2026-10-30, "second pass"): after Windows OCR (the user's Windows language) reads
+  the screen, the helper's second reader (`ocr::recognize_except`) reads the lines Windows OCR didn't, each with the
+  installed non-Latin recognizer that reads it best (Arabic, Cyrillic, CJK); gently, once per opening; the helper
+  isn't started without such a recognizer. Its lines replace Windows OCR's noise lines they overlap.
+- Stealth Frost (owner, 2026-10-30): no card in Settings; a config that has it ("mono") still shows it.
 - Hide, don't delete (owner, 2026-10-29): an option for a feature that hasn't arrived (e.g. "Bars and pills" glass
   styles until 0.1.3; "Screen edge for" Live/Snip until they are on in Labs) is hidden, its code and config key
   kept, and shown when the feature really ships. A row with a single choice is not shown.

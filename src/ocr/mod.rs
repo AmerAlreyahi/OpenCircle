@@ -13,8 +13,8 @@ pub(crate) mod worker;
 pub use models::{download_size, ensure_models, models_dir, ready};
 pub use session::{Hold, gently_here, hold, keep_warm};
 pub use worker::{
-    WORKER_ARG, recognize_as, recognize_band, recognize_in_child, translate_in_child, warm,
-    worker_main,
+    WORKER_ARG, reads_other_scripts, recognize_as, recognize_band, recognize_except,
+    recognize_in_child, translate_in_child, warm, worker_main,
 };
 
 use std::fmt;
@@ -238,6 +238,11 @@ fn quality(blocks: &[TextBlock], boxes: usize, script: Script) -> f32 {
     mean * own * blocks.len() as f32 / boxes as f32
 }
 
+/// The second reader keeps a line read at least this well: lower than
+/// `AUTO_QUALITY` (Arabic with harakat reads at ~0.77), safe since a line
+/// in another script scores ~0 (its letters aren't the recognizer's).
+const OTHER_QUALITY: f32 = 0.6;
+
 /// Below this `quality`, `Auto` tries the other recognizers.
 const AUTO_QUALITY: f32 = 0.8;
 
@@ -376,27 +381,9 @@ impl Engine {
     ) -> Result<Vec<TextBlock>, OcrError> {
         let start = std::time::Instant::now();
         let img = to_rgb(rgba, width, height)?;
-        let (dw, dh) = detect_size(width, height);
-        let small = if (dw, dh) == (width, height) {
-            img.clone()
-        } else {
-            image::imageops::resize(&img, dw, dh, Triangle)
-        };
-        let det = self.det.predict(vec![small]).map_err(engine_err)?;
-        let (w, h) = (width as f32, height as f32);
-        let (sx, sy) = (w / dw as f32, h / dh as f32);
-        let mut boxes: Vec<[f32; 4]> = det
-            .detections
-            .first()
+        let (boxes, (dw, dh)) = self.detect(&img, width, height)?;
+        let mut boxes: Vec<[f32; 4]> = boxes
             .into_iter()
-            .flatten()
-            .map(|d| {
-                let (x0, y0, x1, y1) = d.bbox.aabb();
-                let (x0, y0, x1, y1) = (x0 * sx, y0 * sy, x1 * sx, y1 * sy);
-                let (x0, y0) = (x0.clamp(0.0, w), y0.clamp(0.0, h));
-                [x0, y0, x1.min(w) - x0, y1.min(h) - y0]
-            })
-            .filter(|b| b[2] >= 2.0 && b[3] >= 2.0)
             .filter(|b| {
                 let middle = b[1] + b[3] / 2.0;
                 rows.is_none_or(|(top, bottom)| (top as f32..bottom as f32).contains(&middle))
@@ -432,6 +419,95 @@ impl Engine {
             (start.elapsed() - detected).as_millis()
         );
         Ok(reading_order(best.1, models::RECOGNIZERS[best.0].rtl()))
+    }
+
+    /// The text lines' boxes in `img` (`width` x `height`; image px), and
+    /// the size detection ran at.
+    fn detect(
+        &mut self,
+        img: &RgbImage,
+        width: u32,
+        height: u32,
+    ) -> Result<(Vec<[f32; 4]>, (u32, u32)), OcrError> {
+        let (dw, dh) = detect_size(width, height);
+        let small = if (dw, dh) == (width, height) {
+            img.clone()
+        } else {
+            image::imageops::resize(img, dw, dh, Triangle)
+        };
+        let det = self.det.predict(vec![small]).map_err(engine_err)?;
+        let (w, h) = (width as f32, height as f32);
+        let (sx, sy) = (w / dw as f32, h / dh as f32);
+        let boxes: Vec<[f32; 4]> = det
+            .detections
+            .first()
+            .into_iter()
+            .flatten()
+            .map(|d| {
+                let (x0, y0, x1, y1) = d.bbox.aabb();
+                let (x0, y0, x1, y1) = (x0 * sx, y0 * sy, x1 * sx, y1 * sy);
+                let (x0, y0) = (x0.clamp(0.0, w), y0.clamp(0.0, h));
+                [x0, y0, x1.min(w) - x0, y1.min(h) - y0]
+            })
+            .filter(|b| b[2] >= 2.0 && b[3] >= 2.0)
+            .collect();
+        Ok((boxes, (dw, dh)))
+    }
+
+    /// Main mode's second reader: the lines Windows OCR didn't read (#62),
+    /// each in the script that reads it best. Detection finds the lines; one
+    /// whose middle is in a `known` box (Windows OCR's lines; image px) is
+    /// skipped; the rest are read by every installed non-Latin recognizer
+    /// (Windows OCR reads Latin) and kept where one reads it well
+    /// (`quality` >= `OTHER_QUALITY` for that line alone).
+    // ponytail: each leftover line read by each installed script; a script
+    // classifier if many scripts are installed.
+    pub fn recognize_except(
+        &mut self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+        known: &[[f32; 4]],
+    ) -> Result<Vec<TextBlock>, OcrError> {
+        let start = std::time::Instant::now();
+        let img = to_rgb(rgba, width, height)?;
+        let (boxes, _) = self.detect(&img, width, height)?;
+        let inside = |b: &[f32; 4], k: &[f32; 4]| {
+            let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
+            (k[0]..k[0] + k[2]).contains(&x) && (k[1]..k[1] + k[3]).contains(&y)
+        };
+        let left: Vec<[f32; 4]> = (boxes.into_iter())
+            .filter(|b| !known.iter().any(|k| inside(b, k)))
+            .collect();
+        let mut best: Vec<(f32, TextBlock)> = Vec::new();
+        for i in 0..models::RECOGNIZERS.len() {
+            let rec = models::RECOGNIZERS[i];
+            if left.is_empty() || rec.script() == Script::Latin || !models::installed(rec) {
+                continue;
+            }
+            for block in self.read_lines(i, &img, &left)? {
+                let q = quality(std::slice::from_ref(&block), 1, rec.script());
+                if q < OTHER_QUALITY {
+                    continue;
+                }
+                match best.iter_mut().find(|(_, b)| b.bounds == block.bounds) {
+                    Some(old) if old.0 >= q => {}
+                    Some(old) => *old = (q, block),
+                    None => best.push((q, block)),
+                }
+            }
+        }
+        crate::log!(
+            "[opencircle] ocr second reader: {} of {} lines left, {} read, {} ms",
+            left.len(),
+            known.len() + left.len(),
+            best.len(),
+            start.elapsed().as_millis()
+        );
+        Ok(reading_order(
+            best.into_iter().map(|(_, b)| b).collect(),
+            false,
+        ))
     }
 
     /// Recognizer `i` on the `boxes` of `img`.
