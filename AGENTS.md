@@ -277,6 +277,9 @@ production systems.
   SOFTER (smaller, rounder, quieter handles; a thinner, lower-contrast border than the design's v24 frame). Copy
   and Save keep the capture's full size by default: `snip.max_edge` default 0 (Original) instead of 1568 (a value
   already in a user's config stays; Settings still offers 1024 / 1568 / 2048).
+  The snip area's outline, handles and hover outline take their colours from the chosen Active Look (Settings >
+  Appearance "Active look screen borders": Liquid Prism, Spectrum, Aurora Borealis, ..., Custom), the same source
+  as the screen edge and main mode's selection line (one place, no snip-only colours).
 - Overnight 2026-10-30 (owner asleep, "apply the recommended"): the Snip capture-flow design (canvas v24,
   .claude/artifacts/design/SNIP_FLOW_SPEC.md) is approved with the designer's choices: Ctrl+arrows resize (Shift =
   10 px), the snip toolbar has no Back / Crop / Drag chip (handles crop; drag-out by dragging the picture), Daylight
