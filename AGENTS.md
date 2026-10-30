@@ -266,6 +266,10 @@ production systems.
   Setup-exe user updates by itself. Fix first, before Snip: such installs update through the release's Setup exe
   (quiet, elevated). Installed 0.1.1/0.1.2 copies can't be fixed remotely (their updater is fixed code; channel
   frozen): they install the fixed version by hand once. How it ships is the owner's call (publish rule stands).
+- Update gate (owner, 2026-10-30, "insure this won't happen again"): no release is offered to the owner for
+  "publish" until the previous published version, installed with the Setup exe (Program Files, normal user) AND as
+  the portable exe, has updated itself to the DRAFT on the Windows VM (RELEASING.md step 9, local update server +
+  OPENCIRCLE_TEST_UPDATE_URL). A unit test alone never proves an install path; every way users install is tested.
 - 0.1.3 go (owner, 2026-10-30): the plan in roadmap 2A is approved as is; Edit becomes Snip starts now (first
   0.1.3 item, after the updater fix); M2M100 418M is not measured.
 - Edit becomes Snip (owner, 2026-10-30; in 0.1.2, NOT started until the owner says): every "Edit" / "Edit image"

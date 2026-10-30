@@ -26,8 +26,15 @@ and signs everything and creates a **draft**; it never publishes.
    Until then the files are unsigned and the README explains SmartScreen.
 8. **Release notes.** Write them in the draft from
    `.github/RELEASE_NOTES_TEMPLATE.md`.
-9. **Publish by hand.** The owner reads the draft and presses Publish.
-10. **Post-release check** (on the test machine):
+9. **Update test on the draft (blocks publishing).** Before the owner is asked
+   to publish, the DRAFT's assets are served from a local server on the Windows
+   test machine, and the previous published version updates itself to them
+   through `OPENCIRCLE_TEST_UPDATE_URL` (published builds honour it). Both ways
+   users install: the previous Setup exe (installed in Program Files, run as a
+   normal user) and the previous portable exe. Pass = each one ends on the new
+   version, starts and shows the notes. Any failure: no publish.
+10. **Publish by hand.** The owner reads the draft and presses Publish.
+11. **Post-release check** (on the test machine):
     - Install the previous version, let it auto-update to the new one, check
       the new version starts and its release notes show.
     - Rollback check: a new version that fails to start must be rolled back by
