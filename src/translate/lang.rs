@@ -148,15 +148,69 @@ pub fn name(code: &str) -> &str {
     }
 }
 
+/// Common words that tell Latin-script languages apart (`latin`).
+const WORDS: [(&str, &[&str]); 4] = [
+    (
+        "en",
+        &[
+            "the", "and", "of", "to", "is", "in", "that", "with", "for", "are", "was", "this",
+        ],
+    ),
+    (
+        "es",
+        &[
+            "el", "la", "los", "las", "de", "que", "y", "en", "es", "una", "por", "con", "del",
+            "se",
+        ],
+    ),
+    (
+        "fr",
+        &[
+            "le", "la", "les", "des", "et", "est", "une", "du", "que", "dans", "pour", "pas",
+            "sur", "au",
+        ],
+    ),
+    (
+        "de",
+        &[
+            "der", "die", "das", "und", "ist", "nicht", "ein", "eine", "mit", "den", "von", "zu",
+            "auf", "sich",
+        ],
+    ),
+];
+
+/// Which Latin-script language `texts` are in, by their common words
+/// (`WORDS`); English when none stands out.
+// ponytail: four languages by stop words; more Latin pairs = more rows.
+fn latin(texts: &[&str]) -> &'static str {
+    let mut votes = [0usize; WORDS.len()];
+    for word in texts
+        .iter()
+        .flat_map(|t| t.split(|c: char| !c.is_alphabetic()))
+    {
+        let word = word.to_lowercase();
+        for (i, (_, list)) in WORDS.iter().enumerate() {
+            votes[i] += list.contains(&word.as_str()) as usize;
+        }
+    }
+    let (best, n) = (votes.iter().enumerate())
+        .max_by_key(|(i, n)| (**n, usize::MAX - i))
+        .unwrap_or((0, &0));
+    match *n {
+        0 => "en",
+        _ => WORDS[best].0,
+    }
+}
+
 /// What a detected source most likely is, from the script most of the
-/// letters are in: Arabic, Russian, Japanese (any kana) or Chinese, else
-/// English. `None` = no letters. Latin can't be told apart cheaply, so it
-/// counts as English (what the default recognizer reads).
-// ponytail: script majority only; a word-list check could tell fr/es/de apart.
+/// letters are in: Arabic, Russian, Japanese (any kana) or Chinese; Latin
+/// letters by their common words (English, Spanish, French or German).
+/// `None` = no letters.
 pub fn guess<'a>(texts: impl IntoIterator<Item = &'a str>) -> Option<&'static str> {
+    let texts: Vec<&str> = texts.into_iter().collect();
     let mut counts = [0usize; 4]; // latin, arabic, cyrillic, cjk
     let mut kana = false;
-    for c in texts.into_iter().flat_map(str::chars) {
+    for c in texts.iter().flat_map(|t| t.chars()) {
         kana |= matches!(c, '\u{3040}'..='\u{30FF}');
         let i = [Latin, Arabic, Cyrillic, Cjk].iter().position(|s| s.has(c));
         if let Some(i) = i {
@@ -172,7 +226,7 @@ pub fn guess<'a>(texts: impl IntoIterator<Item = &'a str>) -> Option<&'static st
         2 => "ru",
         3 if kana => "ja",
         3 => "zh",
-        _ => "en",
+        _ => latin(&texts),
     })
 }
 
@@ -224,5 +278,17 @@ mod tests {
         assert_eq!(guess(["主菜单"]), Some("zh"));
         assert_eq!(guess(["メインメニュー", "設定"]), Some("ja"));
         assert_eq!(guess(["12:30", ""]), None);
+        // Latin letters: by their common words
+        let es = "Un faro es una torre de señalización luminosa situada en el litoral";
+        assert_eq!(guess([es]), Some("es"));
+        assert_eq!(guess(["Le phare est une tour dans la mer"]), Some("fr"));
+        assert_eq!(
+            guess(["Der Leuchtturm ist ein Turm und steht an der Küste"]),
+            Some("de")
+        );
+        assert_eq!(
+            guess(["The lighthouse is a tower on the coast"]),
+            Some("en")
+        );
     }
 }

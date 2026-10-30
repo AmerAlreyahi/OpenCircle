@@ -22,6 +22,40 @@ commit below. OpenCircle uses the files unmodified.
   fr-en  Apache-2.0  Helsinki-NLP/opus-mt-fr-en           6b166a182780
   zh-en  CC BY 4.0   Helsinki-NLP/opus-mt-zh-en           39d480d52a9e
   ja-en  Apache-2.0  Helsinki-NLP/opus-mt-ja-en           1a906cfaaf7c
+  es-en  Apache-2.0  Helsinki-NLP/opus-mt-es-en           eadfd7c658a9
+  de-en  Apache-2.0  Helsinki-NLP/opus-mt-de-en           399dfd687067
+  ru-en  CC BY 4.0   Helsinki-NLP/opus-mt-ru-en           afe8c6c738ec
+  it-en  Apache-2.0  Helsinki-NLP/opus-mt-it-en           fd0b89b9c052
+  nl-en  Apache-2.0  Helsinki-NLP/opus-mt-nl-en           82c42d95d150
+  uk-en  Apache-2.0  Helsinki-NLP/opus-mt-uk-en           b2ad6afa424a
+  pl-en  Apache-2.0  Helsinki-NLP/opus-mt-pl-en           aeaf0e003b04
+  hi-en  Apache-2.0  Helsinki-NLP/opus-mt-hi-en           99853100ed9d
+  id-en  Apache-2.0  Helsinki-NLP/opus-mt-id-en           c38ef36c843b
+  vi-en  Apache-2.0  Helsinki-NLP/opus-mt-vi-en           541dfd72ec07
+  th-en  Apache-2.0  Helsinki-NLP/opus-mt-th-en           7f0406b972f7
+  ko-en  Apache-2.0  Helsinki-NLP/opus-mt-ko-en           d9fa1ac60082
+  en-it  Apache-2.0  Helsinki-NLP/opus-mt-en-it           075406e3c8c2
+  en-nl  Apache-2.0  Helsinki-NLP/opus-mt-en-nl           c3a0541231a7
+  en-uk  Apache-2.0  Helsinki-NLP/opus-mt-en-uk           e6ca58729298
+  en-hi  Apache-2.0  Helsinki-NLP/opus-mt-en-hi           7aad72006a15
+  en-id  Apache-2.0  Helsinki-NLP/opus-mt-en-id           b3b41f654c2f
+  en-vi  Apache-2.0  Helsinki-NLP/opus-mt-en-vi           30bcd461c0d7
+  de-es  Apache-2.0  Helsinki-NLP/opus-mt-de-es           d339419ee3bd
+  de-fr  Apache-2.0  Helsinki-NLP/opus-mt-de-fr           e783da03d247
+  es-de  Apache-2.0  Helsinki-NLP/opus-mt-es-de           7f493e4b81b6
+  es-fr  Apache-2.0  Helsinki-NLP/opus-mt-es-fr           3bef5f612825
+  es-it  Apache-2.0  Helsinki-NLP/opus-mt-es-it           596c67cda7cb
+  es-ru  Apache-2.0  Helsinki-NLP/opus-mt-es-ru           268ccd60bde3
+  fr-de  Apache-2.0  Helsinki-NLP/opus-mt-fr-de           7eea1996b448
+  fr-es  Apache-2.0  Helsinki-NLP/opus-mt-fr-es           962338be5103
+  fr-ru  Apache-2.0  Helsinki-NLP/opus-mt-fr-ru           c2ec732b045a
+  it-es  Apache-2.0  Helsinki-NLP/opus-mt-it-es           0eba27fe6da2
+  it-fr  Apache-2.0  Helsinki-NLP/opus-mt-it-fr           7843e3b7137d
+  ru-es  Apache-2.0  Helsinki-NLP/opus-mt-ru-es           9cb5fb9fae4d
+  ru-fr  Apache-2.0  Helsinki-NLP/opus-mt-ru-fr           c7275f468246
+  ru-uk  Apache-2.0  Helsinki-NLP/opus-mt-ru-uk           6d8a744ed6ea
+  uk-ru  Apache-2.0  Helsinki-NLP/opus-mt-uk-ru           cfb76ccd2077
+  nl-fr  Apache-2.0  Helsinki-NLP/opus-mt-nl-fr           6c8ebb68522f
 
 en-ar is the Tatoeba-Challenge eng-ara model, released under CC BY 4.0
 (https://creativecommons.org/licenses/by/4.0/; its Hugging Face card lists

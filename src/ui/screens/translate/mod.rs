@@ -412,7 +412,7 @@ impl Session {
                 (missing > 0).then(|| tx.unbounded_send(Msg::Offline(pair, missing)))
             };
             let expected = offline
-                .then(|| crate::mt::pair(if source == "auto" { "en" } else { &source }, &target))
+                .then(|| crate::mt::next(if source == "auto" { "en" } else { &source }, &target))
                 .flatten();
             if expected.and_then(ask).is_some() {
                 return;

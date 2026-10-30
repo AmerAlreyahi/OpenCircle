@@ -1275,11 +1275,11 @@ fn engine_choice_says_what_offline_means() {
     }
     let gap = "No offline model for this pair: choose AI to translate it";
     assert!(!texts.iter().any(|t| t == gap));
-    update(&mut s, Message::Source(lang::find("fr").copied().unwrap()));
+    update(&mut s, Message::Source(lang::find("pt").copied().unwrap()));
     let texts = shot::texts(view(&s));
     assert!(
         texts.iter().any(|t| t == gap),
-        "fr -> ar offline: {texts:?}"
+        "pt -> ar offline: {texts:?}"
     );
     shot::save("settings-translate", view(&s), Size::new(860.0, 600.0));
     // a saved "offline" is read as is, without a warning

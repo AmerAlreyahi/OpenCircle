@@ -83,15 +83,15 @@ impl Real {
         *self.missing.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The offline pair for `texts` into `target`: the set source, or the
-    /// one their script suggests ("auto"). Err = none is available offline
-    /// (the message offers AI; nothing is sent anywhere).
-    fn pair_for(&self, texts: &[String], target: &str) -> Result<&'static mt::Pair, AiError> {
+    /// The offline models for `texts` into `target` (`mt::route`): from the
+    /// set source, or the one their script and words suggest ("auto").
+    /// Err = no way offline (the message offers AI; nothing is sent anywhere).
+    fn route_for(&self, texts: &[String], target: &str) -> Result<Vec<&'static mt::Pair>, AiError> {
         let source = match self.source.as_str() {
             lang::AUTO => lang::guess(texts.iter().map(String::as_str)).unwrap_or("en"),
             s => s,
         };
-        mt::pair(source, target).ok_or_else(|| AiError::Offline(mt::unavailable(source, target)))
+        mt::route(source, target).ok_or_else(|| AiError::Offline(mt::unavailable(source, target)))
     }
 
     /// `texts` into `target`, one call; `markup` = extra AI instructions.
@@ -110,7 +110,7 @@ impl Real {
         match ai::translate_lines(ai, key.as_ref(), texts, &self.source, target, markup) {
             // A reply that isn't the array (a chatty model): on-device instead
             // of an error card, when a model exists for these lines.
-            Err(AiError::BadResponse(why)) if self.pair_for(texts, target).is_ok() => {
+            Err(AiError::BadResponse(why)) if self.route_for(texts, target).is_ok() => {
                 crate::log!("[opencircle] AI translation unusable ({why}); on-device instead");
                 self.on_device(texts, target)
             }
@@ -118,10 +118,11 @@ impl Real {
         }
     }
 
-    /// `texts` into `target` with the on-device model.
+    /// `texts` into `target` with the on-device model(s): through English
+    /// when there is no direct one.
     fn on_device(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
-        let pair = self.pair_for(texts, target)?;
-        if pair.missing_bytes() > 0 {
+        let route = self.route_for(texts, target)?;
+        if let Some(pair) = route.iter().find(|p| p.missing_bytes() > 0) {
             *self.missing.lock().unwrap_or_else(|e| e.into_inner()) = Some(pair);
             return Err(AiError::Offline(format!(
                 "{} isn't downloaded yet. Translate once with Ctrl+Shift+T to \
@@ -131,7 +132,11 @@ impl Real {
         }
         ocr::keep_warm();
         by_sentence(texts, |t| {
-            mt::translate(t, pair).map_err(|e| AiError::Offline(e.to_string()))
+            let mut t = t.to_vec();
+            for pair in &route {
+                t = mt::translate(&t, pair).map_err(|e| AiError::Offline(e.to_string()))?;
+            }
+            Ok(t)
         })
     }
 }
@@ -178,10 +183,10 @@ impl Deps for Real {
         }
     }
 
-    /// Offline: loads the likely pair (English for "auto") in the helper,
-    /// which stays warm, while the screen is read.
+    /// Offline: loads the likely first model (English for "auto") in the
+    /// helper, which stays warm, while the screen is read.
     fn warm(&self, target: &str) {
-        let Ok(pair) = self.pair_for(&[], target) else {
+        let Some(pair) = self.route_for(&[], target).ok().map(|r| r[0]) else {
             return;
         };
         if self.offline() && pair.missing_bytes() == 0 {
@@ -1024,24 +1029,44 @@ pub(super) mod tests {
         let auto = Real::new(lang::AUTO, Via::Offline);
         assert!(auto.offline() && auto.missing().is_none());
         let pair = |r: &Real, t: &[&str], target| {
-            r.pair_for(&texts(t), target).map(|p| (p.source, p.target))
+            let route = r.route_for(&texts(t), target)?;
+            Ok::<_, AiError>((route[0].source, route[route.len() - 1].target, route.len()))
         };
-        assert_eq!(pair(&auto, &["Main menu"], "ar").unwrap(), ("en", "ar"));
+        assert_eq!(pair(&auto, &["Main menu"], "ar").unwrap(), ("en", "ar", 1));
         assert_eq!(
             pair(&auto, &["القائمة الرئيسية"], "en").unwrap(),
-            ("ar", "en")
+            ("ar", "en", 1)
         );
-        assert_eq!(pair(&auto, &["メニュー"], "en").unwrap(), ("ja", "en"));
+        assert_eq!(pair(&auto, &["メニュー"], "en").unwrap(), ("ja", "en", 1));
+        let es = ["Un faro es una torre de señalización luminosa situada en el litoral"];
+        assert_eq!(pair(&auto, &es, "en").unwrap(), ("es", "en", 1));
+        let same = auto
+            .lines(&texts(&["The menu is open"]), "en", "")
+            .unwrap_err();
+        assert!(same.to_string().contains("already in English"), "{same}");
         assert_eq!(
             pair(&Real::new("fr", Via::Offline), &["x"], "en").unwrap(),
-            ("fr", "en")
+            ("fr", "en", 1)
+        );
+        // no direct model: through English, two models
+        let it = Real::new("it", Via::Offline);
+        assert_eq!(pair(&it, &["x"], "ar").unwrap(), ("it", "ar", 2));
+        assert_eq!(
+            pair(&it, &["x"], "es").unwrap(),
+            ("it", "es", 1),
+            "direct first"
         );
         for (real, t, target, from) in [
-            (&auto, &["Главное меню"][..], "en", "Russian"),
+            (
+                &Real::new("pt", Via::Offline),
+                &["Olá"][..],
+                "en",
+                "Portuguese",
+            ),
             (
                 &Real::new("fr", Via::Offline),
                 &["Bonjour"][..],
-                "de",
+                "ko",
                 "French",
             ),
         ] {

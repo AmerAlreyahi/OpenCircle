@@ -240,6 +240,9 @@ production systems.
   inner edge (double-click = design width); it never shrinks for the bar. A pinned chat's free side holds the
   bar's spots instead (the bar fits there, shorter field if needed). Six bar spots: bottom/top centre and the
   four corners. The chat's log has no scrollbar; its composer sits 8 px under the log.
+- More offline languages (owner, 2026-10-30): offline translate covers every Xenova OPUS-MT model (6 layers, shared
+  vocab) for the languages in our table (44 directions, pinned in `mt::PAIRS`); a pair without a direct model goes
+  through English (`mt::route`, two models). Detect tells Latin languages (en/es/fr/de) apart by common words.
 - Hide, don't delete (owner, 2026-10-29): an option for a feature that hasn't arrived (e.g. "Bars and pills" glass
   styles until 0.1.3; "Screen edge for" Live/Snip until they are on in Labs) is hidden, its code and config key
   kept, and shown when the feature really ships. A row with a single choice is not shown.

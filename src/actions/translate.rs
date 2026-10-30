@@ -37,12 +37,13 @@ pub fn deps_for(source: &str, target: &str) -> Result<(Real, String), String> {
 
 /// The engine, without the keyring: `Some` when translation will surely be
 /// offline (chosen, or the browser provider, which can't translate), with
-/// the pair it will most likely need (English for "auto"). With an API
+/// the model it will most likely need next (`mt::next`; English for
+/// "auto"). With an API
 /// provider whose key is missing, only `deps` finds out.
 pub fn surely_offline(source: &str, target: &str) -> Option<&'static mt::Pair> {
     let source = if source == lang::AUTO { "en" } else { source };
     will_be_offline()
-        .then(|| mt::pair(source, target))
+        .then(|| mt::next(source, target))
         .flatten()
 }
 
@@ -149,7 +150,7 @@ mod tests {
         assert_eq!(offline("fr", "en"), "offline");
         assert_eq!(offline(auto, "en"), "offline", "ar/fr/zh/ja -> en exist");
         // ... unless there is no offline model for the pair: the AI's reason
-        let e = choose(Engine::Ai, &browser, "fr", "de", no_key)
+        let e = choose(Engine::Ai, &browser, "fr", "ko", no_key)
             .err()
             .unwrap();
         assert!(e.starts_with("AI is not set up"), "{e}");

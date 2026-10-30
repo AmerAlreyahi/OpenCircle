@@ -320,19 +320,21 @@ mod tests {
         p.update(Msg::Query("".into()));
         let all = p.choices();
         assert!(all.iter().all(|(c, _)| c != AUTO), "auto is current");
-        // into English: Arabic, French, Japanese have offline models, German not
+        // into English: Arabic, French, Japanese have offline models, Portuguese not
         let mut label = |code: &str| {
             p.update(Msg::Query(lang::name(code).into()));
             p.choices()[0].1.clone()
         };
         assert_eq!(label("ar"), "Arabic");
         assert_eq!(label("ja"), "Japanese");
-        assert_eq!(label("de"), "German · AI");
+        assert_eq!(label("pt"), "Portuguese · AI");
         assert!(p.update(Msg::Pick("fr".into())));
         assert_eq!(p.label(), "FR → EN");
         p.update(Msg::Open(Side::Target));
         p.update(Msg::Query("Ara".into()));
-        assert_eq!(p.choices()[0].1, "Arabic · AI", "no French → Arabic model");
+        assert_eq!(p.choices()[0].1, "Arabic", "French → English → Arabic");
+        p.update(Msg::Query("Kor".into()));
+        assert_eq!(p.choices()[0].1, "Korean · AI", "no model into Korean");
         // with AI nothing is marked
         let mut ai = Picker::new("fr", "en", false);
         ai.update(Msg::Open(Side::Target));

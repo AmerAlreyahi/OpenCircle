@@ -380,7 +380,7 @@ fn the_pill_picks_languages_and_translates_again() {
     let _ = s.update(Msg::Picker(P::Pick("zh".into())));
     assert_eq!(s.picker.label(), "ZH → AR");
     let ready = models::installed(models::recognizer_for("zh"));
-    assert!(ready || matches!(s.phase, Phase::Consent(None)));
+    assert!(ready || matches!(s.phase, Phase::Consent(_)));
     assert!(s.image().is_none(), "the old translation is gone");
 }
 /// OCR finds one line at (20, 10) of what it is given; AI answers or fails.

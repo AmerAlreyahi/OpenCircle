@@ -78,13 +78,24 @@ Choose one in **Settings → Translate → Engine**.
 
   | From | Into |
   |---|---|
-  | English | Arabic, French, Spanish, German, Russian, Chinese (Simplified) |
-  | Arabic, French, Chinese, Japanese | English |
+  | English | Arabic, French, Spanish, German, Russian, Chinese (Simplified), Italian, Dutch, Ukrainian, Hindi, Indonesian, Vietnamese |
+  | Arabic, French, Spanish, German, Russian, Italian, Dutch, Ukrainian, Polish, Hindi, Indonesian, Vietnamese, Thai, Korean, Chinese, Japanese | English |
+  | Spanish | French, German, Italian, Russian |
+  | French | Spanish, German, Russian |
+  | German | Spanish, French |
+  | Italian | Spanish, French |
+  | Russian | Spanish, French, Ukrainian |
+  | Ukrainian | Russian |
+  | Dutch | French |
 
-  Any other pair is not available offline: OpenCircle says so and offers AI
-  (it never sends the text anywhere you didn't choose). With *Detect
-  automatically*, the direction follows the script of the text it read
-  (Latin counts as English).
+  Other pairs go through English when both halves exist (for example Italian
+  into Arabic: Italian to English, then English to Arabic): two models, a bit
+  slower and a little looser. A pair with no way offline (for example into
+  Korean or from Portuguese) is not available offline: OpenCircle says so and
+  offers AI (it never sends the text anywhere you didn't choose). With *Detect
+  automatically*, the direction follows the script of the text it read; Latin
+  text is told apart by its common words (English, Spanish, French or German).
+  Detecting needs no download: only the translation model does.
 
 Offline, a highlighted name inside a line is drawn in the line's colour: the
 model can't say which translated words are the name. A line drawn entirely
