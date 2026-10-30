@@ -211,7 +211,7 @@ mod tests {
     use crate::labs::Labs;
     use crate::ui::app::App;
     use crate::ui::app::message::Hiding;
-    use crate::ui::app::tests::{run_task, snipping_on};
+    use crate::ui::app::tests::{open_app, run_task, snipping_on};
     use crate::ui::screens::editor::toolbar;
     use crate::ui::snip;
 
@@ -224,6 +224,19 @@ mod tests {
         app.select(area);
         let crop = app.crop().unwrap();
         let _ = app.snip_routed(crop, true, snip::route(SnipAfter::Editor));
+        assert!(app.editing(), "the editor is open");
+        app
+    }
+
+    /// Circle to Search's Snip button: the editor in place.
+    fn in_place_editor() -> App {
+        let mut app = open_app(1280, 800, 1.0);
+        app.select(Rectangle::new(
+            Point::new(200.0, 150.0),
+            Size::new(300.0, 200.0),
+        ));
+        let _ = app.open_editor();
+        app.o.swap = 1.0; // the bar has turned into the toolbar
         assert!(app.editing(), "the editor is open");
         app
     }
@@ -284,5 +297,22 @@ mod tests {
         let shown = bar_names(&app).iter().any(|n| n.starts_with("Share"));
         assert_eq!(shown, share::SUPPORTED);
         assert_eq!(stops(&app).contains(&E::Share), share::SUPPORTED);
+    }
+
+    /// With Labs Pins off the toolbar has no Pin button at all (not a dead
+    /// one), in Snip and in place, and Tab never lands on it.
+    #[test]
+    fn no_pin_button_while_labs_pins_is_off() {
+        assert!(!crate::labs::has(crate::labs::Feature::Pins), "the default");
+        let mut app = snip_editor();
+        app.o.labs.set(crate::labs::Feature::Pins, false);
+        let names = bar_names(&app);
+        assert!(names.iter().any(|n| n.starts_with("Copy")), "{names:?}");
+        assert!(!names.iter().any(|n| n.starts_with("Pin")), "{names:?}");
+        assert!(!stops(&app).contains(&E::Pin));
+        let app = in_place_editor();
+        let names = bar_names(&app);
+        assert!(names.iter().any(|n| n.starts_with("Undo")), "{names:?}");
+        assert!(!names.iter().any(|n| n.starts_with("Pin")), "{names:?}");
     }
 }
