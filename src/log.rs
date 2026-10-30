@@ -508,7 +508,7 @@ pub(crate) mod tests {
     fn a_panic_writes_a_redacted_crash_file_and_keeps_five() {
         let dir = temp("crash");
         install_panic_hook(dir.clone());
-        crate::log!("before the crash: key=sk-live-0123456789abcdefXYZ");
+        crate::log!("before the crash: key={}", fake("sk-live-"));
         for _ in 0..7 {
             let t = std::thread::Builder::new()
                 .name("crasher".into())
@@ -530,7 +530,7 @@ pub(crate) mod tests {
         assert!(report.contains("backtrace:"), "{report}");
         assert!(report.contains("before the crash"), "{report}");
         assert!(
-            !report.contains(&fake("ghp_")) && !report.contains("sk-live-0123"),
+            !report.contains(&fake("ghp_")) && !report.contains(&fake("sk-live-")),
             "{report}"
         );
         let _ = fs::remove_dir_all(dir);

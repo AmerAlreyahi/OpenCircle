@@ -115,7 +115,10 @@ mod tests {
     fn the_report_has_no_secrets() {
         let (mut c, _) = Config::parse("");
         c.ai.model = "gpt-secret-model".into();
-        c.ai.base_url = "https://example.com/v1?key=sk-live-0123456789abcdefXYZ".into();
+        c.ai.base_url = format!(
+            "https://example.com/v1?key={}",
+            crate::log::tests::fake("sk-live-")
+        );
         c.general.save_folder = "/home/amer/Pictures".into();
         crate::log!(
             "[opencircle] failed: Bearer {}",
@@ -133,7 +136,7 @@ mod tests {
             assert!(r.contains(want), "{want}\n{r}");
         }
         for secret in [
-            "sk-live-0123",
+            "FakeTest0x",
             "sk-ant-api03",
             "/home/amer",
             "gpt-secret-model",

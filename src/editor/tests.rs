@@ -2347,7 +2347,7 @@ fn chat_block() -> Image {
                 56.0,
                 "the action bar wraps neatly into the free space.",
             ),
-            (20.0, 96.0, "API key: sk-live-4f9a8b7c6d5e4f3a2b1c0d9e8f7a"),
+            (20.0, 96.0, "API key: 4f9a 8b7c 6d5e 4f3a 2b1c 0d9e 8f7a"),
             (20.0, 136.0, "Account: amer@example.com, plan Pro, 3 seats"),
             (
                 20.0,
