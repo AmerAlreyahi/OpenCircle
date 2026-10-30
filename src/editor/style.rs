@@ -30,7 +30,7 @@ pub const NOTE_FILL: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.94);
 pub const NOTE_INK: Color = Color::from_rgb8(28, 28, 36);
 pub const NOTE_HINT: Color = Color::from_rgb8(120, 120, 130);
 pub const NOTE_FONT: iced::Font = iced::Font {
-    family: iced::font::Family::SansSerif,
+    family: iced::font::Family::Name("Inter"), // as the annotations (`text::SANS`)
     weight: iced::font::Weight::Semibold,
     ..iced::Font::DEFAULT
 };

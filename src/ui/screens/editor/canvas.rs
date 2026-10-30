@@ -304,3 +304,144 @@ impl canvas::Program<Message> for Input<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use iced::widget::row;
+    use iced::{Point, Size, Vector};
+
+    use super::{Lens, canvas};
+    use crate::editor::{Editor, Image, Message, TOOLS, Tool};
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+
+    const W: u32 = 280;
+    const H: u32 = 150;
+    /// Between the two canvases of a golden.
+    const GAP: f32 = 8.0;
+
+    /// A light page with dark text-like bars (the blur, spotlight and
+    /// magnifier have something to change).
+    fn page() -> Image {
+        let bar = |x: u32, y: u32| {
+            (24..256).contains(&x) && (20..140).contains(&y) && (y - 20) % 24 < 8 && x < 256 - y / 2
+        };
+        let rgba = (0..H)
+            .flat_map(|y| (0..W).map(move |x| (x, y)))
+            .flat_map(|(x, y)| match bar(x, y) {
+                true => [52, 56, 70, 255],
+                false => [236, 238, 243, 255],
+            })
+            .collect();
+        Image {
+            width: W,
+            height: H,
+            rgba,
+        }
+    }
+
+    fn pt(x: f32, y: f32) -> Point {
+        Point::new(x, y)
+    }
+
+    /// One `tool` item drawn on `page` (typing `text` where it takes text),
+    /// left selected as the tool leaves it; `done` = released (else mid-drag).
+    fn drawn(tool: Tool, text: &str, done: bool) -> Editor {
+        let mut e = Editor::new(page(), 1.0);
+        e.assist = false; // not the user's config
+        e.update(Message::Tool(tool));
+        // (each placed so its text and handles stay inside the page)
+        let (from, to) = match tool {
+            Tool::Magnifier => (pt(110.0, 60.0), pt(150.0, 90.0)),
+            Tool::ArrowLabel => (pt(150.0, 50.0), pt(200.0, 110.0)),
+            _ => (pt(60.0, 40.0), pt(180.0, 110.0)),
+        };
+        let at = match tool {
+            Tool::Text => pt(16.0, 60.0),
+            Tool::Callout => pt(30.0, 135.0),
+            _ => pt(70.0, 60.0),
+        };
+        match tool {
+            Tool::Text | Tool::Label | Tool::Callout | Tool::Step | Tool::Pointer => {
+                e.update(Message::Press(at));
+                e.update(Message::Release);
+                e.update(Message::Type(text.into()));
+                e.update(Message::Finish);
+            }
+            _ => {
+                e.update(Message::Press(from));
+                e.update(Message::Move(from + Vector::new(40.0, 10.0)));
+                e.update(Message::Move(to));
+                if !done {
+                    return e;
+                }
+                e.update(Message::Release);
+                if tool == Tool::ArrowLabel {
+                    e.update(Message::Type(text.into()));
+                    e.update(Message::Finish);
+                }
+            }
+        }
+        // The blur's secret seed is OS-random per stroke: fixed here, or no
+        // two runs draw it alike.
+        if let Some(crate::editor::Shape::Blur { seed, .. }) =
+            e.doc.items.first_mut().map(|i| &mut i.shape)
+        {
+            *seed = 7;
+            e.refresh();
+        }
+        e
+    }
+
+    /// Every editor tool on the canvas: as drawn (nothing selected) beside
+    /// selected (its frame and handles; pen and highlighter have none), in
+    /// Sapphire and Daylight (the handles' accent); the text-bearing tools
+    /// (text, label, callout, arrow label, step + its legend) in Latin and
+    /// Arabic; Crop mid-drag (its dim and edges). Look at each one after an
+    /// update.
+    #[test]
+    fn every_tool_matches_its_golden_images() {
+        crate::ui::kit::text::load(); // the bundled faces the annotations use
+        let mut cases: Vec<(String, Tool, &str)> = Vec::new();
+        for info in TOOLS.iter().filter(|t| t.tool != Tool::Select) {
+            let name = format!("{:?}", info.tool).to_lowercase();
+            let texty = matches!(
+                info.tool,
+                Tool::Text | Tool::Label | Tool::Callout | Tool::ArrowLabel | Tool::Step
+            );
+            cases.push((name.clone(), info.tool, "Open the menu"));
+            if texty {
+                cases.push((format!("{name}-arabic"), info.tool, "افتح القائمة"));
+            }
+        }
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for (name, tool, text) in &cases {
+                let (plain, chosen) = if *tool == Tool::Crop {
+                    (drawn(*tool, text, true), drawn(*tool, text, false))
+                } else {
+                    // (a step's note shows in the legend, on by default)
+                    let mut plain = drawn(*tool, text, true);
+                    let chosen = drawn(*tool, text, true);
+                    plain.update(Message::Tool(Tool::Rect)); // ends any typing
+                    plain.doc.selected = None;
+                    (plain, chosen)
+                };
+                let (a, b) = (plain.size(), chosen.size()); // (a crop is smaller)
+                let size = Size::new(a.width + GAP + b.width, a.height.max(b.height));
+                let file = format!("editor-{name}-{}", theme.id);
+                failed.extend(golden::check("editor", &file, size, &[1.0], || {
+                    row![
+                        canvas(&plain, 1.0, Lens::ONE),
+                        canvas(&chosen, 1.0, Lens::ONE)
+                    ]
+                    .spacing(GAP)
+                    .into()
+                }));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+}

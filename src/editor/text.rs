@@ -51,7 +51,7 @@ impl Font {
     pub const ALL: [Font; 3] = [Font::Sans, Font::Serif, Font::Mono];
     fn family(self) -> Family<'static> {
         match self {
-            Font::Sans => Family::SansSerif,
+            Font::Sans => SANS,
             Font::Serif => Family::Serif,
             Font::Mono => Family::Monospace,
         }
@@ -72,11 +72,14 @@ impl Back {
     pub const ALL: [Back; 3] = [Back::None, Back::Outline, Back::Box];
 }
 
+/// The sans face: the bundled Inter (`ui::kit::text::FONTS`, loaded at start;
+/// Arabic falls back to the bundled Noto Sans Arabic), the same on every PC.
+/// Serif and mono stay the system's.
+const SANS: Family<'static> = Family::Name("Inter");
+
 /// Labels, callouts, steps, the legend: semibold sans.
-// ponytail: system fonts; switch to Family::Name("Inter") once the UI loads the
-// bundled Inter into iced.
 fn layout(text: &str, size: f32) -> Buffer {
-    shape(text, size, Family::SansSerif, Weight::SEMIBOLD)
+    shape(text, size, SANS, Weight::SEMIBOLD)
 }
 
 fn styled(text: &str, size: f32, style: Style) -> Buffer {
@@ -91,6 +94,21 @@ fn styled(text: &str, size: f32, style: Style) -> Buffer {
 /// `text` shaped at `size`, unwrapped.
 fn shape(text: &str, size: f32, family: Family<'_>, weight: Weight) -> Buffer {
     let mut fonts = font_system().write().expect("font system");
+    // Inter is there before the first text (the UI loads it at start; this is
+    // for a text shaped before that, e.g. in tests: never a fallback face).
+    static INTER: std::sync::Once = std::sync::Once::new();
+    INTER.call_once(|| {
+        let has = |fs: &mut iced::advanced::graphics::text::cosmic_text::FontSystem| {
+            (fs.db().faces()).any(|f| f.families.iter().any(|(n, _)| n == "Inter"))
+        };
+        if !has(fonts.raw()) {
+            fonts.load_font(
+                include_bytes!("../../assets/fonts/Inter.ttf")
+                    .as_slice()
+                    .into(),
+            );
+        }
+    });
     let fs = fonts.raw();
     let mut buf = Buffer::new(fs, Metrics::new(size, line_height(size)));
     buf.set_size(fs, None, None);
