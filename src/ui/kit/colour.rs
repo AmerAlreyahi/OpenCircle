@@ -2,7 +2,8 @@
 //! a row of swatches; the design has none): `swatch`, a 34x34 `.oc-btn` with
 //! the colour as an 18 px dot (`accent` edge while its picker is open), and
 //! `picker`, the colours in rows of 6 and a hex field, on the `dropdown`
-//! material with a `rim` edge, radius 14.
+//! material with a `rim` edge, radius 14. `recent`: the screen colour
+//! picker's last colours, the picker's dots in one row.
 use iced::widget::{Space, button, column, container, row};
 use iced::{Border, Color, Element, Fill};
 
@@ -86,21 +87,7 @@ pub fn picker_with<'a, Message: Clone + 'a>(
     on_hex: impl Fn(String) -> Message + 'a,
     more: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let chip = |&colour: &Color| -> Element<'a, Message> {
-        let chosen = colour == current;
-        button(dot(colour, CHIP))
-            .padding(2)
-            .on_press(on_colour(colour))
-            .style(move |_, status| button::Style {
-                background: matches!(status, button::Status::Hovered).then(|| c().hover.into()),
-                border: Border::default()
-                    .rounded(radius::FULL)
-                    .width(if chosen { 2 } else { 0 })
-                    .color(c().text),
-                ..button::Style::default()
-            })
-            .into()
-    };
+    let chip = |&colour: &Color| chip(colour, colour == current, on_colour(colour));
     let rows =
         (colours.chunks(PER_ROW)).map(|r| row(r.iter().map(chip)).spacing(space::GAP).into());
     let hex = input("#RRGGBB", hex, true, false).on_input(on_hex);
@@ -123,4 +110,32 @@ pub fn picker_with<'a, Message: Clone + 'a>(
         true => picker.width(WIDE).into(),
         false => picker.into(),
     }
+}
+
+/// One colour to pick: a 22 px dot, ringed in `text` when `chosen`.
+fn chip<'a, Message: Clone + 'a>(colour: Color, chosen: bool, on: Message) -> Element<'a, Message> {
+    button(dot(colour, CHIP))
+        .padding(2)
+        .on_press(on)
+        .style(move |_, status| button::Style {
+            background: matches!(status, button::Status::Hovered).then(|| c().hover.into()),
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(if chosen { 2 } else { 0 })
+                .color(c().text),
+            ..button::Style::default()
+        })
+        .into()
+}
+
+/// The colour picker's last colours, newest first, in one row: a click
+/// sends `on` with its place in `colours`.
+pub fn recent<'a, Message: Clone + 'a>(
+    colours: &[[u8; 3]],
+    on: impl Fn(usize) -> Message,
+) -> Element<'a, Message> {
+    let chip = |(i, &[r, g, b]): (usize, &[u8; 3])| chip(Color::from_rgb8(r, g, b), false, on(i));
+    row(colours.iter().enumerate().map(chip))
+        .spacing(space::TRACK_GAP)
+        .into()
 }

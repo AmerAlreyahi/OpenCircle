@@ -954,7 +954,7 @@ fn slider_sheet() {
 
 #[test]
 fn colour_sheet() {
-    use super::super::colour::{picker, swatch};
+    use super::super::colour::{picker, recent, swatch};
     use iced::Color;
     const RED: Color = Color::from_rgb(0.94, 0.27, 0.27);
     const BLUE: Color = Color::from_rgb(0.23, 0.51, 0.96);
@@ -964,6 +964,9 @@ fn colour_sheet() {
         row("open", Act::Rest, |_| swatch(RED, true, ())),
         row("picker", Act::Rest, |_| {
             picker(&[RED, BLUE, Color::WHITE], RED, "#EF4444", |_| (), |_| ())
+        }),
+        row("recent", Act::Rest, |_| {
+            recent(&[[59, 130, 246], [239, 68, 68], [255; 3], [0; 3]], |_| ())
         }),
     ];
     sheet("colour", Size::new(220.0, 110.0), &rows);
@@ -1202,7 +1205,8 @@ fn loupe_sheet() {
 fn area_sheet() {
     use super::super::area::{self, Handle};
     use iced::widget::canvas::{self, Frame, Geometry};
-    // (hot handle, grown, dashed: long capture's outline, no handles)
+    // (hot handle, grown, dashed: long capture's outline, no handles;
+    // grown -2: the ruler's spans instead)
     struct Area(Option<((i8, i8), Handle)>, f32, bool);
     impl canvas::Program<()> for Area {
         type State = ();
@@ -1227,7 +1231,20 @@ fn area_sheet() {
                 iced::Color::from_rgb8(0x38, 0xbd, 0xf8),
                 iced::Color::from_rgb8(0xa7, 0x8b, 0xfa),
             );
-            if self.2 {
+            if self.1 < -1.5 {
+                area::span(
+                    &mut frame,
+                    Point::new(24.0, 42.0),
+                    Point::new(256.0, 42.0),
+                    look,
+                );
+                area::span(
+                    &mut frame,
+                    Point::new(40.0, 70.0),
+                    Point::new(110.0, 14.0),
+                    look,
+                );
+            } else if self.2 {
                 area::dashed(&mut frame, r, look);
             } else {
                 area::outline(&mut frame, r, look);
@@ -1258,6 +1275,7 @@ fn area_sheet() {
         ),
         row("scaling in", Act::Rest, at(None, 0.4)),
         row("long capture", Act::Rest, at(None, -1.0)),
+        row("ruler", Act::Rest, at(None, -2.0)),
     ];
     sheet("area", Size::new(280.0, 84.0), &rows);
 }

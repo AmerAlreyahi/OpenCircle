@@ -4,6 +4,7 @@
 //! passed in: the kit reads no config) over a faint dark halo, so it reads on
 //! white and on dark pages; small round handles in the look's first colour,
 //! no white squares. `grown` (0..1) scales the handles in (the pick's 120 ms).
+//! `span`: the screen ruler's measured line, in the same line and halo.
 use iced::widget::canvas::{Frame, LineDash, Path, Stroke, Style, gradient};
 use iced::{Color, Point, Rectangle, Size};
 
@@ -64,6 +65,42 @@ fn stroke(frame: &mut Frame, r: Rectangle, look: (Color, Color), dash: &[f32]) {
                 segments: dash,
                 offset: 0,
             },
+            ..Stroke::default()
+        },
+    );
+}
+
+/// The end ticks' half length (the screen ruler), logical px.
+pub const TICK: f32 = 5.0;
+
+/// The screen ruler's measure from `a` to `b` (logical px): the outline's
+/// line and halo, with a tick across each end.
+pub fn span(frame: &mut Frame, a: Point, b: Point, look: (Color, Color)) {
+    let d = b - a;
+    let len = (d.x * d.x + d.y * d.y).sqrt();
+    // across the line (a dot measures nothing: a plain cross-free tick)
+    let n = match len > 0.0 {
+        true => iced::Vector::new(-d.y / len, d.x / len) * TICK,
+        false => iced::Vector::new(0.0, TICK),
+    };
+    let path = Path::new(|p| {
+        p.move_to(a);
+        p.line_to(b);
+        for end in [a, b] {
+            p.move_to(end - n);
+            p.line_to(end + n);
+        }
+    });
+    let halo = Color::from_rgba(0.008, 0.024, 0.09, HALO_ALPHA);
+    frame.stroke(&path, Stroke::default().with_color(halo).with_width(HALO));
+    let linear = gradient::Linear::new(a, b)
+        .add_stop(0.0, look.0)
+        .add_stop(1.0, look.1);
+    frame.stroke(
+        &path,
+        Stroke {
+            style: Style::Gradient(linear.into()),
+            width: LINE,
             ..Stroke::default()
         },
     );

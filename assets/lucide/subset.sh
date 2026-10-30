@@ -64,6 +64,11 @@ ICONS=$(printf '%s,' \
   U+E3B2 `# picture-in-picture-2 (Snip toolbar: live pin)` \
   U+E5A0 `# blend (live pin: opacity)` \
   U+E5EB `# mouse-pointer-ban (live pin: clicks pass through)` \
+  U+E14E `# ruler (Snip toolbar: the screen ruler)` \
+  U+E1C4 `# move-diagonal-2 (ruler: line)` \
+  U+E1C5 `# move-horizontal (ruler: across)` \
+  U+E1C6 `# move-vertical (ruler: up and down)` \
+  U+E1CA `# square-dashed (ruler: box)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'
