@@ -9,7 +9,7 @@ use iced::widget::canvas::{self, Action, Fill, Frame, Geometry, LineDash, Path, 
 use iced::widget::{image, pin, stack};
 use iced::{ContentFit, Element, Point, Rectangle, Renderer, Size, Theme, Vector};
 
-use crate::editor::area::{Grip, REACH};
+use crate::editor::area::REACH;
 use crate::editor::style::{DIM_OUTSIDE, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK};
 use crate::editor::{Editor, Message};
 
@@ -18,10 +18,12 @@ use crate::editor::{Editor, Message};
 pub fn margin(e: &Editor) -> f32 {
     if e.movable { REACH } else { 0.0 }
 }
+use crate::ui::kit::area;
 use crate::ui::kit::themes::c;
 
 /// The editing surface, `size()` big: for Edit in place, over the selection.
-pub fn canvas(e: &Editor) -> Element<'_, Message> {
+/// `grown`: Snip's handles scaled in (0..1, the pick's motion).
+pub fn canvas(e: &Editor, grown: f32) -> Element<'_, Message> {
     let size = e.size();
     let view = e.doc.view();
     let m = margin(e);
@@ -51,7 +53,7 @@ pub fn canvas(e: &Editor) -> Element<'_, Message> {
         None => iced::widget::space().into(),
     });
     layers.push(
-        iced::widget::canvas(Input { editor: e })
+        iced::widget::canvas(Input { editor: e, grown })
             .width(outer.width)
             .height(outer.height)
             .into(),
@@ -61,11 +63,14 @@ pub fn canvas(e: &Editor) -> Element<'_, Message> {
 
 struct Input<'a> {
     editor: &'a Editor,
+    grown: f32,
 }
 
 #[derive(Default)]
 struct Pointer {
     down: bool,
+    /// Snip's area handle under the pointer (its edges): drawn hot.
+    hot: Option<(i8, i8)>,
 }
 
 impl canvas::Program<Message> for Input<'_> {
@@ -97,6 +102,18 @@ impl canvas::Program<Message> for Input<'_> {
             canvas::Event::Mouse(mouse::Event::CursorMoved { position }) if pointer.down => {
                 Message::Move(e.to_image(*position - (bounds.position() - Point::ORIGIN)))
             }
+            // Snip's area: the handle under the pointer shows hot (a redraw
+            // only when it changes).
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position }) if e.movable => {
+                let hot = (e.area_hot(Some(e.window_to_image(*position))))
+                    .filter(|(_, held)| !held)
+                    .map(|(edges, _)| edges);
+                if hot == pointer.hot {
+                    return None;
+                }
+                pointer.hot = hot;
+                return Some(Action::request_redraw());
+            }
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
                 if pointer.down =>
             {
@@ -126,7 +143,7 @@ impl canvas::Program<Message> for Input<'_> {
 
     fn draw(
         &self,
-        _pointer: &Pointer,
+        pointer: &Pointer,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -138,15 +155,16 @@ impl canvas::Program<Message> for Input<'_> {
         // Everything below in image-canvas px; the margin holds the area's handles.
         let m = margin(e);
         frame.translate(Vector::new(m, m));
+        // Snip's area: its handles (the overlay draws its outline), in the
+        // active look's colours, the held or hovered one hot.
         if e.movable {
             let r = Rectangle::with_size(e.size());
-            frame.stroke(&Path::rectangle(r.position(), r.size()), accent);
-            for grip in Grip::HANDLES {
-                let at = grip.at(r);
-                let knob = Path::rectangle(at - Vector::new(4.5, 4.5), Size::new(9.0, 9.0));
-                frame.fill(&knob, HANDLE);
-                frame.stroke(&knob, accent);
-            }
+            let look = crate::ui::theme::accent_of(&crate::config::look());
+            let hot = match e.area_hot(None) {
+                Some((edges, _)) => Some((edges, area::Handle::Held)),
+                None => pointer.hot.map(|edges| (edges, area::Handle::Hot)),
+            };
+            area::handles(&mut frame, r, look, hot, self.grown);
         }
 
         if let Some(keep) = e.crop_preview() {

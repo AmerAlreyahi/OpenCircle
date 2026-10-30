@@ -651,6 +651,73 @@ fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
     assert_eq!(copied_image(), Some((800, 600)));
 }
 
+/// 0.1.3-2: Snip's toolbar by the keyboard: Tab walks its controls (Shift+Tab
+/// from the end: × then Save), Enter presses the one Tab is on, Enter with
+/// none copies; a press drops the focus. While the area is moved the toolbar
+/// stays put (no frame per move), and glides to its new dock once let go.
+#[test]
+fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
+    use crate::editor::Message as E;
+    use crate::ui::screens::editor::toolbar;
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = snipping(area);
+    app.o.labs = crate::labs::Labs::all_on();
+    app.select(area);
+    let crop = app.crop().unwrap();
+    let _ = app.snip_routed(crop, true, snip::route(config::SnipAfter::Editor));
+    fn edit(app: &App) -> &editor::Editor {
+        &app.o.edit.as_ref().unwrap().editor
+    }
+    fn key(app: &App, named: keyboard::key::Named) -> Option<E> {
+        let none = keyboard::Modifiers::empty();
+        edit(app).key(&keyboard::Key::Named(named), None, none, None)
+    }
+    let stops = toolbar::stops(edit(&app));
+    assert_eq!(stops.last(), Some(&E::Close));
+    assert!(
+        !stops.contains(&E::Slot(editor::Tool::Crop)),
+        "no Crop in Snip"
+    );
+    let _ = app.on_editor(E::Focus(true));
+    let _ = app.on_editor(E::Focus(true));
+    let focus = edit(&app).focus.unwrap();
+    assert_eq!(stops[focus], E::Save);
+    let _ = app.on_editor(E::Focus(false));
+    assert_eq!(stops[edit(&app).focus.unwrap()], E::Close, "and forward");
+    // the keys: Tab, Enter on the focus, Enter alone = Copy
+    assert_eq!(key(&app, keyboard::key::Named::Tab), Some(E::Focus(false)));
+    assert_eq!(key(&app, keyboard::key::Named::Enter), Some(E::Activate));
+    let _ = app.on_editor(E::Press(Point::new(250.0, 180.0)));
+    let _ = app.on_editor(E::Release);
+    assert_eq!(edit(&app).focus, None, "a press drops it");
+    assert_eq!(key(&app, keyboard::key::Named::Enter), Some(E::Copy));
+
+    // moved: the toolbar stays where it was until let go
+    let start = Instant::now();
+    let frame = |app: &mut App, ms| {
+        let _ = app.update(Message::Frame(start + Duration::from_millis(ms)));
+    };
+    for ms in [0, 400, 800] {
+        frame(&mut app, ms);
+    }
+    let docked = app.bar_at();
+    let _ = app.on_editor(E::Press(Point::new(250.0, 180.0)));
+    let _ = app.on_editor(E::Move(Point::new(350.0, 230.0)));
+    frame(&mut app, 816);
+    assert_eq!(app.bar_at(), docked, "still while held");
+    let _ = app.on_editor(E::Release);
+    frame(&mut app, 832);
+    frame(&mut app, 848);
+    let at = app.bar_at();
+    assert!(at != docked && at != app.bar_target(), "on its way: {at:?}");
+    frame(&mut app, 2000);
+    assert_eq!(
+        app.bar_at(),
+        app.bar_target(),
+        "docked under the moved area"
+    );
+}
+
 /// N-74: "After a capture: Both" copies the snip AND opens the editor (it
 /// only opened the editor: nothing reached the clipboard or Win+V).
 #[test]
@@ -2268,7 +2335,7 @@ fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
     let (bar_box, _) = bar_box(&mut app);
     let spot = |app: &App, size| bar::anchor_at(app.o.bar_anchor, app.o.screen, size, 40.0);
     assert_eq!(bar_box.position(), spot(&app, bar_box.size()));
-    let tool = Editing::toolbar_size(app.o.screen.width);
+    let tool = Editing::toolbar_size(app.o.screen.width, false);
     let _ = app.update(Message::Run(&actions::edit::ACTION));
     assert!(app.editing());
     // on its way: one shape between the two sizes, at the same spot

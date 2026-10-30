@@ -59,6 +59,9 @@ impl App {
             };
             // Scrolling capture needs the page under the area: Snip, in place.
             edit.editor.scroll = matches!(&self.o.purpose, Purpose::Snip(s) if s.can_scroll());
+            if edit.editor.movable {
+                (self.o.bar_now, self.o.bar_glide) = (None, None); // it rises from the area
+            }
             self.o.edit = Some(edit);
         }
         Task::none()
@@ -130,7 +133,7 @@ impl App {
                 None => Task::none(),
             },
             Some(Output::AddCapture) => Task::none(), // `edit` picks the area now
-            Some(Output::Dragged) => self.close(),
+            Some(Output::Dragged | Output::Close) => self.close(),
         }
     }
 

@@ -16,6 +16,8 @@ use screens::live::controller as live_controller;
 pub(crate) use screens::setup;
 use screens::{panel, settings, song, translate};
 mod snip;
+#[cfg(test)]
+mod snip_shots;
 pub mod theme;
 mod windows;
 

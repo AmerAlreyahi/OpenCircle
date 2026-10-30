@@ -15,7 +15,7 @@ use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{self as kit_text, text as caption};
 use crate::ui::kit::tokens::{Role, radius, size};
 use crate::ui::kit::tooltip::{Why, hint};
-use crate::ui::kit::{chip, colour, divider, grip, segmented};
+use crate::ui::kit::{button, chip, colour, divider, grip, segmented};
 use crate::ui::screens::bar::geometry as bar;
 
 const SPACING: f32 = bar::SPACING;
@@ -82,10 +82,60 @@ fn parts() -> (Vec<f32>, Vec<f32>) {
     (tools, rest)
 }
 
+/// Snip's toolbar (the design's capture flow, N-73): no Back (no bar to go
+/// back to), no Crop (the area's handles are the crop), no group dividers
+/// between the tools; the size readout after the grip; Long capture, Pin
+/// (Labs) after Undo / Redo; Copy and Save labelled; ×. (Share joins with the
+/// share sheet: hidden until then.)
+fn snip_parts() -> (Vec<f32>, Vec<f32>) {
+    let mut tools = vec![bar::HANDLE, READOUT_W, bar::DIVIDER];
+    tools.extend(snip_slots().map(|_| CONTROL));
+    let mut rest = vec![CONTROL; 4];
+    rest.extend([bar::DIVIDER, CONTROL]);
+    if pins() {
+        rest.push(CONTROL);
+    }
+    rest.extend([bar::DIVIDER, COPY_W, SAVE_W, CONTROL]);
+    (tools, rest)
+}
+
+/// Snip's tool slots (no Crop).
+fn snip_slots() -> impl Iterator<Item = &'static ToolInfo> {
+    slots().filter(|t| t.tool != Tool::Crop)
+}
+
+/// Snip's size readout's width (fits `9999 × 9999`).
+const READOUT_W: f32 = 96.0;
+/// Snip's Copy and Save (the design's widths).
+const COPY_W: f32 = 78.0;
+const SAVE_W: f32 = 74.0;
+const CLOSE: char = '\u{e1b1}'; // lucide "x"
+
+/// What Tab walks on Snip's toolbar, in its order (left to right), and what
+/// Enter / Space on each sends.
+pub fn stops(e: &Editor) -> Vec<Message> {
+    let mut stops: Vec<Message> = snip_slots().map(|t| Message::Slot(t.tool)).collect();
+    stops.extend([
+        Message::Picker,
+        Message::Menu(Menu::Board),
+        Message::Undo,
+        Message::Redo,
+    ]);
+    if e.scroll {
+        stops.push(Message::Scroll);
+    }
+    if pins() {
+        stops.push(Message::Pin);
+    }
+    stops.extend([Message::Copy, Message::Save, Message::Close]);
+    stops
+}
+
 /// The toolbar's size within `max_width` (as `view` lays it out without a
-/// popover): one row, or two (tools, then the rest) when one does not fit.
-pub fn size(max_width: f32) -> Size {
-    let (tools, rest) = parts();
+/// popover): one row, or two (tools, then the rest) when one does not fit;
+/// `snip`: Snip's toolbar.
+pub fn size(max_width: f32, snip: bool) -> Size {
+    let (tools, rest) = if snip { snip_parts() } else { parts() };
     let (tools, rest) = (line_width(&tools), line_width(&rest));
     let pad = 2.0 * bar::PAD;
     let one = tools + SPACING + rest + pad;
@@ -99,7 +149,7 @@ pub fn size(max_width: f32) -> Size {
 /// The toolbar with its open popover under it (where nothing limits the room).
 #[cfg(test)]
 pub fn view(e: &Editor, max_width: f32) -> Element<'_, Message> {
-    let (bar, popover) = build(e, max_width);
+    let (bar, popover) = build(e, max_width, tooltip::Position::Bottom);
     match popover {
         None => bar,
         Some((popover, left)) => column![bar, row![Space::new().width(left), popover]]
@@ -111,12 +161,14 @@ pub fn view(e: &Editor, max_width: f32) -> Element<'_, Message> {
 /// The toolbar shown at `bar` (screen px) and its open popover as a floating
 /// layer for the host to put over the whole screen at (0, 0): laid out there at
 /// its full size, then moved by `place_popover`.
+/// `side`: where the tooltips go (away from Snip's area).
 pub fn view_at(
     e: &Editor,
     max_width: f32,
     bar: Rectangle,
+    side: tooltip::Position,
 ) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
-    let (toolbar, popover) = build(e, max_width);
+    let (toolbar, popover) = build(e, max_width, side);
     let popover = popover.map(|(popover, left)| {
         iced::widget::float(popover)
             .translate(move |laid, screen| {
@@ -131,9 +183,15 @@ pub fn view_at(
     (toolbar, popover)
 }
 
-/// A button, named (and given its key) in a tooltip under it.
+thread_local! {
+    /// Where tooltips go (the toolbar's side away from the area), for this build.
+    static TIP_SIDE: std::cell::Cell<tooltip::Position> =
+        const { std::cell::Cell::new(tooltip::Position::Bottom) };
+}
+
+/// A button, named (and given its key) in a tooltip beside it.
 fn hinted<'a>(button: Element<'a, Message>, label: &'a str, why: Why<'a>) -> Element<'a, Message> {
-    hint(button, label, why, tooltip::Position::Bottom)
+    hint(button, label, why, TIP_SIDE.get())
 }
 
 /// A square icon button with its tooltip.
@@ -185,8 +243,13 @@ impl<'a> Line<'a> {
 fn build(
     e: &Editor,
     max_width: f32,
+    side: tooltip::Position,
 ) -> (Element<'_, Message>, Option<(Element<'_, Message>, f32)>) {
-    let wrap = size(max_width).height > bar::HEIGHT;
+    TIP_SIDE.set(side);
+    if e.movable {
+        return build_snip(e, max_width);
+    }
+    let wrap = size(max_width, false).height > bar::HEIGHT;
     let mut tools = Line {
         items: Vec::new(),
         x: bar::PAD,
@@ -304,6 +367,18 @@ fn build(
         rest.push(chip::drag_out(Message::DragOut), DRAG_WIDTH);
     }
 
+    finish(e, tools, rest, wrap, at)
+}
+
+/// The two lines in the toolbar's surface, and the open popover under its button.
+#[allow(clippy::type_complexity)]
+fn finish<'a>(
+    e: &'a Editor,
+    mut tools: Line<'a>,
+    rest: Line<'a>,
+    wrap: bool,
+    at: Vec<(Menu, f32)>,
+) -> (Element<'a, Message>, Option<(Element<'a, Message>, f32)>) {
     let content: Element<'_, Message> = if wrap {
         column![tools.row(), rest.row()].spacing(SPACING).into()
     } else {
@@ -321,6 +396,145 @@ fn build(
     };
     let left = at.iter().find(|(m, _)| *m == menu).map_or(0.0, |(_, x)| *x);
     (toolbar.into(), Some((popover, left - bar::PAD)))
+}
+
+/// Snip's toolbar (`snip_parts`): Tab's focus shows on `e.focus` (`stops`).
+#[allow(clippy::type_complexity)]
+fn build_snip(
+    e: &Editor,
+    max_width: f32,
+) -> (Element<'_, Message>, Option<(Element<'_, Message>, f32)>) {
+    let wrap = size(max_width, true).height > bar::HEIGHT;
+    let stops = stops(e);
+    let focused = |m: &Message| e.focus.and_then(|i| stops.get(i)).is_some_and(|s| s == m);
+    let state = |active: bool, m: &Message| State {
+        active,
+        focused: focused(m),
+    };
+    let mut tools = Line {
+        items: Vec::new(),
+        x: bar::PAD,
+    };
+    let mut at: Vec<(Menu, f32)> = Vec::new();
+    tools.push(grip::grip(Message::Grab), bar::HANDLE);
+    let px = e.doc.view().size();
+    let readout = chip::readout(
+        format!("{} × {}", px.width.round(), px.height.round()),
+        e.area_held(),
+        None,
+    );
+    tools.push(container(readout).center_x(READOUT_W).into(), READOUT_W);
+    tools.push(divide(), bar::DIVIDER);
+    let current = info(e.tool);
+    for t in snip_slots() {
+        let shown = if current.slot == t.tool { current } else { t };
+        let m = Message::Slot(t.tool);
+        let s = state(current.slot == t.tool, &m);
+        let x = tools.push(
+            hinted(
+                icon_button::square(shown.icon, s, Some(m)),
+                shown.tip,
+                Why::Icon,
+            ),
+            CONTROL,
+        );
+        at.push((Menu::Variants(t.tool), x));
+    }
+    let mut rest = Line {
+        items: Vec::new(),
+        x: if wrap { bar::PAD } else { tools.x },
+    };
+    let x = rest.push(
+        hinted(
+            colour::swatch(e.ink(), e.menu == Some(Menu::Colour), Message::Picker),
+            "Colour, stroke, eyedropper, presets",
+            Why::Icon,
+        ),
+        CONTROL,
+    );
+    at.push((Menu::Colour, x));
+    let board = Message::Menu(Menu::Board);
+    let s = state(e.menu == Some(Menu::Board), &board);
+    let x = rest.push(
+        hinted(
+            icon_button::square(BOARD, s, Some(board)),
+            "Board: add captures, layout, legend",
+            Why::Icon,
+        ),
+        CONTROL,
+    );
+    at.push((Menu::Board, x));
+    for (glyph, m, tip) in [
+        (UNDO, Message::Undo, "Undo (Ctrl+Z)"),
+        (REDO, Message::Redo, "Redo (Ctrl+Shift+Z)"),
+    ] {
+        let s = state(false, &m);
+        rest.push(
+            hinted(icon_button::square(glyph, s, Some(m)), tip, Why::Icon),
+            CONTROL,
+        );
+    }
+    rest.push(divide(), bar::DIVIDER);
+    let long = match e.scroll {
+        true => "Long capture: scrolls the page under the area and stitches it",
+        false => "Long capture: only when snipping a window",
+    };
+    let s = state(false, &Message::Scroll);
+    rest.push(
+        hinted(
+            icon_button::square(SCROLL, s, e.scroll.then_some(Message::Scroll)),
+            long,
+            Why::Icon,
+        ),
+        CONTROL,
+    );
+    if pins() {
+        let s = state(false, &Message::Pin);
+        rest.push(
+            hinted(
+                icon_button::square(PIN, s, Some(Message::Pin)),
+                "Pin to screen: a floating copy (Ctrl+P)",
+                Why::Icon,
+            ),
+            CONTROL,
+        );
+    }
+    rest.push(divide(), bar::DIVIDER);
+    let copy = button::tool(
+        COPY,
+        "Copy",
+        button::Kind::Accent,
+        COPY_W,
+        focused(&Message::Copy),
+        Some(Message::Copy),
+    );
+    rest.push(
+        hint(copy, "Copy", Why::Keys("Ctrl C"), TIP_SIDE.get()),
+        COPY_W,
+    );
+    let save = button::tool(
+        SAVE,
+        "Save",
+        button::Kind::Elevated,
+        SAVE_W,
+        focused(&Message::Save),
+        Some(Message::Save),
+    );
+    rest.push(
+        hint(save, "Save", Why::Keys("Ctrl S"), TIP_SIDE.get()),
+        SAVE_W,
+    );
+    let s = state(false, &Message::Close);
+    rest.push(
+        hint(
+            icon_button::square(CLOSE, s, Some(Message::Close)),
+            "Close",
+            Why::Keys("Esc"),
+            TIP_SIDE.get(),
+        ),
+        CONTROL,
+    );
+    finish(e, tools, rest, wrap, at)
 }
 
 /// A popover's body: the toolbar's surface round `content`.
@@ -568,7 +782,7 @@ mod tests {
             text.update(Message::Slot(Tool::Text));
             let mut colour = editor();
             colour.update(Message::Picker);
-            let wide = size(f32::INFINITY).width;
+            let wide = size(f32::INFINITY, false).width;
             for (name, e, height) in [
                 ("rest", editor(), 60.0),
                 ("text", text, 280.0),

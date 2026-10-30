@@ -1148,7 +1148,7 @@ fn button_dot_sheet() {
 }
 
 /// `loupe::Loupe` over a small striped frame: the cells, the crosshair, its
-/// line; with an outline and its label.
+/// line (swatch, hex, position); with an outline; kept off a dragged area.
 #[test]
 fn loupe_sheet() {
     use super::super::loupe::Loupe;
@@ -1159,26 +1159,176 @@ fn loupe_sheet() {
             .collect::<Vec<u8>>()
             .into_boxed_slice(),
     );
-    let view = move |outline: bool| {
+    let look = (
+        iced::Color::from_rgb8(0x38, 0xbd, 0xf8),
+        iced::Color::from_rgb8(0xa7, 0x8b, 0xfa),
+    );
+    let view = move |outline: bool, away: bool| {
         move |_| {
-            let outline = outline.then(|| {
-                let r = iced::Rectangle::new(Point::new(8.0, 34.0), Size::new(70.0, 40.0));
-                (r, "Window · 70 × 40 px".to_string())
-            });
+            let outline =
+                outline.then(|| iced::Rectangle::new(Point::new(8.0, 34.0), Size::new(70.0, 40.0)));
+            // dragged from the top-left to the pointer: the loupe goes on
+            // down-right of the area's corner, never over it
+            let away =
+                away.then(|| iced::Rectangle::new(Point::new(20.0, 20.0), Size::new(80.0, 60.0)));
+            let (at, scale) = match away {
+                Some(_) => (Point::new(100.0, 80.0), 0.2),
+                None => (Point::new(16.0, 16.0), 1.0),
+            };
             let loupe = Loupe {
                 pixels,
                 width: 32,
                 height: 32,
-                scale: 1.0,
-                at: Point::new(16.0, 16.0),
+                scale,
+                at,
                 outline,
+                look,
+                away,
             };
             canvas(loupe).width(Fill).height(Fill).into()
         }
     };
     let rows = vec![
-        row("loupe", Act::Rest, view(false)),
-        row("outline", Act::Rest, view(true)),
+        row("loupe", Act::Rest, view(false, false)),
+        row("outline", Act::Rest, view(true, false)),
+        row("off a drag", Act::Rest, view(false, true)),
     ];
-    sheet("loupe", Size::new(240.0, 190.0), &rows);
+    sheet("loupe", Size::new(300.0, 300.0), &rows);
+}
+
+/// `area`: Snip's soft outline and handles in a look's pair, over a light and
+/// a dark half: at rest, a handle under the pointer, one held, scaling in.
+#[test]
+fn area_sheet() {
+    use super::super::area::{self, Handle};
+    use iced::widget::canvas::{self, Frame, Geometry};
+    struct Area(Option<((i8, i8), Handle)>, f32);
+    impl canvas::Program<()> for Area {
+        type State = ();
+        fn draw(
+            &self,
+            _: &(),
+            renderer: &iced::Renderer,
+            _: &iced::Theme,
+            bounds: iced::Rectangle,
+            _: iced::mouse::Cursor,
+        ) -> Vec<Geometry> {
+            let mut frame = Frame::new(renderer, bounds.size());
+            let half = Size::new(bounds.width / 2.0, bounds.height);
+            frame.fill_rectangle(Point::ORIGIN, half, iced::Color::from_rgb8(246, 247, 250));
+            frame.fill_rectangle(
+                Point::new(half.width, 0.0),
+                half,
+                iced::Color::from_rgb8(24, 28, 38),
+            );
+            let r = iced::Rectangle::new(Point::new(24.0, 16.0), Size::new(196.0, 52.0));
+            let look = (
+                iced::Color::from_rgb8(0x38, 0xbd, 0xf8),
+                iced::Color::from_rgb8(0xa7, 0x8b, 0xfa),
+            );
+            area::outline(&mut frame, r, look);
+            area::handles(&mut frame, r, look, self.0, self.1);
+            vec![frame.into_geometry()]
+        }
+    }
+    let at = |hot, grown| {
+        move |_| {
+            canvas::Canvas::new(Area(hot, grown))
+                .width(Fill)
+                .height(Fill)
+                .into()
+        }
+    };
+    let rows = vec![
+        row("rest", Act::Rest, at(None, 1.0)),
+        row(
+            "handle hover",
+            Act::Rest,
+            at(Some(((1, 1), Handle::Hot)), 1.0),
+        ),
+        row(
+            "handle held",
+            Act::Rest,
+            at(Some(((1, 0), Handle::Held)), 1.0),
+        ),
+        row("scaling in", Act::Rest, at(None, 0.4)),
+    ];
+    sheet("area", Size::new(280.0, 84.0), &rows);
+}
+
+/// `key_hint`: Snip's freeze hint and its keyboard hint, Latin and Arabic (RTL).
+#[test]
+fn key_hint_sheet() {
+    use super::super::key_hint::key_hint;
+    let rows = vec![
+        row("freeze", Act::Rest, |ar| {
+            let groups = [
+                (None, s(ar, "Click a window", "انقر على نافذة")),
+                (None, s(ar, "Drag an area", "اسحب لتحديد منطقة")),
+                (Some("Enter"), s(ar, "Full screen", "ملء الشاشة")),
+                (Some("Esc"), s(ar, "Cancel", "إلغاء")),
+            ];
+            key_hint(&groups, ar)
+        }),
+        row("keyboard", Act::Rest, |ar| {
+            let groups = [
+                (Some("← ↑ → ↓"), s(ar, "1 px", "1 بكسل")),
+                (Some("Shift"), s(ar, "10 px", "10 بكسل")),
+                (Some("Ctrl"), s(ar, "Resize", "تغيير الحجم")),
+                (Some("Enter"), s(ar, "Copy", "نسخ")),
+            ];
+            key_hint(&groups, ar)
+        }),
+    ];
+    sheet("key_hint", Size::new(520.0, 52.0), &rows);
+}
+
+/// Snip's chips: the size readout (at rest, live, snapped) and the hover
+/// info chip (a window, an element).
+#[test]
+fn chip_snip_sheet() {
+    const LADDER: [&str; 3] = ["Element", "Window", "Screen"];
+    let rows = vec![
+        row("readout", Act::Rest, |_| {
+            chip::readout("688 × 360".into(), false, None)
+        }),
+        row("  live", Act::Rest, |_| {
+            chip::readout("748 × 400".into(), true, None)
+        }),
+        row("  snapped", Act::Rest, |ar| {
+            chip::readout("520 × 300".into(), false, Some(s(ar, "Snapped", "ملتصق")))
+        }),
+        row("info window", Act::Rest, |ar| {
+            let title = s(ar, "Field Notes — Night skies", "ملاحظات ميدانية");
+            chip::info("Window", Some(title.into()), "700 × 520".into(), &LADDER, 1)
+        }),
+        row("info element", Act::Rest, |_| {
+            chip::info("Element", None, "330 × 180".into(), &LADDER, 0)
+        }),
+    ];
+    sheet("chip_snip", Size::new(500.0, 46.0), &rows);
+}
+
+/// `button::tool`: Snip's Copy (Accent) and Save (Elevated): rest, hover,
+/// pressed, Tab's focus.
+#[test]
+fn button_tool_sheet() {
+    use button::Kind;
+    let mut rows = Vec::new();
+    for (name, kind, glyph, label, w) in [
+        ("copy", Kind::Accent, '\u{e0a2}', ("Copy", "نسخ"), 78.0),
+        ("save", Kind::Elevated, '\u{e0b6}', ("Save", "حفظ"), 74.0),
+    ] {
+        for (state, act, focused) in [
+            (name, Act::Rest, false),
+            ("  hover", Act::Hover, false),
+            ("  pressed", Act::Press, false),
+            ("  focused", Act::Rest, true),
+        ] {
+            rows.push(row(state, act, move |ar| {
+                button::tool(glyph, s(ar, label.0, label.1), kind, w, focused, Some(()))
+            }));
+        }
+    }
+    sheet("button_tool", Size::new(120.0, 48.0), &rows);
 }

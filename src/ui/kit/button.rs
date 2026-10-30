@@ -74,7 +74,7 @@ pub fn button<'a, Message: Clone + 'a>(
                     Status::Hovered | Status::Pressed => brighter(fill),
                     _ => fill,
                 })),
-                text_color: fixed::ON_ACCENT,
+                text_color: super::themes::on(fill),
                 border: Border::default()
                     .rounded(radius::CARD)
                     .width(if status == Status::Pressed { 2 } else { 0 })
@@ -368,6 +368,69 @@ pub fn compact<'a, Message: Clone + 'a>(
                 text_color,
                 border: Border::default()
                     .rounded(radius::CARD)
+                    .width(width)
+                    .color(edge),
+                ..iced_button::Style::default()
+            }
+        })
+        .into()
+}
+
+/// A toolbar's labelled button (Snip's Copy and Save): a 16 px glyph and a
+/// 12 px / 600 label, `width` x `size::ICON_BUTTON`, radius 9. `Accent` = the
+/// primary (accent fill, `themes::on` text), else `Elevated` (`elevated`, its
+/// edge). Tab's `focused`: an `accent_soft` fill (Elevated) or a 3 px
+/// `accent_soft` ring (Accent); never a white ring.
+pub fn tool<'a, Message: Clone + 'a>(
+    glyph: char,
+    label: &'a str,
+    kind: Kind,
+    width: f32,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::tokens::{Role, space};
+    use iced_button::Status;
+    let live = on_press.is_some();
+    let content = row![
+        text(glyph).font(super::icon::FONT).size(size::ICON_SMALL),
+        text(label)
+            .size(Role::CONTROL.size)
+            .font(weight(Weight::Semibold)),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    iced_button(container(content).center(Fill))
+        .width(width)
+        .height(size::ICON_BUTTON)
+        .padding(0)
+        .on_press_maybe(on_press)
+        .style(move |_, status| {
+            let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+            let accent = kind == Kind::Accent;
+            let fill = match () {
+                _ if accent && hot => brighter(c().accent),
+                _ if accent => c().accent,
+                _ if focused => c().accent_soft,
+                _ if hot => c().elevated_hover,
+                _ => c().elevated,
+            };
+            let text_color = match () {
+                _ if !live => c().text_muted,
+                _ if accent => super::themes::on(c().accent),
+                _ => c().text,
+            };
+            let (width, edge) = match () {
+                _ if live && status == Status::Pressed => (2.0, c().widget),
+                _ if accent && focused => (3.0, c().accent_soft),
+                _ if accent => (0.0, c().accent),
+                _ => (1.0, c().elevated_border),
+            };
+            iced_button::Style {
+                background: Some(fill.into()),
+                text_color,
+                border: Border::default()
+                    .rounded(radius::CONTROL)
                     .width(width)
                     .color(edge),
                 ..iced_button::Style::default()

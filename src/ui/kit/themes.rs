@@ -79,6 +79,30 @@ pub fn c() -> &'static Colours {
     &current().c
 }
 
+/// The text on a `fill` (an Accent button's): the kit's dark `ON_ACCENT`, or
+/// white where that reads under 4.5:1 (Daylight's blue: 3.9:1 dark, 5.2:1
+/// white).
+pub fn on(fill: Color) -> Color {
+    let dark = super::tokens::fixed::ON_ACCENT;
+    match contrast(dark, fill) >= 4.5 {
+        true => dark,
+        false => Color::WHITE,
+    }
+}
+
+/// WCAG contrast of two opaque colours.
+pub fn contrast(a: Color, b: Color) -> f32 {
+    let lum = |c: Color| {
+        let f = |v: f32| match v <= 0.04045 {
+            true => v / 12.92,
+            false => ((v + 0.055) / 1.055).powf(2.4),
+        };
+        0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+    };
+    let (a, b) = (lum(a), lum(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
 /// The theme to show: the dark pick or the light pick (theme ids) by `mode`,
 /// `System` following the OS. An unknown id, or one of the other mode, falls
 /// back to Sapphire / Daylight.

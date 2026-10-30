@@ -312,6 +312,7 @@ impl App {
             || (self.o.panel.as_ref()).is_some_and(|(_, p)| p.spinning())
             || self.chat.as_ref().is_some_and(|c| c.panel.spinning())
             || self.o.bar_now.is_none()
+            || (self.o.edit.as_ref()).is_some_and(crate::ui::screens::editor::Editing::growing)
             || !self.o.waiting.is_empty() // other screens wait for a frame after the opening
     }
 

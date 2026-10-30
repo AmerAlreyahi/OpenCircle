@@ -158,6 +158,18 @@ impl Editor {
             let keys = (modifiers.command(), modifiers.shift(), modifiers.alt());
             return Some(Message::Nudge(arrow, keys));
         }
+        // Snip: Tab walks the toolbar, Enter / Space press what it is on;
+        // Enter with nothing focused copies.
+        if self.movable {
+            match key {
+                Key::Named(Named::Tab) => return Some(Message::Focus(modifiers.shift())),
+                Key::Named(Named::Enter | Named::Space) if self.focus.is_some() => {
+                    return Some(Message::Activate);
+                }
+                Key::Named(Named::Enter) => return Some(Message::Copy),
+                _ => {}
+            }
+        }
         match key {
             Key::Named(Named::Escape) if self.picking => Some(Message::Eyedropper),
             Key::Named(Named::Escape) => match self.menu {

@@ -1,7 +1,10 @@
-//! The loupe (snip's magnifier): the pixels around the pointer at 8x, the one
-//! under it framed, its coordinates (frame px) and colour; and, while picking,
-//! the outline of what a click would capture with its label. Drawn on a canvas
-//! in the theme's widget, rim, text and accent.
+//! The loupe (snip's magnifier): the pixels around the pointer at 9x, the one
+//! under it framed, its colour (`#RRGGBB`) and coordinates (frame px); and,
+//! while picking, the outline of what a click would capture (`area::outline`,
+//! in the active look's pair; its info chip is a widget, `chip::info`). Drawn
+//! on a canvas in the theme's widget, rim, text and accent. While an area is
+//! dragged it keeps off it: diagonally away from it, outward from the corner
+//! being dragged.
 use iced::mouse::Cursor;
 use iced::widget::canvas::{self, Geometry, Stroke};
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
@@ -9,9 +12,9 @@ use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
 use super::themes::c;
 
 /// Physical px each side of the one under the pointer, and the logical size
-/// each is drawn at (8x zoom).
+/// each is drawn at (9x zoom).
 pub const RADIUS: i32 = 7;
-const CELL: f32 = 8.0;
+const CELL: f32 = 9.0;
 
 /// The `2 * radius + 1` square of pixels around `centre` (frame px), row by row;
 /// outside the frame = transparent.
@@ -36,7 +39,7 @@ pub fn sample(
     out
 }
 
-/// The magnifier: the pixels around the pointer at 8x, the one under it framed,
+/// The magnifier: the pixels around the pointer at 9x, the one under it framed,
 /// its coordinates (frame px) and colour.
 pub struct Loupe<'a> {
     pub pixels: &'a [u8],
@@ -45,9 +48,16 @@ pub struct Loupe<'a> {
     pub scale: f32,
     /// The pointer, logical px.
     pub at: Point,
-    /// What a click would capture, and its label.
-    pub outline: Option<(Rectangle, String)>,
+    /// What a click would capture.
+    pub outline: Option<Rectangle>,
+    /// The active look's pair (the outline's colours).
+    pub look: (Color, Color),
+    /// The area being dragged (its corner is at the pointer): the loupe keeps off it.
+    pub away: Option<Rectangle>,
 }
+
+/// The loupe's distance from the pointer.
+const GAP: f32 = 22.0;
 
 impl<Message> canvas::Program<Message> for Loupe<'_> {
     type State = ();
@@ -63,32 +73,13 @@ impl<Message> canvas::Program<Message> for Loupe<'_> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         // ponytail: square corners; Windows 11 rounds its windows by 8 px (DWM
         // corner preference) and the outline could follow.
-        if let Some((r, label)) = &self.outline {
-            let border = canvas::Path::rectangle(
+        if let Some(r) = self.outline {
+            // just inside: no outline pixel off the screen
+            let inside = Rectangle::new(
                 Point::new(r.x + 1.0, r.y + 1.0),
                 Size::new((r.width - 2.0).max(0.0), (r.height - 2.0).max(0.0)),
             );
-            frame.stroke(
-                &border,
-                Stroke::default().with_color(c().accent).with_width(2.0),
-            );
-            // The label above the outline, or inside it at the top of the screen.
-            let width = 7.2 * label.chars().count() as f32 + 16.0;
-            let y = if r.y >= 30.0 { r.y - 28.0 } else { r.y + 4.0 };
-            let x = r.x.clamp(0.0, (bounds.width - width).max(0.0));
-            let tag = canvas::Path::rounded_rectangle(
-                Point::new(x, y),
-                Size::new(width, 24.0),
-                6.0.into(),
-            );
-            frame.fill(&tag, c().widget);
-            frame.fill_text(canvas::Text {
-                content: label.clone(),
-                position: Point::new(x + 8.0, y + 5.0),
-                color: c().text,
-                size: 12.0.into(),
-                ..canvas::Text::default()
-            });
+            super::area::outline(&mut frame, inside, self.look);
         }
         let centre = (
             (self.at.x * self.scale).floor() as i32,
@@ -98,21 +89,37 @@ impl<Message> canvas::Program<Message> for Loupe<'_> {
         let n = 2 * RADIUS + 1;
         let side = n as f32 * CELL;
         let label = 24.0;
-        // Below-right of the pointer; flipped where it would leave the screen.
-        let gap = 24.0;
-        let x = if self.at.x + gap + side < bounds.width {
-            self.at.x + gap
-        } else {
-            self.at.x - gap - side
+        // Below-right of the pointer, or away from the dragged area (outward
+        // from its corner); flipped where it would leave the screen.
+        let (right, down) = match self.away {
+            Some(r) => (self.at.x >= r.center_x(), self.at.y >= r.center_y()),
+            None => (true, true),
         };
-        let y = if self.at.y + gap + side + label < bounds.height {
-            self.at.y + gap
-        } else {
-            self.at.y - gap - side - label
+        let (w, h) = (side, side + label);
+        let fits_x = |right: bool| match right {
+            true => self.at.x + GAP + w < bounds.width,
+            false => self.at.x - GAP - w > 0.0,
         };
-        let body = canvas::Path::rectangle(
-            Point::new(x - 2.0, y - 2.0),
-            Size::new(side + 4.0, side + label + 4.0),
+        let fits_y = |down: bool| match down {
+            true => self.at.y + GAP + h < bounds.height,
+            false => self.at.y - GAP - h > 0.0,
+        };
+        let right = if fits_x(right) { right } else { !right };
+        let down = if fits_y(down) { down } else { !down };
+        let x = if right {
+            self.at.x + GAP
+        } else {
+            self.at.x - GAP - w
+        };
+        let y = if down {
+            self.at.y + GAP
+        } else {
+            self.at.y - GAP - h
+        };
+        let body = canvas::Path::rounded_rectangle(
+            Point::new(x - 6.0, y - 6.0),
+            Size::new(side + 12.0, side + label + 10.0),
+            12.0.into(),
         );
         frame.fill(&body, c().widget);
         frame.stroke(&body, Stroke::default().with_color(c().rim).with_width(1.0));
@@ -148,12 +155,33 @@ impl<Message> canvas::Program<Message> for Loupe<'_> {
             &pixel,
             Stroke::default().with_color(Color::WHITE).with_width(2.0),
         );
+        // a swatch, the true colour's hex, the position (muted)
         let [r, g, b, _] = cells[cells.len() / 2];
+        let swatch = canvas::Path::rounded_rectangle(
+            Point::new(x + 4.0, y + side + 6.0),
+            Size::new(12.0, 12.0),
+            3.0.into(),
+        );
+        frame.fill(&swatch, Color::from_rgb8(r, g, b));
+        frame.stroke(
+            &swatch,
+            Stroke::default().with_color(c().rim).with_width(1.0),
+        );
         frame.fill_text(canvas::Text {
-            content: format!("{}, {}   #{r:02X}{g:02X}{b:02X}", centre.0, centre.1),
-            position: Point::new(x + 6.0, y + side + 5.0),
+            content: format!("#{r:02X}{g:02X}{b:02X}"),
+            position: Point::new(x + 21.0, y + side + 5.0),
             color: c().text,
-            size: 12.0.into(),
+            size: 11.5.into(),
+            font: super::text::MONO,
+            ..canvas::Text::default()
+        });
+        frame.fill_text(canvas::Text {
+            content: format!("{}, {}", centre.0, centre.1),
+            position: Point::new(x + side - 2.0, y + side + 5.5),
+            color: c().text_muted,
+            size: 10.5.into(),
+            font: super::text::MONO,
+            align_x: iced::widget::text::Alignment::Right,
             ..canvas::Text::default()
         });
         vec![frame.into_geometry()]

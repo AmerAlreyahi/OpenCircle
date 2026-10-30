@@ -49,7 +49,8 @@ impl App {
     /// toolbar, or the shape between them while one turns into the other.
     pub(in crate::ui) fn dock_size(&self) -> Size {
         let (_, bar) = self.bar_size();
-        let tool = Editing::toolbar_size(self.o.screen.width);
+        let snip = self.o.edit.as_ref().is_some_and(|e| e.editor.movable);
+        let tool = Editing::toolbar_size(self.o.screen.width, snip);
         let t = self.swapped();
         Size::new(
             bar.width + (tool.width - bar.width) * t,

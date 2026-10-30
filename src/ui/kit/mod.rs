@@ -9,6 +9,7 @@ pub mod motion;
 pub mod themes;
 pub mod tokens;
 
+pub mod area;
 pub mod bubble;
 pub mod button;
 pub mod card;
@@ -22,6 +23,7 @@ pub mod header;
 pub mod hero;
 pub mod icon;
 pub mod icon_button;
+pub mod key_hint;
 pub mod keycap;
 pub mod logo;
 pub mod loupe;
@@ -78,6 +80,19 @@ mod tests {
             ("card_selected", c.card_selected),
             ("keycap", c.keycap),
         ]
+    }
+
+    /// An Accent button's text reads on its fill in every theme (4.5:1):
+    /// Daylight's blue took the dark text at 3.9:1 (owner, 2026-10-30: Snip's Copy).
+    #[test]
+    fn text_on_the_accent_reads_in_every_theme() {
+        for t in THEMES {
+            let on = themes::on(t.c.accent);
+            let got = contrast(on, t.c.accent);
+            assert!(got >= 4.5, "{}: {got:.2}", t.id);
+        }
+        assert_eq!(themes::on(DAYLIGHT.c.accent), Color::WHITE);
+        assert_eq!(themes::on(SAPPHIRE.c.accent), tokens::fixed::ON_ACCENT);
     }
 
     #[test]

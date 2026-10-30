@@ -175,6 +175,11 @@ impl App {
                 crate::history::recent::clear();
                 Task::none()
             }
+            snip::Msg::HintGone(opening) if opening == self.opening => {
+                snip.hinting = false;
+                Task::none()
+            }
+            snip::Msg::HintGone(_) => Task::none(),
         }
     }
 
@@ -235,10 +240,17 @@ impl App {
             let _ = tx.unbounded_send(crate::history::recent::load());
         })
         .map(|recent| Message::Snip(snip::Msg::Recent(recent)));
+        // the freeze hint goes after its 2 s (no frame clock while still)
+        let opening = self.opening;
+        let hint = background(|tx| {
+            std::thread::sleep(std::time::Duration::from_secs(snip::HINT_SECS));
+            let _ = tx.unbounded_send(());
+        })
+        .map(move |()| Message::Snip(snip::Msg::HintGone(opening)));
+        let recent = Task::batch([recent, hint]);
         if !cfg!(windows) {
             return recent;
         }
-        let opening = self.opening;
         // Ends when the snip (the sender) is gone and every read is in.
         let controls = background(move |tx| {
             // A thread per window: a slow one (a huge page) holds up no other.

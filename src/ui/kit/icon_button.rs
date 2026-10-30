@@ -1,8 +1,9 @@
 //! `icon_button(glyph, state, on_press)`: `.oc-icon-btn` round, 34x34, a
 //! 16 px glyph in `text_sub`; under the cursor `text` on `hover`; `active`
 //! (the one chosen) raised: `elevated` with its edge, `text`. Pressed draws a
-//! 2 px inset edge (no scale on the CPU renderer); Tab's focus an `accent`
-//! edge; no `on_press` = dimmed, no hover. Every state keeps the same layout.
+//! 2 px inset edge (no scale on the CPU renderer); Tab's focus an
+//! `accent_soft` fill (no ring); no `on_press` = dimmed,
+//! no hover. Every state keeps the same layout.
 use iced::widget::{button, container, text};
 use iced::{Border, Element, Fill};
 
@@ -69,17 +70,17 @@ fn made<'a, Message: Clone + 'a>(
             let hot = live && matches!(status, Status::Hovered | Status::Pressed);
             let fill = match () {
                 _ if state.active => Some(c().elevated),
-                _ if hot || state.focused => Some(c().hover),
+                _ if state.focused => Some(c().accent_soft),
+                _ if hot => Some(c().hover),
                 _ => None,
             };
             let text_color = match () {
                 _ if !live => faded(c().text_muted, 0.6),
-                _ if state.active || hot => c().text,
+                _ if state.active || hot || state.focused => c().text,
                 _ => c().text_sub,
             };
             let (width, edge) = match () {
                 _ if live && status == Status::Pressed => (2.0, c().widget),
-                _ if state.focused => (1.0, c().accent),
                 _ if state.active => (1.0, c().elevated_border),
                 _ => (0.0, c().widget),
             };

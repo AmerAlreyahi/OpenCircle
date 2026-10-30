@@ -16,7 +16,7 @@ use iced::widget::image::{FilterMethod, Handle};
 use iced::widget::text::Alignment;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, Vector};
 
-use super::kit::{motion, tokens::fixed};
+use super::kit::{area as kit_area, motion, tokens::fixed};
 use super::theme;
 use crate::config::{BracketStyle, Look};
 
@@ -1195,6 +1195,15 @@ impl canvas::Program<Event> for Overlay<'_> {
                 glow(frame, *kind, s, true, screen, accent, 1.0);
             }
             match (&morph, box_on_screen) {
+                // Snip: a soft thin outline round the area, never the glow
+                // (owner, 2026-10-30), in the same look colours.
+                _ if self.live_drag => {
+                    if (closed || !is_tap(&current, 1.0))
+                        && let Some(r) = self::bounds(&current)
+                    {
+                        kit_area::outline(frame, r, accent);
+                    }
+                }
                 (Some((t, outline)), Some(r)) => {
                     glow(
                         frame,

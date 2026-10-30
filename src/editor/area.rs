@@ -20,7 +20,8 @@ pub enum Grip {
 }
 
 impl Grip {
-    /// The 8 handles, clockwise from the top-left corner.
+    /// The 8 handles, clockwise from the top-left corner (`kit::area` draws them).
+    #[cfg(test)]
     pub const HANDLES: [Grip; 8] = [
         Grip::Edge(-1, -1),
         Grip::Edge(0, -1),

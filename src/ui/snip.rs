@@ -18,8 +18,10 @@ use iced::widget::{canvas, column, container, image, row};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::kit::button;
+use super::kit::chip;
 use super::kit::icon::Icon;
 use super::kit::icon_button::{self, State, icon_button};
+use super::kit::key_hint::key_hint;
 use super::kit::keycap::keycap;
 use super::kit::loupe::Loupe;
 use super::kit::surface::{self, Material, surface};
@@ -33,6 +35,9 @@ use crate::config::{SnipAfter, Target};
 
 /// An edge snaps to a window / control edge this near (logical px).
 const SNAP: f32 = 8.0;
+/// The hover info chip's height, the drag size chip's width (logical px).
+const INFO_H: f32 = 30.0;
+const SIZE_CHIP_W: f32 = 96.0;
 /// The toast offers Edit this long, then the overlay closes.
 pub const TOAST_SECS: u64 = 4;
 pub const COPIED: &str = "Copied: paste it into your AI chat";
@@ -53,14 +58,6 @@ impl Kind {
             Target::Window => Kind::Window,
             Target::FullScreen => Kind::Full,
         }
-    }
-
-    fn hint(self) -> &'static str {
-        [
-            "Click a window or a part of it · scroll = bigger / smaller · or drag an area",
-            "Click a window · Esc to close",
-            "",
-        ][self as usize]
     }
 
     /// Picking an area by hand: the loupe and snapping help.
@@ -102,7 +99,22 @@ pub enum Msg {
     /// A recent capture, read back.
     Loaded(Result<Crop, String>),
     ClearRecent,
+    /// The freeze hint has shown long enough (`HINT_SECS`).
+    HintGone(u32),
 }
+
+/// The freeze hint shows this long (or until a drag starts).
+pub const HINT_SECS: u64 = 2;
+/// The info chip's ladder (the wheel's steps).
+const LADDER: [&str; 3] = ["Element", "Window", "Screen"];
+/// What the freeze hint says (Region, Window).
+const HINT_REGION: [(Option<&str>, &str); 4] = [
+    (None, "Click a window"),
+    (None, "Drag an area"),
+    (Some("Enter"), "Full screen"),
+    (Some("Esc"), "Cancel"),
+];
+const HINT_WINDOW: [(Option<&str>, &str); 2] = [(None, "Click a window"), (Some("Esc"), "Cancel")];
 
 /// What a pick leads to.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -220,6 +232,8 @@ pub struct Snip {
     toast: Option<Toast>,
     toasts: u32,
     recent: Vec<(PathBuf, image::Handle)>,
+    /// The freeze hint shows (`HintGone`, a drag hides it).
+    pub hinting: bool,
 }
 
 pub struct Scroll {
@@ -279,6 +293,7 @@ impl Snip {
             toast: None,
             toasts: 0,
             recent: Vec::new(),
+            hinting: true,
         };
         snip.show_on(place);
         snip
@@ -487,6 +502,7 @@ impl Snip {
 
     /// The button went down at `p`: where the stroke starts (snapped).
     pub fn press(&mut self, p: Point) -> Point {
+        self.hinting = false;
         self.press = None;
         let at = self.snap(p);
         self.press = Some((p, at));
@@ -629,16 +645,18 @@ impl Snip {
             top =
                 top.push(surface(Material::Widget, radius::WINDOW, strip).padding(space::BAR_PAD));
         }
-        let hint = match self.kind {
+        // the freeze hint, 16 px from the top, for its 2 s
+        match self.kind {
+            _ if !self.hinting => {}
             Kind::Region if self.desktop.is_empty() => {
-                "Drag or circle an area (no window picking here) · Esc to close"
+                let hint = "Drag or circle an area (no window picking here) · Esc to close";
+                top = top.push(surface::hint(hint));
             }
-            kind => kind.hint(),
-        };
-        if !hint.is_empty() {
-            top = top.push(surface::hint(hint));
+            Kind::Region => top = top.push(key_hint(&HINT_REGION, false)),
+            Kind::Window => top = top.push(key_hint(&HINT_WINDOW, false)),
+            Kind::Full => {}
         }
-        container(top).center_x(Fill).padding(space::PAGE[1]).into()
+        container(top).center_x(Fill).padding(space::PAGE[0]).into()
     }
 
     /// When the window is only a pill (scrolling, the timer, the toast): its view.
@@ -680,14 +698,19 @@ impl Snip {
         Some(container(pill).center(Fill).into())
     }
 
-    /// While an area is picked by hand: the loupe beside the pointer and, unless
-    /// a drag is under way, the outline of what a click would capture, with its
-    /// label and size. `frame` is the frozen frame, `scale` physical px per logical px.
+    /// While an area is picked by hand: the loupe beside the pointer and,
+    /// unless a drag is under way, the outline of what a click would capture
+    /// with its info chip (kind · title · size | the wheel's ladder); while
+    /// dragging (`drag` = the box so far), its size chip by the dragged corner
+    /// (`Snapped` when an edge snapped) and the loupe away from it. `frame` is
+    /// the frozen frame, `scale` physical px per logical px, `look` the active
+    /// look's pair.
     pub fn guides<'a>(
         &self,
         frame: &'a image::Handle,
         scale: f32,
-        dragging: bool,
+        drag: Option<Rectangle>,
+        look: (iced::Color, iced::Color),
     ) -> Option<Element<'a, Msg>> {
         let image::Handle::Rgba {
             width,
@@ -699,20 +722,71 @@ impl Snip {
             return None;
         };
         let at = self.pointer.filter(|_| self.kind.picks())?;
-        let outline = self.outlined().filter(|_| !dragging).map(|t| {
-            let px = |v: f32| (v * scale).round() as u32;
-            let size = format!("{} × {} px", px(t.rect.width), px(t.rect.height));
-            (t.rect, format!("{} · {size}", t.label))
-        });
+        let px = |v: f32| (v * scale).round() as u32;
+        let size_of = |r: Rectangle| format!("{} × {}", px(r.width), px(r.height));
+        // over bare wallpaper: no outline (the edge frames the screen)
+        let picked = self
+            .outlined()
+            .filter(|t| drag.is_none() && t.label != "Screen");
         let loupe = Loupe {
             pixels,
             width: *width,
             height: *height,
             scale,
             at,
-            outline,
+            outline: picked.as_ref().map(|t| t.rect),
+            look,
+            away: drag,
         };
-        Some(canvas(loupe).width(Fill).height(Fill).into())
+        let mut layers = iced::widget::stack![canvas(loupe).width(Fill).height(Fill)];
+        let screen = self.place.size();
+        if let Some(t) = picked {
+            let (kind, title) = match t.label.split_once(": ") {
+                Some((kind, title)) => (kind.to_string(), Some(title.to_string())),
+                None => (t.label.clone(), None),
+            };
+            let step = LADDER.iter().position(|s| *s == kind).unwrap_or(1);
+            let kind: &'static str = LADDER[step];
+            let chip = chip::info(kind, title, size_of(t.rect), &LADDER, step);
+            // 8 px above the outline's top-left, else inside it
+            let r = t.rect;
+            let spot = match r.y >= INFO_H + 8.0 {
+                true => Point::new(r.x, r.y - 8.0 - INFO_H),
+                false => Point::new(r.x + 8.0, r.y + 8.0),
+            };
+            let spot = Point::new(spot.x.clamp(0.0, (screen.width - 380.0).max(0.0)), spot.y);
+            layers = layers.push(iced::widget::pin(chip).position(spot));
+        }
+        if let Some(r) = drag.filter(|r| r.width >= 1.0 && r.height >= 1.0) {
+            let snapped = self.snap(at) != at;
+            let note = snapped.then_some("Snapped");
+            let chip = chip::readout(size_of(r), false, note);
+            // under (or over) the edge the pointer drags, aligned to the
+            // area's side it is on
+            let down = at.y >= r.center_y();
+            let right = at.x >= r.center_x();
+            let width = if snapped {
+                SIZE_CHIP_W + 70.0
+            } else {
+                SIZE_CHIP_W
+            };
+            let y = match down {
+                true if r.y + r.height + 8.0 + chip::READOUT_H < screen.height => {
+                    r.y + r.height + 8.0
+                }
+                true => r.y + r.height - 8.0 - chip::READOUT_H,
+                false if r.y - 8.0 - chip::READOUT_H > 0.0 => r.y - 8.0 - chip::READOUT_H,
+                false => r.y + 8.0,
+            };
+            let row = match right {
+                true => iced::widget::row![iced::widget::space::horizontal(), chip],
+                false => iced::widget::row![chip, iced::widget::space::horizontal()],
+            };
+            let x = if right { r.x + r.width - width } else { r.x };
+            let at = Point::new(x.clamp(0.0, (screen.width - width).max(0.0)), y);
+            layers = layers.push(iced::widget::pin(container(row).width(width)).position(at));
+        }
+        Some(layers.into())
     }
 }
 
@@ -778,6 +852,10 @@ mod tests {
     use super::*;
 
     const SCREEN: Size = Size::new(1920.0, 1080.0);
+    fn look() -> (iced::Color, iced::Color) {
+        let c = crate::ui::kit::themes::c();
+        (c.accent, c.text)
+    }
 
     /// A monitor at the origin at 100 %: physical px = logical px.
     fn flat(size: Size) -> Place {
@@ -1075,11 +1153,14 @@ mod tests {
         // It shows while picking an area by hand, not in Full.
         let handle = image::Handle::from_rgba(4, 3, frame);
         let mut s = Snip::new(Vec::new(), flat(SCREEN), true, None);
-        assert!(s.guides(&handle, 1.0, false).is_none(), "no pointer yet");
+        assert!(
+            s.guides(&handle, 1.0, None, look()).is_none(),
+            "no pointer yet"
+        );
         s.pointer = Some(Point::new(2.0, 1.0));
-        assert!(s.guides(&handle, 1.0, false).is_some());
+        assert!(s.guides(&handle, 1.0, None, look()).is_some());
         let _ = s.switch(Kind::Full, SCREEN);
-        assert!(s.guides(&handle, 1.0, false).is_none());
+        assert!(s.guides(&handle, 1.0, None, look()).is_none());
     }
 
     #[test]
@@ -1143,7 +1224,7 @@ mod tests {
         let outlined = s.outlined().unwrap();
         assert_eq!(outlined.rect, rect(110.0, 135.0, 30.0, 30.0));
         let frame = image::Handle::from_rgba(4, 4, vec![90; 64]);
-        let guides = s.guides(&frame, 1.0, false).unwrap();
+        let guides = s.guides(&frame, 1.0, None, look()).unwrap();
         crate::ui::kit::testing::shot::save("snip-outline", guides, SCREEN);
         // A click there captures the button exactly.
         let at = Point::new(120.0, 150.0);
@@ -1287,7 +1368,7 @@ mod tests {
         assert!((x1 - x0).abs_diff(1342) <= 1 && (y1 - y0).abs_diff(1006) <= 1);
         // And the label says the physical size.
         let handle = image::Handle::from_rgba(4, 4, vec![0; 64]);
-        assert!(s.guides(&handle, scale, false).is_some());
+        assert!(s.guides(&handle, scale, None, look()).is_some());
         let px = |v: f32| (v * scale).round() as u32;
         assert_eq!((px(area.width), px(area.height)), (1342, 1006));
     }

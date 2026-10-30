@@ -338,3 +338,115 @@ pub fn sample<'a, Message: 'a>(ring: bool, fill: bool) -> Element<'a, Message> {
         })
         .into()
 }
+
+/// A readout's height (Snip's size chip; the toolbar's is the same).
+pub const READOUT_H: f32 = 26.0;
+
+/// A size or position readout (Snip: `688 × 360`, `x 89  y 150`): mono 11.5 /
+/// 500 on `track` with a `divider` edge, radius 7.5, `READOUT_H` tall, in an
+/// LTR run; `live` (changing under a drag) in `accent`; `note` after a dot in
+/// `accent` ("Snapped").
+pub fn readout<'a, Message: 'a>(
+    label: String,
+    live: bool,
+    note: Option<&'a str>,
+) -> Element<'a, Message> {
+    let colour = if live { c().accent } else { c().text };
+    let mut line = row![
+        text(label)
+            .size(11.5)
+            .font(mono(Weight::Medium))
+            .color(colour)
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    if let Some(note) = note {
+        line = line.push(dot(c().accent)).push(
+            text(note)
+                .size(11.5)
+                .font(weight(Weight::Medium))
+                .color(c().accent),
+        );
+    }
+    container(line)
+        .padding([0, 8])
+        .height(READOUT_H)
+        .center_y(READOUT_H)
+        .style(|_| container::Style {
+            background: Some(c().track.into()),
+            border: Border::default()
+                .rounded(radius::PILL)
+                .width(1)
+                .color(c().divider),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// The info chip over what a click would capture (Snip's hover): `kind`
+/// (12 / 600) · `title` (`text_sub`, cut at 190 px) · the `size` readout
+/// text (mono) | the wheel's ladder (`steps`, the `at` one raised as a
+/// segment), on the widget surface, radius 10.
+pub fn info<'a, Message: 'a>(
+    kind: &'a str,
+    title: Option<String>,
+    size_label: String,
+    steps: &'a [&'a str],
+    at: usize,
+) -> Element<'a, Message> {
+    use super::tokens::Role;
+    let sub = |s: String| text(s).size(Role::CONTROL.size).color(c().text_sub);
+    let mut line = row![
+        text(kind)
+            .size(Role::CONTROL.size)
+            .font(weight(Weight::Semibold))
+    ]
+    .spacing(8)
+    .align_y(Center);
+    if let Some(title) = title.filter(|t| !t.is_empty()) {
+        let font = weight(Weight::Normal);
+        line = line.push(sub(super::text::cut(
+            &title,
+            Role::CONTROL.size,
+            font,
+            190.0,
+        )));
+    }
+    line = line
+        .push(
+            text(size_label)
+                .size(11.5)
+                .font(mono(Weight::Medium))
+                .color(c().text_sub),
+        )
+        .push(super::divider::vertical(14));
+    let ladder = steps.iter().enumerate().map(|(i, step)| {
+        let on = i == at;
+        container(
+            text(*step)
+                .size(Role::LABEL.size)
+                .font(weight(Weight::Medium))
+                .color(if on { c().text } else { c().text_muted }),
+        )
+        .padding([2, 7])
+        .style(move |_| container::Style {
+            background: on.then(|| c().elevated.into()),
+            border: Border::default()
+                .rounded(radius::KEYCAP)
+                .width(if on { 1 } else { 0 })
+                .color(c().elevated_border),
+            ..container::Style::default()
+        })
+        .into()
+    });
+    line = line.push(row(ladder).spacing(2).align_y(Center));
+    container(line)
+        .padding([5, 10])
+        .style(|_| container::Style {
+            background: Some(c().widget.into()),
+            text_color: Some(c().text),
+            border: Border::default().rounded(10.0).width(1).color(c().rim),
+            ..container::Style::default()
+        })
+        .into()
+}

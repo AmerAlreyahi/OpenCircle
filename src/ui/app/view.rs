@@ -191,7 +191,35 @@ impl App {
         }
         // Snip: the loupe beside the pointer (under the hint).
         if self.o.edit.is_none()
-            && let Some(loupe) = snip.and_then(|s| s.guides(frame, self.o.scale, self.o.drawing))
+            && let Some(loupe) = snip.and_then(|s| {
+                // the box dragged so far (its stroke's span)
+                let drag = (self.o.drawing).then(|| {
+                    let (lo, hi) = (self.o.stroke.iter()).fold(
+                        (
+                            Point::new(f32::MAX, f32::MAX),
+                            Point::new(f32::MIN, f32::MIN),
+                        ),
+                        |(lo, hi), p| {
+                            let p = self.o.view.to_screen(*p);
+                            (
+                                Point::new(lo.x.min(p.x), lo.y.min(p.y)),
+                                Point::new(hi.x.max(p.x), hi.y.max(p.y)),
+                            )
+                        },
+                    );
+                    Rectangle::new(
+                        lo,
+                        Size::new((hi.x - lo.x).max(0.0), (hi.y - lo.y).max(0.0)),
+                    )
+                });
+                let look = crate::ui::theme::accent_of(&config::look());
+                s.guides(
+                    frame,
+                    self.o.scale,
+                    drag.filter(|_| !self.o.stroke.is_empty()),
+                    look,
+                )
+            })
         {
             layers = layers.push(loupe.map(Message::Snip));
         }

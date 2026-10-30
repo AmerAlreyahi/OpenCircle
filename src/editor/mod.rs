@@ -240,7 +240,7 @@ pub enum Menu {
     Variants(Tool),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     /// Pointer, image px (from the canvas).
     Press(Point),
@@ -301,6 +301,12 @@ pub enum Message {
     /// An arrow key on Snip's live area (`area::nudge`): direction, Ctrl,
     /// Shift, Alt.
     Nudge((i8, i8), (bool, bool, bool)),
+    /// Snip's toolbar: Tab / Shift+Tab (`true`) walks its controls; Enter /
+    /// Space presses the focused one (the host knows the toolbar's order).
+    Focus(bool),
+    Activate,
+    /// Snip's toolbar ×: the snip closes, nothing copied.
+    Close,
 }
 
 /// What the editor asks of its host.
@@ -319,6 +325,8 @@ pub enum Output {
     /// The image was dragged into another app (the overlay is already hidden):
     /// close, as after Copy.
     Dragged,
+    /// Close (Snip's ×).
+    Close,
 }
 
 /// An item being drawn, moved, resized or typed: shown live, committed as one edit.
@@ -401,6 +409,11 @@ pub struct Editor {
     /// then at the monitor's origin, so window px / zoom = image px.
     pub movable: bool,
     area_drag: Option<AreaDrag>,
+    /// Snip's toolbar control Tab is on (its index in the toolbar's order);
+    /// a press anywhere drops it.
+    pub focus: Option<usize>,
+    /// Snip's arrow-key hint shows (after the first arrow key).
+    pub nudged: bool,
 }
 
 impl Editor {
@@ -433,6 +446,8 @@ impl Editor {
             lock: None,
             movable: false,
             area_drag: None,
+            focus: None,
+            nudged: false,
         };
         editor.refresh();
         editor
@@ -457,6 +472,7 @@ impl Editor {
     pub fn update(&mut self, message: Message) -> Option<Output> {
         match message {
             Message::Press(p) => {
+                (self.focus, self.nudged) = (None, false);
                 if matches!(self.menu, Some(Menu::Board | Menu::Variants(_))) {
                     self.menu = None;
                 }
@@ -598,9 +614,11 @@ impl Editor {
                 self.commit();
                 return Some(Output::Back);
             }
-            Message::Grab => {}
+            Message::Grab | Message::Focus(_) | Message::Activate => {}
+            Message::Close => return Some(Output::Close),
             Message::Nudge(arrow, keys) if self.movable => {
                 self.commit();
+                self.nudged = true;
                 let view = self.doc.view();
                 let to = whole(area::nudge(
                     view,
@@ -645,6 +663,25 @@ impl Editor {
             .as_ref()
             .filter(|d| d.grip != area::Grip::Move)?;
         Some(self.to_display_point(drag.grip.at(self.doc.view())))
+    }
+
+    /// Snip's live area is being moved or resized.
+    pub fn area_held(&self) -> bool {
+        self.area_drag.is_some()
+    }
+
+    /// Snip's live area: the handle held (`true`), else the one under `p`
+    /// (image px), as its edges (`area::Grip::Edge`).
+    pub fn area_hot(&self, p: Option<Point>) -> Option<((i8, i8), bool)> {
+        let edges = |g| match g {
+            area::Grip::Edge(x, y) => Some((x, y)),
+            area::Grip::Move => None,
+        };
+        if let Some(drag) = &self.area_drag {
+            return edges(drag.grip).map(|e| (e, true));
+        }
+        let grip = area::grip_at(self.doc.view(), p?, area::REACH / self.zoom)?;
+        edges(grip).map(|e| (e, false))
     }
 
     /// The annotation colour as an iced colour.

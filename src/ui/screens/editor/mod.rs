@@ -13,9 +13,21 @@ pub mod toolbar;
 
 use crate::actions::Crop;
 use crate::editor::{self, Editor, Image, Message, Output};
-use crate::ui::kit::surface;
+use crate::ui::kit::key_hint::{self, key_hint};
+use crate::ui::kit::{chip, surface};
 use crate::ui::screens::bar::geometry::{BOTTOM_GAP, GAP};
 
+/// Snip's keyboard hint (after an arrow key) and its position readout's width.
+const NUDGE_HINT: [key_hint::Group<'static>; 5] = [
+    (Some("← ↑ → ↓"), "1 px"),
+    (Some("Shift"), "10 px"),
+    (Some("Ctrl"), "Resize"),
+    (Some("Enter"), "Copy"),
+    (Some("Esc"), "Back"),
+];
+const POSITION_W: f32 = 120.0;
+/// Snip's handles scale in after the pick (the design's 120 ms).
+const HANDLES_IN: std::time::Duration = std::time::Duration::from_millis(120);
 /// The hint's distance from the edge.
 const HINT_PAD: f32 = 24.0;
 /// Shown while an area for the board is picked.
@@ -33,6 +45,9 @@ pub struct Editing {
     picking: Option<Option<(Point, Point)>>,
     /// The area just picked (logical px), for the host to crop (`take_picked`).
     picked: Option<Rectangle>,
+    /// Snip's handles scaling in after the pick: since when (the first frame)
+    /// and how far (0..1).
+    grow: (Option<std::time::Instant>, f32),
 }
 
 impl Editing {
@@ -56,6 +71,7 @@ impl Editing {
         ));
         e.editor.movable = true;
         e.editor.tool = editor::Tool::Select;
+        e.grow = (None, 0.0);
         e.editor.refresh();
         e
     }
@@ -85,13 +101,48 @@ impl Editing {
             flat: None,
             picking: None,
             picked: None,
+            grow: (None, 1.0),
         }
+    }
+
+    /// Snip's handles scale in from the pick's first frame (120 ms; at once
+    /// with reduced motion).
+    pub fn tick(&mut self, now: std::time::Instant) {
+        use crate::ui::kit::motion;
+        let start = *self.grow.0.get_or_insert(now);
+        if self.grow.1 < 1.0 {
+            self.grow.1 = motion::progress(start, now, HANDLES_IN, motion::Curve::Standard);
+        }
+    }
+
+    /// The handles are still scaling in.
+    pub fn growing(&self) -> bool {
+        self.grow.1 < 1.0
     }
 
     /// The editor's messages; while an area is picked, the picker's (Esc = back
     /// to the editor).
     pub fn update(&mut self, message: Message) -> Option<Output> {
         let Some(drag) = &mut self.picking else {
+            // Snip's toolbar: Tab walks it, Enter / Space press what it is on.
+            let message = match message {
+                Message::Focus(back) => {
+                    let n = toolbar::stops(&self.editor).len();
+                    let next = match (self.editor.focus, back) {
+                        (None, false) => 0,
+                        (None, true) => n - 1,
+                        (Some(i), false) => (i + 1) % n,
+                        (Some(i), true) => (i + n - 1) % n,
+                    };
+                    self.editor.focus = Some(next);
+                    return None;
+                }
+                Message::Activate => {
+                    let stops = toolbar::stops(&self.editor);
+                    self.editor.focus.and_then(|i| stops.get(i))?.clone()
+                }
+                m => m,
+            };
             let out = self.editor.update(message);
             if matches!(out, Some(Output::AddCapture)) {
                 self.picking = Some(None);
@@ -165,9 +216,9 @@ impl Editing {
         )
     }
 
-    /// The toolbar's size on a `screen` this wide.
-    pub fn toolbar_size(screen: f32) -> Size {
-        toolbar_size(screen - 2.0 * GAP)
+    /// The toolbar's size on a `screen` this wide (`snip`: Snip's toolbar).
+    pub fn toolbar_size(screen: f32, snip: bool) -> Size {
+        toolbar_size(screen - 2.0 * GAP, snip)
     }
 
     /// The canvas over its place and the toolbar with its top-left at
@@ -195,12 +246,38 @@ impl Editing {
         let canvas = self.canvas_rect();
         let m = canvas::margin(&self.editor);
         let at = canvas.position() - iced::Vector::new(m, m);
-        let mut layers =
-            stack![pin(Element::from(canvas::canvas(&self.editor)).map(map)).position(at)];
+        let mut layers = stack![
+            pin(Element::from(canvas::canvas(&self.editor, self.grow.1)).map(map)).position(at)
+        ];
+        // Snip moved by the keyboard: its keys above the area, its position
+        // (frame px) in its bottom-right corner, until the pointer is used.
+        // ponytail: shown until the next press, not the design's 2 s / 800 ms fades.
+        if self.editor.movable && self.editor.nudged {
+            let hint = key_hint(&NUDGE_HINT, false);
+            let y = (canvas.y - 8.0 - key_hint::HEIGHT).max(8.0);
+            let hint = container(hint).center_x(screen.width);
+            layers = layers.push(pin(hint).position(Point::new(0.0, y)));
+            let view = self.editor.doc.view();
+            let label = format!("x {}  y {}", view.x.round(), view.y.round());
+            let spot = Point::new(
+                canvas.x + canvas.width - 8.0 - POSITION_W,
+                canvas.y + canvas.height - 8.0 - chip::READOUT_H,
+            );
+            let readout = container(chip::readout(label, false, None))
+                .align_right(POSITION_W)
+                .width(POSITION_W);
+            layers = layers.push(pin(readout).position(spot));
+        }
         if let Some(at) = toolbar {
             let room = screen.width - 2.0 * GAP;
-            let size = toolbar_size(room);
-            let (toolbar, popover) = toolbar::view_at(&self.editor, room, Rectangle::new(at, size));
+            let size = toolbar_size(room, self.editor.movable);
+            // its tooltips away from the area: above it when docked above
+            let side = match at.y + size.height <= canvas.y {
+                true => iced::widget::tooltip::Position::Top,
+                false => iced::widget::tooltip::Position::Bottom,
+            };
+            let (toolbar, popover) =
+                toolbar::view_at(&self.editor, room, Rectangle::new(at, size), side);
             let toolbar = mouse_area(toolbar.map(map))
                 .on_press(grab)
                 .interaction(mouse::Interaction::Grab);
@@ -241,7 +318,7 @@ use toolbar::size as toolbar_size;
 /// most `max_zoom`): centred, scaled down to leave room for the toolbar docked
 /// under it (the bar's bottom spot).
 fn fit(size: Size, screen: Size, max_zoom: f32) -> (Point, f32) {
-    let toolbar = toolbar_size(screen.width - 2.0 * GAP).height;
+    let toolbar = toolbar_size(screen.width - 2.0 * GAP, false).height;
     let room = Size::new(
         screen.width - 2.0 * GAP,
         screen.height - 2.0 * GAP - BOTTOM_GAP - toolbar,
@@ -317,7 +394,7 @@ mod tests {
     #[test]
     fn tall_captures_fit_the_screen_with_the_toolbar() {
         let screen = Size::new(1920.0, 1080.0);
-        let bar = toolbar_size(screen.width - 2.0 * GAP);
+        let bar = toolbar_size(screen.width - 2.0 * GAP, false);
         // A tall scrolling capture: scaled down, centred, toolbar room below.
         let (at, zoom) = fit(Size::new(780.0, 6000.0), screen, 1.0);
         assert!(zoom < 0.2, "{zoom}");

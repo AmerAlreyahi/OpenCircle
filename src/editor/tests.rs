@@ -8,7 +8,7 @@ use iced::widget::column;
 /// look at them.
 impl Editor {
     fn canvas(&self) -> Element<'_, Message> {
-        crate::ui::screens::editor::canvas::canvas(self)
+        crate::ui::screens::editor::canvas::canvas(self, 1.0)
     }
 
     fn toolbar(&self) -> Element<'_, Message> {
@@ -20,7 +20,7 @@ impl Editor {
         max_width: f32,
         at: Rectangle,
     ) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
-        toolbar::view_at(self, max_width, at)
+        toolbar::view_at(self, max_width, at, iced::widget::tooltip::Position::Bottom)
     }
 
     /// The canvas above the toolbar.
@@ -1452,14 +1452,18 @@ fn laid_out(element: Element<'_, Message>) -> Size {
 #[test]
 fn toolbar_size_matches_its_layout() {
     let e = editor(100, 100);
-    let one = toolbar::size(f32::INFINITY);
+    let one = toolbar::size(f32::INFINITY, false);
     assert_eq!(laid_out(e.toolbar()), one);
     // A narrow screen: two rows, both within it.
     let small = one.width - 60.0;
-    let two = toolbar::size(small);
+    let two = toolbar::size(small, false);
     assert!(two.width <= small && two.height > one.height, "{two:?}");
     assert_eq!(laid_out(e.toolbar_at(small, Rectangle::default()).0), two);
-    assert_eq!(toolbar::size(one.width), one, "exactly fits: one row");
+    assert_eq!(
+        toolbar::size(one.width, false),
+        one,
+        "exactly fits: one row"
+    );
 }
 
 // ---- presets, copy / paste style, eyedropper -------------------------------------------
@@ -2217,7 +2221,7 @@ fn snapshots_popovers_at_the_bottom() {
     let screen = Size::new(1000.0, 520.0);
     let mut e = Editor::new(demo_image(), 0.5);
     let room = screen.width - 24.0;
-    let bar = toolbar_size(room);
+    let bar = toolbar_size(room, false);
     let at = Point::new(
         (screen.width - bar.width) / 2.0,
         screen.height - bar.height - 12.0,
@@ -2466,7 +2470,7 @@ fn snapshots_board() {
     // A small screen: two rows.
     let mut e = Editor::new(demo_image(), 1.0);
     e.update(Message::Picker);
-    let small = toolbar::size(f32::INFINITY).width - 60.0;
+    let small = toolbar::size(f32::INFINITY, false).width - 60.0;
     shoot(
         e.toolbar_at(small, Rectangle::default()).0,
         Size::new(small, 520.0),

@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use iced::window::{self, Mode};
-use iced::{Point, Rectangle, Size, Task};
+use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
 use crate::actions::{self, text};
@@ -23,6 +23,11 @@ use crate::ui::{overlay, snip, translate, update_card, windows};
 
 use super::capture::{TEST_SHOT, save_test_shot};
 use super::{App, BAR_MORPH, CAPTURE_TIMEOUT, GLIDE, REVEAL_WAIT, Reader, SHRINK_FRAMES, SHRUNK};
+
+/// Snip's toolbar rises this far from the area as it opens (the design).
+const RISE: f32 = 8.0;
+/// Snip's toolbar steps aside from a dragged handle this near (the design).
+const STEP_ASIDE: f32 = 12.0;
 
 impl App {
     pub(in crate::ui) fn update(&mut self, message: Message) -> Task<Message> {
@@ -403,6 +408,9 @@ impl App {
                     chat.panel.tick(now);
                 }
                 self.o.glow.tick(now);
+                if let Some(edit) = &mut self.o.edit {
+                    edit.tick(now);
+                }
                 // the chat card docking where it was let go
                 if let Some((began, from, _)) = self.o.chat_glide {
                     let t = motion::progress(began, now, motion::DOCK, motion::Curve::Standard);
@@ -444,13 +452,43 @@ impl App {
                     self.o.bar_now = Some(at);
                 } else {
                     let to = self.bar_target();
+                    // Snip's toolbar: while the area is moved or resized it
+                    // stays where it is (no glide per move: the 0.1.3 frame
+                    // budget; the design: no jitter), unless the dragged
+                    // handle comes within 12 px of it: then it jumps clear;
+                    // let go, it glides to its dock (OPEN, expo-out). It rises
+                    // 8 px from the area on the pick.
+                    let snip = self.o.edit.as_ref().filter(|e| e.editor.movable);
+                    let held = snip.is_some_and(|e| e.editor.area_held());
+                    let size = self.dock_size();
+                    let near = |at: Point| {
+                        let handle = snip.and_then(|e| {
+                            let p = e.editor.area_handle()?;
+                            Some(p + (e.canvas_rect().position() - Point::ORIGIN))
+                        });
+                        let bar = Rectangle::new(at, size).expand(STEP_ASIDE);
+                        handle.is_some_and(|p| bar.contains(p))
+                    };
+                    let (length, curve) = match snip {
+                        Some(_) => (motion::OPEN, motion::Curve::Out),
+                        None => (GLIDE, motion::Curve::Standard),
+                    };
                     self.o.bar_now = Some(match (self.o.bar_now, self.o.bar_glide) {
+                        (Some(at), _) if held && !near(at) => at,
+                        _ if held => to,
+                        (None, _) if snip.is_some() && !motion::reduced() => {
+                            let area = snip.map(Editing::canvas_rect).unwrap_or_default();
+                            let rise = if to.y >= area.y { -RISE } else { RISE };
+                            let from = to + Vector::new(0.0, rise);
+                            self.o.bar_glide = Some((now, from, to));
+                            from
+                        }
                         // turning into the toolbar (or back): it stays on its spot
                         _ if self.o.swap != was => to,
                         (Some(at), _) if at == to => to,
                         // on its way there already
                         (Some(_), Some((began, from, end))) if end == to => {
-                            let t = motion::progress(began, now, GLIDE, motion::Curve::Standard);
+                            let t = motion::progress(began, now, length, curve);
                             from + (to - from) * t
                         }
                         // a new place: it glides there from where it is
