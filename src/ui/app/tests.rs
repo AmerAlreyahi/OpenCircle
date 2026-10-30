@@ -502,7 +502,7 @@ fn event(app: &mut App, e: overlay::Event) {
 
 /// Runs `task` to its end (its threads' work done) and hands its messages
 /// to the app (their own tasks are dropped).
-fn run_task(app: &mut App, task: Task<Message>) {
+pub(in crate::ui) fn run_task(app: &mut App, task: Task<Message>) {
     let actions = iced_runtime::task::into_stream(task)
         .map(iced::futures::executor::block_on_stream)
         .into_iter()

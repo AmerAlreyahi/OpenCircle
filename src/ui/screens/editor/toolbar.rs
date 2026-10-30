@@ -7,6 +7,7 @@ use iced::widget::Space;
 use iced::widget::{column, container, row, tooltip};
 use iced::{Element, Point, Rectangle, Size, Vector};
 
+use crate::actions::share;
 use crate::editor::{
     Editor, Menu, Message, PRESETS, TOOLS, TextBack, TextFont, Tool, ToolInfo, Width, dragout, info,
 };
@@ -38,12 +39,13 @@ const LEGEND: char = '\u{e10b}'; // lucide "list"
 const SCROLL: char = '\u{e4d6}'; // lucide "gallery-vertical-end"
 const ASSIST: char = '\u{e2b4}'; // lucide "magnet"
 const PIPETTE: char = '\u{e13e}'; // lucide "pipette"
+const SHARE: char = '\u{e158}'; // lucide "share"
 
 /// The glyphs used here (the font test checks them).
 #[cfg(test)]
 pub const GLYPHS: &[char] = &[
     BACK, UNDO, REDO, COPY, SAVE, PIN, BOARD, ADD, STACK, SIDE, NUMBERS, LEGEND, ASSIST, SCROLL,
-    PIPETTE,
+    PIPETTE, SHARE,
 ];
 
 /// The tool buttons: one per slot (variants live in its strip).
@@ -85,14 +87,17 @@ fn parts() -> (Vec<f32>, Vec<f32>) {
 /// Snip's toolbar (the design's capture flow, N-73): no Back (no bar to go
 /// back to), no Crop (the area's handles are the crop), no group dividers
 /// between the tools; the size readout after the grip; Long capture, Pin
-/// (Labs) after Undo / Redo; Copy and Save labelled; ×. (Share joins with the
-/// share sheet: hidden until then.)
+/// (Labs), Share (where there is a share sheet) after Undo / Redo; Copy and
+/// Save labelled; ×.
 fn snip_parts() -> (Vec<f32>, Vec<f32>) {
     let mut tools = vec![bar::HANDLE, READOUT_W, bar::DIVIDER];
     tools.extend(snip_slots().map(|_| CONTROL));
     let mut rest = vec![CONTROL; 4];
     rest.extend([bar::DIVIDER, CONTROL]);
     if pins() {
+        rest.push(CONTROL);
+    }
+    if share::SUPPORTED {
         rest.push(CONTROL);
     }
     rest.extend([bar::DIVIDER, COPY_W, SAVE_W, CONTROL]);
@@ -126,6 +131,9 @@ pub fn stops(e: &Editor) -> Vec<Message> {
     }
     if pins() {
         stops.push(Message::Pin);
+    }
+    if share::SUPPORTED {
+        stops.push(Message::Share);
     }
     stops.extend([Message::Copy, Message::Save, Message::Close]);
     stops
@@ -494,6 +502,17 @@ fn build_snip(
             hinted(
                 icon_button::square(PIN, s, Some(Message::Pin)),
                 "Pin to screen: a floating copy (Ctrl+P)",
+                Why::Icon,
+            ),
+            CONTROL,
+        );
+    }
+    if share::SUPPORTED {
+        let s = state(false, &Message::Share);
+        rest.push(
+            hinted(
+                icon_button::square(SHARE, s, Some(Message::Share)),
+                "Share: the system's share sheet",
                 Why::Icon,
             ),
             CONTROL,

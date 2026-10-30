@@ -38,9 +38,15 @@ pub const GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl DragFile {
     pub fn write(crop: &Crop) -> Result<Self, String> {
+        Self::temp(crop, "drag")
+    }
+
+    /// `crop` as `opencircle-<what>-<pid>-<n>.png` in the temp folder (the
+    /// share sheet's file too: same life, same grace).
+    pub fn temp(crop: &Crop, what: &str) -> Result<Self, String> {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let name = format!("opencircle-drag-{}-{n}.png", std::process::id());
+        let name = format!("opencircle-{what}-{}-{n}.png", std::process::id());
         let path = std::env::temp_dir().join(name);
         crate::actions::write_png(&path, crop.width, crop.height, &crop.rgba)?;
         Ok(DragFile {
@@ -49,7 +55,7 @@ impl DragFile {
         })
     }
 
-    #[cfg_attr(not(windows), allow(dead_code))] // read by the Windows drag-out
+    #[cfg_attr(not(windows), allow(dead_code))] // read by the Windows drag-out and share
     pub fn path(&self) -> &Path {
         &self.path
     }

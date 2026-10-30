@@ -9,6 +9,7 @@ pub mod entities;
 pub mod lens;
 pub mod qr;
 pub mod save;
+pub mod share;
 pub mod text;
 pub mod translate;
 

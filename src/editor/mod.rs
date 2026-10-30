@@ -294,6 +294,11 @@ pub enum Message {
     Save,
     /// Pin the flattened image to the screen.
     Pin,
+    /// Snip's Share: the flattened image to the OS share sheet.
+    Share,
+    /// The share sheet's user picked a target (the host's answer to
+    /// `Output::Sharing`).
+    Shared,
     Back,
     /// A press on the toolbar's grip: the host drags the toolbar (the editor
     /// ignores it).
@@ -322,8 +327,11 @@ pub enum Output {
     Pin(Crop),
     /// Let the user pick another area; give it to `Editor::append`.
     AddCapture,
-    /// The image was dragged into another app (the overlay is already hidden):
-    /// close, as after Copy.
+    /// The share sheet is up: fires once the user picked a target (send
+    /// `Message::Shared` then); cancelled if the sheet goes without one.
+    Sharing(iced::futures::channel::oneshot::Receiver<()>),
+    /// The image was dragged into another app (the overlay is already hidden),
+    /// or a share target took it: close, as after Copy.
     Dragged,
     /// Close (Snip's ×).
     Close,
@@ -395,6 +403,8 @@ pub struct Editor {
     cropping: Option<(Point, Point)>,
     /// The PNG of the last drag-out (deleted with the editor).
     dragged: Option<dragout::DragFile>,
+    /// The last share (its PNG and the sheet's handlers; go with the editor).
+    shared: Option<crate::actions::share::Shared>,
     /// The blur brush keeps to text lines (config `editor.line_assist`).
     pub(crate) assist: bool,
     /// Scrolling capture can run for this editor (the host sets it; the
@@ -440,6 +450,7 @@ impl Editor {
             pending: None,
             cropping: None,
             dragged: None,
+            shared: None,
             assist: crate::config::current().editor.line_assist,
             scroll: false,
             bands: None,
@@ -574,6 +585,25 @@ impl Editor {
                         }
                     }
                     Err(e) => crate::log!("[opencircle] drag-out: {e}"),
+                }
+            }
+            Message::Share => {
+                self.commit();
+                let flat = render(&self.doc);
+                self.shared = None; // one share at a time
+                match crate::actions::share::start(&flat) {
+                    Ok((shared, chosen)) => {
+                        self.shared = Some(shared);
+                        return Some(Output::Sharing(chosen));
+                    }
+                    Err(e) => crate::log!("[opencircle] {e}"),
+                }
+            }
+            // A target took the image: done, like a drop (the file stays its grace).
+            Message::Shared => {
+                if let Some(shared) = &mut self.shared {
+                    shared.chosen();
+                    return Some(Output::Dragged);
                 }
             }
             Message::Undo | Message::Redo => {

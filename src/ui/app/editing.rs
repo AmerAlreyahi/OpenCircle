@@ -148,6 +148,11 @@ impl App {
                 None => Task::none(),
             },
             Some(Output::AddCapture) => Task::none(), // `edit` picks the area now
+            // The share sheet is up: once a target is picked, the editor closes.
+            Some(Output::Sharing(chosen)) => Task::future(chosen).then(|picked| match picked {
+                Ok(()) => Task::done(Message::Editor(editor::Message::Shared)),
+                Err(_) => Task::none(), // the sheet went without a target
+            }),
             Some(Output::Dragged | Output::Close) => self.close(),
         }
     }
@@ -193,5 +198,91 @@ impl App {
             Purpose::Search => motion::Curve::Out.ease(self.o.swap),
             _ => self.swap_target(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::{Point, Rectangle, Size};
+
+    use crate::actions::share;
+    use crate::config::SnipAfter;
+    use crate::editor::Message as E;
+    use crate::labs::Labs;
+    use crate::ui::app::App;
+    use crate::ui::app::message::Hiding;
+    use crate::ui::app::tests::{run_task, snipping_on};
+    use crate::ui::screens::editor::toolbar;
+    use crate::ui::snip;
+
+    /// A snip of an area in its editor (Labs all on for the host; the toolbar
+    /// reads the shared config, where Pins is off).
+    fn snip_editor() -> App {
+        let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+        let mut app = snipping_on(800, 600, area);
+        app.o.labs = Labs::all_on();
+        app.select(area);
+        let crop = app.crop().unwrap();
+        let _ = app.snip_routed(crop, true, snip::route(SnipAfter::Editor));
+        assert!(app.editing(), "the editor is open");
+        app
+    }
+
+    fn stops(app: &App) -> Vec<E> {
+        toolbar::stops(&app.o.edit.as_ref().unwrap().editor)
+    }
+
+    /// The tooltips of what the overlay draws now (its buttons' names).
+    fn bar_names(app: &App) -> Vec<String> {
+        use crate::ui::kit::tooltip::{SHOWN, tests_support::shown};
+        SHOWN.with(|s| s.borrow_mut().clear());
+        let _ = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
+        shown()
+    }
+
+    /// The overlay is closing and draws no toolbar any more.
+    fn gone(app: &App) -> bool {
+        app.hiding != Hiding::No
+            && app.o.edit.is_none()
+            && !bar_names(app).iter().any(|n| n.starts_with("Copy"))
+    }
+
+    /// N-62: Share hands the capture to the sheet as a PNG; a target picked
+    /// closes the snip (the file stays for the target's grace); no target
+    /// leaves the editor as it was, and its file goes with the overlay.
+    #[test]
+    fn share_gives_the_sheet_the_capture_and_a_picked_target_closes_the_snip() {
+        let mut app = snip_editor();
+        let task = app.on_editor(E::Share);
+        let (path, picked) = share::TEST_SHEET.take().expect("the sheet has it");
+        assert!(
+            path.exists() && app.editing(),
+            "the sheet is up over the snip"
+        );
+        let _ = picked.send(());
+        run_task(&mut app, task);
+        assert!(gone(&app), "a target took it: closed like a drop");
+        assert!(path.exists(), "the target may still read it");
+        let _ = std::fs::remove_file(&path);
+
+        // the sheet went without a target: the editor stays, the file goes with it
+        let mut app = snip_editor();
+        let task = app.on_editor(E::Share);
+        let (path, picked) = share::TEST_SHEET.take().unwrap();
+        drop(picked);
+        run_task(&mut app, task);
+        assert!(app.editing() && path.exists());
+        let _ = app.close();
+        assert!(!path.exists(), "deleted when the overlay closed");
+    }
+
+    /// Share is on Snip's toolbar only where there is a share sheet (Hide,
+    /// don't delete: Linux has none yet).
+    #[test]
+    fn share_shows_only_where_the_system_has_a_sheet() {
+        let app = snip_editor();
+        let shown = bar_names(&app).iter().any(|n| n.starts_with("Share"));
+        assert_eq!(shown, share::SUPPORTED);
+        assert_eq!(stops(&app).contains(&E::Share), share::SUPPORTED);
     }
 }

@@ -4347,6 +4347,7 @@ dependencies = [
  "ureq",
  "widestring",
  "windows",
+ "windows-collections",
  "winresource",
  "xcap",
  "xcb",
