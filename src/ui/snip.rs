@@ -205,6 +205,10 @@ pub struct Snip {
     /// Asks the reader thread for a window's controls (Windows; see
     /// `set_reader`), and the windows already asked for.
     reader: Option<Sender<isize>>,
+    /// The reader and how many windows to read at once, until the first frame
+    /// is drawn (`start_reading`): UI Automation asks every window, the
+    /// overlay too, and held its first frame back ~130 ms on the VM.
+    later: Option<(Sender<isize>, usize)>,
     asked: Vec<isize>,
     /// Where the button went down: as pressed, and as snapped.
     press: Option<(Point, Point)>,
@@ -266,6 +270,7 @@ impl Snip {
             foreground,
             shift: false,
             reader: None,
+            later: None,
             asked: Vec::new(),
             press: None,
             pointer: None,
@@ -360,6 +365,18 @@ impl Snip {
         self.reader = Some(reader);
         let top: Vec<isize> = self.windows.iter().take(first).map(|w| w.window).collect();
         top.into_iter().for_each(|w| self.ask(w));
+    }
+
+    /// `set_reader` once the overlay's first frame is drawn (`start_reading`).
+    pub fn read_later(&mut self, reader: Sender<isize>, first: usize) {
+        self.later = Some((reader, first));
+    }
+
+    /// The first frame is up: the controls are read from now on.
+    pub fn start_reading(&mut self) {
+        if let Some((reader, first)) = self.later.take() {
+            self.set_reader(reader, first);
+        }
     }
 
     /// Asks once for the controls of `window`.
@@ -1273,6 +1290,24 @@ mod tests {
         assert!(s.guides(&handle, scale, false).is_some());
         let px = |v: f32| (v * scale).round() as u32;
         assert_eq!((px(area.width), px(area.height)), (1342, 1006));
+    }
+
+    #[test]
+    fn controls_are_read_only_once_the_first_frame_is_up() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut s = Snip::new(
+            wins(&[rect(0.0, 0.0, 400.0, 300.0)]),
+            flat(SCREEN),
+            true,
+            None,
+        );
+        s.read_later(tx, 4);
+        s.hover(Point::new(10.0, 10.0));
+        assert!(rx.try_iter().next().is_none(), "nothing before the frame");
+        s.start_reading();
+        assert_eq!(rx.try_iter().collect::<Vec<_>>(), [1]);
+        // Enter takes the whole screen, whatever is outlined.
+        assert_eq!(s.full(SCREEN), Next::Edit(Rectangle::with_size(SCREEN)));
     }
 
     #[test]

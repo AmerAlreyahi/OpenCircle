@@ -177,7 +177,7 @@ impl App {
             }
             let (reader, read) = std::sync::mpsc::channel();
             if cfg!(windows) {
-                snip.set_reader(reader, UIA_WINDOWS); // else dropped: no controls
+                snip.read_later(reader, UIA_WINDOWS); // else dropped: no controls
             }
             self.o.purpose = Purpose::Snip(Box::new(snip));
             extras = self.snip_extras(read);

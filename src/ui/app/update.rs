@@ -358,6 +358,12 @@ impl App {
             }
             Message::Frame(now) => {
                 self.o.esc_back = false;
+                // Snip: the windows' controls are read once the frame is up.
+                if self.first_draw.get().is_none()
+                    && let Purpose::Snip(snip) = &mut self.o.purpose
+                {
+                    snip.start_reading();
+                }
                 // Shown fully clear: once its first full frame is up (or after
                 // REVEAL_WAIT), the window fades in and the opening's clock starts.
                 let mut revealed = Task::none();
