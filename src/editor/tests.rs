@@ -1228,6 +1228,7 @@ fn every_icon_is_in_the_subset_font() {
         .iter()
         .map(|t| t.icon)
         .chain(toolbar::GLYPHS.iter().copied())
+        .chain(crate::ui::screens::tools::GLYPHS.iter().copied())
         .chain(['\u{e13e}', crate::ui::kit::icon::Icon::Grip.glyph()]);
     for icon in icons {
         let code = format!("U+{:04X}", icon as u32);

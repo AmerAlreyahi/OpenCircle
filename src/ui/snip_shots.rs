@@ -14,6 +14,7 @@ use super::kit::testing::golden;
 use super::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 use super::overlay::Event;
 use super::screens::long_capture;
+use super::screens::tools::{self, Which, picker, ruler};
 use super::snip;
 use crate::actions::Crop;
 use crate::capture::scroll::Update;
@@ -149,7 +150,50 @@ fn states() -> Vec<(&'static str, App)> {
     out.push(("7a-long-start", long(0, false)));
     out.push(("7b-long", long(3240, false)));
     out.push(("7c-long-limit", long(MAX_HEIGHT, true)));
+    // 8: the colour picker: started from the toolbar (its hint), then three
+    // colours picked (the swatches, the Copied pill)
+    let mut app = picked();
+    let _ = app.on_editor(E::ScreenTool(Which::Picker));
+    let _ = app.on_overlay(Event::Hover(Point::new(520.0, 390.0)));
+    out.push(("8a-picker", app));
+    let mut app = tool(Which::Picker);
+    for at in [(200.0, 450.0), (900.0, 300.0), (520.0, 390.0)] {
+        let at = Point::new(at.0, at.1);
+        let _ = app.on_overlay(Event::Press { at, shift: false });
+        let _ = app.on_overlay(Event::Release);
+    }
+    out.push(("8b-picker-copied", app));
+    // 9: the ruler: a line (Shift: level), across the dark picture, a box
+    let mut app = tool(Which::Ruler);
+    let _ = app.on_overlay(Event::Press {
+        at: Point::new(470.0, 300.0),
+        shift: false,
+    });
+    let _ = app.on_overlay(Event::Move(Point::new(760.0, 470.0)));
+    out.push(("9a-ruler-line", app));
+    let mut app = tool(Which::Ruler);
+    let _ = app.on_tool(tools::Msg::Mode(ruler::Mode::Across));
+    let _ = app.on_overlay(Event::Hover(Point::new(250.0, 450.0)));
+    out.push(("9b-ruler-across", app));
+    let mut app = tool(Which::Ruler);
+    let _ = app.on_tool(tools::Msg::Mode(ruler::Mode::Box));
+    let _ = app.on_overlay(Event::Press {
+        at: Point::new(470.0, 360.0),
+        shift: false,
+    });
+    let _ = app.on_overlay(Event::Move(Point::new(750.0, 420.0)));
+    let _ = app.on_overlay(Event::Release);
+    out.push(("9c-ruler-box", app));
     out
+}
+
+/// A screen tool opened by its shortcut, its hint gone.
+fn tool(which: Which) -> App {
+    let mut app = snipping();
+    let _ = app.start_tool(which);
+    let opening = app.opening;
+    let _ = app.update(Message::Snip(snip::Msg::HintGone(opening)));
+    app
 }
 
 /// Long capture from the picked area, after `height` px (none: just
@@ -222,7 +266,53 @@ fn the_long_capture_toolbar_mirrors() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
-/// States 1-7 in Sapphire and Daylight.
+/// The screen tools' toolbars, Latin and Arabic, both themes: the picker
+/// with no colours yet and with some, the ruler with a measure.
+#[test]
+fn the_screen_tool_toolbars_mirror() {
+    let mut failed = Vec::new();
+    let measure = ruler::Measure {
+        mode: ruler::Mode::Line,
+        a: (10, 10),
+        b: (310, 410),
+        scale: 1.5,
+        live: false,
+    };
+    let recent = [[30, 144, 255], [239, 68, 68], [255, 255, 255]];
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        themes::set(theme);
+        for rtl in [false, true] {
+            let dir = if rtl { "rtl" } else { "ltr" };
+            let bars = [
+                ("picker-empty", picker::toolbar(None, &[], rtl)),
+                (
+                    "picker",
+                    picker::toolbar(Some([30, 144, 255]), &recent, rtl),
+                ),
+                (
+                    "ruler",
+                    ruler::toolbar(ruler::Mode::Line, Some(&measure), rtl),
+                ),
+                (
+                    "ruler-empty",
+                    ruler::toolbar(ruler::Mode::Across, None, rtl),
+                ),
+            ];
+            for (name, bar) in bars {
+                let (w, h) = (620, 60);
+                let px = super::kit::testing::shot::render(bar, w, h);
+                let name = format!("snip-tools-{name}-{dir}-{}@1x", theme.id);
+                if golden::enabled() {
+                    failed.extend(golden::compare("screens", &name, w, h, &px).err());
+                }
+            }
+        }
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// States 1-9 in Sapphire and Daylight.
 #[test]
 fn the_snip_screens_match_their_golden_images() {
     let mut failed = Vec::new();

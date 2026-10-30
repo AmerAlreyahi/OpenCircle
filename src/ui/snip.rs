@@ -8,6 +8,7 @@
 //! last captures, kept only in the user's data dir.
 //! Long capture: the user scrolls the page under the picked area by hand while
 //! a thread grabs and stitches it (`screens::long_capture`, `scroll::by_hand`).
+//! The colour picker and the ruler run on the frozen screen (`screens::tools`).
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
@@ -97,6 +98,8 @@ pub enum Msg {
     ClearRecent,
     /// The freeze hint has shown long enough (`HINT_SECS`).
     HintGone(u32),
+    /// The colour picker's or the ruler's (`screens::tools`).
+    Tool(crate::ui::screens::tools::Msg),
 }
 
 /// The freeze hint shows this long (or until a drag starts).
@@ -215,6 +218,8 @@ pub struct Snip {
     scrolls: bool,
     /// The running long capture.
     pub scroll: Option<crate::ui::screens::long_capture::Long>,
+    /// The colour picker or the ruler, while one runs (`screens::tools`).
+    pub tool: Option<crate::ui::screens::tools::Tool>,
     /// The window the user was in (Windows): focus goes back to it while the
     /// overlay is only a pill.
     pub foreground: Option<isize>,
@@ -263,6 +268,7 @@ impl Snip {
             walk: (None, 0),
             scrolls,
             scroll: None,
+            tool: None,
             foreground,
             shift: false,
             reader: None,
@@ -487,6 +493,11 @@ impl Snip {
 
     pub fn set_shift(&mut self, held: bool) {
         self.shift = held;
+    }
+
+    /// Shift (or Alt) is held.
+    pub fn shift(&self) -> bool {
+        self.shift
     }
 
     /// The button went down at `p`: where the stroke starts (snapped).

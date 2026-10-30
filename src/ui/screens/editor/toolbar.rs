@@ -9,7 +9,8 @@ use iced::{Element, Point, Rectangle, Size, Vector};
 
 use crate::actions::share;
 use crate::editor::{
-    Editor, Menu, Message, PRESETS, TOOLS, TextBack, TextFont, Tool, ToolInfo, Width, dragout, info,
+    Editor, Menu, Message, PRESETS, ScreenTool, TOOLS, TextBack, TextFont, Tool, ToolInfo, Width,
+    dragout, info,
 };
 use crate::ui::kit::icon_button::{self, State};
 use crate::ui::kit::surface::{Material, surface};
@@ -41,12 +42,41 @@ const ASSIST: char = '\u{e2b4}'; // lucide "magnet"
 const PIPETTE: char = '\u{e13e}'; // lucide "pipette"
 const SHARE: char = '\u{e158}'; // lucide "share"
 const LIVE_PIN: char = '\u{e3b2}'; // lucide "picture-in-picture-2"
+/// The screen tools' buttons: glyph, tooltip.
+const SCREEN_TOOLS: [(ScreenTool, char, &str); 2] = [
+    (
+        ScreenTool::Picker,
+        crate::ui::screens::tools::picker::ICON,
+        "Colour picker: click copies HEX, Shift+click RGB",
+    ),
+    (
+        ScreenTool::Ruler,
+        crate::ui::screens::tools::ruler::ICON,
+        "Ruler: measure in pixels",
+    ),
+];
 
 /// The glyphs used here (the font test checks them).
 #[cfg(test)]
 pub const GLYPHS: &[char] = &[
-    BACK, UNDO, REDO, COPY, SAVE, PIN, BOARD, ADD, STACK, SIDE, NUMBERS, LEGEND, ASSIST, SCROLL,
-    PIPETTE, SHARE, LIVE_PIN,
+    BACK,
+    UNDO,
+    REDO,
+    COPY,
+    SAVE,
+    PIN,
+    BOARD,
+    ADD,
+    STACK,
+    SIDE,
+    NUMBERS,
+    LEGEND,
+    ASSIST,
+    SCROLL,
+    PIPETTE,
+    SHARE,
+    crate::ui::screens::tools::ruler::ICON,
+    LIVE_PIN,
 ];
 
 /// The tool buttons: one per slot (variants live in its strip).
@@ -92,14 +122,15 @@ fn parts() -> (Vec<f32>, Vec<f32>) {
 
 /// Snip's toolbar (the design's capture flow, N-73): no Back (no bar to go
 /// back to), no Crop (the area's handles are the crop), no group dividers
-/// between the tools; the size readout after the grip; Long capture, Pin
-/// (Labs), Share (where there is a share sheet) after Undo / Redo; Copy and
-/// Save labelled; ×.
+/// between the tools; the size readout after the grip; Long capture, the
+/// colour picker and the ruler, Pin (Labs), Share (where there is a share
+/// sheet) after Undo / Redo; Copy and Save labelled; ×.
 fn snip_parts() -> (Vec<f32>, Vec<f32>) {
     let mut tools = vec![bar::HANDLE, READOUT_W, bar::DIVIDER];
     tools.extend(snip_slots().map(|_| CONTROL));
     let mut rest = vec![CONTROL; 4];
     rest.extend([bar::DIVIDER, CONTROL]);
+    rest.extend(SCREEN_TOOLS.map(|_| CONTROL));
     if pins() {
         rest.push(CONTROL);
     }
@@ -138,6 +169,7 @@ pub fn stops(e: &Editor) -> Vec<Message> {
     if e.scroll {
         stops.push(Message::Scroll);
     }
+    stops.extend(SCREEN_TOOLS.map(|(t, ..)| Message::ScreenTool(t)));
     if pins() {
         stops.push(Message::Pin);
     }
@@ -508,6 +540,14 @@ fn build_snip(
         ),
         CONTROL,
     );
+    for (tool, glyph, tip) in SCREEN_TOOLS {
+        let m = Message::ScreenTool(tool);
+        let s = state(false, &m);
+        rest.push(
+            hinted(icon_button::square(glyph, s, Some(m)), tip, Why::Icon),
+            CONTROL,
+        );
+    }
     if pins() {
         let s = state(false, &Message::Pin);
         rest.push(

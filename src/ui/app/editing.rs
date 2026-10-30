@@ -151,6 +151,8 @@ impl App {
                 None => Task::none(),
             },
             Some(Output::AddCapture) => Task::none(), // `edit` picks the area now
+            // the colour picker, the ruler: Esc there comes back to this
+            Some(Output::ScreenTool(tool)) => self.start_tool(tool),
             // The share sheet is up: once a target is picked, the editor closes.
             Some(Output::Sharing(chosen)) => Task::future(chosen).then(|picked| match picked {
                 Ok(()) => Task::done(Message::Editor(editor::Message::Shared)),

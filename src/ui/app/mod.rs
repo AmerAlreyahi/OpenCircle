@@ -37,6 +37,7 @@ pub(in crate::ui) mod snip;
 #[cfg(test)]
 pub(in crate::ui) mod tests;
 pub(in crate::ui) mod text;
+pub(in crate::ui) mod tools;
 pub(in crate::ui) mod update;
 pub(in crate::ui) mod view;
 pub(in crate::ui) mod zoom;
@@ -190,6 +191,10 @@ pub(in crate::ui) struct App {
     pub(in crate::ui) timed: bool,
     /// The next snip capture is the live pin quick action's (`Snip::live_pin`).
     pub(in crate::ui) live_next: bool,
+    /// The next snip opens this screen tool (its quick action).
+    pub(in crate::ui) tool_next: Option<crate::ui::screens::tools::Which>,
+    /// The colours the picker copied, newest first (this run of the app only).
+    pub(in crate::ui) colours: Vec<[u8; 3]>,
     /// Where the user moved / sized the result card (this run of the app).
     pub(in crate::ui) card: Option<Rectangle>,
     /// The side the user docked the AI chat to (this run of the app).
@@ -266,6 +271,8 @@ impl App {
             live: None,
             timed: false,
             live_next: false,
+            tool_next: None,
+            colours: Vec::new(),
             card: None,
             chat_side: None,
             chat_width: None,

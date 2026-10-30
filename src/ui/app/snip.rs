@@ -32,6 +32,9 @@ impl App {
             self.timed = true;
             return self.capture(Instant::now(), Some(kind));
         }
+        if let snip::Msg::Tool(msg) = msg {
+            return self.on_tool(msg);
+        }
         let o = &mut *self.o;
         let Purpose::Snip(snip) = &mut o.purpose else {
             return Task::none();
@@ -179,6 +182,7 @@ impl App {
                 Task::none()
             }
             snip::Msg::HintGone(_) => Task::none(),
+            snip::Msg::Tool(_) => Task::none(), // handled above
         }
     }
 

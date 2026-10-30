@@ -669,7 +669,7 @@ impl App {
             first_draw: &screen.first_draw,
             frame_times: &screen.frame_times,
             hover: snip.is_some_and(|s| s.kind.picks()) && self.o.edit.is_none(),
-            dim: true,
+            dim: self.tool().is_none(),
             live_drag: snip.is_some(),
             look: config::look(),
             morph: (self.o.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
@@ -725,7 +725,10 @@ impl App {
             let look = crate::ui::theme::accent_of(&config::look());
             let (frame, scale) = (&screen.frame, screen.place.scale);
             let size = screen.place.size();
-            if let Some(guides) =
+            if let Some(tool) = &snip.tool {
+                let tool = tool.view(frame, scale, screen.view, size, false, false, &[], look);
+                layers = layers.push(tool.map(|m| Message::Snip(crate::ui::snip::Msg::Tool(m))));
+            } else if let Some(guides) =
                 snip.guides(frame, scale, screen.view, size, self.snip_drag(), look)
             {
                 layers = layers.push(guides.map(Message::Snip));

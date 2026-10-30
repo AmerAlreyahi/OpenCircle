@@ -20,6 +20,9 @@ pub enum QuickId {
     SongSearch,
     /// Snip a part of a window into a live pin (Windows, Labs Pins).
     LivePin,
+    /// Snip's screen tools (`ui::screens::tools`).
+    ColourPicker,
+    Ruler,
     /// Any other well-formed id in the config: kept and written back as it was, but
     /// it runs nothing.
     Other(String),
@@ -27,7 +30,7 @@ pub enum QuickId {
 
 impl QuickId {
     /// Every id the app knows.
-    pub const KNOWN: [QuickId; 12] = [
+    pub const KNOWN: [QuickId; 14] = [
         QuickId::Lens,
         QuickId::Ai,
         QuickId::Text,
@@ -40,6 +43,8 @@ impl QuickId {
         QuickId::Snip,
         QuickId::SongSearch,
         QuickId::LivePin,
+        QuickId::ColourPicker,
+        QuickId::Ruler,
     ];
 
     pub fn as_str(&self) -> &str {
@@ -56,6 +61,8 @@ impl QuickId {
             QuickId::Snip => "snip",
             QuickId::SongSearch => "song_search",
             QuickId::LivePin => "live_pin",
+            QuickId::ColourPicker => "colour_picker",
+            QuickId::Ruler => "ruler",
             QuickId::Other(name) => name,
         }
     }

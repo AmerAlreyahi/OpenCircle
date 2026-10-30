@@ -15,6 +15,7 @@ use crate::ui::overlay;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::editor::canvas::Lens;
 use crate::ui::screens::overlay::edge as border;
+use crate::ui::snip;
 
 use super::{
     App, CHIP_SPACE, HINT, LINK_WIDTH, PROTECTED, QR_WIDTH, SELECT_WIDTH, SLIDE, TextMode,
@@ -79,7 +80,8 @@ impl App {
             .map_or_else(Vec::new, word::Picked::rects);
         // The plain dim (nothing selected) while the view moves: folded into
         // the zoomed frame's drawing (`overlay::Zoomed`), one pass.
-        let dim = self.o.translate.is_none() || self.o.selection.is_some();
+        let dim =
+            (self.o.translate.is_none() || self.o.selection.is_some()) && self.tool().is_none();
         let dim_frame = (self.view_moving() && dim)
             .then_some(())
             .filter(|_| self.o.selection.is_none() && self.o.others.is_empty())
@@ -198,7 +200,7 @@ impl App {
         // on this screen (another screen's window draws its own).
         if self.o.edit.is_none()
             && let Some(loupe) = snip
-                .filter(|s| s.scroll.is_none())
+                .filter(|s| s.scroll.is_none() && s.tool.is_none())
                 .filter(|s| {
                     let p = s.pointer.unwrap_or(Point::ORIGIN);
                     s.monitor_at(p) == Rectangle::with_size(self.o.screen)
@@ -235,12 +237,26 @@ impl App {
                 .view(self.o.screen, self.card_at(), self.o.card_hover)
                 .map(move |msg| Message::Translate(id, msg))
         } else if let Some(snip) = snip {
-            match &snip.scroll {
-                Some(long) => {
-                    let look = crate::ui::theme::accent_of(&config::look());
-                    long.view(self.o.screen, snip.hinting, look)
+            let look = crate::ui::theme::accent_of(&config::look());
+            match (&snip.scroll, &snip.tool) {
+                (Some(long), _) => long.view(self.o.screen, snip.hinting, look),
+                // the colour picker or the ruler, with its toolbar here
+                (None, Some(tool)) => {
+                    let (scale, view, screen) = (self.o.scale, self.o.view, self.o.screen);
+                    let hinting = snip.hinting;
+                    (tool.view(
+                        frame,
+                        scale,
+                        view,
+                        screen,
+                        true,
+                        hinting,
+                        &self.colours,
+                        look,
+                    ))
+                    .map(snip::Msg::Tool)
                 }
-                None => snip.view(),
+                (None, None) => snip.view(),
             }
             .map(Message::Snip)
         } else if let Some(selection) = self.o.selection {

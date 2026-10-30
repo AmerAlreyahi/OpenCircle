@@ -117,7 +117,7 @@ pub fn has(f: Feature) -> bool {
 /// The Labs feature an action id (registry, quick action or `opencircle run`) belongs to.
 pub fn action_feature(id: &QuickId) -> Option<Feature> {
     match id {
-        QuickId::Snip => Some(Feature::Snip),
+        QuickId::Snip | QuickId::ColourPicker | QuickId::Ruler => Some(Feature::Snip),
         QuickId::Edit => Some(Feature::Editor),
         QuickId::SongSearch => Some(Feature::Song),
         QuickId::LivePin => Some(Feature::Pins),

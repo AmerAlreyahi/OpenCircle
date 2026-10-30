@@ -377,6 +377,8 @@ pub(super) fn action_name(id: &str, live: bool, target: Target) -> String {
         ("copy_text", _) => "Copy text".into(),
         ("edit", _) => "Snip".into(),
         ("lens", _) => "Search with Lens".into(),
+        ("colour_picker", _) => "Pick a colour".into(),
+        ("ruler", _) => "Measure the screen".into(),
         (other, _) => {
             let spaced = other.replace('_', " ");
             let mut chars = spaced.chars();
@@ -404,6 +406,8 @@ pub(super) fn quick_hint(q: &crate::config::QuickAction) -> &'static str {
         ("snip", _) => "Drag or circle an area, then edit it",
         ("song_search", _) => "Listens and names the song (needs a key)",
         ("live_pin", _) => "Pick a part of a window: it floats on top, kept up to date",
+        ("colour_picker", _) => "Click copies HEX, Shift+click RGB",
+        ("ruler", _) => "Drag to measure in pixels",
         (_, t) => target_name(t),
     }
 }

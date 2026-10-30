@@ -105,6 +105,10 @@ impl App {
             overlay::Event::Hover(at) => overlay::Event::Hover(self.o.view.to_image(at)),
             event => event,
         };
+        // The colour picker or the ruler has the screen.
+        if self.tool().is_some() {
+            return self.on_tool_event(event);
+        }
         // Snip: the loupe follows the pointer; a drag's ends snap to edges.
         let event = match (&mut self.o.purpose, event) {
             (Purpose::Snip(snip), overlay::Event::Press { at, shift }) => {

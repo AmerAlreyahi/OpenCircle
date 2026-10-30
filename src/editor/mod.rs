@@ -291,6 +291,8 @@ pub enum Message {
     Copy,
     /// The toolbar's Scrolling capture button.
     Scroll,
+    /// Snip's toolbar: the colour picker or the ruler on the frozen screen.
+    ScreenTool(ScreenTool),
     Save,
     /// Pin the flattened image to the screen.
     Pin,
@@ -316,6 +318,16 @@ pub enum Message {
     Close,
 }
 
+/// Snip's screen tools on the frozen screen (its toolbar's buttons; the
+/// host runs them, `ui::screens::tools`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenTool {
+    /// The colour picker (N-75).
+    Picker,
+    /// The screen ruler (N-76).
+    Ruler,
+}
+
 /// What the editor asks of its host.
 pub enum Output {
     /// Back to the action bar (edits are kept in the editor).
@@ -325,6 +337,8 @@ pub enum Output {
     Save(Crop),
     /// Scroll and stitch the area under the editor (Snip, in place only).
     Scroll,
+    /// Leave for a screen tool (Snip; Esc there comes back to the area).
+    ScreenTool(ScreenTool),
     /// A floating always-on-top copy of the image.
     Pin(Crop),
     /// A floating copy of the area that keeps following the window under it (Snip).
@@ -628,6 +642,10 @@ impl Editor {
                     self.doc.exec(Edit::Delete(i, item));
                     self.refresh();
                 }
+            }
+            Message::ScreenTool(tool) => {
+                self.commit();
+                return Some(Output::ScreenTool(tool));
             }
             Message::Scroll => {
                 if self.scroll {

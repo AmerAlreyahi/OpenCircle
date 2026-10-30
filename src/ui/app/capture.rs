@@ -205,7 +205,8 @@ impl App {
             self.o.waiting = others;
             first = snip.start(kind, size); // Full = the whole screen at once
             let wait = config::current().snip.delay;
-            if !std::mem::take(&mut self.timed) && wait > 0 && first.is_none() {
+            let tool = self.tool_next.take();
+            if !std::mem::take(&mut self.timed) && wait > 0 && first.is_none() && tool.is_none() {
                 timer = Some(wait); // Settings > Snip > Timer: hide, count down, capture again
             }
             let (reader, read) = std::sync::mpsc::channel();
@@ -215,6 +216,9 @@ impl App {
             snip.live_pin = std::mem::take(&mut self.live_next);
             self.o.purpose = Purpose::Snip(Box::new(snip));
             extras = self.snip_extras(read);
+            if let Some(tool) = tool {
+                extras = Task::batch([extras, self.start_tool(tool)]);
+            }
         }
         let Purpose::Quick(quick, target) = self.o.purpose else {
             let next = match (first, timer) {

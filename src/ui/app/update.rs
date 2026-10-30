@@ -113,6 +113,11 @@ impl App {
                 if qa.action == "snip" || self.live_next {
                     return self.capture(at, Some(snip::Kind::for_target(qa.target)));
                 }
+                // the colour picker, the ruler: a snip that opens with it
+                if let Some(tool) = crate::ui::screens::tools::for_action(&qa.action) {
+                    self.tool_next = Some(tool);
+                    return self.capture(at, Some(snip::Kind::Region));
+                }
                 match Quick::for_id(&qa.action) {
                     Some(q) => self.next = Purpose::Quick(q, qa.target),
                     None => crate::log!("unknown action {}; opening the overlay", qa.action),
@@ -164,6 +169,10 @@ impl App {
             Message::Escape if self.o.is_none() => Task::none(),
             // long capture's Esc is its Cancel: back to the picked area
             Message::Escape if self.scroll().is_some() => self.on_snip(snip::Msg::Cancel),
+            // a screen tool's closes it (back to the picked area, if it came from there)
+            Message::Escape if self.tool().is_some() => {
+                self.on_tool(crate::ui::screens::tools::Msg::Close)
+            }
             // The editor has its own Esc (finish typing, close the picker, back).
             Message::Escape if self.o.edit.as_ref().is_some_and(Editing::is_open) => Task::none(),
             Message::Escape if std::env::var_os(TEST_SHOT).is_some() => self.test_shot(),
@@ -178,7 +187,8 @@ impl App {
                 if self.o.edit.is_some()
                     || self.o.esc_back
                     || self.capturing.is_some()
-                    || self.scroll().is_some() =>
+                    || self.scroll().is_some()
+                    || self.tool().is_some() =>
             {
                 self.update(Message::Escape)
             }

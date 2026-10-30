@@ -894,12 +894,19 @@ impl Config {
     /// once Settings saved it.
     pub fn add_new_quick_actions(&mut self) {
         // Labs Pins, Windows: a part of a window kept live on top.
-        let new = [QuickAction {
-            action: QuickId::LivePin,
+        // Snip's screen tools: the colour picker and the ruler (unbound: no free
+        // combination is safe on every PC).
+        let unbound = |action, target| QuickAction {
+            action,
             shortcut: String::new(),
-            target: Target::Circle,
+            target,
             live: false,
-        }];
+        };
+        let new = [
+            unbound(QuickId::LivePin, Target::Circle),
+            unbound(QuickId::ColourPicker, Target::FullScreen),
+            unbound(QuickId::Ruler, Target::FullScreen),
+        ];
         for q in new {
             if !self.quick_actions.iter().any(|c| c.action == q.action) {
                 self.quick_actions.push(q);
@@ -1230,12 +1237,14 @@ mod tests {
         c.add_new_quick_actions();
         assert_eq!(
             c.quick_actions.len(),
-            Config::default().quick_actions.len() + 1
+            Config::default().quick_actions.len() + 3
         );
-        let last = c.quick_actions.last().unwrap();
+        let added: Vec<_> = (c.quick_actions.iter().rev().take(3).rev())
+            .map(|q| (q.action.as_str(), q.shortcut.as_str()))
+            .collect();
         assert_eq!(
-            (last.action.as_str(), last.shortcut.as_str()),
-            ("live_pin", "")
+            added,
+            [("live_pin", ""), ("colour_picker", ""), ("ruler", "")]
         );
         let once = c.clone();
         c.add_new_quick_actions();

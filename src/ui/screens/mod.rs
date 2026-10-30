@@ -16,6 +16,7 @@ pub mod settings;
 pub mod setup;
 pub mod song;
 pub mod toast;
+pub mod tools;
 pub mod translate;
 pub mod tray_menu;
 pub mod update_card;
