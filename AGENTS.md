@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.1 is the latest release; v0.1.2 was withdrawn (2026-10-30) and is rebuilt with the updater fix; then 0.1.3 Snip and editor.**
+(both local only). Status: **v0.1.2 published (2026-10-30, re-release with the updater fix); now 0.1.3 Snip and editor.**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -38,8 +38,9 @@ where they differ.
   SHA256SUMS; assets re-downloaded and verified). v0.1.1 published 2026-10-27 (owner OK;
   Setup exe + portable exe, AppImage/deb/rpm, no MSI; signature and hashes re-verified). v0.1.2 published
   2026-10-30 on 0afb1f5, then WITHDRAWN the same day by the owner (release and tag deleted, ~2-3 outside
-  downloads): its updater can't update Setup-exe installs (#151). v0.1.2 is re-tagged on the fixed commit and
-  released again only after the update gate (RELEASING.md step 9) and the owner's "publish".
+  downloads): its updater can't update Setup-exe installs (#151). v0.1.2 re-published 2026-10-30 16:33 UTC
+  (owner OK) on 65e8902 with the updater fix; update gate on the draft: v0.1.1 portable PASS, v0.1.1 Setup FAIL as
+  expected (old updater), manual Setup over 0.1.1 PASS; assets re-downloaded, byte-identical to the gated draft.
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
