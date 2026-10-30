@@ -238,6 +238,9 @@ fn quality(blocks: &[TextBlock], boxes: usize, script: Script) -> f32 {
     mean * own * blocks.len() as f32 / boxes as f32
 }
 
+/// Text lines' boxes (x, y, w, h; image px) and the size detection ran at.
+type Detected = (Vec<[f32; 4]>, (u32, u32));
+
 /// The second reader keeps a line read at least this well: lower than
 /// `AUTO_QUALITY` (Arabic with harakat reads at ~0.77), safe since a line
 /// in another script scores ~0 (its letters aren't the recognizer's).
@@ -423,12 +426,7 @@ impl Engine {
 
     /// The text lines' boxes in `img` (`width` x `height`; image px), and
     /// the size detection ran at.
-    fn detect(
-        &mut self,
-        img: &RgbImage,
-        width: u32,
-        height: u32,
-    ) -> Result<(Vec<[f32; 4]>, (u32, u32)), OcrError> {
+    fn detect(&mut self, img: &RgbImage, width: u32, height: u32) -> Result<Detected, OcrError> {
         let (dw, dh) = detect_size(width, height);
         let small = if (dw, dh) == (width, height) {
             img.clone()

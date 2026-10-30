@@ -334,7 +334,7 @@ fn except_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBlock
     }
     let (boxes, body) = body.split_at(n * 16);
     let f = |b: &[u8]| f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-    let known: Vec<[f32; 4]> = (boxes.chunks_exact(16))
+    let known: Vec<[f32; 4]> = (boxes.as_chunks::<16>().0.iter())
         .map(|b| [f(&b[0..]), f(&b[4..]), f(&b[8..]), f(&b[12..])])
         .collect();
     let (size, rgba) = body.split_first_chunk::<8>().ok_or_else(short)?;
