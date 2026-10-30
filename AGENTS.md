@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.2 published (2026-10-30); next is 0.1.3 Snip and editor, only when the owner says so.**
+(both local only). Status: **v0.1.1 is the latest release; v0.1.2 was withdrawn (2026-10-30) and is rebuilt with the updater fix; then 0.1.3 Snip and editor.**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -37,8 +37,9 @@ where they differ.
 - Releases: v0.1.0 published 2026-10-25 (owner OK; Windows + Linux preview; signed
   SHA256SUMS; assets re-downloaded and verified). v0.1.1 published 2026-10-27 (owner OK;
   Setup exe + portable exe, AppImage/deb/rpm, no MSI; signature and hashes re-verified). v0.1.2 published
-  2026-10-30 (owner OK; tag on 0afb1f5; same asset set; draft and public downloads verified against SHA256SUMS +
-  minisig, trusted comment "OpenCircle v0.1.2"; GitHub latest). Not yet done: the v0.1.1 -> v0.1.2 auto-update check.
+  2026-10-30 on 0afb1f5, then WITHDRAWN the same day by the owner (release and tag deleted, ~2-3 outside
+  downloads): its updater can't update Setup-exe installs (#151). v0.1.2 is re-tagged on the fixed commit and
+  released again only after the update gate (RELEASING.md step 9) and the owner's "publish".
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
@@ -265,7 +266,7 @@ production systems.
   (per-machine MSI), so the in-place exe swap fails ("Access is denied", seen on the VM 0.1.1 -> 0.1.2): no
   Setup-exe user updates by itself. Fix first, before Snip: such installs update through the release's Setup exe
   (quiet, elevated). Installed 0.1.1/0.1.2 copies can't be fixed remotely (their updater is fixed code; channel
-  frozen): they install the fixed version by hand once. How it ships is the owner's call (publish rule stands).
+  frozen): they install the fixed version by hand once. Ships as the re-released v0.1.2 (owner, 2026-10-30).
 - Update gate (owner, 2026-10-30, "insure this won't happen again"): no release is offered to the owner for
   "publish" until the previous published version, installed with the Setup exe (Program Files, normal user) AND as
   the portable exe, has updated itself to the DRAFT on the Windows VM (RELEASING.md step 9, local update server +
