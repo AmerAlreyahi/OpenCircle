@@ -1010,7 +1010,7 @@ fn hero_sheet() {
             .collect::<Vec<u8>>();
         Handle::from_rgba(w, h, pixels)
     };
-    let view = move |ar: bool, clip: bool, shown: bool| -> Element<'static, ()> {
+    let view = move |ar: bool, clip: bool, shown: bool, button: bool| -> Element<'static, ()> {
         hero(Hero {
             title: s(ar, "Circle to Search", "دائرة للبحث"),
             desc: s(
@@ -1021,17 +1021,20 @@ fn hero_sheet() {
             lab: ar,
             keys: vec!["Ctrl".into(), "Shift".into(), "Space".into()],
             shown,
-            toggle: (),
+            toggle: button.then_some(()),
             replay: (),
             frame: clip.then(frame),
         })
     };
     let rows = vec![
-        row("clip", Act::Rest, move |ar| view(ar, true, true)),
-        row("placeholder", Act::Rest, move |ar| view(ar, false, true)),
-        row("hidden", Act::Rest, move |ar| view(ar, false, false)),
+        row("clip", Act::Rest, move |ar| view(ar, true, true, true)),
+        row("placeholder", Act::Rest, move |ar| {
+            view(ar, false, true, true)
+        }),
+        row("hidden", Act::Rest, move |ar| view(ar, false, false, true)),
+        row("no clip", Act::Rest, move |ar| view(ar, false, true, false)),
     ];
-    sheet("hero", Size::new(420.0, 340.0), &rows);
+    sheet("hero", Size::new(420.0, 400.0), &rows);
 }
 
 /// `text_area`, the AI chat's composer box: empty with its controls row, one

@@ -2,8 +2,8 @@
 //! `featureHero`, `.oc-feature-*`): the feature's name and one line, its
 //! shortcut as keycaps, Hide / Show preview, and the stage: a "5 s preview"
 //! chip, Replay, and the clip's frame (owner, 2026-10-28: real recordings,
-//! played by the caller), or a quiet "Preview" placeholder until the clip
-//! exists.
+//! played by the caller). Without a clip (`toggle: None`; owner, 2026-10-30)
+//! there is only the heading: no Hide / Show button and no stage.
 use iced::widget::image::Handle;
 use iced::widget::{Image, Space, column, container, row, text};
 use iced::{Border, Center, ContentFit, Element, Fill};
@@ -36,9 +36,10 @@ pub struct Hero<'a, Message> {
     pub keys: Vec<String>,
     /// The stage is shown (else only the heading and Show preview).
     pub shown: bool,
-    pub toggle: Message,
+    /// Hide / Show preview; `None` = no clip yet: no button, no stage.
+    pub toggle: Option<Message>,
     pub replay: Message,
-    /// The clip's frame now (`None`: no clip, the placeholder).
+    /// The clip's frame now (`None`: the clip did not decode, a placeholder).
     pub frame: Option<Handle>,
 }
 
@@ -64,17 +65,21 @@ pub fn hero<'a, Message: Clone + 'a>(h: Hero<'a, Message>) -> Element<'a, Messag
     };
     // one compact line, shown or hidden: the name and line left; Hide / Show
     // preview, then the keycaps, right
+    let has_clip = h.toggle.is_some();
     let heading = row![
         column![name, sub(Role::CARD_DESC, h.desc)]
             .spacing(space::TRACK_GAP)
             .width(Fill),
-        button(label(collapse), Kind::Elevated, Some(h.toggle)),
-        keys,
     ]
+    .push(
+        h.toggle
+            .map(|m| button(label(collapse), Kind::Elevated, Some(m))),
+    )
+    .push(keys)
     .spacing(space::GAP * 2.0)
     .align_y(Center);
     let mut body = column![heading].spacing(STAGE_PAD);
-    if h.shown {
+    if has_clip && h.shown {
         body = body.push(stage(h.frame, h.replay));
     }
     container(body)

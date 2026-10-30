@@ -2091,21 +2091,35 @@ fn with_clip(s: &mut State) {
     s.play_clip(super::previews::player::TINY, Duration::ZERO);
 }
 
-/// Until the owner's clips exist, a preview is a quiet placeholder: no
-/// frame, no clock.
+/// Until the owner's clips exist (owner, 2026-10-30), a page shows only the
+/// feature's heading: no Hide / Show preview, no stage, no placeholder, no
+/// clock. With a clip, the button and the stage are there.
 #[test]
-fn a_preview_without_a_clip_is_a_placeholder_with_no_clock() {
+fn a_preview_without_a_clip_shows_only_its_heading() {
     let (mut s, _) = state(None);
     moving_update(&mut s, Message::Section(Section::Translate));
     (s.moved, s.picked) = (None, None);
     assert!(s.players.is_empty() && !s.animating(), "nothing plays");
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Preview"), "{texts:?}");
-    assert!(
-        !texts.iter().any(|t| t == "Replay"),
-        "nothing to replay: {texts:?}"
-    );
     assert!(texts.iter().any(|t| t == "Translate"), "{texts:?}");
+    for gone in [
+        "Preview",
+        "5 s preview",
+        "Replay",
+        "Hide preview",
+        "Show preview",
+    ] {
+        assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
+    }
+    // hidden by key, still no button to bring the stage back
+    moving_update(&mut s, Message::Preview("translate", false));
+    assert!(!shot::texts(view(&s)).iter().any(|t| t == "Show preview"));
+    // the clip arrives: the button and the stage appear
+    moving_update(&mut s, Message::Preview("translate", true));
+    with_clip(&mut s);
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Hide preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "5 s preview"), "{texts:?}");
     // a page without a preview starts no clock
     moving_update(&mut s, Message::Section(Section::Privacy));
     s.moved = None;
@@ -2160,16 +2174,19 @@ fn hiding_a_preview_writes_its_key_and_showing_removes_it() {
     let path = tmp("previews");
     let (mut s, _) = state(Some(path.clone()));
     update(&mut s, Message::Section(Section::Ai));
+    with_clip(&mut s);
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide preview"));
     moving_update(&mut s, Message::Preview("ai", false));
     assert!(!s.animating(), "hidden: no clock");
     update(&mut s, Message::Save);
     let saved = Config::load_from(&path).0.appearance.hidden_previews;
     assert_eq!(saved, ["ai"]);
+    with_clip(&mut s); // no clip is bundled yet: the player stands in for it
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Show preview"), "{texts:?}");
     assert!(!texts.iter().any(|t| t == "5 s preview" || t == "Replay"));
     moving_update(&mut s, Message::Preview("ai", true));
+    with_clip(&mut s);
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide preview"));
     update(&mut s, Message::Save);
     assert!(

@@ -4,7 +4,8 @@
 //! entry here + its clip (owner, 2026-10-28: a real recording, made by the
 //! owner, `assets/previews/<clip>.webp`, docs/previews.md). A clip plays once
 //! per page visit (`player`), then rests on its last frame; the clock runs
-//! only meanwhile. No clip yet: a quiet placeholder.
+//! only meanwhile. No clip yet (owner, 2026-10-30): only the heading, no
+//! Hide / Show preview and no stage; the clip's file appearing shows both.
 use iced::widget::column;
 use iced::{Element, Padding};
 
@@ -160,13 +161,14 @@ pub fn view(state: &State) -> Option<Element<'_, Message>> {
         .map(|h| {
             let shown = !hidden(state, h);
             let frame = (state.players.iter()).find(|(k, _)| *k == h.key);
+            let has_clip = frame.is_some() || player::clip(h.clip).is_some();
             hero(hero::Hero {
                 title: h.title,
                 desc: h.desc,
                 lab: h.lab.is_some(),
                 keys: key_labels((h.shortcut)(&state.draft)),
                 shown,
-                toggle: Message::Preview(h.key, !shown),
+                toggle: has_clip.then_some(Message::Preview(h.key, !shown)),
                 replay: Message::Replay,
                 frame: frame.map(|(_, p)| p.frame().clone()),
             })
