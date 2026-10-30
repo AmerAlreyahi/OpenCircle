@@ -36,6 +36,18 @@ struct Log {
 
 static LOG: Mutex<Option<Log>> = Mutex::new(None);
 
+/// From now on log lines stay in memory (and stderr). For the elevated setup: an
+/// admin process must never open the user's log for writing (the user could make
+/// it a link to a system file).
+pub fn memory_only() {
+    let mut slot = LOG.lock().unwrap_or_else(|e| e.into_inner());
+    let tail = slot.take().map(|l| l.tail).unwrap_or_default();
+    *slot = Some(Log {
+        tail,
+        ..Log::new(None, MAX_BYTES)
+    });
+}
+
 pub fn dir() -> PathBuf {
     crate::paths::logs()
 }
@@ -386,6 +398,19 @@ fn redact_home(text: &str) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// The elevated setup's log never reaches a file.
+    #[test]
+    fn memory_only_opens_no_file() {
+        let dir = temp("memory-only");
+        *LOG.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(Log::new(Some(dir.clone()), MAX_BYTES));
+        memory_only();
+        crate::log!("[opencircle] memory only");
+        assert!(with_log(|l| l.dir.is_none() && l.file.is_none()));
+        assert!(tail(200).iter().any(|l| l.ends_with("memory only")));
+        let _ = fs::remove_dir_all(&dir); // another test's line may have landed meanwhile
+    }
 
     fn temp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("oc-log-{name}-{}", std::process::id()));

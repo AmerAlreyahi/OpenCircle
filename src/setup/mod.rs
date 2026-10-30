@@ -119,6 +119,157 @@ pub fn delete_when_gone(dir: &Path) {
     let _ = dir;
 }
 
+/// `/sha256=<hex>`: the app's update (`update::SETUP_ARGS`) started this setup
+/// elevated from the user's own (writable) download folder. Before anything runs
+/// as admin, the setup copies itself into a fresh folder only admins can write,
+/// checks the copy against that hash there (a file swapped meanwhile is refused)
+/// and runs the copy, with its temp folder (where the MSI is unpacked) in there
+/// too. Why this design: the elevated side never trusts a path the user can write,
+/// and the hash comes from the app's signed checksums. `/relocated` marks the copy.
+pub const SHA256_ARG: &str = "/sha256=";
+const RELOCATED_ARG: &str = "/relocated";
+
+/// Runs the relocated copy when asked (`SHA256_ARG`) and returns its exit code;
+/// `None` = carry on here (not asked, or this is the copy).
+pub fn relocate(args: &[String]) -> Option<u32> {
+    let hash = args.iter().find_map(|a| a.strip_prefix(SHA256_ARG))?;
+    if args.iter().any(|a| a == RELOCATED_ARG) {
+        return None;
+    }
+    let Some(want) = crate::update::verify::parse_hex(hash) else {
+        return Some(ERROR_INVALID_COMMAND_LINE);
+    };
+    let dir = admin_root().join(format!(
+        "OpenCircle-Update-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
+    let (copy, held) = match std::env::current_exe().and_then(|me| copy_verified(&me, &dir, &want))
+    {
+        Ok(copy) => copy,
+        Err(e) => {
+            crate::log!("[opencircle] setup: not run: {e}");
+            let _ = std::fs::remove_dir_all(&dir);
+            return Some(1);
+        }
+    };
+    let child = std::process::Command::new(&copy)
+        .args(args)
+        .arg(RELOCATED_ARG)
+        .env("TEMP", &dir)
+        .env("TMP", &dir)
+        .spawn();
+    drop(held); // it runs: Windows keeps a running exe's file from changing
+    let code = child
+        .and_then(|mut c| c.wait())
+        .map_or(1, |s| s.code().unwrap_or(1) as u32);
+    let _ = std::fs::remove_dir_all(&dir);
+    Some(code)
+}
+
+/// Where the copy goes: `<Windows folder>\Temp` (its own new folder, admin-only, below).
+fn admin_root() -> PathBuf {
+    windows_dir().join("Temp")
+}
+
+/// The Windows folder from Windows itself, never from the environment: an elevated
+/// process inherits the user's (HKCU\Environment may set WINDIR, SystemRoot, PATH).
+#[cfg(windows)]
+pub fn windows_dir() -> PathBuf {
+    let mut buf = [0u16; 260];
+    // SAFETY: writes at most `buf.len()` wide chars into `buf`.
+    let n = unsafe {
+        windows::Win32::System::SystemInformation::GetSystemWindowsDirectoryW(Some(&mut buf))
+    };
+    match n as usize {
+        1..260 => PathBuf::from(String::from_utf16_lossy(&buf[..n as usize])),
+        _ => PathBuf::from(r"C:\Windows"),
+    }
+}
+
+/// This process runs with admin rights.
+pub fn elevated() -> bool {
+    #[cfg(windows)]
+    // SAFETY: a plain query of this process's token.
+    return unsafe { windows::Win32::UI::Shell::IsUserAnAdmin() }.as_bool();
+    #[cfg(not(windows))]
+    false
+}
+
+#[cfg(not(windows))]
+pub fn windows_dir() -> PathBuf {
+    PathBuf::from(r"C:\Windows")
+}
+
+/// `exe` copied into the new folder `dir` (made admin-only: `admin_only_dir`; fails if
+/// it exists), the copy's SHA-256 checked there against `want`. `Err` = refused. The
+/// copy comes back held open, writing and deleting shared with no one: keep it until
+/// the copy has started, so the verified bytes are the ones that run.
+fn copy_verified(
+    exe: &Path,
+    dir: &Path,
+    want: &[u8; 32],
+) -> std::io::Result<(PathBuf, std::fs::File)> {
+    admin_only_dir(dir)?;
+    let copy = dir.join("OpenCircle-Setup.exe");
+    std::fs::copy(exe, &copy)?;
+    let mut open = std::fs::OpenOptions::new();
+    open.read(true);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::share_mode(&mut open, 1); // FILE_SHARE_READ
+    let file = open.open(&copy)?;
+    if crate::update::verify::sha256(&file)? != *want {
+        drop(file);
+        let _ = std::fs::remove_file(&copy);
+        return Err(std::io::Error::other(
+            "the setup is not the verified download",
+        ));
+    }
+    Ok((copy, file))
+}
+
+/// A new folder that SYSTEM and Administrators may change and users only read and
+/// run (a protected DACL, nothing inherited from `%windir%\Temp`, where users may
+/// create files). Fails if `dir` exists (a folder someone made in advance).
+#[cfg(windows)]
+fn admin_only_dir(dir: &Path) -> std::io::Result<()> {
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+    use windows::Win32::Storage::FileSystem::CreateDirectoryW;
+    use windows::core::{HSTRING, w};
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: a constant SDDL string; `sd` is freed below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            w!("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)"),
+            SDDL_REVISION_1,
+            &mut sd,
+            None,
+        )?;
+    }
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: sd.0,
+        bInheritHandle: false.into(),
+    };
+    // SAFETY: a NUL-terminated path; `attributes` points at the live descriptor.
+    let made = unsafe { CreateDirectoryW(&HSTRING::from(dir.as_os_str()), Some(&attributes)) };
+    // SAFETY: the descriptor the conversion allocated.
+    unsafe { LocalFree(Some(HLOCAL(sd.0))) };
+    made.map_err(std::io::Error::from)
+}
+
+#[cfg(not(windows))]
+fn admin_only_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().mode(0o755).create(dir)
+}
+
 /// What the setup build was asked to do without a window.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Silent {
@@ -126,6 +277,9 @@ pub enum Silent {
     /// fresh install's folder, checked and tidied.
     Install {
         dir: Option<String>,
+        /// `/launch` (hidden, the app's own update: `update::SETUP_ARGS`): start the
+        /// installed app afterwards (the new one, or the old one if it failed).
+        launch: bool,
     },
     Uninstall,
 }
@@ -138,13 +292,14 @@ const ERROR_INVALID_COMMAND_LINE: u32 = 1639;
 /// (nothing here restarts) matter only with it. Flags are case-insensitive and
 /// may start with `/`, `-` or `--`. `Err` = the exit code for a bad `/dir`.
 pub fn parse_silent(args: &[String]) -> Result<Option<Silent>, u32> {
-    let (mut quiet, mut uninstall, mut dir) = (false, false, None);
+    let (mut quiet, mut uninstall, mut dir, mut launch) = (false, false, None, false);
     for arg in args {
         let flag = arg.trim_start_matches(['/', '-']);
         let (name, value) = flag.split_once('=').unwrap_or((flag, ""));
         match name.to_ascii_lowercase().as_str() {
             "quiet" | "qn" | "silent" => quiet = true,
             "uninstall" => uninstall = true,
+            "launch" => launch = true,
             "dir" => dir = Some(value.trim_matches('"')),
             _ => {}
         }
@@ -158,7 +313,7 @@ pub fn parse_silent(args: &[String]) -> Result<Option<Silent>, u32> {
     let dir = dir
         .map(|d| check_folder(d).map_err(|_| ERROR_INVALID_COMMAND_LINE))
         .transpose()?;
-    Ok(Some(Silent::Install { dir }))
+    Ok(Some(Silent::Install { dir, launch }))
 }
 
 /// Where a silent install goes: an update or repair stays where the app is
@@ -184,11 +339,15 @@ pub fn silent(msi_bytes: &'static [u8], what: Silent) -> u32 {
     quit_running_app();
     let code = match what {
         Silent::Uninstall => msi::uninstall_quiet(&package),
-        Silent::Install { dir } => {
+        Silent::Install { dir, launch } => {
             let installed = msi::installed(&package);
             let folder = silent_folder(installed.as_ref(), dir);
             let repair = installed.as_ref().is_some_and(|i| i.same);
-            msi::install_quiet(&package, &folder, repair)
+            let code = msi::install_quiet(&package, &folder, repair);
+            if launch && let Err(e) = self::launch(&app_in(&folder), false) {
+                crate::log!("[opencircle] setup: {e}");
+            }
+            code
         }
     };
     if code != 0 {
@@ -275,11 +434,29 @@ pub fn check_folder(input: &str) -> Result<String, BadFolder> {
 }
 
 /// Where a fresh install goes: `%ProgramFiles%\OpenCircle` (the MSI is per machine).
+/// Asked of Windows (the known folder), not the environment, which an elevated setup
+/// inherits from the user.
 pub fn default_folder() -> String {
-    let programs = std::env::var("ProgramW6432")
-        .or_else(|_| std::env::var("ProgramFiles"))
-        .unwrap_or_else(|_| r"C:\Program Files".into());
+    let programs = program_files().unwrap_or_else(|| r"C:\Program Files".into());
     format!("{}\\OpenCircle\\", programs.trim_end_matches('\\'))
+}
+
+#[cfg(windows)]
+fn program_files() -> Option<String> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    // SAFETY: a known folder id; the string Windows allocates is freed below.
+    unsafe {
+        let path = SHGetKnownFolderPath(&FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, None).ok()?;
+        let text = path.to_string().ok();
+        CoTaskMemFree(Some(path.0 as *const _));
+        text
+    }
+}
+
+#[cfg(not(windows))]
+fn program_files() -> Option<String> {
+    None
 }
 
 /// The installed app in `folder`.
@@ -348,10 +525,10 @@ fn launch_with(
 /// app does not run elevated too.
 fn start(exe: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
-    // SAFETY: a plain query of this process's token.
-    if unsafe { windows::Win32::UI::Shell::IsUserAnAdmin() }.as_bool() {
-        let windir = std::env::var_os("WINDIR").unwrap_or_else(|| r"C:\Windows".into());
-        return std::process::Command::new(Path::new(&windir).join("explorer.exe"))
+    if elevated() {
+        // absolute, from Windows (not the user's PATH / WINDIR); `exe` is the MSI's
+        // install folder (Windows Installer's record, admin-written) + opencircle.exe
+        return std::process::Command::new(windows_dir().join("explorer.exe"))
             .arg(exe)
             .spawn()
             .map(drop);
@@ -622,17 +799,40 @@ mod tests {
         assert_eq!(parse_silent(&args(r"/uninstall /dir=C:\x")), Ok(None));
         assert_eq!(
             parse_silent(&args("/quiet")),
-            Ok(Some(Silent::Install { dir: None }))
+            Ok(Some(Silent::Install {
+                dir: None,
+                launch: false
+            }))
         );
         assert_eq!(
             parse_silent(&args("/QUIET /norestart")),
-            Ok(Some(Silent::Install { dir: None }))
+            Ok(Some(Silent::Install {
+                dir: None,
+                launch: false
+            }))
         );
         assert_eq!(
             parse_silent(&args(r#"--silent /dir="d:/Apps/OC""#)),
             Ok(Some(Silent::Install {
-                dir: Some(r"D:\Apps\OC\".into())
+                dir: Some(r"D:\Apps\OC\".into()),
+                launch: false
             }))
+        );
+        // the app's own update (`update::SETUP_ARGS`): install, then start the app
+        let update: Vec<String> = (crate::update::SETUP_ARGS.split(' '))
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            parse_silent(&update),
+            Ok(Some(Silent::Install {
+                dir: None,
+                launch: true
+            }))
+        );
+        assert_eq!(
+            parse_silent(&args("/launch")),
+            Ok(None),
+            "never without /quiet"
         );
         assert_eq!(
             parse_silent(&args("/uninstall /quiet")),
@@ -659,6 +859,63 @@ mod tests {
         assert_eq!(silent_folder(Some(&at(None)), dir()), r"D:\New\");
         assert_eq!(silent_folder(None, dir()), r"D:\New\");
         assert_eq!(silent_folder(None, None), default_folder());
+    }
+
+    /// The elevated setup runs only a copy it verified in a folder it made itself.
+    #[test]
+    fn the_update_setup_runs_only_its_verified_copy() {
+        let base = std::env::temp_dir().join(format!("oc-relocate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let exe = base.join("OpenCircle-Setup-9.9.9-x64.exe");
+        std::fs::write(&exe, b"setup").unwrap();
+        let good = crate::update::verify::sha256(&b"setup"[..]).unwrap();
+        let (copy, _held) = copy_verified(&exe, &base.join("ok"), &good).unwrap();
+        assert_eq!(std::fs::read(&copy).unwrap(), b"setup");
+        assert_eq!(copy.parent(), Some(base.join("ok").as_path()));
+        // swapped after the app verified it: refused, nothing left to run
+        std::fs::write(&exe, b"evil").unwrap();
+        let err = copy_verified(&exe, &base.join("bad"), &good).unwrap_err();
+        assert!(err.to_string().contains("not the verified"), "{err}");
+        assert!(!base.join("bad").join("OpenCircle-Setup.exe").exists());
+        // a folder that is there already (made in advance by someone): refused
+        assert!(copy_verified(&exe, &base.join("ok"), &good).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+
+        let args = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        assert_eq!(relocate(&args("/quiet")), None, "not asked: runs here");
+        assert_eq!(
+            relocate(&args("/quiet /sha256=nothex")),
+            Some(ERROR_INVALID_COMMAND_LINE),
+            "a bad hash never runs unrelocated"
+        );
+        let hex = "ab".repeat(32);
+        assert_eq!(
+            relocate(&args(&format!("/quiet /sha256={hex} /relocated"))),
+            None,
+            "the copy itself"
+        );
+        assert!(admin_root().ends_with("Temp"));
+    }
+
+    /// The elevated setup inherits the user's environment (HKCU\Environment): the
+    /// folders it trusts never come from it.
+    #[test]
+    fn the_elevated_setup_never_takes_folders_from_the_environment() {
+        let planted = r"C:\Users\u\AppData\Local\Planted";
+        // SAFETY: no other test reads these variables.
+        unsafe {
+            for var in ["WINDIR", "SystemRoot", "ProgramW6432", "ProgramFiles"] {
+                std::env::set_var(var, planted);
+            }
+        }
+        for path in [
+            admin_root().display().to_string(),
+            windows_dir().join("explorer.exe").display().to_string(),
+            default_folder(),
+        ] {
+            assert!(!path.contains("Planted"), "{path}");
+        }
     }
 
     #[test]

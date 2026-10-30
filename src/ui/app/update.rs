@@ -43,6 +43,9 @@ impl App {
                 .map(Message::Windows),
             // a tray menu row: as if it came from the tray
             Message::Windows(windows::Msg::Run(trigger)) => self.update(Message::Trigger(trigger)),
+            Message::Windows(windows::Msg::UpdateCard(update_card::Msg::Install)) => {
+                self.install_update()
+            }
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
             // A hidden (Labs) feature does nothing, whoever asks (no shortcut or tray
             // item reaches here; this is the one place that also covers a late trigger).
@@ -626,10 +629,18 @@ impl App {
     pub(in crate::ui) fn on_update(&mut self, event: crate::update::Event) -> Task<Message> {
         use crate::update::Event;
         match event {
-            Event::Status(status) => self
-                .windows
-                .update(windows::Msg::UpdateStatus(status))
-                .map(Message::Windows),
+            Event::Status(status) => {
+                let status = self
+                    .windows
+                    .update(windows::Msg::UpdateStatus(status))
+                    .map(Message::Windows);
+                // Check now while an installed copy's update waits: its card again
+                // (the way back after "Later")
+                match self.update.clone().filter(needs_user) {
+                    Some(s) => Task::batch([status, self.ready_card(&s)]),
+                    None => status,
+                }
+            }
             Event::Manual {
                 version,
                 notes,
@@ -638,6 +649,11 @@ impl App {
                 .windows
                 .update_card(update_card::Card::available(&version, &notes, &url))
                 .map(Message::Windows),
+            Event::Ready(staged) if needs_user(&staged) => {
+                let card = self.ready_card(&staged);
+                self.update = Some(staged);
+                card
+            }
             Event::Ready(staged) => {
                 let toast = self
                     .windows
@@ -679,6 +695,9 @@ impl App {
             })
             .map(|()| Message::UpdateTick);
         }
+        if self.update.as_ref().is_some_and(needs_user) {
+            return Task::none(); // only "Install now" (`install_update`)
+        }
         let Some(staged) = self.update.take() else {
             return Task::none();
         };
@@ -697,6 +716,33 @@ impl App {
             }
         }
     }
+
+    /// The card that offers `staged` ("Install now" / "Later").
+    fn ready_card(&mut self, staged: &crate::update::Staged) -> Task<Message> {
+        let card = update_card::Card::ready(&staged.version, &staged.notes, &staged.url);
+        self.windows.update_card(card).map(Message::Windows)
+    }
+
+    /// "Install now": the waiting update's setup runs (Windows asks for admin rights)
+    /// and this process exits. Declined or failed: nothing changed, the update and its
+    /// card stay for another try.
+    pub(in crate::ui) fn install_update(&mut self) -> Task<Message> {
+        let Some(staged) = self.update.clone().filter(needs_user) else {
+            return Task::none();
+        };
+        match crate::update::install(&staged) {
+            Ok(()) => iced::exit(),
+            Err(e) => {
+                crate::log!("[opencircle] update {}: {e}", staged.version);
+                Task::none()
+            }
+        }
+    }
+}
+
+/// An update only the user may start (its setup asks for admin rights).
+fn needs_user(staged: &crate::update::Staged) -> bool {
+    matches!(staged.install, crate::update::Install::Setup(_))
 }
 
 /// The messages that mean something while no overlay is open (a trigger, a

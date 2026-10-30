@@ -94,7 +94,23 @@ fn main() -> ExitCode {
     sys::mem::limit_malloc_arenas();
     // The setup build (OpenCircle-Setup-*.exe) is the setup, whatever it is asked.
     if let Some(msi) = setup::payload() {
+        // Elevated: DLLs it loads later come from System32 only, never from its folder.
+        #[cfg(windows)]
+        // SAFETY: a process-wide setting with no pointers.
+        let _ = unsafe {
+            windows::Win32::System::LibraryLoader::SetDefaultDllDirectories(
+                windows::Win32::System::LibraryLoader::LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )
+        };
         let args: Vec<String> = std::env::args().skip(1).collect();
+        if args.iter().any(|a| a.starts_with(setup::SHA256_ARG)) {
+            // the app's update, run elevated: no file of the user's is written as
+            // admin (the app logs the outcome in the user's own log)
+            log::memory_only();
+        }
+        if let Some(code) = setup::relocate(&args) {
+            std::process::exit(code as i32);
+        }
         match setup::parse_silent(&args) {
             Ok(Some(what)) => std::process::exit(setup::silent(msi, what) as i32),
             Err(code) => std::process::exit(code as i32),

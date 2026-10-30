@@ -1,6 +1,7 @@
 //! The update card (`kit::panel_frame`, the design's "App update" card): a
 //! release's notes after an update ("What's new in X") or for an update this
-//! install can't apply itself ("X is available" + the release page). Links
+//! install can't apply itself ("X is available" + the release page), or one
+//! waiting for the user ("X is ready to install": Install now / Later). Links
 //! open in the browser only when clicked. Pressing the heading drags it.
 use iced::widget::{column, row};
 use iced::{Center, Element, Size};
@@ -25,8 +26,19 @@ pub struct Card {
     title: String,
     lines: Vec<NoteLine>,
     pub url: String,
-    /// Installed already ("What's new"), else to get by hand.
-    installed: bool,
+    stage: Stage,
+}
+
+/// What the card is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    /// Installed already ("What's new").
+    Installed,
+    /// Downloaded and verified, waiting for the user (a copy the setup installed:
+    /// its install asks Windows for admin rights, so never on its own).
+    Ready,
+    /// To get by hand.
+    Available,
 }
 
 #[derive(Debug, Clone)]
@@ -39,22 +51,30 @@ pub enum Msg {
     Link(String),
     /// "Open release page" / "Release page".
     Page,
+    /// "Install now" (`Card::ready`): the App runs the waiting update.
+    Install,
 }
 
 impl Card {
     /// After an update to `version`.
     pub fn installed(version: &str, notes: &str, url: &str) -> Card {
         let title = format!("What's new in OpenCircle {version}");
-        Card::new(title, notes, url, true)
+        Card::new(title, notes, url, Stage::Installed)
+    }
+
+    /// `version` is downloaded and verified; it installs when the user says so.
+    pub fn ready(version: &str, notes: &str, url: &str) -> Card {
+        let title = format!("OpenCircle {version} is ready to install");
+        Card::new(title, notes, url, Stage::Ready)
     }
 
     /// `version` is out, but this install updates by hand (deb, rpm, a failed swap).
     pub fn available(version: &str, notes: &str, url: &str) -> Card {
         let title = format!("OpenCircle {version} is available");
-        Card::new(title, notes, url, false)
+        Card::new(title, notes, url, Stage::Available)
     }
 
-    fn new(title: String, notes: &str, url: &str, installed: bool) -> Card {
+    fn new(title: String, notes: &str, url: &str, stage: Stage) -> Card {
         let mut lines = parse_notes(notes);
         if lines.is_empty() {
             lines = parse_notes("See the release page for what changed.");
@@ -63,7 +83,7 @@ impl Card {
             title,
             lines,
             url: url.to_string(),
-            installed,
+            stage,
         }
     }
 
@@ -102,13 +122,18 @@ pub fn view(c: &Card, radius: f32) -> Element<'_, Msg> {
             .into(),
         }
     });
-    let (glyph, main, other) = match c.installed {
-        true => (
+    let (glyph, main, other) = match c.stage {
+        Stage::Installed => (
             Icon::Check,
             ("Get started", Msg::Close),
             ("Release page", Msg::Page),
         ),
-        false => (
+        Stage::Ready => (
+            Icon::Download,
+            ("Install now", Msg::Install),
+            ("Later", Msg::Close),
+        ),
+        Stage::Available => (
             Icon::Download,
             ("Open release page", Msg::Page),
             ("Later", Msg::Close),
@@ -169,6 +194,25 @@ mod tests {
         assert!(matches!(at(100.0, 34.0)[..], [Msg::Drag]));
         let bottom = size.height - 22.0 - 22.0;
         assert!(matches!(at(150.0, bottom)[..], [Msg::Page]));
+        assert!(matches!(at(size.width - 40.0, bottom)[..], [Msg::Close]));
+    }
+
+    /// An installed copy's update waits for the user: "Install now" asks for it.
+    #[test]
+    fn the_ready_card_installs_only_when_asked() {
+        let c = Card::ready("9.9.9", NOTES, "https://e.x/r");
+        let texts = shot::texts(view(&c, RADIUS));
+        for want in [
+            "OpenCircle 9.9.9 is ready to install",
+            "Install now",
+            "Later",
+        ] {
+            assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+        }
+        let size = c.size();
+        let at = |x: f32, y: f32| shot::click(view(&c, RADIUS), size, iced::Point::new(x, y));
+        let bottom = size.height - 22.0 - 22.0;
+        assert!(matches!(at(100.0, bottom)[..], [Msg::Install]));
         assert!(matches!(at(size.width - 40.0, bottom)[..], [Msg::Close]));
     }
 

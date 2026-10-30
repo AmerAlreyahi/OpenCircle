@@ -6,6 +6,9 @@
 //! which installs it when nothing is open (`install`): swap the file, run the new one
 //! once (`--version`), relaunch it, exit. The new process confirms the update at
 //! start (`confirm`: notes card) or rolls it back if it cannot start (`roll_back`).
+//! A copy our setup installed (Program Files: the user can't write it) gets the
+//! release's setup instead, offered on the update card; "Install now" runs it
+//! elevated and quiet (`run_setup`), and it starts the new version (#151).
 //! deb / rpm / source builds can't replace themselves: `Event::Manual` (notes card
 //! with the release page). Failures are logged, never shown, unless the user asked
 //! (Settings > Check now: `Event::Status`).
@@ -16,7 +19,7 @@ pub use release::version;
 mod swap;
 pub(crate) mod verify;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -132,11 +135,22 @@ impl Setup {
             return None;
         }
         Some(Setup {
+            key: key(url.is_some()),
             url: url.unwrap_or_else(|| LATEST_URL.into()),
             current,
             install: Install::detect(),
-            key: verify::RELEASE_PUBLIC_KEY,
         })
+    }
+}
+
+/// The key releases must be signed with. Only for the test hook (`hook`) may a build
+/// trust a throwaway key instead, and only one given at BUILD time
+/// (`OPENCIRCLE_TEST_RELEASE_KEY`, a VM test build's fake releases): release.yml never
+/// sets it, so a published copy trusts `RELEASE_PUBLIC_KEY` alone, hook or not.
+fn key(hook: bool) -> &'static str {
+    match option_env!("OPENCIRCLE_TEST_RELEASE_KEY") {
+        Some(test) if hook && !test.is_empty() => test,
+        _ => verify::RELEASE_PUBLIC_KEY,
     }
 }
 
@@ -164,10 +178,14 @@ fn check(
         return format!("OpenCircle {current} is up to date");
     }
     let version = release.tag_name.trim_start_matches('v').to_string();
-    if handled.as_deref() == Some(version.as_str()) {
-        return format!("OpenCircle {version} is waiting to install");
-    }
     let install = &setup.install;
+    if handled.as_deref() == Some(version.as_str()) {
+        // kept staged (never downloaded again): the UI holds it
+        return match install {
+            Install::Setup(_) => format!("OpenCircle {version} is ready: choose Install now"),
+            _ => format!("OpenCircle {version} is waiting to install"),
+        };
+    }
     let manual = |handled: &mut Option<String>| {
         *handled = Some(version.clone());
         let _ = tx.unbounded_send(Trigger::Update(Event::Manual {
@@ -194,9 +212,14 @@ fn check(
         Ok(staged) => {
             *handled = Some(version.clone());
             let _ = tx.unbounded_send(Trigger::Update(Event::Ready(staged)));
-            format!(
-                "OpenCircle {version} is downloaded and verified: it installs when OpenCircle is not in use"
-            )
+            match install {
+                Install::Setup(_) => {
+                    format!("OpenCircle {version} is downloaded and verified: choose Install now")
+                }
+                _ => format!(
+                    "OpenCircle {version} is downloaded and verified: it installs when OpenCircle is not in use"
+                ),
+            }
         }
         Err(e) if e == "no download for this system" => manual(handled),
         Err(e) => {
@@ -227,15 +250,98 @@ fn remove_stale_downloads() {
 /// Installs a verified update now (call only while OpenCircle is idle): swaps the
 /// file, runs the new one once, writes the marker and starts it. `Ok` = the caller
 /// exits now. On `Err` everything is as before.
+/// A copy installed by the setup (`Install::Setup`) runs the release's setup instead:
+/// call it only when the user chose Install (it asks Windows for admin rights).
 pub fn install(staged: &Staged) -> Result<(), String> {
-    let result = install_at(staged, &swap::Marker::path().ok_or("no data folder")?);
+    let marker = swap::Marker::path().ok_or("no data folder")?;
+    if let Install::Setup(_) = staged.install {
+        // the setup runs from the staged folder: kept (a declined prompt can be
+        // retried); the next start's `remove_stale_downloads` takes it
+        return run_setup(staged, &marker, elevate);
+    }
+    let result = install_at(staged, &marker);
     let _ = std::fs::remove_dir_all(&staged.dir);
     result
+}
+
+/// What the setup is told: install quietly, then start the app (`setup::Silent`).
+pub const SETUP_ARGS: &str = "/quiet /launch";
+
+/// Runs the verified setup with `run` (elevated: one UAC prompt). The marker is
+/// written first so the new version shows its notes; `Err` (the prompt declined,
+/// the file changed) = nothing changed, the staged file stays for another try.
+/// `Ok` = the caller exits now: the setup quits a still-running OpenCircle anyway
+/// before Windows Installer replaces its files, and starts the new one after.
+fn run_setup(
+    staged: &Staged,
+    marker_path: &Path,
+    run: impl FnOnce(&Path, &str) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let Install::Setup(exe) = &staged.install else {
+        return Err("not installed by the setup".into());
+    };
+    // held open, writing and deleting shared with no one, until the setup has started:
+    // only the verified bytes can run
+    let mut open = std::fs::OpenOptions::new();
+    open.read(true);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::share_mode(&mut open, 1); // FILE_SHARE_READ
+    let file = open.open(&staged.file).map_err(|e| e.to_string())?;
+    if verify::sha256(&file).ok() != Some(staged.sha256) {
+        return Err("the file changed after it was verified".into());
+    }
+    let marker = swap::Marker {
+        version: staged.version.clone(),
+        target: exe.clone(),
+        backup: PathBuf::new(), // nothing to roll back: Windows Installer does that
+        notes: staged.notes.clone(),
+        url: staged.url.clone(),
+    };
+    marker.write(marker_path).map_err(|e| e.to_string())?;
+    let hex: String = staged.sha256.iter().map(|b| format!("{b:02x}")).collect();
+    let args = format!("{SETUP_ARGS} {}{hex}", crate::setup::SHA256_ARG);
+    if let Err(e) = run(&staged.file, &args) {
+        let _ = std::fs::remove_file(marker_path);
+        return Err(format!("the setup did not start: {e}"));
+    }
+    drop(file);
+    crate::log!(
+        "[opencircle] update {}: the setup runs, restarting",
+        staged.version
+    );
+    Ok(())
+}
+
+/// Starts `exe` with `args` as administrator (`ShellExecuteEx` "runas": the UAC
+/// prompt). Returns once it started, or the prompt was declined (`ERROR_CANCELLED`).
+#[cfg(windows)]
+fn elevate(exe: &Path, args: &str) -> std::io::Result<()> {
+    use windows::Win32::UI::Shell::{SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW};
+    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+    use windows::core::{HSTRING, PCWSTR, w};
+    let (file, params) = (HSTRING::from(exe.as_os_str()), HSTRING::from(args));
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC,
+        lpVerb: w!("runas"),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: PCWSTR(params.as_ptr()),
+        nShow: SW_HIDE.0,
+        ..Default::default()
+    };
+    // SAFETY: `info` and the strings it points to live through the call.
+    unsafe { ShellExecuteExW(&mut info) }.map_err(std::io::Error::from)
+}
+
+#[cfg(not(windows))]
+fn elevate(_: &Path, _: &str) -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
 }
 
 fn install_at(staged: &Staged, marker_path: &Path) -> Result<(), String> {
     let target = match &staged.install {
         Install::Exe(p) | Install::AppImage(p) => p,
+        Install::Setup(_) => return Err("this install updates through its setup".into()),
         Install::Manual => return Err("this install updates by hand".into()),
     };
     let backup = swap::replace(target, &staged.file, &staged.sha256)
@@ -348,7 +454,7 @@ pub fn wait_for_old(running: impl Fn() -> bool) -> bool {
 /// At start: an update that is waiting to be confirmed is confirmed (the old
 /// program goes). Returns its notes card: version, notes, release page.
 pub fn confirm() -> Option<(String, String, String)> {
-    let marker = swap::confirm(&swap::Marker::path()?)?;
+    let marker = swap::confirm(&swap::Marker::path()?, env!("CARGO_PKG_VERSION"))?;
     crate::log!("[opencircle] update {}: running", marker.version);
     // The old process may still be exiting (Windows locks a running exe).
     let backup = marker.backup.clone();
@@ -379,6 +485,9 @@ mod tests {
     use release::tests::{release, server};
     use verify::tests::SIG;
 
+    /// `check` stages into the one real update folder: one test at a time.
+    static STAGE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn events(rx: &mut fmpsc::UnboundedReceiver<Trigger>) -> Vec<Event> {
         std::iter::from_fn(|| rx.try_recv().ok())
             .filter_map(|t| match t {
@@ -399,6 +508,7 @@ mod tests {
 
     #[test]
     fn a_check_hands_over_once_per_version() {
+        let _stage = STAGE.lock().unwrap_or_else(|e| e.into_inner());
         let (tx, mut rx) = fmpsc::unbounded();
         let fake = server(&release("v9.9.9"), SIG);
         let exe = setup(
@@ -497,6 +607,102 @@ mod tests {
                 "kept until confirmed"
             );
             let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// An installed copy (#151: Program Files can't be swapped): the setup runs
+    /// elevated with the verified bytes only; declined = nothing changed, kept.
+    #[test]
+    fn an_installed_copy_runs_its_verified_setup_and_a_declined_prompt_changes_nothing() {
+        use std::cell::RefCell;
+        let dir = release::tests::temp("setup");
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("update.json");
+        let setup_exe = dir.join("OpenCircle-Setup-9.9.9-x64.exe");
+        std::fs::write(&setup_exe, b"setup").unwrap();
+        let staged = Staged {
+            version: "9.9.9".into(),
+            file: setup_exe.clone(),
+            sha256: verify::sha256(&b"setup"[..]).unwrap(),
+            dir: dir.clone(),
+            install: Install::Setup(r"C:\Program Files\OpenCircle\opencircle.exe".into()),
+            notes: "## New".into(),
+            url: "https://example.test/r".into(),
+        };
+        // the user says No to Windows' prompt
+        let ran = RefCell::new(Vec::new());
+        let declined = run_setup(&staged, &marker, |exe, args| {
+            ran.borrow_mut().push((exe.to_path_buf(), args.to_string()));
+            Err(std::io::Error::other(
+                "The operation was canceled by the user.",
+            ))
+        });
+        assert!(declined.unwrap_err().contains("canceled"));
+        assert!(!marker.exists(), "no notes promised");
+        assert!(setup_exe.exists(), "kept for another try");
+        // Yes: the verified file runs quietly and starts the app after; the marker
+        // makes the new version show its notes
+        run_setup(&staged, &marker, |exe, args| {
+            ran.borrow_mut().push((exe.to_path_buf(), args.to_string()));
+            Ok(())
+        })
+        .unwrap();
+        let hex: String = staged.sha256.iter().map(|b| format!("{b:02x}")).collect();
+        let expected = (setup_exe.clone(), format!("/quiet /launch /sha256={hex}"));
+        assert_eq!(*ran.borrow(), [expected.clone(), expected]);
+        let m = swap::Marker::read(&marker).unwrap();
+        assert_eq!((m.version.as_str(), m.notes.as_str()), ("9.9.9", "## New"));
+        assert_eq!(m.backup, PathBuf::new(), "nothing for roll_back to move");
+        // changed after it was verified: never runs
+        std::fs::remove_file(&marker).unwrap();
+        std::fs::write(&setup_exe, b"evil").unwrap();
+        let err = run_setup(&staged, &marker, |_, _| panic!("must not run")).unwrap_err();
+        assert!(err.contains("changed after"), "{err}");
+        assert!(!marker.exists());
+        // and the swap never touches an installed copy
+        assert!(install_at(&staged, &marker).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The setup asset needs the same signed checksum as every download.
+    #[test]
+    fn an_installed_copy_takes_the_setup_only_when_it_is_signed() {
+        let _stage = STAGE.lock().unwrap_or_else(|e| e.into_inner());
+        let (tx, mut rx) = fmpsc::unbounded();
+        let mut r = release("v9.9.9");
+        r.assets.push(release::Asset {
+            name: "OpenCircle-Setup-9.9.9-x64.exe".into(),
+            browser_download_url: "https://example.test/dl/OpenCircle-Setup-9.9.9-x64.exe".into(),
+            size: 1,
+        });
+        let mut fake = server(&r, SIG);
+        fake.files.insert(
+            "https://example.test/dl/OpenCircle-Setup-9.9.9-x64.exe".into(),
+            (200, b"setup".to_vec()),
+        );
+        let installed = setup(
+            Install::Setup("C:/Program Files/OpenCircle/opencircle.exe".into()),
+            verify::tests::TEST_KEY,
+        );
+        // the signed checksums don't list this setup: refused, nothing handed over
+        let status = check(&fake, &installed, &mut Memo::default(), &mut None, &tx);
+        assert!(status.contains("could not be verified"), "{status}");
+        assert!(events(&mut rx).is_empty());
+        // a wrong key: the same
+        let wrong = setup(
+            Install::Setup("C:/Program Files/OpenCircle/opencircle.exe".into()),
+            verify::tests::WRONG_KEY,
+        );
+        let status = check(&fake, &wrong, &mut Memo::default(), &mut None, &tx);
+        assert!(status.contains("could not be verified"), "{status}");
+        assert!(events(&mut rx).is_empty());
+    }
+
+    #[test]
+    fn a_test_key_needs_the_test_hook() {
+        assert_eq!(key(false), verify::RELEASE_PUBLIC_KEY);
+        if option_env!("OPENCIRCLE_TEST_RELEASE_KEY").is_none() {
+            assert_eq!(key(true), verify::RELEASE_PUBLIC_KEY);
         }
     }
 

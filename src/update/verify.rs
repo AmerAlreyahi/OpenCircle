@@ -43,7 +43,7 @@ pub fn sum_for(sums: &str, name: &str) -> Option<[u8; 32]> {
     })
 }
 
-fn parse_hex(hex: &str) -> Option<[u8; 32]> {
+pub fn parse_hex(hex: &str) -> Option<[u8; 32]> {
     if hex.len() != 64 {
         return None;
     }

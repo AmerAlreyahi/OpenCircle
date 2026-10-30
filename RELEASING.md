@@ -33,6 +33,13 @@ and signs everything and creates a **draft**; it never publishes.
    users install: the previous Setup exe (installed in Program Files, run as a
    normal user) and the previous portable exe. Pass = each one ends on the new
    version, starts and shows the notes. Any failure: no publish.
+   Script: `scripts/update-gate.ps1` (run elevated in the test machine's desktop):
+   `gh release download v<prev> -p "OpenCircle-Setup-*" -p "*-x64-portable.exe" -D prev`,
+   `gh release download v<new> -D draft`, then
+   `update-gate.ps1 -Previous prev -New draft [-Notes notes.md] [-Shots shots]`; it prints
+   PASS / FAIL per install kind and exits non-zero on any FAIL. A Setup install of a
+   version before 0.1.2 can't update itself (#151: it can't write Program Files); from
+   0.1.2 on it offers "Install now" (one admin prompt), which the script clicks and approves.
 10. **Publish by hand.** The owner reads the draft and presses Publish.
 11. **Post-release check** (on the test machine):
     - Install the previous version, let it auto-update to the new one, check

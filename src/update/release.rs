@@ -77,6 +77,10 @@ pub fn is_newer(release: &Release, current: &str) -> bool {
 pub enum Install {
     /// Windows: this exe is replaced by the release's portable exe.
     Exe(PathBuf),
+    /// Windows, installed by our setup (the MSI, per machine: Program Files, which
+    /// the user can't write): the release's setup exe runs `/quiet`, elevated, once
+    /// the user chooses Install (`update::install`). The path is this exe.
+    Setup(PathBuf),
     /// Linux AppImage (`$APPIMAGE`): the file is replaced.
     AppImage(PathBuf),
     /// deb, rpm, a source build: no self-replace (no root); notify + release page.
@@ -87,7 +91,11 @@ impl Install {
     /// This process's install kind.
     pub fn detect() -> Install {
         if cfg!(windows) {
-            return std::env::current_exe().map_or(Install::Manual, Install::Exe);
+            return match std::env::current_exe() {
+                Ok(exe) if by_setup(&exe, setup_folder().as_deref()) => Install::Setup(exe),
+                Ok(exe) => Install::Exe(exe),
+                Err(_) => Install::Manual,
+            };
         }
         match std::env::var_os("APPIMAGE") {
             Some(p) if !p.is_empty() && Path::new(&p).is_absolute() => Install::AppImage(p.into()),
@@ -96,12 +104,74 @@ impl Install {
     }
 }
 
+/// `exe` sits in the folder our MSI installed to (`folder`: the `InstallLocation` of
+/// its Apps & features entry). Why this and not "the folder can't be written": an MSI
+/// copy must update through Windows Installer (its version, repair and uninstall stay
+/// right) wherever it is, and a portable copy is never taken for one.
+pub fn by_setup(exe: &Path, folder: Option<&str>) -> bool {
+    let tidy = |p: &str| {
+        p.trim()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase()
+    };
+    // as text (Windows paths, tested on every OS)
+    let exe = exe.to_string_lossy().replace('/', "\\");
+    match (exe.rsplit_once('\\').map(|(dir, _)| dir), folder) {
+        (Some(dir), Some(folder)) if !tidy(folder).is_empty() => tidy(dir) == tidy(folder),
+        _ => false,
+    }
+}
+
+/// `InstallLocation` of the Apps & features entry our MSI writes
+/// (`HKLM\...\Uninstall\OpenCircle`, assets/installer/main.wxs).
+#[cfg(windows)]
+fn setup_folder() -> Option<String> {
+    use windows::Win32::System::Registry::{
+        HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+    };
+    use windows::core::w;
+    let mut buf = [0u16; 1024];
+    let mut bytes = std::mem::size_of_val(&buf) as u32;
+    // SAFETY: plain registry query into a buffer of `bytes` bytes.
+    let e = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            w!(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\OpenCircle"),
+            w!("InstallLocation"),
+            RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        )
+    };
+    let len = (bytes as usize / 2).min(buf.len());
+    (e.0 == 0).then(|| {
+        String::from_utf16_lossy(&buf[..len])
+            .trim_end_matches('\0')
+            .into()
+    })
+}
+
+#[cfg(not(windows))]
+fn setup_folder() -> Option<String> {
+    None
+}
+
 /// The asset that updates `install` on `arch` (`std::env::consts::ARCH`), named as
 /// release.yml names them: `OpenCircle-<ver>-x64-portable.exe` since #55, before
 /// that `OpenCircle_<ver>_x64-portable.exe` (accepted for one more release;
 /// release.yml also ships that copy once, for 0.1.0's updater, which knows only it).
+/// A copy installed by the setup takes `OpenCircle-Setup-<ver>-x64.exe` (no arm setup).
 pub fn pick<'a>(assets: &'a [Asset], install: &Install, arch: &str) -> Option<&'a Asset> {
     let endings: &[&str] = match (install, arch) {
+        (Install::Setup(_), "x86_64") => {
+            return (assets.iter()).find(|a| {
+                a.name.starts_with("OpenCircle-Setup-")
+                    && a.name.ends_with("-x64.exe")
+                    && !a.name.contains('/')
+            });
+        }
         (Install::Exe(_), "x86_64") => &["-x64-portable.exe", "_x64-portable.exe"],
         (Install::Exe(_), "aarch64") => &["-arm64-portable.exe", "_arm64-portable.exe"],
         (Install::AppImage(_), "x86_64") => &["_x86_64.AppImage"],
@@ -591,6 +661,60 @@ pub(crate) mod tests {
         let installers = named(&["OpenCircle-Setup-9.9.9-x64.exe", "OpenCircle-9.9.9-x64.msi"]);
         assert_eq!(picked(&installers, "x86_64"), None, "never an installer");
         assert_eq!(picked(&new, "aarch64"), None, "no arm build");
+    }
+
+    /// #151: a copy our setup installed takes the setup, a portable copy the portable
+    /// exe, never the other's (and never the old packager's `_x64-setup.exe`).
+    #[test]
+    fn an_installed_copy_takes_the_setup_and_a_portable_one_the_exe() {
+        let mut r = release("v9.9.9");
+        let named = |n: &str| Asset {
+            name: n.into(),
+            browser_download_url: format!("{BASE}{n}"),
+            size: 1,
+        };
+        let setup = Install::Setup(r"C:\Program Files\OpenCircle\opencircle.exe".into());
+        let picked =
+            |r: &Release, i: &Install, arch| pick(&r.assets, i, arch).map(|a| a.name.clone());
+        assert_eq!(
+            picked(&r, &setup, "x86_64"),
+            None,
+            "no setup of ours: notify"
+        );
+        r.assets.push(named("OpenCircle-Setup-9.9.9-x64.exe"));
+        r.assets.push(named("OpenCircle-9.9.9-x64-portable.exe"));
+        assert_eq!(
+            picked(&r, &setup, "x86_64").as_deref(),
+            Some("OpenCircle-Setup-9.9.9-x64.exe")
+        );
+        assert_eq!(picked(&r, &setup, "aarch64"), None, "no arm setup");
+        let exe = Install::Exe(r"D:\Tools\opencircle.exe".into());
+        assert_eq!(
+            picked(&r, &exe, "x86_64").as_deref(),
+            Some("OpenCircle-9.9.9-x64-portable.exe")
+        );
+    }
+
+    /// Installed by our setup = this exe is in the folder its Apps & features entry names.
+    #[test]
+    fn a_copy_in_the_msi_folder_is_the_installed_one() {
+        let exe = Path::new(r"C:\Program Files\OpenCircle\opencircle.exe");
+        for folder in [
+            r"C:\Program Files\OpenCircle\",
+            r"c:\program files\opencircle",
+            "C:/Program Files/OpenCircle/",
+        ] {
+            assert!(by_setup(exe, Some(folder)), "{folder}");
+        }
+        assert!(
+            !by_setup(exe, Some(r"D:\Apps\OpenCircle\")),
+            "another folder"
+        );
+        assert!(!by_setup(exe, Some(r"C:\Program Files\")), "a parent only");
+        assert!(!by_setup(exe, Some("  ")));
+        assert!(!by_setup(exe, None), "no MSI install: portable");
+        let portable = Path::new(r"C:\Users\u\Downloads\OpenCircle-0.1.2-x64-portable.exe");
+        assert!(!by_setup(portable, Some(r"C:\Program Files\OpenCircle\")));
     }
 
     /// Beta channel: a `vX.Y.Z-beta.N` pre-release must never reach a stable user.

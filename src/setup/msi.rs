@@ -32,6 +32,10 @@ pub struct Package {
 
 impl Package {
     pub fn write(bytes: &[u8]) -> io::Result<Package> {
+        if !super::elevated() {
+            // an admin never deletes in a folder the user controls (a planted link)
+            remove_left_behind(&std::env::temp_dir(), STALE);
+        }
         let dir = std::env::temp_dir().join(format!("OpenCircle-Setup-{}", std::process::id()));
         std::fs::create_dir(&dir)?; // fails if it exists: never someone else's folder
         let path = dir.join(format!("OpenCircle-{}-x64.msi", env!("CARGO_PKG_VERSION")));
@@ -46,6 +50,35 @@ impl Package {
             dir,
             lock: Some(lock),
         })
+    }
+}
+
+/// A setup's folder older than this is no running setup's.
+const STALE: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// The folders of setups that never got to delete theirs (killed, the PC turned
+/// off mid-install: `Drop` never ran) in `temp`, untouched for `stale`. A running
+/// setup's is younger, and its open MSI could not be deleted anyway.
+fn remove_left_behind(temp: &std::path::Path, stale: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(temp) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let ours = (entry.file_name().to_str()).is_some_and(|n| {
+            n.strip_prefix("OpenCircle-Setup-")
+                .is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()))
+        });
+        let old = (entry.metadata().and_then(|m| m.modified()))
+            .is_ok_and(|t| t.elapsed().is_ok_and(|age| age > stale));
+        // a real folder, never a link or junction (followed, it would delete elsewhere)
+        if ours
+            && old
+            && entry
+                .file_type()
+                .is_ok_and(|t| t.is_dir() && !t.is_symlink())
+        {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
     }
 }
 
@@ -548,6 +581,37 @@ mod tests {
             r#"INSTALLDIR="C:\Program Files\OpenCircle\""#
         );
         assert!(command_line(r"C:\x\", true).ends_with(" REINSTALL=ALL REINSTALLMODE=amus"));
+    }
+
+    /// A killed setup's folder (seen on the VM: two from 2026-10-27) goes at the next
+    /// setup's start; a fresh one (a setup running now) and other folders stay.
+    #[test]
+    fn a_killed_setups_folder_goes_at_the_next_start() {
+        let temp = std::env::temp_dir().join(format!("oc-setup-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        let names = ["OpenCircle-Setup-348", "OpenCircle-Setup-x", "Other-1"];
+        for n in names {
+            std::fs::create_dir_all(temp.join(n)).unwrap();
+            std::fs::write(temp.join(n).join("a.msi"), b"msi").unwrap();
+        }
+        remove_left_behind(&temp, std::time::Duration::from_secs(3600));
+        assert!(temp.join(names[0]).exists(), "a running setup's: young");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        remove_left_behind(&temp, std::time::Duration::ZERO);
+        assert!(!temp.join(names[0]).exists(), "left behind: gone");
+        assert!(temp.join(names[1]).exists() && temp.join(names[2]).exists());
+        // a link with our name (planted, pointing elsewhere): never followed
+        #[cfg(unix)]
+        {
+            let elsewhere = temp.join("elsewhere");
+            std::fs::create_dir_all(&elsewhere).unwrap();
+            std::fs::write(elsewhere.join("keep"), b"x").unwrap();
+            std::os::unix::fs::symlink(&elsewhere, temp.join("OpenCircle-Setup-77")).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            remove_left_behind(&temp, std::time::Duration::ZERO);
+            assert!(elsewhere.join("keep").exists());
+        }
+        let _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]

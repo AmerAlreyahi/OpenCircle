@@ -57,6 +57,10 @@ pub fn replace(target: &Path, new: &Path, sha256: &[u8; 32]) -> io::Result<PathB
 /// The old program back at `target` (the new one, maybe running, moves aside to
 /// `<target>.bad` and is deleted when it can be).
 pub fn restore(target: &Path, backup: &Path) -> io::Result<()> {
+    if !backup.is_file() {
+        // nothing to put back (a setup's update): never move the target away
+        return Err(io::ErrorKind::NotFound.into());
+    }
     let bad = sibling(target, ".bad");
     let _ = std::fs::remove_file(&bad);
     if target.exists() {
@@ -96,10 +100,19 @@ impl Marker {
 }
 
 /// The new program started: the marker and the old program go. Returns the
-/// marker (the notes to show), or `None` when no update was waiting.
-pub fn confirm(path: &Path) -> Option<Marker> {
+/// marker (the notes to show), or `None` when no update was waiting, or the one
+/// waiting is not this program's version `current` (a setup that failed or was
+/// stopped started the old one again: no "What's new" for what isn't there).
+pub fn confirm(path: &Path, current: &str) -> Option<Marker> {
     let marker = Marker::read(path)?;
     let _ = std::fs::remove_file(path);
+    if marker.version != current {
+        crate::log!(
+            "[opencircle] update {}: not installed, {current} runs",
+            marker.version
+        );
+        return None;
+    }
     // The old process may still be exiting (Windows locks a running exe): a
     // leftover `.old` is deleted by the next update.
     let _ = std::fs::remove_file(&marker.backup);
@@ -158,12 +171,18 @@ mod tests {
         let backup = replace(&target, &new, &hash).unwrap();
         marker.write(&marker_path).unwrap();
         assert_eq!(
-            confirm(&marker_path).map(|m| m.version),
+            confirm(&marker_path, "9.9.9").map(|m| m.version),
             Some("9.9.9".into())
         );
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
         assert!(!backup.exists() && !marker_path.exists());
-        assert_eq!(confirm(&marker_path), None);
+        assert_eq!(confirm(&marker_path, "9.9.9"), None);
+
+        // The setup did not install it (failed, stopped): the old version starts
+        // again and says nothing about 9.9.9; the marker goes.
+        marker.write(&marker_path).unwrap();
+        assert_eq!(confirm(&marker_path, "1.0.0"), None);
+        assert!(!marker_path.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

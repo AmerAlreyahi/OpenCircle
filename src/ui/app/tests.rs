@@ -87,6 +87,37 @@ fn an_update_waits_until_nothing_is_open() {
     assert_eq!(app.update, None, "tried once idle");
 }
 
+/// A copy the setup installed never installs by itself (its setup asks Windows for
+/// admin rights): the card offers it; a failed or declined "Install now" keeps it.
+#[test]
+fn an_installed_copys_update_waits_for_install_now() {
+    use crate::ui::screens::update_card;
+    use crate::update::{Event, Install, Staged};
+    let staged = Staged {
+        version: "9.9.9".into(),
+        file: std::env::temp_dir().join("oc-update-test-no-setup.exe"), // missing: never runs
+        sha256: [0; 32],
+        dir: std::env::temp_dir().join("oc-update-test-never-made"),
+        install: Install::Setup(r"C:\Program Files\OpenCircle\opencircle.exe".into()),
+        notes: String::new(),
+        url: String::new(),
+    };
+    let mut app = App::idle(window::Id::unique());
+    let _ = app.update(Message::Trigger(Trigger::Update(Event::Ready(
+        staged.clone(),
+    ))));
+    let _ = app.update(Message::UpdateTick);
+    assert_eq!(app.update, Some(staged.clone()), "idle, yet not on its own");
+    let _ = app.update(Message::Windows(windows::Msg::UpdateCard(
+        update_card::Msg::Install,
+    )));
+    assert_eq!(
+        app.update,
+        Some(staged),
+        "it did not run: kept for another try"
+    );
+}
+
 #[test]
 fn a_shortcut_while_open_brings_the_overlay_back_and_says_so() {
     let mut app = App::idle(window::Id::unique());

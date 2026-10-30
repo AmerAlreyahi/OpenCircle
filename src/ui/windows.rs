@@ -602,6 +602,7 @@ impl Windows {
                     update_card::Msg::Close => return close(id),
                     update_card::Msg::Link(url) => open_url(&url),
                     update_card::Msg::Page => open_url(&card.url),
+                    update_card::Msg::Install => {} // the App's (`App::install_update`)
                 }
             }
             Msg::Onboarding(onboarding::Message::Caption(caption)) => {

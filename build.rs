@@ -32,6 +32,12 @@ fn main() {
     previews();
     println!("cargo::rerun-if-changed=assets/icons/opencircle.ico");
     println!("cargo::rustc-check-cfg=cfg(setup_payload)");
+    // The DLLs the exe imports load from System32 only, never from its own folder (the
+    // setup runs elevated: a DLL planted beside it must not load, #151 review).
+    // 0x800 = LOAD_LIBRARY_SEARCH_SYSTEM32.
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo::rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
+    }
     println!("cargo::rerun-if-env-changed=OPENCIRCLE_SETUP_MSI");
     let setup = std::env::var_os("OPENCIRCLE_SETUP_MSI").map(|msi| {
         let msi = std::fs::canonicalize(&msi).expect("OPENCIRCLE_SETUP_MSI names a file");
