@@ -6,11 +6,9 @@
 //! pointer. The timer hides the overlay, counts down (menus can be opened
 //! meanwhile), then captures again. Recent (`snip.history`, off by default): the
 //! last captures, kept only in the user's data dir.
-//! Scrolling auto-scrolls and stitches on a thread (`scroll_capture`) while the
-//! overlay shrinks to a progress pill beside the area, so it isn't in the frames.
+//! Long capture: the user scrolls the page under the picked area by hand while
+//! a thread grabs and stitches it (`screens::long_capture`, `scroll::by_hand`).
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
 use iced::widget::tooltip::Position;
@@ -22,7 +20,6 @@ use super::kit::chip;
 use super::kit::icon::Icon;
 use super::kit::icon_button::{self, State, icon_button};
 use super::kit::key_hint::{self, key_hint};
-use super::kit::keycap::keycap;
 use super::kit::loupe::Loupe;
 use super::kit::surface::{self, Material, surface};
 use super::kit::text::{sub, text};
@@ -68,10 +65,11 @@ impl Kind {
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    /// Stop button or Esc while scrolling: keep what was gathered.
+    /// Long capture's Done (Enter): the stitched image opens in the editor.
     Stop,
-    /// The stitched height so far.
-    Progress(u32),
+    /// Long capture so far.
+    Progress(crate::capture::scroll::Update),
+    /// Long capture ended (Done or Cancel): the image gathered.
     Done(Result<Crop, String>),
     /// The timer: hide, wait this many seconds, capture again (0 = off).
     Delay(u8),
@@ -79,7 +77,7 @@ pub enum Msg {
     Tick(u32, u8),
     /// Countdown `.0` is over and the overlay hidden: capture now.
     Shoot(Kind),
-    /// The countdown's Cancel.
+    /// The countdown's Cancel; long capture's (Esc): back to the picked area.
     Cancel,
     /// The toast's Edit: the editor on the capture.
     Edit,
@@ -213,10 +211,10 @@ pub struct Snip {
     /// The wheel's walk from the smallest target under the pointer (the key)
     /// up to its window and the screen: how many steps up.
     walk: (Option<Rectangle>, usize),
-    /// Auto-scroll works here (not on Wayland: no synthetic input).
+    /// Long capture works here (not on Wayland: no silent grab).
     scrolls: bool,
-    /// The running scrolling capture.
-    pub scroll: Option<Scroll>,
+    /// The running long capture.
+    pub scroll: Option<crate::ui::screens::long_capture::Long>,
     /// The window the user was in (Windows): focus goes back to it while the
     /// overlay is only a pill.
     pub foreground: Option<isize>,
@@ -243,32 +241,7 @@ pub struct Snip {
     pub hinting: bool,
 }
 
-pub struct Scroll {
-    stop: Arc<AtomicBool>,
-    width: u32,
-    label: String,
-}
-
-impl Scroll {
-    /// `width` px wide; `stop` is shared with the capture thread.
-    pub fn new(width: u32, stop: Arc<AtomicBool>) -> Self {
-        Scroll {
-            stop,
-            width,
-            label: "Scrolling…".into(),
-        }
-    }
-
-    pub fn stop(&self) {
-        self.stop.store(true, Ordering::Relaxed);
-    }
-
-    pub fn progress(&mut self, height: u32) {
-        self.label = format!("Scrolling · {} × {} px", self.width, height);
-    }
-}
-
-/// The pill window's size (logical px): scrolling progress, countdown, toast.
+/// The pill window's size (logical px): countdown, toast.
 pub const PILL: Size = Size::new(500.0, 68.0);
 /// Its corners (the window is cut to them).
 pub const PILL_RADIUS: f32 = radius::WINDOW;
@@ -586,14 +559,14 @@ impl Snip {
         due
     }
 
-    /// Auto-scroll works here (the editor's Scrolling button).
+    /// Long capture works here (the toolbar's Long capture button).
     pub fn can_scroll(&self) -> bool {
         self.scrolls
     }
 
-    /// The window is only a pill now (scrolling, the timer, the toast).
+    /// The window is only a pill now (the timer, the toast).
     pub fn is_pill(&self) -> bool {
-        self.scroll.is_some() || self.countdown.is_some() || self.toast.is_some()
+        self.countdown.is_some() || self.toast.is_some()
     }
 
     /// Shows the "Copied" toast for `crop`; its number.
@@ -682,15 +655,9 @@ impl Snip {
         container(top).center_x(Fill).padding(space::PAGE[0]).into()
     }
 
-    /// When the window is only a pill (scrolling, the timer, the toast): its view.
+    /// When the window is only a pill (the timer, the toast): its view.
     pub fn pill_view(&self) -> Option<Element<'_, Msg>> {
-        let bar = if let Some(s) = &self.scroll {
-            row![
-                text(Role::NOTE, &s.label),
-                keycap("Esc"),
-                button::regular("Stop", true, Some(Msg::Stop)),
-            ]
-        } else if let Some((_, left)) = self.countdown {
+        let bar = if let Some((_, left)) = self.countdown {
             let label = match left {
                 0 => "Capturing…".to_string(),
                 n => format!("Capturing in {n} s · open a menu now"),

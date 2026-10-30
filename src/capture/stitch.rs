@@ -7,7 +7,7 @@
 //! copied from a real frame, never blended. Pure: no I/O, no platform code.
 
 /// Hard cap on the stitched height, in pixels.
-pub const MAX_HEIGHT: u32 = 30_000;
+pub const MAX_HEIGHT: u32 = 20_000;
 
 /// Pixels per signature bin. Fine enough that two text lines differing in one
 /// character differ in a bin (64 bins over the width could not tell them apart).
@@ -118,45 +118,61 @@ fn fixed_rows(a: &Rows, b: &Rows) -> Option<(usize, usize)> {
     (top + bot < h).then_some((top, bot))
 }
 
-/// Scroll offset d (at most `max_d`) such that b body row y == a body row y+d:
-/// the lowest mean row cost over b's informative rows. `Some(0)` also means
-/// "no informative rows, assume no movement"; None = no trustworthy match
-/// (animated frame, too-large step).
-fn offset(a: &Rows, b: &Rows, t: usize, h: usize, max_d: usize) -> Option<usize> {
+/// Scroll offset d (at most `max_d` either way) such that b body row y == a
+/// body row y+d: the lowest mean row cost over b's informative rows. Negative
+/// = scrolled back up: tried too, so a page of near-identical lines (a
+/// document) scrolled back is not taken for a step down by whole lines.
+/// `Some(0)` also means "no informative rows, assume no movement"; None = no
+/// trustworthy match (animated frame, too-large step).
+fn offset(a: &Rows, b: &Rows, t: usize, h: usize, max_d: usize) -> Option<isize> {
     let info: Vec<usize> = (0..h).filter(|&y| b.info[t + y]).collect();
     if info.is_empty() {
         return Some(0);
     }
     let need = MIN_MATCH.min(info.len());
-    let cost = |d: usize, y: usize| {
+    let cost = |d: isize, y: usize| {
         let still = Some(a.row(t + y));
-        bad(a.row(t + y + d), b.row(t + y), still, b.cap) as u64
+        bad(
+            a.row(t + y.wrapping_add_signed(d)),
+            b.row(t + y),
+            still,
+            b.cap,
+        ) as u64
     };
+    // b's informative rows that a overlaps at d.
+    let overlap = |d: isize| {
+        let (lo, hi) = (d.min(0).unsigned_abs(), h - d.max(0) as usize);
+        &info[info.partition_point(|&y| y < lo)..info.partition_point(|&y| y < hi)]
+    };
+    let max_d = max_d.min(h - 1) as isize;
     // Every 8th row first, to try the offsets best first: the full pass then
-    // cuts the others short. Stable sort: on a tie 0 ("did not move") wins.
-    let mut order: Vec<(u64, usize, usize)> = (0..=max_d.min(h - 1))
+    // cuts the others short. Stable sort: on a tie 0 ("did not move") wins,
+    // then down over up.
+    let mut order: Vec<(u64, isize)> = (0..=max_d)
+        .chain((1..=max_d).map(|d| -d))
         .filter_map(|d| {
-            let rows = info.partition_point(|&y| y < h - d);
-            (rows >= need).then(|| {
-                let sample = info[..rows].iter().step_by(8);
+            let rows = overlap(d);
+            (rows.len() >= need).then(|| {
+                let sample = rows.iter().step_by(8);
                 let (c, n) = sample.fold((0, 0), |(c, n), &y| (c + cost(d, y), n + 1));
-                (c * 1000 / n, rows, d)
+                (c * 1000 / n, d)
             })
         })
         .collect();
-    order.sort_by_key(|&(c, ..)| c);
+    order.sort_by_key(|&(c, _)| c);
     // (cost, rows, d): mean cost = cost / rows.
-    let mut best: Option<(u64, u64, usize)> = None;
-    for (_, rows, d) in order {
-        let limit = ACCEPT_PCT * b.cap as u64 * rows as u64;
+    let mut best: Option<(u64, u64, isize)> = None;
+    for (_, d) in order {
+        let rows = overlap(d);
+        let limit = ACCEPT_PCT * b.cap as u64 * rows.len() as u64;
         let mut sum = 0u64;
-        let beaten = info[..rows].iter().any(|&y| {
+        let beaten = rows.iter().any(|&y| {
             sum += cost(d, y);
             // Past what is accepted, or no better than the best mean: give up on d.
-            sum * 100 > limit || best.is_some_and(|(c, r, _)| sum * r >= c * rows as u64)
+            sum * 100 > limit || best.is_some_and(|(c, r, _)| sum * r >= c * rows.len() as u64)
         });
         if !beaten {
-            best = Some((sum, rows as u64, d));
+            best = Some((sum, rows.len() as u64, d));
         }
     }
     best.map(|(.., d)| d)
@@ -167,34 +183,25 @@ fn offset(a: &Rows, b: &Rows, t: usize, h: usize, max_d: usize) -> Option<usize>
 pub enum Push {
     /// The frame scrolled by this many new rows, now part of the image (the first frame: its height).
     Added(u32),
-    /// Same content as the last accepted frame: the page did not move.
+    /// Same content as the last accepted frame (the page did not move), or
+    /// part of it (scrolled back up): nothing new.
     NoMovement,
     /// Wrong size, no trustworthy match (animated or scrolled too far) or the height cap is reached.
     /// The frame is dropped and the next one is compared with the last accepted frame.
     Rejected,
 }
 
-/// Rows of one accepted frame, kept down to the frame bottom so a footer found
-/// later (the fixed-row estimate only shrinks) can still be cut off exactly.
-struct Chunk {
-    data: Vec<u8>,
-    /// Frame row where `data` starts.
-    top_row: usize,
-    /// New rows this chunk adds (the first chunk: unused).
-    d: usize,
-    /// Rows dropped from the end of the new rows by the height cap.
-    cut: usize,
-}
-
-/// Incremental stitcher: `push` frames, then `finish`.
+/// Incremental stitcher: `push` frames, then `finish`. Keeps only the image so
+/// far (`page`, down to the body's bottom in the last frame) and the last
+/// frame's footer (`foot`): a frame is freed once pushed.
 pub struct Stitcher {
     w: usize,
     h: usize,
     prev: Option<Rows>,
     /// Sticky (header, footer) rows, the minimum over every accepted moving pair.
     fixed: Option<(usize, usize)>,
-    chunks: Vec<Chunk>,
-    height: usize,
+    page: Vec<u8>,
+    foot: Vec<u8>,
 }
 
 impl Stitcher {
@@ -205,25 +212,19 @@ impl Stitcher {
             h: height as usize,
             prev: None,
             fixed: None,
-            chunks: Vec::new(),
-            height: 0,
+            page: Vec::new(),
+            foot: Vec::new(),
         }
     }
 
     /// Height of the image `finish` would return (0 before the first frame).
     pub fn height(&self) -> u32 {
-        self.height as u32
+        ((self.page.len() + self.foot.len()) / (self.w * 4).max(1)) as u32
     }
 
     /// True once the height cap is reached; further frames are rejected.
-    #[cfg(test)]
     pub fn is_full(&self) -> bool {
-        self.height >= MAX_HEIGHT as usize
-    }
-
-    /// Size of the frames this stitcher takes.
-    pub fn frame_size(&self) -> (u32, u32) {
-        (self.w as u32, self.h as u32)
+        self.height() >= MAX_HEIGHT
     }
 
     pub fn push(&mut self, rgba: &[u8]) -> Push {
@@ -233,14 +234,8 @@ impl Stitcher {
         }
         let rows = rows(rgba, self.w, self.h);
         let Some(prev) = &self.prev else {
-            self.chunks.push(Chunk {
-                data: rgba.to_vec(),
-                top_row: 0,
-                d: self.h,
-                cut: 0,
-            });
+            self.page = rgba.to_vec();
             self.prev = Some(rows);
-            self.height = self.h;
             return Push::Added(self.h as u32);
         };
         let Some((t, b)) = fixed_rows(prev, &rows) else {
@@ -252,46 +247,65 @@ impl Stitcher {
         let max_d = body * MAX_STEP_PCT / 100;
         let d = match offset(prev, &rows, top, body, max_d) {
             None => return Push::Rejected,
-            Some(0) => return Push::NoMovement,
-            Some(d) => d,
+            // scrolled back up: what it shows is in the image already
+            Some(..=0) => return Push::NoMovement,
+            Some(d) => d as usize,
         };
-        let take = d.min((MAX_HEIGHT as usize).saturating_sub(self.height));
-        if take == 0 {
+        if self.is_full() {
             return Push::Rejected;
         }
+        // The page ends at the last frame's body bottom (`old` footer rows
+        // above its end); in this frame that row is `d` higher. A footer found
+        // smaller now (`bot` < `old`) takes the rows it gave back as well, so
+        // the page has no gap. The first pair: the first frame's footer goes.
+        let old = match self.fixed {
+            Some((_, fb)) => fb,
+            None => {
+                self.page.truncate(self.page.len() - bot * stride);
+                bot
+            }
+        };
+        // ponytail: a footer shrinking by more than the step reaches into the
+        // header (`top`); clamped there, a few rows may go missing once.
+        let start = (self.h - old).saturating_sub(d).max(top);
+        let end = self.h - bot;
+        let room = (MAX_HEIGHT as usize).saturating_sub(self.page.len() / stride + bot);
+        let take = (end - start).min(room);
         self.fixed = Some((top, bot));
-        let top_row = self.h - bot - d;
-        self.chunks.push(Chunk {
-            data: rgba[top_row * stride..].to_vec(),
-            top_row,
-            d: take,
-            cut: d - take,
-        });
+        self.page
+            .extend_from_slice(&rgba[start * stride..(start + take) * stride]);
+        self.foot = rgba[end * stride..].to_vec();
         self.prev = Some(rows);
-        self.height += take;
         Push::Added(take as u32)
     }
 
-    /// The stitched RGBA image and its width and height (empty when nothing was pushed).
-    pub fn finish(self) -> (Vec<u8>, u32, u32) {
-        let Some(last) = self.chunks.last() else {
-            return (Vec::new(), self.w as u32, 0);
-        };
+    /// The bottom of the image so far: `out_w` px wide (scaled to it, as
+    /// `thumbnail` does), at most `out_h` tall; empty before the first frame.
+    pub fn tail(&self, out_w: u32, out_h: u32) -> (Vec<u8>, u32, u32) {
         let stride = self.w * 4;
-        let bot = self.fixed.map_or(0, |f| f.1);
-        let end = self.h - bot;
-        let mut out = Vec::with_capacity(self.height * stride);
-        for (i, c) in self.chunks.iter().enumerate() {
-            let (from, to) = if i == 0 {
-                (0, end)
-            } else {
-                (end - c.cut - c.d, end - c.cut)
-            };
-            out.extend_from_slice(&c.data[(from - c.top_row) * stride..(to - c.top_row) * stride]);
+        let height = self.height() as usize;
+        if height == 0 || out_w == 0 || out_h == 0 {
+            return (Vec::new(), 0, 0);
         }
-        out.extend_from_slice(&last.data[(end - last.top_row) * stride..]);
-        let height = (out.len() / stride) as u32;
-        (out, self.w as u32, height)
+        let scale = out_w as f32 / self.w as f32;
+        let rows = ((out_h as f32 / scale).ceil() as usize).min(height);
+        let mut part = Vec::with_capacity(rows * stride);
+        let from_page = rows.saturating_sub(self.foot.len() / stride);
+        part.extend_from_slice(&self.page[self.page.len() - from_page * stride..]);
+        part.extend_from_slice(&self.foot[self.foot.len() - (rows - from_page) * stride..]);
+        let Some(img) = image::RgbaImage::from_raw(self.w as u32, rows as u32, part) else {
+            return (Vec::new(), 0, 0);
+        };
+        let out_h = ((rows as f32 * scale).round() as u32).clamp(1, out_h);
+        let small = image::imageops::thumbnail(&img, out_w, out_h);
+        (small.into_raw(), out_w, out_h)
+    }
+
+    /// The stitched RGBA image and its width and height (empty when nothing was pushed).
+    pub fn finish(mut self) -> (Vec<u8>, u32, u32) {
+        let height = self.height();
+        self.page.append(&mut self.foot);
+        (self.page, self.w as u32, height)
     }
 }
 
@@ -387,6 +401,63 @@ pub(super) mod synth {
         img
     }
 
+    /// A chat: bubbles left (grey) and right (blue), a few text lines each,
+    /// on a plain background, small gaps between them.
+    pub fn chat(w: usize, h: usize, seed: u64) -> Img {
+        let mut img = Img::white(w, h);
+        img.fill(0, 0, w, h, [236, 240, 245]);
+        let mut r = Rng::new(seed);
+        let mut y = 12;
+        while y + 80 < h {
+            let mine = r.range(0, 2) == 0;
+            let lines = r.range(1, 5) as usize;
+            let bw = r.range(160, (w as u32 * 2 / 3).max(161)) as usize;
+            let bh = 16 + 20 * lines;
+            let x = if mine { w - 24 - bw } else { 24 };
+            let (bg, ink) = match mine {
+                true => ([37, 99, 235], [235, 240, 255]),
+                false => ([255, 255, 255], [40, 44, 52]),
+            };
+            img.fill(x, y, bw, bh, bg);
+            for l in 0..lines {
+                let mut cx = x + 12;
+                while cx + 20 < x + bw {
+                    let cw = r.range(3, 9) as usize;
+                    if r.range(0, 6) > 0 {
+                        img.fill(cx, y + 12 + 20 * l, cw, 10, ink);
+                    }
+                    cx += cw + 2;
+                }
+            }
+            y += bh + r.range(6, 30) as usize;
+        }
+        img
+    }
+
+    /// A document of `h / 22` lines that are the same text but for their
+    /// 3-digit number ("line 001: the quick brown fox ...").
+    pub fn document(w: usize, h: usize) -> Img {
+        let mut img = Img::white(w, h);
+        let mut r = Rng::new(99);
+        let text: Vec<(usize, usize)> = (0..60).map(|_| (r.range(3, 9) as usize, 2)).collect();
+        for (n, y) in (0..h / 22).map(|n| (n, n * 22 + 6)) {
+            // the number: one glyph per digit, its shape set by the digit
+            for (i, digit) in [n / 100, n / 10 % 10, n % 10].into_iter().enumerate() {
+                let g = 30 + digit as u8 * 20;
+                img.fill(20 + i * 9, y + digit % 4, 7, 10 - digit % 4, [g, g, g]);
+            }
+            let mut x = 60;
+            for &(cw, gap) in &text {
+                img.fill(x, y, cw, 10, [40, 40, 40]);
+                x += cw + gap + 1;
+                if x + 20 > w {
+                    break;
+                }
+            }
+        }
+        img
+    }
+
     /// A page behind a viewport with sticky header (60 px) and footer (40 px).
     pub struct Rig {
         pub page: Img,
@@ -401,6 +472,16 @@ pub(super) mod synth {
                 page: page(w, page_h, seed, max_blank),
                 header: page(w, 60, seed + 1, 20),
                 footer: page(w, 40, seed + 2, 20),
+                vh,
+            }
+        }
+        /// `page` behind the viewport, with a sticky header and footer.
+        pub fn with(page: Img, vh: usize, seed: u64) -> Self {
+            let w = page.w;
+            Rig {
+                page,
+                header: super::synth::page(w, 60, seed + 1, 20),
+                footer: super::synth::page(w, 40, seed + 2, 20),
                 vh,
             }
         }
@@ -493,6 +574,113 @@ mod tests {
             let rig = Rig::new(W, 6000, VH, seed, 150);
             assert_exact(&rig, &random_steps(seed, 100, 421, 40));
         }
+    }
+
+    /// Stitches the frames at scroll positions `at` (any order, repeats).
+    fn stitch_at(rig: &Rig, at: &[usize]) -> (Vec<u8>, u32, u32) {
+        let fr: Vec<Img> = at.iter().map(|&s| rig.frame(s)).collect();
+        stitch(&fr.iter().collect::<Vec<_>>())
+    }
+
+    /// By hand at ~15 fps: small steps, many frames that did not move.
+    fn by_hand(seed: u64, n: usize) -> Vec<usize> {
+        let mut r = Rng::new(seed);
+        (0..n)
+            .map(|_| match r.range(0, 3) {
+                0 => 0,
+                _ => r.range(1, 120) as usize,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn small_steps_by_hand_have_no_seams() {
+        for seed in 1..=3 {
+            // long blank runs: a footer first guessed too tall
+            let rig = Rig::new(W, 6000, VH, seed, 150);
+            assert_exact(&rig, &by_hand(seed, 160));
+        }
+    }
+
+    #[test]
+    fn scrolling_back_up_never_duplicates() {
+        let rig = Rig::new(W, 6000, VH, 5, 40);
+        // down, back up (twice, past the start), down again past where it was
+        let mut at = vec![0, 100, 200, 300, 400, 500];
+        at.extend([450, 380, 300, 200, 100, 0, 0, 60, 120]);
+        at.extend((0..60).map(|i| 180 + i * 90));
+        let (px, w, h) = stitch_at(&rig, &at);
+        let truth = rig.truth(*at.last().unwrap());
+        assert_eq!((w as usize, h as usize), (truth.w, truth.h));
+        assert!(px == truth.px, "scrolling back left a repeat or a gap");
+    }
+
+    #[test]
+    fn a_chat_with_its_title_and_composer_is_seamless() {
+        let rig = Rig::with(synth::chat(W, 7000, 3), VH, 3);
+        assert_exact(&rig, &by_hand(8, 200));
+        assert_exact(&rig, &random_steps(8, 60, 500, 30));
+    }
+
+    #[test]
+    fn a_document_of_near_identical_lines_is_seamless() {
+        // Only the line numbers differ: every other row matches 22 px away.
+        let rig = Rig::with(synth::document(W, 6600), VH, 4);
+        assert_exact(&rig, &by_hand(9, 200));
+        let mut at = vec![0, 66, 132, 88, 44, 132, 198];
+        at.extend((0..60).map(|i| 264 + i * 110));
+        let (px, _, h) = stitch_at(&rig, &at);
+        let truth = rig.truth(*at.last().unwrap());
+        assert_eq!(h as usize, truth.h);
+        assert!(px == truth.px);
+    }
+
+    #[test]
+    fn only_the_image_so_far_is_kept() {
+        // 10,000 px of a 780 px wide page by hand: one copy of it plus one
+        // frame, never a copy per frame (frames are freed once stitched).
+        let rig = Rig::new(W, 10_100, VH, 6, 40);
+        let mut st = Stitcher::new(W as u32, VH as u32);
+        let mut s = 0;
+        while s < rig.max_scroll() {
+            st.push(&rig.frame(s).px);
+            s += 37;
+        }
+        let image = st.height() as usize * W * 4;
+        let kept = st.page.capacity() + st.foot.capacity();
+        assert!(st.height() > 10_000);
+        assert!(
+            kept <= 2 * image,
+            "{kept} bytes kept for a {image} byte image"
+        );
+    }
+
+    #[test]
+    fn the_tail_is_the_newest_rows_scaled_to_the_width() {
+        let rig = Rig::new(W, 6000, VH, 7, 40);
+        let mut st = Stitcher::new(W as u32, VH as u32);
+        assert_eq!(st.tail(390, 300).1, 0, "nothing yet");
+        for s in [0, 300, 600] {
+            st.push(&rig.frame(s).px);
+        }
+        let (px, w, h) = st.tail(390, 300);
+        assert_eq!((w, h, px.len()), (390, 300, 390 * 300 * 4));
+        // its last row: the footer's last, halved
+        let truth = rig.truth(600);
+        let last = &truth.px[(truth.h - 1) * W * 4..];
+        let full = image::RgbaImage::from_raw(W as u32, 1, last.to_vec()).unwrap();
+        let want = image::imageops::thumbnail(&full, 390, 1).into_raw();
+        let got = &px[299 * 390 * 4..];
+        let off = got
+            .iter()
+            .zip(&want)
+            .filter(|(a, b)| a.abs_diff(**b) > 40)
+            .count();
+        assert!(off < 390, "{off} channels off");
+        // a short image comes whole
+        let mut st = Stitcher::new(W as u32, VH as u32);
+        st.push(&rig.frame(0).px);
+        assert_eq!(st.tail(390, 5000).2, 350);
     }
 
     #[test]
@@ -617,7 +805,8 @@ mod tests {
         assert_eq!(st.push(&fr[0].px), Push::Added(VH as u32));
         assert_eq!(st.push(&garbage.px), Push::Rejected);
         assert_eq!(st.push(&fr[1].px), Push::Added(300));
-        assert_eq!(st.push(&fr[2].px), Push::Added(300));
+        // (300 new rows, and the rows a footer guessed too tall gives back)
+        assert!(matches!(st.push(&fr[2].px), Push::Added(300..)));
         assert_eq!(st.push(&[0; 10]), Push::Rejected); // wrong size
         let (px, _, h) = st.finish();
         assert_eq!(h as usize, rig.truth(600).h);

@@ -316,9 +316,9 @@ fn build(
     );
     at.push((Menu::Board, x));
     let scrolling = if e.scroll {
-        "Scrolling capture: scrolls the page under this area and stitches it"
+        "Long capture: scroll the page under this area yourself; it is stitched"
     } else {
-        "Scrolling capture: only when snipping a window"
+        "Long capture: only when snipping"
     };
     rest.push(
         hinted(
@@ -484,8 +484,8 @@ fn build_snip(
     }
     rest.push(divide(), bar::DIVIDER);
     let long = match e.scroll {
-        true => "Long capture: scrolls the page under the area and stitches it",
-        false => "Long capture: only when snipping a window",
+        true => "Long capture: scroll the page under the area yourself; it is stitched",
+        false => "Long capture: only when snipping",
     };
     let s = state(false, &Message::Scroll);
     rest.push(

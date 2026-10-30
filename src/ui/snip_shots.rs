@@ -1,4 +1,4 @@
-//! The snip capture flow's screens (N-73 states 1-6) drawn as the overlay
+//! The snip capture flow's screens (N-73 states 1-7) drawn as the overlay
 //! draws them, over a synthetic desktop, against golden images
 //! (`tests/fixtures/screens/snip-<state>-<theme>@1x.png`, Sapphire + Daylight;
 //! `OPENCIRCLE_UPDATE_GOLDEN=1` writes them anew). `OPENCIRCLE_RENDER_DIR`
@@ -7,11 +7,17 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
 use super::app::App;
+use super::app::message::Message;
 use super::app::tests::snipping_on;
 use super::frame_times::frames;
 use super::kit::testing::golden;
 use super::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 use super::overlay::Event;
+use super::screens::long_capture;
+use super::snip;
+use crate::actions::Crop;
+use crate::capture::scroll::Update;
+use crate::capture::stitch::MAX_HEIGHT;
 use crate::editor::Message as E;
 
 const W: u32 = 1280;
@@ -139,7 +145,41 @@ fn states() -> Vec<(&'static str, App)> {
     let _ = app.on_editor(E::Focus(true));
     let _ = app.on_editor(E::Focus(true));
     out.push(("6b-tab", app));
+    // 7: long capture: started (the hint), going (the preview), at the limit
+    out.push(("7a-long-start", long(0, false)));
+    out.push(("7b-long", long(3240, false)));
+    out.push(("7c-long-limit", long(MAX_HEIGHT, true)));
     out
+}
+
+/// Long capture from the picked area, after `height` px (none: just
+/// started); its preview is the area's picture, scaled as the thread does.
+fn long(height: u32, full: bool) -> App {
+    let mut app = picked();
+    let picture = app.crop().unwrap();
+    let _ = app.on_editor(E::Scroll);
+    if height == 0 {
+        return app;
+    }
+    let card = long_capture::layout(AREA, app.o.screen).card.unwrap();
+    let view = long_capture::viewport(card);
+    let page = ::image::RgbaImage::from_raw(picture.width, picture.height, picture.rgba).unwrap();
+    let small = ::image::imageops::thumbnail(&page, view.width as u32, view.height as u32 / 2);
+    let preview = Crop {
+        width: small.width(),
+        height: small.height(),
+        rgba: small.into_raw(),
+    };
+    let update = Update {
+        height,
+        full,
+        lost: false,
+        preview: Some(preview),
+    };
+    let opening = app.opening;
+    let _ = app.update(Message::Snip(snip::Msg::Progress(update)));
+    let _ = app.update(Message::Snip(snip::Msg::HintGone(opening)));
+    app
 }
 
 fn shoot(name: &str, app: &mut App) -> Result<(), String> {
@@ -156,7 +196,33 @@ fn shoot(name: &str, app: &mut App) -> Result<(), String> {
     golden::compare("screens", &format!("{name}@1x"), W, H, rgba)
 }
 
-/// States 1-6 in Sapphire and Daylight.
+/// Long capture's toolbar, Latin and Arabic (the app has no Arabic UI yet:
+/// the screens above are Latin), going and at the limit, both themes.
+#[test]
+fn the_long_capture_toolbar_mirrors() {
+    let mut failed = Vec::new();
+    let size = long_capture::BAR;
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        themes::set(theme);
+        for (name, height, full, rtl) in [
+            ("ltr", 3240, false, false),
+            ("rtl", 3240, false, true),
+            ("limit-rtl", MAX_HEIGHT, true, true),
+        ] {
+            let view = long_capture::toolbar(height, full, false, rtl);
+            let px = super::kit::testing::shot::render(view, size.width as u32, size.height as u32);
+            let name = format!("snip-7-toolbar-{name}-{}@1x", theme.id);
+            if golden::enabled() {
+                let (w, h) = (size.width as u32, size.height as u32);
+                failed.extend(golden::compare("screens", &name, w, h, &px).err());
+            }
+        }
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// States 1-7 in Sapphire and Daylight.
 #[test]
 fn the_snip_screens_match_their_golden_images() {
     let mut failed = Vec::new();

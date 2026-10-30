@@ -160,10 +160,8 @@ impl App {
                 Task::none()
             }
             Message::Escape if self.o.is_none() => Task::none(),
-            Message::Escape if let Some(scroll) = self.scroll() => {
-                scroll.stop(); // what was gathered opens in the editor
-                Task::none()
-            }
+            // long capture's Esc is its Cancel: back to the picked area
+            Message::Escape if self.scroll().is_some() => self.on_snip(snip::Msg::Cancel),
             // The editor has its own Esc (finish typing, close the picker, back).
             Message::Escape if self.o.edit.as_ref().is_some_and(Editing::is_open) => Task::none(),
             Message::Escape if std::env::var_os(TEST_SHOT).is_some() => self.test_shot(),

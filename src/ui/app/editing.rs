@@ -10,7 +10,6 @@ use crate::labs::{self};
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::kit::motion;
 use crate::ui::screens::editor::Editing;
-use crate::ui::snip;
 
 use super::capture::TEST_SHOT;
 use super::{App, work_area};
@@ -167,8 +166,8 @@ impl App {
         Task::batch([self.close(), pinned])
     }
 
-    /// The running scrolling capture.
-    pub(in crate::ui) fn scroll(&self) -> Option<&snip::Scroll> {
+    /// The running long capture.
+    pub(in crate::ui) fn scroll(&self) -> Option<&crate::ui::screens::long_capture::Long> {
         match &self.o.purpose {
             Purpose::Snip(snip) => snip.scroll.as_ref(),
             _ => None,

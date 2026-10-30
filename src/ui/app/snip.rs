@@ -1,4 +1,4 @@
-//! Snip mode: its pill, timer, capture routing and scrolling capture.
+//! Snip mode: its pill, timer, capture routing and long capture.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -15,8 +15,8 @@ use crate::labs::{self};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
-use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::editor::Editing;
+use crate::ui::screens::long_capture;
 use crate::ui::{snip, windows};
 
 use super::{ASK_MARGIN, App, work_area};
@@ -38,34 +38,49 @@ impl App {
         };
         match msg {
             snip::Msg::Stop => {
-                if let Some(scroll) = &snip.scroll {
-                    scroll.stop();
+                if let Some(long) = &snip.scroll {
+                    long.stop();
                 }
                 Task::none()
             }
-            snip::Msg::Progress(height) => {
-                if let Some(scroll) = &mut snip.scroll {
-                    scroll.progress(height);
+            snip::Msg::Cancel if snip.scroll.is_some() => {
+                if let Some(long) = &mut snip.scroll {
+                    long.cancelled = true;
+                    long.stop();
+                }
+                Task::none()
+            }
+            snip::Msg::Progress(update) => {
+                if let Some(long) = &mut snip.scroll {
+                    long.update(update);
                 }
                 Task::none()
             }
             snip::Msg::Done(stitched) => {
-                snip.scroll = None;
-                let visible = windows::hide_from_capture(self.overlay, false).map(Message::Windows);
+                let Some(long) = snip.scroll.take() else {
+                    return Task::none();
+                };
+                // whole again, and in screenshots again
+                let whole = windows::uncut(self.overlay)
+                    .chain(windows::hide_from_capture(self.overlay, false))
+                    .map(Message::Windows);
+                let crop = match stitched {
+                    Ok(crop) if crop.height > 0 && !long.cancelled => crop,
+                    Err(e) => {
+                        crate::log!("long capture failed: {e}");
+                        return whole.chain(self.open_editor()); // back to the picked area
+                    }
+                    _ => return whole.chain(self.open_editor()),
+                };
+                crate::history::recent::remember(&crop);
                 self.o.selection = None;
                 self.o.stroke.clear();
-                let next = match stitched {
-                    Ok(crop) if crop.height > 0 => self.snip_captured(Some(crop), true),
-                    Ok(_) => Task::none(),
-                    Err(e) => {
-                        crate::log!("scrolling capture failed: {e}");
-                        Task::none()
-                    }
+                // Done opens the editor on it (no editor in Labs: copied)
+                let route = match self.o.labs.has(labs::Feature::Editor) {
+                    true => (false, true),
+                    false => (true, false),
                 };
-                if self.snip_pill() {
-                    return visible.chain(next); // the toast keeps the window small
-                }
-                visible.chain(next).chain(self.show())
+                whole.chain(self.snip_routed(crop, false, route))
             }
             snip::Msg::Delay(secs) => {
                 let Some(id) = snip.delay(secs) else {
@@ -340,10 +355,17 @@ impl App {
         }
     }
 
-    /// Auto-scrolls and stitches `area` on a thread. The overlay shrinks to the
-    /// progress pill beside the area, so it is in none of the frames.
+    /// Long capture of `area` (its part on this screen): the area is cut out
+    /// of the overlay, so the user scrolls the app under it by hand, and a
+    /// thread grabs and stitches it (`scroll::by_hand`) until Done or Cancel.
+    /// What is grabbed lies inside the hole; only when the toolbar has to sit
+    /// over the area (an area as big as the screen) is the overlay kept out of
+    /// captures (`hide_from_capture`).
     pub(in crate::ui) fn start_scroll(&mut self, area: Rectangle) -> Task<Message> {
         let o = &*self.o;
+        let Some(area) = area.intersection(&Rectangle::with_size(o.screen)) else {
+            return Task::none();
+        };
         let Some(image::Handle::Rgba { width, height, .. }) = &o.frame else {
             return Task::none();
         };
@@ -351,36 +373,50 @@ impl App {
             return Task::none();
         };
         let at = |v: f32, offset: u32| (v * o.scale).round() as i32 + offset as i32;
-        let mut region = (at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0);
-        // across screens: the area in desktop px
-        if self.spans(area)
-            && let Some([a0, b0, a1, b1]) = self.desk_bounds(area)
-        {
-            region = (a0, b0, (a1 - a0) as u32, (b1 - b0) as u32);
-        }
+        let region = (at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0);
+        let layout = long_capture::layout(area, o.screen);
+        let preview = layout.card.map_or((0, 0), |card| {
+            let view = long_capture::viewport(card);
+            (
+                (view.width * o.scale) as u32,
+                (view.height * o.scale) as u32,
+            )
+        });
+        let (overlay, scale, opening) = (self.overlay, o.scale, self.opening);
         let o = &mut *self.o;
         let Purpose::Snip(snip) = &mut o.purpose else {
             return Task::none();
         };
         let stop = Arc::new(AtomicBool::new(false));
-        snip.scroll = Some(snip::Scroll::new(region.2, stop.clone()));
+        snip.scroll = Some(long_capture::Long::new(area, stop.clone()));
+        snip.hinting = true;
+        o.stroke.clear(); // its outline is long capture's (dashed)
         let work = background(move |tx| {
-            // Let the window shrink first.
+            // Let the window be cut first.
             std::thread::sleep(Duration::from_millis(150));
-            let progress = |height| {
-                let _ = tx.unbounded_send(snip::Msg::Progress(height));
+            let each = |update| {
+                let _ = tx.unbounded_send(snip::Msg::Progress(update));
             };
-            let stitched = crate::capture::scroll::scroll_capture(region, &stop, progress);
+            let stitched = crate::capture::scroll::by_hand(region, preview, &stop, each);
             let _ = tx.unbounded_send(snip::Msg::Done(stitched));
         })
         .map(Message::Snip);
-        // An area as tall as the screen leaves the pill over it: it is kept out of
-        // the frames (`hide_from_capture`, Windows; elsewhere it stays beside the area).
-        let at = bar::place(area, snip::PILL, self.o.screen);
-        self.pill_window(at)
-            .chain(windows::hide_from_capture(self.overlay, true).map(Message::Windows))
-            .chain(window::gain_focus(self.overlay))
-            .chain(work)
+        let hint = background(|tx| {
+            std::thread::sleep(Duration::from_secs(snip::HINT_SECS));
+            let _ = tx.unbounded_send(());
+        })
+        .map(move |()| Message::Snip(snip::Msg::HintGone(opening)));
+        // the toolbar stays where it is over an area that fills the screen
+        let keep = Some(layout.bar).filter(|bar| bar.intersects(&area));
+        let cut = windows::hide_from_capture(overlay, keep.is_some())
+            .chain(windows::hole(
+                overlay,
+                area,
+                keep.into_iter().collect(),
+                scale,
+            ))
+            .map(Message::Windows);
+        Task::batch([cut.chain(work), hint])
     }
 }
 

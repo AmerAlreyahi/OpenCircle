@@ -55,13 +55,6 @@ pub fn can_hide_windows() -> bool {
     true
 }
 
-/// An X11 display with no Wayland socket: XTest input reaches every window
-/// (into XWayland it never reaches native Wayland windows).
-#[cfg(target_os = "linux")]
-pub fn x11_only() -> bool {
-    std::env::var_os("DISPLAY").is_some() && std::env::var_os("WAYLAND_DISPLAY").is_none()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

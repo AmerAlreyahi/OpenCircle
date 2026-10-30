@@ -26,7 +26,7 @@ use super::{settings, shape, theme, update_card};
 pub use super::platform::windows::CLEARED;
 pub use super::platform::windows::{
     POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, forget,
-    hide_from_capture, is_floating, opacity, reshape, screen, setup_window, uncut,
+    hide_from_capture, hole, is_floating, opacity, reshape, screen, setup_window, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::config::{self, Config, Theme};

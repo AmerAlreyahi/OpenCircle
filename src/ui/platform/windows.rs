@@ -308,6 +308,37 @@ pub fn hide_from_capture<T: Send + 'static>(id: window::Id, on: bool) -> Task<T>
     .discard()
 }
 
+/// The full-screen overlay with `hole` (logical px, `scale` physical px per
+/// logical) cut out of it but for `keep` (its bars there): clicks and the
+/// wheel in the hole reach the app under it (Snip's long capture). `uncut`
+/// makes it whole again.
+pub fn hole<T: Send + 'static>(
+    id: window::Id,
+    hole: iced::Rectangle,
+    keep: Vec<iced::Rectangle>,
+    scale: f32,
+) -> Task<T> {
+    forget_floating(id);
+    // outward to whole px, as `actions::crop_bounds`: what is grabbed is in the hole
+    let px = move |r: iced::Rectangle| {
+        let (x0, y0) = ((r.x * scale).floor() as i32, (r.y * scale).floor() as i32);
+        let (x1, y1) = (
+            ((r.x + r.width) * scale).ceil() as i32,
+            ((r.y + r.height) * scale).ceil() as i32,
+        );
+        (x0, y0, (x1 - x0).max(0) as u32, (y1 - y0).max(0) as u32)
+    };
+    window::run(id, move |w| {
+        let keep: Vec<_> = keep.into_iter().map(px).collect();
+        if let Ok(handle) = w.window_handle()
+            && let Err(e) = super::shape::hole(handle.as_raw(), px(hole), &keep)
+        {
+            crate::log!("[opencircle] window shape: {e}");
+        }
+    })
+    .discard()
+}
+
 /// Whole again (and not floating): the overlay is going full-screen.
 pub fn uncut<T: Send + 'static>(id: window::Id) -> Task<T> {
     forget_floating(id);

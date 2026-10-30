@@ -836,6 +836,44 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
     let _ = app.update(Message::Editor(editor::Message::Scroll));
     assert!(app.o.edit.is_none(), "the editor steps aside");
     assert!(app.scroll().is_some(), "scrolling and stitching has begun");
+    assert!(
+        !app.snip_pill(),
+        "the overlay stays: the area is cut out of it"
+    );
+    // the rest of the overlay is still: no new pick, no hover outline
+    let _ = app.on_overlay(overlay::Event::Press {
+        at: Point::new(600.0, 500.0),
+        shift: false,
+    });
+    assert_eq!(app.o.selection.map(|s| s.area), Some(area));
+    // Esc is Cancel: once the thread hands over, back to the picked area
+    let _ = app.update(Message::Escape);
+    assert!(app.scroll().is_some_and(|l| l.cancelled));
+    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(Crop {
+        width: 300,
+        height: 900,
+        rgba: vec![255; 300 * 900 * 4],
+    }))));
+    assert!(app.scroll().is_none());
+    assert!(
+        app.o.edit.as_ref().is_some_and(|e| e.editor.movable),
+        "picked again"
+    );
+    // Done (Enter): the stitched image opens in the editor, fitted
+    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let _ = app.on_overlay(overlay::Event::Enter);
+    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(Crop {
+        width: 300,
+        height: 900,
+        rgba: vec![255; 300 * 900 * 4],
+    }))));
+    assert!(app.scroll().is_none() && app.o.selection.is_none());
+    let edit = app
+        .o
+        .edit
+        .as_ref()
+        .expect("the editor on the stitched image");
+    assert!(!edit.editor.movable, "the image, not the area");
     // no auto-scroll here (Wayland) or no snip (Edit in place): the button is dimmed
     let mut app = open_app(800, 600, 1.0);
     app.select(area);

@@ -1,239 +1,57 @@
-//! Auto-scroll for scrolling capture: one wheel injection per platform plus the
-//! pure capture loop that drives it.
+//! Long capture by hand (N-73 point 5): the user scrolls the page under a
+//! picked area themselves (wheel, scrollbar, keys); this grabs only that area,
+//! about 15 times a second while there is input, and stitches what passes
+//! through it (`stitch.rs`) until Done. Nothing is injected: no auto-scroll,
+//! so elevated windows (UIPI) work too.
 //!
-//! Windows: `SendInput` mouse wheel (needs the target not to be elevated, UIPI
-//! drops input to elevated windows silently). X11: XTest buttons 4/5. Wayland
-//! forbids synthetic input: `Unsupported`, the UI falls back to manual scrolling.
+//! Windows grabs the area alone with GDI (`BitBlt` from the screen; our own
+//! windows are kept out with `hide_from_capture`), and only while the user is
+//! giving input or the area still moves (`GetLastInputInfo`): a still screen
+//! costs nothing. X11 grabs the monitor and cuts the area. Wayland has no
+//! silent grab: not offered there (`available`).
 
-use std::cell::Cell;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use super::stitch::{MAX_HEIGHT, Push, Stitcher};
+use super::stitch::{Push, Stitcher};
 use crate::actions::Crop;
 
-/// Scrolls the content under the pointer at `at` (physical desktop pixels) by
-/// `notches` wheel notches: positive scrolls down (towards the end of the page),
-/// negative up. Moves the pointer to `at` first.
-#[cfg(windows)]
-pub fn scroll_once(at: (i32, i32), notches: i32) -> io::Result<()> {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+/// Time between two grabs (~15 fps).
+const PERIOD: Duration = Duration::from_millis(66);
+/// Grabs go on this long after the last input or the last change in the area
+/// (a smooth scroll finishing, a page loading under it).
+const SETTLE: Duration = Duration::from_secs(1);
+/// Unmatched frames in a row after which the user is told to scroll back:
+/// the page jumped further than one area's height between two grabs.
+const LOST_AFTER: u32 = 3;
+/// The preview is made at most this often.
+const PREVIEW_EVERY: Duration = Duration::from_millis(200);
 
-    // SAFETY: plain Win32 calls with valid, fully initialised arguments.
-    unsafe { SetCursorPos(at.0, at.1) }.map_err(io::Error::other)?;
-    // Wheel: positive delta is away from the user (up), so down is negative.
-    let delta = (if notches > 0 { -120i32 } else { 120 }) as u32;
-    let wheel = INPUT {
-        r#type: INPUT_MOUSE,
-        Anonymous: INPUT_0 {
-            mi: MOUSEINPUT {
-                dx: 0,
-                dy: 0,
-                mouseData: delta,
-                dwFlags: MOUSEEVENTF_WHEEL,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    // One SendInput per notch, a beat apart: in one batch, Notepad applied only
-    // some of the notches (2 of 7) while our window had the focus.
-    for i in 0..notches.unsigned_abs().min(100) {
-        if i > 0 {
-            std::thread::sleep(Duration::from_millis(15));
-        }
-        // SAFETY: a valid one-element slice of INPUT and its matching size.
-        if unsafe { SendInput(&[wheel], size_of::<INPUT>() as i32) } != 1 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    Ok(())
+/// What the capture has so far, sent after each change.
+#[derive(Clone)]
+pub struct Update {
+    /// The stitched height, physical px.
+    pub height: u32,
+    /// The height limit is reached: nothing more is added.
+    pub full: bool,
+    /// The page moved too far between two grabs to match: scroll back a little.
+    pub lost: bool,
+    /// The newest rows, scaled to the preview's size (when they changed).
+    pub preview: Option<Crop>,
 }
 
-#[cfg(target_os = "linux")]
-pub fn scroll_once(at: (i32, i32), notches: i32) -> io::Result<()> {
-    use xcb::xtest::FakeInput;
-
-    const BUTTON_PRESS: u8 = 4;
-    const BUTTON_RELEASE: u8 = 5;
-    const MOTION_NOTIFY: u8 = 6;
-
-    // XTest into XWayland never reaches native Wayland windows.
-    if !crate::sys::session::x11_only() {
-        return Err(io::Error::from(io::ErrorKind::Unsupported));
-    }
-    let (conn, screen) =
-        xcb::Connection::connect_with_extensions(None, &[xcb::Extension::Test], &[])
-            .map_err(io::Error::other)?;
-    let root = conn
-        .get_setup()
-        .roots()
-        .nth(screen as usize)
-        .ok_or_else(|| io::Error::other("no X11 screen"))?
-        .root();
-    let fake = |ty: u8, detail: u8, x: i16, y: i16| FakeInput {
-        r#type: ty,
-        detail,
-        time: 0,
-        root,
-        root_x: x,
-        root_y: y,
-        deviceid: 0,
-    };
-    let clamp = |v: i32| v.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-    conn.send_and_check_request(&fake(MOTION_NOTIFY, 0, clamp(at.0), clamp(at.1)))
-        .map_err(io::Error::other)?;
-    let button = if notches > 0 { 5 } else { 4 }; // 4 = wheel up, 5 = wheel down
-    for _ in 0..notches.unsigned_abs().min(100) {
-        conn.send_request(&fake(BUTTON_PRESS, button, 0, 0));
-        conn.send_request(&fake(BUTTON_RELEASE, button, 0, 0));
-    }
-    conn.flush().map_err(io::Error::other)
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-pub fn scroll_once(_at: (i32, i32), _notches: i32) -> io::Result<()> {
-    Err(io::Error::from(io::ErrorKind::Unsupported))
-}
-
-/// Tuning of [`run`].
-pub struct Params {
-    /// Pause before each settle check and between two of them.
-    pub poll: Duration,
-    /// Settle checks per scroll before the latest frame is taken as it is
-    /// (animated pages never hold still). `poll * settle_tries` is the timeout.
-    pub settle_tries: u32,
-    /// Consecutive rejected frames after which the run gives up.
-    pub max_rejects: u32,
-    /// Notches for the first scroll; later ones are tuned to half a viewport.
-    pub first_notches: i32,
-    /// Settle checks that must pass with the frame still as before the scroll
-    /// before that counts as "did not move": the target may repaint late.
-    pub quiet_tries: u32,
-}
-
-impl Default for Params {
-    fn default() -> Self {
-        Params {
-            poll: Duration::from_millis(80),
-            settle_tries: 25,
-            max_rejects: 4,
-            first_notches: 3,
-            quiet_tries: 4,
-        }
+impl std::fmt::Debug for Update {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Update({} px, full {}, lost {})",
+            self.height, self.full, self.lost
+        )
     }
 }
 
-/// Why [`run`] returned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Stop {
-    /// Two settled frames in a row without movement: the end of the page.
-    EndOfPage,
-    /// The stitcher reached `MAX_HEIGHT`.
-    Cap,
-    /// The stop flag was set.
-    Cancelled,
-    /// `max_rejects` frames in a row could not be matched (video, animation, jumpy page).
-    Unmatched,
-}
-
-/// Captures until two consecutive captures are identical (the page stopped
-/// moving), or `settle_tries` checks passed, then returns the latest capture.
-/// While the frame still equals `before` (the frame before the scroll), it
-/// keeps waiting for `quiet_tries` checks: the target may not have repainted yet.
-fn settle(
-    capture: &mut impl FnMut() -> io::Result<Vec<u8>>,
-    stop: &AtomicBool,
-    p: &Params,
-    before: Option<&[u8]>,
-) -> io::Result<Vec<u8>> {
-    // The first pause lets the scroll start: capturing at once would see the old page twice.
-    std::thread::sleep(p.poll);
-    let mut prev = capture()?;
-    for i in 0..p.settle_tries {
-        if stop.load(Ordering::Relaxed) {
-            break;
-        }
-        std::thread::sleep(p.poll);
-        let next = capture()?;
-        if next == prev && (before != Some(&next[..]) || i + 1 >= p.quiet_tries) {
-            return Ok(next);
-        }
-        prev = next;
-    }
-    Ok(prev)
-}
-
-/// Scrolls and captures into `st` until the end of the page, the height cap, a
-/// stop request or too many unmatched frames. `capture` returns one RGBA frame
-/// of the stitcher's size, `scroll(notches)` scrolls down, `progress` gets the
-/// stitched height after each added frame. `st` keeps everything gathered, so a
-/// cancelled run can still be finished.
-pub fn run(
-    st: &mut Stitcher,
-    mut capture: impl FnMut() -> io::Result<Vec<u8>>,
-    mut scroll: impl FnMut(i32) -> io::Result<()>,
-    stop: &AtomicBool,
-    p: &Params,
-    mut progress: impl FnMut(u32),
-) -> io::Result<Stop> {
-    let mut last = settle(&mut capture, stop, p, None)?;
-    if st.push(&last) == Push::Rejected {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "frame does not match the stitcher size",
-        ));
-    }
-    let (mut notches, mut per_notch, mut still, mut rejects) = (p.first_notches.max(1), 0f32, 0, 0);
-    loop {
-        if stop.load(Ordering::Relaxed) {
-            return Ok(Stop::Cancelled);
-        }
-        if st.height() >= MAX_HEIGHT {
-            return Ok(Stop::Cap);
-        }
-        scroll(notches)?;
-        let frame = settle(&mut capture, stop, p, Some(&last))?;
-        match st.push(&frame) {
-            Push::Added(px) => {
-                (still, rejects) = (0, 0);
-                // Pixels per notch depend on the app and the system, and a notch
-                // can get lost: trust the largest step seen (a short step is safe,
-                // one past the overlap is not).
-                per_notch = per_notch.max(px as f32 / notches as f32);
-                let target = (st.frame_size().1 / 2) as f32;
-                notches = ((target / per_notch).round() as i32).clamp(1, 40);
-                progress(st.height());
-            }
-            Push::NoMovement => {
-                (still, rejects) = (still + 1, 0);
-                if still >= 2 {
-                    return Ok(Stop::EndOfPage);
-                }
-            }
-            Push::Rejected => {
-                (still, rejects) = (0, rejects + 1);
-                if rejects >= p.max_rejects {
-                    return Ok(Stop::Unmatched);
-                }
-                // Most likely scrolled past the overlap: go back, take smaller steps.
-                scroll(-notches)?;
-                notches = (notches / 2).max(1);
-                continue;
-            }
-        }
-        last = frame;
-    }
-}
-
-/// Test hook: a tall PNG stands in for the scrolled page (WSLg/CI can't scroll).
-const TEST_SCROLL: &str = "OPENCIRCLE_TEST_SCROLL";
-
-/// Auto-scroll can run: synthetic wheel input works (not on native Wayland).
+/// Long capture can run: the area can be grabbed silently (not on Wayland).
 pub fn can_scroll() -> bool {
     #[cfg(target_os = "linux")]
     if super::wayland_session() {
@@ -242,57 +60,33 @@ pub fn can_scroll() -> bool {
     true
 }
 
-/// Auto-scrolls `region` (physical desktop px: x, y, width, height) and stitches
-/// it until the end of the page, the height cap or `stop`. Blocking: run it on a
-/// thread. `progress` gets the stitched height after each new frame.
-pub fn scroll_capture(
+/// Grabs `region` (physical desktop px: x, y, width, height) while the user
+/// scrolls, until `stop`; `each` gets every change, with a `preview` of the
+/// newest rows at most that size (physical px). Blocking: run it on a thread.
+/// The image gathered so far is returned also when a later grab fails.
+pub fn by_hand(
     region: (i32, i32, u32, u32),
+    preview: (u32, u32),
     stop: &AtomicBool,
-    progress: impl FnMut(u32),
+    each: impl FnMut(Update),
 ) -> Result<Crop, String> {
-    let (x, y, w, h) = region;
-    if let Some(path) = std::env::var_os(TEST_SCROLL) {
-        let page = super::from_png(&path)?;
-        let fake = FakePage::new(page.rgba, page.width, page.height);
-        let params = Params {
-            poll: std::time::Duration::from_millis(30),
-            ..Params::default()
-        };
-        return gather(
-            w,
-            h,
-            || fake.frame(w, h),
-            |n| fake.scroll(n, h),
-            stop,
-            &params,
-            progress,
-        );
-    }
-    let centre = (x + w as i32 / 2, y + h as i32 / 2);
-    let grab = || {
-        let frame = super::monitor_of(Some(region)).map_err(io::Error::other)?;
-        let crop = cut(&frame.rgba, frame.width, (x - frame.x, y - frame.y), (w, h));
-        crop.ok_or_else(|| io::Error::other("the area left the monitor"))
-    };
-    let scroll = |n| scroll_once(centre, n);
-    gather(w, h, grab, scroll, stop, &Params::default(), progress)
-}
-
-/// The capture loop over any source; a failed or stopped run keeps what it gathered.
-fn gather(
-    w: u32,
-    h: u32,
-    grab: impl FnMut() -> io::Result<Vec<u8>>,
-    scroll: impl FnMut(i32) -> io::Result<()>,
-    stop: &AtomicBool,
-    params: &Params,
-    progress: impl FnMut(u32),
-) -> Result<Crop, String> {
-    let mut st = Stitcher::new(w, h);
-    match run(&mut st, grab, scroll, stop, params, progress) {
-        Ok(reason) => crate::log!("[opencircle] scrolling capture: {reason:?}"),
+    let mut st = Stitcher::new(region.2, region.3);
+    let grab = || grab_area(region);
+    let started = Instant::now();
+    match run(&mut st, grab, idle_for, stop, PERIOD, preview, each) {
+        Ok(times) => crate::log!(
+            "[opencircle] long capture: {} px in {} s; {} grabs, {:.1} ms each; {} stitched, {:.1} ms each; {} previews, {:.1} ms each",
+            st.height(),
+            started.elapsed().as_secs(),
+            times.grabs,
+            times.grab.as_secs_f64() * 1000.0 / f64::from(times.grabs.max(1)),
+            times.pushes,
+            times.push.as_secs_f64() * 1000.0 / f64::from(times.pushes.max(1)),
+            times.previews,
+            times.preview.as_secs_f64() * 1000.0 / f64::from(times.previews.max(1)),
+        ),
         Err(e) if st.height() == 0 => return Err(e.to_string()),
-        Err(e) => crate::log!("[opencircle] scrolling capture stopped early: {e}"),
+        Err(e) => crate::log!("[opencircle] long capture stopped early: {e}"),
     }
     let (rgba, width, height) = st.finish();
     Ok(Crop {
@@ -302,7 +96,181 @@ fn gather(
     })
 }
 
+/// How long the grabs and the stitching took (the log line).
+#[derive(Debug, Default)]
+struct Times {
+    grabs: u32,
+    grab: Duration,
+    /// Frames handed to the stitcher (new ones: an unchanged frame is not)
+    /// and the time it took.
+    pushes: u32,
+    push: Duration,
+    previews: u32,
+    preview: Duration,
+}
+
+/// The grab loop over any source: `grab` returns one RGBA frame of the
+/// stitcher's size, `idle` the time since the user's last input. Grabs every
+/// `period` while there was input or a change within `SETTLE`, and never the
+/// same frame twice into the stitcher. Returns how long it all took.
+fn run(
+    st: &mut Stitcher,
+    mut grab: impl FnMut() -> io::Result<Vec<u8>>,
+    mut idle: impl FnMut() -> Duration,
+    stop: &AtomicBool,
+    period: Duration,
+    (pw, ph): (u32, u32),
+    mut each: impl FnMut(Update),
+) -> io::Result<Times> {
+    let mut times = Times::default();
+    let mut last: Option<Vec<u8>> = None;
+    let mut changed = Instant::now();
+    let (mut rejects, mut lost, mut full) = (0, false, false);
+    // the preview: rows added since it was last made, and when that was
+    let (mut stale, mut shown) = (false, None::<Instant>);
+    while !stop.load(Ordering::Relaxed) {
+        let start = Instant::now();
+        let busy = last.is_none() || idle() < SETTLE || changed.elapsed() < SETTLE;
+        let mut news = false;
+        if busy && !full {
+            let frame = grab()?;
+            times.grabs += 1;
+            times.grab += start.elapsed();
+            if last.as_deref() != Some(&frame[..]) {
+                changed = Instant::now();
+                let push = st.push(&frame);
+                times.pushes += 1;
+                times.push += changed.elapsed();
+                rejects = match push {
+                    Push::Rejected => rejects + 1,
+                    _ => 0,
+                };
+                let added = matches!(push, Push::Added(_));
+                full = st.is_full();
+                news = added || lost != (rejects >= LOST_AFTER);
+                lost = rejects >= LOST_AFTER;
+                stale |= added;
+                last = Some(frame);
+            }
+        }
+        // (a preview a few times a second is enough to look alive)
+        let due = stale && shown.is_none_or(|t| t.elapsed() >= PREVIEW_EVERY);
+        if news || due {
+            let made = Instant::now();
+            let preview = due.then(|| {
+                let (rgba, width, height) = st.tail(pw, ph);
+                Crop {
+                    width,
+                    height,
+                    rgba,
+                }
+            });
+            if due {
+                (stale, shown) = (false, Some(made));
+                times.previews += 1;
+                times.preview += made.elapsed();
+            }
+            each(Update {
+                height: st.height(),
+                full,
+                lost,
+                preview,
+            });
+        }
+        std::thread::sleep(period.saturating_sub(start.elapsed()));
+    }
+    Ok(times)
+}
+
+/// Time since the user's last keyboard or mouse input (any app). Elsewhere
+/// than Windows: none known, always "just now".
+fn idle_for() -> Duration {
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::SystemInformation::GetTickCount;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+        let mut info = LASTINPUTINFO {
+            cbSize: size_of::<LASTINPUTINFO>() as u32,
+            dwTime: 0,
+        };
+        // SAFETY: `info` is ours, its size set as the call needs.
+        if unsafe { GetLastInputInfo(&mut info) }.as_bool() {
+            // SAFETY: no arguments.
+            let now = unsafe { GetTickCount() };
+            return Duration::from_millis(now.wrapping_sub(info.dwTime).into());
+        }
+    }
+    Duration::ZERO
+}
+
+/// The area alone, from the screen as shown (GDI; windows that keep out of
+/// captures, ours among them, are not in it), RGBA.
+#[cfg(windows)]
+fn grab_area((x, y, w, h): (i32, i32, u32, u32)) -> io::Result<Vec<u8>> {
+    use windows::Win32::Graphics::Gdi::{
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
+        DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SRCCOPY, SelectObject,
+    };
+    let (wi, hi) = (w as i32, h as i32);
+    let mut px = vec![0u8; w as usize * h as usize * 4];
+    let mut info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: wi,
+            biHeight: -hi, // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // SAFETY: plain GDI calls on handles made here and released before
+    // returning; `px` holds exactly `h` top-down rows of 32-bit pixels.
+    let lines = unsafe {
+        let screen = GetDC(None);
+        let mem = CreateCompatibleDC(Some(screen));
+        let bitmap = CreateCompatibleBitmap(screen, wi, hi);
+        let old = SelectObject(mem, bitmap.into());
+        let copied = BitBlt(mem, 0, 0, wi, hi, Some(screen), x, y, SRCCOPY);
+        SelectObject(mem, old);
+        let lines = match copied {
+            Ok(()) => GetDIBits(
+                mem,
+                bitmap,
+                0,
+                h,
+                Some(px.as_mut_ptr().cast()),
+                &mut info,
+                DIB_RGB_COLORS,
+            ),
+            Err(_) => 0,
+        };
+        let _ = DeleteObject(bitmap.into());
+        let _ = DeleteDC(mem);
+        ReleaseDC(None, screen);
+        lines
+    };
+    if lines != hi {
+        return Err(io::Error::other("the area could not be grabbed"));
+    }
+    for p in px.as_chunks_mut::<4>().0 {
+        *p = [p[2], p[1], p[0], 255]; // BGRx -> RGBA
+    }
+    Ok(px)
+}
+
+/// The area cut out of its monitor's capture.
+#[cfg(not(windows))]
+fn grab_area(region: (i32, i32, u32, u32)) -> io::Result<Vec<u8>> {
+    let (x, y, w, h) = region;
+    let frame = super::monitor_of(Some(region)).map_err(io::Error::other)?;
+    cut(&frame.rgba, frame.width, (x - frame.x, y - frame.y), (w, h))
+        .ok_or_else(|| io::Error::other("the area left the monitor"))
+}
+
 /// `size` pixels at `at` out of a `width`-wide RGBA frame; `None` if not inside it.
+#[cfg(any(not(windows), test))]
 fn cut(rgba: &[u8], width: u32, at: (i32, i32), size: (u32, u32)) -> Option<Vec<u8>> {
     let (x, y) = (u32::try_from(at.0).ok()?, u32::try_from(at.1).ok()?);
     let height = rgba.len() as u32 / 4 / width.max(1);
@@ -316,320 +284,177 @@ fn cut(rgba: &[u8], width: u32, at: (i32, i32), size: (u32, u32)) -> Option<Vec<
     Some((0..size.1).flat_map(row).copied().collect())
 }
 
-/// A tall page seen through a viewport that scrolls 100 px per notch.
-struct FakePage {
-    rgba: Vec<u8>,
-    width: u32,
-    height: u32,
-    top: Cell<u32>,
-}
-
-impl FakePage {
-    fn new(rgba: Vec<u8>, width: u32, height: u32) -> Self {
-        FakePage {
-            rgba,
-            width,
-            height,
-            top: Cell::new(0),
-        }
-    }
-
-    fn frame(&self, w: u32, h: u32) -> io::Result<Vec<u8>> {
-        cut(&self.rgba, self.width, (0, self.top.get() as i32), (w, h))
-            .ok_or_else(|| io::Error::other("the test page is smaller than the area"))
-    }
-
-    fn scroll(&self, notches: i32, h: u32) -> io::Result<()> {
-        let to = self.top.get() as i64 + i64::from(notches) * 100;
-        self.top
-            .set(to.clamp(0, i64::from(self.height.saturating_sub(h))) as u32);
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
 
-    use super::super::stitch::synth::{Rig, Rng};
+    use super::super::stitch::MAX_HEIGHT;
+    use super::super::stitch::synth::Rig;
     use super::*;
 
-    const PX_PER_NOTCH: usize = 100;
-
-    fn fast() -> Params {
-        Params {
-            poll: Duration::ZERO,
-            settle_tries: 5,
-            ..Params::default()
-        }
-    }
-
-    /// Runs the loop on a fake page of `page_h` rows; returns the stop reason,
-    /// the scroll calls and the stitched image. `lossy`: the first two scrolls
-    /// apply one notch only, as Notepad did on the Windows VM.
-    fn drive(
-        w: usize,
-        page_h: usize,
-        stop: &AtomicBool,
-        stop_after: Option<usize>,
-        lossy: bool,
-    ) -> (Stop, usize, (Vec<u8>, u32, u32), Rig) {
-        let rig = Rig::new(w, page_h, 700, 5, 40);
-        let pos = Cell::new(0usize);
-        let calls = Cell::new(0usize);
-        let mut st = Stitcher::new(w as u32, 700);
-        let reason = run(
-            &mut st,
-            || Ok(rig.frame(pos.get()).px),
-            |n| {
-                calls.set(calls.get() + 1);
-                let n = if lossy && calls.get() <= 2 {
-                    n.signum()
-                } else {
-                    n
-                };
-                let to = pos.get() as i64 + n as i64 * PX_PER_NOTCH as i64;
-                pos.set((to.max(0) as usize).min(rig.max_scroll()));
-                if Some(calls.get()) == stop_after {
-                    stop.store(true, Ordering::Relaxed);
-                }
-                Ok(())
-            },
-            stop,
-            &fast(),
-            |_| {},
-        )
-        .unwrap();
-        (reason, calls.get(), st.finish(), rig)
-    }
-
-    #[test]
-    fn stops_at_end_of_page_with_exact_result() {
+    /// Runs the loop over the frames at scroll positions `at` (one per grab;
+    /// the run stops after the last, or after twice as many rounds), the
+    /// user busy. Returns the updates, the grabs made and the image.
+    fn drive(rig: &Rig, at: &[usize]) -> (Vec<Update>, usize, Crop) {
         let stop = AtomicBool::new(false);
-        let (reason, calls, (px, w, h), rig) = drive(780, 6000, &stop, None, false);
-        assert_eq!(reason, Stop::EndOfPage);
-        let truth = rig.truth(rig.max_scroll());
-        assert_eq!((w as usize, h as usize), (truth.w, truth.h));
-        assert!(px == truth.px);
-        // First scroll 3 notches (300 px), then tuned to ~half a viewport (3 notches),
-        // so ~20 moves to reach the end, plus the 2 confirming scrolls.
-        assert!((10..40).contains(&calls), "scroll calls: {calls}");
-    }
-
-    #[test]
-    fn lost_notches_do_not_scroll_past_the_overlap() {
-        // 3 notches measured as 100 px used to tune the next scroll to 11 notches
-        // (1100 px, past the 600 px body): every later frame was rejected.
-        let stop = AtomicBool::new(false);
-        let (reason, _, (px, w, h), rig) = drive(780, 6000, &stop, None, true);
-        assert_eq!(reason, Stop::EndOfPage);
-        let truth = rig.truth(rig.max_scroll());
-        assert_eq!((w as usize, h as usize), (truth.w, truth.h));
-        assert!(px == truth.px);
-    }
-
-    #[test]
-    fn settle_waits_for_a_late_repaint() {
-        // The target repaints only on the 4th capture after the scroll: settling on
-        // the old frame (twice the same) would read as "did not move".
-        let n = Cell::new(0);
-        let mut cap = || {
-            n.set(n.get() + 1);
-            Ok(vec![if n.get() < 4 { 0 } else { 1 }; 4])
+        let grabs = Cell::new(0);
+        let updates = RefCell::new(Vec::new());
+        let mut st = Stitcher::new(rig.page.w as u32, rig.vh as u32);
+        let grab = || {
+            let i = grabs.get();
+            grabs.set(i + 1);
+            if i + 1 >= at.len() {
+                stop.store(true, Ordering::Relaxed);
+            }
+            Ok(rig.frame(at[i.min(at.len() - 1)]).px)
         };
-        let f = settle(&mut cap, &AtomicBool::new(false), &fast(), Some(&[0; 4])).unwrap();
-        assert_eq!(f, vec![1; 4]);
-        // A page that really did not move is let go after `quiet_tries` checks.
-        n.set(0);
-        let mut still = || {
-            n.set(n.get() + 1);
-            Ok(vec![0; 4])
+        let each = |u| updates.borrow_mut().push(u);
+        let rounds = Cell::new(0);
+        let busy = || {
+            rounds.set(rounds.get() + 1);
+            if rounds.get() > 2 * at.len() {
+                stop.store(true, Ordering::Relaxed); // (nothing grabbed once full)
+            }
+            Duration::ZERO
         };
-        let f = settle(&mut still, &AtomicBool::new(false), &fast(), Some(&[0; 4])).unwrap();
-        assert_eq!((f, n.get()), (vec![0; 4], 1 + fast().quiet_tries));
+        run(&mut st, grab, busy, &stop, Duration::ZERO, (200, 300), each).unwrap();
+        let (rgba, width, height) = st.finish();
+        let image = Crop {
+            width,
+            height,
+            rgba,
+        };
+        (updates.into_inner(), grabs.get(), image)
     }
 
     #[test]
-    fn stops_at_the_height_cap() {
-        let stop = AtomicBool::new(false);
-        let (reason, _, (_, w, h), _) = drive(100, 36_000, &stop, None, false);
-        assert_eq!(reason, Stop::Cap);
-        assert_eq!((w, h), (100, MAX_HEIGHT));
-    }
-
-    #[test]
-    fn stops_on_the_stop_flag_and_keeps_the_partial_result() {
-        let stop = AtomicBool::new(false);
-        let (reason, calls, (_, _, h), _) = drive(780, 6000, &stop, Some(4), false);
-        assert_eq!(reason, Stop::Cancelled);
-        assert_eq!(calls, 4);
-        assert!(h > 700);
-    }
-
-    #[test]
-    fn stop_flag_set_before_start_scrolls_nothing() {
-        let stop = AtomicBool::new(true);
-        let (reason, calls, (_, _, h), _) = drive(780, 6000, &stop, None, false);
-        assert_eq!((reason, calls, h), (Stop::Cancelled, 0, 700));
-    }
-
-    #[test]
-    fn settle_gives_up_on_a_page_that_never_holds_still() {
-        // Every capture differs (a video filling the region): settle must time out
-        // by count, and the run must end through rejected frames, not hang.
-        let stop = AtomicBool::new(false);
-        let captures = Cell::new(0usize);
-        let rng = RefCell::new(Rng::new(1));
-        let (w, h) = (780usize, 700usize);
-        let mut st = Stitcher::new(w as u32, h as u32);
-        let reason = run(
-            &mut st,
-            || {
-                captures.set(captures.get() + 1);
-                let mut r = rng.borrow_mut();
-                // First frame ok-ish noise too: the stitcher only needs the right size.
-                Ok((0..w * h * 4).map(|_| r.range(0, 256) as u8).collect())
-            },
-            |_| Ok(()),
-            &stop,
-            &fast(),
-            |_| {},
-        )
-        .unwrap();
-        assert_eq!(reason, Stop::Unmatched);
-        // 1 initial settle + max_rejects settles, each at most 1 + settle_tries captures.
-        assert!(
-            captures.get() <= (1 + 4) * (1 + 5),
-            "captures: {}",
-            captures.get()
+    fn what_the_user_scrolls_is_stitched_with_a_preview_after_each_step() {
+        let rig = Rig::new(400, 4000, 500, 1, 40);
+        // still, down, still, back up, down again: no repeats
+        let at = [0, 0, 80, 160, 160, 240, 120, 40, 240, 400, 600, 800];
+        let (updates, grabs, image) = drive(&rig, &at);
+        assert_eq!(grabs, at.len());
+        let truth = rig.truth(800);
+        assert_eq!(
+            (image.width as usize, image.height as usize),
+            (400, truth.h)
         );
-        assert!(captures.get() > 5, "settle should have retried");
+        assert!(image.rgba == truth.px);
+        // one update per step that added rows; the newest rows with the
+        // first (then at most every PREVIEW_EVERY)
+        let heights: Vec<u32> = updates.iter().map(|u| u.height).collect();
+        assert_eq!(heights.len(), 7, "{heights:?}");
+        assert!(heights.windows(2).all(|h| h[0] < h[1]), "{heights:?}");
+        let first = updates[0].preview.as_ref().unwrap();
+        assert_eq!((first.width, first.height), (200, 250), "500 rows at half");
+        assert!(updates.iter().all(|u| !u.full && !u.lost));
     }
 
     #[test]
-    fn settle_returns_as_soon_as_two_captures_match() {
+    fn the_preview_catches_up_once_the_user_pauses() {
+        let rig = Rig::new(400, 4000, 500, 6, 40);
+        let stop = AtomicBool::new(false);
+        let started = Instant::now();
         let n = Cell::new(0);
-        let mut cap = || {
+        let mut st = Stitcher::new(400, 500);
+        let grab = || {
             n.set(n.get() + 1);
-            // frames: 0, 1, 2, 2, ...
-            Ok(vec![n.get().min(3) as u8; 4])
+            Ok(rig.frame([0, 100, 200][(n.get() - 1).min(2)]).px)
         };
-        let f = settle(&mut cap, &AtomicBool::new(false), &fast(), None).unwrap();
-        assert_eq!(f, vec![3; 4]);
-        assert_eq!(n.get(), 4);
+        let idle = || {
+            if started.elapsed() > PREVIEW_EVERY * 2 {
+                stop.store(true, Ordering::Relaxed);
+            }
+            Duration::ZERO
+        };
+        let updates = RefCell::new(Vec::new());
+        let each = |u| updates.borrow_mut().push(u);
+        let period = Duration::from_millis(10);
+        run(&mut st, grab, idle, &stop, period, (200, 300), each).unwrap();
+        let updates = updates.into_inner();
+        let last = updates.last().unwrap();
+        assert_eq!(last.height as usize, rig.truth(200).h);
+        assert!(
+            last.preview.is_some(),
+            "the rows added after the first preview"
+        );
+        assert_eq!(updates.iter().filter(|u| u.preview.is_some()).count(), 2);
     }
 
     #[test]
-    fn capture_errors_propagate() {
-        let mut st = Stitcher::new(4, 4);
+    fn nothing_is_grabbed_while_the_user_does_nothing() {
+        // No input, and the area unchanged since the first grab: grabs stop
+        // `SETTLE` after it (a still screen costs nothing).
+        let rig = Rig::new(400, 4000, 500, 2, 40);
+        let stop = AtomicBool::new(false);
+        let started = Instant::now();
+        let last_grab = Cell::new(Duration::ZERO);
+        let mut st = Stitcher::new(400, 500);
+        let grab = || {
+            last_grab.set(started.elapsed());
+            Ok(rig.frame(0).px)
+        };
+        let idle = || {
+            if started.elapsed() > SETTLE + Duration::from_millis(500) {
+                stop.store(true, Ordering::Relaxed);
+            }
+            Duration::from_secs(60)
+        };
+        let period = Duration::from_millis(20);
+        run(&mut st, grab, idle, &stop, period, (10, 10), |_| {}).unwrap();
+        assert!(last_grab.get() < SETTLE + Duration::from_millis(100));
+        assert_eq!(st.height(), 500);
+    }
+
+    #[test]
+    fn the_height_limit_stops_adding_and_says_so() {
+        let rig = Rig::new(100, 26_000, 700, 3, 40);
+        let at: Vec<usize> = (0..100).map(|i| i * 300).collect();
+        let (updates, grabs, image) = drive(&rig, &at);
+        assert_eq!(image.height, MAX_HEIGHT);
+        let first_full = updates.iter().position(|u| u.full).unwrap();
+        assert_eq!(first_full, updates.len() - 1, "full is the last news");
+        assert!(grabs < at.len(), "no grabs once full");
+    }
+
+    #[test]
+    fn a_jump_too_far_asks_to_scroll_back_then_goes_on() {
+        let rig = Rig::new(400, 4000, 500, 4, 40);
+        // 0 -> 1500 is far past the 400 px body: lost until back at 300
+        let at = [0, 1500, 1600, 1700, 1800, 300, 500];
+        let (updates, _, image) = drive(&rig, &at);
+        let lost: Vec<bool> = updates.iter().map(|u| u.lost).collect();
+        // the first frame, the jump (lost), back in step, on
+        assert_eq!(lost, [false, true, false, false], "{updates:?}");
+        let truth = rig.truth(500);
+        assert!(image.height as usize == truth.h && image.rgba == truth.px);
+    }
+
+    #[test]
+    fn a_grab_that_fails_keeps_what_was_gathered() {
+        let rig = Rig::new(400, 4000, 500, 5, 40);
+        let n = Cell::new(0);
+        let mut st = Stitcher::new(400, 500);
+        let grab = || {
+            n.set(n.get() + 1);
+            match n.get() {
+                1 => Ok(rig.frame(0).px),
+                2 => Ok(rig.frame(200).px),
+                _ => Err(io::Error::other("gone")),
+            }
+        };
+        let stop = AtomicBool::new(false);
         let err = run(
             &mut st,
-            || Err(io::Error::other("gone")),
-            |_| Ok(()),
-            &AtomicBool::new(false),
-            &fast(),
-            |_| {},
-        )
-        .unwrap_err();
-        assert_eq!(err.to_string(), "gone");
-    }
-}
-
-#[cfg(test)]
-mod capture_tests {
-    use super::*;
-
-    /// A page with a distinct block pattern on every row (the stitcher matches rows).
-    fn page(w: u32, h: u32) -> Vec<u8> {
-        let mut seed = 0x9e37_79b9_u32;
-        let blocks: Vec<u8> = (0..(w / 8 + 1) * (h / 4 + 1))
-            .map(|_| {
-                seed ^= seed << 13;
-                seed ^= seed >> 17;
-                seed ^= seed << 5;
-                seed as u8
-            })
-            .collect();
-        (0..h)
-            .flat_map(|y| (0..w).map(move |x| (x, y)))
-            .flat_map(|(x, y)| {
-                let v = blocks[((y / 4) * (w / 8 + 1) + x / 8) as usize];
-                [v, v.wrapping_mul(3), 255 - v, 255]
-            })
-            .collect()
-    }
-
-    fn fast_two() -> Params {
-        Params {
-            poll: std::time::Duration::ZERO,
-            settle_tries: 2,
-            ..Params::default()
-        }
-    }
-
-    #[test]
-    fn scrolling_runs_to_the_end_of_the_page_with_progress() {
-        let (w, h, vh) = (320, 3000, 600);
-        let fake = FakePage::new(page(w, h), w, h);
-        let mut seen = Vec::new();
-        let stop = AtomicBool::new(false);
-        let out = gather(
-            w,
-            vh,
-            || fake.frame(w, vh),
-            |n| fake.scroll(n, vh),
+            grab,
+            || Duration::ZERO,
             &stop,
-            &fast_two(),
-            |height| seen.push(height),
-        )
-        .unwrap();
-        assert_eq!((out.width, out.height), (w, h));
-        assert!(out.rgba == fake.rgba, "stitched page differs");
-        assert!(seen.windows(2).all(|p| p[0] < p[1]), "{seen:?}");
-        assert_eq!(seen.last(), Some(&h));
-    }
-
-    #[test]
-    fn stop_keeps_what_was_gathered() {
-        let (w, h, vh) = (320, 6000, 600);
-        let fake = FakePage::new(page(w, h), w, h);
-        let stop = AtomicBool::new(false);
-        let mut seen = Vec::new();
-        let out = gather(
-            w,
-            vh,
-            || fake.frame(w, vh),
-            |n| fake.scroll(n, vh),
-            &stop,
-            &fast_two(),
-            |height| {
-                seen.push(height);
-                if seen.len() == 3 {
-                    stop.store(true, Ordering::Relaxed); // the Stop button
-                }
-            },
-        )
-        .unwrap();
-        assert_eq!(seen.len(), 3);
-        assert_eq!(out.height, seen[2]);
-        assert!(vh < out.height && out.height < h);
-        // The part gathered is the top of the page, exactly.
-        let n = (w * out.height * 4) as usize;
-        assert!(out.rgba[..] == fake.rgba[..n]);
-    }
-
-    #[test]
-    fn a_source_that_fails_at_once_is_an_error() {
-        let err = gather(
-            4,
-            4,
-            || Err(io::Error::other("no screen")),
-            |_| Ok(()),
-            &AtomicBool::new(false),
-            &fast_two(),
+            Duration::ZERO,
+            (9, 9),
             |_| {},
         );
-        assert_eq!(err.unwrap_err(), "no screen");
+        assert_eq!(err.unwrap_err().to_string(), "gone");
+        assert_eq!(st.height() as usize, rig.truth(200).h);
     }
 
     #[test]

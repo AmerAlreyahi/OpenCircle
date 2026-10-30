@@ -59,7 +59,7 @@ gtk = "0.18"
 # PipeWire's pulse server speaks it). Opened only while listening.
 pulseaudio = "0.3"
 # xfixes + shape: the live layer's empty input shape (click-through)
-xcb = { version = "1.7", features = ["randr", "xtest", "xfixes", "shape"] }
+xcb = { version = "1.7", features = ["randr", "xfixes", "shape"] }
 
 [target.'cfg(windows)'.dependencies]
 # Song search's audio (src/music): WASAPI loopback / microphone, only while listening.

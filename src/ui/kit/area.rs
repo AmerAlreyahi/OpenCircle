@@ -4,7 +4,7 @@
 //! passed in: the kit reads no config) over a faint dark halo, so it reads on
 //! white and on dark pages; small round handles in the look's first colour,
 //! no white squares. `grown` (0..1) scales the handles in (the pick's 120 ms).
-use iced::widget::canvas::{Frame, Path, Stroke, Style, gradient};
+use iced::widget::canvas::{Frame, LineDash, Path, Stroke, Style, gradient};
 use iced::{Color, Point, Rectangle, Size};
 
 /// The line, logical px, and its halo's.
@@ -33,6 +33,19 @@ pub enum Handle {
 /// The outline of `r` (logical px; drawn on its edge, half a line each side),
 /// in the look's pair `(start, end)` along its diagonal.
 pub fn outline(frame: &mut Frame, r: Rectangle, look: (Color, Color)) {
+    stroke(frame, r, look, &[]);
+}
+
+/// The dash and gap of `dashed`, logical px.
+pub const DASH: [f32; 2] = [7.0, 5.0];
+
+/// `outline`, dashed (Snip's long capture while it runs), drawn just OUTSIDE
+/// `r`: the area itself is the live screen there.
+pub fn dashed(frame: &mut Frame, r: Rectangle, look: (Color, Color)) {
+    stroke(frame, r.expand(HALO / 2.0), look, &DASH);
+}
+
+fn stroke(frame: &mut Frame, r: Rectangle, look: (Color, Color), dash: &[f32]) {
     if r.width <= 0.0 || r.height <= 0.0 {
         return;
     }
@@ -47,6 +60,10 @@ pub fn outline(frame: &mut Frame, r: Rectangle, look: (Color, Color)) {
         Stroke {
             style: Style::Gradient(linear.into()),
             width: LINE,
+            line_dash: LineDash {
+                segments: dash,
+                offset: 0,
+            },
             ..Stroke::default()
         },
     );

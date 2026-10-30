@@ -1202,7 +1202,8 @@ fn loupe_sheet() {
 fn area_sheet() {
     use super::super::area::{self, Handle};
     use iced::widget::canvas::{self, Frame, Geometry};
-    struct Area(Option<((i8, i8), Handle)>, f32);
+    // (hot handle, grown, dashed: long capture's outline, no handles)
+    struct Area(Option<((i8, i8), Handle)>, f32, bool);
     impl canvas::Program<()> for Area {
         type State = ();
         fn draw(
@@ -1226,14 +1227,18 @@ fn area_sheet() {
                 iced::Color::from_rgb8(0x38, 0xbd, 0xf8),
                 iced::Color::from_rgb8(0xa7, 0x8b, 0xfa),
             );
-            area::outline(&mut frame, r, look);
-            area::handles(&mut frame, r, look, self.0, self.1);
+            if self.2 {
+                area::dashed(&mut frame, r, look);
+            } else {
+                area::outline(&mut frame, r, look);
+                area::handles(&mut frame, r, look, self.0, self.1);
+            }
             vec![frame.into_geometry()]
         }
     }
     let at = |hot, grown| {
         move |_| {
-            canvas::Canvas::new(Area(hot, grown))
+            canvas::Canvas::new(Area(hot, grown, grown < 0.0))
                 .width(Fill)
                 .height(Fill)
                 .into()
@@ -1252,6 +1257,7 @@ fn area_sheet() {
             at(Some(((1, 0), Handle::Held)), 1.0),
         ),
         row("scaling in", Act::Rest, at(None, 0.4)),
+        row("long capture", Act::Rest, at(None, -1.0)),
     ];
     sheet("area", Size::new(280.0, 84.0), &rows);
 }
@@ -1304,6 +1310,18 @@ fn chip_snip_sheet() {
         }),
         row("info element", Act::Rest, |_| {
             chip::info("Element", None, "330 × 180".into(), &LADDER, 0)
+        }),
+        row("counter", Act::Rest, |ar| {
+            chip::counter(s(ar, "3,240 px", "3,240 بكسل").into(), 0.162, None, ar)
+        }),
+        row("  limit", Act::Rest, |ar| {
+            let warn = s(ar, "Limit reached", "بلغت الحد");
+            chip::counter(
+                s(ar, "20,000 px", "20,000 بكسل").into(),
+                1.0,
+                Some(warn),
+                ar,
+            )
         }),
     ];
     sheet("chip_snip", Size::new(500.0, 46.0), &rows);

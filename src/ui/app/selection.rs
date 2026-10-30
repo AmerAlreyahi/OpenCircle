@@ -44,7 +44,14 @@ impl App {
             }
             event => event,
         };
-        // The editor, a toast or a scrolling capture has the screen.
+        // Long capture: Enter is Done; the rest of the overlay is still.
+        if self.scroll().is_some() {
+            return match event {
+                overlay::Event::Enter => self.on_snip(crate::ui::snip::Msg::Stop),
+                _ => Task::none(),
+            };
+        }
+        // The editor, a toast or a timer's pill has the screen.
         if self.o.edit.as_ref().is_some_and(Editing::is_open)
             || self.o.toast.is_some()
             || self.snip_pill()

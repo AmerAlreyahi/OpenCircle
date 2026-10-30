@@ -94,7 +94,8 @@ impl App {
             opening: self.opening,
             first_draw: &self.first_draw,
             frame_times: &self.frame_times,
-            hover: snip.is_some_and(|s| s.kind.picks()) && self.o.edit.is_none(),
+            hover: snip.is_some_and(|s| s.kind.picks() && s.scroll.is_none())
+                && self.o.edit.is_none(),
             dim: dim && dim_frame.is_none(),
             live_drag: snip.is_some(),
             look: config::look(),
@@ -197,6 +198,7 @@ impl App {
         // on this screen (another screen's window draws its own).
         if self.o.edit.is_none()
             && let Some(loupe) = snip
+                .filter(|s| s.scroll.is_none())
                 .filter(|s| {
                     let p = s.pointer.unwrap_or(Point::ORIGIN);
                     s.monitor_at(p) == Rectangle::with_size(self.o.screen)
@@ -233,7 +235,14 @@ impl App {
                 .view(self.o.screen, self.card_at(), self.o.card_hover)
                 .map(move |msg| Message::Translate(id, msg))
         } else if let Some(snip) = snip {
-            snip.view().map(Message::Snip)
+            match &snip.scroll {
+                Some(long) => {
+                    let look = crate::ui::theme::accent_of(&config::look());
+                    long.view(self.o.screen, snip.hinting, look)
+                }
+                None => snip.view(),
+            }
+            .map(Message::Snip)
         } else if let Some(selection) = self.o.selection {
             match self.o.purpose {
                 Purpose::Search if !self.o.drawing && !self.settling() => {

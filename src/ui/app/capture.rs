@@ -411,13 +411,16 @@ impl App {
     /// Frees the frame and drops the panel (stopping its work); Lens pages go
     /// once old enough. The window is shrunk and hidden in steps (see `Hiding`).
     pub(in crate::ui) fn close(&mut self) -> Task<Message> {
-        if let Some(scroll) = self.scroll() {
-            scroll.stop();
+        // a long capture ends with it; the window shows in screenshots again
+        let mut chat = Task::none();
+        if let Some(long) = self.scroll() {
+            long.stop();
+            chat = windows::hide_from_capture(self.overlay, false).map(Message::Windows);
         }
         // Everything the opening held goes at once (the panel, translate and
         // song stop; the next show clears the window again).
         // a pinned chat goes on in its own window
-        let chat = self.float_chat();
+        let chat = chat.chain(self.float_chat());
         let Some(opening) = self.o.take() else {
             return Task::none(); // closed already
         };

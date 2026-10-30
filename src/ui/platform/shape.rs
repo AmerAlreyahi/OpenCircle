@@ -80,6 +80,49 @@ pub fn apply(handle: RawWindowHandle, max_radius: f32) -> Result<(), String> {
     }
 }
 
+/// A window px rectangle: x, y, width, height.
+pub type Px = (i32, i32, u32, u32);
+
+/// A `w` x `h` window less `hole`, but with `keep` (bars over the hole) as
+/// rectangles: the bands above, below, left and right of the hole, then `keep`.
+pub fn holed(w: u32, h: u32, hole: Px, keep: &[Px]) -> Vec<Px> {
+    let (wi, hi) = (w as i32, h as i32);
+    let (x0, y0) = (hole.0.clamp(0, wi), hole.1.clamp(0, hi));
+    let (x1, y1) = (
+        (hole.0 + hole.2 as i32).clamp(x0, wi),
+        (hole.1 + hole.3 as i32).clamp(y0, hi),
+    );
+    let bands = [
+        (0, 0, wi, y0),
+        (0, y1, wi, hi - y1),
+        (0, y0, x0, y1 - y0),
+        (x1, y0, wi - x1, y1 - y0),
+    ];
+    (bands.into_iter())
+        .filter(|b| b.2 > 0 && b.3 > 0)
+        .map(|(x, y, w, h)| (x, y, w as u32, h as u32))
+        .chain(keep.iter().copied().filter(|k| k.2 > 0 && k.3 > 0))
+        .collect()
+}
+
+/// Shapes the window behind `handle` to `holed`: clicks and the wheel in the
+/// hole reach the window under it (Snip's long capture). `Ok` also where
+/// nothing can be cut (Wayland).
+pub fn hole(handle: RawWindowHandle, hole: Px, keep: &[Px]) -> Result<(), String> {
+    match handle {
+        #[cfg(windows)]
+        RawWindowHandle::Win32(h) => win::rects(h.hwnd.get(), |w, h| holed(w, h, hole, keep)),
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xlib(h) => x11::rects(h.window as u32, |w, h| holed(w, h, hole, keep)),
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xcb(h) => x11::rects(h.window.get(), |w, h| holed(w, h, hole, keep)),
+        _ => {
+            let _ = (hole, keep);
+            Ok(())
+        }
+    }
+}
+
 /// Whether a whole window can fade here (`opacity`): Windows (DWM composites
 /// a layered window's alpha on the GPU, free for our CPU renderer).
 // ponytail: Windows only. X11 has _NET_WM_WINDOW_OPACITY (compositor-only),
@@ -172,7 +215,9 @@ pub fn no_taskbar(handle: RawWindowHandle) {
 mod win {
     use super::corner;
     use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
-    use windows::Win32::Graphics::Gdi::{CreateRectRgn, CreateRoundRectRgn, SetWindowRgn};
+    use windows::Win32::Graphics::Gdi::{
+        CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, RGN_OR, SetWindowRgn,
+    };
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, GWL_EXSTYLE, GWL_STYLE, GWLP_WNDPROC, GetPropW, GetWindowLongPtrW,
@@ -410,6 +455,28 @@ mod win {
         Ok(())
     }
 
+    /// Shapes the window to the union of `of(width, height)`'s rectangles.
+    pub fn rects(hwnd: isize, of: impl FnOnce(u32, u32) -> Vec<super::Px>) -> Result<(), String> {
+        let hwnd = HWND(hwnd as *mut _);
+        let mut rect = RECT::default();
+        // SAFETY: `hwnd` is a live window of this process. Each part region is
+        // deleted after it is merged; the whole one is handed to the system.
+        unsafe {
+            GetWindowRect(hwnd, &mut rect).map_err(|e| e.to_string())?;
+            let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
+            let region = CreateRectRgn(0, 0, 0, 0);
+            for (x, y, rw, rh) in of(w.max(0) as u32, h.max(0) as u32) {
+                let part = CreateRectRgn(x, y, x + rw as i32, y + rh as i32);
+                CombineRgn(Some(region), Some(region), Some(part), RGN_OR);
+                let _ = DeleteObject(part.into());
+            }
+            if SetWindowRgn(hwnd, Some(region), true) == 0 {
+                return Err("SetWindowRgn failed".into());
+            }
+        }
+        Ok(())
+    }
+
     pub fn apply(hwnd: isize, max_radius: f32) -> Result<(), String> {
         let hwnd = HWND(hwnd as *mut _);
         let mut rect = RECT::default();
@@ -455,6 +522,14 @@ mod x11 {
     }
 
     pub fn apply(window: u32, max_radius: f32) -> Result<(), String> {
+        rects(window, |w, h| {
+            let r = corner(max_radius, w as f32, h as f32).round() as u32;
+            round_rect(w, h, r)
+        })
+    }
+
+    /// Shapes the window to the union of `of(width, height)`'s rectangles.
+    pub fn rects(window: u32, of: impl FnOnce(u32, u32) -> Vec<super::Px>) -> Result<(), String> {
         let os = |e: &dyn std::fmt::Debug| format!("X11: {e:?}");
         let (conn, _) =
             xcb::Connection::connect_with_extensions(None, &[xcb::Extension::Shape], &[])
@@ -465,9 +540,7 @@ mod x11 {
                 drawable: x::Drawable::Window(window),
             }))
             .map_err(|e| os(&e))?;
-        let (w, h) = (geometry.width(), geometry.height());
-        let r = corner(max_radius, w as f32, h as f32).round() as u32;
-        let rects: Vec<x::Rectangle> = round_rect(w as u32, h as u32, r)
+        let rects: Vec<x::Rectangle> = of(geometry.width().into(), geometry.height().into())
             .into_iter()
             .map(|(x, y, w, h)| x::Rectangle {
                 x: x as i16,
@@ -512,6 +585,27 @@ mod tests {
 
     fn area(bands: &[(i32, i32, u32, u32)]) -> u32 {
         bands.iter().map(|b| b.2 * b.3).sum()
+    }
+
+    /// Long capture's window: everything but the area, its toolbar kept even
+    /// over the area; a hole at the window's edge leaves no empty band.
+    #[test]
+    fn a_holed_window_is_all_but_the_hole_plus_what_is_kept() {
+        let inside = |r: &[Px], (px, py): (i32, i32)| {
+            (r.iter())
+                .any(|&(x, y, w, h)| px >= x && py >= y && px < x + w as i32 && py < y + h as i32)
+        };
+        let bands = holed(100, 80, (20, 10, 50, 40), &[(30, 40, 20, 5)]);
+        assert_eq!(area(&bands[..4]), 100 * 80 - 50 * 40);
+        assert!(!inside(&bands, (20, 10)) && !inside(&bands, (69, 49)));
+        assert!(inside(&bands, (19, 10)) && inside(&bands, (70, 49)) && inside(&bands, (20, 50)));
+        assert!(inside(&bands, (35, 42)), "the toolbar over the area stays");
+        // the whole window: only what is kept
+        assert_eq!(holed(100, 80, (0, 0, 100, 80), &[]), vec![]);
+        assert_eq!(
+            holed(100, 80, (-5, 0, 200, 10), &[]),
+            vec![(0, 10, 100, 70)]
+        );
     }
 
     /// #126: DefWindowProc must get WM_NCACTIVATE with lParam -1 (no caption

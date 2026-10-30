@@ -383,6 +383,67 @@ pub fn readout<'a, Message: 'a>(
         .into()
 }
 
+/// The meter's size (Snip's long capture counter).
+const METER: (f32, f32) = (64.0, 4.0);
+
+/// A running count with its meter (Snip's long capture: `3,240 px` of the
+/// 20,000 limit): a dot, `label` in mono 11.5 / 500 (an LTR run), a 64 x 4
+/// meter `share` (0..1) full. `warn` (the limit, a lost match): the dot and
+/// the meter turn `WARNING` and `warn` follows the label. `rtl`: mirrored.
+pub fn counter<'a, Message: 'a>(
+    label: String,
+    share: f32,
+    warn: Option<&'a str>,
+    rtl: bool,
+) -> Element<'a, Message> {
+    let tone = if warn.is_some() {
+        fixed::WARNING
+    } else {
+        c().accent
+    };
+    let bar = |w: f32, colour: Color| {
+        container(Space::new().width(w).height(METER.1)).style(move |_| container::Style {
+            background: Some(colour.into()),
+            border: Border::default().rounded(radius::FULL),
+            ..container::Style::default()
+        })
+    };
+    let fill = (METER.0 * share.clamp(0.0, 1.0)).round();
+    let meter = container(bar(fill, tone))
+        .width(METER.0)
+        .align_x(if rtl { iced::Right } else { iced::Left })
+        .style(|_| container::Style {
+            background: Some(c().track.into()),
+            border: Border::default().rounded(radius::FULL),
+            ..container::Style::default()
+        });
+    let mut parts: Vec<Element<'a, Message>> = vec![
+        dot(tone),
+        text(label)
+            .size(11.5)
+            .font(mono(Weight::Medium))
+            .color(c().text)
+            .into(),
+    ];
+    if let Some(warn) = warn {
+        parts.push(
+            text(warn)
+                .size(11.5)
+                .font(weight(Weight::Medium))
+                .color(c().text)
+                .into(),
+        );
+    }
+    parts.push(meter.into());
+    if rtl {
+        parts.reverse();
+    }
+    iced::widget::Row::with_children(parts)
+        .spacing(space::GAP)
+        .align_y(Center)
+        .into()
+}
+
 /// The info chip over what a click would capture (Snip's hover): `kind`
 /// (12 / 600) · `title` (`text_sub`, cut at 190 px) · the `size` readout
 /// text (mono) | the wheel's ladder (`steps`, the `at` one raised as a
