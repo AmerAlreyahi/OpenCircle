@@ -273,6 +273,11 @@ production systems.
   (the owner records them after v0.1.2). Labs keeps two rows, "Snip" and "Snip editor" (owner OK).
 - N-74 on Windows 11 (owner, 2026-10-30): with "Use the Print Screen key to open Snipping Tool" turned off the bug
   stays, so the cause is ours. Work runs on the Windows 10 VM; the owner checks on their Windows 11 PC when asked.
+- Overnight 2026-10-30 (owner asleep, "apply the recommended"): the Snip capture-flow design (canvas v24,
+  .claude/artifacts/design/SNIP_FLOW_SPEC.md) is approved with the designer's choices: Ctrl+arrows resize (Shift =
+  10 px), the snip toolbar has no Back / Crop / Drag chip (handles crop; drag-out by dragging the picture), Daylight
+  Copy button contrast raised to >= 4.5:1. Continue 0.1.3 item by item; verified items wait in "Needs your check";
+  no release.
 - Update gate (owner, 2026-10-30, "insure this won't happen again"): no release is offered to the owner for
   "publish" until the previous published version, installed with the Setup exe (Program Files, normal user) AND as
   the portable exe, has updated itself to the DRAFT on the Windows VM (RELEASING.md step 9, local update server +
