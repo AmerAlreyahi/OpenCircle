@@ -248,6 +248,13 @@ production systems.
   installed non-Latin recognizer that reads it best (Arabic, Cyrillic, CJK); gently, once per opening; the helper
   isn't started without such a recognizer. Its lines replace Windows OCR's noise lines they overlap.
 - Stealth Frost (owner, 2026-10-30): no card in Settings; a config that has it ("mono") still shows it.
+- Version order (owner, 2026-10-30, supersedes "Version plan" and "Version scope" after 0.1.2): 0.1.2 (in progress,
+  not finalised: owner checks + preview clips) -> 0.1.3 Snip and editor -> 0.2.0 GPU renderer + glass -> 0.3.0 AI
+  online + fast core -> 0.4.0 live translation -> 0.5.0 visual search + sound (lead's order after Snip; owner may
+  reorder). Snip spec (N-73): Print Screen freezes the screen; pick a window (hover outline, click) or drag a region
+  with its exact size shown, or full screen, like Windows Snipping Tool; then ONLY the editing toolbar; the picked area
+  can be moved and resized; long capture = select an area, the user scrolls BY HAND, OpenCircle stitches until Done;
+  copy lands on the clipboard and in Win+V history like main mode's Ctrl+C (bug N-74). Don't start before the owner says.
 - Hide, don't delete (owner, 2026-10-29): an option for a feature that hasn't arrived (e.g. "Bars and pills" glass
   styles until 0.1.3; "Screen edge for" Live/Snip until they are on in Labs) is hidden, its code and config key
   kept, and shown when the feature really ships. A row with a single choice is not shown.
