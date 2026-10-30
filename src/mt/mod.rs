@@ -1273,8 +1273,9 @@ pub fn unavailable(source: &str, target: &str) -> String {
         );
     }
     format!(
-        "there is no offline model from {} into {}. Choose AI as the engine in \
-         Settings > Translate (and set it up in Settings > AI) to translate it",
+        "there is no offline model from {} into {} yet (coming in a future \
+         update). Choose AI as the engine in Settings > Translate (and set it up \
+         in Settings > AI) to translate it now",
         lang::name(source),
         lang::name(target)
     )

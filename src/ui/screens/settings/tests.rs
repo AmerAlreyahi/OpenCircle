@@ -1273,7 +1273,8 @@ fn engine_choice_says_what_offline_means() {
     for want in ["Source language", "Target language"] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
-    let gap = "No offline model for this pair: choose AI to translate it";
+    let gap =
+        "No offline model for this pair yet (coming in a future update): choose AI to translate it";
     assert!(!texts.iter().any(|t| t == gap));
     update(&mut s, Message::Source(lang::find("pt").copied().unwrap()));
     let texts = shot::texts(view(&s));

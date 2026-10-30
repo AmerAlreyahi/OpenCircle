@@ -50,7 +50,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
     ));
     // Offline can't do every pair: say so (AI is the other way).
     let target_desc = match t.engine == Engine::Offline && !mt::available(&t.source, &t.target) {
-        true => "No offline model for this pair: choose AI to translate it",
+        true => {
+            "No offline model for this pair yet (coming in a future update): choose AI to translate it"
+        }
         false => "What the text is translated into",
     };
     let target = LANGUAGES.iter().find(|l| l.code == t.target).copied();

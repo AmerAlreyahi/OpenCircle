@@ -6,7 +6,7 @@
 //! (and are remembered as recent); Settings › Translate keeps the defaults.
 use std::cell::RefCell;
 
-use iced::widget::{column, container, row};
+use iced::widget::{Space, column, container, row};
 use iced::{Center, Element, Fill, Length};
 
 use crate::mt;
@@ -30,9 +30,12 @@ const SEARCH_H: f32 = 32.0;
 /// Choices the open list shows (two columns), after filtering.
 const SHOWN: usize = 8;
 const COLUMNS: usize = 2;
-/// What the open list adds under the chips: the search field and the rows.
+/// The line explaining the "AI" badge (`AI_ONLY`: 12 px on a 1.5 line).
+const NOTE_H: f32 = 18.0;
+/// What the open list adds under the chips: the search field, the rows and
+/// the badge's line (kept while it is empty: the list never jumps).
 pub const LIST_HEIGHT: f32 =
-    SPACING + SEARCH_H + (SHOWN / COLUMNS) as f32 * (CHIP_HEIGHT + SPACING);
+    SPACING + SEARCH_H + (SHOWN / COLUMNS) as f32 * (CHIP_HEIGHT + SPACING) + NOTE_H + SPACING;
 /// The search field's widget id.
 const SEARCH: &str = "language-search";
 
@@ -241,13 +244,21 @@ impl Picker {
             let none = sub(Role::NOTE, "No language matches");
             rows = rows.push(container(none).center_y(CHIP_HEIGHT));
         }
-        let list = column![search, rows]
+        // what the badge means, while one shows (owner, 2026-10-30)
+        let needs_ai = choices.iter().any(|(_, l)| l.ends_with(" · AI"));
+        let note = needs_ai.then(|| sub(Role::NOTE, AI_ONLY));
+        let list = column![search, rows, Space::new().height(Fill)]
+            .push(note)
             .spacing(SPACING)
             .width(width)
             .height(Length::Fixed(LIST_HEIGHT - SPACING));
         Some(list.into())
     }
 }
+
+/// Under the list when an "AI" badge shows.
+pub const AI_ONLY: &str =
+    "AI: no offline model for this language yet. Offline support is coming in a future update.";
 
 /// Remembers a pick, most recent first.
 fn remember(side: Side, code: &str) {
@@ -335,6 +346,11 @@ mod tests {
         assert_eq!(p.choices()[0].1, "Arabic", "French → English → Arabic");
         p.update(Msg::Query("Kor".into()));
         assert_eq!(p.choices()[0].1, "Korean · AI", "no model into Korean");
+        let shown = crate::ui::kit::testing::shot::texts(p.list(368.0).unwrap());
+        assert!(
+            shown.iter().any(|t| t == AI_ONLY),
+            "the badge explained: {shown:?}"
+        );
         // with AI nothing is marked
         let mut ai = Picker::new("fr", "en", false);
         ai.update(Msg::Open(Side::Target));
