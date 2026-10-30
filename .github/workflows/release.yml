@@ -42,6 +42,9 @@ permissions:
 env:
   CARGO_PACKAGER_VERSION: 0.11.8
   CARGO_GENERATE_RPM_VERSION: 0.21.1
+  # Published builds trust the release key alone, even through the update test hook
+  # (src/update/mod.rs `key`): a test key is never compiled into a release.
+  OPENCIRCLE_TEST_RELEASE_KEY: ""
 
 jobs:
   build:
