@@ -271,6 +271,8 @@ production systems.
 - Previews hidden until recorded (owner, 2026-10-30): a feature's Settings preview (Hide/Show preview button and
   stage) is not shown while it has no bundled clip; it appears by itself when assets/previews/<clip>.webp is added
   (the owner records them after v0.1.2). Labs keeps two rows, "Snip" and "Snip editor" (owner OK).
+- N-74 on Windows 11 (owner, 2026-10-30): with "Use the Print Screen key to open Snipping Tool" turned off the bug
+  stays, so the cause is ours. Work runs on the Windows 10 VM; the owner checks on their Windows 11 PC when asked.
 - Update gate (owner, 2026-10-30, "insure this won't happen again"): no release is offered to the owner for
   "publish" until the previous published version, installed with the Setup exe (Program Files, normal user) AND as
   the portable exe, has updated itself to the DRAFT on the Windows VM (RELEASING.md step 9, local update server +
