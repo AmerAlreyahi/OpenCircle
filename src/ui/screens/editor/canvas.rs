@@ -26,14 +26,16 @@ pub fn canvas(e: &Editor) -> Element<'_, Message> {
     let view = e.doc.view();
     let m = margin(e);
     let outer = Size::new(size.width + 2.0 * m, size.height + 2.0 * m);
-    let mut layers: Vec<Element<'_, Message>> = vec![
-        pin(image(e.base.clone())
+    // (Snip's bare live area: the frozen frame under it shows through)
+    let mut layers: Vec<Element<'_, Message>> = vec![match e.bare() {
+        true => iced::widget::space().into(),
+        false => pin(image(e.base.clone())
             .width(size.width)
             .height(size.height)
             .content_fit(ContentFit::Fill))
         .position(Point::new(m, m))
         .into(),
-    ];
+    }];
     // Always a layer here, live or not: the canvas must keep its index, or iced
     // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
     let live = e.live.as_ref().map(|(r, handle)| {

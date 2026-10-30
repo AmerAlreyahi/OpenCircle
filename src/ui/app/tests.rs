@@ -530,7 +530,12 @@ fn close_to(a: Rectangle, b: Rectangle) -> bool {
 
 /// A snip over a 800x600 screen with one window (`area`) the pointer is on.
 fn snipping(area: Rectangle) -> App {
-    let mut app = open_app(800, 600, 1.0);
+    snipping_on(800, 600, area)
+}
+
+/// A snip over a `w` x `h` screen (scale 1) with one window (`area`) the pointer is on.
+pub(in crate::ui) fn snipping_on(w: u32, h: u32, area: Rectangle) -> App {
+    let mut app = open_app(w, h, 1.0);
     let window = snip::Pick::window(area, "App", 1);
     app.o.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.place(), true, None)));
     event(&mut app, overlay::Event::Hover(area.center()));

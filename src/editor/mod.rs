@@ -843,6 +843,7 @@ impl Editor {
     }
 
     fn begin(&mut self, index: Option<usize>, item: Item, drag: Drag, start: Point) {
+        let bare = self.bare();
         self.pending = Some(Pending {
             index,
             item,
@@ -850,7 +851,10 @@ impl Editor {
             start,
             hidden: false,
         });
-        self.update_live();
+        match bare {
+            true => self.refresh(), // the first item: the base is painted now
+            false => self.update_live(),
+        }
     }
 
     /// Repaints the base without the pending item (once, when it first changes).
@@ -1172,9 +1176,19 @@ impl Editor {
             .map(|(i, item)| (item, Some(i) != hide))
             .collect();
         self.legend = self.doc.legend_layout();
+        if self.bare() {
+            return; // nothing to paint: the frozen frame under it is the area
+        }
         let pm = self.doc.flatten(&layers, self.legend.as_ref());
         self.base = handle(pm);
         self.update_live();
+    }
+
+    /// Snip's live area with nothing on it: the overlay's frozen frame under
+    /// the area already shows its pixels, so no base is painted or drawn (a
+    /// move or resize re-painted and re-uploaded the whole area every frame).
+    pub(crate) fn bare(&self) -> bool {
+        self.movable && self.doc.items.is_empty() && self.pending.is_none()
     }
 
     /// Repaints the pending item's region with it in place.

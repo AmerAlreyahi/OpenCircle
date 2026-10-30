@@ -1395,3 +1395,112 @@ fn stroke_across_screens_frame_times() {
         }
     }
 }
+
+/// The snip's three drags.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum SnipDrag {
+    /// An area picked by hand (the loupe beside the pointer).
+    Pick,
+    /// The live area's bottom-right handle, the toolbar docking along.
+    Resize,
+    /// The live area moved from its middle.
+    Move,
+}
+
+/// `n` frames of a `drag` over a `w` x `h` snip, one pointer move each, and
+/// the app after them; the window under the pointer is (200, 150, 600 x 400),
+/// the live area starts there.
+fn snip_drag(w: u32, h: u32, drag: SnipDrag, n: u32, pixels: bool) -> (Vec<Drawn>, App) {
+    use super::app::tests::snipping_on;
+    use crate::editor::Message as E;
+    use crate::ui::overlay::Event;
+    let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
+    let mut app = snipping_on(w, h, window);
+    if drag != SnipDrag::Pick {
+        app.o.labs = crate::labs::Labs::all_on();
+        app.select(window);
+        let crop = app.crop().unwrap();
+        let route = super::snip::route(crate::config::SnipAfter::Editor);
+        let _ = app.snip_routed(crop, true, route);
+    }
+    let (from, by) = match drag {
+        SnipDrag::Pick => (Point::new(120.0, 100.0), Vector::new(14.0, 9.0)),
+        SnipDrag::Resize => (Point::new(800.0, 550.0), Vector::new(9.0, 6.0)),
+        SnipDrag::Move => (Point::new(400.0, 300.0), Vector::new(7.0, 4.0)),
+    };
+    let t = frames(&mut app, n, pixels, |app, i, now| {
+        let at = from + by * i as f32;
+        if drag == SnipDrag::Pick {
+            let e = match i {
+                0 => Event::Press { at, shift: false },
+                _ => Event::Move(at),
+            };
+            let _ = app.on_overlay(e);
+            return;
+        }
+        let _ = app.on_editor(match i {
+            0 => E::Press(at),
+            _ => E::Move(at),
+        });
+        let _ = app.update(Message::Frame(now)); // the toolbar docks along
+    });
+    (t, app)
+}
+
+/// The snip's drags at the VM's screen, 1280x720 and the wide desktop (run
+/// in release: `cargo test --release snip_frame_times -- --ignored --nocapture`).
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn snip_frame_times() {
+    for (w, h) in [(1716, 1271), (1280, 720), (3438, 1280)] {
+        for drag in [SnipDrag::Pick, SnipDrag::Resize, SnipDrag::Move] {
+            let (t, app) = snip_drag(w, h, drag, 60, false);
+            report(&format!("snip {drag:?}"), app.o.screen, 1.0, &t);
+        }
+    }
+}
+
+/// Snip's drags (0.1.3 gate: frames p95 under 16 ms on the VM, were 30 / 27 ms)
+/// redraw round what moves and draw what a fresh frame draws. Before: the
+/// loupe's label redrew the screen from it to the corner (a canvas text's
+/// damage reached its infinite box), and the live area painted and redrew all
+/// of itself on every move (51 % and 40-68 % of the screen a frame).
+#[test]
+fn a_snips_drags_redraw_round_what_moves() {
+    for drag in [SnipDrag::Pick, SnipDrag::Resize, SnipDrag::Move] {
+        let (t, app) = snip_drag(1716, 1271, drag, 30, false);
+        let whole = app.o.screen.width * app.o.screen.height;
+        let area: f32 = (t.iter().skip(1))
+            .flat_map(|d| d.damage.iter().map(|r| r.width * r.height))
+            .sum();
+        let share = area / ((t.len() - 1) as f32 * whole);
+        assert!(share < 0.3, "{drag:?}: {:.0} % a frame", share * 100.0);
+        // the middle of the box being drawn or resized is never redrawn (once
+        // the pick is big: a small box's sides are one run of damage; a moved
+        // area's edges cross every dim tile it covers in turn)
+        let middle = match drag {
+            SnipDrag::Pick => Some(Point::new(200.0, 150.0)),
+            SnipDrag::Resize => Some(Point::new(500.0, 350.0)),
+            SnipDrag::Move => None,
+        };
+        for (i, d) in t.iter().enumerate().skip(15) {
+            let hit = d
+                .damage
+                .iter()
+                .find(|r| middle.is_some_and(|m| r.contains(m)));
+            assert!(
+                hit.is_none(),
+                "{drag:?} frame {i} redrew the middle: {hit:?}"
+            );
+        }
+        // drawn bit by bit, the last frame is the frame drawn afresh (to the
+        // rounding of a dim blended in parts or whole: 1 of 255)
+        let (t, mut app) = snip_drag(1280, 720, drag, 12, true);
+        let fresh = frames(&mut app, 1, true, |_, _, _| {});
+        let (got, want) = (&t.last().unwrap().rgba, &fresh[0].rgba);
+        let off = (got.iter().zip(want))
+            .filter(|(a, b)| a.abs_diff(**b) > 1)
+            .count();
+        assert_eq!(off, 0, "{drag:?}: as drawn afresh");
+    }
+}
