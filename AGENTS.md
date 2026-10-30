@@ -259,6 +259,9 @@ production systems.
   with its exact size shown, or full screen, like Windows Snipping Tool; then ONLY the editing toolbar; the picked area
   can be moved and resized; long capture = select an area, the user scrolls BY HAND, OpenCircle stitches until Done;
   copy lands on the clipboard and in Win+V history like main mode's Ctrl+C (bug N-74). Don't start before the owner says.
+- Edit becomes Snip (owner, 2026-10-30; in 0.1.2, NOT started until the owner says): every "Edit" / "Edit image"
+  entry point (bar button, tooltip, Labs row, shortcut name, docs) gets a new Snip icon and Snip text, because Snip
+  contains the editor. Icon and text only; behaviour unchanged; the Snipping Tool flow stays 0.1.3.
 - Hide, don't delete (owner, 2026-10-29): an option for a feature that hasn't arrived (e.g. "Bars and pills" glass
   styles until 0.1.4; "Screen edge for" Live/Snip until they are on in Labs) is hidden, its code and config key
   kept, and shown when the feature really ships. A row with a single choice is not shown.
