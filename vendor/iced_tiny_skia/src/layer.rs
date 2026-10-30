@@ -278,40 +278,60 @@ impl Layer {
             },
         );
 
-        let primitives = damage::list(
+        // OpenCircle patch (#89): where each primitive draws, a stroke's
+        // width and anti-aliasing included (upstream: its path's bounds),
+        // a cached canvas's too (upstream: the whole canvas, so any change
+        // to the overlay's full-window canvas redrew the window)
+        let drawn = |item: &Item<Primitive>| match item {
+            Item::Live(primitive) => drawn_primitive(primitive),
+            Item::Group(_, group_bounds, transformation)
+            | Item::Cached(_, group_bounds, transformation) => item
+                .as_slice()
+                .iter()
+                .flat_map(drawn_primitive)
+                .map(|bounds| bounds * *transformation)
+                .filter_map(|bounds| bounds.intersection(group_bounds))
+                .collect(),
+        };
+        let primitives = damage::diff(
             &previous.primitives,
             &current.primitives,
-            // OpenCircle patch (#89): where each primitive draws, a stroke's
-            // width and anti-aliasing included (upstream: its path's bounds),
-            // a cached canvas's too (upstream: the whole canvas, so any change
-            // to the overlay's full-window canvas redrew the window)
-            |item| match item {
-                Item::Live(primitive) => drawn_primitive(primitive),
-                Item::Group(_, group_bounds, transformation)
-                | Item::Cached(_, group_bounds, transformation) => item
-                    .as_slice()
-                    .iter()
-                    .flat_map(drawn_primitive)
-                    .map(|bounds| bounds * *transformation)
-                    .filter_map(|bounds| bounds.intersection(group_bounds))
-                    .collect(),
-            },
+            drawn,
             |primitive_a, primitive_b| match (primitive_a, primitive_b) {
                 (
                     Item::Cached(cache_a, bounds_a, transformation_a),
                     Item::Cached(cache_b, bounds_b, transformation_b),
-                ) => {
-                    Arc::ptr_eq(cache_a, cache_b)
-                        && bounds_a == bounds_b
-                        && transformation_a == transformation_b
+                ) if Arc::ptr_eq(cache_a, cache_b)
+                    && bounds_a == bounds_b
+                    && transformation_a == transformation_b =>
+                {
+                    Vec::new()
                 }
                 // OpenCircle patch (#89): a canvas drawn anew the same as
                 // before (the zoomed frame's black under its picture, a few
                 // shapes) is unchanged (upstream: always redrawn)
-                (Item::Group(a, bounds_a, t_a), Item::Group(b, bounds_b, t_b)) => {
-                    bounds_a == bounds_b && t_a == t_b && a == b
+                (Item::Group(a, bounds_a, t_a), Item::Group(b, bounds_b, t_b))
+                    if bounds_a == bounds_b && t_a == t_b =>
+                {
+                    match a == b {
+                        true => Vec::new(),
+                        // OpenCircle patch: fills of rectangles whose
+                        // rectangles moved (the dim's tiles round a box being
+                        // moved or resized) redraw only the strips that
+                        // changed, not each tile whole
+                        false => boxes_moved(a, b)
+                            .map(|moved| {
+                                (moved.into_iter())
+                                    .map(|r| r * *t_a)
+                                    .filter_map(|r| r.intersection(bounds_a))
+                                    .collect()
+                            })
+                            .unwrap_or_else(|| {
+                                drawn(primitive_a).into_iter().chain(drawn(primitive_b)).collect()
+                            }),
+                    }
                 }
-                _ => false,
+                _ => drawn(primitive_a).into_iter().chain(drawn(primitive_b)).collect(),
             },
         );
 
@@ -328,6 +348,84 @@ impl Layer {
         damage.extend(moved);
         damage
     }
+}
+
+/// OpenCircle patch: where two drawings of as many primitives differ: only
+/// the primitives that changed (upstream: all of both), and of a fill of
+/// rectangles that kept its paint and rule only what each changed rectangle
+/// covers before or after but not both, a rectangle that came or went whole,
+/// +1 px for anti-aliasing (a fill of rectangles changes only there, whatever
+/// the rule: the dim's tiles round a box being moved or resized). `None`:
+/// primitives came or went (then each is redrawn whole).
+fn boxes_moved(a: &[Primitive], b: &[Primitive]) -> Option<Vec<Rectangle>> {
+    if a.len() != b.len() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for (pa, pb) in a.iter().zip(b).filter(|(pa, pb)| pa != pb) {
+        let boxes = match (pa, pb) {
+            (
+                Primitive::Fill { path: path_a, paint: paint_a, rule: rule_a },
+                Primitive::Fill { path: path_b, paint: paint_b, rule: rule_b },
+            ) if paint_a == paint_b && rule_a == rule_b => rects(path_a).zip(rects(path_b)),
+            _ => None,
+        };
+        let Some((ra, rb)) = boxes else {
+            out.extend(drawn_primitive(pa));
+            out.extend(drawn_primitive(pb));
+            continue;
+        };
+        let n = ra.len().min(rb.len());
+        for (x, y) in ra.iter().zip(&rb).filter(|(x, y)| x != y) {
+            out.extend(apart(*x, *y).into_iter().map(|r| r.expand(1.0)));
+        }
+        out.extend(ra[n..].iter().chain(&rb[n..]).map(|r| r.expand(1.0)));
+    }
+    Some(out)
+}
+
+/// OpenCircle patch: `path` as the axis-aligned rectangles it is made of
+/// (each a closed run of 4 straight sides), else `None`.
+fn rects(path: &tiny_skia::Path) -> Option<Vec<Rectangle>> {
+    use tiny_skia::PathSegment;
+    let mut out = Vec::new();
+    let mut corners: Vec<tiny_skia::Point> = Vec::new();
+    let mut close = |corners: &mut Vec<tiny_skia::Point>| -> Option<()> {
+        if corners.is_empty() {
+            return Some(());
+        }
+        if corners.len() == 5 && corners[4] == corners[0] {
+            let _ = corners.pop();
+        }
+        if corners.len() != 4 {
+            return None;
+        }
+        let sides = (0..4).all(|i| {
+            let (p, q) = (corners[i], corners[(i + 1) % 4]);
+            (p.x == q.x) != (p.y == q.y)
+        });
+        if !sides {
+            return None;
+        }
+        let (x0, x1) = corners.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), p| (lo.min(p.x), hi.max(p.x)));
+        let (y0, y1) = corners.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), p| (lo.min(p.y), hi.max(p.y)));
+        out.push(Rectangle::new(Point::new(x0, y0), core::Size::new(x1 - x0, y1 - y0)));
+        corners.clear();
+        Some(())
+    };
+    for segment in path.segments() {
+        match segment {
+            PathSegment::MoveTo(p) => {
+                close(&mut corners)?;
+                corners.push(p);
+            }
+            PathSegment::LineTo(p) => corners.push(p),
+            PathSegment::Close => close(&mut corners)?,
+            PathSegment::QuadTo(..) | PathSegment::CubicTo(..) => return None,
+        }
+    }
+    close(&mut corners)?;
+    Some(out)
 }
 
 /// OpenCircle patch: `r` is a real rectangle (not a layer's infinite bounds).

@@ -1407,7 +1407,13 @@ fn dim(
                         let style = canvas::Style::Solid(colour);
                         frame.fill(&path, Fill { style, rule });
                     }
-                    false => frame.fill_rectangle(tile.position(), size, colour),
+                    // (the same fill as a tile with a hole: when one comes or
+                    // goes, the renderer redraws only the hole's part)
+                    false => {
+                        let path = Path::rectangle(tile.position(), size);
+                        let style = canvas::Style::Solid(colour);
+                        frame.fill(&path, Fill { style, rule });
+                    }
                 }
                 out.push(frame.into_geometry());
                 x += side;

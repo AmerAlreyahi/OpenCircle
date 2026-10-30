@@ -1274,8 +1274,14 @@ fn a_box_resized_across_screens_redraws_only_its_moving_edges() {
         app.o.grab.is_some() && now != r,
         "resized: {r:?} -> {now:?}"
     );
+    // (to the rounding of shapes rasterized in parts: the dim's tiles redraw
+    // only the strips their box's edges crossed, tiny-skia: 2 of 255)
     let fresh = frames(&mut app, 1, true, |_, _, _| {});
-    assert!(t.last().unwrap().rgba == fresh[0].rgba, "as drawn afresh");
+    let (got, want) = (&t.last().unwrap().rgba, &fresh[0].rgba);
+    let off = (got.iter().zip(want))
+        .filter(|(a, b)| a.abs_diff(**b) > 2)
+        .count();
+    assert_eq!(off, 0, "as drawn afresh");
 }
 
 /// A box resized by a corner redraws round its edges, never its middle (VM,
@@ -1474,7 +1480,9 @@ fn a_snips_drags_redraw_round_what_moves() {
             .flat_map(|d| d.damage.iter().map(|r| r.width * r.height))
             .sum();
         let share = area / ((t.len() - 1) as f32 * whole);
-        assert!(share < 0.3, "{drag:?}: {:.0} % a frame", share * 100.0);
+        // (the dim's tiles a moved or resized edge crosses redraw only the
+        // strips it crossed: 26-27 % of the screen a frame before, ~3 % now)
+        assert!(share < 0.1, "{drag:?}: {:.0} % a frame", share * 100.0);
         // the middle of the box being drawn or resized is never redrawn (once
         // the pick is big: a small box's sides are one run of damage; a moved
         // area's edges cross every dim tile it covers in turn)
