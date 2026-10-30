@@ -46,14 +46,20 @@ impl App {
         let crop = actions::crop(pixels, *width, *height, self.o.scale, selection.area);
         if let (Some(bounds), Some(crop)) = (bounds, crop) {
             // Snip: the area stays live on the whole frozen monitor (N-73).
+            let joined = match &self.o.purpose {
+                Purpose::Snip(_) => self.desktop_live(selection.area),
+                _ => None,
+            };
             let mut edit = match &self.o.purpose {
+                // across screens: the document is every frame joined
+                Purpose::Snip(_) if let Some(edit) = joined => edit,
                 Purpose::Snip(_) => {
                     let frame = Image {
                         width: *width,
                         height: *height,
                         rgba: pixels.to_vec(),
                     };
-                    Editing::live(frame, bounds, self.o.scale)
+                    Editing::live(frame, bounds, self.o.scale, iced::Point::ORIGIN)
                 }
                 _ => Editing::in_place(crop, bounds, self.o.scale),
             };
@@ -79,6 +85,15 @@ impl App {
             editor::Message::Release if live => self.log_frames("snip area drag"),
             _ => {}
         }
+        // (a press on another screen's part gave its window the focus: back)
+        if matches!(msg, editor::Message::Release) && !self.o.screens.is_empty() {
+            let focus = iced::window::gain_focus(self.overlay);
+            return self.on_editor_here(msg).chain(focus);
+        }
+        self.on_editor_here(msg)
+    }
+
+    fn on_editor_here(&mut self, msg: editor::Message) -> Task<Message> {
         let o = &mut *self.o;
         let Some(edit) = &mut o.edit else {
             return Task::none();

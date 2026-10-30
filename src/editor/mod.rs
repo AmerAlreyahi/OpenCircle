@@ -404,9 +404,9 @@ pub struct Editor {
     bands: Option<((u32, u32, board::Board), Vec<lines::Band>)>,
     /// The text line the blur stroke being drawn is held on.
     lock: Option<lines::Lock>,
-    /// Snip's live area: the document is the whole frozen monitor and its crop
-    /// is the captured area, which moves and resizes (`area`). The canvas is
-    /// then at the monitor's origin, so window px / zoom = image px.
+    /// Snip's live area: the document is the whole frozen monitor (or every
+    /// monitor joined) and its crop is the captured area, which moves and
+    /// resizes (`area`). The host places its top-left pixel (`canvas::Lens`).
     pub movable: bool,
     area_drag: Option<AreaDrag>,
     /// Snip's toolbar control Tab is on (its index in the toolbar's order);

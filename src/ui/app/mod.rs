@@ -440,16 +440,12 @@ impl App {
                 }),
                 None => Subscription::none(),
             };
-            // Snip: Shift or Alt held = no snapping; the pointer leaving may be
-            // for another monitor.
+            // Snip: Shift or Alt held = no snapping.
             let shift = match self.o.purpose {
                 Purpose::Snip(_) => iced::event::listen_with(|event, _, _| match event {
                     iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => Some(
                         Message::Snip(crate::ui::snip::Msg::Shift(m.shift() || m.alt())),
                     ),
-                    iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
-                        Some(Message::Snip(crate::ui::snip::Msg::Left))
-                    }
                     _ => None,
                 }),
                 _ => Subscription::none(),
@@ -463,9 +459,10 @@ impl App {
             // whenever the bar shows (not only once held), so no move or release
             // is lost while the grab is still being handled.
             let bar = match self.bottom_bar_shown() || self.editing() {
-                true => iced::event::listen_with(|event, _, _| match event {
+                true => iced::event::listen_with(|event, _, id| match event {
+                    // (in that window's px: Snip's toolbar may be on another screen)
                     iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
-                        Some(Message::BarMoved(position))
+                        Some(Message::BarMovedOn(id, position))
                     }
                     iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
                         iced::mouse::Button::Left,

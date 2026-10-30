@@ -19,6 +19,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self, Crop};
 use crate::config;
+use crate::editor;
 use crate::ocr;
 use crate::ui::app::background::background;
 use crate::ui::app::capture::overlay_window;
@@ -27,6 +28,8 @@ use crate::ui::app::opening::Opening;
 use crate::ui::app::word;
 use crate::ui::kit::motion;
 use crate::ui::platform::monitor::{Place, place_window};
+use crate::ui::screens::editor::Editing;
+use crate::ui::screens::editor::canvas::Lens;
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::{overlay, windows};
 
@@ -42,6 +45,8 @@ pub(in crate::ui) struct Screen {
     pub(in crate::ui) frame: image::Handle,
     /// The starting screen's image px <-> this window's logical px.
     pub(in crate::ui) view: overlay::View,
+    /// The taskbar's share of its bottom (its logical px): Snip's toolbar keeps off it.
+    pub(in crate::ui) inset: f32,
     /// Its own draw log, so the starting screen's frame budget stays its own.
     pub(in crate::ui) first_draw: Cell<Option<(Instant, Size)>>,
     pub(in crate::ui) frame_times: RefCell<Vec<Instant>>,
@@ -65,6 +70,11 @@ impl Screen {
             place,
             frame,
             view: view_of(start, place),
+            inset: crate::ui::platform::monitor::taskbar_inset(
+                place.logical_origin(),
+                place.size(),
+                place.scale,
+            ),
             first_draw: Cell::new(None),
             frame_times: RefCell::default(),
             lines: Vec::new(),
@@ -170,12 +180,22 @@ pub(in crate::ui) fn area_of(start: Place, place: Place) -> Rectangle {
 /// image px: `u` at `u * start.scale / place.scale + (start - place origin) /
 /// place.scale` of its logical px, i.e. through the desktop px both share.
 pub(in crate::ui) fn view_of(start: Place, place: Place) -> overlay::View {
+    let Lens { k, at, .. } = lens_of(start, place);
+    overlay::View::mapped(place.size(), k, at)
+}
+
+/// The same map for the editor drawn there (Snip's live area across screens).
+pub(in crate::ui) fn lens_of(start: Place, place: Place) -> Lens {
     let k = start.scale / place.scale;
     let at = Vector::new(
         (start.origin.0 - place.origin.0) as f32 / place.scale,
         (start.origin.1 - place.origin.1) as f32 / place.scale,
     );
-    overlay::View::mapped(place.size(), k, at)
+    Lens {
+        k,
+        at,
+        origin: Point::ORIGIN,
+    }
 }
 
 /// How the lines of the monitor at `place` (its own logical px) go into the
@@ -243,37 +263,75 @@ impl App {
         else {
             return None;
         };
-        let start = self.o.place();
-        let meets = |s: &&Screen| {
-            (area_of(start, s.place).intersection(&area)).is_some_and(|r| r.width * r.height > 0.0)
-        };
-        if !self.o.screens.iter().any(|s| meets(&s)) {
+        if !self.spans(area) {
             return actions::crop(pixels, *width, *height, self.o.scale, area);
         }
-        let bounds = self.desk_bounds(area)?;
-        fn part(at: (i32, i32), frame: &image::Handle) -> Option<actions::crop::Part<'_>> {
-            match frame {
-                image::Handle::Rgba {
-                    width,
-                    height,
-                    pixels,
-                    ..
-                } => Some((at, *width, *height, &pixels[..])),
-                _ => None,
-            }
+        self.stitched(self.desk_bounds(area)?)
+    }
+
+    /// `area` (image px) reaches another screen.
+    pub(in crate::ui) fn spans(&self, area: Rectangle) -> bool {
+        let start = self.o.place();
+        (self.o.screens.iter()).any(|s| {
+            (area_of(start, s.place).intersection(&area)).is_some_and(|r| r.width * r.height > 0.0)
+        })
+    }
+
+    /// Snip's live area `area` (image px) on several screens: the editor's
+    /// document is every frame joined in desktop px (`actions::stitch`, pixel
+    /// for pixel on every monitor whatever its scale; gaps white), its top-left
+    /// pixel at the desk's top-left. `None` with one screen (its own frame is
+    /// the document, as before).
+    // ponytail: a copy of every frame while the editor is open (as one screen
+    // copies its frame); share the frames if several 4K screens ever weigh.
+    pub(in crate::ui) fn desktop_live(&self, area: Rectangle) -> Option<Editing> {
+        if self.o.screens.is_empty() {
+            return None;
         }
-        let others = (self.o.screens.iter().filter(meets)).map(|s| part(s.place.origin, &s.frame));
-        let parts: Vec<_> = (std::iter::once(Some((start.origin, *width, *height, &pixels[..]))))
-            .chain(others)
-            .flatten()
-            .collect();
+        let start = self.o.place();
+        let all = self.desk_bounds(self.o.desk())?;
+        let [x0, y0, ..] = all;
+        let joined = self.stitched(all)?;
+        let [a0, b0, a1, b1] = self.desk_bounds(area)?;
+        let bounds = [a0 - x0, b0 - y0, a1 - x0, b1 - y0].map(|v| v.max(0) as u32);
+        let origin = from_desktop(start, Point::new(x0 as f32, y0 as f32));
+        let image = editor::Image {
+            width: joined.width,
+            height: joined.height,
+            rgba: joined.rgba,
+        };
+        Some(Editing::live(image, bounds, self.o.scale, origin))
+    }
+
+    /// The desktop px `bounds` cut out of every frozen frame they meet.
+    fn stitched(&self, bounds: [i32; 4]) -> Option<Crop> {
+        let image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        } = self.o.frame.as_ref()?
+        else {
+            return None;
+        };
+        let others = (self.o.screens.iter()).filter_map(|s| match &s.frame {
+            image::Handle::Rgba {
+                width,
+                height,
+                pixels,
+                ..
+            } => Some((s.place.origin, *width, *height, &pixels[..])),
+            _ => None,
+        });
+        let start = (self.o.place().origin, *width, *height, &pixels[..]);
+        let parts: Vec<actions::crop::Part<'_>> = std::iter::once(start).chain(others).collect();
         actions::stitch(&parts, bounds)
     }
 
     /// `area` (image px, on a stitched crop) in desktop px: `[x0, y0, x1, y1]`, the
     /// edges rounded outwards, as `crop` does (past a mapping's float error), kept
     /// on the screens.
-    fn desk_bounds(&self, area: Rectangle) -> Option<[i32; 4]> {
+    pub(in crate::ui) fn desk_bounds(&self, area: Rectangle) -> Option<[i32; 4]> {
         let start = self.o.place();
         let desk = self.o.desk().intersection(&area)?;
         let a = to_desktop(start, desk.position());
@@ -290,14 +348,11 @@ impl App {
         let image::Handle::Rgba { width, height, .. } = self.o.frame.as_ref()? else {
             return None;
         };
-        let start = self.o.place();
-        let meets = |s: &Screen| {
-            (area_of(start, s.place).intersection(&area)).is_some_and(|r| r.width * r.height > 0.0)
-        };
-        if self.o.screens.iter().any(meets) {
+        if self.spans(area) {
             let [x, y, ..] = self.desk_bounds(area)?;
             return Some((x, y));
         }
+        let start = self.o.place();
         let [x, y, ..] = actions::crop_bounds(*width, *height, self.o.scale, area)?;
         Some((start.origin.0 + x as i32, start.origin.1 + y as i32))
     }
@@ -307,7 +362,9 @@ impl App {
     // ponytail: the helper's bands are the starting screen's rows; add a Rows
     // per screen if the helper ever reads other screens.
     fn screens_text(&self) -> bool {
-        self.o.text_by == Some(ocr::Source::System) && !self.o.screens.is_empty()
+        self.o.text_by == Some(ocr::Source::System)
+            && !self.o.screens.is_empty()
+            && matches!(self.o.purpose, Purpose::Search)
     }
 
     /// Row or screen under `p` (image px) was read: its lines are known (or
@@ -552,6 +609,13 @@ impl App {
             },
             overlay::Event::Move(p) => overlay::Event::Move(on_start(p)),
             overlay::Event::Hover(p) => overlay::Event::Hover(on_start(p)),
+            // Snip: the wheel walks what is outlined there
+            overlay::Event::Zoom { at, notches } if matches!(self.o.purpose, Purpose::Snip(_)) => {
+                overlay::Event::Zoom {
+                    at: on_start(at),
+                    notches,
+                }
+            }
             overlay::Event::Zoom { .. }
             | overlay::Event::PanStart(_)
             | overlay::Event::PanMove(_)
@@ -571,7 +635,7 @@ impl App {
     /// The pointer came into `window` at `now`: the edge glow follows it there
     /// when it is one of this opening's screens (the bar stays put).
     pub(in crate::ui) fn pointer_on(&mut self, window: window::Id, now: Instant) {
-        if self.o.is_none() || !matches!(self.o.purpose, Purpose::Search) {
+        if self.o.is_none() || !matches!(self.o.purpose, Purpose::Search | Purpose::Snip(_)) {
             return;
         }
         let to = match window {
@@ -587,6 +651,10 @@ impl App {
     /// the breath is the starting screen's). No bar, card, toast or hint:
     /// those stay on the starting screen.
     pub(in crate::ui) fn screen_view<'a>(&'a self, screen: &'a Screen) -> Element<'a, Message> {
+        let snip = match &self.o.purpose {
+            Purpose::Snip(snip) => Some(snip),
+            _ => None,
+        };
         let picked: Vec<Rectangle> = (self.o.text_mode.as_ref())
             .and_then(|m| m.picked.as_ref())
             .map_or_else(Vec::new, word::Picked::rects);
@@ -600,9 +668,9 @@ impl App {
             opening: self.opening,
             first_draw: &screen.first_draw,
             frame_times: &screen.frame_times,
-            hover: false,
+            hover: snip.is_some_and(|s| s.kind.picks()) && self.o.edit.is_none(),
             dim: true,
-            live_drag: false,
+            live_drag: snip.is_some(),
             look: config::look(),
             morph: (self.o.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
             words: (self.o.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
@@ -620,17 +688,50 @@ impl App {
         };
         let window = screen.window;
         let glow = self.o.glow.at(Some(window));
-        stack![
+        let mode = match snip {
+            Some(_) => border::Mode::Snip,
+            None => border::Mode::Overlay,
+        };
+        let mut layers = stack![
             canvas(frozen).width(Fill).height(Fill),
             Element::from(canvas(overlay).width(Fill).height(Fill))
                 .map(move |event| Message::ScreenEvent(window, event)),
         ]
-        // (last: its coming and going leaves the layers under it as they are)
+        // (its coming and going leaves the layers under it as they are)
         .push((glow > 0.0).then(|| {
-            let (mode, scale) = (border::Mode::Overlay, screen.place.scale);
+            let scale = screen.place.scale;
             border::view(mode, scale, false, border::Breathe::Off, glow)
-        }))
-        .into()
+        }));
+        // Snip: the live area's part here (and the toolbar when it docks
+        // here), or the loupe and outline while the pointer is here.
+        let start = self.o.place();
+        if let Some(edit) = self.o.edit.as_ref().filter(|e| e.is_open()) {
+            let lens = lens_of(start, screen.place);
+            let toolbar =
+                (self.toolbar_on() == Some(window)).then(|| screen.view.to_screen(self.bar_at()));
+            layers = layers.push(edit.view(
+                screen.place.size(),
+                toolbar,
+                lens,
+                Message::Editor,
+                Message::BarGrab,
+            ));
+        } else if let Some(snip) = snip
+            && self.o.edit.is_none()
+            && snip
+                .pointer
+                .is_some_and(|p| area_of(start, screen.place).contains(p))
+        {
+            let look = crate::ui::theme::accent_of(&config::look());
+            let (frame, scale) = (&screen.frame, screen.place.scale);
+            let size = screen.place.size();
+            if let Some(guides) =
+                snip.guides(frame, scale, screen.view, size, self.snip_drag(), look)
+            {
+                layers = layers.push(guides.map(Message::Snip));
+            }
+        }
+        layers.into()
     }
 }
 
@@ -783,6 +884,129 @@ mod tests {
                 out
             })
             .collect()
+    }
+
+    /// Snip opened on `START` with a 150 % screen right of it (2880 x 1620
+    /// physical px), its other screen's window open (the opening over); the
+    /// editor on (Labs). Returns that screen's window.
+    fn snipped() -> (App, window::Id) {
+        let mut app = App::idle(window::Id::unique());
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        let n = app.capturing.expect("pending");
+        let right = place((640, 0), (2880, 1620), 1.5);
+        // opaque greys (the editor's document is premultiplied)
+        let opaque = |p: Place, grey: u8| {
+            let (w, h) = p.px;
+            image::Handle::from_rgba(w, h, [grey, grey, grey, 255].repeat((w * h) as usize))
+        };
+        let frames = vec![(START, opaque(START, 200)), (right, opaque(right, 90))];
+        let shot = Shot {
+            image: opaque(START, 200),
+            scale: START.scale,
+            origin: START.logical_origin(),
+            size: START.size(),
+            snip: Some((crate::ui::snip::Kind::Region, Vec::new(), None, frames)),
+        };
+        let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
+        assert!(app.o.screens.is_empty(), "after the opening");
+        app.o.appear = Some((Instant::now(), 1.0));
+        let _ = app.update(Message::Frame(Instant::now()));
+        assert_eq!(app.o.screens.len(), 1, "the other screen's window");
+        app.o.labs = crate::labs::Labs::all_on();
+        let id = app.o.screens[0].window;
+        (app, id)
+    }
+
+    /// Design state 8: one snip area across two screens of mixed scale: drawn
+    /// from one onto the other, the live editor's document is both frames
+    /// joined (desktop px), so moving the area across the bezel and Copy take
+    /// both screens' own pixels; the toolbar docks on the screen holding the
+    /// larger part, drawn by that screen's window.
+    #[test]
+    fn a_snip_area_spans_screens_and_its_editor_copies_both_frames() {
+        use crate::editor::Message as E;
+        let (mut app, id) = snipped();
+        // hover on the other screen: its window outlines (forwarded in start px)
+        let local = |x: f32, y: f32| Point::new((x - 640.0) / 1.5, y / 1.5);
+        let hover = overlay::Event::Hover(local(900.0, 100.0));
+        let _ = app.update(Message::ScreenEvent(id, hover));
+        let Purpose::Snip(snip) = &app.o.purpose else {
+            panic!("a snip")
+        };
+        let at = snip.pointer.expect("hovered");
+        assert!(at.distance(Point::new(900.0, 100.0)) < 0.01, "{at:?}");
+        // an area from the starting screen onto the other, picked
+        let route = crate::ui::snip::route(config::SnipAfter::Editor);
+        app.select(Rectangle::new(
+            Point::new(600.0, 100.0),
+            Size::new(100.0, 50.0),
+        ));
+        let crop = app.crop().expect("a crop");
+        assert_eq!((crop.width, crop.height), (100, 50));
+        let _ = app.snip_routed(crop, true, route);
+        let edit = app.o.edit.as_ref().expect("the live editor");
+        assert!(edit.editor.movable);
+        let doc = &edit.editor.doc.image;
+        assert_eq!((doc.width, doc.height), (3520, 1620), "both frames joined");
+        let crop = app.crop().unwrap();
+        assert_eq!((crop.width, crop.height), (100, 50));
+        assert!(
+            runs(&crop).iter().all(|r| *r == [(200, 40), (90, 60)]),
+            "both screens' pixels"
+        );
+        // the area moved 300 px right, onto the other screen (Select drags it)
+        let _ = app.on_editor(E::Press(Point::new(650.0, 125.0)));
+        let _ = app.on_editor(E::Move(Point::new(950.0, 125.0)));
+        let _ = app.on_editor(E::Release);
+        let area = app.o.selection.expect("follows").area;
+        assert!((area.x - 900.0).abs() < 0.01, "{area:?}");
+        let crop = app.crop().unwrap();
+        assert!(
+            runs(&crop).iter().all(|r| *r == [(90, 100)]),
+            "the other screen's pixels"
+        );
+        // the toolbar: on that screen, whole, drawn by its window
+        let (on, work, size) = app.snip_dock().expect("docked");
+        assert_eq!(on, Some(0));
+        let at = app.bar_target();
+        let bar = Rectangle::new(at, size);
+        assert!(
+            bar.x >= work.x && bar.x + bar.width <= work.x + work.width + 0.01,
+            "{bar:?} {work:?}"
+        );
+        app.o.bar_now = Some(at);
+        assert_eq!(app.toolbar_on(), Some(id));
+        // drawn there: the window shows more than the frozen frame and the dim
+        let size = app.o.screens[0].place.size();
+        let rgba = shot::render(app.view(id), size.width as u32, size.height as u32);
+        let (pixels, _) = rgba.as_chunks::<4>();
+        let w = size.width as usize;
+        let bar_at = app.o.screens[0].view.to_screen(at);
+        let y = (bar_at.y + 10.0) as usize;
+        let row = &pixels[y * w..(y + 1) * w];
+        assert!(
+            row.iter().any(|p| *p != row[0]),
+            "the toolbar is on that screen"
+        );
+    }
+
+    #[test]
+    fn shift_enter_snips_every_screen_and_a_pill_closes_the_other_windows() {
+        let (mut app, _) = snipped();
+        app.o.labs = crate::labs::Labs::default();
+        let _ = app.update(Message::Overlay(overlay::Event::ShiftEnter));
+        // (no editor: copied, the toast pill shows)
+        assert!(app.snip_toast(), "copied");
+        let Purpose::Snip(snip) = &app.o.purpose else {
+            panic!("a snip")
+        };
+        let toast = snip.toast_crop().expect("the capture");
+        // 640 + 2880 physical px wide, the taller screen high
+        assert_eq!((toast.width, toast.height), (3520, 1620));
+        assert!(
+            app.o.screens.is_empty(),
+            "the pill leaves the screens to the user"
+        );
     }
 
     #[test]

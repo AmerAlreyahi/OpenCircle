@@ -221,31 +221,32 @@ pub(in crate::ui) fn place(selection: Rectangle, bar: Size, screen: Size) -> Poi
     Point::new(x, y.max(GAP))
 }
 
+/// Which of `screens` (work areas) Snip's toolbar docks on for the live area
+/// `area`: the one holding the larger part of it (design state 8), the first
+/// on a tie or when it is on none.
+pub(in crate::ui) fn dock_screen(area: Rectangle, screens: &[Rectangle]) -> usize {
+    let part = |s: &Rectangle| area.intersection(s).map_or(0.0, |r| r.width * r.height);
+    (screens.iter().enumerate())
+        .fold((0, 0.0), |(best, most), (i, s)| match part(s) {
+            p if p > most => (i, p),
+            _ => (best, most),
+        })
+        .0
+}
+
 /// Where Snip's editing toolbar (`bar`) docks for the live area `area`
 /// (logical px): centred under it, else above it, else inside its top edge,
-/// else inside its bottom edge; on the screen of `screens` (work areas) where
-/// the area leaves the most room above or below; never off that screen, and
-/// never over `avoid` (the handle being dragged) while another spot is free.
+/// else inside its bottom edge; on the screen of `screens` (work areas) that
+/// holds the larger part of the area (`dock_screen`); never off that screen,
+/// and never over `avoid` (the handle being dragged) while another spot is free.
 pub(in crate::ui) fn dock(
     area: Rectangle,
     bar: Size,
     screens: &[Rectangle],
     avoid: Option<Point>,
 ) -> Point {
-    let room = |s: &Rectangle| {
-        let part = area.intersection(s)?;
-        let below = s.y + s.height - (part.y + part.height);
-        let above = part.y - s.y;
-        Some((part, below.max(above)))
-    };
-    let (screen, part) = (screens.iter())
-        .filter_map(|s| room(s).map(|(part, free)| (s, part, free)))
-        .max_by(|a, b| a.2.total_cmp(&b.2))
-        .map(|(s, part, _)| (*s, part))
-        .unwrap_or_else(|| {
-            let s = screens.first().copied().unwrap_or(area);
-            (s, area)
-        });
+    let screen = (screens.get(dock_screen(area, screens)).copied()).unwrap_or(area);
+    let part = area.intersection(&screen).unwrap_or(area);
     let (top, bottom) = (screen.y + GAP, screen.y + screen.height - GAP - bar.height);
     let x = (part.center_x() - bar.width / 2.0)
         .min(screen.x + screen.width - GAP - bar.width)
@@ -476,14 +477,25 @@ mod tests {
         assert_eq!(dock(a, BAR, &work, Some(Point::new(10.0, 10.0))), below);
     }
 
+    /// Design state 8: the toolbar docks on the screen holding the larger
+    /// part of the area, whole, never across the bezel.
     #[test]
-    fn snips_toolbar_goes_to_the_screen_with_the_most_room() {
+    fn snips_toolbar_goes_to_the_screen_with_the_larger_part_of_the_area() {
         // Two screens side by side; the area spans both, low on the left one
-        // (little room) and high on the right one (lots below).
+        // (little room under it there) and high on the right one.
         let left = sel(0.0, 0.0, 1920.0, 1080.0);
         let right = sel(1920.0, -600.0, 1280.0, 1800.0);
+        // 420 px on the left, 380 on the right: the left one, above the area
         let a = sel(1500.0, 900.0, 800.0, 150.0);
+        assert_eq!(dock_screen(a, &[left, right]), 0);
         let p = dock(a, BAR, &[left, right], None);
+        let r = Rectangle::new(p, BAR);
+        assert!(r.x >= left.x + GAP && r.x + r.width <= left.x + left.width - GAP);
+        assert_eq!(p.y, 900.0 - GAP - BAR.height, "above it: no room below");
+        // mostly on the right: under the area there
+        let b = sel(1800.0, 900.0, 800.0, 150.0);
+        assert_eq!(dock_screen(b, &[left, right]), 1);
+        let p = dock(b, BAR, &[left, right], None);
         let r = Rectangle::new(p, BAR);
         assert!(r.x >= right.x + GAP && r.x + r.width <= right.x + right.width - GAP);
         assert_eq!(
@@ -491,5 +503,7 @@ mod tests {
             900.0 + 150.0 + GAP,
             "under the area on the right screen"
         );
+        // on neither (a gap between offset screens): the first one
+        assert_eq!(dock_screen(sel(5000.0, 0.0, 10.0, 10.0), &[left, right]), 0);
     }
 }

@@ -54,10 +54,24 @@ pub fn key_hint<'a, Message: 'a>(groups: &[Group<'a>], rtl: bool) -> Element<'a,
     .into()
 }
 
+/// How wide `key_hint(groups)` is (logical px): padding, groups, the dots
+/// between them (each 3 px with the row's 8 px gaps).
+pub fn width(groups: &[Group<'_>]) -> f32 {
+    let label = |l: &str| kit_text::width(l, Role::CONTROL.size, font(Role::CONTROL));
+    let parts: f32 = (groups.iter())
+        .map(|(key, l)| label(l) + key.map_or(0.0, |k| cap_width(k) + 6.0))
+        .sum();
+    let dots = groups.len().saturating_sub(1) as f32 * (3.0 + 2.0 * 8.0);
+    24.0 + parts + dots
+}
+
 /// A keycap as wide as its key (the kit keycap fills its cell).
 fn cap<'a, Message: 'a>(key: &str) -> Element<'a, Message> {
-    let w = kit_text::width(key, Role::KEYCAP.size, font(Role::KEYCAP)) + 12.0;
     container(super::keycap::keycap(key.to_string()))
-        .width(w.max(22.0))
+        .width(cap_width(key))
         .into()
+}
+
+fn cap_width(key: &str) -> f32 {
+    (kit_text::width(key, Role::KEYCAP.size, font(Role::KEYCAP)) + 12.0).max(22.0)
 }

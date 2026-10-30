@@ -57,12 +57,13 @@ impl Editing {
         Self::new(crop, on_screen(bounds, scale).position(), 1.0 / scale)
     }
 
-    /// Snip's live area: the whole frozen monitor `frame` (physical px, shown
-    /// at the monitor's origin) with the frame pixels `bounds` as the area,
-    /// which then moves and resizes (`editor::area`); it starts with Select,
-    /// so a drag inside moves it until a tool is picked.
-    pub fn live(frame: Image, bounds: [u32; 4], scale: f32) -> Self {
-        let mut e = Self::new_image(frame, Point::ORIGIN, 1.0 / scale);
+    /// Snip's live area: the whole frozen monitor `frame` (physical px), or
+    /// every monitor's frame joined (desktop px), its top-left pixel shown at
+    /// `origin` (logical px), with the frame pixels `bounds` as the area, which
+    /// then moves and resizes (`editor::area`), across screens too; it starts
+    /// with Select, so a drag inside moves it until a tool is picked.
+    pub fn live(frame: Image, bounds: [u32; 4], scale: f32, origin: Point) -> Self {
+        let mut e = Self::new_image(frame, origin, 1.0 / scale);
         let [x0, y0, x1, y1] = bounds;
         let px = |v: u32| v as f32;
         e.editor.doc.crop = Some(Rectangle::new(
@@ -222,15 +223,20 @@ impl Editing {
     }
 
     /// The canvas over its place and the toolbar with its top-left at
-    /// `toolbar` (`None`: not shown, e.g. while the bar turns into it); a press
-    /// on the toolbar outside its buttons sends `grab` (drags it, as the bar).
+    /// `toolbar` (`None`: not shown, e.g. while the bar turns into it, or on
+    /// another screen); a press on the toolbar outside its buttons sends `grab`
+    /// (drags it, as the bar). `lens`: the window it is drawn in (`ONE` = the
+    /// starting screen, which alone shows the keyboard hints); `screen` = that
+    /// window's size, `toolbar` in its px.
     pub fn view<'a, M: Clone + 'a>(
         &'a self,
         screen: Size,
         toolbar: Option<Point>,
+        lens: canvas::Lens,
         map: fn(editor::Message) -> M,
         grab: M,
     ) -> Element<'a, M> {
+        let main = lens.k == 1.0 && lens.at == iced::Vector::ZERO;
         if let Some(drag) = self.picking {
             let hint = container(surface::hint(PICK_HINT))
                 .center_x(Fill)
@@ -245,14 +251,17 @@ impl Editing {
         }
         let canvas = self.canvas_rect();
         let m = canvas::margin(&self.editor);
-        let at = canvas.position() - iced::Vector::new(m, m);
-        let mut layers = stack![
-            pin(Element::from(canvas::canvas(&self.editor, self.grow.1)).map(map)).position(at)
-        ];
+        let at = lens.to_window(canvas.position() - iced::Vector::new(m, m));
+        let lens = canvas::Lens {
+            origin: self.origin,
+            ..lens
+        };
+        let drawn = canvas::canvas(&self.editor, self.grow.1, lens);
+        let mut layers = stack![pin(Element::from(drawn).map(map)).position(at)];
         // Snip moved by the keyboard: its keys above the area, its position
         // (frame px) in its bottom-right corner, until the pointer is used.
         // ponytail: shown until the next press, not the design's 2 s / 800 ms fades.
-        if self.editor.movable && self.editor.nudged {
+        if main && self.editor.movable && self.editor.nudged {
             let hint = key_hint(&NUDGE_HINT, false);
             let y = (canvas.y - 8.0 - key_hint::HEIGHT).max(8.0);
             let hint = container(hint).center_x(screen.width);

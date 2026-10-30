@@ -252,16 +252,30 @@ impl App {
             }
             // While held its target follows the pointer (kept on screen); the
             // frames ease it there (`Frame`), never a jump per mouse event.
+            Message::BarMovedOn(window, p) => {
+                let screen = self.o.screens.iter().find(|s| s.window == window);
+                let p = match screen {
+                    Some(s) => self.o.view.to_screen(s.view.to_image(p)),
+                    None => p,
+                };
+                self.update(Message::BarMoved(p))
+            }
             Message::BarMoved(p) => {
                 if let Some((last, at)) = self.o.bar_drag {
                     let size = self.dock_size();
                     let at = match last {
                         Some(from) => {
                             let to = at + (p - from);
-                            let max = |whole: f32, side: f32| (whole - side).max(0.0);
+                            // Snip's toolbar may go onto any screen
+                            let desk = match self.o.edit.as_ref().is_some_and(|e| e.editor.movable)
+                            {
+                                true => self.o.desk(),
+                                false => Rectangle::with_size(self.o.screen),
+                            };
+                            let fit = |lo: f32, whole: f32, side: f32| lo.max(lo + whole - side);
                             Point::new(
-                                to.x.clamp(0.0, max(self.o.screen.width, size.width)),
-                                to.y.clamp(0.0, max(self.o.screen.height, size.height)),
+                                to.x.clamp(desk.x, fit(desk.x, desk.width, size.width)),
+                                to.y.clamp(desk.y, fit(desk.y, desk.height, size.height)),
                             )
                         }
                         None => at,

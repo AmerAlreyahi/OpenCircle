@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use iced::widget::image;
 use iced::window::{self, Level, Mode};
-use iced::{Point, Size, Task};
+use iced::{Point, Rectangle, Size, Task};
 
 use crate::actions::{self, Action, Run, text};
 use crate::capture::{self, CaptureError};
@@ -189,7 +189,20 @@ impl App {
                 crate::capture::scroll::can_scroll(),
                 foreground,
             );
-            snip.set_screens(screens);
+            // Every other monitor gets its window over its frame once the
+            // opening is up (`app::screens`, as Circle to Search): one area may
+            // span them.
+            let start = self.place();
+            let others: Vec<_> = (screens.into_iter())
+                .filter(|(p, _)| p.origin != start.origin)
+                .collect();
+            let monitors = std::iter::once(Rectangle::with_size(size)).chain(
+                others
+                    .iter()
+                    .map(|(p, _)| super::screens::area_of(start, *p)),
+            );
+            snip.set_monitors(monitors.collect());
+            self.o.waiting = others;
             first = snip.start(kind, size); // Full = the whole screen at once
             let wait = config::current().snip.delay;
             if !std::mem::take(&mut self.timed) && wait > 0 && first.is_none() {

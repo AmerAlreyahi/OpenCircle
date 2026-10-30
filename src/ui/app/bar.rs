@@ -11,6 +11,7 @@ use crate::labs::{self, BarButton};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
+use crate::ui::app::screens;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::editor::Editing;
@@ -48,9 +49,11 @@ impl App {
     /// The size of what is docked at the bar's spot now: the bar, the editing
     /// toolbar, or the shape between them while one turns into the other.
     pub(in crate::ui) fn dock_size(&self) -> Size {
+        if let Some((_, _, size)) = self.snip_dock() {
+            return size;
+        }
         let (_, bar) = self.bar_size();
-        let snip = self.o.edit.as_ref().is_some_and(|e| e.editor.movable);
-        let tool = Editing::toolbar_size(self.o.screen.width, snip);
+        let tool = Editing::toolbar_size(self.o.screen.width, false);
         let t = self.swapped();
         Size::new(
             bar.width + (tool.width - bar.width) * t,
@@ -70,18 +73,16 @@ impl App {
         if let Some((_, at)) = self.o.bar_drag {
             return at;
         }
-        let size = self.dock_size();
         // Snip's live area: the toolbar docks to it (under, above, inside),
-        // clear of the handle being dragged.
-        if let Some(edit) = self.o.edit.as_ref().filter(|e| e.editor.movable) {
+        // clear of the handle being dragged, on the screen holding most of it.
+        if let Some(edit) = self.o.edit.as_ref().filter(|e| e.editor.movable)
+            && let Some((_, work, size)) = self.snip_dock()
+        {
             let area = edit.canvas_rect();
-            let work = Size::new(
-                self.o.screen.width,
-                self.o.screen.height - self.o.work_inset,
-            );
             let avoid = (edit.editor.area_handle()).map(|p| p + (area.position() - Point::ORIGIN));
-            return bar::dock(area, size, &[Rectangle::with_size(work)], avoid);
+            return bar::dock(area, size, &[work], avoid);
         }
+        let size = self.dock_size();
         let canvas = self.o.edit.as_ref().map(Editing::canvas_rect);
         let room = self.bar_room();
         let off = Vector::new(room.x, room.y);
@@ -94,6 +95,53 @@ impl App {
         let inset = self.o.work_inset;
         let spot = bar::free(self.o.bar_anchor, &blocked, room.size(), size, inset);
         bar::anchor_at(spot, room.size(), size, inset) + off
+    }
+
+    /// Every screen's work area (the starting screen's px, the taskbar left
+    /// out), the starting one first, with its scale against it (`Lens::k`).
+    fn work_areas(&self) -> Vec<(Rectangle, f32)> {
+        let start = self.o.place();
+        let here = Size::new(
+            self.o.screen.width,
+            self.o.screen.height - self.o.work_inset,
+        );
+        let others = (self.o.screens.iter()).map(|s| {
+            let k = start.scale / s.place.scale;
+            let mut work = screens::area_of(start, s.place);
+            work.height -= s.inset / k;
+            (work, k)
+        });
+        std::iter::once((Rectangle::with_size(here), 1.0))
+            .chain(others)
+            .collect()
+    }
+
+    /// Snip's toolbar (`None` without its live area): the screen it docks on
+    /// (`None` = the starting one, else that index in `screens`), its work
+    /// area and the toolbar's size there, in the starting screen's px. The
+    /// screen holding the larger part of the area (design state 8): it fits
+    /// there whole, never across a bezel.
+    pub(in crate::ui) fn snip_dock(&self) -> Option<(Option<usize>, Rectangle, Size)> {
+        let edit = self.o.edit.as_ref().filter(|e| e.editor.movable)?;
+        let works = self.work_areas();
+        let rects: Vec<Rectangle> = works.iter().map(|(r, _)| *r).collect();
+        let i = bar::dock_screen(edit.canvas_rect(), &rects);
+        let (work, k) = works[i];
+        // its own logical width there, back in the starting screen's px
+        let size = Editing::toolbar_size(work.width * k, true) * (1.0 / k);
+        Some((i.checked_sub(1), work, size))
+    }
+
+    /// The window Snip's toolbar is drawn in: the screen its spot is on now
+    /// (where it docked, or where it was left), else the starting one.
+    pub(in crate::ui) fn toolbar_on(&self) -> Option<iced::window::Id> {
+        self.o.edit.as_ref().filter(|e| e.editor.movable)?;
+        let at = self.bar_at();
+        let start = self.o.place();
+        let here = (self.o.screens.iter())
+            .find(|s| screens::area_of(start, s.place).contains(at))
+            .map(|s| s.window);
+        Some(here.unwrap_or(self.overlay))
     }
 
     /// The part of the screen the bar's spots are in: beside the pinned AI

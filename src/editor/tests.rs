@@ -8,7 +8,11 @@ use iced::widget::column;
 /// look at them.
 impl Editor {
     fn canvas(&self) -> Element<'_, Message> {
-        crate::ui::screens::editor::canvas::canvas(self, 1.0)
+        crate::ui::screens::editor::canvas::canvas(
+            self,
+            1.0,
+            crate::ui::screens::editor::canvas::Lens::ONE,
+        )
     }
 
     fn toolbar(&self) -> Element<'_, Message> {

@@ -122,6 +122,8 @@ pub(in crate::ui) enum Message {
     /// The bottom bar's handle went down / the pointer moved / it was let go.
     BarGrab,
     BarMoved(Point),
+    /// The pointer moved in that window (its px), while the bar may be held.
+    BarMovedOn(window::Id, Point),
     BarReleased,
     /// While the result card is dragged: the pointer moved / was let go.
     CardMoved(Point),

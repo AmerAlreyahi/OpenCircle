@@ -28,12 +28,6 @@ impl Place {
             self.origin.1 as f32 / self.scale,
         )
     }
-
-    pub(in crate::ui) fn contains(&self, (x, y): (i32, i32)) -> bool {
-        let (ox, oy) = (i64::from(self.origin.0), i64::from(self.origin.1));
-        (ox..ox + i64::from(self.px.0)).contains(&i64::from(x))
-            && (oy..oy + i64::from(self.px.1)).contains(&i64::from(y))
-    }
 }
 
 /// Puts the overlay window over the monitor at `place`, so full-screen (which

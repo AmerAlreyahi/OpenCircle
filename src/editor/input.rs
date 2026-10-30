@@ -103,12 +103,6 @@ impl Editor {
         }
     }
 
-    /// Window px → image px for Snip's live area (the canvas starts at the
-    /// monitor's origin there, wherever the area is now).
-    pub(crate) fn window_to_image(&self, p: Point) -> Point {
-        Point::new(p.x / self.zoom, p.y / self.zoom)
-    }
-
     /// Canvas px → image px.
     pub(crate) fn to_image(&self, p: Point) -> Point {
         let v = self.doc.view();

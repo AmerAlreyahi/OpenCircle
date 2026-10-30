@@ -21,12 +21,43 @@ pub fn margin(e: &Editor) -> f32 {
 use crate::ui::kit::area;
 use crate::ui::kit::themes::c;
 
+/// How a window shows Snip's live area (`app::screens`' one unit): its px =
+/// the starting screen's px * `k` + `at`; the image's top-left pixel is at
+/// `origin` (starting screen's px). The starting screen: `ONE` (k 1, at 0).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Lens {
+    pub k: f32,
+    pub at: Vector,
+    pub origin: Point,
+}
+
+impl Lens {
+    pub const ONE: Lens = Lens {
+        k: 1.0,
+        at: Vector::ZERO,
+        origin: Point::ORIGIN,
+    };
+
+    /// A starting screen's point in this window.
+    pub fn to_window(self, p: Point) -> Point {
+        Point::new(p.x * self.k, p.y * self.k) + self.at
+    }
+
+    /// This window's point `p` in the editor's image px (`zoom` display px per image px).
+    fn to_image(self, p: Point, zoom: f32) -> Point {
+        let s = Point::new((p.x - self.at.x) / self.k, (p.y - self.at.y) / self.k);
+        Point::new((s.x - self.origin.x) / zoom, (s.y - self.origin.y) / zoom)
+    }
+}
+
 /// The editing surface, `size()` big: for Edit in place, over the selection.
-/// `grown`: Snip's handles scaled in (0..1, the pick's motion).
-pub fn canvas(e: &Editor, grown: f32) -> Element<'_, Message> {
-    let size = e.size();
+/// `grown`: Snip's handles scaled in (0..1, the pick's motion); `lens`: the
+/// window it is drawn in (Snip's area may span screens), `k` times as big.
+pub fn canvas(e: &Editor, grown: f32, lens: Lens) -> Element<'_, Message> {
+    let k = lens.k;
+    let size = e.size() * k;
     let view = e.doc.view();
-    let m = margin(e);
+    let m = margin(e) * k;
     let outer = Size::new(size.width + 2.0 * m, size.height + 2.0 * m);
     // (Snip's bare live area: the frozen frame under it shows through)
     let mut layers: Vec<Element<'_, Message>> = vec![match e.bare() {
@@ -41,10 +72,11 @@ pub fn canvas(e: &Editor, grown: f32) -> Element<'_, Message> {
     // Always a layer here, live or not: the canvas must keep its index, or iced
     // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
     let live = e.live.as_ref().map(|(r, handle)| {
-        let at = Point::new((r.x - view.x) * e.zoom + m, (r.y - view.y) * e.zoom + m);
+        let z = e.zoom * k;
+        let at = Point::new((r.x - view.x) * z + m, (r.y - view.y) * z + m);
         pin(image(handle.clone())
-            .width(r.width * e.zoom)
-            .height(r.height * e.zoom)
+            .width(r.width * z)
+            .height(r.height * z)
             .content_fit(ContentFit::Fill))
         .position(at)
     });
@@ -53,10 +85,14 @@ pub fn canvas(e: &Editor, grown: f32) -> Element<'_, Message> {
         None => iced::widget::space().into(),
     });
     layers.push(
-        iced::widget::canvas(Input { editor: e, grown })
-            .width(outer.width)
-            .height(outer.height)
-            .into(),
+        iced::widget::canvas(Input {
+            editor: e,
+            grown,
+            lens,
+        })
+        .width(outer.width)
+        .height(outer.height)
+        .into(),
     );
     stack(layers).width(outer.width).height(outer.height).into()
 }
@@ -64,6 +100,14 @@ pub fn canvas(e: &Editor, grown: f32) -> Element<'_, Message> {
 struct Input<'a> {
     editor: &'a Editor,
     grown: f32,
+    lens: Lens,
+}
+
+impl Input<'_> {
+    /// Snip's live area: a window point in image px (the canvas moves with the area).
+    fn image_at(&self, p: Point) -> Point {
+        self.lens.to_image(p, self.editor.zoom)
+    }
 }
 
 #[derive(Default)]
@@ -89,7 +133,7 @@ impl canvas::Program<Message> for Input<'_> {
                 let at = cursor.position_in(bounds)?; // None = over the toolbar
                 pointer.down = true;
                 match e.movable {
-                    true => Message::Press(e.window_to_image(cursor.position()?)),
+                    true => Message::Press(self.image_at(cursor.position()?)),
                     false => Message::Press(e.to_image(at)),
                 }
             }
@@ -97,7 +141,7 @@ impl canvas::Program<Message> for Input<'_> {
             canvas::Event::Mouse(mouse::Event::CursorMoved { position })
                 if pointer.down && e.movable =>
             {
-                Message::Move(e.window_to_image(*position))
+                Message::Move(self.image_at(*position))
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { position }) if pointer.down => {
                 Message::Move(e.to_image(*position - (bounds.position() - Point::ORIGIN)))
@@ -105,7 +149,7 @@ impl canvas::Program<Message> for Input<'_> {
             // Snip's area: the handle under the pointer shows hot (a redraw
             // only when it changes).
             canvas::Event::Mouse(mouse::Event::CursorMoved { position }) if e.movable => {
-                let hot = (e.area_hot(Some(e.window_to_image(*position))))
+                let hot = (e.area_hot(Some(self.image_at(*position))))
                     .filter(|(_, held)| !held)
                     .map(|(edges, _)| edges);
                 if hot == pointer.hot {
@@ -151,6 +195,7 @@ impl canvas::Program<Message> for Input<'_> {
     ) -> Vec<Geometry> {
         let e = self.editor;
         let mut frame = Frame::new(renderer, bounds.size());
+        frame.scale(self.lens.k);
         let accent = Stroke::default().with_color(c().accent).with_width(1.5);
         // Everything below in image-canvas px; the margin holds the area's handles.
         let m = margin(e);
@@ -254,7 +299,7 @@ impl canvas::Program<Message> for Input<'_> {
             return mouse::Interaction::Crosshair;
         }
         match (e.movable, cursor.position()) {
-            (true, Some(p)) => e.cursor(e.window_to_image(p)),
+            (true, Some(p)) => e.cursor(self.image_at(p)),
             _ => e.cursor(e.to_image(at)),
         }
     }

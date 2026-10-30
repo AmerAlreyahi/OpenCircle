@@ -21,7 +21,7 @@ use super::kit::button;
 use super::kit::chip;
 use super::kit::icon::Icon;
 use super::kit::icon_button::{self, State, icon_button};
-use super::kit::key_hint::key_hint;
+use super::kit::key_hint::{self, key_hint};
 use super::kit::keycap::keycap;
 use super::kit::loupe::Loupe;
 use super::kit::surface::{self, Material, surface};
@@ -89,8 +89,6 @@ pub enum Msg {
     CopyFailed(u32),
     /// Controls of one window (logical px), for opening `.0`.
     Controls(u32, Vec<Pick>),
-    /// The pointer left the overlay (maybe for another monitor: `Snip::follow`).
-    Left,
     /// Shift is held: no snapping.
     Shift(bool),
     /// The Recent strip's pictures, newest first.
@@ -112,6 +110,14 @@ const HINT_REGION: [(Option<&str>, &str); 4] = [
     (None, "Click a window"),
     (None, "Drag an area"),
     (Some("Enter"), "Full screen"),
+    (Some("Esc"), "Cancel"),
+];
+/// With several screens, when it fits: Shift+Enter too.
+const HINT_ALL: [(Option<&str>, &str); 5] = [
+    (None, "Click a window"),
+    (None, "Drag an area"),
+    (Some("Enter"), "Full screen"),
+    (Some("Shift+Enter"), "All screens"),
     (Some("Esc"), "Cancel"),
 ];
 const HINT_WINDOW: [(Option<&str>, &str); 2] = [(None, "Click a window"), (Some("Esc"), "Cancel")];
@@ -195,12 +201,13 @@ pub struct Snip {
     /// topmost first; their controls (Windows: UI Automation), arriving later.
     desktop: Vec<Pick>,
     desktop_controls: Vec<Pick>,
-    /// The monitor shown, and every monitor with its frame, all frozen at the
-    /// start: the overlay moves to the one the pointer goes to (`follow`).
+    /// The starting monitor (the overlay's), and every monitor in its px
+    /// (`app::screens`' one unit: the others have their own windows), it first.
     place: Place,
-    screens: Vec<(Place, image::Handle)>,
-    /// The windows on the shown monitor (logical px, clipped to it), topmost
-    /// first, and their controls (cut to their window).
+    monitors: Vec<Rectangle>,
+    /// The windows on the desktop in the starting monitor's px (clipped to the
+    /// box round the monitors), topmost first, and their controls (cut to their
+    /// window).
     windows: Vec<Pick>,
     controls: Vec<Pick>,
     /// The wheel's walk from the smallest target under the pointer (the key)
@@ -275,7 +282,7 @@ impl Snip {
             desktop: windows,
             desktop_controls: Vec::new(),
             place,
-            screens: Vec::new(),
+            monitors: vec![Rectangle::with_size(place.size())],
             windows: Vec::new(),
             controls: Vec::new(),
             walk: (None, 0),
@@ -295,34 +302,31 @@ impl Snip {
             recent: Vec::new(),
             hinting: true,
         };
-        snip.show_on(place);
+        snip.relocal();
         snip
     }
 
-    /// Every monitor and its frozen frame, for `follow`.
-    pub fn set_screens(&mut self, screens: Vec<(Place, image::Handle)>) {
-        self.screens = screens;
+    /// Every monitor (the starting one first) in the starting monitor's px:
+    /// hover, picks and drags work on all of them (each has its window).
+    pub fn set_monitors(&mut self, monitors: Vec<Rectangle>) {
+        if !monitors.is_empty() {
+            self.monitors = monitors;
+            self.relocal();
+        }
     }
 
-    /// The pointer left the overlay for `p` (physical desktop px): if that is on
-    /// another monitor, the snip goes on there, and that monitor (with its
-    /// frame, frozen with the others) comes out for the overlay to show. Not
-    /// while a pill shows (the window is small then).
-    pub fn follow(&mut self, p: (i32, i32)) -> Option<(Place, image::Handle)> {
-        if self.is_pill() {
-            return None;
-        }
-        let (place, frame) = self.screens.iter().find(|(s, _)| s.contains(p))?.clone();
-        if place == self.place {
-            return None;
-        }
-        self.show_on(place);
-        Some((place, frame))
+    /// The box round every monitor (starting monitor's px): where an area may go.
+    pub fn desk(&self) -> Rectangle {
+        (self.monitors.iter()).fold(self.monitors[0], |all, m| all.union(m))
     }
 
-    /// The monitor shown is `place`: its windows and controls, nothing hovered.
-    fn show_on(&mut self, place: Place) {
-        self.place = place;
+    /// The monitor under `p`, else the starting one.
+    pub fn monitor_at(&self, p: Point) -> Rectangle {
+        (self.monitors.iter().find(|m| m.contains(p))).map_or(self.monitors[0], |m| *m)
+    }
+
+    /// The windows and controls in the starting monitor's px, nothing hovered.
+    fn relocal(&mut self) {
         self.windows = self.local(&self.desktop);
         self.controls = Vec::new();
         let controls = self.local(&self.desktop_controls);
@@ -330,15 +334,15 @@ impl Snip {
         (self.walk, self.press, self.pointer) = ((None, 0), None, None);
     }
 
-    /// `picks` (physical desktop px) in this monitor's logical px, cut to it;
-    /// those off it go.
+    /// `picks` (physical desktop px) in the starting monitor's logical px (on
+    /// every monitor: one unit), cut to the box round the monitors; those off it go.
     fn local(&self, picks: &[Pick]) -> Vec<Pick> {
         let Place { origin, scale, .. } = self.place;
         let here = picks.iter().map(|p| Pick {
             rect: local(p.rect, origin, scale),
             ..p.clone()
         });
-        clip(here.collect(), self.place.size())
+        clip(here.collect(), self.desk())
     }
 
     /// Adds `controls` (logical px) cut to their window: a page's content runs
@@ -423,7 +427,7 @@ impl Snip {
         chain.sort_by(|a, b| area(a).total_cmp(&area(b)));
         chain.extend(top.cloned());
         chain.push(Pick {
-            rect: Rectangle::with_size(self.place.size()),
+            rect: self.monitor_at(p),
             label: "Screen".into(),
             window: 0,
         });
@@ -528,9 +532,14 @@ impl Snip {
         self.switch(kind, screen)
     }
 
-    /// Enter: the whole screen shown (the pointer's), whatever is outlined.
-    pub fn full(&self, screen: Size) -> Next {
-        Next::Edit(Rectangle::with_size(screen))
+    /// Enter: the whole screen the pointer is on, whatever is outlined.
+    pub fn full(&self) -> Next {
+        Next::Edit(self.monitor_at(self.pointer.unwrap_or(Point::ORIGIN)))
+    }
+
+    /// Shift+Enter: every screen as one picture (the box round them).
+    pub fn all(&self) -> Next {
+        Next::Edit(self.desk())
     }
 
     /// Switches mode; Full picks the whole screen at once.
@@ -607,6 +616,12 @@ impl Snip {
         self.toast.take()
     }
 
+    /// The toast's capture (tests).
+    #[cfg(test)]
+    pub fn toast_crop(&self) -> Option<&Crop> {
+        self.toast.as_ref().map(|t| &t.crop)
+    }
+
     /// Toast `id` is still the one showing.
     pub fn toast_showing(&self, id: u32) -> bool {
         self.toast.as_ref().is_some_and(|t| t.id == id)
@@ -652,7 +667,15 @@ impl Snip {
                 let hint = "Drag or circle an area (no window picking here) · Esc to close";
                 top = top.push(surface::hint(hint));
             }
-            Kind::Region => top = top.push(key_hint(&HINT_REGION, false)),
+            Kind::Region => {
+                let all = self.monitors.len() > 1
+                    && key_hint::width(&HINT_ALL) + 2.0 * space::PAGE[0] <= self.place.size().width;
+                let groups: &[key_hint::Group<'_>] = match all {
+                    true => &HINT_ALL,
+                    false => &HINT_REGION,
+                };
+                top = top.push(key_hint(groups, false));
+            }
             Kind::Window => top = top.push(key_hint(&HINT_WINDOW, false)),
             Kind::Full => {}
         }
@@ -704,11 +727,15 @@ impl Snip {
     /// dragging (`drag` = the box so far), its size chip by the dragged corner
     /// (`Snapped` when an edge snapped) and the loupe away from it. `frame` is
     /// the frozen frame, `scale` physical px per logical px, `look` the active
-    /// look's pair.
+    /// look's pair. Drawn by the window of the monitor the pointer is on:
+    /// `view` maps the starting monitor's px to that window's (`screen` big),
+    /// `frame` / `scale` are that monitor's.
     pub fn guides<'a>(
         &self,
         frame: &'a image::Handle,
         scale: f32,
+        view: overlay::View,
+        screen: Size,
         drag: Option<Rectangle>,
         look: (iced::Color, iced::Color),
     ) -> Option<Element<'a, Msg>> {
@@ -721,13 +748,17 @@ impl Snip {
         else {
             return None;
         };
-        let at = self.pointer.filter(|_| self.kind.picks())?;
+        let at = view.to_screen(self.pointer.filter(|_| self.kind.picks())?);
+        let drag = drag.map(|r| view.rect_to_screen(r));
         let px = |v: f32| (v * scale).round() as u32;
         let size_of = |r: Rectangle| format!("{} × {}", px(r.width), px(r.height));
         // over bare wallpaper: no outline (the edge frames the screen)
-        let picked = self
-            .outlined()
-            .filter(|t| drag.is_none() && t.label != "Screen");
+        let picked = (self.outlined())
+            .filter(|t| drag.is_none() && t.label != "Screen")
+            .map(|t| Pick {
+                rect: view.rect_to_screen(t.rect),
+                ..t
+            });
         let loupe = Loupe {
             pixels,
             width: *width,
@@ -739,7 +770,6 @@ impl Snip {
             away: drag,
         };
         let mut layers = iced::widget::stack![canvas(loupe).width(Fill).height(Fill)];
-        let screen = self.place.size();
         if let Some(t) = picked {
             let (kind, title) = match t.label.split_once(": ") {
                 Some((kind, title)) => (kind.to_string(), Some(title.to_string())),
@@ -790,9 +820,8 @@ impl Snip {
     }
 }
 
-/// `targets` cut to the screen; those off it go.
-fn clip(targets: Vec<Pick>, screen: Size) -> Vec<Pick> {
-    let whole = Rectangle::with_size(screen);
+/// `targets` cut to `whole`; those off it go.
+fn clip(targets: Vec<Pick>, whole: Rectangle) -> Vec<Pick> {
     (targets.into_iter())
         .filter_map(|t| {
             Some(Pick {
@@ -852,6 +881,10 @@ mod tests {
     use super::*;
 
     const SCREEN: Size = Size::new(1920.0, 1080.0);
+    /// The starting screen's own view (its px as they are).
+    fn ident() -> overlay::View {
+        overlay::View::new(1920, 1080, SCREEN)
+    }
     fn look() -> (iced::Color, iced::Color) {
         let c = crate::ui::kit::themes::c();
         (c.accent, c.text)
@@ -1154,13 +1187,20 @@ mod tests {
         let handle = image::Handle::from_rgba(4, 3, frame);
         let mut s = Snip::new(Vec::new(), flat(SCREEN), true, None);
         assert!(
-            s.guides(&handle, 1.0, None, look()).is_none(),
+            s.guides(&handle, 1.0, ident(), SCREEN, None, look())
+                .is_none(),
             "no pointer yet"
         );
         s.pointer = Some(Point::new(2.0, 1.0));
-        assert!(s.guides(&handle, 1.0, None, look()).is_some());
+        assert!(
+            s.guides(&handle, 1.0, ident(), SCREEN, None, look())
+                .is_some()
+        );
         let _ = s.switch(Kind::Full, SCREEN);
-        assert!(s.guides(&handle, 1.0, None, look()).is_none());
+        assert!(
+            s.guides(&handle, 1.0, ident(), SCREEN, None, look())
+                .is_none()
+        );
     }
 
     #[test]
@@ -1224,7 +1264,9 @@ mod tests {
         let outlined = s.outlined().unwrap();
         assert_eq!(outlined.rect, rect(110.0, 135.0, 30.0, 30.0));
         let frame = image::Handle::from_rgba(4, 4, vec![90; 64]);
-        let guides = s.guides(&frame, 1.0, None, look()).unwrap();
+        let guides = s
+            .guides(&frame, 1.0, ident(), SCREEN, None, look())
+            .unwrap();
         crate::ui::kit::testing::shot::save("snip-outline", guides, SCREEN);
         // A click there captures the button exactly.
         let at = Point::new(120.0, 150.0);
@@ -1274,67 +1316,107 @@ mod tests {
         assert_eq!(label(&s), "Window: App 1", "stops at the smallest");
     }
 
+    /// N-73 / design state 8: every screen is frozen with its own window, and
+    /// picks work on all of them in the starting screen's px (one unit, mixed
+    /// scales): hover, the wheel, snapping, Enter = the pointer's screen,
+    /// Shift+Enter = every screen.
     #[test]
-    fn the_snip_follows_the_pointer_to_a_screen_left_of_the_primary_at_its_own_scale() {
-        // The primary at 100 %; screen 2 LEFT of it, 150 %, its top 200 px higher.
+    fn picks_work_on_every_screen_in_one_unit_at_any_scale() {
+        use crate::ui::app::screens::{area_of, to_desktop, view_of};
+        // The starting screen at 150 %; screen 2 LEFT of it, 100 %, its top 200 px higher.
         let primary = Place {
             origin: (0, 0),
-            px: (1920, 1080),
-            scale: 1.0,
-        };
-        let left = Place {
-            origin: (-2880, -200),
             px: (2880, 1620),
             scale: 1.5,
         };
-        let frame = |n| image::Handle::from_rgba(1, 1, vec![n; 4]);
+        let left = Place {
+            origin: (-1920, -200),
+            px: (1920, 1080),
+            scale: 1.0,
+        };
         let windows = vec![
-            Pick::window(desktop_rect((-2580, 100, 1500, 900)), "Left", 1),
-            Pick::window(desktop_rect((100, 100, 800, 600)), "Primary", 2),
+            Pick::window(desktop_rect((-1620, 100, 1200, 600)), "Left", 1),
+            Pick::window(desktop_rect((150, 150, 1200, 900)), "Primary", 2),
         ];
-        // Started with the pointer on the primary.
         let mut s = Snip::new(windows, primary, true, None);
-        let two = frame(2);
-        s.set_screens(vec![(primary, frame(1)), (left, two.clone())]);
+        let two = area_of(primary, left);
+        s.set_monitors(vec![Rectangle::with_size(primary.size()), two]);
         s.hover(Point::new(150.0, 150.0));
         assert_eq!(s.outlined().unwrap().label, "Window: Primary");
-        assert!(s.follow((500, 500)).is_none(), "still on the primary");
-        assert!(
-            s.follow((-1000, -300)).is_none(),
-            "above screen 2: no screen"
-        );
-
-        let (place, shown) = s.follow((-1000, 500)).expect("moved to screen 2");
-        assert_eq!((place, shown), (left, two));
-        assert_eq!(s.outlined(), None, "nothing hovered yet");
-        // Screen 2's window in its logical px: ((-2580 + 2880) / 1.5, (100 + 200) / 1.5).
-        s.hover(Point::new(250.0, 250.0));
+        // Screen 2's window, in the starting screen's px: its desktop px / 1.5.
+        s.hover(Point::new(-700.0, 200.0));
         let window = s.outlined().unwrap();
         assert_eq!(window.label, "Window: Left");
-        assert_eq!(window.rect, rect(200.0, 200.0, 1000.0, 600.0));
-        // Its crop is the window's own pixels on screen 2's frame.
-        let crop = crate::actions::crop_bounds(2880, 1620, 1.5, window.rect);
-        assert_eq!(crop, Some([300, 300, 1800, 1200]));
+        let near = |a: Point, b: Point| a.distance(b) < 0.01;
+        assert!(near(
+            to_desktop(primary, window.rect.position()),
+            Point::new(-1620.0, 100.0)
+        ));
+        // drawn on screen 2's window at its own pixels
+        let view = view_of(primary, left);
+        let shown = view.rect_to_screen(window.rect);
+        assert!(
+            near(shown.position(), Point::new(300.0, 300.0)),
+            "{shown:?}"
+        );
+        assert!((shown.width - 1200.0).abs() < 0.01 && (shown.height - 600.0).abs() < 0.01);
+        let handle = image::Handle::from_rgba(4, 4, vec![0; 64]);
+        assert!(
+            s.guides(&handle, 1.0, view, left.size(), None, look())
+                .is_some()
+        );
         // Controls (physical px) read now land on screen 2 too.
         s.add_controls(vec![Pick::control(
-            desktop_rect((-2400, 400, 300, 150)),
+            desktop_rect((-1500, 400, 300, 150)),
             "button: OK",
             1,
         )]);
-        s.hover(Point::new(330.0, 410.0));
-        assert_eq!(s.outlined().unwrap().rect, rect(320.0, 400.0, 200.0, 100.0));
-        // The wheel's top is screen 2 (Full is the monitor under the pointer).
+        s.hover(Point::new(-950.0, 300.0));
+        let button = s.outlined().unwrap();
+        assert_eq!(button.label, "Element: button: OK");
+        // A drag snaps to its edges.
+        let snapped = s.snap(Point::new(button.rect.x - 3.0, button.rect.y - 2.0));
+        assert_eq!(snapped, button.rect.position());
+        // The wheel's top is screen 2: the monitor under the pointer.
         s.walk(1.0);
         s.walk(1.0);
-        let screen = s.outlined().unwrap();
-        assert_eq!(screen.rect, Rectangle::with_size(Size::new(1920.0, 1080.0)));
-        // A drag snaps to screen 2's edges.
-        assert_eq!(s.snap(Point::new(203.0, 197.0)), Point::new(200.0, 200.0));
-
-        // Back on the primary: screen 2's window and button are off it.
-        assert_eq!(s.follow((10, 10)).map(|(p, _)| p), Some(primary));
-        s.hover(Point::new(330.0, 410.0));
+        assert_eq!(s.outlined().unwrap().rect, two);
+        // Enter takes that screen; Shift+Enter every screen as one picture.
+        assert_eq!(s.full(), Next::Edit(two));
+        let all = Rectangle::with_size(primary.size()).union(&two);
+        assert_eq!(s.all(), Next::Edit(all));
+        assert!((all.width - 3200.0).abs() < 0.01, "{all:?}");
+        // Its bare wallpaper: a click takes screen 2.
+        s.hover(Point::new(-100.0, 500.0));
+        assert_eq!(
+            s.pick(None, Point::new(-100.0, 500.0), SCREEN),
+            Some(Next::Edit(two))
+        );
+        // Back on the starting screen.
+        s.hover(Point::new(150.0, 150.0));
         assert_eq!(s.outlined().unwrap().label, "Window: Primary");
+        assert_eq!(s.full(), Next::Edit(Rectangle::with_size(primary.size())));
+    }
+
+    /// The freeze hint says Shift+Enter only with several screens, and only
+    /// when it fits the starting screen.
+    #[test]
+    fn the_freeze_hint_offers_all_screens_only_when_there_are_some_and_it_fits() {
+        let says = |s: &Snip| {
+            let texts = crate::ui::kit::testing::shot::texts(s.view());
+            texts.iter().any(|t| t == "All screens")
+        };
+        let one = wins(&[rect(0.0, 0.0, 10.0, 10.0)]);
+        let mut s = Snip::new(one.clone(), flat(SCREEN), true, None);
+        assert!(!says(&s), "one screen");
+        let other = rect(1920.0, 0.0, 1920.0, 1080.0);
+        s.set_monitors(vec![Rectangle::with_size(SCREEN), other]);
+        assert!(says(&s), "two screens");
+        // a narrow starting screen: the hint without it
+        let narrow = Size::new(560.0, 900.0);
+        let mut s = Snip::new(one, flat(narrow), true, None);
+        s.set_monitors(vec![Rectangle::with_size(narrow), other]);
+        assert!(!says(&s), "doesn't fit");
     }
 
     #[test]
@@ -1368,7 +1450,10 @@ mod tests {
         assert!((x1 - x0).abs_diff(1342) <= 1 && (y1 - y0).abs_diff(1006) <= 1);
         // And the label says the physical size.
         let handle = image::Handle::from_rgba(4, 4, vec![0; 64]);
-        assert!(s.guides(&handle, scale, None, look()).is_some());
+        assert!(
+            s.guides(&handle, scale, ident(), SCREEN, None, look())
+                .is_some()
+        );
         let px = |v: f32| (v * scale).round() as u32;
         assert_eq!((px(area.width), px(area.height)), (1342, 1006));
     }
@@ -1388,7 +1473,7 @@ mod tests {
         s.start_reading();
         assert_eq!(rx.try_iter().collect::<Vec<_>>(), [1]);
         // Enter takes the whole screen, whatever is outlined.
-        assert_eq!(s.full(SCREEN), Next::Edit(Rectangle::with_size(SCREEN)));
+        assert_eq!(s.full(), Next::Edit(Rectangle::with_size(SCREEN)));
     }
 
     #[test]

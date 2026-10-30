@@ -133,22 +133,6 @@ impl App {
                 }
                 Task::none()
             }
-            // The pointer went to another monitor: the overlay goes with it (that
-            // monitor's frame was frozen with this one), unless a drag, the
-            // editor or a pill holds this one.
-            snip::Msg::Left => {
-                if o.drawing || o.edit.is_some() {
-                    return Task::none();
-                }
-                let Some((place, image)) = capture::pointer().and_then(|p| snip.follow(p)) else {
-                    return Task::none();
-                };
-                self.o.selection = None;
-                self.o.stroke.clear();
-                self.set_frame(image, place.scale, place.logical_origin(), place.size());
-                // Full-screen stays on its monitor: windowed first.
-                window::set_mode(self.overlay, Mode::Windowed).chain(self.show())
-            }
             snip::Msg::Shift(held) => {
                 snip.set_shift(held);
                 Task::none()
@@ -194,7 +178,7 @@ impl App {
     }
 
     /// Shrinks the overlay to the pill at the top of the monitor (no focus taken).
-    pub(in crate::ui) fn pill_at_top(&self) -> Task<Message> {
+    pub(in crate::ui) fn pill_at_top(&mut self) -> Task<Message> {
         let x = (self.o.screen.width - snip::PILL.width) / 2.0;
         self.pill_window(Point::new(x.max(0.0), ASK_MARGIN))
     }
@@ -204,12 +188,16 @@ impl App {
     /// monitor). Switch it to the shared floating-window helper when it lands.
     /// Wayland can't move, shrink or hide a window (`can_hide_windows`): the
     /// overlay stays full-screen there and `view` draws the pill over the frame.
-    pub(in crate::ui) fn pill_window(&self, at: Point) -> Task<Message> {
+    /// The other screens' windows go (a pill leaves the screens to the user).
+    pub(in crate::ui) fn pill_window(&mut self, at: Point) -> Task<Message> {
         if !self.can_hide {
             return Task::none();
         }
+        self.o.waiting.clear();
+        let others = super::screens::close_all(&std::mem::take(&mut self.o.screens));
         // never left clear by an opening that hadn't faded in yet (`show`)
-        window::set_mode(self.overlay, Mode::Windowed)
+        others
+            .chain(window::set_mode(self.overlay, Mode::Windowed))
             .chain(windows::opacity(self.overlay, 1.0))
             .chain(window::resize(self.overlay, snip::PILL))
             .chain(window::move_to(
@@ -277,7 +265,9 @@ impl App {
         given: Option<Crop>,
         remember: bool,
     ) -> Task<Message> {
-        let in_place = given.is_none();
+        // (a crop across screens is edited fitted: its other screens' windows
+        // go with the toast)
+        let in_place = given.is_none() && !self.crop_area().is_some_and(|a| self.spans(a));
         let Some(crop) = given.or_else(|| self.crop()) else {
             return Task::none();
         };
@@ -352,19 +342,27 @@ impl App {
     /// Auto-scrolls and stitches `area` on a thread. The overlay shrinks to the
     /// progress pill beside the area, so it is in none of the frames.
     pub(in crate::ui) fn start_scroll(&mut self, area: Rectangle) -> Task<Message> {
-        let o = &mut *self.o;
-        let (Some(image::Handle::Rgba { width, height, .. }), Purpose::Snip(snip)) =
-            (&o.frame, &mut o.purpose)
-        else {
+        let o = &*self.o;
+        let Some(image::Handle::Rgba { width, height, .. }) = &o.frame else {
             return Task::none();
         };
         let Some([x0, y0, x1, y1]) = actions::crop_bounds(*width, *height, o.scale, area) else {
             return Task::none();
         };
         let at = |v: f32, offset: u32| (v * o.scale).round() as i32 + offset as i32;
-        let region = (at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0);
+        let mut region = (at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0);
+        // across screens: the area in desktop px
+        if self.spans(area)
+            && let Some([a0, b0, a1, b1]) = self.desk_bounds(area)
+        {
+            region = (a0, b0, (a1 - a0) as u32, (b1 - b0) as u32);
+        }
+        let o = &mut *self.o;
+        let Purpose::Snip(snip) = &mut o.purpose else {
+            return Task::none();
+        };
         let stop = Arc::new(AtomicBool::new(false));
-        snip.scroll = Some(snip::Scroll::new(x1 - x0, stop.clone()));
+        snip.scroll = Some(snip::Scroll::new(region.2, stop.clone()));
         let work = background(move |tx| {
             // Let the window shrink first.
             std::thread::sleep(Duration::from_millis(150));

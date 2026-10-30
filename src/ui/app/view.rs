@@ -13,6 +13,7 @@ use crate::ui::kit::panel_frame as card;
 use crate::ui::kit::{motion, surface};
 use crate::ui::overlay;
 use crate::ui::screens::bar::geometry as bar;
+use crate::ui::screens::editor::canvas::Lens;
 use crate::ui::screens::overlay::edge as border;
 
 use super::{
@@ -174,11 +175,14 @@ impl App {
         if let Some(edit) = &self.o.edit {
             if edit.is_open() {
                 // the toolbar once the bar has turned into it, in its place
+                // (Snip's: unless it docks on another screen)
                 let at = self.bar_at();
-                let toolbar = (self.swapped() >= 1.0).then_some(at);
+                let here = self.toolbar_on().is_none_or(|w| w == self.overlay);
+                let toolbar = (self.swapped() >= 1.0 && here).then_some(at);
                 layers = layers.push(edit.view(
                     self.o.screen,
                     toolbar,
+                    Lens::ONE,
                     Message::Editor,
                     Message::BarGrab,
                 ));
@@ -189,37 +193,19 @@ impl App {
             }
             layers = layers.extend(edit.flat_view());
         }
-        // Snip: the loupe beside the pointer (under the hint).
+        // Snip: the loupe beside the pointer (under the hint), while it is
+        // on this screen (another screen's window draws its own).
         if self.o.edit.is_none()
-            && let Some(loupe) = snip.and_then(|s| {
-                // the box dragged so far (its stroke's span)
-                let drag = (self.o.drawing).then(|| {
-                    let (lo, hi) = (self.o.stroke.iter()).fold(
-                        (
-                            Point::new(f32::MAX, f32::MAX),
-                            Point::new(f32::MIN, f32::MIN),
-                        ),
-                        |(lo, hi), p| {
-                            let p = self.o.view.to_screen(*p);
-                            (
-                                Point::new(lo.x.min(p.x), lo.y.min(p.y)),
-                                Point::new(hi.x.max(p.x), hi.y.max(p.y)),
-                            )
-                        },
-                    );
-                    Rectangle::new(
-                        lo,
-                        Size::new((hi.x - lo.x).max(0.0), (hi.y - lo.y).max(0.0)),
-                    )
-                });
-                let look = crate::ui::theme::accent_of(&config::look());
-                s.guides(
-                    frame,
-                    self.o.scale,
-                    drag.filter(|_| !self.o.stroke.is_empty()),
-                    look,
-                )
-            })
+            && let Some(loupe) = snip
+                .filter(|s| {
+                    let p = s.pointer.unwrap_or(Point::ORIGIN);
+                    s.monitor_at(p) == Rectangle::with_size(self.o.screen)
+                })
+                .and_then(|s| {
+                    let look = crate::ui::theme::accent_of(&config::look());
+                    let (view, screen) = (self.o.view, self.o.screen);
+                    s.guides(frame, self.o.scale, view, screen, self.snip_drag(), look)
+                })
         {
             layers = layers.push(loupe.map(Message::Snip));
         }
@@ -302,6 +288,29 @@ impl App {
             layers = layers.push(iced::widget::pin(pill).position(room.position()));
         }
         layers.into()
+    }
+
+    /// Snip: the box dragged so far (its stroke's span, image px), while drawing.
+    pub(in crate::ui) fn snip_drag(&self) -> Option<Rectangle> {
+        if !self.o.drawing || self.o.stroke.is_empty() {
+            return None;
+        }
+        let (lo, hi) = (self.o.stroke.iter()).fold(
+            (
+                Point::new(f32::MAX, f32::MAX),
+                Point::new(f32::MIN, f32::MIN),
+            ),
+            |(lo, hi), p| {
+                (
+                    Point::new(lo.x.min(p.x), lo.y.min(p.y)),
+                    Point::new(hi.x.max(p.x), hi.y.max(p.y)),
+                )
+            },
+        );
+        Some(Rectangle::new(
+            lo,
+            Size::new((hi.x - lo.x).max(0.0), (hi.y - lo.y).max(0.0)),
+        ))
     }
 
     /// The part of the overlay a result card leaves free (all of it without

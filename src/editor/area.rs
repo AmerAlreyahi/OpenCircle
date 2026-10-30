@@ -1,6 +1,7 @@
 //! Snip's live area (N-73 points 3-4): after the pick the captured area stays
 //! movable and resizable on the frozen frame, before and while it is annotated.
-//! The document then holds the whole frozen monitor and the area is its crop:
+//! The document then holds the whole frozen monitor (or every monitor joined)
+//! and the area is its crop:
 //! resizing only changes the crop (the capture is cut or extended from the
 //! frame, the drawing is never scaled); moving shifts the crop and every item
 //! with it. Pure geometry here; `Editor` applies it as one undoable edit.

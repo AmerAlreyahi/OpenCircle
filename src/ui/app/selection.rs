@@ -37,6 +37,13 @@ impl App {
                 }
             }
         }
+        // Shift+Enter is Snip's (every screen); elsewhere it is Enter.
+        let event = match event {
+            overlay::Event::ShiftEnter if !matches!(self.o.purpose, Purpose::Snip(_)) => {
+                overlay::Event::Enter
+            }
+            event => event,
+        };
         // The editor, a toast or a scrolling capture has the screen.
         if self.o.edit.as_ref().is_some_and(Editing::is_open)
             || self.o.toast.is_some()
@@ -339,7 +346,12 @@ impl App {
             overlay::Event::Tab { back } if self.bottom_bar_shown() => return self.tab_bar(back),
             // Snip: Enter takes the whole screen the pointer is on.
             overlay::Event::Enter if let Purpose::Snip(snip) = &self.o.purpose => {
-                let next = snip.full(self.o.screen);
+                let next = snip.full();
+                return self.snip_next(Some(next));
+            }
+            // Snip: Shift+Enter takes every screen as one picture.
+            overlay::Event::ShiftEnter if let Purpose::Snip(snip) = &self.o.purpose => {
+                let next = snip.all();
                 return self.snip_next(Some(next));
             }
             overlay::Event::Enter if matches!(self.o.purpose, Purpose::Search) => {
@@ -402,6 +414,7 @@ impl App {
                 shift,
             } => self.nudge(dx, dy, ctrl, shift),
             overlay::Event::Enter
+            | overlay::Event::ShiftEnter
             | overlay::Event::Space
             | overlay::Event::Tab { .. }
             | overlay::Event::Alt(_)

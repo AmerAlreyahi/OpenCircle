@@ -82,6 +82,8 @@ pub enum Event {
     Release,
     /// Enter: the default action.
     Enter,
+    /// Shift+Enter: Snip's every screen as one picture (elsewhere Enter).
+    ShiftEnter,
     /// Space: activates the bar's focused control (nothing else).
     Space,
     /// Tab / Shift+Tab (`back`): moves focus through the bar.
@@ -1001,6 +1003,7 @@ impl canvas::Program<Event> for Overlay<'_> {
                 modifiers,
                 ..
             }) => match key {
+                keyboard::Key::Named(Named::Enter) if modifiers.shift() => Event::ShiftEnter,
                 keyboard::Key::Named(Named::Enter) => Event::Enter,
                 keyboard::Key::Named(Named::Space) => Event::Space,
                 keyboard::Key::Named(Named::Tab) => Event::Tab {
