@@ -889,6 +889,24 @@ fn may_stand_alone(key: Code) -> bool {
 }
 
 impl Config {
+    /// Quick actions that came after the default file was frozen (that file stays byte for
+    /// byte): Settings adds the missing ones, unbound, so their rows show; a file has them
+    /// once Settings saved it.
+    pub fn add_new_quick_actions(&mut self) {
+        // Labs Pins, Windows: a part of a window kept live on top.
+        let new = [QuickAction {
+            action: QuickId::LivePin,
+            shortcut: String::new(),
+            target: Target::Circle,
+            live: false,
+        }];
+        for q in new {
+            if !self.quick_actions.iter().any(|c| c.action == q.action) {
+                self.quick_actions.push(q);
+            }
+        }
+    }
+
     /// `<user config dir>/opencircle/config.toml`; `None` if the OS has no config dir,
     /// and in tests (hermetic: the machine's config, e.g. a widget theme, never leaks in).
     pub fn path() -> Option<PathBuf> {
@@ -1204,6 +1222,27 @@ mod tests {
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(back, c);
         assert_eq!(toml::to_string_pretty(&back).unwrap(), text);
+    }
+
+    #[test]
+    fn new_quick_actions_join_unbound_once_and_the_default_file_stays() {
+        let mut c = Config::default();
+        c.add_new_quick_actions();
+        assert_eq!(
+            c.quick_actions.len(),
+            Config::default().quick_actions.len() + 1
+        );
+        let last = c.quick_actions.last().unwrap();
+        assert_eq!(
+            (last.action.as_str(), last.shortcut.as_str()),
+            ("live_pin", "")
+        );
+        let once = c.clone();
+        c.add_new_quick_actions();
+        assert_eq!(c, once, "never twice");
+        // a file Settings saved keeps it
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert_eq!(Config::parse(&text).0, c);
     }
 
     #[test]

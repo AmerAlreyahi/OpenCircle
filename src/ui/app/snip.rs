@@ -348,11 +348,32 @@ impl App {
                 self.o.stroke.clear();
                 Task::none()
             }
+            // the live pin quick action: no editor, the pin at once
+            Some(snip::Next::Edit(area)) if matches!(&self.o.purpose, Purpose::Snip(s) if s.live_pin) =>
+            {
+                self.select(area);
+                self.live_pin(area)
+            }
             Some(snip::Next::Edit(area)) => {
                 self.select(area);
                 self.snip_captured(None, true)
             }
         }
+    }
+
+    /// `area` (logical px, this screen) in physical desktop px, cut to the screen.
+    pub(in crate::ui) fn screen_region(
+        &self,
+        area: Rectangle,
+    ) -> Option<crate::capture::window_rect::WinRect> {
+        let o = &*self.o;
+        let area = area.intersection(&Rectangle::with_size(o.screen))?;
+        let Some(image::Handle::Rgba { width, height, .. }) = &o.frame else {
+            return None;
+        };
+        let [x0, y0, x1, y1] = actions::crop_bounds(*width, *height, o.scale, area)?;
+        let at = |v: f32, offset: u32| (v * o.scale).round() as i32 + offset as i32;
+        Some((at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0))
     }
 
     /// Long capture of `area` (its part on this screen): the area is cut out
@@ -362,18 +383,13 @@ impl App {
     /// over the area (an area as big as the screen) is the overlay kept out of
     /// captures (`hide_from_capture`).
     pub(in crate::ui) fn start_scroll(&mut self, area: Rectangle) -> Task<Message> {
+        let (Some(region), Some(area)) = (
+            self.screen_region(area),
+            area.intersection(&Rectangle::with_size(self.o.screen)),
+        ) else {
+            return Task::none();
+        };
         let o = &*self.o;
-        let Some(area) = area.intersection(&Rectangle::with_size(o.screen)) else {
-            return Task::none();
-        };
-        let Some(image::Handle::Rgba { width, height, .. }) = &o.frame else {
-            return Task::none();
-        };
-        let Some([x0, y0, x1, y1]) = actions::crop_bounds(*width, *height, o.scale, area) else {
-            return Task::none();
-        };
-        let at = |v: f32, offset: u32| (v * o.scale).round() as i32 + offset as i32;
-        let region = (at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0);
         let layout = long_capture::layout(area, o.screen);
         let preview = layout.card.map_or((0, 0), |card| {
             let view = long_capture::viewport(card);

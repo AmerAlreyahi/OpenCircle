@@ -212,6 +212,7 @@ impl App {
             if cfg!(windows) {
                 snip.read_later(reader, UIA_WINDOWS); // else dropped: no controls
             }
+            snip.live_pin = std::mem::take(&mut self.live_next);
             self.o.purpose = Purpose::Snip(Box::new(snip));
             extras = self.snip_extras(read);
         }

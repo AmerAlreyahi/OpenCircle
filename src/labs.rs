@@ -120,13 +120,15 @@ pub fn action_feature(id: &QuickId) -> Option<Feature> {
         QuickId::Snip => Some(Feature::Snip),
         QuickId::Edit => Some(Feature::Editor),
         QuickId::SongSearch => Some(Feature::Song),
+        QuickId::LivePin => Some(Feature::Pins),
         _ => None,
     }
 }
 
-/// Is the action `id` available with these switches?
+/// Is the action `id` available with these switches? A live pin also needs Windows.
 pub fn action_on(labs: &Labs, id: &QuickId) -> bool {
     action_feature(id).is_none_or(|f| labs.has(f))
+        && (*id != QuickId::LivePin || crate::capture::live::SUPPORTED)
 }
 
 /// Is this quick action available? Live translate is its own Labs feature.
@@ -217,6 +219,15 @@ mod tests {
             assert!(l.has(f));
             assert_eq!(Feature::ALL.iter().filter(|g| l.has(**g)).count(), 1);
         }
+    }
+
+    #[test]
+    fn the_live_pin_quick_action_is_a_pins_feature_and_windows_only() {
+        let id = QuickId::LivePin;
+        assert_eq!(action_feature(&id), Some(Feature::Pins));
+        assert!(!action_on(&Labs::default(), &id));
+        assert_eq!(action_on(&Labs::all_on(), &id), cfg!(windows));
+        assert!(command_allowed(&Labs::default(), "live_pin").is_err());
     }
 
     #[test]

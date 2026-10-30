@@ -108,7 +108,9 @@ impl App {
             }
             Message::Trigger(Trigger::Quick(at, qa)) => {
                 self.next = Purpose::Search;
-                if qa.action == "snip" {
+                // the live pin quick action is a snip whose pick is pinned live
+                self.live_next = qa.action == crate::hotkey::QuickId::LivePin;
+                if qa.action == "snip" || self.live_next {
                     return self.capture(at, Some(snip::Kind::for_target(qa.target)));
                 }
                 match Quick::for_id(&qa.action) {

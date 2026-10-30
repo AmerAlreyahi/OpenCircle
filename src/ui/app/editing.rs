@@ -138,6 +138,10 @@ impl App {
             Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
             Some(Output::Pin(_)) if !self.o.labs.has(labs::Feature::Pins) => Task::none(),
             Some(Output::Pin(crop)) => self.pin(crop),
+            Some(Output::LivePin) => match self.o.selection {
+                Some(selection) => self.live_pin(selection.area),
+                None => Task::none(),
+            },
             // Scrolling capture of the area under the editor.
             Some(Output::Scroll) => match self.o.selection {
                 Some(selection) => {
@@ -162,6 +166,34 @@ impl App {
         let pinned = self
             .windows
             .pin(crop, at, self.o.scale)
+            .map(Message::Windows);
+        Task::batch([self.close(), pinned])
+    }
+
+    /// Live pin (Snip, Labs Pins): the overlay closes and `area`'s part of the
+    /// window under it floats where it was, kept updating (`Windows::live_pin`).
+    pub(in crate::ui) fn live_pin(&mut self, area: iced::Rectangle) -> Task<Message> {
+        let o = &*self.o;
+        let window = match &o.purpose {
+            Purpose::Snip(snip) => snip.window_under(area),
+            _ => None,
+        };
+        let first = match &o.frame {
+            Some(image::Handle::Rgba {
+                width,
+                height,
+                pixels,
+                ..
+            }) => actions::crop(pixels, *width, *height, o.scale, area),
+            _ => None,
+        };
+        let (Some(window), Some(first), Some(region)) = (window, first, self.screen_region(area))
+        else {
+            return self.close();
+        };
+        let at = o.origin + Vector::new(area.x, area.y);
+        let pinned = (self.windows)
+            .live_pin(window, region, first, Some(at), o.scale)
             .map(Message::Windows);
         Task::batch([self.close(), pinned])
     }

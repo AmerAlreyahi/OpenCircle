@@ -188,6 +188,8 @@ pub(in crate::ui) struct App {
     pub(in crate::ui) live: Option<live_layer::Live>,
     /// The next snip capture is the one a timer waited for: no timer again.
     pub(in crate::ui) timed: bool,
+    /// The next snip capture is the live pin quick action's (`Snip::live_pin`).
+    pub(in crate::ui) live_next: bool,
     /// Where the user moved / sized the result card (this run of the app).
     pub(in crate::ui) card: Option<Rectangle>,
     /// The side the user docked the AI chat to (this run of the app).
@@ -263,6 +265,7 @@ impl App {
             cache: Arc::new(Cache::new(8)),
             live: None,
             timed: false,
+            live_next: false,
             card: None,
             chat_side: None,
             chat_width: None,

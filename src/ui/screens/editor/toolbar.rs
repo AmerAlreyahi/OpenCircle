@@ -40,12 +40,13 @@ const SCROLL: char = '\u{e4d6}'; // lucide "gallery-vertical-end"
 const ASSIST: char = '\u{e2b4}'; // lucide "magnet"
 const PIPETTE: char = '\u{e13e}'; // lucide "pipette"
 const SHARE: char = '\u{e158}'; // lucide "share"
+const LIVE_PIN: char = '\u{e3b2}'; // lucide "picture-in-picture-2"
 
 /// The glyphs used here (the font test checks them).
 #[cfg(test)]
 pub const GLYPHS: &[char] = &[
     BACK, UNDO, REDO, COPY, SAVE, PIN, BOARD, ADD, STACK, SIDE, NUMBERS, LEGEND, ASSIST, SCROLL,
-    PIPETTE, SHARE,
+    PIPETTE, SHARE, LIVE_PIN,
 ];
 
 /// The tool buttons: one per slot (variants live in its strip).
@@ -56,6 +57,11 @@ fn slots() -> impl Iterator<Item = &'static ToolInfo> {
 /// Pins are a Labs feature: the toolbar has the pin button only while it is on.
 fn pins() -> bool {
     crate::labs::has(crate::labs::Feature::Pins)
+}
+
+/// Snip's Live pin (Windows; Labs Pins); it works only over the live screen (`Editor::scroll`).
+fn live_pin() -> bool {
+    pins() && crate::capture::live::SUPPORTED
 }
 
 /// The widths of a line's items, side by side.
@@ -97,6 +103,9 @@ fn snip_parts() -> (Vec<f32>, Vec<f32>) {
     if pins() {
         rest.push(CONTROL);
     }
+    if live_pin() {
+        rest.push(CONTROL);
+    }
     if share::SUPPORTED {
         rest.push(CONTROL);
     }
@@ -131,6 +140,9 @@ pub fn stops(e: &Editor) -> Vec<Message> {
     }
     if pins() {
         stops.push(Message::Pin);
+    }
+    if live_pin() && e.scroll {
+        stops.push(Message::LivePin);
     }
     if share::SUPPORTED {
         stops.push(Message::Share);
@@ -502,6 +514,21 @@ fn build_snip(
             hinted(
                 icon_button::square(PIN, s, Some(Message::Pin)),
                 "Pin to screen: a floating copy (Ctrl+P)",
+                Why::Icon,
+            ),
+            CONTROL,
+        );
+    }
+    if live_pin() {
+        let s = state(false, &Message::LivePin);
+        let tip = match e.scroll {
+            true => "Live pin: this part of the window, kept up to date",
+            false => "Live pin: only when snipping",
+        };
+        rest.push(
+            hinted(
+                icon_button::square(LIVE_PIN, s, e.scroll.then_some(Message::LivePin)),
+                tip,
                 Why::Icon,
             ),
             CONTROL,

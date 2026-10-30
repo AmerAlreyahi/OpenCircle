@@ -239,6 +239,8 @@ pub struct Snip {
     recent: Vec<(PathBuf, image::Handle)>,
     /// The freeze hint shows (`HintGone`, a drag hides it).
     pub hinting: bool,
+    /// Started by the live pin quick action: a pick becomes a live pin, no editor.
+    pub live_pin: bool,
 }
 
 /// The pill window's size (logical px): countdown, toast.
@@ -274,9 +276,19 @@ impl Snip {
             toasts: 0,
             recent: Vec::new(),
             hinting: true,
+            live_pin: false,
         };
         snip.relocal();
         snip
+    }
+
+    /// The topmost window under `area`'s centre (logical px, this screen): the
+    /// one a live pin of it follows.
+    pub fn window_under(&self, area: Rectangle) -> Option<isize> {
+        let centre = area.center();
+        (self.windows.iter())
+            .find(|w| w.rect.contains(centre))
+            .map(|w| w.window)
     }
 
     /// Every monitor (the starting one first) in the starting monitor's px:
@@ -879,6 +891,21 @@ mod tests {
         (rects.iter().zip(1..))
             .map(|(r, h)| Pick::window(*r, &format!("App {h}"), h))
             .collect()
+    }
+
+    #[test]
+    fn a_live_pin_follows_the_topmost_window_under_the_areas_centre() {
+        let front = rect(100.0, 100.0, 400.0, 300.0);
+        let back = rect(0.0, 0.0, 1200.0, 900.0);
+        let s = Snip::new(wins(&[front, back]), flat(SCREEN), true, None);
+        // over both: the one in front; reaching past it: the centre decides
+        assert_eq!(s.window_under(rect(150.0, 150.0, 50.0, 50.0)), Some(1));
+        assert_eq!(s.window_under(rect(20.0, 20.0, 100.0, 100.0)), Some(2));
+        assert_eq!(
+            s.window_under(rect(1300.0, 950.0, 50.0, 50.0)),
+            None,
+            "the desktop"
+        );
     }
 
     #[test]

@@ -403,6 +403,7 @@ pub(super) fn quick_hint(q: &crate::config::QuickAction) -> &'static str {
         ("snip", Target::FullScreen) => "The whole screen, then edit it",
         ("snip", _) => "Drag or circle an area, then edit it",
         ("song_search", _) => "Listens and names the song (needs a key)",
+        ("live_pin", _) => "Pick a part of a window: it floats on top, kept up to date",
         (_, t) => target_name(t),
     }
 }
@@ -854,6 +855,8 @@ impl State {
         store: Box<dyn KeyStore>,
     ) -> Self {
         theme::apply(config.theme);
+        let mut config = config;
+        config.add_new_quick_actions(); // their rows show; the file gets them at the next save
         let store: Arc<dyn KeyStore> = store.into();
         let key_owner = crate::ai::providers::key_of(&config.ai);
         let key = match key_owner {

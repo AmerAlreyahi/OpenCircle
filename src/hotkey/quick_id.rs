@@ -18,6 +18,8 @@ pub enum QuickId {
     AiExplain,
     Snip,
     SongSearch,
+    /// Snip a part of a window into a live pin (Windows, Labs Pins).
+    LivePin,
     /// Any other well-formed id in the config: kept and written back as it was, but
     /// it runs nothing.
     Other(String),
@@ -25,7 +27,7 @@ pub enum QuickId {
 
 impl QuickId {
     /// Every id the app knows.
-    pub const KNOWN: [QuickId; 11] = [
+    pub const KNOWN: [QuickId; 12] = [
         QuickId::Lens,
         QuickId::Ai,
         QuickId::Text,
@@ -37,6 +39,7 @@ impl QuickId {
         QuickId::AiExplain,
         QuickId::Snip,
         QuickId::SongSearch,
+        QuickId::LivePin,
     ];
 
     pub fn as_str(&self) -> &str {
@@ -52,6 +55,7 @@ impl QuickId {
             QuickId::AiExplain => "ai_explain",
             QuickId::Snip => "snip",
             QuickId::SongSearch => "song_search",
+            QuickId::LivePin => "live_pin",
             QuickId::Other(name) => name,
         }
     }
@@ -124,6 +128,7 @@ mod tests {
             "ai_explain",
             "snip",
             "song_search",
+            "live_pin",
         ];
         for (id, name) in QuickId::KNOWN.iter().zip(names) {
             assert_eq!(id.as_str(), name);

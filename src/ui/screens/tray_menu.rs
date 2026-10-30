@@ -57,6 +57,13 @@ impl Menu {
         }
     }
 
+    /// With the "Make pins clickable" row (a live pin lets clicks pass through), above Settings.
+    pub fn with_click_pins(mut self) -> Menu {
+        let at = (self.rows.iter().position(|(e, _)| *e == Entry::Settings)).unwrap_or(0);
+        self.rows.insert(at, (Entry::ClickPins, None));
+        self
+    }
+
     /// The window's size (logical px).
     pub fn size(&self) -> Size {
         let separators = self.rows.iter().filter(|(e, _)| e.separated()).count();

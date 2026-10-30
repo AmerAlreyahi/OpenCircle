@@ -22,6 +22,9 @@ pub enum Entry {
     Snip,
     Live,
     Song,
+    /// Only while a live pin lets clicks pass through (`tray_menu::Menu::with_click_pins`;
+    /// not in `ALL`): they take clicks again. `ui::windows` runs it itself.
+    ClickPins,
     Settings,
     Quit,
 }
@@ -45,6 +48,7 @@ impl Entry {
             Entry::Snip => "Snip",
             Entry::Live => "Live translate",
             Entry::Song => "Song search",
+            Entry::ClickPins => "Make pins clickable",
             Entry::Settings => "Settings…",
             Entry::Quit => "Quit",
         }
@@ -83,13 +87,13 @@ impl Entry {
             Entry::Snip => quick("snip", false, None),
             Entry::Live => quick("translate", true, None),
             Entry::Song => quick("song_search", false, None),
-            Entry::Settings | Entry::Quit => None,
+            Entry::ClickPins | Entry::Settings | Entry::Quit => None,
         }
     }
 
     /// It captures the screen, so it waits until the menu is off it.
     pub fn captures(self) -> bool {
-        !matches!(self, Entry::Settings | Entry::Quit)
+        !matches!(self, Entry::ClickPins | Entry::Settings | Entry::Quit)
     }
 
     /// What choosing it does.
@@ -116,7 +120,8 @@ impl Entry {
                 },
             ),
             Entry::Song => run("song_search", None),
-            Entry::Settings => Trigger::OpenSettings,
+            // never sent: `ui::windows` runs it (the pins are its own); Settings at worst
+            Entry::ClickPins | Entry::Settings => Trigger::OpenSettings,
             Entry::Quit => Trigger::Quit,
         }
     }

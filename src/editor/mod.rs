@@ -294,6 +294,8 @@ pub enum Message {
     Save,
     /// Pin the flattened image to the screen.
     Pin,
+    /// Snip's Live pin: the area's part of the window under it, kept updating.
+    LivePin,
     /// Snip's Share: the flattened image to the OS share sheet.
     Share,
     /// The share sheet's user picked a target (the host's answer to
@@ -325,6 +327,8 @@ pub enum Output {
     Scroll,
     /// A floating always-on-top copy of the image.
     Pin(Crop),
+    /// A floating copy of the area that keeps following the window under it (Snip).
+    LivePin,
     /// Let the user pick another area; give it to `Editor::append`.
     AddCapture,
     /// The share sheet is up: fires once the user picked a target (send
@@ -631,6 +635,9 @@ impl Editor {
                     return Some(Output::Scroll);
                 }
             }
+            // like Long capture: the area over the live screen (Snip in place)
+            Message::LivePin if self.scroll => return Some(Output::LivePin),
+            Message::LivePin => {}
             Message::Copy | Message::Save | Message::Pin => {
                 self.commit();
                 let flat = render(&self.doc);

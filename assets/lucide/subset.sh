@@ -61,6 +61,9 @@ ICONS=$(printf '%s,' \
   U+E2B5 `# pin-off (the pinned AI chat: unpin)` \
   U+E151 `# scissors (Snip: the bar button)` \
   U+E158 `# share (Snip toolbar: the share sheet)` \
+  U+E3B2 `# picture-in-picture-2 (Snip toolbar: live pin)` \
+  U+E5A0 `# blend (live pin: opacity)` \
+  U+E5EB `# mouse-pointer-ban (live pin: clicks pass through)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

@@ -1,6 +1,7 @@
 //! The normal windows beside the overlay: Settings (from the tray) and the
 //! first-run Onboarding. At most one of each; asking again focuses the open one.
-//! Also the pinned images (any number): small borderless always-on-top windows.
+//! Also the pinned images (any number): small borderless always-on-top windows;
+//! a live pin's picture keeps following a part of one window (`capture::live`).
 //! Closing a window drops its state. Also owns the OS-theme feed.
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -29,6 +30,7 @@ pub use super::platform::windows::{
     hide_from_capture, hole, is_floating, opacity, reshape, screen, setup_window, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};
+use crate::capture::live;
 use crate::config::{self, Config, Theme};
 use crate::editor::dragout::{self, DragFile};
 
@@ -121,7 +123,30 @@ struct Pin {
     hover: bool,
     /// The PNG of its last drag-out (deleted with the pin).
     dragged: Option<DragFile>,
+    /// A live pin: its source (dropped with the pin: the capture stops).
+    live: Option<Live>,
 }
+
+/// What a live pin has beyond a still one.
+struct Live {
+    _source: live::Source,
+    /// Physical px per logical px where it was pinned (a frame's size -> the window's).
+    scale: f32,
+    /// Its step in `OPACITY`.
+    opacity: usize,
+    /// Clicks pass through it (back: the tray menu's "Make pins clickable").
+    through: bool,
+}
+
+/// A live pin's opacity steps (its button walks them) and their tooltips.
+const OPACITY: [(f32, &str); 4] = [
+    (1.0, "Opacity: 100 %"),
+    (0.8, "Opacity: 80 %"),
+    (0.6, "Opacity: 60 %"),
+    (0.4, "Opacity: 40 %"),
+];
+/// Live pins open at once: each holds a window capture and a thread.
+pub const MAX_LIVE: usize = 4;
 
 #[derive(Debug, Clone)]
 pub enum PinMsg {
@@ -134,6 +159,12 @@ pub enum PinMsg {
     Copy,
     Save,
     Close,
+    /// From a live pin's source.
+    Live(live::Event),
+    /// A live pin's next opacity step.
+    Opacity,
+    /// A live pin lets clicks pass through.
+    ClickThrough,
 }
 
 /// A pin starts no bigger than this (logical px); a tall scrolling capture shrinks.
@@ -141,8 +172,10 @@ const PIN_MAX: Size = Size::new(1400.0, 900.0);
 const PIN_ZOOM: std::ops::RangeInclusive<f32> = 0.1..=8.0;
 /// Scroll pixels that count as one wheel notch.
 const PIXELS_PER_NOTCH: f32 = 40.0;
-/// The hover bar needs this much window (logical px) to fit.
+/// The hover bar needs this much window (logical px) to fit; a live pin's
+/// two more buttons need `LIVE_BAR_EXTRA` more width.
 const PIN_BAR_ROOM: Size = Size::new(240.0, 80.0);
+const LIVE_BAR_EXTRA: f32 = 80.0;
 
 impl Pin {
     fn size(&self) -> Size {
@@ -193,6 +226,10 @@ fn finish(action: &Action, crop: Crop) {
     }
 }
 
+/// A live pin's Opacity and Click-through glyphs (in the subset font: `tests`).
+const OPACITY_GLYPH: char = '\u{e5a0}'; // lucide "blend"
+const THROUGH: char = '\u{e5eb}'; // lucide "mouse-pointer-ban"
+
 fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
     use iced::widget::tooltip::Position as Side;
     const COPY: char = '\u{e0a2}'; // lucide "copy"
@@ -203,7 +240,8 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
         .content_fit(ContentFit::Fill);
     let mut layers = stack![picture];
     let size = pin.size();
-    if pin.hover && size.width >= PIN_BAR_ROOM.width && size.height >= PIN_BAR_ROOM.height {
+    let room = PIN_BAR_ROOM.width + pin.live.as_ref().map_or(0.0, |_| LIVE_BAR_EXTRA);
+    if pin.hover && size.width >= room && size.height >= PIN_BAR_ROOM.height {
         // the editing toolbar's Copy, Save and Drag chip: one look for one action
         let button = |glyph, message, label, keys| {
             hint(
@@ -215,11 +253,27 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
         };
         // its word "Drag" says it: no tooltip (owner rule: only when it adds)
         let drag = dragout::SUPPORTED.then(|| chip::drag_out(PinMsg::DragOut));
+        let live = pin.live.as_ref().map(|l| {
+            let tool = |glyph, message, label| {
+                let button = icon_button::square(glyph, State::default(), Some(message));
+                hint(button, label, Why::Icon, Side::Bottom)
+            };
+            row![
+                tool(OPACITY_GLYPH, PinMsg::Opacity, OPACITY[l.opacity].1),
+                tool(
+                    THROUGH,
+                    PinMsg::ClickThrough,
+                    "Let clicks pass through (back: tray menu)"
+                ),
+            ]
+            .spacing(space::GAP)
+        });
         let bar = surface(
             Material::Widget,
             radius::WINDOW,
             row![
                 drag,
+                live,
                 button(COPY, PinMsg::Copy, "Copy", "Ctrl+C"),
                 button(SAVE, PinMsg::Save, "Save", "Ctrl+S"),
                 button(Icon::Close.glyph(), PinMsg::Close, "Close", "Esc"),
@@ -321,6 +375,10 @@ impl Windows {
     /// Pins `crop` (physical px, `scale` per logical px) in its own always-on-top
     /// window, at `at` (logical desktop px) or centred. Any number can be open.
     pub fn pin(&mut self, crop: Crop, at: Option<Point>, scale: f32) -> Task<Msg> {
+        self.open_pin(crop, at, scale).1
+    }
+
+    fn open_pin(&mut self, crop: Crop, at: Option<Point>, scale: f32) -> (window::Id, Task<Msg>) {
         let base = Size::new(crop.width as f32, crop.height as f32) * (1.0 / scale.max(0.1));
         let zoom = fit_zoom(base);
         let (id, open) = floating(
@@ -341,8 +399,75 @@ impl Windows {
             zoom,
             hover: false,
             dragged: None,
+            live: None,
         });
-        open.discard()
+        (id, open.discard())
+    }
+
+    /// Live pins open now.
+    fn live_pins(&self) -> usize {
+        self.pins.iter().filter(|p| p.live.is_some()).count()
+    }
+
+    /// A live pin of `region` (physical desktop px) of the window `source`,
+    /// showing `first` until the window's first frame: a pin (as `pin`) whose
+    /// picture keeps following that part of the window (`capture::live`). At
+    /// most `MAX_LIVE`; a region beside the window's client area is refused (a toast).
+    pub fn live_pin(
+        &mut self,
+        source: isize,
+        region: crate::capture::window_rect::WinRect,
+        first: Crop,
+        at: Option<Point>,
+        scale: f32,
+    ) -> Task<Msg> {
+        if self.live_pins() >= MAX_LIVE {
+            return self.toast(
+                "Up to 4 live pins: close one first",
+                Tone::Neutral,
+                None,
+                TOAST_MS,
+            );
+        }
+        let Some(pick) = (live::geom(source).ok()).and_then(|g| live::pick(region, &g)) else {
+            let text = "Pick a part of one window to pin it live";
+            return self.toast(text, Tone::Neutral, None, TOAST_MS);
+        };
+        let (id, open) = self.open_pin(first, at, scale);
+        let (tx, rx) = iced::futures::channel::mpsc::unbounded();
+        let (source, run) = live::source(source, pick, move |e| tx.unbounded_send(e).is_ok());
+        if let Err(e) = std::thread::Builder::new()
+            .name("live pin".into())
+            .spawn(run)
+        {
+            crate::log!("cannot start a thread: {e}");
+        }
+        if let Some(pin) = self.pins.last_mut() {
+            pin.live = Some(Live {
+                _source: source,
+                scale,
+                opacity: 0,
+                through: false,
+            });
+        }
+        crate::log!("[opencircle] live pin {}x{} of a window", pick.w, pick.h);
+        let frames = Task::stream(rx).map(move |e| Msg::Pin(id, PinMsg::Live(e)));
+        Task::batch([open, frames])
+    }
+
+    /// The tray menu's "Make pins clickable": every live pin takes clicks again.
+    fn clickable_pins(&mut self) -> Task<Msg> {
+        let through = self.pins.iter_mut().filter_map(|p| {
+            let live = p.live.as_mut().filter(|l| l.through)?;
+            live.through = false;
+            Some(window::disable_mouse_passthrough(p.id))
+        });
+        Task::batch(through.collect::<Vec<_>>())
+    }
+
+    /// Some live pin lets clicks pass through (the tray menu offers them back).
+    fn pins_through(&self) -> bool {
+        (self.pins.iter()).any(|p| p.live.as_ref().is_some_and(|l| l.through))
     }
 
     /// A small message window: the toast pill (`screens::toast`) with `text`,
@@ -427,7 +552,10 @@ impl Windows {
     /// translate runs (its row's ✓). An open one goes first (a second right-click).
     pub fn tray_menu(&mut self, icon: [i32; 4], live_on: bool) -> Task<Msg> {
         let cfg = config::current();
-        let menu = tray_menu::Menu::new(&cfg.labs, &cfg, live_on);
+        let mut menu = tray_menu::Menu::new(&cfg.labs, &cfg, live_on);
+        if self.pins_through() {
+            menu = menu.with_click_pins();
+        }
         let size = menu.size();
         let place = platform::tray::menu_place(icon, size);
         crate::log!(
@@ -466,6 +594,9 @@ impl Windows {
         let Some(entry) = entry else {
             return close(id);
         };
+        if entry == platform::tray::Entry::ClickPins {
+            return Task::batch([close(id), self.clickable_pins()]);
+        }
         let trigger = entry.trigger(std::time::Instant::now());
         let settle = match entry.captures() {
             true => platform::tray::SETTLE,
@@ -818,6 +949,44 @@ impl Windows {
             PinMsg::Close => {
                 // the image goes when the window has (`Closed`): it fades out first
                 close(id)
+            }
+            PinMsg::Live(live::Event::Frame(crop)) => {
+                let Some(live) = &pin.live else {
+                    return Task::none();
+                };
+                let base = Size::new(crop.width as f32, crop.height as f32) * (1.0 / live.scale);
+                pin.image = image::Handle::from_rgba(crop.width, crop.height, crop.rgba);
+                if base == pin.base {
+                    return Task::none();
+                }
+                // the window was resized or changed DPI: the pin keeps the crop's shape
+                pin.base = base;
+                window::resize(id, pin.size())
+            }
+            PinMsg::Live(live::Event::Gone) => {
+                let gone = self.toast("The pinned window closed", Tone::Neutral, None, TOAST_MS);
+                Task::batch([close(id), gone])
+            }
+            PinMsg::Live(live::Event::Failed(e)) => {
+                crate::log!("[opencircle] live pin: {e}");
+                pin.live = None; // a still pin from here
+                let text = "Can't follow this window: the pin stays still";
+                self.toast(text, false, None, TOAST_MS)
+            }
+            PinMsg::Opacity => {
+                let Some(live) = &mut pin.live else {
+                    return Task::none();
+                };
+                live.opacity = (live.opacity + 1) % OPACITY.len();
+                opacity(id, OPACITY[live.opacity].0)
+            }
+            PinMsg::ClickThrough => {
+                let Some(live) = &mut pin.live else {
+                    return Task::none();
+                };
+                live.through = true;
+                pin.hover = false; // it gets no pointer from now on
+                window::enable_mouse_passthrough(id)
             }
         }
     }
@@ -1490,6 +1659,185 @@ mod tests {
         // Drag-out (Windows only) is the editor's Drag chip: its word says it, no tooltip.
         assert_eq!(shown(), ["Copy · Ctrl+C", "Save · Ctrl+S", "Close · Esc"]);
         assert_tips_add_something("pin bar");
+    }
+
+    /// A pin made live by hand (no window capture in tests): its source never runs.
+    fn live(windows: &mut Windows, w: u32, h: u32, scale: f32) -> window::Id {
+        let _ = windows.open_pin(picture(w, h), None, scale);
+        let pick = live::Pick {
+            x: 0,
+            y: 0,
+            w,
+            h,
+            dpi: 96,
+        };
+        let (source, _never_run) = live::source(0, pick, |_| true);
+        let pin = windows.pins.last_mut().unwrap();
+        pin.live = Some(Live {
+            _source: source,
+            scale,
+            opacity: 0,
+            through: false,
+        });
+        pin.id
+    }
+
+    #[test]
+    fn a_live_pin_shows_each_frame_and_keeps_the_crops_shape() {
+        let mut windows = Windows::default();
+        let id = live(&mut windows, 300, 200, 1.5);
+        assert_eq!(
+            windows.pins[0].size(),
+            Size::new(300.0, 200.0) * (1.0 / 1.5)
+        );
+        // a new frame of the same size: only the picture changes
+        let mut frame = picture(300, 200);
+        frame.rgba[0] = 7;
+        let _ = windows.update(Msg::Pin(id, PinMsg::Live(live::Event::Frame(frame))));
+        assert_eq!(windows.pins[0].crop().unwrap().rgba[0], 7);
+        assert_eq!(windows.pins[0].base, Size::new(300.0, 200.0) * (1.0 / 1.5));
+        // the source window got narrower (or changed DPI): the pin follows the crop
+        let _ = windows.update(Msg::Pin(
+            id,
+            PinMsg::Live(live::Event::Frame(picture(150, 200))),
+        ));
+        assert_eq!(
+            windows.pins[0].size(),
+            Size::new(150.0, 200.0) * (1.0 / 1.5)
+        );
+        // a still pin ignores frames (a late one after the source failed)
+        let _ = windows.update(Msg::Pin(id, PinMsg::Live(live::Event::Failed("x".into()))));
+        assert!(windows.pins[0].live.is_none(), "a still pin from here");
+        assert_eq!(
+            windows.toasts(),
+            [(
+                "Can't follow this window: the pin stays still".into(),
+                false
+            )]
+        );
+        let _ = windows.update(Msg::Pin(
+            id,
+            PinMsg::Live(live::Event::Frame(picture(10, 10))),
+        ));
+        assert_eq!(windows.pins[0].crop().unwrap().width, 150);
+    }
+
+    #[test]
+    fn a_live_pin_closes_with_its_window_and_says_so() {
+        let mut windows = Windows::default();
+        let id = live(&mut windows, 300, 200, 1.0);
+        let _ = windows.update(Msg::Pin(id, PinMsg::Live(live::Event::Gone)));
+        assert_eq!(
+            windows.toasts(),
+            [("The pinned window closed".into(), false)]
+        );
+        // the pin goes once its window has (it fades out first): the capture stops with it
+        let _ = windows.update(Msg::Closed(id));
+        assert!(windows.pins.is_empty());
+    }
+
+    #[test]
+    fn a_live_pin_steps_its_opacity_and_lets_clicks_through_until_the_tray_says() {
+        let mut windows = Windows::default();
+        let id = live(&mut windows, 400, 200, 1.0);
+        let still = windows.pin(picture(400, 200), None, 1.0);
+        drop(still);
+        let step = |w: &Windows| w.pins[0].live.as_ref().unwrap().opacity;
+        let seen: Vec<f32> = (0..5)
+            .map(|_| {
+                let _ = windows.update(Msg::Pin(id, PinMsg::Opacity));
+                OPACITY[step(&windows)].0
+            })
+            .collect();
+        assert_eq!(seen, [0.8, 0.6, 0.4, 1.0, 0.8], "round the steps");
+        // a still pin has neither control
+        let other = windows.pins[1].id;
+        let _ = windows.update(Msg::Pin(other, PinMsg::ClickThrough));
+        assert!(!windows.pins_through());
+        // click-through: the tray menu offers the way back, above Settings
+        let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
+        let _ = windows.update(Msg::Pin(id, PinMsg::ClickThrough));
+        assert!(windows.pins_through() && !windows.pins[0].hover);
+        let cfg = Config::default();
+        let menu = tray_menu::Menu::new(&cfg.labs, &cfg, false);
+        let rows = menu.clone().with_click_pins().entries();
+        let at = rows
+            .iter()
+            .position(|e| *e == platform::tray::Entry::ClickPins);
+        assert_eq!(at, Some(rows.len() - 3), "{rows:?}");
+        assert!(!menu.entries().contains(&platform::tray::Entry::ClickPins));
+        let _ = windows.clickable_pins();
+        assert!(!windows.pins_through());
+    }
+
+    #[test]
+    fn live_pins_are_limited() {
+        let mut windows = Windows::default();
+        for _ in 0..MAX_LIVE {
+            live(&mut windows, 100, 100, 1.0);
+        }
+        let _ = windows.live_pin(1, (0, 0, 10, 10), picture(10, 10), None, 1.0);
+        assert_eq!(windows.pins.len(), MAX_LIVE, "no fifth");
+        assert_eq!(
+            windows.toasts(),
+            [("Up to 4 live pins: close one first".into(), false)]
+        );
+    }
+
+    #[test]
+    fn the_live_pin_bar_and_its_glyphs() {
+        use crate::ui::kit::tooltip::tests_support::{assert_tips_add_something, shown};
+        let script = include_str!("../../assets/lucide/subset.sh");
+        for glyph in [OPACITY_GLYPH, THROUGH] {
+            let code = format!("U+{:04X}", glyph as u32);
+            assert!(script.contains(&code), "add {code} to subset.sh");
+        }
+        let mut windows = Windows::default();
+        let id = live(&mut windows, 420, 260, 1.0);
+        let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
+        let _ = shown();
+        let _ = windows.view(id).unwrap();
+        assert_eq!(
+            shown(),
+            [
+                "Opacity: 100 %",
+                "Let clicks pass through (back: tray menu)",
+                "Copy · Ctrl+C",
+                "Save · Ctrl+S",
+                "Close · Esc"
+            ]
+        );
+        assert_tips_add_something("live pin bar");
+        // too narrow for its two more buttons: no bar (as a small still pin)
+        let id = live(&mut windows, 260, 200, 1.0);
+        let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
+        let bare = shot::render(windows.view(id).unwrap(), 260, 200);
+        let _ = windows.update(Msg::Pin(id, PinMsg::Hover(false)));
+        assert_eq!(bare, shot::render(windows.view(id).unwrap(), 260, 200));
+    }
+
+    /// The live pin's hover bar, Sapphire and Daylight.
+    #[test]
+    fn the_live_pin_matches_its_golden_images() {
+        use crate::ui::kit::testing::golden;
+        use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+        let mut windows = Windows::default();
+        let id = live(&mut windows, 420, 260, 1.0);
+        let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let name = format!("live-pin-hover-{}", theme.id);
+            failed.extend(golden::check(
+                "screens",
+                &name,
+                Size::new(420.0, 260.0),
+                &[1.0],
+                || windows.view(id).unwrap(),
+            ));
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
     }
 
     #[test]
