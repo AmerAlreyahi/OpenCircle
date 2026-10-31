@@ -10,7 +10,8 @@ use super::pages::{self, PAGES};
 use super::*;
 use crate::config::{
     self, After, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
-    LookTheme, Provider, Rgb, SearchWith, SelectStyle, SnipAfter, SongSource, TextReader, Theme,
+    LookTheme, Provider, Rgb, SearchWith, SelectStyle, SnipAfter, SongSource, Target, TextReader,
+    Theme,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::labs::{Feature, Labs};
@@ -347,7 +348,7 @@ fn hidden_features_have_no_settings_page_row_or_shortcut() {
         !shortcuts.iter().any(|t| t.contains("Song")),
         "{shortcuts:?}"
     );
-    assert!(shortcuts.iter().any(|t| t == "Snip a region"));
+    assert!(shortcuts.iter().any(|t| t == "Snip"));
     let general = page(&mut s, Section::General);
     assert!(
         !general.iter().any(|t| t == "Search history"),
@@ -1418,33 +1419,64 @@ fn snip_shortcuts_are_listed_and_editable() {
     let (mut s, _) = state(None);
     s.draft.labs = Labs::all_on();
     update(&mut s, Message::Section(Section::Shortcuts));
+    // Snip is one feature (owner, 2026-10-31): ONE row; the window and
+    // full-screen entries stay in the file, unseen.
     let texts = shot::texts(view(&s));
-    for want in ["Snip a region", "Snip a window", "Snip the full screen"] {
-        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    // (the sidebar's page and the one row)
+    assert_eq!(
+        texts.iter().filter(|t| *t == "Snip").count(),
+        2,
+        "{texts:?}"
+    );
+    for gone in ["Snip a region", "Snip a window", "Snip the full screen"] {
+        assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
     }
-    let names: Vec<_> = s.quick_text.iter().map(|t| t.label.as_str()).collect();
-    for want in ["Snip a region", "Snip a window", "Snip the full screen"] {
-        assert!(names.contains(&want), "{names:?}");
+    let snips = |s: &State| {
+        s.slots()
+            .filter(
+                |slot| matches!(slot, Slot::Quick(i) if s.draft.quick_actions[*i].action == "snip"),
+            )
+            .collect::<Vec<_>>()
+    };
+    let [Slot::Quick(i)] = snips(&s)[..] else {
+        panic!("one snip row")
+    };
+    assert_eq!(
+        s.draft.quick_actions[i].shortcut, "PrintScreen",
+        "the user's key"
+    );
+    for (target, key) in [
+        (Target::Window, "Alt+PrintScreen"),
+        (Target::FullScreen, "Ctrl+PrintScreen"),
+    ] {
+        let kept = (s.draft.quick_actions.iter())
+            .any(|q| q.action == "snip" && q.target == target && q.shortcut == key);
+        assert!(kept, "{key}: kept in the file (it pre-picks), unseen");
     }
-    let i = s
-        .draft
-        .quick_actions
-        .iter()
-        .position(|q| q.shortcut == "Alt+PrintScreen")
-        .unwrap();
     update(&mut s, Message::Record(Slot::Quick(i)));
     press(&mut s, chord(false, false, "F8"));
     assert_eq!(s.draft.quick_actions[i].shortcut, "F8");
-    // Print Screen is a valid lone key but each key still does one job.
+    // Print Screen alone is valid; so is Alt alone + a key (Alt is a modifier).
+    for (alt, want) in [
+        (false, "PrintScreen"),
+        (true, "Alt+PrintScreen"),
+        (true, "Alt+F8"),
+    ] {
+        update(&mut s, Message::Record(Slot::Quick(i)));
+        let key = Chord {
+            ctrl: false,
+            alt,
+            shift: false,
+            logo: false,
+            key: want.trim_start_matches("Alt+").into(),
+        };
+        press(&mut s, key);
+        assert_eq!(s.shortcut_error, None, "{want}");
+        assert_eq!(s.draft.quick_actions[i].shortcut, want);
+    }
+    // each key still does one job
     update(&mut s, Message::Record(Slot::Quick(i)));
-    let key = Chord {
-        ctrl: false,
-        alt: false,
-        shift: false,
-        logo: false,
-        key: "PrintScreen".into(),
-    };
-    press(&mut s, key);
+    press(&mut s, chord(true, true, "Space"));
     assert!(
         s.shortcut_error
             .as_ref()
@@ -2315,9 +2347,7 @@ fn the_snip_page_has_its_shortcuts_folder_and_long_capture_limit() {
     assert_eq!(s.draft.labs, Labs::default());
     let texts = page(&mut s, Section::Snip);
     for want in [
-        "Snip a region",
-        "Snip a window",
-        "Snip the full screen",
+        "Snip",
         "PrtSc",
         "Save folder",
         "Long capture",
@@ -2326,6 +2356,15 @@ fn the_snip_page_has_its_shortcuts_folder_and_long_capture_limit() {
         "Open History",
     ] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    // one shortcut row: Snip is one feature (owner, 2026-10-31)
+    for gone in [
+        "Snip a region",
+        "Snip a window",
+        "Snip the full screen",
+        "Alt",
+    ] {
+        assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
     }
     assert!(!texts.iter().any(|t| t == "Print Screen key"), "no note");
     let mut snip = s.draft.snip.clone();
@@ -2367,7 +2406,7 @@ fn the_snip_page_says_when_print_screen_or_a_key_is_taken() {
     );
     assert!(!s.dirty());
     s.print_screen_taken = false;
-    s.desktop = |keys| (keys == "Alt+PrintScreen").then_some(DesktopKey::Taken);
+    s.desktop = |keys| (keys == "PrintScreen").then_some(DesktopKey::Taken);
     let texts = shot::texts(view(&s));
     assert!(
         texts

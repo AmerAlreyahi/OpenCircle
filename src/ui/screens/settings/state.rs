@@ -381,7 +381,7 @@ pub(super) fn action_name(id: &str, live: bool, target: Target) -> String {
         ("snip", _) => match target {
             Target::Window => "Snip a window".into(),
             Target::FullScreen => "Snip the full screen".into(),
-            _ => "Snip a region".into(),
+            _ => "Snip".into(),
         },
         ("translate", false) => "Translate".into(),
         ("translate", true) => "Translate (live, Beta)".into(),
@@ -415,7 +415,7 @@ pub(super) fn quick_hint(q: &crate::config::QuickAction) -> &'static str {
     match (q.action.as_str(), q.target) {
         ("snip", Target::Window) => "Click a window, then edit it",
         ("snip", Target::FullScreen) => "The whole screen, then edit it",
-        ("snip", _) => "Drag or circle an area, then edit it",
+        ("snip", _) => "Click a window or drag an area",
         ("song_search", _) => "Listens and names the song (needs a key)",
         ("live_pin", _) => "Pick a part of a window: it floats on top, kept up to date",
         ("colour_picker", _) => "Click copies HEX, Shift+click RGB",
@@ -1070,7 +1070,12 @@ impl State {
     pub(super) fn slots(&self) -> std::vec::IntoIter<Slot> {
         let labs = &self.draft.labs;
         let quick = self.draft.quick_actions.iter().enumerate();
-        let shown = quick.filter(|(_, q)| crate::labs::quick_on(labs, q));
+        // Snip is one feature (owner, 2026-10-31): one row; the window and
+        // full-screen snips' entries stay in the file, unseen (they still pre-pick).
+        let one_snip = |q: &crate::config::QuickAction| {
+            q.action != "snip" || !matches!(q.target, Target::Window | Target::FullScreen)
+        };
+        let shown = quick.filter(|(_, q)| crate::labs::quick_on(labs, q) && one_snip(q));
         let mut all = vec![Slot::Capture];
         all.extend(shown.map(|(i, _)| Slot::Quick(i)));
         all.into_iter()
