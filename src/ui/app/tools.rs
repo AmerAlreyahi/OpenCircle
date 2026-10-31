@@ -83,6 +83,12 @@ impl App {
         };
         match event {
             overlay::Event::Hover(p) | overlay::Event::Move(p) => {
+                if which == Which::Picker {
+                    moving(
+                        &mut self.frame_times.borrow_mut(),
+                        std::time::Instant::now(),
+                    );
+                }
                 let (tool, p) = place(snip, p);
                 tool.ruler.drag(p, shift);
                 Task::none()
@@ -248,6 +254,18 @@ fn place(snip: &mut snip::Snip, p: Point) -> (&mut Tool, Point) {
     (tool, p)
 }
 
+/// The picker's frame times (its log line) count from the move that ends a
+/// still pointer: the opening and a pause aren't frames drawn late (they
+/// made its p95 read 31 ms on the VM for moves drawn every 15 ms).
+fn moving(times: &mut Vec<std::time::Instant>, now: std::time::Instant) {
+    if times
+        .last()
+        .is_some_and(|&t| now - t > Duration::from_millis(250))
+    {
+        times.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
@@ -301,6 +319,20 @@ mod tests {
     fn press(app: &mut App, at: Point, shift: bool) {
         let _ = app.on_overlay(Event::Press { at, shift });
         let _ = app.on_overlay(Event::Release);
+    }
+
+    #[test]
+    fn the_pickers_frame_times_start_where_the_pointer_starts_moving() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut times = vec![ms(0), ms(16), ms(32)];
+        super::moving(&mut times, ms(48)); // moving on: kept
+        assert_eq!(times.len(), 3);
+        super::moving(&mut times, ms(1100)); // after a still second: anew
+        assert!(times.is_empty());
+        super::moving(&mut times, ms(1116)); // nothing drawn yet: nothing to drop
+        assert!(times.is_empty());
     }
 
     #[test]
