@@ -62,7 +62,6 @@ impl Entry {
     /// The Labs switch that shows it (`None` = always shown).
     fn feature(self) -> Option<Feature> {
         match self {
-            Entry::Snip => Some(Feature::Snip),
             Entry::Live => Some(Feature::Live),
             Entry::Song => Some(Feature::Song),
             _ => None,
@@ -551,16 +550,18 @@ mod tests {
     #[test]
     fn the_menu_shows_a_labs_row_only_while_it_is_on() {
         use Entry::*;
+        // Snip is out of Labs (N-41): always there
         assert_eq!(
             entries(&Labs::default()),
-            [Circle, Translate, Settings, Quit]
+            [Circle, Translate, Snip, Settings, Quit]
         );
         let mut on = Labs::default();
         on.set(Feature::Live, true);
-        assert_eq!(entries(&on), [Circle, Translate, Live, Settings, Quit]);
-        on.set(Feature::Editor, true); // no row of its own
+        assert_eq!(
+            entries(&on),
+            [Circle, Translate, Snip, Live, Settings, Quit]
+        );
         on.set(Feature::Song, true);
-        on.set(Feature::Snip, true);
         assert_eq!(
             entries(&on),
             [Circle, Translate, Snip, Live, Song, Settings, Quit]

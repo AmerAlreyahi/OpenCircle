@@ -82,8 +82,8 @@ fn general_has_the_start_with_the_os_switch_on_by_default() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// Settings > AI: "AI chat stays open" and "Keep chat history", for every
-/// provider, saved to the file.
+/// Settings > AI: "AI chat stays open", and Chat history's link to History
+/// (its switch lives there), for every provider, saved to the file.
 #[test]
 fn ai_has_the_chat_rows_and_saves_them() {
     let path = tmp("chat-rows");
@@ -94,7 +94,8 @@ fn ai_has_the_chat_rows_and_saves_them() {
     for want in [
         "AI chat stays open",
         "After a follow-up",
-        "Keep chat history",
+        "Chat history",
+        "Open History",
     ] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
@@ -326,28 +327,27 @@ fn opens_at_a_size_that_fits_the_sidebar_and_the_content() {
         assert!(size.width >= MIN_WIDTH, "{screen:?} {scale}: {size:?}");
     }
     // A huge screen does not make a huge window.
-    assert_eq!(window_limits(work(3440.0, 1440.0, 1.0)).0, WINDOW_SIZE);
+    assert_eq!(
+        window_limits(work(3440.0, 1440.0, 1.0)).0,
+        Size::new(WINDOW_SIZE.width, WINDOW_SIZE.height.max(FIT_HEIGHT))
+    );
     // The header and every sidebar page are what FIT_HEIGHT counts.
-    const { assert!(FIT_HEIGHT > 400.0 && FIT_HEIGHT <= WINDOW_SIZE.height) };
+    const { assert!(FIT_HEIGHT > 400.0 && FIT_HEIGHT <= WINDOW_SIZE.height + 20.0) };
 }
 
 #[test]
 fn hidden_features_have_no_settings_page_row_or_shortcut() {
     let (mut s, _) = state(None);
     let side = sidebar(&s);
-    assert!(
-        !side.contains(&"Snip") && !side.contains(&"Song search"),
-        "{side:?}"
-    );
-    assert!(side.contains(&"Labs"));
-    // No snip shortcut fields, no search-history row.
+    assert!(!side.contains(&"Song search"), "{side:?}");
+    assert!(side.contains(&"Labs") && side.contains(&"Snip"));
+    // No song shortcut field, no search-history row (Snip's are there: out of Labs).
     let shortcuts = page(&mut s, Section::Shortcuts);
     assert!(
-        !shortcuts
-            .iter()
-            .any(|t| t.contains("Snip") || t.contains("song")),
+        !shortcuts.iter().any(|t| t.contains("Song")),
         "{shortcuts:?}"
     );
+    assert!(shortcuts.iter().any(|t| t == "Snip a region"));
     let general = page(&mut s, Section::General);
     assert!(
         !general.iter().any(|t| t == "Search history"),
@@ -373,7 +373,7 @@ fn a_failed_write_keeps_the_queued_switches_and_the_unsaved_edit() {
     let Outcome::Write(first) = super::update(&mut s, Message::Theme(Theme::Light)) else {
         panic!("no write")
     };
-    super::update(&mut s, Message::Labs(Feature::Snip, true));
+    super::update(&mut s, Message::Labs(Feature::Song, true));
     let out = super::update(&mut s, Message::Written(first.run()));
     assert!(
         matches!(out, Outcome::Write(_)),
@@ -399,7 +399,7 @@ fn writes_go_one_at_a_time_and_a_switch_during_a_write_waits_its_turn() {
     assert!(!path.exists());
     // More edits while it is on its way: held, nothing else starts.
     assert_eq!(
-        super::update(&mut s, Message::Labs(Feature::Snip, true)),
+        super::update(&mut s, Message::Labs(Feature::Song, true)),
         Outcome::None
     );
     super::update(&mut s, Message::Autostart(false));
@@ -414,7 +414,7 @@ fn writes_go_one_at_a_time_and_a_switch_during_a_write_waits_its_turn() {
     };
     let (back, _) = Config::load_from(&path);
     assert_eq!(back, cfg);
-    assert!(back.theme == Theme::Light && back.labs.snip && !back.general.autostart);
+    assert!(back.theme == Theme::Light && back.labs.song && !back.general.autostart);
 }
 
 #[test]
@@ -423,35 +423,34 @@ fn a_labs_switch_saves_and_applies_at_once_and_brings_its_rows_back() {
     let (mut s, _) = state(Some(path.clone()));
     // An unsaved edit elsewhere is not saved by a Labs switch.
     update(&mut s, Message::Theme(Theme::Light));
-    let Outcome::Saved(cfg) = update(&mut s, Message::Labs(Feature::Snip, true)) else {
+    let Outcome::Saved(cfg) = update(&mut s, Message::Labs(Feature::Song, true)) else {
         panic!("not saved: {:?}", s.notice)
     };
-    assert!(cfg.labs.snip && !cfg.labs.song && cfg.theme == Theme::System);
+    assert!(cfg.labs.song && !cfg.labs.live && cfg.theme == Theme::System);
     let (back, w) = Config::load_from(&path);
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(back.labs, cfg.labs);
     assert_eq!(back.theme, Theme::System, "other draft edits stay unsaved");
     assert_eq!(s.draft.theme, Theme::Light);
-    // Snip's page and its three shortcuts are back.
-    assert!(sidebar(&s).contains(&"Snip"));
+    // Song search's page and its shortcut are back.
+    assert!(sidebar(&s).contains(&"Song search"));
     let shortcuts = page(&mut s, Section::Shortcuts);
-    for want in ["Snip a region", "Snip a window", "Snip the full screen"] {
-        assert!(shortcuts.iter().any(|t| t == want), "{want}: {shortcuts:?}");
-    }
-    // History and Song likewise.
+    assert!(
+        shortcuts.iter().any(|t| t == "Song search"),
+        "{shortcuts:?}"
+    );
+    // History likewise.
     update(&mut s, Message::Labs(Feature::History, true));
-    update(&mut s, Message::Labs(Feature::Song, true));
     assert!(
         page(&mut s, Section::General)
             .iter()
             .any(|t| t == "Search history")
     );
-    assert!(sidebar(&s).contains(&"Song search"));
     // Off again: gone again, and the page it was on is left.
-    update(&mut s, Message::Section(Section::Snip));
-    update(&mut s, Message::Labs(Feature::Snip, false));
+    update(&mut s, Message::Section(Section::Song));
+    update(&mut s, Message::Labs(Feature::Song, false));
     assert_eq!(s.section, Section::Labs);
-    assert!(!sidebar(&s).contains(&"Snip"));
+    assert!(!sidebar(&s).contains(&"Song search"));
     let _ = std::fs::remove_file(&path);
 }
 
@@ -1158,14 +1157,19 @@ fn every_control_has_its_own_label() {
         update(&mut s, Message::Section(page.id));
         TIPS.with(|t| t.borrow_mut().clear());
         let _ = view(&s);
-        all.extend(TIPS.with(|t| t.borrow().clone()));
+        // (The sidebar items and segment pills are named by their own text.)
+        let mut labels = TIPS.with(|t| t.borrow().clone());
+        labels.sort();
+        labels.retain(|t| t != "Save settings");
+        let mut unique = labels.clone();
+        unique.dedup();
+        // one page never has two controls of one name (a row shown on two
+        // pages, like Snip's shortcuts and the save folder, is fine)
+        assert_eq!(labels, unique, "duplicate control labels on {}", page.title);
+        all.extend(labels);
     }
-    // (The sidebar items and segment pills are named by their own text.)
     all.sort();
-    all.retain(|t| t != "Save settings");
-    let mut unique = all.clone();
-    unique.dedup();
-    assert_eq!(all, unique, "duplicate control labels");
+    all.dedup();
     assert!(all.len() >= 22, "{all:?}");
 }
 
@@ -1509,10 +1513,10 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
     for want in ["Edge style", "Glow strength", "Your two colours"] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
-    // hidden until they do something: glass bars (0.1.4), a one-mode edge row
-    for hidden in ["Bars and pills", "Screen edge for"] {
-        assert!(!texts.iter().any(|t| t == hidden), "{hidden}");
-    }
+    // hidden until it does something: glass bars (0.1.4); Snip is out of
+    // Labs, so the edge row has two modes at least
+    assert!(!texts.iter().any(|t| t == "Bars and pills"));
+    assert!(texts.iter().any(|t| t == "Screen edge for"), "{texts:?}");
     assert!(s.problems.is_empty(), "{:?}", s.problems);
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
         panic!("not saved: {:?}", s.notice)
@@ -1713,9 +1717,9 @@ fn renders_every_section_in_both_themes() {
     theme::apply(Theme::Dark);
 }
 
-/// The Labs rule: Snip and Song search are listed only while their switch is
-/// on, and switching one off on its own page goes back to Labs (it was Snip
-/// only: Song search stayed on a page the sidebar no longer lists).
+/// The Labs rule: Song search is listed only while its switch is on, and
+/// switching it off on its own page goes back to Labs. Snip is out of Labs
+/// (N-41): always listed.
 #[test]
 fn labs_pages_are_hidden_while_their_switch_is_off() {
     let path = tmp("labs-pages");
@@ -1733,20 +1737,19 @@ fn labs_pages_are_hidden_while_their_switch_is_off() {
             "AI",
             "Translate",
             "Shortcuts",
+            "Snip",
+            "History",
             "Privacy",
             "About",
             "Labs"
         ]
     );
-    for (f, page) in [(Feature::Snip, "Snip"), (Feature::Song, "Song search")] {
-        update(&mut s, Message::Labs(f, true));
-        assert!(sidebar(&s).contains(&page), "{page} on");
-        let id = PAGES.iter().find(|p| p.title == page).unwrap().id;
-        update(&mut s, Message::Section(id));
-        update(&mut s, Message::Labs(f, false));
-        assert!(!sidebar(&s).contains(&page), "{page} off");
-        assert_eq!(s.section, Section::Labs, "{page}: back to Labs");
-    }
+    update(&mut s, Message::Labs(Feature::Song, true));
+    assert!(sidebar(&s).contains(&"Song search"));
+    update(&mut s, Message::Section(Section::Song));
+    update(&mut s, Message::Labs(Feature::Song, false));
+    assert!(!sidebar(&s).contains(&"Song search"));
+    assert_eq!(s.section, Section::Labs, "back to Labs");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -1910,7 +1913,7 @@ fn the_step_33_pages_match_their_golden_images() {
     use crate::ui::kit::testing::golden;
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     type Setup = fn(&mut State);
-    let cases: [(&str, Section, f32, Setup); 11] = [
+    let cases: [(&str, Section, f32, Setup); 14] = [
         ("ai", Section::Ai, 0.0, |s| {
             update(s, Message::Provider(Provider::OpenaiCompatible));
             update(s, Message::Preset(preset("OpenRouter")));
@@ -1930,7 +1933,29 @@ fn the_step_33_pages_match_their_golden_images() {
             update(s, Message::Record(Slot::Quick(0)));
             press(s, chord(true, true, "Space"));
         }),
-        ("snip", Section::Snip, 0.0, |_| {}),
+        ("snip", Section::Snip, 1180.0, |_| {}),
+        ("snip-print-screen", Section::Snip, 1280.0, |s| {
+            s.print_screen_taken = true;
+        }),
+        ("history", Section::History, 0.0, |s| {
+            update(
+                s,
+                Message::Kept(crate::history::Counts {
+                    captures: 12,
+                    chats: 0,
+                }),
+            );
+        }),
+        ("history-clear-all", Section::History, 0.0, |s| {
+            update(
+                s,
+                Message::Kept(crate::history::Counts {
+                    captures: 3,
+                    chats: 7,
+                }),
+            );
+            update(s, Message::ClearAll(false));
+        }),
         ("song", Section::Song, 0.0, |_| {}),
         ("privacy", Section::Privacy, 0.0, |_| {}),
         ("appearance-custom", Section::Appearance, 1500.0, |s| {
@@ -2277,4 +2302,140 @@ fn previews_last_frames_match_their_golden_images() {
     }
     themes::set(&SAPPHIRE);
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// N-41: the Snip page has its three shortcuts (the same rows as Shortcuts),
+/// the save folder, the long-capture limit and Recent captures' link to
+/// History, with every Labs switch off; the limit is saved.
+#[test]
+fn the_snip_page_has_its_shortcuts_folder_and_long_capture_limit() {
+    let dir = tmp("snip-page");
+    let path = dir.join("config.toml");
+    let (mut s, _) = state(Some(path.clone()));
+    assert_eq!(s.draft.labs, Labs::default());
+    let texts = page(&mut s, Section::Snip);
+    for want in [
+        "Snip a region",
+        "Snip a window",
+        "Snip the full screen",
+        "PrtSc",
+        "Save folder",
+        "Long capture",
+        "20,000 px",
+        "Recent captures",
+        "Open History",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    assert!(!texts.iter().any(|t| t == "Print Screen key"), "no note");
+    let mut snip = s.draft.snip.clone();
+    snip.long_max = 5_000;
+    update(&mut s, Message::Snip(snip));
+    assert!(matches!(update(&mut s, Message::Save), Outcome::Saved(_)));
+    assert_eq!(Config::load_from(&path).0.snip.long_max, 5_000);
+    // the link opens History, which counts what is kept
+    assert_eq!(
+        update(&mut s, Message::Section(Section::History)),
+        Outcome::History(Vec::new())
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Print Screen taken by Windows' own screen capture: a calm note with a
+/// button to Windows' setting (never changed by us), and the Print Screen
+/// row says who has the key. Another app holding a key: its row says so.
+#[test]
+fn the_snip_page_says_when_print_screen_or_a_key_is_taken() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Snip));
+    s.print_screen_taken = true;
+    let texts = shot::texts(view(&s));
+    for want in [
+        "Print Screen key",
+        "Open Windows settings",
+        "Windows' screen capture uses this key",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    // only bare Print Screen: Alt+ / Ctrl+Print Screen are ours
+    let notes = texts.iter().filter(|t| t.contains("uses this key")).count();
+    assert_eq!(notes, 1, "{texts:?}");
+    assert_eq!(
+        update(&mut s, Message::OpenKeyboardSettings),
+        Outcome::None,
+        "opens Windows' page (Windows only), nothing saved"
+    );
+    assert!(!s.dirty());
+    s.print_screen_taken = false;
+    s.desktop = |keys| (keys == "Alt+PrintScreen").then_some(DesktopKey::Taken);
+    let texts = shot::texts(view(&s));
+    assert!(
+        texts
+            .iter()
+            .any(|t| t == "Another app uses this key: pick a different one"),
+        "{texts:?}"
+    );
+}
+
+/// N-39: one History page: each kind's switch, count and Clear; Clear all
+/// asks first. Counting and clearing are handed to the shell (a thread).
+#[test]
+fn history_counts_clears_and_asks_before_clearing_all() {
+    use crate::history::{Counts, Kind};
+    let (mut s, _) = state(None);
+    assert_eq!(
+        update(&mut s, Message::Section(Section::History)),
+        Outcome::History(Vec::new())
+    );
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Counting…"));
+    let kept = Counts {
+        captures: 3,
+        chats: 1,
+    };
+    update(&mut s, Message::Kept(kept));
+    let texts = shot::texts(view(&s));
+    for want in [
+        "Recent captures",
+        "Chat history",
+        "3 kept",
+        "1 kept",
+        "Clear all…",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    assert_eq!(
+        update(&mut s, Message::ClearHistory(Kind::Chats)),
+        Outcome::History(vec![Kind::Chats])
+    );
+    // Clear all asks; Cancel keeps everything; Delete all clears every kind
+    assert_eq!(update(&mut s, Message::ClearAll(false)), Outcome::None);
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Delete all"));
+    update(&mut s, Message::KeepHistory);
+    assert!(!shot::texts(view(&s)).iter().any(|t| t == "Delete all"));
+    update(&mut s, Message::ClearAll(false));
+    assert_eq!(
+        update(&mut s, Message::ClearAll(true)),
+        Outcome::History(Kind::ALL.to_vec())
+    );
+    assert!(!s.clearing_all);
+    // a switch off deletes that kind: its count goes to nothing at once
+    update(&mut s, Message::KeepChats(false));
+    assert_eq!(s.kept.unwrap().chats, 0);
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Nothing kept"));
+}
+
+/// The switches for what is kept exist once: on History (Snip and AI link there).
+#[test]
+fn the_history_switches_exist_only_on_the_history_page() {
+    let (mut s, _) = state(None);
+    s.draft.labs = Labs::all_on();
+    for p in PAGES.iter().filter(|p| p.id != Section::History) {
+        let texts = page(&mut s, p.id);
+        for old in [
+            "Keep chat history",
+            "The last 20 snips, on this PC only. Off deletes them",
+        ] {
+            assert!(!texts.iter().any(|t| t == old), "{}: {old}", p.title);
+        }
+    }
 }

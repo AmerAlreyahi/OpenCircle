@@ -38,7 +38,7 @@ pub fn remember(crop: &Crop) {
 }
 
 /// Writes `crop` into `dir` as the newest PNG, then drops all but the newest `limit`.
-fn keep(dir: &Path, crop: &Crop, limit: usize) -> Result<PathBuf, String> {
+pub(super) fn keep(dir: &Path, crop: &Crop, limit: usize) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -113,7 +113,7 @@ pub fn clear() {
     }
 }
 
-fn clear_dir(dir: &Path) {
+pub(super) fn clear_dir(dir: &Path) {
     if dir.exists()
         && let Err(e) = std::fs::remove_dir_all(dir)
     {

@@ -77,7 +77,7 @@ pub const HEROES: [Hero; 7] = [
         key: "snip",
         title: "Snip",
         desc: "Capture, mark up and copy a picture.",
-        lab: Some(Feature::Snip),
+        lab: None,
         shortcut: snip,
         clip: "snip",
     },

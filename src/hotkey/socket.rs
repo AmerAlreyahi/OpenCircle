@@ -356,11 +356,7 @@ mod tests {
     /// usual refusal: `main` prints it with the usage and exits with status 2.
     #[test]
     fn the_cli_refuses_a_hidden_features_target_with_a_clear_message() {
-        for (action, title) in [
-            ("snip", "Snip"),
-            ("song_search", "Song search"),
-            ("edit", "Snip editor"),
-        ] {
+        for (action, title) in [("song_search", "Song search"), ("live_pin", "Pins")] {
             let msg = Command::from_args(&args(&["run", action])).unwrap_err();
             assert_eq!(
                 msg,
@@ -372,6 +368,13 @@ mod tests {
         }
         // Everything else is as before; an unknown action keeps its own message.
         assert!(Command::from_args(&args(&["run", "translate"])).is_ok());
+        // Snip is out of Labs (N-41)
+        for action in ["snip", "edit", "colour_picker", "ruler"] {
+            assert!(
+                Command::from_args(&args(&["run", action])).is_ok(),
+                "{action}"
+            );
+        }
         assert!(parse_command("run translate full_screen\n").is_ok());
         assert_eq!(
             Command::from_args(&args(&["run", "nope"])).unwrap_err(),

@@ -139,20 +139,18 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
             ),
         ));
     }
-    // Only Circle has an edge until Live or Snip is on in Labs: no one-choice row.
-    if modes.len() > 1 {
-        rows.push(row_of(
-            "Screen edge for",
-            "Each mode has its own edge",
-            segmented(
-                &modes,
-                state.edge_mode,
-                state.edge_mode,
-                1.0,
-                Message::EdgeMode,
-            ),
-        ));
-    }
+    // (Circle and Snip at least: never a one-choice row)
+    rows.push(row_of(
+        "Screen edge for",
+        "Each mode has its own edge",
+        segmented(
+            &modes,
+            state.edge_mode,
+            state.edge_mode,
+            1.0,
+            Message::EdgeMode,
+        ),
+    ));
     rows.push(row_of(
         "Edge style",
         "A soft glow along the screen edge, or none",
@@ -167,14 +165,12 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
     rows
 }
 
-/// The Screen edge segments: Live and Snip only while they are on in Labs.
+/// The Screen edge segments: Live only while it is on in Labs.
 fn edge_modes(labs: &Labs) -> Vec<(EdgeMode, &'static str)> {
     let mut modes = vec![(EdgeMode::Overlay, "Circle")];
     if labs.has(Feature::Live) {
         modes.push((EdgeMode::Live, "Live"));
     }
-    if labs.has(Feature::Snip) {
-        modes.push((EdgeMode::Snip, "Snip"));
-    }
+    modes.push((EdgeMode::Snip, "Snip"));
     modes
 }

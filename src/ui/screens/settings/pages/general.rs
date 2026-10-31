@@ -58,11 +58,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ),
         ));
     }
-    rows = rows.push(setting_row::row(
-        title("Save folder"),
-        "Where Save starts. Files are OpenCircle-date-time.png",
-        folder(state),
-    ));
+    rows = rows.push(folder_row(state));
     rows = rows.push(update_row(state));
     let status = state.update_status.as_deref();
     rows = rows.push(setting_row::row(
@@ -118,6 +114,15 @@ pub fn update_row(state: &State) -> Element<'_, Message> {
             },
             Message::AutoUpdate,
         ),
+    )
+}
+
+/// Where Save starts (General and Snip: the one folder).
+pub(super) fn folder_row(state: &State) -> Element<'_, Message> {
+    setting_row::row(
+        title("Save folder"),
+        "Where Save starts. Files are OpenCircle-date-time.png",
+        folder(state),
     )
 }
 

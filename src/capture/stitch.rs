@@ -202,6 +202,8 @@ pub struct Stitcher {
     fixed: Option<(usize, usize)>,
     page: Vec<u8>,
     foot: Vec<u8>,
+    /// The height cap (`MAX_HEIGHT` unless `limit` lowers it).
+    max: u32,
 }
 
 impl Stitcher {
@@ -214,7 +216,14 @@ impl Stitcher {
             fixed: None,
             page: Vec::new(),
             foot: Vec::new(),
+            max: MAX_HEIGHT,
         }
+    }
+
+    /// Stops growing at `max` px (at most `MAX_HEIGHT`; Settings > Snip).
+    pub fn limit(mut self, max: u32) -> Self {
+        self.max = max.clamp(1, MAX_HEIGHT);
+        self
     }
 
     /// Height of the image `finish` would return (0 before the first frame).
@@ -224,7 +233,7 @@ impl Stitcher {
 
     /// True once the height cap is reached; further frames are rejected.
     pub fn is_full(&self) -> bool {
-        self.height() >= MAX_HEIGHT
+        self.height() >= self.max
     }
 
     pub fn push(&mut self, rgba: &[u8]) -> Push {
@@ -269,7 +278,7 @@ impl Stitcher {
         // header (`top`); clamped there, a few rows may go missing once.
         let start = (self.h - old).saturating_sub(d).max(top);
         let end = self.h - bot;
-        let room = (MAX_HEIGHT as usize).saturating_sub(self.page.len() / stride + bot);
+        let room = (self.max as usize).saturating_sub(self.page.len() / stride + bot);
         let take = (end - start).min(room);
         self.fixed = Some((top, bot));
         self.page
@@ -830,6 +839,22 @@ mod tests {
         // All rows above the glued-on footer are the page.
         let keep = (MAX_HEIGHT as usize - 40) * w * 4;
         assert!(px[..keep] == rig.truth(rig.max_scroll()).px[..keep]);
+    }
+
+    /// Settings > Snip's long-capture limit: the image stops at that height.
+    #[test]
+    fn a_lower_limit_caps_the_height_there() {
+        let (w, vh) = (100, 700);
+        let rig = Rig::new(w, 36_000, vh, 81, 40);
+        let mut st = Stitcher::new(w as u32, vh as u32).limit(5_000);
+        let mut s = 0;
+        while !st.is_full() && s <= rig.max_scroll() {
+            assert_ne!(st.push(&rig.frame(s).px), Push::Rejected);
+            s += 500;
+        }
+        assert_eq!(st.height(), 5_000);
+        assert_eq!(st.push(&rig.frame(s).px), Push::Rejected);
+        assert_eq!(st.finish().2, 5_000);
     }
 
     /// A PNG fixture (grey or RGB) as RGBA, with its size.

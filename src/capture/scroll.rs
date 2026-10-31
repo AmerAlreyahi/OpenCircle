@@ -61,16 +61,18 @@ pub fn can_scroll() -> bool {
 }
 
 /// Grabs `region` (physical desktop px: x, y, width, height) while the user
-/// scrolls, until `stop`; `each` gets every change, with a `preview` of the
-/// newest rows at most that size (physical px). Blocking: run it on a thread.
+/// scrolls, until `stop` or `max` px tall; `each` gets every change, with a
+/// `preview` of the newest rows at most that size (physical px). Blocking: run
+/// it on a thread.
 /// The image gathered so far is returned also when a later grab fails.
 pub fn by_hand(
     region: (i32, i32, u32, u32),
     preview: (u32, u32),
+    max: u32,
     stop: &AtomicBool,
     each: impl FnMut(Update),
 ) -> Result<Crop, String> {
-    let mut st = Stitcher::new(region.2, region.3);
+    let mut st = Stitcher::new(region.2, region.3).limit(max);
     let grab = || grab_area(region);
     let started = Instant::now();
     match run(&mut st, grab, idle_for, stop, PERIOD, preview, each) {

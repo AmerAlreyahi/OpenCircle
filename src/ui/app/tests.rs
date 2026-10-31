@@ -2081,7 +2081,7 @@ fn bar_names(app: &App) -> Vec<String> {
 }
 
 #[test]
-fn hidden_features_have_no_bar_button_key_or_editor_and_turning_them_on_brings_them_back() {
+fn hidden_features_have_no_bar_button_and_turning_them_on_brings_them_back() {
     let mut app = open_app(1280, 800, 1.0);
     let (_, full) = app.bar_size();
     app.o.labs = Labs::default();
@@ -2091,53 +2091,37 @@ fn hidden_features_have_no_bar_button_key_or_editor_and_turning_them_on_brings_t
         "two buttons fewer: {small:?} < {full:?}"
     );
     let names = bar_names(&app);
+    // the design's bar, no Live translate, no Song search; Snip is out of Labs
+    let snip = names.iter().filter(|n| n.starts_with("Snip")).count();
+    assert_eq!(snip, 1, "{names:?}");
+    let rest: Vec<_> = names.iter().filter(|n| !n.starts_with("Snip")).collect();
     assert_eq!(
-        names,
+        rest,
         ["Ask AI", "Open OpenCircle AI chat", "Screen included"],
-        "the design's bar, no Live translate, no Song search, no Snip"
+        "{names:?}"
     );
     let texts = overlay_texts(&app);
     for pill in ["Search in browser", "Copy text", "Translate"] {
         assert!(texts.iter().any(|t| t == pill), "{pill}: {texts:?}");
     }
-    // E does nothing without a selection and with one (no editor, no whole-screen editor).
-    event(
-        &mut app,
-        overlay::Event::Key {
-            letter: 'e',
-            ctrl: false,
-        },
-    );
-    assert!(app.o.edit.is_none() && !app.editing());
+    // Pins are off.
+    assert!(!app.o.labs.has(labs::Feature::Pins));
+    // Song search on: its button is back (one more).
+    app.o.labs.set(labs::Feature::Song, true);
+    assert!(bar_names(&app).iter().any(|n| n == "Song search"));
+    // (the first icon also brings the divider before the icons)
+    assert!(app.bar_size().1.width >= small.width + bar::BUBBLE);
+    // Live translate on: its button is back.
+    app.o.labs.set(labs::Feature::Live, true);
+    assert!(bar_names(&app).iter().any(|n| n == "Live translate (Beta)"));
+    // Snip is out of Labs (N-41): E opens the editor with every switch off.
+    app.o.labs = Labs::default();
     drag(
         &mut app,
         Point::new(200.0, 150.0),
         Point::new(500.0, 350.0),
         false,
     );
-    event(
-        &mut app,
-        overlay::Event::Key {
-            letter: 'e',
-            ctrl: false,
-        },
-    );
-    let _ = app.update(Message::Run(&actions::edit::ACTION));
-    let _ = app.update(Message::EditScreen);
-    assert!(app.o.edit.is_none(), "the editor never opens");
-    // Pins and a snip's editor are off too.
-    assert!(!app.o.labs.has(labs::Feature::Pins));
-    // Song search on: its button is back (one more), the editor still off.
-    app.o.labs.set(labs::Feature::Song, true);
-    assert!(bar_names(&app).iter().any(|n| n == "Song search"));
-    // (the first icon also brings the divider before the icons)
-    assert!(app.bar_size().1.width >= small.width + bar::BUBBLE + bar::SPACING);
-    // Live translate on: its button is back.
-    app.o.labs.set(labs::Feature::Live, true);
-    assert!(bar_names(&app).iter().any(|n| n == "Live translate (Beta)"));
-    // Editor on: Edit is back, and E opens it.
-    app.o.labs.set(labs::Feature::Editor, true);
-    assert!(bar_names(&app).iter().any(|n| n.starts_with("Snip")));
     let _ = app.update(Message::Run(&actions::edit::ACTION));
     assert!(app.editing());
 }
@@ -2165,7 +2149,7 @@ fn a_pin_needs_its_labs_switch() {
 
 #[test]
 fn a_hidden_features_trigger_does_nothing() {
-    // The shared config is the defaults here: Snip and Song are off.
+    // The shared config is the defaults here: Song is off.
     let mut app = open_app(1280, 800, 1.0);
     app.o.frame = None;
     let qa = |action: &str| QuickAction {
@@ -2174,10 +2158,14 @@ fn a_hidden_features_trigger_does_nothing() {
         target: Target::Circle,
         live: false,
     };
-    for id in ["snip", "song_search"] {
-        let _ = app.update(Message::Trigger(Trigger::Quick(Instant::now(), qa(id))));
-        assert!(app.capturing.is_none(), "{id} did not start a capture");
-    }
+    let _ = app.update(Message::Trigger(Trigger::Quick(
+        Instant::now(),
+        qa("song_search"),
+    )));
+    assert!(
+        app.capturing.is_none(),
+        "song search did not start a capture"
+    );
 }
 
 /// #144: the ask field's placeholder fits its text area at every bar width,

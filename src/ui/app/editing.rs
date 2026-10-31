@@ -19,9 +19,6 @@ impl App {
     /// place on screen; the toolbar takes the bar's place. Edits made before
     /// (then Back) are still there.
     pub(in crate::ui) fn open_editor(&mut self) -> Task<Message> {
-        if !self.o.labs.has(labs::Feature::Editor) {
-            return Task::none();
-        }
         self.o.panel = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x
         self.o.zoom = None;

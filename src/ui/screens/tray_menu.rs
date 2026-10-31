@@ -131,7 +131,7 @@ mod tests {
 
     fn all_on() -> Labs {
         let mut labs = Labs::default();
-        for f in [Feature::Snip, Feature::Live, Feature::Song] {
+        for f in [Feature::Live, Feature::Song] {
             labs.set(f, true);
         }
         labs
@@ -153,6 +153,7 @@ mod tests {
             m.update(Msg::Key(Key::Enter)),
             Some(Outcome::Run(Entry::Translate))
         );
+        m.update(Msg::Key(Key::Down));
         m.update(Msg::Key(Key::Down));
         m.update(Msg::Key(Key::Down));
         assert_eq!(
@@ -180,12 +181,13 @@ mod tests {
         assert_eq!(m.update(Msg::Pick(9)), None);
     }
 
-    /// The window is as tall as its rows and the separator: 4 rows (Labs off) or 7.
+    /// The window is as tall as its rows and the separator: 5 rows (Labs off:
+    /// Snip is out of Labs) or 7.
     #[test]
     fn the_window_fits_the_rows() {
         let off = Menu::new(&Labs::default(), &Config::default(), false);
-        assert_eq!(off.entries().len(), 4);
-        assert_eq!(off.size(), Size::new(240.0, 10.0 + 4.0 * 32.0 + 9.0));
+        assert_eq!(off.entries().len(), 5);
+        assert_eq!(off.size(), Size::new(240.0, 10.0 + 5.0 * 32.0 + 9.0));
         let on = Menu::new(&all_on(), &Config::default(), false);
         assert_eq!(on.size().height, 10.0 + 7.0 * 32.0 + 9.0);
     }

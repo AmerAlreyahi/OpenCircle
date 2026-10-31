@@ -216,6 +216,11 @@ impl Config {
                     .then_some(())
                     .ok_or_else(|| "expected 0 (off), 3, 5 or 10 seconds".to_string())
             });
+            c.snip.long_max = get_checked(t, p, "long_max", d.snip.long_max, &mut w, |n: &u32| {
+                (LONG_MAX.contains(n))
+                    .then_some(())
+                    .ok_or_else(|| "expected 5000, 10000 or 20000 px".to_string())
+            });
         }
         if let Some(t) = section(&root, "labs", &mut w) {
             let (p, d) = ("labs.", d.labs);

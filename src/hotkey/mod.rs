@@ -231,13 +231,106 @@ pub enum DesktopKey {
     Other(String),
     /// The desktop gave it no key at all.
     Unassigned,
+    /// The OS refused it: another app holds the key (`regrab`).
+    Taken,
+}
+
+/// The shortcuts the OS refused at the last grab (another app holds them).
+static TAKEN: Mutex<Vec<HotKey>> = Mutex::new(Vec::new());
+
+fn taken() -> MutexGuard<'static, Vec<HotKey>> {
+    TAKEN.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The desktop's own say on `shortcut` (a key of the running config) when it is
 /// not simply that key. `None` = active as configured, or nothing known (not
 /// Wayland, the desktop hasn't answered yet, or not a running shortcut).
 pub fn desktop_key(shortcut: &str) -> Option<DesktopKey> {
+    let refused = parse_shortcut(shortcut).is_ok_and(|h| taken().contains(&h));
+    if refused {
+        return Some(DesktopKey::Taken);
+    }
     desktop_key_in(&bindings(), &desktop_keys(), shortcut)
+}
+
+/// A registry value `snipping_has_print_screen` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reg {
+    /// HKCU\Control Panel\Keyboard `PrintScreenKeyForSnippingEnabled` (DWORD).
+    Snipping,
+    /// HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion `CurrentBuildNumber`.
+    Build,
+}
+
+/// Windows opens its own screen capture with Print Screen ("Use the Print
+/// screen key to open screen capture"): OpenCircle never gets the key then.
+/// Only read: the user turns it off in Windows' settings (Settings > Snip
+/// opens the page), never us.
+pub fn windows_snips_print_screen() -> bool {
+    snipping_has_print_screen(&read_reg)
+}
+
+/// The switch as `read` answers: its value when set; unset, it is on from
+/// Windows 11 (build 22000) and off before.
+fn snipping_has_print_screen(read: &dyn Fn(Reg) -> Option<u32>) -> bool {
+    match read(Reg::Snipping) {
+        Some(on) => on != 0,
+        None => read(Reg::Build).is_some_and(|build| build >= 22_000),
+    }
+}
+
+#[cfg(windows)]
+fn read_reg(value: Reg) -> Option<u32> {
+    use windows::Win32::System::Registry::{
+        HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
+    };
+    use windows::core::w;
+    match value {
+        Reg::Snipping => {
+            let mut v = 0u32;
+            let mut bytes = std::mem::size_of::<u32>() as u32;
+            // SAFETY: plain registry query into a u32 of `bytes` bytes.
+            let e = unsafe {
+                RegGetValueW(
+                    HKEY_CURRENT_USER,
+                    w!(r"Control Panel\Keyboard"),
+                    w!("PrintScreenKeyForSnippingEnabled"),
+                    RRF_RT_REG_DWORD,
+                    None,
+                    Some((&raw mut v).cast()),
+                    Some(&mut bytes),
+                )
+            };
+            (e.0 == 0).then_some(v)
+        }
+        Reg::Build => {
+            let mut buf = [0u16; 32];
+            let mut bytes = std::mem::size_of_val(&buf) as u32;
+            // SAFETY: plain registry query into a buffer of `bytes` bytes.
+            let e = unsafe {
+                RegGetValueW(
+                    HKEY_LOCAL_MACHINE,
+                    w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"),
+                    w!("CurrentBuildNumber"),
+                    RRF_RT_REG_SZ,
+                    None,
+                    Some(buf.as_mut_ptr().cast()),
+                    Some(&mut bytes),
+                )
+            };
+            if e.0 != 0 {
+                return None;
+            }
+            let len = (bytes as usize / 2).min(buf.len());
+            let text = String::from_utf16_lossy(&buf[..len]);
+            text.trim_end_matches('\0').parse().ok()
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn read_reg(_: Reg) -> Option<u32> {
+    None
 }
 
 fn desktop_key_in(
@@ -458,12 +551,17 @@ pub fn suspended() -> bool {
 fn regrab(grab: &mut Grab, planned: &[Binding]) {
     let _ = grab.manager.unregister_all(&grab.held);
     grab.held.clear();
+    let mut refused = Vec::new();
     for b in planned {
         match grab.manager.register(b.hotkey) {
             Ok(()) => grab.held.push(b.hotkey),
-            Err(e) => crate::log!("[opencircle] {}", unavailable(b, &e.to_string())),
+            Err(e) => {
+                crate::log!("[opencircle] {}", unavailable(b, &e.to_string()));
+                refused.push(b.hotkey);
+            }
         }
     }
+    *taken() = refused; // Settings shows these keys as in use
 }
 
 /// The one log line for a shortcut the OS refused. Print Screen also says how to
@@ -550,20 +648,22 @@ mod tests {
         use crate::labs::Feature;
         let ids = |c: &Config| -> Vec<String> { plan(c).0.into_iter().map(|b| b.id).collect() };
         let off = ids(&Config::default());
-        assert!(
-            !off.iter().any(|i| i.contains("snip") || i.contains("song")),
-            "{off:?}"
-        );
+        assert!(!off.iter().any(|i| i.contains("song")), "{off:?}");
         assert!(
             off.contains(&"capture".to_string())
                 && off.contains(&"quick-translate-full_screen".to_string())
         );
-        // Print Screen belongs to no binding: nothing is registered for it.
+        // Snip is out of Labs (N-41): its three keys are there with every switch off.
+        assert_eq!(
+            off.iter().filter(|i| i.starts_with("quick-snip-")).count(),
+            3,
+            "{off:?}"
+        );
         assert!(
             plan(&Config::default())
                 .0
                 .iter()
-                .all(|b| b.hotkey.key != Code::PrintScreen)
+                .any(|b| b.hotkey.key == Code::PrintScreen)
         );
         let with = |f: Feature| {
             let mut c = Config::default();
@@ -576,13 +676,7 @@ mod tests {
             }
             ids(&c)
         };
-        let snip = with(Feature::Snip);
-        assert_eq!(
-            snip.iter().filter(|i| i.starts_with("quick-snip-")).count(),
-            3,
-            "{snip:?}"
-        );
-        assert!(!with(Feature::Snip).iter().any(|i| i.contains("song")));
+        assert!(!with(Feature::Live).iter().any(|i| i.contains("song")));
         assert!(
             with(Feature::Song)
                 .iter()
@@ -787,6 +881,37 @@ mod tests {
         }
         assert_eq!(parse_target("Circle"), None);
         assert_eq!(parse_target(""), None);
+    }
+
+    /// Windows' "Use the Print screen key to open screen capture", read through
+    /// a fake registry: set = its value; unset = on from Windows 11 only.
+    #[test]
+    fn windows_snipping_owns_print_screen_as_the_registry_says() {
+        let reg = |snipping: Option<u32>, build: Option<u32>| {
+            move |r: Reg| match r {
+                Reg::Snipping => snipping,
+                Reg::Build => build,
+            }
+        };
+        assert!(snipping_has_print_screen(&reg(Some(1), Some(19045))));
+        assert!(!snipping_has_print_screen(&reg(Some(0), Some(26100))));
+        assert!(snipping_has_print_screen(&reg(None, Some(22631))));
+        assert!(!snipping_has_print_screen(&reg(None, Some(19045))));
+        assert!(!snipping_has_print_screen(&reg(None, None)));
+        #[cfg(not(windows))]
+        assert!(!windows_snips_print_screen());
+    }
+
+    /// A key the OS refused shows as taken in Settings (`desktop_key`), until a
+    /// later grab gets it.
+    #[test]
+    fn a_refused_shortcut_reads_as_taken() {
+        let key = parse_shortcut("Ctrl+Alt+F9").unwrap();
+        *taken() = vec![key];
+        assert_eq!(desktop_key("Ctrl+Alt+F9"), Some(DesktopKey::Taken));
+        assert_ne!(desktop_key("Ctrl+Alt+F10"), Some(DesktopKey::Taken));
+        taken().clear();
+        assert_eq!(desktop_key("Ctrl+Alt+F9"), None);
     }
 
     #[test]

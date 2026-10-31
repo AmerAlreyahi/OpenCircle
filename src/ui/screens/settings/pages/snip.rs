@@ -1,11 +1,17 @@
-//! Snip (`settings-window.js` "SNIP", Labs): what a capture does, the size
-//! and file it is copied and saved as, the pointer, the timer, and Recent
-//! (off = nothing kept on disk).
-use iced::Element;
-use iced::widget::column;
+//! Snip (`settings-window.js` "SNIP"; out of Labs since 0.1.3, N-41): its
+//! shortcuts (Print Screen, Alt+ / Ctrl+Print Screen: the same rows as on
+//! Shortcuts), a calm note when Windows keeps Print Screen for its own screen
+//! capture, what a capture does, the size and file it is copied and saved as,
+//! the save folder (General's, the one folder), the pointer, the timer, how
+//! tall a long capture may grow, and Recent captures (its switch is on
+//! History).
+use iced::widget::{Space, column, row};
+use iced::{Element, Fill};
 
-use super::super::state::{Message, State};
-use crate::config::{Format, SnipAfter, SnipConfig};
+use super::super::state::{Message, Slot, State};
+use super::{general, history, shortcuts};
+use crate::config::{Format, LONG_MAX, SnipAfter, SnipConfig};
+use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::segmented::{boolean, segmented};
 use crate::ui::kit::setting_row::{self, title};
 
@@ -20,7 +26,32 @@ pub fn view(state: &State) -> Element<'_, Message> {
         Message::Snip(next)
     };
     let pick = |name, desc, control| setting_row::row(title(name), desc, control);
-    column![
+    let snips = state.slots().filter(|slot| match slot {
+        Slot::Quick(i) => state.draft.quick_actions[*i].action == "snip",
+        Slot::Capture => false,
+    });
+    let mut rows = column(snips.map(|slot| shortcuts::row(state, slot)));
+    if state.print_screen_taken {
+        rows = rows.push(pick(
+            "Print Screen key",
+            "Windows opens its own screen capture with it. To snip with Print Screen, \
+             turn off \"Use the Print screen key to open screen capture\" in Windows",
+            row![
+                Space::new().width(Fill),
+                button(
+                    label("Open Windows settings"),
+                    Kind::Elevated,
+                    Some(Message::OpenKeyboardSettings),
+                )
+            ]
+            .into(),
+        ));
+    }
+    let recent = match d.history {
+        true => "On: the last 20, on this PC only. Kept and cleared in History",
+        false => "Off: nothing is kept. Turn it on in History",
+    };
+    rows = rows.extend([
         pick(
             "After a capture",
             "Copy: ready to paste into an AI chat, Snip a click away",
@@ -44,7 +75,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
                     (1024, "1024"),
                     (1568, "1568"),
                     (2048, "2048"),
-                    (0, "Original")
+                    (0, "Original"),
                 ],
                 d.max_edge,
                 d.max_edge,
@@ -74,6 +105,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 move |original| edit(&|s| s.save_original = original),
             ),
         ),
+        general::folder_row(state),
         pick(
             "Mouse pointer",
             "Draw the pointer into the capture",
@@ -93,12 +125,38 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ),
         ),
         pick(
-            "Recent captures",
-            "The last 20, on this PC only. Off deletes them",
-            boolean(OFF_ON, d.history, d.history, 1.0, move |history| {
-                edit(&|s| s.history = history)
-            }),
+            "Long capture",
+            "How tall a long capture may grow; taller takes more memory",
+            segmented(
+                &LONG_MAX.map(|px| (px, px_label(px))),
+                d.long_max,
+                d.long_max,
+                1.0,
+                move |px| edit(&|s| s.long_max = px),
+            ),
         ),
-    ]
-    .into()
+        history::link("Recent captures", recent),
+    ]);
+    rows.into()
+}
+
+/// A long-capture limit as the page shows it.
+fn px_label(px: u32) -> &'static str {
+    match px {
+        5_000 => "5,000 px",
+        10_000 => "10,000 px",
+        _ => "20,000 px",
+    }
+}
+
+/// Windows' keyboard settings, where its Print Screen switch is (never
+/// changed by us).
+pub fn open_keyboard_settings() {
+    #[cfg(windows)]
+    {
+        let run = crate::sys::open::open_system_settings("ms-settings:easeofaccess-keyboard");
+        if let Err(e) = run {
+            crate::log!("[opencircle] could not open Windows' keyboard settings: {e}");
+        }
+    }
 }

@@ -75,10 +75,12 @@
 //! cursor = false                    # draw the mouse pointer into the capture
 //! history = false                   # keep the last 20 captures (user data dir only)
 //! delay = 0                         # timer before a snip: 0 (off) | 3 | 5 | 10 seconds
+//! long_max = 20000                  # a long capture stops at this height: 5000 | 10000 | 20000 px
+//!                                   # (written only when not 20000)
 //!
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
-//! snip = false                      # Snip mode, its shortcuts and tray item
-//! editor = false                    # the Snip editor (the bar button)
+//! snip = false                      # until 0.1.2 Snip's switch; read and written, ignored since
+//! editor = false                    # 0.1.3 (Snip and its editor are on for everyone)
 //! song = false                      # song search
 //! history = false                   # the local search history
 //! pins = false                      # pinning a capture to the screen
@@ -140,6 +142,10 @@ pub const LIVE_INTERVAL_MS: std::ops::RangeInclusive<u32> = 500..=5000;
 /// without shrinking it again themselves. `0` = original size.
 pub const DEFAULT_MAX_EDGE: u32 = 0;
 pub const MAX_EDGE: std::ops::RangeInclusive<u32> = 256..=8192;
+/// The heights (px) a long capture may grow to (`snip.long_max`): the choices
+/// in Settings > Snip; the tallest is the default.
+pub const LONG_MAX: [u32; 3] = [5_000, 10_000, 20_000];
+pub const DEFAULT_LONG_MAX: u32 = 20_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -390,6 +396,14 @@ pub struct SnipConfig {
     pub history: bool,
     /// Seconds to wait (the overlay hidden) before a snip captures; 0 = off.
     pub delay: u8,
+    /// A long capture stops growing at this height (px, one of `LONG_MAX`).
+    /// Written only when changed: the default file stays as it was.
+    #[serde(skip_serializing_if = "is_default_long_max")]
+    pub long_max: u32,
+}
+
+fn is_default_long_max(px: &u32) -> bool {
+    *px == DEFAULT_LONG_MAX
 }
 
 impl Default for SnipConfig {
@@ -402,6 +416,7 @@ impl Default for SnipConfig {
             cursor: false,
             history: false,
             delay: 0,
+            long_max: DEFAULT_LONG_MAX,
         }
     }
 }
@@ -1184,6 +1199,56 @@ mod tests {
             !c.labs.snip && w.iter().any(|w| w.starts_with("labs.snip")),
             "{w:?}"
         );
+    }
+
+    /// N-41: a v0.1.2 file (schema 4, Snip a Labs switch) loads as it is:
+    /// Snip works whatever `[labs] snip` / `editor` say, the user's snip
+    /// choices are kept, and a save writes those two keys back unchanged (an
+    /// older OpenCircle reads them).
+    #[test]
+    fn a_v0_1_2_file_keeps_its_snip_settings_and_snip_is_on_whatever_labs_says() {
+        for (snip, editor) in [(false, false), (true, true), (true, false)] {
+            let text = format!(
+                "version = 4\n[snip]\nafter = \"editor\"\nmax_edge = 1568\nformat = \"jpeg\"\n\
+                 history = true\ndelay = 3\n[labs]\nsnip = {snip}\neditor = {editor}\npins = true\n"
+            );
+            let (dir, path) = config_with(&format!("v012-{snip}-{editor}"), &text);
+            let (c, w) = Config::load_from(&path);
+            assert!(w.is_empty(), "{w:?}");
+            assert_eq!(fs_text(&path), text, "same schema: not rewritten on load");
+            assert!(!dir.join("config.toml.bak-v4").exists());
+            assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Editor, 1568));
+            assert_eq!(
+                (c.snip.format, c.snip.history, c.snip.delay),
+                (Format::Jpeg, true, 3)
+            );
+            assert_eq!(c.snip.long_max, DEFAULT_LONG_MAX);
+            assert!(c.labs.pins, "the Labs switches that remain are kept");
+            for id in ["snip", "edit", "colour_picker", "ruler"] {
+                let id = crate::hotkey::QuickId::from_name(id);
+                assert!(crate::labs::action_on(&c.labs, &id), "{id:?}");
+            }
+            c.save_to(&path).unwrap();
+            let saved: Table = fs_text(&path).parse().unwrap();
+            assert_eq!(saved["labs"]["snip"].as_bool(), Some(snip));
+            assert_eq!(saved["labs"]["editor"].as_bool(), Some(editor));
+            assert!(
+                saved["snip"].get("long_max").is_none(),
+                "default: not written"
+            );
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn the_long_capture_limit_is_one_of_three_heights() {
+        let (c, w) = Config::parse("version = 4\n[snip]\nlong_max = 10000\n");
+        assert!(w.is_empty() && c.snip.long_max == 10_000, "{w:?}");
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert!(text.contains("long_max = 10000"), "{text}");
+        let (c, w) = Config::parse("version = 4\n[snip]\nlong_max = 123\n");
+        assert_eq!(c.snip.long_max, DEFAULT_LONG_MAX);
+        assert!(w.iter().any(|w| w.starts_with("snip.long_max")), "{w:?}");
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::secrets::Secret;
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::dropdown::dropdown;
 use crate::ui::kit::field::input;
-use crate::ui::kit::segmented::{boolean, segmented};
+use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::tokens::{Role, space};
@@ -47,20 +47,13 @@ fn chat_rows(state: &State) -> Element<'_, Message> {
             Message::ChatStays,
         ),
     );
-    let (from, t) = state.thumb(chat.keep_history, |p| match p {
-        Pick::KeepChats(v) => Some(v),
-        _ => None,
-    });
-    let keep = setting_row::row(
-        title("Keep chat history"),
-        "Chats, text only, kept on this PC. Off deletes them",
-        boolean(
-            ["Off", "On"],
-            chat.keep_history,
-            from,
-            t,
-            Message::KeepChats,
-        ),
+    // its switch is on History (the one place for what is kept)
+    let keep = super::history::link(
+        "Chat history",
+        match chat.keep_history {
+            true => "On: chats, text only, kept on this PC. Kept and cleared in History",
+            false => "Off: no chat is kept. Turn it on in History",
+        },
     );
     column![stays, keep].into()
 }

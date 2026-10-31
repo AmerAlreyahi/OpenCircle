@@ -26,6 +26,7 @@ use crate::config::{
     EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
     SnipConfig, SongSource, StaysOpen, Target, TextReader, Theme, parse_shortcut,
 };
+use crate::history::{Counts, Kind};
 use crate::hotkey::{DesktopKey, managed};
 use crate::labs::Feature;
 use crate::music::{self, SERVICE, Service};
@@ -37,6 +38,7 @@ use crate::ui::kit::themes::THEMES;
 use crate::ui::kit::tokens::{size, space};
 use crate::ui::theme;
 
+use super::pages::snip::open_keyboard_settings;
 use super::pages::text_reading::open_language_settings;
 use super::pages::{self, PAGES};
 use super::previews;
@@ -49,9 +51,19 @@ pub const WINDOW_SIZE: Size = Size::new(820.0, 560.0);
 /// 10.5 px line (`kit::sidebar`).
 const SIDEBAR_FOOTER: f32 = 2.0 + 1.0 + 8.0 + 16.0;
 
-/// The height that shows the header and every sidebar page (Labs on).
+/// The sidebar's pages on this OS with every Labs switch on (Text reading is
+/// Windows only).
+const LISTED: usize = if cfg!(windows) {
+    PAGES.len()
+} else {
+    PAGES.len() - 1
+};
+
+/// The height that shows the header and every sidebar page (Labs on). With
+/// all 13 (Windows, Labs on) it is a little over the design's 560: the window
+/// then opens that much taller.
 pub const FIT_HEIGHT: f32 =
-    size::HEADER + 2.0 * space::SIDEBAR_PAD + PAGES.len() as f32 * (size::NAV_ITEM + 2.0) - 2.0
+    size::HEADER + 2.0 * space::SIDEBAR_PAD + LISTED as f32 * (size::NAV_ITEM + 2.0) - 2.0
         + SIDEBAR_FOOTER;
 /// The narrowest layout that keeps the label column readable beside a control.
 pub(super) const MIN_WIDTH: f32 = 760.0;
@@ -64,7 +76,7 @@ pub fn window_limits(work: Size) -> (Size, Size) {
     let room = Size::new(work.width * 0.92, work.height * 0.96);
     let size = Size::new(
         WINDOW_SIZE.width.min(room.width),
-        WINDOW_SIZE.height.min(room.height),
+        WINDOW_SIZE.height.max(FIT_HEIGHT).min(room.height),
     );
     let min = Size::new(MIN_WIDTH.min(size.width), FIT_HEIGHT.min(size.height));
     (size, min)
@@ -507,6 +519,7 @@ pub enum Section {
     TextReading,
     Translate,
     Song,
+    History,
     Privacy,
     Labs,
     About,
@@ -593,6 +606,14 @@ pub struct State {
     /// The page's preview clips, by `hidden_previews` name: made at each
     /// visit, dropped with the page (and with Settings).
     pub(super) players: Vec<(&'static str, previews::player::Player)>,
+    /// Windows opens its own screen capture with Print Screen
+    /// (`hotkey::windows_snips_print_screen`), read when the window opens and
+    /// at each visit of the Snip page.
+    pub(super) print_screen_taken: bool,
+    /// History: what is kept (`None` = being counted), and whether Clear all
+    /// is asking to be sure.
+    pub(super) kept: Option<Counts>,
+    pub(super) clearing_all: bool,
 }
 
 /// A segmented control's value before a pick (`State::thumb`).
@@ -673,6 +694,14 @@ pub enum Message {
     TextReader(TextReader),
     /// The text reader row's button: Windows' language settings.
     OpenLanguageSettings,
+    /// The Snip page's Print Screen note: Windows' keyboard settings.
+    OpenKeyboardSettings,
+    /// History: clear one kind; Clear all asks first (`ClearAll(false)`),
+    /// then clears (`true`) or is cancelled (`KeepHistory`); what is kept now.
+    ClearHistory(Kind),
+    ClearAll(bool),
+    KeepHistory,
+    Kept(Counts),
     Look(LookTheme),
     /// The custom look's controls.
     Palette(PaletteChoice),
@@ -778,6 +807,9 @@ pub enum Outcome {
     CopyDiagnostics,
     /// Check for an update now; the answer comes back as `Message::UpdateStatus`.
     CheckUpdate,
+    /// History: delete these kinds (none: only count) on a worker thread
+    /// (`history::tidy`) and send what is kept back as `Message::Kept`.
+    History(Vec<Kind>),
 }
 
 /// A config write for a worker thread.
@@ -918,6 +950,9 @@ impl State {
             picked: None,
             played: None,
             players: Vec::new(),
+            print_screen_taken: crate::hotkey::windows_snips_print_screen(),
+            kept: None,
+            clearing_all: false,
         };
         s.revalidate();
         s
@@ -1013,9 +1048,13 @@ impl State {
         if saved.map(String::as_str) != Some(shortcut) {
             return None;
         }
+        if self.print_screen_taken && parse_shortcut(shortcut).ok() == print_screen() {
+            return Some("Windows' screen capture uses this key".into());
+        }
         Some(match (self.desktop)(shortcut)? {
             DesktopKey::Other(keys) => format!("In use: {keys}. {}", managed()),
             DesktopKey::Unassigned => format!("No key in use. {}", managed()),
+            DesktopKey::Taken => "Another app uses this key: pick a different one".into(),
         })
     }
 
@@ -1075,6 +1114,11 @@ impl State {
             Err(why) => self.shortcut_error = Some((slot, why)),
         }
     }
+}
+
+/// Print Screen alone: the key Windows' own screen capture can keep.
+pub(super) fn print_screen() -> Option<global_hotkey::hotkey::HotKey> {
+    parse_shortcut("PrintScreen").ok()
 }
 
 /// Everything wrong with `cfg`, as "key: reason" lines. The shared validator is
@@ -1190,6 +1234,15 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 state.song_key = Some(field.labelled(SONG_KEY));
                 state.key_jobs.push((true, job));
             }
+            state.clearing_all = false;
+            match s {
+                // the user may have changed it in Windows meanwhile
+                Section::Snip => {
+                    state.print_screen_taken = crate::hotkey::windows_snips_print_screen()
+                }
+                Section::History => return Outcome::History(Vec::new()),
+                _ => {}
+            }
         }
         Message::SongKey(k) => {
             if let Some(field) = &mut state.song_key {
@@ -1207,7 +1260,13 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::SongSource(source) => state.draft.song.source = source,
         Message::SongHistory(on) => state.draft.song.history = on,
         Message::ChatStays(how) => state.draft.chat.stays_open = how,
-        Message::KeepChats(on) => state.draft.chat.keep_history = on,
+        Message::KeepChats(on) => {
+            state.draft.chat.keep_history = on;
+            // off deletes them (`windows::apply` once saved)
+            if let (false, Some(kept)) = (on, &mut state.kept) {
+                kept.chats = 0;
+            }
+        }
         Message::Labs(feature, on) => return set_lab(state, feature, on),
         Message::Theme(t) => {
             state.draft.theme = t;
@@ -1265,6 +1324,15 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::SearchWith(v) => state.draft.selection.search_with = v,
         Message::TextReader(v) => state.draft.selection.text_reader = v,
         Message::OpenLanguageSettings => open_language_settings(),
+        Message::OpenKeyboardSettings => open_keyboard_settings(),
+        Message::ClearHistory(kind) => return Outcome::History(vec![kind]),
+        Message::ClearAll(false) => state.clearing_all = true,
+        Message::ClearAll(true) => {
+            state.clearing_all = false;
+            return Outcome::History(Kind::ALL.to_vec());
+        }
+        Message::KeepHistory => state.clearing_all = false,
+        Message::Kept(counts) => state.kept = Some(counts),
         Message::Look(t) => {
             // The first time Custom is picked it starts as the look in use.
             let look = &mut state.draft.look;
@@ -1315,7 +1383,12 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 _ => {}
             }
         }
-        Message::Snip(snip) => state.draft.snip = snip,
+        Message::Snip(snip) => {
+            if let (false, Some(kept)) = (snip.history, &mut state.kept) {
+                kept.captures = 0; // off deletes them, as with chats
+            }
+            state.draft.snip = snip;
+        }
         Message::BrowseFolder => return Outcome::Browse,
         Message::Folder(Some(dir)) => {
             state.draft.general.save_folder = dir.to_string_lossy().into_owned();

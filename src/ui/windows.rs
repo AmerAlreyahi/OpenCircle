@@ -704,6 +704,13 @@ impl Windows {
                             return Task::batch([keys, toast]);
                         }
                         settings::Outcome::CheckUpdate => crate::update::check_now(),
+                        settings::Outcome::History(clear) => {
+                            let tidy = super::background(move |tx| {
+                                let _ = tx.unbounded_send(crate::history::tidy(&clear));
+                            });
+                            let kept = tidy.map(|k| Msg::Settings(settings::Message::Kept(k)));
+                            return Task::batch([keys, kept]);
+                        }
                         settings::Outcome::None => {}
                     }
                     if leaving {
@@ -712,11 +719,8 @@ impl Windows {
                     return keys;
                 }
             }
-            Msg::Folder(dir) => {
-                if let Some((_, state)) = &mut self.settings {
-                    settings::update(state, settings::Message::Folder(dir));
-                }
-            }
+            // through Settings' own path, so its auto-save write runs
+            Msg::Folder(dir) => return self.handle(Msg::Settings(settings::Message::Folder(dir))),
             Msg::Pin(id, msg) => return self.on_pin(id, msg),
             Msg::UpdateStatus(status) => {
                 if let Some((_, state)) = &mut self.settings {
@@ -1197,6 +1201,10 @@ fn apply_from(old: &Config, cfg: Config) {
     // Keep chat history turned off: what was kept goes now, nothing more is written
     if old.chat.keep_history && !cfg.chat.keep_history {
         crate::store::chats::forget_all();
+    }
+    // Recent captures likewise
+    if old.snip.history && !cfg.snip.history {
+        std::thread::spawn(crate::history::recent::clear);
     }
     let labs_changed = old.labs != cfg.labs;
     config::set_current(cfg);

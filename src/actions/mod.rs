@@ -129,13 +129,11 @@ mod tests {
     }
 
     #[test]
-    fn a_hidden_feature_has_no_key() {
+    fn snip_has_its_key_with_every_labs_switch_off() {
         let (off, on) = (crate::labs::Labs::default(), crate::labs::Labs::all_on());
         let e = edit::ACTION.key;
-        assert!(
-            for_key(&off, e.letter, e.ctrl).is_none(),
-            "E with the editor off"
-        );
+        // out of Labs since 0.1.3 (N-41)
+        assert_eq!(for_key(&off, e.letter, e.ctrl).map(|a| a.id), Some("edit"));
         assert_eq!(for_key(&on, e.letter, e.ctrl).map(|a| a.id), Some("edit"));
         let l = lens::ACTION.key;
         assert!(for_key(&off, l.letter, l.ctrl).is_some());

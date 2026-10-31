@@ -21,7 +21,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
     column(state.slots().map(|slot| row(state, slot))).into()
 }
 
-fn row(state: &State, slot: Slot) -> Element<'_, Message> {
+/// One shortcut's row (also on the Snip page).
+pub(super) fn row(state: &State, slot: Slot) -> Element<'_, Message> {
     let (label, hint, name) = match slot {
         Slot::Capture => (
             "Open OpenCircle",

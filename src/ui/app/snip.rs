@@ -11,7 +11,6 @@ use iced::{Point, Rectangle, Task, Vector};
 use crate::actions::{self, Crop, Run, copy};
 use crate::capture;
 use crate::config::{self};
-use crate::labs::{self};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
@@ -78,12 +77,8 @@ impl App {
                 crate::history::recent::remember(&crop);
                 self.o.selection = None;
                 self.o.stroke.clear();
-                // Done opens the editor on it (no editor in Labs: copied)
-                let route = match self.o.labs.has(labs::Feature::Editor) {
-                    true => (false, true),
-                    false => (true, false),
-                };
-                whole.chain(self.snip_routed(crop, false, route))
+                // Done opens the editor on it
+                whole.chain(self.snip_routed(crop, false, (false, true)))
             }
             snip::Msg::Delay(secs) => {
                 let Some(id) = snip.delay(secs) else {
@@ -291,11 +286,7 @@ impl App {
         if remember {
             crate::history::recent::remember(&crop);
         }
-        // No editor (Labs): a snip is only copied.
-        let route = match self.o.labs.has(labs::Feature::Editor) {
-            true => snip::route(config::current().snip.after),
-            false => (true, false),
-        };
+        let route = snip::route(config::current().snip.after);
         self.snip_routed(crop, in_place, route)
     }
 
@@ -417,7 +408,8 @@ impl App {
             let each = |update| {
                 let _ = tx.unbounded_send(snip::Msg::Progress(update));
             };
-            let stitched = crate::capture::scroll::by_hand(region, preview, &stop, each);
+            let max = config::current().snip.long_max;
+            let stitched = crate::capture::scroll::by_hand(region, preview, max, &stop, each);
             let _ = tx.unbounded_send(snip::Msg::Done(stitched));
         })
         .map(Message::Snip);

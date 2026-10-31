@@ -4,17 +4,15 @@
 //! has no shortcut, tray item, bar button or Settings row. Its own settings stay in
 //! the file untouched; turning it on brings them back.
 //!
-//! Live translate is hidden here until 0.3.0 (owner, 2026-10-27).
+//! Live translate is hidden here until 0.3.0 (owner, 2026-10-27). Snip and its
+//! editor left Labs in 0.1.3 (N-41): on for everyone, with the colour picker,
+//! the ruler, long capture and share; still and live pins stay here (`Pins`).
 use serde::Serialize;
 
 use crate::hotkey::QuickId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Feature {
-    /// Snip mode: its shortcuts (Print Screen ...), tray item and Settings page.
-    Snip,
-    /// The annotation editor: the bar's Snip button (E), and the editor after a capture.
-    Editor,
     /// Song search: bar button, shortcut and Settings page.
     Song,
     /// The local history of searches (`general.search_history`).
@@ -26,9 +24,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Feature; 6] = [
-        Feature::Snip,
-        Feature::Editor,
+    pub const ALL: [Feature; 4] = [
         Feature::Song,
         Feature::History,
         Feature::Pins,
@@ -38,8 +34,6 @@ impl Feature {
     /// The switch's name in Settings and in messages.
     pub fn title(self) -> &'static str {
         match self {
-            Feature::Snip => "Snip",
-            Feature::Editor => "Snip editor",
             Feature::Song => "Song search",
             Feature::History => "Search history",
             Feature::Pins => "Pins",
@@ -50,10 +44,6 @@ impl Feature {
     /// One honest line: what it is, and that it is unfinished.
     pub fn blurb(self) -> &'static str {
         match self {
-            Feature::Snip => {
-                "Screenshots with Print Screen, window and region capture. Unfinished; may change"
-            }
-            Feature::Editor => "Draw on a capture: arrows, text, blur. Unfinished; may change",
             Feature::Song => "Find the song playing on your PC. Unfinished; may change",
             Feature::History => "Keep a list of your searches on this PC. Unfinished; may change",
             Feature::Pins => "Float a capture above your windows. Unfinished; may change",
@@ -65,6 +55,9 @@ impl Feature {
 /// `[labs]`: which unfinished features are on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct Labs {
+    /// `snip` / `editor`: the switches Snip and its editor had until 0.1.2. Read
+    /// and written as they are (an older OpenCircle reads them), used for nothing:
+    /// Snip is on for everyone since 0.1.3.
     pub snip: bool,
     pub editor: bool,
     pub song: bool,
@@ -76,8 +69,6 @@ pub struct Labs {
 impl Labs {
     pub fn has(&self, f: Feature) -> bool {
         match f {
-            Feature::Snip => self.snip,
-            Feature::Editor => self.editor,
             Feature::Song => self.song,
             Feature::History => self.history,
             Feature::Pins => self.pins,
@@ -87,8 +78,6 @@ impl Labs {
 
     pub fn set(&mut self, f: Feature, on: bool) {
         match f {
-            Feature::Snip => self.snip = on,
-            Feature::Editor => self.editor = on,
             Feature::Song => self.song = on,
             Feature::History => self.history = on,
             Feature::Pins => self.pins = on,
@@ -117,8 +106,6 @@ pub fn has(f: Feature) -> bool {
 /// The Labs feature an action id (registry, quick action or `opencircle run`) belongs to.
 pub fn action_feature(id: &QuickId) -> Option<Feature> {
     match id {
-        QuickId::Snip | QuickId::ColourPicker | QuickId::Ruler => Some(Feature::Snip),
-        QuickId::Edit => Some(Feature::Editor),
         QuickId::SongSearch => Some(Feature::Song),
         QuickId::LivePin => Some(Feature::Pins),
         _ => None,
@@ -186,7 +173,6 @@ impl BarButton {
     fn feature(self) -> Option<Feature> {
         match self {
             BarButton::Song => Some(Feature::Song),
-            BarButton::Edit => Some(Feature::Editor),
             BarButton::Live => Some(Feature::Live),
             _ => None,
         }
@@ -235,15 +221,13 @@ mod tests {
         use BarButton::*;
         assert_eq!(
             bar(&Labs::default()),
-            [Search, CopyText, Translate],
-            "the design's bar with Labs off"
+            [Search, CopyText, Translate, Edit],
+            "the design's bar with Labs off: Snip is out of Labs"
         );
         let mut on = Labs::default();
         on.set(Feature::Live, true);
-        assert_eq!(bar(&on), [Search, CopyText, Translate, Live]);
+        assert_eq!(bar(&on), [Search, CopyText, Translate, Live, Edit]);
         on.set(Feature::Song, true);
-        assert_eq!(bar(&on), [Search, CopyText, Translate, Live, Song]);
-        on.set(Feature::Editor, true);
         assert_eq!(bar(&on), [Search, CopyText, Translate, Live, Song, Edit]);
         assert_eq!(bar(&on).iter().filter(|b| b.is_pill()).count(), 3);
     }
@@ -251,11 +235,25 @@ mod tests {
     #[test]
     fn the_cli_says_why_a_hidden_target_is_refused() {
         let off = Labs::default();
-        let msg = command_allowed(&off, "snip").unwrap_err();
-        assert_eq!(msg, "\"snip\" is off: turn on Snip in Settings > Labs");
-        assert!(command_allowed(&off, "song_search").is_err());
-        assert!(command_allowed(&off, "edit").is_err());
+        let msg = command_allowed(&off, "song_search").unwrap_err();
+        assert_eq!(
+            msg,
+            "\"song_search\" is off: turn on Song search in Settings > Labs"
+        );
         assert!(command_allowed(&off, "translate").is_ok());
-        assert!(command_allowed(&Labs::all_on(), "snip").is_ok());
+        assert!(command_allowed(&Labs::all_on(), "song_search").is_ok());
+    }
+
+    /// N-41: Snip, its editor and its screen tools work with every Labs switch
+    /// off, also for a v0.1.2 file that had `[labs] snip` / `editor` off or on.
+    #[test]
+    fn snip_and_its_tools_are_out_of_labs() {
+        for labs in [Labs::default(), Labs::all_on()] {
+            for id in ["snip", "edit", "colour_picker", "ruler"] {
+                assert!(action_on(&labs, &QuickId::from_name(id)), "{id}");
+                assert!(command_allowed(&labs, id).is_ok(), "{id}");
+            }
+            assert!(bar(&labs).contains(&BarButton::Edit));
+        }
     }
 }

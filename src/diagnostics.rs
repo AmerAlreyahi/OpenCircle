@@ -38,14 +38,13 @@ pub fn report(c: &Config) -> String {
          translate {src} -> {dst}, engine {engine:?}, live every {ms} ms\n  \
          text reader {reader:?}, snip after {after:?}, format {format:?}\n  \
          start with the OS {autostart}, auto update {update:?}, quick actions {quick}\n\
-         Labs: snip {}, editor {}, song {}, history {}, pins {}\n\n\
+         Labs: song {}, history {}, pins {}, live {}\n\n\
          OCR:\n{windows_ocr}  text reader files downloaded: {ready}\n\n\
          Last log lines:\n{log}\n",
-        l.snip,
-        l.editor,
         l.song,
         l.history,
         l.pins,
+        l.live,
         version = env!("CARGO_PKG_VERSION"),
         build = if cfg!(debug_assertions) {
             "debug"
@@ -130,7 +129,7 @@ mod tests {
             "OpenCircle ",
             "OS: ",
             "Screens:",
-            "Labs: snip",
+            "Labs: song",
             "Last log lines:",
         ] {
             assert!(r.contains(want), "{want}\n{r}");

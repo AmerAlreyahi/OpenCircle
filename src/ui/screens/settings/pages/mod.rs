@@ -11,11 +11,12 @@ mod ai;
 mod appearance;
 mod custom;
 mod general;
+mod history;
 mod labs;
 mod look;
 mod privacy;
 mod shortcuts;
-mod snip;
+pub mod snip;
 mod song;
 pub mod text_reading;
 mod translate;
@@ -65,7 +66,7 @@ const fn page(
 }
 
 /// In the design's order.
-pub const PAGES: [Page; 12] = [
+pub const PAGES: [Page; 13] = [
     page(Section::General, "General", general::view),
     page(Section::Appearance, "Appearance", appearance::view),
     page(Section::Look, "Look & behaviour", look::view),
@@ -76,14 +77,12 @@ pub const PAGES: [Page; 12] = [
         note: Some(shortcuts::NOTE),
         ..page(Section::Shortcuts, "Shortcuts", shortcuts::view)
     },
-    Page {
-        lab: Some(Feature::Snip),
-        ..page(Section::Snip, "Snip", snip::view)
-    },
+    page(Section::Snip, "Snip", snip::view),
     Page {
         lab: Some(Feature::Song),
         ..page(Section::Song, "Song search", song::view)
     },
+    page(Section::History, "History", history::view),
     Page {
         note: Some(privacy::NOTE),
         ..page(Section::Privacy, "Privacy", privacy::view)

@@ -319,6 +319,15 @@ pub fn forget_all() {
     });
 }
 
+/// Blocking `forget_all` at `path` (Settings > History's Clear runs it on a
+/// thread of its own).
+pub fn forget(path: &Path) {
+    with_generation(|g| g.fetch_add(1, Ordering::SeqCst));
+    if let Err(e) = clear(path) {
+        crate::log!("[opencircle] {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
