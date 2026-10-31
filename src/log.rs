@@ -171,13 +171,7 @@ fn civil(secs: u64) -> (i64, i64, i64) {
 pub fn install_panic_hook(dir: PathBuf) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        // The log lock may be held by the panicking thread itself: never wait for it.
-        let lines = match LOG.try_lock() {
-            Ok(slot) => slot
-                .as_ref()
-                .map_or(vec![], |l| l.tail.iter().cloned().collect()),
-            Err(_) => vec![],
-        };
+        let lines = tail_for_crash();
         let thread = std::thread::current();
         let report = format!(
             "OpenCircle {}\n{}\nthread: {}\n\n{info}\n\nbacktrace:\n{}\n\nlast log lines:\n{}\n",
@@ -192,11 +186,62 @@ pub fn install_panic_hook(dir: PathBuf) {
     }));
 }
 
-/// `crash-<time>.txt` in `dir`; keeps the newest `CRASH_FILES`.
+/// The log's last lines for a crash file. The lock may be held by the panicking
+/// thread itself, so never wait for it: a few short tries (another thread
+/// holds it for a moment), then none. A poisoned lock still has its lines.
+fn tail_for_crash() -> Vec<String> {
+    for _ in 0..20 {
+        let slot = match LOG.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                continue;
+            }
+        };
+        return slot
+            .as_ref()
+            .map_or(vec![], |l| l.tail.iter().cloned().collect());
+    }
+    vec![]
+}
+
+/// Crash files oldest first: by time, then by the `-<n>` of a second's later
+/// ones (plain name order puts `-1` before the first and `-10` before `-2`).
+fn crash_order(path: &Path) -> (String, u32) {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let name = name.strip_suffix(".txt").unwrap_or(name);
+    let base = "crash-YYYYMMDD-HHMMSS".len();
+    let (time, n) = name.split_at(base.min(name.len()));
+    let n = n
+        .strip_prefix('-')
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0);
+    (time.to_string(), n)
+}
+
+/// `crash-<time>.txt` in `dir` (`crash-<time>-<n>.txt` for a second's later
+/// ones, numbered past the newest: a name freed by the pruning is never
+/// taken again, it would sort as the oldest); keeps the newest `CRASH_FILES`.
 fn write_crash(dir: &Path, report: &str) -> std::io::Result<PathBuf> {
     fs::create_dir_all(dir)?;
+    let crashes = || -> std::io::Result<Vec<PathBuf>> {
+        let mut found: Vec<_> = fs::read_dir(dir)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("crash-") && n.ends_with(".txt"))
+            })
+            .collect();
+        found.sort_by_key(|p| crash_order(p));
+        Ok(found)
+    };
     let base = format!("crash-{}", stamp(now()));
-    let mut n = 0;
+    let mut n = match crashes()?.last().map(|p| crash_order(p)) {
+        Some((time, n)) if time == base => n + 1,
+        _ => 0,
+    };
     let (path, mut file) = loop {
         let path = dir.join(match n {
             0 => format!("{base}.txt"),
@@ -209,16 +254,7 @@ fn write_crash(dir: &Path, report: &str) -> std::io::Result<PathBuf> {
         }
     };
     file.write_all(report.as_bytes())?;
-    let mut crashes: Vec<_> = fs::read_dir(dir)?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("crash-") && n.ends_with(".txt"))
-        })
-        .collect();
-    crashes.sort(); // the stamp sorts by time
-    for old in crashes.iter().rev().skip(CRASH_FILES) {
+    for old in crashes()?.iter().rev().skip(CRASH_FILES) {
         let _ = fs::remove_file(old);
     }
     Ok(path)
@@ -403,8 +439,8 @@ pub(crate) mod tests {
     #[test]
     fn memory_only_opens_no_file() {
         let dir = temp("memory-only");
-        *LOG.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some(Log::new(Some(dir.clone()), MAX_BYTES));
+        // (only the folder changes: the tail is shared with tests running meanwhile)
+        with_log(|l| l.dir = Some(dir.clone()));
         memory_only();
         crate::log!("[opencircle] memory only");
         assert!(with_log(|l| l.dir.is_none() && l.file.is_none()));
@@ -508,11 +544,12 @@ pub(crate) mod tests {
     fn a_panic_writes_a_redacted_crash_file_and_keeps_five() {
         let dir = temp("crash");
         install_panic_hook(dir.clone());
-        crate::log!("before the crash: key={}", fake("sk-live-"));
-        for _ in 0..7 {
+        for i in 0..7 {
             let t = std::thread::Builder::new()
                 .name("crasher".into())
-                .spawn(|| {
+                .spawn(move || {
+                    // (logged right before: other tests log meanwhile, 200 lines are kept)
+                    crate::log!("before crash {i}: key={}", fake("sk-live-"));
                     panic!("boom with token={}", fake("ghp_"));
                 });
             assert!(t.unwrap().join().is_err());
@@ -522,18 +559,44 @@ pub(crate) mod tests {
             .unwrap()
             .map(|e| e.unwrap().path())
             .collect();
-        files.sort();
+        files.sort_by_key(|p| crash_order(p));
         assert_eq!(files.len(), 5, "{files:?}");
         let report = fs::read_to_string(files.last().unwrap()).unwrap();
         assert!(report.contains(env!("CARGO_PKG_VERSION")), "{report}");
         assert!(report.contains("boom with"), "{report}");
         assert!(report.contains("backtrace:"), "{report}");
-        assert!(report.contains("before the crash"), "{report}");
+        assert!(
+            report.contains("before crash 6"),
+            "the newest is kept: {report}"
+        );
         assert!(
             !report.contains(&fake("ghp_")) && !report.contains(&fake("sk-live-")),
             "{report}"
         );
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn crash_files_order_by_time_then_number() {
+        let mut names: Vec<PathBuf> = [
+            "crash-20261031-012705-10.txt",
+            "crash-20261031-012706.txt",
+            "crash-20261031-012705-2.txt",
+            "crash-20261031-012705.txt",
+        ]
+        .map(PathBuf::from)
+        .into();
+        names.sort_by_key(|p| crash_order(p));
+        let names: Vec<_> = names.iter().map(|p| p.to_str().unwrap()).collect();
+        assert_eq!(
+            names,
+            [
+                "crash-20261031-012705.txt",
+                "crash-20261031-012705-2.txt",
+                "crash-20261031-012705-10.txt",
+                "crash-20261031-012706.txt",
+            ]
+        );
     }
 
     #[test]
