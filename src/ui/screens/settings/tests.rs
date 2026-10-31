@@ -1414,6 +1414,37 @@ fn shortcuts_show_the_key_the_desktop_actually_uses() {
     assert!(notes(&s).is_empty());
 }
 
+/// Windows sends no key-down for Print Screen, only its key-up: the recorder
+/// takes Print Screen (alone, with Alt, with Ctrl) as it goes up; any other
+/// key's key-up records nothing.
+#[test]
+fn print_screen_records_on_its_key_up() {
+    use iced::keyboard::{self, Key, Location, Modifiers, key};
+    let up = |code, modifiers| {
+        iced::Event::Keyboard(keyboard::Event::KeyReleased {
+            key: Key::Unidentified,
+            modified_key: Key::Unidentified,
+            physical_key: key::Physical::Code(code),
+            location: Location::Standard,
+            modifiers,
+        })
+    };
+    let shortcut = |e| super::state::chord_of(e).and_then(|c| c.shortcut());
+    assert_eq!(
+        shortcut(up(key::Code::PrintScreen, Modifiers::ALT)).as_deref(),
+        Some("Alt+PrintScreen")
+    );
+    assert_eq!(
+        shortcut(up(key::Code::PrintScreen, Modifiers::empty())).as_deref(),
+        Some("PrintScreen")
+    );
+    assert_eq!(
+        shortcut(up(key::Code::KeyA, Modifiers::ALT)),
+        None,
+        "a key-up"
+    );
+}
+
 #[test]
 fn snip_shortcuts_are_listed_and_editable() {
     let (mut s, _) = state(None);

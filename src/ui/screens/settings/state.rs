@@ -1627,15 +1627,28 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     if state.recording.is_none() {
         return clock;
     }
-    let keys = event::listen_with(|event, _status, _window| match event {
+    let keys = event::listen_with(|event, _status, _window| chord_of(event).map(Message::Key));
+    Subscription::batch([keys, clock])
+}
+
+/// The chord a key event records: a key going down, and Print Screen going
+/// up: Windows sends no key-down for it (alone or with Alt / Ctrl), only its
+/// key-up, so Print Screen and Alt+Print Screen could never be recorded.
+pub(super) fn chord_of(event: iced::Event) -> Option<Chord> {
+    use keyboard::key::{Code, Physical};
+    match event {
         iced::Event::Keyboard(keyboard::Event::KeyPressed {
             physical_key,
             modifiers,
             ..
-        }) => Chord::from_iced(physical_key, modifiers).map(Message::Key),
+        }) => Chord::from_iced(physical_key, modifiers),
+        iced::Event::Keyboard(keyboard::Event::KeyReleased {
+            physical_key: physical @ Physical::Code(Code::PrintScreen),
+            modifiers,
+            ..
+        }) => Chord::from_iced(physical, modifiers),
         _ => None,
-    });
-    Subscription::batch([keys, clock])
+    }
 }
 
 impl State {
