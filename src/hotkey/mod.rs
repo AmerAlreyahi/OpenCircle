@@ -266,8 +266,10 @@ enum Reg {
 /// screen key to open screen capture"): OpenCircle never gets the key then.
 /// Only read: the user turns it off in Windows' settings (Settings > Snip
 /// opens the page), never us.
+/// Tests never read the machine's setting (on in CI's Windows): they set
+/// `print_screen_taken` themselves.
 pub fn windows_snips_print_screen() -> bool {
-    snipping_has_print_screen(&read_reg)
+    !cfg!(test) && snipping_has_print_screen(&read_reg)
 }
 
 /// The switch as `read` answers: its value when set; unset, it is on from

@@ -520,20 +520,28 @@ mod frames {
         let mut app = snipping_on(1280, 720, window);
         let _ = app.start_tool(Which::Ruler);
         let _ = app.on_overlay(Event::Hover(Point::new(250.0, 450.0)));
-        let mut modes = Vec::new();
-        for x in (480..800).step_by(4) {
+        // across the whole row: the toolbar's width is the UI font's (Segoe UI
+        // on Windows, Inter elsewhere), so its edges aren't known here
+        let (mut modes, mut taken) = (Vec::new(), Vec::new());
+        for x in (0..1280).step_by(4) {
+            let mut through = false;
             for m in clicked(&app, Point::new(x as f32, 46.0)) {
                 match m {
                     Message::Snip(crate::ui::snip::Msg::Tool(Msg::Mode(mode))) => modes.push(mode),
-                    Message::Overlay(e @ Event::Press { .. }) => {
-                        panic!("{x}: the toolbar let {e:?} through")
-                    }
+                    Message::Overlay(Event::Press { .. }) => through = true,
                     _ => {}
                 }
+            }
+            if !through {
+                taken.push(x);
             }
         }
         modes.dedup();
         assert_eq!(modes, [Mode::Line, Mode::Across, Mode::Down, Mode::Box]);
+        // one run of x the screen never gets: the toolbar, buttons and gaps
+        // (a hole would be a click let through)
+        assert!(taken.windows(2).all(|w| w[1] == w[0] + 4), "{taken:?}");
+        assert!(taken.len() * 4 > 200, "{taken:?}");
     }
 
     /// The tools' frames at the VM's screen (run in release:
