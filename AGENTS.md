@@ -305,6 +305,10 @@ production systems.
   tool) or with the Select tool; with a drawing tool a plain drag always draws, even over an annotation.
   Remember (owner, 2026-10-31): the editor keeps the user's last colour, sizes, per-tool options (outline, fill,
   blur size/Auto) and last tool across sessions.
+  Blur look (owner, 2026-10-31, SUPERSEDES "Softer blur" 2026-10-25): a fine pixel mosaic like iTop's but softer and
+  with smaller cells (more pixels), cell edges slightly softened; NO colour tint or noise (only the area's own
+  colours averaged); a flat rectangular stroke along the text line, as tall as the line (not a round blob); a
+  pixel-size control in its options; text stays unreadable. Redact stays solid.
   Long capture look (owner, 2026-10-31, "super bad" next to iTop): the live preview is SHARP (good downscale, never
   blurry): the bare image beside the area, no widget around it (no card, frame or surface), a little smaller than
   iTop's (~80 % of the free height); the
