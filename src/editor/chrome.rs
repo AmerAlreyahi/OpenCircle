@@ -11,26 +11,14 @@ impl Editor {
         Some(self.to_display(super::span(&[a, b])))
     }
 
-    /// The text line the blur brush is held on.
-    pub fn assist_band(&self) -> Option<Rectangle> {
-        let b = self.lock.as_ref()?.band;
-        let r = Rectangle::new(Point::new(b.x0, b.y0), Size::new(b.x1 - b.x0, b.height()));
-        Some(self.to_display(r))
-    }
-
-    /// The selection frame of the framed item.
-    pub fn frame_rect(&self) -> Option<Rectangle> {
-        Some(self.to_display(self.framed()?.frame()))
-    }
-
-    /// The framed item's handles: (a bend knob, else a corner square, centre).
-    pub fn handle_marks(&self) -> Vec<(bool, Point)> {
-        let Some(item) = self.framed() else {
+    /// Where the framed item's handles are (none while it is typed into).
+    pub fn handle_marks(&self) -> Vec<Point> {
+        let Some(item) = self.framed().filter(|_| !self.typing()) else {
             return Vec::new();
         };
         select::handles(item)
             .into_iter()
-            .map(|(h, at)| (matches!(h, select::Handle::Bend), self.to_display_point(at)))
+            .map(|(_, at)| self.to_display_point(at))
             .collect()
     }
 

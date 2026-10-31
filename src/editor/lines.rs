@@ -1,12 +1,11 @@
-//! Line assist for the blur brush: finds the image's text lines without OCR
-//! (instant), so a stroke stays on the line it started on and is as tall as it.
+//! The blur brush's Auto size: finds the image's text lines without OCR
+//! (instant, any capture), so a stroke is as tall as the line it starts on.
+//! Nothing of it is drawn (owner, 2026-10-31: no suggested boxes).
 //!
 //! Detection: "ink" = a strong horizontal step in brightness (glyph edges; dark
 //! on light and light on dark alike; a horizontal rule has none). Columns are
 //! split at vertical gutters with no ink at all; in each column, rows with ink
 //! form the line bands.
-use std::time::{Duration, Instant};
-
 use iced::Point;
 
 use super::document::Image;
@@ -24,6 +23,7 @@ impl Band {
         self.y1 - self.y0
     }
 
+    #[cfg(test)]
     pub fn centre(&self) -> f32 {
         (self.y0 + self.y1) / 2.0
     }
@@ -128,45 +128,4 @@ fn runs(counts: &[u32], gap: usize) -> Vec<(usize, usize)> {
 /// The line under `p`.
 pub fn under(bands: &[Band], p: Point) -> Option<Band> {
     bands.iter().copied().find(|b| b.contains(p))
-}
-
-/// The pointer must stay on another line this long to move the stroke there.
-pub const SWITCH_AFTER: Duration = Duration::from_millis(150);
-
-/// A brush stroke held on one line.
-pub struct Lock {
-    pub band: Band,
-    /// Since when the pointer has been over another line, far from this one.
-    away: Option<Instant>,
-}
-
-pub enum Follow {
-    /// The stroke point (on the line's middle).
-    Stay(Point),
-    /// The pointer has been on another line long enough: go on there.
-    Switch(Band),
-}
-
-impl Lock {
-    pub fn new(band: Band) -> Self {
-        Lock { band, away: None }
-    }
-
-    /// Where the stroke goes for pointer `p` at `now`.
-    pub fn follow(&mut self, bands: &[Band], p: Point, now: Instant) -> Follow {
-        let on_line = Point::new(p.x, self.band.centre());
-        let far = (p.y - self.band.centre()).abs() >= self.band.height();
-        let other = under(bands, p).filter(|b| far && *b != self.band);
-        let Some(other) = other else {
-            self.away = None;
-            return Follow::Stay(on_line);
-        };
-        let since = *self.away.get_or_insert(now);
-        if now.duration_since(since) >= SWITCH_AFTER {
-            self.band = other;
-            self.away = None;
-            return Follow::Switch(other);
-        }
-        Follow::Stay(on_line)
-    }
 }

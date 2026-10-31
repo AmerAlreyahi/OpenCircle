@@ -36,12 +36,15 @@ pub fn arrow_size(width: f32) -> f32 {
     (width * 4.0).max(10.0)
 }
 
-pub fn paint(layer: &mut Layer, at: Point, text: &str, size: f32, colour: [u8; 4]) {
+/// `ring`: with its halo (an arrow's label follows its arrow's outline).
+pub fn paint(layer: &mut Layer, at: Point, text: &str, size: f32, colour: [u8; 4], ring: bool) {
     let body = bubble(at, text, size);
     let Some(shape) = rounded(body, size * 0.4) else {
         return;
     };
-    layer.stroke(&shape, halo(colour), 2.5);
+    if ring {
+        layer.stroke(&shape, halo(colour), 2.5);
+    }
     layer.fill(&shape, colour);
     text::paint(layer, text_origin(at, size), text, size, on(colour), false);
 }

@@ -1,6 +1,6 @@
 //! The floating editing toolbar (the design's `editor-toolbar.js`), composed
-//! from kit parts only: grip · back · tools in groups (a tool with variants opens them
-//! in a strip under it) · colour · board · scrolling · undo, redo · pin · copy,
+//! from kit parts only: grip · back · tools in groups (a click on the active tool
+//! opens its options under it: variants, size, outline, fill) · colour · board · scrolling · undo, redo · pin · copy,
 //! save · drag. The open popover shows under its button.
 #[cfg(test)]
 use iced::widget::Space;
@@ -324,7 +324,7 @@ fn build(
             ),
             CONTROL,
         );
-        at.push((Menu::Variants(t.tool), x));
+        at.push((Menu::Options(t.tool), x));
     }
     let mut rest = Line {
         items: Vec::new(),
@@ -435,7 +435,7 @@ fn finish<'a>(
     let popover = match menu {
         Menu::Colour => colour_popover(e),
         Menu::Board => board_popover(e),
-        Menu::Variants(slot) => variants_popover(e, slot),
+        Menu::Options(slot) => options_popover(e, slot),
     };
     let left = at.iter().find(|(m, _)| *m == menu).map_or(0.0, |(_, x)| *x);
     (toolbar.into(), Some((popover, left - bar::PAD)))
@@ -481,7 +481,7 @@ fn build_snip(
             ),
             CONTROL,
         );
-        at.push((Menu::Variants(t.tool), x));
+        at.push((Menu::Options(t.tool), x));
     }
     let mut rest = Line {
         items: Vec::new(),
@@ -619,9 +619,11 @@ fn popover<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message>
         .into()
 }
 
-/// A tool's variants (and the blur brush's line assist; the Text tool's options
-/// under them).
-fn variants_popover(e: &Editor, slot: Tool) -> Element<'_, Message> {
+/// A tool's options (a click on the active tool; ONE design for every tool):
+/// its variants (the blur brush: and line help), then its own sections:
+/// the Text tool's style; else its size, and where it applies the outline
+/// and the fill. They apply to the next item and to the selected one.
+fn options_popover(e: &Editor, slot: Tool) -> Element<'_, Message> {
     let mut tools: Vec<Element<'_, Message>> = (TOOLS.iter())
         .filter(|t| t.slot == slot)
         .map(|t| icon(t.icon, e.tool == t.tool, Message::Tool(t.tool), t.tip))
@@ -632,14 +634,64 @@ fn variants_popover(e: &Editor, slot: Tool) -> Element<'_, Message> {
             ASSIST,
             e.assist,
             Message::Assist,
-            "Line assist: the brush keeps to the text line (Shift: free)",
+            "Line help: a stroke stays on its line unless you clearly move up or down (Shift: free)",
         ));
     }
-    let tools = row(tools).spacing(SPACING).align_y(iced::Center);
+    let mut parts: Vec<Element<'_, Message>> = Vec::new();
+    if tools.len() > 1 {
+        parts.push(row(tools).spacing(SPACING).align_y(iced::Center).into());
+    }
     if slot == Tool::Text {
-        popover(column![tools, text_options(e)].spacing(SPACING * 2.0))
-    } else {
-        popover(tools)
+        parts.push(text_options(e));
+        return popover(column(parts).spacing(SPACING * 2.0));
+    }
+    let weights = [
+        (Width::Thin, "Thin"),
+        (Width::Medium, "Medium"),
+        (Width::Thick, "Thick"),
+    ];
+    let (outline, fill) = styles(slot);
+    let size: Element<'_, Message> = match slot {
+        Tool::Blur => {
+            let sizes = [
+                (None, "Auto"),
+                (Some(Width::Thin), "Small"),
+                (Some(Width::Medium), "Medium"),
+                (Some(Width::Thick), "Large"),
+            ];
+            let on = e.blur_size;
+            segmented::inline(&sizes, on, on, 1.0, Message::BlurSize)
+        }
+        _ => segmented::inline(&weights, e.width, e.width, 1.0, Message::Width),
+    };
+    let label = if slot == Tool::Blur { "Brush" } else { "Size" };
+    let mut options: Vec<Element<'_, Message>> = vec![caption(Role::SECTION, label).into(), size];
+    if outline {
+        options.push(caption(Role::SECTION, "Outline").into());
+        let on = segmented::inline_boolean(
+            ["None", "Outline"],
+            e.outline,
+            e.outline,
+            1.0,
+            Message::Outline,
+        );
+        options.push(on);
+    }
+    if fill {
+        options.push(caption(Role::SECTION, "Fill").into());
+        let on = segmented::inline_boolean(["None", "Tint"], e.fill, e.fill, 1.0, Message::Fill);
+        options.push(on);
+    }
+    parts.push(column(options).spacing(SPACING).into());
+    popover(column(parts).spacing(SPACING * 2.0))
+}
+
+/// What a tool button's options offer besides the size: (outline, fill).
+pub fn styles(slot: Tool) -> (bool, bool) {
+    match slot {
+        Tool::Rect | Tool::Ellipse => (true, true),
+        Tool::Arrow | Tool::Callout => (true, false),
+        _ => (false, false),
     }
 }
 
@@ -842,8 +894,8 @@ mod tests {
         Editor::new(image, 1.0)
     }
 
-    /// The toolbar (Arrow active; the Text tool's options; the colour
-    /// popover) in Sapphire and Daylight.
+    /// The toolbar (Arrow active; the Text, Rectangle, Arrow and Blur tools'
+    /// options; the colour popover) in Sapphire and Daylight.
     #[test]
     fn the_toolbar_matches_its_golden_images() {
         let mut failed = Vec::new();
@@ -851,13 +903,24 @@ mod tests {
             themes::set(theme);
             let mut text = editor();
             text.update(Message::Slot(Tool::Text));
+            text.update(Message::Slot(Tool::Text));
             let mut colour = editor();
             colour.update(Message::Picker);
+            // a click on the active tool: its options (one design for all)
+            let options = |tool| {
+                let mut e = editor();
+                e.update(Message::Tool(tool));
+                e.update(Message::Slot(tool));
+                e
+            };
             let wide = size(f32::INFINITY, false).width;
             for (name, e, height) in [
                 ("rest", editor(), 60.0),
                 ("text", text, 280.0),
                 ("colour", colour, 440.0),
+                ("options-rect", options(Tool::Rect), 260.0),
+                ("options-arrow", options(Tool::Arrow), 260.0),
+                ("options-blur", options(Tool::Blur), 200.0),
             ] {
                 let file = format!("editor-toolbar-{name}-{}", theme.id);
                 let at = Size::new(wide, height);

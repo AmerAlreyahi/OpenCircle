@@ -20,7 +20,7 @@ pub fn frame(at: Point, radius: f32) -> Rectangle {
 pub fn paint(layer: &mut Layer, at: Point, radius: f32, colour: [u8; 4], width: f32) {
     let (tail, tip) = arrow_ends(at, radius);
     let mid = Point::new((tail.x + tip.x) / 2.0, (tail.y + tip.y) / 2.0);
-    arrow::paint(layer, tail, tip, mid, true, colour, width);
+    arrow::paint(layer, (tail, tip, mid), true, colour, width, true);
     let Some(ring) = PathBuilder::from_circle(at.x, at.y, radius) else {
         return;
     };

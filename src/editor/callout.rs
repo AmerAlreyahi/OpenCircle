@@ -25,7 +25,15 @@ pub fn text_origin(at: Point, text: &str, size: f32) -> Point {
     bubble(at, text, size).position() + padding(size)
 }
 
-pub fn paint(layer: &mut Layer, tip: Point, at: Point, text: &str, size: f32, colour: [u8; 4]) {
+/// `ring`: the halo round bubble and tail (off by default: a solid bubble).
+pub fn paint(
+    layer: &mut Layer,
+    (tip, at): (Point, Point),
+    text: &str,
+    size: f32,
+    colour: [u8; 4],
+    ring: bool,
+) {
     let body = bubble(at, text, size);
     let Some(shape) = rounded(body, size * 0.6) else {
         return;
@@ -42,10 +50,14 @@ pub fn paint(layer: &mut Layer, tip: Point, at: Point, text: &str, size: f32, co
     p.close();
     let tail = p.finish();
 
-    let ring = halo(colour);
-    layer.stroke(&shape, ring, 3.0);
+    let halo = halo(colour);
+    if ring {
+        layer.stroke(&shape, halo, 3.0);
+    }
     if let Some(tail) = &tail {
-        layer.stroke(tail, ring, 3.0);
+        if ring {
+            layer.stroke(tail, halo, 3.0);
+        }
         layer.fill(tail, colour);
     }
     layer.fill(&shape, colour);

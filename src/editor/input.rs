@@ -1,5 +1,5 @@
 //! What the pointer and the keys mean to the editor: which item shows its
-//! selection frame, the cursor, canvas <-> image coordinates, key -> message.
+//! handles, the cursor, canvas <-> image coordinates, key -> message.
 //! (The canvas that draws and feeds these is `ui::screens::editor::canvas`.)
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::mouse;
@@ -10,9 +10,9 @@ use super::{
 };
 
 impl Editor {
-    /// The item that shows the selection frame (and handles): the one drawn,
-    /// moved or typed, else the selected one. Pen and highlighter strokes never
-    /// do: they are moved by dragging the stroke itself.
+    /// The item that shows its handles (never a frame): the one drawn, moved
+    /// or typed, else the selected one. Pen and highlighter strokes never do:
+    /// they are moved by dragging the stroke itself.
     pub(crate) fn framed(&self) -> Option<&super::Item> {
         let item = (self.pending.as_ref().map(|p| &p.item))
             .or_else(|| self.doc.selected.and_then(|i| self.doc.items.get(i)))?;
@@ -25,7 +25,7 @@ impl Editor {
         use mouse::Interaction as I;
         match self.pending.as_ref().map(|p| &p.drag) {
             Some(Drag::Move { .. }) => return I::Grabbing,
-            Some(Drag::Draw | Drag::Resize(..) | Drag::Bend(_)) => return I::Crosshair,
+            Some(Drag::Draw | Drag::Handle(..)) => return I::Crosshair,
             Some(Drag::Type) | None => {}
         }
         // Snip's live area: its handles and edges, and a move inside.
@@ -49,7 +49,7 @@ impl Editor {
         match (handle, self.tool) {
             (Some(select::Handle::Corner(c)), _) if c % 2 == 0 => I::ResizingDiagonallyDown,
             (Some(select::Handle::Corner(_)), _) => I::ResizingDiagonallyUp,
-            (Some(select::Handle::Bend), _) => I::Grab,
+            (Some(_), _) => I::Grab, // an end, the bend, a callout's tip
             (None, Tool::Select) if select::hit(&self.doc.items, p, reach).is_some() => I::Grab,
             (None, Tool::Select) if self.movable && self.doc.view().contains(p) => I::Grab,
             (None, Tool::Select) => I::default(),

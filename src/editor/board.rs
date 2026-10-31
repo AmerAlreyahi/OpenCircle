@@ -103,7 +103,7 @@ pub fn compose(sources: &[Image], board: &Board) -> (Image, Vec<Rectangle>) {
         for (i, tile) in tiles.iter().enumerate() {
             let size = (tile.width.min(tile.height) / 16.0).clamp(14.0, 22.0);
             let at = tile.position() + Vector::new(size * 0.5, size * 0.5);
-            label::paint(&mut layer, at, &(i + 1).to_string(), size, NUMBER);
+            label::paint(&mut layer, at, &(i + 1).to_string(), size, NUMBER, true);
         }
         rgba = layer.pm.take(); // opaque: premultiplied = straight
     }

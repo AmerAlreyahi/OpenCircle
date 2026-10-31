@@ -95,7 +95,7 @@ pub const TOOLS: &[ToolInfo] = &[
     tool(
         Tool::Arrow,
         '\u{e497}',
-        "Arrow: drag the middle to curve it; click again for line and labelled arrow (A)",
+        "Arrow: drag the middle to curve it; click again for its options, line, labelled arrow (A)",
         'a',
         1,
     ),
@@ -153,7 +153,7 @@ pub const TOOLS: &[ToolInfo] = &[
     tool(
         Tool::Blur,
         '\u{e0b8}',
-        "Blur brush: stays on the text line (Shift: free); click again for redact and line assist (B)",
+        "Blur brush: stays on its line (Shift: free); click again for its size, redact, line help (B)",
         'b',
         3,
     ),
@@ -223,9 +223,10 @@ impl Width {
     fn badge(self) -> f32 {
         [12.0, 16.0, 22.0][self as usize]
     }
-    /// The blur brush's height where no text line is under it.
+    /// The blur brush's height: Medium covers one line of normal UI text at
+    /// 100 % (owner 2026-10-31: a smaller brush; display px, so DPI-scaled).
     fn brush(self) -> f32 {
-        [16.0, 28.0, 44.0][self as usize]
+        [14.0, 20.0, 32.0][self as usize]
     }
 }
 
@@ -236,14 +237,17 @@ pub enum Menu {
     Colour,
     /// Add capture, board layout, numbers, legend.
     Board,
-    /// The variants of a tool button (`slot`).
-    Variants(Tool),
+    /// A tool button's options (`slot`; opened by a click on the active
+    /// tool): its variants, size, outline, fill, the text's style.
+    Options(Tool),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     /// Pointer, image px (from the canvas).
     Press(Point),
+    /// Ctrl+press: moves the item under it, whatever the tool (else a press).
+    PressMove(Point),
     Move(Point),
     Release,
     /// Shift is held (lines snap to 45° steps).
@@ -254,7 +258,8 @@ pub enum Message {
     /// Ends typing.
     Finish,
     Tool(Tool),
-    /// A toolbar tool button: picks its tool, or opens / closes its variants.
+    /// A toolbar tool button: picks its tool; on the active one, opens /
+    /// closes its options.
     Slot(Tool),
     /// Opens/closes the colour picker.
     Picker,
@@ -262,6 +267,12 @@ pub enum Message {
     Menu(Menu),
     Colour([u8; 4]),
     Width(Width),
+    /// A shape's, arrow's or callout's outline (its halo) on / off.
+    Outline(bool),
+    /// A rectangle's or ellipse's tint inside on / off.
+    Fill(bool),
+    /// The blur brush's size: `None` = Auto (the text line it starts on).
+    BlurSize(Option<Width>),
     /// The Text tool's options (its button's strip): font px on screen, and
     /// font, weight, backdrop.
     TextSize(f32),
@@ -276,7 +287,7 @@ pub enum Message {
     PasteStyle,
     /// Shows / hides the steps' legend.
     Legend,
-    /// Line assist on / off (the blur brush keeps to text lines).
+    /// Line help on / off (a blur stroke keeps to the line it started on).
     Assist,
     /// Asks the host for another capture (`Output::AddCapture`). No button
     /// sends it (owner, 2026-10-31: the Steps board replaces it; hidden, kept).
@@ -375,8 +386,8 @@ enum Drag {
         from: Item,
         edits: bool,
     },
-    Resize(usize, Item),
-    Bend(Item),
+    /// A handle of the item as picked up.
+    Handle(select::Handle, Item),
     Type,
 }
 
@@ -401,6 +412,10 @@ pub struct Editor {
     pub tool: Tool,
     pub(crate) colour: [u8; 4],
     pub(crate) width: Width,
+    /// New shapes, arrows and callouts get an outline / rectangles and
+    /// ellipses a tint (both off by default, owner 2026-10-31).
+    pub(crate) outline: bool,
+    pub(crate) fill: bool,
     /// The Text tool's font size (display px; a weight sets it too) and style.
     pub(crate) text_size: f32,
     pub(crate) text_style: TextStyle,
@@ -425,15 +440,19 @@ pub struct Editor {
     dragged: Option<dragout::DragFile>,
     /// The last share (its PNG and the sheet's handlers; go with the editor).
     shared: Option<crate::actions::share::Shared>,
-    /// The blur brush keeps to text lines (config `editor.line_assist`).
+    /// Line help: a blur stroke keeps to the line it started on (config
+    /// `editor.line_assist`).
     pub(crate) assist: bool,
     /// Scrolling capture can run for this editor (the host sets it; the
     /// toolbar button is dimmed without).
     pub scroll: bool,
-    /// The image's text lines, for the image they were found in.
+    /// The height (image px) the blur stroke being drawn is held at.
+    lock: Option<f32>,
+    /// The blur brush's size picked in its options; `None` = Auto: as tall
+    /// as the text line under the stroke's start (owner, 2026-10-31).
+    pub(crate) blur_size: Option<Width>,
+    /// The image's text lines (Auto's), for the image they were found in.
     bands: Option<((u32, u32, board::Board), Vec<lines::Band>)>,
-    /// The text line the blur stroke being drawn is held on.
-    lock: Option<lines::Lock>,
     /// Snip's live area: the document is the whole frozen monitor (or every
     /// monitor joined) and its crop is the captured area, which moves and
     /// resizes (`area`). The host places its top-left pixel (`canvas::Lens`).
@@ -459,6 +478,8 @@ impl Editor {
             tool: Tool::Arrow,
             colour,
             width: Width::Medium,
+            outline: false,
+            fill: false,
             text_size: Width::Medium.font(),
             text_style: TextStyle::default(),
             menu: None,
@@ -476,8 +497,9 @@ impl Editor {
             shared: None,
             assist: crate::config::current().editor.line_assist,
             scroll: false,
-            bands: None,
             lock: None,
+            blur_size: None,
+            bands: None,
             movable: false,
             own_image: false,
             area_drag: None,
@@ -508,10 +530,22 @@ impl Editor {
         match message {
             Message::Press(p) => {
                 (self.focus, self.nudged) = (None, false);
-                if matches!(self.menu, Some(Menu::Board | Menu::Variants(_))) {
+                if matches!(self.menu, Some(Menu::Board | Menu::Options(_))) {
                     self.menu = None;
                 }
                 self.press(p)
+            }
+            Message::PressMove(p) => {
+                (self.focus, self.nudged) = (None, false);
+                self.menu = self.menu.filter(|m| *m == Menu::Colour);
+                self.commit();
+                match select::hit(&self.doc.items, p, REACH / self.zoom) {
+                    Some(i) => {
+                        self.doc.selected = Some(i);
+                        self.pick_up(i, false, p);
+                    }
+                    None => self.press(p),
+                }
             }
             Message::Move(p) => self.drag_to(p),
             Message::Release => self.release(),
@@ -522,19 +556,30 @@ impl Editor {
             }),
             Message::Finish => self.commit(),
             Message::Tool(tool) => self.pick_tool(tool),
+            // First click: the tool; a click on the active one: its options.
+            Message::Slot(slot) if info(self.tool).slot != slot => self.pick_tool(slot),
             Message::Slot(slot) => {
-                let has_variants = TOOLS.iter().any(|t| t.slot == slot && t.tool != slot);
-                let open = self.menu == Some(Menu::Variants(slot));
-                if info(self.tool).slot != slot {
-                    self.pick_tool(slot);
-                }
-                self.menu = (has_variants && !open).then_some(Menu::Variants(slot));
+                let open = self.menu == Some(Menu::Options(slot));
+                self.menu = (has_options(slot) && !open).then_some(Menu::Options(slot));
+                self.picking = false;
             }
             Message::Picker => self.toggle(Menu::Colour),
             Message::Menu(menu) => self.toggle(menu),
             Message::Colour(c) => self.set_colour(c),
             Message::Width(w) => {
                 self.set_width(w);
+                self.restyle();
+            }
+            Message::BlurSize(size) => {
+                self.blur_size = size;
+                self.restyle();
+            }
+            Message::Outline(on) => {
+                self.outline = on;
+                self.restyle();
+            }
+            Message::Fill(on) => {
+                self.fill = on;
                 self.restyle();
             }
             Message::TextSize(size) => {
@@ -830,7 +875,7 @@ impl Editor {
         self.set_colour(colour);
     }
 
-    /// The image's text lines (detected once per board layout).
+    /// The image's text lines (found once per board layout).
     fn bands(&mut self) -> &[lines::Band] {
         let key = (self.doc.image.width, self.doc.image.height, self.doc.board);
         if self.bands.as_ref().is_none_or(|(k, _)| *k != key) {
@@ -839,17 +884,30 @@ impl Editor {
         self.bands.as_ref().map_or(&[], |(_, b)| b)
     }
 
-    /// A blur stroke at `p`: as tall as the text line there; with line assist
-    /// (and no Shift) held on that line.
+    /// The blur brush's size at `p` (image px): the one picked, else Auto:
+    /// the text line there (a line taller than three default brushes is a
+    /// block, not a line), else the default.
+    fn brush_size(&mut self, p: Point) -> f32 {
+        let default = Width::Medium.brush() / self.zoom;
+        if let Some(w) = self.blur_size {
+            return w.brush() / self.zoom;
+        }
+        lines::under(self.bands(), p)
+            .map(|b| b.brush())
+            .filter(|&h| h <= 3.0 * default)
+            .unwrap_or(default)
+    }
+
+    /// A blur stroke at `p`, sized (`brush_size`); with line help (and no
+    /// Shift) held at its height.
     fn brush(&mut self, p: Point) -> Item {
-        let band = lines::under(self.bands(), p);
+        let size = self.brush_size(p);
+        if self.assist && !self.shift {
+            self.lock = Some(p.y);
+        }
         let mut item = self.create(p);
-        if let (Some(band), Shape::Blur { points, size, .. }) = (band, &mut item.shape) {
-            *size = band.brush();
-            if self.assist && !self.shift {
-                points[0] = Point::new(p.x, band.centre());
-                self.lock = Some(lines::Lock::new(band));
-            }
+        if let Shape::Blur { size: s, .. } = &mut item.shape {
+            *s = size;
         }
         item
     }
@@ -875,10 +933,7 @@ impl Editor {
         if let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) {
             let original = self.doc.items[i].clone();
             if let Some(handle) = select::handle_at(&original, p, reach) {
-                let drag = match handle {
-                    select::Handle::Corner(c) => Drag::Resize(c, original.clone()),
-                    select::Handle::Bend => Drag::Bend(original.clone()),
-                };
+                let drag = Drag::Handle(handle, original.clone());
                 self.begin(Some(i), original, drag, p);
                 return;
             }
@@ -937,6 +992,7 @@ impl Editor {
         if let Shape::Text { size, style, .. } = &from.shape {
             (self.text_size, self.text_style) = (size * self.zoom, *style);
         }
+        (self.outline, self.fill) = (from.outline, from.fill);
         self.begin(Some(i), from.clone(), Drag::Move { from, edits }, p);
     }
 
@@ -1007,24 +1063,14 @@ impl Editor {
             self.cropping = Some((from, p));
             return;
         }
-        if let Some(lock) = &mut self.lock
+        if let Some(held) = &mut self.lock
             && !self.shift
         {
-            let bands = self.bands.as_ref().map_or(&[][..], |(_, b)| b);
-            match lock.follow(bands, p, std::time::Instant::now()) {
-                lines::Follow::Stay(on_line) => p = on_line,
-                // On to another line: this stroke ends, a new one starts there.
-                lines::Follow::Switch(band) => {
-                    self.commit();
-                    let at = Point::new(p.x, band.centre());
-                    let mut item = self.create(at);
-                    if let Shape::Blur { size, .. } = &mut item.shape {
-                        *size = band.brush();
-                    }
-                    self.begin(None, item, Drag::Draw, at);
-                    return;
-                }
-            }
+            let brush = match self.pending.as_ref().map(|p| &p.item.shape) {
+                Some(Shape::Blur { size, .. }) => *size,
+                _ => Width::Medium.brush() / self.zoom,
+            };
+            p = blur::follow(held, p, brush);
         }
         let Some(pending) = &mut self.pending else {
             return;
@@ -1034,8 +1080,7 @@ impl Editor {
             // A click that wobbles a pixel is not a move.
             Drag::Move { from, .. } if p.distance(pending.start) * self.zoom < SLOP => from.clone(),
             Drag::Move { from, .. } => select::moved(from, p - pending.start),
-            Drag::Resize(corner, original) => select::resized(original, *corner, p),
-            Drag::Bend(original) => select::bent(original, p),
+            Drag::Handle(handle, original) => select::dragged(original, *handle, p),
             Drag::Type => return,
         };
         if pending.hidden || pending.index.is_none() {
@@ -1200,7 +1245,7 @@ impl Editor {
             },
             Tool::Blur => Shape::Blur {
                 points: vec![p],
-                size: self.width.brush() / z,
+                size: self.blur_size.unwrap_or(Width::Medium).brush() / z,
                 seed: blur::seed(),
             },
             Tool::Redact => Shape::Redact { a: p, b: p },
@@ -1218,6 +1263,8 @@ impl Editor {
             shape,
             colour: self.colour,
             width,
+            outline: self.outline,
+            fill: self.fill,
         }
     }
 
@@ -1241,8 +1288,13 @@ impl Editor {
                     new.width = editor.width.stroke() / z;
                 }
                 Shape::Highlighter(_) => new.width = editor.width.stroke() * 4.0 / z,
-                // A brush keeps its size (fit to its text line).
-                Shape::Blur { .. } => new.width = item.width,
+                // Auto keeps the size it was given (its line); a picked one applies.
+                Shape::Blur { size, .. } => {
+                    new.width = item.width;
+                    if let Some(w) = editor.blur_size {
+                        *size = w.brush() / z;
+                    }
+                }
                 _ => new.width = editor.width.stroke() / z,
             }
             new
@@ -1316,7 +1368,15 @@ impl Editor {
     }
 }
 
-/// Remembers the line assist choice (`editor.line_assist`) for the next editor.
+/// A tool button has options to open: its variants, a size, a style.
+pub fn has_options(slot: Tool) -> bool {
+    !matches!(
+        slot,
+        Tool::Select | Tool::Crop | Tool::Spotlight | Tool::Magnifier
+    )
+}
+
+/// Remembers the line help choice (`editor.line_assist`) for the next editor.
 fn save_assist(on: bool) {
     if cfg!(test) {
         return; // never the user's config file

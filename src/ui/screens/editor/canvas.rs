@@ -1,11 +1,11 @@
 //! The editor's canvas: the flattened image, the item being drawn over it, and
 //! the input layer (pointer -> image px, keys -> editor messages) with the
-//! chrome (crop preview, selection frame, handles, caret, a step's note).
+//! chrome (crop preview, the selection's handles, caret, a step's note).
 //! Annotations themselves are painted by `editor::render`, never here; what
 //! the pointer and keys mean is the editor's (`Editor::key`, `cursor`).
 use iced::keyboard;
 use iced::mouse::{self, Cursor};
-use iced::widget::canvas::{self, Action, Fill, Frame, Geometry, LineDash, Path, Stroke, fill};
+use iced::widget::canvas::{self, Action, Fill, Frame, Geometry, Path, Stroke, fill};
 use iced::widget::{image, pin, stack};
 use iced::{ContentFit, Element, Point, Rectangle, Renderer, Size, Theme, Vector};
 
@@ -115,6 +115,8 @@ struct Pointer {
     down: bool,
     /// Snip's area handle under the pointer (its edges): drawn hot.
     hot: Option<(i8, i8)>,
+    /// Ctrl is held: a press moves what is under it (`Message::PressMove`).
+    ctrl: bool,
 }
 
 impl canvas::Program<Message> for Input<'_> {
@@ -132,9 +134,13 @@ impl canvas::Program<Message> for Input<'_> {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?; // None = over the toolbar
                 pointer.down = true;
-                match e.movable {
-                    true => Message::Press(self.image_at(cursor.position()?)),
-                    false => Message::Press(e.to_image(at)),
+                let p = match e.movable {
+                    true => self.image_at(cursor.position()?),
+                    false => e.to_image(at),
+                };
+                match pointer.ctrl {
+                    true => Message::PressMove(p),
+                    false => Message::Press(p),
                 }
             }
             // Snip's live area: from the window's px, as the canvas moves with it.
@@ -166,6 +172,7 @@ impl canvas::Program<Message> for Input<'_> {
             }
             // Not captured: other widgets see modifiers too.
             canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+                pointer.ctrl = m.command();
                 return Some(Action::publish(Message::Shift(m.shift())));
             }
             canvas::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -230,56 +237,37 @@ impl canvas::Program<Message> for Input<'_> {
             );
         }
 
-        // Line assist: a faint guide over the line the brush is held on.
-        if let Some(r) = e.assist_band() {
-            frame.fill_rectangle(r.position(), r.size(), c().accent.scale_alpha(0.35));
+        // The selection: no frame (owner, 2026-10-31), only the item's own
+        // small handles, soft, in the active look's colour (as Snip's area).
+        if let Some((top, height)) = e.caret_rect() {
+            if let Some(note) = e.note_pill() {
+                // The step's note, in a small pill beside the badge.
+                let pad = 6.0;
+                frame.fill(
+                    &Path::rounded_rectangle(
+                        note.top - iced::Vector::new(pad, 2.0),
+                        Size::new(note.text.width + 2.0 * pad, note.text.height + 4.0),
+                        8.0.into(),
+                    ),
+                    NOTE_FILL,
+                );
+                frame.fill_text(canvas::Text {
+                    content: note.shown,
+                    position: note.top,
+                    color: if note.empty { NOTE_HINT } else { NOTE_INK },
+                    size: note.size.into(),
+                    line_height: iced::widget::text::LineHeight::Absolute(note.line.into()),
+                    font: NOTE_FONT,
+                    ..canvas::Text::default()
+                });
+            }
+            frame.fill_rectangle(top, Size::new(2.0, height), c().accent);
         }
-
-        if let Some(f) = e.frame_rect() {
-            frame.stroke(
-                &Path::rectangle(f.position(), f.size()),
-                Stroke {
-                    line_dash: LineDash {
-                        segments: &[5.0, 4.0],
-                        offset: 0,
-                    },
-                    ..accent
-                },
-            );
-            if let Some((top, height)) = e.caret_rect() {
-                if let Some(note) = e.note_pill() {
-                    // The step's note, in a small pill beside the badge.
-                    let pad = 6.0;
-                    frame.fill(
-                        &Path::rounded_rectangle(
-                            note.top - iced::Vector::new(pad, 2.0),
-                            Size::new(note.text.width + 2.0 * pad, note.text.height + 4.0),
-                            8.0.into(),
-                        ),
-                        NOTE_FILL,
-                    );
-                    frame.fill_text(canvas::Text {
-                        content: note.shown,
-                        position: note.top,
-                        color: if note.empty { NOTE_HINT } else { NOTE_INK },
-                        size: note.size.into(),
-                        line_height: iced::widget::text::LineHeight::Absolute(note.line.into()),
-                        font: NOTE_FONT,
-                        ..canvas::Text::default()
-                    });
-                }
-                frame.fill_rectangle(top, Size::new(2.0, height), c().accent);
-            } else {
-                for (bend, at) in e.handle_marks() {
-                    let knob = match bend {
-                        true => Path::circle(at, 5.5),
-                        false => {
-                            Path::rectangle(at - iced::Vector::new(4.5, 4.5), Size::new(9.0, 9.0))
-                        }
-                    };
-                    frame.fill(&knob, HANDLE);
-                    frame.stroke(&knob, accent);
-                }
+        let marks = e.handle_marks();
+        if !marks.is_empty() {
+            let look = crate::ui::theme::accent_of(&crate::config::look());
+            for at in marks {
+                area::handle(&mut frame, at, (1, 1), area::Handle::Rest, look.0);
             }
         }
         vec![frame.into_geometry()]
@@ -394,8 +382,8 @@ mod tests {
     }
 
     /// Every editor tool on the canvas: as drawn (nothing selected) beside
-    /// selected (its frame and handles; pen and highlighter have none), in
-    /// Sapphire and Daylight (the handles' accent); the text-bearing tools
+    /// selected (its own handles only, no frame; pen, highlighter and blur
+    /// have none), in Sapphire and Daylight; the text-bearing tools
     /// (text, label, callout, arrow label, step + its legend) in Latin and
     /// Arabic; Crop mid-drag (its dim and edges). Look at each one after an
     /// update.

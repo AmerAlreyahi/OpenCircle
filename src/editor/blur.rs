@@ -1,5 +1,5 @@
 //! Blur brush: a freehand stroke that softly blurs what is under it (feathered
-//! edges, like a photo editor's blur brush), sized to the text line it covers.
+//! edges, like a photo editor's blur brush); line help keeps a stroke on its line.
 //!
 //! It must not be reversible. A plain blur (or mosaic) is a fixed, nearly
 //! invertible function of the text: an attacker deconvolves it or renders
@@ -251,4 +251,15 @@ fn box_blur<const N: usize>(values: &mut [[f32; N]], r: usize, tmp: &mut Vec<[f3
         let (add, sub) = (at(i + r + 1), at(i - r));
         (0..N).for_each(|c| sum[c] += add[c] - sub[c]);
     }
+}
+
+/// Line help: where a stroke held at height `held` goes for pointer `p`
+/// (brush `size`, image px). It stays on its line through any wobble; only a
+/// clear move up or down (more than one and a half brush heights) takes it
+/// to the pointer's height, held there from then on.
+pub fn follow(held: &mut f32, p: Point, size: f32) -> Point {
+    if (p.y - *held).abs() > 1.5 * size {
+        *held = p.y;
+    }
+    Point::new(p.x, *held)
 }

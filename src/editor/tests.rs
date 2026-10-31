@@ -66,6 +66,8 @@ fn item(shape: Shape) -> Item {
         shape,
         colour: RED,
         width: 4.0,
+        outline: false,
+        fill: false,
     }
 }
 
@@ -612,6 +614,8 @@ fn redact_is_a_solid_box() {
         },
         colour: [0, 0, 0, 255],
         width: 4.0,
+        outline: false,
+        fill: false,
     };
     let out = render(&doc_with(field("hunter2"), vec![redact]));
     for y in 10..30 {
@@ -983,7 +987,8 @@ fn popovers_open_above_a_toolbar_at_the_bottom_and_stay_on_screen() {
 fn text_options_style_the_text() {
     let mut e = editor(400, 200);
     e.update(Message::Slot(Tool::Text));
-    assert_eq!(e.menu, Some(Menu::Variants(Tool::Text)));
+    e.update(Message::Slot(Tool::Text)); // the active tool: its options
+    assert_eq!(e.menu, Some(Menu::Options(Tool::Text)));
     let _ = e.toolbar(); // the options build
     e.update(Message::TextSize(38.0));
     let boxed = TextStyle {
@@ -1051,11 +1056,12 @@ fn move_resize_bend_delete_and_crop_undo() {
     };
     assert_eq!(a, pt(60.0, 60.0));
 
-    // Resize from the bottom-right corner: twice as wide.
-    let f = e.doc.items[0].frame();
-    let corner = pt(f.x + f.width, f.y + f.height);
-    drag(&mut e, corner, &[], pt(f.x + 2.0 * f.width, f.y + f.height));
-    assert!((e.doc.items[0].frame().width - 2.0 * f.width).abs() < 0.01);
+    // Its head dragged out: twice as long.
+    let Shape::Arrow { a, b, .. } = e.doc.items[0].shape else {
+        panic!()
+    };
+    drag(&mut e, b, &[], b + (b - a));
+    assert!(matches!(e.doc.items[0].shape, Shape::Arrow { b: to, .. } if to == b + (b - a)));
 
     e.update(Message::Delete);
     assert!(e.doc.items.is_empty());
@@ -1363,6 +1369,8 @@ fn label_text_contrasts_with_its_fill() {
             },
             colour,
             width: 4.0,
+            outline: false,
+            fill: false,
         };
         let out = render(&doc_with(image_of(160, 60, |_, _| SLATE), vec![label]));
         let origin = label::text_origin(at, 24.0);
@@ -1413,18 +1421,23 @@ fn pointer_and_label_are_drawn_and_editable() {
 fn tool_buttons_open_their_variants() {
     let mut e = editor(100, 100);
     assert_eq!(e.tool, Tool::Arrow);
+    // The active tool's button: its options (variants among them).
     e.update(Message::Slot(Tool::Arrow));
-    assert_eq!(e.menu, Some(Menu::Variants(Tool::Arrow)));
+    assert_eq!(e.menu, Some(Menu::Options(Tool::Arrow)));
     e.update(Message::Slot(Tool::Arrow));
     assert_eq!(e.menu, None);
     e.update(Message::Slot(Tool::Text));
-    assert_eq!(
-        (e.tool, e.menu),
-        (Tool::Text, Some(Menu::Variants(Tool::Text)))
-    );
+    assert_eq!((e.tool, e.menu), (Tool::Text, None));
+    e.update(Message::Slot(Tool::Text));
+    assert_eq!(e.menu, Some(Menu::Options(Tool::Text)));
     e.update(Message::Tool(Tool::Label));
     assert_eq!((e.tool, e.menu), (Tool::Label, None));
-    // A button without variants just picks its tool.
+    // The Text button with Label in use: its options again.
+    e.update(Message::Slot(Tool::Text));
+    assert_eq!(
+        (e.tool, e.menu),
+        (Tool::Label, Some(Menu::Options(Tool::Text)))
+    );
     e.update(Message::Slot(Tool::Rect));
     assert_eq!((e.tool, e.menu), (Tool::Rect, None));
     // Esc closes a popover before it leaves the editor.
@@ -1778,7 +1791,7 @@ fn drag_out_writes_a_temp_png_that_goes_with_the_editor() {
     assert!(!second.exists(), "deleted with the editor");
 }
 
-// ---- line assist -------------------------------------------------------------------
+// ---- blur size and line help -------------------------------------------------------------------
 
 /// Text `lines` (top-left, text) at `size` on `bg`, in `fg`.
 fn page(w: u32, h: u32, bg: [u8; 4], fg: [u8; 4], lines: &[(f32, f32, &str)]) -> Image {
@@ -1851,75 +1864,66 @@ fn text_lines_are_found_light_dark_and_in_columns() {
 }
 
 #[test]
-fn the_lock_holds_a_line_and_switches_after_a_moment() {
-    use lines::{Band, Follow, Lock, SWITCH_AFTER};
-    use std::time::Duration;
-    let band = |y0: f32| Band {
-        x0: 0.0,
-        x1: 300.0,
-        y0,
-        y1: y0 + 20.0,
-    };
-    let bands = [band(10.0), band(50.0)];
-    let t0 = std::time::Instant::now();
-    let ms = |n: u64| t0 + Duration::from_millis(n);
-    let stay = |f: Follow| match f {
-        Follow::Stay(p) => p,
-        Follow::Switch(b) => panic!("switched to {b:?}"),
-    };
-    let mut lock = Lock::new(bands[0]);
+fn line_help_holds_the_line_until_a_clear_move() {
+    let mut held = 20.0;
+    // Wobbling up to one and a half brushes off: still on its line.
+    for y in [26.0, 14.0, 49.0, -9.0] {
+        assert_eq!(blur::follow(&mut held, pt(50.0, y), 20.0), pt(50.0, 20.0));
+    }
+    // A clear move down: on to the pointer's height, held there.
     assert_eq!(
-        stay(lock.follow(&bands, pt(50.0, 25.0), ms(0))),
-        pt(50.0, 20.0)
-    );
-    // Wobbling near the line: still on it.
-    assert_eq!(
-        stay(lock.follow(&bands, pt(60.0, 36.0), ms(10))),
-        pt(60.0, 20.0)
-    );
-    // Over the next line, but only briefly: stays.
-    stay(lock.follow(&bands, pt(70.0, 60.0), ms(20)));
-    stay(lock.follow(&bands, pt(80.0, 60.0), ms(100)));
-    stay(lock.follow(&bands, pt(85.0, 22.0), ms(120))); // back: the clock resets
-    stay(lock.follow(&bands, pt(90.0, 60.0), ms(130)));
-    stay(lock.follow(&bands, pt(95.0, 60.0), ms(200)));
-    // Held there long enough: on to that line.
-    let at = 130 + SWITCH_AFTER.as_millis() as u64;
-    assert!(
-        matches!(lock.follow(&bands, pt(99.0, 60.0), ms(at)), Follow::Switch(b) if b == bands[1])
+        blur::follow(&mut held, pt(60.0, 52.0), 20.0),
+        pt(60.0, 52.0)
     );
     assert_eq!(
-        stay(lock.follow(&bands, pt(100.0, 58.0), ms(at + 10))),
-        pt(100.0, 60.0)
+        blur::follow(&mut held, pt(70.0, 60.0), 20.0),
+        pt(70.0, 52.0)
     );
-    // Far away with no line there: held where it is.
+    // And a clear move up.
     assert_eq!(
-        stay(lock.follow(&bands, pt(100.0, 150.0), ms(at + 500))),
-        pt(100.0, 60.0)
+        blur::follow(&mut held, pt(80.0, 10.0), 20.0),
+        pt(80.0, 10.0)
     );
 }
 
+/// The blur brush: Auto = as tall as the text line it starts on (the
+/// default off any text); a size picked in its options overrides that, Auto
+/// gives it back; line help keeps a wobbly stroke on its line, Shift frees it.
+/// No suggestion is drawn: a blur has no handles, drawn or selected.
 #[test]
-fn the_blur_brush_follows_text_lines() {
+fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
     let image = page(400, 160, PAPER, INK, &PARAGRAPH);
     let bands = lines::detect(&image);
     let mut e = Editor::new(image, 1.0);
     e.assist = true;
     e.update(Message::Tool(Tool::Blur));
+    assert_eq!(e.blur_size, None, "Auto by default");
     let b = bands[1];
     let c = b.centre();
-    // A wobbly stroke along line 2: held on it, as tall as it.
-    drag(
-        &mut e,
-        pt(15.0, c + 3.0),
-        &[pt(80.0, c - 5.0), pt(150.0, c + 6.0)],
-        pt(220.0, c),
-    );
-    let Shape::Blur { points, size, .. } = &e.doc.items[0].shape else {
-        panic!()
+    let size_of = |e: &Editor, i: usize| match &e.doc.items[i].shape {
+        Shape::Blur { size, points, .. } => (*size, points.clone()),
+        _ => panic!(),
     };
-    assert!(points.iter().all(|p| p.y == c), "{points:?}");
-    assert_eq!(*size, b.brush());
+    // Auto on line 2 (20 px text): its height; held on it through a wobble.
+    e.update(Message::Press(pt(15.0, c + 3.0)));
+    e.update(Message::Move(pt(80.0, c - 5.0)));
+    assert!(e.handle_marks().is_empty(), "nothing drawn while brushing");
+    e.update(Message::Move(pt(150.0, c + 6.0)));
+    e.update(Message::Move(pt(220.0, c)));
+    e.update(Message::Release);
+    let (size, points) = size_of(&e, 0);
+    assert_eq!(size, b.brush());
+    assert!((14.0..40.0).contains(&size), "one line: {size}");
+    assert!(points.iter().all(|p| p.y == c + 3.0), "{points:?}");
+    assert_eq!(e.doc.selected, Some(0));
+    assert!(
+        e.handle_marks().is_empty(),
+        "no handles or box when selected"
+    );
+    // Off any text: the default (one line of UI text).
+    drag(&mut e, pt(15.0, 145.0), &[], pt(220.0, 145.0));
+    assert_eq!(size_of(&e, 1).0, Width::Medium.brush());
+    assert_eq!(Width::Medium.brush(), 20.0);
     // Shift: free.
     e.update(Message::Shift(true));
     drag(
@@ -1928,31 +1932,22 @@ fn the_blur_brush_follows_text_lines() {
         &[pt(80.0, c - 5.0)],
         pt(220.0, c),
     );
-    let Shape::Blur { points, .. } = &e.doc.items[1].shape else {
-        panic!()
-    };
-    assert!(points.iter().any(|p| p.y != c));
+    assert!(size_of(&e, 2).1.iter().any(|p| p.y != c + 3.0));
     e.update(Message::Shift(false));
 
-    // Dragged onto line 3 and held there: the stroke goes on along line 3.
-    e.update(Message::Press(pt(15.0, bands[0].centre())));
-    e.update(Message::Move(pt(60.0, bands[0].centre())));
-    e.update(Message::Move(pt(70.0, bands[2].centre())));
-    std::thread::sleep(lines::SWITCH_AFTER + std::time::Duration::from_millis(20));
-    e.update(Message::Move(pt(80.0, bands[2].centre() + 2.0)));
-    e.update(Message::Move(pt(150.0, bands[2].centre() - 2.0)));
-    e.update(Message::Release);
-    let ys: Vec<f32> = e.doc.items[2..]
-        .iter()
-        .map(|i| match &i.shape {
-            Shape::Blur { points, .. } => points[0].y,
-            _ => panic!(),
-        })
-        .collect();
-    assert_eq!(ys, [bands[0].centre(), bands[2].centre()]);
+    // Its options: a click on the active Blur button; a size there overrides Auto.
+    e.update(Message::Slot(Tool::Blur));
+    assert_eq!(e.menu, Some(Menu::Options(Tool::Blur)));
+    let _ = e.toolbar(); // they build
+    e.update(Message::BlurSize(Some(Width::Thick)));
+    drag(&mut e, pt(15.0, c), &[], pt(220.0, c));
+    assert_eq!(size_of(&e, 3).0, Width::Thick.brush());
+    // Auto: the line's size again.
+    e.update(Message::BlurSize(None));
+    drag(&mut e, pt(15.0, c), &[], pt(220.0, c));
+    assert_eq!(size_of(&e, 4).0, b.brush());
 
-    // Assist off: the stroke is free but still fits the line it starts on;
-    // off any text it takes the weight's size.
+    // Line help off: the stroke follows the pointer.
     e.update(Message::Assist);
     assert!(!e.assist);
     drag(
@@ -1961,15 +1956,177 @@ fn the_blur_brush_follows_text_lines() {
         &[pt(80.0, c - 5.0)],
         pt(220.0, c),
     );
-    let Shape::Blur { points, size, .. } = &e.doc.items[4].shape else {
+    assert!(size_of(&e, 5).1.iter().any(|p| p.y != c + 3.0));
+}
+
+/// A selected annotation shows only its own small handles, never a frame:
+/// every pixel the selection adds to the canvas is at one of its handles
+/// (an arrow: its two ends and its bend; a callout: its bubble's corners
+/// and its tail's tip; a box: its corners).
+#[test]
+fn a_selection_has_no_frame_only_its_handles() {
+    let canvas_px = |e: &Editor| crate::ui::kit::testing::shot::save("", e.canvas(), e.size());
+    for tool in [
+        Tool::Rect,
+        Tool::Ellipse,
+        Tool::Arrow,
+        Tool::Line,
+        Tool::Callout,
+        Tool::Text,
+        Tool::Step,
+        Tool::Spotlight,
+        Tool::Magnifier,
+        Tool::Blur,
+    ] {
+        let mut e = editor(300, 200);
+        e.update(Message::Tool(tool));
+        match tool {
+            Tool::Callout | Tool::Text | Tool::Step => {
+                drag(&mut e, pt(60.0, 120.0), &[], pt(60.0, 120.0));
+                e.update(Message::Type("Hi".into()));
+                e.update(Message::Finish);
+            }
+            _ => drag(&mut e, pt(60.0, 50.0), &[pt(100.0, 70.0)], pt(200.0, 140.0)),
+        }
+        e.doc.selected = Some(0);
+        let marks = e.handle_marks();
+        let selected = canvas_px(&e);
+        e.doc.selected = None;
+        let plain = canvas_px(&e);
+        let w = e.size().width as usize;
+        for (i, (a, b)) in selected.chunks(4).zip(plain.chunks(4)).enumerate() {
+            if a != b {
+                let p = pt((i % w) as f32 + 0.5, (i / w) as f32 + 0.5);
+                assert!(
+                    marks.iter().any(|m| m.distance(p) <= 7.0),
+                    "{tool:?}: {p:?} drawn away from its handles {marks:?}"
+                );
+            }
+        }
+        let want = match tool {
+            Tool::Arrow | Tool::Line => 3,
+            Tool::Callout => 5,
+            Tool::Blur => 0,
+            _ => 4,
+        };
+        assert_eq!(marks.len(), want, "{tool:?}");
+    }
+}
+
+/// An arrow's ends and a callout's tip are handles: dragged with any tool,
+/// one undoable change each.
+#[test]
+fn arrow_ends_and_callout_tip_drag() {
+    let mut e = editor(400, 300);
+    drag(&mut e, pt(50.0, 50.0), &[], pt(150.0, 50.0)); // the starting Arrow
+    drag(&mut e, pt(150.0, 50.0), &[], pt(200.0, 100.0));
+    let Shape::Arrow { a, b, bend, .. } = e.doc.items[0].shape else {
         panic!()
     };
-    assert!(points.iter().any(|p| p.y != c) && *size == b.brush());
-    drag(&mut e, pt(15.0, 140.0), &[], pt(220.0, 140.0));
-    let Shape::Blur { size, .. } = &e.doc.items[5].shape else {
+    assert_eq!((a, b), (pt(50.0, 50.0), pt(200.0, 100.0)));
+    assert!(
+        arrow::middle(a, b, bend).distance(pt(125.0, 75.0)) < 0.01,
+        "still straight"
+    );
+    assert_eq!(e.doc.items.len(), 1);
+    e.update(Message::Tool(Tool::Callout));
+    drag(&mut e, pt(100.0, 250.0), &[], pt(100.0, 250.0));
+    e.update(Message::Type("Note".into()));
+    e.update(Message::Finish);
+    drag(&mut e, pt(100.0, 250.0), &[], pt(40.0, 280.0));
+    let Shape::Callout { tip, .. } = e.doc.items[1].shape else {
         panic!()
     };
-    assert_eq!(*size, Width::Medium.brush());
+    assert_eq!(tip, pt(40.0, 280.0));
+    e.update(Message::Undo);
+    e.update(Message::Undo);
+    let Shape::Arrow { b, .. } = e.doc.items[0].shape else {
+        panic!()
+    };
+    assert_eq!(b, pt(200.0, 100.0));
+}
+
+/// The first click on a tool button picks it; a click on the active one
+/// opens (then closes) its options. Shapes, arrows and callouts start with no
+/// outline (a solid arrow, a solid bubble) and no fill; the options turn them
+/// on for the next item and the selected one.
+#[test]
+fn options_open_on_the_second_click_and_outlines_are_off_by_default() {
+    let mut e = editor(300, 200);
+    e.update(Message::Slot(Tool::Rect));
+    assert_eq!(
+        (e.tool, e.menu),
+        (Tool::Rect, None),
+        "first click: the tool"
+    );
+    e.update(Message::Slot(Tool::Rect));
+    assert_eq!(e.menu, Some(Menu::Options(Tool::Rect)));
+    let _ = e.toolbar();
+    e.update(Message::Slot(Tool::Rect));
+    assert_eq!(e.menu, None);
+    // Tools with nothing to set open nothing.
+    e.update(Message::Slot(Tool::Spotlight));
+    e.update(Message::Slot(Tool::Spotlight));
+    assert_eq!(e.menu, None);
+    for tool in [Tool::Rect, Tool::Arrow, Tool::Callout] {
+        e.update(Message::Tool(tool));
+        e.update(Message::Press(pt(30.0, 150.0)));
+        e.update(Message::Move(pt(90.0, 190.0)));
+        e.update(Message::Release);
+        e.update(Message::Finish);
+    }
+    assert!(e.doc.items.iter().all(|i| !i.outline && !i.fill));
+    // A plain red arrow on white: no white or dark ring beside its shaft.
+    let mut a = editor(200, 100);
+    a.doc = doc_with(image_of(200, 100, |_, _| SLATE), vec![]);
+    drag(&mut a, pt(20.0, 50.0), &[], pt(180.0, 50.0));
+    let flat = render(&a.doc);
+    let w = a.doc.items[0].width;
+    let beside = (50.0 + w / 2.0 + 0.6) as u32; // just off the shaft, inside a ring
+    assert_eq!(px(&flat, 80, beside), SLATE, "no halo");
+    assert_eq!(px(&flat, 80, 50), RED);
+    // Outline on: the selected arrow gets its ring.
+    a.update(Message::Outline(true));
+    assert!(a.doc.items[0].outline);
+    assert_ne!(px(&render(&a.doc), 80, beside), SLATE);
+    // Fill: a rectangle's inside is tinted.
+    e.update(Message::Tool(Tool::Rect));
+    e.update(Message::Fill(true));
+    drag(&mut e, pt(150.0, 20.0), &[], pt(250.0, 90.0));
+    let inside = px(&render(&e.doc), 200, 55);
+    let bare = px(&render(&doc_with(checker(300, 200), vec![])), 200, 55);
+    assert!(e.doc.items.last().unwrap().fill);
+    assert_ne!(inside, bare, "tinted");
+}
+
+/// Ctrl+press moves any annotation whatever the tool, even where a plain
+/// press would draw (inside a box); a plain drag there still draws.
+#[test]
+fn ctrl_drag_moves_with_any_tool() {
+    let mut e = editor(400, 300);
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(50.0, 50.0), &[], pt(150.0, 150.0));
+    let drawn = e.doc.items[0].clone();
+    for tool in [Tool::Rect, Tool::Pen, Tool::Blur, Tool::Text, Tool::Arrow] {
+        e.update(Message::Tool(tool));
+        e.update(Message::PressMove(pt(100.0, 100.0)));
+        e.update(Message::Move(pt(110.0, 105.0)));
+        e.update(Message::Release);
+        assert_eq!(e.doc.items.len(), 1, "{tool:?}: moved, nothing drawn");
+    }
+    assert_eq!(
+        e.doc.items[0],
+        select::moved(&drawn, iced::Vector::new(50.0, 25.0))
+    );
+    // Without Ctrl, inside the box: a new one.
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(110.0, 110.0), &[], pt(140.0, 140.0));
+    assert_eq!(e.doc.items.len(), 2);
+    // Ctrl over nothing: draws as usual.
+    e.update(Message::PressMove(pt(250.0, 200.0)));
+    e.update(Message::Move(pt(300.0, 250.0)));
+    e.update(Message::Release);
+    assert_eq!(e.doc.items.len(), 3);
 }
 
 // ---- snapshots and timing (run by hand) -------------------------------------------

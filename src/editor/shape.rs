@@ -3,18 +3,36 @@
 use iced::Point;
 use tiny_skia::{PathBuilder, Rect};
 
-use super::document::{Layer, Shape, span};
+use super::document::{Layer, Shape, halo, span};
 
-pub fn paint_rect(layer: &mut Layer, a: Point, b: Point, colour: [u8; 4], width: f32) {
-    if let Some(path) = rect(a, b).map(PathBuilder::from_rect) {
-        layer.stroke(&path, colour, width);
-    }
-}
+/// The fill's opacity: a tint, so what is inside still shows.
+pub const TINT: f32 = 0.25;
 
-pub fn paint_ellipse(layer: &mut Layer, a: Point, b: Point, colour: [u8; 4], width: f32) {
-    if let Some(path) = rect(a, b).and_then(PathBuilder::from_oval) {
-        layer.stroke(&path, colour, width);
+/// A rectangle or (`oval`) an ellipse over `a`..`b`: its stroke, with
+/// `(ring, fill)` its halo under it and a tint of its colour inside.
+pub fn paint(
+    layer: &mut Layer,
+    (a, b): (Point, Point),
+    oval: bool,
+    colour: [u8; 4],
+    width: f32,
+    (ring, fill): (bool, bool),
+) {
+    let path = match oval {
+        true => rect(a, b).and_then(PathBuilder::from_oval),
+        false => rect(a, b).map(PathBuilder::from_rect),
+    };
+    let Some(path) = path else {
+        return;
+    };
+    if fill {
+        let [r, g, b, al] = colour;
+        layer.fill(&path, [r, g, b, (al as f32 * TINT) as u8]);
     }
+    if ring {
+        layer.stroke(&path, halo(colour), width + 3.0);
+    }
+    layer.stroke(&path, colour, width);
 }
 
 fn rect(a: Point, b: Point) -> Option<Rect> {

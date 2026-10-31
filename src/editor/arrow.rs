@@ -1,5 +1,5 @@
 //! Arrow (and plain line, and an arrow with a label at its tail): straight, or curved by dragging its middle handle.
-//! Rounded head, white halo so it reads on any background.
+//! Rounded head; a white / dark halo (its outline, opt-in) reads on any background.
 use iced::{Point, Vector};
 use tiny_skia::PathBuilder;
 
@@ -35,14 +35,14 @@ pub fn bend_through(a: Point, b: Point, handle: Point) -> Point {
     )
 }
 
+/// `ring`: the white / dark halo under it (off by default: a solid arrow).
 pub fn paint(
     layer: &mut Layer,
-    a: Point,
-    b: Point,
-    bend: Point,
+    (a, b, bend): (Point, Point, Point),
     head: bool,
     colour: [u8; 4],
     width: f32,
+    ring: bool,
 ) {
     // Direction the curve arrives at `b`.
     let along = if bend.distance(b) > 0.5 {
@@ -79,13 +79,13 @@ pub fn paint(
         p.finish()
     });
 
-    let ring = halo(colour);
+    let halo = halo(colour);
     let joint = width * 0.6;
-    if let Some(shaft) = &shaft {
-        layer.stroke(shaft, ring, width + 3.0);
+    if ring && let Some(shaft) = &shaft {
+        layer.stroke(shaft, halo, width + 3.0);
     }
-    if let Some(Some(tip)) = &tip {
-        layer.stroke(tip, ring, joint + 3.0);
+    if ring && let Some(Some(tip)) = &tip {
+        layer.stroke(tip, halo, joint + 3.0);
     }
     if let Some(shaft) = &shaft {
         layer.stroke(shaft, colour, width);

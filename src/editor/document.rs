@@ -106,6 +106,11 @@ pub struct Item {
     pub colour: [u8; 4],
     /// Stroke width, image px.
     pub width: f32,
+    /// A white / dark ring round it so it reads on any background (shapes,
+    /// arrows, lines, callouts; off by default, owner 2026-10-31).
+    pub outline: bool,
+    /// A rectangle or ellipse is filled with a see-through tint of its colour.
+    pub fill: bool,
 }
 
 impl Shape {
@@ -683,10 +688,12 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
         if !visible {
             continue;
         }
-        let (c, w) = (item.colour, item.width);
+        let (c, w, ring) = (item.colour, item.width, item.outline);
         match &item.shape {
-            Shape::Rect { a, b } => shape::paint_rect(&mut layer, *a, *b, c, w),
-            Shape::Ellipse { a, b } => shape::paint_ellipse(&mut layer, *a, *b, c, w),
+            Shape::Rect { a, b } | Shape::Ellipse { a, b } => {
+                let oval = matches!(item.shape, Shape::Ellipse { .. });
+                shape::paint(&mut layer, (*a, *b), oval, c, w, (ring, item.fill))
+            }
             Shape::Arrow {
                 a,
                 b,
@@ -694,10 +701,11 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
                 head,
                 text,
             } => {
-                arrow::paint(&mut layer, *a, *b, *bend, *head, c, w);
+                arrow::paint(&mut layer, (*a, *b, *bend), *head, c, w, ring);
                 if !text.is_empty() {
                     let size = label::arrow_size(w);
-                    label::paint(&mut layer, label::centred(*a, text, size), text, size, c);
+                    let at = label::centred(*a, text, size);
+                    label::paint(&mut layer, at, text, size, c, ring);
                 }
             }
             Shape::Pen(points) => pen::paint(&mut layer, points, c, w),
@@ -709,7 +717,7 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
                 style,
             } => text::paint_styled(&mut layer, *at, text, *size, c, *style),
             Shape::Step { at, radius, .. } => step::paint(&mut layer, *at, *radius, steps, c),
-            Shape::Label { at, text, size } => label::paint(&mut layer, *at, text, *size, c),
+            Shape::Label { at, text, size } => label::paint(&mut layer, *at, text, *size, c, true),
             Shape::Pointer { at, radius } => pointer::paint(&mut layer, *at, *radius, c, w),
             Shape::Blur { points, size, seed } => blur::paint(&mut layer, points, *size, *seed),
             Shape::Redact { a, b } => {
@@ -723,7 +731,7 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
                 at,
                 text,
                 size,
-            } => callout::paint(&mut layer, *tip, *at, text, *size, c),
+            } => callout::paint(&mut layer, (*tip, *at), text, *size, c, ring),
             Shape::Magnifier { at, radius } => magnifier::paint(&mut layer, *at, *radius, c, w),
         }
     }

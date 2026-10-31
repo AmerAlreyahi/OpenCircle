@@ -5,35 +5,57 @@
 use iced::{Point, Rectangle, Size, Vector};
 
 use super::document::{Item, Shape, span};
-use super::{arrow, label};
+use super::{arrow, callout, label};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Handle {
-    /// Frame corner: top-left, top-right, bottom-right, bottom-left.
+    /// Box corner: top-left, top-right, bottom-right, bottom-left.
     Corner(usize),
+    /// An arrow's or line's tail (0) or head (1).
+    End(usize),
     /// An arrow's middle (bend) handle.
     Bend,
+    /// A callout's tail tip.
+    Tip,
 }
 
-/// The item's handles and where they are (image px). Pen and highlighter
-/// strokes have none (dragged by the stroke, never resized).
+/// The item's handles and where they are (image px), its own small ones only
+/// (no selection frame, owner 2026-10-31): an arrow or line its two ends and
+/// its bend, a callout its bubble's corners and its tip, other boxes their
+/// corners. Pen, highlighter and blur strokes have none (dragged by the stroke).
 pub fn handles(item: &Item) -> Vec<(Handle, Point)> {
-    if matches!(item.shape, Shape::Pen(_) | Shape::Highlighter(_)) {
-        return Vec::new();
+    match item.shape {
+        Shape::Pen(_) | Shape::Highlighter(_) | Shape::Blur { .. } => Vec::new(),
+        Shape::Arrow { a, b, bend, .. } => vec![
+            (Handle::End(0), a),
+            (Handle::End(1), b),
+            (Handle::Bend, arrow::middle(a, b, bend)),
+        ],
+        _ => {
+            let mut all: Vec<_> = corners(item)
+                .into_iter()
+                .enumerate()
+                .map(|(i, p)| (Handle::Corner(i), p))
+                .collect();
+            if let Shape::Callout { tip, .. } = item.shape {
+                all.push((Handle::Tip, tip));
+            }
+            all
+        }
     }
-    let mut all: Vec<_> = corners(item)
-        .into_iter()
-        .enumerate()
-        .map(|(i, p)| (Handle::Corner(i), p))
-        .collect();
-    if let Shape::Arrow { a, b, bend, .. } = item.shape {
-        all.push((Handle::Bend, arrow::middle(a, b, bend)));
+}
+
+/// The box its corner handles are on: a callout's bubble (not its tail), else
+/// its frame.
+fn body(item: &Item) -> Rectangle {
+    match &item.shape {
+        Shape::Callout { at, text, size, .. } => callout::bubble(*at, text, *size),
+        _ => item.frame(),
     }
-    all
 }
 
 fn corners(item: &Item) -> [Point; 4] {
-    let f = item.frame();
+    let f = body(item);
     let (x1, y1) = (f.x + f.width, f.y + f.height);
     [
         f.position(),
@@ -170,6 +192,32 @@ pub fn resized(original: &Item, corner: usize, p: Point) -> Item {
         },
         sy.abs().max(0.05),
     );
+    // A callout's bubble grows; its tail keeps pointing where it did.
+    if let (Shape::Callout { tip, .. }, Shape::Callout { tip: was, .. }) =
+        (&mut item.shape, &original.shape)
+    {
+        *tip = *was;
+    }
+    item
+}
+
+/// `original` with `handle` dragged to `p`.
+pub fn dragged(original: &Item, handle: Handle, p: Point) -> Item {
+    let mut item = match handle {
+        Handle::Corner(c) => return resized(original, c, p),
+        Handle::Bend => return bent(original, p),
+        _ => original.clone(),
+    };
+    match (&mut item.shape, handle) {
+        // One end moves; the bend moves half as far (a straight line stays straight).
+        (Shape::Arrow { a, b, bend, .. }, Handle::End(end)) => {
+            let at = if end == 0 { a } else { b };
+            *bend += (p - *at) * 0.5;
+            *at = p;
+        }
+        (Shape::Callout { tip, .. }, Handle::Tip) => *tip = p,
+        _ => {}
+    }
     item
 }
 
