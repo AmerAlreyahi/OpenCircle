@@ -75,7 +75,16 @@ pub fn by_hand(
     let mut st = Stitcher::new(region.2, region.3).limit(max);
     let grab = || grab_area(region);
     let started = Instant::now();
-    match run(&mut st, grab, idle_for, stop, PERIOD, preview, each) {
+    match run(
+        &mut st,
+        grab,
+        idle_for,
+        Instant::now,
+        stop,
+        PERIOD,
+        preview,
+        each,
+    ) {
         Ok(times) => crate::log!(
             "[opencircle] long capture: {} px in {} s; {} grabs, {:.1} ms each; {} stitched, {:.1} ms each; {} previews, {:.1} ms each",
             st.height(),
@@ -112,13 +121,17 @@ struct Times {
 }
 
 /// The grab loop over any source: `grab` returns one RGBA frame of the
-/// stitcher's size, `idle` the time since the user's last input. Grabs every
-/// `period` while there was input or a change within `SETTLE`, and never the
-/// same frame twice into the stitcher. Returns how long it all took.
+/// stitcher's size, `idle` the time since the user's last input, `now` the
+/// clock the settle and preview times are read on (a test's own, so a slow
+/// machine can't change what happens). Grabs every `period` while there was
+/// input or a change within `SETTLE`, and never the same frame twice into the
+/// stitcher. Returns how long it all took.
+#[allow(clippy::too_many_arguments)]
 fn run(
     st: &mut Stitcher,
     mut grab: impl FnMut() -> io::Result<Vec<u8>>,
     mut idle: impl FnMut() -> Duration,
+    now: impl Fn() -> Instant,
     stop: &AtomicBool,
     period: Duration,
     (pw, ph): (u32, u32),
@@ -126,23 +139,24 @@ fn run(
 ) -> io::Result<Times> {
     let mut times = Times::default();
     let mut last: Option<Vec<u8>> = None;
-    let mut changed = Instant::now();
+    let mut changed = now();
     let (mut rejects, mut lost, mut full) = (0, false, false);
     // the preview: rows added since it was last made, and when that was
     let (mut stale, mut shown) = (false, None::<Instant>);
     while !stop.load(Ordering::Relaxed) {
         let start = Instant::now();
-        let busy = last.is_none() || idle() < SETTLE || changed.elapsed() < SETTLE;
+        let busy = last.is_none() || idle() < SETTLE || now() - changed < SETTLE;
         let mut news = false;
         if busy && !full {
             let frame = grab()?;
             times.grabs += 1;
             times.grab += start.elapsed();
             if last.as_deref() != Some(&frame[..]) {
-                changed = Instant::now();
+                changed = now();
+                let pushed = Instant::now();
                 let push = st.push(&frame);
                 times.pushes += 1;
-                times.push += changed.elapsed();
+                times.push += pushed.elapsed();
                 rejects = match push {
                     Push::Rejected => rejects + 1,
                     _ => 0,
@@ -156,7 +170,7 @@ fn run(
             }
         }
         // (a preview a few times a second is enough to look alive)
-        let due = stale && shown.is_none_or(|t| t.elapsed() >= PREVIEW_EVERY);
+        let due = stale && shown.is_none_or(|t| now() - t >= PREVIEW_EVERY);
         if news || due {
             let made = Instant::now();
             let preview = due.then(|| {
@@ -168,7 +182,7 @@ fn run(
                 }
             });
             if due {
-                (stale, shown) = (false, Some(made));
+                (stale, shown) = (false, Some(now()));
                 times.previews += 1;
                 times.preview += made.elapsed();
             }
@@ -296,7 +310,8 @@ mod tests {
 
     /// Runs the loop over the frames at scroll positions `at` (one per grab;
     /// the run stops after the last, or after twice as many rounds), the
-    /// user busy. Returns the updates, the grabs made and the image.
+    /// user busy and the clock still (so only the first preview is due).
+    /// Returns the updates, the grabs made and the image.
     fn drive(rig: &Rig, at: &[usize]) -> (Vec<Update>, usize, Crop) {
         let stop = AtomicBool::new(false);
         let grabs = Cell::new(0);
@@ -319,7 +334,19 @@ mod tests {
             }
             Duration::ZERO
         };
-        run(&mut st, grab, busy, &stop, Duration::ZERO, (200, 300), each).unwrap();
+        let t0 = Instant::now();
+        let still = || t0;
+        run(
+            &mut st,
+            grab,
+            busy,
+            still,
+            &stop,
+            Duration::ZERO,
+            (200, 300),
+            each,
+        )
+        .unwrap();
         let (rgba, width, height) = st.finish();
         let image = Crop {
             width,
@@ -342,8 +369,8 @@ mod tests {
             (400, truth.h)
         );
         assert!(image.rgba == truth.px);
-        // one update per step that added rows; the newest rows with the
-        // first (then at most every PREVIEW_EVERY)
+        // one update per step that added rows; the newest rows with the first
+        // (the clock stands still: no later preview is due)
         let heights: Vec<u32> = updates.iter().map(|u| u.height).collect();
         assert_eq!(heights.len(), 7, "{heights:?}");
         assert!(heights.windows(2).all(|h| h[0] < h[1]), "{heights:?}");
@@ -354,9 +381,12 @@ mod tests {
 
     #[test]
     fn the_preview_catches_up_once_the_user_pauses() {
+        // rows come in the first three grabs, 10 ms apart on the test's clock:
+        // the first preview at once, the catch-up one PREVIEW_EVERY later
         let rig = Rig::new(400, 4000, 500, 6, 40);
         let stop = AtomicBool::new(false);
-        let started = Instant::now();
+        let t0 = Instant::now();
+        let clock = Cell::new(t0);
         let n = Cell::new(0);
         let mut st = Stitcher::new(400, 500);
         let grab = || {
@@ -364,15 +394,26 @@ mod tests {
             Ok(rig.frame([0, 100, 200][(n.get() - 1).min(2)]).px)
         };
         let idle = || {
-            if started.elapsed() > PREVIEW_EVERY * 2 {
+            clock.set(clock.get() + Duration::from_millis(10)); // one round
+            if clock.get() - t0 > PREVIEW_EVERY * 2 {
                 stop.store(true, Ordering::Relaxed);
             }
             Duration::ZERO
         };
         let updates = RefCell::new(Vec::new());
         let each = |u| updates.borrow_mut().push(u);
-        let period = Duration::from_millis(10);
-        run(&mut st, grab, idle, &stop, period, (200, 300), each).unwrap();
+        let now = || clock.get();
+        run(
+            &mut st,
+            grab,
+            idle,
+            now,
+            &stop,
+            Duration::ZERO,
+            (200, 300),
+            each,
+        )
+        .unwrap();
         let updates = updates.into_inner();
         let last = updates.last().unwrap();
         assert_eq!(last.height as usize, rig.truth(200).h);
@@ -386,25 +427,42 @@ mod tests {
     #[test]
     fn nothing_is_grabbed_while_the_user_does_nothing() {
         // No input, and the area unchanged since the first grab: grabs stop
-        // `SETTLE` after it (a still screen costs nothing).
+        // `SETTLE` after it (a still screen costs nothing). 20 ms a round on
+        // the test's clock.
         let rig = Rig::new(400, 4000, 500, 2, 40);
         let stop = AtomicBool::new(false);
-        let started = Instant::now();
+        let t0 = Instant::now();
+        let clock = Cell::new(t0);
         let last_grab = Cell::new(Duration::ZERO);
         let mut st = Stitcher::new(400, 500);
         let grab = || {
-            last_grab.set(started.elapsed());
+            last_grab.set(clock.get() - t0);
             Ok(rig.frame(0).px)
         };
         let idle = || {
-            if started.elapsed() > SETTLE + Duration::from_millis(500) {
+            clock.set(clock.get() + Duration::from_millis(20));
+            if clock.get() - t0 > SETTLE + Duration::from_millis(500) {
                 stop.store(true, Ordering::Relaxed);
             }
             Duration::from_secs(60)
         };
-        let period = Duration::from_millis(20);
-        run(&mut st, grab, idle, &stop, period, (10, 10), |_| {}).unwrap();
-        assert!(last_grab.get() < SETTLE + Duration::from_millis(100));
+        let now = || clock.get();
+        run(
+            &mut st,
+            grab,
+            idle,
+            now,
+            &stop,
+            Duration::ZERO,
+            (10, 10),
+            |_| {},
+        )
+        .unwrap();
+        let last = last_grab.get();
+        assert!(
+            last + Duration::from_millis(20) >= SETTLE && last <= SETTLE,
+            "{last:?}"
+        );
         assert_eq!(st.height(), 500);
     }
 
@@ -450,6 +508,7 @@ mod tests {
             &mut st,
             grab,
             || Duration::ZERO,
+            Instant::now,
             &stop,
             Duration::ZERO,
             (9, 9),
