@@ -72,7 +72,17 @@ pub(crate) fn open(path: &Path) -> Result<Connection> {
     let mut db = Connection::open(path).map_err(err)?;
     db.busy_timeout(std::time::Duration::from_secs(2))
         .map_err(err)?;
-    db.pragma_update(None, "journal_mode", "WAL").map_err(err)?;
+    // Switching a new file to WAL answers "locked" at once, without the busy
+    // timeout, while another connection opens it too: try again for as long.
+    let mut tries = 0;
+    while let Err(e) = db.pragma_update(None, "journal_mode", "WAL") {
+        let busy = e.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy);
+        tries += 1;
+        if !busy || tries == 200 {
+            return Err(err(e));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     // deleted rows are overwritten, never left readable in free pages
     db.pragma_update(None, "secure_delete", "ON").map_err(err)?;
     let version = |db: &Connection| -> Result<usize> {
@@ -125,18 +135,18 @@ mod tests {
     /// ("table chats already exists" before).
     #[test]
     fn connections_opening_a_new_database_together_migrate_it_once() {
-        for round in 0..10 {
+        for round in 0..50 {
             let dir =
                 std::env::temp_dir().join(format!("oc-store-race-{}-{round}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             let file = dir.join("opencircle.db");
-            let start = std::sync::Barrier::new(4);
+            let start = std::sync::Barrier::new(8);
             let opened: Vec<_> = std::thread::scope(|s| {
                 let open = || {
                     start.wait();
                     open(&file).map(drop)
                 };
-                let threads: Vec<_> = (0..4).map(|_| s.spawn(open)).collect();
+                let threads: Vec<_> = (0..8).map(|_| s.spawn(open)).collect();
                 threads.into_iter().map(|t| t.join().unwrap()).collect()
             });
             assert!(opened.iter().all(Result::is_ok), "{opened:?}");
