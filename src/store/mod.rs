@@ -75,16 +75,22 @@ pub(crate) fn open(path: &Path) -> Result<Connection> {
     db.pragma_update(None, "journal_mode", "WAL").map_err(err)?;
     // deleted rows are overwritten, never left readable in free pages
     db.pragma_update(None, "secure_delete", "ON").map_err(err)?;
-    let version: usize = db
-        .pragma_query_value(None, "user_version", |r| r.get(0))
-        .map_err(err)?;
-    if version > MIGRATIONS.len() {
-        return Err(err("written by a newer OpenCircle"));
-    }
-    for (i, step) in MIGRATIONS.iter().enumerate().skip(version) {
-        let tx = db.transaction().map_err(err)?;
-        tx.execute_batch(step).map_err(err)?;
-        tx.pragma_update(None, "user_version", i + 1).map_err(err)?;
+    let version = |db: &Connection| -> Result<usize> {
+        let v: usize = (db.pragma_query_value(None, "user_version", |r| r.get(0))).map_err(err)?;
+        match v > MIGRATIONS.len() {
+            true => Err(err("written by a newer OpenCircle")),
+            false => Ok(v),
+        }
+    };
+    if version(&db)? < MIGRATIONS.len() {
+        // Another connection (a save thread, History) may be migrating it right
+        // now: take the write lock first, then read where it stands.
+        let tx = (db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate))
+            .map_err(err)?;
+        for (i, step) in MIGRATIONS.iter().enumerate().skip(version(&tx)?) {
+            tx.execute_batch(step).map_err(err)?;
+            tx.pragma_update(None, "user_version", i + 1).map_err(err)?;
+        }
         tx.commit().map_err(err)?;
     }
     Ok(db)
@@ -112,5 +118,29 @@ mod tests {
         drop(db);
         assert!(open(&file).is_err(), "a newer schema is not touched");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A new database opened by several connections at once (the chat's save
+    /// thread and History's list): one migrates, the others wait for it
+    /// ("table chats already exists" before).
+    #[test]
+    fn connections_opening_a_new_database_together_migrate_it_once() {
+        for round in 0..10 {
+            let dir =
+                std::env::temp_dir().join(format!("oc-store-race-{}-{round}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let file = dir.join("opencircle.db");
+            let start = std::sync::Barrier::new(4);
+            let opened: Vec<_> = std::thread::scope(|s| {
+                let open = || {
+                    start.wait();
+                    open(&file).map(drop)
+                };
+                let threads: Vec<_> = (0..4).map(|_| s.spawn(open)).collect();
+                threads.into_iter().map(|t| t.join().unwrap()).collect()
+            });
+            assert!(opened.iter().all(Result::is_ok), "{opened:?}");
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
