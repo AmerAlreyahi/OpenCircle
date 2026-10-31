@@ -284,6 +284,11 @@ production systems.
   is frozen"); once an area is picked, including a main-mode selection when the bar's Snip is pressed (no instant
   action ran), the outer glow disappears (else it reads as "the whole screen was captured") and the area gets the
   snip outline + handles instead of main mode's corner brackets.
+  Steps board replaces "Add capture" (owner, 2026-10-31, after trying N-50): the board of several captures of the
+  SAME frozen screen is pointless. Instead: "Add to steps" pins the capture into a small floating, movable board
+  (windows::floating); the overlay closes so the user can go to any app/screen; each next snip is added as the next
+  numbered step; reorder / delete; Copy = one image of all steps, numbered (for AI chats); a step can be copied /
+  saved alone. Still Pin leaves Labs (a visible Pin button on the Snip toolbar); live pin stays in Labs "Pins".
 - Snip look + size (owner, 2026-10-30, on the design's picked frame): the area's handles and its outline are
   SOFTER (smaller, rounder, quieter handles; a thinner, lower-contrast border than the design's v24 frame). Copy
   and Save keep the capture's full size by default: `snip.max_edge` default 0 (Original) instead of 1568 (a value
