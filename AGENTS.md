@@ -301,6 +301,10 @@ production systems.
   text line under the stroke start (fallback: about one line), or MANUAL from the Blur options (with "Auto").
   A tool's first click turns it on; a click on the active tool opens its options (outline on/off, size, ...);
   shapes, arrows, callouts default to NO outer outline. Ctrl+drag moves any annotation with any tool active.
+  Moving (owner, 2026-10-31, SUPERSEDES "Editor moving" 2026-10-24): an annotation moves ONLY with Ctrl+drag (any
+  tool) or with the Select tool; with a drawing tool a plain drag always draws, even over an annotation.
+  Remember (owner, 2026-10-31): the editor keeps the user's last colour, sizes, per-tool options (outline, fill,
+  blur size/Auto) and last tool across sessions.
   Long capture look (owner, 2026-10-31, "super bad" next to iTop): the live preview is SHARP (good downscale, never
   blurry): the bare image beside the area, no widget around it (no card, frame or surface), a little smaller than
   iTop's (~80 % of the free height); the
