@@ -2,10 +2,13 @@
 //! Graphics Capture: it keeps updating when the window is covered or moved),
 //! cropped to the part the user picked. The crop is kept relative to the
 //! window's client area (it follows a move and a resize, and scales with the
-//! window's DPI). The capture only delivers a frame when the window changed,
-//! and a changed frame is read at most every `MIN_GAP` (~10 fps): a still
-//! window costs nothing. Elsewhere: not supported (the UI hides it).
+//! window's DPI). A frame is read at most every `MIN_GAP` (~10 fps), and only
+//! after the capture delivered one; Windows 10 delivers them for a still window
+//! too, so a part that stopped changing is read once a second (`gap`) and an
+//! unchanged picture never reaches the pin. Elsewhere: not supported (the UI hides it).
 #![cfg_attr(not(windows), allow(dead_code))]
+#[cfg(windows)]
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -17,6 +20,9 @@ pub const SUPPORTED: bool = cfg!(windows);
 
 /// At most this often a frame is read (~10 fps).
 pub const MIN_GAP: Duration = Duration::from_millis(100);
+/// With no frame for this long, the source checks its window still exists (one call).
+#[cfg(windows)]
+const ALIVE: Duration = Duration::from_secs(1);
 
 /// The picked part of a window: its offset from the client area's top-left and
 /// its size, physical px at the window's `dpi` then.
@@ -86,10 +92,26 @@ pub fn crop(p: &Pick, g: &Geom, content: (u32, u32)) -> Option<[u32; 4]> {
     Some([x as u32, y as u32, w as u32, h as u32])
 }
 
-/// How long to wait before reading a changed frame, the last read at `last`.
-pub fn wait(last: Option<Instant>, now: Instant) -> Duration {
+/// The part shows no change after this many reads in a row: it is read only every `IDLE_GAP`.
+const QUIET: u32 = 10;
+/// A quiet part's gap between reads (the first change after a quiet spell shows within it).
+pub const IDLE_GAP: Duration = Duration::from_secs(1);
+
+/// The gap between reads after `unchanged` reads in a row showed the same picture: Windows 10
+/// delivers frames of a window that didn't change too (~10 a second here), so a still part
+/// is read once a second, a changing one at ~10 fps.
+pub fn gap(unchanged: u32) -> Duration {
+    if unchanged >= QUIET {
+        IDLE_GAP
+    } else {
+        MIN_GAP
+    }
+}
+
+/// How long to wait before reading a frame, the last read at `last`, `gap` apart.
+pub fn wait(last: Option<Instant>, now: Instant, gap: Duration) -> Duration {
     last.map_or(Duration::ZERO, |t| {
-        MIN_GAP.saturating_sub(now.saturating_duration_since(t))
+        gap.saturating_sub(now.saturating_duration_since(t))
     })
 }
 
@@ -175,16 +197,24 @@ fn run(
         }
     };
     let mut last = None;
+    let mut shown: Option<Vec<u8>> = None;
+    let mut unchanged = 0;
     loop {
-        match rx.recv() {
+        match rx.recv_timeout(ALIVE) {
             Ok(Wake::Frame) => {}
             Ok(Wake::Closed) => {
                 send(Event::Gone);
                 return;
             }
-            Ok(Wake::Stop) | Err(_) => return,
+            Ok(Wake::Stop) | Err(RecvTimeoutError::Disconnected) => return,
+            // the capture's Closed event never came on the VM (Windows 10): asked here
+            Err(RecvTimeoutError::Timeout) if !win::alive(window) => {
+                send(Event::Gone);
+                return;
+            }
+            Err(RecvTimeoutError::Timeout) => continue,
         }
-        std::thread::sleep(wait(last, Instant::now()));
+        std::thread::sleep(wait(last, Instant::now(), gap(unchanged)));
         // what came meanwhile: one read for all the frames
         for w in rx.try_iter() {
             match w {
@@ -198,7 +228,12 @@ fn run(
         }
         last = Some(Instant::now());
         match capture.read(window, &pick) {
+            // a change elsewhere in the window (or none: Windows 10 sends frames
+            // anyway): the pin has this picture already
+            Ok(Some(crop)) if shown.as_ref() == Some(&crop.rgba) => unchanged += 1,
             Ok(Some(crop)) => {
+                unchanged = 0;
+                shown = Some(crop.rgba.clone());
                 if !send(Event::Frame(crop)) {
                     return;
                 }
@@ -239,7 +274,7 @@ mod win {
     };
     use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
-    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+    use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, IsWindow};
     use windows::core::{IInspectable, Interface, factory};
 
     use super::{Geom, Pick, Wake};
@@ -248,6 +283,12 @@ mod win {
     const FORMAT: DirectXPixelFormat = DirectXPixelFormat::B8G8R8A8UIntNormalized;
     /// Two buffers: one being read, one the next change lands in.
     const BUFFERS: i32 = 2;
+
+    /// The window still exists.
+    pub fn alive(window: isize) -> bool {
+        // SAFETY: a plain query; any value is a valid argument.
+        unsafe { IsWindow(Some(HWND(window as *mut c_void))).as_bool() }
+    }
 
     pub fn geom(window: isize) -> Result<Geom, String> {
         let hwnd = HWND(window as *mut c_void);
@@ -565,15 +606,28 @@ mod tests {
     #[test]
     fn frames_are_read_at_most_every_min_gap() {
         let t = Instant::now();
-        assert_eq!(wait(None, t), Duration::ZERO, "the first at once");
-        assert_eq!(wait(Some(t), t), MIN_GAP);
+        let gap = MIN_GAP;
+        assert_eq!(wait(None, t, gap), Duration::ZERO, "the first at once");
+        assert_eq!(wait(Some(t), t, gap), MIN_GAP);
         assert_eq!(
-            wait(Some(t), t + Duration::from_millis(30)),
+            wait(Some(t), t + Duration::from_millis(30), gap),
             Duration::from_millis(70)
         );
-        assert_eq!(wait(Some(t), t + Duration::from_secs(5)), Duration::ZERO);
+        assert_eq!(
+            wait(Some(t), t + Duration::from_secs(5), gap),
+            Duration::ZERO
+        );
         // a clock that went back never waits longer than the gap
-        assert_eq!(wait(Some(t + Duration::from_secs(1)), t), MIN_GAP);
+        assert_eq!(wait(Some(t + Duration::from_secs(1)), t, gap), MIN_GAP);
+    }
+
+    #[test]
+    fn a_still_part_is_read_once_a_second_a_changing_one_at_10_fps() {
+        assert_eq!(gap(0), MIN_GAP);
+        assert_eq!(gap(QUIET - 1), MIN_GAP, "a short pause keeps the pace");
+        assert_eq!(gap(QUIET), IDLE_GAP);
+        assert_eq!(gap(u32::MAX), IDLE_GAP);
+        assert!(IDLE_GAP >= MIN_GAP * 10);
     }
 
     #[cfg(not(windows))]
