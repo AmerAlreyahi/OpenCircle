@@ -859,7 +859,8 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
         app.o.edit.as_ref().is_some_and(|e| e.editor.movable),
         "picked again"
     );
-    // Done (Enter): the stitched image opens in the editor, fitted
+    // Done (Enter): the stitched image opens picked, fitted on the screen
+    // (600 px high: shown whole, scaled down), with Snip's toolbar
     let _ = app.update(Message::Editor(editor::Message::Scroll));
     let _ = app.on_overlay(overlay::Event::Enter);
     let _ = app.update(Message::Snip(snip::Msg::Done(Ok(Crop {
@@ -867,13 +868,34 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
         height: 900,
         rgba: vec![255; 300 * 900 * 4],
     }))));
-    assert!(app.scroll().is_none() && app.o.selection.is_none());
+    assert!(app.scroll().is_none());
     let edit = app
         .o
         .edit
         .as_ref()
         .expect("the editor on the stitched image");
-    assert!(!edit.editor.movable, "the image, not the area");
+    assert!(
+        edit.editor.movable && edit.editor.own_image,
+        "picked: the image is the area"
+    );
+    let stops = crate::ui::screens::editor::toolbar::stops(&edit.editor);
+    assert!(!stops.contains(&editor::Message::Back), "Snip's toolbar");
+    let shown = edit.canvas_rect();
+    assert!(
+        shown.y >= 0.0 && shown.y + shown.height < 600.0,
+        "{shown:?}"
+    );
+    assert_eq!(
+        (edit.image().width, edit.image().height),
+        (300, 900),
+        "full size"
+    );
+    assert_eq!(app.o.selection.map(|s| s.area), Some(shown));
+    let dock = app.bar_target();
+    assert!(
+        dock.y >= shown.y + shown.height,
+        "docked under it: {dock:?}"
+    );
     // no auto-scroll here (Wayland) or no snip (Edit in place): the button is dimmed
     let mut app = open_app(800, 600, 1.0);
     app.select(area);
@@ -891,10 +913,50 @@ fn a_pick_is_picked_with_the_toolbar_and_copied_by_default() {
     let _ = copy::copied::image();
     let task = app.snip_next(Some(snip::Next::Edit(area)));
     let edit = app.o.edit.as_ref().expect("picked");
-    assert!(edit.editor.movable, "the live area");
+    assert!(
+        edit.editor.movable && !edit.editor.own_image,
+        "the live area"
+    );
     assert!(!app.snip_toast(), "no toast: the toolbar shows");
     run_task(&mut app, task);
     assert_eq!(copied_image(), Some((300, 200)), "and copied");
+}
+
+/// A recent capture (the Recent strip) opens picked on its own image: the
+/// whole image is the area, Snip's toolbar docks to it; taller than the
+/// screen, it is shown whole (scaled down), kept at full size.
+#[test]
+fn a_recent_capture_opens_picked_with_snips_toolbar() {
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = snipping(area);
+    let _ = copy::copied::image();
+    let crop = Crop {
+        width: 400,
+        height: 1500,
+        rgba: vec![200; 400 * 1500 * 4],
+    };
+    let task = app.on_snip(snip::Msg::Loaded(Ok(crop)));
+    let edit = app.o.edit.as_ref().expect("the editor");
+    assert!(edit.editor.movable && edit.editor.own_image);
+    assert!(
+        !edit.editor.bare(),
+        "its own pixels drawn, not the frozen frame's"
+    );
+    let stops = crate::ui::screens::editor::toolbar::stops(&edit.editor);
+    assert!(!stops.contains(&editor::Message::Back), "Snip's toolbar");
+    assert!(
+        !stops.contains(&editor::Message::Scroll),
+        "no page under it"
+    );
+    let shown = edit.canvas_rect();
+    assert!(
+        shown.y >= 0.0 && shown.y + shown.height < 600.0,
+        "{shown:?}"
+    );
+    assert_eq!(app.o.selection.map(|s| s.area), Some(shown));
+    assert!(app.snip_dock().is_some(), "its toolbar docks to it");
+    run_task(&mut app, task);
+    assert_eq!(copied_image(), Some((400, 1500)), "full size, copied");
 }
 
 #[test]

@@ -438,6 +438,9 @@ pub struct Editor {
     /// monitor joined) and its crop is the captured area, which moves and
     /// resizes (`area`). The host places its top-left pixel (`canvas::Lens`).
     pub movable: bool,
+    /// The live area is on a capture of its own (a stitched long capture, a
+    /// recent one), not on the frozen frame: its pixels are always painted.
+    pub own_image: bool,
     area_drag: Option<AreaDrag>,
     /// Snip's toolbar control Tab is on (its index in the toolbar's order);
     /// a press anywhere drops it.
@@ -476,6 +479,7 @@ impl Editor {
             bands: None,
             lock: None,
             movable: false,
+            own_image: false,
             area_drag: None,
             focus: None,
             nudged: false,
@@ -1282,7 +1286,7 @@ impl Editor {
     /// the area already shows its pixels, so no base is painted or drawn (a
     /// move or resize re-painted and re-uploaded the whole area every frame).
     pub(crate) fn bare(&self) -> bool {
-        self.movable && self.doc.items.is_empty() && self.pending.is_none()
+        self.movable && !self.own_image && self.doc.items.is_empty() && self.pending.is_none()
     }
 
     /// Repaints the pending item's region with it in place.

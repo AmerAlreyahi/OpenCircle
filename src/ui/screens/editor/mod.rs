@@ -77,12 +77,26 @@ impl Editing {
         e
     }
 
-    /// Scaled down to fit the work area `screen` (the screen above the
-    /// taskbar), with room for the toolbar docked under it (a scrolling capture).
+    /// A capture of its own (a stitched long capture, a recent capture, a
+    /// toast's across screens) in Snip's picked state: the live area is the
+    /// whole image (its handles cut it down), with Snip's toolbar docked to it.
+    /// Shown whole on the work area `screen` (the screen above the taskbar),
+    /// scaled down to leave room for the toolbar under it, never past its
+    /// on-screen size: an image taller than the screen is shown smaller, so
+    /// every edge and handle is in reach (Copy and Save keep its full size).
+    // ponytail: no pan / zoom in the editor; a very tall stitch shows small.
     pub fn fitted(crop: Crop, screen: Size, scale: f32) -> Self {
         let size = Size::new(crop.width as f32, crop.height as f32);
         let (origin, zoom) = fit(size, screen, 1.0 / scale);
-        Self::new(crop, origin, zoom)
+        let bounds = [0, 0, crop.width, crop.height];
+        let image = Image {
+            width: crop.width,
+            height: crop.height,
+            rgba: crop.rgba,
+        };
+        let mut e = Self::live(image, bounds, 1.0 / zoom, origin);
+        e.editor.own_image = true; // (its base, the whole image, was painted on open)
+        e
     }
 
     fn new(crop: Crop, origin: Point, zoom: f32) -> Self {
@@ -324,10 +338,10 @@ fn on_screen([x0, y0, x1, y1]: [u32; 4], scale: f32) -> Rectangle {
 use toolbar::size as toolbar_size;
 
 /// Where an image of `size` px goes on the work area `screen` and its zoom (at
-/// most `max_zoom`): centred, scaled down to leave room for the toolbar docked
-/// under it (the bar's bottom spot).
+/// most `max_zoom`): centred, scaled down to leave room for Snip's toolbar
+/// docked under it.
 fn fit(size: Size, screen: Size, max_zoom: f32) -> (Point, f32) {
-    let toolbar = toolbar_size(screen.width - 2.0 * GAP, false).height;
+    let toolbar = toolbar_size(screen.width - 2.0 * GAP, true).height;
     let room = Size::new(
         screen.width - 2.0 * GAP,
         screen.height - 2.0 * GAP - BOTTOM_GAP - toolbar,
@@ -403,7 +417,7 @@ mod tests {
     #[test]
     fn tall_captures_fit_the_screen_with_the_toolbar() {
         let screen = Size::new(1920.0, 1080.0);
-        let bar = toolbar_size(screen.width - 2.0 * GAP, false);
+        let bar = toolbar_size(screen.width - 2.0 * GAP, true);
         // A tall scrolling capture: scaled down, centred, toolbar room below.
         let (at, zoom) = fit(Size::new(780.0, 6000.0), screen, 1.0);
         assert!(zoom < 0.2, "{zoom}");

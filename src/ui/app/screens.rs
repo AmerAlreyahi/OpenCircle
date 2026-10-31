@@ -995,14 +995,18 @@ mod tests {
 
     /// Shift+Enter snips every screen: picked across them (After a capture's
     /// default, Both). Copy only: the toast pill, which closes the other
-    /// screens' windows.
+    /// screens' windows; its Edit opens the capture picked on this screen
+    /// (Snip's toolbar on the image, never the old in-place one).
     #[test]
     fn shift_enter_snips_every_screen_and_a_pill_closes_the_other_windows() {
         let (mut app, _) = snipped();
         app.o.labs = crate::labs::Labs::default();
         let _ = app.update(Message::Overlay(overlay::Event::ShiftEnter));
         let edit = app.o.edit.as_ref().expect("picked");
-        assert!(edit.editor.movable, "on the frozen frames");
+        assert!(
+            edit.editor.movable && !edit.editor.own_image,
+            "on the frozen frames"
+        );
         // 640 + 2880 physical px wide, the taller screen high
         let all = edit.image();
         assert_eq!((all.width, all.height), (3520, 1620));
@@ -1027,6 +1031,22 @@ mod tests {
             app.o.screens.is_empty(),
             "the pill leaves the screens to the user"
         );
+        // its Edit: picked on this screen, the whole capture, Snip's toolbar
+        let _ = app.on_snip(crate::ui::snip::Msg::Edit);
+        let edit = app.o.edit.as_ref().expect("the editor");
+        assert!(edit.editor.movable && edit.editor.own_image);
+        let stops = crate::ui::screens::editor::toolbar::stops(&edit.editor);
+        assert!(!stops.contains(&editor::Message::Back), "Snip's toolbar");
+        assert_eq!((edit.image().width, edit.image().height), (3520, 1620));
+        let shown = edit.canvas_rect();
+        assert!(Rectangle::with_size(app.o.screen).contains(shown.position()));
+        assert!(shown.x + shown.width <= app.o.screen.width);
+        assert_eq!(
+            app.o.selection.map(|s| s.area),
+            Some(shown),
+            "the outline on it"
+        );
+        assert!(app.snip_dock().is_some(), "its toolbar docks to it");
     }
 
     #[test]

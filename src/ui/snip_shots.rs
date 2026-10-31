@@ -150,6 +150,24 @@ fn states() -> Vec<(&'static str, App)> {
     out.push(("7a-long-start", long(0, false)));
     out.push(("7b-long", long(3240, false)));
     out.push(("7c-long-limit", long(MAX_HEIGHT, true)));
+    // 7d: Done: the stitched page (taller than the screen) picked, shown whole
+    let mut app = long(3240, false);
+    let picture = app.crop().unwrap();
+    let rows = picture.rgba.len();
+    let stitched = Crop {
+        width: picture.width,
+        height: picture.height * 4,
+        rgba: picture
+            .rgba
+            .iter()
+            .copied()
+            .cycle()
+            .take(rows * 4)
+            .collect(),
+    };
+    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(stitched))));
+    settle(&mut app);
+    out.push(("7d-long-done", app));
     // 8: the colour picker: started from the toolbar (its hint), then three
     // colours picked (the swatches, the Copied pill)
     let mut app = picked();

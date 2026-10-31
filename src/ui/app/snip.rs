@@ -77,8 +77,9 @@ impl App {
                 crate::history::recent::remember(&crop);
                 self.o.selection = None;
                 self.o.stroke.clear();
-                // Done opens the editor on it
-                whole.chain(self.snip_routed(crop, false, (false, true)))
+                // Done opens it picked, copied too unless "After a capture" is Editor
+                let (copy, _) = snip::route(config::current().snip.after);
+                whole.chain(self.snip_routed(crop, false, (copy, true)))
             }
             snip::Msg::Delay(secs) => {
                 let Some(id) = snip.delay(secs) else {
@@ -128,11 +129,7 @@ impl App {
                 if toast.in_place {
                     let _ = self.open_editor();
                 } else {
-                    self.o.edit = Some(Editing::fitted(
-                        toast.crop,
-                        work_area(self.o.screen, self.o.work_inset),
-                        self.o.scale,
-                    ));
+                    self.edit_fitted(toast.crop);
                 }
                 self.show()
             }
@@ -356,11 +353,7 @@ impl App {
             if in_place {
                 return Task::batch([copied, self.open_editor()]);
             }
-            self.o.edit = Some(Editing::fitted(
-                crop,
-                work_area(self.o.screen, self.o.work_inset),
-                self.o.scale,
-            ));
+            self.edit_fitted(crop);
             return copied;
         }
         // (a crop across screens is edited fitted from the toast: the other
@@ -381,6 +374,24 @@ impl App {
         })
         .map(move |()| Message::Snip(snip::Msg::ToastDone(id)));
         Task::batch([copied, self.pill_at_top().chain(done)])
+    }
+
+    /// A capture of its own (stitched, recent, a toast's across screens) in
+    /// Snip's picked state on this screen: the live area is its whole image,
+    /// with Snip's toolbar docked to it (`Editing::fitted`).
+    fn edit_fitted(&mut self, crop: Crop) {
+        let edit = Editing::fitted(
+            crop,
+            work_area(self.o.screen, self.o.work_inset),
+            self.o.scale,
+        );
+        let area = edit.canvas_rect();
+        self.o.panel = None;
+        self.o.view = self.o.view.reset(); // the editor works at 1x
+        self.o.zoom = None;
+        (self.o.bar_now, self.o.bar_glide) = (None, None); // it rises from the area
+        self.o.edit = Some(edit);
+        self.select(area); // the overlay's dim and outline follow it
     }
 
     /// Where a snip pick leads: the editor on the area, or a scrolling capture.

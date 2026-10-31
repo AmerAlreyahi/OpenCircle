@@ -56,6 +56,10 @@ impl App {
                     };
                     Editing::live(frame, bounds, self.o.scale, iced::Point::ORIGIN)
                 }
+                // The old in-place editor (Back / Crop / Drag): no entry reaches it
+                // since Snip is one flow (main mode's Snip runs `snip_here`) and
+                // every capture of its own opens picked (`Editing::fitted`).
+                // Hide, don't delete: kept, driven by its tests.
                 _ => Editing::in_place(crop, bounds, self.o.scale),
             };
             // Scrolling capture needs the page under the area: Snip, in place.
