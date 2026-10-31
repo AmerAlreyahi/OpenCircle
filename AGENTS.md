@@ -302,7 +302,8 @@ production systems.
   A tool's first click turns it on; a click on the active tool opens its options (outline on/off, size, ...);
   shapes, arrows, callouts default to NO outer outline. Ctrl+drag moves any annotation with any tool active.
   Long capture look (owner, 2026-10-31, "super bad" next to iTop): the live preview is SHARP (good downscale, never
-  blurry) in a plain slim frame beside the area, as tall as the free space (no heavy "Long capture" card); the
+  blurry): the bare image beside the area, no widget around it (no card, frame or surface), a little smaller than
+  iTop's (~80 % of the free height); the
   normal Snip toolbar stays (close, pin, share, Copy, Save) and Copy / Save finish the long capture (no separate
   Cancel / Done bar over the page); a short hint "Scroll to capture the page" beside the area.
 - Snip look + size (owner, 2026-10-30, on the design's picked frame): the area's handles and its outline are
