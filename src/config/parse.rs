@@ -126,7 +126,30 @@ impl Config {
             }
         }
         if let Some(t) = section(&root, "editor", &mut w) {
-            c.editor.line_assist = get(t, "editor.", "line_assist", d.editor.line_assist, &mut w);
+            let p = "editor.";
+            c.editor.line_assist = get(t, p, "line_assist", d.editor.line_assist, &mut w);
+            c.editor.tool = get_checked(t, p, "tool", None, &mut w, |t| match t {
+                Some(crate::editor::Tool::Crop) => Err("crop is never remembered".into()),
+                _ => Ok(()),
+            });
+            c.editor.colour =
+                get_checked(t, p, "colour", None, &mut w, |s: &Option<String>| {
+                    match s
+                        .as_deref()
+                        .is_none_or(|s| crate::editor::parse_hex(s).is_some())
+                    {
+                        true => Ok(()),
+                        false => Err("expected #RRGGBB".into()),
+                    }
+                });
+            c.editor.size = get(t, p, "size", None, &mut w);
+            let in_range = within(TEXT_SIZE, " px");
+            c.editor.text_size = get_checked(t, p, "text_size", None, &mut w, |n| {
+                n.as_ref().map_or(Ok(()), &in_range)
+            });
+            c.editor.outline = get(t, p, "outline", None, &mut w);
+            c.editor.fill = get(t, p, "fill", None, &mut w);
+            c.editor.blur_size = get(t, p, "blur_size", None, &mut w);
         }
         if root.get("ai").is_some_and(|v| !v.is_table()) {
             w.push(format!("ai: expected a table; using defaults{AI_OFF}"));

@@ -716,7 +716,7 @@ fn drag(e: &mut Editor, from: Point, via: &[Point], to: Point) {
 }
 
 /// Draws one item with every tool; returns how many items it made.
-/// (Each one clear of the last: a press on an item moves it.)
+/// (Each one clear of the last: a click on a text types into it.)
 fn draw_with_every_tool(e: &mut Editor) -> usize {
     let mut made = 0;
     for info in TOOLS {
@@ -796,72 +796,110 @@ fn every_tool_makes_one_undoable_item() {
     }
 }
 
-/// A press on an item moves it whatever the tool (no Select needed); a press on
-/// empty canvas draws; the selection's handles resize; undo puts it all back.
+/// Ctrl+drag the way the canvas sends it (`Message::PressMove`).
+fn ctrl_drag(e: &mut Editor, from: Point, to: Point) {
+    e.update(Message::PressMove(from));
+    e.update(Message::Move(to));
+    e.update(Message::Release);
+}
+
+/// A drawing tool's plain drag always draws, even over an annotation; only the
+/// Select tool or Ctrl+drag moves one (owner, 2026-10-31). The selection's
+/// handles still resize with any tool; undo puts it all back.
 #[test]
-fn any_tool_moves_what_it_is_pressed_on() {
+fn a_drawing_tool_draws_over_annotations_only_select_or_ctrl_moves() {
     use iced::mouse::Interaction;
     let mut e = editor(400, 300);
     e.update(Message::Tool(Tool::Rect));
     drag(&mut e, pt(50.0, 50.0), &[], pt(150.0, 120.0));
     let drawn = e.doc.items[0].clone();
-    assert_eq!(e.cursor(pt(150.0, 85.0)), Interaction::Move);
-    assert_eq!(e.cursor(pt(100.0, 85.0)), Interaction::Crosshair); // inside: draws
+    // The move cursor only with Ctrl held.
+    assert_eq!(e.cursor(pt(150.0, 85.0), false), Interaction::Crosshair);
+    assert_eq!(e.cursor(pt(150.0, 85.0), true), Interaction::Move);
+    assert_eq!(e.cursor(pt(300.0, 250.0), true), Interaction::Crosshair);
 
-    // Rect tool on its edge: moved, nothing new.
-    drag(&mut e, pt(150.0, 80.0), &[pt(160.0, 85.0)], pt(170.0, 90.0));
-    assert_eq!(e.doc.items.len(), 1);
-    let moved = select::moved(&drawn, iced::Vector::new(20.0, 10.0));
-    assert_eq!(e.doc.items[0], moved);
-    // The pen, a few px off the thin edge (now x = 170): moved again.
-    e.update(Message::Tool(Tool::Pen));
-    drag(&mut e, pt(174.0, 95.0), &[], pt(174.0, 105.0));
-    assert_eq!(e.doc.items.len(), 1);
-    assert_eq!(e.doc.items[0].frame().y, 70.0);
-    // Inside the box, clear of its edge: a new rectangle.
-    e.update(Message::Tool(Tool::Rect));
-    drag(&mut e, pt(100.0, 90.0), &[], pt(140.0, 120.0));
-    assert_eq!(e.doc.items.len(), 2);
+    // Every drawing tool, dragged from the box's edge: a new item, the box stays.
+    let mut n = 1;
+    for tool in [
+        Tool::Rect,
+        Tool::Ellipse,
+        Tool::Arrow,
+        Tool::Pen,
+        Tool::Highlighter,
+        Tool::Blur,
+        Tool::Redact,
+        Tool::Callout,
+    ] {
+        e.update(Message::Tool(tool));
+        e.doc.selected = None; // (the last one's handles are right there)
+        drag(
+            &mut e,
+            pt(150.0, 80.0),
+            &[pt(170.0, 95.0)],
+            pt(190.0, 110.0),
+        );
+        e.update(Message::Type("x".into())); // (a callout is typed)
+        e.update(Message::Finish);
+        n += 1;
+        assert_eq!(e.doc.items.len(), n, "{tool:?}: drew");
+        assert_eq!(e.doc.items[0], drawn, "{tool:?}: never moved");
+    }
+    for _ in 1..n {
+        e.update(Message::Undo);
+    }
+    assert_eq!(e.doc.items, vec![drawn.clone()]);
 
-    // A thin arrow: 3 px off its line moves it, 12 px off draws.
+    // A highlighter over an arrow draws (the owner's case), Ctrl+drag moves it.
     e.update(Message::Tool(Tool::Arrow));
     drag(&mut e, pt(50.0, 250.0), &[], pt(250.0, 250.0));
-    e.update(Message::Tool(Tool::Ellipse));
-    drag(&mut e, pt(200.0, 253.0), &[], pt(200.0, 243.0));
-    assert_eq!(e.doc.items.len(), 3);
-    assert!(matches!(e.doc.items[2].shape, Shape::Arrow { a, .. } if a == pt(50.0, 240.0)));
-    drag(&mut e, pt(200.0, 252.0), &[], pt(230.0, 280.0));
-    assert_eq!(e.doc.items.len(), 4);
-
-    // The selected item's corner handle resizes it with a drawing tool active.
-    e.update(Message::Tool(Tool::Rect));
+    let arrow = e.doc.items[1].clone();
+    e.update(Message::Tool(Tool::Highlighter));
     drag(
         &mut e,
-        pt(100.0, 90.0),
-        &[pt(105.0, 95.0)],
-        pt(110.0, 100.0),
-    ); // picks the inner box
-    assert_eq!(e.doc.selected, Some(1));
-    let f = e.doc.items[1].frame();
+        pt(100.0, 250.0),
+        &[pt(150.0, 251.0)],
+        pt(200.0, 250.0),
+    );
+    assert_eq!(e.doc.items.len(), 3);
+    assert_eq!(e.doc.items[1], arrow);
+    e.update(Message::Undo);
+    ctrl_drag(&mut e, pt(150.0, 250.0), pt(150.0, 270.0));
+    assert_eq!(
+        e.doc.items[1],
+        select::moved(&arrow, iced::Vector::new(0.0, 20.0))
+    );
+    assert_eq!(e.doc.items.len(), 2);
+
+    // Select moves by the edge, without Ctrl.
+    e.update(Message::Tool(Tool::Select));
+    assert_eq!(e.cursor(pt(150.0, 85.0), false), Interaction::Grab);
+    drag(&mut e, pt(150.0, 80.0), &[pt(160.0, 85.0)], pt(170.0, 90.0));
+    assert_eq!(e.doc.items.len(), 2);
+    let moved = select::moved(&drawn, iced::Vector::new(20.0, 10.0));
+    assert_eq!(e.doc.items[0], moved);
+
+    // The selected box's corner handle resizes it with a drawing tool active.
+    e.update(Message::Tool(Tool::Rect));
+    let f = e.doc.items[0].frame();
     let corner = pt(f.x + f.width, f.y + f.height);
     drag(&mut e, corner, &[], corner + iced::Vector::new(20.0, 10.0));
-    assert_eq!(e.doc.items.len(), 4);
+    assert_eq!(e.doc.items.len(), 2);
     assert_eq!(
-        e.doc.items[1].frame().size(),
+        e.doc.items[0].frame().size(),
         f.size() + Size::new(20.0, 10.0)
     );
 
-    // Undo: resize, inner move, ellipse, arrow move, arrow, inner box, pen move,
-    // rect move.
-    for _ in 0..8 {
+    // Undo: resize, select move, Ctrl move, arrow.
+    for _ in 0..4 {
         e.update(Message::Undo);
     }
     assert_eq!(e.doc.items, vec![drawn]);
 }
 
-/// A text tool's click on its own text types into it, a drag moves it.
+/// A text tool's click on its own text types into it; a drag there never moves
+/// it (it starts a new text); Ctrl+drag moves it.
 #[test]
-fn text_moves_on_drag_and_edits_on_click() {
+fn text_edits_on_click_and_moves_only_with_ctrl() {
     let mut e = editor(300, 200);
     e.update(Message::Tool(Tool::Text));
     drag(&mut e, pt(20.0, 20.0), &[], pt(20.0, 20.0));
@@ -873,23 +911,29 @@ fn text_moves_on_drag_and_edits_on_click() {
     let c = e.doc.items[0].frame().center(); // clear of its corner handles
     let to = c + iced::Vector::new(40.0, 30.0);
     drag(&mut e, c, &[], to);
+    assert!(matches!(e.doc.items[0].shape, Shape::Text { at: a, .. } if a == at));
+    assert!(e.typing(), "a new text is typed");
+    e.update(Message::Finish); // empty: dropped
+    assert_eq!(e.doc.items.len(), 1);
+    // A click types into it.
+    drag(&mut e, c, &[], c);
+    e.update(Message::Type("!".into()));
+    e.update(Message::Finish);
+    assert!(matches!(&e.doc.items[0].shape, Shape::Text { text, .. } if text == "Hi!"));
+    // Ctrl+drag moves it.
+    ctrl_drag(&mut e, c, to);
     let Shape::Text { at: moved, .. } = e.doc.items[0].shape else {
         panic!()
     };
     assert!(moved.distance(at + iced::Vector::new(40.0, 30.0)) < 0.01);
-    assert!(!e.typing());
-    drag(&mut e, to, &[], to);
-    e.update(Message::Type("!".into()));
-    e.update(Message::Finish);
-    assert!(matches!(&e.doc.items[0].shape, Shape::Text { text, .. } if text == "Hi!"));
     assert_eq!(e.doc.items.len(), 1);
 }
 
 /// Pen and highlighter strokes show no selection frame or handles (drawn,
-/// selected or moved); a drag on the stroke moves it, with their own tool too;
-/// undo puts it back, Delete removes it. Shapes keep their frame.
+/// selected or moved); their own tool draws over them, Ctrl+drag moves one by
+/// the stroke, undo puts it back, Delete removes it. Shapes keep their handles.
 #[test]
-fn freehand_strokes_have_no_frame_and_move_by_the_stroke() {
+fn freehand_strokes_have_no_frame_and_move_by_the_stroke_with_ctrl() {
     let canvas_px = |e: &Editor| crate::ui::kit::testing::shot::save("", e.canvas(), e.size());
     let wave = |y: f32| -> Vec<Point> {
         (0..40)
@@ -918,36 +962,31 @@ fn freehand_strokes_have_no_frame_and_move_by_the_stroke() {
             selected,
             "{tool:?}: no frame or handles drawn"
         );
-        assert!(e.cursor(w[20]).eq(&iced::mouse::Interaction::Move));
+        assert_eq!(e.cursor(w[20], true), iced::mouse::Interaction::Move);
+        assert_eq!(e.cursor(w[20], false), iced::mouse::Interaction::Crosshair);
 
-        // A press on the stroke (2 px off) with its own tool: moved, nothing new.
+        // A drag on the stroke (2 px off) with its own tool: a new stroke.
         let on = w[20] + iced::Vector::new(0.0, 2.0);
-        drag(
-            &mut e,
-            on,
-            &[on + iced::Vector::new(5.0, 20.0)],
-            on + iced::Vector::new(10.0, 70.0),
-        );
+        let away = on + iced::Vector::new(10.0, 70.0);
+        drag(&mut e, on, &[on + iced::Vector::new(5.0, 20.0)], away);
+        assert_eq!(e.doc.items.len(), 2, "{tool:?}");
+        assert_eq!(e.doc.items[0], drawn);
+        e.update(Message::Undo);
+        // Ctrl+drag: moved, nothing new.
+        ctrl_drag(&mut e, on, away);
         assert_eq!(e.doc.items.len(), 1, "{tool:?}");
         let (now, was) = (e.doc.items[0].frame(), drawn.frame());
         assert!((now.x - was.x - 10.0).abs() < 0.01 && (now.y - was.y - 70.0).abs() < 0.01);
         assert!(e.framed().is_none());
         e.update(Message::Undo);
         assert_eq!(e.doc.items[0], drawn);
-        // Off the stroke: a new one.
-        let w2 = wave(150.0);
-        drag(&mut e, w2[0], &w2[1..39], w2[39]);
-        assert_eq!(e.doc.items.len(), 2);
-        // Delete removes the last one touched.
-        drag(&mut e, on, &[], on + iced::Vector::new(0.0, 10.0));
+        // Delete removes the one Ctrl picked up.
+        e.update(Message::PressMove(on));
+        e.update(Message::Release);
         e.update(Message::Delete);
-        assert_eq!(e.doc.items.len(), 1);
-        assert!(
-            e.doc.items[0].frame().y > 130.0,
-            "the second stroke is left"
-        );
+        assert!(e.doc.items.is_empty(), "{tool:?}");
     }
-    // A box keeps its frame.
+    // A box keeps its handles.
     let mut e = editor(300, 200);
     e.update(Message::Tool(Tool::Rect));
     drag(&mut e, pt(40.0, 40.0), &[], pt(140.0, 120.0));
@@ -2127,6 +2166,82 @@ fn ctrl_drag_moves_with_any_tool() {
     e.update(Message::Move(pt(300.0, 250.0)));
     e.update(Message::Release);
     assert_eq!(e.doc.items.len(), 3);
+}
+
+/// The editor remembers its tool, colour, sizes and options (owner,
+/// 2026-10-31): saved through the config file, the next editor opens on them;
+/// pointer messages never count as a choice; Crop is never the opening tool.
+#[test]
+fn the_editor_opens_on_the_last_tool_colour_sizes_and_options() {
+    let mut e = editor(200, 100);
+    let fresh = e.remembered();
+    e.update(Message::Press(pt(10.0, 10.0)));
+    e.update(Message::Release);
+    assert_eq!(
+        e.saved,
+        crate::config::EditorConfig::default(),
+        "no choice yet"
+    );
+    let purple = style::ANNOTATION[7].into_rgba8();
+    e.update(Message::Tool(Tool::Arrow));
+    e.update(Message::Colour(purple));
+    e.update(Message::Width(Width::Thick));
+    e.update(Message::Outline(true));
+    e.update(Message::Fill(true));
+    e.update(Message::TextSize(52.0));
+    e.update(Message::BlurSize(Some(Width::Thin)));
+    e.update(Message::Tool(Tool::Highlighter));
+    e.update(Message::Tool(Tool::Crop)); // a step: the tool before it stays
+    assert_ne!(e.saved, fresh);
+    assert_eq!(e.saved, e.remembered(), "every choice is remembered");
+
+    let dir = std::env::temp_dir().join(format!("oc-editor-remember-{}", std::process::id()));
+    let path = dir.join("config.toml");
+    let c = crate::config::Config {
+        editor: e.remembered(),
+        ..Default::default()
+    };
+    c.save_to(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("tool = \"highlighter\"") && text.contains("colour = \"#AF52DE\""),
+        "{text}"
+    );
+    let (back, w) = crate::config::Config::load_from(&path);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(w.is_empty(), "{w:?}");
+
+    let r = Editor::restored(checker(200, 100), 1.0, back.editor);
+    assert_eq!(r.tool, Tool::Highlighter);
+    assert_eq!((r.colour, r.hex.as_str()), (purple, "#AF52DE"));
+    assert_eq!((r.width, r.text_size), (Width::Thick, 52.0));
+    assert_eq!(
+        (r.outline, r.fill, r.blur_size),
+        (true, true, Some(Width::Thin))
+    );
+    assert!(!r.assist, "line help too");
+    // A new arrow gets them.
+    let mut r = r;
+    r.update(Message::Tool(Tool::Arrow));
+    drag(&mut r, pt(20.0, 20.0), &[], pt(120.0, 60.0));
+    let item = &r.doc.items[0];
+    assert_eq!((item.colour, item.outline), (purple, true));
+    assert_eq!(item.width, Width::Thick.stroke());
+
+    // Nothing remembered (an old file): the defaults.
+    let d = Editor::restored(checker(20, 20), 1.0, Default::default());
+    assert_eq!(
+        (d.tool, d.width, d.text_size),
+        (Tool::Arrow, Width::Medium, 26.0)
+    );
+    assert_eq!(d.colour, style::ANNOTATION[0].into_rgba8());
+    assert_eq!(
+        (d.outline, d.fill, d.blur_size, d.assist),
+        (false, false, None, true)
+    );
+    // Auto blur is remembered as no key.
+    r.update(Message::BlurSize(None));
+    assert_eq!(r.saved.blur_size, None);
 }
 
 // ---- snapshots and timing (run by hand) -------------------------------------------

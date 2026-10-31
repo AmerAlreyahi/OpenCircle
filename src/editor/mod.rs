@@ -41,10 +41,15 @@ pub use text::{Back as TextBack, Font as TextFont, Style as TextStyle, free_glyp
 use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::actions::Crop;
+use crate::config::EditorConfig;
 use document::int_rect;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Tool {
     Select,
     Crop,
@@ -205,7 +210,8 @@ pub fn info(tool: Tool) -> &'static ToolInfo {
 }
 
 /// Stroke weight, in display px (as seen on screen, whatever the zoom).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Width {
     Thin,
     Medium,
@@ -469,21 +475,35 @@ pub struct Editor {
     pub focus: Option<usize>,
     /// Snip's arrow-key hint shows (after the first arrow key).
     pub nudged: bool,
+    /// The options as last remembered (`remember`).
+    saved: EditorConfig,
 }
 
 impl Editor {
     /// Opens `image`, shown at `zoom` display px per image px (e.g. 1 / the
-    /// monitor's scale factor, so the crop shows at its on-screen size).
+    /// monitor's scale factor, so the crop shows at its on-screen size), with
+    /// the user's last tool and options (owner, 2026-10-31).
     pub fn new(image: Image, zoom: f32) -> Self {
-        let colour = style::ANNOTATION[0].into_rgba8();
+        Self::restored(image, zoom, remembered())
+    }
+
+    /// `new` with `saved`'s tool and options (a missing or bad one: its default).
+    pub(crate) fn restored(image: Image, zoom: f32, saved: EditorConfig) -> Self {
+        let colour = (saved.colour.as_deref())
+            .and_then(parse_hex)
+            .unwrap_or(style::ANNOTATION[0].into_rgba8());
+        let width = saved.size.unwrap_or(Width::Medium);
         let mut editor = Editor {
             doc: Document::new(image),
-            tool: Tool::Arrow,
+            tool: saved
+                .tool
+                .filter(|&t| t != Tool::Crop)
+                .unwrap_or(Tool::Arrow),
             colour,
-            width: Width::Medium,
-            outline: false,
-            fill: false,
-            text_size: Width::Medium.font(),
+            width,
+            outline: saved.outline.unwrap_or(false),
+            fill: saved.fill.unwrap_or(false),
+            text_size: saved.text_size.map_or(width.font(), f32::from),
             text_style: TextStyle::default(),
             menu: None,
             hex: hex(colour),
@@ -498,20 +518,56 @@ impl Editor {
             cropping: None,
             dragged: None,
             shared: None,
-            assist: crate::config::current().editor.line_assist,
+            assist: saved.line_assist,
             scroll: false,
             capturing: false,
             lock: None,
-            blur_size: None,
+            blur_size: saved.blur_size,
             bands: None,
             movable: false,
             own_image: false,
             area_drag: None,
             focus: None,
             nudged: false,
+            saved,
         };
         editor.refresh();
         editor
+    }
+
+    /// The tool and options to remember: `saved` with this editor's own.
+    pub(crate) fn remembered(&self) -> EditorConfig {
+        EditorConfig {
+            line_assist: self.assist,
+            // Crop is a step, not a tool to open on.
+            tool: (self.tool != Tool::Crop)
+                .then_some(self.tool)
+                .or(self.saved.tool),
+            colour: Some(hex(self.colour)),
+            size: Some(self.width),
+            text_size: Some(self.text_size.round().clamp(8.0, 96.0) as u8),
+            outline: Some(self.outline),
+            fill: Some(self.fill),
+            blur_size: self.blur_size,
+        }
+    }
+
+    pub fn update(&mut self, message: Message) -> Option<Output> {
+        // Pointer messages never write (a press can pick up an item's options;
+        // they are remembered with the next choice).
+        let pointer = matches!(
+            message,
+            Message::Press(_) | Message::PressMove(_) | Message::Move(_) | Message::Release
+        );
+        let out = self.handle(message);
+        if !pointer {
+            let now = self.remembered();
+            if now != self.saved {
+                self.saved = now.clone();
+                remember(now);
+            }
+        }
+        out
     }
 
     /// Adds `image` (another capture) to the board.
@@ -530,7 +586,7 @@ impl Editor {
         self.zoom = zoom;
     }
 
-    pub fn update(&mut self, message: Message) -> Option<Output> {
+    fn handle(&mut self, message: Message) -> Option<Output> {
         match message {
             Message::Press(p) => {
                 (self.focus, self.nudged) = (None, false);
@@ -621,7 +677,6 @@ impl Editor {
             }
             Message::Assist => {
                 self.assist = !self.assist;
-                save_assist(self.assist);
             }
             Message::Legend => {
                 self.commit();
@@ -957,8 +1012,7 @@ impl Editor {
         }
         if let Some(i) = self.grabbed(p) {
             self.doc.selected = Some(i);
-            let edits = edits(self.tool, &self.doc.items[i], p, reach);
-            self.pick_up(i, edits, p);
+            self.pick_up(i, true, p);
             return;
         }
         match self.tool {
@@ -974,19 +1028,12 @@ impl Editor {
         }
     }
 
-    /// The item a press at `p` moves instead of drawing: every drawing tool moves
-    /// what is painted under it (a click on one of its own text items types into
-    /// it), the pen and highlighter their own strokes too (owner: drag a drawing
-    /// by holding it). The blur brush paints over its own strokes (a second
-    /// pass); crop always crops.
+    /// The item a click at `p` types into instead of drawing: one of the
+    /// tool's own text items (`edits`). Nothing else: a drawing tool never
+    /// moves what is under it; only Ctrl+drag or Select move (owner, 2026-10-31).
     fn grabbed(&self, p: Point) -> Option<usize> {
-        if self.tool == Tool::Crop {
-            return None;
-        }
         let i = select::grab(&self.doc.items, p, GRAB / self.zoom)?;
-        let second_pass =
-            self.tool == Tool::Blur && matches!(self.doc.items[i].shape, Shape::Blur { .. });
-        (!second_pass).then_some(i)
+        edits(self.tool, &self.doc.items[i], p, REACH / self.zoom).then_some(i)
     }
 
     /// Starts moving item `i` (`edits`: a click without a move types into it).
@@ -1075,6 +1122,20 @@ impl Editor {
                 _ => Width::Medium.brush() / self.zoom,
             };
             p = blur::follow(held, p, brush);
+        }
+        // A press on a text item the tool types into that turns into a drag
+        // draws a new item from there: a drawing tool never moves one.
+        if let Some(Pending {
+            drag: Drag::Move { edits: true, .. },
+            start,
+            ..
+        }) = self.pending
+            && p.distance(start) * self.zoom >= SLOP
+        {
+            self.pending = None;
+            self.doc.selected = None;
+            let item = self.create(start);
+            self.begin(None, item, Drag::Draw, start);
         }
         let Some(pending) = &mut self.pending else {
             return;
@@ -1380,13 +1441,40 @@ pub fn has_options(slot: Tool) -> bool {
     )
 }
 
-/// Remembers the line help choice (`editor.line_assist`) for the next editor.
-fn save_assist(on: bool) {
+/// The editor's options as last changed in this run (the next editor opens on
+/// them even before the file is written), else the config's.
+static LAST: Mutex<Option<EditorConfig>> = Mutex::new(None);
+/// A write of `LAST` is waiting (`remember`).
+static WRITE_DUE: AtomicBool = AtomicBool::new(false);
+/// Changes within this long are written once.
+const SAVE_AFTER: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn remembered() -> EditorConfig {
+    let last = LAST.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    last.unwrap_or_else(|| crate::config::current().editor)
+}
+
+/// Remembers the editor's options (`[editor]`) for the next editor: at once in
+/// memory; the file through the one writer, off the UI thread, `SAVE_AFTER`
+/// the first of a burst of changes (one write for all of them).
+fn remember(options: EditorConfig) {
     if cfg!(test) {
-        return; // never the user's config file
+        return; // never the user's config file, nor another test's editor
     }
-    std::thread::spawn(move || {
-        if let Err(e) = crate::config::update(|c| c.editor.line_assist = on) {
+    *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some(options);
+    if WRITE_DUE.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(|| {
+        std::thread::sleep(SAVE_AFTER);
+        WRITE_DUE.store(false, Ordering::Release);
+        // Read under the writer's lock: the last write always has the newest.
+        let written = crate::config::update(|c| {
+            if let Some(last) = LAST.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+                c.editor = last;
+            }
+        });
+        if let Err(e) = written {
             crate::log!("[opencircle] config: {e}");
         }
     });
@@ -1473,7 +1561,7 @@ fn hex(c: [u8; 4]) -> String {
 }
 
 /// `#RRGGBB` (the `#` optional) as an opaque colour.
-fn parse_hex(s: &str) -> Option<[u8; 4]> {
+pub(crate) fn parse_hex(s: &str) -> Option<[u8; 4]> {
     let s = s.trim().trim_start_matches('#');
     if s.len() != 6 || !s.is_ascii() {
         return None;

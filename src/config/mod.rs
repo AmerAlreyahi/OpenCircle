@@ -78,6 +78,16 @@
 //! long_max = 20000                  # a long capture stops at this height: 5000 | 10000 | 20000 px
 //!                                   # (written only when not 20000)
 //!
+//! [editor]                          # the annotation editor; all but line_assist written
+//! line_assist = true                # only once the editor changed them (missing = default)
+//! tool = "arrow"                    # the last tool (a Tool, snake_case; never crop)
+//! colour = "#FF3B30"                # the last colour
+//! size = "medium"                   # thin | medium | thick: the shared size
+//! text_size = 26                    # the Text tool's size, 8-96 px
+//! outline = false                   # shapes, arrows, callouts get an outline
+//! fill = false                      # rectangles and ellipses get a tint
+//! blur_size = "medium"              # the blur brush: thin | medium | thick; missing = Auto
+//!
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
 //! snip = false                      # until 0.1.2 Snip's switch; read and written, ignored since
 //! editor = false                    # 0.1.3 (Snip and its editor are on for everyone)
@@ -717,16 +727,49 @@ impl Default for LookConfig {
     }
 }
 
-/// The annotation editor's remembered options.
+/// The annotation editor's remembered options. The others are written only once
+/// the editor changed them (`None` = the editor's default; the default file stays
+/// as frozen).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EditorConfig {
     /// The blur brush keeps to the text line it starts on.
     pub line_assist: bool,
+    /// The last tool (never Crop).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<crate::editor::Tool>,
+    /// `#RRGGBB`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colour: Option<String>,
+    /// The shared size (pen, arrows, shapes, steps, callouts).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<crate::editor::Width>,
+    /// The Text tool's font size, display px (`TEXT_SIZE`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_size: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill: Option<bool>,
+    /// The blur brush's picked size; `None` = Auto.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blur_size: Option<crate::editor::Width>,
 }
+
+/// `editor.text_size`'s range (display px).
+pub const TEXT_SIZE: std::ops::RangeInclusive<u8> = 8..=96;
 
 impl Default for EditorConfig {
     fn default() -> Self {
-        EditorConfig { line_assist: true }
+        EditorConfig {
+            line_assist: true,
+            tool: None,
+            colour: None,
+            size: None,
+            text_size: None,
+            outline: None,
+            fill: None,
+            blur_size: None,
+        }
     }
 }
 
@@ -1551,6 +1594,40 @@ mod tests {
             c.editor.line_assist && w[0].starts_with("editor.line_assist"),
             "{w:?}"
         );
+        // The remembered tool and options: read back; a bad one is its default.
+        let (c, w) = Config::parse(
+            "[editor]\ntool = \"step\"\ncolour = \"#AF52DE\"\nsize = \"thin\"\ntext_size = 38\n\
+             outline = true\nfill = false\nblur_size = \"thick\"\n",
+        );
+        assert!(w.is_empty(), "{w:?}");
+        use crate::editor::{Tool, Width};
+        assert_eq!(
+            (c.editor.tool, c.editor.colour.as_deref(), c.editor.size),
+            (Some(Tool::Step), Some("#AF52DE"), Some(Width::Thin))
+        );
+        assert_eq!(
+            (c.editor.text_size, c.editor.outline, c.editor.fill),
+            (Some(38), Some(true), Some(false))
+        );
+        assert_eq!(c.editor.blur_size, Some(Width::Thick));
+        let (c, w) = Config::parse(
+            "[editor]\ntool = \"crop\"\ncolour = \"purple\"\nsize = \"huge\"\ntext_size = 200\n\
+             outline = 1\nfill = \"no\"\nblur_size = 3\n",
+        );
+        assert_eq!(c.editor, EditorConfig::default());
+        assert_eq!(w.len(), 7, "{w:?}");
+        for key in [
+            "tool",
+            "colour",
+            "size",
+            "text_size",
+            "outline",
+            "fill",
+            "blur_size",
+        ] {
+            let key = format!("editor.{key}");
+            assert!(w.iter().any(|w| w.starts_with(&key)), "{key}: {w:?}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

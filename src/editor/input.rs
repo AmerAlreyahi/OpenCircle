@@ -11,8 +11,8 @@ use super::{
 
 impl Editor {
     /// The item that shows its handles (never a frame): the one drawn, moved
-    /// or typed, else the selected one. Pen and highlighter strokes never do:
-    /// they are moved by dragging the stroke itself.
+    /// or typed, else the selected one. Pen and highlighter strokes never do
+    /// (Ctrl+drag or Select moves them by the stroke itself).
     pub(crate) fn framed(&self) -> Option<&super::Item> {
         let item = (self.pending.as_ref().map(|p| &p.item))
             .or_else(|| self.doc.selected.and_then(|i| self.doc.items.get(i)))?;
@@ -20,8 +20,9 @@ impl Editor {
     }
 
     /// The pointer over `p` (image px): grabbing while something moves; a resize
-    /// cursor on the selection's handles; a move cursor on what a press moves.
-    pub(crate) fn cursor(&self, p: Point) -> mouse::Interaction {
+    /// cursor on the selection's handles; a move cursor on what a press moves
+    /// (with Select, or `ctrl` held).
+    pub(crate) fn cursor(&self, p: Point, ctrl: bool) -> mouse::Interaction {
         use mouse::Interaction as I;
         match self.pending.as_ref().map(|p| &p.drag) {
             Some(Drag::Move { .. }) => return I::Grabbing,
@@ -53,7 +54,8 @@ impl Editor {
             (None, Tool::Select) if select::hit(&self.doc.items, p, reach).is_some() => I::Grab,
             (None, Tool::Select) if self.movable && self.doc.view().contains(p) => I::Grab,
             (None, Tool::Select) => I::default(),
-            (None, _) if self.grabbed(p).is_some() => I::Move,
+            // Ctrl+drag moves what is under it (`Message::PressMove`).
+            (None, _) if ctrl && select::hit(&self.doc.items, p, reach).is_some() => I::Move,
             (None, Tool::Text | Tool::Label | Tool::Callout) => I::Text,
             (None, _) => I::Crosshair,
         }

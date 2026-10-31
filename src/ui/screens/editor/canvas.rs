@@ -275,7 +275,7 @@ impl canvas::Program<Message> for Input<'_> {
 
     fn mouse_interaction(
         &self,
-        _pointer: &Pointer,
+        pointer: &Pointer,
         bounds: Rectangle,
         cursor: Cursor,
     ) -> mouse::Interaction {
@@ -287,8 +287,8 @@ impl canvas::Program<Message> for Input<'_> {
             return mouse::Interaction::Crosshair;
         }
         match (e.movable, cursor.position()) {
-            (true, Some(p)) => e.cursor(self.image_at(p)),
-            _ => e.cursor(e.to_image(at)),
+            (true, Some(p)) => e.cursor(self.image_at(p), pointer.ctrl),
+            _ => e.cursor(e.to_image(at), pointer.ctrl),
         }
     }
 }
