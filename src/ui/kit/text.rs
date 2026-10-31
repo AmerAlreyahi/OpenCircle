@@ -11,7 +11,7 @@ use super::tokens::Role;
 /// Every font the UI registers at start (`ui::run`; the headless renders too):
 /// the icons, Inter (the UI font where Segoe UI is missing), Noto Sans
 /// Arabic (Arabic where the UI font has none) and the design's mono font
-/// (`MONO`: a Latin subset of JetBrains Mono, weights 400-600, plus ▴ ▾ ✓ →).
+/// (`MONO`: a Latin subset of JetBrains Mono, weights 400-600, plus ▴ ▾ ✓ → Δ).
 /// OFL licences in `assets/fonts/`.
 pub const FONTS: [&[u8]; 4] = [
     super::icon::FONT_BYTES,
@@ -359,5 +359,29 @@ mod tests {
         drop(fonts);
         wrong.dedup();
         assert!(wrong.is_empty(), "{wrong:?}");
+    }
+
+    /// The mono readouts' signs (the ruler's `·` and `Δ`) are in the bundled
+    /// subset: a sign it lacks falls to whatever face the machine has, and is
+    /// drawn another width there (CI's goldens differed from a dev machine's).
+    #[test]
+    fn mono_text_signs_come_from_the_mono_face() {
+        const SIGNS: &str = "500 px · Δx 300 · Δy 400 · 333 at 150 % ▴▾✓→";
+        super::load();
+        let mut fonts = iced::advanced::graphics::text::font_system()
+            .write()
+            .unwrap();
+        let fs = fonts.raw();
+        let mut buf = Buffer::new(fs, Metrics::new(12.0, 18.0));
+        let attrs = Attrs::new().family(Family::Name("JetBrains Mono"));
+        buf.set_text(fs, SIGNS, &attrs, Shaping::Advanced, None);
+        buf.shape_until_scroll(fs, false);
+        let other: Vec<_> = (buf.layout_runs())
+            .flat_map(|r| r.glyphs.iter())
+            .filter(|g| fs.db().face(g.font_id).unwrap().families[0].0 != "JetBrains Mono")
+            .map(|g| &SIGNS[g.start..g.end])
+            .collect();
+        drop(fonts);
+        assert!(other.is_empty(), "not in the mono face: {other:?}");
     }
 }
