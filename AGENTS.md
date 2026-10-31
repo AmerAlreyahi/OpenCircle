@@ -280,6 +280,10 @@ production systems.
   same flow and ends in the same soft look-coloured outline + docked Snip toolbar; the old in-place editor toolbar
   (Back / Crop / Drag chip, plain white box) is never shown for Snip. Settings shows ONE "Snip" shortcut row (no
   separate region / window / full-screen rows; their config keys stay read: hide, don't delete).
+  Glow vs outline (owner, 2026-10-31): the screen-edge glow shows only while nothing is picked (it says "the screen
+  is frozen"); once an area is picked, including a main-mode selection when the bar's Snip is pressed (no instant
+  action ran), the outer glow disappears (else it reads as "the whole screen was captured") and the area gets the
+  snip outline + handles instead of main mode's corner brackets.
 - Snip look + size (owner, 2026-10-30, on the design's picked frame): the area's handles and its outline are
   SOFTER (smaller, rounder, quieter handles; a thinner, lower-contrast border than the design's v24 frame). Copy
   and Save keep the capture's full size by default: `snip.max_edge` default 0 (Original) instead of 1568 (a value
