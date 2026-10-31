@@ -4,11 +4,10 @@
 //! colour_picker` / `ruler`, a Settings > Shortcuts row); both are Snip's,
 //! behind its Labs switch. Over every frozen screen the pointer is on, they
 //! read the frame in its true pixels (`frame px = logical px x scale`); the
-//! toolbar sits on the starting screen, at its top (at its bottom while the
-//! pointer is up there). Esc closes: back to the picked area when opened
+//! toolbar sits at the top of the starting screen. Esc closes: back to the picked area when opened
 //! from the toolbar, else the overlay closes.
 use iced::widget::image;
-use iced::widget::{Space, column, container, stack};
+use iced::widget::{Space, column, container, opaque, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Size};
 
 use crate::ui::kit::key_hint::{self, key_hint};
@@ -38,8 +37,6 @@ pub const GLYPHS: &[char] = &[
 const CLOSE: char = '\u{e1b1}';
 /// The toolbar's distance from the screen's top (or bottom) edge.
 const EDGE_GAP: f32 = 24.0;
-/// The toolbar's band: the pointer this near the top moves it to the bottom.
-const BAND: f32 = 120.0;
 /// The Copied pill shows this long.
 pub const COPIED_MS: u64 = 1500;
 
@@ -172,20 +169,20 @@ impl Tool {
             Which::Ruler => ruler::toolbar(self.ruler.mode, measure.as_ref(), false),
         };
         // under the toolbar: the Copied pill, the hint
-        let mut top = column![bar].spacing(space::GAP).align_x(iced::Center);
+        // (a click on it is never a pick or a measure)
+        let mut top = column![opaque(bar)]
+            .spacing(space::GAP)
+            .align_x(iced::Center);
         if let Some((_, what)) = &self.copied {
             top = top.push(toast(what, Tone::Ok, radius::PILL));
         }
         if hinting {
             top = top.push(key_hint(hint(self.which), false));
         }
-        // at the top, or the bottom while the pointer is up there
-        let low = self.at.is_some_and(|p| p.y < BAND);
-        let placed = container(top).center_x(Fill).height(Fill);
-        let placed = match low {
-            true => placed.align_bottom(Fill).padding([EDGE_GAP, 0.0]),
-            false => placed.padding([EDGE_GAP, 0.0]),
-        };
+        // ponytail: always at the top (the overlay sees every move, also over
+        // the toolbar, so one that moved away from the pointer could never be
+        // clicked); the pixels under it are reached with the arrows.
+        let placed = container(top).center_x(Fill).padding([EDGE_GAP, 0.0]);
         layers.push(placed).into()
     }
 }

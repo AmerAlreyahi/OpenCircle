@@ -42,12 +42,11 @@ impl App {
         self.o.selection = None;
         self.o.stroke.clear();
         self.o.drawing = false;
-        let at = self.o.pointer;
         let Purpose::Snip(snip) = &mut self.o.purpose else {
             return Task::none();
         };
         let mut tool = Tool::new(which, back);
-        tool.at = snip.pointer.or(Some(at));
+        tool.at = snip.pointer; // (none yet from a shortcut: the first move says)
         snip.tool = Some(tool);
         snip.hinting = true;
         self.frame_times.borrow_mut().clear();
@@ -229,13 +228,21 @@ impl App {
     }
 }
 
-/// The pointer at `p`: the snip's hover (it reads the controls there), and
-/// the tool's pointer, snapped to window and control edges for a box (as a
-/// snip's corners are).
+/// The pointer at `p`: the tool's, snapped to window and control edges for a
+/// box (as a snip's corners are; the snip's hover reads the controls there).
 fn place(snip: &mut snip::Snip, p: Point) -> (&mut Tool, Point) {
-    snip.hover(p);
     let boxed = (snip.tool.as_ref()).is_some_and(|t| t.ruler.mode == ruler::Mode::Box);
-    let p = if boxed { snip.snap(p) } else { p };
+    // (the snip's hover walks every control under the pointer: only a box snaps)
+    let p = match boxed {
+        true => {
+            snip.hover(p);
+            snip.snap(p)
+        }
+        false => {
+            snip.pointer = Some(p); // (the screen it is on draws the tool)
+            p
+        }
+    };
     let tool = snip.tool.as_mut().expect("a tool runs");
     tool.at = Some(p);
     (tool, p)
@@ -442,6 +449,59 @@ mod frames {
             let _ = app.on_overlay(e);
         });
         (t, app)
+    }
+
+    /// The messages a click at `at` on the overlay's window sends.
+    fn clicked(app: &App, at: Point) -> Vec<crate::ui::app::message::Message> {
+        use iced::mouse::{Button, Cursor, Event as Mouse};
+        use iced_runtime::user_interface::{Cache, UserInterface};
+        let mut renderer = crate::ui::kit::testing::shot::renderer();
+        let mut ui = UserInterface::build(
+            app.view(app.overlay),
+            app.o.screen,
+            Cache::default(),
+            &mut renderer,
+        );
+        let mut out = Vec::new();
+        let events = [
+            iced::Event::Mouse(Mouse::CursorMoved { position: at }),
+            iced::Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+            iced::Event::Mouse(Mouse::ButtonReleased(Button::Left)),
+        ];
+        let mut clipboard = iced::advanced::clipboard::Null;
+        let _ = ui.update(
+            &events,
+            Cursor::Available(at),
+            &mut renderer,
+            &mut clipboard,
+            &mut out,
+        );
+        out
+    }
+
+    /// A click on the ruler's toolbar switches its mode and never measures.
+    #[test]
+    fn the_toolbar_takes_its_clicks() {
+        use crate::ui::app::message::Message;
+        use crate::ui::screens::tools::{Msg, ruler::Mode};
+        let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
+        let mut app = snipping_on(1280, 720, window);
+        let _ = app.start_tool(Which::Ruler);
+        let _ = app.on_overlay(Event::Hover(Point::new(250.0, 450.0)));
+        let mut modes = Vec::new();
+        for x in (480..800).step_by(4) {
+            for m in clicked(&app, Point::new(x as f32, 46.0)) {
+                match m {
+                    Message::Snip(crate::ui::snip::Msg::Tool(Msg::Mode(mode))) => modes.push(mode),
+                    Message::Overlay(e @ Event::Press { .. }) => {
+                        panic!("{x}: the toolbar let {e:?} through")
+                    }
+                    _ => {}
+                }
+            }
+        }
+        modes.dedup();
+        assert_eq!(modes, [Mode::Line, Mode::Across, Mode::Down, Mode::Box]);
     }
 
     #[test]
