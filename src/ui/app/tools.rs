@@ -50,6 +50,7 @@ impl App {
         tool.at = snip.pointer.or(Some(at));
         snip.tool = Some(tool);
         snip.hinting = true;
+        self.frame_times.borrow_mut().clear();
         let opening = self.opening;
         background(|tx| {
             std::thread::sleep(Duration::from_secs(snip::HINT_SECS));
@@ -81,7 +82,6 @@ impl App {
         let Some(which) = snip.tool.as_ref().map(|t| t.which) else {
             return Task::none();
         };
-        // a box's corners snap to window and control edges, as a snip's
         match event {
             overlay::Event::Hover(p) | overlay::Event::Move(p) => {
                 let (tool, p) = place(snip, p);
@@ -92,16 +92,26 @@ impl App {
                 snip.hinting = false;
                 let (tool, p) = place(snip, at);
                 match which {
-                    Which::Picker => self.copy_colour(shift),
+                    // the frame times of the loupe's moves so far (the 0.1.3 gate)
+                    Which::Picker => {
+                        self.log_frames("colour picker");
+                        self.copy_colour(shift)
+                    }
                     Which::Ruler => {
                         tool.ruler.press(p);
+                        self.frame_times.borrow_mut().clear();
                         Task::none()
                     }
                 }
             }
             overlay::Event::Release => {
-                if let Some(tool) = self.tool_mut() {
-                    tool.ruler.release();
+                let held = self.tool_mut().is_some_and(|t| {
+                    let held = t.ruler.held;
+                    t.ruler.release();
+                    held
+                });
+                if held {
+                    self.log_frames("ruler drag");
                 }
                 Task::none()
             }
@@ -402,5 +412,49 @@ mod tests {
         let _ = app.update(Message::Captured(3, Instant::now(), Ok(shot)));
         assert!(app.tool().is_some_and(|t| t.which == Which::Picker));
         assert!(app.tool_next.is_none() && !app.snip_pill());
+    }
+}
+
+/// The tools redraw round what moves (the 0.1.3 gate: frames p95 under 16 ms
+/// on the VM): the loupe, the measure, the readouts; never the frozen screen.
+#[cfg(test)]
+mod frames {
+    use iced::{Point, Rectangle, Size, Vector};
+
+    use super::super::tests::snipping_on;
+    use crate::ui::app::App;
+    use crate::ui::frame_times::{Drawn, frames};
+    use crate::ui::overlay::Event;
+    use crate::ui::screens::tools::Which;
+
+    fn moved(which: Which, n: u32) -> (Vec<Drawn>, App) {
+        let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
+        let mut app = snipping_on(1716, 1271, window);
+        let _ = app.start_tool(which);
+        let (from, by) = (Point::new(120.0, 300.0), Vector::new(9.0, 4.0));
+        let t = frames(&mut app, n, false, |app, i, _| {
+            let at = from + by * i as f32;
+            let e = match (which, i) {
+                (Which::Ruler, 0) => Event::Press { at, shift: false },
+                (Which::Ruler, _) => Event::Move(at),
+                (Which::Picker, _) => Event::Hover(at),
+            };
+            let _ = app.on_overlay(e);
+        });
+        (t, app)
+    }
+
+    #[test]
+    fn the_screen_tools_redraw_round_what_moves() {
+        for which in [Which::Picker, Which::Ruler] {
+            let (t, app) = moved(which, 30);
+            let whole = app.o.screen.width * app.o.screen.height;
+            // (~1-1.5 % a frame: the loupe or the measure, its readouts)
+            for (i, d) in t.iter().enumerate().skip(2) {
+                let area: f32 = d.damage.iter().map(|r| r.width * r.height).sum();
+                let share = area / whole;
+                assert!(share < 0.04, "{which:?} frame {i}: {:.1} %", share * 100.0);
+            }
+        }
     }
 }
