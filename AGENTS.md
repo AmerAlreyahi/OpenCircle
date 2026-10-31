@@ -273,6 +273,13 @@ production systems.
   (the owner records them after v0.1.2). Labs keeps two rows, "Snip" and "Snip editor" (owner OK).
 - N-74 on Windows 11 (owner, 2026-10-30): with "Use the Print Screen key to open Snipping Tool" turned off the bug
   stays, so the cause is ours. Work runs on the Windows 10 VM; the owner checks on their Windows 11 PC when asked.
+- Snip is ONE feature (owner, 2026-10-31, firm, after trying the 0.1.3-6 dev build): one flow, like iTop's Alt+A:
+  the key freezes the screen (edge glow shows it is captured); hovering outlines the window under the pointer and a
+  click takes it; press-and-drag draws a free area instead; Enter = full screen. EVERY entry point (Print Screen /
+  the Snip shortcut, the main bar's Snip button over the already frozen screen, tray "Snip", quick action) runs this
+  same flow and ends in the same soft look-coloured outline + docked Snip toolbar; the old in-place editor toolbar
+  (Back / Crop / Drag chip, plain white box) is never shown for Snip. Settings shows ONE "Snip" shortcut row (no
+  separate region / window / full-screen rows; their config keys stay read: hide, don't delete).
 - Snip look + size (owner, 2026-10-30, on the design's picked frame): the area's handles and its outline are
   SOFTER (smaller, rounder, quieter handles; a thinner, lower-contrast border than the design's v24 frame). Copy
   and Save keep the capture's full size by default: `snip.max_edge` default 0 (Original) instead of 1568 (a value
