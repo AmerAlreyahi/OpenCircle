@@ -295,6 +295,11 @@ production systems.
   Window hover (owner, 2026-10-31, compared with iTop): hovering outlines the WHOLE top-level window under the
   pointer by default (its visible frame, like iTop); a part of it (element) only after the wheel goes down; every
   normal window counts, OpenCircle's own Settings / chat / pins too (only the snip overlay itself is skipped).
+  Editor feel (owner, 2026-10-31): no dashed selection box around any annotation (shapes, arrows, callouts, blur):
+  a selected one shows only its own small handles (e.g. an arrow's ends). Blur: no blur assistant (no suggested
+  areas); only the line help (stays on its line unless the pointer clearly moves down); a smaller default brush.
+  A tool's first click turns it on; a click on the active tool opens its options (outline on/off, size, ...);
+  shapes, arrows, callouts default to NO outer outline. Ctrl+drag moves any annotation with any tool active.
 - Snip look + size (owner, 2026-10-30, on the design's picked frame): the area's handles and its outline are
   SOFTER (smaller, rounder, quieter handles; a thinner, lower-contrast border than the design's v24 frame). Copy
   and Save keep the capture's full size by default: `snip.max_edge` default 0 (Original) instead of 1568 (a value
