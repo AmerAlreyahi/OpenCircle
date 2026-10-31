@@ -1111,6 +1111,18 @@ impl State {
         }
         match self.check_chord(slot, &chord) {
             Ok(shortcut) => {
+                // The unseen window / full-screen snip entries give up the key
+                // the one Snip row takes (else the file would bind it twice).
+                let hotkey = parse_shortcut(&shortcut).ok();
+                let shown: Vec<Slot> = self.slots().collect();
+                for (i, q) in self.draft.quick_actions.iter_mut().enumerate() {
+                    if q.action == "snip"
+                        && !shown.contains(&Slot::Quick(i))
+                        && parse_shortcut(&q.shortcut).ok() == hotkey
+                    {
+                        q.shortcut.clear();
+                    }
+                }
                 self.set_shortcut(slot, shortcut);
                 self.recording = None;
                 self.shortcut_error = None;

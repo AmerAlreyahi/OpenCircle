@@ -1504,7 +1504,13 @@ fn snip_shortcuts_are_listed_and_editable() {
         press(&mut s, key);
         assert_eq!(s.shortcut_error, None, "{want}");
         assert_eq!(s.draft.quick_actions[i].shortcut, want);
+        assert!(s.problems.is_empty(), "{want}: {:?}", s.problems);
     }
+    // the unseen window snip gave Alt+Print Screen up to the Snip row
+    let window = (s.draft.quick_actions.iter())
+        .find(|q| q.action == "snip" && q.target == Target::Window)
+        .unwrap();
+    assert_eq!(window.shortcut, "", "one key, one job");
     // each key still does one job
     update(&mut s, Message::Record(Slot::Quick(i)));
     press(&mut s, chord(true, true, "Space"));
