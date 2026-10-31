@@ -289,6 +289,9 @@ production systems.
   (windows::floating); the overlay closes so the user can go to any app/screen; each next snip is added as the next
   numbered step; reorder / delete; Copy = one image of all steps, numbered (for AI chats); a step can be copied /
   saved alone. Still Pin leaves Labs (a visible Pin button on the Snip toolbar); live pin stays in Labs "Pins".
+  After a pick (owner, 2026-10-31): the default is "Both": the area stays picked with the Snip toolbar AND is
+  already on the clipboard. `snip.after` default = both; a config from before 0.1.3 whose Snip was still in Labs
+  (never used) moves to both; a user's own choice stays.
 - Snip look + size (owner, 2026-10-30, on the design's picked frame): the area's handles and its outline are
   SOFTER (smaller, rounder, quieter handles; a thinner, lower-contrast border than the design's v24 frame). Copy
   and Save keep the capture's full size by default: `snip.max_edge` default 0 (Original) instead of 1568 (a value
