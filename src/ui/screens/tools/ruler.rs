@@ -6,7 +6,7 @@
 //! and control edges as a snip's do). Ctrl+C copies the measure as text.
 use iced::mouse::Cursor;
 use iced::widget::canvas::{self, Geometry};
-use iced::widget::{canvas as draw, pin, stack};
+use iced::widget::{Space, canvas as draw, pin, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
 
 use super::{CLOSE, Msg};
@@ -261,7 +261,7 @@ pub fn marks<'a>(
     look: (Color, Color),
 ) -> Element<'a, Msg> {
     let Some(m) = measure else {
-        return stack![].into();
+        return Space::new().into();
     };
     let label = m.text();
     let readout = chip::readout(label, m.live, None);

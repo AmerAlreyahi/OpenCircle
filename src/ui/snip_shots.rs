@@ -163,7 +163,11 @@ fn states() -> Vec<(&'static str, App)> {
         let _ = app.on_overlay(Event::Release);
     }
     out.push(("8b-picker-copied", app));
-    // 9: the ruler: a line (Shift: level), across the dark picture, a box
+    // 9: the ruler: just opened (its hint), a line, across the dark picture, a box
+    let mut app = snipping();
+    let _ = app.start_tool(Which::Ruler);
+    let _ = app.on_overlay(Event::Hover(Point::new(250.0, 450.0)));
+    out.push(("9-ruler", app));
     let mut app = tool(Which::Ruler);
     let _ = app.on_overlay(Event::Press {
         at: Point::new(470.0, 300.0),

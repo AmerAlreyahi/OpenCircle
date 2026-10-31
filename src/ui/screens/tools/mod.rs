@@ -8,7 +8,7 @@
 //! pointer is up there). Esc closes: back to the picked area when opened
 //! from the toolbar, else the overlay closes.
 use iced::widget::image;
-use iced::widget::{column, container, stack};
+use iced::widget::{Space, column, container, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Size};
 
 use crate::ui::kit::key_hint::{self, key_hint};
@@ -148,7 +148,8 @@ impl Tool {
         recent: &[[u8; 3]],
         look: (Color, Color),
     ) -> Element<'a, Msg> {
-        let mut layers = stack![];
+        // (a stack is as big as its first layer: the whole window)
+        let mut layers = stack![Space::new().width(Fill).height(Fill)];
         let here = self
             .at
             .map(|p| view.to_screen(p))
