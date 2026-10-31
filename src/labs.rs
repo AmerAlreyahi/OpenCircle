@@ -6,7 +6,8 @@
 //!
 //! Live translate is hidden here until 0.3.0 (owner, 2026-10-27). Snip and its
 //! editor left Labs in 0.1.3 (N-41): on for everyone, with the colour picker,
-//! the ruler, long capture and share; still and live pins stay here (`Pins`).
+//! the ruler, long capture, share and still pins (owner, 2026-10-31); live pins
+//! stay here (`Pins`).
 use serde::Serialize;
 
 use crate::hotkey::QuickId;
@@ -17,7 +18,7 @@ pub enum Feature {
     Song,
     /// The local history of searches (`general.search_history`).
     History,
-    /// Pinning an image to the screen from the editor.
+    /// Live pins: a part of a window kept up to date on top (still pins left Labs).
     Pins,
     /// Live translate: bar button, tray item, shortcut and its Settings rows.
     Live,
@@ -46,7 +47,9 @@ impl Feature {
         match self {
             Feature::Song => "Find the song playing on your PC. Unfinished; may change",
             Feature::History => "Keep a list of your searches on this PC. Unfinished; may change",
-            Feature::Pins => "Float a capture above your windows. Unfinished; may change",
+            Feature::Pins => {
+                "Keep a part of a window live above your windows. Unfinished; may change"
+            }
             Feature::Live => "Keep the screen translated as it changes. Unfinished; may change",
         }
     }

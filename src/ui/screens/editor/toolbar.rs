@@ -32,6 +32,7 @@ const COPY: char = '\u{e0a2}'; // lucide "copy"
 const SAVE: char = '\u{e0b6}'; // lucide "download"
 const PIN: char = '\u{e258}'; // lucide "pin"
 const BOARD: char = '\u{e104}'; // lucide "layout-grid"
+#[allow(dead_code)] // Add capture's, hidden (`board_popover`)
 const ADD: char = '\u{e1f6}'; // lucide "image-plus"
 const STACK: char = '\u{e43d}'; // lucide "rows-2"
 const SIDE: char = '\u{e09c}'; // lucide "columns-2"
@@ -84,14 +85,10 @@ fn slots() -> impl Iterator<Item = &'static ToolInfo> {
     TOOLS.iter().filter(|t| t.slot == t.tool)
 }
 
-/// Pins are a Labs feature: the toolbar has the pin button only while it is on.
-fn pins() -> bool {
-    crate::labs::has(crate::labs::Feature::Pins)
-}
-
-/// Snip's Live pin (Windows; Labs Pins); it works only over the live screen (`Editor::scroll`).
+/// Snip's Live pin (Windows; Labs Pins); it works only over the live screen
+/// (`Editor::scroll`). Still pins left Labs (owner, 2026-10-31): Pin is always there.
 fn live_pin() -> bool {
-    pins() && crate::capture::live::SUPPORTED
+    crate::labs::has(crate::labs::Feature::Pins) && crate::capture::live::SUPPORTED
 }
 
 /// The widths of a line's items, side by side.
@@ -112,7 +109,7 @@ fn parts() -> (Vec<f32>, Vec<f32>) {
         }
         tools.push(CONTROL);
     }
-    let mut rest = vec![CONTROL; 5 + usize::from(pins())];
+    let mut rest = vec![CONTROL; 6];
     rest.extend([bar::DIVIDER, CONTROL, CONTROL]);
     if dragout::SUPPORTED {
         rest.extend([bar::DIVIDER, DRAG_WIDTH]);
@@ -123,7 +120,7 @@ fn parts() -> (Vec<f32>, Vec<f32>) {
 /// Snip's toolbar (the design's capture flow, N-73): no Back (no bar to go
 /// back to), no Crop (the area's handles are the crop), no group dividers
 /// between the tools; the size readout after the grip; Long capture, the
-/// colour picker and the ruler, Pin (Labs), Share (where there is a share
+/// colour picker and the ruler, Pin, Live pin (Labs), Share (where there is a share
 /// sheet) after Undo / Redo; Copy and Save labelled; ×.
 fn snip_parts() -> (Vec<f32>, Vec<f32>) {
     let mut tools = vec![bar::HANDLE, READOUT_W, bar::DIVIDER];
@@ -131,9 +128,7 @@ fn snip_parts() -> (Vec<f32>, Vec<f32>) {
     let mut rest = vec![CONTROL; 4];
     rest.extend([bar::DIVIDER, CONTROL]);
     rest.extend(SCREEN_TOOLS.map(|_| CONTROL));
-    if pins() {
-        rest.push(CONTROL);
-    }
+    rest.push(CONTROL); // Pin
     if live_pin() {
         rest.push(CONTROL);
     }
@@ -170,9 +165,7 @@ pub fn stops(e: &Editor) -> Vec<Message> {
         stops.push(Message::Scroll);
     }
     stops.extend(SCREEN_TOOLS.map(|(t, ..)| Message::ScreenTool(t)));
-    if pins() {
-        stops.push(Message::Pin);
-    }
+    stops.push(Message::Pin);
     if live_pin() && e.scroll {
         stops.push(Message::LivePin);
     }
@@ -353,7 +346,7 @@ fn build(
     let x = rest.push(
         hinted(
             icon_button::square(BOARD, open(Menu::Board), Some(Message::Menu(Menu::Board))),
-            "Board: add captures, layout, legend",
+            "Board: layout, legend",
             Why::Icon,
         ),
         CONTROL,
@@ -381,17 +374,15 @@ fn build(
         icon(REDO, false, Message::Redo, "Redo (Ctrl+Shift+Z)"),
         CONTROL,
     );
-    if pins() {
-        rest.push(
-            icon(
-                PIN,
-                false,
-                Message::Pin,
-                "Pin to screen: a floating copy (Ctrl+P)",
-            ),
-            CONTROL,
-        );
-    }
+    rest.push(
+        icon(
+            PIN,
+            false,
+            Message::Pin,
+            "Pin to screen: a floating copy (Ctrl+P)",
+        ),
+        CONTROL,
+    );
     rest.push(divide(), bar::DIVIDER);
     let copy = State {
         active: true,
@@ -510,7 +501,7 @@ fn build_snip(
     let x = rest.push(
         hinted(
             icon_button::square(BOARD, s, Some(board)),
-            "Board: add captures, layout, legend",
+            "Board: layout, legend",
             Why::Icon,
         ),
         CONTROL,
@@ -548,17 +539,15 @@ fn build_snip(
             CONTROL,
         );
     }
-    if pins() {
-        let s = state(false, &Message::Pin);
-        rest.push(
-            hinted(
-                icon_button::square(PIN, s, Some(Message::Pin)),
-                "Pin to screen: a floating copy (Ctrl+P)",
-                Why::Icon,
-            ),
-            CONTROL,
-        );
-    }
+    let s = state(false, &Message::Pin);
+    rest.push(
+        hinted(
+            icon_button::square(PIN, s, Some(Message::Pin)),
+            "Pin to screen: a floating copy (Ctrl+P)",
+            Why::Icon,
+        ),
+        CONTROL,
+    );
     if live_pin() {
         let s = state(false, &Message::LivePin);
         let tip = match e.scroll {
@@ -722,17 +711,13 @@ fn colour_popover(e: &Editor) -> Element<'_, Message> {
     )
 }
 
-/// Add capture, then (with two or more) the layout and numbers, then the legend.
+/// (With two or more captures) the layout and numbers, then the legend.
+/// No Add capture (owner, 2026-10-31): the new Steps board replaces it; its
+/// message and `Output::AddCapture` stay, unreachable (Hide, don't delete).
 fn board_popover(e: &Editor) -> Element<'_, Message> {
     let board = e.doc.board;
-    let mut items: Vec<Element<'_, Message>> = vec![icon(
-        ADD,
-        false,
-        Message::AddCapture,
-        "Add capture: pick another area to put beside this one",
-    )];
+    let mut items: Vec<Element<'_, Message>> = Vec::new();
     if board.count > 1 {
-        items.push(divide());
         for (glyph, layout, tip) in [
             (STACK, crate::editor::board::Layout::Stack, "Stacked"),
             (SIDE, crate::editor::board::Layout::Side, "Side by side"),
@@ -751,8 +736,8 @@ fn board_popover(e: &Editor) -> Element<'_, Message> {
             Message::Numbers,
             "Number each capture",
         ));
+        items.push(divide());
     }
-    items.push(divide());
     items.push(icon(
         LEGEND,
         e.doc.legend,

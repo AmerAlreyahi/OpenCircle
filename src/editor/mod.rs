@@ -278,7 +278,9 @@ pub enum Message {
     Legend,
     /// Line assist on / off (the blur brush keeps to text lines).
     Assist,
-    /// Asks the host for another capture (`Output::AddCapture`).
+    /// Asks the host for another capture (`Output::AddCapture`). No button
+    /// sends it (owner, 2026-10-31: the Steps board replaces it; hidden, kept).
+    #[allow(dead_code)]
     AddCapture,
     Layout(board::Layout),
     /// Number labels on the board's captures.

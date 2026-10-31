@@ -5,7 +5,6 @@ use iced::{Task, Vector};
 
 use crate::actions::{self, Crop, copy, save};
 use crate::editor::{self, Image, Output};
-use crate::labs::{self};
 
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::kit::motion;
@@ -133,7 +132,6 @@ impl App {
             }
             Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
             Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
-            Some(Output::Pin(_)) if !self.o.labs.has(labs::Feature::Pins) => Task::none(),
             Some(Output::Pin(crop)) => self.pin(crop),
             Some(Output::LivePin) => match self.o.selection {
                 Some(selection) => self.live_pin(selection.area),
@@ -329,21 +327,45 @@ mod tests {
         assert_eq!(stops(&app).contains(&E::Share), share::SUPPORTED);
     }
 
-    /// With Labs Pins off the toolbar has no Pin button at all (not a dead
-    /// one), in Snip and in place, and Tab never lands on it.
+    /// Still pins left Labs (owner, 2026-10-31): with Labs Pins off the
+    /// toolbar has Pin (and Tab lands on it) but no Live pin.
     #[test]
-    fn no_pin_button_while_labs_pins_is_off() {
+    fn pin_shows_with_labs_pins_off_live_pin_does_not() {
         assert!(!crate::labs::has(crate::labs::Feature::Pins), "the default");
         let mut app = snip_editor();
         app.o.labs.set(crate::labs::Feature::Pins, false);
         let names = bar_names(&app);
         assert!(names.iter().any(|n| n.starts_with("Copy")), "{names:?}");
-        assert!(!names.iter().any(|n| n.starts_with("Pin")), "{names:?}");
-        assert!(!stops(&app).contains(&E::Pin));
-        let app = in_place_editor();
-        let names = bar_names(&app);
-        assert!(names.iter().any(|n| n.starts_with("Undo")), "{names:?}");
-        assert!(!names.iter().any(|n| n.starts_with("Pin")), "{names:?}");
+        assert!(
+            names.iter().any(|n| n.starts_with("Pin to screen")),
+            "{names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n.starts_with("Long capture")),
+            "{names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.starts_with("Live pin")),
+            "{names:?}"
+        );
+        assert!(stops(&app).contains(&E::Pin));
+        // a pin with every Labs switch off
+        let _ = app.on_editor(E::Pin);
+        assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
+    }
+
+    /// No Add capture in Snip's board (owner, 2026-10-31: the Steps board
+    /// replaces it): the board's popover offers only the legend.
+    #[test]
+    fn the_board_has_no_add_capture() {
+        let mut app = snip_editor();
+        let _ = app.on_editor(E::Menu(crate::editor::Menu::Board));
+        let texts = bar_names(&app);
+        assert!(texts.iter().any(|t| t.starts_with("Legend")), "{texts:?}");
+        assert!(
+            !texts.iter().any(|t| t.starts_with("Add capture")),
+            "{texts:?}"
+        );
     }
 
     /// #37: a drag-out an app took closes the overlay with its toolbar (none
