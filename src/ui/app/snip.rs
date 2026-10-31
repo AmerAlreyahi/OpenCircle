@@ -181,6 +181,54 @@ impl App {
         }
     }
 
+    /// Snip from main mode (the bar's Snip, E, `run edit`): the one Snip flow
+    /// over the frame already frozen. `picked` (main mode's selection) starts
+    /// it picked, as a pick would; none = the pick step, with the edge glow.
+    /// Main mode's state (selections, words, cards) goes; the frame stays.
+    pub(in crate::ui) fn snip_here(&mut self, picked: Option<Rectangle>) -> Task<Message> {
+        let windows: Vec<_> = (capture::window_rect::list().into_iter())
+            .map(|w| snip::Pick::window(snip::desktop_rect(w.rect), &w.title, w.handle))
+            .collect();
+        // the user's app: the topmost window under the overlay (ours aren't listed)
+        let user = windows.first().map(|w| w.window);
+        let start = self.place();
+        let mut snip = snip::Snip::new(windows, start, capture::scroll::can_scroll(), user);
+        let monitors = std::iter::once(Rectangle::with_size(self.o.screen)).chain(
+            self.o
+                .screens
+                .iter()
+                .map(|s| super::screens::area_of(start, s.place)),
+        );
+        snip.set_monitors(monitors.collect());
+        let _ = snip.start(snip::Kind::Region, self.o.screen);
+        let (reader, read) = std::sync::mpsc::channel();
+        if cfg!(windows) {
+            snip.read_later(reader, super::UIA_WINDOWS);
+            snip.start_reading(); // its first frame is long up
+        }
+        let o = &mut *self.o;
+        (o.panel, o.translate, o.song, o.toast) = (None, None, None, None);
+        (o.word, o.text_mode, o.edit, o.morph) = (None, None, None, None);
+        (o.bar_focus, o.grab, o.drawing) = (None, None, false);
+        o.others.clear();
+        (o.selection, o.stroke) = (None, Vec::new()); // no corner brackets: Snip's outline
+        o.view = o.view.reset();
+        o.zoom = None;
+        o.purpose = Purpose::Snip(Box::new(snip));
+        let extras = self.snip_extras(read);
+        let Some(area) = picked else {
+            return Task::batch([self.snip_next(None), extras]);
+        };
+        self.select(area);
+        let Some(crop) = self.crop() else {
+            return extras;
+        };
+        crate::history::recent::remember(&crop);
+        // Snip pressed on a selection: its picked state (the live area and the
+        // toolbar), whatever "After a capture" says a fresh pick does.
+        Task::batch([self.snip_routed(crop, true, (false, true)), extras])
+    }
+
     /// The window is only Snip's pill (scrolling, the timer, the toast).
     pub(in crate::ui) fn snip_pill(&self) -> bool {
         matches!(&self.o.purpose, Purpose::Snip(s) if s.is_pill())

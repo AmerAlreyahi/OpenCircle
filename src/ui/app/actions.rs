@@ -172,7 +172,9 @@ impl App {
             return self.search_text(text);
         }
         match action.run {
-            Run::Edit => return self.open_editor(),
+            // Snip is one flow: from main mode its selection is the pick.
+            Run::Edit if matches!(self.o.purpose, Purpose::Snip(_)) => return self.open_editor(),
+            Run::Edit => return self.snip_here(self.o.selection.map(|s| s.area)),
             Run::Translate => return self.start_translate(),
             // Picked words (a word selection, or select-text mode's picks): Copy
             // (the bar's or Ctrl+C) copies exactly their text. In select-text

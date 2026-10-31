@@ -372,12 +372,8 @@ impl App {
                 let closing = self.close();
                 closing.chain(self.toggle_live(Instant::now()))
             }
-            Message::EditScreen => {
-                self.o.others.clear();
-                self.o.word = None;
-                self.select(Rectangle::with_size(self.o.screen));
-                self.open_editor()
-            }
+            // the bar's Snip with nothing selected: Snip's pick step
+            Message::EditScreen => self.snip_here(None),
             Message::TranslateScreen => {
                 self.o.others.clear();
                 self.o.word = None;

@@ -687,7 +687,7 @@ impl App {
             scale: screen.place.scale,
         };
         let window = screen.window;
-        let glow = self.o.glow.at(Some(window));
+        let glow = self.edge_glow(Some(window));
         let mode = match snip {
             Some(_) => border::Mode::Snip,
             None => border::Mode::Overlay,

@@ -40,6 +40,18 @@ impl App {
         }
     }
 
+    /// How much of the screen edge's glow shows on `window` (`None`: the
+    /// starting screen's): the mouse's screen (`screens::Glow`), and in Snip
+    /// only while nothing is picked: it says "the screen is frozen"; over a
+    /// picked area (the live area, long capture) it would read as "the whole
+    /// screen was captured", so the area's outline alone shows (owner, 2026-10-31).
+    pub(in crate::ui) fn edge_glow(&self, window: Option<window::Id>) -> f32 {
+        match &self.o.purpose {
+            Purpose::Snip(s) if s.scroll.is_some() || self.o.edit.is_some() => 0.0,
+            _ => self.o.glow.at(window),
+        }
+    }
+
     pub(in crate::ui) fn view(&self, window: window::Id) -> Element<'_, Message> {
         if let Some(page) = self.windows.view(window) {
             return page.map(Message::Windows);
@@ -172,7 +184,7 @@ impl App {
                 self.o.scale,
                 false,
                 self.breathing(),
-                self.o.glow.at(None),
+                self.edge_glow(None),
             ),
         ]);
         if let Some(edit) = &self.o.edit {

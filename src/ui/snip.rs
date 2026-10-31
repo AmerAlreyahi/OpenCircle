@@ -519,13 +519,21 @@ impl Snip {
 
     /// Starts in `kind` if this screen offers it (else Region, no Window list on
     /// Wayland). Full picks the whole screen at once.
+    /// Snip is one flow (owner, 2026-10-31): every start is the pick step
+    /// (hover + click = a window, drag = an area, Enter = the screen); a
+    /// window snip (Alt+Print Screen, `--target window`) starts with the
+    /// window the user was in already picked, a full-screen one with the screen.
     pub fn start(&mut self, kind: Kind, screen: Size) -> Option<Next> {
-        let kind = if self.kinds().contains(&kind) {
-            kind
-        } else {
-            Kind::Region
-        };
-        self.switch(kind, screen)
+        let user = (self.windows.iter()).find(|w| Some(w.window) == self.foreground);
+        match kind {
+            Kind::Window if self.kinds().contains(&kind) => {
+                let picked = user.map(|w| Next::Edit(w.rect));
+                let _ = self.switch(Kind::Region, screen);
+                picked
+            }
+            Kind::Full => self.switch(kind, screen),
+            _ => self.switch(Kind::Region, screen),
+        }
     }
 
     /// Enter: the whole screen the pointer is on, whatever is outlined.
@@ -972,9 +980,15 @@ mod tests {
         assert_eq!(by_key("Alt+PrintScreen"), Kind::Window);
         assert_eq!(by_key("Ctrl+PrintScreen"), Kind::Full);
 
+        // One flow: a window snip is the pick step with the user's window
+        // already picked; the user's window unknown: the pick step.
         let mut s = Snip::new(wins(&windows), flat(SCREEN), true, None);
-        assert_eq!(s.start(Kind::Window, SCREEN), None, "waits for a click");
-        assert_eq!(s.kind, Kind::Window);
+        assert_eq!(s.start(Kind::Window, SCREEN), None, "the pick step");
+        assert_eq!(s.kind, Kind::Region);
+        let user = s.windows[0].window;
+        let mut s = Snip::new(wins(&windows), flat(SCREEN), true, Some(user));
+        assert_eq!(s.start(Kind::Window, SCREEN), Some(Next::Edit(windows[0])));
+        assert_eq!(s.kind, Kind::Region, "the same flow once picked");
         // Full opens the editor on the whole screen at once.
         let whole = Rectangle::with_size(SCREEN);
         assert_eq!(s.start(Kind::Full, SCREEN), Some(Next::Edit(whole)));

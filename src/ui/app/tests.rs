@@ -2126,8 +2126,65 @@ fn hidden_features_have_no_bar_button_and_turning_them_on_brings_them_back() {
     assert!(app.editing());
 }
 
+/// Snip is one flow (owner, 2026-10-31): main mode's Snip (the bar's button,
+/// E, `run edit`) turns the frozen screen into Snip's pick step (edge glow on),
+/// or, with an area selected, its picked state: the live area with Snip's
+/// toolbar (no Back), the selection's corner brackets and the edge glow gone.
 #[test]
-fn a_pin_needs_its_labs_switch() {
+fn main_modes_snip_runs_the_one_snip_flow() {
+    let snip_toolbar = |app: &App| {
+        let edit = app.o.edit.as_ref().expect("the editor");
+        assert!(
+            edit.editor.movable,
+            "Snip's live area, not the in-place editor"
+        );
+        let stops = crate::ui::screens::editor::toolbar::stops(&edit.editor);
+        assert!(
+            !stops.contains(&editor::Message::Back),
+            "no Back: Snip's toolbar"
+        );
+    };
+    // the bar's Snip (and E) with nothing selected: the pick step
+    let mut app = open_app(1280, 800, 1.0);
+    let edit = app.bar_message(BarButton::Edit).unwrap();
+    let _ = app.update(edit);
+    assert!(matches!(app.o.purpose, Purpose::Snip(_)), "Snip's flow");
+    assert!(app.o.edit.is_none() && app.o.selection.is_none(), "picking");
+    assert!(
+        app.edge_glow(None) > 0.0,
+        "the edge glow: the screen is frozen"
+    );
+    // a drag there picks an area: the same picked state as Print Screen's
+    let area = Rectangle::new(Point::new(200.0, 150.0), Size::new(300.0, 200.0));
+    let _ = app.snip_next(Some(snip::Next::Edit(area)));
+    let _ = app.on_snip(snip::Msg::Edit);
+    // (After a capture = Copy: the toast's Edit opens it)
+    snip_toolbar(&app);
+    assert_eq!(app.edge_glow(None), 0.0, "picked: no edge glow");
+    // with an area selected (the bar's Snip, E, `run edit`): picked at once
+    for message in [
+        |app: &App| app.bar_message(BarButton::Edit).unwrap(),
+        |_: &App| Message::Run(&actions::edit::ACTION),
+    ] {
+        let mut app = open_app(1280, 800, 1.0);
+        drag(
+            &mut app,
+            area.position(),
+            area.position() + Vector::new(300.0, 200.0),
+            false,
+        );
+        let selected = app.o.selection.unwrap().area;
+        let m = message(&app);
+        let _ = app.update(m);
+        assert!(matches!(app.o.purpose, Purpose::Snip(_)), "Snip's flow");
+        snip_toolbar(&app);
+        assert_eq!(app.o.selection.map(|s| s.area), Some(selected), "its area");
+        assert_eq!(app.edge_glow(None), 0.0, "picked: no edge glow");
+    }
+}
+
+#[test]
+fn a_still_pin_needs_no_labs_switch() {
     let mut app = open_app(1280, 800, 1.0);
     drag(
         &mut app,
@@ -2135,14 +2192,8 @@ fn a_pin_needs_its_labs_switch() {
         Point::new(500.0, 350.0),
         false,
     );
-    let _ = app.open_editor();
+    let _ = app.update(Message::Run(&actions::edit::ACTION));
     app.o.labs.set(labs::Feature::Pins, false);
-    let _ = app.update(Message::Editor(editor::Message::Pin));
-    assert!(
-        app.o.frame.is_some() && app.o.edit.is_some(),
-        "the overlay stays: nothing was pinned"
-    );
-    app.o.labs.set(labs::Feature::Pins, true);
     let _ = app.update(Message::Editor(editor::Message::Pin));
     assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
 }
@@ -2362,7 +2413,8 @@ fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
     let spot = |app: &App, size| bar::anchor_at(app.o.bar_anchor, app.o.screen, size, 40.0);
     assert_eq!(bar_box.position(), spot(&app, bar_box.size()));
     let tool = Editing::toolbar_size(app.o.screen.width, false);
-    let _ = app.update(Message::Run(&actions::edit::ACTION));
+    // (the in-place editor: no entry runs it any more, Snip is one flow; kept)
+    let _ = app.open_editor();
     assert!(app.editing());
     // on its way: one shape between the two sizes, at the same spot
     let start = Instant::now();
@@ -2589,7 +2641,8 @@ fn the_bottom_bar_buttons_work_on_the_whole_screen() {
         app.o.panel.as_ref().map(|(_, p)| p.kind()),
         Some(actions::Panel::Ask)
     );
-    // the same keys with nothing selected: A asks, E edits, R translates, all the screen
+    // the same keys with nothing selected: A asks, R translates, all the
+    // screen; E snips: Snip's pick step over the frozen screen
     let mut app = open_app(800, 600, 1.0);
     event(
         &mut app,
@@ -2598,11 +2651,8 @@ fn the_bottom_bar_buttons_work_on_the_whole_screen() {
             ctrl: false,
         },
     );
-    assert!(app.o.edit.is_some(), "the whole screen in the editor");
-    assert_eq!(
-        app.o.selection.map(|s| s.area),
-        Some(Rectangle::with_size(app.o.screen))
-    );
+    assert!(matches!(app.o.purpose, Purpose::Snip(_)), "Snip's flow");
+    assert!(app.o.edit.is_none() && app.o.selection.is_none(), "picking");
     let mut app = open_app(800, 600, 1.0);
     event(
         &mut app,
