@@ -498,6 +498,7 @@ impl Windows {
             toast::RADIUS,
             TOAST,
         );
+        let open = open.then(|id| platform::windows::no_pick(id).chain(Task::done(id)));
         // At its exact place in physical px before it fades in (its rise moves
         // from there): iced places a new window in logical px at the scale of
         // the monitor it opens on, not the one it goes to (#149).

@@ -17,8 +17,9 @@ pub struct Snapshot {
 /// The windows are listed on a thread while the monitors are grabbed: the
 /// freeze waits for the slower one only. `chosen` gets the pointer's monitor
 /// first (`every_monitor`): the overlay may show on it, unseen, meanwhile, so
-/// the window the user is in is read before anything else (our own windows
-/// are never listed, and a clear layered window is not in a GDI grab).
+/// the window the user is in is read before anything else (the overlay is
+/// never listed, `window_rect::no_pick`, and a clear layered window is not in
+/// a GDI grab).
 pub fn snapshot(cursor: bool, chosen: impl FnOnce(&super::Monitor)) -> Result<Snapshot, String> {
     let start = Instant::now();
     let foreground = window_rect::foreground();

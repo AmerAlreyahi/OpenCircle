@@ -189,8 +189,24 @@ pub fn fade<T: Send + 'static>(id: window::Id, open: bool, how: Motion, wait: bo
 
 /// A screen-sized window (the capture overlay, the live layer): no frame, not
 /// cut to a shape; each sets its own transparency and level.
+/// Never a snip target (`no_pick`).
 pub fn screen(settings: window::Settings) -> (window::Id, Task<window::Id>) {
-    open(settings)
+    let (id, open) = open(settings);
+    (id, open.then(|id| no_pick(id).chain(Task::done(id))))
+}
+
+/// Snip never outlines or picks the window `id` (`window_rect::no_pick`): the
+/// overlay and the screen-sized ones (`screen`), toasts. Every other window of
+/// ours is a target like any app's (Settings, the AI chat, pins).
+pub fn no_pick<T: Send + 'static>(id: window::Id) -> Task<T> {
+    window::run(id, |w| {
+        if let Ok(handle) = w.window_handle()
+            && let Some(hwnd) = super::shape::fadeable(handle.as_raw())
+        {
+            crate::capture::window_rect::no_pick(hwnd);
+        }
+    })
+    .discard()
 }
 
 /// What the three above share: `app_window`'s settings, and on Windows no classic

@@ -186,8 +186,12 @@ impl App {
         let windows: Vec<_> = (capture::window_rect::list().into_iter())
             .map(|w| snip::Pick::window(snip::desktop_rect(w.rect), &w.title, w.handle))
             .collect();
-        // the user's app: the topmost window under the overlay (ours aren't listed)
-        let user = windows.first().map(|w| w.window);
+        // the user's app: the topmost titled window under the overlay (the
+        // overlay isn't listed; the taskbar has no title)
+        // ponytail: an untitled app window is passed over for the next one
+        let user = (windows.iter())
+            .find(|w| w.label != "Window")
+            .map(|w| w.window);
         let start = self.place();
         let mut snip = snip::Snip::new(windows, start, capture::scroll::can_scroll(), user);
         let monitors = std::iter::once(Rectangle::with_size(self.o.screen)).chain(

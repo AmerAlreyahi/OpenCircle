@@ -1,7 +1,9 @@
 //! The windows on screen, for snip (hover a window, click it; Window mode): outer
 //! rectangles (with the frame) in physical desktop pixels, topmost first, with
-//! their titles; none of our own. Read before the overlay shows, while it is
-//! hidden (it would be the topmost window).
+//! their titles. Windows: our own count too (Settings, chat, pins), except the
+//! overlay and toasts (`no_pick`); X11: none of ours.
+//! ponytail: X11 still drops all of ours (Linux on hold); a property like
+//! Windows' `NO_PICK` is the upgrade.
 //!
 //! Windows: `EnumWindows` (z-order) + the DWM extended frame bounds (no invisible
 //! resize border). X11: `_NET_CLIENT_LIST_STACKING` + geometry + `_NET_FRAME_EXTENTS`.
@@ -28,6 +30,42 @@ pub fn list() -> Vec<Win> {
         crate::log!("[opencircle] window list unavailable: {e}");
         Vec::new()
     })
+}
+
+/// Windows: set on our windows that are never a snip target (the overlay and
+/// its window on every other screen, the live layer, toasts): `no_pick`.
+#[cfg(windows)]
+const NO_PICK: windows::core::PCWSTR = windows::core::w!("OpenCircle.no_pick");
+
+/// Windows: the window `hwnd` (one of ours) is left out of `list` from now on.
+pub fn no_pick(hwnd: isize) {
+    #[cfg(windows)]
+    // SAFETY: a property of ours on a live window of ours.
+    unsafe {
+        use windows::Win32::Foundation::{HANDLE, HWND};
+        let _ = windows::Win32::UI::WindowsAndMessaging::SetPropW(
+            HWND(hwnd as *mut _),
+            NO_PICK,
+            Some(HANDLE(std::ptr::dangling_mut())),
+        );
+    }
+    #[cfg(not(windows))]
+    let _ = hwnd;
+}
+
+/// Windows: which visible, not minimised window is a snip target, like iTop's:
+/// every normal one, OpenCircle's own (Settings, the AI chat, pins: tool windows
+/// too) unless marked `no_pick`, and the taskbar; not the desktop (Progman /
+/// WorkerW: over the wallpaper and its icons the target is the screen) nor
+/// another app's tool windows (invisible helpers, floating palettes).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn listed(class: &str, tool: bool, ours: bool, no_pick: bool) -> bool {
+    let taskbar = matches!(class, "Shell_TrayWnd" | "Shell_SecondaryTrayWnd");
+    let desktop = matches!(class, "Progman" | "WorkerW");
+    match ours {
+        true => !no_pick,
+        false => !desktop && (!tool || taskbar),
+    }
 }
 
 /// The rects of the windows their apps keep out of captures (none off Windows).
@@ -183,8 +221,9 @@ fn platform() -> Result<Vec<Win>, String> {
         DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GWL_EXSTYLE, GetWindowDisplayAffinity, GetWindowLongW, GetWindowRect,
-        GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, WS_EX_TOOLWINDOW,
+        EnumWindows, GWL_EXSTYLE, GetClassNameW, GetPropW, GetWindowDisplayAffinity,
+        GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+        IsWindowVisible, WS_EX_TOOLWINDOW,
     };
     use windows::core::BOOL;
 
@@ -197,7 +236,14 @@ fn platform() -> Result<Vec<Win>, String> {
             let mut pid = 0;
             GetWindowThreadProcessId(hwnd, Some(&mut pid));
             let ours = pid == std::process::id();
-            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || tool || ours {
+            let mut class = [0u16; 64];
+            let n = GetClassNameW(hwnd, &mut class).max(0) as usize;
+            let class = String::from_utf16_lossy(&class[..n]);
+            let unpickable = !GetPropW(hwnd, NO_PICK).is_invalid();
+            if !IsWindowVisible(hwnd).as_bool()
+                || IsIconic(hwnd).as_bool()
+                || !listed(&class, tool, ours, unpickable)
+            {
                 return BOOL(1);
             }
             // Cloaked: on another virtual desktop, or a suspended store app.
@@ -522,6 +568,29 @@ mod tests {
             vec![(2, 0, 10, 10)]
         );
         assert!(protected_in(&[win(1, false)]).is_empty());
+    }
+
+    /// Like iTop: every app window, ours (Settings, chat, pins: tool windows
+    /// too) unless marked off (the overlay, toasts), the taskbar; not the
+    /// desktop (the screen is the target there) nor other apps' tool windows.
+    #[test]
+    fn snip_lists_every_normal_window_ours_too_but_not_the_overlay() {
+        // class, tool window, ours, marked no_pick
+        assert!(listed("Chrome_WidgetWin_1", false, false, false), "Edge");
+        assert!(listed("Window Class", false, true, false), "our Settings");
+        assert!(listed("Window Class", true, true, false), "our pin, chat");
+        assert!(
+            !listed("Window Class", true, true, true),
+            "our overlay, toasts"
+        );
+        assert!(listed("Shell_TrayWnd", true, false, false), "the taskbar");
+        assert!(listed("Shell_SecondaryTrayWnd", true, false, false));
+        assert!(!listed("Progman", false, false, false), "the desktop");
+        assert!(!listed("WorkerW", false, false, false), "the wallpaper");
+        assert!(
+            !listed("SomeHelper", true, false, false),
+            "another tool window"
+        );
     }
 
     #[test]

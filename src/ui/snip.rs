@@ -211,9 +211,11 @@ pub struct Snip {
     /// window).
     windows: Vec<Pick>,
     controls: Vec<Pick>,
-    /// The wheel's walk from the smallest target under the pointer (the key)
-    /// up to its window and the screen: how many steps up.
-    walk: (Option<Rectangle>, usize),
+    /// The wheel's walk (owner, 2026-10-31, like iTop): the window under the
+    /// pointer (the key; `None` = the desktop) and how many steps from it:
+    /// 0 = the whole window (the default), +1 = the screen, -1, -2… = ever
+    /// smaller controls in it.
+    walk: (Option<isize>, i32),
     /// Long capture works here (not on Wayland: no silent grab).
     scrolls: bool,
     /// The running long capture.
@@ -439,28 +441,39 @@ impl Snip {
     /// A window not read yet has its controls asked for.
     pub fn hover(&mut self, p: Point) {
         self.pointer = Some(p);
-        if let Some(w) = self.windows.iter().find(|w| w.rect.contains(p)) {
-            self.ask(w.window);
+        let under = (self.windows.iter())
+            .find(|w| w.rect.contains(p))
+            .map(|w| w.window);
+        if let Some(w) = under {
+            self.ask(w);
         }
-        let first = self.chain(p).first().map(|t| t.rect);
-        if first != self.walk.0 {
-            self.walk = (first, 0);
+        if under != self.walk.0 {
+            self.walk = (under, 0);
         }
     }
 
-    /// The wheel: away from the user (`notches` > 0) = the next bigger target,
-    /// towards = back to a smaller one.
+    /// The step of `chain` the walk is on: the window's (else the screen's,
+    /// the last) moved by the wheel's steps, within the chain.
+    fn step(&self, chain: &[Pick]) -> Option<usize> {
+        let last = chain.len().checked_sub(1)?;
+        let window = (chain.iter())
+            .position(|t| t.label.starts_with("Window"))
+            .unwrap_or(last);
+        Some((window as i32 + self.walk.1).clamp(0, last as i32) as usize)
+    }
+
+    /// The wheel: away from the user (`notches` > 0) = the next bigger target
+    /// (window → screen), towards = a smaller one (window → element → finer).
     pub fn walk(&mut self, notches: f32) {
         let Some(p) = self.pointer else { return };
-        let last = self.chain(p).len().saturating_sub(1);
-        let level = self.walk.1;
-        self.walk.1 = if notches > 0.0 {
-            (level + 1).min(last)
-        } else if notches < 0.0 {
-            level.saturating_sub(1)
-        } else {
-            level
+        let chain = self.chain(p);
+        let Some(at) = self.step(&chain) else { return };
+        let to = match notches {
+            n if n > 0.0 => (at + 1).min(chain.len() - 1),
+            n if n < 0.0 => at.saturating_sub(1),
+            _ => at,
         };
+        self.walk.1 += to as i32 - at as i32;
     }
 
     /// What a click would capture now (Region mode), outlined while hovering.
@@ -469,7 +482,7 @@ impl Snip {
             return None;
         }
         let chain = self.chain(self.pointer?);
-        let at = self.walk.1.min(chain.len().checked_sub(1)?);
+        let at = self.step(&chain)?;
         chain.into_iter().nth(at)
     }
 
@@ -750,13 +763,11 @@ impl Snip {
         let drag = drag.map(|r| view.rect_to_screen(r));
         let px = |v: f32| (v * scale).round() as u32;
         let size_of = |r: Rectangle| format!("{} × {}", px(r.width), px(r.height));
-        // over bare wallpaper: no outline (the edge frames the screen)
-        let picked = (self.outlined())
-            .filter(|t| drag.is_none() && t.label != "Screen")
-            .map(|t| Pick {
-                rect: view.rect_to_screen(t.rect),
-                ..t
-            });
+        // over bare wallpaper: the screen, outlined with its size (like iTop)
+        let picked = (self.outlined()).filter(|_| drag.is_none()).map(|t| Pick {
+            rect: view.rect_to_screen(t.rect),
+            ..t
+        });
         let loupe = Loupe {
             pixels,
             width: *width,
@@ -1257,7 +1268,7 @@ mod tests {
     }
 
     #[test]
-    fn hovering_outlines_the_smallest_thing_under_the_pointer() {
+    fn hovering_outlines_the_whole_window_under_the_pointer() {
         let mut s = desk();
         let labels =
             |s: &Snip, p| -> Vec<String> { s.chain(p).into_iter().map(|t| t.label).collect() };
@@ -1279,16 +1290,18 @@ mod tests {
         );
         // On the desktop: only the screen.
         assert_eq!(labels(&s, Point::new(1800.0, 1050.0)), ["Screen"]);
-        s.hover(Point::new(120.0, 150.0));
+        // Like iTop: the default is the whole window, even over its button.
+        let at = Point::new(120.0, 150.0);
+        s.hover(at);
         let outlined = s.outlined().unwrap();
-        assert_eq!(outlined.rect, rect(110.0, 135.0, 30.0, 30.0));
+        assert_eq!(outlined.label, "Window: App 1");
+        assert_eq!(outlined.rect, rect(100.0, 100.0, 800.0, 600.0));
         let frame = image::Handle::from_rgba(4, 4, vec![90; 64]);
         let guides = s
             .guides(&frame, 1.0, ident(), SCREEN, None, look())
             .unwrap();
         crate::ui::kit::testing::shot::save("snip-outline", guides, SCREEN);
-        // A click there captures the button exactly.
-        let at = Point::new(120.0, 150.0);
+        // A click there captures exactly that window.
         assert_eq!(s.pick(None, at, SCREEN), Some(Next::Edit(outlined.rect)));
         // Only Region mode outlines.
         let _ = s.switch(Kind::Full, SCREEN);
@@ -1304,15 +1317,87 @@ mod tests {
         );
     }
 
+    /// The owner's VM bugs (2026-10-31, beside iTop): our own Settings window
+    /// outlined nothing, and over Edge the page ("Element: document") was
+    /// outlined instead of the whole Edge window.
     #[test]
-    fn the_wheel_walks_element_parent_window_screen_and_back() {
+    fn our_settings_and_a_browser_are_outlined_whole_by_default() {
+        let settings = rect(100.0, 100.0, 820.0, 579.0);
+        let edge = rect(600.0, 50.0, 865.0, 990.0);
+        let page = rect(608.0, 130.0, 848.0, 680.0);
+        let mut s = Snip::new(
+            vec![
+                Pick::window(settings, "OpenCircle Settings", 7),
+                Pick::window(edge, "Page - Microsoft Edge", 8),
+            ],
+            flat(SCREEN),
+            true,
+            None,
+        );
+        s.add_controls(vec![
+            Pick::control(page, "document: file:///C:/page.html", 8),
+            Pick::control(rect(950.0, 200.0, 120.0, 40.0), "link: Home", 8),
+        ]);
+        let chip = |s: &Snip| s.outlined().unwrap().label;
+        s.hover(Point::new(300.0, 300.0));
+        assert_eq!(chip(&s), "Window: OpenCircle Settings");
+        assert_eq!(s.outlined().unwrap().rect, settings);
+        // Over the page's link (Settings doesn't cover it): the Edge window.
+        let link = Point::new(960.0, 210.0);
+        s.hover(link);
+        assert_eq!(chip(&s), "Window: Page - Microsoft Edge");
+        assert_eq!(s.pick(None, link, SCREEN), Some(Next::Edit(edge)));
+        // Wheel down: the page, then the link; up again: page, window, screen.
+        s.walk(-1.0);
+        assert_eq!(chip(&s), "Element: document: file:///C:/page.html");
+        assert_eq!(s.pick(None, link, SCREEN), Some(Next::Edit(page)));
+        s.walk(-1.0);
+        assert_eq!(chip(&s), "Element: link: Home");
+        s.walk(-1.0);
+        assert_eq!(chip(&s), "Element: link: Home", "stops at the finest");
+        s.walk(1.0);
+        s.walk(1.0);
+        assert_eq!(chip(&s), "Window: Page - Microsoft Edge");
+        s.walk(1.0);
+        assert_eq!(chip(&s), "Screen");
+        // Where Settings overlaps Edge: Settings (on top) wins, whole.
+        s.hover(Point::new(700.0, 400.0));
+        assert_eq!(chip(&s), "Window: OpenCircle Settings");
+    }
+
+    /// iTop: over bare wallpaper (desktop icons are no window) the whole screen
+    /// is outlined with its size, and a click takes it.
+    #[test]
+    fn the_bare_desktop_outlines_the_whole_screen_with_its_size() {
+        let mut s = desk();
+        let wallpaper = Point::new(1800.0, 1050.0);
+        s.hover(wallpaper);
+        let screen = Rectangle::with_size(SCREEN);
+        assert_eq!(s.outlined().unwrap().label, "Screen");
+        assert_eq!(s.pick(None, wallpaper, SCREEN), Some(Next::Edit(screen)));
+        s.walk(-1.0);
+        assert_eq!(s.outlined().unwrap().label, "Screen", "nothing smaller");
+        let frame = image::Handle::from_rgba(4, 4, vec![90; 64]);
+        let guides = s.guides(&frame, 1.0, ident(), SCREEN, None, look());
+        let texts = crate::ui::kit::testing::shot::texts(guides.unwrap());
+        let size = format!("{} × {}", SCREEN.width, SCREEN.height);
+        assert!(texts.iter().any(|t| t.contains(&size)), "{texts:?}");
+    }
+
+    #[test]
+    fn the_wheel_walks_window_element_finer_and_back_up_to_the_screen() {
         let mut s = desk();
         let at = Point::new(120.0, 150.0);
         s.hover(at);
         let label = |s: &Snip| s.outlined().unwrap().label;
-        assert_eq!(label(&s), "Element: button: Save");
-        s.walk(1.0);
+        assert_eq!(label(&s), "Window: App 1");
+        s.walk(-1.0);
         assert_eq!(label(&s), "Element: tool bar");
+        s.walk(-1.0);
+        assert_eq!(label(&s), "Element: button: Save");
+        s.walk(-1.0);
+        assert_eq!(label(&s), "Element: button: Save", "stops at the smallest");
+        s.walk(1.0);
         s.walk(1.0);
         assert_eq!(label(&s), "Window: App 1");
         s.walk(1.0);
@@ -1326,13 +1411,15 @@ mod tests {
         s.walk(-1.0);
         s.walk(-1.0);
         assert_eq!(label(&s), "Element: tool bar");
-        // Moving within the same button keeps the level; onto something else resets it.
+        // Within the same window the depth stays; another window starts whole.
         s.hover(Point::new(125.0, 152.0));
         assert_eq!(label(&s), "Element: tool bar");
         s.hover(Point::new(600.0, 500.0));
-        assert_eq!(label(&s), "Window: App 1");
-        s.walk(-5.0);
-        assert_eq!(label(&s), "Window: App 1", "stops at the smallest");
+        assert_eq!(label(&s), "Window: App 1", "no control there");
+        s.hover(Point::new(1200.0, 900.0));
+        assert_eq!(label(&s), "Window: App 2");
+        s.hover(at);
+        assert_eq!(label(&s), "Window: App 1", "back: whole again");
     }
 
     /// N-73 / design state 8: every screen is frozen with its own window, and
@@ -1391,6 +1478,8 @@ mod tests {
             1,
         )]);
         s.hover(Point::new(-950.0, 300.0));
+        assert_eq!(s.outlined().unwrap().label, "Window: Left");
+        s.walk(-1.0);
         let button = s.outlined().unwrap();
         assert_eq!(button.label, "Element: button: OK");
         // A drag snaps to its edges.
@@ -1540,13 +1629,12 @@ mod tests {
 
     #[test]
     fn a_click_with_a_little_jitter_between_two_edges_stays_a_click() {
-        // A 16 px icon in a toolbar; the user walked up to the window and clicks.
+        // A 16 px icon in a toolbar; the window is outlined (the default) and clicked.
         let window = rect(0.0, 0.0, 800.0, 600.0);
         let icon = rect(100.0, 100.0, 16.0, 16.0);
         let mut s = Snip::new(wins(&[window]), flat(SCREEN), true, None);
         s.add_controls(vec![Pick::control(icon, "button", 1)]);
         s.hover(Point::new(107.0, 107.0));
-        s.walk(1.0);
         assert_eq!(s.outlined().unwrap().rect, window);
         // Down near the icon's top-left, up 3 px further: nearer its other edges.
         let down = s.press(Point::new(107.0, 107.0));
