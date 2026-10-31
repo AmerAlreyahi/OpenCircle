@@ -105,7 +105,9 @@
 //! is sent before the user picks an action) and drops `[results]` (the web view card
 //! is gone: its keys are ignored); 4 adds `[appearance]` and the looks horizon, solar,
 //! hud and borealis (written only when picked; stored look values never change); without `[appearance]` an older file's
-//! `widget_theme` frost / graphite becomes the light / dark pick. A file older than `VERSION` is copied to
+//! `widget_theme` frost / graphite becomes the light / dark pick; 5 makes `snip.after`
+//! "both" the default, and an older file whose Snip was still off in Labs (never used)
+//! moves from the old default "copy" to it (a Snip user's value stays). A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -130,7 +132,7 @@ pub use store::{appearance, current, look, look_config, rebase, set_current, upd
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
@@ -364,11 +366,12 @@ pub struct TranslateConfig {
 #[serde(rename_all = "snake_case")]
 pub enum SnipAfter {
     /// To the clipboard at once (a toast offers Edit for a moment).
-    #[default]
     Copy,
     /// The editor opens on it.
     Editor,
-    /// Both.
+    /// Both: picked, with the Snip toolbar, and already copied (the default
+    /// since schema 5).
+    #[default]
     Both,
 }
 
@@ -409,7 +412,7 @@ fn is_default_long_max(px: &u32) -> bool {
 impl Default for SnipConfig {
     fn default() -> Self {
         SnipConfig {
-            after: SnipAfter::Copy,
+            after: SnipAfter::Both,
             max_edge: DEFAULT_MAX_EDGE,
             format: Format::Png,
             save_original: false,
@@ -1073,7 +1076,7 @@ mod tests {
         // The file is the new schema now, with every old value and the Labs switches.
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 4") && text.contains("[labs]"),
+            text.contains("version = 5") && text.contains("[labs]"),
             "{text}"
         );
         let (again, w) = Config::load_from(&path);
@@ -1110,13 +1113,13 @@ mod tests {
 
     #[test]
     fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-        let (dir, path) = config_with("current", "version = 4\n[labs]\nsong = true\n");
+        let (dir, path) = config_with("current", "version = 5\n[labs]\nsong = true\n");
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty() && c.labs.song && !c.labs.snip, "{w:?}");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "version = 4\n[labs]\nsong = true\n"
+            "version = 5\n[labs]\nsong = true\n"
         );
         let gone = dir.join("none.toml");
         Config::load_from(&gone);
@@ -1215,8 +1218,7 @@ mod tests {
             let (dir, path) = config_with(&format!("v012-{snip}-{editor}"), &text);
             let (c, w) = Config::load_from(&path);
             assert!(w.is_empty(), "{w:?}");
-            assert_eq!(fs_text(&path), text, "same schema: not rewritten on load");
-            assert!(!dir.join("config.toml.bak-v4").exists());
+            assert_eq!(fs_text(&dir.join("config.toml.bak-v4")), text);
             assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Editor, 1568));
             assert_eq!(
                 (c.snip.format, c.snip.history, c.snip.delay),
@@ -1322,7 +1324,7 @@ mod tests {
     #[test]
     fn defaults_match_design() {
         let c = Config::default();
-        assert_eq!(c.version, 4);
+        assert_eq!(c.version, 5);
         assert_eq!(c.labs, Labs::default(), "Labs: everything off");
         assert_eq!(c.theme, Theme::System);
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
@@ -1665,7 +1667,7 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
             let text = std::fs::read_to_string(&path).unwrap();
             assert!(
-                text.contains("version = 4") && text.contains("after = \"wait\""),
+                text.contains("version = 5") && text.contains("after = \"wait\""),
                 "{text}"
             );
             assert!(!text.contains("[results]"), "{text}");
@@ -1693,7 +1695,11 @@ mod tests {
     #[test]
     fn snip_section_defaults_and_checks() {
         let d = Config::default().snip;
-        assert_eq!(d.after, SnipAfter::Copy, "copy for the AI chat by default");
+        assert_eq!(
+            d.after,
+            SnipAfter::Both,
+            "picked with the toolbar, and copied"
+        );
         assert_eq!(
             (d.max_edge, d.format),
             (0, Format::Png),
@@ -1996,14 +2002,14 @@ mod tests {
         std::fs::read_to_string(dir.join(name)).unwrap()
     }
 
-    /// The default file is byte-for-byte the frozen v4 one (the file format is frozen).
+    /// The default file is byte-for-byte the frozen v5 one (the file format is frozen).
     #[test]
     fn the_default_file_is_byte_for_byte_the_frozen_one() {
         let dir = tmp_dir("default-bytes");
         let path = dir.join("config.toml");
         Config::default().save_to(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(written, fixture("default-v4.toml"));
+        assert_eq!(written, fixture("default-v5.toml"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2031,11 +2037,17 @@ mod tests {
             paths(&text.parse::<Table>().unwrap(), "", &mut out);
             out
         };
-        let v4 = keys(&fixture("default-v4.toml"));
+        let (v4, v5) = (
+            keys(&fixture("default-v4.toml")),
+            keys(&fixture("default-v5.toml")),
+        );
         for key in keys(&fixture("default-v3.toml")) {
             assert!(v4.contains(&key), "{key} is gone");
         }
-        // The v3 default file loads (and migrates) to the v4 defaults.
+        for key in &v4 {
+            assert!(v5.contains(key), "{key} is gone in v5");
+        }
+        // The v3 default file loads (and migrates) to the current defaults.
         let (dir, path) = config_with("v3-default", &fixture("default-v3.toml"));
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
@@ -2043,8 +2055,8 @@ mod tests {
         let mut want = Config::default();
         want.snip.max_edge = 1568;
         assert_eq!(c, want);
-        let v4 = fixture("default-v4.toml").replace("max_edge = 0\n", "max_edge = 1568\n");
-        assert_eq!(fs_text(&path), v4);
+        let v5 = fixture("default-v5.toml").replace("max_edge = 0\n", "max_edge = 1568\n");
+        assert_eq!(fs_text(&path), v5);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2086,7 +2098,7 @@ mod tests {
         assert_eq!(c.appearance.dark, "sapphire");
     }
 
-    /// A v3 file is backed up once as `.bak-v3` and rewritten as v4 with the mapped
+    /// A v3 file is backed up once as `.bak-v3` and rewritten as the current schema with the mapped
     /// values and its old keys; after that it is left alone.
     #[test]
     fn a_v3_file_migrates_once_with_a_bak_v3() {
@@ -2100,7 +2112,7 @@ mod tests {
         assert_eq!(look(&fs_text(&path)), look(old));
         let text = fs_text(&path);
         for want in [
-            "version = 4",
+            "version = 5",
             "widget_theme = \"graphite\"",
             "glass_effect = false",
             "theme = \"aurora\"",
@@ -2116,6 +2128,46 @@ mod tests {
         assert_eq!(fs_text(&path), text, "not rewritten again");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "one backup");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Schema 5 (owner, 2026-10-31): "both" is the default. A v0.1.1 (v3) or v0.1.2
+    /// (v4) file whose Snip was still off in Labs had "copy" only as the old default:
+    /// it moves to "both", once, with a backup. With Snip on in Labs the user's
+    /// "copy" stays, and any other value stays whatever Labs said.
+    #[test]
+    fn an_unused_snips_old_default_copy_moves_to_both_a_snip_users_value_stays() {
+        let on = |text: &str| text.replace("[labs]\nsnip = false\n", "[labs]\nsnip = true\n");
+        let (v3, v4) = (fixture("default-v3.toml"), fixture("default-v4.toml"));
+        for old in [&v3, &v4] {
+            assert!(old.contains("after = \"copy\"") && old.contains("[labs]\nsnip = false\n"));
+        }
+        for (name, old, n) in [("v3", &v3, 3), ("v4", &v4, 4)] {
+            let editor = old.replace("after = \"copy\"", "after = \"editor\"");
+            for (snip, text, want) in [
+                (false, old.clone(), SnipAfter::Both),
+                (true, on(old), SnipAfter::Copy),
+                (false, editor, SnipAfter::Editor),
+            ] {
+                let (dir, path) = config_with(&format!("v5-{name}-{snip}-{want:?}"), &text);
+                let (c, w) = Config::load_from(&path);
+                assert!(w.is_empty(), "{name}: {w:?}");
+                assert_eq!((c.labs.snip, c.snip.after), (snip, want), "{name}");
+                assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
+                let saved: Table = fs_text(&path).parse().unwrap();
+                assert_eq!(saved["version"].as_integer(), Some(5));
+                assert_eq!(
+                    saved["labs"]["snip"].as_bool(),
+                    Some(snip),
+                    "kept as it was"
+                );
+                // migrated once: a v5 "copy" is the user's own choice from then on
+                let (again, _) = Config::load_from(&path);
+                assert_eq!(again.snip.after, want);
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
+        let (c, _) = Config::parse("version = 5\n[snip]\nafter = \"copy\"\n");
+        assert_eq!(c.snip.after, SnipAfter::Copy, "a v5 value is never moved");
     }
 
     fn fs_text(path: &Path) -> String {

@@ -74,7 +74,7 @@ live_interval_ms = 1500
 
 [snip]
 after = "copy"
-max_edge = 0
+max_edge = 1568
 format = "png"
 save_original = false
 cursor = false

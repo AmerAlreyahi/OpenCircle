@@ -1055,10 +1055,10 @@ mod tests {
         assert_eq!(route(SnipAfter::Copy), (true, false));
         assert_eq!(route(SnipAfter::Editor), (false, true));
         assert_eq!(route(SnipAfter::Both), (true, true));
-        // Out of the box a snip goes to the clipboard for the AI chat.
+        // Out of the box a snip is picked with the toolbar and already copied.
         assert_eq!(
             route(crate::config::Config::default().snip.after),
-            (true, false)
+            (true, true)
         );
     }
 

@@ -882,6 +882,21 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
     assert!(app.o.edit.is_some() && app.scroll().is_none());
 }
 
+/// After a pick (owner, 2026-10-31): "Both" by default: a pick lands in the
+/// picked state (the live area, Snip's toolbar) and is already copied.
+#[test]
+fn a_pick_is_picked_with_the_toolbar_and_copied_by_default() {
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = snipping(area);
+    let _ = copy::copied::image();
+    let task = app.snip_next(Some(snip::Next::Edit(area)));
+    let edit = app.o.edit.as_ref().expect("picked");
+    assert!(edit.editor.movable, "the live area");
+    assert!(!app.snip_toast(), "no toast: the toolbar shows");
+    run_task(&mut app, task);
+    assert_eq!(copied_image(), Some((300, 200)), "and copied");
+}
+
 #[test]
 fn after_a_drag_out_the_editor_is_still_there_or_the_overlay_closes_whole() {
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));

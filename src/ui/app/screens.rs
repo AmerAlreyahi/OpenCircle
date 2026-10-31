@@ -993,18 +993,35 @@ mod tests {
         );
     }
 
+    /// Shift+Enter snips every screen: picked across them (After a capture's
+    /// default, Both). Copy only: the toast pill, which closes the other
+    /// screens' windows.
     #[test]
     fn shift_enter_snips_every_screen_and_a_pill_closes_the_other_windows() {
         let (mut app, _) = snipped();
         app.o.labs = crate::labs::Labs::default();
         let _ = app.update(Message::Overlay(overlay::Event::ShiftEnter));
-        // (no editor: copied, the toast pill shows)
+        let edit = app.o.edit.as_ref().expect("picked");
+        assert!(edit.editor.movable, "on the frozen frames");
+        // 640 + 2880 physical px wide, the taller screen high
+        let all = edit.image();
+        assert_eq!((all.width, all.height), (3520, 1620));
+        assert_eq!(app.o.screens.len(), 1, "the other screen stays");
+        // Copy only: the pill
+        let (mut app, _) = snipped();
+        let Purpose::Snip(snip) = &app.o.purpose else {
+            panic!("a snip")
+        };
+        let crate::ui::snip::Next::Edit(area) = snip.all();
+        app.select(area);
+        let crop = app.crop().expect("every screen");
+        let route = crate::ui::snip::route(config::SnipAfter::Copy);
+        let _ = app.snip_routed(crop, true, route);
         assert!(app.snip_toast(), "copied");
         let Purpose::Snip(snip) = &app.o.purpose else {
             panic!("a snip")
         };
         let toast = snip.toast_crop().expect("the capture");
-        // 640 + 2880 physical px wide, the taller screen high
         assert_eq!((toast.width, toast.height), (3520, 1620));
         assert!(
             app.o.screens.is_empty(),
