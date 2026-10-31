@@ -168,7 +168,9 @@ impl App {
             }
             Message::Escape if self.o.is_none() => Task::none(),
             // long capture's Esc is its Cancel: back to the picked area
-            Message::Escape if self.scroll().is_some() => self.on_snip(snip::Msg::Cancel),
+            Message::Escape if self.scroll().is_some() => self.on_snip(snip::Msg::Finish(
+                crate::ui::screens::long_capture::Finish::Cancel,
+            )),
             // a screen tool's closes it (back to the picked area, if it came from there)
             Message::Escape if self.tool().is_some() => {
                 self.on_tool(crate::ui::screens::tools::Msg::Close)

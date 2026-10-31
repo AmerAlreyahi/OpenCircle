@@ -43,7 +43,7 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
         let dot = |i: usize, name| {
             let open = state.picker == Some(i);
             hint(
-                swatch(rgb(i), open, Message::Picker(i)),
+                swatch(rgb(i), open, Some(Message::Picker(i))),
                 name,
                 Why::Icon,
                 Position::Top,

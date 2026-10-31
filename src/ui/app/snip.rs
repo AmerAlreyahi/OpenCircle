@@ -8,14 +8,14 @@ use iced::widget::image;
 use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Task, Vector};
 
-use crate::actions::{self, Crop, Run, copy};
+use crate::actions::{self, Crop, Run, copy, save};
 use crate::capture;
 use crate::config::{self};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::screens::editor::Editing;
-use crate::ui::screens::long_capture;
+use crate::ui::screens::long_capture::{self, Finish};
 use crate::ui::{snip, windows};
 
 use super::{ASK_MARGIN, App, work_area};
@@ -39,16 +39,9 @@ impl App {
             return Task::none();
         };
         match msg {
-            snip::Msg::Stop => {
-                if let Some(long) = &snip.scroll {
-                    long.stop();
-                }
-                Task::none()
-            }
-            snip::Msg::Cancel if snip.scroll.is_some() => {
+            snip::Msg::Finish(how) => {
                 if let Some(long) = &mut snip.scroll {
-                    long.cancelled = true;
-                    long.stop();
+                    long.finish(how);
                 }
                 Task::none()
             }
@@ -66,20 +59,33 @@ impl App {
                 let whole = windows::uncut(self.overlay)
                     .chain(windows::hide_from_capture(self.overlay, false))
                     .map(Message::Windows);
+                // back to the picked area (its editor kept, edits and all)
+                if let Some(edit) = &mut o.edit {
+                    edit.editor.capturing = false;
+                }
                 let crop = match stitched {
-                    Ok(crop) if crop.height > 0 && !long.cancelled => crop,
+                    Ok(crop) if crop.height > 0 && !long.cancelled() => crop,
                     Err(e) => {
                         crate::log!("long capture failed: {e}");
-                        return whole.chain(self.open_editor()); // back to the picked area
+                        return whole;
                     }
-                    _ => return whole.chain(self.open_editor()),
+                    _ => return whole,
                 };
                 crate::history::recent::remember(&crop);
-                self.o.selection = None;
-                self.o.stroke.clear();
-                // Done opens it picked, copied too unless "After a capture" is Editor
-                let (copy, _) = snip::route(config::current().snip.after);
-                whole.chain(self.snip_routed(crop, false, (copy, true)))
+                // the toolbar's button (Enter = Copy) acts on the stitched image
+                let then = match long.then.unwrap_or(Finish::Copy) {
+                    Finish::Copy | Finish::Cancel => self.finish(&copy::ACTION, crop),
+                    Finish::Save => self.finish(&save::ACTION, crop),
+                    Finish::Pin => self.pin(crop),
+                    // the share sheet comes from the editor: on the image, picked
+                    Finish::Share => {
+                        self.o.selection = None;
+                        self.o.stroke.clear();
+                        self.edit_fitted(crop);
+                        Task::done(Message::Editor(crate::editor::Message::Share))
+                    }
+                };
+                whole.chain(then)
             }
             snip::Msg::Delay(secs) => {
                 let Some(id) = snip.delay(secs) else {
@@ -447,23 +453,27 @@ impl App {
         ) else {
             return Task::none();
         };
+        // the toolbar stays docked where it is
+        let size = Editing::toolbar_size(self.o.screen.width, true);
+        let bar = Rectangle::new(self.bar_at(), size);
         let o = &*self.o;
-        let layout = long_capture::layout(area, o.screen);
-        let preview = layout.card.map_or((0, 0), |card| {
-            let view = long_capture::viewport(card);
-            (
-                (view.width * o.scale) as u32,
-                (view.height * o.scale) as u32,
-            )
+        let room = long_capture::layout(area, o.screen, bar, o.scale);
+        let preview = room.map_or((0, 0), |r| {
+            let px = |v: f32| (v * o.scale).round() as u32;
+            (px(r.width), px(r.height))
         });
-        let (overlay, scale, opening) = (self.overlay, o.scale, self.opening);
+        let (overlay, scale) = (self.overlay, o.scale);
         let o = &mut *self.o;
         let Purpose::Snip(snip) = &mut o.purpose else {
             return Task::none();
         };
         let stop = Arc::new(AtomicBool::new(false));
-        snip.scroll = Some(long_capture::Long::new(area, stop.clone()));
-        snip.hinting = true;
+        snip.scroll = Some(long_capture::Long::new(area, stop.clone(), scale));
+        if let Some(edit) = &mut o.edit {
+            edit.editor.capturing = true;
+            edit.editor.focus = None;
+            edit.editor.menu = None;
+        }
         o.stroke.clear(); // its outline is long capture's (dashed)
         let work = background(move |tx| {
             // Let the window be cut first.
@@ -476,13 +486,8 @@ impl App {
             let _ = tx.unbounded_send(snip::Msg::Done(stitched));
         })
         .map(Message::Snip);
-        let hint = background(|tx| {
-            std::thread::sleep(Duration::from_secs(snip::HINT_SECS));
-            let _ = tx.unbounded_send(());
-        })
-        .map(move |()| Message::Snip(snip::Msg::HintGone(opening)));
         // the toolbar stays where it is over an area that fills the screen
-        let keep = Some(layout.bar).filter(|bar| bar.intersects(&area));
+        let keep = Some(bar).filter(|bar| bar.intersects(&area));
         let cut = windows::hide_from_capture(overlay, keep.is_some())
             .chain(windows::hole(
                 overlay,
@@ -491,7 +496,7 @@ impl App {
                 scale,
             ))
             .map(Message::Windows);
-        Task::batch([cut.chain(work), hint])
+        cut.chain(work)
     }
 }
 

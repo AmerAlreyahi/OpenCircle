@@ -194,6 +194,17 @@ impl App {
                 let at = self.bar_at();
                 let here = self.toolbar_on().is_none_or(|w| w == self.overlay);
                 let toolbar = (self.swapped() >= 1.0 && here).then_some(at);
+                // long capture: its outline, picture and hint under the toolbar
+                if let Some(long) = snip.and_then(|s| s.scroll.as_ref()) {
+                    let size = crate::ui::screens::editor::Editing::toolbar_size(
+                        self.o.screen.width,
+                        true,
+                    );
+                    let look = crate::ui::theme::accent_of(&config::look());
+                    let bar = Rectangle::new(at, size);
+                    let shown = long.view(self.o.screen, bar, look, false);
+                    layers = layers.push(shown.map(Message::Snip));
+                }
                 layers = layers.push(edit.view(
                     self.o.screen,
                     toolbar,
@@ -251,7 +262,8 @@ impl App {
         } else if let Some(snip) = snip {
             let look = crate::ui::theme::accent_of(&config::look());
             match (&snip.scroll, &snip.tool) {
-                (Some(long), _) => long.view(self.o.screen, snip.hinting, look),
+                // (drawn with the toolbar, above)
+                (Some(_), _) => space().into(),
                 // the colour picker or the ruler, with its toolbar here
                 (None, Some(tool)) => {
                     let (scale, view, screen) = (self.o.scale, self.o.view, self.o.screen);

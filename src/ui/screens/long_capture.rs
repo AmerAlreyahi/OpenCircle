@@ -1,247 +1,243 @@
-//! Snip's long capture (N-73 point 5, design state 7): the picked area stays
-//! outlined (dashed) and is cut out of the overlay, so the user scrolls the
-//! app under it by hand; the toolbar shrinks to the counter, Cancel and
-//! Done; a preview of the stitched image grows beside the area, pinned to
-//! its newest rows; at the height limit the counter says so (7c). The
-//! grabbing and stitching run on a thread (`capture::scroll::by_hand`).
+//! Snip's long capture (N-73 point 5; look: owner, 2026-10-31): the picked
+//! area stays outlined (dashed) and is cut out of the overlay, so the user
+//! scrolls the app under it by hand; Snip's own toolbar stays docked to it
+//! (its Copy / Save / Pin / Share finish the capture, close cancels it). Beside
+//! the area the stitched image itself grows, sharp (`capture::shrink`) and
+//! drawn 1:1 in physical px, with only a 1 px edge (no card, no title): top
+//! aligned with the area, at most ~80 % of the free height, pinned to its
+//! newest rows; its px count is a small chip under it (over it where the
+//! toolbar is). A calm hint near the
+//! area until the first scroll. The grabbing and stitching run on a thread
+//! (`capture::scroll::by_hand`).
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use iced::widget::canvas::{self, Frame, Geometry};
-use iced::widget::{Space, canvas as draw, column, container, image, pin, row, stack};
+use iced::widget::{canvas as draw, container, image, pin, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme, mouse};
 
 use crate::capture::scroll::Update;
-use crate::capture::stitch::MAX_HEIGHT;
 use crate::ui::kit::area;
-use crate::ui::kit::button::{self, Kind};
 use crate::ui::kit::chip;
-use crate::ui::kit::divider;
-use crate::ui::kit::icon::Icon;
 use crate::ui::kit::key_hint::{self, key_hint};
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::text;
-use crate::ui::kit::tokens::{Role, radius, space};
-use crate::ui::screens::bar::geometry;
 use crate::ui::snip::Msg;
 
-/// The toolbar while capturing (logical px): counter, divider, Cancel, Done.
-pub const BAR: Size = Size::new(480.0, 46.0);
-/// Cancel's and Done's widths.
-const CANCEL_W: f32 = 92.0;
-const DONE_W: f32 = 80.0;
-const DIVIDER_H: f32 = 24.0;
-/// Beside the area: the gap, the preview card's narrowest, the thin strip
-/// taken when not even that fits, the card's padding and title row.
+/// Between the area, the picture and the screen's edge (logical px).
 const GAP: f32 = 12.0;
-const CARD_MIN: f32 = 240.0;
-const STRIP: f32 = 120.0;
-const PAD: f32 = 10.0;
-const TITLE_H: f32 = 26.0;
-/// The preview keeps 14 px text at 9 px or more (design 7b), and takes at
-/// most this share of the screen's width.
-const MIN_SCALE: f32 = 9.0 / 14.0;
-const MAX_SHARE: f32 = 0.4;
-/// What the hint says for its 2 s.
-const HINT: [key_hint::Group<'static>; 3] = [
-    (None, "Scroll the page yourself"),
-    (Some("Enter"), "Done"),
-    (Some("Esc"), "Cancel"),
-];
+/// The picture's width: this share of the area's (readable text, about half
+/// size), at most `MAX_SHARE` of the screen, at least `MIN_W` (else none).
+const SCALE: f32 = 0.5;
+const MAX_SHARE: f32 = 0.3;
+const MIN_W: f32 = 120.0;
+/// Its tallest: this share of the free height under the area's top (a little
+/// shorter than the whole free height, owner 2026-10-31), at least `MIN_H`.
+const TALL: f32 = 0.8;
+const MIN_H: f32 = 80.0;
+/// The count chip under the picture.
+const CHIP_GAP: f32 = 6.0;
+
+/// How the capture ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Finish {
+    /// Esc / close: back to the picked area.
+    Cancel,
+    /// Enter / Copy, Save, Pin, Share: that, on the stitched image.
+    Copy,
+    Save,
+    Pin,
+    Share,
+}
 
 /// The running capture (`Snip::scroll`).
 pub struct Long {
     stop: Arc<AtomicBool>,
-    /// Cancel was pressed: back to the picked area when the thread ends.
-    pub cancelled: bool,
+    /// How it ends (the first finish asked for wins); the thread then hands
+    /// over the image.
+    pub then: Option<Finish>,
     /// The area, logical px on the overlay's screen.
     pub area: Rectangle,
+    /// The overlay's scale: the preview is drawn 1:1 in physical px.
+    scale: f32,
     height: u32,
+    /// The first frame's height: more = the page was scrolled.
+    first: Option<u32>,
     full: bool,
     lost: bool,
-    preview: Option<(image::Handle, Size)>,
+    preview: Option<(image::Handle, u32, u32)>,
 }
 
 impl Long {
     /// Capturing `area`; `stop` is shared with the grabbing thread.
-    pub fn new(area: Rectangle, stop: Arc<AtomicBool>) -> Self {
+    pub fn new(area: Rectangle, stop: Arc<AtomicBool>, scale: f32) -> Self {
         Long {
             stop,
-            cancelled: false,
+            then: None,
             area,
+            scale,
             height: 0,
+            first: None,
             full: false,
             lost: false,
             preview: None,
         }
     }
 
-    /// Ends the grabbing: the thread hands over the image.
+    /// Ends the grabbing, then `how` (unless an end was already asked for).
+    pub fn finish(&mut self, how: Finish) {
+        self.then.get_or_insert(how);
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
+    /// Ends the grabbing as it is (the overlay closes).
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
     }
 
+    pub fn cancelled(&self) -> bool {
+        self.then == Some(Finish::Cancel)
+    }
+
+    /// The page moved under the area (the hint goes).
+    pub fn scrolled(&self) -> bool {
+        self.first.is_some_and(|f| self.height > f)
+    }
+
     pub fn update(&mut self, u: Update) {
         (self.height, self.full, self.lost) = (u.height, u.full, u.lost);
+        self.first.get_or_insert(u.height);
         if let Some(p) = u.preview.filter(|p| p.width > 0 && p.height > 0) {
-            let size = Size::new(p.width as f32, p.height as f32);
-            self.preview = Some((image::Handle::from_rgba(p.width, p.height, p.rgba), size));
+            let handle = image::Handle::from_rgba(p.width, p.height, p.rgba);
+            self.preview = Some((handle, p.width, p.height));
         }
     }
 
-    /// The toolbar, the preview card and the hint (`hinting`) on a `screen`
-    /// big overlay; `look` = the active look's pair, for the outline.
-    pub fn view(&self, screen: Size, hinting: bool, look: (Color, Color)) -> Element<'_, Msg> {
-        let at = layout(self.area, screen);
+    /// The outline, the picture with its count and the hint on a `screen`
+    /// big overlay whose toolbar is at `bar`; `look` = the active look's
+    /// pair, for the outline. `rtl`: the count's corner and wording mirrored.
+    pub fn view(
+        &self,
+        screen: Size,
+        bar: Rectangle,
+        look: (Color, Color),
+        rtl: bool,
+    ) -> Element<'_, Msg> {
+        let room = layout(self.area, screen, bar, self.scale);
+        // the picture as drawn: its physical px at 1 / scale, from the top
+        let shown = room
+            .zip(self.preview.as_ref())
+            .map(|(room, (handle, w, h))| {
+                let size = Size::new(*w as f32 / self.scale, *h as f32 / self.scale);
+                (Rectangle::new(room.position(), size), handle.clone())
+            });
         let outline = Outline {
             area: self.area,
             look,
             solid: self.full,
+            picture: shown.as_ref().map(|(r, _)| *r),
         };
         let mut layers = stack![draw(outline).width(Fill).height(Fill)];
-        let bar = toolbar(self.height, self.full, self.lost, false);
-        layers = layers.push(pin(bar).position(at.bar.position()));
-        if let Some(card) = at.card {
-            layers = layers.push(pin(self.card(card)).position(card.position()));
+        if let Some((r, handle)) = shown {
+            let picture = image(handle)
+                .width(r.width)
+                .height(r.height)
+                .filter_method(image::FilterMethod::Nearest);
+            layers = layers.push(pin(picture).position(r.position()));
+            let chip = container(count(self.height, self.full, self.lost, rtl)).width(r.width);
+            let chip = match rtl {
+                true => chip.align_left(r.width),
+                false => chip.align_right(r.width),
+            };
+            // under it; above it where the toolbar or the screen's end is
+            let under = Rectangle::new(
+                Point::new(r.x, r.y + r.height + CHIP_GAP),
+                Size::new(r.width, chip::READOUT_H),
+            );
+            let fits = !under.intersects(&bar) && under.y + under.height <= screen.height;
+            let y = match fits {
+                true => under.y,
+                false => r.y - CHIP_GAP - chip::READOUT_H,
+            };
+            if y >= 0.0 {
+                layers = layers.push(pin(chip).position(Point::new(r.x, y)));
+            }
         }
-        // (a lost match shows in the counter: "Scroll back")
-        if hinting && let Some(spot) = hint_at(at.bar, self.area, key_hint::width(&HINT), screen) {
-            layers = layers.push(pin(key_hint(&HINT, false)).position(spot));
+        if !self.scrolled() {
+            let hint = hint(rtl);
+            let spot = hint_at(bar, self.area, key_hint::width(&hint), screen);
+            if let Some(spot) = spot {
+                layers = layers.push(pin(key_hint(&hint, rtl)).position(spot));
+            }
         }
         layers.into()
     }
+}
 
-    /// The preview card: title and count, then the newest rows at its width.
-    fn card(&self, card: Rectangle) -> Element<'_, Msg> {
-        let view = viewport(card);
-        let count = chip::readout(px(self.height), false, None);
-        let title = row![
-            text(Role::CONTROL, "Long capture"),
-            Space::new().width(Fill),
-            count
-        ]
-        .align_y(iced::Center)
-        .height(TITLE_H);
-        let shown: Element<'_, Msg> = match &self.preview {
-            // from the top while it fits, then pinned to the newest rows
-            Some((handle, px)) => {
-                let h = view.width * px.height / px.width;
-                let picture = image(handle.clone()).width(view.width).height(h);
-                let shown = container(picture).height(view.height).clip(true);
-                match h > view.height {
-                    true => shown.align_bottom(view.height).into(),
-                    false => shown.into(),
-                }
-            }
-            None => Space::new().height(view.height).into(),
-        };
-        surface(
-            Material::Widget,
-            radius::CARD,
-            column![title, shown].spacing(space::GAP),
-        )
-        .padding(PAD)
-        .width(card.width)
-        .height(card.height)
-        .into()
+/// The hint until the first scroll.
+fn hint(rtl: bool) -> [key_hint::Group<'static>; 1] {
+    match rtl {
+        true => [(None, "مرّر لالتقاط الصفحة")],
+        false => [(None, "Scroll to capture the page")],
     }
 }
 
-/// The capture toolbar: dot, `3,240 px`, meter | Cancel, Done. `full`: the
-/// limit (7c); `lost`: no match. `rtl`: mirrored.
-pub fn toolbar<'a>(height: u32, full: bool, lost: bool, rtl: bool) -> Element<'a, Msg> {
+/// The count chip: `3,240 px`, with "Limit reached" / "Scroll back".
+pub fn count<'a>(height: u32, full: bool, lost: bool, rtl: bool) -> Element<'a, Msg> {
     let ar = |latin: &'a str, arabic: &'a str| if rtl { arabic } else { latin };
-    let warn = match () {
+    let note = match () {
         _ if full => Some(ar("Limit reached", "بلغت الحد")),
         _ if lost => Some(ar("Scroll back", "مرّر للخلف")),
         _ => None,
     };
-    let share = height as f32 / MAX_HEIGHT as f32;
     let label = match rtl {
         true => format!("{} بكسل", group(height)),
         false => px(height),
     };
-    let cancel = button::tool(
-        Icon::Close.glyph(),
-        ar("Cancel", "إلغاء"),
-        Kind::Elevated,
-        CANCEL_W,
-        false,
-        Some(Msg::Cancel),
-    );
-    let done = button::tool(
-        Icon::Check.glyph(),
-        ar("Done", "تم"),
-        Kind::Accent,
-        DONE_W,
-        false,
-        Some(Msg::Stop),
-    );
-    let mut parts = vec![
-        chip::counter(label, share, warn, rtl),
-        Space::new().width(Fill).into(),
-        divider::vertical(DIVIDER_H),
-        cancel,
-        done,
-    ];
-    if rtl {
-        parts.reverse();
-    }
-    let line = iced::widget::Row::with_children(parts)
-        .spacing(space::GAP)
-        .padding([0.0, space::GAP])
-        .align_y(iced::Center);
-    surface(Material::Widget, radius::WINDOW, line)
-        .padding(space::BAR_PAD)
-        .width(BAR.width)
-        .height(BAR.height)
-        .into()
+    chip::readout(label, false, note)
 }
 
-/// Where the toolbar and the preview card go.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Layout {
-    pub bar: Rectangle,
-    /// None: no room beside the area.
-    pub card: Option<Rectangle>,
-}
-
-/// The toolbar docks as the picked one did (under, else over, else inside
-/// the area); the card takes the wider free side, as tall as the area,
-/// wide enough to read (`MIN_SCALE`) up to `MAX_SHARE` of the screen; a
-/// thin strip when that side is narrow; none when there is no side.
-pub fn layout(area: Rectangle, screen: Size) -> Layout {
-    let bar = Rectangle::new(geometry::place(area, BAR, screen), BAR);
+/// Where the picture may grow (logical px, on the physical px grid): beside
+/// the area on the side with more room, top-aligned with it, `SCALE` of its
+/// width, `TALL` of the free height (beside the toolbar where they would
+/// meet, else above it); none when no side has `MIN_W` x `MIN_H`.
+pub fn layout(area: Rectangle, screen: Size, bar: Rectangle, scale: f32) -> Option<Rectangle> {
     let left = area.x - 2.0 * GAP;
     let right = screen.width - (area.x + area.width) - 2.0 * GAP;
-    let side = left.max(right);
-    let want = (area.width * MIN_SCALE).clamp(CARD_MIN, screen.width * MAX_SHARE);
-    let width = match () {
-        _ if side >= CARD_MIN => want.min(side),
-        _ if side >= STRIP => STRIP,
-        _ => return Layout { bar, card: None },
-    };
+    let width = (area.width * SCALE)
+        .min(screen.width * MAX_SHARE)
+        .min(left.max(right));
+    if width < MIN_W {
+        return None;
+    }
     let top = area.y.max(GAP);
-    let bottom = (area.y + area.height).min(screen.height - GAP);
-    let height = (bottom - top).max(TITLE_H + 2.0 * PAD + 80.0);
-    let top = top.min(screen.height - GAP - height).max(GAP);
-    let x = match right >= left {
+    let mut height = (screen.height - GAP - top) * TALL;
+    let mut x = match right >= left {
         true => area.x + area.width + GAP,
         false => area.x - GAP - width,
     };
-    let card = Rectangle::new(Point::new(x, top), Size::new(width, height));
-    Layout {
-        bar,
-        card: Some(card),
+    // the toolbar reaching into that side: beside it when there is room,
+    // else the picture ends above it
+    let room = Rectangle::new(Point::new(x, top), Size::new(width, height));
+    if room.intersects(&bar) {
+        let past = match right >= left {
+            true => bar.x + bar.width + GAP,
+            false => bar.x - GAP - width,
+        };
+        if past >= GAP && past + width <= screen.width - GAP {
+            x = past;
+        } else if bar.y > top {
+            height = height.min(bar.y - GAP - top);
+        }
     }
-}
-
-/// The preview's own size inside `card` (logical px).
-pub fn viewport(card: Rectangle) -> Size {
-    Size::new(
-        (card.width - 2.0 * PAD).max(1.0),
-        (card.height - 2.0 * PAD - TITLE_H - space::GAP).max(1.0),
-    )
+    if height < MIN_H {
+        return None;
+    }
+    // whole physical px: the picture is drawn 1:1, never resampled
+    let snap = |v: f32| (v * scale).round() / scale;
+    let floor = |v: f32| (v * scale).floor() / scale;
+    Some(Rectangle::new(
+        Point::new(snap(x), snap(top)),
+        Size::new(floor(width), floor(height)),
+    ))
 }
 
 /// The hint beside the toolbar, on its side away from the area, `width`
@@ -249,8 +245,8 @@ pub fn viewport(card: Rectangle) -> Size {
 fn hint_at(bar: Rectangle, area: Rectangle, width: f32, screen: Size) -> Option<Point> {
     let h = key_hint::HEIGHT;
     let y = match bar.y >= area.y + area.height {
-        true => bar.y + bar.height + space::GAP,
-        false => bar.y - space::GAP - h,
+        true => bar.y + bar.height + 8.0,
+        false => bar.y - 8.0 - h,
     };
     let x = (bar.center_x() - width / 2.0).clamp(GAP, (screen.width - GAP - width).max(GAP));
     let spot = Rectangle::new(Point::new(x, y), Size::new(width, h));
@@ -276,12 +272,13 @@ fn group(n: u32) -> String {
     out
 }
 
-/// The area's outline: dashed while capturing, solid at the limit; drawn
-/// outside the area (the live screen shows inside).
+/// The area's outline (dashed while capturing, solid at the limit; outside
+/// the area: the live screen shows inside) and the picture's edge.
 struct Outline {
     area: Rectangle,
     look: (Color, Color),
     solid: bool,
+    picture: Option<Rectangle>,
 }
 
 impl canvas::Program<Msg> for Outline {
@@ -300,6 +297,9 @@ impl canvas::Program<Msg> for Outline {
             true => area::outline(&mut frame, self.area.expand(area::LINE), self.look),
             false => area::dashed(&mut frame, self.area, self.look),
         }
+        if let Some(r) = self.picture {
+            area::edge(&mut frame, r);
+        }
         vec![frame.into_geometry()]
     }
 }
@@ -314,39 +314,65 @@ mod tests {
         Rectangle::new(Point::new(x, y), Size::new(w, h))
     }
 
+    /// A toolbar docked under `area`, centred, 600 x 46.
+    fn bar_under(area: Rectangle) -> Rectangle {
+        rect(
+            area.center_x() - 300.0,
+            area.y + area.height + 12.0,
+            600.0,
+            46.0,
+        )
+    }
+
     #[test]
-    fn the_card_takes_the_wider_side_and_never_covers_the_area() {
-        // design 7b: area on the left, the card on its right
-        let area = rect(80.0, 120.0, 560.0, 500.0);
-        let at = layout(area, SCREEN);
-        let card = at.card.unwrap();
-        assert!(!card.intersects(&area) && card.x > area.x + area.width);
-        assert_eq!(card.width, 360.0, "560 px at 9/14");
-        assert_eq!((card.y, card.height), (120.0, 500.0));
-        // area on the right: the card on its left
+    fn the_picture_takes_the_roomier_side_top_aligned_and_never_covers_the_area() {
+        // area on the left: the picture on its right, half its width
+        let area = rect(80.0, 120.0, 560.0, 300.0);
+        let room = layout(area, SCREEN, bar_under(area), 1.0).unwrap();
+        assert!(!room.intersects(&area) && room.x >= area.x + area.width);
+        assert_eq!((room.width, room.y), (280.0, 120.0));
+        // 80 % of the free height (no toolbar in the way)
+        let far = rect(0.0, 700.0, 10.0, 10.0);
+        let room = layout(area, SCREEN, far, 1.0).unwrap();
+        assert_eq!(room.height, ((720.0 - 12.0 - 120.0) * 0.8f32).floor());
+        // area on the right: the picture on its left
         let area = rect(700.0, 100.0, 500.0, 400.0);
-        let card = layout(area, SCREEN).card.unwrap();
-        assert!(card.x + card.width <= area.x);
-        // little room: a strip; none: no card
-        let area = rect(10.0, 50.0, 1120.0, 500.0);
-        assert_eq!(layout(area, SCREEN).card.unwrap().width, STRIP);
-        let area = rect(0.0, 0.0, 1280.0, 720.0);
-        assert_eq!(layout(area, SCREEN).card, None);
-        // the toolbar is on screen in every case
-        let bar = layout(area, SCREEN).bar;
-        assert!(bar.x >= 0.0 && bar.y + bar.height <= SCREEN.height);
+        let room = layout(area, SCREEN, bar_under(area), 1.0).unwrap();
+        assert!(room.x + room.width <= area.x);
+        // the toolbar under the area reaching the picture's side: above it
+        let area = rect(80.0, 120.0, 560.0, 300.0);
+        let bar = bar_under(area);
+        let room = layout(area, SCREEN, bar, 1.0).unwrap();
+        assert!(!room.intersects(&bar), "{room:?} {bar:?}");
+        // no side wide enough: none
+        let area = rect(10.0, 50.0, 1200.0, 500.0);
+        assert_eq!(layout(area, SCREEN, bar_under(area), 1.0), None);
+        let full = rect(0.0, 0.0, 1280.0, 720.0);
+        assert_eq!(layout(full, SCREEN, bar_under(full), 1.0), None);
+    }
+
+    #[test]
+    fn the_picture_sits_on_whole_physical_pixels() {
+        let area = rect(80.3, 120.7, 561.0, 300.0);
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let room = layout(area, SCREEN, bar_under(area), scale).unwrap();
+            for v in [room.x, room.y, room.width, room.height] {
+                let phys = v * scale;
+                assert!((phys - phys.round()).abs() < 1e-3, "{v} at {scale}");
+            }
+        }
     }
 
     #[test]
     fn the_hint_sits_beside_the_toolbar_away_from_the_area() {
         let area = rect(80.0, 120.0, 560.0, 400.0);
-        let at = layout(area, SCREEN);
-        let spot = hint_at(at.bar, area, 300.0, SCREEN).unwrap();
-        assert!(spot.y > at.bar.y, "under the toolbar under the area");
+        let bar = bar_under(area);
+        let spot = hint_at(bar, area, 300.0, SCREEN).unwrap();
+        assert!(spot.y > bar.y, "under the toolbar under the area");
         // a full-screen area: the toolbar is over it; no hint over the page
         let full = rect(0.0, 0.0, 1280.0, 720.0);
-        let at = layout(full, SCREEN);
-        assert_eq!(hint_at(at.bar, full, 300.0, SCREEN), None);
+        let bar = rect(340.0, 600.0, 600.0, 46.0);
+        assert_eq!(hint_at(bar, full, 300.0, SCREEN), None);
     }
 
     #[test]
@@ -355,14 +381,26 @@ mod tests {
         assert_eq!(px(3240), "3,240 px");
         assert_eq!(px(20_000), "20,000 px");
         assert_eq!(group(1_234_567), "1,234,567");
+        let texts = crate::ui::kit::testing::shot::texts(count(20_000, true, false, false));
+        assert!(texts.iter().any(|t| t == "Limit reached"), "{texts:?}");
     }
 
     #[test]
-    fn done_and_cancel_are_in_the_toolbar() {
-        let texts = crate::ui::kit::testing::shot::texts(toolbar(3240, false, false, false));
-        assert!(texts.iter().any(|t| t == "Done") && texts.iter().any(|t| t == "Cancel"));
-        assert!(texts.iter().any(|t| t == "3,240 px"), "{texts:?}");
-        let texts = crate::ui::kit::testing::shot::texts(toolbar(20_000, true, false, false));
-        assert!(texts.iter().any(|t| t == "Limit reached"), "{texts:?}");
+    fn the_first_finish_wins_and_the_hint_goes_after_a_scroll() {
+        let mut long = Long::new(rect(0.0, 0.0, 10.0, 10.0), Arc::default(), 1.0);
+        let update = |height| Update {
+            height,
+            full: false,
+            lost: false,
+            preview: None,
+        };
+        long.update(update(300));
+        assert!(!long.scrolled());
+        long.update(update(420));
+        assert!(long.scrolled());
+        long.finish(Finish::Save);
+        long.finish(Finish::Cancel);
+        assert_eq!(long.then, Some(Finish::Save));
+        assert!(long.stop.load(Ordering::Relaxed));
     }
 }

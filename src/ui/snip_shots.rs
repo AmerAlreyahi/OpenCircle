@@ -146,28 +146,10 @@ fn states() -> Vec<(&'static str, App)> {
     let _ = app.on_editor(E::Focus(true));
     let _ = app.on_editor(E::Focus(true));
     out.push(("6b-tab", app));
-    // 7: long capture: started (the hint), going (the preview), at the limit
+    // 7: long capture: started (the hint), going (the picture), at the limit
     out.push(("7a-long-start", long(0, false)));
     out.push(("7b-long", long(3240, false)));
     out.push(("7c-long-limit", long(MAX_HEIGHT, true)));
-    // 7d: Done: the stitched page (taller than the screen) picked, shown whole
-    let mut app = long(3240, false);
-    let picture = app.crop().unwrap();
-    let rows = picture.rgba.len();
-    let stitched = Crop {
-        width: picture.width,
-        height: picture.height * 4,
-        rgba: picture
-            .rgba
-            .iter()
-            .copied()
-            .cycle()
-            .take(rows * 4)
-            .collect(),
-    };
-    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(stitched))));
-    settle(&mut app);
-    out.push(("7d-long-done", app));
     // 8: the colour picker: started from the toolbar (its hint), then three
     // colours picked (the swatches, the Copied pill)
     let mut app = picked();
@@ -219,7 +201,8 @@ fn tool(which: Which) -> App {
 }
 
 /// Long capture from the picked area, after `height` px (none: just
-/// started); its preview is the area's picture, scaled as the thread does.
+/// started); its picture is the area's, repeated `height` px tall and scaled
+/// as the thread does (`Stitcher::tail`: `capture::shrink`, the newest rows).
 fn long(height: u32, full: bool) -> App {
     let mut app = picked();
     let picture = app.crop().unwrap();
@@ -227,14 +210,31 @@ fn long(height: u32, full: bool) -> App {
     if height == 0 {
         return app;
     }
-    let card = long_capture::layout(AREA, app.o.screen).card.unwrap();
-    let view = long_capture::viewport(card);
-    let page = ::image::RgbaImage::from_raw(picture.width, picture.height, picture.rgba).unwrap();
-    let small = ::image::imageops::thumbnail(&page, view.width as u32, view.height as u32 / 2);
+    let size = super::screens::editor::Editing::toolbar_size(W as f32, true);
+    let bar = Rectangle::new(app.bar_at(), size);
+    let room = long_capture::layout(AREA, app.o.screen, bar, 1.0).unwrap();
+    let w = picture.width as usize;
+    let tall = height.min(3 * picture.height) as usize;
+    let page: Vec<u8> = picture
+        .rgba
+        .iter()
+        .copied()
+        .cycle()
+        .take(tall * w * 4)
+        .collect();
+    let (small, rows) = crate::capture::shrink::shrink(&page, w, room.width as usize);
+    let out_w = small.len() / rows / 4;
+    let keep = rows.min(room.height as usize);
     let preview = Crop {
-        width: small.width(),
-        height: small.height(),
-        rgba: small.into_raw(),
+        width: out_w as u32,
+        height: keep as u32,
+        rgba: small[(rows - keep) * out_w * 4..].to_vec(),
+    };
+    let first = Update {
+        height: picture.height,
+        full: false,
+        lost: false,
+        preview: None,
     };
     let update = Update {
         height,
@@ -242,9 +242,8 @@ fn long(height: u32, full: bool) -> App {
         lost: false,
         preview: Some(preview),
     };
-    let opening = app.opening;
+    let _ = app.update(Message::Snip(snip::Msg::Progress(first)));
     let _ = app.update(Message::Snip(snip::Msg::Progress(update)));
-    let _ = app.update(Message::Snip(snip::Msg::HintGone(opening)));
     app
 }
 
@@ -262,12 +261,13 @@ fn shoot(name: &str, app: &mut App) -> Result<(), String> {
     golden::compare("screens", &format!("{name}@1x"), W, H, rgba)
 }
 
-/// Long capture's toolbar, Latin and Arabic (the app has no Arabic UI yet:
-/// the screens above are Latin), going and at the limit, both themes.
+/// Long capture's count chip under its picture, Latin and Arabic (the app
+/// has no Arabic UI yet: the screens above are Latin), going and at the
+/// limit, both themes.
 #[test]
-fn the_long_capture_toolbar_mirrors() {
+fn the_long_capture_count_mirrors() {
     let mut failed = Vec::new();
-    let size = long_capture::BAR;
+    let size = Size::new(220.0, 26.0);
     for theme in [&SAPPHIRE, &DAYLIGHT] {
         themes::set(theme);
         for (name, height, full, rtl) in [
@@ -275,9 +275,9 @@ fn the_long_capture_toolbar_mirrors() {
             ("rtl", 3240, false, true),
             ("limit-rtl", MAX_HEIGHT, true, true),
         ] {
-            let view = long_capture::toolbar(height, full, false, rtl);
+            let view = long_capture::count(height, full, false, rtl);
             let px = super::kit::testing::shot::render(view, size.width as u32, size.height as u32);
-            let name = format!("snip-7-toolbar-{name}-{}@1x", theme.id);
+            let name = format!("snip-7-count-{name}-{}@1x", theme.id);
             if golden::enabled() {
                 let (w, h) = (size.width as u32, size.height as u32);
                 failed.extend(golden::compare("screens", &name, w, h, &px).err());

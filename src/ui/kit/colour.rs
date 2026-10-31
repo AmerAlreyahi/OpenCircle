@@ -35,13 +35,18 @@ fn dot<'a, Message: 'a>(colour: Color, d: f32) -> Element<'a, Message> {
 pub fn swatch<'a, Message: Clone + 'a>(
     colour: Color,
     open: bool,
-    on_press: Message,
+    on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    // dimmed (no press) as the icon buttons are
+    let colour = match on_press {
+        Some(_) => colour,
+        None => colour.scale_alpha(0.4),
+    };
     button(container(dot(colour, DOT)).center(Fill))
         .width(size::ICON_BUTTON)
         .height(size::ICON_BUTTON)
         .padding(0)
-        .on_press(on_press)
+        .on_press_maybe(on_press)
         .style(move |_, status| {
             let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
             let fill = if hot {

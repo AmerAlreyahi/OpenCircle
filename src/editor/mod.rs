@@ -446,6 +446,9 @@ pub struct Editor {
     /// Scrolling capture can run for this editor (the host sets it; the
     /// toolbar button is dimmed without).
     pub scroll: bool,
+    /// A long capture of the area is running: the toolbar keeps only what
+    /// finishes it (Copy, Save, Pin, Share, close); the rest is dimmed.
+    pub capturing: bool,
     /// The height (image px) the blur stroke being drawn is held at.
     lock: Option<f32>,
     /// The blur brush's size picked in its options; `None` = Auto: as tall
@@ -497,6 +500,7 @@ impl Editor {
             shared: None,
             assist: crate::config::current().editor.line_assist,
             scroll: false,
+            capturing: false,
             lock: None,
             blur_size: None,
             bands: None,

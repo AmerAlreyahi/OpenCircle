@@ -8,6 +8,7 @@ pub mod live;
 #[cfg(target_os = "linux")]
 pub mod portal;
 pub mod scroll;
+pub mod shrink;
 pub mod snip;
 pub mod stitch;
 pub mod uia;

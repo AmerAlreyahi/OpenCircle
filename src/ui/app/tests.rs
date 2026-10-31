@@ -829,13 +829,24 @@ fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
 
 #[test]
 fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
+    use crate::ui::screens::long_capture::Finish;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let stitched = || {
+        Message::Snip(snip::Msg::Done(Ok(Crop {
+            width: 300,
+            height: 900,
+            rgba: vec![255; 300 * 900 * 4],
+        })))
+    };
     let mut app = snipping(area);
     app.select(area);
     let _ = app.open_editor();
     let _ = app.update(Message::Editor(editor::Message::Scroll));
-    assert!(app.o.edit.is_none(), "the editor steps aside");
     assert!(app.scroll().is_some(), "scrolling and stitching has begun");
+    assert!(
+        app.o.edit.as_ref().is_some_and(|e| e.editor.capturing),
+        "Snip's toolbar stays, in its capturing state"
+    );
     assert!(
         !app.snip_pill(),
         "the overlay stays: the area is cut out of it"
@@ -846,56 +857,57 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
         shift: false,
     });
     assert_eq!(app.o.selection.map(|s| s.area), Some(area));
+    // the toolbar's tools do nothing meanwhile
+    let _ = app.update(Message::Editor(editor::Message::Undo));
+    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    assert!(app.scroll().is_some_and(|l| l.then.is_none()));
     // Esc is Cancel: once the thread hands over, back to the picked area
     let _ = app.update(Message::Escape);
-    assert!(app.scroll().is_some_and(|l| l.cancelled));
-    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(Crop {
-        width: 300,
-        height: 900,
-        rgba: vec![255; 300 * 900 * 4],
-    }))));
+    assert!(app.scroll().is_some_and(|l| l.cancelled()));
+    let _ = app.update(stitched());
     assert!(app.scroll().is_none());
     assert!(
-        app.o.edit.as_ref().is_some_and(|e| e.editor.movable),
+        app.o
+            .edit
+            .as_ref()
+            .is_some_and(|e| e.editor.movable && !e.editor.capturing),
         "picked again"
     );
-    // Done (Enter): the stitched image opens picked, fitted on the screen
-    // (600 px high: shown whole, scaled down), with Snip's toolbar
+    // the toolbar's close is Cancel too
+    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let _ = app.update(Message::Editor(editor::Message::Close));
+    assert!(app.scroll().is_some_and(|l| l.cancelled()));
+    let _ = app.update(stitched());
+    assert!(app.o.is_some(), "still open");
+    // Save finishes it: the stitched image saved, the overlay closes
+    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let _ = app.update(Message::Editor(editor::Message::Save));
+    assert_eq!(app.scroll().and_then(|l| l.then), Some(Finish::Save));
+    let _ = app.update(stitched());
+    assert!(app.o.is_none(), "finished");
+    // Enter is Copy
+    let mut app = snipping(area);
+    app.select(area);
+    let _ = app.open_editor();
     let _ = app.update(Message::Editor(editor::Message::Scroll));
     let _ = app.on_overlay(overlay::Event::Enter);
-    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(Crop {
-        width: 300,
-        height: 900,
-        rgba: vec![255; 300 * 900 * 4],
-    }))));
-    assert!(app.scroll().is_none());
+    assert_eq!(app.scroll().and_then(|l| l.then), Some(Finish::Copy));
+    let _ = app.update(stitched());
+    assert!(app.o.is_none(), "copied and closed");
+    // Share: the stitched image picked (shown whole), the sheet from there
+    let mut app = snipping(area);
+    app.select(area);
+    let _ = app.open_editor();
+    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let _ = app.update(Message::Editor(editor::Message::Share));
+    let _ = app.update(stitched());
     let edit = app
         .o
         .edit
         .as_ref()
         .expect("the editor on the stitched image");
-    assert!(
-        edit.editor.movable && edit.editor.own_image,
-        "picked: the image is the area"
-    );
-    let stops = crate::ui::screens::editor::toolbar::stops(&edit.editor);
-    assert!(!stops.contains(&editor::Message::Back), "Snip's toolbar");
-    let shown = edit.canvas_rect();
-    assert!(
-        shown.y >= 0.0 && shown.y + shown.height < 600.0,
-        "{shown:?}"
-    );
-    assert_eq!(
-        (edit.image().width, edit.image().height),
-        (300, 900),
-        "full size"
-    );
-    assert_eq!(app.o.selection.map(|s| s.area), Some(shown));
-    let dock = app.bar_target();
-    assert!(
-        dock.y >= shown.y + shown.height,
-        "docked under it: {dock:?}"
-    );
+    assert!(edit.editor.movable && edit.editor.own_image && !edit.editor.capturing);
+    assert_eq!((edit.image().width, edit.image().height), (300, 900));
     // no auto-scroll here (Wayland) or no snip (Edit in place): the button is dimmed
     let mut app = open_app(800, 600, 1.0);
     app.select(area);

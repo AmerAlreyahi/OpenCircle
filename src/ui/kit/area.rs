@@ -5,6 +5,7 @@
 //! white and on dark pages; small round handles in the look's first colour,
 //! no white squares. `grown` (0..1) scales the handles in (the pick's 120 ms).
 //! `span`: the screen ruler's measured line, in the same line and halo.
+//! `edge`: the 1 px edge round long capture's live preview.
 use iced::widget::canvas::{Frame, LineDash, Path, Stroke, Style, gradient};
 use iced::{Color, Point, Rectangle, Size};
 
@@ -68,6 +69,16 @@ fn stroke(frame: &mut Frame, r: Rectangle, look: (Color, Color), dash: &[f32]) {
             ..Stroke::default()
         },
     );
+}
+
+/// The thinnest edge round a picture laid on the screen (long capture's live
+/// preview: no card, no frame): 1 px of the halo's dark, just outside `r`, so
+/// a white page reads against white and dark desktops alike.
+pub fn edge(frame: &mut Frame, r: Rectangle) {
+    let r = r.expand(0.5);
+    let path = Path::rectangle(r.position(), r.size());
+    let dark = Color::from_rgba(0.008, 0.024, 0.09, 0.45);
+    frame.stroke(&path, Stroke::default().with_color(dark).with_width(1.0));
 }
 
 /// The end ticks' half length (the screen ruler), logical px.

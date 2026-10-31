@@ -93,6 +93,20 @@ impl App {
     }
 
     fn on_editor_here(&mut self, msg: editor::Message) -> Task<Message> {
+        // A long capture running: the toolbar's finishing buttons end it, on
+        // the stitched image; nothing else reaches the editor meanwhile.
+        if self.scroll().is_some() {
+            use crate::ui::screens::long_capture::Finish;
+            let how = match msg {
+                editor::Message::Copy => Finish::Copy,
+                editor::Message::Save => Finish::Save,
+                editor::Message::Pin => Finish::Pin,
+                editor::Message::Share => Finish::Share,
+                editor::Message::Close => Finish::Cancel,
+                _ => return Task::none(),
+            };
+            return self.on_snip(crate::ui::snip::Msg::Finish(how));
+        }
         let o = &mut *self.o;
         let Some(edit) = &mut o.edit else {
             return Task::none();
@@ -141,12 +155,9 @@ impl App {
                 Some(selection) => self.live_pin(selection.area),
                 None => Task::none(),
             },
-            // Scrolling capture of the area under the editor.
+            // Scrolling capture of the area under the editor (its toolbar stays).
             Some(Output::Scroll) => match self.o.selection {
-                Some(selection) => {
-                    self.o.edit = None;
-                    self.start_scroll(selection.area)
-                }
+                Some(selection) => self.start_scroll(selection.area),
                 None => Task::none(),
             },
             Some(Output::AddCapture) => Task::none(), // `edit` picks the area now

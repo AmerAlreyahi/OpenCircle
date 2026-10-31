@@ -336,7 +336,7 @@ fn build(
     };
     let x = rest.push(
         hinted(
-            colour::swatch(e.ink(), e.menu == Some(Menu::Colour), Message::Picker),
+            colour::swatch(e.ink(), e.menu == Some(Menu::Colour), Some(Message::Picker)),
             "Colour, stroke, eyedropper, presets",
             Why::Icon,
         ),
@@ -454,6 +454,9 @@ fn build_snip(
         active,
         focused: focused(m),
     };
+    // a long capture running: only what finishes it stays live
+    let idle = !e.capturing;
+    let live = |m: Message| idle.then_some(m);
     let mut tools = Line {
         items: Vec::new(),
         x: bar::PAD,
@@ -472,10 +475,10 @@ fn build_snip(
     for t in snip_slots() {
         let shown = if current.slot == t.tool { current } else { t };
         let m = Message::Slot(t.tool);
-        let s = state(current.slot == t.tool, &m);
+        let s = state(idle && current.slot == t.tool, &m);
         let x = tools.push(
             hinted(
-                icon_button::square(shown.icon, s, Some(m)),
+                icon_button::square(shown.icon, s, live(m)),
                 shown.tip,
                 Why::Icon,
             ),
@@ -489,7 +492,7 @@ fn build_snip(
     };
     let x = rest.push(
         hinted(
-            colour::swatch(e.ink(), e.menu == Some(Menu::Colour), Message::Picker),
+            colour::swatch(e.ink(), e.menu == Some(Menu::Colour), live(Message::Picker)),
             "Colour, stroke, eyedropper, presets",
             Why::Icon,
         ),
@@ -500,7 +503,7 @@ fn build_snip(
     let s = state(e.menu == Some(Menu::Board), &board);
     let x = rest.push(
         hinted(
-            icon_button::square(BOARD, s, Some(board)),
+            icon_button::square(BOARD, s, live(board)),
             "Board: layout, legend",
             Why::Icon,
         ),
@@ -513,16 +516,17 @@ fn build_snip(
     ] {
         let s = state(false, &m);
         rest.push(
-            hinted(icon_button::square(glyph, s, Some(m)), tip, Why::Icon),
+            hinted(icon_button::square(glyph, s, live(m)), tip, Why::Icon),
             CONTROL,
         );
     }
     rest.push(divide(), bar::DIVIDER);
-    let long = match e.scroll {
-        true => "Long capture: scroll the page under the area yourself; it is stitched",
-        false => "Long capture: only when snipping",
+    let long = match (e.capturing, e.scroll) {
+        (true, _) => "Long capture: scroll the page; Copy or Save finishes it",
+        (false, true) => "Long capture: scroll the page under the area yourself; it is stitched",
+        (false, false) => "Long capture: only when snipping",
     };
-    let s = state(false, &Message::Scroll);
+    let s = state(e.capturing, &Message::Scroll);
     rest.push(
         hinted(
             icon_button::square(SCROLL, s, e.scroll.then_some(Message::Scroll)),
@@ -535,7 +539,7 @@ fn build_snip(
         let m = Message::ScreenTool(tool);
         let s = state(false, &m);
         rest.push(
-            hinted(icon_button::square(glyph, s, Some(m)), tip, Why::Icon),
+            hinted(icon_button::square(glyph, s, live(m)), tip, Why::Icon),
             CONTROL,
         );
     }
@@ -556,7 +560,7 @@ fn build_snip(
         };
         rest.push(
             hinted(
-                icon_button::square(LIVE_PIN, s, e.scroll.then_some(Message::LivePin)),
+                icon_button::square(LIVE_PIN, s, (e.scroll && idle).then_some(Message::LivePin)),
                 tip,
                 Why::Icon,
             ),

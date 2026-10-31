@@ -202,25 +202,6 @@ pub(in crate::ui) fn free(
     all.into_iter().find(|a| clear(*a)).unwrap_or(chosen)
 }
 
-/// Top-left corner for a `bar`: centred under the selection, else above it, else
-/// over its bottom edge (selection fills the screen). Always inside the screen,
-/// `GAP` from its edges, unless the bar is bigger than the screen.
-pub(in crate::ui) fn place(selection: Rectangle, bar: Size, screen: Size) -> Point {
-    let x = (selection.center_x() - bar.width / 2.0)
-        .min(screen.width - GAP - bar.width)
-        .max(GAP);
-    let below = selection.y + selection.height + GAP;
-    let above = selection.y - GAP - bar.height;
-    let y = if below + bar.height <= screen.height - GAP {
-        below
-    } else if above >= GAP {
-        above
-    } else {
-        screen.height - GAP - bar.height
-    };
-    Point::new(x, y.max(GAP))
-}
-
 /// Which of `screens` (work areas) Snip's toolbar docks on for the live area
 /// `area`: the one holding the larger part of it (design state 8), the first
 /// on a tie or when it is on none.
@@ -288,36 +269,6 @@ mod tests {
 
     fn sel(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
         Rectangle::new(Point::new(x, y), Size::new(w, h))
-    }
-
-    #[test]
-    fn bar_goes_centred_under_the_selection() {
-        let p = place(sel(800.0, 300.0, 200.0, 100.0), BAR, SCREEN);
-        assert_eq!(p, Point::new(700.0, 416.0));
-    }
-
-    #[test]
-    fn bar_goes_above_when_there_is_no_room_below() {
-        let s = sel(800.0, 900.0, 200.0, 150.0);
-        let p = place(s, BAR, SCREEN);
-        assert_eq!(p.y, 900.0 - GAP - BAR.height);
-        assert!(on_screen(p));
-    }
-
-    #[test]
-    fn bar_stays_on_screen_everywhere() {
-        let cases = [
-            sel(0.0, 0.0, 30.0, 30.0),        // top-left corner
-            sel(1890.0, 500.0, 30.0, 30.0),   // right edge
-            sel(1890.0, 1050.0, 30.0, 30.0),  // bottom-right corner
-            sel(0.0, 0.0, 1920.0, 1080.0),    // whole screen
-            sel(-50.0, 1000.0, 100.0, 200.0), // partly off screen
-            sel(100.0, 40.0, 300.0, 1000.0),  // tall: no room above or below
-        ];
-        for s in cases {
-            let p = place(s, BAR, SCREEN);
-            assert!(on_screen(p), "{s:?} -> {p:?}");
-        }
     }
 
     #[test]

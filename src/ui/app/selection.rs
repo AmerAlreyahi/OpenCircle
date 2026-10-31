@@ -44,10 +44,11 @@ impl App {
             }
             event => event,
         };
-        // Long capture: Enter is Done; the rest of the overlay is still.
+        // Long capture: Enter is Copy; the rest of the overlay is still.
         if self.scroll().is_some() {
+            use crate::ui::screens::long_capture::Finish;
             return match event {
-                overlay::Event::Enter => self.on_snip(crate::ui::snip::Msg::Stop),
+                overlay::Event::Enter => self.on_snip(crate::ui::snip::Msg::Finish(Finish::Copy)),
                 _ => Task::none(),
             };
         }

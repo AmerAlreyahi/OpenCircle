@@ -6,6 +6,8 @@
 //! scroll offset = lowest mean row cost over informative rows. Output pixels are always
 //! copied from a real frame, never blended. Pure: no I/O, no platform code.
 
+use super::shrink::Shrink;
+
 /// Hard cap on the stitched height, in pixels.
 pub const MAX_HEIGHT: u32 = 20_000;
 
@@ -204,6 +206,9 @@ pub struct Stitcher {
     foot: Vec<u8>,
     /// The height cap (`MAX_HEIGHT` unless `limit` lowers it).
     max: u32,
+    /// The preview: its scaler, the page rows fed to it and its newest
+    /// finished rows (`tail`; only the band added since is scaled).
+    shrink: Option<(Shrink, usize, Vec<u8>)>,
 }
 
 impl Stitcher {
@@ -217,6 +222,7 @@ impl Stitcher {
             page: Vec::new(),
             foot: Vec::new(),
             max: MAX_HEIGHT,
+            shrink: None,
         }
     }
 
@@ -288,26 +294,58 @@ impl Stitcher {
         Push::Added(take as u32)
     }
 
-    /// The bottom of the image so far: `out_w` px wide (scaled to it, as
-    /// `thumbnail` does), at most `out_h` tall; empty before the first frame.
-    pub fn tail(&self, out_w: u32, out_h: u32) -> (Vec<u8>, u32, u32) {
+    /// The bottom of the image so far, `out_w` px wide (at most the frame's;
+    /// a sharp area-average scale, `shrink`), at most `out_h` tall; empty
+    /// before the first frame. Rows already scaled are kept (the newest
+    /// `out_h`): a call scales only the page rows added since, plus the
+    /// footer (it changes with every frame).
+    pub fn tail(&mut self, out_w: u32, out_h: u32) -> (Vec<u8>, u32, u32) {
         let stride = self.w * 4;
-        let height = self.height() as usize;
-        if height == 0 || out_w == 0 || out_h == 0 {
+        if self.height() == 0 || out_w == 0 || out_h == 0 {
             return (Vec::new(), 0, 0);
         }
-        let scale = out_w as f32 / self.w as f32;
-        let rows = ((out_h as f32 / scale).ceil() as usize).min(height);
-        let mut part = Vec::with_capacity(rows * stride);
-        let from_page = rows.saturating_sub(self.foot.len() / stride);
-        part.extend_from_slice(&self.page[self.page.len() - from_page * stride..]);
-        part.extend_from_slice(&self.foot[self.foot.len() - (rows - from_page) * stride..]);
-        let Some(img) = image::RgbaImage::from_raw(self.w as u32, rows as u32, part) else {
+        let (out_w, out_h) = (out_w as usize, out_h as usize);
+        if self
+            .shrink
+            .as_ref()
+            .is_none_or(|(s, ..)| s.out_w() != out_w.min(self.w))
+        {
+            self.shrink = Some((Shrink::new(self.w, out_w), 0, Vec::new()));
+        }
+        let Some((shrink, fed, small)) = &mut self.shrink else {
             return (Vec::new(), 0, 0);
         };
-        let out_h = ((rows as f32 * scale).round() as u32).clamp(1, out_h);
-        let small = image::imageops::thumbnail(&img, out_w, out_h);
-        (small.into_raw(), out_w, out_h)
+        let row_out = shrink.out_w() * 4;
+        // Page rows are final once the first pair is matched (before it, the
+        // first frame's footer may still be cut off the page).
+        let rows = self.page.len() / stride;
+        if self.fixed.is_some() {
+            for row in self.page[*fed * stride..].chunks_exact(stride) {
+                shrink.feed(row, small);
+            }
+            *fed = rows;
+            let keep = out_h * row_out;
+            if small.len() > keep {
+                small.drain(..small.len() - keep);
+            }
+        }
+        let mut rest = shrink.clone();
+        let mut end = Vec::new();
+        for row in self.page[*fed * stride..].chunks_exact(stride) {
+            rest.feed(row, &mut end);
+        }
+        for row in self.foot.chunks_exact(stride) {
+            rest.feed(row, &mut end);
+        }
+        rest.flush(&mut end);
+        let total = small.len() + end.len();
+        let take = total.min(out_h * row_out);
+        let mut out = Vec::with_capacity(take);
+        let from_small = take.saturating_sub(end.len());
+        out.extend_from_slice(&small[small.len() - from_small..]);
+        out.extend_from_slice(&end[end.len() - (take - from_small)..]);
+        let w = shrink.out_w() as u32;
+        (out, w, (take / row_out) as u32)
     }
 
     /// The stitched RGBA image and its width and height (empty when nothing was pushed).
@@ -669,23 +707,24 @@ mod tests {
         let rig = Rig::new(W, 6000, VH, 7, 40);
         let mut st = Stitcher::new(W as u32, VH as u32);
         assert_eq!(st.tail(390, 300).1, 0, "nothing yet");
-        for s in [0, 300, 600] {
+        // asked between pushes (only the new band is scaled each time) it is
+        // what scaling the whole image at once gives: its newest rows
+        for s in [0, 300, 600, 777, 1100] {
             st.push(&rig.frame(s).px);
+            let _ = st.tail(390, 300);
         }
         let (px, w, h) = st.tail(390, 300);
         assert_eq!((w, h, px.len()), (390, 300, 390 * 300 * 4));
-        // its last row: the footer's last, halved
-        let truth = rig.truth(600);
-        let last = &truth.px[(truth.h - 1) * W * 4..];
-        let full = image::RgbaImage::from_raw(W as u32, 1, last.to_vec()).unwrap();
-        let want = image::imageops::thumbnail(&full, 390, 1).into_raw();
-        let got = &px[299 * 390 * 4..];
-        let off = got
-            .iter()
-            .zip(&want)
-            .filter(|(a, b)| a.abs_diff(**b) > 40)
-            .count();
-        assert!(off < 390, "{off} channels off");
+        let mut whole = Stitcher::new(W as u32, VH as u32);
+        for s in [0, 300, 600, 777, 1100] {
+            whole.push(&rig.frame(s).px);
+        }
+        let (rgba, ..) = whole.finish();
+        let (all, rows) = super::super::shrink::shrink(&rgba, W, 390);
+        assert_eq!(px, all[(rows - 300) * 390 * 4..], "the newest 300 rows");
+        // only the newest rows are kept scaled
+        let kept = st.shrink.as_ref().unwrap().2.len();
+        assert!(kept <= 300 * 390 * 4, "{kept}");
         // a short image comes whole
         let mut st = Stitcher::new(W as u32, VH as u32);
         st.push(&rig.frame(0).px);

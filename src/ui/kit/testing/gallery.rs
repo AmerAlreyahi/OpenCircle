@@ -959,9 +959,9 @@ fn colour_sheet() {
     const RED: Color = Color::from_rgb(0.94, 0.27, 0.27);
     const BLUE: Color = Color::from_rgb(0.23, 0.51, 0.96);
     let rows = vec![
-        row("swatch", Act::Rest, |_| swatch(RED, false, ())),
-        row("hover", Act::Hover, |_| swatch(RED, false, ())),
-        row("open", Act::Rest, |_| swatch(RED, true, ())),
+        row("swatch", Act::Rest, |_| swatch(RED, false, Some(()))),
+        row("hover", Act::Hover, |_| swatch(RED, false, Some(()))),
+        row("open", Act::Rest, |_| swatch(RED, true, Some(()))),
         row("picker", Act::Rest, |_| {
             picker(&[RED, BLUE, Color::WHITE], RED, "#EF4444", |_| (), |_| ())
         }),
@@ -1328,18 +1328,6 @@ fn chip_snip_sheet() {
         }),
         row("info element", Act::Rest, |_| {
             chip::info("Element", None, "330 × 180".into(), &LADDER, 0)
-        }),
-        row("counter", Act::Rest, |ar| {
-            chip::counter(s(ar, "3,240 px", "3,240 بكسل").into(), 0.162, None, ar)
-        }),
-        row("  limit", Act::Rest, |ar| {
-            let warn = s(ar, "Limit reached", "بلغت الحد");
-            chip::counter(
-                s(ar, "20,000 px", "20,000 بكسل").into(),
-                1.0,
-                Some(warn),
-                ar,
-            )
         }),
     ];
     sheet("chip_snip", Size::new(500.0, 46.0), &rows);

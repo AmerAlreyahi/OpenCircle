@@ -270,8 +270,12 @@ impl Editing {
             origin: self.origin,
             ..lens
         };
-        let drawn = canvas::canvas(&self.editor, self.grow.1, lens);
-        let mut layers = stack![pin(Element::from(drawn).map(map)).position(at)];
+        // a long capture shows the live page there: the toolbar alone
+        let mut layers = stack![];
+        if !self.editor.capturing {
+            let drawn = canvas::canvas(&self.editor, self.grow.1, lens);
+            layers = layers.push(pin(Element::from(drawn).map(map)).position(at));
+        }
         // Snip moved by the keyboard: its keys above the area, its position
         // (frame px) in its bottom-right corner, until the pointer is used.
         // ponytail: shown until the next press, not the design's 2 s / 800 ms fades.

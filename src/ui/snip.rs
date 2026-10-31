@@ -66,8 +66,9 @@ impl Kind {
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    /// Long capture's Done (Enter): the stitched image opens in the editor.
-    Stop,
+    /// Long capture ends so (Enter = Copy; the toolbar's Copy / Save / Pin /
+    /// Share; Esc / close = Cancel).
+    Finish(crate::ui::screens::long_capture::Finish),
     /// Long capture so far.
     Progress(crate::capture::scroll::Update),
     /// Long capture ended (Done or Cancel): the image gathered.
@@ -78,7 +79,7 @@ pub enum Msg {
     Tick(u32, u8),
     /// Countdown `.0` is over and the overlay hidden: capture now.
     Shoot(Kind),
-    /// The countdown's Cancel; long capture's (Esc): back to the picked area.
+    /// The countdown's Cancel.
     Cancel,
     /// The toast's Edit: the editor on the capture.
     Edit,
