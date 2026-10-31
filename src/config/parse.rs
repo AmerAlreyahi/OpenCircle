@@ -150,6 +150,7 @@ impl Config {
             c.editor.outline = get(t, p, "outline", None, &mut w);
             c.editor.fill = get(t, p, "fill", None, &mut w);
             c.editor.blur_size = get(t, p, "blur_size", None, &mut w);
+            c.editor.blur_cell = get(t, p, "blur_cell", None, &mut w);
         }
         if root.get("ai").is_some_and(|v| !v.is_table()) {
             w.push(format!("ai: expected a table; using defaults{AI_OFF}"));

@@ -4320,6 +4320,7 @@ dependencies = [
  "cpal",
  "dirs",
  "flate2",
+ "getrandom 0.3.4",
  "global-hotkey",
  "gtk",
  "hmac-sha256",

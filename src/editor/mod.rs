@@ -234,6 +234,11 @@ impl Width {
     fn brush(self) -> f32 {
         [14.0, 20.0, 32.0][self as usize]
     }
+    /// The blur's mosaic cell (display px): fine, iTop's look with smaller
+    /// cells (owner, 2026-10-31).
+    fn cell(self) -> f32 {
+        [4.0, 6.0, 9.0][self as usize]
+    }
 }
 
 /// The popovers under the toolbar (one at a time).
@@ -279,6 +284,8 @@ pub enum Message {
     Fill(bool),
     /// The blur brush's size: `None` = Auto (the text line it starts on).
     BlurSize(Option<Width>),
+    /// The blur's pixel size (its mosaic cells).
+    BlurCell(Width),
     /// The Text tool's options (its button's strip): font px on screen, and
     /// font, weight, backdrop.
     TextSize(f32),
@@ -460,6 +467,8 @@ pub struct Editor {
     /// The blur brush's size picked in its options; `None` = Auto: as tall
     /// as the text line under the stroke's start (owner, 2026-10-31).
     pub(crate) blur_size: Option<Width>,
+    /// The blur's pixel size (its mosaic cells).
+    pub(crate) blur_cell: Width,
     /// The image's text lines (Auto's), for the image they were found in.
     bands: Option<((u32, u32, board::Board), Vec<lines::Band>)>,
     /// Snip's live area: the document is the whole frozen monitor (or every
@@ -523,6 +532,7 @@ impl Editor {
             capturing: false,
             lock: None,
             blur_size: saved.blur_size,
+            blur_cell: saved.blur_cell.unwrap_or(Width::Medium),
             bands: None,
             movable: false,
             own_image: false,
@@ -549,6 +559,7 @@ impl Editor {
             outline: Some(self.outline),
             fill: Some(self.fill),
             blur_size: self.blur_size,
+            blur_cell: Some(self.blur_cell),
         }
     }
 
@@ -632,6 +643,10 @@ impl Editor {
             }
             Message::BlurSize(size) => {
                 self.blur_size = size;
+                self.restyle();
+            }
+            Message::BlurCell(cell) => {
+                self.blur_cell = cell;
                 self.restyle();
             }
             Message::Outline(on) => {
@@ -943,24 +958,28 @@ impl Editor {
         self.bands.as_ref().map_or(&[], |(_, b)| b)
     }
 
-    /// The blur brush's size at `p` (image px): the one picked, else Auto:
-    /// the text line there (a line taller than three default brushes is a
-    /// block, not a line), else the default.
-    fn brush_size(&mut self, p: Point) -> f32 {
+    /// The blur brush's size at `p` (image px) and, for Auto on a line, the
+    /// line's middle: the size picked, else Auto: the text line there (a line
+    /// taller than three default brushes is a block, not a line), else the
+    /// default.
+    fn brush_size(&mut self, p: Point) -> (f32, Option<f32>) {
         let default = Width::Medium.brush() / self.zoom;
         if let Some(w) = self.blur_size {
-            return w.brush() / self.zoom;
+            return (w.brush() / self.zoom, None);
         }
         lines::under(self.bands(), p)
-            .map(|b| b.brush())
-            .filter(|&h| h <= 3.0 * default)
-            .unwrap_or(default)
+            .filter(|b| b.brush(self.zoom) <= 3.0 * default)
+            .map_or((default, None), |b| (b.brush(self.zoom), Some(b.centre())))
     }
 
-    /// A blur stroke at `p`, sized (`brush_size`); with line help (and no
+    /// A blur stroke at `p`, sized (`brush_size`; Auto on a line: on its
+    /// middle, so it covers that line and no other); with line help (and no
     /// Shift) held at its height.
-    fn brush(&mut self, p: Point) -> Item {
-        let size = self.brush_size(p);
+    fn brush(&mut self, mut p: Point) -> Item {
+        let (size, middle) = self.brush_size(p);
+        if let Some(y) = middle.filter(|_| !self.shift) {
+            p.y = y;
+        }
         if self.assist && !self.shift {
             self.lock = Some(p.y);
         }
@@ -1311,6 +1330,7 @@ impl Editor {
             Tool::Blur => Shape::Blur {
                 points: vec![p],
                 size: self.blur_size.unwrap_or(Width::Medium).brush() / z,
+                cell: self.blur_cell.cell() / z,
                 seed: blur::seed(),
             },
             Tool::Redact => Shape::Redact { a: p, b: p },
@@ -1354,7 +1374,8 @@ impl Editor {
                 }
                 Shape::Highlighter(_) => new.width = editor.width.stroke() * 4.0 / z,
                 // Auto keeps the size it was given (its line); a picked one applies.
-                Shape::Blur { size, .. } => {
+                Shape::Blur { size, cell, .. } => {
+                    *cell = editor.blur_cell.cell() / z;
                     new.width = item.width;
                     if let Some(w) = editor.blur_size {
                         *size = w.brush() / z;

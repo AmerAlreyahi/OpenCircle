@@ -68,11 +68,12 @@ pub enum Shape {
         at: Point,
         radius: f32,
     },
-    /// A blur brush stroke, `size` px tall. `seed`: OS-random per item, never
-    /// shown; drives the noise that makes the blur irreversible (see `blur`).
+    /// A blur brush stroke: a pixel mosaic `size` px tall, of `cell` px cells.
+    /// `seed`: OS-random per item, never shown: its jitter makes it irreversible.
     Blur {
         points: Vec<Point>,
         size: f32,
+        cell: f32,
         seed: u64,
     },
     /// A solid box of the colour (passwords, keys: nothing left to recover).
@@ -121,9 +122,12 @@ impl Shape {
             | Shape::Ellipse { a, b }
             | Shape::Redact { a, b }
             | Shape::Spotlight { a, b } => (*a, *b) = (f(*a), f(*b)),
-            Shape::Blur { points, size, .. } => {
+            Shape::Blur {
+                points, size, cell, ..
+            } => {
                 points.iter_mut().for_each(|p| *p = f(*p));
                 *size = (*size * k).max(4.0);
+                *cell = (*cell * k).max(2.0);
             }
             Shape::Arrow { a, b, bend, .. } => (*a, *b, *bend) = (f(*a), f(*b), f(*bend)),
             Shape::Pen(points) | Shape::Highlighter(points) => {
@@ -196,7 +200,7 @@ impl Item {
             }
             Shape::Highlighter(_) => self.width / 2.0 + 2.0,
             Shape::Redact { .. } | Shape::Spotlight { .. } => 1.0,
-            Shape::Blur { size, .. } => blur::reach(*size),
+            Shape::Blur { size, cell, .. } => blur::reach(*size, *cell),
             Shape::Text { size, .. } | Shape::Callout { size, .. } | Shape::Label { size, .. } => {
                 size / 6.0 + 3.0
             }
@@ -719,7 +723,12 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
             Shape::Step { at, radius, .. } => step::paint(&mut layer, *at, *radius, steps, c),
             Shape::Label { at, text, size } => label::paint(&mut layer, *at, text, *size, c, true),
             Shape::Pointer { at, radius } => pointer::paint(&mut layer, *at, *radius, c, w),
-            Shape::Blur { points, size, seed } => blur::paint(&mut layer, points, *size, *seed),
+            Shape::Blur {
+                points,
+                size,
+                cell,
+                seed,
+            } => blur::paint(&mut layer, points, *size, *cell, *seed),
             Shape::Redact { a, b } => {
                 if let Some(path) = rounded(span(&[*a, *b]), 0.0) {
                     layer.fill(&path, [c[0], c[1], c[2], 255]);

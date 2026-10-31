@@ -27,6 +27,8 @@ interprocess = "2.4"
 keyring = "4.2"
 png = "0.18"
 serde = { version = "1", features = ["derive"] }
+# The blur's secret per-stroke seed from the OS CSPRNG (already in the tree).
+getrandom = "0.3"
 serde_json = "1"
 # Saved AI chats (history::chat): SQLite compiled into the exe (no DLL). Text only.
 rusqlite = { version = "0.37", features = ["bundled"] }

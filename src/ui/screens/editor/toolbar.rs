@@ -670,6 +670,16 @@ fn options_popover(e: &Editor, slot: Tool) -> Element<'_, Message> {
     };
     let label = if slot == Tool::Blur { "Brush" } else { "Size" };
     let mut options: Vec<Element<'_, Message>> = vec![caption(Role::SECTION, label).into(), size];
+    if slot == Tool::Blur {
+        let cells = [
+            (Width::Thin, "Fine"),
+            (Width::Medium, "Medium"),
+            (Width::Thick, "Coarse"),
+        ];
+        options.push(caption(Role::SECTION, "Pixel size").into());
+        let on = e.blur_cell;
+        options.push(segmented::inline(&cells, on, on, 1.0, Message::BlurCell));
+    }
     if outline {
         options.push(caption(Role::SECTION, "Outline").into());
         let on = segmented::inline_boolean(
@@ -924,7 +934,7 @@ mod tests {
                 ("colour", colour, 440.0),
                 ("options-rect", options(Tool::Rect), 260.0),
                 ("options-arrow", options(Tool::Arrow), 260.0),
-                ("options-blur", options(Tool::Blur), 200.0),
+                ("options-blur", options(Tool::Blur), 260.0),
             ] {
                 let file = format!("editor-toolbar-{name}-{}", theme.id);
                 let at = Size::new(wide, height);

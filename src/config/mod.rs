@@ -87,6 +87,7 @@
 //! outline = false                   # shapes, arrows, callouts get an outline
 //! fill = false                      # rectangles and ellipses get a tint
 //! blur_size = "medium"              # the blur brush: thin | medium | thick; missing = Auto
+//! blur_cell = "medium"              # the blur's pixel size: thin | medium | thick
 //!
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
 //! snip = false                      # until 0.1.2 Snip's switch; read and written, ignored since
@@ -754,6 +755,9 @@ pub struct EditorConfig {
     /// The blur brush's picked size; `None` = Auto.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blur_size: Option<crate::editor::Width>,
+    /// The blur's pixel size (its mosaic cells).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blur_cell: Option<crate::editor::Width>,
 }
 
 /// `editor.text_size`'s range (display px).
@@ -770,6 +774,7 @@ impl Default for EditorConfig {
             outline: None,
             fill: None,
             blur_size: None,
+            blur_cell: None,
         }
     }
 }
@@ -1598,7 +1603,7 @@ mod tests {
         // The remembered tool and options: read back; a bad one is its default.
         let (c, w) = Config::parse(
             "[editor]\ntool = \"step\"\ncolour = \"#AF52DE\"\nsize = \"thin\"\ntext_size = 38\n\
-             outline = true\nfill = false\nblur_size = \"thick\"\n",
+             outline = true\nfill = false\nblur_size = \"thick\"\nblur_cell = \"thin\"\n",
         );
         assert!(w.is_empty(), "{w:?}");
         use crate::editor::{Tool, Width};
@@ -1610,13 +1615,16 @@ mod tests {
             (c.editor.text_size, c.editor.outline, c.editor.fill),
             (Some(38), Some(true), Some(false))
         );
-        assert_eq!(c.editor.blur_size, Some(Width::Thick));
+        assert_eq!(
+            (c.editor.blur_size, c.editor.blur_cell),
+            (Some(Width::Thick), Some(Width::Thin))
+        );
         let (c, w) = Config::parse(
             "[editor]\ntool = \"crop\"\ncolour = \"purple\"\nsize = \"huge\"\ntext_size = 200\n\
-             outline = 1\nfill = \"no\"\nblur_size = 3\n",
+             outline = 1\nfill = \"no\"\nblur_size = 3\nblur_cell = \"x\"\n",
         );
         assert_eq!(c.editor, EditorConfig::default());
-        assert_eq!(w.len(), 7, "{w:?}");
+        assert_eq!(w.len(), 8, "{w:?}");
         for key in [
             "tool",
             "colour",
@@ -1625,6 +1633,7 @@ mod tests {
             "outline",
             "fill",
             "blur_size",
+            "blur_cell",
         ] {
             let key = format!("editor.{key}");
             assert!(w.iter().any(|w| w.starts_with(&key)), "{key}: {w:?}");
