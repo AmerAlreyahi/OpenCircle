@@ -195,38 +195,46 @@ pub fn count<'a>(height: u32, full: bool, lost: bool, rtl: bool) -> Element<'a, 
     chip::readout(label, false, note)
 }
 
-/// Where the picture may grow (logical px, on the physical px grid): beside
-/// the area on the side with more room, top-aligned with it, `SCALE` of its
-/// width, `TALL` of the free height (beside the toolbar where they would
-/// meet, else above it); none when no side has `MIN_W` x `MIN_H`.
+/// Where the picture may grow (logical px, on the physical px grid): right
+/// beside the area (`GAP`), on the side it fits (the roomier when both or
+/// neither do; narrower to fit, down to `MIN_W`, then over the area's edge
+/// by less than half its width), top-aligned with it, `SCALE` of its width,
+/// `TALL` of the free height, ending above Snip's toolbar where they would
+/// meet; none when that leaves less than `MIN_H` or a bigger overlap.
 pub fn layout(area: Rectangle, screen: Size, bar: Rectangle, scale: f32) -> Option<Rectangle> {
+    // room beside the area on each side (a GAP to the area and to the edge)
     let left = area.x - 2.0 * GAP;
     let right = screen.width - (area.x + area.width) - 2.0 * GAP;
-    let width = (area.width * SCALE)
+    let want = (area.width * SCALE)
         .min(screen.width * MAX_SHARE)
-        .min(left.max(right));
-    if width < MIN_W {
+        .max(MIN_W);
+    // the side it fits on (the roomier one when both do), else the roomier
+    // side, narrower; never across the screen, never past the toolbar
+    let on_right = match (right >= want, left >= want) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => right >= left,
+    };
+    let room = if on_right { right } else { left };
+    let width = want.min(room.max(MIN_W));
+    // too little room even for MIN_W: overlap the area's edge a little
+    let x = match on_right {
+        true => (area.x + area.width + GAP).min(screen.width - GAP - width),
+        false => (area.x - GAP - width).max(GAP),
+    };
+    let overlap = match on_right {
+        true => area.x + area.width + GAP - x,
+        false => x + width + GAP - area.x,
+    };
+    if overlap > width / 2.0 {
         return None;
     }
     let top = area.y.max(GAP);
     let mut height = (screen.height - GAP - top) * TALL;
-    let mut x = match right >= left {
-        true => area.x + area.width + GAP,
-        false => area.x - GAP - width,
-    };
-    // the toolbar reaching into that side: beside it when there is room,
-    // else the picture ends above it
-    let room = Rectangle::new(Point::new(x, top), Size::new(width, height));
-    if room.intersects(&bar) {
-        let past = match right >= left {
-            true => bar.x + bar.width + GAP,
-            false => bar.x - GAP - width,
-        };
-        if past >= GAP && past + width <= screen.width - GAP {
-            x = past;
-        } else if bar.y > top {
-            height = height.min(bar.y - GAP - top);
-        }
+    // Snip's toolbar reaching into that column: the picture ends above it
+    let column = Rectangle::new(Point::new(x, top), Size::new(width, height));
+    if column.intersects(&bar) && bar.y > top {
+        height = height.min(bar.y - GAP - top);
     }
     if height < MIN_H {
         return None;
@@ -349,6 +357,48 @@ mod tests {
         assert_eq!(layout(area, SCREEN, bar_under(area), 1.0), None);
         let full = rect(0.0, 0.0, 1280.0, 720.0);
         assert_eq!(layout(full, SCREEN, bar_under(full), 1.0), None);
+    }
+
+    /// The owner's VM (2026-10-31): an area at the right edge got its picture
+    /// at the far left (past the wide toolbar). It goes right beside the area,
+    /// `GAP` away, top-aligned, wherever the area is.
+    #[test]
+    fn the_picture_is_right_beside_the_area_at_the_edges_and_centre() {
+        let screen = Size::new(1716.0, 1271.0);
+        let wide_bar = |area: Rectangle| {
+            rect(
+                area.center_x() - 590.0,
+                area.y + area.height + 12.0,
+                1180.0,
+                46.0,
+            )
+        };
+        let room_for = |area: Rectangle| {
+            let room = layout(area, screen, wide_bar(area), 1.0).unwrap();
+            assert_eq!(room.y, area.y, "top-aligned: {room:?}");
+            assert!(room.x >= 0.0 && room.x + room.width <= screen.width);
+            room
+        };
+        // right edge (the VM's case): on its left, GAP away
+        let area = rect(866.0, 150.0, 830.0, 400.0);
+        let room = room_for(area);
+        assert_eq!(room.x + room.width + GAP, area.x);
+        // left edge: on its right
+        let area = rect(20.0, 150.0, 830.0, 400.0);
+        assert_eq!(room_for(area).x, area.x + area.width + GAP);
+        // centre: the roomier side, adjacent
+        let area = rect(600.0, 200.0, 500.0, 400.0);
+        assert_eq!(room_for(area).x, area.x + area.width + GAP);
+        // neither side fits the full width: narrower, still adjacent
+        let area = rect(150.0, 100.0, 1416.0, 600.0);
+        let room = room_for(area);
+        assert_eq!(room.x, area.x + area.width + GAP);
+        assert!(room.width >= MIN_W && !room.intersects(&area));
+        // no room at all: over the area's edge, by less than half its width
+        let area = rect(60.0, 100.0, 1560.0, 600.0);
+        let room = room_for(area);
+        let over = (area.x + area.width - room.x).max(0.0);
+        assert!(over > 0.0 && over <= room.width / 2.0, "{room:?}");
     }
 
     #[test]
