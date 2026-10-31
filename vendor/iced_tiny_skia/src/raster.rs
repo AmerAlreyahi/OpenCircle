@@ -141,7 +141,7 @@ impl Pipeline {
         }
         let n = (x1 - x0) as usize;
         // (#89: on all cores when big, the edge glow's strips under a pan)
-        rows(dst, w as usize, y0 as usize..y1 as usize, |row, dst| {
+        rows(dst, w as usize, n, y0 as usize..y1 as usize, |row, dst| {
             let s = (row as i64 - y) as usize * iw as usize + (x0 - x) as usize;
             let (src, dst) = (&image.pixels[s..s + n], &mut dst[x0 as usize..x0 as usize + n]);
             if image.opaque {
@@ -227,7 +227,13 @@ fn scaled(
             *d = ((t + (t >> 8)) >> 8) as u8;
         }
     };
-    rows(dst, w as usize, y0 as usize..y1 as usize, |y, row| {
+    // only the rows the image covers (drawn within the clip, the clip is the
+    // whole window: a 9x loupe cell walked all 1271 rows, and on all cores)
+    let ys = (y0..y1).filter(|&y| nearest(y, oy, sy, ih).is_some());
+    let (Some(ya), Some(yb)) = (ys.clone().next(), ys.last()) else {
+        return true;
+    };
+    rows(dst, w as usize, n, ya as usize..yb as usize + 1, |y, row| {
         let Some(v) = nearest(y as u32, oy, sy, ih) else {
             return;
         };
@@ -276,16 +282,27 @@ pub(crate) fn nearest(d: u32, o: f64, s: f64, n: usize) -> Option<usize> {
 /// OpenCircle patch (#89): `each(y, row)` over the rows `ys` of a `w` px wide
 /// image, split between the CPU's cores when there are many pixels (a whole
 /// screen each frame of the wheel zoom); in order on one core when few.
+/// `px`: the pixels `each` works on in a row (the threads are started for
+/// those, not for the row's width: a loupe's strip of a few hundred px
+/// started them on each draw, ~0.2 ms here, more on a VM).
 pub(crate) fn rows(
     data: &mut [u32],
     w: usize,
+    px: usize,
     ys: std::ops::Range<usize>,
     each: impl Fn(usize, &mut [u32]) + Sync,
 ) {
     let data = &mut data[ys.start * w..ys.end * w];
+    if !threaded(ys.len(), px) {
+        for (i, row) in data.chunks_exact_mut(w).enumerate() {
+            each(ys.start + i, row);
+        }
+        return;
+    }
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get().min(8));
     let band = ys.len().div_ceil(cores).max(1);
-    if cores == 1 || data.len() < 1 << 18 {
+    SPLIT.set(SPLIT.get() + 1);
+    if cores == 1 {
         for (i, row) in data.chunks_exact_mut(w).enumerate() {
             each(ys.start + i, row);
         }
@@ -301,6 +318,19 @@ pub(crate) fn rows(
             });
         }
     });
+}
+
+thread_local! {
+    /// OpenCircle patch (#89): how often `rows` split its work between the
+    /// cores on this thread (tests: a small redraw never does).
+    pub static SPLIT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// OpenCircle patch (#89): `rows` splits `n` rows of `px` pixels between the
+/// cores from a megapixel (a zoomed screen; starting the threads costs more
+/// than copying a damaged strip on one core, ~0.2 ms here, more on a VM).
+pub(crate) fn threaded(n: usize, px: usize) -> bool {
+    n * px >= 1 << 20
 }
 
 #[derive(Debug, Default)]

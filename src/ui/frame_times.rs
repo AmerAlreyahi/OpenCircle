@@ -34,6 +34,8 @@ pub struct Drawn {
     /// rasterizing the damage.
     pub layout: Duration,
     pub raster: Duration,
+    /// Times rasterizing it started threads (`iced_tiny_skia::SPLIT`).
+    pub split: u64,
     pub damage: Vec<Rectangle>,
     pub rgba: Vec<u8>,
     /// When its widgets want the next frame (a canvas still moving).
@@ -113,6 +115,7 @@ pub fn drawn<S, M>(
         };
         let changed = damage::group(changed, all);
         let rastering = Instant::now();
+        let split = iced_tiny_skia::SPLIT.get();
         if !changed.is_empty() {
             renderer.draw(
                 &mut pixmap.as_mut(),
@@ -129,6 +132,7 @@ pub fn drawn<S, M>(
                 took,
                 layout,
                 raster: rastering.elapsed(),
+                split: iced_tiny_skia::SPLIT.get() - split,
                 damage: changed,
                 next,
                 rgba: if pixels {
@@ -696,7 +700,7 @@ fn settings_at(section: settings::Section) -> settings::State {
 }
 
 /// One line per motion: mean / worst frame, where the time goes, how much is redrawn.
-fn report(name: &str, size: Size, k: f32, t: &[Drawn]) {
+pub fn report(name: &str, size: Size, k: f32, t: &[Drawn]) {
     let ms = |d: Duration| d.as_secs_f64() * 1e3;
     let n = t.len() as f64;
     let mean = t.iter().map(|d| ms(d.took)).sum::<f64>() / n;
@@ -1483,6 +1487,12 @@ fn a_snips_drags_redraw_round_what_moves() {
         // (the dim's tiles a moved or resized edge crosses redraw only the
         // strips it crossed: 26-27 % of the screen a frame before, ~3 % now)
         assert!(share < 0.1, "{drag:?}: {:.0} % a frame", share * 100.0);
+        // a strip of the screen is drawn on this thread: starting threads for
+        // it cost more than it saved (each image or fill over ~250k px of
+        // *rows* did: the loupe's strip, ~0.2 ms each here, 16-34 ms frames
+        // on the 4-core VM)
+        let split: u64 = t.iter().map(|d| d.split).sum();
+        assert_eq!(split, 0, "{drag:?}: threads started");
         // the middle of the box being drawn or resized is never redrawn (once
         // the pick is big: a small box's sides are one run of damage; a moved
         // area's edges cross every dim tile it covers in turn)

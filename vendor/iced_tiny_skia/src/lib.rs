@@ -22,6 +22,7 @@ pub use iced_graphics as graphics;
 pub use iced_graphics::core;
 
 pub use engine::PIPELINE_PIXELS;
+pub use raster::SPLIT;
 pub use layer::Layer;
 pub use primitive::Primitive;
 pub use settings::Settings;

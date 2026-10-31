@@ -977,7 +977,7 @@ fn fill_rect(
             mix(chunks.into_remainder(), &c);
         }
     };
-    crate::raster::rows(data, w as usize, y0 as usize..y1 as usize, |_, row| {
+    crate::raster::rows(data, w as usize, (x1 - x0) as usize, y0 as usize..y1 as usize, |_, row| {
         blend(&mut row[x0 as usize..x1 as usize]);
     });
     true

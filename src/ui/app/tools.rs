@@ -504,6 +504,17 @@ mod frames {
         assert_eq!(modes, [Mode::Line, Mode::Across, Mode::Down, Mode::Box]);
     }
 
+    /// The tools' frames at the VM's screen (run in release:
+    /// `cargo test --release tool_frame_times -- --ignored --nocapture`).
+    #[test]
+    #[ignore = "timing: run by hand, in release"]
+    fn tool_frame_times() {
+        for which in [Which::Picker, Which::Ruler] {
+            let (t, app) = moved(which, 60);
+            crate::ui::frame_times::report(&format!("{which:?}"), app.o.screen, 1.0, &t[1..]);
+        }
+    }
+
     #[test]
     fn the_screen_tools_redraw_round_what_moves() {
         for which in [Which::Picker, Which::Ruler] {
@@ -514,6 +525,8 @@ mod frames {
                 let area: f32 = d.damage.iter().map(|r| r.width * r.height).sum();
                 let share = area / whole;
                 assert!(share < 0.04, "{which:?} frame {i}: {:.1} %", share * 100.0);
+                // (one thread: the loupe's strip started them on every move)
+                assert_eq!(d.split, 0, "{which:?} frame {i}: threads started");
             }
         }
     }
