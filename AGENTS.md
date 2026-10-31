@@ -292,6 +292,9 @@ production systems.
   After a pick (owner, 2026-10-31): the default is "Both": the area stays picked with the Snip toolbar AND is
   already on the clipboard. `snip.after` default = both; a config from before 0.1.3 whose Snip was still in Labs
   (never used) moves to both; a user's own choice stays.
+  Window hover (owner, 2026-10-31, compared with iTop): hovering outlines the WHOLE top-level window under the
+  pointer by default (its visible frame, like iTop); a part of it (element) only after the wheel goes down; every
+  normal window counts, OpenCircle's own Settings / chat / pins too (only the snip overlay itself is skipped).
 - Snip look + size (owner, 2026-10-30, on the design's picked frame): the area's handles and its outline are
   SOFTER (smaller, rounder, quieter handles; a thinner, lower-contrast border than the design's v24 frame). Copy
   and Save keep the capture's full size by default: `snip.max_edge` default 0 (Original) instead of 1568 (a value
