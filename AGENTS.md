@@ -318,6 +318,9 @@ production systems.
   Copy · Save; NO close (x) button (Esc closes); Copy and Save icon-only, Copy stays the accent button (owner,
   2026-11-02); a group shows its last-used tool; a click on the ACTIVE button opens one panel (the group's tools +
   that tool's options); Fill greyed for line/arrow; Undo's second click = Undo/Redo panel. The Edit fold is not used.
+  Drags (owner OK, 2026-11-02; canvas v29 legend): the grip moves the toolbar; the size chip (with a picture icon)
+  drags the picture out: once the thumbnail leaves the area the frozen screen fades away, the drop lands in the real
+  app, and Snip closes after the drop; a drag inside the area moves the area.
   Steps board simplified (owner, 2026-11-02): a slim strip of numbered thumbnails at a screen edge, thin border, no
   extra space; Copy all copies at once (stacked, numbered) with the Copied pill; hover x deletes a step, drag
   reorders; x on the strip clears it with Undo in the pill; at 12 the Add button says full. No captions, no preview
