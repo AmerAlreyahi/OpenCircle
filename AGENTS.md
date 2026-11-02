@@ -310,8 +310,8 @@ production systems.
   colours averaged); a flat rectangular stroke along the text line, as tall as the line (not a round blob); a
   pixel-size control in its options; text stays unreadable. Redact stays solid.
   Grouped Snip toolbar (owner approved the design, 2026-11-02; canvas v27, SNIP_TOOLBAR_SPEC.md): one bar, always
-  the same: size chip (also the drag handle) · Select · Shapes · Draw · Text · Hide · Colour · Undo · More · Copy ·
-  Save · close; a group shows its last-used tool; a click on the ACTIVE button opens one panel (the group's tools +
+  the same: 6-dot grip (the drag handle) · size chip · Select · Shapes · Draw · Text · Hide · Colour · Undo · More ·
+  Copy · Save; NO close (x) button (Esc closes) (owner, 2026-11-02); a group shows its last-used tool; a click on the ACTIVE button opens one panel (the group's tools +
   that tool's options); Fill greyed for line/arrow; Undo's second click = Undo/Redo panel. The Edit fold is not used.
   Steps board simplified (owner, 2026-11-02): a slim strip of numbered thumbnails at a screen edge, thin border, no
   extra space; Copy all copies at once (stacked, numbered) with the Copied pill; hover x deletes a step, drag
