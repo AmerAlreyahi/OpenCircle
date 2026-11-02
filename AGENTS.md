@@ -313,6 +313,12 @@ production systems.
   with smaller cells (more pixels), cell edges slightly softened; NO colour tint or noise (only the area's own
   colours averaged); a flat rectangular stroke along the text line, as tall as the line (not a round blob); a
   pixel-size control in its options; text stays unreadable. Redact stays solid.
+  Secure blur approved (owner, 2026-11-02, after the real-text sheet): coarse blocks (line tall, 2.5 lines wide)
+  drawn as fine cells, one colour pair per stroke, secret OS-random offsets; pixel size 4 / 6 (default) / 9.
+  Live pin border (owner, 2026-11-02): Windows 10's yellow capture border is accepted; on Windows 11 it is turned
+  off (IsBorderRequired = false).
+  0.1.3 gate on BOTH VMs (owner, 2026-11-02): the Windows 10 VM and the Ubuntu VM (Linux testing resumes for this
+  gate).
   Grouped Snip toolbar (owner approved the design, 2026-11-02; canvas v27, SNIP_TOOLBAR_SPEC.md): one bar, always
   the same: 6-dot grip (the drag handle) · size chip · Select · Shapes · Draw · Text · Hide · Colour · Undo · More ·
   Copy · Save; NO close (x) button (Esc closes); Copy and Save icon-only, Copy stays the accent button (owner,
