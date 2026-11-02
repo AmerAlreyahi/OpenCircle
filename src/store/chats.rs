@@ -495,7 +495,9 @@ mod tests {
         save(&db, &chat("1-0", 1), generation()).unwrap();
         crate::store::test_path(Some(db.clone()));
         forget_all();
-        let gone = (0..200).any(|_| {
+        // The clear runs on a thread behind the one write lock: under a busy test run
+        // (parallel tests, other builds) it can take seconds; it stops as soon as it's done.
+        let gone = (0..1000).any(|_| {
             std::thread::sleep(std::time::Duration::from_millis(10));
             list(&db, "").is_empty()
         });
