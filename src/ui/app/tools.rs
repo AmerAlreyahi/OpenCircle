@@ -415,7 +415,7 @@ mod tests {
         let area = Rectangle::new(Point::new(120.0, 100.0), Size::new(200.0, 120.0));
         app.select(area);
         let crop = app.crop().unwrap();
-        let _ = app.snip_routed(crop, true, snip::route(crate::config::SnipAfter::Editor));
+        let _ = app.snip_routed(crop, true, false);
         assert!(app.o.edit.is_some());
         let _ = app.on_editor(editor::Message::ScreenTool(Which::Ruler));
         assert!(app.tool().is_some_and(|t| t.which == Which::Ruler));

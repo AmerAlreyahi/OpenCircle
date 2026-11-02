@@ -254,14 +254,12 @@ mod tests {
     use iced::{Point, Rectangle, Size};
 
     use crate::actions::share;
-    use crate::config::SnipAfter;
     use crate::editor::{Message as E, dragout};
     use crate::labs::Labs;
     use crate::ui::app::App;
     use crate::ui::app::message::Hiding;
     use crate::ui::app::tests::{open_app, run_task, snipping_on};
     use crate::ui::screens::editor::toolbar;
-    use crate::ui::snip;
 
     /// A snip of an area in its editor (Labs all on for the host; the toolbar
     /// reads the shared config, where Pins is off).
@@ -271,7 +269,7 @@ mod tests {
         app.o.labs = Labs::all_on();
         app.select(area);
         let crop = app.crop().unwrap();
-        let _ = app.snip_routed(crop, true, snip::route(SnipAfter::Editor));
+        let _ = app.snip_routed(crop, true, false);
         assert!(app.editing(), "the editor is open");
         app
     }

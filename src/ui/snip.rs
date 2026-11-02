@@ -1,6 +1,6 @@
 //! Snip mode (DESIGN.md "Snip mode"): pick a region, a window, the whole screen or
-//! a scrolling area on the frozen frame. Then (`snip.after`) the capture is copied,
-//! with a toast that offers Edit for a few seconds, and/or the editor opens on it.
+//! a scrolling area on the frozen frame. Then the picked state with the
+//! Snip toolbar always follows; `snip.after` only says whether it is also copied.
 //! While picking, edges snap to windows and (Windows) to the controls of the app
 //! the user was in (Shift = no snapping), and a loupe shows the pixels under the
 //! pointer. The timer hides the overlay, counts down (menus can be opened
@@ -36,9 +36,6 @@ const SNAP: f32 = 8.0;
 /// The hover info chip's height, the drag size chip's width (logical px).
 const INFO_H: f32 = 30.0;
 const SIZE_CHIP_W: f32 = 96.0;
-/// The toast offers Edit this long, then the overlay closes.
-pub const TOAST_SECS: u64 = 4;
-pub const COPIED: &str = "Copied: paste it into your AI chat";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -81,12 +78,6 @@ pub enum Msg {
     Shoot(Kind),
     /// The countdown's Cancel.
     Cancel,
-    /// The toast's Edit: the editor on the capture.
-    Edit,
-    /// Toast `.0` was shown long enough.
-    ToastDone(u32),
-    /// Toast `.0`'s capture could not be copied: the editor opens on it.
-    CopyFailed(u32),
     /// Controls of one window (logical px), for opening `.0`.
     Controls(u32, Vec<Pick>),
     /// Shift is held: no snapping.
@@ -131,13 +122,10 @@ pub enum Next {
     Edit(Rectangle),
 }
 
-/// What a finished capture does (config `snip.after`): (copy it, open the editor).
-pub fn route(after: SnipAfter) -> (bool, bool) {
-    match after {
-        SnipAfter::Copy => (true, false),
-        SnipAfter::Editor => (false, true),
-        SnipAfter::Both => (true, true),
-    }
+/// Whether a pick is also copied (config `snip.after`, "Copy when picked"): the
+/// picked state with the Snip toolbar always follows.
+pub fn copies(after: SnipAfter) -> bool {
+    after != SnipAfter::Editor
 }
 
 /// Something a click can capture: a window, a control in one, or the screen.
@@ -171,15 +159,6 @@ impl Pick {
             window,
         }
     }
-}
-
-/// The "Copied" toast: the capture, for its Edit button.
-pub struct Toast {
-    id: u32,
-    pub crop: Crop,
-    /// Still on the frozen frame at the selection (else: a scrolling or recent
-    /// capture, edited fitted to the screen).
-    pub in_place: bool,
 }
 
 pub use super::platform::monitor::Place;
@@ -242,8 +221,6 @@ pub struct Snip {
     /// The timer pill: countdown number, seconds left.
     countdown: Option<(u32, u8)>,
     countdowns: u32,
-    toast: Option<Toast>,
-    toasts: u32,
     recent: Vec<(PathBuf, image::Handle)>,
     /// The freeze hint shows (`HintGone`, a drag hides it).
     pub hinting: bool,
@@ -251,7 +228,7 @@ pub struct Snip {
     pub live_pin: bool,
 }
 
-/// The pill window's size (logical px): countdown, toast.
+/// The pill window's size (logical px): countdown.
 pub const PILL: Size = Size::new(500.0, 68.0);
 /// Its corners (the window is cut to them).
 pub const PILL_RADIUS: f32 = radius::WINDOW;
@@ -281,8 +258,6 @@ impl Snip {
             pointer: None,
             countdown: None,
             countdowns: 0,
-            toast: None,
-            toasts: 0,
             recent: Vec::new(),
             hinting: true,
             live_pin: false,
@@ -609,40 +584,9 @@ impl Snip {
         self.scrolls
     }
 
-    /// The window is only a pill now (the timer, the toast).
+    /// The window is only a pill now (the timer).
     pub fn is_pill(&self) -> bool {
-        self.countdown.is_some() || self.toast.is_some()
-    }
-
-    /// Shows the "Copied" toast for `crop`; its number.
-    pub fn toast(&mut self, crop: Crop, in_place: bool) -> u32 {
-        self.toasts = self.toasts.wrapping_add(1);
-        self.toast = Some(Toast {
-            id: self.toasts,
-            crop,
-            in_place,
-        });
-        self.toasts
-    }
-
-    pub fn has_toast(&self) -> bool {
-        self.toast.is_some()
-    }
-
-    /// The toast's Edit: it goes, the capture comes out.
-    pub fn take_toast(&mut self) -> Option<Toast> {
-        self.toast.take()
-    }
-
-    /// The toast's capture (tests).
-    #[cfg(test)]
-    pub fn toast_crop(&self) -> Option<&Crop> {
-        self.toast.as_ref().map(|t| &t.crop)
-    }
-
-    /// Toast `id` is still the one showing.
-    pub fn toast_showing(&self, id: u32) -> bool {
-        self.toast.as_ref().is_some_and(|t| t.id == id)
+        self.countdown.is_some()
     }
 
     pub fn set_recent(&mut self, recent: Vec<(PathBuf, image::Handle)>) {
@@ -700,7 +644,7 @@ impl Snip {
         container(top).center_x(Fill).padding(space::PAGE[0]).into()
     }
 
-    /// When the window is only a pill (the timer, the toast): its view.
+    /// When the window is only a pill (the timer): its view.
     pub fn pill_view(&self) -> Option<Element<'_, Msg>> {
         let bar = if let Some((_, left)) = self.countdown {
             let label = match left {
@@ -710,11 +654,6 @@ impl Snip {
             row![
                 text(Role::NOTE, label),
                 button::regular("Cancel", false, Some(Msg::Cancel)),
-            ]
-        } else if self.toast.is_some() {
-            row![
-                text(Role::NOTE, COPIED),
-                button::regular("Snip", true, Some(Msg::Edit)),
             ]
         } else {
             return None;
@@ -1063,41 +1002,11 @@ mod tests {
     }
 
     #[test]
-    fn after_capture_routes_to_copy_editor_or_both() {
-        assert_eq!(route(SnipAfter::Copy), (true, false));
-        assert_eq!(route(SnipAfter::Editor), (false, true));
-        assert_eq!(route(SnipAfter::Both), (true, true));
+    fn only_editor_skips_the_copy_on_pick() {
+        assert!(copies(SnipAfter::Copy) && copies(SnipAfter::Both));
+        assert!(!copies(SnipAfter::Editor));
         // Out of the box a snip is picked with the toolbar and already copied.
-        assert_eq!(
-            route(crate::config::Config::default().snip.after),
-            (true, true)
-        );
-    }
-
-    #[test]
-    fn the_toast_offers_edit_until_it_is_taken_or_replaced() {
-        let mut s = Snip::new(Vec::new(), flat(SCREEN), true, None);
-        let crop = Crop {
-            width: 2,
-            height: 1,
-            rgba: vec![0; 8],
-        };
-        assert!(s.pill_view().is_none());
-        let first = s.toast(crop.clone(), true);
-        assert!(s.toast_showing(first) && s.pill_view().is_some());
-        let texts = crate::ui::kit::testing::shot::texts(s.pill_view().unwrap());
-        assert!(texts.iter().any(|t| t == COPIED), "{texts:?}");
-        crate::ui::kit::testing::shot::save("snip-toast", s.pill_view().unwrap(), PILL);
-        let second = s.toast(crop, false);
-        assert!(!s.toast_showing(first), "an older toast's timeout is stale");
-        let t = s.take_toast().unwrap();
-        assert!(!t.in_place && (t.crop.width, t.crop.height) == (2, 1));
-        assert!(!s.toast_showing(second) && !s.has_toast());
-        assert!(
-            crate::ui::kit::testing::shot::texts(s.view())
-                .iter()
-                .all(|t| t != COPIED)
-        );
+        assert!(copies(crate::config::Config::default().snip.after));
     }
 
     #[test]

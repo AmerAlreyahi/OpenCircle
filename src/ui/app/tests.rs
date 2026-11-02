@@ -592,7 +592,6 @@ fn snip_ctrl_c_copies_the_area_under_the_pointer_as_an_image() {
     );
     assert_eq!(copied_image(), Some((300, 200)), "that area");
     assert!(copy::copied::text().is_none(), "the picture only, no text");
-    assert!(app.snip_toast(), "and the toast says so");
     // off every window it is what a click takes there: the whole screen
     let mut app = snipping(area);
     event(&mut app, overlay::Event::Hover(Point::new(700.0, 500.0)));
@@ -617,7 +616,7 @@ fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
     app.o.labs = crate::labs::Labs::all_on();
     app.select(area);
     let crop = app.crop().unwrap();
-    let _ = app.snip_routed(crop, true, snip::route(config::SnipAfter::Editor));
+    let _ = app.snip_routed(crop, true, false);
     let edit = app.o.edit.as_ref().expect("the editor is open");
     assert!(edit.editor.movable && edit.editor.tool == crate::editor::Tool::Select);
     assert_eq!(edit.canvas_rect(), area, "over the picked area");
@@ -664,7 +663,7 @@ fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
     app.o.labs = crate::labs::Labs::all_on();
     app.select(area);
     let crop = app.crop().unwrap();
-    let _ = app.snip_routed(crop, true, snip::route(config::SnipAfter::Editor));
+    let _ = app.snip_routed(crop, true, false);
     fn edit(app: &App) -> &editor::Editor {
         &app.o.edit.as_ref().unwrap().editor
     }
@@ -728,7 +727,7 @@ fn a_snip_routed_to_both_is_copied_and_edited() {
     app.select(area);
     let crop = app.crop().unwrap();
     let _ = copy::copied::image();
-    let _ = app.snip_routed(crop, true, snip::route(config::SnipAfter::Both));
+    let _ = app.snip_routed(crop, true, true);
     assert_eq!(copied_image(), Some((300, 200)), "copied");
     assert!(app.o.edit.is_some(), "and the editor is open");
 }
@@ -1023,7 +1022,6 @@ fn a_pick_is_picked_with_the_toolbar_and_copied_by_default() {
         edit.editor.movable && !edit.editor.own_image,
         "the live area"
     );
-    assert!(!app.snip_toast(), "no toast: the toolbar shows");
     run_task(&mut app, task);
     assert_eq!(copied_image(), Some((300, 200)), "and copied");
 }
@@ -2340,8 +2338,6 @@ fn main_modes_snip_runs_the_one_snip_flow() {
     // a drag there picks an area: the same picked state as Print Screen's
     let area = Rectangle::new(Point::new(200.0, 150.0), Size::new(300.0, 200.0));
     let _ = app.snip_next(Some(snip::Next::Edit(area)));
-    let _ = app.on_snip(snip::Msg::Edit);
-    // (After a capture = Copy: the toast's Edit opens it)
     snip_toolbar(&app);
     assert_eq!(app.edge_glow(None), 0.0, "picked: no edge glow");
     // with an area selected (the bar's Snip, E, `run edit`): picked at once

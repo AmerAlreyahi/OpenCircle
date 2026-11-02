@@ -254,9 +254,9 @@ impl Config {
             c.labs.pins = get(t, p, "pins", d.pins, &mut w);
             c.labs.live = get(t, p, "live", d.live, &mut w);
         }
-        // Schema 5: "both" is the default; Snip was in Labs before 0.1.3, so a
-        // file with it off never used Snip and its "copy" was only the old default.
-        if file_version < Some(5) && !c.labs.snip && c.snip.after == SnipAfter::Copy {
+        // Schema 6: "copy" (copy and close, a toast) is gone; a pick always shows
+        // the Snip toolbar, so it is "both" (copy when picked, plus the toolbar).
+        if file_version < Some(6) && c.snip.after == SnipAfter::Copy {
             c.snip.after = SnipAfter::Both;
         }
         if let Some(v) = root.get("quick_actions") {

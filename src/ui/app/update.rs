@@ -78,13 +78,6 @@ impl App {
                 }
                 Task::none()
             }
-            // The snip toast is only a pill: a new shot replaces it.
-            Message::Trigger(trigger @ (Trigger::Capture(_) | Trigger::Quick(..)))
-                if self.snip_toast() =>
-            {
-                let closing = self.close();
-                closing.chain(self.update(Message::Trigger(trigger)))
-            }
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..))
                 if self.capturing.is_some() =>
             {

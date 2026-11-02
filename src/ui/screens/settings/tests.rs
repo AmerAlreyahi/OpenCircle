@@ -1303,7 +1303,7 @@ fn snip_section_edits_the_snip_choices() {
     update(&mut s, Message::Section(Section::Snip));
     let texts = shot::texts(view(&s));
     for label in [
-        "After a capture",
+        "Copy when picked",
         "Image size",
         "Save as",
         "Recent captures",
@@ -1312,7 +1312,7 @@ fn snip_section_edits_the_snip_choices() {
     }
     let mut snip = s.draft.snip.clone();
     assert!(!snip.history, "off until the user turns it on");
-    snip.after = SnipAfter::Both;
+    snip.after = SnipAfter::Editor;
     snip.max_edge = 0;
     snip.format = Format::Jpeg;
     snip.history = true;

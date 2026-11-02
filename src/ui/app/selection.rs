@@ -417,7 +417,7 @@ impl App {
                 let Some(crop) = self.crop() else {
                     return Task::none();
                 };
-                return self.snip_routed(crop, true, (true, false));
+                return self.snip_routed(crop, true, true);
             }
             overlay::Event::Arrow {
                 dx,

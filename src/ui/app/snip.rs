@@ -128,21 +128,6 @@ impl App {
             },
             snip::Msg::Shoot(_) => Task::none(), // handled above
             snip::Msg::Cancel => self.close(),
-            snip::Msg::Edit => {
-                let Some(toast) = snip.take_toast() else {
-                    return Task::none();
-                };
-                if toast.in_place {
-                    let _ = self.open_editor();
-                } else {
-                    self.edit_fitted(toast.crop);
-                }
-                self.show()
-            }
-            snip::Msg::ToastDone(id) if snip.toast_showing(id) => self.close(),
-            snip::Msg::CopyFailed(id) if snip.toast_showing(id) => self.on_snip(snip::Msg::Edit),
-            snip::Msg::CopyFailed(_) => Task::none(),
-            snip::Msg::ToastDone(_) => Task::none(),
             snip::Msg::Controls(opening, controls) => {
                 if opening == self.opening {
                     snip.add_controls(controls);
@@ -233,17 +218,12 @@ impl App {
         crate::history::recent::remember(&crop);
         // Snip pressed on a selection: its picked state (the live area and the
         // toolbar), whatever "After a capture" says a fresh pick does.
-        Task::batch([self.snip_routed(crop, true, (false, true)), extras])
+        Task::batch([self.snip_routed(crop, true, false), extras])
     }
 
-    /// The window is only Snip's pill (scrolling, the timer, the toast).
+    /// The window is only Snip's pill (scrolling, the timer).
     pub(in crate::ui) fn snip_pill(&self) -> bool {
         matches!(&self.o.purpose, Purpose::Snip(s) if s.is_pill())
-    }
-
-    /// Snip's "Copied" toast is showing.
-    pub(in crate::ui) fn snip_toast(&self) -> bool {
-        matches!(&self.o.purpose, Purpose::Snip(s) if s.has_toast())
     }
 
     /// Shrinks the overlay to the pill at the top of the monitor (no focus taken).
@@ -252,7 +232,7 @@ impl App {
         self.pill_window(Point::new(x.max(0.0), ASK_MARGIN))
     }
 
-    /// THE one way Snip's pills (toast, timer, scrolling progress) become a
+    /// THE one way Snip's pills (timer, scrolling progress) become a
     /// window: the overlay shrunk to `snip::PILL` at `at` (logical px on this
     /// monitor). Switch it to the shared floating-window helper when it lands.
     /// Wayland can't move, shrink or hide a window (`can_hide_windows`): the
@@ -328,7 +308,7 @@ impl App {
 
     /// A snip is taken: the selection on the frozen frame (`given: None`), or a
     /// stitched / recent capture. Kept in Recent (`remember`, if history is on),
-    /// then copied (a toast offers Edit) and / or edited, as `snip.after` says.
+    /// then picked with the toolbar, and copied unless `snip.after` is "editor".
     pub(in crate::ui) fn snip_captured(
         &mut self,
         given: Option<Crop>,
@@ -341,49 +321,28 @@ impl App {
         if remember {
             crate::history::recent::remember(&crop);
         }
-        let route = snip::route(config::current().snip.after);
-        self.snip_routed(crop, in_place, route)
+        let copy = snip::copies(config::current().snip.after);
+        self.snip_routed(crop, in_place, copy)
     }
 
-    /// Copies and / or edits a snip's `crop` as `route` says; Copy gets the toast.
+    /// Picks a snip's `crop` (the Snip toolbar, always), also copied if `copy`.
     pub(in crate::ui) fn snip_routed(
         &mut self,
         crop: Crop,
         in_place: bool,
-        route: (bool, bool),
+        copy: bool,
     ) -> Task<Message> {
-        let (copy, edit) = route;
-        if edit || !copy {
-            // Both (N-74): copied as well, quietly (the editor opening says it
-            // went; a failure is logged and the capture is in the editor).
-            let copied = match copy {
-                true => copy_snip(crop.clone(), None),
-                false => Task::none(),
-            };
-            if in_place {
-                return Task::batch([copied, self.open_editor()]);
-            }
-            self.edit_fitted(crop);
-            return copied;
-        }
-        // (a crop across screens is edited fitted from the toast: the other
-        // screens' windows go with the pill)
-        let in_place = in_place && !self.crop_area().is_some_and(|a| self.spans(a));
-        let Purpose::Snip(snip) = &mut self.o.purpose else {
-            return Task::none();
+        // Copied quietly (the toolbar opening says it went; a failure is logged
+        // and the capture is in the editor).
+        let copied = match copy {
+            true => copy_snip(crop.clone()),
+            false => Task::none(),
         };
-        let id = snip.toast(crop.clone(), in_place);
-        let foreground = snip.foreground;
-        let copied = copy_snip(crop, Some(id));
-        let done = background(move |tx| {
-            // Once the pill is up, the user's app (their AI chat) gets the focus back.
-            std::thread::sleep(Duration::from_millis(150));
-            capture::window_rect::activate(foreground);
-            std::thread::sleep(Duration::from_secs(snip::TOAST_SECS));
-            let _ = tx.unbounded_send(());
-        })
-        .map(move |()| Message::Snip(snip::Msg::ToastDone(id)));
-        Task::batch([copied, self.pill_at_top().chain(done)])
+        if in_place {
+            return Task::batch([copied, self.open_editor()]);
+        }
+        self.edit_fitted(crop);
+        copied
     }
 
     /// A capture of its own (stitched, recent, a toast's across screens) in
@@ -507,17 +466,13 @@ impl App {
 }
 
 /// Copies a snip on a thread (encoding a big capture takes a while), through
-/// the one copy path. If it fails while toast `toast` shows, the editor opens,
-/// so the capture isn't lost.
-fn copy_snip(crop: Crop, toast: Option<u32>) -> Task<Message> {
-    background(move |tx| {
+/// the one copy path.
+fn copy_snip(crop: Crop) -> Task<Message> {
+    background(move |_| {
         if let Run::Finish(copy) = copy::ACTION.run
             && let Err(e) = copy(crop)
         {
             crate::log!("copy failed: {e}");
-            if let Some(id) = toast {
-                let _ = tx.unbounded_send(Message::Snip(snip::Msg::CopyFailed(id)));
-            }
         }
     })
 }

@@ -88,7 +88,7 @@ fn picked() -> App {
     let mut app = snipping();
     app.select(AREA);
     let crop = app.crop().unwrap();
-    let route = super::snip::route(crate::config::SnipAfter::Editor);
+    let route = false;
     let _ = app.snip_routed(crop, true, route);
     settle(&mut app);
     app

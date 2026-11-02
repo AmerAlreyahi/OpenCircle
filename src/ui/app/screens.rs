@@ -939,7 +939,7 @@ mod tests {
         let at = snip.pointer.expect("hovered");
         assert!(at.distance(Point::new(900.0, 100.0)) < 0.01, "{at:?}");
         // an area from the starting screen onto the other, picked
-        let route = crate::ui::snip::route(config::SnipAfter::Editor);
+        let route = false;
         app.select(Rectangle::new(
             Point::new(600.0, 100.0),
             Size::new(100.0, 50.0),
@@ -1011,42 +1011,6 @@ mod tests {
         let all = edit.image();
         assert_eq!((all.width, all.height), (3520, 1620));
         assert_eq!(app.o.screens.len(), 1, "the other screen stays");
-        // Copy only: the pill
-        let (mut app, _) = snipped();
-        let Purpose::Snip(snip) = &app.o.purpose else {
-            panic!("a snip")
-        };
-        let crate::ui::snip::Next::Edit(area) = snip.all();
-        app.select(area);
-        let crop = app.crop().expect("every screen");
-        let route = crate::ui::snip::route(config::SnipAfter::Copy);
-        let _ = app.snip_routed(crop, true, route);
-        assert!(app.snip_toast(), "copied");
-        let Purpose::Snip(snip) = &app.o.purpose else {
-            panic!("a snip")
-        };
-        let toast = snip.toast_crop().expect("the capture");
-        assert_eq!((toast.width, toast.height), (3520, 1620));
-        assert!(
-            app.o.screens.is_empty(),
-            "the pill leaves the screens to the user"
-        );
-        // its Edit: picked on this screen, the whole capture, Snip's toolbar
-        let _ = app.on_snip(crate::ui::snip::Msg::Edit);
-        let edit = app.o.edit.as_ref().expect("the editor");
-        assert!(edit.editor.movable && edit.editor.own_image);
-        let stops = crate::ui::screens::editor::toolbar::stops(&edit.editor);
-        assert!(!stops.contains(&editor::Message::Back), "Snip's toolbar");
-        assert_eq!((edit.image().width, edit.image().height), (3520, 1620));
-        let shown = edit.canvas_rect();
-        assert!(Rectangle::with_size(app.o.screen).contains(shown.position()));
-        assert!(shown.x + shown.width <= app.o.screen.width);
-        assert_eq!(
-            app.o.selection.map(|s| s.area),
-            Some(shown),
-            "the outline on it"
-        );
-        assert!(app.snip_dock().is_some(), "its toolbar docks to it");
     }
 
     #[test]

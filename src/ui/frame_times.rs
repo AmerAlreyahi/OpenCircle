@@ -1430,7 +1430,7 @@ fn snip_drag(w: u32, h: u32, drag: SnipDrag, n: u32, pixels: bool) -> (Vec<Drawn
         app.o.labs = crate::labs::Labs::all_on();
         app.select(window);
         let crop = app.crop().unwrap();
-        let route = super::snip::route(crate::config::SnipAfter::Editor);
+        let route = false;
         let _ = app.snip_routed(crop, true, route);
     }
     let (from, by) = match drag {

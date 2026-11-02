@@ -1,7 +1,7 @@
 //! Snip (`settings-window.js` "SNIP"; out of Labs since 0.1.3, N-41): its
 //! shortcuts (Print Screen, Alt+ / Ctrl+Print Screen: the same rows as on
 //! Shortcuts), a calm note when Windows keeps Print Screen for its own screen
-//! capture, what a capture does, the size and file it is copied and saved as,
+//! capture, whether a pick is copied, the size and file it is copied and saved as,
 //! the save folder (General's, the one folder), the pointer, the timer, how
 //! tall a long capture may grow, and Recent captures (its switch is on
 //! History).
@@ -25,6 +25,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         change(&mut next);
         Message::Snip(next)
     };
+    let copies = crate::ui::snip::copies(d.after);
     let pick = |name, desc, control| setting_row::row(title(name), desc, control);
     let snips = state.slots().filter(|slot| match slot {
         Slot::Quick(i) => state.draft.quick_actions[*i].action == "snip",
@@ -53,19 +54,16 @@ pub fn view(state: &State) -> Element<'_, Message> {
     };
     rows = rows.extend([
         pick(
-            "After a capture",
-            "Copy: ready to paste into an AI chat, Snip a click away",
-            segmented(
-                &[
-                    (SnipAfter::Copy, "Copy"),
-                    (SnipAfter::Editor, "Editor"),
-                    (SnipAfter::Both, "Both"),
-                ],
-                d.after,
-                d.after,
-                1.0,
-                move |after| edit(&|s| s.after = after),
-            ),
+            "Copy when picked",
+            "The picked area is also copied, ready to paste into an AI chat",
+            boolean(OFF_ON, copies, copies, 1.0, move |copy| {
+                let after = if copy {
+                    SnipAfter::Both
+                } else {
+                    SnipAfter::Editor
+                };
+                edit(&|s| s.after = after)
+            }),
         ),
         pick(
             "Image size",
