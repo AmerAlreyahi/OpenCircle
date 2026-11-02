@@ -337,6 +337,11 @@ production systems.
   SOFTER (smaller, rounder, quieter handles; a thinner, lower-contrast border than the design's v24 frame). Copy
   and Save keep the capture's full size by default: `snip.max_edge` default 0 (Original) instead of 1568 (a value
   already in a user's config stays; Settings still offers 1024 / 1568 / 2048).
+  Original for everyone (owner, 2026-11-02, "insure the snip is original by default"): a file still on the old
+  default 1568 moves to Original once (schema 7, backup); other chosen sizes stay.
+  Preview videos (owner, 2026-11-02): Codex records REAL full-screen videos on the Windows VM (edge glow visible),
+  one complete take per feature, on useful legal content (Blender's "Sintel", CC BY, for video text and subtitles
+  translation; public-domain images; Wikipedia); the owner reviews the full takes before trimming/motion polish.
   The snip area's outline, handles and hover outline take their colours from the chosen Active Look (Settings >
   Appearance "Active look screen borders": Liquid Prism, Spectrum, Aurora Borealis, ..., Custom), the same source
   as the screen edge and main mode's selection line (one place, no snip-only colours).
