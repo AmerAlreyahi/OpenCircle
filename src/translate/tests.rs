@@ -1656,3 +1656,7 @@ fn busy_background_threshold() {
     assert_eq!((drawn.drawn, drawn.busy), (0, 1));
     assert!(out == c.img, "left as it was");
 }
+
+mod evidence;
+mod game;
+mod subtitles;

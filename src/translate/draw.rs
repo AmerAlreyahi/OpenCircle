@@ -126,19 +126,32 @@ impl Fonts {
         &mut self,
         buf: &Buffer,
         rgba: &mut [u8],
+        dims: (usize, usize),
+        at: (i32, i32),
+        over: Option<[u8; 4]>,
+    ) {
+        self.paint(buf, rgba, dims, at, &|_, c| match over {
+            Some([r, g, b, a]) => [r, g, b, (c[3] as u32 * a as u32 / 255) as u8],
+            None => c,
+        });
+    }
+
+    /// `draw` with each glyph pixel's colour from `shade(y in the buffer,
+    /// its colour)`.
+    pub fn paint(
+        &mut self,
+        buf: &Buffer,
+        rgba: &mut [u8],
         (iw, ih): (usize, usize),
         (x, y): (i32, i32),
-        over: Option<[u8; 4]>,
+        shade: &dyn Fn(i32, [u8; 4]) -> [u8; 4],
     ) {
         buf.draw(
             &mut self.fs,
             &mut self.cache,
             Color::rgb(255, 255, 255),
             |gx, gy, _, _, c| {
-                let [r, g, b, a] = match over {
-                    Some([r, g, b, a]) => [r, g, b, (c.a() as u32 * a as u32 / 255) as u8],
-                    None => [c.r(), c.g(), c.b(), c.a()],
-                };
+                let [r, g, b, a] = shade(gy, [c.r(), c.g(), c.b(), c.a()]);
                 let (px, py) = (x + gx, y + gy);
                 if px < 0 || py < 0 || px >= iw as i32 || py >= ih as i32 || a == 0 {
                     return;
@@ -196,24 +209,35 @@ pub type Fit = (Buffer, (i32, i32), f32);
 const MIN_SCALE: f32 = 0.7;
 
 /// The original's size (em), from its ink, never above its OCR box (the line
-/// box without the padding) nor much above what its dense band says (the
-/// x-height of mixed-case Latin, ~0.53 em, else the cap height): an icon or
-/// a stray mark in the window cannot blow it up.
+/// box without the padding), not far under it (a misread ink:
+/// 85 % of what the box says), nor
+/// much above what its dense band says (the
+/// x-height of mixed-case Latin, ~0.53 em): an icon or a stray mark in the
+/// window cannot blow it up.
 fn original_em(p: &Placement) -> f32 {
     let s0 = &p.styles[0];
     let n = p.styles.len() as f32;
     let text = &p.texts[0];
-    let band = s0.band
-        / if text.chars().any(|c| c.is_ascii_lowercase()) {
-            0.53
-        } else {
-            0.73
-        };
+    // (capitals have no dense band: their bars make a few rows the
+    // busiest, the round letters' middles count under half of those)
+    let lower = text.chars().any(|c| c.is_ascii_lowercase());
+    let band = if lower { s0.band / 0.53 } else { 0.0 };
     let ink = source_em(text, (s0.ink[3] - s0.ink[1]) as f32);
-    ink.min(if band > 0.0 { band * 1.15 } else { ink })
-        .min(p.line_h / 1.3)
-        .min(p.bounds[3] / n)
-        .max(6.0)
+    // nor far under what the OCR box says: an ink the erase misread (a
+    // sliver of an outlined subtitle) must not shrink a 60 px line to 8 px
+    let ocr_h = p.line_h / 1.3;
+    let from_box = source_em(text, ocr_h).min(ocr_h);
+    let em = ink
+        .min(if band > 0.0 { band * 1.15 } else { ink })
+        .min(ocr_h);
+    // (a loose OCR box around small UI text is about twice its ink or more:
+    // only big text, subtitles and captions, gets the floor)
+    let em = if from_box >= 24.0 && em < 0.35 * from_box {
+        0.85 * from_box
+    } else {
+        em
+    };
+    em.min(p.bounds[3] / n).max(6.0)
 }
 
 /// Font weight from stroke width per em (Inter: 400 about 0.08, 500 about
@@ -333,7 +357,24 @@ pub fn draw_block(
             );
         }
     }
-    fonts.draw(&buf, rgba, dims, (x, y), None);
+    match p.styles[0].fade {
+        // the fill fades over each line's cap height, as the original did
+        Some((top, bottom)) => {
+            let lines: Vec<(f32, f32)> =
+                buf.layout_runs().map(|r| (r.line_top, r.line_y)).collect();
+            fonts.paint(&buf, rgba, dims, (x, y), &|gy, c| {
+                let gy = gy as f32;
+                let base = (lines.iter().rev())
+                    .find(|l| l.0 <= gy)
+                    .or(lines.first())
+                    .map_or(gy, |l| l.1);
+                let t = ((gy - (base - 0.73 * size)) / (0.73 * size)).clamp(0.0, 1.0);
+                let mix = |k: usize| (top[k] as f32 + (bottom[k] as f32 - top[k] as f32) * t) as u8;
+                [mix(0), mix(1), mix(2), c[3]]
+            });
+        }
+        None => fonts.draw(&buf, rgba, dims, (x, y), None),
+    }
 }
 
 #[cfg(test)]
@@ -350,6 +391,9 @@ mod tests {
             residual: 0.0,
             band: 0.0,
             text_x: [i32::MIN, i32::MAX],
+            fade: None,
+            field: None,
+            tail: None,
         }
     }
 

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 pub use super::lang::is_rtl;
 use super::lang::{self, Script};
-use super::{Block, Drawn, Line, MARKUP, group_blocks, render};
+use super::{Block, Drawn, Line, MARKUP, group_blocks, render, split_fields};
 use crate::ai::{self, AiError};
 use crate::config::{AiConfig, TextReader};
 use crate::mt;
@@ -403,6 +403,7 @@ pub fn translate_progressively(
         .filter(|b| !cut_off(b, (width, height)))
         .map(|b| to_line(b, width, height))
         .collect();
+    let lines = split_fields(rgba, width as usize, height as usize, &lines);
     let ocr = start.elapsed();
     let blocks = group_blocks(&lines);
     deps.read(&blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>());

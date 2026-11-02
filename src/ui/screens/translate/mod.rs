@@ -512,7 +512,8 @@ fn translate(
     crate::log!(
         "[opencircle] translate {}x{} at {x0},{y0}: ocr {} ms, translate {} ms, render {} ms, \
          swap {} ms, first shown {} ms, total {} ms; {} blocks, {} drawn, {} left \
-         (busy background {}, no room {})",
+         (busy background {}, no room {}), {} kept (no words, or the model gave them back \
+         unchanged)",
         crop.width,
         crop.height,
         t.ocr.as_millis(),
@@ -526,6 +527,10 @@ fn translate(
         out.drawn.busy + out.drawn.no_room,
         out.drawn.busy,
         out.drawn.no_room,
+        out.blocks
+            .iter()
+            .filter(|b| b.translation.is_empty())
+            .count(),
     );
     Ok(result)
 }

@@ -45,6 +45,15 @@ pub struct LineStyle {
     /// of the box (a radio button, a magnifier) is no text and stays, so the
     /// redraw keeps off it. Unbounded when there is none.
     pub text_x: [i32; 2],
+    /// A fill fading top to bottom: its top and bottom colours.
+    pub fade: Option<([u8; 3], [u8; 3])>,
+    /// The solid field (a game's drop-down, a button) the box spills past,
+    /// x, y, w, h: its fill was taken for the text. Erasing it would wipe
+    /// the field, so `erase_line` erases inside it instead.
+    pub field: Option<[i32; 4]>,
+    /// Where a solid field that starts inside the box and runs to its end
+    /// begins (x): the value of a label read as one line with it.
+    pub tail: Option<i32>,
 }
 
 /// The pixels an erase changed, with their old colour (byte index, RGB):
@@ -65,14 +74,36 @@ const REACH: i32 = 40;
 /// is tried again a little smaller, its ring inside.
 pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, Undo) {
     let (style, undo) = erase_box(rgba, iw, ih, b);
-    if style.residual <= super::BUSY || b[3] < 16.0 {
-        return (style, undo);
-    }
     let put_back = |rgba: &mut [u8], undo: &Undo| {
         for (at, old) in undo.iter().rev() {
             rgba[*at..at + 3].copy_from_slice(old);
         }
     };
+    // text in a field the box spills past: erased inside the field (its
+    // ring on the field's own fill), redrawn inside it
+    if let Some(f) = style.field {
+        put_back(rgba, &undo);
+        let [fx, fy, fw, fh] = grow(rgba, iw, ih, f);
+        let nb = [fx + PAD, fy + PAD, fw - 2 * PAD, fh - 2 * PAD].map(|v| v as f32);
+        if nb[2] > 2.0 && nb[3] > 2.0 {
+            let (mut inside, undo2) = erase_box(rgba, iw, ih, nb);
+            if inside.residual <= super::BUSY && inside.field.is_none() {
+                inside.text_x = [
+                    inside.text_x[0].max(fx + RING),
+                    inside.text_x[1].min(fx + fw - RING),
+                ];
+                inside.field = Some([fx, fy, fw, fh]);
+                return (inside, undo2);
+            }
+            put_back(rgba, &undo2);
+        }
+        let mut busy = style;
+        busy.residual = 255.0;
+        return (busy, Vec::new());
+    }
+    if style.residual <= super::BUSY || b[3] < 16.0 {
+        return (style, undo);
+    }
     put_back(rgba, &undo);
     for inset in [0.35, 0.28, 0.2, 0.12] {
         let k = inset * b[3];
@@ -89,6 +120,60 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
         put_back(rgba, &undo2);
     }
     erase_box(rgba, iw, ih, b)
+}
+
+/// `f` grown up and down while both its side columns keep the field's
+/// colour (the window may have cut it: the box's edge moved to quiet rows),
+/// then sideways while its top and bottom rows do.
+fn grow(rgba: &[u8], iw: usize, ih: usize, [x, y, w, h]: [i32; 4]) -> [i32; 4] {
+    let at = |x: i32, y: i32| {
+        let i = (y as usize * iw + x as usize) * 4;
+        [rgba[i], rgba[i + 1], rgba[i + 2]]
+    };
+    let (l, r) = (x + 1, x + w - 2);
+    if w < 4 || h < 1 {
+        return [x, y, w, h];
+    }
+    let c = at(l, y + h / 2);
+    let like = |y: i32| {
+        (0..ih as i32).contains(&y)
+            && [l, r]
+                .iter()
+                .all(|&x| (0..3).all(|k| at(x, y)[k].abs_diff(c[k]) <= 30))
+    };
+    let (mut y0, mut y1) = (y, y + h);
+    while like(y0 - 1) {
+        y0 -= 1;
+    }
+    while like(y1) {
+        y1 += 1;
+    }
+    // and sideways along its top and bottom rows (no text there): a value's
+    // box covers only its text, the field runs on (to its arrow box)
+    let side = |x: i32| {
+        (0..iw as i32).contains(&x)
+            && [y0, y1 - 1]
+                .iter()
+                .all(|&y| (0..3).all(|k| at(x, y)[k].abs_diff(c[k]) <= 30))
+    };
+    let (mut x0, mut x1) = (x, x + w);
+    while side(x0 - 1) {
+        x0 -= 1;
+    }
+    while side(x1) {
+        x1 += 1;
+    }
+    [x0, y0, x1 - x0, y1 - y0]
+}
+
+/// Where a solid field under the end of a line's box starts (see
+/// `LineStyle::tail`), if any; `rgba` is left as it was.
+pub fn field_start(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> Option<i32> {
+    let (style, undo) = erase_box(rgba, iw, ih, b);
+    for (at, old) in undo.iter().rev() {
+        rgba[*at..at + 3].copy_from_slice(old);
+    }
+    style.tail
 }
 
 fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, Undo) {
@@ -141,6 +226,9 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
             stroke: 0.0,
             residual: 0.0,
             text_x: [i32::MIN, i32::MAX],
+            fade: None,
+            field: None,
+            tail: None,
         };
         return (style, Vec::new());
     }
@@ -198,6 +286,8 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
             })
         })
     };
+    let bar_h = 3.max((b[3] / 1.3 / 6.0) as usize);
+    let crossing = crossing(&cand, w, bar_h, &px, &art);
     // A text field's or a button's frame is no text: a thin straight run
     // longer than any glyph (a column of 90 % of the OCR box's height, a row
     // as wide as the box or 2.5 heights long), not in an art colour, stays,
@@ -215,12 +305,29 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
     // are then much denser within 3 px of the fill than farther out, and the
     // near ones count as text. Otherwise every art colour is background.
     let near = |p: [u8; 3], c: [u8; 3]| (0..3).all(|k| (p[k] as i32 - c[k] as i32).abs() <= 64);
-    let fill_c = clusters(&cand, w, &px, &art)
-        .first()
-        .map_or([255; 3], |c| c.color);
-    let fill_px: Vec<bool> = (0..w * h).map(|i| cand[i] && near(px(i), fill_c)).collect();
+    let own: Vec<bool> = (0..w * h).map(|i| cand[i] && !crossing[i]).collect();
+    let fill_c = clusters(
+        if own.contains(&true) { &own } else { &cand },
+        w,
+        &px,
+        &|_| false,
+    )
+    .first()
+    .map_or([255; 3], |c| c.color);
+    let fill_px: Vec<bool> = (0..w * h).map(|i| own[i] && near(px(i), fill_c)).collect();
     let by_fill = dilate(&fill_px, w, 3);
-    let art_px = |i: usize| art(px(i)) && !(0..3).all(|k| px(i)[k].abs_diff(fill_c[k]) <= 24);
+    // An art colour near the fill's is art only where it crosses the box
+    // (`crossing`): a pale cloth above a grey subtitle does not make the
+    // glyphs art. Other art colours, and pixels too faint to be candidates,
+    // keep the colour test.
+    let art_px = |i: usize| {
+        let p = px(i);
+        let art = match cand[i] {
+            true => crossing[i] || (art(p) && !near(p, fill_c)),
+            false => art(p),
+        };
+        art && !(0..3).all(|k| p[k].abs_diff(fill_c[k]) <= 24)
+    };
     let (mut n_near, mut a_near, mut n_far, mut a_far) = (0, 0, 0, 0);
     for i in (0..w * h).filter(|&i| !on_ring(i)) {
         let hit = (cand[i] && art_px(i)) as usize;
@@ -298,7 +405,9 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
     // An outline or shadow hugs the fill: most fill pixels have it within
     // 2 px. Black words between blue links do not, and are text.
     let hugs_fill = |k: usize| {
-        let near = dilate(&member.iter().map(|&m| m == k).collect::<Vec<_>>(), w, 2);
+        // (2 px, or more for big text: a thick stroke's middle is farther)
+        let r = 2.max((ocr_h / 12.0) as usize);
+        let near = dilate(&member.iter().map(|&m| m == k).collect::<Vec<_>>(), w, r);
         let (n, by) = (0..w * h)
             .filter(|&i| member[i] == 0)
             .fold((0, 0), |(n, by), i| (n + 1, by + near[i] as usize));
@@ -365,6 +474,55 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
         }
     }
 
+    // A light glyph's dark outline (a subtitle, a game caption) is no
+    // candidate where it is as dark as what is behind the text (a video's
+    // dark band), so it forms no cluster: it is the ring of dark pixels right
+    // around the glyphs, darker than what lies beyond it.
+    let mut halo = vec![false; w * h];
+    // a bar through the box and its soft edges (a video's progress bar)
+    let bar = through_rows(&cand, w, bar_h, &px);
+    let bar: Vec<bool> = (0..h)
+        .map(|y| (y.saturating_sub(2)..(y + 3).min(h)).any(|k| bar[k]))
+        .collect();
+    let lf = luma(color);
+    if shadow.is_none() && lf > bg_luma + 40.0 {
+        let g2 = dilate(&glyph, w, 2);
+        // a thick outline (big subtitles: about an eighth of the line)
+        let g4 = dilate(&glyph, w, (HALO as usize).max((ocr_h / 8.0) as usize));
+
+        let lumas = |f: &dyn Fn(usize) -> bool| {
+            let mut v: Vec<f32> = (0..w * h).filter(|&i| f(i)).map(|i| luma(px(i))).collect();
+            v.sort_by(f32::total_cmp);
+            v
+        };
+        let near_l = lumas(&|i| g2[i] && !glyph[i] && !on_ring(i));
+        let mid = near_l.get(near_l.len() / 2).copied().unwrap_or(255.0);
+        let dark_n = (near_l.iter())
+            .filter(|&&l| l < 0.4 * lf && l <= mid + 24.0)
+            .count();
+        // and something lighter lies beyond it (else it is the panel itself)
+        let r = (HALO as usize).max((ocr_h / 8.0) as usize);
+        let g_far = dilate(&glyph, w, 2 * r);
+        let far_l = lumas(&|i| g_far[i] && !g4[i]);
+        let lighter = far_l.iter().filter(|&&l| l > mid + 24.0).count();
+        if !near_l.is_empty() && dark_n * 5 >= near_l.len() * 4 && lighter * 10 >= far_l.len() {
+            // only where the outline borders something lighter: in a dark
+            // band it is the band itself, and stays
+            let dark_px = |i: usize| g4[i] && !glyph[i] && luma(px(i)) <= mid + 24.0;
+            let light: Vec<bool> = (0..w * h)
+                .map(|i| !g2[i] && !dark_px(i) && !bar[i / w])
+                .collect();
+            let by_light = dilate(&light, w, r);
+            let (mut sum, mut n) = ([0u64; 3], 0u64);
+            for i in (0..w * h).filter(|&i| dark_px(i) && !on_ring(i)) {
+                (0..3).for_each(|k| sum[k] += px(i)[k] as u64);
+                n += 1;
+                halo[i] = by_light[i];
+            }
+            shadow = Some((sum.map(|s| (s / n.max(1)) as u8), false));
+        }
+    }
+
     // 4. dilate (anti-aliasing), plus a darker-than-background halo (soft shadows)
     let mut mask = glyph.clone();
     // Weak pixels only count when the text explains them: a dark halo only if
@@ -395,7 +553,8 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
     for (i, m) in mask.iter_mut().enumerate() {
         *m |=
             !on_ring(i) && (d2[i] || (d3[i] && dist[i] > t_lo && toward(i)) || (d4[i] && dark(i)));
-        *m &= !near_frame[i] && i % w >= keep0 && i % w < keep1;
+        *m |= halo[i];
+        *m &= !near_frame[i] && !bar[i / w] && i % w >= keep0 && i % w < keep1;
     }
 
     // 5. fill the holes from the background around them
@@ -426,7 +585,32 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
         v[v.len() / 2]
     });
     let like_bg = (0..3).all(|k| color[k].abs_diff(ring_mid[k]) < 30);
-    let lost = filled.is_empty() || glyphs * 4 > inner * 3 || like_bg;
+    // Nor is a solid field the box spills past (a game's drop-down, its
+    // value's box taller than the field, so the panel is on the ring): the
+    // "glyphs" fill much of the box, and more than half of one rectangle as
+    // wide as most of the box. `erase_line` erases inside it instead
+    // (`LineStyle::field`).
+    let (ink, band) = extent(&ink_only, w, x0, y0);
+    let stroke = stroke_width(&ink_only, w);
+    let rect = fill_rect(&ink_only, w).filter(|&[fx, fy, fw, fh]| {
+        let on = (fy..fy + fh)
+            .flat_map(|y| (fx..fx + fw).map(move |x| y * w + x))
+            .filter(|&i| ink_only[i])
+            .count();
+        on * 20 >= fw * fh * 11
+    });
+    let field = rect
+        .filter(|&[_, _, fw, _]| glyphs * 5 > inner * 2 && fw * 10 >= (w - 2 * RING as usize) * 6)
+        .map(|[fx, fy, fw, fh]| [x0 + fx as i32, y0 + fy as i32, fw as i32, fh as i32]);
+    // a field that starts inside the box and runs to its end: a label and
+    // its value read as one line (`super::split_fields`)
+    let tail = rect
+        .filter(|&[fx, _, fw, fh]| {
+            fx * 4 >= w && fx + fw + RING as usize + 1 >= w && fh * 2 >= h - 2 * RING as usize
+        })
+        .map(|[fx, ..]| x0 + fx as i32);
+    let solid = field.is_some();
+    let lost = filled.is_empty() || glyphs * 4 > inner * 3 || like_bg || solid;
     // fine texture (grain) is smoothed away inside the hole: a smear
     let residual = if lost { 255.0 } else { unsure.max(3.0 * grain) };
     let mut undo = Vec::with_capacity(filled.len());
@@ -435,18 +619,183 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
         undo.push((at(i), [px[0], px[1], px[2]]));
         px.copy_from_slice(&v);
     }
-    let (ink, band) = extent(&ink_only, w, x0, y0);
+    let fade = if accent.is_none() {
+        fade(&ink_only, w, &px, luma(color) > bg_luma)
+    } else {
+        None
+    };
     let style = LineStyle {
         color,
         accent,
         shadow,
         ink,
         band,
-        stroke: stroke_width(&ink_only, w),
+        stroke,
         residual,
         text_x,
+        fade,
+        field,
+        tail,
     };
     (style, undo)
+}
+
+/// The rectangle a solid fill covers in the window, x, y, w, h: the longest
+/// run of columns at least a fifth as full as the fullest (the text in the
+/// field takes the rest), then the longest run of rows the text-free
+/// columns cover.
+fn fill_rect(m: &[bool], w: usize) -> Option<[usize; 4]> {
+    let h = m.len() / w;
+    let run = |on: &dyn Fn(usize) -> bool, n: usize| {
+        let (mut best, mut start) = ((0, 0), None);
+        for k in 0..=n {
+            match (k < n && on(k), start) {
+                (true, None) => start = Some(k),
+                (false, Some(s)) => {
+                    if k - s > best.1 - best.0 {
+                        best = (s, k);
+                    }
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        (best.1 > best.0).then_some(best)
+    };
+    let col = |x: usize| (0..h).filter(|&y| m[y * w + x]).count();
+    let peak = (0..w).map(col).max()?;
+    let (c0, c1) = run(&|x| col(x) * 5 >= peak && peak > 0, w)?;
+    // rows: where the columns with no text (as full as the fullest: the
+    // box's padding, the gaps between letters) are on
+    let full: Vec<usize> = (c0..c1).filter(|&x| col(x) * 10 >= peak * 9).collect();
+    let row = |y: usize| full.iter().filter(|&&x| m[y * w + x]).count();
+    let (r0, r1) = run(&|y| row(y) * 2 >= full.len() && !full.is_empty(), h)?;
+    Some([c0, r0, c1 - c0, r1 - r0])
+}
+
+/// A fill that fades from top to bottom (a subtitle under a video player's
+/// dark fade, a game's gold title): the mean colour of the top and the
+/// bottom fifth of the text's rows (rows with at least a quarter of the
+/// busiest row's ink: a stray mark above is no text), when their brightness
+/// differs by more than 40. `light` = the text is lighter than its background.
+fn fade(
+    ink: &[bool],
+    w: usize,
+    px: &dyn Fn(usize) -> [u8; 3],
+    light: bool,
+) -> Option<([u8; 3], [u8; 3])> {
+    let rows: Vec<usize> = ink
+        .chunks(w)
+        .map(|r| r.iter().filter(|&&on| on).count())
+        .collect();
+    let peak = rows.iter().copied().max().unwrap_or(0);
+    let text: Vec<usize> = (0..rows.len())
+        .filter(|&y| rows[y] * 4 >= peak && peak > 0)
+        .collect();
+    let (&top, &bottom) = (text.first()?, text.last()?);
+    let q = ((bottom - top) / 5).max(1);
+    // the half farthest from the background (the brighter half of light
+    // text): anti-aliasing at the stroke edges is no fill
+    let mean = |ys: std::ops::Range<usize>| {
+        let mut v: Vec<[u8; 3]> = (ys.start * w..ys.end * w)
+            .filter(|&i| ink[i])
+            .map(px)
+            .collect();
+        v.sort_by(|a, b| luma(*b).total_cmp(&luma(*a)));
+        if !light {
+            v.reverse();
+        }
+        let v = &v[..v.len().div_ceil(2)];
+        (!v.is_empty()).then(|| {
+            [0, 1, 2].map(|k| (v.iter().map(|c| c[k] as u32).sum::<u32>() / v.len() as u32) as u8)
+        })
+    };
+    let (a, b) = (mean(top..top + q)?, mean(bottom + 1 - q..bottom + 1)?);
+    ((luma(a) - luma(b)).abs() > 40.0).then_some((a, b))
+}
+
+/// Art crossing the box: pixels in an art colour (`art`: seen on the top or
+/// bottom ring rows) joined to those rows by a path of such pixels whose
+/// colour changes little from one pixel to the next (a tree's own texture),
+/// plus the candidates of a row through the whole box (a video's progress
+/// bar under a subtitle). A text colour that happens to be on the ring too
+/// (a pale cloth above a white subtitle) is no art where the text is: the
+/// glyphs' outline and anti-aliasing cut the path.
+fn crossing(
+    cand: &[bool],
+    w: usize,
+    thick: usize,
+    px: &dyn Fn(usize) -> [u8; 3],
+    art: &dyn Fn([u8; 3]) -> bool,
+) -> Vec<bool> {
+    const STEP: u8 = 24;
+    let h = cand.len() / w;
+    let r = RING as usize;
+    let mut out = vec![false; cand.len()];
+    let mut todo: Vec<usize> = (0..cand.len())
+        .filter(|&i| i / w < r || i / w >= h - r)
+        .collect();
+    for &i in &todo {
+        out[i] = true;
+    }
+    while let Some(i) = todo.pop() {
+        let (x, y) = (i % w, i / w);
+        let c = px(i);
+        for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+            let (nx, ny) = (x as isize + dx, y as isize + dy);
+            if nx < 0 || ny < 0 || nx >= w as isize || ny >= h as isize {
+                continue;
+            }
+            let j = ny as usize * w + nx as usize;
+            let p = px(j);
+            if !out[j] && cand[j] && (0..3).all(|k| p[k].abs_diff(c[k]) <= STEP) && art(p) {
+                out[j] = true;
+                todo.push(j);
+            }
+        }
+    }
+    for (y, _) in through_rows(cand, w, thick, px)
+        .iter()
+        .enumerate()
+        .filter(|r| *r.1)
+    {
+        out[y * w..(y + 1) * w].iter_mut().for_each(|o| *o = true);
+    }
+    out
+}
+
+/// Rows whose candidates run through the whole box (ring to ring), in a
+/// thin run (at most `thick` rows) and smooth: a bar crossing it (a video's progress
+/// bar), never text. Dense art fills whole rows too, but many of them.
+fn through_rows(cand: &[bool], w: usize, thick: usize, px: &dyn Fn(usize) -> [u8; 3]) -> Vec<bool> {
+    let (h, r) = (cand.len() / w, RING as usize);
+    let inner = w.saturating_sub(2 * r).max(1);
+    // and smooth along the row (a bar is one or two flat colours; a row of
+    // text or of trees changes at every stroke)
+    let step = |i: usize| {
+        (0..3)
+            .map(|k| px(i)[k].abs_diff(px(i + 1)[k]))
+            .max()
+            .unwrap_or(0)
+    };
+    let full: Vec<bool> = (0..h)
+        .map(|y| {
+            let xs = y * w + r..y * w + w - r;
+            (r..h.saturating_sub(r)).contains(&y)
+                && cand[xs.clone()].iter().filter(|&&c| c).count() * 100 >= inner * 97
+                && xs.clone().take(inner - 1).filter(|&i| step(i) > 24).count() * 50 <= inner
+        })
+        .collect();
+    let mut out = full.clone();
+    let mut y = 0;
+    while y < h {
+        let end = (y..h).find(|&k| !full[k]).unwrap_or(h);
+        if end - y > thick {
+            out[y..end].iter_mut().for_each(|o| *o = false);
+        }
+        y = end + 1;
+    }
+    out
 }
 
 /// 8 directions, 22.5 degrees apart (a line through the pixel is two rays).
@@ -599,7 +948,8 @@ fn straight(m: &[bool], w: usize, col: f32, row: f32) -> (Vec<bool>, Vec<usize>)
 /// Icons at the ends of a line (a radio button before its label, a
 /// magnifier in a search field): ink before the first (after the last) gap
 /// of 3+ empty columns that is as wide as about two thirds of its height,
-/// and a third taller than the rest of the line, reaching above it.
+/// and a third taller than the rest of the line, reaching above it, and
+/// about square (a word after a gap is no icon: "Configuración de IA").
 /// Returns the columns the text spans without them, x0..x1 (all: no icon).
 // ponytail: shape-blind (a big round initial would pass); a real icon
 // classifier if that ever happens.
@@ -633,7 +983,8 @@ fn icons(glyph: &[bool], w: usize) -> [usize; 2] {
     let icon = |seg: [usize; 2], rest: [usize; 2]| {
         let (r, o) = (rows(seg), rows(rest));
         let (sh, oh) = ((r[1] - r[0]) as f32, (o[1] - o[0]) as f32);
-        r[0] < o[0] && sh >= 1.3 * oh && (seg[1] - seg[0]) as f32 >= 0.6 * sh
+        let sw = (seg[1] - seg[0]) as f32;
+        r[0] < o[0] && sh >= 1.3 * oh && sw >= 0.6 * sh && sw <= 1.6 * sh
     };
     let mut keep = [0, w];
     if let [first, .., last] = segs[..] {

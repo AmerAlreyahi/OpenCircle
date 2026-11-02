@@ -40,6 +40,40 @@ pub struct Block {
     pub bounds: [f32; 4],
 }
 
+/// A label and its field's value read as one line ("Nombres de municipios:
+/// Inglés", the value in a game's drop-down) are cut where the field
+/// starts: the label is translated and drawn on the panel, the value inside
+/// its field. Only a line with a label (`: ` then more) is looked at.
+pub fn split_fields(rgba: &[u8], w: usize, h: usize, lines: &[Line]) -> Vec<Line> {
+    let labelled = |l: &Line| l.text.find(": ").filter(|&k| k + 2 < l.text.len());
+    if rgba.len() != w * h * 4 || !lines.iter().any(|l| labelled(l).is_some()) {
+        return lines.to_vec();
+    }
+    let mut scratch = rgba.to_vec();
+    let mut out = Vec::with_capacity(lines.len());
+    for l in lines {
+        let [x, y, lw, lh] = l.bounds;
+        let cut = labelled(l)
+            .zip(labelled(l).and_then(|_| erase::field_start(&mut scratch, w, h, l.bounds)))
+            .filter(|&(_, f)| (f as f32) > x + 0.25 * lw && (f as f32) < x + 0.9 * lw);
+        match cut {
+            Some((k, f)) => {
+                let fx = f as f32;
+                out.push(Line {
+                    bounds: [x, y, fx - 2.0 - x, lh],
+                    text: l.text[..k + 1].to_string(),
+                });
+                out.push(Line {
+                    bounds: [fx, y, x + lw - fx, lh],
+                    text: l.text[k + 2..].to_string(),
+                });
+            }
+            None => out.push(l.clone()),
+        }
+    }
+    out
+}
+
 /// Groups lines (in reading order) into blocks: a wrapped paragraph becomes
 /// one block, list items and labels stay separate. A line continues the
 /// latest block whose last line sits right above it in the same column, so
@@ -47,8 +81,9 @@ pub struct Block {
 /// ponytail: heuristic (see [`continues`]); the AI step can re-split with
 /// context later.
 pub fn group_blocks(lines: &[Line]) -> Vec<Block> {
+    let lines = join_rows(lines);
     let mut out: Vec<Block> = Vec::new();
-    for l in lines {
+    for l in &lines {
         let [x, y, w, h] = l.bounds;
         // a line read in between (that did not join) keeps them apart: one
         // block's box never covers another's line
@@ -87,6 +122,56 @@ pub fn group_blocks(lines: &[Line]) -> Vec<Block> {
     out
 }
 
+/// Fragments of one line joined back: a detector splits a widely spaced
+/// line at its word gaps ("El sendero" | "está" | "abierto"), and each
+/// fragment alone translates to nonsense ("He's here.") at its own size.
+/// The next fragment (reading order) joins when it sits on the same row,
+/// about as tall, their OCR boxes overlap (a detector's boxes reach past
+/// the ink, so a split line's fragments overlap; separate items, a heading
+/// and its "hide" button 2 px apart, do not), and the sentence goes on: it
+/// starts lower case, or
+/// both are capitals (a sign's title), and the first is no label ("Fecha:" |
+/// "1 Ene 1950" stay apart).
+fn join_rows(lines: &[Line]) -> Vec<Line> {
+    let caps = |t: &str| t.chars().any(char::is_alphabetic) && !t.chars().any(char::is_lowercase);
+    let mut out: Vec<Line> = Vec::new();
+    for l in lines {
+        let [x, y, w, h] = l.bounds;
+        if let Some(p) = out.last_mut() {
+            let [px, py, pw, ph] = p.bounds;
+            let (lo, overlap) = (ph.min(h), (py + ph).min(y + h) - py.max(y));
+            // between the OCR boxes (`pipeline::to_line` pads 0.1 of the
+            // OCR height each side)
+            let gap = x - (px + pw) + 0.1 * (ph + h) / 1.3;
+            let goes_on =
+                l.text.starts_with(char::is_lowercase) || (caps(&p.text) && caps(&l.text));
+            if overlap > 0.6 * lo
+                && ph.max(h) / lo < 1.5
+                && (-lo..0.0).contains(&gap)
+                && goes_on
+                && !p.text.trim_end().ends_with(':')
+            {
+                let (x0, y0) = (px.min(x), py.min(y));
+                let (x1, y1) = ((px + pw).max(x + w), (py + ph).max(y + h));
+                p.bounds = [x0, y0, x1 - x0, y1 - y0];
+                p.text = format!("{} {}", p.text, l.text);
+                continue;
+            }
+        }
+        out.push(l.clone());
+    }
+    out
+}
+
+/// Words a line never ends on unless it wraps (articles, prepositions,
+/// conjunctions) in the Latin-script languages offline MT reads.
+const JOINERS: &[&str] = &[
+    "a", "an", "the", "of", "to", "in", "for", "with", "and", "or", "de", "del", "la", "el", "los",
+    "las", "al", "y", "o", "en", "con", "por", "para", "un", "una", "des", "du", "le", "les", "et",
+    "ou", "au", "aux", "avec", "pour", "der", "die", "das", "und", "oder", "zu", "mit", "für",
+    "von", "da", "do", "dos", "e", "em", "di", "il", "lo", "gli", "per",
+];
+
 /// `l` is the next line of the paragraph `p` ends: right below it, same left
 /// edge (or same centre: subtitles), about the same size, not wider by more
 /// than a few words (a narrow column beside a picture does not join the full
@@ -101,7 +186,15 @@ fn continues(p: &Line, l: &Line) -> bool {
     let similar = ph.max(h) / ph.min(h) < 1.45;
     let fits = w < pw + 5.0 * h;
     let list = |t: &str| t.contains(['·', '•', '|']);
+    // a line ending on an article or a preposition is cut mid-phrase
+    // ("Revoluciones de la" | "Luna": one TOC entry wrapped)
+    let cut = p
+        .text
+        .rsplit(' ')
+        .next()
+        .is_some_and(|w| JOINERS.contains(&w.to_lowercase().as_str()) && p.text.contains(' '));
     let goes_on = l.text.starts_with(char::is_lowercase)
+        || cut
         || (p.text.chars().count() > 30 && !p.text.ends_with(['.', '!', '?', ':']));
     same_col && close && similar && fits && goes_on && !list(&p.text) && !list(&l.text)
 }
@@ -186,6 +279,14 @@ pub fn render(
             true => x1.min(b.bounds[0] + b.bounds[2]),
             false => x1,
         };
+        // a value in a field (a game's drop-down) may use the field's width
+        let (x0, x1) = match styles.iter().map(|s| s.field).collect::<Option<Vec<_>>>() {
+            Some(f) if !f.is_empty() => (
+                f.iter().map(|f| f[0] + 2).max().unwrap_or(0) as f32,
+                f.iter().map(|f| f[0] + f[2] - 2).min().unwrap_or(0) as f32,
+            ),
+            _ => (x0, x1),
+        };
         report.rooms[i] = [x0, ry, (x1 - x0).max(0.0), rh];
         let p = draw::Placement {
             bounds: report.rooms[i],
@@ -199,11 +300,18 @@ pub fn render(
         match (!busy).then(|| draw::fit(&mut fonts, t, &p)).flatten() {
             Some(fit) => fits.push((i, t, p, fit, undo)),
             None => {
-                if busy {
+                // why a block stays as it was (its place, never its text)
+                let [x, y, w, h] = b.bounds.map(|v| v as i32);
+                let why = if busy {
                     report.busy += 1;
+                    "the background could not be erased cleanly"
                 } else {
                     report.no_room += 1;
-                }
+                    "the translation does not fit legibly"
+                };
+                crate::log!(
+                    "[opencircle] translate: block at {x},{y} {w}x{h} left as it was: {why}"
+                );
                 restore.push((i, undo));
             }
         }
@@ -284,6 +392,9 @@ fn separate(
         gone.sort_unstable_by_key(|&k| std::cmp::Reverse(k));
         for k in gone {
             let (i, _, _, _, undo) = fits.remove(k);
+            crate::log!(
+                "[opencircle] translate: block {i} left as it was: no room beside its neighbour"
+            );
             report.no_room += 1;
             restore.push((i, undo));
         }
