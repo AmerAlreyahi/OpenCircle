@@ -87,7 +87,7 @@
 //! outline = false                   # shapes, arrows, callouts get an outline
 //! fill = false                      # rectangles and ellipses get a tint
 //! blur_size = "medium"              # the blur brush: thin | medium | thick; missing = Auto
-//! blur_cell = "medium"              # the blur's pixel size: thin | medium | thick
+//! blur_cell = "thin"                # the blur's pixel size: thin (6 px) | medium (9) | thick (12)
 //! stroke = 5                        # the line width of shapes, arrows, pen: 1-32 px
 //! group_tools = ["select", "arrow", "pen", "text", "blur"]  # each toolbar group's last tool
 //!

@@ -245,8 +245,9 @@ fn brushed(image: Image, band: lines::Band, cell: f32, seed: u64) -> Image {
             .unwrap(),
         origin: Point::ORIGIN,
     };
-    let stroke = [pt(8.0, band.centre()), pt(w as f32 - 8.0, band.centre())];
-    blur::paint(&mut layer, &stroke, band.brush(1.0), cell, seed);
+    let (middle, size) = band.stroke(1.0);
+    let stroke = [pt(8.0, middle), pt(w as f32 - 8.0, middle)];
+    blur::paint(&mut layer, &stroke, size, cell, seed);
     Image {
         width: w,
         height: h,
@@ -273,6 +274,26 @@ const LOOKS: [([u8; 4], [u8; 4]); 3] = [
     ([200, 60, 60, 255], [20, 20, 120, 255]),
 ];
 
+/// `image` as ClearType draws text: each pixel's red takes some of its left
+/// neighbour's ink, its blue some of its right one's, so glyph edges get
+/// coloured fringes (on any colours: the pixels are mixed channel by channel).
+fn cleartype(image: Image) -> Image {
+    let (w, h) = (image.width, image.height);
+    let mut out = Image {
+        rgba: image.rgba.clone(),
+        ..image
+    };
+    for y in 0..h {
+        for x in 1..w - 1 {
+            let at = |x: u32, k: usize| image.rgba[((y * w + x) * 4) as usize + k] as u32;
+            let i = ((y * w + x) * 4) as usize;
+            out.rgba[i] = ((at(x - 1, 0) + 2 * at(x, 0)) / 3) as u8;
+            out.rgba[i + 2] = ((at(x + 1, 2) + 2 * at(x, 2)) / 3) as u8;
+        }
+    }
+    out
+}
+
 /// One view an attacker takes of a blur (its pixels, column or row averages).
 type Take<'a> = dyn Fn(&Image) -> Vec<f32> + 'a;
 
@@ -290,10 +311,18 @@ fn blur_mosaic_text_is_below_the_noise() {
         ("R-G", [1.0, -1.0, 0.0]),
         ("G-B", [0.0, 1.0, -1.0]),
     ];
-    for cell in [4.0, 6.0, 9.0] {
-        for (bg, fg) in LOOKS {
+    // Grey anti-aliasing, and ClearType-like colour fringes (Windows screens).
+    let looks = LOOKS
+        .iter()
+        .flat_map(|&(bg, fg)| [(bg, fg, false), (bg, fg, true)]);
+    for cell in [6.0, 9.0, 12.0] {
+        for (bg, fg, fringed) in looks.clone() {
+            let field = |s: &str| match fringed {
+                true => cleartype(field_in(s, bg, fg)),
+                false => field_in(s, bg, fg),
+            };
             for (a, b) in PAIRS {
-                let band = lines::detect(&field_in(a, bg, fg))[0];
+                let band = lines::detect(&field(a))[0];
                 let core = core_of(band);
                 let (y0, y1) = (band.y0.ceil() as u32, band.y1 as u32);
                 for (view, k) in VIEWS {
@@ -320,13 +349,14 @@ fn blur_mosaic_text_is_below_the_noise() {
                     for (what, take) in takes {
                         let (mut text, mut noise) = (0.0, 0.0);
                         for seed in 1u64..=8 {
-                            let pa = take(&brushed(field_in(a, bg, fg), band, cell, seed));
-                            let pb = take(&brushed(field_in(b, bg, fg), band, cell, seed));
-                            let pc = take(&brushed(field_in(a, bg, fg), band, cell, seed + 99));
+                            let pa = take(&brushed(field(a), band, cell, seed));
+                            let pb = take(&brushed(field(b), band, cell, seed));
+                            let pc = take(&brushed(field(a), band, cell, seed + 99));
                             text += diff(&pa, &pb) / 8.0;
                             noise += diff(&pa, &pc) / 8.0;
                         }
-                        let at = format!("cell {cell} {a}/{b} {bg:?} {view} {what}");
+                        let at =
+                            format!("cell {cell} {a}/{b} {bg:?} fringed {fringed} {view} {what}");
                         eprintln!("{at}: text {text:.2} noise {noise:.2}");
                         // (A grey field has no colour at all: both are 0 there.)
                         assert!(text < noise || text < 0.05, "{at}: {text} vs {noise}");
@@ -431,7 +461,7 @@ fn blur_mosaic_makes_the_text_unreadable() {
     let original = field("hunter2");
     let band = lines::detect(&original)[0];
     let core = core_of(band);
-    for cell in [4.0, 6.0, 9.0] {
+    for cell in [6.0, 9.0, 12.0] {
         let out = brushed(field("hunter2"), band, cell, 1);
         for &(x, y) in &core {
             let (a, b) = (pxi(&original, x, y), pxi(&out, x, y));
@@ -488,7 +518,7 @@ fn blur_mosaic_has_no_tint() {
 fn blur_mosaic_reads_only_coarse_blocks() {
     let original = field("hunter2");
     let band = lines::detect(&original)[0];
-    let (bw, bh) = blur::block(band.brush(1.0));
+    let (bw, bh) = blur::block(band.stroke(1.0).1);
     let (bw, bh) = (bw as u32, bh as u32);
     let mut mirrored = field("hunter2");
     for y in 0..40 - 40 % bh {
@@ -503,7 +533,7 @@ fn blur_mosaic_reads_only_coarse_blocks() {
         }
     }
     assert_ne!(mirrored.rgba, original.rgba);
-    for cell in [4.0, 6.0, 9.0] {
+    for cell in [6.0, 9.0, 12.0] {
         let (p, q) = (
             brushed(field("hunter2"), band, cell, 5),
             brushed(
@@ -574,7 +604,7 @@ fn blur_mosaic_resists_a_candidate_scoring_attack() {
             })
             .collect()
     };
-    for cell in [4.0, 6.0, 9.0] {
+    for cell in [6.0, 9.0, 12.0] {
         // The attacker's expected picture of each candidate.
         let expected: Vec<Vec<f32>> = (candidates.iter())
             .map(|text| {
@@ -586,7 +616,7 @@ fn blur_mosaic_resists_a_candidate_scoring_attack() {
                 sum
             })
             .collect();
-        let trials = 60;
+        let trials = 120;
         let mut top = 0;
         for seed in 0..trials {
             let seen = tones(&brushed(field(truth), band, cell, 100 + seed));
@@ -603,8 +633,8 @@ fn blur_mosaic_resists_a_candidate_scoring_attack() {
             top += usize::from(place < 0.1 * candidates.len() as f32);
         }
         eprintln!("cell {cell}: the true text in the top 10 % in {top} of {trials} trials");
-        // Chance: places 0, 1 and 2 of 22 (13.6 %, 8.2 of 60); two standard
-        // deviations of luck allowed (13), never a pattern (plain snapped
+        // Chance: places 0, 1 and 2 of 22 (13.6 %, 16.4 of 120); two standard
+        // deviations of luck allowed (24), never a pattern (plain snapped
         // blocks: 24 of 24; with the dither only: 14 of 24).
         let p = (0.1 * candidates.len() as f32).ceil() / candidates.len() as f32;
         let n = trials as f32;
@@ -620,7 +650,7 @@ fn blur_mosaic_resists_a_candidate_scoring_attack() {
 fn blur_brush_repaint_of_a_crop_gives_the_same_pixels() {
     let full = field("hunter2");
     let band = lines::detect(&full)[0];
-    let (size, cell) = (band.brush(1.0), 6.0);
+    let (size, cell) = (band.stroke(1.0).1, 6.0);
     let stroke = [pt(100.0, band.centre()), pt(140.0, band.centre())];
     let mut whole = document::Layer {
         pm: tiny_skia::Pixmap::from_vec(
@@ -2071,9 +2101,9 @@ fn write_line(image: &mut Image, at: Point, line: &str, size: f32) {
 /// covers ALL of it: three lines at 13, 16 and 20 px, loose to touching (1.6,
 /// 1.3, 1.2, 1.1 x the size); a stroke started on the middle one (2 px above,
 /// on, 2 px below its middle) pixelates every pixel of that line's ink
-/// (accents, ascenders, descenders: É, g, y, j) and at most the tails of the
-/// lines above and below (in the gap tight lines share, their descenders and
-/// ascenders sit next to its own: covering all of its ink wins).
+/// (accents, ascenders, descenders: É, g, y, j) and at most 10 % of the lines
+/// above and below (their tails in the gap tight lines share; the margin stops
+/// at their cores).
 #[test]
 fn auto_blur_covers_all_of_the_line_it_starts_on_and_no_other() {
     const TEXT: [&str; 3] = [
@@ -2150,8 +2180,11 @@ fn auto_blur_covers_all_of_the_line_it_starts_on_and_no_other() {
                         }
                     }
                 }
+                eprintln!(
+                    "{size} px x{pitch} from {start}: {touched} of {others} px of the other lines"
+                );
                 assert!(
-                    touched * 100 <= others * 30,
+                    touched * 100 <= others * 10,
                     "{size} px x{pitch} from {start}: {touched} of {others} px of the other lines"
                 );
             }
@@ -2244,7 +2277,7 @@ fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
     e.update(Message::Move(pt(220.0, c)));
     e.update(Message::Release);
     let (size, points) = size_of(&e, 0);
-    assert_eq!(size, b.brush(1.0));
+    assert_eq!(size, b.stroke(1.0).1);
     assert!((14.0..40.0).contains(&size), "one line: {size}");
     assert!(
         points.iter().all(|p| p.y == c),
@@ -2280,7 +2313,7 @@ fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
     // Auto: the line's size again.
     e.update(Message::BlurSize(None));
     drag(&mut e, pt(15.0, c), &[], pt(220.0, c));
-    assert_eq!(size_of(&e, 4).0, b.brush(1.0));
+    assert_eq!(size_of(&e, 4).0, b.stroke(1.0).1);
     // Pixel size: fine 6 px cells by default (display px), coarser picked.
     let cell_of = |e: &Editor, i: usize| match &e.doc.items[i].shape {
         Shape::Blur { cell, .. } => *cell,
@@ -2288,8 +2321,8 @@ fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
     };
     assert_eq!(cell_of(&e, 4), 6.0);
     e.update(Message::BlurCell(Width::Thick));
-    assert_eq!(cell_of(&e, 4), 9.0, "the selected one too");
-    e.update(Message::BlurCell(Width::Medium));
+    assert_eq!(cell_of(&e, 4), 12.0, "the selected one too");
+    e.update(Message::BlurCell(Width::Thin));
 
     // Line help off: the stroke follows the pointer.
     e.update(Message::Assist);

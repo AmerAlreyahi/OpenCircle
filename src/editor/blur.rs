@@ -259,29 +259,33 @@ fn block_tone(
 }
 
 /// The stroke's ONE colour pair (owner's look, review: never per block, or a
-/// coloured word would show in its block): the mean colour of the darkest and
-/// of the lightest tenth of the pixels under the footprint (`m` > 0), snapped
-/// to `COLOUR_STEP`. Moving the text around under the stroke changes nothing.
-/// No contrast: both are the footprint's mean.
+/// coloured word would show in its block): per channel, the median of the
+/// darkest 2 % of the pixels under the footprint (the ink's own colour: whole
+/// stems, not anti-aliased or ClearType-fringed edges) and of the lightest half
+/// (the background's), snapped to `COLOUR_STEP`. Medians of the ink and of the
+/// background, so another text in the same colours gives the same pair, and
+/// moving the text around under the stroke changes nothing. No contrast: both
+/// are the footprint's median.
 pub(crate) fn colours(pixels: impl Iterator<Item = [u8; 3]>) -> ([f32; 3], [f32; 3]) {
     let mut all: Vec<(f32, [u8; 3])> = pixels.map(|p| (luma(p.map(f32::from)), p)).collect();
     if all.is_empty() {
         return ([128.0; 3], [128.0; 3]);
     }
     all.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let tenth = (all.len() / 10).max(1);
-    let mean = |part: &[(f32, [u8; 3])]| {
-        let mut sum = [0.0f32; 3];
-        part.iter()
-            .for_each(|(_, p)| (0..3).for_each(|k| sum[k] += p[k] as f32));
-        sum.map(|v| (v / part.len() as f32 / COLOUR_STEP).round() * COLOUR_STEP)
-            .map(|v| v.clamp(0.0, 255.0))
+    let median = |part: &[(f32, [u8; 3])]| {
+        [0, 1, 2].map(|k| {
+            let mut v: Vec<u8> = part.iter().map(|(_, p)| p[k]).collect();
+            v.sort_unstable();
+            let m = v[v.len() / 2] as f32;
+            ((m / COLOUR_STEP).round() * COLOUR_STEP).clamp(0.0, 255.0)
+        })
     };
-    let (dark, light) = (mean(&all[..tenth]), mean(&all[all.len() - tenth..]));
+    let ink = (all.len() / 50).max(1);
+    let (dark, light) = (median(&all[..ink]), median(&all[all.len() / 2..]));
     match luma(light) - luma(dark) > 8.0 {
         true => (dark, light),
         false => {
-            let m = mean(&all);
+            let m = median(&all);
             (m, m)
         }
     }

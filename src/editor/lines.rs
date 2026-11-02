@@ -16,9 +16,9 @@ pub struct Band {
     pub x1: f32,
     pub y0: f32,
     pub y1: f32,
-    /// Cut from lines set so tight they touch: it already reaches its
-    /// neighbours' cores, so it gets only the least margin.
-    pub tight: bool,
+    /// Free rows above and below before the neighbouring line's core (its
+    /// x-height): the stroke's margin never goes past them.
+    pub room: (f32, f32),
 }
 
 impl Band {
@@ -32,18 +32,18 @@ impl Band {
         (self.y0..self.y1).contains(&p.y) && (self.x0 - slack..=self.x1 + slack).contains(&p.x)
     }
 
-    /// The brush that covers ALL of the line's ink (anti-aliased edges,
-    /// accents, tails the edge test misses): a margin of 15 % of its height,
-    /// at least 2 image px and 2 display px (`zoom`), above and below; it may
-    /// reach into the gap between lines.
-    pub fn brush(&self, zoom: f32) -> f32 {
-        let least = (2.0f32).max(2.0 / zoom);
-        let margin = if self.tight {
-            least
-        } else {
-            least.max(0.15 * self.height())
-        };
-        self.height() + 2.0 * margin
+    /// The stroke that covers ALL of the line's ink (anti-aliased edges,
+    /// accents, tails the edge test misses): (its middle, its height). A
+    /// margin of 15 % of the line's height, at least 2 image px and 2 display
+    /// px (`zoom`), above and below; it may reach into the gap between lines
+    /// but never past the free rows into a neighbour's core (`room`).
+    pub fn stroke(&self, zoom: f32) -> (f32, f32) {
+        let want = (2.0f32).max(2.0 / zoom).max(0.15 * self.height());
+        let (top, bottom) = (
+            self.y0 - want.min(self.room.0),
+            self.y1 + want.min(self.room.1),
+        );
+        ((top + bottom) / 2.0, bottom - top)
     }
 
     pub fn centre(&self) -> f32 {
@@ -108,20 +108,33 @@ pub fn detect(image: &Image) -> Vec<Band> {
             .collect();
         // Rows with a pixel or two of ink, joined across 2-px gaps (i dots),
         // then split where tight lines touch.
-        for (y0, y1, tight) in runs(&rows, 3).into_iter().flat_map(|r| split(&rows, r)) {
+        let mut column: Vec<(Band, (usize, usize))> = Vec::new();
+        for (y0, y1, core) in runs(&rows, 3).into_iter().flat_map(|r| split(&rows, r)) {
             if !(5..=MAX_LINE).contains(&(y1 - y0)) {
                 continue;
             }
             let cols = (x0..x1).filter(|&x| (y0..y1).any(|y| ink[y * w + x]));
             let (first, last) = cols.fold((x1, x0), |(a, b), x| (a.min(x), b.max(x)));
-            bands.push(Band {
+            let band = Band {
                 x0: first as f32,
                 x1: last as f32 + 1.0,
                 y0: y0 as f32,
                 y1: y1 as f32,
-                tight,
-            });
+                room: (f32::INFINITY, f32::INFINITY),
+            };
+            column.push((band, core));
         }
+        // The free rows to the neighbours' cores (top to bottom in a column).
+        for i in 0..column.len() {
+            let (y0, y1) = (column[i].0.y0, column[i].0.y1);
+            let above = (i > 0).then(|| (y0 - column[i - 1].1.1 as f32).max(0.0));
+            let below = (column.get(i + 1)).map(|n| (n.1.0 as f32 - y1).max(0.0));
+            column[i].0.room = (
+                above.unwrap_or(f32::INFINITY),
+                below.unwrap_or(f32::INFINITY),
+            );
+        }
+        bands.extend(column.into_iter().map(|(b, _)| b));
     }
     bands
 }
@@ -131,7 +144,8 @@ pub fn detect(image: &Image) -> Vec<Band> {
 /// (its x-height: every glyph has ink there) with only sparse rows between.
 /// Each core gets ALL the sparse rows up to its neighbours' cores (they may hold
 /// its ascenders, descenders or accents): neighbouring bands overlap in the gap.
-fn split(rows: &[u32], (y0, y1): (usize, usize)) -> Vec<(usize, usize, bool)> {
+/// Each with its core.
+fn split(rows: &[u32], (y0, y1): (usize, usize)) -> Vec<(usize, usize, (usize, usize))> {
     let max = rows[y0..y1].iter().copied().max().unwrap_or(0);
     let dense: Vec<u32> = (y0..y1)
         .map(|y| u32::from(rows[y] * 100 >= max * CORE))
@@ -142,7 +156,8 @@ fn split(rows: &[u32], (y0, y1): (usize, usize)) -> Vec<(usize, usize, bool)> {
         .map(|(a, b)| (a + y0, b + y0))
         .collect();
     if cores.len() < 2 {
-        return vec![(y0, y1, false)];
+        let core = cores.first().copied().unwrap_or((y0, y1));
+        return vec![(y0, y1, core)];
     }
     (0..cores.len())
         .map(|i| {
@@ -151,7 +166,7 @@ fn split(rows: &[u32], (y0, y1): (usize, usize)) -> Vec<(usize, usize, bool)> {
                 Some(next) => next.0,
                 None => y1,
             };
-            (top, bottom, true)
+            (top, bottom, cores[i])
         })
         .collect()
 }

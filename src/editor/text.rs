@@ -97,6 +97,21 @@ fn shape(text: &str, size: f32, family: Family<'_>, weight: Weight) -> Buffer {
     // for a text shaped before that, e.g. in tests: never a fallback face).
     static INTER: std::sync::Once = std::sync::Once::new();
     INTER.call_once(|| {
+        // Tests draw with OUR Inter on every OS: a PC's own "Inter" (another
+        // version) is dropped, so a test's text is the same pixels everywhere.
+        if cfg!(test) {
+            let ours: &[u8] = include_bytes!("../../assets/fonts/Inter.ttf");
+            let db = fonts.raw().db_mut();
+            let inter: Vec<_> = (db.faces())
+                .filter(|f| f.families.iter().any(|(n, _)| n == "Inter"))
+                .map(|f| f.id)
+                .collect();
+            for id in inter {
+                if db.with_face_data(id, |data, _| data == ours) != Some(true) {
+                    db.remove_face(id);
+                }
+            }
+        }
         let has = |fs: &mut iced::advanced::graphics::text::cosmic_text::FontSystem| {
             (fs.db().faces()).any(|f| f.families.iter().any(|(n, _)| n == "Inter"))
         };

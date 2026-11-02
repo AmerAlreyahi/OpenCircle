@@ -558,7 +558,7 @@ fn tool_options(e: &Editor, tool: Tool) -> Vec<Element<'_, Message>> {
             let value = if auto { ar("line", "السطر") } else { "" };
             let cell = Width::ALL.iter().position(|&w| w == e.blur_cell);
             let cells = segmented::presets(cell, None, false, |i| Message::BlurCell(Width::ALL[i]));
-            let px = [4, 6, 9][e.blur_cell as usize];
+            let px = e.blur_cell.cell();
             vec![
                 column![
                     option(ar("Brush", "الفرشاة"), None, Some(value.into()), Some(chip)),

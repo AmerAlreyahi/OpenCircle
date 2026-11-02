@@ -269,9 +269,10 @@ impl Width {
         [14.0, 20.0, 32.0][self as usize]
     }
     /// The blur's mosaic cell (display px): fine, iTop's look with smaller
-    /// cells (owner, 2026-10-31).
-    fn cell(self) -> f32 {
-        [4.0, 6.0, 9.0][self as usize]
+    /// cells (owner, 2026-10-31); no finer than 6 px: below that the text shows
+    /// through (the candidate-scoring test, Windows CI 2026-11-02).
+    pub(crate) fn cell(self) -> f32 {
+        [6.0, 9.0, 12.0][self as usize]
     }
 }
 
@@ -592,7 +593,7 @@ impl Editor {
             capturing: false,
             lock: None,
             blur_size: saved.blur_size,
-            blur_cell: saved.blur_cell.unwrap_or(Width::Medium),
+            blur_cell: saved.blur_cell.unwrap_or(Width::Thin),
             bands: None,
             movable: false,
             own_image: false,
@@ -1066,9 +1067,11 @@ impl Editor {
         if let Some(w) = self.blur_size {
             return (w.brush() / self.zoom, None);
         }
+        let zoom = self.zoom;
         lines::under(self.bands(), p)
-            .filter(|b| b.brush(self.zoom) <= 3.0 * default)
-            .map_or((default, None), |b| (b.brush(self.zoom), Some(b.centre())))
+            .map(|b| b.stroke(zoom))
+            .filter(|&(_, height)| height <= 3.0 * default)
+            .map_or((default, None), |(middle, height)| (height, Some(middle)))
     }
 
     /// A blur stroke at `p`, sized (`brush_size`; Auto on a line: on its
