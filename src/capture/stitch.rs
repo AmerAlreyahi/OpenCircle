@@ -24,6 +24,12 @@ const FLAT: u8 = 24;
 const ACCEPT_PCT: u64 = 40;
 /// Informative overlap rows needed, at minimum, to trust an offset.
 const MIN_MATCH: usize = 8;
+/// Mean row cost (mismatched bins a row) under which a second offset, away
+/// from the best, makes the match ambiguous.
+const RIVAL: f64 = 0.05;
+/// How far (px) a rival offset must be from the best to count: nearer ones
+/// differ by a few rows over plain stretches, not by a section.
+const RIVAL_GAP: usize = 8;
 /// Largest scroll step accepted, in percent of the scrolling body. Bigger steps
 /// leave too little overlap to tell from a blank-row coincidence.
 const MAX_STEP_PCT: usize = 90;
@@ -120,16 +126,25 @@ fn fixed_rows(a: &Rows, b: &Rows) -> Option<(usize, usize)> {
     (top + bot < h).then_some((top, bot))
 }
 
-/// Scroll offset d (at most `max_d` either way) such that b body row y == a
-/// body row y+d: the lowest mean row cost over b's informative rows. Negative
-/// = scrolled back up: tried too, so a page of near-identical lines (a
-/// document) scrolled back is not taken for a step down by whole lines.
-/// `Some(0)` also means "no informative rows, assume no movement"; None = no
-/// trustworthy match (animated frame, too-large step).
-fn offset(a: &Rows, b: &Rows, t: usize, h: usize, max_d: usize) -> Option<isize> {
-    let info: Vec<usize> = (0..h).filter(|&y| b.info[t + y]).collect();
+/// Scroll offset d (in `lo..=hi`) such that b body row y == a body row y+d:
+/// the lowest mean row cost over b's evidence rows. Negative = scrolled back
+/// up: tried too, so a page of near-identical lines (a document) scrolled
+/// back is not taken for a step down by whole lines.
+/// Evidence = informative rows that changed at their spot: a row that stayed
+/// put (a sticky bar, even one that appeared later and so is not in the
+/// fixed header) matches any offset whose overlap it fills, and so made a
+/// short scroll back up read as a step down by nearly a screen (the owner's
+/// README, 2026-11-02: sections twice, the limit reached).
+/// `d: 0` also means "nothing changed that says anything, assume no
+/// movement"; None = no trustworthy match (animated frame, too-large step).
+/// Not `sure` when another offset, `RIVAL_GAP` away or more, with as much
+/// evidence, matches about as well (repeated rows).
+fn offset(a: &Rows, b: &Rows, t: usize, h: usize, (lo, hi): (isize, isize)) -> Option<Found> {
+    let info: Vec<usize> = (0..h)
+        .filter(|&y| b.info[t + y] && !same(a.row(t + y), b.row(t + y)))
+        .collect();
     if info.is_empty() {
-        return Some(0);
+        return Some(Found { d: 0, sure: true });
     }
     let need = MIN_MATCH.min(info.len());
     let cost = |d: isize, y: usize| {
@@ -141,17 +156,17 @@ fn offset(a: &Rows, b: &Rows, t: usize, h: usize, max_d: usize) -> Option<isize>
             b.cap,
         ) as u64
     };
-    // b's informative rows that a overlaps at d.
+    // b's evidence rows that a overlaps at d.
     let overlap = |d: isize| {
         let (lo, hi) = (d.min(0).unsigned_abs(), h - d.max(0) as usize);
         &info[info.partition_point(|&y| y < lo)..info.partition_point(|&y| y < hi)]
     };
-    let max_d = max_d.min(h - 1) as isize;
+    let (lo, hi) = (lo.max(1 - h as isize), hi.min(h as isize - 1));
     // Every 8th row first, to try the offsets best first: the full pass then
     // cuts the others short. Stable sort: on a tie 0 ("did not move") wins,
     // then down over up.
-    let mut order: Vec<(u64, isize)> = (0..=max_d)
-        .chain((1..=max_d).map(|d| -d))
+    let mut order: Vec<(u64, isize)> = (lo.max(0)..=hi)
+        .chain((lo..=hi.min(-1)).rev())
         .filter_map(|d| {
             let rows = overlap(d);
             (rows.len() >= need).then(|| {
@@ -162,22 +177,160 @@ fn offset(a: &Rows, b: &Rows, t: usize, h: usize, max_d: usize) -> Option<isize>
         })
         .collect();
     order.sort_by_key(|&(c, _)| c);
-    // (cost, rows, d): mean cost = cost / rows.
+    // (cost, rows, d): mean cost = cost / rows. On an equal mean the offset
+    // with more evidence rows wins: a far step down overlaps only a few
+    // rows, and a few rows match by chance.
     let mut best: Option<(u64, u64, isize)> = None;
-    for (_, d) in order {
+    for &(_, d) in &order {
         let rows = overlap(d);
-        let limit = ACCEPT_PCT * b.cap as u64 * rows.len() as u64;
+        let n = rows.len() as u64;
+        let limit = ACCEPT_PCT * b.cap as u64 * n;
         let mut sum = 0u64;
+        // Past what is accepted, or already worse than the best mean: give up on d.
         let beaten = rows.iter().any(|&y| {
             sum += cost(d, y);
-            // Past what is accepted, or no better than the best mean: give up on d.
-            sum * 100 > limit || best.is_some_and(|(c, r, _)| sum * r >= c * rows.len() as u64)
+            sum * 100 > limit || best.is_some_and(|(c, r, _)| sum * r > c * n)
         });
-        if !beaten {
-            best = Some((sum, rows.len() as u64, d));
+        let better = best.is_none_or(|(c, r, _)| sum * r < c * n || 4 * n > 5 * r);
+        if !beaten && better {
+            best = Some((sum, n, d));
         }
     }
-    best.map(|(.., d)| d)
+    let (c, r, found) = best?;
+    // A rival: an offset away from it, with as much evidence, whose mean
+    // is within reach of it: no telling them apart (repeated rows).
+    let reach = 1.2 * c as f64 / r as f64 + RIVAL;
+    let rival = order.iter().any(|&(_, d)| {
+        let rows = overlap(d);
+        let limit = reach * rows.len() as f64;
+        let mut sum = 0u64;
+        d.abs_diff(found) > RIVAL_GAP
+            && rows.len() as u64 >= r
+            && !rows.iter().any(|&y| {
+                sum += cost(d, y);
+                sum as f64 > limit
+            })
+    });
+    Some(Found {
+        d: found,
+        sure: !rival,
+    })
+}
+
+/// An offset `offset` found; not `sure` when another one, at least
+/// `RIVAL_GAP` away, matches about as well.
+#[derive(Debug, Clone, Copy)]
+struct Found {
+    d: isize,
+    sure: bool,
+}
+
+impl Found {
+    /// Its offset, unless a rival makes it a guess at a real step down (back up
+    /// adds nothing; a small step down cannot stitch a section twice).
+    fn trusted(self) -> Option<isize> {
+        (self.sure || self.d.unsigned_abs() <= RIVAL_GAP).then_some(self.d)
+    }
+}
+
+/// The preview's shown width narrows in steps of this share (`whole`).
+const STEP: f64 = 0.02;
+
+/// `w0` narrowed by `i` steps.
+fn width_at(w0: usize, i: u32) -> usize {
+    ((w0 as f64 * (1.0 - STEP).powi(i as i32)).round() as usize).max(1)
+}
+
+/// `Stitcher::whole`'s state: the page at the widest preview width (`base`,
+/// fed `fed` page rows, its finished rows `small`), and that scaled to the
+/// shown width (`mini`: scaler, `small` rows fed, finished rows) at `step`.
+struct Preview {
+    /// The page's width.
+    w: usize,
+    base: Shrink,
+    fed: usize,
+    small: Vec<u8>,
+    step: u32,
+    mini: Option<(Shrink, usize, Vec<u8>)>,
+}
+
+impl Preview {
+    fn new(w: usize, w0: usize) -> Self {
+        Preview {
+            w,
+            base: Shrink::new(w, w0),
+            fed: 0,
+            small: Vec::new(),
+            step: 0,
+            mini: None,
+        }
+    }
+
+    /// `page` (final rows when `settled`) then `foot`, at most `max_h` tall
+    /// (`Stitcher::whole`).
+    fn show(
+        &mut self,
+        page: &[u8],
+        settled: bool,
+        foot: &[u8],
+        max_h: usize,
+    ) -> (Vec<u8>, u32, u32) {
+        let stride = self.w * 4;
+        let w0 = self.base.out_w();
+        if settled {
+            for row in page[self.fed * stride..].chunks_exact(stride) {
+                self.base.feed(row, &mut self.small);
+            }
+            self.fed = page.len() / stride;
+        }
+        let mut rest = self.base.clone();
+        let mut end = Vec::new();
+        let unsettled = page[self.fed * stride..].chunks_exact(stride);
+        for row in unsettled.chain(foot.chunks_exact(stride)) {
+            rest.feed(row, &mut end);
+        }
+        rest.flush(&mut end);
+        // the widest step that fits the height: w0 * (1 - STEP)^i
+        let total = (page.len() + foot.len()) / stride;
+        let fits = |w1: usize| (total * w1).div_ceil(self.w) <= max_h;
+        let mut i = self.step;
+        while i > 0 && fits(width_at(w0, i - 1)) {
+            i -= 1;
+        }
+        while width_at(w0, i) > 1 && !fits(width_at(w0, i)) {
+            i += 1;
+        }
+        let w1 = width_at(w0, i);
+        let (row0, row1) = (w0 * 4, w1 * 4);
+        if w1 == w0 {
+            self.step = 0;
+            let mut out = self.small.clone();
+            out.extend_from_slice(&end);
+            let h = (out.len() / row0).min(max_h);
+            out.truncate(h * row0);
+            return (out, w0 as u32, h as u32);
+        }
+        if self.step != i || self.mini.is_none() {
+            self.mini = Some((Shrink::new(w0, w1), 0, Vec::new()));
+            self.step = i;
+        }
+        let Some((mini, fed, small)) = &mut self.mini else {
+            return (Vec::new(), 0, 0);
+        };
+        for row in self.small[*fed * row0..].chunks_exact(row0) {
+            mini.feed(row, small);
+        }
+        *fed = self.small.len() / row0;
+        let mut rest = mini.clone();
+        let mut out = small.clone();
+        for row in end.chunks_exact(row0) {
+            rest.feed(row, &mut out);
+        }
+        rest.flush(&mut out);
+        let h = (out.len() / row1).min(max_h);
+        out.truncate(h * row1);
+        (out, w1 as u32, h as u32)
+    }
 }
 
 /// Result of [`Stitcher::push`].
@@ -200,15 +353,16 @@ pub struct Stitcher {
     w: usize,
     h: usize,
     prev: Option<Rows>,
+    /// Where the last frame placed is from `prev` (its offset; 0 or less).
+    seen: isize,
     /// Sticky (header, footer) rows, the minimum over every accepted moving pair.
     fixed: Option<(usize, usize)>,
     page: Vec<u8>,
     foot: Vec<u8>,
     /// The height cap (`MAX_HEIGHT` unless `limit` lowers it).
     max: u32,
-    /// The preview: its scaler, the page rows fed to it and its newest
-    /// finished rows (`tail`; only the band added since is scaled).
-    shrink: Option<(Shrink, usize, Vec<u8>)>,
+    /// The preview's scalers and what they made so far (`whole`).
+    preview: Option<Preview>,
 }
 
 impl Stitcher {
@@ -218,11 +372,12 @@ impl Stitcher {
             w: width as usize,
             h: height as usize,
             prev: None,
+            seen: 0,
             fixed: None,
             page: Vec::new(),
             foot: Vec::new(),
             max: MAX_HEIGHT,
-            shrink: None,
+            preview: None,
         }
     }
 
@@ -254,16 +409,35 @@ impl Stitcher {
             return Push::Added(self.h as u32);
         };
         let Some((t, b)) = fixed_rows(prev, &rows) else {
+            self.seen = 0;
             return Push::NoMovement;
         };
         // Tentative: only kept when the pair turns out to be a real scroll.
         let (top, bot) = self.fixed.map_or((t, b), |(ft, fb)| (ft.min(t), fb.min(b)));
-        let body = self.h - top - bot;
-        let max_d = body * MAX_STEP_PCT / 100;
-        let d = match offset(prev, &rows, top, body, max_d) {
+        // matched on this pair's own body: rows fixed in both frames (a
+        // sticky bar that appeared after the first pairs) say nothing, and
+        // a's bar must not be compared with b's page (a scroll back up
+        // under it read as a step down)
+        let body = self.h - t - b;
+        let max_d = (body * MAX_STEP_PCT / 100) as isize;
+        // Where the page was last seen from `prev` (back up: 0 or less). Once
+        // it went back up, a step down from there that overlaps less than
+        // half of what changed is taken only within half an area: a "step
+        // down" from far above `prev` to below it on a few rows is a
+        // lookalike (scrolled back up further than the bar or the search
+        // lets it match, then a section matched one repeated below it).
+        let seen = self.seen;
+        let d = offset(prev, &rows, t, body, (-max_d, max_d))
+            .filter(|f| f.d <= 0 || seen == 0 || f.d.abs_diff(seen) <= max_d as usize / 2)
+            .and_then(Found::trusted);
+        let d = match d {
+            // (the last frame placed stays the one to follow from)
             None => return Push::Rejected,
             // scrolled back up: what it shows is in the image already
-            Some(..=0) => return Push::NoMovement,
+            Some(d) if d <= 0 => {
+                self.seen = d;
+                return Push::NoMovement;
+            }
             Some(d) => d as usize,
         };
         if self.is_full() {
@@ -291,61 +465,31 @@ impl Stitcher {
             .extend_from_slice(&rgba[start * stride..(start + take) * stride]);
         self.foot = rgba[end * stride..].to_vec();
         self.prev = Some(rows);
+        self.seen = 0;
         Push::Added(take as u32)
     }
 
-    /// The bottom of the image so far, `out_w` px wide (at most the frame's;
-    /// a sharp area-average scale, `shrink`), at most `out_h` tall; empty
-    /// before the first frame. Rows already scaled are kept (the newest
-    /// `out_h`): a call scales only the page rows added since, plus the
-    /// footer (it changes with every frame).
-    pub fn tail(&mut self, out_w: u32, out_h: u32) -> (Vec<u8>, u32, u32) {
-        let stride = self.w * 4;
-        if self.height() == 0 || out_w == 0 || out_h == 0 {
+    /// The whole image so far, miniature (owner, 2026-11-02, as iTop): scaled
+    /// by min(`max_w` / width, `max_h` / height), never taller than `max_h`, so it
+    /// starts `max_w` wide and narrows as the page grows; sharp (area average,
+    /// `shrink`). Two stages, both fed only the rows added since the last call:
+    /// the page at `max_w` (`base`, kept whole), then that at the shown width
+    /// (`mini`). The shown width moves in steps of `STEP` (2 %), so `mini` is
+    /// rebuilt from `base` once per 2 % of growth, not every call; the
+    /// footer and the partial last rows are scaled on copies (they change).
+    /// Empty before the first frame.
+    pub fn whole(&mut self, max_w: u32, max_h: u32) -> (Vec<u8>, u32, u32) {
+        if self.height() == 0 || max_w == 0 || max_h == 0 {
             return (Vec::new(), 0, 0);
         }
-        let (out_w, out_h) = (out_w as usize, out_h as usize);
-        if self
-            .shrink
-            .as_ref()
-            .is_none_or(|(s, ..)| s.out_w() != out_w.min(self.w))
-        {
-            self.shrink = Some((Shrink::new(self.w, out_w), 0, Vec::new()));
+        let (w, w0) = (self.w, (max_w as usize).min(self.w));
+        let p = self.preview.get_or_insert_with(|| Preview::new(w, w0));
+        if p.base.out_w() != w0 {
+            *p = Preview::new(w, w0);
         }
-        let Some((shrink, fed, small)) = &mut self.shrink else {
-            return (Vec::new(), 0, 0);
-        };
-        let row_out = shrink.out_w() * 4;
-        // Page rows are final once the first pair is matched (before it, the
-        // first frame's footer may still be cut off the page).
-        let rows = self.page.len() / stride;
-        if self.fixed.is_some() {
-            for row in self.page[*fed * stride..].chunks_exact(stride) {
-                shrink.feed(row, small);
-            }
-            *fed = rows;
-            let keep = out_h * row_out;
-            if small.len() > keep {
-                small.drain(..small.len() - keep);
-            }
-        }
-        let mut rest = shrink.clone();
-        let mut end = Vec::new();
-        for row in self.page[*fed * stride..].chunks_exact(stride) {
-            rest.feed(row, &mut end);
-        }
-        for row in self.foot.chunks_exact(stride) {
-            rest.feed(row, &mut end);
-        }
-        rest.flush(&mut end);
-        let total = small.len() + end.len();
-        let take = total.min(out_h * row_out);
-        let mut out = Vec::with_capacity(take);
-        let from_small = take.saturating_sub(end.len());
-        out.extend_from_slice(&small[small.len() - from_small..]);
-        out.extend_from_slice(&end[end.len() - (take - from_small)..]);
-        let w = shrink.out_w() as u32;
-        (out, w, (take / row_out) as u32)
+        // page rows are final once the first pair is matched (before it, the
+        // first frame's footer may still be cut off the page)
+        p.show(&self.page, self.fixed.is_some(), &self.foot, max_h as usize)
     }
 
     /// The stitched RGBA image and its width and height (empty when nothing was pushed).
@@ -503,6 +647,203 @@ pub(super) mod synth {
             }
         }
         img
+    }
+
+    /// A README at `scale` (device px per CSS px): headings, paragraphs, bullet
+    /// lists, hairline rules and grey code blocks whose lines repeat (`cargo
+    /// build` three times, a table of near-identical rows): many rows look alike.
+    pub fn readme(w: usize, h: usize, scale: f32, seed: u64) -> Img {
+        let mut img = Img::white(w, h);
+        let mut r = Rng::new(seed);
+        let px = |v: f32| (v * scale).round() as usize;
+        let line = px(24.0);
+        // a few fixed "words" so code lines repeat exactly
+        let words: Vec<Vec<usize>> = (0..6)
+            .map(|_| {
+                (0..r.range(4, 9))
+                    .map(|_| px(r.range(5, 9) as f32))
+                    .collect()
+            })
+            .collect();
+        let glyphs = |img: &mut Img, x0: usize, y: usize, word: &[usize], ink: [u8; 3]| {
+            let mut x = x0;
+            for &cw in word {
+                img.fill(x, y, cw, px(11.0), ink);
+                x += cw + px(2.0);
+            }
+            x
+        };
+        let mut y = px(16.0);
+        while y < h {
+            match r.range(0, 10) {
+                // heading + hairline under it
+                0..=1 => {
+                    let mut x = px(16.0);
+                    for _ in 0..r.range(1, 4) {
+                        let cw = px(r.range(40, 120) as f32);
+                        img.fill(x, y, cw, px(18.0), [31, 35, 40]);
+                        x += cw + px(10.0);
+                    }
+                    y += px(30.0);
+                    img.fill(px(16.0), y, w - px(32.0), 1.max(px(1.0)), [208, 215, 222]);
+                    y += px(12.0);
+                }
+                // paragraph
+                2..=4 => {
+                    for _ in 0..r.range(2, 6) {
+                        let mut x = px(16.0);
+                        while x + px(60.0) < w {
+                            let wd = &words[r.range(0, 6) as usize];
+                            x = glyphs(&mut img, x, y, wd, [31, 35, 40]) + px(6.0);
+                        }
+                        y += line;
+                    }
+                }
+                // bullet list
+                5..=6 => {
+                    for _ in 0..r.range(2, 6) {
+                        img.fill(px(24.0), y + px(4.0), px(4.0), px(4.0), [31, 35, 40]);
+                        let n = r.range(1, 4);
+                        let mut x = px(40.0);
+                        for _ in 0..n {
+                            x = glyphs(
+                                &mut img,
+                                x,
+                                y,
+                                &words[r.range(0, 6) as usize],
+                                [9, 105, 218],
+                            ) + px(6.0);
+                        }
+                        y += line;
+                    }
+                }
+                // code block: grey box, repeated lines
+                _ => {
+                    let n = r.range(2, 9) as usize;
+                    let bh = n * px(20.0) + px(32.0);
+                    img.fill(px(16.0), y, w - px(32.0), bh, [246, 248, 250]);
+                    let same = r.range(0, 2) == 0;
+                    for i in 0..n {
+                        let wd = if same { &words[0] } else { &words[i % 3] };
+                        let ly = y + px(16.0) + i * px(20.0);
+                        let x = glyphs(&mut img, px(32.0), ly, &words[5], [130, 80, 223]);
+                        glyphs(&mut img, x + px(7.0), ly, wd, [31, 35, 40]);
+                    }
+                    y += bh;
+                }
+            }
+            y += px(16.0);
+        }
+        img
+    }
+
+    /// A browser over `page`: a `vh` px tall viewport, optionally a sticky bar
+    /// on top (`head` px, from the start or only once scrolled past `head_from`)
+    /// and a sticky side column (`toc` px wide on the right, its own content,
+    /// fixed); positions come from `smooth`.
+    pub struct Browser {
+        pub page: Img,
+        pub vh: usize,
+        pub head: usize,
+        pub head_from: usize,
+        pub toc: usize,
+        bar: Img,
+        side: Img,
+    }
+
+    impl Browser {
+        pub fn new(page: Img, vh: usize, head: usize, head_from: usize, toc: usize) -> Self {
+            let w = page.w;
+            let mut bar = Img::white(w, head.max(1));
+            bar.fill(0, 0, w, head, [246, 248, 250]);
+            bar.fill(12, head / 3, 90, head / 3, [31, 35, 40]);
+            bar.fill(w / 2, head / 3, 60, head / 3, [9, 105, 218]);
+            bar.fill(0, head.saturating_sub(1), w, 1, [208, 215, 222]);
+            let side = match toc {
+                0 => Img::white(1, 1),
+                _ => super::synth::readme(toc, vh, 1.0, 77),
+            };
+            Browser {
+                page,
+                vh,
+                head,
+                head_from,
+                toc,
+                bar,
+                side,
+            }
+        }
+        pub fn max_scroll(&self) -> usize {
+            self.page.h - self.vh
+        }
+        pub fn frame(&self, s: usize) -> Img {
+            let s = s.min(self.max_scroll());
+            let w = self.page.w;
+            let mut f = Img {
+                w,
+                h: self.vh,
+                px: self.page.rows(s, self.vh).to_vec(),
+            };
+            if self.head > 0 && s >= self.head_from {
+                f.px[..self.head * w * 4].copy_from_slice(self.bar.rows(0, self.head));
+            }
+            if self.toc > 0 {
+                let x0 = w - self.toc;
+                for y in 0..self.vh {
+                    let row = &self.side.px[y * self.toc * 4..(y + 1) * self.toc * 4];
+                    f.px[(y * w + x0) * 4..(y * w + w) * 4].copy_from_slice(row);
+                }
+            }
+            f
+        }
+    }
+
+    /// Smooth scrolling as Chrome / Edge do it, grabbed every ~66 ms: each
+    /// wheel notch (`notch` px) adds to the target, the position eases there
+    /// over ~150 ms (frames land mid-way); notches `every` ms apart in bursts
+    /// of `burst`, a pause between bursts; every `back`-th notch goes back up
+    /// (0: never). Integer device px positions.
+    pub fn smooth(
+        notch: f32,
+        every: u32,
+        burst: u32,
+        back: u32,
+        until: usize,
+        seed: u64,
+    ) -> Vec<usize> {
+        let mut r = Rng::new(seed);
+        let (mut t, mut target, mut from, mut since) = (0u32, 0f32, 0f32, 0u32);
+        let mut pos = vec![0usize];
+        let mut next_notch = 100u32;
+        let (mut in_burst, mut notches) = (0, 0);
+        let mut at = 0f32;
+        while (at as usize) < until && pos.len() < 4000 {
+            let step = 60 + r.range(0, 13);
+            for _ in 0..step {
+                t += 1;
+                if t >= next_notch {
+                    from = at;
+                    notches += 1;
+                    target = match back > 0 && notches % back == 0 {
+                        true => (target - notch * r.range(1, 4) as f32).max(0.0),
+                        false => target + notch,
+                    };
+                    since = 0;
+                    in_burst += 1;
+                    next_notch = t + if in_burst >= burst {
+                        in_burst = 0;
+                        every * 3 + r.range(0, 200)
+                    } else {
+                        every
+                    };
+                }
+                since += 1;
+                let k = (since as f32 / 150.0).min(1.0);
+                at = from + (target - from) * (1.0 - (1.0 - k).powi(3));
+            }
+            pos.push(at.max(0.0).round() as usize);
+        }
+        pos
     }
 
     /// A page behind a viewport with sticky header (60 px) and footer (40 px).
@@ -702,33 +1043,68 @@ mod tests {
         );
     }
 
+    /// The preview is the WHOLE page so far, as iTop's (owner, 2026-11-02):
+    /// `max_w` wide while it fits, then narrower as the page grows, never
+    /// taller than `max_h` and filling it once tall. The owner's numbers: a
+    /// 1720 px wide README on a 1440 px screen, iTop ~400 -> 330 -> 190 px
+    /// wide; ours (280 px at most, 80 % of the free height: 1112) ~280 -> 250
+    /// -> 150 at the same lengths (5,000 / 7,245 / 12,583 px).
     #[test]
-    fn the_tail_is_the_newest_rows_scaled_to_the_width() {
+    fn the_preview_is_the_whole_page_narrowing_as_it_grows() {
+        let w = 1720;
+        let page = synth::readme(w, 13_000, 1.0, 2);
+        let mut p = Preview::new(w, 280);
+        let mut widths = Vec::new();
+        for h in (1440..=12_583).step_by(331).chain([12_583]) {
+            let (px, pw, ph) = p.show(&page.px[..h * w * 4], true, &[], 1112);
+            assert_eq!(px.len(), (pw * ph * 4) as usize);
+            assert!(ph <= 1112);
+            // all of it: as tall as the page at that width (give or take a row)
+            let want = h as f64 * f64::from(pw) / w as f64;
+            assert!((f64::from(ph) - want).abs() <= 2.0, "{h}: {ph} vs {want}");
+            if pw < 280 {
+                assert!(f64::from(ph) >= 0.97 * 1112.0, "fills the height: {ph}");
+            }
+            widths.push((h, pw));
+        }
+        assert!(widths.windows(2).all(|p| p[1].1 <= p[0].1), "{widths:?}");
+        let at = |len: usize| widths.iter().find(|(h, _)| *h >= len).unwrap().1;
+        assert_eq!(at(5000), 280, "{widths:?}");
+        assert!((245..=265).contains(&at(7245)), "{widths:?}");
+        assert!((145..=153).contains(&at(12_583)), "{widths:?}");
+    }
+
+    /// Fed a little at a time (each call scales only what is new, plus a
+    /// rebuild per 2 % step) it is what one call at the end gives, and that
+    /// is the exact area average of the finished image, give or take.
+    #[test]
+    fn the_preview_built_bit_by_bit_is_the_one_built_at_once() {
         let rig = Rig::new(W, 6000, VH, 7, 40);
         let mut st = Stitcher::new(W as u32, VH as u32);
-        assert_eq!(st.tail(390, 300).1, 0, "nothing yet");
-        // asked between pushes (only the new band is scaled each time) it is
-        // what scaling the whole image at once gives: its newest rows
-        for s in [0, 300, 600, 777, 1100] {
+        let mut once = Stitcher::new(W as u32, VH as u32);
+        assert_eq!(st.whole(300, 900).1, 0, "nothing yet");
+        let mut s = 0;
+        while s < 5000 {
             st.push(&rig.frame(s).px);
-            let _ = st.tail(390, 300);
+            once.push(&rig.frame(s).px);
+            let _ = st.whole(300, 900);
+            s += 250;
         }
-        let (px, w, h) = st.tail(390, 300);
-        assert_eq!((w, h, px.len()), (390, 300, 390 * 300 * 4));
-        let mut whole = Stitcher::new(W as u32, VH as u32);
-        for s in [0, 300, 600, 777, 1100] {
-            whole.push(&rig.frame(s).px);
-        }
-        let (rgba, ..) = whole.finish();
-        let (all, rows) = super::super::shrink::shrink(&rgba, W, 390);
-        assert_eq!(px, all[(rows - 300) * 390 * 4..], "the newest 300 rows");
-        // only the newest rows are kept scaled
-        let kept = st.shrink.as_ref().unwrap().2.len();
-        assert!(kept <= 300 * 390 * 4, "{kept}");
-        // a short image comes whole
+        let (px, pw, ph) = st.whole(300, 900);
+        assert!(pw < 300 && ph > 870, "{pw} x {ph}");
+        assert!(px == once.whole(300, 900).0);
+        let (rgba, ..) = once.finish();
+        let (all, _) = super::super::shrink::shrink(&rgba, W, pw as usize);
+        let n = px.len().min(all.len());
+        let diff: u64 = (px[..n].iter().zip(&all[..n]))
+            .map(|(a, b)| u64::from(a.abs_diff(*b)))
+            .sum();
+        assert!(diff / n as u64 <= 3, "mean difference {}", diff / n as u64);
+        // a short image comes whole, at full width
         let mut st = Stitcher::new(W as u32, VH as u32);
         st.push(&rig.frame(0).px);
-        assert_eq!(st.tail(390, 5000).2, 350);
+        let (_, pw, ph) = st.whole(390, 5000);
+        assert_eq!((pw, ph), (390, 350));
     }
 
     #[test]
@@ -949,6 +1325,62 @@ mod tests {
             include_bytes!("testdata/edge161_1.png"),
         );
         assert_eq!((moved, again), (Push::Added(503), Push::NoMovement));
+    }
+
+    /// Smooth-scrolled README behind a browser: (stitched height, true
+    /// height, rows of the page column that differ from the truth).
+    fn browse(b: &synth::Browser, pos: &[usize]) -> (usize, usize, usize) {
+        let mut st = Stitcher::new(b.page.w as u32, b.vh as u32);
+        for &s in pos {
+            st.push(&b.frame(s).px);
+        }
+        let last = pos.iter().copied().max().unwrap().min(b.max_scroll());
+        let (px, w, h) = st.finish();
+        let w = w as usize;
+        let mut truth = b.page.px[..(last + b.vh) * w * 4].to_vec();
+        if b.head > 0 && b.head_from == 0 {
+            truth[..b.head * w * 4].copy_from_slice(&b.frame(0).px[..b.head * w * 4]);
+        }
+        let cols = (w - b.toc - scrollbar_strip(w)) * 4;
+        let rows = (h as usize).min(last + b.vh);
+        let bad = (0..rows)
+            .filter(|&y| px[y * w * 4..y * w * 4 + cols] != truth[y * w * 4..y * w * 4 + cols])
+            .count();
+        (h as usize, last + b.vh, bad)
+    }
+
+    /// A README in a browser, scrolled smoothly (Chrome / Edge: frames land
+    /// mid-animation) at 100 %, 150 % and 250 %: slow and fast wheel, down
+    /// and back up, a touchpad's small steps; a sticky bar that shows only
+    /// once scrolled (GitHub's) and a sticky side column. The owner's README
+    /// (2026-11-02) came out with sections twice and hit the 20,000 px limit:
+    /// here every case is exact, as tall as the page, no row repeated.
+    #[test]
+    fn a_smoothly_scrolled_readme_is_exact_at_every_scale() {
+        for scale in [1.0f32, 1.5, 2.5] {
+            let px = |v: f32| (v * scale) as usize;
+            let page = synth::readme(px(260.0), px(1800.0), scale, 5);
+            let browsers = [
+                // a sticky bar from the start
+                synth::Browser::new(page.clone(), px(320.0), px(40.0), 0, 0),
+                // one that shows once scrolled past 300 px, and a side column
+                synth::Browser::new(page, px(320.0), px(40.0), px(300.0), px(60.0)),
+            ];
+            for b in &browsers {
+                for (speed, notch, every, burst, back) in [
+                    ("slow", 100.0, 400, 1, 0),
+                    ("fast", 60.0, 30, 3, 0),
+                    ("down and up", 100.0, 120, 3, 4),
+                    ("touchpad", 12.0, 16, 30, 7),
+                ] {
+                    let until = b.max_scroll() + 50;
+                    let pos = synth::smooth(notch * scale, every, burst, back, until, 3);
+                    let (h, truth, bad) = browse(b, &pos);
+                    let case = format!("{scale}x {speed}, bar from {}", b.head_from);
+                    assert_eq!((h, bad), (truth, 0), "{case}: {h} px, {bad} rows wrong");
+                }
+            }
+        }
     }
 
     #[test]

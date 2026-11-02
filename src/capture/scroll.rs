@@ -174,7 +174,7 @@ fn run(
         if news || due {
             let made = Instant::now();
             let preview = due.then(|| {
-                let (rgba, width, height) = st.tail(pw, ph);
+                let (rgba, width, height) = st.whole(pw, ph);
                 Crop {
                     width,
                     height,
