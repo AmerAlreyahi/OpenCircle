@@ -328,8 +328,8 @@ production systems.
   click a step = copy it, double-click = edit, no per-step menu).
   Long capture look (owner, 2026-10-31, "super bad" next to iTop): the live preview is SHARP (good downscale, never
   blurry): the bare image beside the area, no widget around it (no card, frame or surface). Like iTop (owner,
-  2026-11-02, 3 shots): it ALWAYS shows the whole page so far, scaled to fit the free height, so it starts at a max
-  width (~360 px, a bit under iTop's ~400) and gets narrower as the page grows; top-aligned, right next to the area;
+  2026-11-02, 3 shots): it ALWAYS shows the whole page so far, scaled to fit ~80 % of the free height, so it starts at
+  a max width (~280 px, clearly narrower than iTop's ~400) and gets narrower as the page grows; top-aligned, right next to the area;
   the
   normal Snip toolbar stays (close, pin, share, Copy, Save) and Copy / Save finish the long capture (no separate
   Cancel / Done bar over the page); a short hint "Scroll to capture the page" beside the area.
