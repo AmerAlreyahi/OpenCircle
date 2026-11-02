@@ -30,6 +30,16 @@ impl Place {
     }
 }
 
+/// THE way to resize one of our windows at run time (a test forbids
+/// `window::resize` elsewhere). Wayland: winit applies a program's resize without
+/// a `Resized` event, so iced keeps drawing the old size and the compositor
+/// stretches it; a window whose content depends on its size is replaced by a new
+/// one instead (`Windows::place_steps`, `update_card`). Every other caller goes
+/// through here so the next one has one place to fix.
+pub fn resize<T: Send + 'static>(id: window::Id, size: Size) -> Task<T> {
+    window::resize(id, size)
+}
+
 /// Puts the overlay window over the monitor at `place`, so full-screen (which
 /// covers the window's own monitor) lands there. Windows: in physical px; iced
 /// moves in logical px at the window's current scale, another monitor's when
@@ -71,7 +81,7 @@ pub fn place_window<T: Send + 'static>(id: window::Id, place: Place) -> Task<T> 
     })
     .discard();
     #[cfg(not(windows))]
-    window::move_to(id, place.logical_origin()).chain(window::resize(id, place.size()))
+    window::move_to(id, place.logical_origin()).chain(resize(id, place.size()))
 }
 
 /// How much of the bottom of the monitor at `origin` (`size`, logical px at

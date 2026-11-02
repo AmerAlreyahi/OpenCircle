@@ -288,3 +288,20 @@ fn one_scrollbar_and_one_dropdown() {
     }
     assert!(found.is_empty(), "{found:#?}");
 }
+
+/// Every runtime resize of our windows goes through `platform::monitor::resize`
+/// (Wayland sends no `Resized` for a program's resize: one place to handle it).
+#[test]
+fn only_the_monitor_helper_calls_window_resize() {
+    for (name, src) in sources("") {
+        if name == "platform/monitor.rs" || name == "arch_tests.rs" {
+            continue;
+        }
+        for l in code(&src) {
+            assert!(
+                !l.contains("window::resize("),
+                "{name}: use platform::monitor::resize, not window::resize: {l}"
+            );
+        }
+    }
+}

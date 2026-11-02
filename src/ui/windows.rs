@@ -444,7 +444,7 @@ impl Windows {
                 let Some(id) = window else {
                     return self.open_steps(place);
                 };
-                return platform::monitor::place_window(id, place);
+                return self.place_steps(id, place);
             }
             steps::Msg::Expire(n) => {
                 return match window {
@@ -462,10 +462,14 @@ impl Windows {
             // (no window yet: its first step is still being packed)
             (steps::Do::Drag | steps::Do::Resize | steps::Do::Cleared, None) => Task::none(),
             (steps::Do::Drag, Some(id)) => window::drag(id),
-            (steps::Do::Resize, Some(id)) => platform::monitor::place_window(id, strip.place()),
+            (steps::Do::Resize, Some(id)) => {
+                let place = strip.place();
+                self.place_steps(id, place)
+            }
             (steps::Do::Cleared, Some(id)) => {
                 let clears = strip.clears;
-                let place = platform::monitor::place_window(id, strip.place());
+                let place = strip.place();
+                let place = self.place_steps(id, place);
                 let expire = super::background(move |tx| {
                     std::thread::sleep(Duration::from_millis(steps::UNDO_MS));
                     let _ = tx.unbounded_send(());
@@ -495,6 +499,18 @@ impl Windows {
                 .map(|ok| Msg::Steps(steps::Msg::Copied(ok)))
             }
         }
+    }
+
+    /// Puts the strip's window `id` at `place`. Wayland: winit applies a
+    /// program's resize without a `Resized` event, so iced kept drawing the old
+    /// size and the compositor stretched it (Copy all pushed out of the window):
+    /// the strip's window is replaced by one opened at the new size instead.
+    fn place_steps(&mut self, id: window::Id, place: platform::monitor::Place) -> Task<Msg> {
+        if platform::monitor::can_hide_windows() {
+            return platform::monitor::place_window(id, place);
+        }
+        let open = self.open_steps(place); // the strip's window is the new one now
+        Task::batch([open, close(id)])
     }
 
     /// The strip's window at `place` (physical px): floating, kept out of
@@ -749,9 +765,12 @@ impl Windows {
     /// The update card (release notes) with `card`; replaces an open one's content.
     pub fn update_card(&mut self, card: update_card::Card) -> Task<Msg> {
         let size = card.size();
-        if let Some((id, open)) = &mut self.update_card {
-            *open = card;
-            return window::resize(*id, size);
+        let old = self.update_card.take().map(|(id, _)| id);
+        // Wayland can't resize it in place (`monitor::resize`): a new window replaces it
+        let reuse = old.filter(|_| platform::monitor::can_hide_windows());
+        if let Some(id) = reuse {
+            self.update_card = Some((id, card));
+            return platform::monitor::resize(id, size);
         }
         let (id, open) = floating(
             window::Settings {
@@ -764,7 +783,10 @@ impl Windows {
             POPUP,
         );
         self.update_card = Some((id, card));
-        open.discard()
+        match old {
+            Some(old) => Task::batch([open.discard(), close(old)]),
+            None => open.discard(),
+        }
     }
 
     /// The tray menu at the tray icon (`icon`: physical px), with the keyboard; `live_on` = live
@@ -1153,7 +1175,7 @@ impl Windows {
             }
             PinMsg::Zoom(delta) => {
                 pin.zoom = zoom_after(pin.zoom, delta);
-                window::resize(id, pin.size())
+                platform::monitor::resize(id, pin.size())
             }
             PinMsg::DragOut => {
                 pin.dragged = None; // one temp file per pin
@@ -1196,7 +1218,7 @@ impl Windows {
                 }
                 // the window was resized or changed DPI: the pin keeps the crop's shape
                 pin.base = base;
-                window::resize(id, pin.size())
+                platform::monitor::resize(id, pin.size())
             }
             PinMsg::Live(live::Event::Gone) => {
                 let gone = self.toast("The pinned window closed", Tone::Neutral, None, TOAST_MS);

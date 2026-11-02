@@ -770,6 +770,27 @@ mod tests {
         assert_eq!(s.place().origin.1, 12);
     }
 
+    /// Copy all sits inside the window at every scale and step count, and the
+    /// physical window is the logical size times the scale.
+    #[test]
+    fn copy_all_always_fits_the_window() {
+        let icon = crate::ui::kit::tokens::size::ICON_BUTTON;
+        for k in [1.0, 1.25, 1.5, 2.0] {
+            for n in 1..=MAX {
+                let mut s = strip(n);
+                s.monitor.scale = k;
+                s.monitor.px = ((1280.0 * k) as u32, (720.0 * k) as u32);
+                let h = s.size().height;
+                assert!(
+                    TOP + s.thumbs_height() + PAD + icon + PAD <= h + 0.001,
+                    "k {k} n {n}"
+                );
+                let p = s.place();
+                assert_eq!(p.px.1, (h * k).round() as u32, "k {k} n {n}");
+            }
+        }
+    }
+
     /// Dragged near the other edge it docks there and keeps its height.
     #[test]
     fn a_dragged_strip_docks_to_the_nearer_edge() {

@@ -233,7 +233,7 @@ impl Live {
         }
         self.ctl_at += Vector::new(old.width - new.width, old.height - new.height);
         self.update_mask();
-        window::resize(id, new).chain(window::move_to(id, self.ctl_at))
+        crate::ui::platform::monitor::resize(id, new).chain(window::move_to(id, self.ctl_at))
     }
 
     /// The layer window, once open.

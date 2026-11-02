@@ -248,7 +248,10 @@ impl App {
         others
             .chain(window::set_mode(self.overlay, Mode::Windowed))
             .chain(windows::opacity(self.overlay, 1.0))
-            .chain(window::resize(self.overlay, snip::PILL))
+            .chain(crate::ui::platform::monitor::resize(
+                self.overlay,
+                snip::PILL,
+            ))
             .chain(window::move_to(
                 self.overlay,
                 self.o.origin + Vector::new(at.x, at.y),

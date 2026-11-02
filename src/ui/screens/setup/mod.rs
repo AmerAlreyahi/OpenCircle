@@ -489,7 +489,8 @@ impl State {
             return Task::none();
         };
         self.applied = h;
-        window::resize(id, Size::new(WIDTH, h)).chain(windows::reshape::<()>(id).discard())
+        crate::ui::platform::monitor::resize(id, Size::new(WIDTH, h))
+            .chain(windows::reshape::<()>(id).discard())
     }
 
     fn bar_at(&self) -> f32 {

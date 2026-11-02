@@ -675,8 +675,9 @@ impl App {
             // open() resizes it back before showing.
             Message::Drawn if self.hiding == Hiding::Empty => {
                 self.hiding = Hiding::Shrinking(0);
-                window::set_mode(self.overlay, Mode::Windowed)
-                    .chain(window::resize(self.overlay, Size::new(1.0, 1.0)))
+                window::set_mode(self.overlay, Mode::Windowed).chain(
+                    crate::ui::platform::monitor::resize(self.overlay, Size::new(1.0, 1.0)),
+                )
             }
             Message::Resized(size)
                 if matches!(self.hiding, Hiding::Shrinking(_))
