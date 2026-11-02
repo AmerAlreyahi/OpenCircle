@@ -292,6 +292,10 @@ production systems.
   After a pick (owner, 2026-10-31): the default is "Both": the area stays picked with the Snip toolbar AND is
   already on the clipboard. `snip.after` default = both; a config from before 0.1.3 whose Snip was still in Labs
   (never used) moves to both; a user's own choice stays.
+  No copy-and-close (owner, 2026-11-02, "wipe it"): a pick ALWAYS shows the Snip toolbar at once; the old "Copy"
+  route (copy, close, toast "Copied: paste it into your AI chat · Snip") is removed, for every user: a config with
+  `snip.after = "copy"` migrates (with a backup) to the new behaviour. Settings: "After a capture" becomes one switch
+  "Copy when picked" (on by default; off = toolbar only, the old "editor").
   Window hover (owner, 2026-10-31, compared with iTop): hovering outlines the WHOLE top-level window under the
   pointer by default (its visible frame, like iTop); a part of it (element) only after the wheel goes down; every
   normal window counts, OpenCircle's own Settings / chat / pins too (only the snip overlay itself is skipped).
