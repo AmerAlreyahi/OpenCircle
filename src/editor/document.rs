@@ -336,7 +336,8 @@ impl Document {
         &self.tiles
     }
 
-    /// Adds a capture to the board (one undoable edit).
+    /// Adds a capture to the board (one undoable edit; tests only, `Editor::append`).
+    #[cfg(test)]
     pub fn append(&mut self, image: Image) {
         if self.sources.is_empty() {
             let first = std::mem::replace(
@@ -496,6 +497,7 @@ impl Document {
     /// The crop becomes the whole image (its pixels cut out, the items moved
     /// with them): Snip's live area is fixed from here on (a board needs its
     /// captures as they are). Undo starts again from this state.
+    #[cfg(test)]
     pub fn bake(&mut self) {
         let Some(crop) = self.crop.take() else {
             return;

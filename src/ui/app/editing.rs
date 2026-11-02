@@ -10,8 +10,8 @@ use crate::ui::app::message::{Message, Purpose};
 use crate::ui::kit::motion;
 use crate::ui::screens::editor::Editing;
 
+use super::App;
 use super::capture::TEST_SHOT;
-use super::{App, work_area};
 
 impl App {
     /// Edit in place: the selection's pixels become the editor's canvas, at their
@@ -67,6 +67,7 @@ impl App {
             if edit.editor.movable {
                 (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area
             }
+            edit.editor.steps = self.windows.steps();
             self.o.edit = Some(edit);
         }
         Task::none()
@@ -131,18 +132,6 @@ impl App {
         // Snip's live area moved or resized: the selection (the overlay's dim,
         // scrolling capture, pin) follows it.
         let live = edit.editor.movable.then(|| edit.canvas_rect());
-        // Add capture: the area picked on the frozen frame joins the board.
-        if let Some(area) = edit.take_picked()
-            && let Some(image::Handle::Rgba {
-                width,
-                height,
-                pixels,
-                ..
-            }) = &o.frame
-            && let Some(crop) = actions::crop(pixels, *width, *height, o.scale, area)
-        {
-            edit.add(crop, work_area(o.screen, o.work_inset));
-        }
         if let Some(area) = live.filter(|a| self.o.selection.is_none_or(|s| s.area != *a)) {
             self.select(area);
         }
@@ -152,6 +141,8 @@ impl App {
         };
         match out {
             None => Task::none(),
+            // a step of the Steps strip edited: Esc leaves it as it was
+            Some(Output::Back) if edit.editor.updating.is_some() => self.close(),
             // Snip has no action bar: back to picking an area.
             Some(Output::Back) if matches!(o.purpose, Purpose::Snip(_)) => {
                 self.o.edit = None;
@@ -176,7 +167,10 @@ impl App {
                 Some(selection) => self.start_scroll(selection.area),
                 None => Task::none(),
             },
-            Some(Output::AddCapture) => Task::none(), // `edit` picks the area now
+            Some(Output::AddStep(crop)) => {
+                let update = edit.editor.updating;
+                self.add_step(crop, update)
+            }
             // the colour picker, the ruler: Esc there comes back to this
             Some(Output::ScreenTool(tool)) => self.start_tool(tool),
             // The share sheet is up: once a target is picked, the editor closes.
@@ -196,6 +190,29 @@ impl App {
             .pin(crop, at, self.o.scale)
             .map(Message::Windows);
         Task::batch([self.close(), pinned])
+    }
+
+    /// Add to steps / Add step N / Update step N: the overlay closes and the
+    /// capture goes to the Steps strip (opened on this monitor by its first
+    /// step) as its next step, or in place of the `update`th.
+    pub(in crate::ui) fn add_step(&mut self, crop: Crop, update: Option<usize>) -> Task<Message> {
+        let (place, inset) = (self.place(), self.o.work_inset);
+        let added = self.windows.add_step(crop, update, place, inset);
+        Task::batch([self.close(), added.map(Message::Windows)])
+    }
+
+    /// A double-click on a step: Snip opens (freezing the screen) with that
+    /// step picked, its toolbar saying "Update step N" (`capture::open`).
+    pub(in crate::ui) fn edit_step(&mut self, i: usize) -> Task<Message> {
+        let Some(crop) = self.windows.step_crop(i) else {
+            return Task::none();
+        };
+        self.step_next = Some((i, crop));
+        self.next = Purpose::Search;
+        self.capture(
+            std::time::Instant::now(),
+            Some(crate::ui::snip::Kind::Region),
+        )
     }
 
     /// Live pin (Snip, Labs Pins): the overlay closes and `area`'s part of the
@@ -271,12 +288,84 @@ mod tests {
     use crate::ui::app::message::Hiding;
     use crate::ui::app::tests::{open_app, run_task, snipping_on};
     use crate::ui::screens::editor::toolbar;
+    use crate::ui::windows::Windows;
+
+    /// Add to steps (More, owner 2026-11-02): the overlay closes and the
+    /// capture is the strip's step 1; the next snip's primary is "Add step
+    /// 2" (Copy moves into More) and adds it; at 12 it says "Steps full" and
+    /// adds nothing. A step edited: "Update step N" replaces it, Esc leaves.
+    #[test]
+    fn add_to_steps_then_each_next_snip_adds_the_next_step() {
+        let mut app = snip_editor();
+        assert!(more(&app).contains(&Some(E::AddStep)), "More: Add to steps");
+        let task = app.on_editor(E::AddStep);
+        run_task(&mut app, task);
+        assert!(app.hiding != Hiding::No, "the overlay closes");
+        assert_eq!(app.windows.steps(), Some(1));
+        let mut windows = std::mem::take(&mut app.windows);
+        for n in 1..crate::editor::STEPS_MAX {
+            let mut app = snip_editor_with(windows);
+            let editor = &app.o.edit.as_ref().unwrap().editor;
+            assert_eq!(editor.steps, Some(n));
+            assert!(toolbar::stops(editor).contains(&E::AddStep), "Enter adds");
+            assert!(more(&app).contains(&Some(E::Copy)), "Copy moved to More");
+            assert!(
+                bar_names(&app)
+                    .iter()
+                    .any(|t| t.starts_with("Add as the next step"))
+            );
+            let task = app.on_editor(E::AddStep);
+            run_task(&mut app, task);
+            assert_eq!(app.windows.steps(), Some(n + 1));
+            windows = std::mem::take(&mut app.windows);
+        }
+        // full: dimmed, nothing added, the overlay stays
+        let mut app = snip_editor_with(windows);
+        // Copy all: ONE image of the 12 (300 x 200) stacked and numbered
+        use crate::ui::app::message::Message;
+        use crate::ui::screens::steps::Msg as Steps;
+        let all = Message::Windows(crate::ui::windows::Msg::Steps(Steps::CopyAll));
+        let task = app.update(all);
+        run_task(&mut app, task);
+        let copied = crate::actions::copy::copied::image();
+        assert_eq!(copied, Some((440, 40 + 12 * 200 + 11 * 32 + 40)));
+        assert!(
+            bar_names(&app)
+                .iter()
+                .any(|t| t.starts_with("Steps full (12 of 12)"))
+        );
+        let task = app.on_editor(E::AddStep);
+        run_task(&mut app, task);
+        assert!(app.editing() && app.hiding == Hiding::No);
+        // a step edited: Update step 1 replaces it (still 12)
+        app.o.edit.as_mut().unwrap().editor.updating = Some(0);
+        assert!(
+            bar_names(&app)
+                .iter()
+                .any(|t| t.starts_with("Update the step"))
+        );
+        let task = app.on_editor(E::AddStep);
+        run_task(&mut app, task);
+        assert!(app.hiding != Hiding::No);
+        assert_eq!(app.windows.steps(), Some(12));
+        // Esc on an edited step leaves it as it was
+        let mut app = snip_editor_with(std::mem::take(&mut app.windows));
+        app.o.edit.as_mut().unwrap().editor.updating = Some(0);
+        let _ = app.on_editor(E::Back);
+        assert!(app.hiding != Hiding::No, "closed, nothing changed");
+    }
 
     /// A snip of an area in its editor (Labs all on for the host; the toolbar
     /// reads the shared config, where Pins is off).
     fn snip_editor() -> App {
+        snip_editor_with(Windows::default())
+    }
+
+    /// `snip_editor` with these windows (a Steps strip from an earlier snip).
+    fn snip_editor_with(windows: Windows) -> App {
         let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
         let mut app = snipping_on(800, 600, area);
+        app.windows = windows;
         app.o.labs = Labs::all_on();
         app.select(area);
         let crop = app.crop().unwrap();
@@ -392,9 +481,9 @@ mod tests {
         assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }
 
-    /// More (owner, 2026-11-02): Long capture, Pin, Share (where there is a
-    /// sheet), the screen tools; no Add capture / Add to steps (hidden until
-    /// the Steps strip exists). The arrow keys walk its live rows, Enter runs one.
+    /// More (owner, 2026-11-02): Long capture, Add to steps, Pin, Share (where
+    /// there is a sheet), the screen tools. The arrow keys walk its live
+    /// rows, Enter runs one.
     #[test]
     fn more_holds_the_rest_and_the_keys_walk_it() {
         use crate::editor::Menu;
@@ -403,6 +492,7 @@ mod tests {
         let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
         for row in [
             "Long capture",
+            "Add to steps",
             "Pin to screen",
             "Colour picker",
             "Screen ruler",
@@ -410,8 +500,8 @@ mod tests {
             assert!(texts.iter().any(|t| t == row), "{row}: {texts:?}");
         }
         assert_eq!(texts.iter().any(|t| t == "Share"), share::SUPPORTED);
-        assert!(!texts.iter().any(|t| t.starts_with("Add")), "{texts:?}");
-        // Down, Down: the second live row (Pin); Enter pins (the overlay closes)
+        // Down x3: the third live row (Pin); Enter pins (the overlay closes)
+        let _ = app.on_editor(E::MenuStep(false));
         let _ = app.on_editor(E::MenuStep(false));
         let _ = app.on_editor(E::MenuStep(false));
         let editor = &app.o.edit.as_ref().unwrap().editor;

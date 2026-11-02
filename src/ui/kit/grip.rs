@@ -13,24 +13,32 @@ const DOTS: char = '\u{e0ee}';
 
 /// Its whole size: the dots and the room round them.
 pub const SIZE: Size = Size::new(30.0, 26.0);
+/// The small grip's room (the Steps strip's 22 px top row).
+pub const SMALL: Size = Size::new(22.0, 22.0);
 
 pub fn grip<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message> {
-    made(on_press, mouse::Interaction::Grab)
+    made(on_press, mouse::Interaction::Grab, SIZE)
+}
+
+/// The same grip in `SMALL` room (the Steps strip's top row).
+pub fn small<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message> {
+    made(on_press, mouse::Interaction::Grab, SMALL)
 }
 
 /// The same grip moving a toolbar (Snip's): the four-way move cursor.
 pub fn mover<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message> {
-    made(on_press, mouse::Interaction::Move)
+    made(on_press, mouse::Interaction::Move, SIZE)
 }
 
 fn made<'a, Message: Clone + 'a>(
     on_press: Message,
     cursor: mouse::Interaction,
+    room: Size,
 ) -> Element<'a, Message> {
     let dots = |alpha: f32| {
         container(text(DOTS).font(FONT).size(14).color(faded(c().text, alpha)))
-            .center_x(SIZE.width)
-            .center_y(SIZE.height)
+            .center_x(room.width)
+            .center_y(room.height)
     };
     // under the cursor the brighter dots are drawn over the dim ones:
     // 1 - (1 - .45)(1 - .73) = .85

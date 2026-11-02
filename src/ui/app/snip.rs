@@ -349,11 +349,12 @@ impl App {
     /// Snip's picked state on this screen: the live area is its whole image,
     /// with Snip's toolbar docked to it (`Editing::fitted`).
     fn edit_fitted(&mut self, crop: Crop) {
-        let edit = Editing::fitted(
+        let mut edit = Editing::fitted(
             crop,
             work_area(self.o.screen, self.o.work_inset),
             self.o.scale,
         );
+        edit.editor.steps = self.windows.steps();
         let area = edit.canvas_rect();
         self.o.panel = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x
@@ -402,7 +403,7 @@ impl App {
     /// Snip's toolbar during a long capture, as its picture and hint keep
     /// clear of it (logical px).
     pub(in crate::ui) fn long_bar(&self) -> Rectangle {
-        let size = Editing::toolbar_size();
+        let size = (self.o.edit.as_ref()).map_or_else(Editing::toolbar_size, Editing::bar_size);
         Rectangle::new(self.bar_at(), size)
     }
 

@@ -41,6 +41,7 @@ pub mod spinner;
 pub mod surface;
 pub mod text;
 pub mod text_area;
+pub mod thumb;
 pub mod toast;
 pub mod tooltip;
 

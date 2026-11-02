@@ -48,6 +48,13 @@ impl App {
                 .map(Message::Windows),
             // a tray menu row: as if it came from the tray
             Message::Windows(windows::Msg::Run(trigger)) => self.update(Message::Trigger(trigger)),
+            // a step double-clicked (or Enter on it): Snip opens with it, unless busy
+            Message::Windows(windows::Msg::EditStep(i)) => {
+                match self.capturing.is_some() || self.o.frame.is_some() {
+                    true => Task::none(),
+                    false => self.edit_step(i),
+                }
+            }
             Message::Windows(windows::Msg::UpdateCard(update_card::Msg::Install)) => {
                 self.install_update()
             }

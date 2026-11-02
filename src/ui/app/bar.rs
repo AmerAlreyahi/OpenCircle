@@ -53,7 +53,7 @@ impl App {
             return size;
         }
         let (_, bar) = self.bar_size();
-        let tool = Editing::toolbar_size();
+        let tool = (self.o.edit.as_ref()).map_or_else(Editing::toolbar_size, Editing::bar_size);
         let t = self.swapped();
         Size::new(
             bar.width + (tool.width - bar.width) * t,
@@ -131,7 +131,7 @@ impl App {
         let i = bar::dock_screen(edit.canvas_rect(), &rects);
         let (work, k) = works[i];
         // its own logical width there, back in the starting screen's px
-        let size = Editing::toolbar_size() * (1.0 / k);
+        let size = edit.bar_size() * (1.0 / k);
         Some((i.checked_sub(1), work, size))
     }
 

@@ -15,6 +15,7 @@ pub mod panel;
 pub mod settings;
 pub mod setup;
 pub mod song;
+pub mod steps;
 pub mod toast;
 pub mod tools;
 pub mod translate;

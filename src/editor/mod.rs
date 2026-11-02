@@ -34,9 +34,30 @@ pub mod style;
 mod tests;
 mod text;
 
+pub use document::rounded as rounded_path;
 pub use document::{Document, Edit, Image, Item, Shape, render, span};
 pub use style::PRESETS;
+
+/// Steps the Steps strip holds at most (open point 3: 12).
+pub const STEPS_MAX: usize = 12;
 pub use text::{Style as TextStyle, free_glyphs};
+
+/// The numbered step tool's badge (a `colour` disc of `radius` with `number`
+/// on it) drawn on `pm` centred at `at` (the Steps strip's Copy all image).
+pub fn badge(
+    pm: tiny_skia::Pixmap,
+    at: Point,
+    radius: f32,
+    number: u32,
+    colour: [u8; 4],
+) -> tiny_skia::Pixmap {
+    let mut layer = document::Layer {
+        pm,
+        origin: Point::ORIGIN,
+    };
+    step::paint(&mut layer, at, radius, number, colour);
+    layer.pm
+}
 
 use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
@@ -341,11 +362,11 @@ pub enum Message {
     Legend,
     /// Line help on / off (a blur stroke keeps to the line it started on).
     Assist,
-    /// Asks the host for another capture (`Output::AddCapture`). No button
-    /// sends it (owner, 2026-10-31: the Steps board replaces it; hidden, kept).
-    #[allow(dead_code)]
-    AddCapture,
-    /// The board's layout and numbers: hidden with Add capture (kept).
+    /// Snip: the flattened image to the Steps strip, as its next step or in
+    /// place of the one being edited (`Output::AddStep`).
+    AddStep,
+    /// The board's layout and numbers: hidden (owner, 2026-10-31: the Steps
+    /// strip replaces Add capture).
     #[allow(dead_code)]
     Layout(board::Layout),
     /// Number labels on the board's captures.
@@ -413,8 +434,9 @@ pub enum Output {
     Pin(Crop),
     /// A floating copy of the area that keeps following the window under it (Snip).
     LivePin,
-    /// Let the user pick another area; give it to `Editor::append`.
-    AddCapture,
+    /// The flattened image for the Steps strip (`Editor::updating`: in place
+    /// of that step).
+    AddStep(Crop),
     /// The share sheet is up: fires once the user picked a target (send
     /// `Message::Shared` then); cancelled if the sheet goes without one.
     Sharing(iced::futures::channel::oneshot::Receiver<()>),
@@ -536,6 +558,11 @@ pub struct Editor {
     pub nudged: bool,
     /// The host drags the toolbar (its grip): it shows lifted.
     pub held: bool,
+    /// Steps in the Steps strip (the host sets it; `None`: no strip): Copy's
+    /// place holds "Add step N", Enter adds.
+    pub steps: Option<usize>,
+    /// The strip's step being edited (its index): "Update step N".
+    pub updating: Option<usize>,
     /// The options as last remembered (`remember`).
     saved: EditorConfig,
 }
@@ -601,6 +628,8 @@ impl Editor {
             focus: None,
             nudged: false,
             held: false,
+            steps: None,
+            updating: None,
             saved,
         };
         editor.refresh();
@@ -645,7 +674,10 @@ impl Editor {
         out
     }
 
-    /// Adds `image` (another capture) to the board.
+    /// Adds `image` (another capture) to the board. No entry point since the
+    /// Steps strip replaced Add capture (owner, 2026-11-02): tests only.
+    // ponytail: the board model stays for its tests; delete it with them.
+    #[cfg(test)]
     pub fn append(&mut self, image: Image) {
         self.commit();
         if std::mem::take(&mut self.movable) {
@@ -653,12 +685,6 @@ impl Editor {
         }
         self.doc.append(image);
         self.refresh();
-    }
-
-    /// Shows the document at `zoom` display px per image px (e.g. after the board
-    /// grew past the screen).
-    pub fn set_zoom(&mut self, zoom: f32) {
-        self.zoom = zoom;
     }
 
     fn handle(&mut self, message: Message) -> Option<Output> {
@@ -788,11 +814,12 @@ impl Editor {
                 self.doc.legend = !self.doc.legend;
                 self.refresh();
             }
-            Message::AddCapture => {
+            Message::AddStep if self.adds_step() => {
                 self.commit();
                 self.menu = None;
-                return Some(Output::AddCapture);
+                return Some(Output::AddStep(render(&self.doc)));
             }
+            Message::AddStep => {}
             Message::Layout(layout) => self.rearrange(board::Board {
                 layout,
                 ..self.doc.board
@@ -960,6 +987,12 @@ impl Editor {
     pub fn ink(&self) -> iced::Color {
         let [r, g, b, a] = self.colour;
         iced::Color::from_rgba8(r, g, b, a as f32 / 255.0)
+    }
+
+    /// `AddStep` does something: a step being edited, or room in the strip
+    /// (`STEPS_MAX`; no strip yet = its first step).
+    pub fn adds_step(&self) -> bool {
+        self.updating.is_some() || self.steps.is_none_or(|n| n < STEPS_MAX)
     }
 
     /// The canvas size, display px (changes with the crop, the board and the

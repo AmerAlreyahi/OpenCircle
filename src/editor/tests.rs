@@ -1951,10 +1951,6 @@ fn the_board_keeps_annotations_on_their_capture() {
     drag(&mut e, pt(40.0, 15.0), &[], pt(80.0, 40.0));
     e.update(Message::Tool(Tool::Crop));
     drag(&mut e, pt(0.0, 0.0), &[], pt(90.0, 45.0));
-    assert!(matches!(
-        e.update(Message::AddCapture),
-        Some(Output::AddCapture)
-    ));
 
     e.append(image_of(60, 80, |_, _| blue));
     assert_eq!(e.doc.crop, None, "the board shows whole");
@@ -3114,7 +3110,7 @@ fn snapshots_board() {
     write(&dir, "board.png", &render(&e.doc));
 
     let backdrop = iced::Color::from_rgb8(0x2a, 0x2d, 0x3e);
-    e.set_zoom(0.6);
+    e.zoom = 0.6;
     e.update(Message::Tool(Tool::Select));
     let size = e.size() + Size::new(560.0, 90.0);
     shoot(e.view(), size, backdrop, &dir.join("board-editor.png"));
@@ -3379,4 +3375,28 @@ fn snips_live_area_follows_the_arrow_keys_and_stays_put_once_on_a_board() {
         now,
         before - Vector::new(40.0, 30.0) + Vector::new(first.x, first.y)
     );
+}
+
+/// Snip's Enter copies; with the Steps strip open it adds the step (full:
+/// copies); Ctrl+Enter = Add to steps. AddStep gives the flattened image.
+#[test]
+fn snips_enter_adds_the_step_while_the_steps_strip_is_open() {
+    let mut e = live_area();
+    let enter = |e: &Editor, m| e.key(&Key::Named(Named::Enter), None, m, None);
+    let none = Modifiers::empty();
+    assert!(matches!(enter(&e, none), Some(Message::Copy)));
+    assert!(matches!(enter(&e, Modifiers::CTRL), Some(Message::AddStep)));
+    e.steps = Some(3);
+    assert!(matches!(enter(&e, none), Some(Message::AddStep)));
+    e.steps = Some(STEPS_MAX);
+    assert!(
+        matches!(enter(&e, none), Some(Message::Copy)),
+        "full: copies"
+    );
+    assert!(e.update(Message::AddStep).is_none(), "full: nothing added");
+    e.updating = Some(0);
+    let Some(Output::AddStep(flat)) = e.update(Message::AddStep) else {
+        panic!("a step edited is updated even when full")
+    };
+    assert_eq!((flat.width, flat.height), (60, 30), "the area, flattened");
 }

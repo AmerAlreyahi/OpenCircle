@@ -39,8 +39,53 @@ pub fn size(label: &str) -> Size {
     )
 }
 
+/// `with_action`'s size: the pill and its action after the label.
+pub fn size_with_action(label: &str, action: &str) -> Size {
+    let pill = size(label);
+    let more = GAP + width(action, Role::NOTE.size, font(Role::CTA));
+    Size::new((pill.width + more).ceil(), pill.height)
+}
+
 /// The pill with `label`, corners of `radius` (the window's cut).
 pub fn toast<'a, Message: 'a>(label: &'a str, tone: Tone, radius: f32) -> Element<'a, Message> {
+    made(label, tone, radius, None, size(label))
+}
+
+/// The pill with an action after its label ("Steps cleared · Undo"): the
+/// action's word in `accent`, `text` under the cursor.
+pub fn with_action<'a, Message: Clone + 'a>(
+    label: &'a str,
+    tone: Tone,
+    radius: f32,
+    action: &'a str,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use iced::widget::button;
+    let word = button(
+        super::text::text(Role::NOTE, action)
+            .font(font(Role::CTA))
+            .line_height(iced::Pixels(LINE)),
+    )
+    .padding(0)
+    .on_press(on_press)
+    .style(|_, status| button::Style {
+        text_color: match status {
+            button::Status::Hovered | button::Status::Pressed => c().text,
+            _ => c().accent,
+        },
+        ..button::Style::default()
+    });
+    let at = size_with_action(label, action);
+    made(label, tone, radius, Some(word.into()), at)
+}
+
+fn made<'a, Message: 'a>(
+    label: &'a str,
+    tone: Tone,
+    radius: f32,
+    action: Option<Element<'a, Message>>,
+    at: Size,
+) -> Element<'a, Message> {
     let dot = match tone {
         Tone::Ok => fixed::SUCCESS,
         Tone::Error => fixed::DANGER,
@@ -57,7 +102,7 @@ pub fn toast<'a, Message: 'a>(label: &'a str, tone: Tone, radius: f32) -> Elemen
     let line = super::text::text(Role::NOTE, label)
         .line_height(iced::Pixels(LINE))
         .wrapping(iced::widget::text::Wrapping::None);
-    let pill = container(row![dot, line].spacing(GAP).align_y(Center))
+    let pill = container(row![dot, line].push(action).spacing(GAP).align_y(Center))
         .padding(PAD)
         .center_y(Fill)
         .width(Fill)
@@ -72,7 +117,6 @@ pub fn toast<'a, Message: 'a>(label: &'a str, tone: Tone, radius: f32) -> Elemen
     // `inset 0 1px 0 --ui-elevated-hi`: a 1 px line under the top edge, between the corners
     let hi = container(Space::new().width(Fill).height(1))
         .style(|_| container::Style::default().background(c().elevated_hi));
-    let at = size(label);
     stack![pill, container(hi).padding([1.0, radius])]
         .width(at.width)
         .height(at.height)

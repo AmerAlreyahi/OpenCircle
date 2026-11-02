@@ -448,11 +448,44 @@ pub fn tool<'a, Message: Clone + 'a>(
     focused: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    let content = text(glyph).font(super::icon::FONT).size(size::ICON);
+    tooled(content, size::ICON_BUTTON, kind, focused, on_press)
+}
+
+/// `tool` with a label after its glyph, `width` wide (the Steps strip's Copy
+/// all, Snip's "Add step N" in Copy's place). No `on_press` = dimmed (.45).
+pub fn labelled<'a, Message: Clone + 'a>(
+    glyph: char,
+    label: impl text::IntoFragment<'a>,
+    width: f32,
+    kind: Kind,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::tokens::{Role, space};
+    let content = row![
+        text(glyph).font(super::icon::FONT).size(size::ICON_SMALL),
+        text(label)
+            .size(Role::CONTROL.size)
+            .font(super::text::font(Role::CTA))
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    tooled(content, width, kind, focused, on_press)
+}
+
+fn tooled<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    width: f32,
+    kind: Kind,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
     use iced_button::Status;
     let live = on_press.is_some();
-    let content = text(glyph).font(super::icon::FONT).size(size::ICON);
     iced_button(container(content).center(Fill))
-        .width(size::ICON_BUTTON)
+        .width(width)
         .height(size::ICON_BUTTON)
         .padding(0)
         .on_press_maybe(on_press)
@@ -460,6 +493,7 @@ pub fn tool<'a, Message: Clone + 'a>(
             let hot = live && matches!(status, Status::Hovered | Status::Pressed);
             let accent = kind == Kind::Accent;
             let fill = match () {
+                _ if accent && !live => faded(c().accent, 0.45),
                 _ if accent && hot => brighter(c().accent),
                 _ if accent => c().accent,
                 _ if focused => c().accent_soft,
@@ -467,6 +501,7 @@ pub fn tool<'a, Message: Clone + 'a>(
                 _ => c().elevated,
             };
             let text_color = match () {
+                _ if accent && !live => faded(super::themes::on(c().accent), 0.45),
                 _ if !live => c().text_muted,
                 _ if accent => super::themes::on(c().accent),
                 _ => c().text,

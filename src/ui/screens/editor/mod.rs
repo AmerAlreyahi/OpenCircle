@@ -1,20 +1,17 @@
 //! Edit in place and the snip editor: the annotation editor (`crate::editor`) over
 //! the frozen frame, its toolbar docked where the bottom bar is (the host
 //! places it: same anchors, same drag).
-//! Add capture (board): the editor steps aside and an area is dragged on the
-//! frozen frame; its crop joins the board.
 use iced::mouse;
 use iced::widget::{container, image, mouse_area, pin, stack};
-use iced::{ContentFit, Element, Fill, Point, Rectangle, Size};
+use iced::{ContentFit, Element, Point, Rectangle, Size};
 
 pub mod canvas;
-mod picker;
 pub mod toolbar;
 
 use crate::actions::Crop;
 use crate::editor::{self, Editor, Image, Message, Output};
+use crate::ui::kit::chip;
 use crate::ui::kit::key_hint::{self, key_hint};
-use crate::ui::kit::{chip, surface};
 use crate::ui::screens::bar::geometry::{BOTTOM_GAP, GAP};
 
 /// Snip's keyboard hint (after an arrow key) and its position readout's width.
@@ -28,10 +25,6 @@ const NUDGE_HINT: [key_hint::Group<'static>; 5] = [
 const POSITION_W: f32 = 120.0;
 /// Snip's handles scale in after the pick (the design's 120 ms).
 const HANDLES_IN: std::time::Duration = std::time::Duration::from_millis(120);
-/// The hint's distance from the edge.
-const HINT_PAD: f32 = 24.0;
-/// Shown while an area for the board is picked.
-const PICK_HINT: &str = "Drag an area to add to the board · Esc to go back";
 
 pub struct Editing {
     pub editor: Editor,
@@ -41,10 +34,6 @@ pub struct Editing {
     zoom: f32,
     /// Back at the action bar: the flattened edits, shown over the selection.
     flat: Option<image::Handle>,
-    /// Picking another capture's area: the drag so far (from, to; logical px).
-    picking: Option<Option<(Point, Point)>>,
-    /// The area just picked (logical px), for the host to crop (`take_picked`).
-    picked: Option<Rectangle>,
     /// Snip's handles scaling in after the pick: since when (the first frame)
     /// and how far (0..1).
     grow: (Option<std::time::Instant>, f32),
@@ -114,8 +103,6 @@ impl Editing {
             origin,
             zoom,
             flat: None,
-            picking: None,
-            picked: None,
             grow: (None, 1.0),
         }
     }
@@ -135,10 +122,9 @@ impl Editing {
         self.grow.1 < 1.0
     }
 
-    /// The editor's messages; while an area is picked, the picker's (Esc = back
-    /// to the editor).
+    /// The editor's messages.
     pub fn update(&mut self, message: Message) -> Option<Output> {
-        let Some(drag) = &mut self.picking else {
+        {
             // Snip's toolbar: Tab walks it, Enter / Space press what it is on.
             let message = match message {
                 Message::Focus(back) => {
@@ -185,48 +171,8 @@ impl Editing {
                 }
                 m => m,
             };
-            let out = self.editor.update(message);
-            if matches!(out, Some(Output::AddCapture)) {
-                self.picking = Some(None);
-            }
-            return out;
-        };
-        match message {
-            Message::Press(p) => *drag = Some((p, p)),
-            Message::Move(p) => {
-                if let Some((_, to)) = drag {
-                    *to = p;
-                }
-            }
-            Message::Release => {
-                let area = drag.take().map(|(a, b)| editor::span(&[a, b]));
-                // A click is no area: keep picking.
-                if let Some(area) = area.filter(|r| r.width >= 4.0 && r.height >= 4.0) {
-                    self.picking = None;
-                    self.picked = Some(area);
-                }
-            }
-            Message::Back => self.picking = None,
-            _ => {}
+            self.editor.update(message)
         }
-        None
-    }
-
-    /// The area picked for the board (logical px), once.
-    pub fn take_picked(&mut self) -> Option<Rectangle> {
-        self.picked.take()
-    }
-
-    /// Adds `crop` to the board, refit to `screen` (never larger than now).
-    pub fn add(&mut self, crop: Crop, screen: Size) {
-        self.editor.append(Image {
-            width: crop.width,
-            height: crop.height,
-            rgba: crop.rgba,
-        });
-        let (origin, zoom) = fit(self.editor.doc.view().size(), screen, self.zoom);
-        (self.origin, self.zoom) = (origin, zoom);
-        self.editor.set_zoom(zoom);
     }
 
     /// The toolbar is showing (not back at the action bar).
@@ -258,9 +204,14 @@ impl Editing {
         )
     }
 
-    /// The toolbar's size (the same in every state).
+    /// The toolbar's size (the same in every state)...
     pub fn toolbar_size() -> Size {
         toolbar::size()
+    }
+
+    /// ...but while the Steps strip is open: Copy's place holds "Add step N".
+    pub fn bar_size(&self) -> Size {
+        toolbar::size_for(&self.editor)
     }
 
     /// The canvas over its place and the toolbar with its top-left at
@@ -278,18 +229,6 @@ impl Editing {
         grab: M,
     ) -> Element<'a, M> {
         let main = lens.k == 1.0 && lens.at == iced::Vector::ZERO;
-        if let Some(drag) = self.picking {
-            let hint = container(surface::hint(PICK_HINT))
-                .center_x(Fill)
-                .padding(HINT_PAD);
-            return Element::from(stack![
-                iced::widget::canvas(picker::Picker { drag })
-                    .width(Fill)
-                    .height(Fill),
-                hint,
-            ])
-            .map(map);
-        }
         let canvas = self.canvas_rect();
         let m = canvas::margin(&self.editor);
         let at = lens.to_window(canvas.position() - iced::Vector::new(m, m));
@@ -323,7 +262,7 @@ impl Editing {
             layers = layers.push(pin(readout).position(spot));
         }
         if let Some(at) = toolbar {
-            let size = toolbar::size();
+            let size = toolbar::size_for(&self.editor);
             // its tooltips and panels away from the area: above it when docked above
             let side = match at.y + size.height <= canvas.y {
                 true => iced::widget::tooltip::Position::Top,

@@ -193,6 +193,8 @@ pub(in crate::ui) struct App {
     pub(in crate::ui) live_next: bool,
     /// The next snip opens this screen tool (its quick action).
     pub(in crate::ui) tool_next: Option<crate::ui::screens::tools::Which>,
+    /// The next snip opens this step of the Steps strip picked, to update it.
+    pub(in crate::ui) step_next: Option<(usize, crate::actions::Crop)>,
     /// The colours the picker copied, newest first (this run of the app only).
     pub(in crate::ui) colours: Vec<[u8; 3]>,
     /// Where the user moved / sized the result card (this run of the app).
@@ -272,6 +274,7 @@ impl App {
             timed: false,
             live_next: false,
             tool_next: None,
+            step_next: None,
             colours: Vec::new(),
             card: None,
             chat_side: None,

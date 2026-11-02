@@ -19,6 +19,7 @@ use super::kit::tokens::{radius, space};
 use super::kit::tooltip::{Why, hint};
 use super::platform;
 use super::screens::onboarding;
+use super::screens::steps::{self, Strip};
 use super::screens::toast::{self, Tone};
 use super::screens::tray_menu;
 use super::{settings, shape, theme, update_card};
@@ -77,6 +78,14 @@ pub enum Msg {
     Unfocused(window::Id),
     /// A tray menu row was chosen and the menu is gone: `ui::App` runs it as if it came from the tray.
     Run(crate::Trigger),
+    /// From the Steps strip.
+    Steps(steps::Msg),
+    /// A key in a window (the Steps strip's, when it has the focus).
+    StepKey(window::Id, steps::Key),
+    /// A window moved (the Steps strip docks once it stops).
+    Moved(window::Id, Point),
+    /// Edit the strip's `i`th step in Snip: `ui::App` opens it ("Update step N").
+    EditStep(usize),
 }
 
 #[derive(Default)]
@@ -93,6 +102,8 @@ pub struct Windows {
     tray_menu: Option<(window::Id, tray_menu::Menu)>,
     /// What each normal window's header knows (see `Chrome`).
     chrome: HashMap<window::Id, Chrome>,
+    /// The Steps strip and its window (none until its first step is packed).
+    steps: Option<(Option<window::Id>, Strip)>,
 }
 
 /// A normal window's header state.
@@ -326,6 +337,211 @@ fn pin_keys() -> Subscription<Msg> {
         };
         Some(Msg::Pin(window, msg))
     })
+}
+
+/// While the Steps strip is open: its window's moves (it docks once it stops)
+/// and the keys of whichever window has the focus (`Windows::update` keeps
+/// the strip's).
+fn steps_events() -> Subscription<Msg> {
+    use keyboard::key::Named;
+    iced::event::listen_with(|event, _status, window| match event {
+        iced::Event::Window(window::Event::Moved(at)) => Some(Msg::Moved(window, at)),
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            physical_key,
+            modifiers,
+            ..
+        }) => {
+            use steps::Key;
+            let ctrl = modifiers.command();
+            let key = match (&key, key.to_latin(physical_key)) {
+                (keyboard::Key::Named(Named::ArrowUp), _) if ctrl => Key::MoveUp,
+                (keyboard::Key::Named(Named::ArrowDown), _) if ctrl => Key::MoveDown,
+                (keyboard::Key::Named(Named::ArrowUp), _) => Key::Up,
+                (keyboard::Key::Named(Named::ArrowDown), _) => Key::Down,
+                (keyboard::Key::Named(Named::Enter), _) => Key::Enter,
+                (keyboard::Key::Named(Named::Delete), _) => Key::Delete,
+                (_, Some('c')) if ctrl && modifiers.shift() => Key::CopyAll,
+                (_, Some('c')) if ctrl => Key::Copy,
+                (_, Some('z')) if ctrl => Key::Undo,
+                _ => return None,
+            };
+            Some(Msg::StepKey(window, key))
+        }
+        _ => None,
+    })
+}
+
+/// A drag of the strip has stopped once it has not moved for this long.
+const STEPS_SETTLE: Duration = Duration::from_millis(250);
+
+impl Windows {
+    /// The Steps strip's window, once open.
+    fn steps_window(&self) -> Option<window::Id> {
+        self.steps.as_ref().and_then(|(id, _)| *id)
+    }
+
+    /// Steps in the strip (`None`: no strip, or it says "Steps cleared"):
+    /// Snip's toolbar shows "Add step N" while there is one.
+    pub fn steps(&self) -> Option<usize> {
+        let (_, strip) = self.steps.as_ref().filter(|(_, s)| !s.cleared)?;
+        Some(strip.len())
+    }
+
+    /// The strip's `i`th step's capture (to edit it).
+    pub fn step_crop(&self, i: usize) -> Option<Crop> {
+        self.steps.as_ref()?.1.crop(i)
+    }
+
+    /// Adds `crop` (a snip, annotated and flattened) as the next step, or in
+    /// place of the `update`th; packed on a thread. The first step opens the
+    /// strip on `monitor` (`inset`: its taskbar, logical px).
+    pub fn add_step(
+        &mut self,
+        crop: Crop,
+        update: Option<usize>,
+        monitor: platform::monitor::Place,
+        inset: f32,
+    ) -> Task<Msg> {
+        let fresh = match &self.steps {
+            None => true,
+            Some((_, strip)) => strip.cleared && update.is_none(),
+        };
+        if fresh {
+            // a cleared strip's steps go now (its window shows the new strip)
+            let id = self.steps.take().and_then(|(id, _)| id);
+            let rtl = false; // the app's UI is Latin today
+            self.steps = Some((id, Strip::new(monitor, inset, rtl)));
+        }
+        super::background(move |tx| match steps::Step::new(&crop) {
+            Ok(step) => {
+                let _ = tx.unbounded_send(std::sync::Arc::new(step));
+            }
+            Err(e) => crate::log!("[opencircle] step not added: {e}"),
+        })
+        .map(move |step| Msg::Steps(steps::Msg::Ready(step, update)))
+    }
+
+    fn on_steps(&mut self, msg: steps::Msg) -> Task<Msg> {
+        let Some((id, strip)) = &mut self.steps else {
+            return Task::none();
+        };
+        let window = *id;
+        let todo = match msg {
+            steps::Msg::Ready(step, update) => {
+                match update {
+                    Some(i) => strip.replace(i, step),
+                    None if strip.push(step) => {}
+                    None => crate::log!("[opencircle] steps full: not added"),
+                }
+                strip.cleared = false;
+                crate::log!(
+                    "[opencircle] steps: {} ({} KB in memory)",
+                    strip.len(),
+                    strip.bytes() / 1024
+                );
+                let place = strip.place();
+                let Some(id) = window else {
+                    return self.open_steps(place);
+                };
+                return platform::monitor::place_window(id, place);
+            }
+            steps::Msg::Expire(n) => {
+                return match window {
+                    Some(id) if strip.cleared && strip.clears == n => close(id),
+                    _ => Task::none(),
+                };
+            }
+            steps::Msg::Copied(ok) => return self.steps_toast(ok),
+            msg => strip.update(msg),
+        };
+        let Some(todo) = todo else {
+            return Task::none();
+        };
+        match (todo, window) {
+            // (no window yet: its first step is still being packed)
+            (steps::Do::Drag | steps::Do::Resize | steps::Do::Cleared, None) => Task::none(),
+            (steps::Do::Drag, Some(id)) => window::drag(id),
+            (steps::Do::Resize, Some(id)) => platform::monitor::place_window(id, strip.place()),
+            (steps::Do::Cleared, Some(id)) => {
+                let clears = strip.clears;
+                let place = platform::monitor::place_window(id, strip.place());
+                let expire = super::background(move |tx| {
+                    std::thread::sleep(Duration::from_millis(steps::UNDO_MS));
+                    let _ = tx.unbounded_send(());
+                })
+                .map(move |()| Msg::Steps(steps::Msg::Expire(clears)));
+                Task::batch([place, expire])
+            }
+            (steps::Do::Wait(moves), _) => super::background(move |tx| {
+                std::thread::sleep(STEPS_SETTLE);
+                let _ = tx.unbounded_send(());
+            })
+            .map(move |()| Msg::Steps(steps::Msg::Settle(moves))),
+            (steps::Do::Edit(i), _) => Task::done(Msg::EditStep(i)),
+            (steps::Do::Copy(i), _) => {
+                let ok = strip.crop(i).is_some_and(copy_image);
+                self.steps_toast(ok)
+            }
+            (steps::Do::CopyAll, _) => {
+                use super::kit::themes::c;
+                let crops = strip.crops();
+                let colours = [c().bg, c().accent, c().rim].map(|c| c.into_rgba8());
+                let rtl = strip.rtl;
+                super::background(move |tx| {
+                    let ok = steps::compose(&crops, colours, rtl).is_some_and(copy_image);
+                    let _ = tx.unbounded_send(ok);
+                })
+                .map(|ok| Msg::Steps(steps::Msg::Copied(ok)))
+            }
+        }
+    }
+
+    /// The strip's window at `place` (physical px): floating, kept out of
+    /// captures, faded in once there.
+    fn open_steps(&mut self, place: platform::monitor::Place) -> Task<Msg> {
+        let (id, open) = floating(
+            window::Settings {
+                size: place.size(),
+                position: Position::Specific(place.logical_origin()),
+                visible: false,
+                resizable: false,
+                ..window::Settings::default()
+            },
+            steps::RADIUS,
+            POPUP,
+        );
+        if let Some((window, _)) = &mut self.steps {
+            *window = Some(id);
+        }
+        open.then(move |id| {
+            hide_from_capture::<()>(id, true)
+                .chain(platform::monitor::place_window(id, place))
+                .chain(appear(id, POPUP))
+        })
+        .discard()
+    }
+
+    /// "Copied" (or why not) under the strip.
+    fn steps_toast(&mut self, ok: bool) -> Task<Msg> {
+        let text = match ok {
+            true => copy::COPIED_PILL,
+            false => "Couldn't copy",
+        };
+        let Some((_, strip)) = &self.steps else {
+            return Task::none();
+        };
+        let at = strip.under(toast_size(text));
+        self.toast(text, ok, Some(at), TOAST_MS)
+    }
+}
+
+/// `crop` on the clipboard through THE copy path (Win+V history too).
+fn copy_image(crop: Crop) -> bool {
+    match copy::ACTION.run {
+        Run::Finish(run) => run(crop).is_ok(),
+        _ => false,
+    }
 }
 
 /// While the tray menu is open: its keys (it has the focus; it closes when it loses it) and
@@ -622,6 +838,7 @@ impl Windows {
             || self.onboarding.is_some()
             || self.permission.is_some()
             || !self.pins.is_empty()
+            || self.steps.is_some()
     }
 
     /// Opens the window, or focuses it when it is already open.
@@ -723,6 +940,14 @@ impl Windows {
             // through Settings' own path, so its auto-save write runs
             Msg::Folder(dir) => return self.handle(Msg::Settings(settings::Message::Folder(dir))),
             Msg::Pin(id, msg) => return self.on_pin(id, msg),
+            Msg::Steps(msg) => return self.on_steps(msg),
+            Msg::StepKey(id, key) if self.steps_window() == Some(id) => {
+                return self.on_steps(steps::Msg::Key(key));
+            }
+            Msg::Moved(id, at) if self.steps_window() == Some(id) => {
+                return self.on_steps(steps::Msg::Moved(at));
+            }
+            Msg::StepKey(..) | Msg::Moved(..) | Msg::EditStep(_) => {}
             Msg::UpdateStatus(status) => {
                 if let Some((_, state)) = &mut self.settings {
                     settings::update(state, settings::Message::UpdateStatus(status));
@@ -834,6 +1059,9 @@ impl Windows {
                     self.tray_menu = None;
                 }
                 self.pins.retain(|p| p.id != id); // the OS closed it: free the pixels
+                if self.steps_window() == Some(id) {
+                    self.steps = None; // the steps go with it (memory only)
+                }
                 if self.id(Kind::Permission) == Some(id) {
                     self.permission = None;
                 }
@@ -997,6 +1225,9 @@ impl Windows {
     }
 
     pub fn view(&self, window: window::Id) -> Option<Element<'_, Msg>> {
+        if let Some((_, strip)) = self.steps.as_ref().filter(|(w, _)| *w == Some(window)) {
+            return Some(strip.view(shape::radius(steps::RADIUS)).map(Msg::Steps));
+        }
         if let Some(pin) = self.pins.iter().find(|p| p.id == window) {
             let id = pin.id;
             return Some(pin_view(pin).map(move |msg| Msg::Pin(id, msg)));
@@ -1046,6 +1277,9 @@ impl Windows {
         if self.pins.iter().any(|p| p.id == window) {
             return "OpenCircle pin";
         }
+        if self.steps_window() == Some(window) {
+            return "OpenCircle steps";
+        }
         if self.id(Kind::Permission) == Some(window) {
             return "OpenCircle needs screenshot permission";
         }
@@ -1085,6 +1319,10 @@ impl Windows {
             },
             match self.tray_menu {
                 Some(_) => tray_menu_events(),
+                None => Subscription::none(),
+            },
+            match self.steps_window() {
+                Some(_) => steps_events(),
                 None => Subscription::none(),
             },
         ])

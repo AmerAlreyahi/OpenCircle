@@ -777,12 +777,62 @@ fn logo_sheet() {
 
 #[test]
 fn grip_sheet() {
-    use super::super::grip::grip;
+    use super::super::grip::{grip, small};
     let rows = vec![
         row("rest", Act::Rest, |_| grip(())),
         row("hover", Act::Hover, |_| grip(())),
+        row("small", Act::Rest, |_| small(())),
     ];
     sheet("grip", Size::new(80.0, 36.0), &rows);
+}
+
+/// `thumb`: a step at rest, under the cursor (ring, x), lifted, focused
+/// (right to left on the right), the small x at rest and under the cursor.
+#[test]
+fn thumb_sheet() {
+    use super::super::thumb::{self, Look};
+    use iced::widget::image::Handle;
+    // a wide capture, letterboxed in the well
+    let picture = || {
+        let px = (0..40 * 12).flat_map(|i| match i % 40 < 20 {
+            true => [56, 189, 248, 255],
+            false => [240, 240, 245, 255],
+        });
+        Handle::from_rgba(40, 12, px.collect::<Vec<u8>>())
+    };
+    let step = move |look: Look| {
+        move |ar: bool| thumb::step(picture(), 3, Look { rtl: ar, ..look }, Some(()))
+    };
+    let rows = vec![
+        row("step", Act::Rest, step(Look::default())),
+        row(
+            "  hover",
+            Act::Rest,
+            step(Look {
+                hover: true,
+                ..Look::default()
+            }),
+        ),
+        row(
+            "  lifted",
+            Act::Rest,
+            step(Look {
+                lifted: true,
+                ..Look::default()
+            }),
+        ),
+        row(
+            "  focused",
+            Act::Rest,
+            step(Look {
+                focused: true,
+                ..Look::default()
+            }),
+        ),
+        row("x", Act::Rest, |_| thumb::close(())),
+        row("  hover", Act::Hover, |_| thumb::close(())),
+    ];
+    sheet("thumb", Size::new(110.0, 70.0), &rows);
 }
 
 #[test]
@@ -1353,6 +1403,24 @@ fn button_tool_sheet() {
                 button::tool(glyph, kind, focused, Some(()))
             }));
         }
+    }
+    // labelled (the Steps strip's Copy all, Snip's Add step N): rest, hover, dimmed
+    for (state, act, on) in [
+        ("labelled", Act::Rest, true),
+        ("  hover", Act::Hover, true),
+        ("  dimmed", Act::Rest, false),
+    ] {
+        rows.push(row(state, act, move |ar| {
+            let label = s(ar, "Add step 2", "أضف الخطوة 2");
+            button::labelled(
+                '\u{e23e}',
+                label,
+                112.0,
+                Kind::Accent,
+                false,
+                on.then_some(()),
+            )
+        }));
     }
     sheet("button_tool", Size::new(120.0, 48.0), &rows);
 }

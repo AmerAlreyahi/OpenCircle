@@ -182,6 +182,7 @@ impl App {
         let mut first = None;
         let mut extras = Task::none();
         let mut timer = None;
+        let mut step = None;
         if let Some((kind, windows, foreground, screens)) = shot.snip {
             let mut snip = Snip::new(
                 windows,
@@ -206,6 +207,10 @@ impl App {
             first = snip.start(kind, size); // Full = the whole screen at once
             let wait = config::current().snip.delay;
             let tool = self.tool_next.take();
+            step = self.step_next.take();
+            if step.is_some() {
+                (first, self.timed) = (None, true); // no pick, no timer: the step is picked
+            }
             if !std::mem::take(&mut self.timed) && wait > 0 && first.is_none() && tool.is_none() {
                 timer = Some(wait); // Settings > Snip > Timer: hide, count down, capture again
             }
@@ -221,6 +226,13 @@ impl App {
             }
         }
         let Purpose::Quick(quick, target) = self.o.purpose else {
+            // a step of the Steps strip to update: picked at once ("Update step N")
+            if let Some((i, crop)) = step {
+                let _ = self.snip_routed(crop, false, false);
+                if let Some(edit) = &mut self.o.edit {
+                    edit.editor.updating = Some(i);
+                }
+            }
             let next = match (first, timer) {
                 (Some(next), _) => self.snip_next(Some(next)),
                 (None, Some(secs)) => self.on_snip(snip::Msg::Delay(secs)),

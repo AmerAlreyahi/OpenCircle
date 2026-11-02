@@ -164,12 +164,18 @@ impl Editor {
             return Some(Message::Nudge(arrow, keys));
         }
         // Snip: Tab walks the toolbar, Enter / Space press what it is on;
-        // Enter with nothing focused copies.
+        // Enter with nothing focused copies, or adds the step while the
+        // Steps strip is open (full: copies); Ctrl+Enter = Add to steps.
         if self.movable {
+            let steps = self.steps.is_some() || self.updating.is_some();
             match key {
                 Key::Named(Named::Tab) => return Some(Message::Focus(modifiers.shift())),
+                Key::Named(Named::Enter) if modifiers.command() => return Some(Message::AddStep),
                 Key::Named(Named::Enter | Named::Space) if self.focus.is_some() => {
                     return Some(Message::Activate);
+                }
+                Key::Named(Named::Enter) if steps && self.adds_step() => {
+                    return Some(Message::AddStep);
                 }
                 Key::Named(Named::Enter) => return Some(Message::Copy),
                 _ => {}

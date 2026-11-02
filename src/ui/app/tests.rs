@@ -4019,46 +4019,6 @@ fn look_shots() {
     shot(&app, "look-5-select-text-popup.png");
 }
 
-/// Add capture: the editor steps aside, an area dragged on the frozen frame
-/// joins the board (Esc first: back to the editor, nothing added).
-#[test]
-fn add_capture_puts_a_picked_area_on_the_board() {
-    const BLUE: [u8; 4] = [20, 60, 230, 255];
-    // Left half white, right half blue.
-    let rgba = (0..1200 * 800)
-        .flat_map(|i| if i % 1200 < 600 { [255; 4] } else { BLUE })
-        .collect();
-    let frame = Crop {
-        width: 1200,
-        height: 800,
-        rgba,
-    };
-    let (mut app, _) = selected_app(&frame);
-    app.select(Rectangle::new(
-        Point::new(10.0, 10.0),
-        Size::new(300.0, 200.0),
-    ));
-    let _ = app.open_editor();
-    let mut editor = |msg| {
-        let _ = app.update(Message::Editor(msg));
-    };
-    editor(editor::Message::AddCapture);
-    editor(editor::Message::Back);
-    editor(editor::Message::AddCapture);
-    editor(editor::Message::Press(Point::new(700.0, 100.0)));
-    editor(editor::Message::Move(Point::new(1000.0, 400.0)));
-    editor(editor::Message::Release);
-    let edit = app.o.edit.as_ref().expect("still editing");
-    assert_eq!(edit.editor.doc.tiles().len(), 2);
-    let board = edit.image();
-    assert!(
-        board.rgba.chunks(4).any(|p| p == BLUE),
-        "the blue area is on it"
-    );
-    let r = edit.canvas_rect();
-    assert!(r.x >= 0.0 && r.y >= 0.0 && r.x + r.width <= 1200.0 && r.y + r.height <= 800.0);
-}
-
 /// The old hand reset in `close` forgot these: a bar button Tab had focused
 /// stayed focused (and took Enter) in the next opening; Alt stayed held.
 #[test]

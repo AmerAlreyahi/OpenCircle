@@ -36,6 +36,7 @@ const SCROLL: char = '\u{e4d6}'; // lucide "gallery-vertical-end"
 const PIPETTE: char = crate::ui::screens::tools::picker::ICON;
 const SHARE: char = '\u{e158}'; // lucide "share"
 const LIVE_PIN: char = '\u{e3b2}'; // lucide "picture-in-picture-2"
+const LIST_PLUS: char = '\u{e23e}'; // lucide "list-plus"
 /// A tool's keycap in its panel.
 const KEY_W: f32 = 22.0;
 /// The Text tool's size presets (display px).
@@ -54,6 +55,7 @@ pub const GLYPHS: &[char] = &[
     SHARE,
     crate::ui::screens::tools::ruler::ICON,
     LIVE_PIN,
+    LIST_PLUS,
 ];
 
 /// Snip's Live pin (Windows; Labs Pins); it works only over the live screen
@@ -62,8 +64,12 @@ fn live_pin() -> bool {
     crate::labs::has(crate::labs::Feature::Pins) && crate::capture::live::SUPPORTED
 }
 
-/// The bar's items' widths, in order (`build`).
-fn widths() -> Vec<f32> {
+/// The labelled primary in Copy's place while the Steps strip is open
+/// (fits "Update step 12").
+const PRIMARY_W: f32 = 128.0;
+
+/// The bar's items' widths, in order (`build`); `primary`: the labelled one.
+fn widths(primary: bool) -> Vec<f32> {
     let mut w = vec![bar::HANDLE, CHIP_W, bar::DIVIDER];
     w.extend(Group::ALL.map(|_| CONTROL));
     w.extend([
@@ -72,17 +78,31 @@ fn widths() -> Vec<f32> {
         bar::DIVIDER,
         CONTROL,
         bar::DIVIDER,
-        CONTROL,
+        if primary { PRIMARY_W } else { CONTROL },
         CONTROL,
     ]);
     w
 }
 
-/// The toolbar's size (one line, the same in every state).
+/// The toolbar's size (one line, the same in every state)...
 pub fn size() -> Size {
-    let w = widths();
+    sized(false)
+}
+
+/// ...and with the Steps strip open ("Add step N" in Copy's place).
+pub fn size_for(e: &Editor) -> Size {
+    sized(steps_on(e))
+}
+
+fn sized(primary: bool) -> Size {
+    let w = widths(primary);
     let line = w.iter().sum::<f32>() + SPACING * (w.len() - 1) as f32;
     Size::new(line + 2.0 * bar::PAD, bar::HEIGHT)
+}
+
+/// The Steps strip is open, or one of its steps is edited.
+fn steps_on(e: &Editor) -> bool {
+    e.steps.is_some() || e.updating.is_some()
 }
 
 /// What Tab walks on the toolbar, in its order (left to right), and what
@@ -93,7 +113,11 @@ pub fn stops(e: &Editor) -> Vec<Message> {
         Message::Picker,
         Message::UndoClick,
         Message::Menu(Menu::More),
-        Message::Copy,
+        if steps_on(e) {
+            Message::AddStep
+        } else {
+            Message::Copy
+        },
         Message::Save,
     ]);
     stops
@@ -119,6 +143,16 @@ pub fn more_rows(e: &Editor) -> Vec<MoreRow> {
         None,
         (e.scroll && idle).then_some(Message::Scroll),
     )];
+    // while the strip is open Copy's place adds the step: Copy moves here
+    rows.push(match steps_on(e) {
+        false => (
+            LIST_PLUS,
+            ("Add to steps", "أضف إلى الخطوات"),
+            Some("Ctrl+Enter"),
+            live(Message::AddStep),
+        ),
+        true => (COPY, ("Copy", "نسخ"), Some("Ctrl+C"), Some(Message::Copy)),
+    });
     rows.push((
         PIN,
         ("Pin to screen", "تثبيت على الشاشة"),
@@ -311,13 +345,10 @@ fn build(
         Why::Icon,
     ));
     items.push(divide());
-    let copy = button::tool(
-        COPY,
-        button::Kind::Accent,
-        focused(&Message::Copy),
-        Some(Message::Copy),
-    );
-    items.push(hinted(copy, ar("Copy", "نسخ"), Why::Keys("Ctrl+C")));
+    items.push(primary(
+        e,
+        focused(&Message::AddStep) || focused(&Message::Copy),
+    ));
     let save = button::tool(
         SAVE,
         button::Kind::Elevated,
@@ -345,11 +376,11 @@ fn build(
         Menu::More => (more_panel(e), option_list::MENU_WIDTH),
     };
     // centred on its button (mirrored right to left)
-    let w = widths();
+    let w = widths(steps_on(e));
     let i = at.iter().find(|(m, _)| *m == menu).map_or(0, |(_, i)| *i);
     let mut x = bar::PAD + w[..i].iter().map(|w| w + SPACING).sum::<f32>();
     if RTL.get() {
-        x = size().width - x - w[i];
+        x = size_for(e).width - x - w[i];
     }
     let left = x + w[i] / 2.0 - width / 2.0;
     (toolbar.into(), Some((panel, left)))
@@ -611,6 +642,45 @@ fn undo_panel(e: &Editor) -> Element<'_, Message> {
     surface::panel(line(items).width(Fill)).into()
 }
 
+/// The primary: Copy, or while the Steps strip is open "Add step N" (the
+/// next step), "Update step N" (one being edited) or "Steps full" (dimmed).
+fn primary<'a>(e: &Editor, focused: bool) -> Element<'a, Message> {
+    let accent = button::Kind::Accent;
+    if !steps_on(e) {
+        let copy = button::tool(COPY, accent, focused, Some(Message::Copy));
+        return hinted(copy, ar("Copy", "نسخ"), Why::Keys("Ctrl+C"));
+    }
+    let n = e.steps.unwrap_or(0);
+    let (label, tip, why) = match e.updating {
+        Some(i) => (
+            step_label(("Update step", "حدّث الخطوة"), i + 1),
+            ar("Update the step", "حدّث الخطوة"),
+            Why::Keys("Enter"),
+        ),
+        None if !e.adds_step() => (
+            ar("Steps full", "الخطوات ممتلئة").to_string(),
+            ar(
+                "Steps full (12 of 12) · Copy all or clear to add more",
+                "الخطوات ممتلئة (12 من 12) · انسخ الكل أو امسح لإضافة المزيد",
+            ),
+            Why::Icon,
+        ),
+        None => (
+            step_label(("Add step", "أضف الخطوة"), n + 1),
+            ar("Add as the next step", "أضف كخطوة تالية"),
+            Why::Keys("Enter"),
+        ),
+    };
+    let on = e.adds_step().then_some(Message::AddStep);
+    let add = button::labelled(LIST_PLUS, label, PRIMARY_W, accent, focused, on);
+    hinted(add, tip, why)
+}
+
+/// "Add step 2": the words, then the number.
+fn step_label(words: (&'static str, &'static str), n: usize) -> String {
+    format!("{} {n}", ar(words.0, words.1))
+}
+
 /// More: long capture, pin, share, the screen tools (arrow keys walk it).
 fn more_panel(e: &Editor) -> Element<'_, Message> {
     let rows = more_rows(e)
@@ -733,7 +803,19 @@ mod tests {
                 more.update(Message::Menu(Menu::More));
                 let mut held = editor();
                 held.held = true;
+                // the Steps strip open: Add step 2, full, a step edited, More
+                let with = |steps: Option<usize>, updating: Option<usize>| {
+                    let mut e = editor();
+                    (e.steps, e.updating) = (steps, updating);
+                    e
+                };
+                let mut add_more = with(Some(1), None);
+                add_more.update(Message::Menu(Menu::More));
                 let cases: Vec<(&str, Editor, f32)> = vec![
+                    ("add-step", with(Some(1), None), 60.0),
+                    ("steps-full", with(Some(12), None), 60.0),
+                    ("update-step", with(Some(3), Some(1)), 60.0),
+                    ("add-step-more", add_more, 330.0),
                     ("bar", editor(), 60.0),
                     ("held", held, 60.0),
                     ("shapes", panel(Tool::Arrow), 330.0),
@@ -749,7 +831,7 @@ mod tests {
                 let dir = if rtl { "-ar" } else { "" };
                 for (name, e, height) in cases {
                     let file = format!("snip-toolbar-{name}{dir}-{}", theme.id);
-                    let at = Size::new(size().width, height);
+                    let at = Size::new(size_for(&e).width, height);
                     failed.extend(golden::check("screens", &file, at, &[1.0], || view(&e)));
                 }
             }
