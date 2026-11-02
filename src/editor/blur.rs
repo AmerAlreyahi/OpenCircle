@@ -4,23 +4,22 @@
 //!
 //! It must not be reversible: a mosaic of fine cell means is a function of the
 //! glyph shapes, and an attacker renders candidate strings and scores them
-//! (Depix, or a likelihood over all cells). So the stroke is FIRST reduced to
-//! coarse information only: blocks one brush tall and 2.5 brushes wide (two or
-//! three glyphs), each its mean tone plus a secret offset, snapped to `LEVELS`
-//! tones with a secret dither; and ONE dark / light colour pair for the whole
-//! stroke (`colours`), never per block (a block's own colours would show a
-//! coloured word in it). No fine cell ever reads the source pixels. THEN the
-//! fine mosaic is drawn from those blocks: each cell's tone is interpolated
-//! between the neighbouring blocks, plus a secret jitter per cell and one per
-//! stroke from an OS-random seed (never from the content), folded back at
-//! black and white; its colour is that tone on the stroke's dark-light line
-//! (text, background and every
-//! mix lie on it): no chroma of its own, no tint (grey stays grey, a blue link
-//! stays blue). The cell grid is softened a little (two box passes of a
-//! quarter cell). The footprint is a flat band `size` tall along the stroke
-//! (square ends, no round blob), sharp at its edges. A repaint of any region
-//! gives the same pixels (blocks, cells and jitter belong to the image's
-//! coordinates and the stroke's seed).
+//! (Depix, or a likelihood over all cells). Even coarse block means (two or
+//! three glyphs each) left the true text ranked first more often than chance
+//! on Windows. So the source is read ONCE, for the whole stroke: its mean tone
+//! and one tint (the chroma of its ink / background pair, `colours`, snapped).
+//! The mosaic is then drawn from secrets only: coarse blocks one brush tall
+//! and 2.5 brushes wide, each the stroke's tone plus a secret offset, snapped
+//! to `LEVELS` tones with a secret dither; each fine cell's tone interpolated
+//! between them, plus a secret jitter per cell and one per stroke from an
+//! OS-random seed (never from the content), folded back at black and white;
+//! its colour = that tone in grey + the stroke's tint, the same on every cell
+//! (no colour noise, no cast: grey stays grey, a blue link stays blue). The
+//! cell grid is softened a little (two box passes of a quarter cell). The
+//! footprint is a flat band `size` tall along the stroke (square ends, no
+//! round blob), sharp at its edges. A repaint of any region holding the
+//! stroke gives the same pixels (blocks, cells and jitter belong to the
+//! image's coordinates and the stroke's seed).
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -43,7 +42,7 @@ pub fn seed() -> u64 {
 /// Tones a block's mean is snapped to.
 pub const LEVELS: f32 = 8.0;
 /// Secret tone offset per block, ± levels (before the snap).
-pub const BLOCK_NOISE: f32 = 54.0;
+pub const BLOCK_NOISE: f32 = 30.0;
 /// Secret tone jitter, ± levels: per cell, and once per stroke.
 pub const JITTER: f32 = 18.0;
 /// A block is this many brushes wide (about two or three glyphs).
@@ -79,7 +78,7 @@ pub fn reach(size: f32, cell_px: f32) -> f32 {
     (2 * soften(c)) as f32 + c as f32 + 2.0 * bw.max(bh) as f32 + 1.0
 }
 
-/// One coarse block: its snapped tone (its colour is the stroke's pair).
+/// One coarse block: the stroke's tone with its secret offset, snapped.
 #[derive(Clone, Copy)]
 struct Block {
     tone: f32,
@@ -134,26 +133,28 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, cell_px: f32, seed:
     let to_mask = Transform::from_translate(-(ox + ax0 as f32), -(oy + ay0 as f32));
     mask.fill_path(&outline, FillRule::Winding, true, to_mask);
 
-    // 1. The coarse blocks, one beyond the cells each way: the ONLY reading of
-    // the source. Columns on the image's grid; rows on the stroke's band (its
-    // start's middle), so one row of blocks is the line itself.
-    let (bw, bh) = block(size);
-    let (dark, light) = {
+    // 1. The ONLY reading of the source: what is under the footprint gives
+    // one tone and one tint for the whole stroke.
+    let (tone, tint) = {
         let data = layer.pm.data();
-        colours(
-            (ay0..ay1)
-                .flat_map(|y| (ax0..ax1).map(move |x| (x, y)))
-                .filter_map(|(x, y)| {
-                    let m = mask.data()[(y - ay0) as usize * aw + (x - ax0) as usize];
-                    let i = ((y * w + x) * 4) as usize;
-                    (m > 0).then(|| [data[i], data[i + 1], data[i + 2]])
-                }),
-        )
+        let under: Vec<[u8; 3]> = (ay0..ay1)
+            .flat_map(|y| (ax0..ax1).map(move |x| (x, y)))
+            .filter_map(|(x, y)| {
+                let m = mask.data()[(y - ay0) as usize * aw + (x - ax0) as usize];
+                let i = ((y * w + x) * 4) as usize;
+                (m > 0).then(|| [data[i], data[i + 1], data[i + 2]])
+            })
+            .collect();
+        let n = under.len().max(1) as f32;
+        let tone = under.iter().map(|p| luma(p.map(f32::from))).sum::<f32>() / n;
+        (tone, tint(colours(under.into_iter())))
     };
+    // 2. The coarse blocks (columns on the image's grid; rows on the stroke's
+    // band, its start's middle): the stroke's tone, each with a secret offset
+    // and a secret dither. They give the mosaic its patches; no content.
+    let (bw, bh) = block(size);
     let band = (points[0].y - size / 2.0).round() as i64;
     let oyb = oyi - band;
-    let data = layer.pm.data_mut();
-    let index = |x: i64, y: i64| ((y * w + x) * 4) as usize;
     let (gx0, gx1) = (
         (sx0 + oxi).div_euclid(bw) - 1,
         (sx1 + oxi).div_euclid(bw) + 1,
@@ -166,32 +167,21 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, cell_px: f32, seed:
     let mut blocks = Vec::with_capacity(gw * (gy1 - gy0 + 1) as usize);
     for gy in gy0..=gy1 {
         for gx in gx0..=gx1 {
-            let (x0, x1) = (
-                (gx * bw - oxi).clamp(0, w),
-                ((gx + 1) * bw - oxi).clamp(0, w),
-            );
-            let (y0, y1) = (
-                (gy * bh - oyb).clamp(0, h),
-                ((gy + 1) * bh - oyb).clamp(0, h),
-            );
-            let mut b = Block {
-                tone: block_tone(data, index, (x0, x1), (y0, y1)),
-            };
-            // A secret offset per block, then snapped with a secret dither (an
-            // error of up to half a step, independent of the text): what the
-            // mean tone still tells apart is drowned.
             let key = mix(!seed ^ mix(gx as u64 ^ (gy as u64) << 32));
             let step = 255.0 / (LEVELS - 1.0);
             let d = step / 2.0 * unit(mix(key));
-            b.tone = quantise(b.tone + BLOCK_NOISE * unit(key) + d) - d;
-            blocks.push(b);
+            blocks.push(Block {
+                tone: quantise(tone + BLOCK_NOISE * unit(key) + d) - d,
+            });
         }
     }
     let at = |gx: i64, gy: i64| {
         blocks[(gy.clamp(gy0, gy1) - gy0) as usize * gw + (gx.clamp(gx0, gx1) - gx0) as usize]
     };
 
-    // 2. The fine cells, from the blocks only.
+    // 3. The fine cells, from the blocks only.
+    let data = layer.pm.data_mut();
+    let index = |x: i64, y: i64| ((y * w + x) * 4) as usize;
     let stroke_tone = JITTER * unit(mix(seed ^ 0x5bd1_e995));
     let mut buf = vec![[0.0f32; 3]; sw * sh];
     let mut cy = sy0;
@@ -209,7 +199,8 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, cell_px: f32, seed:
             let tone = (1.0 - tx) * at(ix, iy).tone + tx * at(ix + 1, iy).tone;
             let (gx, gy) = ((cx + oxi).div_euclid(c), (cy + oyi).div_euclid(c));
             let jitter = JITTER * unit(mix(seed ^ mix(gx as u64 ^ (gy as u64) << 32)));
-            let value = on_line(dark, light, reflect(tone + jitter + stroke_tone));
+            let grey = reflect(tone + jitter + stroke_tone);
+            let value = tint.map(|t| (grey + t).clamp(0.0, 255.0));
             for y in cy..y1 {
                 buf[(y - sy0) as usize * sw + (cx - sx0) as usize..][..(x1 - cx) as usize]
                     .fill(value);
@@ -234,28 +225,6 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, cell_px: f32, seed:
             data[i + 3] = 255;
         }
     }
-}
-
-/// A block's mean tone (`xs` x `ys`, clipped to the layer; off the layer: mid
-/// grey, never painted).
-fn block_tone(
-    data: &[u8],
-    index: impl Fn(i64, i64) -> usize,
-    xs: (i64, i64),
-    ys: (i64, i64),
-) -> f32 {
-    let n = (xs.1 - xs.0) * (ys.1 - ys.0);
-    if n <= 0 {
-        return 128.0;
-    }
-    let mut sum = 0.0f32;
-    for y in ys.0..ys.1 {
-        for x in xs.0..xs.1 {
-            let i = index(x, y);
-            sum += luma([0, 1, 2].map(|k| data[i + k] as f32));
-        }
-    }
-    sum / n as f32
 }
 
 /// The stroke's ONE colour pair (owner's look, review: never per block, or a
@@ -298,25 +267,19 @@ fn luma(c: [f32; 3]) -> f32 {
     0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
 }
 
-/// The colour of tone `y` on the line from `dark` to `light` (text and its
-/// background, with every anti-aliased mix between them, lie on it), so the
-/// colour says no more than the tone (and the tone is under the secret
-/// jitter): no chroma of its own to leak the text, no tint. Beyond the ends,
-/// or with no contrast (a plain area: both are its colour), it moves in grey.
-fn on_line(dark: [f32; 3], light: [f32; 3], y: f32) -> [f32; 3] {
-    let (yd, yl) = (luma(dark), luma(light));
-    let (base, at) = match yl - yd > 8.0 {
-        true => {
-            let t = (y.clamp(yd, yl) - yd) / (yl - yd);
-            (
-                [0, 1, 2].map(|k| dark[k] + t * (light[k] - dark[k])),
-                y.clamp(yd, yl),
-            )
-        }
-        false => (dark, luma(dark)),
-    };
-    base.map(|v| (v + y - at).clamp(0.0, 255.0))
+/// The stroke's ONE tint, the same on every cell whatever its tone: the
+/// chroma of the middle of its colour pair (`colours`), snapped to steps of
+/// `TINT_STEP`. A cell's colour = its tone in grey + this tint, so no cell's
+/// colour carries anything of its own (grey text: no tint at all; a blue link
+/// stays blue).
+fn tint((dark, light): ([f32; 3], [f32; 3])) -> [f32; 3] {
+    let mid = [0, 1, 2].map(|k| (dark[k] + light[k]) / 2.0);
+    let y = luma(mid);
+    mid.map(|v| ((v - y) / TINT_STEP).round() * TINT_STEP)
 }
+
+/// The stroke's tint is snapped to steps of this many levels.
+pub const TINT_STEP: f32 = 32.0;
 
 /// A level folded back into 0..=255 at the ends (clipping would cut the
 /// jitter near black and white).

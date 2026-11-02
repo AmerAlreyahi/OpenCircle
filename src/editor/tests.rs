@@ -475,9 +475,9 @@ fn blur_mosaic_makes_the_text_unreadable() {
     assert!(again(1) == again(1) && again(1) != again(2));
 }
 
-/// No colour tint: the jitter is the same on R, G and B, so a grey source gives
-/// grey cells, and a flat colour moves only in tone (equal steps on every
-/// channel that isn't at 0 or 255).
+/// No colour noise: the jitter is the same on R, G and B and the stroke has one
+/// tint, so a grey source gives grey cells, and a flat colour moves only in
+/// tone.
 #[test]
 fn blur_mosaic_has_no_tint() {
     let grey = field_in("hunter2", [250, 250, 250, 255], [20, 20, 20, 255]);
@@ -496,15 +496,17 @@ fn blur_mosaic_has_no_tint() {
         }
         for colour in [[120, 140, 160, 255], [90, 120, 100, 255]] {
             let flat = brushed(image_of(240, 40, |_, _| colour), band, 6.0, seed);
+            // One tint for the whole stroke: every pixel has the same channel
+            // differences (its colour moves only in tone), near the source's.
+            let diffs = |p: [u8; 4]| (p[0] as i32 - p[1] as i32, p[1] as i32 - p[2] as i32);
+            let first = diffs(pxi(&flat, core[0].0, core[0].1));
+            let (want, step) = (diffs(colour), blur::TINT_STEP as i32);
+            assert!((first.0 - want.0).abs() <= step && (first.1 - want.1).abs() <= step);
             for &(x, y) in &core {
-                let p = pxi(&flat, x, y);
-                let d: Vec<i32> = (0..3).map(|k| p[k] as i32 - colour[k] as i32).collect();
-                // One shift on every channel, but for the pair's snap (half a
-                // `COLOUR_STEP` each way per channel) and rounding.
-                let step = blur::COLOUR_STEP as i32 + 1;
+                let d = diffs(pxi(&flat, x, y));
                 assert!(
-                    (d[0] - d[1]).abs() <= step && (d[1] - d[2]).abs() <= step,
-                    "({x}, {y}) {p:?} from {colour:?}"
+                    (d.0 - first.0).abs() <= 1 && (d.1 - first.1).abs() <= 1,
+                    "({x}, {y}) {d:?} vs {first:?} from {colour:?}"
                 );
             }
         }
