@@ -111,6 +111,22 @@ impl Long {
         }
     }
 
+    /// Where the picture is drawn (logical px; none before its first frame or
+    /// without room): its physical px at 1 / scale, from the top of its room.
+    pub fn picture(&self, screen: Size, bar: Rectangle) -> Option<Rectangle> {
+        let room = layout(self.area, screen, bar, self.scale)?;
+        let (_, w, h) = self.preview.as_ref()?;
+        let size = Size::new(*w as f32 / self.scale, *h as f32 / self.scale);
+        Some(Rectangle::new(room.position(), size))
+    }
+
+    /// Where the hint is drawn (none once scrolled, or without a free spot).
+    pub fn hint_spot(&self, screen: Size, bar: Rectangle, rtl: bool) -> Option<Point> {
+        let width = key_hint::width(&hint(rtl));
+        let picture = self.picture(screen, bar);
+        (!self.scrolled()).then(|| hint_at(bar, self.area, picture, width, screen))?
+    }
+
     /// The outline, the picture with its count and the hint on a `screen`
     /// big overlay whose toolbar is at `bar`; `look` = the active look's
     /// pair, for the outline. `rtl`: the count's corner and wording mirrored.
@@ -121,19 +137,16 @@ impl Long {
         look: (Color, Color),
         rtl: bool,
     ) -> Element<'_, Msg> {
-        let room = layout(self.area, screen, bar, self.scale);
-        // the picture as drawn: its physical px at 1 / scale, from the top
-        let shown = room
+        let shown = self
+            .picture(screen, bar)
             .zip(self.preview.as_ref())
-            .map(|(room, (handle, w, h))| {
-                let size = Size::new(*w as f32 / self.scale, *h as f32 / self.scale);
-                (Rectangle::new(room.position(), size), handle.clone())
-            });
+            .map(|(r, (handle, ..))| (r, handle.clone()));
+        let picture = shown.as_ref().map(|(r, _)| *r);
         let outline = Outline {
             area: self.area,
             look,
             solid: self.full,
-            picture: shown.as_ref().map(|(r, _)| *r),
+            picture,
         };
         let mut layers = stack![draw(outline).width(Fill).height(Fill)];
         if let Some((r, handle)) = shown {
@@ -161,12 +174,8 @@ impl Long {
                 layers = layers.push(pin(chip).position(Point::new(r.x, y)));
             }
         }
-        if !self.scrolled() {
-            let hint = hint(rtl);
-            let spot = hint_at(bar, self.area, key_hint::width(&hint), screen);
-            if let Some(spot) = spot {
-                layers = layers.push(pin(key_hint(&hint, rtl)).position(spot));
-            }
+        if let Some(spot) = self.hint_spot(screen, bar, rtl) {
+            layers = layers.push(pin(key_hint(&hint(rtl), rtl)).position(spot));
         }
         layers.into()
     }
@@ -200,7 +209,8 @@ pub fn count<'a>(height: u32, full: bool, lost: bool, rtl: bool) -> Element<'a, 
 /// neither do; narrower to fit, down to `MIN_W`, then over the area's edge
 /// by less than half its width), top-aligned with it, `SCALE` of its width,
 /// `TALL` of the free height, ending above Snip's toolbar where they would
-/// meet; none when that leaves less than `MIN_H` or a bigger overlap.
+/// meet (or starting under it, where above leaves nothing); none when that leaves
+/// less than `MIN_H` or a bigger overlap.
 pub fn layout(area: Rectangle, screen: Size, bar: Rectangle, scale: f32) -> Option<Rectangle> {
     // room beside the area on each side (a GAP to the area and to the edge)
     let left = area.x - 2.0 * GAP;
@@ -229,12 +239,20 @@ pub fn layout(area: Rectangle, screen: Size, bar: Rectangle, scale: f32) -> Opti
     if overlap > width / 2.0 {
         return None;
     }
-    let top = area.y.max(GAP);
-    let mut height = (screen.height - GAP - top) * TALL;
-    // Snip's toolbar reaching into that column: the picture ends above it
+    let mut top = area.y.max(GAP);
+    let tall = |top: f32| (screen.height - GAP - top) * TALL;
+    let mut height = tall(top);
+    // Snip's toolbar reaching into that column: the picture ends above it,
+    // or starts under it when that leaves nothing (a toolbar docked inside
+    // the area's top edge, as over a full-height window: owner's VM, 2026-10-31)
     let column = Rectangle::new(Point::new(x, top), Size::new(width, height));
-    if column.intersects(&bar) && bar.y > top {
-        height = height.min(bar.y - GAP - top);
+    if column.intersects(&bar) {
+        let above = height.min(bar.y - GAP - top);
+        let under = bar.y + bar.height + GAP;
+        (top, height) = match above >= MIN_H {
+            true => (top, above),
+            false => (under, tall(under)),
+        };
     }
     if height < MIN_H {
         return None;
@@ -248,18 +266,37 @@ pub fn layout(area: Rectangle, screen: Size, bar: Rectangle, scale: f32) -> Opti
     ))
 }
 
-/// The hint beside the toolbar, on its side away from the area, `width`
-/// wide; none where it would cover the area or leave the screen.
-fn hint_at(bar: Rectangle, area: Rectangle, width: f32, screen: Size) -> Option<Point> {
+/// The hint beside the toolbar, on its side away from the area, else under
+/// the picture (`picture`, with its count chip), else above it; `width`
+/// wide; none where every spot would cover the area, the toolbar or the
+/// picture, or leave the screen.
+fn hint_at(
+    bar: Rectangle,
+    area: Rectangle,
+    picture: Option<Rectangle>,
+    width: f32,
+    screen: Size,
+) -> Option<Point> {
     let h = key_hint::HEIGHT;
-    let y = match bar.y >= area.y + area.height {
+    let clamp = |x: f32| x.clamp(GAP, (screen.width - GAP - width).max(GAP));
+    let beside_bar = match bar.y >= area.y + area.height {
         true => bar.y + bar.height + 8.0,
         false => bar.y - 8.0 - h,
     };
-    let x = (bar.center_x() - width / 2.0).clamp(GAP, (screen.width - GAP - width).max(GAP));
-    let spot = Rectangle::new(Point::new(x, y), Size::new(width, h));
-    let inside = y >= 0.0 && y + h <= screen.height;
-    (inside && !spot.intersects(&area)).then_some(spot.position())
+    let mut spots = vec![Point::new(clamp(bar.center_x() - width / 2.0), beside_bar)];
+    if let Some(r) = picture {
+        let x = clamp(r.center_x() - width / 2.0);
+        let under = r.y + r.height + CHIP_GAP + chip::READOUT_H + 8.0;
+        spots.extend([Point::new(x, under), Point::new(x, r.y - 8.0 - h)]);
+    }
+    spots.into_iter().find(|p| {
+        let spot = Rectangle::new(*p, Size::new(width, h));
+        let inside = p.y >= 0.0 && p.y + h <= screen.height;
+        inside
+            && !spot.intersects(&area)
+            && !spot.intersects(&bar)
+            && picture.is_none_or(|r| !spot.intersects(&r))
+    })
 }
 
 /// `3,240 px`.
@@ -417,12 +454,12 @@ mod tests {
     fn the_hint_sits_beside_the_toolbar_away_from_the_area() {
         let area = rect(80.0, 120.0, 560.0, 400.0);
         let bar = bar_under(area);
-        let spot = hint_at(bar, area, 300.0, SCREEN).unwrap();
+        let spot = hint_at(bar, area, None, 300.0, SCREEN).unwrap();
         assert!(spot.y > bar.y, "under the toolbar under the area");
         // a full-screen area: the toolbar is over it; no hint over the page
         let full = rect(0.0, 0.0, 1280.0, 720.0);
         let bar = rect(340.0, 600.0, 600.0, 46.0);
-        assert_eq!(hint_at(bar, full, 300.0, SCREEN), None);
+        assert_eq!(hint_at(bar, full, None, 300.0, SCREEN), None);
     }
 
     #[test]

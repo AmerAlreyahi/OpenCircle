@@ -827,6 +827,100 @@ fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
     assert!(!app.snip_pill());
 }
 
+/// The owner's VM (2026-10-31): a full-height window on the right half of a
+/// 1716 x 1271 screen (40 px taskbar) picked, Long capture pressed: neither
+/// the picture nor the hint showed. The toolbar docks inside the area's top
+/// edge there and reaches into the picture's column: the picture ended
+/// "above" it (nothing left) and the hint went above it (off the screen).
+/// From the thread's first frame on (before any scroll) both show, beside
+/// the area on its free (left) side, clear of the toolbar.
+#[test]
+fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
+    use crate::capture::scroll::Update;
+    use crate::ui::screens::long_capture;
+    for y in [0.0, 0.4, 1.0] {
+        let area = Rectangle::new(Point::new(858.0, y), Size::new(858.0, 1231.0 - y));
+        let mut app = snipping_on(1716, 1271, area);
+        app.o.work_inset = 40.0;
+        app.select(area);
+        let _ = app.open_editor();
+        let _ = app.update(Message::Editor(editor::Message::Scroll));
+        let bar = app.long_bar();
+        assert!(
+            bar.intersects(&area),
+            "docked inside the area's top: {bar:?}"
+        );
+        // the size start_scroll asks the thread for
+        let room = long_capture::layout(area, app.o.screen, bar, 1.0);
+        let room = room.unwrap_or_else(|| panic!("no room at y {y}"));
+        // the thread's first update: the first frame, scaled into that room
+        let (w, h) = (room.width as u32, (area.height / 2.0) as u32);
+        let first = Update {
+            height: area.height as u32,
+            full: false,
+            lost: false,
+            preview: Some(Crop {
+                width: w,
+                height: h,
+                rgba: vec![200; (w * h * 4) as usize],
+            }),
+        };
+        let _ = app.update(Message::Snip(snip::Msg::Progress(first)));
+        let long = app.scroll().unwrap();
+        let picture = long.picture(app.o.screen, bar).expect("the picture shows");
+        assert!(picture.width > 0.0 && picture.height > 0.0);
+        assert_eq!(
+            picture.x + picture.width + 12.0,
+            area.x,
+            "right beside it, on its left"
+        );
+        assert!(
+            !picture.intersects(&bar) && !picture.intersects(&area),
+            "{picture:?}"
+        );
+        let hint = long.hint_spot(app.o.screen, bar, false);
+        let hint = hint.unwrap_or_else(|| panic!("the hint shows at y {y}"));
+        assert!(hint.x + 1.0 < area.x && hint.y >= 0.0, "{hint:?}");
+    }
+}
+
+/// The toolbar's 6-dot grip drags Snip's toolbar (picked, and during a long
+/// capture): its own press used to stop there (the editor ignored it, the
+/// toolbar's grab under it never heard it). Dropped, it stays for this area.
+#[test]
+fn the_snip_toolbars_grip_drags_it_and_it_stays_where_dropped() {
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    for long in [false, true] {
+        let mut app = snipping(area);
+        app.select(area);
+        let _ = app.open_editor();
+        if long {
+            let _ = app.update(Message::Editor(editor::Message::Scroll));
+            assert!(app.scroll().is_some());
+        }
+        let docked = app.bar_at();
+        let _ = app.update(Message::Editor(editor::Message::Grab));
+        assert!(app.o.bar_drag.is_some(), "the grip holds the toolbar");
+        let from = docked + Vector::new(10.0, 10.0);
+        let _ = app.update(Message::BarMoved(from));
+        let _ = app.update(Message::BarMoved(from + Vector::new(120.0, 100.0)));
+        let _ = app.update(Message::BarReleased);
+        let dropped = docked + Vector::new(120.0, 100.0);
+        assert_eq!(
+            app.bar_target(),
+            dropped,
+            "stays where dropped (long: {long})"
+        );
+        assert_eq!(app.scroll().is_some(), long, "the capture goes on");
+    }
+    // a new pick docks again
+    let mut app = snipping(area);
+    app.o.bar_left = Some(Point::new(5.0, 5.0));
+    app.select(area);
+    let _ = app.open_editor();
+    assert_ne!(app.bar_target(), Point::new(5.0, 5.0));
+}
+
 #[test]
 fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
     use crate::ui::screens::long_capture::Finish;

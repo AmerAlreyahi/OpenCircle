@@ -78,6 +78,9 @@ impl App {
         if let Some(edit) = self.o.edit.as_ref().filter(|e| e.editor.movable)
             && let Some((_, work, size)) = self.snip_dock()
         {
+            if let Some(at) = self.o.bar_left {
+                return at;
+            }
             let area = edit.canvas_rect();
             let avoid = (edit.editor.area_handle()).map(|p| p + (area.position() - Point::ORIGIN));
             return bar::dock(area, size, &[work], avoid);

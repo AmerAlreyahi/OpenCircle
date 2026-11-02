@@ -196,12 +196,8 @@ impl App {
                 let toolbar = (self.swapped() >= 1.0 && here).then_some(at);
                 // long capture: its outline, picture and hint under the toolbar
                 if let Some(long) = snip.and_then(|s| s.scroll.as_ref()) {
-                    let size = crate::ui::screens::editor::Editing::toolbar_size(
-                        self.o.screen.width,
-                        true,
-                    );
                     let look = crate::ui::theme::accent_of(&config::look());
-                    let bar = Rectangle::new(at, size);
+                    let bar = self.long_bar();
                     let shown = long.view(self.o.screen, bar, look, false);
                     layers = layers.push(shown.map(Message::Snip));
                 }

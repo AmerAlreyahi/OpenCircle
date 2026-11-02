@@ -65,7 +65,7 @@ impl App {
             // Scrolling capture needs the page under the area: Snip, in place.
             edit.editor.scroll = matches!(&self.o.purpose, Purpose::Snip(s) if s.can_scroll());
             if edit.editor.movable {
-                (self.o.bar_now, self.o.bar_glide) = (None, None); // it rises from the area
+                (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area
             }
             self.o.edit = Some(edit);
         }
@@ -76,6 +76,11 @@ impl App {
         // Test hook: the editor's Esc (Back) takes the shot of the editor instead.
         if matches!(msg, editor::Message::Back) && std::env::var_os(TEST_SHOT).is_some() {
             return self.test_shot();
+        }
+        // The toolbar's grip (its own press, so the toolbar's `grab` under it
+        // never hears it): drags the toolbar as the bar's grip does.
+        if matches!(msg, editor::Message::Grab) {
+            return self.update(Message::BarGrab);
         }
         // Snip's live area: the frame times of each drag on it (the log).
         let live = self.o.edit.as_ref().is_some_and(|e| e.editor.movable);

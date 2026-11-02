@@ -298,6 +298,13 @@ impl App {
             }
             // Let go: it glides to the nearest spot, remembered.
             Message::BarReleased => match self.o.bar_drag.take() {
+                // Snip's toolbar stays where it is dropped (this area only)
+                Some((_, at)) if self.o.edit.as_ref().is_some_and(|e| e.editor.movable) => {
+                    self.o.bar_left = Some(at);
+                    self.o.bar_eased = None;
+                    self.log_frames("toolbar drag");
+                    Task::none()
+                }
                 Some((_, at)) => {
                     let size = self.dock_size();
                     let room = self.bar_room();

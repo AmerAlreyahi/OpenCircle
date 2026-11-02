@@ -399,7 +399,7 @@ impl App {
         self.o.panel = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x
         self.o.zoom = None;
-        (self.o.bar_now, self.o.bar_glide) = (None, None); // it rises from the area
+        (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area
         self.o.edit = Some(edit);
         self.select(area); // the overlay's dim and outline follow it
     }
@@ -440,6 +440,13 @@ impl App {
         Some((at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0))
     }
 
+    /// Snip's toolbar during a long capture, as its picture and hint keep
+    /// clear of it (logical px).
+    pub(in crate::ui) fn long_bar(&self) -> Rectangle {
+        let size = Editing::toolbar_size(self.o.screen.width, true);
+        Rectangle::new(self.bar_at(), size)
+    }
+
     /// Long capture of `area` (its part on this screen): the area is cut out
     /// of the overlay, so the user scrolls the app under it by hand, and a
     /// thread grabs and stitches it (`scroll::by_hand`) until Done or Cancel.
@@ -454,8 +461,7 @@ impl App {
             return Task::none();
         };
         // the toolbar stays docked where it is
-        let size = Editing::toolbar_size(self.o.screen.width, true);
-        let bar = Rectangle::new(self.bar_at(), size);
+        let bar = self.long_bar();
         let o = &*self.o;
         let room = long_capture::layout(area, o.screen, bar, o.scale);
         let preview = room.map_or((0, 0), |r| {
