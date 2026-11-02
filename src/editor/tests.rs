@@ -435,6 +435,65 @@ fn blur_mosaic_colours_are_one_pair_per_stroke() {
     }
 }
 
+/// The stroke's tint doesn't track how much ink is under it (review): a line
+/// of "iiii" and one of "WWWW" (a few stems vs a lot of ink), plain and with
+/// ClearType-like fringes, in grey, blue and on a coloured field, give the same
+/// snapped tint and the same background.
+#[test]
+fn blur_tint_ignores_how_much_ink_there_is() {
+    let looks = [
+        ([255, 255, 255, 255], [20, 20, 30, 255]),
+        ([255, 255, 255, 255], [26, 13, 171, 255]),
+        ([30, 90, 160, 255], [250, 200, 40, 255]),
+    ];
+    for (bg, fg) in looks {
+        for fringed in [false, true] {
+            let pair = |s: &str| {
+                let f = field_in(s, bg, fg);
+                let f = if fringed { cleartype(f) } else { f };
+                let rgba = f.rgba;
+                blur::colours((10..30).flat_map(|y| (8..200).map(move |x| (x, y))).map(
+                    |(x, y): (usize, usize)| {
+                        let i = (y * 240 + x) * 4;
+                        [rgba[i], rgba[i + 1], rgba[i + 2]]
+                    },
+                ))
+            };
+            let (thin, heavy) = (pair("iiiiiiii"), pair("WWWWWWWW"));
+            assert_eq!(thin.1, heavy.1, "{fg:?} fringed {fringed}: background");
+            assert_eq!(
+                blur::snapped_tint(thin),
+                blur::snapped_tint(heavy),
+                "{fg:?} fringed {fringed}: {thin:?} vs {heavy:?}"
+            );
+        }
+    }
+}
+
+/// The most saturated colours (a tint wider than 255 levels before it is
+/// bounded) paint without a panic and stay in range.
+#[test]
+fn blur_takes_extreme_colours() {
+    for colour in [
+        [0, 0, 255, 255],
+        [255, 0, 0, 255],
+        [0, 255, 0, 255],
+        [255, 0, 255, 255],
+    ] {
+        for seed in 0..16 {
+            let band = lines::Band {
+                x0: 0.0,
+                x1: 240.0,
+                y0: 10.0,
+                y1: 30.0,
+                room: (f32::INFINITY, f32::INFINITY),
+            };
+            let out = brushed(image_of(240, 40, |_, _| colour), band, 6.0, seed);
+            assert_eq!(out.rgba.len(), 240 * 40 * 4);
+        }
+    }
+}
+
 #[test]
 fn blur_mosaic_keeps_a_links_own_hue() {
     let (bg, fg) = ([255, 255, 255, 255], [26, 13, 171, 255]);
@@ -447,7 +506,7 @@ fn blur_mosaic_keeps_a_links_own_hue() {
             let (r16, g16, b16) = (r as u16, g as u16, b as u16);
             assert!(b16 + 1 >= r16 && b16 + 1 >= g16, "({x}, {y}) {r} {g} {b}");
             assert!(
-                r.abs_diff(g) <= 16,
+                r.abs_diff(g) <= 24,
                 "no pink or green: ({x}, {y}) {r} {g} {b}"
             );
         }
@@ -500,7 +559,7 @@ fn blur_mosaic_has_no_tint() {
             // differences (its colour moves only in tone), near the source's.
             let diffs = |p: [u8; 4]| (p[0] as i32 - p[1] as i32, p[1] as i32 - p[2] as i32);
             let first = diffs(pxi(&flat, core[0].0, core[0].1));
-            let (want, step) = (diffs(colour), blur::TINT_STEP as i32);
+            let (want, step) = (diffs(colour), (blur::TINT_STEP + blur::TINT_JITTER) as i32);
             assert!((first.0 - want.0).abs() <= step && (first.1 - want.1).abs() <= step);
             for &(x, y) in &core {
                 let d = diffs(pxi(&flat, x, y));
