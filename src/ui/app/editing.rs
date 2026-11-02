@@ -82,6 +82,18 @@ impl App {
         if matches!(msg, editor::Message::Grab) {
             return self.update(Message::BarGrab);
         }
+        // Esc while the toolbar is dragged: it glides back to where it was.
+        if matches!(msg, editor::Message::Back)
+            && let Some(was) = self.o.bar_was.take()
+            && self.o.bar_drag.take().is_some()
+        {
+            self.o.bar_left = was;
+            self.o.bar_eased = None;
+            if let Some(edit) = &mut self.o.edit {
+                edit.editor.held = false;
+            }
+            return Task::none();
+        }
         // Snip's live area: the frame times of each drag on it (the log).
         let live = self.o.edit.as_ref().is_some_and(|e| e.editor.movable);
         match &msg {
@@ -107,7 +119,6 @@ impl App {
                 editor::Message::Save => Finish::Save,
                 editor::Message::Pin => Finish::Pin,
                 editor::Message::Share => Finish::Share,
-                editor::Message::Close => Finish::Cancel,
                 _ => return Task::none(),
             };
             return self.on_snip(crate::ui::snip::Msg::Finish(how));
@@ -173,7 +184,7 @@ impl App {
                 Ok(()) => Task::done(Message::Editor(editor::Message::Shared)),
                 Err(_) => Task::none(), // the sheet went without a target
             }),
-            Some(Output::Dragged | Output::Close) => self.close(),
+            Some(Output::Dragged) => self.close(),
         }
     }
 
@@ -287,8 +298,13 @@ mod tests {
         app
     }
 
-    fn stops(app: &App) -> Vec<E> {
-        toolbar::stops(&app.o.edit.as_ref().unwrap().editor)
+    /// What More offers now (each row's message).
+    fn more(app: &App) -> Vec<Option<E>> {
+        let editor = &app.o.edit.as_ref().unwrap().editor;
+        toolbar::more_rows(editor)
+            .into_iter()
+            .map(|r| r.3)
+            .collect()
     }
 
     /// The tooltips of what the overlay draws now (its buttons' names).
@@ -339,10 +355,11 @@ mod tests {
     /// don't delete: Linux has none yet).
     #[test]
     fn share_shows_only_where_the_system_has_a_sheet() {
-        let app = snip_editor();
-        let shown = bar_names(&app).iter().any(|n| n.starts_with("Share"));
-        assert_eq!(shown, share::SUPPORTED);
-        assert_eq!(stops(&app).contains(&E::Share), share::SUPPORTED);
+        let mut app = snip_editor();
+        let _ = app.on_editor(E::Menu(crate::editor::Menu::More));
+        let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
+        assert_eq!(texts.iter().any(|n| n == "Share"), share::SUPPORTED);
+        assert_eq!(more(&app).contains(&Some(E::Share)), share::SUPPORTED);
     }
 
     /// Still pins left Labs (owner, 2026-10-31): with Labs Pins off the
@@ -354,6 +371,9 @@ mod tests {
         app.o.labs.set(crate::labs::Feature::Pins, false);
         let names = bar_names(&app);
         assert!(names.iter().any(|n| n.starts_with("Copy")), "{names:?}");
+        // More's rows
+        let _ = app.on_editor(E::Menu(crate::editor::Menu::More));
+        let names = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
         assert!(
             names.iter().any(|n| n.starts_with("Pin to screen")),
             "{names:?}"
@@ -366,24 +386,39 @@ mod tests {
             !names.iter().any(|n| n.starts_with("Live pin")),
             "{names:?}"
         );
-        assert!(stops(&app).contains(&E::Pin));
+        assert!(more(&app).contains(&Some(E::Pin)));
         // a pin with every Labs switch off
         let _ = app.on_editor(E::Pin);
         assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }
 
-    /// No Add capture in Snip's board (owner, 2026-10-31: the Steps board
-    /// replaces it): the board's popover offers only the legend.
+    /// More (owner, 2026-11-02): Long capture, Pin, Share (where there is a
+    /// sheet), the screen tools; no Add capture / Add to steps (hidden until
+    /// the Steps strip exists). The arrow keys walk its live rows, Enter runs one.
     #[test]
-    fn the_board_has_no_add_capture() {
+    fn more_holds_the_rest_and_the_keys_walk_it() {
+        use crate::editor::Menu;
         let mut app = snip_editor();
-        let _ = app.on_editor(E::Menu(crate::editor::Menu::Board));
-        let texts = bar_names(&app);
-        assert!(texts.iter().any(|t| t.starts_with("Legend")), "{texts:?}");
-        assert!(
-            !texts.iter().any(|t| t.starts_with("Add capture")),
-            "{texts:?}"
-        );
+        let _ = app.on_editor(E::Menu(Menu::More));
+        let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
+        for row in [
+            "Long capture",
+            "Pin to screen",
+            "Colour picker",
+            "Screen ruler",
+        ] {
+            assert!(texts.iter().any(|t| t == row), "{row}: {texts:?}");
+        }
+        assert_eq!(texts.iter().any(|t| t == "Share"), share::SUPPORTED);
+        assert!(!texts.iter().any(|t| t.starts_with("Add")), "{texts:?}");
+        // Down, Down: the second live row (Pin); Enter pins (the overlay closes)
+        let _ = app.on_editor(E::MenuStep(false));
+        let _ = app.on_editor(E::MenuStep(false));
+        let editor = &app.o.edit.as_ref().unwrap().editor;
+        let rows = toolbar::more_rows(editor);
+        assert_eq!(rows[editor.row.unwrap()].3, Some(E::Pin));
+        let _ = app.on_editor(E::Activate);
+        assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }
 
     /// #37: a drag-out an app took closes the overlay with its toolbar (none

@@ -1470,6 +1470,57 @@ fn snip_frame_times() {
     }
 }
 
+/// Snip's grouped toolbar (owner, 2026-11-02): the pointer hovering along it
+/// (each button lights in turn) and its grip dragging it, at the VM's screens
+/// and the wide desktop (run in release: `cargo test --release
+/// snip_toolbar_frame_times -- --ignored --nocapture`; aim: p95 < 16 ms).
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn snip_toolbar_frame_times() {
+    use super::app::tests::snipping_on;
+    use crate::editor::Message as E;
+    fn view(app: &App) -> Element<'_, Message> {
+        app.view(app.overlay)
+    }
+    for (w, h) in [(1280, 720), (1716, 1271), (3438, 1280)] {
+        let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
+        let picked = || {
+            let mut app = snipping_on(w, h, window);
+            app.select(window);
+            let crop = app.crop().unwrap();
+            let _ = app.snip_routed(crop, true, false);
+            settle_bar(&mut app);
+            app
+        };
+        let mut app = picked();
+        let (at, size) = (
+            app.bar_at(),
+            crate::ui::screens::editor::Editing::toolbar_size(),
+        );
+        let y = at.y + size.height / 2.0;
+        let step = size.width / 40.0;
+        let hover = move |i: u32| {
+            let p = Point::new(at.x + step * i as f32, y);
+            let moved = iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: p });
+            (iced::mouse::Cursor::Available(p), vec![moved])
+        };
+        let (s, k) = (app.o.screen, app.o.scale);
+        let t = drawn(&mut app, s, k, view, 40, false, |_, _, _| {}, hover);
+        report("snip toolbar hover", s, k, &t);
+        let mut app = picked();
+        let t = frames(&mut app, 40, false, |app, i, now| {
+            if i == 0 {
+                let _ = app.on_editor(E::Grab);
+                let _ = app.update(Message::BarMoved(at));
+            }
+            let p = at + Vector::new(9.0 * i as f32, -5.0 * i as f32);
+            let _ = app.update(Message::BarMoved(p));
+            let _ = app.update(Message::Frame(now));
+        });
+        report("snip toolbar drag", s, k, &t);
+    }
+}
+
 /// Snip's drags (0.1.3 gate: frames p95 under 16 ms on the VM, were 30 / 27 ms)
 /// redraw round what moves and draw what a fresh frame draws. Before: the
 /// loupe's label redrew the screen from it to the corner (a canvas text's

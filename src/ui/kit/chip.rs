@@ -322,23 +322,6 @@ pub fn drag_out<'a, Message: Clone + 'a>(on_down: Message) -> Element<'a, Messag
     .into()
 }
 
-/// A Text backdrop's sample for an option button: an "A" plain, ringed, or on
-/// a fill (the button's colours).
-pub fn sample<'a, Message: 'a>(ring: bool, fill: bool) -> Element<'a, Message> {
-    let ink = if fill { c().widget } else { c().text_sub };
-    container(text("A").size(14).color(ink))
-        .padding([0, 4])
-        .style(move |_| container::Style {
-            background: fill.then(|| c().text_sub.into()),
-            border: Border::default()
-                .rounded(radius::KEYCAP)
-                .width(if ring { 1.5 } else { 0.0 })
-                .color(c().text_sub),
-            ..container::Style::default()
-        })
-        .into()
-}
-
 /// A readout's height (Snip's size chip; the toolbar's is the same).
 pub const READOUT_H: f32 = 26.0;
 
@@ -380,6 +363,49 @@ pub fn readout<'a, Message: 'a>(
                 .color(c().divider),
             ..container::Style::default()
         })
+        .into()
+}
+
+/// Snip's size chip, the picture's drag handle (owner, 2026-11-02): an
+/// `image` glyph and the size, as `readout` (mono on `track`, `live` in
+/// `accent`); under the cursor raised (`elevated`, its edge) with the open
+/// hand. A press starts the drag (`on_down`; a button reacts on release).
+pub fn size_handle<'a, Message: Clone + 'a>(
+    label: String,
+    live: bool,
+    on_down: Message,
+) -> Element<'a, Message> {
+    use iced::widget::{hover, mouse_area};
+    let look = move |hot: bool| {
+        let ink = if live { c().accent } else { c().text };
+        let picture = text(super::icon::Icon::Picture.glyph())
+            .font(super::icon::FONT)
+            .size(12)
+            .color(if hot { c().text } else { c().text_sub });
+        let size = text(label.clone())
+            .size(11.5)
+            .font(mono(Weight::Medium))
+            .color(ink);
+        container(row![picture, size].spacing(space::GAP).align_y(Center))
+            .padding([0, 8])
+            .height(READOUT_H)
+            .center_y(READOUT_H)
+            .style(move |_| container::Style {
+                background: Some(if hot { c().elevated } else { c().track }.into()),
+                border: Border::default()
+                    .rounded(radius::PILL)
+                    .width(1)
+                    .color(if hot {
+                        c().elevated_border
+                    } else {
+                        c().divider
+                    }),
+                ..container::Style::default()
+            })
+    };
+    mouse_area(hover(look(false), look(true)))
+        .on_press(on_down)
+        .interaction(iced::mouse::Interaction::Grab)
         .into()
 }
 

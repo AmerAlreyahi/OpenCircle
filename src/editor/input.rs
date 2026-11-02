@@ -143,6 +143,15 @@ impl Editor {
         if self.menu == Some(Menu::Colour) {
             return matches!(key, Key::Named(Named::Escape)).then_some(Message::Picker);
         }
+        // More's menu: arrows walk its rows, Enter runs one, Esc closes it.
+        if self.menu == Some(Menu::More) {
+            match key {
+                Key::Named(Named::ArrowUp) => return Some(Message::MenuStep(true)),
+                Key::Named(Named::ArrowDown) => return Some(Message::MenuStep(false)),
+                Key::Named(Named::Enter | Named::Space) => return Some(Message::Activate),
+                _ => {}
+            }
+        }
         let arrow = match key {
             Key::Named(Named::ArrowLeft) => Some((-1, 0)),
             Key::Named(Named::ArrowRight) => Some((1, 0)),

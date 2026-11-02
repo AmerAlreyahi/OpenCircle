@@ -1,7 +1,7 @@
 //! `.oc-track` with `.oc-pills` and the gliding thumb: one choice of a few.
 //! `boolean` (Off / On) is the only on/off control (the design has no switch).
 use iced::widget::{Space, button, container, row, stack, text};
-use iced::{Border, Element, Fill};
+use iced::{Border, Element, Fill, Size};
 
 use super::themes::c;
 use super::tokens::{Role, radius, size, space};
@@ -140,6 +140,84 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     });
     let pills = row(pills).spacing(GAP).height(PILL);
     container(stack![thumb, pills])
+        .padding(space::TRACK_PAD)
+        .style(|_| container::Style {
+            background: Some(c().track.into()),
+            border: Border::default()
+                .rounded(radius::TRACK)
+                .width(1)
+                .color(c().divider),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// Three size presets in a small track (Snip's toolbar panels: S / M / L):
+/// each a dot (4, 6, 8 px) or `letter` (10, 12.5, 15 px); `chosen` raised on
+/// `elevated` (none: the size is between presets, or Auto is on); `dim`: the
+/// marks faded (Auto decides; a press still picks one).
+pub fn presets<'a, Message: Clone + 'a>(
+    chosen: Option<usize>,
+    letter: Option<&'a str>,
+    dim: bool,
+    on: impl Fn(usize) -> Message + 'a,
+) -> Element<'a, Message> {
+    const SIDE: [f32; 3] = [4.0, 6.0, 8.0];
+    const PX: [f32; 3] = [10.0, 12.5, 15.0];
+    const CELL: Size = Size::new(30.0, 24.0);
+    let cells = (0..3).map(|i| {
+        let active = chosen == Some(i);
+        let ink = move |hot: bool| {
+            let ink = if active || hot {
+                c().text
+            } else {
+                c().text_sub
+            };
+            if dim {
+                super::button::faded(ink, 0.45)
+            } else {
+                ink
+            }
+        };
+        let mark: Element<'a, Message> = match letter {
+            Some(l) => text(l)
+                .size(PX[i])
+                .font(super::text::font(Role::CONTROL))
+                .into(),
+            None => container(Space::new())
+                .width(SIDE[i])
+                .height(SIDE[i])
+                .style(move |_| container::Style {
+                    background: Some(ink(false).into()),
+                    border: Border::default().rounded(radius::FULL),
+                    ..container::Style::default()
+                })
+                .into(),
+        };
+        button(container(mark).center(Fill))
+            .width(CELL.width)
+            .height(CELL.height)
+            .padding(0)
+            .on_press(on(i))
+            .style(move |_, status| {
+                let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: match () {
+                        _ if active => Some(c().elevated.into()),
+                        _ if hot => Some(c().hover.into()),
+                        _ => None,
+                    },
+                    text_color: ink(hot),
+                    border: Border::default()
+                        .rounded(radius::PILL)
+                        .width(if active { 1 } else { 0 })
+                        .color(c().elevated_border),
+                    ..button::Style::default()
+                }
+            })
+            .into()
+    });
+    container(row(cells).spacing(space::TRACK_GAP))
         .padding(space::TRACK_PAD)
         .style(|_| container::Style {
             background: Some(c().track.into()),

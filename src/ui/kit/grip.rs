@@ -15,6 +15,18 @@ const DOTS: char = '\u{e0ee}';
 pub const SIZE: Size = Size::new(30.0, 26.0);
 
 pub fn grip<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message> {
+    made(on_press, mouse::Interaction::Grab)
+}
+
+/// The same grip moving a toolbar (Snip's): the four-way move cursor.
+pub fn mover<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message> {
+    made(on_press, mouse::Interaction::Move)
+}
+
+fn made<'a, Message: Clone + 'a>(
+    on_press: Message,
+    cursor: mouse::Interaction,
+) -> Element<'a, Message> {
     let dots = |alpha: f32| {
         container(text(DOTS).font(FONT).size(14).color(faded(c().text, alpha)))
             .center_x(SIZE.width)
@@ -24,6 +36,6 @@ pub fn grip<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message> 
     // 1 - (1 - .45)(1 - .73) = .85
     mouse_area(hover(dots(0.45), dots(0.73)))
         .on_press(on_press)
-        .interaction(mouse::Interaction::Grab)
+        .interaction(cursor)
         .into()
 }

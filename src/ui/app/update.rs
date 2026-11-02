@@ -252,6 +252,10 @@ impl App {
             Message::BarGrab => {
                 let at = self.bar_at();
                 self.o.bar_drag = Some((None, at));
+                if let Some(edit) = &mut self.o.edit {
+                    edit.editor.held = true; // lifted while it follows the pointer
+                    self.o.bar_was = Some(self.o.bar_left);
+                }
                 (self.o.bar_now, self.o.bar_glide, self.o.bar_eased) = (Some(at), None, None);
                 self.frame_times.borrow_mut().clear();
                 Task::none()
@@ -295,6 +299,10 @@ impl App {
                 // Snip's toolbar stays where it is dropped (this area only)
                 Some((_, at)) if self.o.edit.as_ref().is_some_and(|e| e.editor.movable) => {
                     self.o.bar_left = Some(at);
+                    self.o.bar_was = None;
+                    if let Some(edit) = &mut self.o.edit {
+                        edit.editor.held = false;
+                    }
                     self.o.bar_eased = None;
                     self.log_frames("toolbar drag");
                     Task::none()

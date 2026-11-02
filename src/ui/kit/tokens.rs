@@ -37,6 +37,8 @@ pub mod space {
     pub const PAGE: [f32; 2] = [16.0, 20.0];
     pub const CARD: [f32; 2] = [9.0, 10.0];
     pub const SIDEBAR_PAD: f32 = 10.0;
+    /// Inside a toolbar's panel (`surface::panel`).
+    pub const PANEL: f32 = 12.0;
 }
 
 /// Fixed control sizes.
@@ -44,6 +46,8 @@ pub mod size {
     use iced::Size;
 
     pub const ICON_BUTTON: f32 = 34.0;
+    /// A toolbar's panel (Snip's group panels, More).
+    pub const PANEL: f32 = 252.0;
     pub const HEADER: f32 = 40.0;
     pub const HEADER_COMPACT: f32 = 36.0;
     pub const CAPTION_BUTTON: f32 = 46.0;

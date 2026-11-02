@@ -42,11 +42,14 @@ pub enum Icon {
     Back,
     /// lucide "grip-vertical": a drag-out handle (the Drag chip's dots).
     Grip,
+    /// lucide "image" (Snip's size chip: the picture) and "ellipsis" (More).
+    Picture,
+    More,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 18] = [
+    pub const ALL: [Icon; 20] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -65,6 +68,8 @@ impl Icon {
         Icon::Unpin,
         Icon::Back,
         Icon::Grip,
+        Icon::Picture,
+        Icon::More,
     ];
 
     pub const fn glyph(self) -> char {
@@ -87,6 +92,8 @@ impl Icon {
             Icon::Unpin => '\u{e2b5}',
             Icon::Back => '\u{e04c}',
             Icon::Grip => '\u{e0ee}',
+            Icon::Picture => '\u{e0f9}',
+            Icon::More => '\u{e0ba}',
         }
     }
 }

@@ -268,6 +268,67 @@ pub fn switch<'a, Message: Clone + 'a>(
         .into()
 }
 
+/// An on / off switch (Snip's toolbar panels: Outline, Fill, Bold, Line
+/// help): a 32x18 pill, `accent` with its knob right while on, `track` with a
+/// `divider` edge and the knob left while off; the knob 12 px, white (`fixed::HANDLE`)
+/// on / `text_sub` off. No `on_press` = dimmed (an option that does not
+/// apply, e.g. Fill for a line). Lighter under the cursor.
+pub fn toggle<'a, Message: Clone + 'a>(
+    on: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use iced::alignment::Horizontal;
+    use iced_button::Status;
+    let live = on_press.is_some();
+    let knob = container(iced::widget::Space::new())
+        .width(TOGGLE_KNOB)
+        .height(TOGGLE_KNOB)
+        .style(move |_| container::Style {
+            background: Some(
+                match on {
+                    true => fixed::HANDLE,
+                    false => c().text_sub,
+                }
+                .into(),
+            ),
+            border: Border::default().rounded(radius::FULL),
+            ..container::Style::default()
+        });
+    let side = if on {
+        Horizontal::Right
+    } else {
+        Horizontal::Left
+    };
+    iced_button(container(knob).align_x(side).center_y(Fill).width(Fill))
+        .width(TOGGLE.width)
+        .height(TOGGLE.height)
+        .padding(3)
+        .on_press_maybe(on_press)
+        .style(move |_, status| {
+            let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+            let fill = match (on, hot) {
+                (true, false) => c().accent,
+                (true, true) => brighter(c().accent),
+                (false, false) => c().track,
+                (false, true) => c().hover,
+            };
+            let alpha = if live { 1.0 } else { 0.4 };
+            iced_button::Style {
+                background: Some(faded(fill, alpha).into()),
+                border: Border::default()
+                    .rounded(radius::FULL)
+                    .width(if on { 0 } else { 1 })
+                    .color(faded(c().divider, alpha)),
+                ..iced_button::Style::default()
+            }
+        })
+        .into()
+}
+
+/// `toggle`'s size and its knob's.
+pub const TOGGLE: iced::Size = iced::Size::new(32.0, 18.0);
+const TOGGLE_KNOB: f32 = 12.0;
+
 /// A round button in the accent with nothing on it, `side` across (a control
 /// minimised to a dot: the live controller); brighter under the cursor, a
 /// 2 px inset edge of the widget colour while pressed.
@@ -376,32 +437,22 @@ pub fn compact<'a, Message: Clone + 'a>(
         .into()
 }
 
-/// A toolbar's labelled button (Snip's Copy and Save): a 16 px glyph and a
-/// 12 px / 600 label, `width` x `size::ICON_BUTTON`, radius 9. `Accent` = the
-/// primary (accent fill, `themes::on` text), else `Elevated` (`elevated`, its
-/// edge). Tab's `focused`: an `accent_soft` fill (Elevated) or a 3 px
-/// `accent_soft` ring (Accent); never a white ring.
+/// A toolbar's action (Snip's Copy and Save, icon-only, owner 2026-11-02): a
+/// 16 px glyph, `size::ICON_BUTTON` square, radius 9. `Accent` = the primary
+/// (accent fill, `themes::on` glyph), else `Elevated` (`elevated`, its edge).
+/// Tab's `focused`: an `accent_soft` fill (Elevated) or a 3 px `accent_soft`
+/// ring (Accent); never a white ring.
 pub fn tool<'a, Message: Clone + 'a>(
     glyph: char,
-    label: &'a str,
     kind: Kind,
-    width: f32,
     focused: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    use super::tokens::{Role, space};
     use iced_button::Status;
     let live = on_press.is_some();
-    let content = row![
-        text(glyph).font(super::icon::FONT).size(size::ICON_SMALL),
-        text(label)
-            .size(Role::CONTROL.size)
-            .font(weight(Weight::Semibold)),
-    ]
-    .spacing(space::GAP)
-    .align_y(Center);
+    let content = text(glyph).font(super::icon::FONT).size(size::ICON);
     iced_button(container(content).center(Fill))
-        .width(width)
+        .width(size::ICON_BUTTON)
         .height(size::ICON_BUTTON)
         .padding(0)
         .on_press_maybe(on_press)

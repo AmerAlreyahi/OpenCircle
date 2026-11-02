@@ -160,6 +160,56 @@ pub fn item<'a, Message: Clone + 'a>(
         .into()
 }
 
+/// A menu row that runs something (Snip's More): its `glyph` (16 px,
+/// `text_sub`), `label` (13 px `text`), its `key` (mono, muted) at the end;
+/// `hover` under the cursor or when `focused`; no `on_press` = dimmed.
+pub fn action<'a, Message: Clone + 'a>(
+    glyph: char,
+    label: &'a str,
+    key: Option<&'a str>,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use button::Status;
+    let (role, small) = (Role::MENU, Role::KEYCAP);
+    let live = on_press.is_some();
+    let ink = move |c: iced::Color| if live { c } else { faded(c, 0.45) };
+    let content = row![
+        text(glyph)
+            .font(super::icon::FONT)
+            .size(super::tokens::size::ICON)
+            .color(ink(c().text_sub)),
+        text(label)
+            .size(role.size)
+            .font(font(role))
+            .color(ink(c().text)),
+        Space::new().width(Fill),
+    ]
+    .push(key.map(|k| {
+        text(k)
+            .size(small.size)
+            .font(font(small))
+            .color(ink(c().text_muted))
+    }))
+    .spacing(ITEM_PAD)
+    .align_y(Center);
+    button(container(content).center_y(Fill))
+        .width(Fill)
+        .height(ITEM_H)
+        .padding([0.0, ITEM_PAD])
+        .on_press_maybe(on_press)
+        .style(move |_, status| {
+            let hot = focused || (live && matches!(status, Status::Hovered | Status::Pressed));
+            button::Style {
+                background: hot.then(|| c().hover.into()),
+                text_color: c().text,
+                border: Border::default().rounded(radius::MENU_ITEM),
+                ..button::Style::default()
+            }
+        })
+        .into()
+}
+
 /// One option: `label`, a `badge` at its end, `width` x `height`.
 pub fn option<'a, Message: Clone + 'a>(
     label: String,

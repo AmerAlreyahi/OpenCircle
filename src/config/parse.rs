@@ -151,6 +151,16 @@ impl Config {
             c.editor.fill = get(t, p, "fill", None, &mut w);
             c.editor.blur_size = get(t, p, "blur_size", None, &mut w);
             c.editor.blur_cell = get(t, p, "blur_cell", None, &mut w);
+            let in_range = within(STROKE, " px");
+            c.editor.stroke = get_checked(t, p, "stroke", None, &mut w, |n| {
+                n.as_ref().map_or(Ok(()), &in_range)
+            });
+            c.editor.group_tools = get_checked(t, p, "group_tools", None, &mut w, |g| {
+                match g.as_deref().is_none_or(crate::editor::Group::valid) {
+                    true => Ok(()),
+                    false => Err("expected one tool per toolbar group, in order".into()),
+                }
+            });
         }
         if root.get("ai").is_some_and(|v| !v.is_table()) {
             w.push(format!("ai: expected a table; using defaults{AI_OFF}"));

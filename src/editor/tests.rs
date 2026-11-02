@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui::screens::editor::toolbar::{self, size as toolbar_size};
+use crate::ui::screens::editor::toolbar;
 use iced::Element;
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::column;
@@ -16,15 +16,11 @@ impl Editor {
     }
 
     fn toolbar(&self) -> Element<'_, Message> {
-        toolbar::view(self, f32::INFINITY)
+        toolbar::view(self)
     }
 
-    fn toolbar_at(
-        &self,
-        max_width: f32,
-        at: Rectangle,
-    ) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
-        toolbar::view_at(self, max_width, at, iced::widget::tooltip::Position::Bottom)
+    fn toolbar_at(&self, at: Rectangle) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
+        toolbar::view_at(self, at, iced::widget::tooltip::Position::Bottom)
     }
 
     /// The canvas above the toolbar.
@@ -1068,7 +1064,7 @@ fn popovers_open_above_a_toolbar_at_the_bottom_and_stay_on_screen() {
         600.0 - 8.0 - 52.0 - 8.0,
         "just above it"
     );
-    assert_eq!(placed.x, 500.0, "pulled in from the right edge");
+    assert_eq!(placed.x, 492.0, "pulled in from the right edge, 8 px clear");
     // Room below: where it was laid out.
     let under = Rectangle::new(pt(100.0, 70.0), Size::new(300.0, 260.0));
     assert_eq!(
@@ -1084,7 +1080,7 @@ fn text_options_style_the_text() {
     let mut e = editor(400, 200);
     e.update(Message::Slot(Tool::Text));
     e.update(Message::Slot(Tool::Text)); // the active tool: its options
-    assert_eq!(e.menu, Some(Menu::Options(Tool::Text)));
+    assert_eq!(e.menu, Some(Menu::Options(Group::Text)));
     let _ = e.toolbar(); // the options build
     e.update(Message::TextSize(38.0));
     let boxed = TextStyle {
@@ -1513,39 +1509,139 @@ fn pointer_and_label_are_drawn_and_editable() {
     assert_eq!(e.doc.items.len(), 2);
 }
 
+/// The grouped toolbar (owner, 2026-11-02): a group button picks its last
+/// tool; a click on the active one opens its panel, where another of the
+/// group's tools switches and keeps it open; Esc closes it first.
 #[test]
-fn tool_buttons_open_their_variants() {
+fn group_buttons_pick_their_last_tool_and_open_one_panel() {
     let mut e = editor(100, 100);
     assert_eq!(e.tool, Tool::Arrow);
-    // The active tool's button: its options (variants among them).
+    assert_eq!(
+        e.last,
+        [Tool::Select, Tool::Arrow, Tool::Pen, Tool::Text, Tool::Blur]
+    );
+    // The active group's button: its panel; again: closed.
     e.update(Message::Slot(Tool::Arrow));
-    assert_eq!(e.menu, Some(Menu::Options(Tool::Arrow)));
-    e.update(Message::Slot(Tool::Arrow));
-    assert_eq!(e.menu, None);
-    e.update(Message::Slot(Tool::Text));
-    assert_eq!((e.tool, e.menu), (Tool::Text, None));
-    e.update(Message::Slot(Tool::Text));
-    assert_eq!(e.menu, Some(Menu::Options(Tool::Text)));
-    e.update(Message::Tool(Tool::Label));
-    assert_eq!((e.tool, e.menu), (Tool::Label, None));
-    // The Text button with Label in use: its options again.
-    e.update(Message::Slot(Tool::Text));
+    assert_eq!(e.menu, Some(Menu::Options(Group::Shapes)));
+    // a tool of the panel's row: switched, the panel stays (its options)
+    e.update(Message::Tool(Tool::Rect));
     assert_eq!(
         (e.tool, e.menu),
-        (Tool::Label, Some(Menu::Options(Tool::Text)))
+        (Tool::Rect, Some(Menu::Options(Group::Shapes)))
     );
     e.update(Message::Slot(Tool::Rect));
-    assert_eq!((e.tool, e.menu), (Tool::Rect, None));
-    // Esc closes a popover before it leaves the editor.
-    e.update(Message::Menu(Menu::Board));
+    assert_eq!(e.menu, None);
+    // Hide's button shows Blur; its first click picks it, no panel.
+    e.update(Message::Slot(e.last[Group::Hide as usize]));
+    assert_eq!((e.tool, e.menu), (Tool::Blur, None));
+    // A key letter: that tool, its group's last from now on.
+    e.update(Message::Tool(Tool::Ellipse));
+    assert_eq!(e.last[Group::Shapes as usize], Tool::Ellipse);
+    e.update(Message::Slot(e.last[Group::Text as usize]));
+    assert_eq!(e.tool, Tool::Text);
+    // Shapes shows Ellipse now: a click goes back to it.
+    e.update(Message::Slot(e.last[Group::Shapes as usize]));
+    assert_eq!(e.tool, Tool::Ellipse);
+    // Text's option Background is Label: the Text button stays its group.
+    e.update(Message::Tool(Tool::Label));
+    e.update(Message::Slot(e.last[Group::Text as usize]));
+    assert_eq!(
+        (e.tool, e.menu),
+        (Tool::Label, Some(Menu::Options(Group::Text)))
+    );
+    let _ = e.toolbar(); // the panel builds
+    // Esc closes a panel before it leaves the editor; Select has none.
     let esc = |e: &Editor| e.key(&Key::Named(Named::Escape), None, Modifiers::empty(), None);
-    assert!(matches!(esc(&e), Some(Message::Menu(Menu::Board))));
-    e.update(Message::Menu(Menu::Board));
+    assert!(matches!(
+        esc(&e),
+        Some(Message::Menu(Menu::Options(Group::Text)))
+    ));
+    e.update(Message::Menu(Menu::Options(Group::Text)));
     assert!(matches!(esc(&e), Some(Message::Back)));
-    // Every tool is reachable from a toolbar button.
-    for t in TOOLS {
-        assert!(TOOLS.iter().any(|s| s.tool == t.slot && s.slot == s.tool));
+    e.update(Message::Slot(Tool::Select));
+    e.update(Message::Slot(Tool::Select));
+    assert_eq!(e.menu, None, "Select has no panel");
+    // Every tool is in a group's panel or an option of one there (Crop:
+    // the area's handles).
+    for t in TOOLS.iter().filter(|t| t.tool != Tool::Crop) {
+        assert!(t.group.tools().any(|s| s.tool == t.slot), "{:?}", t.tool);
     }
+    // Remembered across sessions: the next editor's buttons show them.
+    let saved = e.remembered();
+    assert!(Group::valid(saved.group_tools.as_deref().unwrap()));
+    let next = Editor::restored(checker(10, 10), 1.0, saved);
+    assert_eq!(next.last, e.last);
+}
+
+/// Fill applies to rectangles and ellipses only: lines and arrows show it
+/// dimmed (the panel doesn't jump); Outline everywhere in Shapes.
+#[test]
+fn fill_is_greyed_for_lines_and_arrows() {
+    use crate::ui::kit::testing::shot;
+    for (tool, fills) in [
+        (Tool::Rect, true),
+        (Tool::Ellipse, true),
+        (Tool::Line, false),
+        (Tool::Arrow, false),
+    ] {
+        assert_eq!(fills_inside(tool), fills, "{tool:?}");
+        let mut e = editor(100, 100);
+        e.update(Message::Tool(tool));
+        e.update(Message::Slot(tool));
+        let texts = shot::texts(e.toolbar());
+        assert!(texts.iter().any(|t| t == "Fill"), "{texts:?}");
+        assert_eq!(
+            texts.iter().any(|t| t == "rectangle, ellipse"),
+            !fills,
+            "{texts:?}"
+        );
+    }
+}
+
+/// Undo undoes; a second click right after opens its panel (Undo, Redo,
+/// where the history is) instead of undoing again; any other change ends it.
+#[test]
+fn undos_second_click_opens_its_panel() {
+    let mut e = editor(200, 100);
+    for x in [20.0, 60.0, 100.0] {
+        drag(&mut e, pt(x, 20.0), &[], pt(x + 30.0, 60.0));
+    }
+    assert_eq!(e.doc.steps(), (3, 3));
+    e.update(Message::UndoClick);
+    assert_eq!((e.doc.steps(), e.menu), ((2, 3), None));
+    e.update(Message::UndoClick);
+    assert_eq!((e.doc.steps(), e.menu), ((2, 3), Some(Menu::Undo)));
+    let texts = crate::ui::kit::testing::shot::texts(e.toolbar());
+    assert!(texts.iter().any(|t| t == "2 of 3 steps"), "{texts:?}");
+    e.update(Message::Redo);
+    assert_eq!(e.doc.steps(), (3, 3));
+    e.update(Message::Menu(Menu::Undo));
+    // a new drawing: Undo's click undoes again
+    e.update(Message::Tool(Tool::Rect));
+    e.update(Message::UndoClick);
+    assert_eq!((e.doc.steps(), e.menu), ((2, 3), None));
+}
+
+/// No close button (owner, 2026-11-02): Esc closes; Copy and Save are
+/// icon-only (their tooltips say them and their keys).
+#[test]
+fn the_toolbar_has_no_close_button() {
+    use crate::ui::kit::tooltip::tests_support::shown;
+    let mut e = editor(100, 100);
+    e.movable = true;
+    let _ = shown();
+    let _ = e.toolbar();
+    let tips = shown();
+    assert!(!tips.iter().any(|t| t.starts_with("Close")), "{tips:?}");
+    assert!(tips.contains(&"Copy · Ctrl+C".to_string()), "{tips:?}");
+    assert!(tips.contains(&"Save · Ctrl+S".to_string()), "{tips:?}");
+    assert!(tips.contains(&"Move toolbar".to_string()), "{tips:?}");
+    assert!(tips.contains(&"Shapes · Arrow (A)".to_string()), "{tips:?}");
+    assert!(
+        !toolbar::stops(&e)
+            .iter()
+            .any(|m| matches!(m, Message::Back))
+    );
 }
 
 /// The laid-out size of `element` (logical px).
@@ -1563,21 +1659,18 @@ fn laid_out(element: Element<'_, Message>) -> Size {
     node.size()
 }
 
+/// One bar, the same size in every state (about half the 0.1.3 dev bar's
+/// 1129 px: the design's grouped bar is 553).
 #[test]
 fn toolbar_size_matches_its_layout() {
-    let e = editor(100, 100);
-    let one = toolbar::size(f32::INFINITY, false);
+    let mut e = editor(100, 100);
+    e.movable = true;
+    let one = toolbar::size();
     assert_eq!(laid_out(e.toolbar()), one);
-    // A narrow screen: two rows, both within it.
-    let small = one.width - 60.0;
-    let two = toolbar::size(small, false);
-    assert!(two.width <= small && two.height > one.height, "{two:?}");
-    assert_eq!(laid_out(e.toolbar_at(small, Rectangle::default()).0), two);
-    assert_eq!(
-        toolbar::size(one.width, false),
-        one,
-        "exactly fits: one row"
-    );
+    e.update(Message::UndoClick);
+    e.update(Message::Tool(Tool::Blur));
+    assert_eq!(laid_out(e.toolbar_at(Rectangle::default()).0), one);
+    assert!(one.width < 600.0 && one.width > 500.0, "{one:?}");
 }
 
 // ---- presets, copy / paste style, eyedropper -------------------------------------------
@@ -2179,7 +2272,7 @@ fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
 
     // Its options: a click on the active Blur button; a size there overrides Auto.
     e.update(Message::Slot(Tool::Blur));
-    assert_eq!(e.menu, Some(Menu::Options(Tool::Blur)));
+    assert_eq!(e.menu, Some(Menu::Options(Group::Hide)));
     let _ = e.toolbar(); // they build
     e.update(Message::BlurSize(Some(Width::Thick)));
     drag(&mut e, pt(15.0, c), &[], pt(220.0, c));
@@ -2304,6 +2397,7 @@ fn arrow_ends_and_callout_tip_drag() {
 #[test]
 fn options_open_on_the_second_click_and_outlines_are_off_by_default() {
     let mut e = editor(300, 200);
+    e.update(Message::Tool(Tool::Select)); // Rect's group not active yet
     e.update(Message::Slot(Tool::Rect));
     assert_eq!(
         (e.tool, e.menu),
@@ -2311,13 +2405,9 @@ fn options_open_on_the_second_click_and_outlines_are_off_by_default() {
         "first click: the tool"
     );
     e.update(Message::Slot(Tool::Rect));
-    assert_eq!(e.menu, Some(Menu::Options(Tool::Rect)));
+    assert_eq!(e.menu, Some(Menu::Options(Group::Shapes)));
     let _ = e.toolbar();
     e.update(Message::Slot(Tool::Rect));
-    assert_eq!(e.menu, None);
-    // Tools with nothing to set open nothing.
-    e.update(Message::Slot(Tool::Spotlight));
-    e.update(Message::Slot(Tool::Spotlight));
     assert_eq!(e.menu, None);
     for tool in [Tool::Rect, Tool::Arrow, Tool::Callout] {
         e.update(Message::Tool(tool));
@@ -2713,8 +2803,7 @@ fn snapshots_popovers_at_the_bottom() {
     let dir = png_dir();
     let screen = Size::new(1000.0, 520.0);
     let mut e = Editor::new(demo_image(), 0.5);
-    let room = screen.width - 24.0;
-    let bar = toolbar_size(room, false);
+    let bar = toolbar::size();
     let at = Point::new(
         (screen.width - bar.width) / 2.0,
         screen.height - bar.height - 12.0,
@@ -2725,7 +2814,7 @@ fn snapshots_popovers_at_the_bottom() {
         ("popover-text-bottom.png", Message::Slot(Tool::Text)),
     ] {
         e.update(open);
-        let (toolbar, popover) = e.toolbar_at(room, Rectangle::new(at, bar));
+        let (toolbar, popover) = e.toolbar_at(Rectangle::new(at, bar));
         let view = stack![
             pin(e.canvas()).position(Point::new(12.0, 12.0)),
             pin(toolbar).position(at),
@@ -2793,8 +2882,8 @@ fn toolbar_tooltips_are_for_icon_only_buttons() {
     let e = Editor::new(checker(200, 100), 1.0);
     let _ = e.toolbar();
     let tips = shown();
-    assert!(tips.len() >= 15, "{tips:?}");
-    assert!(tips.iter().any(|t| t == "Undo (Ctrl+Z)"), "{tips:?}");
+    assert!(tips.len() >= 11, "{tips:?}");
+    assert!(tips.iter().any(|t| t == "Undo · Ctrl+Z"), "{tips:?}");
     assert_tips_add_something("editor toolbar");
 }
 
@@ -2941,7 +3030,7 @@ fn snapshots_board() {
     for (name, open, light) in [
         ("toolbar-colour-dark.png", Message::Picker, false),
         ("toolbar-colour-light.png", Message::Picker, true),
-        ("toolbar-board.png", Message::Menu(Menu::Board), false),
+        ("toolbar-more.png", Message::Menu(Menu::More), false),
         ("toolbar-arrows.png", Message::Slot(Tool::Arrow), false),
         ("toolbar-blur.png", Message::Slot(Tool::Blur), false),
     ] {
@@ -2960,16 +3049,6 @@ fn snapshots_board() {
         shoot(e.toolbar(), bar, backdrop, &dir.join(name));
     }
     theme::set_light(false);
-    // A small screen: two rows.
-    let mut e = Editor::new(demo_image(), 1.0);
-    e.update(Message::Picker);
-    let small = toolbar::size(f32::INFINITY, false).width - 60.0;
-    shoot(
-        e.toolbar_at(small, Rectangle::default()).0,
-        Size::new(small, 520.0),
-        backdrop,
-        &dir.join("toolbar-two-rows.png"),
-    );
 }
 
 /// Timings on a 3440x1440 crop:

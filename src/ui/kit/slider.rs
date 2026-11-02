@@ -5,7 +5,7 @@
 use std::ops::RangeInclusive;
 
 use iced::widget::slider::{self as rail, Handle, HandleShape, Rail};
-use iced::widget::{row, text};
+use iced::widget::{container, row, text};
 use iced::{Border, Center, Color, Element, alignment};
 
 use super::text::font;
@@ -23,26 +23,9 @@ pub fn slider<'a, Message: Clone + 'a>(
     unit: &'a str,
     on_change: impl Fn(u8) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let bar = rail::Slider::new(range, value, on_change).style(|_, status| rail::Style {
-        rail: Rail {
-            backgrounds: (c().accent.into(), c().track.into()),
-            width: RAIL,
-            border: Border::default().rounded(radius::FULL),
-        },
-        handle: Handle {
-            shape: HandleShape::Circle { radius: HANDLE },
-            background: match status {
-                rail::Status::Active => c().text,
-                _ => c().accent,
-            }
-            .into(),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
-        },
-    });
     let role = Role::KEYCAP;
     row![
-        bar,
+        line(range, value, false, on_change),
         text(format!("{value}{unit}"))
             .size(role.size)
             .font(font(role))
@@ -54,4 +37,45 @@ pub fn slider<'a, Message: Clone + 'a>(
     .width(size::CONTROL_COLUMN)
     .align_y(Center)
     .into()
+}
+
+/// The rail alone, `width` across (Snip's toolbar panels: the value shows
+/// in the panel's row); `dim`: faded (Auto decides; dragging it still works).
+pub fn bare<'a, Message: Clone + 'a>(
+    range: RangeInclusive<u8>,
+    value: u8,
+    width: f32,
+    dim: bool,
+    on_change: impl Fn(u8) -> Message + 'a,
+) -> Element<'a, Message> {
+    container(line(range, value, dim, on_change))
+        .width(width)
+        .into()
+}
+
+fn line<'a, Message: Clone + 'a>(
+    range: RangeInclusive<u8>,
+    value: u8,
+    dim: bool,
+    on_change: impl Fn(u8) -> Message + 'a,
+) -> rail::Slider<'a, u8, Message> {
+    let alpha = if dim { 0.45 } else { 1.0 };
+    let fade = move |colour: Color| super::button::faded(colour, alpha);
+    rail::Slider::new(range, value, on_change).style(move |_, status| rail::Style {
+        rail: Rail {
+            backgrounds: (fade(c().accent).into(), c().track.into()),
+            width: RAIL,
+            border: Border::default().rounded(radius::FULL),
+        },
+        handle: Handle {
+            shape: HandleShape::Circle { radius: HANDLE },
+            background: fade(match status {
+                rail::Status::Active => c().text,
+                _ => c().accent,
+            })
+            .into(),
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
+        },
+    })
 }

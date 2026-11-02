@@ -210,7 +210,7 @@ fn long(height: u32, full: bool) -> App {
     if height == 0 {
         return app;
     }
-    let size = super::screens::editor::Editing::toolbar_size(W as f32, true);
+    let size = super::screens::editor::Editing::toolbar_size();
     let bar = Rectangle::new(app.bar_at(), size);
     let room = long_capture::layout(AREA, app.o.screen, bar, 1.0).unwrap();
     let w = picture.width as usize;

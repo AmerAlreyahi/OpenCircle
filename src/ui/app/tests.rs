@@ -651,7 +651,7 @@ fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
 }
 
 /// 0.1.3-2: Snip's toolbar by the keyboard: Tab walks its controls (Shift+Tab
-/// from the end: × then Save), Enter presses the one Tab is on, Enter with
+/// from the end: Save then Copy), Enter presses the one Tab is on, Enter with
 /// none copies; a press drops the focus. While the area is moved the toolbar
 /// stays put (no frame per move), and glides to its new dock once let go.
 #[test]
@@ -672,7 +672,7 @@ fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
         edit(app).key(&keyboard::Key::Named(named), None, none, None)
     }
     let stops = toolbar::stops(edit(&app));
-    assert_eq!(stops.last(), Some(&E::Close));
+    assert_eq!(stops.last(), Some(&E::Save), "no ×: Esc closes");
     assert!(
         !stops.contains(&E::Slot(editor::Tool::Crop)),
         "no Crop in Snip"
@@ -680,9 +680,9 @@ fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
     let _ = app.on_editor(E::Focus(true));
     let _ = app.on_editor(E::Focus(true));
     let focus = edit(&app).focus.unwrap();
-    assert_eq!(stops[focus], E::Save);
+    assert_eq!(stops[focus], E::Copy);
     let _ = app.on_editor(E::Focus(false));
-    assert_eq!(stops[edit(&app).focus.unwrap()], E::Close, "and forward");
+    assert_eq!(stops[edit(&app).focus.unwrap()], E::Save, "and forward");
     // the keys: Tab, Enter on the focus, Enter alone = Copy
     assert_eq!(key(&app, keyboard::key::Named::Tab), Some(E::Focus(false)));
     assert_eq!(key(&app, keyboard::key::Named::Enter), Some(E::Activate));
@@ -920,6 +920,62 @@ fn the_snip_toolbars_grip_drags_it_and_it_stays_where_dropped() {
     assert_ne!(app.bar_target(), Point::new(5.0, 5.0));
 }
 
+/// The three drags (owner OK, 2026-11-02): the grip moves ONLY the toolbar
+/// (lifted while held; Esc mid-drag puts it back); the size chip drags the
+/// picture out and moves nothing (nothing took it: all stays; a drop closes
+/// the snip); a drag inside the area with Select moves ONLY the area (the
+/// toolbar re-docks to it).
+#[test]
+fn the_three_drags_each_move_their_own_thing() {
+    use crate::editor::{Message as E, dragout};
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = snipping(area);
+    app.select(area);
+    let _ = app.open_editor();
+    let canvas = |app: &App| app.o.edit.as_ref().unwrap().canvas_rect();
+    let held = |app: &App| app.o.edit.as_ref().unwrap().editor.held;
+    let (docked, picked) = (app.bar_at(), canvas(&app));
+
+    // a) the grip: the toolbar follows, the area stays
+    let _ = app.update(Message::Editor(E::Grab));
+    assert!(held(&app), "lifted");
+    let _ = app.update(Message::BarMoved(docked));
+    let _ = app.update(Message::BarMoved(docked + Vector::new(60.0, 40.0)));
+    assert_eq!(app.bar_target(), docked + Vector::new(60.0, 40.0));
+    assert_eq!(canvas(&app), picked, "the area did not move");
+    // Esc mid-drag: back where it was, the snip still open
+    let _ = app.update(Message::Editor(E::Back));
+    assert!(app.o.bar_drag.is_none() && !held(&app));
+    assert_eq!(app.bar_target(), docked, "glides back");
+    assert!(app.editing(), "Esc only cancelled the drag");
+
+    // b) the size chip: nothing moves; nothing took it = all stays
+    dragout::TEST_DROP.set(Some(false));
+    let _ = app.on_editor(E::DragOut);
+    assert_eq!((app.bar_target(), canvas(&app)), (docked, picked));
+    assert!(app.editing());
+
+    // c) inside the area with Select: the area moves, the toolbar re-docks
+    let _ = app.on_editor(E::Tool(editor::Tool::Select));
+    let z = app.o.edit.as_ref().unwrap().editor.zoom;
+    let inside = |p: Point| Point::new(p.x / z, p.y / z);
+    let _ = app.on_editor(E::Press(inside(Point::new(250.0, 180.0))));
+    let _ = app.on_editor(E::Move(inside(Point::new(290.0, 200.0))));
+    let _ = app.on_editor(E::Release);
+    let moved = canvas(&app);
+    assert_eq!(
+        moved.position(),
+        picked.position() + Vector::new(40.0, 20.0)
+    );
+    assert_ne!(app.bar_target(), docked, "docked to the moved area");
+
+    // b) again: an app took it, the snip closes
+    dragout::TEST_DROP.set(Some(true));
+    let task = app.on_editor(E::DragOut);
+    run_task(&mut app, task);
+    assert!(app.hiding != Hiding::No, "dropped: closed");
+}
+
 #[test]
 fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
     use crate::ui::screens::long_capture::Finish;
@@ -966,12 +1022,7 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
             .is_some_and(|e| e.editor.movable && !e.editor.capturing),
         "picked again"
     );
-    // the toolbar's close is Cancel too
-    let _ = app.update(Message::Editor(editor::Message::Scroll));
-    let _ = app.update(Message::Editor(editor::Message::Close));
-    assert!(app.scroll().is_some_and(|l| l.cancelled()));
-    let _ = app.update(stitched());
-    assert!(app.o.is_some(), "still open");
+
     // Save finishes it: the stitched image saved, the overlay closes
     let _ = app.update(Message::Editor(editor::Message::Scroll));
     let _ = app.update(Message::Editor(editor::Message::Save));
@@ -2589,7 +2640,7 @@ fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
     let (bar_box, _) = bar_box(&mut app);
     let spot = |app: &App, size| bar::anchor_at(app.o.bar_anchor, app.o.screen, size, 40.0);
     assert_eq!(bar_box.position(), spot(&app, bar_box.size()));
-    let tool = Editing::toolbar_size(app.o.screen.width, false);
+    let tool = Editing::toolbar_size();
     // (the in-place editor: no entry runs it any more, Snip is one flow; kept)
     let _ = app.open_editor();
     assert!(app.editing());
@@ -2624,18 +2675,17 @@ fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
     assert_eq!(at, spot(&app, tool));
     assert_eq!(at.y + tool.height, bar_box.y + bar_box.height);
     assert_eq!(at.x + tool.width / 2.0, bar_box.center_x());
-    // its first row (two rows where drag-out makes it too wide)
     let pad = bar::PAD;
     let row = pad + crate::ui::kit::tokens::size::ICON_BUTTON / 2.0;
-    // the grip, then Back
-    let back = at + Vector::new(row + bar::HANDLE + bar::SPACING, row);
+    // its grip first
+    let grip = at + Vector::new(pad + bar::HANDLE / 2.0, row);
     let hit =
         |app: &App, p| crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, p);
     assert!(
-        hit(&app, back)
+        hit(&app, grip)
             .iter()
-            .any(|m| matches!(m, Message::Editor(editor::Message::Back))),
-        "its Back arrow is there"
+            .any(|m| matches!(m, Message::Editor(editor::Message::Grab))),
+        "its grip is there"
     );
     // dragged by its edge, it docks at the nearest spot, remembered
     let edge = at + Vector::new(pad / 2.0, row);

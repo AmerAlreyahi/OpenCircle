@@ -250,7 +250,8 @@ pub(in crate::ui) fn dock(
         .find(|&y| fits(y) && clear(y))
         .or_else(|| spots.iter().copied().find(|&y| fits(y)))
         .unwrap_or(bottom);
-    Point::new(x, y.min(bottom).max(top))
+    // on whole px: a bar on half px drew sliver quads (crisp, too)
+    Point::new(x.round(), y.min(bottom).max(top).round())
 }
 
 #[cfg(test)]

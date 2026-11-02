@@ -152,6 +152,33 @@ impl Editing {
                     self.editor.focus = Some(next);
                     return None;
                 }
+                // More's rows: the arrow keys walk the live ones
+                Message::MenuStep(back) => {
+                    let rows = toolbar::more_rows(&self.editor);
+                    let live: Vec<usize> =
+                        (0..rows.len()).filter(|&i| rows[i].3.is_some()).collect();
+                    let n = live.len();
+                    if n > 0 {
+                        let at = self
+                            .editor
+                            .row
+                            .and_then(|r| live.iter().position(|&i| i == r));
+                        let next = match (at, back) {
+                            (None, false) => 0,
+                            (None, true) => n - 1,
+                            (Some(i), false) => (i + 1) % n,
+                            (Some(i), true) => (i + n - 1) % n,
+                        };
+                        self.editor.row = Some(live[next]);
+                    }
+                    return None;
+                }
+                Message::Activate if self.editor.menu == Some(editor::Menu::More) => {
+                    let rows = toolbar::more_rows(&self.editor);
+                    let row = self.editor.row.and_then(|i| rows.into_iter().nth(i));
+                    self.editor.menu = None;
+                    row?.3?
+                }
                 Message::Activate => {
                     let stops = toolbar::stops(&self.editor);
                     self.editor.focus.and_then(|i| stops.get(i))?.clone()
@@ -231,9 +258,9 @@ impl Editing {
         )
     }
 
-    /// The toolbar's size on a `screen` this wide (`snip`: Snip's toolbar).
-    pub fn toolbar_size(screen: f32, snip: bool) -> Size {
-        toolbar_size(screen - 2.0 * GAP, snip)
+    /// The toolbar's size (the same in every state).
+    pub fn toolbar_size() -> Size {
+        toolbar::size()
     }
 
     /// The canvas over its place and the toolbar with its top-left at
@@ -296,18 +323,16 @@ impl Editing {
             layers = layers.push(pin(readout).position(spot));
         }
         if let Some(at) = toolbar {
-            let room = screen.width - 2.0 * GAP;
-            let size = toolbar_size(room, self.editor.movable);
-            // its tooltips away from the area: above it when docked above
+            let size = toolbar::size();
+            // its tooltips and panels away from the area: above it when docked above
             let side = match at.y + size.height <= canvas.y {
                 true => iced::widget::tooltip::Position::Top,
                 false => iced::widget::tooltip::Position::Bottom,
             };
-            let (toolbar, popover) =
-                toolbar::view_at(&self.editor, room, Rectangle::new(at, size), side);
+            let (toolbar, popover) = toolbar::view_at(&self.editor, Rectangle::new(at, size), side);
             let toolbar = mouse_area(toolbar.map(map))
                 .on_press(grab)
-                .interaction(mouse::Interaction::Grab);
+                .interaction(mouse::Interaction::Move);
             layers = layers
                 .push(pin(toolbar).position(at))
                 .extend(popover.map(|p| p.map(map)));
@@ -339,13 +364,11 @@ fn on_screen([x0, y0, x1, y1]: [u32; 4], scale: f32) -> Rectangle {
     )
 }
 
-use toolbar::size as toolbar_size;
-
 /// Where an image of `size` px goes on the work area `screen` and its zoom (at
 /// most `max_zoom`): centred, scaled down to leave room for Snip's toolbar
 /// docked under it.
 fn fit(size: Size, screen: Size, max_zoom: f32) -> (Point, f32) {
-    let toolbar = toolbar_size(screen.width - 2.0 * GAP, true).height;
+    let toolbar = toolbar::size().height;
     let room = Size::new(
         screen.width - 2.0 * GAP,
         screen.height - 2.0 * GAP - BOTTOM_GAP - toolbar,
@@ -421,7 +444,7 @@ mod tests {
     #[test]
     fn tall_captures_fit_the_screen_with_the_toolbar() {
         let screen = Size::new(1920.0, 1080.0);
-        let bar = toolbar_size(screen.width - 2.0 * GAP, true);
+        let bar = toolbar::size();
         // A tall scrolling capture: scaled down, centred, toolbar room below.
         let (at, zoom) = fit(Size::new(780.0, 6000.0), screen, 1.0);
         assert!(zoom < 0.2, "{zoom}");

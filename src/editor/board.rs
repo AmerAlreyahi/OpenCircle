@@ -7,6 +7,7 @@ use iced::{Point, Rectangle, Size, Vector};
 use super::document::{Image, Item, Layer};
 use super::label;
 
+#[allow(dead_code)] // hidden with Add capture (`Message::Layout`)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layout {
     Stack,

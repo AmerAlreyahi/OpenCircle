@@ -21,6 +21,8 @@ pub enum Why<'a> {
     Keys(&'a str),
     /// Its text is cut short: the tooltip is the whole text.
     Cut(&'a str),
+    /// It is a drag handle and nothing on it says so (Snip's size chip).
+    Drag,
 }
 
 /// A control's accessible name (screen readers, automation, the unique-label
@@ -34,7 +36,7 @@ pub fn hint<'a, Message: 'a>(
     #[cfg_attr(not(test), allow(unused_mut))]
     let mut content = content.into();
     let shown = match why {
-        Why::Icon => label.to_string(),
+        Why::Icon | Why::Drag => label.to_string(),
         Why::Keys(keys) => format!("{label} · {keys}"),
         Why::Cut(full) => full.to_string(),
     };

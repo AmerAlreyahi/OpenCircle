@@ -16,7 +16,7 @@ const CHIP: f32 = 22.0;
 const PER_ROW: usize = 6;
 const PAD: f32 = 10.0;
 /// `picker_with`'s width: its rows of controls, and the padding.
-const WIDE: f32 = 256.0;
+pub const PICKER_W: f32 = 256.0;
 
 /// A round dot of `colour` with a `rim` edge (white reads on a light page).
 fn dot<'a, Message: 'a>(colour: Color, d: f32) -> Element<'a, Message> {
@@ -112,7 +112,7 @@ pub fn picker_with<'a, Message: Clone + 'a>(
         ..container::Style::default()
     });
     match wide {
-        true => picker.width(WIDE).into(),
+        true => picker.width(PICKER_W).into(),
         false => picker.into(),
     }
 }

@@ -148,6 +148,8 @@ pub(in crate::ui) struct Opening {
     /// Snip's toolbar dropped here by the user: it stays (no docking to the
     /// area) until a new area is picked.
     pub(in crate::ui) bar_left: Option<Point>,
+    /// Snip's toolbar picked up: where it was left before (Esc puts it back).
+    pub(in crate::ui) bar_was: Option<Option<Point>>,
     pub(in crate::ui) bar_now: Option<Point>,
     /// Its glide to a new spot: since when, from and to where.
     pub(in crate::ui) bar_glide: Option<(Instant, Point, Point)>,
@@ -247,6 +249,7 @@ impl Default for Opening {
             bar_anchor: BarAnchor::Bottom,
             bar_drag: None,
             bar_left: None,
+            bar_was: None,
             bar_now: None,
             bar_eased: None,
             bar_glide: None,

@@ -40,6 +40,9 @@ impl Default for Style {
     }
 }
 
+/// The grouped toolbar offers Bold and Background only (owner, 2026-11-02):
+/// the other faces and backdrops are hidden, kept (and drawn).
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Font {
     Sans,
@@ -48,7 +51,6 @@ pub enum Font {
 }
 
 impl Font {
-    pub const ALL: [Font; 3] = [Font::Sans, Font::Serif, Font::Mono];
     fn family(self) -> Family<'static> {
         match self {
             Font::Sans => SANS,
@@ -59,6 +61,7 @@ impl Font {
 }
 
 /// What is behind the glyphs.
+#[allow(dead_code)] // hidden with the other faces (`Font`)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Back {
     None,
@@ -66,10 +69,6 @@ pub enum Back {
     Outline,
     /// A solid rounded box of the halo's colour.
     Box,
-}
-
-impl Back {
-    pub const ALL: [Back; 3] = [Back::None, Back::Outline, Back::Box];
 }
 
 /// The sans face: the bundled Inter (`ui::kit::text::FONTS`, loaded at start;

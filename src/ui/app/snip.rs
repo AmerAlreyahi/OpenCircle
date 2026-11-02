@@ -402,7 +402,7 @@ impl App {
     /// Snip's toolbar during a long capture, as its picture and hint keep
     /// clear of it (logical px).
     pub(in crate::ui) fn long_bar(&self) -> Rectangle {
-        let size = Editing::toolbar_size(self.o.screen.width, true);
+        let size = Editing::toolbar_size();
         Rectangle::new(self.bar_at(), size)
     }
 

@@ -36,7 +36,7 @@ mod text;
 
 pub use document::{Document, Edit, Image, Item, Shape, render, span};
 pub use style::PRESETS;
-pub use text::{Back as TextBack, Font as TextFont, Style as TextStyle, free_glyphs};
+pub use text::{Style as TextStyle, free_glyphs};
 
 use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
@@ -80,100 +80,134 @@ pub struct ToolInfo {
     pub tool: Tool,
     /// Lucide glyph (listed in `assets/lucide/subset.sh`).
     pub icon: char,
-    /// Tooltip = the button's description, with its key.
+    /// Tooltip: its name and key, `Name (K)`.
     pub tip: &'static str,
     /// Its key (no Ctrl) while the editor is open.
     pub key: char,
-    /// Toolbar group: a divider goes between groups.
-    pub group: u8,
-    /// The toolbar button it is under (itself, or the tool whose variant it is:
-    /// the variants show in a strip under that button).
+    /// The toolbar group (button) it is in.
+    pub group: Group,
+    /// The tool it is an option of (an arrow with a label: Arrow's "Label"),
+    /// else itself (a tool of its group's panel).
     pub slot: Tool,
 }
 
-/// Every tool, in toolbar order (variants right after their button's tool).
+impl ToolInfo {
+    /// Its name (the tooltip without the key).
+    pub fn name(&self) -> &'static str {
+        self.tip.split(" (").next().unwrap_or(self.tip)
+    }
+}
+
+/// The grouped toolbar's tool buttons (owner approved, 2026-11-02): each
+/// shows its last-used tool; a click on the active one opens its panel (the
+/// group's tools, then the tool's options).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Group {
+    Select,
+    Shapes,
+    Draw,
+    Text,
+    Hide,
+}
+
+impl Group {
+    pub const ALL: [Group; 5] = [
+        Group::Select,
+        Group::Shapes,
+        Group::Draw,
+        Group::Text,
+        Group::Hide,
+    ];
+
+    /// Each group's tool before one was used.
+    const FIRST: [Tool; 5] = [Tool::Select, Tool::Arrow, Tool::Pen, Tool::Text, Tool::Blur];
+
+    pub fn name(self) -> &'static str {
+        ["Select", "Shapes", "Draw", "Text", "Hide"][self as usize]
+    }
+
+    /// The tools of its panel's top row (options such as Label are not
+    /// tools there; Crop has no button: the area's handles crop).
+    pub fn tools(self) -> impl Iterator<Item = &'static ToolInfo> {
+        (TOOLS.iter()).filter(move |t| t.group == self && t.slot == t.tool && t.tool != Tool::Crop)
+    }
+
+    /// Its button opens a panel (Select has nothing to choose).
+    pub fn has_panel(self) -> bool {
+        self != Group::Select
+    }
+
+    /// `tools` is one tool of each group, in order (a remembered `group_tools`).
+    pub fn valid(tools: &[Tool]) -> bool {
+        tools.len() == Group::ALL.len()
+            && (tools.iter().zip(Group::ALL)).all(|(&t, g)| t != Tool::Crop && info(t).group == g)
+    }
+}
+
+/// `tool`'s shapes take a Fill (a tint inside): rectangles and ellipses.
+pub fn fills_inside(tool: Tool) -> bool {
+    matches!(tool, Tool::Rect | Tool::Ellipse)
+}
+
+/// Every tool, in toolbar order (its options right after it).
 pub const TOOLS: &[ToolInfo] = &[
-    tool(Tool::Select, '\u{e1c2}', "Select, move, resize (V)", 'v', 0),
-    tool(Tool::Crop, '\u{e0af}', "Crop (X)", 'x', 0),
-    tool(Tool::Rect, '\u{e16a}', "Rectangle (R)", 'r', 1),
-    tool(Tool::Ellipse, '\u{e07a}', "Ellipse (O)", 'o', 1),
-    tool(
-        Tool::Arrow,
-        '\u{e497}',
-        "Arrow: drag the middle to curve it; click again for its options, line, labelled arrow (A)",
-        'a',
-        1,
-    ),
-    variant(
-        Tool::Line,
-        '\u{e521}',
-        "Line: Shift keeps it at 0, 45 or 90° (L)",
-        'l',
-        (Tool::Arrow, 1),
-    ),
-    variant(
+    tool(Tool::Select, '\u{e1c2}', "Select (V)", 'v', Group::Select),
+    tool(Tool::Crop, '\u{e0af}', "Crop (X)", 'x', Group::Select),
+    tool(Tool::Rect, '\u{e16a}', "Rectangle (R)", 'r', Group::Shapes),
+    tool(Tool::Ellipse, '\u{e07a}', "Ellipse (O)", 'o', Group::Shapes),
+    tool(Tool::Line, '\u{e521}', "Line (L)", 'l', Group::Shapes),
+    tool(Tool::Arrow, '\u{e497}', "Arrow (A)", 'a', Group::Shapes),
+    option(
         Tool::ArrowLabel,
         '\u{e544}',
-        "Arrow with a label: draw, then type (W)",
+        "Arrow with a label (W)",
         'w',
-        (Tool::Arrow, 1),
+        (Tool::Arrow, Group::Shapes),
     ),
+    tool(Tool::Pen, '\u{e133}', "Pen (P)", 'p', Group::Draw),
     tool(
-        Tool::Pen,
-        '\u{e133}',
-        "Pen: rough boxes, circles, lines and arrows snap clean (P)",
-        'p',
-        1,
+        Tool::Highlighter,
+        '\u{e0f7}',
+        "Highlighter (H)",
+        'h',
+        Group::Draw,
     ),
-    tool(Tool::Highlighter, '\u{e0f7}', "Highlighter (H)", 'h', 1),
-    tool(
-        Tool::Text,
-        '\u{e197}',
-        "Text; click again for a label (T)",
-        't',
-        2,
-    ),
-    variant(
+    tool(Tool::Text, '\u{e197}', "Text (T)", 't', Group::Text),
+    option(
         Tool::Label,
         '\u{e182}',
-        "Label: text on a colour (E)",
+        "Text on a background (E)",
         'e',
-        (Tool::Text, 2),
+        (Tool::Text, Group::Text),
     ),
-    tool(Tool::Callout, '\u{e11a}', "Callout (C)", 'c', 2),
+    tool(Tool::Callout, '\u{e11a}', "Callout (C)", 'c', Group::Text),
     tool(
         Tool::Step,
         '\u{e1d0}',
-        "Numbered step: click, then type its note for the legend; click again for a pointer (N)",
+        "Numbered steps (N)",
         'n',
-        2,
+        Group::Text,
     ),
-    variant(
+    option(
         Tool::Pointer,
         '\u{e123}',
-        "Pointer: a ring and arrow, no number (I)",
+        "Pointer (I)",
         'i',
-        (Tool::Step, 2),
+        (Tool::Step, Group::Text),
     ),
+    tool(Tool::Blur, '\u{e0b8}', "Blur (B)", 'b', Group::Hide),
+    tool(Tool::Redact, '\u{e16b}', "Redact (K)", 'k', Group::Hide),
     tool(
-        Tool::Blur,
-        '\u{e0b8}',
-        "Blur brush: stays on its line (Shift: free); click again for its size, redact, line help (B)",
-        'b',
-        3,
+        Tool::Spotlight,
+        '\u{e29d}',
+        "Spotlight (S)",
+        's',
+        Group::Hide,
     ),
-    variant(
-        Tool::Redact,
-        '\u{e16b}',
-        "Redact: a solid box (K)",
-        'k',
-        (Tool::Blur, 3),
-    ),
-    tool(Tool::Spotlight, '\u{e29d}', "Spotlight (S)", 's', 3),
-    tool(Tool::Magnifier, '\u{e1b5}', "Magnifier (M)", 'm', 3),
+    tool(Tool::Magnifier, '\u{e1b5}', "Magnify (M)", 'm', Group::Hide),
 ];
 
-const fn tool(tool: Tool, icon: char, tip: &'static str, key: char, group: u8) -> ToolInfo {
+const fn tool(tool: Tool, icon: char, tip: &'static str, key: char, group: Group) -> ToolInfo {
     ToolInfo {
         tool,
         icon,
@@ -184,13 +218,13 @@ const fn tool(tool: Tool, icon: char, tip: &'static str, key: char, group: u8) -
     }
 }
 
-/// A tool shown in the strip under `slot`'s button (in `slot`'s `group`).
-const fn variant(
+/// A tool that is an option of `slot` (its panel's switch turns it on).
+const fn option(
     tool: Tool,
     icon: char,
     tip: &'static str,
     key: char,
-    (slot, group): (Tool, u8),
+    (slot, group): (Tool, Group),
 ) -> ToolInfo {
     ToolInfo {
         tool,
@@ -220,7 +254,7 @@ pub enum Width {
 
 impl Width {
     pub const ALL: [Width; 3] = [Width::Thin, Width::Medium, Width::Thick];
-    fn stroke(self) -> f32 {
+    pub(crate) fn stroke(self) -> f32 {
         [3.0, 5.0, 9.0][self as usize]
     }
     fn font(self) -> f32 {
@@ -241,16 +275,18 @@ impl Width {
     }
 }
 
-/// The popovers under the toolbar (one at a time).
+/// The panels by the toolbar (one at a time).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Menu {
-    /// Colour, weight, eyedropper, presets, copy / paste style.
+    /// Colour, eyedropper, presets, copy / paste style.
     Colour,
-    /// Add capture, board layout, numbers, legend.
-    Board,
-    /// A tool button's options (`slot`; opened by a click on the active
-    /// tool): its variants, size, outline, fill, the text's style.
-    Options(Tool),
+    /// A group button's panel (a click on the active one): the group's
+    /// tools, then the current tool's options.
+    Options(Group),
+    /// Undo's second click: Undo, Redo and where in the history.
+    Undo,
+    /// More: long capture, pin, share, the screen tools.
+    More,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -269,8 +305,8 @@ pub enum Message {
     /// Ends typing.
     Finish,
     Tool(Tool),
-    /// A toolbar tool button: picks its tool; on the active one, opens /
-    /// closes its options.
+    /// A group button (it shows `Tool`, its group's last): picks that tool;
+    /// on the active group, opens / closes its panel.
     Slot(Tool),
     /// Opens/closes the colour picker.
     Picker,
@@ -278,6 +314,8 @@ pub enum Message {
     Menu(Menu),
     Colour([u8; 4]),
     Width(Width),
+    /// The line width of shapes, arrows, pen (display px; its slider).
+    Stroke(u8),
     /// A shape's, arrow's or callout's outline (its halo) on / off.
     Outline(bool),
     /// A rectangle's or ellipse's tint inside on / off.
@@ -306,13 +344,18 @@ pub enum Message {
     /// sends it (owner, 2026-10-31: the Steps board replaces it; hidden, kept).
     #[allow(dead_code)]
     AddCapture,
+    /// The board's layout and numbers: hidden with Add capture (kept).
+    #[allow(dead_code)]
     Layout(board::Layout),
     /// Number labels on the board's captures.
+    #[allow(dead_code)]
     Numbers,
     /// Left button down on the drag handle: OS drag of the image.
     DragOut,
     Undo,
     Redo,
+    /// The toolbar's Undo: undoes; right after an undo, opens its panel.
+    UndoClick,
     Delete,
     Copy,
     /// The toolbar's Scrolling capture button.
@@ -339,9 +382,9 @@ pub enum Message {
     /// Snip's toolbar: Tab / Shift+Tab (`true`) walks its controls; Enter /
     /// Space presses the focused one (the host knows the toolbar's order).
     Focus(bool),
+    /// The More menu's arrow keys: the next row (`true`: the one before).
+    MenuStep(bool),
     Activate,
-    /// Snip's toolbar ×: the snip closes, nothing copied.
-    Close,
 }
 
 /// Snip's screen tools on the frozen screen (its toolbar's buttons; the
@@ -377,8 +420,6 @@ pub enum Output {
     /// The image was dragged into another app (the overlay is already hidden),
     /// or a share target took it: close, as after Copy.
     Dragged,
-    /// Close (Snip's ×).
-    Close,
 }
 
 /// An item being drawn, moved, resized or typed: shown live, committed as one edit.
@@ -425,6 +466,14 @@ pub struct Editor {
     pub tool: Tool,
     pub(crate) colour: [u8; 4],
     pub(crate) width: Width,
+    /// The line width of shapes, arrows, pen (display px; `width` sets it).
+    pub(crate) stroke: f32,
+    /// Each group's last tool (`Group::ALL` order): its button shows it.
+    pub(crate) last: [Tool; 5],
+    /// The last change was an undo: Undo's next click opens its panel.
+    pub(crate) undid: bool,
+    /// The More menu's row the arrow keys are on.
+    pub row: Option<usize>,
     /// New shapes, arrows and callouts get an outline / rectangles and
     /// ellipses a tint (both off by default, owner 2026-10-31).
     pub(crate) outline: bool,
@@ -484,6 +533,8 @@ pub struct Editor {
     pub focus: Option<usize>,
     /// Snip's arrow-key hint shows (after the first arrow key).
     pub nudged: bool,
+    /// The host drags the toolbar (its grip): it shows lifted.
+    pub held: bool,
     /// The options as last remembered (`remember`).
     saved: EditorConfig,
 }
@@ -502,14 +553,23 @@ impl Editor {
             .and_then(parse_hex)
             .unwrap_or(style::ANNOTATION[0].into_rgba8());
         let width = saved.size.unwrap_or(Width::Medium);
+        let tool = (saved.tool)
+            .filter(|&t| t != Tool::Crop)
+            .unwrap_or(Tool::Arrow);
+        let mut last = Group::FIRST;
+        if let Some(tools) = saved.group_tools.as_deref().filter(|t| Group::valid(t)) {
+            last.copy_from_slice(tools);
+        }
+        last[info(tool).group as usize] = tool;
         let mut editor = Editor {
             doc: Document::new(image),
-            tool: saved
-                .tool
-                .filter(|&t| t != Tool::Crop)
-                .unwrap_or(Tool::Arrow),
+            tool,
             colour,
             width,
+            stroke: saved.stroke.map_or(width.stroke(), f32::from),
+            last,
+            undid: false,
+            row: None,
             outline: saved.outline.unwrap_or(false),
             fill: saved.fill.unwrap_or(false),
             text_size: saved.text_size.map_or(width.font(), f32::from),
@@ -539,6 +599,7 @@ impl Editor {
             area_drag: None,
             focus: None,
             nudged: false,
+            held: false,
             saved,
         };
         editor.refresh();
@@ -560,6 +621,8 @@ impl Editor {
             fill: Some(self.fill),
             blur_size: self.blur_size,
             blur_cell: Some(self.blur_cell),
+            stroke: Some(self.stroke.round().clamp(1.0, 32.0) as u8),
+            group_tools: Some(self.last.to_vec()),
         }
     }
 
@@ -598,12 +661,27 @@ impl Editor {
     }
 
     fn handle(&mut self, message: Message) -> Option<Output> {
+        // Undo's next click opens its panel only right after an undo.
+        if !matches!(
+            message,
+            Message::Undo
+                | Message::Redo
+                | Message::UndoClick
+                | Message::Menu(_)
+                | Message::Move(_)
+                | Message::Release
+                | Message::Shift(_)
+                | Message::Focus(_)
+                | Message::MenuStep(_)
+                | Message::Activate
+        ) {
+            self.undid = false;
+        }
         match message {
             Message::Press(p) => {
                 (self.focus, self.nudged) = (None, false);
-                if matches!(self.menu, Some(Menu::Board | Menu::Options(_))) {
-                    self.menu = None;
-                }
+                // starting to draw closes a panel (not the colour's: its field)
+                self.menu = self.menu.filter(|m| *m == Menu::Colour);
                 self.press(p)
             }
             Message::PressMove(p) => {
@@ -627,11 +705,14 @@ impl Editor {
             }),
             Message::Finish => self.commit(),
             Message::Tool(tool) => self.pick_tool(tool),
-            // First click: the tool; a click on the active one: its options.
-            Message::Slot(slot) if info(self.tool).slot != slot => self.pick_tool(slot),
-            Message::Slot(slot) => {
-                let open = self.menu == Some(Menu::Options(slot));
-                self.menu = (has_options(slot) && !open).then_some(Menu::Options(slot));
+            // First click: the group's tool; a click on the active one: its panel.
+            Message::Slot(tool) if info(self.tool).group != info(tool).group => {
+                self.pick_tool(tool)
+            }
+            Message::Slot(tool) => {
+                let group = info(tool).group;
+                let open = self.menu == Some(Menu::Options(group));
+                self.menu = (group.has_panel() && !open).then_some(Menu::Options(group));
                 self.picking = false;
             }
             Message::Picker => self.toggle(Menu::Colour),
@@ -639,6 +720,14 @@ impl Editor {
             Message::Colour(c) => self.set_colour(c),
             Message::Width(w) => {
                 self.set_width(w);
+                self.restyle();
+            }
+            Message::Stroke(px) => {
+                self.stroke = f32::from(px);
+                let off = |w: &Width| (w.stroke() - self.stroke).abs();
+                if let Some(&w) = Width::ALL.iter().min_by(|a, b| off(a).total_cmp(&off(b))) {
+                    self.width = w;
+                }
                 self.restyle();
             }
             Message::BlurSize(size) => {
@@ -749,6 +838,8 @@ impl Editor {
                     return Some(Output::Dragged);
                 }
             }
+            Message::UndoClick if self.undid => self.toggle(Menu::Undo),
+            Message::UndoClick => return self.handle(Message::Undo),
             Message::Undo | Message::Redo => {
                 self.commit();
                 let undo = matches!(message, Message::Undo);
@@ -759,6 +850,7 @@ impl Editor {
                 } {
                     self.refresh();
                 }
+                self.undid = true;
             }
             Message::Delete => {
                 self.commit();
@@ -794,8 +886,7 @@ impl Editor {
                 self.commit();
                 return Some(Output::Back);
             }
-            Message::Grab | Message::Focus(_) | Message::Activate => {}
-            Message::Close => return Some(Output::Close),
+            Message::Grab | Message::Focus(_) | Message::MenuStep(_) | Message::Activate => {}
             Message::Nudge(arrow, keys) if self.movable => {
                 self.commit();
                 self.nudged = true;
@@ -891,18 +982,26 @@ impl Editor {
     fn toggle(&mut self, menu: Menu) {
         self.menu = (self.menu != Some(menu)).then_some(menu);
         self.picking = false;
+        self.row = None;
     }
 
+    /// Picks `tool`, its group's last from now on; its group's open panel
+    /// stays (it shows this tool's options), any other closes.
     fn pick_tool(&mut self, tool: Tool) {
         self.commit();
         self.tool = tool;
-        self.menu = None;
+        let group = info(tool).group;
+        if tool != Tool::Crop {
+            self.last[group as usize] = tool;
+        }
+        self.menu = self.menu.filter(|m| *m == Menu::Options(group));
         self.picking = false;
     }
 
-    /// The weight; a text's size follows it.
+    /// The weight; the line width and a text's size follow it.
     fn set_width(&mut self, w: Width) {
         self.width = w;
+        self.stroke = w.stroke();
         self.text_size = w.font();
     }
 
@@ -1310,13 +1409,13 @@ impl Editor {
             Tool::Label => Shape::Label {
                 at: p,
                 text: String::new(),
-                size: self.width.font() * 0.75 / z,
+                size: self.text_size * 0.75 / z,
             },
             Tool::Callout => Shape::Callout {
                 tip: p,
                 at: p + iced::Vector::new(90.0, -60.0) * (1.0 / z),
                 text: String::new(),
-                size: self.width.font() * 0.75 / z,
+                size: self.text_size * 0.75 / z,
             },
             Tool::Step => Shape::Step {
                 at: p,
@@ -1341,8 +1440,8 @@ impl Editor {
             },
         };
         let width = match self.tool {
-            Tool::Highlighter => self.width.stroke() * 4.0,
-            _ => self.width.stroke(),
+            Tool::Highlighter => self.stroke * 4.0,
+            _ => self.stroke,
         } / z;
         Item {
             shape,
@@ -1365,14 +1464,14 @@ impl Editor {
                     *style = editor.text_style;
                 }
                 Shape::Callout { size, .. } | Shape::Label { size, .. } => {
-                    *size = editor.width.font() * 0.75 / z
+                    *size = editor.text_size * 0.75 / z
                 }
                 Shape::Step { radius, .. } => *radius = editor.width.badge() / z,
                 Shape::Pointer { radius, .. } => {
                     *radius = editor.width.badge() / z;
-                    new.width = editor.width.stroke() / z;
+                    new.width = editor.stroke / z;
                 }
-                Shape::Highlighter(_) => new.width = editor.width.stroke() * 4.0 / z,
+                Shape::Highlighter(_) => new.width = editor.stroke * 4.0 / z,
                 // Auto keeps the size it was given (its line); a picked one applies.
                 Shape::Blur { size, cell, .. } => {
                     *cell = editor.blur_cell.cell() / z;
@@ -1381,7 +1480,7 @@ impl Editor {
                         *size = w.brush() / z;
                     }
                 }
-                _ => new.width = editor.width.stroke() / z,
+                _ => new.width = editor.stroke / z,
             }
             new
         };
@@ -1452,14 +1551,6 @@ impl Editor {
             (rect, handle(pm))
         });
     }
-}
-
-/// A tool button has options to open: its variants, a size, a style.
-pub fn has_options(slot: Tool) -> bool {
-    !matches!(
-        slot,
-        Tool::Select | Tool::Crop | Tool::Spotlight | Tool::Magnifier
-    )
 }
 
 /// The editor's options as last changed in this run (the next editor opens on

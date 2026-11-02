@@ -88,6 +88,8 @@
 //! fill = false                      # rectangles and ellipses get a tint
 //! blur_size = "medium"              # the blur brush: thin | medium | thick; missing = Auto
 //! blur_cell = "medium"              # the blur's pixel size: thin | medium | thick
+//! stroke = 5                        # the line width of shapes, arrows, pen: 1-32 px
+//! group_tools = ["select", "arrow", "pen", "text", "blur"]  # each toolbar group's last tool
 //!
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
 //! snip = false                      # until 0.1.2 Snip's switch; read and written, ignored since
@@ -758,10 +760,18 @@ pub struct EditorConfig {
     /// The blur's pixel size (its mosaic cells).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blur_cell: Option<crate::editor::Width>,
+    /// The line width of shapes, arrows and the pen, display px (`STROKE`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<u8>,
+    /// Each toolbar group's last tool (the grouped toolbar shows it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_tools: Option<Vec<crate::editor::Tool>>,
 }
 
 /// `editor.text_size`'s range (display px).
 pub const TEXT_SIZE: std::ops::RangeInclusive<u8> = 8..=96;
+/// `editor.stroke`'s range (display px).
+pub const STROKE: std::ops::RangeInclusive<u8> = 1..=32;
 
 impl Default for EditorConfig {
     fn default() -> Self {
@@ -775,6 +785,8 @@ impl Default for EditorConfig {
             fill: None,
             blur_size: None,
             blur_cell: None,
+            stroke: None,
+            group_tools: None,
         }
     }
 }

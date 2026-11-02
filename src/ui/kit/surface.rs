@@ -47,6 +47,15 @@ pub fn surface<'a, Message: 'a>(
     })
 }
 
+/// A toolbar's panel (Snip's group panels, Undo, More): `content` on the
+/// widget surface, `size::PANEL` wide, radius 14, 12 px in.
+pub fn panel<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
+    use super::tokens::{size, space};
+    surface(Material::Widget, radius::DROPDOWN, content)
+        .padding(space::PANEL)
+        .width(size::PANEL)
+}
+
 /// A one-line hint over the screen ("Circle, drag or tap anything", the
 /// editor's area picker, a protected capture): a solid pill on the bar's
 /// surface, in its text, in every theme.

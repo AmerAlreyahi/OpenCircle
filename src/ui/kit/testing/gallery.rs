@@ -1333,15 +1333,15 @@ fn chip_snip_sheet() {
     sheet("chip_snip", Size::new(500.0, 46.0), &rows);
 }
 
-/// `button::tool`: Snip's Copy (Accent) and Save (Elevated): rest, hover,
-/// pressed, Tab's focus.
+/// `button::tool`: Snip's Copy (Accent) and Save (Elevated), icon-only:
+/// rest, hover, pressed, Tab's focus.
 #[test]
 fn button_tool_sheet() {
     use button::Kind;
     let mut rows = Vec::new();
-    for (name, kind, glyph, label, w) in [
-        ("copy", Kind::Accent, '\u{e0a2}', ("Copy", "نسخ"), 78.0),
-        ("save", Kind::Elevated, '\u{e0b6}', ("Save", "حفظ"), 74.0),
+    for (name, kind, glyph) in [
+        ("copy", Kind::Accent, '\u{e0a2}'),
+        ("save", Kind::Elevated, '\u{e0b6}'),
     ] {
         for (state, act, focused) in [
             (name, Act::Rest, false),
@@ -1349,10 +1349,87 @@ fn button_tool_sheet() {
             ("  pressed", Act::Press, false),
             ("  focused", Act::Rest, true),
         ] {
-            rows.push(row(state, act, move |ar| {
-                button::tool(glyph, s(ar, label.0, label.1), kind, w, focused, Some(()))
+            rows.push(row(state, act, move |_| {
+                button::tool(glyph, kind, focused, Some(()))
             }));
         }
     }
     sheet("button_tool", Size::new(120.0, 48.0), &rows);
+}
+
+/// `button::toggle`: on, off, under the cursor, dimmed (does not apply).
+#[test]
+fn button_toggle_sheet() {
+    let rows = vec![
+        row("on", Act::Rest, |_| button::toggle(true, Some(()))),
+        row("off", Act::Rest, |_| button::toggle(false, Some(()))),
+        row("  hover", Act::Hover, |_| button::toggle(false, Some(()))),
+        row("dimmed", Act::Rest, |_| button::toggle(false, None::<()>)),
+    ];
+    sheet("button_toggle", Size::new(120.0, 40.0), &rows);
+}
+
+/// Snip's toolbar parts: the size chip (drag the picture out: rest, under
+/// the cursor, live), the presets (dots, letters, dimmed), the bare slider,
+/// More's rows (rest, keyboard row, dimmed) and the panel surface.
+#[test]
+fn snip_toolbar_parts_sheet() {
+    use super::super::{option_list, slider};
+    let rows = vec![
+        row("size chip", Act::Rest, |_| {
+            chip::size_handle("688 × 330".into(), false, ())
+        }),
+        row("  hover", Act::Hover, |_| {
+            chip::size_handle("688 × 330".into(), false, ())
+        }),
+        row("  live", Act::Rest, |_| {
+            chip::size_handle("748 × 400".into(), true, ())
+        }),
+        row("presets", Act::Rest, |_| {
+            segmented::presets(Some(1), None, false, |_| ())
+        }),
+        row("  letters", Act::Rest, |_| {
+            segmented::presets(Some(0), Some("A"), false, |_| ())
+        }),
+        row("  dimmed", Act::Rest, |_| {
+            segmented::presets(None, None, true, |_| ())
+        }),
+        row("slider", Act::Rest, |_| {
+            slider::bare(1..=32, 5, 110.0, false, |_| ())
+        }),
+        row("  dimmed", Act::Rest, |_| {
+            slider::bare(1..=32, 5, 110.0, true, |_| ())
+        }),
+        row("menu row", Act::Rest, |ar| {
+            option_list::action(
+                '\u{e258}',
+                s(ar, "Pin to screen", "تثبيت"),
+                Some("Ctrl+P"),
+                false,
+                Some(()),
+            )
+        }),
+        row("  keyboard", Act::Rest, |ar| {
+            option_list::action(
+                '\u{e258}',
+                s(ar, "Pin to screen", "تثبيت"),
+                Some("Ctrl+P"),
+                true,
+                Some(()),
+            )
+        }),
+        row("  dimmed", Act::Rest, |ar| {
+            option_list::action(
+                '\u{e4d6}',
+                s(ar, "Long capture", "لقطة طويلة"),
+                None,
+                false,
+                None::<()>,
+            )
+        }),
+        row("panel", Act::Rest, |ar| {
+            surface::panel(super::super::text::text(Role::NOTE, s(ar, "Panel", "لوحة"))).into()
+        }),
+    ];
+    sheet("snip_toolbar_parts", Size::new(300.0, 48.0), &rows);
 }

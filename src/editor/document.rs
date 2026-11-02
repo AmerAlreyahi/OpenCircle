@@ -461,6 +461,11 @@ impl Document {
         self.undone.clear();
     }
 
+    /// Where the history is: (steps done, all steps).
+    pub fn steps(&self) -> (usize, usize) {
+        (self.done.len(), self.done.len() + self.undone.len())
+    }
+
     pub fn undo(&mut self) -> bool {
         let Some(edit) = self.done.pop() else {
             return false;
