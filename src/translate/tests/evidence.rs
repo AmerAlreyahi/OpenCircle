@@ -49,7 +49,7 @@ fn run(name: &str) -> (Rgba, Rgba, (usize, usize), Vec<Block>, Drawn) {
 
 #[test]
 fn every_case_matches_its_golden() {
-    for name in ["subtitle", "sign", "web"] {
+    for name in ["subtitle", "subtitle2", "sign", "web"] {
         let (_, out, dims, _, _) = run(name);
         if std::env::var_os("OC_BLESS").is_some() {
             save_png(format!("{DIR}{name}_expected.png").as_ref(), dims, &out);
@@ -101,6 +101,33 @@ fn the_film_subtitle_is_replaced_at_its_size() {
         .filter(|&x| img[(155 * w + x) * 4..][..3] != out[(155 * w + x) * 4..][..3])
         .count();
     assert_eq!(changed, 0, "the progress bar changed");
+}
+
+/// The Sintel subtitle of the second recording: white, a thick black
+/// outline, straight on the dark film. Before: the fill was erased but the
+/// outline stayed, and the hole filled from it: black Spanish silhouettes
+/// around the English. Now no near-black pixels are left beside the redraw
+/// (the film there is no darker than ~10), and the English is outlined.
+#[test]
+fn the_outline_goes_with_the_text() {
+    let (img, out, (w, _), blocks, d) = run("subtitle2");
+    let i = (blocks.iter().position(|b| b.text.contains("pasado"))).unwrap();
+    let [bx, by, bw, bh] = blocks[i].bounds.map(|v| v as usize);
+    let [ix, _, iw, _] = d.ink[i].map(|v| v as usize);
+    assert!(iw > 0, "{d:?}");
+    let black = |im: &[u8], xs: std::ops::Range<usize>| {
+        (by..by + bh)
+            .flat_map(|y| xs.clone().map(move |x| (y * w + x) * 4))
+            .filter(|&k| im[k] < 6 && im[k + 1] < 6 && im[k + 2] < 6)
+            .count()
+    };
+    let beside = |im: &[u8]| black(im, bx..ix) + black(im, ix + iw..bx + bw);
+    let (before, after) = (beside(&img), beside(&out));
+    assert!(
+        after * 20 < before,
+        "black outline pixels beside the English: {before} -> {after}"
+    );
+    assert!(black(&out, ix..ix + iw) > 500, "the English has no outline");
 }
 
 /// The forest sign: each line one block (the detector split them at word

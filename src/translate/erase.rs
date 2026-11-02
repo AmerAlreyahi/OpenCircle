@@ -63,7 +63,8 @@ pub type Undo = Vec<(usize, [u8; 3])>;
 const PAD: i32 = 3;
 const RING: i32 = 2;
 const HALO: i32 = 4;
-/// Longest ray a hole pixel walks to find background.
+/// Longest ray a hole pixel walks to find background (at least; a window
+/// taller than this lets it walk its height).
 const REACH: i32 = 40;
 
 /// Erases the glyphs inside `b` (x, y, w, h) of an RGBA image and returns
@@ -73,7 +74,7 @@ const REACH: i32 = 40;
 /// text is lost (so does a neighbour's edge under a tall box: busy); the box
 /// is tried again a little smaller, its ring inside.
 pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, Undo) {
-    let (style, undo) = erase_box(rgba, iw, ih, b);
+    let (style, undo) = erase_box(rgba, iw, ih, b, true);
     let put_back = |rgba: &mut [u8], undo: &Undo| {
         for (at, old) in undo.iter().rev() {
             rgba[*at..at + 3].copy_from_slice(old);
@@ -84,10 +85,19 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
     if let Some(f) = style.field {
         put_back(rgba, &undo);
         let [fx, fy, fw, fh] = grow(rgba, iw, ih, f);
-        let nb = [fx + PAD, fy + PAD, fw - 2 * PAD, fh - 2 * PAD].map(|v| v as f32);
-        if nb[2] > 2.0 && nb[3] > 2.0 {
-            let (mut inside, undo2) = erase_box(rgba, iw, ih, nb);
-            if inside.residual <= super::BUSY && inside.field.is_none() {
+        let at = ((fy + fh / 2) as usize * iw + (fx + 1) as usize) * 4;
+        let fill = [rgba[at], rgba[at + 1], rgba[at + 2]];
+        // the field's own rectangle, else just inside its bevel (a game
+        // field's lit and shaded edges)
+        for i in [PAD, PAD + 1, PAD + 2] {
+            let nb = [fx + i, fy + i, fw - 2 * i, fh - 2 * i].map(|v| v as f32);
+            if nb[2] <= 2.0 || nb[3] <= 2.0 {
+                break;
+            }
+            let (mut inside, undo2) = erase_box(rgba, iw, ih, nb, false);
+            // (the text found must not be the field's own colour again)
+            let own = (0..3).all(|k| inside.color[k].abs_diff(fill[k]) < 40);
+            if inside.residual <= super::BUSY && !own {
                 inside.text_x = [
                     inside.text_x[0].max(fx + RING),
                     inside.text_x[1].min(fx + fw - RING),
@@ -108,7 +118,7 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
     for inset in [0.35, 0.28, 0.2, 0.12] {
         let k = inset * b[3];
         let nb = [b[0], b[1] + k, b[2], b[3] - 2.0 * k];
-        let (again, undo2) = erase_box(rgba, iw, ih, nb);
+        let (again, undo2) = erase_box(rgba, iw, ih, nb, true);
         // and the text must still be whole inside it
         let (top, bottom) = (nb[1] as i32 - PAD, (nb[1] + nb[3]).ceil() as i32 + PAD);
         if again.residual <= super::BUSY
@@ -119,7 +129,7 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
         }
         put_back(rgba, &undo2);
     }
-    erase_box(rgba, iw, ih, b)
+    erase_box(rgba, iw, ih, b, true)
 }
 
 /// `f` grown up and down while both its side columns keep the field's
@@ -169,14 +179,22 @@ fn grow(rgba: &[u8], iw: usize, ih: usize, [x, y, w, h]: [i32; 4]) -> [i32; 4] {
 /// Where a solid field under the end of a line's box starts (see
 /// `LineStyle::tail`), if any; `rgba` is left as it was.
 pub fn field_start(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> Option<i32> {
-    let (style, undo) = erase_box(rgba, iw, ih, b);
+    let (style, undo) = erase_box(rgba, iw, ih, b, true);
     for (at, old) in undo.iter().rev() {
         rgba[*at..at + 3].copy_from_slice(old);
     }
     style.tail
 }
 
-fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, Undo) {
+/// `fields` = look for a field under the box (`LineStyle::field`); not
+/// inside one (bold text filling a tight field would pass for one).
+fn erase_box(
+    rgba: &mut [u8],
+    iw: usize,
+    ih: usize,
+    b: [f32; 4],
+    fields: bool,
+) -> (LineStyle, Undo) {
     let x0 = (b[0] as i32 - PAD).clamp(0, iw as i32);
     let y0 = (b[1] as i32 - PAD).clamp(0, ih as i32);
     let x1 = ((b[0] + b[2]).ceil() as i32 + PAD).clamp(x0, iw as i32);
@@ -486,38 +504,48 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
         .collect();
     let lf = luma(color);
     if shadow.is_none() && lf > bg_luma + 40.0 {
-        let g2 = dilate(&glyph, w, 2);
+        let g1 = dilate(&glyph, w, 1);
         // a thick outline (big subtitles: about an eighth of the line)
-        let g4 = dilate(&glyph, w, (HALO as usize).max((ocr_h / 8.0) as usize));
-
+        let r = (HALO as usize).max((ocr_h / 8.0) as usize);
+        let g4 = dilate(&glyph, w, r);
         let lumas = |f: &dyn Fn(usize) -> bool| {
             let mut v: Vec<f32> = (0..w * h).filter(|&i| f(i)).map(|i| luma(px(i))).collect();
             v.sort_by(f32::total_cmp);
             v
         };
-        let near_l = lumas(&|i| g2[i] && !glyph[i] && !on_ring(i));
+        // the ring past the glyphs' own anti-aliasing (1 px; a video's soft
+        // edge is grey there) out to HALO
+        let g_near = dilate(&glyph, w, HALO as usize);
+        let near_l = lumas(&|i| g_near[i] && !g1[i] && !on_ring(i));
         let mid = near_l.get(near_l.len() / 2).copied().unwrap_or(255.0);
-        let dark_n = (near_l.iter())
-            .filter(|&&l| l < 0.4 * lf && l <= mid + 24.0)
-            .count();
-        // and something lighter lies beyond it (else it is the panel itself)
-        let r = (HALO as usize).max((ocr_h / 8.0) as usize);
+        let dark_n = near_l.iter().filter(|&&l| l < 0.25 * lf).count();
+        // something lighter beyond it: an outline to redraw (else it is the
+        // panel itself)
         let g_far = dilate(&glyph, w, 2 * r);
         let far_l = lumas(&|i| g_far[i] && !g4[i]);
-        let lighter = far_l.iter().filter(|&&l| l > mid + 24.0).count();
-        if !near_l.is_empty() && dark_n * 5 >= near_l.len() * 4 && lighter * 10 >= far_l.len() {
-            // only where the outline borders something lighter: in a dark
-            // band it is the band itself, and stays
-            let dark_px = |i: usize| g4[i] && !glyph[i] && luma(px(i)) <= mid + 24.0;
-            let light: Vec<bool> = (0..w * h)
-                .map(|i| !g2[i] && !dark_px(i) && !bar[i / w])
-                .collect();
-            let by_light = dilate(&light, w, r);
+        let lighter = far_l.iter().filter(|&&l| l > mid + 12.0).count();
+        // (beyond a dark translucent panel is about as dark as next to the
+        // text; an outline is near black, what is beyond it clearly lighter)
+        let far_mid = far_l.get(far_l.len() / 2).copied().unwrap_or(0.0);
+        if !near_l.is_empty()
+            && dark_n * 5 >= near_l.len() * 4
+            && lighter * 10 >= far_l.len()
+            && far_mid >= 2.0 * mid + 10.0
+        {
+            // erased whole, with its soft outer edge (2 px, darker than what
+            // lies beyond): the hole's edge is then the picture, not the
+            // outline, else the fill draws black glyph silhouettes. (In a
+            // dark band it is the band: filled from the band, the same.)
+            let dark_px = |i: usize| g4[i] && !glyph[i] && luma(px(i)) <= mid + 12.0;
+            let ring: Vec<bool> = (0..w * h).map(dark_px).collect();
+            let soft = dilate(&ring, w, 2);
             let (mut sum, mut n) = ([0u64; 3], 0u64);
-            for i in (0..w * h).filter(|&i| dark_px(i) && !on_ring(i)) {
-                (0..3).for_each(|k| sum[k] += px(i)[k] as u64);
-                n += 1;
-                halo[i] = by_light[i];
+            for i in (0..w * h).filter(|&i| !on_ring(i)) {
+                if ring[i] {
+                    (0..3).for_each(|k| sum[k] += px(i)[k] as u64);
+                    n += 1;
+                }
+                halo[i] = ring[i] || (soft[i] && !glyph[i] && luma(px(i)) < far_mid);
             }
             shadow = Some((sum.map(|s| (s / n.max(1)) as u8), false));
         }
@@ -572,7 +600,9 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
     let grain = steps
         .get(steps.len() / 2)
         .map_or(2.0, |&s| (s as f32).max(2.0));
-    let (filled, unsure) = fill(&win, &mask, w, grain, &bg);
+    // a big outlined line's hole is taller than REACH: rays reach across it
+    let reach = REACH.max(h as i32);
+    let (filled, unsure) = fill(&win, &mask, w, grain, reach, &bg);
     // Not text at all: the glyphs themselves cover most of the box (a
     // picture or a dark band crossing it), or their colour is the
     // background's. (The hole, grown for anti-aliasing, covers most of a
@@ -592,7 +622,7 @@ fn erase_box(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineStyle, 
     // (`LineStyle::field`).
     let (ink, band) = extent(&ink_only, w, x0, y0);
     let stroke = stroke_width(&ink_only, w);
-    let rect = fill_rect(&ink_only, w).filter(|&[fx, fy, fw, fh]| {
+    let rect = (fields.then(|| fill_rect(&ink_only, w)).flatten()).filter(|&[fx, fy, fw, fh]| {
         let on = (fy..fy + fh)
             .flat_map(|y| (fx..fx + fw).map(move |x| y * w + x))
             .filter(|&i| ink_only[i])
@@ -825,23 +855,26 @@ fn fill(
     mask: &[bool],
     w: usize,
     noise: f32,
+    reach: i32,
     fallback: &dyn Fn(usize) -> [f32; 3],
 ) -> (Vec<(usize, [u8; 3])>, f32) {
     // index offset of step t along each ray (8 directions, both ways)
-    let rays: Vec<[isize; REACH as usize + 2]> = DIRS
+    let rays: Vec<Vec<isize>> = DIRS
         .iter()
         .flat_map(|&(dx, dy)| [(dx, dy), (-dx, -dy)])
         .map(|(dx, dy)| {
-            std::array::from_fn(|t| {
-                (dy * t as f32).round() as isize * w as isize + (dx * t as f32).round() as isize
-            })
+            (0..reach as usize + 2)
+                .map(|t| {
+                    (dy * t as f32).round() as isize * w as isize + (dx * t as f32).round() as isize
+                })
+                .collect()
         })
         .collect();
     // first background pixel along a ray: its distance and colour (mean of
     // the first two known pixels, so one noisy pixel does not set the edge)
-    let probe = |i: usize, ray: &[isize; REACH as usize + 2]| -> Option<(f32, [f32; 3])> {
+    let probe = |i: usize, ray: &[isize]| -> Option<(f32, [f32; 3])> {
         let at = |t: usize| (i as isize + ray[t]) as usize;
-        let t = (1..=REACH as usize).find(|&t| !mask[at(t)])?;
+        let t = (1..=reach as usize).find(|&t| !mask[at(t)])?;
         let c = win[at(t)].map(f32::from);
         Some((
             t as f32,

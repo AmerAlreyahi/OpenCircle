@@ -45,7 +45,13 @@ pub struct Block {
 /// starts: the label is translated and drawn on the panel, the value inside
 /// its field. Only a line with a label (`: ` then more) is looked at.
 pub fn split_fields(rgba: &[u8], w: usize, h: usize, lines: &[Line]) -> Vec<Line> {
-    let labelled = |l: &Line| l.text.find(": ").filter(|&k| k + 2 < l.text.len());
+    // (OCR may drop the space: "municipios:Inglés"; "10:30" is no label)
+    let labelled = |l: &Line| {
+        l.text.find(':').filter(|&k| {
+            let rest = l.text[k + 1..].trim_start();
+            rest.starts_with(char::is_alphabetic)
+        })
+    };
     if rgba.len() != w * h * 4 || !lines.iter().any(|l| labelled(l).is_some()) {
         return lines.to_vec();
     }
@@ -65,7 +71,7 @@ pub fn split_fields(rgba: &[u8], w: usize, h: usize, lines: &[Line]) -> Vec<Line
                 });
                 out.push(Line {
                     bounds: [fx, y, x + lw - fx, lh],
-                    text: l.text[k + 2..].to_string(),
+                    text: l.text[k + 1..].trim_start().to_string(),
                 });
             }
             None => out.push(l.clone()),

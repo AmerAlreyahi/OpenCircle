@@ -13,3 +13,8 @@ text. `lines.json` = the lines PP-OCR read on the whole frame (shifted to the cu
   contributors, CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/).
 - `game_expected.png`: the golden of a game settings dialog drawn by the test itself
   (`src/translate/tests/game.rs`; no game's art), OpenCircle, MIT.
+- `subtitle2.png`: Sintel again (the second recording: the subtitle straight on the film).
+  Sintel © Blender Foundation | durian.blender.org | CC BY 3.0.
+
+The English in `translations.json` is the real on-device output (OPUS-MT es→en, the app's
+pinned model) for every block it was run on.

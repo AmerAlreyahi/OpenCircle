@@ -227,8 +227,12 @@ fn original_em(p: &Placement) -> f32 {
     // sliver of an outlined subtitle) must not shrink a 60 px line to 8 px
     let ocr_h = p.line_h / 1.3;
     let from_box = source_em(text, ocr_h).min(ocr_h);
+    // (the band under-reads big wide letters, a subtitle's: their x-height
+    // rows hold only stems, under half the busiest row's ink; small UI text
+    // keeps the tight cap, an icon beside it doubles the ink)
+    let slack = if ocr_h >= 48.0 { 1.6 } else { 1.15 };
     let em = ink
-        .min(if band > 0.0 { band * 1.15 } else { ink })
+        .min(if band > 0.0 { band * slack } else { ink })
         .min(ocr_h);
     // (a loose OCR box around small UI text is about twice its ink or more:
     // only big text, subtitles and captions, gets the floor)
