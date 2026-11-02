@@ -197,3 +197,7 @@ iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
 # coming: a box drawn across two screens moved on the other screen only after
 # the drag (2 frames in a second's drag). "OpenCircle patch" in its src/lib.rs.
 iced_winit = { path = "vendor/iced_winit" }
+# oar-ocr 0.10.1 with its zip dependency ^9.2 instead of ^8.6 (RUSTSEC-2026-0429, fixed in
+# zip 9). It only calls ZipArchive::new / by_name, unchanged in 9. "OpenCircle patch" in its
+# Cargo.toml. Drop when oar-ocr moves to zip 9.
+oar-ocr = { path = "vendor/oar-ocr" }
