@@ -2,10 +2,12 @@
 //! area stays outlined (dashed) and is cut out of the overlay, so the user
 //! scrolls the app under it by hand; Snip's own toolbar stays docked to it
 //! (its Copy / Save / Pin / Share finish the capture, close cancels it). Beside
-//! the area the stitched image itself grows, sharp (`capture::shrink`) and
-//! drawn 1:1 in physical px, with only a 1 px edge (no card, no title): top
-//! aligned with the area, at most ~80 % of the free height, pinned to its
-//! newest rows; its px count is a small chip under it (over it where the
+//! the area the WHOLE stitched image so far shows as a narrow miniature (as
+//! iTop's, a little narrower; owner, 2026-11-02): at most `MAX_W` wide, the
+//! whole page fitted into ~80 % of the free height, so it narrows as the page
+//! grows; sharp (`capture::shrink`), drawn 1:1 in physical px with only a
+//! 1 px edge (no card, no title), top aligned with the area, its edge next
+//! to the area's; its px count is a small chip under it (over it where the
 //! toolbar is). A calm hint near the
 //! area until the first scroll. The grabbing and stitching run on a thread
 //! (`capture::scroll::by_hand`).
@@ -24,10 +26,9 @@ use crate::ui::snip::Msg;
 
 /// Between the area, the picture and the screen's edge (logical px).
 const GAP: f32 = 12.0;
-/// The picture's width: this share of the area's (readable text, about half
-/// size), at most `MAX_SHARE` of the screen, at least `MIN_W` (else none).
-const SCALE: f32 = 0.5;
-const MAX_SHARE: f32 = 0.3;
+/// The picture's widest (the page's first screen; it narrows as the page
+/// grows), and the least room beside the area it is shown in.
+const MAX_W: f32 = 280.0;
 const MIN_W: f32 = 120.0;
 /// Its tallest: this share of the free height under the area's top (a little
 /// shorter than the whole free height, owner 2026-10-31), at least `MIN_H`.
@@ -112,12 +113,17 @@ impl Long {
     }
 
     /// Where the picture is drawn (logical px; none before its first frame or
-    /// without room): its physical px at 1 / scale, from the top of its room.
+    /// without room): its physical px at 1 / scale, at the top of its room,
+    /// against the area's side of it (it grows away from the area).
     pub fn picture(&self, screen: Size, bar: Rectangle) -> Option<Rectangle> {
         let room = layout(self.area, screen, bar, self.scale)?;
         let (_, w, h) = self.preview.as_ref()?;
         let size = Size::new(*w as f32 / self.scale, *h as f32 / self.scale);
-        Some(Rectangle::new(room.position(), size))
+        let x = match room.x < self.area.x {
+            true => room.x + room.width - size.width,
+            false => room.x,
+        };
+        Some(Rectangle::new(Point::new(x, room.y), size))
     }
 
     /// Where the hint is drawn (none once scrolled, or without a free spot).
@@ -155,10 +161,17 @@ impl Long {
                 .height(r.height)
                 .filter_method(image::FilterMethod::Nearest);
             layers = layers.push(pin(picture).position(r.position()));
-            let chip = container(count(self.height, self.full, self.lost, rtl)).width(r.width);
-            let chip = match rtl {
-                true => chip.align_left(r.width),
-                false => chip.align_right(r.width),
+            // (wider than a narrow picture, against the area's side as it is)
+            let left = r.x < self.area.x;
+            let cw = r.width.max(MAX_W);
+            let cx = match left {
+                true => (r.x + r.width - cw).max(0.0),
+                false => r.x,
+            };
+            let chip = container(count(self.height, self.full, self.lost, rtl)).width(cw);
+            let chip = match left {
+                true => chip.align_right(cw),
+                false => chip.align_left(cw),
             };
             // under it; above it where the toolbar or the screen's end is
             let under = Rectangle::new(
@@ -171,7 +184,7 @@ impl Long {
                 false => r.y - CHIP_GAP - chip::READOUT_H,
             };
             if y >= 0.0 {
-                layers = layers.push(pin(chip).position(Point::new(r.x, y)));
+                layers = layers.push(pin(chip).position(Point::new(cx, y)));
             }
         }
         if let Some(spot) = self.hint_spot(screen, bar, rtl) {
@@ -207,17 +220,16 @@ pub fn count<'a>(height: u32, full: bool, lost: bool, rtl: bool) -> Element<'a, 
 /// Where the picture may grow (logical px, on the physical px grid): right
 /// beside the area (`GAP`), on the side it fits (the roomier when both or
 /// neither do; narrower to fit, down to `MIN_W`, then over the area's edge
-/// by less than half its width), top-aligned with it, `SCALE` of its width,
-/// `TALL` of the free height, ending above Snip's toolbar where they would
+/// by less than half its width), top-aligned with it, `MAX_W` wide, `TALL`
+/// of the free height (`screen`: the work area, above the taskbar), ending
+/// above Snip's toolbar where they would
 /// meet (or starting under it, where above leaves nothing); none when that leaves
 /// less than `MIN_H` or a bigger overlap.
 pub fn layout(area: Rectangle, screen: Size, bar: Rectangle, scale: f32) -> Option<Rectangle> {
     // room beside the area on each side (a GAP to the area and to the edge)
     let left = area.x - 2.0 * GAP;
     let right = screen.width - (area.x + area.width) - 2.0 * GAP;
-    let want = (area.width * SCALE)
-        .min(screen.width * MAX_SHARE)
-        .max(MIN_W);
+    let want = MAX_W;
     // the side it fits on (the roomier one when both do), else the roomier
     // side, narrower; never across the screen, never past the toolbar
     let on_right = match (right >= want, left >= want) {
@@ -470,6 +482,50 @@ mod tests {
         assert_eq!(group(1_234_567), "1,234,567");
         let texts = crate::ui::kit::testing::shot::texts(count(20_000, true, false, false));
         assert!(texts.iter().any(|t| t == "Limit reached"), "{texts:?}");
+    }
+
+    /// The owner's PC (2026-11-02): the picture filled half the screen. It is
+    /// a narrow column now (at most 280 px), top-aligned, its edge next to the
+    /// area's whichever side it is on, growing away from the area as the
+    /// (whole-page) miniature narrows or widens.
+    #[test]
+    fn the_picture_is_a_narrow_column_against_the_area() {
+        let screen = Size::new(1720.0, 1392.0); // half a 3440 x 1440 ultrawide's work area
+        let far = rect(1700.0, 1380.0, 10.0, 10.0);
+        let with = |area: Rectangle, w: u32, h: u32| {
+            let mut long = Long::new(area, Arc::default(), 1.0);
+            long.update(Update {
+                height: h,
+                full: false,
+                lost: false,
+                preview: Some(crate::actions::Crop {
+                    width: w,
+                    height: h,
+                    rgba: vec![0; (w * h * 4) as usize],
+                }),
+            });
+            long.picture(screen, far).unwrap()
+        };
+        // the area on the right half: the column on its left, its right
+        // edge GAP from the area, top-aligned
+        let area = rect(860.0, 0.0, 860.0, 1392.0);
+        let room = layout(area, screen, far, 1.0).unwrap();
+        assert_eq!(room.width, MAX_W);
+        assert_eq!(room.height, ((1392.0 - 2.0 * GAP) * TALL).floor()); // from y GAP
+        for w in [280, 250, 150] {
+            let p = with(area, w, 1100);
+            assert_eq!((p.x + p.width + GAP, p.y), (area.x, GAP), "{w}: {p:?}");
+        }
+        // on the left half: the column on its right, its left edge next to it
+        let area = rect(0.0, 200.0, 860.0, 1000.0);
+        for w in [280, 150] {
+            let p = with(area, w, 700);
+            assert_eq!(
+                (p.x, p.y),
+                (area.x + area.width + GAP, area.y),
+                "{w}: {p:?}"
+            );
+        }
     }
 
     #[test]

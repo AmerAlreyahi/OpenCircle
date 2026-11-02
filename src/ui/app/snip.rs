@@ -422,7 +422,7 @@ impl App {
         // the toolbar stays docked where it is
         let bar = self.long_bar();
         let o = &*self.o;
-        let room = long_capture::layout(area, o.screen, bar, o.scale);
+        let room = long_capture::layout(area, work_area(o.screen, o.work_inset), bar, o.scale);
         let preview = room.map_or((0, 0), |r| {
             let px = |v: f32| (v * o.scale).round() as u32;
             (px(r.width), px(r.height))

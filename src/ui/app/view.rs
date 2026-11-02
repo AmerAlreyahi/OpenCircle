@@ -198,7 +198,12 @@ impl App {
                 if let Some(long) = snip.and_then(|s| s.scroll.as_ref()) {
                     let look = crate::ui::theme::accent_of(&config::look());
                     let bar = self.long_bar();
-                    let shown = long.view(self.o.screen, bar, look, false);
+                    let shown = long.view(
+                        super::work_area(self.o.screen, self.o.work_inset),
+                        bar,
+                        look,
+                        false,
+                    );
                     layers = layers.push(shown.map(Message::Snip));
                 }
                 layers = layers.push(edit.view(

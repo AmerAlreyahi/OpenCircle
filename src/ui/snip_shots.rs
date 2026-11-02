@@ -202,7 +202,7 @@ fn tool(which: Which) -> App {
 
 /// Long capture from the picked area, after `height` px (none: just
 /// started); its picture is the area's, repeated `height` px tall and scaled
-/// as the thread does (`Stitcher::tail`: `capture::shrink`, the newest rows).
+/// as the thread does (`Stitcher::whole`: the whole page, fitted to the room).
 fn long(height: u32, full: bool) -> App {
     let mut app = picked();
     let picture = app.crop().unwrap();
@@ -222,13 +222,13 @@ fn long(height: u32, full: bool) -> App {
         .cycle()
         .take(tall * w * 4)
         .collect();
-    let (small, rows) = crate::capture::shrink::shrink(&page, w, room.width as usize);
-    let out_w = small.len() / rows / 4;
-    let keep = rows.min(room.height as usize);
+    let mut st = crate::capture::stitch::Stitcher::new(w as u32, tall as u32);
+    st.push(&page);
+    let (rgba, width, height) = st.whole(room.width as u32, room.height as u32);
     let preview = Crop {
-        width: out_w as u32,
-        height: keep as u32,
-        rgba: small[(rows - keep) * out_w * 4..].to_vec(),
+        width,
+        height,
+        rgba,
     };
     let first = Update {
         height: picture.height,
