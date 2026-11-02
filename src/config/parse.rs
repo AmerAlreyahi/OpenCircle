@@ -259,6 +259,11 @@ impl Config {
         if file_version < Some(6) && c.snip.after == SnipAfter::Copy {
             c.snip.after = SnipAfter::Both;
         }
+        // Schema 7: Copy and Save keep the original size by default; the old
+        // default (1568) moves to Original once, any other choice stays.
+        if file_version < Some(7) && c.snip.max_edge == 1568 {
+            c.snip.max_edge = 0;
+        }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
         }

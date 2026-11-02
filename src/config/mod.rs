@@ -119,7 +119,7 @@
 //! "both" the default, and an older file whose Snip was still off in Labs (never used)
 //! moves from the old default "copy" to it (a Snip user's value stays); 6 retires "copy" (copy and
 //! close): every "copy" becomes "both", so `snip.after` is one switch, "Copy when picked"
-//! ("editor" = no auto copy; "both" = copy; a stored "copy" still reads as "both"). A file older than `VERSION` is copied to
+//! ("editor" = no auto copy; "both" = copy; a stored "copy" still reads as "both"); 7 moves the old default `snip.max_edge` 1568 to 0 (Original; any other value stays). A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -144,7 +144,7 @@ pub use store::{appearance, current, look, look_config, rebase, set_current, upd
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
@@ -1120,7 +1120,7 @@ mod tests {
         // The file is the new schema now, with every old value and the Labs switches.
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 6") && text.contains("[labs]"),
+            text.contains("version = 7") && text.contains("[labs]"),
             "{text}"
         );
         let (again, w) = Config::load_from(&path);
@@ -1157,13 +1157,13 @@ mod tests {
 
     #[test]
     fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-        let (dir, path) = config_with("current", "version = 6\n[labs]\nsong = true\n");
+        let (dir, path) = config_with("current", "version = 7\n[labs]\nsong = true\n");
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty() && c.labs.song && !c.labs.snip, "{w:?}");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "version = 6\n[labs]\nsong = true\n"
+            "version = 7\n[labs]\nsong = true\n"
         );
         let gone = dir.join("none.toml");
         Config::load_from(&gone);
@@ -1263,7 +1263,7 @@ mod tests {
             let (c, w) = Config::load_from(&path);
             assert!(w.is_empty(), "{w:?}");
             assert_eq!(fs_text(&dir.join("config.toml.bak-v4")), text);
-            assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Editor, 1568));
+            assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Editor, 0));
             assert_eq!(
                 (c.snip.format, c.snip.history, c.snip.delay),
                 (Format::Jpeg, true, 3)
@@ -1368,7 +1368,7 @@ mod tests {
     #[test]
     fn defaults_match_design() {
         let c = Config::default();
-        assert_eq!(c.version, 6);
+        assert_eq!(c.version, 7);
         assert_eq!(c.labs, Labs::default(), "Labs: everything off");
         assert_eq!(c.theme, Theme::System);
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
@@ -1745,7 +1745,7 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
             let text = std::fs::read_to_string(&path).unwrap();
             assert!(
-                text.contains("version = 6") && text.contains("after = \"wait\""),
+                text.contains("version = 7") && text.contains("after = \"wait\""),
                 "{text}"
             );
             assert!(!text.contains("[results]"), "{text}");
@@ -2080,14 +2080,14 @@ mod tests {
         std::fs::read_to_string(dir.join(name)).unwrap()
     }
 
-    /// The default file is byte-for-byte the frozen v6 one (the file format is frozen).
+    /// The default file is byte-for-byte the frozen v7 one (the file format is frozen).
     #[test]
     fn the_default_file_is_byte_for_byte_the_frozen_one() {
         let dir = tmp_dir("default-bytes");
         let path = dir.join("config.toml");
         Config::default().save_to(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(written, fixture("default-v6.toml"));
+        assert_eq!(written, fixture("default-v7.toml"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2129,13 +2129,37 @@ mod tests {
         let (dir, path) = config_with("v3-default", &fixture("default-v3.toml"));
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
-        // (a value in the file stays: v3 wrote the then-default 1568 px)
-        let mut want = Config::default();
-        want.snip.max_edge = 1568;
-        assert_eq!(c, want);
-        let v6 = fixture("default-v6.toml").replace("max_edge = 0\n", "max_edge = 1568\n");
-        assert_eq!(fs_text(&path), v6);
+        // (schema 7 moves the old default 1568 px to Original)
+        assert_eq!(c, Config::default());
+        assert_eq!(fs_text(&path), fixture("default-v7.toml"));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Schema 7: the old default max_edge (1568) moves to Original once, with a backup;
+    /// any other choice stays; a new file is Original.
+    #[test]
+    fn schema_7_moves_the_old_default_size_to_original() {
+        assert_eq!(Config::default().snip.max_edge, 0);
+        for (v, edge, want) in [
+            (4, 1568, 0),
+            (5, 1568, 0),
+            (6, 1568, 0),
+            (6, 1024, 1024),
+            (6, 2048, 2048),
+            (6, 0, 0),
+            (7, 1568, 1568),
+        ] {
+            let text = format!("version = {v}\n[snip]\nmax_edge = {edge}\n");
+            let (dir, path) = config_with(&format!("edge-{v}-{edge}"), &text);
+            let (c, w) = Config::load_from(&path);
+            assert!(w.is_empty(), "{w:?}");
+            assert_eq!(c.snip.max_edge, want, "v{v} {edge}");
+            if v < 7 {
+                assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{v}"))), text);
+                assert!(fs_text(&path).contains(&format!("max_edge = {want}")));
+            }
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     /// Schema 4 never changes a stored look: every v3 value is read and written as
@@ -2190,7 +2214,7 @@ mod tests {
         assert_eq!(look(&fs_text(&path)), look(old));
         let text = fs_text(&path);
         for want in [
-            "version = 6",
+            "version = 7",
             "widget_theme = \"graphite\"",
             "glass_effect = false",
             "theme = \"aurora\"",
@@ -2232,7 +2256,7 @@ mod tests {
                 assert_eq!((c.labs.snip, c.snip.after), (snip, want), "{name}");
                 assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
                 let saved: Table = fs_text(&path).parse().unwrap();
-                assert_eq!(saved["version"].as_integer(), Some(6));
+                assert_eq!(saved["version"].as_integer(), Some(7));
                 assert_eq!(
                     saved["labs"]["snip"].as_bool(),
                     Some(snip),
@@ -2244,7 +2268,7 @@ mod tests {
             }
         }
         // a v6 file is never moved; a stored "copy" there still acts as "both"
-        let (c, _) = Config::parse("version = 6\n[snip]\nafter = \"copy\"\n");
+        let (c, _) = Config::parse("version = 7\n[snip]\nafter = \"copy\"\n");
         assert_eq!(c.snip.after, SnipAfter::Copy);
     }
 
