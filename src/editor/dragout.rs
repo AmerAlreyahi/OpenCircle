@@ -118,7 +118,7 @@ pub fn start(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool
 #[cfg(windows)]
 fn drag(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool, String> {
     use std::mem::ManuallyDrop;
-    use windows::Win32::Foundation::HGLOBAL;
+    use windows::Win32::Foundation::{HGLOBAL, POINT};
     use windows::Win32::System::Com::{
         DVASPECT_CONTENT, FORMATETC, IDataObject, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
     };
@@ -126,11 +126,11 @@ fn drag(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool, Str
     use windows::Win32::System::Ole::{
         CF_DIB, DROPEFFECT_COPY, DROPEFFECT_NONE, IDropSource, OleInitialize, OleUninitialize,
     };
-    use windows::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{DragDetect, GetActiveWindow};
     use windows::Win32::UI::Shell::{
         BHID_DataObject, IShellItem, SHCreateItemFromParsingName, SHDoDragDrop,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOW, ShowWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SW_HIDE, SW_SHOW, ShowWindow};
     use windows::core::HSTRING;
 
     if cfg!(test) {
@@ -175,6 +175,15 @@ fn drag(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool, Str
         }
         let window = GetActiveWindow();
         let window = (!window.is_invalid()).then_some(window);
+        // A press that lets go before the system drag distance (SM_CXDRAG /
+        // SM_CYDRAG, 4 px at 100 %) is a click: nothing is dragged (a drop
+        // would land in the app under the hidden overlay).
+        if let Some(w) = window {
+            let mut at = POINT::default();
+            if GetCursorPos(&mut at).is_ok() && !DragDetect(w, at).as_bool() {
+                return Ok(false);
+            }
+        }
         let hidden = window.filter(|_| hide_source);
         if let Some(w) = hidden {
             let _ = ShowWindow(w, SW_HIDE);
