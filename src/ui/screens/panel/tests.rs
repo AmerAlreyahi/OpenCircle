@@ -114,17 +114,14 @@ fn every_result_card_matches_its_golden_image() {
     const CARD: Size = Size::new(420.0, 560.0);
     let at = Rectangle::with_size(CARD);
     type Make = Box<dyn Fn() -> Panel>;
-    let states: Vec<(&str, Make)> = vec![
-        ("lens", Box::new(|| panel_in(State::Lens(Some(Ok(())))))),
-        (
-            "ask",
-            Box::new(move || {
-                let mut p = panel_in(State::ask(Chat::default()));
-                let _ = p.update(Msg::Ready(Ok(Arc::new(ask::tests::browser_setup()))));
-                p
-            }),
-        ),
-    ];
+    let states: Vec<(&str, Make)> = vec![(
+        "ask",
+        Box::new(move || {
+            let mut p = panel_in(State::ask(Chat::default()));
+            let _ = p.update(Msg::Ready(Ok(Arc::new(ask::tests::browser_setup()))));
+            p
+        }),
+    )];
     let mut failed = Vec::new();
     for theme in [&SAPPHIRE, &DAYLIGHT] {
         themes::set(theme);

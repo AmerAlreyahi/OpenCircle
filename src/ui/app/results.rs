@@ -265,17 +265,6 @@ impl App {
     }
 
     pub(in crate::ui) fn on_panel(&mut self, id: u32, msg: panel::Msg) -> Task<Message> {
-        // Every opened page is held, whichever panel is showing now.
-        if let panel::Msg::LensOpened(Ok(page)) = &msg {
-            if self.o.frame.is_some() {
-                self.o.lens_pages.push(page.clone());
-                // The search is in the browser now: the overlay, its panel and
-                // pills must not stay on screen behind or over it. Close.
-                return self.close();
-            } else {
-                page.clone().release(); // the overlay closed meanwhile
-            }
-        }
         let resident = self.chat.as_ref().is_some_and(|c| c.id == id);
         let open = self.o.is_some();
         if !resident && !open {
@@ -326,17 +315,6 @@ impl App {
                             settings::Section::Ai,
                         )));
                 return settings.chain(section).map(Message::Windows);
-            }
-            // Lens follow-up: hand the question over to Ask AI.
-            panel::Msg::Submit if panel.kind() == actions::Panel::Lens => {
-                let question = panel.take_input();
-                if question.trim().is_empty() {
-                    return Task::none();
-                }
-                let Some(crop) = self.crop() else {
-                    return Task::none();
-                };
-                return self.open_panel(actions::Panel::Ask, crop, Some(question));
             }
             msg => {
                 let task = panel.update(msg);

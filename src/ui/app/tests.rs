@@ -2482,22 +2482,20 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         Point::new(500.0, 350.0),
         false,
     );
+    assert!(app.o.panel.is_none(), "Search in browser shows no card");
+    // the key still works: A asks
+    app.o.panel = None;
+    event(
+        &mut app,
+        overlay::Event::Key {
+            letter: 'a',
+            ctrl: false,
+        },
+    );
     assert_eq!(
         app.o.panel.as_ref().map(|(_, p)| p.kind()),
-        Some(actions::Panel::Lens)
+        Some(actions::Panel::Ask)
     );
-    // the keys still work: A asks, L searches
-    for (letter, kind) in [('a', actions::Panel::Ask), ('l', actions::Panel::Lens)] {
-        app.o.panel = None;
-        event(
-            &mut app,
-            overlay::Event::Key {
-                letter,
-                ctrl: false,
-            },
-        );
-        assert_eq!(app.o.panel.as_ref().map(|(_, p)| p.kind()), Some(kind));
-    }
 }
 
 /// Frames until the bar is where it goes (it glides there).
@@ -3084,8 +3082,29 @@ fn in_browser_mode_asking_opens_no_chat() {
     let crop = app.crop().unwrap();
     assert_eq!(config::current().ai.provider, config::Provider::Browser);
     let _ = app.open_panel(actions::Panel::Ask, crop, Some("What is this?".into()));
+    // the same from the bar: its Ask AI action and the AI field's Enter
+    let _ = app.update(Message::Run(&actions::ask::ACTION));
+    let _ = app.update(Message::AskInput("What is this?".into()));
+    let _ = app.update(Message::AskSubmit);
     super::results::HAND_OFF.set(false);
     assert!(app.o.panel.is_none() && app.chat.is_none(), "no chat");
+}
+
+/// Search in browser (the pill, its key) never shows a card of ours, not for a
+/// frame: the browser opens, a small pill at most (owner, 2026-11-02).
+#[test]
+fn search_in_browser_shows_no_card() {
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let _ = app.on_pill(BarButton::Search);
+    assert!(app.o.panel.is_none() && app.chat.is_none(), "the pill");
+    let _ = app.update(Message::Run(&lens::ACTION));
+    assert!(app.o.panel.is_none() && app.chat.is_none(), "the action");
 }
 
 /// An open overlay with a selection and a ready Ask AI panel (browser provider).
@@ -3819,7 +3838,7 @@ fn nothing_floats_over_the_result_card() {
         Point::new(940.0, 500.0),
         false,
     );
-    let _ = app.update(Message::Run(&lens::ACTION));
+    let _ = app.update(Message::Run(&actions::ask::ACTION));
     let card = app.card_at();
     let room = app.room();
     assert!(room.intersection(&card).is_none(), "{room:?} vs {card:?}");
@@ -3855,16 +3874,17 @@ fn lens_in_the_browser_closes_the_overlay() {
         false,
     );
     let _ = app.update(Message::Run(&lens::ACTION));
-    let id = app.o.panel.as_ref().expect("the Lens panel").0;
-    let opened = panel::Msg::LensOpened(Ok(lens::Held::for_test()));
-    let _ = app.update(Message::Panel(id, opened));
+    // never a card of ours, not even while the page is being written
+    assert!(app.o.panel.is_none(), "Search in browser opens no panel");
+    let opened = Message::LensOpened(Ok(lens::Held::for_test()));
+    let _ = app.update(opened);
     // Closed on every OS: nothing of ours stays on screen after the hand-off.
     assert!(app.o.frame.is_none());
     assert!(app.o.panel.is_none());
 }
 
 #[test]
-fn the_result_card_opens_off_the_selection_and_moves_by_its_grip() {
+fn the_result_card_opens_off_the_selection() {
     let mut app = open_app(1920, 1080, 1.0);
     drag(
         &mut app,
@@ -3872,37 +3892,10 @@ fn the_result_card_opens_off_the_selection_and_moves_by_its_grip() {
         Point::new(400.0, 300.0),
         false,
     );
-    let _ = app.update(Message::Run(&lens::ACTION)); // the Lens card
+    let _ = app.update(Message::Run(&actions::ask::ACTION)); // a card
     assert!(app.o.panel.is_some());
     let at = app.card_at();
-    assert_eq!(at.x + at.width, 1920.0 - card::GAP, "right");
-    // the grip: the card follows the pointer while held
-    let id = app.o.panel.as_ref().unwrap().0;
-    let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Move));
-    let _ = app.update(Message::Panel(id, grab));
-    let _ = app.update(Message::CardMoved(Point::new(1700.0, 200.0)));
-    let _ = app.update(Message::CardMoved(Point::new(1100.0, 200.0)));
-    assert_eq!(
-        app.card_at().position(),
-        at.position() + Vector::new(-600.0, 0.0)
-    );
-    // let go: it stays there (nothing is saved), no more moves
-    let _ = app.update(Message::CardReleased);
-    let _ = app.update(Message::CardMoved(Point::new(0.0, 0.0)));
-    assert_eq!(
-        app.card_at().position(),
-        at.position() + Vector::new(-600.0, 0.0)
-    );
-    // the default place again; a selection under it: this one goes left
-    let _ = app.update(Message::Panel(id, panel::Msg::Card(card::Event::Reset)));
-    assert_eq!(app.card_at(), at);
-    drag(
-        &mut app,
-        Point::new(1500.0, 100.0),
-        Point::new(1800.0, 300.0),
-        false,
-    );
-    assert_eq!(app.card_at().x, card::GAP);
+    assert_eq!(at.x + at.width, 1920.0 - 16.0, "right");
 }
 
 /// `OPENCIRCLE_LOOK_PNG=<dir> cargo test ui::tests::look_shots -- --ignored`:
@@ -3953,7 +3946,7 @@ fn look_shots() {
     shot(&app, "look-1-snap-morphing.png");
     app.o.morph = None;
     shot(&app, "look-2-snapped-chips.png");
-    let _ = app.update(Message::Run(&lens::ACTION)); // the Lens card
+    let _ = app.update(Message::Run(&actions::ask::ACTION)); // a card
     shot(&app, "look-6-result-card.png");
     // Ask AI beside a selection at 1440x900, the bar kept out of the card,
     // the resize grip showing (hovered)
@@ -4038,7 +4031,7 @@ fn close_leaves_a_fresh_opening() {
     read_back(&mut app, at_word(1, 7.0), page(), false);
     assert!(app.o.word.is_some() && app.o.selection.is_some());
     let crop = app.crop().unwrap();
-    let _ = app.open_panel(actions::Panel::Lens, crop, None);
+    let _ = app.open_panel(actions::Panel::Ask, crop, None);
     let frame = app.o.frame.clone().unwrap();
     let (session, _) =
         translate::Session::start(frame, [0, 0, 40, 20], 1.0, app.cache.clone(), false);
@@ -4087,7 +4080,7 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
     assert!(app.o.is_some() && app.o.frame.is_some());
     app.select(Rectangle::new(Point::new(4.0, 4.0), Size::new(40.0, 30.0)));
     let crop = app.crop().unwrap();
-    let _ = app.open_panel(actions::Panel::Lens, crop, None);
+    let _ = app.open_panel(actions::Panel::Ask, crop, None);
     assert!(app.o.panel.is_some());
     let _ = app.start_translate(); // (the panel goes)
     assert!(app.o.translate.is_some());
@@ -4449,7 +4442,7 @@ fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
         false,
     );
     let crop = lens.crop().unwrap();
-    let _ = lens.open_panel(actions::Panel::Lens, crop, None);
+    let _ = lens.open_panel(actions::Panel::Ask, crop, None);
     assert!(!overlay_texts(&lens).contains(&close));
 }
 

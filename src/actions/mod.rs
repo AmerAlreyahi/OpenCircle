@@ -44,6 +44,8 @@ pub enum Run {
     Finish(fn(Crop) -> Result<String, String>),
     /// Open this result panel beside the selection; the overlay stays.
     Panel(Panel),
+    /// Search the crop in the user's browser (Lens); nothing of ours shows.
+    Lens,
     /// Turn the action bar into the editing toolbar over the selection.
     Edit,
     /// Replace the selection's text by its translation, in place.
@@ -53,7 +55,6 @@ pub enum Run {
 /// The result panels (`ui/panel.rs` draws them).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
-    Lens,
     Ask,
 }
 

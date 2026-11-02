@@ -1,4 +1,4 @@
-//! Result panels (DESIGN.md Flow step 5): Search (Lens) and Ask AI (the
+//! The result panel (DESIGN.md Flow step 5): Ask AI (the
 //! AI chat: docked, its answers as Markdown). One floating card (`kit::panel_frame::card`: on the side away from the
 //! selection, a card at the bottom on narrow screens; dragged and resized by
 //! its frame) over the frozen frame, so the selection stays visible. Slow work
@@ -9,6 +9,8 @@
 //! or by its pin button: the App then keeps it across overlays (`App::chat`).
 //! Each answered chat is saved, text only (`store::chats`), while Keep chat
 //! history is on; its drawer (`Tab`) holds History and the chat's settings.
+// `State` has one variant since Search in browser lost its card; flatten it later.
+#![allow(irrefutable_let_patterns)]
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,7 +19,7 @@ use iced::{Task, task};
 
 use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::actions::text::{self, Progress};
-use crate::actions::{self, Crop, lens};
+use crate::actions::{self, Crop};
 use crate::ai;
 use crate::ai::providers::{self, Preset};
 use crate::config::{self, Provider, StaysOpen};
@@ -109,8 +111,6 @@ pub fn classifier(model: &str) -> bool {
 pub enum Msg {
     /// The card's grip or corner was pressed (the App moves / resizes it).
     Card(panel_frame::Event),
-    /// The Lens page is written and the browser launched (the App holds the page).
-    LensOpened(Result<lens::Held, String>),
     /// An edit in the composer (typing, a new line, a paste).
     Edit(text_editor::Action),
     /// Enter / send in the follow-up input.
@@ -203,8 +203,6 @@ pub struct Panel {
 }
 
 enum State {
-    /// `None` while the page is being written.
-    Lens(Option<Result<(), String>>),
     Ask {
         /// `None` while loading the config and key.
         setup: Option<Result<Arc<Setup>, String>>,
@@ -234,8 +232,6 @@ impl Panel {
     /// Opens `kind` for `crop`. `question` (Ask AI only) is sent once ready:
     /// the user already pressed Enter on it elsewhere (Lens follow-up, the
     /// bar's AI field); `include`: its Include screen starts on.
-    /// Search (Lens) hands the crop to the user's browser at once: the user
-    /// picked it.
     pub fn open(
         kind: actions::Panel,
         crop: Crop,
@@ -246,24 +242,14 @@ impl Panel {
         let mut panel = Panel {
             input: text_editor::Content::with_text(question.as_deref().unwrap_or_default()),
             queued: question.is_some(),
-            ..Panel::new(crop.clone(), State::Lens(None))
+            ..Panel::new(crop, State::ask(Chat::default()))
         };
-        let task = match kind {
-            actions::Panel::Lens => background(move |tx| {
-                let _ = tx.unbounded_send(Msg::LensOpened(lens::open(&crop)));
-            }),
-            actions::Panel::Ask => {
-                panel.state = State::ask(Chat::default());
-                if let State::Ask { include: on, .. } = &mut panel.state {
-                    *on = include;
-                }
-                panel.pinned = starts_pinned(config::current().chat.stays_open);
-                return {
-                    let task = panel.load();
-                    (panel, task)
-                };
-            }
-        };
+        let actions::Panel::Ask = kind;
+        if let State::Ask { include: on, .. } = &mut panel.state {
+            *on = include;
+        }
+        panel.pinned = starts_pinned(config::current().chat.stays_open);
+        let task = panel.load();
         (panel, task)
     }
 
@@ -306,7 +292,6 @@ impl Panel {
     pub fn chat(&self) -> Option<&Chat> {
         match &self.state {
             State::Ask { chat, .. } => Some(chat),
-            State::Lens(_) => None,
         }
     }
 
@@ -362,13 +347,11 @@ impl Panel {
     pub fn include(&self) -> Option<bool> {
         match self.state {
             State::Ask { include, .. } => Some(include),
-            State::Lens(_) => None,
         }
     }
 
     pub fn kind(&self) -> actions::Panel {
         match self.state {
-            State::Lens(_) => actions::Panel::Lens,
             State::Ask { .. } => actions::Panel::Ask,
         }
     }
@@ -434,7 +417,6 @@ impl Panel {
 
     fn on(&mut self, msg: Msg) -> Task<Msg> {
         match (&mut self.state, msg) {
-            (State::Lens(status), Msg::LensOpened(result)) => *status = Some(result.map(drop)),
             (_, Msg::Edit(action)) => self.input.perform(action),
             (_, Msg::Pin) => self.pinned = true,
             (State::Ask { .. }, Msg::Card(Event::Menu)) => {

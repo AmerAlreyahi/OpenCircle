@@ -5,7 +5,7 @@ pub mod page;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::{Action, Crop, Key, Panel, Run};
+use super::{Action, Crop, Key, Run};
 use page::LensPage;
 
 pub const ACTION: Action = Action {
@@ -16,7 +16,7 @@ pub const ACTION: Action = Action {
         letter: 'l',
     },
     icon: '\u{e154}', // lucide "search"
-    run: Run::Panel(Panel::Lens),
+    run: Run::Lens,
 };
 
 /// The browser reads the page a while after we launch it (a cold browser start

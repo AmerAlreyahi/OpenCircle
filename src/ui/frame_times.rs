@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use iced::window::{self};
 use iced::{Element, Point, Rectangle, Size, Vector};
 
-use crate::actions::{self, lens};
+use crate::actions;
 use crate::ocr::{self, TextBlock};
 
 use super::app::message::Message;
@@ -171,7 +171,7 @@ fn card_app(w: u32, h: u32) -> App {
     let mut app = open_app(w, h, 1.0);
     let (a, b) = (Point::new(100.0, 100.0), Point::new(400.0, 300.0));
     drag(&mut app, a, b, false);
-    let _ = app.update(Message::Run(&lens::ACTION));
+    let _ = app.update(Message::Run(&actions::ask::ACTION));
     settle_bar(&mut app);
     app
 }
@@ -249,7 +249,7 @@ fn animation_frame_times() {
         settle_bar(&mut app);
         let t = frames(&mut app, 16, false, |app, i, now| {
             if i == 0 {
-                let _ = app.update(Message::Run(&lens::ACTION));
+                let _ = app.update(Message::Run(&actions::ask::ACTION));
             }
             let _ = app.update(Message::Frame(now));
         });
@@ -527,7 +527,7 @@ fn a_still_overlay_asks_for_no_frames() {
             drag(app, a, b, false);
         }
         if i == 2 {
-            let _ = app.update(Message::Run(&lens::ACTION));
+            let _ = app.update(Message::Run(&actions::ask::ACTION));
         }
         let _ = app.update(Message::Frame(now));
     });
@@ -621,7 +621,7 @@ fn widgets_open_by_the_design_motion_or_at_once() {
         app.o.appear = None;
         let (a, b) = (Point::new(300.0, 200.0), Point::new(600.0, 400.0));
         drag(&mut app, a, b, false);
-        let _ = app.update(Message::Run(&lens::ACTION));
+        let _ = app.update(Message::Run(&actions::ask::ACTION));
         let start = Instant::now();
         let steps: Vec<(f32, f32)> = [0, 50, 100, 209, 210]
             .into_iter()

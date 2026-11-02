@@ -102,11 +102,6 @@ impl Panel {
     /// `hover`: the pointer is on its resize edge.
     pub fn view(&self, at: Rectangle, screen: Size, hover: bool) -> Element<'_, Msg> {
         let (glyph, title, (body, footer)) = match &self.state {
-            State::Lens(status) => (
-                actions::lens::ACTION.icon,
-                actions::lens::ACTION.label,
-                self.lens_view(status.as_ref()),
-            ),
             State::Ask {
                 setup,
                 chat,
@@ -179,22 +174,6 @@ impl Panel {
             };
         }
         card(header, body, footer, at, screen, hover, Msg::Card)
-    }
-
-    /// Body and footer.
-    fn lens_view<'a>(&'a self, status: Option<&'a Result<(), String>>) -> Part<'a> {
-        let only = note("Only this selection goes to Google Lens.");
-        let body = match status {
-            None => column![note("Opening Google Lens in your browser…"), only],
-            Some(Ok(())) => column![note("Opened in your browser"), only],
-            // nothing went (e.g. a blank selection): no note about what goes
-            Some(Err(e)) => column![error(Role::NOTE, e)],
-        }
-        .spacing(STACK);
-        (
-            body.into(),
-            Some(self.follow_up("Ask AI about it…", false, None, None)),
-        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -445,7 +424,6 @@ impl Panel {
         }
         let open = match &self.state {
             State::Ask { chat, .. } => chat.id.clone(),
-            State::Lens(_) => None,
         };
         let now = crate::store::chats::now();
         let mut cards = column![].spacing(space::GAP).width(Fill);

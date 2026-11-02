@@ -71,6 +71,8 @@ pub(in crate::ui) enum Message {
     /// A link opened (or text copied) off the UI thread: the overlay closes,
     /// after this pill if any.
     ThenClose(Option<&'static str>),
+    /// Lens is open in the browser (the page is held), or why it could not.
+    LensOpened(Result<crate::actions::lens::Held, String>),
     /// The toast has been shown long enough.
     ToastDone,
     /// The selection with this area was scanned (a stale area is ignored).

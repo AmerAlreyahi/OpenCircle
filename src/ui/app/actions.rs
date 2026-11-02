@@ -143,6 +143,33 @@ impl App {
         })
     }
 
+    /// Search in browser on a picture: Lens opens in the user's own browser and
+    /// the overlay closes; no panel of ours shows meanwhile.
+    fn search_image(&mut self, crop: Crop) -> Task<Message> {
+        background(move |tx| {
+            let _ = tx.unbounded_send(Message::LensOpened(lens::open(&crop)));
+        })
+    }
+
+    /// The browser has the Lens page (held until the overlay is gone), or not.
+    pub(in crate::ui) fn on_lens_opened(
+        &mut self,
+        opened: Result<lens::Held, String>,
+    ) -> Task<Message> {
+        match opened {
+            Ok(page) if self.o.frame.is_some() => {
+                self.o.lens_pages.push(page);
+                self.close()
+            }
+            Ok(page) => {
+                page.release(); // the overlay closed meanwhile
+                Task::none()
+            }
+            Err(e) if self.o.frame.is_some() => self.confirm_after(move || Err(e)),
+            Err(_) => Task::none(),
+        }
+    }
+
     /// A pill of the bottom bar: Search in browser and Copy text act on the
     /// selection (dimmed without one); Translate on it, else the whole screen.
     pub(in crate::ui) fn on_pill(&mut self, pill: BarButton) -> Task<Message> {
@@ -205,6 +232,7 @@ impl App {
         match action.run {
             Run::Finish(_) => self.finish(action, crop),
             Run::Panel(kind) => self.open_panel(kind, crop, None),
+            Run::Lens => self.search_image(crop),
             Run::Edit | Run::Translate => Task::none(), // handled above
         }
     }
