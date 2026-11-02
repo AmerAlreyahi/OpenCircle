@@ -514,8 +514,10 @@ impl Windows {
         if let Some((window, _)) = &mut self.steps {
             *window = Some(id);
         }
+        // (test hook: the VM proof's screenshots show it)
+        let hide = std::env::var_os("OPENCIRCLE_TEST_SHOW_STEPS").is_none();
         open.then(move |id| {
-            hide_from_capture::<()>(id, true)
+            hide_from_capture::<()>(id, hide)
                 .chain(platform::monitor::place_window(id, place))
                 .chain(appear(id, POPUP))
         })

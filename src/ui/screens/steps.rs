@@ -451,19 +451,22 @@ impl Strip {
         place(self.monitor, self.work(), self.left, self.top, self.size())
     }
 
-    /// The window stopped at `at` (logical desktop px): it docks to the nearer
-    /// side and keeps its height. `true`: it moves (it is not there yet).
+    /// The window stopped at `at` (logical desktop px): dragged there, it
+    /// docks to the nearer side and keeps its height from then on (`true`:
+    /// place it). Where it was placed already (its own placement settling,
+    /// 1 px rounding): nothing changes, it stays centred until dragged.
     pub fn dock(&mut self, at: Point) -> bool {
-        let before = self.place();
+        let now = self.place().origin;
+        let k = self.monitor.scale;
+        let here = ((at.x * k).round() as i32, (at.y * k).round() as i32);
+        if (here.0 - now.0).abs() <= 1 && (here.1 - now.1).abs() <= 1 {
+            return false;
+        }
         let origin = self.monitor.logical_origin();
         let mid = at.x - origin.x + self.size().width / 2.0;
         self.left = mid < self.work().width / 2.0;
         self.top = Some(at.y - origin.y);
-        let after = self.place();
-        // already there: its own placement settling (1 px rounding is there)
-        let moved = (after.origin.0 - (at.x * self.monitor.scale).round() as i32).abs() > 1
-            || (after.origin.1 - (at.y * self.monitor.scale).round() as i32).abs() > 1;
-        moved || after != before
+        true
     }
 
     /// Where a pill under the strip goes (`size` logical): centred under it,
@@ -771,6 +774,13 @@ mod tests {
     #[test]
     fn a_dragged_strip_docks_to_the_nearer_edge() {
         let mut s = strip(2);
+        // its own placement settling: it stays centred as it grows (VM: it
+        // grew down from a pinned top before)
+        let p = s.place().origin;
+        assert!(!s.dock(Point::new(p.0 as f32, p.1 as f32)));
+        s.push(step(8, 8, 1));
+        assert_eq!(s.place().origin.1, (1040 - 252) / 2);
+        s.update(Msg::Delete(2));
         assert!(s.dock(Point::new(300.0, 200.0)));
         let p = s.place();
         assert_eq!(p.origin, (12, 200));
