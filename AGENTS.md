@@ -349,6 +349,10 @@ production systems.
 - Preview variants (owner, 2026-11-03): a feature may have several clips; its Settings preview shows the one that
   matches the user's current choice (e.g. AI: Browser -> the browser clip, AI provider -> the in-app chat clip), and
   switches when the choice changes. Files: assets/previews/<feature>-<variant>.webp (plain <feature>.webp = one clip).
+- Preview clips bundled (owner, 2026-11-03): the owner's edited clips (docs/internal/preview-edit/outputs/final) map
+  Look = circle-1..3 in turn, Text = text, Translate = translate, AI = ai-chat / ai-browser by provider (the Google AI
+  Mode clip stays until the owner replaces it), Snip = snip-blur, snip-comment, snip-long in sequence; clips with
+  unresolved photo rights (lotus, kingfisher, COFFEE) are held until cleared; credits on About + NOTICE.
 - Copy = button AND Ctrl+C (owner, 2026-11-03, universal): wherever the app has a Copy button, Ctrl+C does the same
   (long capture included: Ctrl+C finishes and copies); Save pairs with Ctrl+S the same way. A text field with a
   selection still copies its text.
@@ -608,3 +612,7 @@ production systems.
 Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the rendered pilots. Apply static framing and clean cuts consistently across all supplied recordings; adapt source ranges for clarity.
 
 - Preview live effect (owner, 2026-11-03): crops may hide the actual Active Look edge. The editor may reconstruct that effect from the app/design reference in the edited viewport, ONLY during the real active state. Never add it over inactive source or external results. Preserve Snip pre-pick glow versus picked-area outline. Respect shortcut-driven actions; never invent toolbar clicks. Document the reconstructed layer in edit notes.
+
+- Preview glow selection (owner, 2026-11-03): owner likes the minimal edits but requests a different reconstructed edge effect; show actual rendered Active Look samples including the new Sapphire Glow, then wait for their choice before replacing the full preview set.
+
+- Preview final glow (owner, 2026-11-03): apply the recommended sample A, Sapphire Glow (blue #0a84ff / indigo #5e5ce6, 100% preset strength), across the finished minimal previews. Keep the same genuine active-state gates and Snip pre-pick distinction. Supply a Claude handoff explaining every clip and the editing choices.
