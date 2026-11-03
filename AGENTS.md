@@ -348,6 +348,9 @@ production systems.
   Preview videos (owner, 2026-11-02): Codex records REAL full-screen videos on the Windows VM (edge glow visible),
   one complete take per feature, on useful legal content (Blender's "Sintel", CC BY, for video text and subtitles
   translation; public-domain images; Wikipedia); the owner reviews the full takes before trimming/motion polish.
+  Owner records the clips (owner, 2026-11-03, SUPERSEDES the Codex recordings): every Codex take was rejected
+  (old snip tool, unclear text sample, translate not showing where it runs, subtitles not detected); agents record no
+  preview clips; the owner records them himself with the dev exe and provides the samples.
   The snip area's outline, handles and hover outline take their colours from the chosen Active Look (Settings >
   Appearance "Active look screen borders": Liquid Prism, Spectrum, Aurora Borealis, ..., Custom), the same source
   as the screen edge and main mode's selection line (one place, no snip-only colours).
