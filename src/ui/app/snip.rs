@@ -34,6 +34,9 @@ impl App {
         if let snip::Msg::Tool(msg) = msg {
             return self.on_tool(msg);
         }
+        if let snip::Msg::Progress(update) = msg {
+            return self.on_progress(update);
+        }
         let o = &mut *self.o;
         let Purpose::Snip(snip) = &mut o.purpose else {
             return Task::none();
@@ -42,12 +45,6 @@ impl App {
             snip::Msg::Finish(how) => {
                 if let Some(long) = &mut snip.scroll {
                     long.finish(how);
-                }
-                Task::none()
-            }
-            snip::Msg::Progress(update) => {
-                if let Some(long) = &mut snip.scroll {
-                    long.update(update);
                 }
                 Task::none()
             }
@@ -169,7 +166,7 @@ impl App {
                 Task::none()
             }
             snip::Msg::HintGone(_) => Task::none(),
-            snip::Msg::Tool(_) => Task::none(), // handled above
+            snip::Msg::Tool(_) | snip::Msg::Progress(_) => Task::none(), // handled above
         }
     }
 
@@ -407,6 +404,33 @@ impl App {
         Some((at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0))
     }
 
+    /// Long capture's news; the small picture over the area (`Long::over_area`)
+    /// is kept in the overlay's hole as it grows.
+    fn on_progress(&mut self, update: crate::capture::scroll::Update) -> Task<Message> {
+        let (bar, work) = (self.long_bar(), work_area(self.o.screen, self.o.work_inset));
+        let (overlay, scale) = (self.overlay, self.o.scale);
+        let Purpose::Snip(snip) = &mut self.o.purpose else {
+            return Task::none();
+        };
+        let Some(long) = &mut snip.scroll else {
+            return Task::none();
+        };
+        long.update(update);
+        let picture = long.over_area(work, bar);
+        if picture == long.cut {
+            return Task::none();
+        }
+        long.cut = picture;
+        let keep = [Some(bar).filter(|b| b.intersects(&long.area)), picture];
+        windows::hole(
+            overlay,
+            long.area,
+            keep.into_iter().flatten().collect(),
+            scale,
+        )
+        .map(Message::Windows)
+    }
+
     /// Snip's toolbar during a long capture, as its picture and hint keep
     /// clear of it (logical px).
     pub(in crate::ui) fn long_bar(&self) -> Rectangle {
@@ -440,7 +464,7 @@ impl App {
             bar = Rectangle::new(at, bar.size());
         }
         let o = &*self.o;
-        let room = long_capture::layout(area, work, bar, o.scale);
+        let room = long_capture::room(area, work, bar, o.scale);
         let preview = room.map_or((0, 0), |r| {
             let px = |v: f32| (v * o.scale).round() as u32;
             (px(r.width), px(r.height))
@@ -471,8 +495,11 @@ impl App {
             let _ = tx.unbounded_send(snip::Msg::Done(stitched));
         })
         .map(Message::Snip);
-        // the toolbar stays where it is over an area that fills the screen
+        // the toolbar stays where it is over an area that fills the screen,
+        // and the small picture sits in its corner (`on_progress`): kept in the
+        // hole, out of every grab (no other window of ours over the area)
         let keep = Some(bar).filter(|bar| bar.intersects(&area));
+        let over = keep.is_some() || room.is_some_and(|r| r.intersects(&area));
         crate::log!(
             "[opencircle] long capture: toolbar {}",
             match (keep.is_some(), bar_was.is_some()) {
@@ -481,7 +508,7 @@ impl App {
                 (false, false) => "beside the area",
             }
         );
-        let cut = windows::hide_from_capture(overlay, keep.is_some())
+        let cut = windows::hide_from_capture(overlay, over)
             .chain(windows::no_backdrop(overlay))
             .chain(windows::hole(
                 overlay,

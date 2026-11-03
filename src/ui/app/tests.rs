@@ -896,6 +896,45 @@ fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
     }
 }
 
+/// A long capture of the whole screen had no picture (no side has room). Like
+/// iTop (owner, 2026-11-03): a small one in the area's top-right corner, under
+/// the toolbar, kept in the overlay's hole (the overlay is kept out of the grabs).
+#[test]
+fn a_full_screen_long_capture_shows_a_small_picture_in_the_corner() {
+    use crate::capture::scroll::Update;
+    use crate::ui::screens::long_capture;
+    let area = Rectangle::new(Point::ORIGIN, Size::new(1280.0, 720.0));
+    let mut app = snipping_on(1280, 720, area);
+    app.select(area);
+    let _ = app.open_editor();
+    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let bar = app.long_bar();
+    assert!(bar.intersects(&area), "the toolbar stays over the area");
+    let room = long_capture::room(area, app.o.screen, bar, 1.0).expect("the corner");
+    let (w, h) = (room.width as u32, 60);
+    let first = Update {
+        height: 720,
+        full: false,
+        lost: false,
+        preview: Some(Crop {
+            width: w,
+            height: h,
+            rgba: vec![200; (w * h * 4) as usize],
+        }),
+    };
+    let _ = app.update(Message::Snip(snip::Msg::Progress(first)));
+    let long = app.scroll().unwrap();
+    let picture = long.picture(app.o.screen, bar).expect("the picture shows");
+    assert!(area.contains(picture.position()), "{picture:?}");
+    assert_eq!(picture.x + picture.width, area.width - 12.0, "top-right");
+    assert!(
+        picture.width <= 180.0 && !picture.intersects(&bar),
+        "{picture:?}"
+    );
+    assert!(picture.y < area.height / 2.0, "at the top: {picture:?}");
+    assert_eq!(long.cut, Some(picture.expand(1.0)), "kept in the hole");
+}
+
 /// The toolbar's 6-dot grip drags Snip's toolbar (picked, and during a long
 /// capture): its own press used to stop there (the editor ignored it, the
 /// toolbar's grab under it never heard it). Dropped, it stays for this area.

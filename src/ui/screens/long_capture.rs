@@ -8,7 +8,9 @@
 //! grows; sharp (`capture::shrink`), drawn 1:1 in physical px with only a
 //! 1 px edge (no card, no title), top aligned with the area, its edge next
 //! to the area's; its px count is a small chip under it (over it where the
-//! toolbar is). A calm hint near the
+//! toolbar is). No side with room (an area filling the screen): a small one
+//! in the area's top-right corner, kept in the overlay's hole while the overlay
+//! is kept out of the grabs (`corner`; owner, 2026-11-03). A calm hint near the
 //! area until the first scroll. The grabbing and stitching run on a thread
 //! (`capture::scroll::by_hand`).
 use std::sync::Arc;
@@ -30,6 +32,9 @@ const GAP: f32 = 12.0;
 /// grows), and the least room beside the area it is shown in.
 const MAX_W: f32 = 280.0;
 const MIN_W: f32 = 120.0;
+/// The small picture's widest, in the area's top-right corner when no side
+/// has room (an area that fills the screen; like iTop, owner 2026-11-03).
+const SMALL_W: f32 = 180.0;
 /// Its tallest: this share of the free height under the area's top (a little
 /// shorter than the whole free height, owner 2026-10-31), at least `MIN_H`.
 const TALL: f32 = 0.8;
@@ -68,6 +73,9 @@ pub struct Long {
     /// The toolbar was moved off the area for the capture (`bar_beside`):
     /// where it was dropped before (`None`: docked), restored after.
     pub bar_was: Option<Option<Point>>,
+    /// The small picture's rect kept in the overlay's hole (`over_area`), as
+    /// last cut.
+    pub cut: Option<Rectangle>,
 }
 
 impl Long {
@@ -84,6 +92,7 @@ impl Long {
             lost: false,
             preview: None,
             bar_was: None,
+            cut: None,
         }
     }
 
@@ -120,14 +129,23 @@ impl Long {
     /// without room): its physical px at 1 / scale, at the top of its room,
     /// against the area's side of it (it grows away from the area).
     pub fn picture(&self, screen: Size, bar: Rectangle) -> Option<Rectangle> {
-        let room = layout(self.area, screen, bar, self.scale)?;
+        let room = room(self.area, screen, bar, self.scale)?;
         let (_, w, h) = self.preview.as_ref()?;
         let size = Size::new(*w as f32 / self.scale, *h as f32 / self.scale);
-        let x = match room.x < self.area.x {
+        // (in the area's corner: against its right edge)
+        let x = match room.x < self.area.x || room.intersects(&self.area) {
             true => room.x + room.width - size.width,
             false => room.x,
         };
         Some(Rectangle::new(Point::new(x, room.y), size))
+    }
+
+    /// The small picture over the area (`corner`), with its 1 px edge: what the
+    /// overlay's hole keeps (the overlay is kept out of the grabs then); none
+    /// beside the area.
+    pub fn over_area(&self, screen: Size, bar: Rectangle) -> Option<Rectangle> {
+        let r = self.picture(screen, bar)?;
+        r.intersects(&self.area).then(|| r.expand(1.0))
     }
 
     /// Where the hint is drawn (none once scrolled, or without a free spot).
@@ -177,18 +195,21 @@ impl Long {
                 true => chip.align_right(cw),
                 false => chip.align_left(cw),
             };
-            // under it; above it where the toolbar or the screen's end is
+            // under it; above it where the toolbar or the screen's end is;
+            // over the area: on the picture's top (only the picture is kept
+            // in the hole, the chip under it would sit on the frozen frame)
             let under = Rectangle::new(
                 Point::new(r.x, r.y + r.height + CHIP_GAP),
                 Size::new(r.width, chip::READOUT_H),
             );
             let fits = !under.intersects(&bar) && under.y + under.height <= screen.height;
-            let y = match fits {
-                true => under.y,
-                false => r.y - CHIP_GAP - chip::READOUT_H,
+            let (x, y) = match () {
+                _ if r.intersects(&self.area) => (r.x + CHIP_GAP, r.y + CHIP_GAP),
+                _ if fits => (cx, under.y),
+                _ => (cx, r.y - CHIP_GAP - chip::READOUT_H),
             };
             if y >= 0.0 {
-                layers = layers.push(pin(chip).position(Point::new(cx, y)));
+                layers = layers.push(pin(chip).position(Point::new(x, y)));
             }
         }
         if let Some(spot) = self.hint_spot(screen, bar, rtl) {
@@ -274,6 +295,37 @@ pub fn layout(area: Rectangle, screen: Size, bar: Rectangle, scale: f32) -> Opti
         return None;
     }
     // whole physical px: the picture is drawn 1:1, never resampled
+    let snap = |v: f32| (v * scale).round() / scale;
+    let floor = |v: f32| (v * scale).floor() / scale;
+    Some(Rectangle::new(
+        Point::new(snap(x), snap(top)),
+        Size::new(floor(width), floor(height)),
+    ))
+}
+
+/// Where the picture grows: beside the area (`layout`), else small in the
+/// area's top-right corner (`corner`).
+pub fn room(area: Rectangle, screen: Size, bar: Rectangle, scale: f32) -> Option<Rectangle> {
+    layout(area, screen, bar, scale).or_else(|| corner(area, bar, scale))
+}
+
+/// Where the small picture grows when no side has room (an area that fills
+/// the screen; owner, 2026-11-03, like iTop): inside the area's top-right
+/// corner, `SMALL_W` wide, under Snip's toolbar where it reaches that corner,
+/// `TALL` of the height left in the area; none under `MIN_H`.
+pub fn corner(area: Rectangle, bar: Rectangle, scale: f32) -> Option<Rectangle> {
+    let width = SMALL_W.min(area.width - 2.0 * GAP);
+    let x = area.x + area.width - GAP - width;
+    let bottom = area.y + area.height - GAP;
+    let mut top = area.y + GAP;
+    let column = Rectangle::new(Point::new(x, top), Size::new(width, bottom - top));
+    if column.intersects(&bar) && bar.y < top + MIN_H {
+        top = bar.y + bar.height + GAP;
+    }
+    let height = (bottom - top) * TALL;
+    if width < MIN_H || height < MIN_H {
+        return None;
+    }
     let snap = |v: f32| (v * scale).round() / scale;
     let floor = |v: f32| (v * scale).floor() / scale;
     Some(Rectangle::new(
@@ -388,6 +440,50 @@ mod tests {
     use super::*;
 
     const SCREEN: Size = Size::new(1280.0, 720.0);
+
+    /// An area that fills the screen (no side has room): the small picture
+    /// sits inside its top-right corner, under the toolbar where the toolbar
+    /// reaches that corner, and is the only part of it kept in the hole.
+    #[test]
+    fn a_full_screen_area_gets_a_small_picture_in_its_top_right_corner() {
+        let full = rect(0.0, 0.0, 1280.0, 680.0);
+        // a toolbar docked inside the area's top edge, centred: clear of the corner
+        let centred = rect(340.0, 12.0, 600.0, 46.0);
+        assert_eq!(layout(full, SCREEN, centred, 1.0), None, "no side has room");
+        let r = room(full, SCREEN, centred, 1.0).expect("the corner");
+        assert_eq!((r.x + r.width, r.y, r.width), (1268.0, 12.0, 180.0));
+        assert!(full.contains(r.position()) && r.y + r.height <= 680.0 - 12.0);
+        // a toolbar reaching the top-right corner: the picture starts under it
+        let right = rect(660.0, 12.0, 600.0, 46.0);
+        let r = room(full, SCREEN, right, 1.0).unwrap();
+        assert_eq!((r.x + r.width, r.y), (1268.0, 12.0 + 46.0 + 12.0));
+        assert!(!r.intersects(&right) && full.contains(r.position()));
+        // the picture against the corner's right edge; only it is kept in the hole
+        let mut long = Long::new(full, Arc::new(AtomicBool::new(false)), 1.0);
+        assert_eq!(
+            long.over_area(SCREEN, right),
+            None,
+            "nothing before a frame"
+        );
+        long.update(Update {
+            height: 680,
+            full: false,
+            lost: false,
+            preview: Some(crate::actions::Crop {
+                width: 160,
+                height: 85,
+                rgba: vec![9; 160 * 85 * 4],
+            }),
+        });
+        let p = long.picture(SCREEN, right).unwrap();
+        assert_eq!((p.x + p.width, p.y, p.width), (1268.0, 70.0, 160.0));
+        assert_eq!(long.over_area(SCREEN, right), Some(p.expand(1.0)));
+        // beside an area with room: nothing kept over it
+        let area = rect(80.0, 120.0, 560.0, 300.0);
+        let mut long = Long::new(area, Arc::new(AtomicBool::new(false)), 1.0);
+        long.preview = Some((image::Handle::from_rgba(1, 1, vec![0; 4]), 100, 100));
+        assert_eq!(long.over_area(SCREEN, bar_under(area)), None);
+    }
 
     fn rect(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
         Rectangle::new(Point::new(x, y), Size::new(w, h))
