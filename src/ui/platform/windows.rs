@@ -110,7 +110,7 @@ const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
 /// of Snip's targets (`no_pick`: a pick would hold what is under it). Linux has
 /// no such call: the capture takes it out of the frame (`Windows::leave_frame`).
 fn keep_out<T: Send + 'static>(id: window::Id) -> Task<T> {
-    let out = std::env::var_os(CAPTURABLE).is_none();
+    let out = crate::sys::test_hook(CAPTURABLE).is_none();
     hide_from_capture(id, out).chain(no_pick(id))
 }
 
