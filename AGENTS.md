@@ -332,6 +332,10 @@ production systems.
   reorders; x on the strip clears it with Undo in the pill; at 12 the Add button says full. No captions, no preview
   dialog, no collapse, no grid option. Simplified design approved (owner, 2026-11-02; canvas v28, 104 px wide strip;
   click a step = copy it, double-click = edit, no per-step menu).
+  Fast scrolling (owner OK, 2026-11-03): long capture keeps up: every screen frame while it runs (none idle), the
+  wheel paced to what the stitcher has seen (only during the capture), and a note + "Scroll back" for jumps that
+  can't be paced (scrollbar drag, Page Down, End). Window effects (Windhawk "Translucent Windows") must not touch it:
+  no window of ours over the area while capturing.
   Long capture look (owner, 2026-10-31, "super bad" next to iTop): the live preview is SHARP (good downscale, never
   blurry): the bare image beside the area, no widget around it (no card, frame or surface). Like iTop (owner,
   2026-11-02, 3 shots): it ALWAYS shows the whole page so far, scaled to fit ~80 % of the free height, so it starts at
