@@ -339,6 +339,9 @@ production systems.
   the
   normal Snip toolbar stays (close, pin, share, Copy, Save) and Copy / Save finish the long capture (no separate
   Cancel / Done bar over the page); a short hint "Scroll to capture the page" beside the area.
+- Preview variants (owner, 2026-11-03): a feature may have several clips; its Settings preview shows the one that
+  matches the user's current choice (e.g. AI: Browser -> the browser clip, AI provider -> the in-app chat clip), and
+  switches when the choice changes. Files: assets/previews/<feature>-<variant>.webp (plain <feature>.webp = one clip).
 - Copy = button AND Ctrl+C (owner, 2026-11-03, universal): wherever the app has a Copy button, Ctrl+C does the same
   (long capture included: Ctrl+C finishes and copies); Save pairs with Ctrl+S the same way. A text field with a
   selection still copies its text.
