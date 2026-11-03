@@ -152,7 +152,34 @@ impl Long {
     pub fn hint_spot(&self, screen: Size, bar: Rectangle, rtl: bool) -> Option<Point> {
         let width = key_hint::width(&hint(rtl));
         let picture = self.picture(screen, bar);
-        (!self.scrolled()).then(|| hint_at(bar, self.area, picture, width, screen))?
+        (!self.scrolled() && !self.lost).then(|| hint_at(bar, self.area, picture, width, screen))?
+    }
+
+    /// Where the gap note goes while the page jumped too far to match
+    /// (owner, 2026-11-03: a scrollbar drag, Page Down, End): centred on the
+    /// area, right above its edge, else right under it; clear of the toolbar
+    /// and the picture. None where neither fits: nothing of ours goes over the
+    /// area while capturing (the count chip still says "Scroll back").
+    pub fn note_spot(&self, screen: Size, bar: Rectangle, rtl: bool) -> Option<Point> {
+        if !self.lost || self.full {
+            return None;
+        }
+        let (width, h) = (key_hint::width(&note(rtl)), key_hint::HEIGHT);
+        let x =
+            (self.area.center_x() - width / 2.0).clamp(GAP, (screen.width - GAP - width).max(GAP));
+        let picture = self.picture(screen, bar);
+        let (top, bottom) = (self.area.y, self.area.y + self.area.height);
+        [top - 8.0 - h, bottom + 8.0]
+            .into_iter()
+            .map(|y| Point::new(x, y))
+            .find(|p| {
+                let spot = Rectangle::new(*p, Size::new(width, h));
+                p.y >= 0.0
+                    && p.y + h <= screen.height
+                    && !spot.intersects(&self.area)
+                    && !spot.intersects(&bar)
+                    && picture.is_none_or(|r| !spot.intersects(&r))
+            })
     }
 
     /// The outline, the picture with its count and the hint on a `screen`
@@ -215,6 +242,9 @@ impl Long {
         if let Some(spot) = self.hint_spot(screen, bar, rtl) {
             layers = layers.push(pin(key_hint(&hint(rtl), rtl)).position(spot));
         }
+        if let Some(spot) = self.note_spot(screen, bar, rtl) {
+            layers = layers.push(pin(key_hint(&note(rtl), rtl)).position(spot));
+        }
         layers.into()
     }
 }
@@ -224,6 +254,14 @@ fn hint(rtl: bool) -> [key_hint::Group<'static>; 1] {
     match rtl {
         true => [(None, "مرّر لالتقاط الصفحة")],
         false => [(None, "Scroll to capture the page")],
+    }
+}
+
+/// The gap note while the page jumped too far to match.
+fn note(rtl: bool) -> [key_hint::Group<'static>; 1] {
+    match rtl {
+        true => [(None, "قفزت الصفحة: مرّر للخلف قليلًا")],
+        false => [(None, "The page jumped: scroll back a little")],
     }
 }
 
@@ -666,6 +704,51 @@ mod tests {
             bar_beside(rect(300.0, 0.0, 1700.0, 960.0), screen, bar),
             None
         );
+    }
+
+    /// A jump too far (scrollbar drag, Page Down, End): a note right above
+    /// the area (else under it), never over it; gone once matched again.
+    #[test]
+    fn a_jump_too_far_shows_a_note_beside_the_area_until_matched_again() {
+        let area = rect(300.0, 150.0, 500.0, 400.0);
+        let bar = bar_under(area);
+        let mut long = Long::new(area, Arc::default(), 1.0);
+        let update = |height, lost| Update {
+            height,
+            full: false,
+            lost,
+            preview: None,
+        };
+        long.update(update(400, false));
+        assert_eq!(long.note_spot(SCREEN, bar, false), None);
+        long.update(update(400, true));
+        let at = long.note_spot(SCREEN, bar, false).expect("a note");
+        let width = key_hint::width(&note(false));
+        assert_eq!(
+            at.y + key_hint::HEIGHT + 8.0,
+            area.y,
+            "right above the area"
+        );
+        assert_eq!(at.x + width / 2.0, area.center_x(), "centred on it");
+        assert_eq!(
+            long.hint_spot(SCREEN, bar, false),
+            None,
+            "one note at a time"
+        );
+        // an area at the screen's top: under it (the toolbar elsewhere)
+        let high = rect(300.0, 0.0, 500.0, 400.0);
+        let mut top = Long::new(high, Arc::default(), 1.0);
+        top.update(update(400, true));
+        let far = rect(0.0, 700.0, 10.0, 10.0);
+        let at = top.note_spot(SCREEN, far, false).unwrap();
+        assert_eq!(at.y, high.height + 8.0);
+        // a full-screen area: no note over the page
+        let mut full = Long::new(rect(0.0, 0.0, 1280.0, 720.0), Arc::default(), 1.0);
+        full.update(update(720, true));
+        assert_eq!(full.note_spot(SCREEN, far, false), None);
+        // matched again: gone
+        long.update(update(500, false));
+        assert_eq!(long.note_spot(SCREEN, bar, false), None);
     }
 
     #[test]

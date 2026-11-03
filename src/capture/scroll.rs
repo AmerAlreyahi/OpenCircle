@@ -4,11 +4,16 @@
 //! through it (`stitch.rs`) until Done. Nothing is injected: no auto-scroll,
 //! so elevated windows (UIPI) work too.
 //!
-//! Windows grabs the area alone with GDI (`BitBlt` from the screen; our own
-//! windows are kept out with `hide_from_capture`), and only while the user is
-//! giving input or the area still moves (`GetLastInputInfo`): a still screen
-//! costs nothing. X11 grabs the monitor and cuts the area. Wayland has no
-//! silent grab: not offered there (`available`).
+//! Windows reads every frame the screen shows from a Desktop Duplication of
+//! the area's monitor, kept open only while the capture runs (it waits for a
+//! new frame: a still screen costs nothing), and paces the wheel over the
+//! area to what was seen (`pace`: a fast spin can't skip the page; owner,
+//! 2026-11-03). Where duplication can't run (an area across monitors, a
+//! rotated one, a remote session) or stops, it grabs the area alone with GDI
+//! (`BitBlt`), ~15 times a second and only while the user is giving input or
+//! the area still moves (`GetLastInputInfo`). Our own windows are kept out
+//! with `hide_from_capture` either way. X11 grabs the monitor and cuts the
+//! area (no pacing). Wayland has no silent grab: not offered there.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,8 +22,11 @@ use std::time::{Duration, Instant};
 use super::stitch::{Push, Stitcher};
 use crate::actions::Crop;
 
-/// Time between two grabs (~15 fps).
+/// Time between two GDI grabs (~15 fps).
 const PERIOD: Duration = Duration::from_millis(66);
+/// Longest wait for a duplicated frame (the stop flag is read in between).
+#[cfg(windows)]
+const FRAME_WAIT_MS: u32 = 100;
 /// Grabs go on this long after the last input or the last change in the area
 /// (a smooth scroll finishing, a page loading under it).
 const SETTLE: Duration = Duration::from_secs(1);
@@ -73,24 +81,47 @@ pub fn by_hand(
     each: impl FnMut(Update),
 ) -> Result<Crop, String> {
     let mut st = Stitcher::new(region.2, region.3).limit(max);
-    let grab = || grab_area(region);
     let started = Instant::now();
-    match run(
+    let source = std::cell::RefCell::new(Source::open(region));
+    // (unhooked when it goes, as this returns: what it held is replayed)
+    let paced = super::pace::over(region);
+    let grab = || source.borrow_mut().next(region);
+    // duplication waits for frames itself: no input check, no period
+    let idle = || match source.borrow().fast() {
+        true => Duration::ZERO,
+        false => idle_for(),
+    };
+    let period = || match source.borrow().fast() {
+        true => Duration::ZERO,
+        false => PERIOD,
+    };
+    let moved = || {
+        if let Some(p) = &paced {
+            p.moved();
+        }
+    };
+    let ran = run(
         &mut st,
         grab,
-        idle_for,
+        idle,
         Instant::now,
         stop,
-        PERIOD,
+        period,
         preview,
+        moved,
         each,
-    ) {
+    );
+    let source = source.into_inner();
+    let secs = started.elapsed().as_secs_f64().max(0.001);
+    match ran {
         Ok(times) => crate::log!(
-            "[opencircle] long capture: {} px in {} s; {} grabs, {:.1} ms each; {} stitched, {:.1} ms each; {} previews, {:.1} ms each",
+            "[opencircle] long capture: {} px in {:.0} s; {}; {} grabs, {:.1} ms each, {:.1}/s; {} stitched, {:.1} ms each; {} previews, {:.1} ms each",
             st.height(),
-            started.elapsed().as_secs(),
+            secs,
+            source.describe(),
             times.grabs,
-            times.grab.as_secs_f64() * 1000.0 / f64::from(times.grabs.max(1)),
+            source.ms_each(times.grab, times.grabs),
+            f64::from(times.grabs) / secs,
             times.pushes,
             times.push.as_secs_f64() * 1000.0 / f64::from(times.pushes.max(1)),
             times.previews,
@@ -107,6 +138,82 @@ pub fn by_hand(
     })
 }
 
+/// Where frames come from: a Desktop Duplication (Windows) while it works,
+/// else a grab of the area each time.
+struct Source {
+    #[cfg(windows)]
+    dup: Option<super::win::Duplication>,
+    /// Why there is no duplication (it never started, or stopped).
+    why: Option<String>,
+    first: bool,
+}
+
+impl Source {
+    fn open(region: (i32, i32, u32, u32)) -> Source {
+        #[cfg(windows)]
+        let (dup, why) = match super::win::Duplication::start(region) {
+            Ok(dup) => (Some(dup), None),
+            Err(e) => (None, Some(e)),
+        };
+        #[cfg(not(windows))]
+        let (_, why) = (region, None);
+        Source {
+            #[cfg(windows)]
+            dup,
+            why,
+            first: true,
+        }
+    }
+
+    /// Frames come as the screen shows them (no input check, no period).
+    fn fast(&self) -> bool {
+        #[cfg(windows)]
+        return self.dup.is_some();
+        #[cfg(not(windows))]
+        false
+    }
+
+    /// The next frame; none when nothing new was shown. The first is a grab
+    /// (duplication only says what changes).
+    fn next(&mut self, region: (i32, i32, u32, u32)) -> io::Result<Option<Vec<u8>>> {
+        let first = std::mem::take(&mut self.first);
+        #[cfg(windows)]
+        if !first && let Some(dup) = &mut self.dup {
+            match dup.next(FRAME_WAIT_MS) {
+                Ok(frame) => return Ok(frame),
+                Err(e) => {
+                    crate::log!("[opencircle] long capture: screen frames stopped ({e}); grabs");
+                    (self.why, self.dup) = (Some(e), None);
+                }
+            }
+        }
+        let _ = first;
+        grab_area(region).map(Some)
+    }
+
+    /// For the log line.
+    fn describe(&self) -> String {
+        #[cfg(windows)]
+        if let Some(dup) = &self.dup {
+            return format!("screen frames ({} read)", dup.frames);
+        }
+        match &self.why {
+            Some(why) => format!("grabs (no screen frames: {why})"),
+            None => "grabs".into(),
+        }
+    }
+
+    /// Ms a frame took to read: the copy alone for duplicated frames (the
+    /// loop's time includes waiting for them).
+    fn ms_each(&self, total: Duration, n: u32) -> f64 {
+        #[cfg(windows)]
+        if let Some(dup) = &self.dup {
+            return dup.copy.as_secs_f64() * 1000.0 / f64::from(dup.frames.max(1));
+        }
+        total.as_secs_f64() * 1000.0 / f64::from(n.max(1))
+    }
+}
+
 /// How long the grabs and the stitching took (the log line).
 #[derive(Debug, Default)]
 struct Times {
@@ -121,20 +228,22 @@ struct Times {
 }
 
 /// The grab loop over any source: `grab` returns one RGBA frame of the
-/// stitcher's size, `idle` the time since the user's last input, `now` the
-/// clock the settle and preview times are read on (a test's own, so a slow
-/// machine can't change what happens). Grabs every `period` while there was
-/// input or a change within `SETTLE`, and never the same frame twice into the
-/// stitcher. Returns how long it all took.
+/// stitcher's size (none: nothing new shown), `idle` the time since the
+/// user's last input, `now` the clock the settle and preview times are read
+/// on (a test's own, so a slow machine can't change what happens). Grabs
+/// every `period` while there was input or a change within `SETTLE`, and
+/// never the same frame twice into the stitcher; `moved` hears of each frame
+/// that added rows (the wheel's pacer). Returns how long it all took.
 #[allow(clippy::too_many_arguments)]
 fn run(
     st: &mut Stitcher,
-    mut grab: impl FnMut() -> io::Result<Vec<u8>>,
+    mut grab: impl FnMut() -> io::Result<Option<Vec<u8>>>,
     mut idle: impl FnMut() -> Duration,
     now: impl Fn() -> Instant,
     stop: &AtomicBool,
-    period: Duration,
+    period: impl Fn() -> Duration,
     (pw, ph): (u32, u32),
+    mut moved: impl FnMut(),
     mut each: impl FnMut(Update),
 ) -> io::Result<Times> {
     let mut times = Times::default();
@@ -149,9 +258,11 @@ fn run(
         let mut news = false;
         if busy && !full {
             let frame = grab()?;
-            times.grabs += 1;
-            times.grab += start.elapsed();
-            if last.as_deref() != Some(&frame[..]) {
+            if frame.is_some() {
+                times.grabs += 1;
+                times.grab += start.elapsed();
+            }
+            if let Some(frame) = frame.filter(|f| last.as_deref() != Some(&f[..])) {
                 changed = now();
                 let pushed = Instant::now();
                 let push = st.push(&frame);
@@ -162,6 +273,9 @@ fn run(
                     _ => 0,
                 };
                 let added = matches!(push, Push::Added(_));
+                if added {
+                    moved();
+                }
                 full = st.is_full();
                 news = added || lost != (rejects >= LOST_AFTER);
                 lost = rejects >= LOST_AFTER;
@@ -197,7 +311,7 @@ fn run(
                 preview,
             });
         }
-        std::thread::sleep(period.saturating_sub(start.elapsed()));
+        std::thread::sleep(period().saturating_sub(start.elapsed()));
     }
     Ok(times)
 }
@@ -277,7 +391,7 @@ mod tests {
             if i + 1 >= at.len() {
                 stop.store(true, Ordering::Relaxed);
             }
-            Ok(rig.frame(at[i.min(at.len() - 1)]).px)
+            Ok(Some(rig.frame(at[i.min(at.len() - 1)]).px))
         };
         let each = |u| updates.borrow_mut().push(u);
         let rounds = Cell::new(0);
@@ -296,8 +410,9 @@ mod tests {
             busy,
             still,
             &stop,
-            Duration::ZERO,
+            || Duration::ZERO,
             (200, 300),
+            || {},
             each,
         )
         .unwrap();
@@ -345,7 +460,7 @@ mod tests {
         let mut st = Stitcher::new(400, 500);
         let grab = || {
             n.set(n.get() + 1);
-            Ok(rig.frame([0, 100, 200][(n.get() - 1).min(2)]).px)
+            Ok(Some(rig.frame([0, 100, 200][(n.get() - 1).min(2)]).px))
         };
         let idle = || {
             clock.set(clock.get() + Duration::from_millis(10)); // one round
@@ -363,8 +478,9 @@ mod tests {
             idle,
             now,
             &stop,
-            Duration::ZERO,
+            || Duration::ZERO,
             (200, 300),
+            || {},
             each,
         )
         .unwrap();
@@ -391,7 +507,7 @@ mod tests {
         let mut st = Stitcher::new(400, 500);
         let grab = || {
             last_grab.set(clock.get() - t0);
-            Ok(rig.frame(0).px)
+            Ok(Some(rig.frame(0).px))
         };
         let idle = || {
             clock.set(clock.get() + Duration::from_millis(20));
@@ -407,8 +523,9 @@ mod tests {
             idle,
             now,
             &stop,
-            Duration::ZERO,
+            || Duration::ZERO,
             (10, 10),
+            || {},
             |_| {},
         )
         .unwrap();
@@ -470,8 +587,14 @@ mod tests {
         let truth = rig.truth(950);
         assert_eq!(image.height as usize, truth.h, "{updates:?}");
         assert!(image.rgba == truth.px, "no gap, nothing twice");
-        assert!(updates.iter().any(|u| u.lost), "the flick asked to scroll back");
-        assert!(!updates.last().unwrap().lost, "the note goes once it goes on");
+        assert!(
+            updates.iter().any(|u| u.lost),
+            "the flick asked to scroll back"
+        );
+        assert!(
+            !updates.last().unwrap().lost,
+            "the note goes once it goes on"
+        );
     }
 
     #[test]
@@ -482,8 +605,8 @@ mod tests {
         let grab = || {
             n.set(n.get() + 1);
             match n.get() {
-                1 => Ok(rig.frame(0).px),
-                2 => Ok(rig.frame(200).px),
+                1 => Ok(Some(rig.frame(0).px)),
+                2 => Ok(Some(rig.frame(200).px)),
                 _ => Err(io::Error::other("gone")),
             }
         };
@@ -494,8 +617,9 @@ mod tests {
             || Duration::ZERO,
             Instant::now,
             &stop,
-            Duration::ZERO,
+            || Duration::ZERO,
             (9, 9),
+            || {},
             |_| {},
         );
         assert_eq!(err.unwrap_err().to_string(), "gone");

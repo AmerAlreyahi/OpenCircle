@@ -5,6 +5,7 @@
 //! `win.rs` (Windows, xcap). Scrolling capture: `stitch.rs` + `scroll.rs`.
 pub mod cursor;
 pub mod live;
+pub mod pace;
 #[cfg(target_os = "linux")]
 pub mod portal;
 pub mod scroll;
