@@ -33,7 +33,7 @@ use screens::update_card;
 
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     app::background::set_triggers(triggers);
-    crate::actions::search_in_browser::page::sweep_stale(); // pages left by a crash
+    crate::actions::search_in_browser::page::sweep_stale(); // temp files left by a crash
     let logo = kit::logo::window_icon();
     platform::windows::set_icon(logo.rgba.clone(), logo.width, logo.height);
     let mut app = iced::daemon(App::boot, App::update, App::view);
@@ -45,4 +45,5 @@ pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
         .theme(App::theme)
         .subscription(App::subscription)
         .run()
+        .inspect(|()| crate::snip::annotate::dragout::clear_own()) // a drop's grace ends with us
 }

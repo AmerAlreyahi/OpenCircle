@@ -14,6 +14,8 @@ const PREFIX: &str = "opencircle-lens-";
 const MAX_EDGE: u32 = 1600;
 /// A page younger than this is never swept (it may belong to a live instance).
 const SWEEP_AGE: Duration = Duration::from_secs(60);
+/// What the start-up sweep deletes: our Lens pages, drag-out and Share PNGs.
+const SWEPT: [&str; 3] = [PREFIX, "opencircle-drag-", "opencircle-share-"];
 
 // The hand-off page: it posts the crop the moment it is parsed (the script runs
 // before anything below it is drawn), and while Lens answers it shows a calm
@@ -115,15 +117,20 @@ fn page(png: &[u8], width: u32, height: u32) -> io::Result<String> {
     Ok(page_html(&png, w, h, &locale(), epoch_ms()))
 }
 
-/// Delete leftover pages from a crash. Call once at app start.
+/// Delete our temp files left by a crash or a quick quit: Lens pages, and the
+/// drag-out / Share PNGs (`dragout::DragFile`). Call once at app start.
 pub fn sweep_stale() {
-    sweep_dir(&std::env::temp_dir(), SWEEP_AGE);
+    sweep_dir(&std::env::temp_dir(), &SWEPT, SWEEP_AGE);
 }
 
-fn sweep_dir(dir: &Path, min_age: Duration) {
+/// Deletes the plain files in `dir` whose name starts with one of `prefixes`
+/// and that are at least `min_age` old.
+pub fn sweep_dir(dir: &Path, prefixes: &[impl AsRef<str>], min_age: Duration) {
     let Ok(rd) = fs::read_dir(dir) else { return };
     for e in rd.flatten() {
-        let ours = e.file_name().to_string_lossy().starts_with(PREFIX);
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        let ours = prefixes.iter().any(|p| name.starts_with(p.as_ref()));
         let old = e
             .metadata()
             .and_then(|m| m.modified())
@@ -444,8 +451,14 @@ mod tests {
         let ours_old = mk(&format!("{PREFIX}1-1.html"), true);
         let ours_new = mk(&format!("{PREFIX}2-2.html"), false);
         let other_old = mk("other-file.html", true);
-        sweep_dir(&dir, Duration::from_secs(60));
+        let drag_old = mk("opencircle-drag-1-1.png", true);
+        let share_old = mk("opencircle-share-1-1.png", true);
+        sweep_dir(&dir, &SWEPT, Duration::from_secs(60));
         assert!(!ours_old.exists());
+        assert!(
+            !drag_old.exists() && !share_old.exists(),
+            "drag-out / Share PNGs"
+        );
         assert!(ours_new.exists());
         assert!(other_old.exists());
         fs::remove_dir_all(dir).unwrap();

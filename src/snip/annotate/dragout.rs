@@ -24,9 +24,9 @@ pub const SUPPORTED: bool = cfg!(windows);
 /// A temp PNG of the image being dragged; deleted when dropped (the editor or
 /// pin that made it closes, or the next drag replaces it). Once an app took the
 /// drop it may still be reading the file (a browser uploads it after the drop),
-/// so then it goes `GRACE` later.
-// ponytail: a crash, or quitting within GRACE, leaves the file in the temp
-// folder; sweep `opencircle-drag-*` at start if that ever matters.
+/// so then it goes `GRACE` later. Quitting within `GRACE` deletes it at once
+/// (`clear_own`); a crash leaves it to the next start's sweep
+/// (`search_in_browser::page::sweep_stale`).
 pub struct DragFile {
     path: PathBuf,
     /// An app took it: delete after `GRACE`.
@@ -59,6 +59,18 @@ impl DragFile {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// Deletes every drag-out / Share PNG of this process now, waiting ones too.
+/// Call when the app quits (the grace threads die with it).
+pub fn clear_own() {
+    clear_own_in(&std::env::temp_dir());
+}
+
+fn clear_own_in(dir: &Path) {
+    let pid = std::process::id();
+    let ours = ["drag", "share"].map(|what| format!("opencircle-{what}-{pid}-"));
+    crate::actions::search_in_browser::page::sweep_dir(dir, &ours, std::time::Duration::ZERO);
 }
 
 impl Drop for DragFile {
@@ -94,6 +106,25 @@ pub fn dib(crop: &Crop) -> Vec<u8> {
         }
     }
     out
+}
+
+#[test]
+fn quit_deletes_only_this_process_files() {
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("oc-dragout-quit-{pid}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mk = |name: String| {
+        let p = dir.join(name);
+        std::fs::write(&p, b"png").unwrap();
+        p
+    };
+    let drag = mk(format!("opencircle-drag-{pid}-7.png"));
+    let share = mk(format!("opencircle-share-{pid}-7.png"));
+    let other = mk(format!("opencircle-drag-{}-7.png", pid + 1)); // a live instance's
+    clear_own_in(&dir);
+    assert!(!drag.exists() && !share.exists(), "ours go, grace or not");
+    assert!(other.exists(), "another process's file stays");
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[cfg(test)]

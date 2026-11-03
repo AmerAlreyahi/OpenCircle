@@ -65,6 +65,9 @@ only to the server of the provider it belongs to. A remote server must use `http
   deleted as soon as the browser has had time to read it, when the overlay
   closes. A page left behind by a crash is removed the next time OpenCircle
   starts.
+- **Drag-out and Share** hand the picture to the app you pick as a temporary
+  file, deleted about 30 seconds after the drop (at once when you quit); one
+  left behind by a crash is removed the next time OpenCircle starts.
 - **Wayland.** The screenshot file the desktop portal hands over is deleted
   right after it is read.
 - **OCR and offline translation files** (runtime and models, no personal
