@@ -391,7 +391,7 @@ impl App {
     }
 
     /// A hand-off to the browser drops the overlay out of the topmost band
-    /// behind iced's back (`lens::hand_off_foreground`): Normal then
+    /// behind iced's back (`search_in_browser::hand_off_foreground`): Normal then
     /// AlwaysOnTop makes it apply again. At the fade-in, not in `show_steps`:
     /// each step is a round trip the first frame waited for (~30 ms on the VM).
     pub(in crate::ui) fn relevel(&self) -> Task<Message> {

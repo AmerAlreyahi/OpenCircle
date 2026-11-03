@@ -7,7 +7,7 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, Task};
 
 use crate::Trigger;
-use crate::actions::{self, Action, Crop, Run, copy, lens, qr, text};
+use crate::actions::{self, Action, Crop, Run, copy, qr, search_in_browser, text};
 use crate::config::{self, After, QuickAction, SearchWith, SelectionConfig, Target};
 use crate::labs::BarButton;
 
@@ -147,14 +147,14 @@ impl App {
     /// the overlay closes; no panel of ours shows meanwhile.
     fn search_image(&mut self, crop: Crop) -> Task<Message> {
         background(move |tx| {
-            let _ = tx.unbounded_send(Message::LensOpened(lens::open(&crop)));
+            let _ = tx.unbounded_send(Message::LensOpened(search_in_browser::open(&crop)));
         })
     }
 
     /// The browser has the Lens page (held until the overlay is gone), or not.
     pub(in crate::ui) fn on_lens_opened(
         &mut self,
-        opened: Result<lens::Held, String>,
+        opened: Result<search_in_browser::Held, String>,
     ) -> Task<Message> {
         match opened {
             Ok(page) if self.o.frame.is_some() => {
@@ -175,7 +175,7 @@ impl App {
     pub(in crate::ui) fn on_pill(&mut self, pill: BarButton) -> Task<Message> {
         let picked = self.picked_in_box();
         match pill {
-            BarButton::Search => self.run(&lens::ACTION),
+            BarButton::Search => self.run(&search_in_browser::ACTION),
             BarButton::CopyText if picked || self.o.word.is_some() => self.on_picked(PickAct::Copy),
             BarButton::CopyText => self.run_quick(Quick::CopyText),
             BarButton::Translate if self.o.selection.is_none() => {
@@ -192,7 +192,7 @@ impl App {
     /// turns the bar into the editing toolbar. No selection yet = nothing to do.
     pub(in crate::ui) fn run(&mut self, action: &'static Action) -> Task<Message> {
         // Search in browser on picked words: their text, not a picture of them.
-        if action.id == lens::ACTION.id
+        if action.id == search_in_browser::ACTION.id
             && self.o.edit.is_none()
             && let Some(text) = self.picked_text()
         {
@@ -234,7 +234,7 @@ impl App {
         match action.run {
             Run::Finish(_) => self.finish(action, crop),
             Run::AskAi => self.open_chat(crop, None),
-            Run::Lens => self.search_image(crop),
+            Run::SearchInBrowser => self.search_image(crop),
             Run::Snip | Run::Translate => Task::none(), // handled above
         }
     }
@@ -545,9 +545,9 @@ impl App {
 pub(in crate::ui) fn auto_targets(behaviour: SelectionConfig) -> &'static [&'static Action] {
     match (behaviour.after, behaviour.search_with) {
         (After::Wait, _) => &[],
-        (After::Search, SearchWith::Lens) => &[&lens::ACTION],
+        (After::Search, SearchWith::Lens) => &[&search_in_browser::ACTION],
         (After::Search, SearchWith::Ai) => &[&actions::ask::ACTION],
-        (After::Search, SearchWith::Both) => &[&lens::ACTION, &actions::ask::ACTION],
+        (After::Search, SearchWith::Both) => &[&search_in_browser::ACTION, &actions::ask::ACTION],
     }
 }
 

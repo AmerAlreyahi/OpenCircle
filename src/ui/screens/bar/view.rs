@@ -6,7 +6,7 @@ use iced::widget::{container, opaque, space};
 use iced::{Element, Point};
 
 use super::geometry::{self as bar, Stop};
-use crate::actions::{self, lens, qr, text};
+use crate::actions::{self, qr, search_in_browser, text};
 use crate::labs::{self, BarButton};
 use crate::ui::app::keys;
 use crate::ui::app::message::Message;
@@ -74,8 +74,8 @@ impl App {
         let pills = [
             (
                 BarButton::Search,
-                lens::ACTION.icon,
-                lens::ACTION.label,
+                search_in_browser::ACTION.icon,
+                search_in_browser::ACTION.label,
                 &keys.search,
             ),
             (

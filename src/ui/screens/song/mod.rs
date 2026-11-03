@@ -356,7 +356,7 @@ mod tests {
         // A late Heard doesn't undo the result.
         s.update(Msg::Heard(9));
         assert!(matches!(s.state, State::Found(..)));
-        // Links open only on click, through the App (lens::open_link).
+        // Links open only on click, through the App (search_in_browser::open_link).
         let url = "https://open.spotify.com/track/x".to_string();
         assert_eq!(s.update(Msg::Open(url.clone())), Outcome::Open(url));
     }

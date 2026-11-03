@@ -6,7 +6,7 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, window};
 
 use crate::Trigger;
-use crate::actions::{self, Action, lens, qr, text};
+use crate::actions::{self, Action, qr, search_in_browser, text};
 use crate::capture::CaptureError;
 use crate::config::{self, Target};
 use crate::labs::BarButton;
@@ -72,7 +72,7 @@ pub(in crate::ui) enum Message {
     /// after this pill if any.
     ThenClose(Option<&'static str>),
     /// Lens is open in the browser (the page is held), or why it could not.
-    LensOpened(Result<crate::actions::lens::Held, String>),
+    LensOpened(Result<crate::actions::search_in_browser::Held, String>),
     /// The toast has been shown long enough.
     ToastDone,
     /// The selection with this area was scanned (a stale area is ignored).
@@ -162,7 +162,7 @@ impl BarKeys {
         };
         let key = |a: &Action| bar::key_hint(a.key);
         BarKeys {
-            search: key(&lens::ACTION),
+            search: key(&search_in_browser::ACTION),
             copy_text: quick("copy_text", false),
             translate: quick(actions::translate::ACTION.id, false),
             live: quick(actions::translate::ACTION.id, true),

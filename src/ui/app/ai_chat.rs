@@ -7,7 +7,7 @@ use std::time::Duration;
 use iced::window;
 use iced::{Point, Rectangle, Size, Task};
 
-use crate::actions::{self, Crop, lens, stack_crops};
+use crate::actions::{self, Crop, search_in_browser, stack_crops};
 use crate::config::{self, Provider};
 
 use crate::ui::ai_chat;
@@ -296,7 +296,7 @@ impl App {
             ai_chat::Msg::Card(card::Event::Hover(on)) if open => self.o.chat_hover = on,
             ai_chat::Msg::Card(card::Event::Reset) => (self.card, self.chat_width) = (None, None),
             ai_chat::Msg::Card(card::Event::Grab(_) | card::Event::Hover(_)) => {}
-            ai_chat::Msg::Search if open => return self.run(&lens::ACTION),
+            ai_chat::Msg::Search if open => return self.run(&search_in_browser::ACTION),
             ai_chat::Msg::Search => {}
             // A card's focused field gave Ctrl+C back (nothing selected in it).
             ai_chat::Msg::Key(keys::Keyed::Copy) if open => {

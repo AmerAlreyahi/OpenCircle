@@ -5,9 +5,9 @@ pub mod ask;
 pub mod copy;
 pub mod crop;
 pub mod entities;
-pub mod lens;
 pub mod qr;
 pub mod save;
+pub mod search_in_browser;
 pub mod share;
 pub mod snip;
 pub mod text;
@@ -15,7 +15,7 @@ pub mod translate;
 
 /// Every action, in action-bar order. The first one runs on Enter.
 pub const ACTIONS: &[Action] = &[
-    lens::ACTION,
+    search_in_browser::ACTION,
     ask::ACTION,
     text::ACTION,
     translate::ACTION,
@@ -44,8 +44,8 @@ pub enum Run {
     Finish(fn(Crop) -> Result<String, String>),
     /// Ask AI about the crop: opens the AI chat; the overlay stays.
     AskAi,
-    /// Search the crop in the user's browser (Lens); nothing of ours shows.
-    Lens,
+    /// Search the crop in the user's browser (Google Lens); nothing of ours shows.
+    SearchInBrowser,
     /// Snip: the action bar turns into the Snip toolbar over the selection.
     Snip,
     /// Replace the selection's text by its translation, in place.
@@ -130,7 +130,7 @@ mod tests {
         // out of Labs since 0.1.3 (N-41)
         assert_eq!(for_key(&off, e.letter, e.ctrl).map(|a| a.id), Some("edit"));
         assert_eq!(for_key(&on, e.letter, e.ctrl).map(|a| a.id), Some("edit"));
-        let l = lens::ACTION.key;
+        let l = search_in_browser::ACTION.key;
         assert!(for_key(&off, l.letter, l.ctrl).is_some());
     }
 

@@ -139,7 +139,7 @@ mod tests {
             u,
             "https://www.google.com/search?q=Roter%20Sand%20%26%20lighthouse%20%231%3F"
         );
-        // what lens::open_link accepts: one plain link on Google's host
+        // what search_in_browser::open_link accepts: one plain link on Google's host
         assert_eq!(
             crate::sys::open::web_host(&u).as_deref(),
             Some("www.google.com")

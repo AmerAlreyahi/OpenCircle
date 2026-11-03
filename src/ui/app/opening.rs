@@ -9,7 +9,7 @@ use std::time::Instant;
 use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
-use crate::actions::{lens, qr};
+use crate::actions::{qr, search_in_browser};
 use crate::config::{After, BarAnchor, SearchWith, SelectStyle, SelectionConfig, TextReader};
 use crate::labs::{BarButton, Labs};
 use crate::ocr;
@@ -106,7 +106,7 @@ pub(in crate::ui) struct Opening {
     /// The open AI chat and its number.
     pub(in crate::ui) ai_chat: Option<(u32, ai_chat::AiChat)>,
     /// Lens pages opened from this overlay, released when it closes (`finish`).
-    pub(in crate::ui) lens_pages: Vec<lens::Held>,
+    pub(in crate::ui) lens_pages: Vec<search_in_browser::Held>,
     pub(in crate::ui) purpose: Purpose,
     /// The annotation editor on the selection; kept when going back to the bar.
     pub(in crate::ui) edit: Option<SnipToolbar>,
@@ -274,7 +274,9 @@ impl Opening {
     /// Releases what dropping doesn't: the Lens pages. Everything else (panel,
     /// translate, song, helper, frame) stops or frees itself when dropped.
     pub(in crate::ui) fn finish(self) {
-        self.lens_pages.into_iter().for_each(lens::Held::release);
+        self.lens_pages
+            .into_iter()
+            .for_each(search_in_browser::Held::release);
     }
 }
 

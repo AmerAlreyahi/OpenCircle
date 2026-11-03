@@ -7,7 +7,7 @@ use iced::window::{self};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
-use crate::actions::{self, Crop, copy, lens, qr, text};
+use crate::actions::{self, Crop, copy, qr, search_in_browser, text};
 use crate::capture::CaptureError;
 use crate::config::{self, After, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target};
 use crate::labs::{self, BarButton};
@@ -440,7 +440,7 @@ fn the_crop_lens_gets_is_the_selection_at_any_scale_and_monitor() {
             assert_eq!(*p, px(x, y), "{scale}: pixel ({x}, {y})");
         }
         assert!(
-            lens::lens_png(&crop).is_ok(),
+            search_in_browser::lens_png(&crop).is_ok(),
             "{scale}: never refused as blank"
         );
     }
@@ -459,7 +459,10 @@ fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
     let texts = overlay_texts(&app);
     assert!(texts.contains(&PROTECTED.to_string()), "{texts:?}");
     let texts = overlay_texts(&app);
-    assert!(texts.contains(&lens::ACTION.icon.to_string()), "{texts:?}");
+    assert!(
+        texts.contains(&search_in_browser::ACTION.icon.to_string()),
+        "{texts:?}"
+    );
     crate::ui::kit::testing::shot::save("overlay-protected", app.view(app.overlay), area.size());
     // An ordinary capture shows no such pill.
     let grey = Crop {
@@ -3119,7 +3122,7 @@ fn search_in_browser_shows_no_card() {
     );
     let _ = app.on_pill(BarButton::Search);
     assert!(app.o.ai_chat.is_none() && app.chat.is_none(), "the pill");
-    let _ = app.update(Message::Run(&lens::ACTION));
+    let _ = app.update(Message::Run(&search_in_browser::ACTION));
     assert!(app.o.ai_chat.is_none() && app.chat.is_none(), "the action");
 }
 
@@ -3893,10 +3896,10 @@ fn lens_in_the_browser_closes_the_overlay() {
         Point::new(400.0, 300.0),
         false,
     );
-    let _ = app.update(Message::Run(&lens::ACTION));
+    let _ = app.update(Message::Run(&search_in_browser::ACTION));
     // never a card of ours, not even while the page is being written
     assert!(app.o.ai_chat.is_none(), "Search in browser opens no panel");
-    let opened = Message::LensOpened(Ok(lens::Held::for_test()));
+    let opened = Message::LensOpened(Ok(search_in_browser::Held::for_test()));
     let _ = app.update(opened);
     // Closed on every OS: nothing of ours stays on screen after the hand-off.
     assert!(app.o.frame.is_none());

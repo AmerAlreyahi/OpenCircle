@@ -1,7 +1,7 @@
 //! Google Lens through the user's own browser: no image host, no upload by us.
 //! We write a local HTML page that embeds the crop and auto-submits it (multipart
 //! POST) to lens.google.com, then open that page in the default browser. The
-//! page file lives until the overlay drops its [`LensPage`] (or the next start
+//! page file lives until the overlay drops its [`SearchPage`] (or the next start
 //! sweeps it after a crash).
 
 use std::fs::{self, OpenOptions};
@@ -81,21 +81,21 @@ form{display:none}
 
 /// A written Lens page. Deletes its file when dropped.
 #[derive(Debug)]
-pub struct LensPage {
+pub struct SearchPage {
     path: PathBuf,
 }
 
-impl LensPage {
+impl SearchPage {
     /// A page with no file (tests).
     #[cfg(test)]
-    pub fn none() -> LensPage {
-        LensPage {
+    pub fn none() -> SearchPage {
+        SearchPage {
             path: PathBuf::new(),
         }
     }
 }
 
-impl Drop for LensPage {
+impl Drop for SearchPage {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }
@@ -103,7 +103,7 @@ impl Drop for LensPage {
 
 /// Write the page for this PNG crop (`width` x `height`) and open it in the
 /// default browser. Hold the result until the overlay closes, then drop it.
-pub fn open(png: &[u8], width: u32, height: u32) -> io::Result<LensPage> {
+pub fn open(png: &[u8], width: u32, height: u32) -> io::Result<SearchPage> {
     let page = write_page(&std::env::temp_dir(), &page(png, width, height)?)?;
     crate::sys::open::open_file(&page.path)?; // on error `page` drops and the file goes
     Ok(page)
@@ -143,7 +143,7 @@ fn epoch_ms() -> u128 {
         .map_or(0, |d| d.as_millis())
 }
 
-fn write_page(dir: &Path, html: &str) -> io::Result<LensPage> {
+fn write_page(dir: &Path, html: &str) -> io::Result<SearchPage> {
     let nanos = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
@@ -153,7 +153,7 @@ fn write_page(dir: &Path, html: &str) -> io::Result<LensPage> {
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
     let mut f = opts.open(&path)?;
-    let page = LensPage { path }; // from here a failed write still cleans up
+    let page = SearchPage { path }; // from here a failed write still cleans up
     f.write_all(html.as_bytes())?;
     Ok(page)
 }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::{Action, Crop, Key, Run};
-use page::LensPage;
+use page::SearchPage;
 
 pub const ACTION: Action = Action {
     id: "lens",
@@ -16,7 +16,7 @@ pub const ACTION: Action = Action {
         letter: 'l',
     },
     icon: '\u{e154}', // lucide "search"
-    run: Run::Lens,
+    run: Run::SearchInBrowser,
 };
 
 /// The browser reads the page a while after we launch it (a cold browser start
@@ -60,7 +60,7 @@ pub fn open(crop: &Crop) -> Result<Held, String> {
 #[derive(Debug, Clone)]
 pub struct Held {
     /// Only held: its Drop deletes the file.
-    _page: Arc<LensPage>,
+    _page: Arc<SearchPage>,
     opened: Instant,
 }
 
@@ -69,7 +69,7 @@ impl Held {
     #[cfg(test)]
     pub fn for_test() -> Held {
         Held {
-            _page: Arc::new(LensPage::none()),
+            _page: Arc::new(SearchPage::none()),
             opened: Instant::now(),
         }
     }
