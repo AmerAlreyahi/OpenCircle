@@ -615,8 +615,29 @@ impl Windows {
         let mut tasks = vec![iced::system::theme().map(Msg::OsTheme), test_hook()];
         if Config::path().is_some_and(|p| !p.exists()) {
             tasks.push(self.open(Kind::Onboarding));
+        } else {
+            tasks.push(self.taken_once(crate::hotkey::taken_shortcuts()));
         }
         Task::batch(tasks)
+    }
+
+    /// Shortcuts another app holds (`taken`, refused at the start): one quiet
+    /// notice, once; the next start with the same ones says nothing (Settings
+    /// shows each such row's note).
+    fn taken_once(&mut self, taken: Vec<String>) -> Task<Msg> {
+        let told = config::current().general.shortcuts_taken_shown;
+        let notice = taken_notice(&taken, &told);
+        if taken != told {
+            std::thread::spawn(move || {
+                if let Err(e) = config::update(|c| c.general.shortcuts_taken_shown = taken) {
+                    crate::log!("[opencircle] the taken shortcuts were not saved: {e}");
+                }
+            });
+        }
+        match notice {
+            Some(text) => self.toast(&text, Tone::Neutral, None, NOTICE_MS),
+            None => Task::none(),
+        }
     }
 
     /// The open window of this kind, if any.
@@ -1615,6 +1636,22 @@ pub fn tray_notice(shortcut: &str) -> String {
     format!("OpenCircle is running in the tray. Press {keys}.")
 }
 
+/// The start notice for shortcuts another app holds (`taken`); none when
+/// `told` (the last notice's) names them all.
+pub fn taken_notice(taken: &[String], told: &[String]) -> Option<String> {
+    if taken.iter().all(|k| told.contains(k)) {
+        return None;
+    }
+    let keys: Vec<String> = (taken.iter())
+        .map(|k| super::settings::key_labels(k).join("+"))
+        .collect();
+    let verb = if keys.len() == 1 { "is" } else { "are" };
+    Some(format!(
+        "{} {verb} taken by another app: pick another key in Settings",
+        keys.join(", ")
+    ))
+}
+
 /// A toast's window size (logical px): the pill's (`screens::toast::size`).
 pub fn toast_size(text: &str) -> Size {
     toast::size(text)
@@ -2247,6 +2284,24 @@ mod tests {
         let mut windows = Windows::default();
         let _ = windows.update(Msg::Closed(id));
         assert!(!is_floating(id));
+    }
+
+    #[test]
+    fn a_taken_shortcut_is_told_once() {
+        let keys = |k: &[&str]| k.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            taken_notice(&keys(&["Alt+A"]), &[]).as_deref(),
+            Some("Alt+A is taken by another app: pick another key in Settings")
+        );
+        // the next start, the same key: nothing
+        assert_eq!(taken_notice(&keys(&["Alt+A"]), &keys(&["Alt+A"])), None);
+        assert_eq!(taken_notice(&[], &keys(&["Alt+A"])), None, "none taken");
+        // another key taken since: both named
+        let both = taken_notice(&keys(&["Alt+A", "Ctrl+Shift+Space"]), &keys(&["Alt+A"]));
+        assert!(
+            both.unwrap()
+                .starts_with("Alt+A, Ctrl+Shift+Space are taken")
+        );
     }
 
     #[test]

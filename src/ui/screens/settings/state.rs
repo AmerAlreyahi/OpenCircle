@@ -1048,7 +1048,7 @@ impl State {
         Some(match (self.desktop)(shortcut)? {
             DesktopKey::Other(keys) => format!("In use: {keys}. {}", managed()),
             DesktopKey::Unassigned => format!("No key in use. {}", managed()),
-            DesktopKey::Taken => "Another app uses this key: pick a different one".into(),
+            DesktopKey::Taken => "Taken by another app: pick another key".into(),
         })
     }
 

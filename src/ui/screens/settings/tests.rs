@@ -2483,9 +2483,18 @@ fn the_snip_page_says_when_print_screen_or_a_key_is_taken() {
     assert!(
         texts
             .iter()
-            .any(|t| t == "Another app uses this key: pick a different one"),
+            .any(|t| t == "Taken by another app: pick another key"),
         "{texts:?}"
     );
+    // the default Snip key held by another app (iTop, WeChat): its Shortcuts row says so
+    let (mut s, _) = state(None);
+    s.desktop = |keys| (keys == "Alt+A").then_some(DesktopKey::Taken);
+    update(&mut s, Message::Section(Section::Shortcuts));
+    let texts = shot::texts(view(&s));
+    let notes = (texts.iter())
+        .filter(|t| *t == "Taken by another app: pick another key")
+        .count();
+    assert_eq!(notes, 1, "{texts:?}");
 }
 
 /// N-39: one History page: each kind's switch, count and Clear; Clear all

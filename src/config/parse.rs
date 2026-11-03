@@ -102,6 +102,8 @@ impl Config {
                 &mut w,
             );
             c.general.autostart = get(t, "general.", "autostart", d.general.autostart, &mut w);
+            c.general.shortcuts_taken_shown =
+                get(t, "general.", "shortcuts_taken_shown", vec![], &mut w);
         }
         // `[results]` (schema 1-2: the web view card's side and size) is ignored.
         if let Some(t) = section(&root, "bar", &mut w) {

@@ -22,6 +22,8 @@
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
 //! search_history = false            # keep the searches handed to the browser on this PC (opt-in)
 //! autostart = true                  # start with Windows / at login (tray only, no window)
+//! shortcuts_taken_shown = []        # the shortcuts another app held when the one-time notice said so
+//!                                   # (written only when not empty)
 //!
 //! [bar]                             # the overlay's action bar, where the user docked it
 //! anchor = "bottom"                 # bottom | top | bottom_left | bottom_right
@@ -451,6 +453,10 @@ pub struct GeneralConfig {
     pub search_history: bool,
     /// Start OpenCircle with the OS (`autostart`). On by default.
     pub autostart: bool,
+    /// The shortcuts another app held when the start notice last said so
+    /// (`hotkey::taken_notice`): the same ones aren't told again.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shortcuts_taken_shown: Vec<String>,
 }
 
 impl Default for GeneralConfig {
@@ -460,6 +466,7 @@ impl Default for GeneralConfig {
             save_folder: String::new(),
             search_history: false,
             autostart: true,
+            shortcuts_taken_shown: Vec::new(),
         }
     }
 }

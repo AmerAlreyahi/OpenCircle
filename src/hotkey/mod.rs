@@ -242,6 +242,15 @@ fn taken() -> MutexGuard<'static, Vec<HotKey>> {
     TAKEN.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The running shortcuts the OS refused at the last grab, as configured.
+pub fn taken_shortcuts() -> Vec<String> {
+    let taken = taken().clone();
+    (bindings().iter())
+        .filter(|b| taken.contains(&b.hotkey))
+        .map(|b| b.shortcut.clone())
+        .collect()
+}
+
 /// The desktop's own say on `shortcut` (a key of the running config) when it is
 /// not simply that key. `None` = active as configured, or nothing known (not
 /// Wayland, the desktop hasn't answered yet, or not a running shortcut).
