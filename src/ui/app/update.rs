@@ -216,7 +216,7 @@ impl App {
             Message::Confirm(place, result) => self.toast_for(place, result),
             Message::ThenClose(Some(pill)) => self.toast_then_close(pill),
             Message::ThenClose(None) => self.close(),
-            Message::LensOpened(opened) => self.on_lens_opened(opened),
+            Message::SearchOpened(opened) => self.on_search_opened(opened),
             Message::TextRead(copied) if self.o.toast.is_some() => {
                 self.o.toast = Some(match copied {
                     Ok(()) => "Text copied",

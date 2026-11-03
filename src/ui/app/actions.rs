@@ -147,18 +147,18 @@ impl App {
     /// the overlay closes; no panel of ours shows meanwhile.
     fn search_image(&mut self, crop: Crop) -> Task<Message> {
         background(move |tx| {
-            let _ = tx.unbounded_send(Message::LensOpened(search_in_browser::open(&crop)));
+            let _ = tx.unbounded_send(Message::SearchOpened(search_in_browser::open(&crop)));
         })
     }
 
     /// The browser has the Lens page (held until the overlay is gone), or not.
-    pub(in crate::ui) fn on_lens_opened(
+    pub(in crate::ui) fn on_search_opened(
         &mut self,
         opened: Result<search_in_browser::Held, String>,
     ) -> Task<Message> {
         match opened {
             Ok(page) if self.o.frame.is_some() => {
-                self.o.lens_pages.push(page);
+                self.o.search_pages.push(page);
                 self.close()
             }
             Ok(page) => {

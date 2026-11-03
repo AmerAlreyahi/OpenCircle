@@ -106,7 +106,7 @@ pub(in crate::ui) struct Opening {
     /// The open AI chat and its number.
     pub(in crate::ui) ai_chat: Option<(u32, ai_chat::AiChat)>,
     /// Lens pages opened from this overlay, released when it closes (`finish`).
-    pub(in crate::ui) lens_pages: Vec<search_in_browser::Held>,
+    pub(in crate::ui) search_pages: Vec<search_in_browser::Held>,
     pub(in crate::ui) purpose: Purpose,
     /// The annotation editor on the selection; kept when going back to the bar.
     pub(in crate::ui) edit: Option<SnipToolbar>,
@@ -225,7 +225,7 @@ impl Default for Opening {
             include: true,
             reveal: None,
             ai_chat: None,
-            lens_pages: Vec::new(),
+            search_pages: Vec::new(),
             purpose: Purpose::Search,
             edit: None,
             origin: Point::ORIGIN,
@@ -274,7 +274,7 @@ impl Opening {
     /// Releases what dropping doesn't: the Lens pages. Everything else (panel,
     /// translate, song, helper, frame) stops or frees itself when dropped.
     pub(in crate::ui) fn finish(self) {
-        self.lens_pages
+        self.search_pages
             .into_iter()
             .for_each(search_in_browser::Held::release);
     }

@@ -589,3 +589,5 @@ production systems.
 - Preview finishing (owner, 2026-11-03): use the owner-supplied real recordings; preserve raws, edit locally in a separate project, and show two rendered pilots (minimal / focus motion) for style selection before finishing the batch. No cloud uploads, generated replacement UI or added cursor. Deliver silent 1200x680 WebP (15-20 fps), matching MP4, poster and editable source. Editing brief and handover: docs/internal/preview-edit/.
 
 Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the rendered pilots. Apply static framing and clean cuts consistently across all supplied recordings; adapt source ranges for clarity.
+
+- Preview live effect (owner, 2026-11-03): crops may hide the actual Active Look edge. The editor may reconstruct that effect from the app/design reference in the edited viewport, ONLY during the real active state. Never add it over inactive source or external results. Preserve Snip pre-pick glow versus picked-area outline. Respect shortcut-driven actions; never invent toolbar clicks. Document the reconstructed layer in edit notes.

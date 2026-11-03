@@ -30,7 +30,7 @@ pub const BLANK: &str =
 /// `crop` as the PNG Lens gets, every pixel opaque (a screen has no
 /// see-through pixels, and a zero alpha from any capture path would reach Lens
 /// as blank white). `Err(BLANK)` for a crop of one flat colour: never sent.
-pub fn lens_png(crop: &Crop) -> Result<Vec<u8>, String> {
+pub fn search_png(crop: &Crop) -> Result<Vec<u8>, String> {
     let mut rgba = crop.rgba.clone();
     let (pixels, _) = rgba.as_chunks_mut::<4>();
     pixels.iter_mut().for_each(|p| p[3] = 255);
@@ -43,7 +43,7 @@ pub fn lens_png(crop: &Crop) -> Result<Vec<u8>, String> {
 /// Writes the Lens page for `crop` and opens it in the default browser.
 /// Blocking (PNG encode, file write, process spawn): call off the UI thread.
 pub fn open(crop: &Crop) -> Result<Held, String> {
-    let png = lens_png(crop)?;
+    let png = search_png(crop)?;
     let page = page::open(&png, crop.width, crop.height).map_err(|e| {
         crate::log!("[lens] browser not opened: {e}");
         "Couldn't open your browser. Check that a default browser is set, then try again."
@@ -100,7 +100,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lens_gets_exactly_the_selected_pixels_all_opaque() {
+    fn search_gets_exactly_the_selected_pixels_all_opaque() {
         // A 16 x 12 frame at scale 2 (8 x 6 logical); every pixel says where it
         // is, and some have alpha 0 (what a bad capture could give).
         let (fw, fh) = (16u32, 12u32);
@@ -119,7 +119,7 @@ mod tests {
         let crop = super::super::crop(&frame, fw, fh, 2.0, area).unwrap();
         assert_eq!((crop.width, crop.height), (6, 4));
         // What the browser's page sends: the PNG inside the auto-submit form.
-        let png = lens_png(&crop).unwrap();
+        let png = search_png(&crop).unwrap();
         let mut dec = png::Decoder::new(std::io::Cursor::new(png))
             .read_info()
             .unwrap();
@@ -149,7 +149,7 @@ mod tests {
             [0, 0, 0, 255],
             [40, 90, 200, 255],
         ] {
-            assert_eq!(lens_png(&flat(colour)), Err(BLANK.into()), "{colour:?}");
+            assert_eq!(search_png(&flat(colour)), Err(BLANK.into()), "{colour:?}");
             assert_eq!(
                 open(&flat(colour)).map(drop),
                 Err(BLANK.into()),
@@ -159,7 +159,7 @@ mod tests {
         // One pixel of something else is a picture.
         let mut dot = flat([255; 4]);
         dot.rgba[4 * 77..4 * 78].copy_from_slice(&[0, 0, 0, 255]);
-        assert!(lens_png(&dot).is_ok());
+        assert!(search_png(&dot).is_ok());
     }
 
     #[test]
