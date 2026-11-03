@@ -559,6 +559,11 @@ production systems.
   only in a GitHub Actions secret); no valid signature = no install. Binaries stay
   unsigned. Where self-replace isn't possible (deb/rpm), notify + link only.
 
+- Names follow features (owner, 2026-11-03): module, file, type, function and test names use the feature's
+  current name as users see it (Snip, Steps strip, Long capture, Live translate, Copied pill, ...); when a feature is
+  renamed or reshaped, its code is renamed in the same change (no leftover old names like "edit" for Snip or "board"
+  for the Steps strip). Frozen contracts keep their spelling (CLI, config keys, update channel): map them at the edge.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
@@ -580,3 +585,7 @@ production systems.
 - Google Lens has no public upload API. Existing clones upload to imgur/uguu
   (privacy leak). Our approach: the browser itself posts the image to Lens
   through a local auto-submitting form (spike S1 in the plan proves it).
+
+- Preview finishing (owner, 2026-11-03): use the owner-supplied real recordings; preserve raws, edit locally in a separate project, and show two rendered pilots (minimal / focus motion) for style selection before finishing the batch. No cloud uploads, generated replacement UI or added cursor. Deliver silent 1200x680 WebP (15-20 fps), matching MP4, poster and editable source. Editing brief and handover: docs/internal/preview-edit/.
+
+Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the rendered pilots. Apply static framing and clean cuts consistently across all supplied recordings; adapt source ranges for clarity.
