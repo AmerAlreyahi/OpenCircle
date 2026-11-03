@@ -208,12 +208,17 @@ fn offset(a: &Rows, b: &Rows, t: usize, h: usize, (lo, hi): (isize, isize)) -> O
     if inner.len() >= MIN_MATCH {
         (info, from) = (inner, (up as isize, (h - down) as isize));
     }
+    // Only rows that changed a little: whole rows must match (a document's
+    // lines one line pitch on, the numbers moving with them), not just the
+    // bins that changed (a spinner on a still page "moved" by a pixel: the
+    // spinner rows were stitched again and again, the owner's 2026-11-03).
+    let whole = info.iter().all(held);
     if info.is_empty() {
         return Some(Found { d: 0, sure: true });
     }
     let need = MIN_MATCH.max(info.len() / 16).min(info.len());
     let cost = |d: isize, y: usize| {
-        let still = Some(a.row(t + y));
+        let still = (!whole).then(|| a.row(t + y));
         bad(
             a.row(t + y.wrapping_add_signed(d)),
             b.row(t + y),
@@ -1453,6 +1458,27 @@ mod tests {
         assert_eq!((moved, again), (Push::Added(162), Push::NoMovement)); // 9 lines x 18 px
     }
 
+    /// The bottom 400 rows of a chat page on the VM (Edge, 100 %): its prompt
+    /// box, a blinking caret and a turning "Working" spinner, the page still.
+    /// The spinner rows "moved" by a pixel and were stitched again and again
+    /// (owner's shot and VM run, 2026-11-03).
+    #[test]
+    fn real_spinner_and_caret_on_a_still_page_add_nothing() {
+        let pairs: [(&[u8], &[u8]); 2] = [
+            (
+                include_bytes!("testdata/promptbox_0.png"),
+                include_bytes!("testdata/promptbox_1.png"),
+            ),
+            (
+                include_bytes!("testdata/promptbox_2.png"),
+                include_bytes!("testdata/promptbox_3.png"),
+            ),
+        ];
+        for (a, b) in pairs {
+            assert_eq!(real_pair(a, b), (Push::NoMovement, Push::NoMovement));
+        }
+    }
+
     #[test]
     fn real_edge_sticky_header_and_floating_popup() {
         // Pastel paragraph bands under a sticky header, with Edge's "Restore pages"
@@ -1569,6 +1595,10 @@ mod tests {
             x..x + 8
         }
         fn frame(&self, s: usize) -> Img {
+            self.frame_at(s, s)
+        }
+        /// At scroll position `s`, the spinner and caret at step `k`.
+        fn frame_at(&self, s: usize, k: usize) -> Img {
             let s = s.min(self.max_scroll());
             let mut f = self.chrome.clone();
             let cw = self.page.w;
@@ -1582,25 +1612,33 @@ mod tests {
             f.fill(self.thumb().start, y, 8, len, [120, 120, 120]);
             if self.bot > 0 {
                 // a spinner on the bottom edge and a blinking caret in the
-                // prompt box, different in every frame
-                let k = s % 7;
+                // prompt box, turning while the page stands still too
                 f.fill(self.w / 2, self.vh - 16, 16, 16, [250, 250, 250]);
-                f.fill(self.w / 2 + 2 * k, self.vh - 14, 4, 12, [40, 90, 200]);
-                let c = if s.is_multiple_of(2) { 20 } else { 230 };
+                f.fill(self.w / 2 + 2 * (k % 7), self.vh - 14, 4, 12, [40, 90, 200]);
+                let c = if k.is_multiple_of(2) { 20 } else { 230 };
                 f.fill(self.left + 40, self.vh - self.bot / 2, 2, 14, [c, c, c]);
             }
             f
         }
         /// (stitched height, true height, rows of the page column, thumb left
         /// out, that differ from the truth: the top bar, the page seen, the
-        /// bottom bar once, as last seen).
+        /// bottom bar once, as last seen). After the last position the page
+        /// stands still while the spinner turns (it was stitched as page,
+        /// again and again: the owner's run, 2026-11-03).
         fn check(&self, pos: &[usize]) -> (usize, usize, usize) {
             let mut st = Stitcher::new(self.w as u32, self.vh as u32);
             for &s in pos {
                 st.push(&self.frame(s).px);
             }
-            let (px, _, h) = st.finish();
             let last = pos.iter().copied().max().unwrap().min(self.max_scroll());
+            for k in 1..=20 {
+                st.push(
+                    &self
+                        .frame_at(*pos.last().unwrap(), pos.last().unwrap() + k)
+                        .px,
+                );
+            }
+            let (px, _, h) = st.finish();
             let truth_h = self.top + last + self.body() + self.bot;
             let (a, b) = (self.left, self.thumb().start);
             // the bottom bar as the last frame shows it (spinner, caret)
