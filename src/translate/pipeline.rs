@@ -123,10 +123,38 @@ impl Real {
                 .zip(lang::find(target))
                 .is_some_and(|(s, t)| s == t)
         };
+        // On a page clearly in one language (3/4 of the lines that tell), a
+        // line's own language in the page's script (told by its words, which
+        // can be wrong) only counts where its models are here, or the page
+        // itself needs nothing: else it goes the page's way. A French line
+        // taken for Spanish asked for es-de (112 MB) and the page waited on it.
+        // Another script (an Arabic line) is sure: its pair is asked for.
+        let told = self
+            .guessed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .1
+            .clone();
+        let clear = told.iter().filter(|s| **s == fallback).count() * 4 >= told.len() * 3;
+        let page_runs = clear && !same(fallback) && mt::route(fallback, target).is_some();
+        let script = |s: &str| lang::find(s).map(|l| l.script);
+        let mut own: Vec<(&str, bool)> = Vec::new();
+        let mut usable = |s: &'static str| match own.iter().find(|(o, _)| *o == s) {
+            Some((_, ok)) => *ok,
+            None => {
+                let ok = !page_runs
+                    || same(s)
+                    || script(s) != script(fallback)
+                    || mt::route(s, target)
+                        .is_some_and(|r| r.iter().all(|p| p.missing_bytes() == 0));
+                own.push((s, ok));
+                ok
+            }
+        };
         let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
         for (i, t) in texts.iter().enumerate() {
             let s = match self.source.as_str() {
-                lang::AUTO => lang::sure(t).unwrap_or(fallback),
+                lang::AUTO => lang::sure(t).filter(|s| usable(s)).unwrap_or(fallback),
                 _ => fallback,
             };
             if same(s) {
@@ -137,13 +165,7 @@ impl Real {
                 None => groups.push((s, vec![i])),
             }
         }
-        let page = self
-            .guessed
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .1
-            .clone();
-        if groups.is_empty() && page.iter().all(|s| same(s)) {
+        if groups.is_empty() && told.iter().all(|s| same(s)) {
             return Err(no_route(fallback, target));
         }
         (groups.into_iter())
@@ -1028,15 +1050,30 @@ fn needs_translation(text: &str, target: &str) -> bool {
     let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
     let word =
         (text.split(|c: char| !c.is_alphabetic())).any(|w| w.chars().count() > 1 || !w.is_ascii());
+    match lang::find(target).map(|l| l.script) {
+        _ if !word || code(text) => false,
+        Some(Script::Latin) | None => true,
+        Some(script) => letters.iter().filter(|c| script.has(**c)).count() * 2 < letters.len(),
+    }
+}
+
+/// An address or code line (`code_like`): its letters are >= 80 % in such
+/// tokens, or it starts with an address (a domain, "www.", "://"), as a
+/// browser's address bar does however OCR reads the rest of it: PP-OCR's
+/// "fr.wikipedia.org /wiki/Système solaire" has a gap, and a line in front
+/// ("Q", a lock icon read as a letter) is skipped.
+pub(crate) fn code(text: &str) -> bool {
+    let letters = text.chars().filter(|c| c.is_alphabetic()).count();
     let in_code: usize = (text.split_whitespace())
         .filter(|w| code_like(w))
         .map(|w| w.chars().filter(|c| c.is_alphabetic()).count())
         .sum();
-    match lang::find(target).map(|l| l.script) {
-        _ if !word || in_code * 5 >= letters.len() * 4 => false,
-        Some(Script::Latin) | None => true,
-        Some(script) => letters.iter().filter(|c| script.has(**c)).count() * 2 < letters.len(),
-    }
+    let first = text.split_whitespace().find(|w| w.chars().count() > 1);
+    let address = first.is_some_and(|w| {
+        let host = w.split('/').next().unwrap_or_default();
+        code_like(w) && (w.contains("://") || w.starts_with("www.") || host.contains('.'))
+    });
+    letters > 0 && (address || in_code * 5 >= letters * 4)
 }
 
 /// A web address, a path, an e-mail address, a file name or an identifier:
@@ -1653,6 +1690,41 @@ pub(super) mod tests {
             AiError::AlreadyIn("English"),
             "a quiet note, not an error card"
         );
+    }
+
+    /// Ubuntu gate: a French page into German asked for Spanish -> German
+    /// (112 MB) for one line its words took for Spanish, and drew nothing
+    /// until it was downloaded. On a page clearly in French, a line in the
+    /// same script whose own models aren't here goes the page's way.
+    #[test]
+    fn a_stray_line_never_holds_the_page_for_a_download() {
+        let fr = [
+            "Le Système solaire est le système planétaire du Soleil.",
+            "Il est composé de cette étoile et des objets célestes qui tournent autour.",
+            "Les planètes telluriques sont les plus proches du Soleil.",
+            "Esta hoja tiene un pasado oscuro.",
+        ];
+        let texts: Vec<String> = fr.iter().map(|s| s.to_string()).collect();
+        assert_eq!(lang::sure(fr[3]), Some("es"));
+        let real = Real::new(lang::AUTO, Via::Offline);
+        real.read(&fr);
+        let es_here = (mt::route("es", "de").unwrap().iter()).all(|p| p.missing_bytes() == 0);
+        let routes = real.routes(&texts, "de").unwrap();
+        let got: Vec<_> = routes
+            .iter()
+            .map(|(r, i)| (r[0].source, i.clone()))
+            .collect();
+        if es_here {
+            assert_eq!(got, [("fr", vec![0, 1, 2]), ("es", vec![3])]);
+        } else {
+            assert_eq!(got, [("fr", vec![0, 1, 2, 3])]);
+        }
+        // a page that isn't clearly one language keeps each line's own way
+        let half = [fr[0], fr[3]];
+        let real = Real::new(lang::AUTO, Via::Offline);
+        real.read(&half);
+        let texts: Vec<String> = half.iter().map(|s| s.to_string()).collect();
+        assert_eq!(real.routes(&texts, "de").unwrap().len(), 2);
     }
 
     #[test]

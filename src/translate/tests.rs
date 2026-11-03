@@ -1035,7 +1035,8 @@ fn real_frames() {
 /// models): each frame into each of its targets with the app's own offline
 /// path (`pipeline::Real`, "auto": detect, routes, pivot), the models in
 /// process. Per run: `<frame>-<target>.png` and `.json` (every block's
-/// original and translation), and one summary line.
+/// original and translation), and one summary line; `OC_ROUTES=1` also
+/// prints each text's route (which pair a line asks for).
 /// `OC_MATRIX="fr.png:en,ar;ar.png:en" OC_REAL_OUT=dir [OC_WINOCR=1] cargo test --release real_matrix -- --ignored --nocapture`
 #[test]
 #[ignore]
@@ -1061,7 +1062,13 @@ fn real_matrix() {
             self.real.batch()
         }
         fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
-            for (route, _) in self.real.routes(texts, target)? {
+            for (route, idx) in self.real.routes(texts, target)? {
+                if std::env::var_os("OC_ROUTES").is_some() {
+                    let l: Vec<_> = route.iter().map(|p| p.label()).collect();
+                    for &i in &idx {
+                        eprintln!("ROUTE {l:?} <- {:?}", texts[i]);
+                    }
+                }
                 for pair in route {
                     pair.ensure(|_, _| {})
                         .map_err(|e| AiError::Offline(e.to_string()))?;
@@ -1294,6 +1301,43 @@ mod real {
             s = format!("{s} {w}").trim().to_string();
         }
         s
+    }
+
+    /// Ubuntu, Firefox, PP-OCR (0.1.3 gate): French, English and Arabic
+    /// Wikipedia ("Système solaire", 1920x1440), the lines the app read. Before:
+    /// fr -> en/de/ar asked for an es pair ("Nb. de satellites plus de 600, dont
+    /// 205 naturels connus" read as Spanish) and waited on it; en -> en altered
+    /// "Known dwarf planets" (taken for Spanish) and had no "Already in English";
+    /// the address bar was one block with the logo under it and translated.
+    #[test]
+    fn linux_pages_go_the_page_way_and_keep_the_address() {
+        use crate::ai::AiError;
+        use crate::translate::pipeline::{Deps, Real, Via, code};
+        let blocks = |name| group_blocks(&lines(name, (1920, 1440)));
+        let texts = |b: &[Block]| b.iter().map(|b| b.text.clone()).collect::<Vec<_>>();
+        for name in ["linux_fr", "linux_en", "linux_ar"] {
+            let all = blocks(name);
+            let bar = (all.iter())
+                .find(|b| b.text.contains("wikipedia.org"))
+                .unwrap();
+            assert!(code(&bar.text), "{name}: {}", bar.text);
+            assert_eq!(bar.lines.len(), 1, "{name}: {}", bar.text);
+        }
+        let routes = |name, target| {
+            let t = texts(&blocks(name));
+            let real = Real::new(lang::AUTO, Via::Offline);
+            real.read(&t.iter().map(String::as_str).collect::<Vec<_>>());
+            (real.routes(&t, target))
+                .map(|r| r.iter().map(|(r, _)| r[0].source).collect::<Vec<_>>())
+        };
+        for target in ["en", "de", "es", "ar"] {
+            assert_eq!(routes("linux_fr", target), Ok(vec!["fr"]), "fr -> {target}");
+        }
+        assert_eq!(routes("linux_en", "en"), Err(AiError::AlreadyIn("English")));
+        for target in ["fr", "ar"] {
+            assert_eq!(routes("linux_en", target), Ok(vec!["en"]), "en -> {target}");
+        }
+        assert_eq!(routes("linux_ar", "en"), Ok(vec!["ar"]));
     }
 
     fn changed(a: &[u8], b: &[u8], w: usize) -> Vec<(usize, usize)> {

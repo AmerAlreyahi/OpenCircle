@@ -202,7 +202,18 @@ fn continues(p: &Line, l: &Line) -> bool {
     let goes_on = l.text.starts_with(char::is_lowercase)
         || cut
         || (p.text.chars().count() > 30 && !p.text.ends_with(['.', '!', '?', ':']));
-    same_col && close && similar && fits && goes_on && !list(&p.text) && !list(&l.text)
+    // an address bar is never one block with the page under it ("...org/wiki/
+    // Système_solaire WIKIPÉDIA": the logo's word made it a sentence)
+    let code = |t: &str| pipeline::code(t);
+    same_col
+        && close
+        && similar
+        && fits
+        && goes_on
+        && !list(&p.text)
+        && !list(&l.text)
+        && !code(&p.text)
+        && !code(&l.text)
 }
 
 /// What [`render`] did. Blocks it left as they were: `busy` = the background

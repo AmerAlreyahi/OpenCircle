@@ -178,7 +178,8 @@ const WORDS: [(&str, &[&str], &[&str], &str); 4] = [
         "fr",
         &[
             "le", "la", "les", "des", "et", "est", "une", "du", "que", "dans", "pour", "pas",
-            "sur", "au", "un", "il", "elle", "je", "vous", "ce", "qui", "avec",
+            "sur", "au", "un", "il", "elle", "je", "vous", "ce", "qui", "avec", "de", "en", "plus",
+            "dont", "aux",
         ],
         &["eux", "eau", "aux", "ment", "ait", "ais", "ée", "ées"],
         "èêçàùâîôûëïœ",
@@ -260,11 +261,16 @@ pub fn guess<'a>(texts: impl IntoIterator<Item = &'a str>) -> Option<&'static st
 /// The language of ONE text when it says so itself: its script (Arabic,
 /// Russian, Japanese, Chinese), or Latin words that clearly lean one way
 /// (two votes ahead of any other). `None` = too little to tell ("Gracias.",
-/// "Blender Studio"): the page's language applies. A line of three or more
+/// "Blender Studio", any Latin line under three words: "Pluto Haumea" has two
+/// Spanish endings): the page's language applies. A line of three or more
 /// plain words the votes can't settle goes to `detected`.
 pub fn sure(text: &str) -> Option<&'static str> {
     match guess([text])? {
         "en" | "es" | "fr" | "de" => {
+            let words = text.split_whitespace();
+            if words.filter(|w| w.chars().any(char::is_alphabetic)).count() < 3 {
+                return None;
+            }
             let v = votes(&[text]);
             let mut sorted = v;
             sorted.sort_unstable();
@@ -284,7 +290,8 @@ pub fn sure(text: &str) -> Option<&'static str> {
 /// has one French and one Spanish vote). Only for 3+ plain words making 3/4
 /// of the line (never IPA "[a.löz_ö.fä da la]", menus, "Text"), and only
 /// when that language has a vote of its own: on the matrix pages the
-/// detector alone said "Modifier le code" is Spanish.
+/// detector alone said "Modifier le code" is Spanish, on English Wikipedia
+/// (Linux, PP-OCR) "Known dwarf planets" and "Local Interstellar Cloud".
 fn detected(text: &str, votes: &[usize; WORDS.len()]) -> Option<&'static str> {
     let plain = |w: &&&str| {
         let w = w.trim_end_matches([',', ';', ':', '.', '!', '?']);
@@ -306,7 +313,7 @@ fn detected(text: &str, votes: &[usize; WORDS.len()]) -> Option<&'static str> {
         _ => return None,
     };
     let i = WORDS.iter().position(|w| w.0 == code)?;
-    (votes[i] > 0 || votes.iter().all(|v| *v <= votes[i])).then_some(code)
+    (votes[i] > 0).then_some(code)
 }
 
 #[cfg(test)]
@@ -401,7 +408,6 @@ mod tests {
             "Ils viennent jusque dans vos bras Égorger vos fils, vos compagnes",
             "I} Aux armes, citoyens;",
             "Qu'un sang impur",
-            "Abreuve nos sillons 41",
         ] {
             assert_eq!((fr, sure(fr)), (fr, Some("fr")));
         }
@@ -417,6 +423,20 @@ mod tests {
             ("fr", "Modifier le code"),
             ("fr", "Q Rechercher sur Wikipédia"),
             ("es", "Q Buscaren Wikipedia"),
+            // no word of its own: the detector alone said French; on the
+            // Ubuntu gate it said Spanish for the English lines below
+            ("en", "Abreuve nos sillons 41"),
+            // Ubuntu, Firefox, PP-OCR (English, French Wikipedia): read as
+            // Spanish (the detector alone, two "-o"/"-a" endings, three "de")
+            ("en", "Known dwarf planets"),
+            ("en", "Known minor planets"),
+            ("en", "Local Interstellar Cloud"),
+            ("en", "Pluto aumea"),
+            ("en", "View source View history"),
+            (
+                "fr",
+                "Nb. de satellites plus de 600, dont 205 naturels connus de planètes (150",
+            ),
         ] {
             let got = sure(line);
             assert!(got.is_none() || got == Some(page), "{line}: {got:?}");
