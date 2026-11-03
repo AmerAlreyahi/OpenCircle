@@ -572,7 +572,10 @@ production systems.
   file's default Print Screen moves to Alt+A once (schema 8), a user's own key stays.
 - Clean before every release (owner, 2026-11-03, from 0.1.3 on): the LAST step before a release, then the security
   check: remove every dead or old config key, code path, test, asset, script and tool we no longer use AND won't use
-  (things waiting for a planned feature, e.g. glass in 0.1.4, stay). Old config keys: still read without a warning
+  (things waiting for a planned feature, e.g. glass in 0.1.4, stay). Docs and assets too (owner, 2026-11-03): public
+  docs updated to what ships (no screenshot or text of an old tool), internal docs/reports/briefs/samples, rejected
+  preview takes, old designs, spikes and dev builds that are outdated or abandoned are removed; the owner sees the
+  list first, and gitignored files (no git history) are archived outside the repo, not deleted. Old config keys: still read without a warning
   so older files load, dropped on the next save (migration with a backup); frozen contracts keep working.
 - Learn from open source (owner, 2026-11-03): study solid open-source tools (e.g. ShareX, Flameshot) for how
   their logic works, then build it our way (Rust, iced, our kit). GPL code is read for the approach only, never
