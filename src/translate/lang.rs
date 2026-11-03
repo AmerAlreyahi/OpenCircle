@@ -217,6 +217,26 @@ fn votes(texts: &[&str]) -> [usize; WORDS.len()] {
     votes
 }
 
+/// Words in `texts`, and how many are common words of the `WORDS`
+/// languages ("the", "de", "und"): a page of real text has 1 in 5 or more,
+/// Latin noise read from another script ("aill agarall") about none.
+pub fn common<'a>(texts: impl IntoIterator<Item = &'a str>) -> (usize, usize) {
+    let mut n = (0, 0);
+    for t in texts {
+        for w in t
+            .split(|c: char| !c.is_alphabetic())
+            .filter(|w| !w.is_empty())
+        {
+            let w = w.to_lowercase();
+            n.0 += 1;
+            n.1 += WORDS
+                .iter()
+                .any(|(_, list, _, _)| list.contains(&w.as_str())) as usize;
+        }
+    }
+    n
+}
+
 /// Which Latin-script language `texts` are in (`votes`); English when none
 /// stands out.
 fn latin(texts: &[&str]) -> &'static str {

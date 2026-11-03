@@ -557,16 +557,19 @@ impl Real {
 
 /// A read that is mostly noise: a page in a script none of the installed
 /// readers reads (Arabic or Russian Wikipedia read by PP-OCR's Latin reader:
-/// "ConHe4Hag cuctema", "Jih Ths"): of 10 lines or more, a quarter read
-/// unsurely (confidence < 0.7) and a quarter of the tokens aren't words.
-/// Measured (Edge, 1024x768, Latin and English readers only): Arabic page
-/// 43 % unsure / 66 % words, Russian 39 % / 42 %, French 6 % / 95 %.
-// ponytail: two ratios; the reader's own quality (lines read of the boxes
-// found) is the upgrade if a stylised game font ever trips it.
+/// "ConHe4Hag cuctema", "aill agarall"): of 10 lines or more, a quarter read
+/// unsurely (confidence < 0.7), and a quarter of the tokens aren't words or
+/// under 1 word in 8 is a common word (`lang::common`). Measured (Edge on
+/// Win10 1024x768, Firefox on Ubuntu 1920x1440; Latin and English readers
+/// only): Arabic pages 43-51 % unsure, 8-9 % common; Russian 39 %, 5 %;
+/// French 6 %, 28 %; Windows OCR's reads are all sure.
+// ponytail: ratios; the reader's own quality (lines read of the boxes found)
+// is the upgrade if a stylised game font ever trips it.
 pub(super) fn unreadable(lines: &[TextBlock]) -> bool {
     let unsure = lines.iter().filter(|l| l.confidence < 0.7).count();
     let (tokens, words) = word_count(lines);
-    lines.len() >= 10 && unsure * 4 >= lines.len() && words * 4 < tokens * 3
+    let (all, common) = lang::common(lines.iter().map(|l| l.text.as_str()));
+    lines.len() >= 10 && unsure * 4 >= lines.len() && (words * 4 < tokens * 3 || common * 8 < all)
 }
 
 impl Deps for Real {
@@ -2385,6 +2388,29 @@ pub(super) mod tests {
             ("2", 0.19),
         ]);
         assert!(unreadable(&russian));
+        // Firefox on the Ubuntu VM (1920x1440): the noise reads as words
+        let firefox = read(&[
+            ("ar.wikipedia.org/wiki/_acgl", 0.89),
+            ("Try private translations in Firefox", 1.0),
+            ("Translate from", 1.0),
+            ("Arabic", 1.0),
+            ("skiall", 0.73),
+            ("uaill", 0.9),
+            ("dosal", 0.68),
+            ("Solar:) 2", 0.85),
+            ("mail garall", 0.62),
+            ("billg ll", 0.82),
+            ("bwgll", 0.89),
+            ("aill agarall", 0.69),
+            ("iaill pu", 0.48),
+            ("agill yg aiall?", 0.61),
+            ("blial lei", 0.83),
+            ("al gai", 0.65),
+            ("quaill acgarall", 0.76),
+            ("ll illluo", 0.64),
+            ("jhas", 0.61),
+        ]);
+        assert!(unreadable(&firefox));
         let french = read(&[
             ("W", 0.54),
             ("Système solaire — Wikipédia", 1.0),
