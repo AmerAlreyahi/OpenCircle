@@ -1619,6 +1619,37 @@ mod real {
         assert!(px.iter().any(|p| p.0 > 356) && px.iter().any(|p| p.0 < 355));
     }
 
+    /// ar.wikipedia's bold infobox title with its ⊙ (Edge, Win10 VM, read
+    /// "لشّمُس۞" by PP-OCR) filled its box like a field: the "field" grew
+    /// over the white page and "Sun" was drawn far right of the title, in
+    /// empty space. Nothing is drawn away from the title.
+    #[test]
+    fn a_bold_title_is_no_field() {
+        let (img, (w, h)) = image(include_bytes!("fixtures/title.png"));
+        let b = [175.0, 77.0, 109.0, 51.0]; // the VM's block, in the crop
+        let blocks = vec![Block {
+            lines: vec![Line {
+                bounds: b,
+                text: "لشّمُس۞".into(),
+            }],
+            text: "لشّمُس۞".into(),
+            bounds: b,
+        }];
+        let mut out = img.clone();
+        render(
+            &mut out,
+            w as u32,
+            h as u32,
+            &blocks,
+            &["Sun".into()],
+            false,
+        );
+        let far = (changed(&img, &out, w).into_iter())
+            .filter(|&(x, _)| x as f32 > b[0] + b[2] + 20.0 || (x as f32) < b[0] - 60.0)
+            .count();
+        assert_eq!(far, 0, "drawn away from the title");
+    }
+
     /// Radio buttons before their labels stay, and no label is drawn over
     /// them; the labels keep their colour. Before: the circles were erased
     /// with the labels, and labels came back orange or blue.

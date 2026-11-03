@@ -85,13 +85,18 @@ pub fn erase_line(rgba: &mut [u8], iw: usize, ih: usize, b: [f32; 4]) -> (LineSt
     if let Some(f) = style.field {
         put_back(rgba, &undo);
         let [fx, fy, fw, fh] = grow(rgba, iw, ih, f);
+        // a "field" much taller and wider than the box it spills past is the page
+        // around a bold line (ar.wikipedia's title with its ⊙, Win10 VM:
+        // [525, 288, 1376, 111] for a 109x51 box, and its "Sun" was drawn
+        // 1200 px right of it): no field; the line stays as it was
+        let page = fh as f32 > 1.5 * b[3] && fw as f32 > 3.0 * b[2];
         let at = ((fy + fh / 2) as usize * iw + (fx + 1) as usize) * 4;
         let fill = [rgba[at], rgba[at + 1], rgba[at + 2]];
         // the field's own rectangle, else just inside its bevel (a game
         // field's lit and shaded edges)
         for i in [PAD, PAD + 1, PAD + 2] {
             let nb = [fx + i, fy + i, fw - 2 * i, fh - 2 * i].map(|v| v as f32);
-            if nb[2] <= 2.0 || nb[3] <= 2.0 {
+            if page || nb[2] <= 2.0 || nb[3] <= 2.0 {
                 break;
             }
             let (mut inside, undo2) = erase_box(rgba, iw, ih, nb, false);
