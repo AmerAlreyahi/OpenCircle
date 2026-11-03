@@ -144,12 +144,11 @@ impl Real {
             .1
             .clone();
         if groups.is_empty() && page.iter().all(|s| same(s)) {
-            return Err(AiError::Offline(mt::unavailable(fallback, target)));
+            return Err(no_route(fallback, target));
         }
         (groups.into_iter())
             .map(|(s, idx)| {
-                let route = mt::route(s, target)
-                    .ok_or_else(|| AiError::Offline(mt::unavailable(s, target)))?;
+                let route = mt::route(s, target).ok_or_else(|| no_route(s, target))?;
                 Ok((route, idx))
             })
             .collect()
@@ -416,6 +415,15 @@ pub struct Translated {
 
 /// Translates every text block of an RGBA frame in place. An OCR or AI
 /// error returns before anything is drawn (never a half-translated frame).
+/// No offline route from `source` into `target`: "already in" when they are
+/// the same language (a quiet note), else why not (offers AI).
+fn no_route(source: &str, target: &str) -> AiError {
+    match lang::find(source).zip(lang::find(target)) {
+        Some((s, t)) if s.code == t.code => AiError::AlreadyIn(t.name),
+        _ => AiError::Offline(mt::unavailable(source, target)),
+    }
+}
+
 #[cfg(test)]
 pub fn translate_frame(
     rgba: &[u8],
@@ -1132,7 +1140,11 @@ pub(super) mod tests {
         let same = auto
             .lines(&texts(&["The menu is open"]), "en", "")
             .unwrap_err();
-        assert!(same.to_string().contains("already in English"), "{same}");
+        assert_eq!(
+            same,
+            AiError::AlreadyIn("English"),
+            "a quiet note, not an error card"
+        );
         assert_eq!(
             pair(&Real::new("fr", Via::Offline), &["x"], "en").unwrap(),
             ("fr", "en", 1)
@@ -1205,7 +1217,11 @@ pub(super) mod tests {
         let page = Real::new(lang::AUTO, Via::Offline);
         page.read(&en);
         let same = page.routes(&texts(&en), "en").unwrap_err();
-        assert!(same.to_string().contains("already in English"), "{same}");
+        assert_eq!(
+            same,
+            AiError::AlreadyIn("English"),
+            "a quiet note, not an error card"
+        );
     }
 
     #[test]

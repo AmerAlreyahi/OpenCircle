@@ -98,6 +98,9 @@ pub enum AiError {
     BadResponse(String),
     /// The offline translation engine (`crate::mt`) failed; no AI involved.
     Offline(String),
+    /// Nothing to translate: the text is in the target already (its name).
+    /// Not a failure: shown as a quiet note, never an error card.
+    AlreadyIn(&'static str),
 }
 
 impl fmt::Display for AiError {
@@ -113,6 +116,7 @@ impl fmt::Display for AiError {
             AiError::Network(why) => write!(f, "Could not reach the AI provider: {why}"),
             AiError::BadResponse(why) => write!(f, "The AI provider sent an unexpected answer: {why}"),
             AiError::Offline(why) => write!(f, "Offline translation failed: {why}"),
+            AiError::AlreadyIn(name) => write!(f, "Already in {name}"),
         }
     }
 }

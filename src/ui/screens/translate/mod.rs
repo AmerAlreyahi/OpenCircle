@@ -82,6 +82,9 @@ pub struct Problem {
     pub message: String,
     /// The AI is not set up (no key, provider, model): offer Settings.
     pub setup: bool,
+    /// Nothing to translate (already in the target): a quiet note in the
+    /// language pill, no card.
+    pub quiet: bool,
 }
 
 #[derive(Debug)]
@@ -505,7 +508,12 @@ fn translate(
             e,
             Error::Ai(AiError::NotConfigured(_) | AiError::Auth(_) | AiError::Offline(_))
         );
-        problem(e.to_string(), setup)
+        let quiet = matches!(e, Error::Ai(AiError::AlreadyIn(_)));
+        Problem {
+            message: e.to_string(),
+            setup,
+            quiet,
+        }
     })?;
     let result = shown(&out);
     let t = out.timings;
@@ -536,7 +544,11 @@ fn translate(
 }
 
 fn problem(message: String, setup: bool) -> Problem {
-    Problem { message, setup }
+    Problem {
+        message,
+        setup,
+        quiet: false,
+    }
 }
 
 /// Copies `rgba` (the area's size) into `frame` (`width` wide) at `area`.

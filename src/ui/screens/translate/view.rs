@@ -74,6 +74,8 @@ impl Session {
             Phase::Downloading(done) => fetched(Stage::at(*done)),
             Phase::DownloadFailed(why) => fetched(Stage::Failed(why)),
             Phase::Translating => self.languages(Some("Translating…")),
+            // already in the target: a note beside the languages (pick another)
+            Phase::Failed(problem) if problem.quiet => self.languages(Some(&problem.message)),
             Phase::Failed(problem) => {
                 let buttons = match problem.setup {
                     true => actions(("Set up AI", Msg::OpenSettings), [("Close", Msg::Close)]),
@@ -96,7 +98,7 @@ impl Session {
 
     /// The pill at the top (`.as-language-pill`): source → target (the
     /// picker), and `status`.
-    fn languages(&self, status: Option<&'static str>) -> Element<'_, Msg> {
+    fn languages<'a>(&'a self, status: Option<&'a str>) -> Element<'a, Msg> {
         let mut top = row![self.picker.chips(picker::CHIP_HEIGHT).map(Msg::Picker)]
             .spacing(PILL_PAD)
             .align_y(Center);
