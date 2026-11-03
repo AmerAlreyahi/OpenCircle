@@ -492,6 +492,60 @@ fn wrapped_paragraphs_join_list_items_do_not() {
     assert!(centred(&b[3], 1920.0) && !centred(&b[0], 1920.0));
 }
 
+/// ar -> en on a plain page (Ubuntu regression): the paragraphs were kept as
+/// "does not fit legibly". A wrapped Arabic paragraph shares its RIGHT edge
+/// (it was cut into single lines, each with no room to wrap), and English is
+/// longer: it may use the free space on the left, where the Arabic lines end.
+#[test]
+fn arabic_paragraphs_take_their_longer_english() {
+    let (w, h) = (1400usize, 420usize);
+    let mut img = vec![255u8; w * h * 4];
+    let mut f = Fonts::new();
+    let right = 1300.0;
+    let mut put = |s: &str, y: f32| {
+        let m = cosmic_text::Metrics::new(22.0, 30.0);
+        let buf = f.layout(&[(s.into(), [30; 3])], true, m, 400, None, Align::Left);
+        let (lw, lh) = draw::extent(&buf);
+        f.draw(
+            &buf,
+            &mut img,
+            (w, h),
+            ((right - lw) as i32, y as i32),
+            None,
+        );
+        line(s, right - lw - 2.0, y, lw + 4.0, lh)
+    };
+    let lines = [
+        put(
+            "النظام الشمسي هو نظام كوكبي يضم الشمس وجميع الأجرام التي",
+            40.0,
+        ),
+        put(
+            "تدور حولها بفعل الجاذبية، ومنها الكواكب الثمانية والأقمار",
+            72.0,
+        ),
+        put("والكويكبات والمذنبات.", 104.0),
+        put("يتكون من ثمانية كواكب رئيسية أقربها إلى الشمس عطارد", 200.0),
+        // a heading under a line without its full stop: not the same paragraph
+        put("الكواكب الغازية", 244.0),
+    ];
+    let blocks = group_blocks(&lines);
+    let sizes: Vec<usize> = blocks.iter().map(|b| b.lines.len()).collect();
+    assert_eq!(sizes, [3, 1, 1], "the paragraph is one block");
+    let tr = [
+        "The Solar System is a planetary system made up of the Sun and all the bodies that \
+         orbit it by gravity, among them the eight planets, their moons, the asteroids and \
+         the comets."
+            .to_string(),
+        "It is made up of eight major planets, the closest of which to the Sun is Mercury."
+            .to_string(),
+        "Gas planets".to_string(),
+    ];
+    let mut out = img.clone();
+    let d = render(&mut out, w as u32, h as u32, &blocks, &tr, false);
+    assert_eq!((d.drawn, d.no_room), (3, 0), "{d:?}");
+}
+
 #[test]
 fn render_replaces_text_and_stays_inside_its_blocks() {
     let c = &cases()[3];
@@ -1309,6 +1363,39 @@ mod real {
             s = format!("{s} {w}").trim().to_string();
         }
         s
+    }
+
+    /// Ubuntu, Firefox (regression): the tab titles were translated and
+    /// garbled ("système wSolar"). The tab strip and the address row are
+    /// left out; the page's own header right under them is not.
+    #[test]
+    fn the_browsers_tabs_are_never_translated() {
+        use crate::translate::pipeline::without_chrome;
+        for name in ["linux_fr", "linux_en", "linux_ar"] {
+            let all = lines(name, (1920, 1440));
+            let kept = without_chrome(all.clone(), 1440);
+            let gone: Vec<&str> = (all.iter())
+                .filter(|l| !kept.contains(l))
+                .map(|l| l.text.as_str())
+                .collect();
+            assert!(
+                gone.iter().any(|t| t.contains("Wikip")),
+                "{name}: the tab is left out: {gone:?}"
+            );
+            assert!(gone.iter().any(|t| t.contains("wikipedia.org")), "{name}");
+            assert!(
+                gone.iter()
+                    .all(|t| !t.contains("Nov") && !t.contains("Try private")),
+                "{name}: only the browser's rows: {gone:?}"
+            );
+            assert!(
+                name == "linux_ar"
+                    || kept
+                        .iter()
+                        .any(|l| l.text.contains("Wikip") && l.bounds[1] > 110.0),
+                "{name}: the page's header stays"
+            );
+        }
     }
 
     /// Ubuntu, Firefox, PP-OCR (0.1.3 gate): French, English and Arabic

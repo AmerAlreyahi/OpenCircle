@@ -186,8 +186,17 @@ const JOINERS: &[&str] = &[
 fn continues(p: &Line, l: &Line) -> bool {
     let [x, y, w, h] = l.bounds;
     let [px, py, pw, ph] = p.bounds;
-    let same_col = (px - x).abs() < 0.6 * h || (px + pw / 2.0 - x - w / 2.0).abs() < 0.6 * h;
-    let close = y - (py + ph) < 0.6 * h && y > py;
+    let gap = y - (py + ph);
+    // a right-to-left paragraph shares its right edge (Arabic), its lines
+    // tight: Arabic has no capitals to tell a heading under a paragraph that
+    // ends without its full stop (OCR drops it) from a next line
+    let rtl_col = rtl_text(&p.text)
+        && rtl_text(&l.text)
+        && (px + pw - x - w).abs() < 0.6 * h
+        && gap < 0.3 * h;
+    let same_col =
+        (px - x).abs() < 0.6 * h || (px + pw / 2.0 - x - w / 2.0).abs() < 0.6 * h || rtl_col;
+    let close = gap < 0.6 * h && y > py;
     // OCR boxes of one font vary with ascenders, descenders and brackets
     let similar = ph.max(h) / ph.min(h) < 1.45;
     let fits = w < pw + 5.0 * h;
@@ -310,6 +319,7 @@ pub fn render(
             line_h: b.lines[0].bounds[3],
             texts: b.lines.iter().map(|l| l.text.clone()).collect(),
             centred: centred(b, dims.0 as f32),
+            right: !rtl && rtl_text(&b.text),
             styles,
             rtl,
         };
@@ -449,10 +459,49 @@ fn room(rgba: &[u8], dims: (usize, usize), b: &Block, blocks: &[Block], rtl: boo
             free(rgba, dims, b, x1, right)
         };
         x0 = free(rgba, dims, b, x0, x0 - em);
+    } else if rtl_text(&b.text) {
+        // a right-to-left original keeps its right edge (`Placement::right`)
+        // and grows to the left, where its lines end: to its column's left
+        // edge, a single line half its width more where that is free
+        // (English is about 1.5x as long). It had only an em to the right:
+        // the paragraphs were kept as "does not fit".
+        let line_em = b.lines[0].bounds[3] / 1.3;
+        let left = match b.lines.len() {
+            1 => column_left(b, blocks).min(x0 - 0.5 * w),
+            _ => column_left(b, blocks),
+        };
+        x0 = free(rgba, dims, b, x0, left - line_em);
     } else {
         x1 = free(rgba, dims, b, x1, x1 + em);
     }
     [x0, y, x1 - x0, h]
+}
+
+/// Most of `t`'s letters are of a right-to-left script (Arabic, Hebrew).
+fn rtl_text(t: &str) -> bool {
+    use lang::Script::{Arabic, Hebrew};
+    let letters = t.chars().filter(|c| c.is_alphabetic());
+    let (n, rtl) = letters.fold((0, 0), |(n, r), c| {
+        (n + 1, r + (Arabic.has(c) || Hebrew.has(c)) as usize)
+    });
+    rtl * 2 > n
+}
+
+/// Left edge of the right-aligned column `b` sits in (an Arabic page's
+/// paragraphs): mirrored from [`column_right`].
+fn column_left(b: &Block, blocks: &[Block]) -> f32 {
+    let [x, y, w, _] = b.bounds;
+    let lh = b.lines[0].bounds[3];
+    blocks
+        .iter()
+        .filter(|o| {
+            let olh = o.lines[0].bounds[3];
+            (o.bounds[0] + o.bounds[2] - x - w).abs() < lh.max(8.0)
+                && (o.bounds[1] - y).abs() < 8.0 * lh
+                && (olh - lh).abs() * 3.0 < lh
+        })
+        .map(|o| o.bounds[0])
+        .fold(x, f32::min)
 }
 
 /// From the box edge at `from` toward `to` (either way): how far the pixel

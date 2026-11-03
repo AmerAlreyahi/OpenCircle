@@ -507,7 +507,17 @@ fn made_up(src: &str, out: &str, target: &str) -> bool {
             || "«»“”‘’„–—…·•".contains(c)
     };
     let symbol = out.chars().any(|c| !common(c) && !src.contains(c));
-    looped || long || lost || number_lost || number_new || foreign || symbol
+    // letters strewn as words ("سن ه ه س س ب ن ن ..." from Latin noise)
+    let strewn = |s: &str| {
+        let t: Vec<&str> = s.split_whitespace().collect();
+        let one = t
+            .iter()
+            .filter(|w| w.chars().filter(|c| c.is_alphabetic()).count() == 1);
+        (one.count(), t.len())
+    };
+    let ((so, _), (oo, ot)) = (strewn(src), strewn(out));
+    let strewn = oo >= 4 && oo * 5 >= ot * 2 && oo > so + 2;
+    looped || long || lost || number_lost || number_new || foreign || symbol || strewn
 }
 
 /// Windows OCR reads the text (#62: a screen in ~0.1-0.3 s, in this
@@ -569,7 +579,19 @@ pub(super) fn unreadable(lines: &[TextBlock]) -> bool {
     let unsure = lines.iter().filter(|l| l.confidence < 0.7).count();
     let (tokens, words) = word_count(lines);
     let (all, common) = lang::common(lines.iter().map(|l| l.text.as_str()));
-    lines.len() >= 10 && unsure * 4 >= lines.len() && (words * 4 < tokens * 3 || common * 8 < all)
+    // noise is Latin letters: a page the Arabic reader read well has no
+    // common Latin words either (Ubuntu: the readers were offered over it)
+    let letters = lines
+        .iter()
+        .flat_map(|l| l.text.chars())
+        .filter(|c| c.is_alphabetic());
+    let (n, latin) = letters.fold((0, 0), |(n, l), c| {
+        (n + 1, l + Script::Latin.has(c) as usize)
+    });
+    lines.len() >= 10
+        && latin * 2 > n
+        && unsure * 4 >= lines.len()
+        && (words * 4 < tokens * 3 || common * 8 < all)
 }
 
 impl Deps for Real {
@@ -869,7 +891,7 @@ pub fn translate_progressively(
         .collect();
     let lines = split_fields(rgba, width as usize, height as usize, &lines);
     let ocr = start.elapsed();
-    let blocks = group_blocks(&lines);
+    let blocks = group_blocks(&without_chrome(lines, height));
     deps.read(&blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>());
     let mut tr = vec![String::new(); blocks.len()];
     let mut timings = Timings {
@@ -993,6 +1015,39 @@ pub(super) fn check_frame(rgba: &[u8], width: u32, height: u32) -> Result<(), Er
 pub(super) fn cut_off(b: &TextBlock, (width, height): (u32, u32)) -> bool {
     let [x, y, w, h] = b.bounds;
     y <= 3.0 || y + h >= height as f32 - 3.0 || x <= 3.0 || x + w >= width as f32 - 3.0
+}
+
+/// The lines of a browser's own chrome left out (never translated, never
+/// redrawn): the tab strip above its address bar and the rest of the address
+/// row. The address bar is the topmost address line (`code`) in the top
+/// quarter of the frame; a tab title sits less than 1.3 of its heights above
+/// it (Firefox and Edge: ~1.4). Before, tab titles were translated and,
+/// read with the tab's icon and close button, garbled ("système wSolar").
+// ponytail: the bookmarks bar is left to the page's rules: right under the
+// address row a page's own header looks the same (Wikipedia's logo, search).
+pub(super) fn without_chrome(lines: Vec<Line>, height: u32) -> Vec<Line> {
+    let bar = (lines.iter())
+        .filter(|l| l.bounds[1] < height as f32 / 4.0 && code(&l.text))
+        .min_by(|a, b| a.bounds[1].total_cmp(&b.bounds[1]));
+    let Some(&Line {
+        bounds: [_, top, _, h],
+        ..
+    }) = bar
+    else {
+        return lines;
+    };
+    let chrome = |l: &Line| {
+        let mid = l.bounds[1] + l.bounds[3] / 2.0;
+        mid > top - 1.3 * h && mid < top + h
+    };
+    let (kept, left): (Vec<Line>, Vec<Line>) = lines.into_iter().partition(|l| !chrome(l));
+    if left.len() > 1 {
+        crate::log!(
+            "[opencircle] translate: {} lines of the browser's tabs and address row left as they are",
+            left.len()
+        );
+    }
+    kept
 }
 
 /// An OCR box hugs the ink; `render`'s erase wants the line's box (it reads
@@ -1190,10 +1245,34 @@ fn needs_translation(text: &str, target: &str) -> bool {
     let word =
         (text.split(|c: char| !c.is_alphabetic())).any(|w| w.chars().count() > 1 || !w.is_ascii());
     match lang::find(target).map(|l| l.script) {
-        _ if !word || code(text) => false,
+        _ if !word || code(text) || misshapen(text) => false,
         Some(Script::Latin) | None => true,
         Some(script) => letters.iter().filter(|c| script.has(**c)).count() * 2 < letters.len(),
     }
+}
+
+/// Another script read as Latin letters (a Russian line by the Latin
+/// reader, Ubuntu: "CnH ce BKn CN n Be He6eb Ten, BaLL Bpr Hero."): of 3+
+/// words, a third are misshapen, a capital after the first letter mixed
+/// with small ones ("BKn", "BaLL") or a digit between letters ("He6eb").
+/// Translated, it came back as gibberish; it is kept as it is.
+// ponytail: a camelCase name or two in a line of words passes; a line of
+// only such names ("iPhone McDonald's JavaScript") is kept, as names are.
+fn misshapen(text: &str) -> bool {
+    let words: Vec<&str> = (text.split_whitespace())
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| w.chars().any(char::is_alphabetic))
+        .collect();
+    let odd = |w: &str| {
+        let c: Vec<char> = w.chars().collect();
+        let inner_cap =
+            c[1..].iter().any(|c| c.is_uppercase()) && c.iter().any(|c| c.is_lowercase());
+        let inner_digit = (1..c.len().saturating_sub(1))
+            .any(|i| c[i].is_ascii_digit() && c[i - 1].is_alphabetic() && c[i + 1].is_alphabetic());
+        inner_cap || inner_digit
+    };
+    let n = words.iter().filter(|w| odd(w)).count();
+    words.len() >= 3 && n >= 2 && n * 3 >= words.len()
 }
 
 /// An address or code line (`code_like`): its letters are >= 80 % in such
@@ -1914,6 +1993,40 @@ pub(super) mod tests {
         }
     }
 
+    /// Ubuntu regression: an Italian line on a French page went through the
+    /// fr model ("sistema sole"). It is Italian (not Spanish, as its endings
+    /// voted), so it is kept and its pair offered when it-en isn't here.
+    #[test]
+    fn an_italian_line_on_a_french_page_is_not_french() {
+        let page = [
+            "Le Système solaire est le système planétaire du Soleil, étoile autour de laquelle tourne la planète Terre.",
+            "Il est composé de cette étoile et des objets célestes gravitant autour d'elle, dont les huit planètes.",
+            "Il sistema solare è formato dal Sole e da tutti i corpi celesti che orbitano attorno ad esso.",
+            "Les planètes telluriques internes sont principalement composées de roches et de métaux.",
+            "La ceinture d'astéroïdes sépare les planètes telluriques des planètes géantes gazeuses.",
+        ];
+        assert_eq!(lang::sure(page[2]), Some("it"));
+        assert_eq!(lang::certain(page[2]), Some("it"));
+        for l in [0, 1, 3, 4] {
+            assert_eq!(lang::sure(page[l]), Some("fr"), "{}", page[l]);
+        }
+        let texts: Vec<String> = page.iter().map(|s| s.to_string()).collect();
+        let real = Real::new(lang::AUTO, Via::Offline);
+        real.read(&page);
+        let it_here = (mt::route("it", "en").unwrap().iter()).all(|p| p.missing_bytes() == 0);
+        let routes = real.routes(&texts, "en").unwrap();
+        let got: Vec<_> = (routes.iter())
+            .map(|(r, i)| (r[0].source, i.clone()))
+            .collect();
+        if it_here {
+            assert_eq!(got, [("fr", vec![0, 1, 3, 4]), ("it", vec![2])]);
+        } else {
+            assert_eq!(got, [("fr", vec![0, 1, 3, 4])]);
+            let (pair, lines) = real.held().expect("offered");
+            assert_eq!((pair.source, lines), ("it", vec![texts[2].clone()]));
+        }
+    }
+
     #[test]
     fn cache_hit_miss_and_eviction() {
         let c = Cache::new(2);
@@ -2292,6 +2405,24 @@ pub(super) mod tests {
         let t = "ويتألف من هذا النجم والأجسام السماوية المحيطة به: كوكبات الأرض الثمانية \
                  المؤكدة، التي يزيد عدد السواتل الطبيعية المعروفة عنها على 200 ساتل";
         assert!(!made_up(s, t, "ar"), "a sentence's number may be spelled");
+        // Ubuntu: a Russian line read by the Latin reader, through en-ar
+        let noise = "CnH ce BKn CN n Be He6eb Ten, BaLL Bpr Hero.";
+        let out = "\"سن ه ه س س ب ن ن ن ن ه ه ه ه ه ع 10، بطل بلال ب ب ب.";
+        assert!(made_up(noise, out, "ar"), "letters strewn as words");
+        assert!(!needs_translation(noise, "ar") && !needs_translation(noise, "en"));
+        for fine in [
+            "The iPhone and the MacBook are made by Apple",
+            "Il est composé de cette étoile et des objets célestes",
+            "B2B sales grew in 2024",
+        ] {
+            assert!(needs_translation(fine, "ar"), "{fine}");
+        }
+        let t = "و هي مكونة من هذا النجم و من أجسام سماوية تدور حوله و من بينها ثمانية كواكب";
+        assert!(!made_up(
+            "Il est composé de cette étoile et des objets célestes",
+            t,
+            "ar"
+        ));
         // good ones
         assert!(!made_up("40 langues", "40 لغة", "ar"));
         assert!(!made_up("1:47 AM", "1: 47 صباحاً", "ar"));
@@ -2434,6 +2565,37 @@ pub(super) mod tests {
         ]);
         assert!(!unreadable(&french));
         assert!(!unreadable(&arabic[..8]), "too little to judge");
+        // Ubuntu, Firefox: an Arabic page the Arabic reader read well (its
+        // icons read unsurely) was taken for noise, and the readers offered
+        let read_well = read(&[
+            ("U", 0.15),
+            ("Nov 3 23:48", 0.95),
+            ("0 0 *", 0.59),
+            ("المجموعة الشمسية", 0.96),
+            ("= Σ θ", 0.51),
+            ("s{ ZA", 0.48),
+            ("file://home/test/trn/ar.html", 0.99),
+            ("c → < □", 0.47),
+            ("النظام الشمسي", 0.85),
+            ("A", 0.49),
+            (
+                "النظام الشمسي هو نظام كوكبي يضم الشمس وجميع الأجرامالتي تدور",
+                0.86,
+            ),
+            ("?", 0.59),
+            ("والغبار الكوني وسحب الغاز البعيدة.", 0.96),
+            (
+                "يتكون من ثمانية كواكب رئيسية، أقربها إلى الشمس عطارد وأبعدها",
+                0.98,
+            ),
+            ("الكواكب الغازية", 1.0),
+            (
+                "المشتري وزحل هما أكبر الكواكب حجماً أما أورانوس ونبتون فهما",
+                0.93,
+            ),
+            ("C", 0.42),
+        ]);
+        assert!(!unreadable(&read_well));
     }
 
     /// Windows OCR (English) on the Arabic Wikipedia page read noise: nothing

@@ -291,6 +291,9 @@ pub fn sure(text: &str) -> Option<&'static str> {
             if words.filter(|w| w.chars().any(char::is_alphabetic)).count() < 3 {
                 return None;
             }
+            if italian(text) {
+                return Some("it");
+            }
             let v = votes(&[text]);
             let mut sorted = v;
             sorted.sort_unstable();
@@ -302,6 +305,23 @@ pub fn sure(text: &str) -> Option<&'static str> {
         }
         other => Some(other),
     }
+}
+
+/// An Italian line: the detector says so and two of its words are only
+/// Italian. On a French page "Il sistema solare è formato dal Sole e da
+/// tutti i corpi celesti..." had five Spanish endings: it went through the
+/// page's fr model and came back altered ("sistema sole").
+// ponytail: Italian only (`WORDS` has no row for it, so its votes go to
+// Spanish); a language row of its own if more pages need it.
+fn italian(text: &str) -> bool {
+    const ONLY: [&str; 16] = [
+        "è", "che", "della", "delle", "degli", "dei", "gli", "sono", "nel", "nella", "dal", "alla",
+        "anche", "questo", "questa", "molto",
+    ];
+    let words = (text.split(|c: char| !c.is_alphabetic()))
+        .filter(|w| ONLY.contains(&w.to_lowercase().as_str()))
+        .count();
+    words >= 2 && whichlang::detect_language(text) == whichlang::Lang::Ita
 }
 
 /// [`sure`], and certain enough to keep a line out of the page's language

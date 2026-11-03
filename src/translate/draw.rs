@@ -4,6 +4,7 @@
 //! if the original had one. Shaping, Arabic joining and bidi: cosmic-text.
 
 use super::erase::LineStyle;
+use super::lang::Script;
 use cosmic_text::{
     Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Weight, Wrap,
     fontdb,
@@ -99,7 +100,6 @@ pub fn parse_marked(s: &str, color: [u8; 3], accent: [u8; 3]) -> Vec<Span> {
 /// fonts have them): moved to Inter in an Arabic line they lost their
 /// right-to-left order and mirroring ("( مع" drawn as "مع(").
 fn runs(s: &str) -> impl Iterator<Item = (&str, bool)> {
-    use crate::translate::lang::Script;
     let kind = |c: char| match c {
         c if Script::Arabic.has(c) => Some(true),
         c if c.is_alphabetic() => Some(false),
@@ -229,7 +229,18 @@ pub fn extent(buf: &Buffer) -> (f32, f32) {
 /// Em size of the original from its ink height and text: ink height is the
 /// cap/ascender height (+ descender) of a Latin line; brackets reach both.
 /// ponytail: fixed Latin ratios (Inter-like); other scripts get 0.8.
+/// Most of `text`'s letters are Arabic.
+fn arabic(text: &str) -> bool {
+    let n = text.chars().filter(|c| Script::Arabic.has(*c)).count();
+    n * 2 > text.chars().filter(|c| c.is_alphabetic()).count()
+}
+
 fn source_em(text: &str, ink_h: f32) -> f32 {
+    // Arabic ink spans alef tops to the descenders, ~1.25 em (a 19 px page
+    // line inks ~24 px): read as 0.8 em, its English came out 1.5x too big
+    if arabic(text) {
+        return ink_h / 1.25;
+    }
     if !text.chars().any(|c| c.is_ascii_alphanumeric()) {
         return ink_h / 0.8;
     }
@@ -251,6 +262,9 @@ pub struct Placement {
     pub texts: Vec<String>,
     pub styles: Vec<LineStyle>,
     pub rtl: bool,
+    /// Right-aligned though the target is left-to-right: a right-to-left
+    /// original (an Arabic page in English keeps its lines' right edges).
+    pub right: bool,
     pub centred: bool,
 }
 
@@ -286,7 +300,8 @@ fn original_em(p: &Placement) -> f32 {
     let slack = if ocr_h >= 48.0 { 1.6 } else { 1.15 };
     let em = ink
         .min(if band > 0.0 { band * slack } else { ink })
-        .min(ocr_h);
+        // (an Arabic line's OCR box is ~1.8 em: marks above and below)
+        .min(if arabic(text) { ocr_h / 1.75 } else { ocr_h });
     // (a loose OCR box around small UI text is about twice its ink or more:
     // only big text, subtitles and captions, gets the floor)
     let em = if from_box >= 24.0 && em < 0.35 * from_box {
@@ -330,7 +345,7 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
     // pitch of the original lines (baseline to baseline), if it wrapped
     let pitch = (n > 1).then(|| (p.styles[n - 1].ink[3] - s0.ink[3]) as f32 / (n - 1) as f32);
     let weight = weight(s0, em);
-    let align = match (p.centred, p.rtl) {
+    let align = match (p.centred, p.rtl || p.right) {
         (true, _) => Align::Center,
         (false, true) => Align::Right,
         (false, false) => Align::Left,
@@ -488,6 +503,7 @@ mod tests {
                 })
                 .collect(),
             rtl,
+            right: false,
             centred: false,
         }
     }
