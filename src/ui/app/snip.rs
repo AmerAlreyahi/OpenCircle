@@ -175,24 +175,18 @@ impl App {
     /// it picked, as a pick would; none = the pick step, with the edge glow.
     /// Main mode's state (selections, words, cards) goes; the frame stays.
     pub(in crate::ui) fn snip_here(&mut self, picked: Option<Rectangle>) -> Task<Message> {
-        let windows: Vec<_> = (capture::window_rect::list().into_iter())
-            .map(|w| snip::Pick::window(snip::desktop_rect(w.rect), &w.title, w.handle))
-            .collect();
-        // the user's app: the topmost titled window under the overlay (the
-        // overlay isn't listed; the taskbar has no title)
+        // the windows as they were at the freeze (as Snip's own shortcut lists
+        // them), not now: a late list drifts from the frozen frames
+        let windows = std::mem::take(&mut self.o.windows);
+        // the user's app: the topmost titled window (the overlay wasn't up
+        // yet; the taskbar has no title)
         // ponytail: an untitled app window is passed over for the next one
         let user = (windows.iter())
             .find(|w| w.label != "Window")
             .map(|w| w.window);
         let start = self.place();
         let mut snip = snip::Snip::new(windows, start, capture::scroll::can_scroll(), user);
-        let monitors = std::iter::once(Rectangle::with_size(self.o.screen)).chain(
-            self.o
-                .screens
-                .iter()
-                .map(|s| super::screens::area_of(start, s.place)),
-        );
-        snip.set_monitors(monitors.collect());
+        snip.set_monitors(self.monitors());
         let _ = snip.start(snip::Kind::Region, self.o.screen);
         let (reader, read) = std::sync::mpsc::channel();
         if cfg!(windows) {

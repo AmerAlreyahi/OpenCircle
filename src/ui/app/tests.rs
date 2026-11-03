@@ -48,6 +48,7 @@ fn a_shot() -> Result<Shot, CaptureError> {
         origin: Point::ORIGIN,
         size: Size::new(4.0, 4.0),
         snip: None,
+        windows: Vec::new(),
     })
 }
 
@@ -198,6 +199,7 @@ fn a_snip_shown_while_grabbing_hides_again_unless_it_opens() {
     app.pre_shown = true;
     let shot = Shot {
         snip: Some((snip::Kind::Region, Vec::new(), None, Vec::new())),
+        windows: Vec::new(),
         ..a_shot().unwrap()
     };
     let _ = app.update(Message::Captured(7, Instant::now(), Ok(shot)));
@@ -415,6 +417,7 @@ fn the_crop_search_gets_is_the_selection_at_any_scale_and_monitor() {
             origin,
             size: Size::new(1280.0, 720.0),
             snip: None,
+            windows: Vec::new(),
         };
         let _ = app.open(Instant::now(), Ok(shot));
         app.o.behaviour = config::Config::default().selection;
@@ -2101,6 +2104,7 @@ fn the_screen_is_read_on_demand_the_touched_band_first() {
         origin: Point::ORIGIN,
         size: page.o.screen,
         snip: None,
+        windows: Vec::new(),
     };
     let _ = app.open(Instant::now(), Ok(shot));
     assert!(app.o.ocr_ready && app.o.reader == Reader::Idle);
@@ -2194,6 +2198,7 @@ fn windows_ocr_reads_the_whole_screen_from_the_capture() {
         origin: Point::ORIGIN,
         size: page.o.screen,
         snip: None,
+        windows: Vec::new(),
     };
     let opened = app.open(Instant::now(), Ok(shot));
     assert_eq!(app.o.reader, Reader::Idle, "no download offered");
@@ -4061,6 +4066,7 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
         origin: Point::ORIGIN,
         size: Size::new(w as f32, h as f32),
         snip: None,
+        windows: Vec::new(),
     };
     let _ = app.open(Instant::now(), Ok(shot));
     assert!(app.o.is_some() && app.o.frame.is_some());

@@ -37,33 +37,38 @@ impl App {
         else {
             return Task::none();
         };
-        let bounds = actions::crop_bounds(*width, *height, self.o.scale, selection.area);
-        if let Some(bounds) = bounds {
-            // Snip: the area stays live on the whole frozen monitor (N-73).
-            let joined = match &self.o.purpose {
-                Purpose::Snip(_) => self.desktop_live(selection.area),
-                _ => None,
+        // Snip: the area stays live on the whole frozen monitor (N-73). With
+        // several screens the document is every frame joined, so an area wholly
+        // on another screen counts too, not only one meeting the starting one's
+        // frame (owner bug 2026-11-03: a pick there opened nothing).
+        let joined = match &self.o.purpose {
+            Purpose::Snip(_) => self.desktop_live(selection.area),
+            _ => None,
+        };
+        let edit = joined.or_else(|| {
+            let bounds = actions::crop_bounds(*width, *height, self.o.scale, selection.area)?;
+            let frame = Image {
+                width: *width,
+                height: *height,
+                rgba: pixels.to_vec(),
             };
-            let mut edit = match &self.o.purpose {
-                // across screens: the document is every frame joined
-                Purpose::Snip(_) if let Some(edit) = joined => edit,
-                _ => {
-                    let frame = Image {
-                        width: *width,
-                        height: *height,
-                        rgba: pixels.to_vec(),
-                    };
-                    SnipToolbar::live(frame, bounds, self.o.scale, iced::Point::ORIGIN)
-                }
-            };
-            // Scrolling capture needs the page under the area: Snip, in place.
-            edit.annotator.scroll = matches!(&self.o.purpose, Purpose::Snip(s) if s.can_scroll());
-            if edit.annotator.movable {
-                (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area
-            }
-            edit.annotator.steps = self.windows.steps();
-            self.o.edit = Some(edit);
+            Some(SnipToolbar::live(
+                frame,
+                bounds,
+                self.o.scale,
+                iced::Point::ORIGIN,
+            ))
+        });
+        let Some(mut edit) = edit else {
+            return Task::none();
+        };
+        // Scrolling capture needs the page under the area: Snip, in place.
+        edit.annotator.scroll = matches!(&self.o.purpose, Purpose::Snip(s) if s.can_scroll());
+        if edit.annotator.movable {
+            (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area
         }
+        edit.annotator.steps = self.windows.steps();
+        self.o.edit = Some(edit);
         Task::none()
     }
 

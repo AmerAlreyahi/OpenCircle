@@ -507,7 +507,9 @@ impl App {
 
     /// Another monitor's frame of capture `n` landed: its window opens over it
     /// (no focus: the keys stay with the starting screen). Dropped when it is
-    /// late (closed, another capture's) or this opening isn't Circle to Search.
+    /// late (closed, another capture's) or this opening is neither Circle to
+    /// Search nor the Snip it turned into (the bar's Snip pressed before every
+    /// frame was in: that screen is Snip's too).
     pub(in crate::ui) fn add_screen(
         &mut self,
         n: u32,
@@ -519,7 +521,8 @@ impl App {
             .chain(self.o.waiting.iter().map(|(p, _)| *p))
             .any(|p| p == place);
         if self.o.capture != n
-            || !matches!(self.o.purpose, Purpose::Search)
+            || !matches!(self.o.purpose, Purpose::Search | Purpose::Snip(_))
+            || self.snip_pill()
             || place.origin == start.origin
             || known
         {
@@ -527,11 +530,30 @@ impl App {
         }
         // The starting screen's opening first: a window opened and drawn
         // meanwhile slows its frames (and its first one) on a small PC.
-        if self.appeared() < 1.0 {
-            self.o.waiting.push((place, frame));
-            return Task::none();
+        let shown = match self.appeared() < 1.0 {
+            true => {
+                self.o.waiting.push((place, frame));
+                Task::none()
+            }
+            false => self.show_screen(place, frame),
+        };
+        let monitors = self.monitors();
+        if let Purpose::Snip(snip) = &mut self.o.purpose {
+            snip.set_monitors(monitors);
         }
-        self.show_screen(place, frame)
+        shown
+    }
+
+    /// Every monitor this opening froze (image px), the starting one first:
+    /// those shown and those still waiting for the opening to end. The one
+    /// list every Snip entry picks on (`Snip::set_monitors`).
+    pub(in crate::ui) fn monitors(&self) -> Vec<Rectangle> {
+        let start = self.o.place();
+        let others =
+            (self.o.screens.iter().map(|s| s.place)).chain(self.o.waiting.iter().map(|(p, _)| *p));
+        std::iter::once(Rectangle::with_size(self.o.screen))
+            .chain(others.map(|p| area_of(start, p)))
+            .collect()
     }
 
     /// A press with other screens open: every screen's frame log starts over.
@@ -635,7 +657,7 @@ impl App {
     /// The pointer came into `window` at `now`: the edge glow follows it there
     /// when it is one of this opening's screens (the bar stays put).
     pub(in crate::ui) fn pointer_on(&mut self, window: window::Id, now: Instant) {
-        if self.o.is_none() || !matches!(self.o.purpose, Purpose::Search | Purpose::Snip(_)) {
+        if self.o.is_none() || !matches!(self.o.purpose, Purpose::Search) {
             return;
         }
         let to = match window {
@@ -774,6 +796,7 @@ mod tests {
             origin: START.logical_origin(),
             size: START.size(),
             snip: None,
+            windows: Vec::new(),
         };
         let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
         assert!(app.o.is_some());
@@ -893,6 +916,11 @@ mod tests {
     /// physical px), its other screen's window open (the opening over); the
     /// editor on (Labs). Returns that screen's window.
     fn snipped() -> (App, window::Id) {
+        snipped_with(Vec::new())
+    }
+
+    /// `snipped` with these windows on the desktop (physical desktop px).
+    fn snipped_with(windows: Vec<crate::ui::snip::Pick>) -> (App, window::Id) {
         let mut app = App::idle(window::Id::unique());
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let n = app.capturing.expect("pending");
@@ -908,7 +936,8 @@ mod tests {
             scale: START.scale,
             origin: START.logical_origin(),
             size: START.size(),
-            snip: Some((crate::ui::snip::Kind::Region, Vec::new(), None, frames)),
+            snip: Some((crate::ui::snip::Kind::Region, windows, None, frames)),
+            windows: Vec::new(),
         };
         let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
         assert!(app.o.screens.is_empty(), "after the opening");
@@ -991,6 +1020,87 @@ mod tests {
             row.iter().any(|p| *p != row[0]),
             "the toolbar is on that screen"
         );
+    }
+
+    /// Owner bug (2026-11-03): a pick wholly on another screen (a window
+    /// clicked there, an area dragged there, Enter there) opened nothing: the
+    /// live area was only built when the pick met the starting screen's frame.
+    /// Each now ends picked there, with that screen's own pixels.
+    #[test]
+    fn a_pick_wholly_on_another_screen_opens_the_snip_toolbar_there() {
+        use overlay::Event::{Enter, Hover, Move, Press, Release};
+        // a window on the right screen, desktop px (1000, 150) 900 x 600
+        let rect = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));
+        let window = crate::ui::snip::Pick::window(rect, "Notes", 7);
+        let local = |x: f32, y: f32| Point::new((x - 640.0) / 1.5, y / 1.5);
+        let press = |at: Point| Press { at, shift: false };
+        let picked = |app: &App| {
+            let edit = app.o.edit.as_ref().expect("picked: the Snip toolbar");
+            assert!(edit.annotator.movable, "the live area");
+            let crop = app.crop().expect("a crop");
+            assert!(runs(&crop).iter().all(|r| r.iter().all(|(g, _)| *g == 90)));
+            app.o.selection.expect("the area").area
+        };
+        // a click on the window there takes it
+        let (mut app, id) = snipped_with(vec![window]);
+        let at = local(1300.0, 300.0);
+        for event in [Hover(at), press(at), Release] {
+            let _ = app.update(Message::ScreenEvent(id, event));
+        }
+        assert_eq!(picked(&app), rect);
+        // a free area dragged there
+        let (mut app, id) = snipped();
+        let (a, b) = (local(1000.0, 300.0), local(1600.0, 700.0));
+        for event in [Hover(a), press(a), Move(b), Release] {
+            let _ = app.update(Message::ScreenEvent(id, event));
+        }
+        let area = picked(&app);
+        assert!(
+            (area.x - 1000.0).abs() < 0.01 && (area.width - 600.0).abs() < 0.01,
+            "{area:?}"
+        );
+        // Enter with the pointer there: that whole screen, its toolbar there
+        let (mut app, id) = snipped();
+        let _ = app.update(Message::ScreenEvent(id, Hover(local(1200.0, 400.0))));
+        let _ = app.update(Message::Overlay(Enter));
+        let screen = Rectangle::new(Point::new(640.0, 0.0), Size::new(2880.0, 1620.0));
+        assert_eq!(picked(&app), screen);
+        let (on, ..) = app.snip_dock().expect("docked");
+        assert_eq!(on, Some(0), "the toolbar docks on that screen");
+    }
+
+    /// The main bar's Snip is the same pick on every screen: it picks among
+    /// the windows listed at the freeze (not a late list that drifts from the
+    /// frames), and a screen whose frame lands after it was pressed is Snip's
+    /// too (it was dropped: Circle to Search only).
+    #[test]
+    fn the_bars_snip_picks_on_every_screen_among_the_windows_frozen_with_them() {
+        use overlay::Event::{Hover, Press, Release};
+        let mut app = App::idle(window::Id::unique());
+        let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+        let n = app.capturing.expect("pending");
+        let rect = Rectangle::new(Point::new(800.0, 100.0), Size::new(300.0, 200.0));
+        let shot = Shot {
+            image: solid(START, 200),
+            scale: START.scale,
+            origin: START.logical_origin(),
+            size: START.size(),
+            snip: None,
+            windows: vec![crate::ui::snip::Pick::window(rect, "Notes", 7)],
+        };
+        let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
+        app.o.appear = Some((Instant::now(), 1.0));
+        let _ = app.update(Message::EditScreen); // before the other frame is in
+        assert!(matches!(app.o.purpose, Purpose::Snip(_)));
+        let right = place((640, 0), (960, 600), 1.5);
+        let _ = app.update(Message::Screen(n, right, solid(right, 90)));
+        let id = (app.o.screens.first()).expect("Snip's screen too").window;
+        let at = Point::new((900.0 - 640.0) / 1.5, 200.0 / 1.5);
+        for event in [Hover(at), Press { at, shift: false }, Release] {
+            let _ = app.update(Message::ScreenEvent(id, event));
+        }
+        assert!(app.o.edit.is_some(), "picked: the Snip toolbar");
+        assert_eq!(app.o.selection.expect("the window").area, rect);
     }
 
     /// Shift+Enter snips every screen: picked across them (After a capture's
@@ -1198,6 +1308,7 @@ mod text_tests {
             origin: START.logical_origin(),
             size: START.size(),
             snip: None,
+            windows: Vec::new(),
         };
         let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
         app.o.appear = Some((Instant::now(), 1.0));

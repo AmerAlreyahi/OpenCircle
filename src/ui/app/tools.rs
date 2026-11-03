@@ -447,6 +447,7 @@ mod tests {
             origin: Point::ORIGIN,
             size: Size::new(4.0, 4.0),
             snip: Some((snip::Kind::Region, Vec::new(), None, Vec::new())),
+            windows: Vec::new(),
         };
         let _ = app.update(Message::Captured(3, Instant::now(), Ok(shot)));
         assert!(app.tool().is_some_and(|t| t.which == Which::Picker));

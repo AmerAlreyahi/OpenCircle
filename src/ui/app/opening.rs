@@ -183,6 +183,9 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) waiting: Vec<(crate::ui::snip::Place, image::Handle)>,
     /// Where the edge glow is: the screen the mouse is on (`screens::Glow`).
     pub(in crate::ui) glow: crate::ui::app::screens::Glow,
+    /// Main mode: the desktop's windows at the freeze (`Shot::windows`), for
+    /// the bar's Snip (a late list drifts from the frozen frames).
+    pub(in crate::ui) windows: Vec<crate::ui::snip::Pick>,
 }
 
 impl Default for Opening {
@@ -266,6 +269,7 @@ impl Default for Opening {
             screens: Vec::new(),
             waiting: Vec::new(),
             glow: Default::default(),
+            windows: Vec::new(),
         }
     }
 }

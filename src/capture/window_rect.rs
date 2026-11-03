@@ -57,14 +57,16 @@ pub fn no_pick(hwnd: isize) {
 /// every normal one, OpenCircle's own (Settings, the AI chat, pins: tool windows
 /// too) unless marked `no_pick`, and the taskbar; not the desktop (Progman /
 /// WorkerW: over the wallpaper and its icons the target is the screen) nor
-/// another app's tool windows (invisible helpers, floating palettes).
+/// another app's tool windows (invisible helpers, floating palettes) nor its
+/// click-through ones (`through`: WS_EX_TRANSPARENT, e.g. a GPU overlay or a
+/// screen tint over a whole monitor; a click goes to what is under them).
 #[cfg_attr(not(windows), allow(dead_code))]
-fn listed(class: &str, tool: bool, ours: bool, no_pick: bool) -> bool {
+fn listed(class: &str, tool: bool, ours: bool, no_pick: bool, through: bool) -> bool {
     let taskbar = matches!(class, "Shell_TrayWnd" | "Shell_SecondaryTrayWnd");
     let desktop = matches!(class, "Progman" | "WorkerW");
     match ours {
         true => !no_pick,
-        false => !desktop && (!tool || taskbar),
+        false => !desktop && !through && (!tool || taskbar),
     }
 }
 
@@ -223,7 +225,7 @@ fn platform() -> Result<Vec<Win>, String> {
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GWL_EXSTYLE, GetClassNameW, GetPropW, GetWindowDisplayAffinity,
         GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
-        IsWindowVisible, WS_EX_TOOLWINDOW,
+        IsWindowVisible, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
     };
     use windows::core::BOOL;
 
@@ -232,7 +234,9 @@ fn platform() -> Result<Vec<Win>, String> {
         let out = unsafe { &mut *(out.0 as *mut Vec<Win>) };
         // SAFETY: plain queries on a window handle EnumWindows just gave us.
         unsafe {
-            let tool = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0;
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            let tool = ex & WS_EX_TOOLWINDOW.0 != 0;
+            let through = ex & WS_EX_TRANSPARENT.0 != 0;
             let mut pid = 0;
             GetWindowThreadProcessId(hwnd, Some(&mut pid));
             let ours = pid == std::process::id();
@@ -242,7 +246,7 @@ fn platform() -> Result<Vec<Win>, String> {
             let unpickable = !GetPropW(hwnd, NO_PICK).is_invalid();
             if !IsWindowVisible(hwnd).as_bool()
                 || IsIconic(hwnd).as_bool()
-                || !listed(&class, tool, ours, unpickable)
+                || !listed(&class, tool, ours, unpickable, through)
             {
                 return BOOL(1);
             }
@@ -575,21 +579,44 @@ mod tests {
     /// desktop (the screen is the target there) nor other apps' tool windows.
     #[test]
     fn snip_lists_every_normal_window_ours_too_but_not_the_overlay() {
-        // class, tool window, ours, marked no_pick
-        assert!(listed("Chrome_WidgetWin_1", false, false, false), "Edge");
-        assert!(listed("Window Class", false, true, false), "our Settings");
-        assert!(listed("Window Class", true, true, false), "our pin, chat");
+        // class, tool window, ours, marked no_pick, click-through
         assert!(
-            !listed("Window Class", true, true, true),
+            listed("Chrome_WidgetWin_1", false, false, false, false),
+            "Edge"
+        );
+        assert!(
+            listed("Window Class", false, true, false, false),
+            "our Settings"
+        );
+        assert!(
+            listed("Window Class", true, true, false, false),
+            "our pin, chat"
+        );
+        assert!(
+            !listed("Window Class", true, true, true, false),
             "our overlay, toasts"
         );
-        assert!(listed("Shell_TrayWnd", true, false, false), "the taskbar");
-        assert!(listed("Shell_SecondaryTrayWnd", true, false, false));
-        assert!(!listed("Progman", false, false, false), "the desktop");
-        assert!(!listed("WorkerW", false, false, false), "the wallpaper");
         assert!(
-            !listed("SomeHelper", true, false, false),
+            listed("Shell_TrayWnd", true, false, false, false),
+            "the taskbar"
+        );
+        assert!(listed("Shell_SecondaryTrayWnd", true, false, false, false));
+        assert!(
+            !listed("Progman", false, false, false, false),
+            "the desktop"
+        );
+        assert!(
+            !listed("WorkerW", false, false, false, false),
+            "the wallpaper"
+        );
+        assert!(
+            !listed("SomeHelper", true, false, false, false),
             "another tool window"
+        );
+        // a click-through overlay over a whole monitor: what is under it counts
+        assert!(
+            !listed("CEF-OSC-WIDGET", false, false, false, true),
+            "another app's click-through window"
         );
     }
 

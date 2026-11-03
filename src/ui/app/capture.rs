@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use iced::widget::image;
 use iced::window::{self, Level, Mode};
-use iced::{Point, Rectangle, Size, Task};
+use iced::{Point, Size, Task};
 
 use crate::actions::{self, Action, Run, text};
 use crate::capture::{self, CaptureError};
@@ -53,17 +53,29 @@ impl App {
             let Some(kind) = snip else {
                 // The monitor the mouse is on first: its overlay opens on it;
                 // then the others.
+                // The windows as frozen, listed beside the grab (the overlay
+                // isn't up yet): the bar's Snip outlines them (`snip_here`).
+                let mut listing = Some(std::thread::spawn(capture::window_rect::list));
                 let mut first = true;
                 capture::mouse_first(all, |frame| {
                     let grabbed = match (std::mem::take(&mut first), frame) {
                         (true, frame) => Grabbed::Active(frame.map(|frame| {
                             let (place, image) = snip::screen_of(frame);
+                            let windows = (listing.take().map(|l| l.join()))
+                                .and_then(Result::ok)
+                                .unwrap_or_default();
                             Shot {
                                 origin: place.logical_origin(),
                                 size: place.size(),
                                 image,
                                 scale: place.scale,
                                 snip: None,
+                                windows: (windows.into_iter())
+                                    .map(|w| {
+                                        let rect = snip::desktop_rect(w.rect);
+                                        snip::Pick::window(rect, &w.title, w.handle)
+                                    })
+                                    .collect(),
                             }
                         })),
                         (false, Ok(frame)) => {
@@ -122,6 +134,7 @@ impl App {
             image,
             scale: place.scale,
             snip: Some((kind, windows, foreground, screens)),
+            windows: Vec::new(),
         })
     }
 
@@ -157,6 +170,7 @@ impl App {
         let purpose = std::mem::replace(&mut self.next, Purpose::Search);
         self.o.start(Opening {
             purpose,
+            windows: shot.windows,
             ..Opening::default()
         });
         self.set_frame(shot.image, shot.scale, shot.origin, size);
@@ -194,16 +208,10 @@ impl App {
             // opening is up (`app::screens`, as Circle to Search): one area may
             // span them.
             let start = self.place();
-            let others: Vec<_> = (screens.into_iter())
+            self.o.waiting = (screens.into_iter())
                 .filter(|(p, _)| p.origin != start.origin)
                 .collect();
-            let monitors = std::iter::once(Rectangle::with_size(size)).chain(
-                others
-                    .iter()
-                    .map(|(p, _)| super::screens::area_of(start, *p)),
-            );
-            snip.set_monitors(monitors.collect());
-            self.o.waiting = others;
+            snip.set_monitors(self.monitors());
             first = snip.start(kind, size); // Full = the whole screen at once
             let wait = config::current().snip.delay;
             let tool = self.tool_next.take();

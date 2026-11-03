@@ -250,6 +250,9 @@ pub(in crate::ui) struct Shot {
     /// topmost first), the window the user was in (Windows), and every monitor
     /// with its frame (this one too).
     pub(in crate::ui) snip: Option<SnipShot>,
+    /// Main mode: every window at the freeze (physical desktop px, topmost
+    /// first), for the bar's Snip; Snip's own are in `snip`.
+    pub(in crate::ui) windows: Vec<snip::Pick>,
 }
 
 pub(in crate::ui) type SnipShot = (
