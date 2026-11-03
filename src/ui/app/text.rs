@@ -330,7 +330,7 @@ impl App {
             let Some(_held) = held.upgrade() else {
                 return; // closed meanwhile
             };
-            let read = ocr::recognize_except(&pixels, width, height, &known).map(|blocks| {
+            let read = ocr::recognize_except(&pixels, width, height, &known, true).map(|blocks| {
                 let mut lines = word::lines(blocks, [0, 0], scale);
                 word::measure(&mut lines, &pixels, width, height, scale);
                 lines

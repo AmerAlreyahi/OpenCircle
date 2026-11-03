@@ -576,7 +576,7 @@ impl Real {
                     // script that suits it (main mode's second reader)
                     crate::log!("[opencircle] Windows OCR read no words: the second reader reads");
                     let (keep, known) = words_read(lines);
-                    match ocr::recognize_except(rgba, width, height, &known) {
+                    match ocr::recognize_except(rgba, width, height, &known, false) {
                         Ok(other) if !other.is_empty() => return Ok(merged(keep, other)),
                         Ok(_) => crate::log!("[opencircle] no other script read; PP-OCR reads"),
                         Err(e) => {

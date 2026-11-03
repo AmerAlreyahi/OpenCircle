@@ -114,20 +114,24 @@ pub fn reads_other_scripts() -> bool {
 }
 
 /// The lines of an RGBA image that aren't in the `known` boxes (Windows
-/// OCR's lines; image px), read in the script that suits each, gently, in
-/// the helper (`Engine::recognize_except`). None without a non-Latin
-/// recognizer on disk (the helper isn't even started).
+/// OCR's lines; image px), read in the script that suits each, in the
+/// helper (`Engine::recognize_except`); `gently` (main mode: in the
+/// background) on two cores below normal, else (a translate the user waits
+/// for) on all of them: an Arabic page on the Win10 VM (4 cores) read in
+/// 14.7-17.3 s gently. None without a non-Latin recognizer on disk (the
+/// helper isn't even started).
 pub fn recognize_except(
     rgba: &[u8],
     width: u32,
     height: u32,
     known: &[[f32; 4]],
+    gently: bool,
 ) -> Result<Vec<TextBlock>, OcrError> {
     check_image(rgba, width, height)?;
     if !reads_other_scripts() {
         return Ok(Vec::new());
     }
-    let mut header = vec![EXCEPT, 1];
+    let mut header = vec![EXCEPT, u8::from(gently)];
     header.extend_from_slice(&(known.len() as u32).to_le_bytes());
     for v in known.iter().flatten() {
         header.extend_from_slice(&v.to_le_bytes());
