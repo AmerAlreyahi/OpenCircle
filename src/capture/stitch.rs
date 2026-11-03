@@ -2,9 +2,11 @@
 //!
 //! Feed it successive captures of one screen region while the content scrolls
 //! down. Per frame: a colour signature per row in 4 px bins (right-hand scrollbar
-//! strip left out), sticky header/footer = rows fixed in every moving pair,
-//! scroll offset = lowest mean row cost over informative rows. Output pixels are always
-//! copied from a real frame, never blended. Pure: no I/O, no platform code.
+//! strip left out), sticky header/footer = rows fixed in the moving pairs,
+//! the frame's place in the page so far = lowest mean row cost over informative
+//! rows, around where the last frame was (else anywhere in the page). Output
+//! pixels are always copied from a real frame, never blended. Pure: no I/O, no
+//! platform code.
 
 use super::shrink::Shrink;
 
@@ -35,6 +37,7 @@ const RIVAL_GAP: usize = 8;
 const MAX_STEP_PCT: usize = 90;
 
 /// Per-row signatures: mean R, G, B of every `BIN_PX` bin, row after row.
+#[derive(Clone, Default)]
 struct Rows {
     /// Bytes per row (3 per bin).
     n: usize,
@@ -49,6 +52,18 @@ struct Rows {
 impl Rows {
     fn row(&self, y: usize) -> &[u8] {
         &self.sig[y * self.n..(y + 1) * self.n]
+    }
+
+    fn truncate(&mut self, rows: usize) {
+        self.sig.truncate(rows * self.n);
+        self.info.truncate(rows);
+    }
+
+    /// `ys` of `other` added at the end.
+    fn extend(&mut self, other: &Rows, ys: std::ops::Range<usize>) {
+        self.sig
+            .extend_from_slice(&other.sig[ys.start * other.n..ys.end * other.n]);
+        self.info.extend_from_slice(&other.info[ys]);
     }
 }
 
@@ -173,75 +188,70 @@ fn fixed_rows(a: &Rows, b: &Rows) -> Option<(usize, usize)> {
     (top + bot < h).then_some((top, bot))
 }
 
-/// Scroll offset d (in `lo..=hi`) such that b body row y == a body row y+d:
-/// the lowest mean row cost over b's evidence rows. Negative = scrolled back
-/// up: tried too, so a page of near-identical lines (a document) scrolled
-/// back is not taken for a step down by whole lines.
-/// Evidence = informative rows that changed at their spot: a row that stayed
-/// put (a sticky bar, even one that appeared later and so is not in the
-/// fixed header) matches any offset whose overlap it fills, and so made a
-/// short scroll back up read as a step down by nearly a screen (the owner's
-/// README, 2026-11-02: sections twice, the limit reached). So do the rows
-/// at the edges that changed only a little (`still`: a fixed bar with a
-/// caret, a spinner or a scrollbar thumb in it; a chat app's prompt box made
-/// a step down read as a scroll back up by most of a screen): left out
-/// while enough other rows changed (a document whose lines differ only in
-/// their numbers has only those).
+/// Where frame `b` is in the page: the offset d (one of `ds`) such that b's
+/// body row y (frame row `t + y`, `y < h`) shows page row `at + y + d`
+/// (`at` = the page row the last frame located, `prev`, showed at frame row
+/// `t`): the lowest mean row cost over b's evidence rows, against the page
+/// itself (`page`, `page_rows` of them), not only the last frame, so a
+/// frame anywhere in what is captured is found again.
+/// Evidence = informative rows that changed at their spot (against
+/// `prev`): a row that stayed put (a sticky bar, even one that appeared
+/// later and so is not in the fixed header) matches any offset whose
+/// overlap it fills, and so made a short scroll back up read as a step
+/// down by nearly a screen (the owner's README, 2026-11-02: sections twice,
+/// the limit reached). So do the rows at the edges that changed only a
+/// little (`still`: a fixed bar with a caret, a spinner or a scrollbar
+/// thumb in it; a chat app's prompt box made a step down read as a scroll
+/// back up by most of a screen): left out while enough other rows changed
+/// (a document whose lines differ only in their numbers has only those).
 /// `d: 0` also means "nothing changed that says anything, assume no
 /// movement"; None = no trustworthy match (animated frame, too-large step).
 /// Not `sure` when another offset, `RIVAL_GAP` away or more, with as much
 /// evidence, matches about as well (repeated rows).
-fn offset(a: &Rows, b: &Rows, t: usize, h: usize, (lo, hi): (isize, isize)) -> Option<Found> {
-    let mut info: Vec<usize> = (0..h)
-        .filter(|&y| b.info[t + y] && !same(a.row(t + y), b.row(t + y)))
-        .collect();
-    let held = |y: &usize| still(a.row(t + y), b.row(t + y));
-    let (up, down) = (
-        (0..h).take_while(held).count(),
-        (0..h).rev().take_while(held).count(),
-    );
-    let inner: Vec<usize> = (info.iter().copied())
-        .filter(|&y| y >= up && y + down < h)
-        .collect();
-    // the rows a's side may come from as well (b's edge rows are a's too)
-    let mut from = (0, h as isize);
-    if inner.len() >= MIN_MATCH {
-        (info, from) = (inner, (up as isize, (h - down) as isize));
+#[allow(clippy::too_many_arguments)]
+fn offset(
+    page: &Rows,
+    page_rows: usize,
+    prev: &Rows,
+    b: &Rows,
+    (t, h): (usize, usize),
+    at: isize,
+    ds: &[isize],
+    quiet: &[usize],
+) -> Option<Found> {
+    let evidence = Evidence::of(prev, b, t, h);
+    if evidence.rows.is_empty() {
+        return Some(Found {
+            d: 0,
+            sure: true,
+            ..Found::default()
+        });
     }
+    let (info, whole) = (&evidence.rows, evidence.whole);
+    let need = MIN_MATCH.max(info.len() / 16).min(info.len());
     // Only rows that changed a little: whole rows must match (a document's
     // lines one line pitch on, the numbers moving with them), not just the
     // bins that changed (a spinner on a still page "moved" by a pixel: the
     // spinner rows were stitched again and again, the owner's 2026-11-03).
-    let whole = info.iter().all(held);
-    if info.is_empty() {
-        return Some(Found { d: 0, sure: true });
-    }
-    let need = MIN_MATCH.max(info.len() / 16).min(info.len());
     let cost = |d: isize, y: usize| {
-        let still = (!whole).then(|| a.row(t + y));
-        bad(
-            a.row(t + y.wrapping_add_signed(d)),
-            b.row(t + y),
-            still,
-            b.cap,
-        ) as u64
+        let still = (!whole).then(|| prev.row(t + y));
+        let p = (at + y as isize + d) as usize;
+        bad(page.row(p), b.row(t + y), still, b.cap) as u64
     };
-    // b's evidence rows that a overlaps at d.
+    // b's evidence rows that the page holds at d.
     let overlap = |d: isize| {
-        let lo = (from.0 - d).clamp(0, h as isize) as usize;
-        let hi = (from.1 - d).clamp(lo as isize, h as isize) as usize;
+        let lo = (-at - d).clamp(0, h as isize) as usize;
+        let hi = (page_rows as isize - at - d).clamp(lo as isize, h as isize) as usize;
         &info[info.partition_point(|&y| y < lo)..info.partition_point(|&y| y < hi)]
     };
-    let (lo, hi) = (lo.max(1 - h as isize), hi.min(h as isize - 1));
-    // Every 8th row first, to try the offsets best first: the full pass then
-    // cuts the others short. Stable sort: on a tie 0 ("did not move") wins,
-    // then down over up.
-    let mut order: Vec<(u64, isize)> = (lo.max(0)..=hi)
-        .chain((lo..=hi.min(-1)).rev())
+    // Every 16th row first, to try the offsets best first: the full pass then
+    // cuts the others short. Stable sort: on a tie the first of `ds` wins
+    // (0, "did not move", then down over up).
+    let mut order: Vec<(u64, isize)> = (ds.iter().copied())
         .filter_map(|d| {
             let rows = overlap(d);
             (rows.len() >= need).then(|| {
-                let sample = rows.iter().step_by(8);
+                let sample = rows.iter().step_by(16);
                 let (c, n) = sample.fold((0, 0), |(c, n), &y| (c + cost(d, y), n + 1));
                 (c * 1000 / n, d)
             })
@@ -267,10 +277,41 @@ fn offset(a: &Rows, b: &Rows, t: usize, h: usize, (lo, hi): (isize, isize)) -> O
             best = Some((sum, n, d));
         }
     }
+    // Zero competes: a still page with an animation in it (a colour box)
+    // changes only the animated rows, and those match the box as an earlier
+    // frame left it in the page, a step away (or nothing matches them). When
+    // the informative rows that did not change outnumber the evidence, a move
+    // must fit them too (a document of lookalike lines does), else it is no
+    // move. (`quiet`: frame rows, informative and unchanged.)
+    if quiet.len() > info.len() && best.is_none_or(|(.., d)| d != 0) {
+        let fits = best.is_some_and(|(.., d)| {
+            let (mut sum, mut n) = (0u64, 0u64);
+            for &y in quiet {
+                let p = at - t as isize + y as isize + d;
+                if p >= 0 && (p as usize) < page_rows {
+                    sum += bad(page.row(p as usize), b.row(y), None, b.cap) as u64;
+                    n += 1;
+                }
+            }
+            n > 0 && sum * 100 <= ACCEPT_PCT * b.cap as u64 * n
+        });
+        if !fits {
+            return Some(Found {
+                d: 0,
+                sure: true,
+                ..Found::default()
+            });
+        }
+    }
     let (c, r, found) = best?;
     // A rival: an offset away from it, with as much evidence, whose mean
-    // is within reach of it: no telling them apart (repeated rows).
-    let reach = 1.2 * c as f64 / r as f64 + RIVAL;
+    // is within reach of it: no telling them apart (repeated rows). An
+    // exact match only has exact rivals (a document of lines that differ
+    // in a digit or two, the page above it all in reach).
+    let reach = match c {
+        0 => 0.0,
+        _ => 1.2 * c as f64 / r as f64 + RIVAL,
+    };
     let rival = order.iter().any(|&(_, d)| {
         let rows = overlap(d);
         let limit = reach * rows.len() as f64;
@@ -285,20 +326,66 @@ fn offset(a: &Rows, b: &Rows, t: usize, h: usize, (lo, hi): (isize, isize)) -> O
     Some(Found {
         d: found,
         sure: !rival,
+        cost: c,
+        rows: r as usize,
+        of: info.len(),
     })
 }
 
+/// A frame's evidence rows (body rows, `offset`): informative, changed at
+/// their spot against the last frame located; the edge rows that changed
+/// only a little left out while enough others changed. `whole`: all of them
+/// changed only a little.
+struct Evidence {
+    rows: Vec<usize>,
+    whole: bool,
+}
+
+impl Evidence {
+    fn of(prev: &Rows, b: &Rows, t: usize, h: usize) -> Self {
+        let info: Vec<usize> = (0..h)
+            .filter(|&y| b.info[t + y] && !same(prev.row(t + y), b.row(t + y)))
+            .collect();
+        let held = |y: &usize| still(prev.row(t + y), b.row(t + y));
+        let (up, down) = (
+            (0..h).take_while(held).count(),
+            (0..h).rev().take_while(held).count(),
+        );
+        let inner: Vec<usize> = (info.iter().copied())
+            .filter(|&y| y >= up && y + down < h)
+            .collect();
+        let rows = if inner.len() >= MIN_MATCH {
+            inner
+        } else {
+            info
+        };
+        let whole = rows.iter().all(held);
+        Evidence { rows, whole }
+    }
+}
+
+/// Most places one anchor row may match in the page for a search of the
+/// whole page (`Stitcher::anywhere`): more is a plain row, no anchor.
+const ANCHOR_HITS: usize = 32;
+/// Largest mean row cost (percent of the row cap) for a frame found that
+/// way: nearly exact, not the 40 % (`ACCEPT_PCT`) a step nearby may be.
+const FAR_PCT: u64 = 10;
+
 /// An offset `offset` found; not `sure` when another one, at least
 /// `RIVAL_GAP` away, matches about as well.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 struct Found {
     d: isize,
     sure: bool,
+    /// Its summed row cost over its `rows` evidence rows, `of` in all.
+    cost: u64,
+    rows: usize,
+    of: usize,
 }
 
 impl Found {
-    /// Its offset, unless a rival makes it a guess at a real step down (back up
-    /// adds nothing; a small step down cannot stitch a section twice).
+    /// Its offset, unless a rival makes it a guess at a real step (a small
+    /// one cannot stitch a section twice).
     fn trusted(self) -> Option<isize> {
         (self.sure || self.d.unsigned_abs() <= RIVAL_GAP).then_some(self.d)
     }
@@ -409,28 +496,66 @@ impl Preview {
 pub enum Push {
     /// The frame scrolled by this many new rows, now part of the image (the first frame: its height).
     Added(u32),
-    /// Same content as the last accepted frame (the page did not move), or
-    /// part of it (scrolled back up): nothing new.
+    /// Found in what is captured already, elsewhere than the last frame
+    /// (scrolled back up, or down again over it): nothing new.
+    Moved,
+    /// Same content as the last frame located (the page did not move): nothing new.
     NoMovement,
-    /// Wrong size, no trustworthy match (animated or scrolled too far) or the height cap is reached.
-    /// The frame is dropped and the next one is compared with the last accepted frame.
+    /// Wrong size, not found in the page (animated, or it jumped past what
+    /// is captured) or the height cap is reached. The frame is dropped; the
+    /// next one is looked for in the page again, around the last position
+    /// first.
     Rejected,
 }
 
-/// Incremental stitcher: `push` frames, then `finish`. Keeps only the image so
-/// far (`page`, down to the body's bottom in the last frame) and the last
-/// frame's footer (`foot`): a frame is freed once pushed.
+/// What the last `push` decided, for a per-frame log line (`scroll`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Step {
+    /// The frame's offset from the last position (none: not found).
+    pub d: Option<isize>,
+    /// Found by the search of the whole page, not around the position.
+    pub anywhere: bool,
+    /// The viewport's position in the page after it (its top row).
+    pub at: isize,
+    /// The page's rows (the footer not counted).
+    pub page: usize,
+    /// The fixed (top, bottom) bands the page is cut at.
+    pub bands: (usize, usize),
+}
+
+impl std::fmt::Display for Step {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.d {
+            Some(d) => write!(f, "d {d}")?,
+            None => write!(f, "not found")?,
+        }
+        let far = if self.anywhere { " (whole page)" } else { "" };
+        write!(
+            f,
+            "{far}, at {} of {} rows, bands {:?}",
+            self.at, self.page, self.bands
+        )
+    }
+}
+
+/// Incremental stitcher: `push` frames, then `finish`. Keeps the page so
+/// far (`page`, down to the body's bottom in the frame that reached
+/// furthest, with each row's signature: `sigs`), the last footer (`foot`)
+/// and where the viewport is in the page (`at`): each frame is looked for
+/// in the page around there (a frame is freed once pushed). A frame inside
+/// what is captured only moves `at`; rows past the page's end are added;
+/// a frame not found leaves everything as it was, so the capture goes on
+/// as soon as one is found again, anywhere in the page.
 pub struct Stitcher {
     w: usize,
     h: usize,
+    /// The last frame located (its rows say what changed at their spot).
     prev: Option<Rows>,
-    /// Where the last frame placed is from `prev` (its offset; 0 or less,
-    /// or further down while followed from there: `back`).
-    seen: isize,
-    /// That frame, while it is not `prev` (scrolled back up): a step down is
-    /// followed from it (`follow`).
-    back: Option<Rows>,
-    /// Sticky (header, footer) rows the last frame placed was cut at.
+    /// The page row `prev`'s frame row 0 shows (above the page: < 0).
+    at: isize,
+    /// `page`'s row signatures.
+    sigs: Rows,
+    /// Sticky (header, footer) rows the page is cut at, once a frame added rows.
     fixed: Option<(usize, usize)>,
     /// The bands of the last `RECENT` moving pairs (their median is used).
     recent: Vec<(usize, usize)>,
@@ -440,6 +565,8 @@ pub struct Stitcher {
     max: u32,
     /// The preview's scalers and what they made so far (`whole`).
     preview: Option<Preview>,
+    /// What the last `push` decided.
+    pub step: Step,
 }
 
 impl Stitcher {
@@ -449,14 +576,15 @@ impl Stitcher {
             w: width as usize,
             h: height as usize,
             prev: None,
-            seen: 0,
-            back: None,
+            at: 0,
+            sigs: Rows::default(),
             fixed: None,
             recent: Vec::new(),
             page: Vec::new(),
             foot: Vec::new(),
             max: MAX_HEIGHT,
             preview: None,
+            step: Step::default(),
         }
     }
 
@@ -464,6 +592,11 @@ impl Stitcher {
     pub fn limit(mut self, max: u32) -> Self {
         self.max = max.clamp(1, MAX_HEIGHT);
         self
+    }
+
+    /// The frames' size.
+    pub fn size(&self) -> (u32, u32) {
+        (self.w as u32, self.h as u32)
     }
 
     /// Height of the image `finish` would return (0 before the first frame).
@@ -477,6 +610,15 @@ impl Stitcher {
     }
 
     pub fn push(&mut self, rgba: &[u8]) -> Push {
+        self.step = Step::default();
+        let push = self.place(rgba);
+        self.step.at = self.at;
+        self.step.page = self.page.len() / (self.w * 4).max(1);
+        self.step.bands = self.fixed.unwrap_or_default();
+        push
+    }
+
+    fn place(&mut self, rgba: &[u8]) -> Push {
         let stride = self.w * 4;
         if self.w == 0 || self.h == 0 || rgba.len() != stride * self.h {
             return Push::Rejected;
@@ -484,127 +626,174 @@ impl Stitcher {
         let rows = rows(rgba, self.w, self.h);
         let Some(prev) = &self.prev else {
             self.page = rgba.to_vec();
+            self.sigs = rows.clone();
             self.prev = Some(rows);
+            self.step.d = Some(0);
             return Push::Added(self.h as u32);
         };
         let Some((t, b)) = fixed_rows(prev, &rows) else {
-            (self.seen, self.back) = (0, None);
+            self.step.d = Some(0);
             return Push::NoMovement;
         };
         // matched on this pair's own body: rows fixed in both frames (a
-        // sticky bar that appeared after the first pairs) say nothing, and
-        // a's bar must not be compared with b's page (a scroll back up
-        // under it read as a step down)
+        // sticky bar that appeared after the first pairs) say nothing
         let body = self.h - t - b;
         let max_d = (body * MAX_STEP_PCT / 100) as isize;
-        // Where the page was last seen from `prev` (back up: 0 or less). Once
-        // it went back up, a step down from there that overlaps less than
-        // half of what changed is taken only within half an area: a "step
-        // down" from far above `prev` to below it on a few rows is a
-        // lookalike (scrolled back up further than the bar or the search
-        // lets it match, then a section matched one repeated below it).
-        let seen = self.seen;
-        let near = |d: isize| d <= 0 || seen == 0 || d.abs_diff(seen) <= max_d as usize / 2;
-        let found = offset(prev, &rows, t, body, (-max_d, max_d)).and_then(Found::trusted);
-        let d = match found {
-            Some(d) if near(d) => Some(d),
-            _ if seen == 0 => None,
-            // Back up, then a bigger step down: followed from the frame seen
-            // last (`back`). Where both agree it is real; else the page is
-            // where following puts it, and the next step is checked from
-            // there (it was checked from a spot left behind, forever: the
-            // owner's capture stuck after a flick, 2026-11-03). Not followed
-            // either (one more flick): nothing moves on, so back at `back`
-            // or `prev` it goes on (forgetting `back` let a README's
-            // lookalike lines through).
-            _ => match self.follow(&rows) {
-                Some(at) if found.is_some_and(|d| d.abs_diff(at) <= RIVAL_GAP) => found,
-                Some(at) if at <= 0 => Some(at),
-                Some(at) => {
-                    (self.seen, self.back) = (at, Some(rows));
-                    return Push::Rejected;
-                }
+        let page_rows = self.page.len() / stride;
+        let at = self.at + t as isize;
+        // around the position first (0, then down, then up: the order a tie
+        // goes), else anywhere in the page, if one place clearly wins
+        let near: Vec<isize> = (0..=max_d).chain((-max_d..0).rev()).collect();
+        // the informative rows between the page's fixed bands that did not
+        // change (`offset`: zero competes; a fixed band of this pair alone,
+        // most of a frame torn between two scroll positions, is no header)
+        let (qt, qb) = self.fixed.unwrap_or_default();
+        let quiet: Vec<usize> = (qt..self.h - qb)
+            .filter(|&y| rows.info[y] && same(prev.row(y), rows.row(y)))
+            .collect();
+        let found = offset(
+            &self.sigs,
+            page_rows,
+            prev,
+            &rows,
+            (t, body),
+            at,
+            &near,
+            &quiet,
+        );
+        let (d, anywhere) = match found.and_then(Found::trusted) {
+            Some(d) => (d, false),
+            None => match self.anywhere(prev, &rows, (t, body), max_d, &near, &quiet) {
+                Some(d) => (d, true),
                 None => return Push::Rejected,
             },
         };
-        let d = match d {
-            // (the last frame placed stays the one to follow from)
-            None => return Push::Rejected,
-            // scrolled back up: what it shows is in the image already
-            Some(d) if d <= 0 => {
-                (self.seen, self.back) = (d, Some(rows));
-                return Push::NoMovement;
-            }
-            Some(d) => d as usize,
-        };
-        if self.is_full() {
-            return Push::Rejected;
+        (self.step.d, self.step.anywhere) = (Some(d), anywhere);
+        if d == 0 {
+            return Push::NoMovement;
         }
+        let to = self.at + d;
         // This pair's bands (a thumb or spinner through them as well,
         // `bands`), then the median of the last `RECENT` pairs: one noisy
         // pair neither drops a footer nor grows one (the minimum over every
         // pair let one such pair switch the footer off for good).
-        let (t, b) = match bands(prev, &rows, d) {
-            (vt, vb) if vt.max(t) + vb.max(b) + d < self.h => (vt.max(t), vb.max(b)),
+        let (vt, vb) = match d {
+            1.. if (d as usize) < self.h => bands(prev, &rows, d as usize),
             _ => (t, b),
         };
-        if self.recent.len() == RECENT {
-            self.recent.remove(0);
+        let pair = match vt.max(t) + vb.max(b) + d.unsigned_abs() < self.h {
+            true => (vt.max(t), vb.max(b)),
+            false => (t, b),
+        };
+        let mut recent = self.recent.clone();
+        if recent.len() == RECENT {
+            recent.remove(0);
         }
-        self.recent.push((t, b));
+        recent.push(pair);
         let median = |f: fn(&(usize, usize)) -> usize| {
-            let mut v: Vec<usize> = self.recent.iter().map(f).collect();
+            let mut v: Vec<usize> = recent.iter().map(f).collect();
             v.sort_unstable();
             v[v.len() / 2]
         };
         let (top, bot) = (median(|p| p.0), median(|p| p.1));
-        let before = self.height();
-        // The page ends at the last frame's body bottom (`old` footer rows
-        // above its end); in this frame that row is `d` higher. The first
-        // pair: the first frame's footer goes.
-        let old = match self.fixed {
-            Some((_, fb)) => fb,
-            None => {
-                self.page.truncate(self.page.len() - bot * stride);
-                bot
-            }
-        };
+        // The page ends at the furthest frame's body bottom; before any
+        // rows were added it is the first frame, its footer too.
         let end = self.h - bot;
+        let ends = match self.fixed {
+            Some(_) => page_rows,
+            None => page_rows - bot,
+        };
+        // the frame row the page ends at; inside what is captured when the
+        // body ends above it (the footer the page was cut at, not this
+        // pair's guess: a row the footer grew by is no move inside)
+        let start = ends as isize - to;
+        let body_end = self.h - self.fixed.map_or(bot, |f| f.1);
+        if start >= body_end as isize {
+            // inside what is captured: only the position moves
+            (self.at, self.prev) = (to, Some(rows));
+            return Push::Moved;
+        }
+        if anywhere && end as isize - start > max_d || self.is_full() {
+            // (found anywhere, far past the end on a few rows: a lookalike)
+            return Push::Rejected;
+        }
+        self.recent = recent;
+        let before = self.height();
+        if self.fixed.is_none() {
+            // the first rows added: the first frame's footer goes
+            self.page.truncate(ends * stride);
+            self.sigs.truncate(ends);
+        }
         // ponytail: a footer shrinking by more than the step reaches into the
         // header (`top`); clamped there, a few rows may go missing once.
-        let start = (self.h - old).saturating_sub(d).max(top);
+        let start = (start.max(0) as usize).max(top);
+        let grow = end - start.min(end);
         // The page's tail is painted again from this frame's lower part
         // (half the area, or a quarter + the step; as Snow Shot): a fixed
         // band no pair saw yet (up to about a quarter) is left only at the
         // end, never stitched in; the same pixels when it was seen.
-        let from = (self.h.saturating_sub((self.h / 2).max(self.h / 4 + d)))
+        let from = (self.h.saturating_sub((self.h / 2).max(self.h / 4 + grow)))
             .min(start)
             .min(end)
             .max(top);
-        let cut = (start - from.min(start)).min(self.page.len() / stride);
-        self.page.truncate(self.page.len() - cut * stride);
-        let room = (self.max as usize).saturating_sub(self.page.len() / stride + bot);
+        let keep = (to + from as isize) as usize;
+        self.page.truncate(keep * stride);
+        self.sigs.truncate(keep);
+        let room = (self.max as usize).saturating_sub(keep + bot);
         let take = end.saturating_sub(from).min(room);
         self.fixed = Some((top, bot));
         self.page
             .extend_from_slice(&rgba[from * stride..(from + take) * stride]);
+        self.sigs.extend(&rows, from..from + take);
         self.foot = rgba[end * stride..].to_vec();
-        self.prev = Some(rows);
-        (self.seen, self.back) = (0, None);
+        (self.at, self.prev) = (to, Some(rows));
         Push::Added(self.height().saturating_sub(before))
     }
 
-    /// Where `rows` is from `prev`, followed from `back` (`seen` from it);
-    /// none without `back` or a trusted match with it.
-    fn follow(&self, rows: &Rows) -> Option<isize> {
-        let back = self.back.as_ref()?;
-        let Some((t, b)) = fixed_rows(back, rows) else {
-            return Some(self.seen);
-        };
-        let body = self.h - t - b;
-        let max_d = (body * MAX_STEP_PCT / 100) as isize;
-        let d = offset(back, rows, t, body, (-max_d, max_d)).and_then(Found::trusted)?;
-        Some(self.seen + d)
+    /// Where frame `b` is in the whole page, when one place clearly wins
+    /// (`sure`): it jumped further than the search around the position
+    /// reaches (a flick, a scrollbar drag, Page Down) and came back into
+    /// what is captured. A few of its evidence rows are looked up in the
+    /// page row by row; the offsets they point at are then tried in full.
+    fn anywhere(
+        &self,
+        prev: &Rows,
+        b: &Rows,
+        (t, h): (usize, usize),
+        max_d: isize,
+        near: &[isize],
+        quiet: &[usize],
+    ) -> Option<isize> {
+        let page_rows = self.page.len() / (self.w * 4);
+        let at = self.at + t as isize;
+        let rows = Evidence::of(prev, b, t, h).rows;
+        let mut ds = Vec::new();
+        for k in 1..=3 {
+            let Some(&y) = rows.get(rows.len() * k / 4) else {
+                continue;
+            };
+            let hits: Vec<isize> = (0..page_rows)
+                .filter(|&p| self.sigs.info[p] && same(self.sigs.row(p), b.row(t + y)))
+                .map(|p| p as isize - at - y as isize)
+                .take(ANCHOR_HITS + 1)
+                .collect();
+            if hits.len() <= ANCHOR_HITS {
+                ds.extend(hits.into_iter().filter(|d| d.abs() > max_d));
+            }
+        }
+        ds.sort_unstable();
+        ds.dedup();
+        if ds.is_empty() {
+            return None;
+        }
+        // the search around the position again, as rivals: what it found
+        // there must not lose to a lookalike the anchors pointed at
+        ds.extend(near);
+        let found = offset(&self.sigs, page_rows, prev, b, (t, h), at, &ds, quiet)?;
+        // far, sure, and nearly exact over most of the frame
+        let clear = found.cost * 100 <= FAR_PCT * b.cap as u64 * found.rows as u64;
+        (found.d.abs() > max_d && found.sure && clear && 2 * found.rows >= found.of)
+            .then_some(found.d)
     }
 
     /// The whole image so far, miniature (owner, 2026-11-02, as iTop): scaled
@@ -1696,9 +1885,59 @@ mod tests {
         }
     }
 
+    /// The viewport's place in the page: a frame anywhere in what is
+    /// captured (far back up, then down again over it) only moves it; rows
+    /// come again only past the page's end, none twice.
+    #[test]
+    fn a_frame_anywhere_in_the_page_moves_the_position_only() {
+        let rig = Rig::new(W, 6000, VH, 5, 40);
+        let mut st = Stitcher::new(W as u32, VH as u32);
+        for s in (0..=3000).step_by(300) {
+            assert!(matches!(st.push(&rig.frame(s).px), Push::Added(_)));
+        }
+        let h = st.height();
+        for s in [800, 1100, 1400, 1700, 2000, 2300, 2600, 2900] {
+            assert_eq!(st.push(&rig.frame(s).px), Push::Moved, "at {s}");
+            assert_eq!(st.step.at, s as isize);
+        }
+        assert_eq!(st.height(), h);
+        assert_eq!(st.push(&rig.frame(3200).px), Push::Added(200));
+        let (px, _, h) = st.finish();
+        assert_eq!(h as usize, rig.truth(3200).h);
+        assert!(px == rig.truth(3200).px);
+    }
+
+    /// A frame torn between two scroll positions (the VM, Edge with an
+    /// animation on the page: the screen's top still at the last position,
+    /// its lower part already a step on) took the top for a fixed header and
+    /// the step for real: the page's tail was painted again from the stale
+    /// top, a step's rows twice. The rows that did not change say "no move".
+    #[test]
+    fn a_frame_torn_between_two_positions_adds_nothing() {
+        let rig = Rig::new(W, 6000, VH, 9, 40);
+        let mut st = Stitcher::new(W as u32, VH as u32);
+        for s in (0..=1200).step_by(60) {
+            st.push(&rig.frame(s).px);
+        }
+        let (old, new) = (rig.frame(1200), rig.frame(1260));
+        let cut = 450 * W * 4;
+        let mut torn = old.px[..cut].to_vec();
+        torn.extend_from_slice(&new.px[cut..]);
+        st.push(&torn);
+        for s in (1260..=2400).step_by(60) {
+            st.push(&rig.frame(s).px);
+        }
+        let (px, _, h) = st.finish();
+        assert_eq!(h as usize, rig.truth(2400).h);
+        assert!(px == rig.truth(2400).px, "a step's rows twice");
+    }
+
     #[test]
     fn empty_stitcher_finishes_empty() {
         let (px, w, h) = Stitcher::new(10, 10).finish();
         assert!(px.is_empty() && w == 10 && h == 0);
     }
 }
+
+#[cfg(test)]
+mod replay;

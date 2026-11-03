@@ -247,6 +247,7 @@ fn run(
     mut each: impl FnMut(Update),
 ) -> io::Result<Times> {
     let mut times = Times::default();
+    let debug = Debug::from_env(st);
     let mut last: Option<Vec<u8>> = None;
     let mut changed = now();
     let (mut rejects, mut lost, mut full) = (0, false, false);
@@ -268,12 +269,13 @@ fn run(
                 let push = st.push(&frame);
                 times.pushes += 1;
                 times.push += pushed.elapsed();
+                debug.frame(times.pushes, &frame, st, push, pushed.elapsed());
                 rejects = match push {
                     Push::Rejected => rejects + 1,
                     _ => 0,
                 };
                 let added = matches!(push, Push::Added(_));
-                if added {
+                if added || push == Push::Moved {
                     moved();
                 }
                 full = st.is_full();
@@ -314,6 +316,44 @@ fn run(
         std::thread::sleep(period().saturating_sub(start.elapsed()));
     }
     Ok(times)
+}
+
+/// For field reports, off unless asked for: `OPENCIRCLE_LONG_LOG` set = a
+/// log line per frame stitched (what the stitcher decided and how long it
+/// took); `OPENCIRCLE_LONG_DUMP=<folder>` = every such frame saved there as
+/// a PNG too (a replay fixture's source, `stitch::replay`). Captures stay on
+/// this PC, in the folder the user named, and nowhere else.
+struct Debug {
+    log: bool,
+    dump: Option<std::path::PathBuf>,
+    size: (u32, u32),
+}
+
+impl Debug {
+    fn from_env(st: &Stitcher) -> Debug {
+        Debug {
+            log: std::env::var_os("OPENCIRCLE_LONG_LOG").is_some(),
+            dump: std::env::var_os("OPENCIRCLE_LONG_DUMP").map(Into::into),
+            size: st.size(),
+        }
+    }
+
+    fn frame(&self, i: u32, rgba: &[u8], st: &Stitcher, push: Push, took: Duration) {
+        if self.log {
+            let ms = took.as_secs_f64() * 1000.0;
+            crate::log!(
+                "[opencircle] long capture frame {i}: {push:?}, {}, {ms:.1} ms",
+                st.step
+            );
+        }
+        if let Some(dir) = &self.dump {
+            let path = dir.join(format!("{i:05}.png"));
+            let (w, h) = self.size;
+            if let Err(e) = crate::actions::write_png(&path, w, h, rgba) {
+                crate::log!("[opencircle] long capture: frame not saved ({e})");
+            }
+        }
+    }
 }
 
 /// Time since the user's last keyboard or mouse input (any app). Elsewhere
@@ -595,6 +635,22 @@ mod tests {
             !updates.last().unwrap().lost,
             "the note goes once it goes on"
         );
+    }
+
+    /// A jump back up further than the search around the position reaches
+    /// (Page Up twice), then on down over what is captured and past it: found
+    /// in the page at once, so no "Scroll back" note (it showed while the
+    /// user scrolled over what was captured) and no gap or repeat.
+    #[test]
+    fn a_jump_back_up_into_the_page_is_found_at_once() {
+        let rig = Rig::new(400, 4000, 500, 4, 40);
+        let mut at: Vec<usize> = (0..=10).map(|i| i * 150).collect();
+        at.extend((0..10).map(|i| 600 + i * 150));
+        let (updates, _, image) = drive(&rig, &at);
+        assert!(updates.iter().all(|u| !u.lost), "{updates:?}");
+        let truth = rig.truth(1950);
+        assert_eq!(image.height as usize, truth.h);
+        assert!(image.rgba == truth.px, "no gap, nothing twice");
     }
 
     #[test]
