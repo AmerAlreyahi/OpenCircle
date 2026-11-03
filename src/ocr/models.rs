@@ -222,6 +222,27 @@ pub(crate) fn other_scripts_files() -> Vec<(PathBuf, &'static ModelFile)> {
     files
 }
 
+/// The readers for other scripts than Latin that aren't on disk, by name,
+/// for the offer's text ("Cyrillic, Chinese and Japanese").
+pub(crate) fn missing_other_scripts() -> String {
+    other_scripts_but(installed)
+}
+
+/// The other scripts' names but those `have`: "a", "a and b", "a, b and c"
+/// (a last name with its own "and" ends the list).
+fn other_scripts_but(have: impl Fn(&'static Recognizer) -> bool) -> String {
+    let names: Vec<&str> = (RECOGNIZERS.into_iter())
+        .filter(|r| r.script() != Script::Latin && !have(r))
+        .map(|r| r.script)
+        .collect();
+    match names.split_last() {
+        Some((last, rest)) if !rest.is_empty() && !last.contains(" and ") => {
+            format!("{} and {last}", rest.join(", "))
+        }
+        _ => names.join(", "),
+    }
+}
+
 /// All of `rec`'s files are on disk (sizes only; `ensure` verifies).
 pub(crate) fn installed(rec: &'static Recognizer) -> bool {
     missing_bytes(&ocr_files(rec)) == 0
@@ -501,6 +522,18 @@ mod tests {
         assert!(!is_verified(&dest, &HELLO).unwrap());
         assert!(!is_verified(&dir.join("missing"), &HELLO).unwrap());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_offer_names_only_the_missing_readers() {
+        assert_eq!(
+            other_scripts_but(|_| false),
+            "Arabic, Cyrillic, Chinese and Japanese"
+        );
+        let arabic = |r: &Recognizer| r.id == "arabic";
+        assert_eq!(other_scripts_but(arabic), "Cyrillic, Chinese and Japanese");
+        assert_eq!(other_scripts_but(|r| r.id == "cjk"), "Arabic and Cyrillic");
+        assert_eq!(other_scripts_but(|r| r.id != "cyrillic"), "Cyrillic");
     }
 
     #[test]

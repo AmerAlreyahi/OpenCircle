@@ -15,7 +15,7 @@ use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{error, text as label};
 use crate::ui::kit::tokens::{Role, radius};
 use crate::ui::picker;
-use crate::ui::screens::model_download::{self, OCR, SCRIPTS, Stage, TRANSLATION};
+use crate::ui::screens::model_download::{self, Model, OCR, SCRIPTS, Stage, TRANSLATION};
 
 /// The pill's padding and its gap (`.as-language-pill`: 10 px, gap 10), and
 /// its distance to the top of the screen.
@@ -53,7 +53,7 @@ impl Session {
             stack![pin(pill).position(free.position()), card].into()
         };
         // the download card (`model_download`): asks, its progress, why it failed
-        let download = |model, bytes, stage, provider| {
+        let download = |model: &Model, bytes, stage, provider| {
             let on = model_download::On {
                 download: Msg::Download,
                 dismiss: Some(Msg::Close),
@@ -65,8 +65,20 @@ impl Session {
         // what is (being) fetched: the pair's models, else OCR's
         let fetched = |stage| match self.offline {
             Some(pair) => download(&TRANSLATION, pair.full_size(), stage, None),
-            None => match self.readers {
-                Some(bytes) => download(&SCRIPTS, bytes, stage, None),
+            None => match &self.readers {
+                // only the readers that aren't installed
+                Some((bytes, names)) => {
+                    let does = format!("Read {names} text");
+                    download(
+                        &Model {
+                            does: &does,
+                            ..SCRIPTS
+                        },
+                        *bytes,
+                        stage,
+                        None,
+                    )
+                }
                 None => download(&OCR, crate::ocr::models::full_size(), stage, None),
             },
         };

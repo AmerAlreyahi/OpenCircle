@@ -80,11 +80,11 @@ fn session(models: bool) -> Session {
 #[test]
 fn a_page_read_as_noise_offers_the_other_readers() {
     let mut s = session(true);
-    let _ = s.update(Msg::Readers(0));
+    let _ = s.update(Msg::Readers(0, String::new()));
     assert!(matches!(&s.phase, Phase::Translating), "nothing to fetch");
-    let _ = s.update(Msg::Readers(32_000_000));
+    let _ = s.update(Msg::Readers(32_000_000, "Cyrillic".into()));
     assert!(matches!(&s.phase, Phase::Consent(None)));
-    assert_eq!(s.readers, Some(32_000_000));
+    assert_eq!(s.readers, Some((32_000_000, "Cyrillic".into())));
     // the picker's next language asks for its own models, not these
     let source = s.picker.source.clone();
     let _ = s.begin(crate::ocr::models::installed(
@@ -724,7 +724,7 @@ fn every_translate_state_matches_its_golden_image() {
             }
             "readers" => {
                 s.phase = {
-                    s.readers = Some(32_686_000);
+                    s.readers = Some((32_686_000, "Arabic, Cyrillic, Chinese and Japanese".into()));
                     Phase::Consent(None)
                 }
             }

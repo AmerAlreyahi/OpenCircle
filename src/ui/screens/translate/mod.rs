@@ -58,7 +58,7 @@ pub enum Msg {
     /// Get the pair of the lines kept in their own language (`Offer`).
     GetHeld,
     /// The page read as noise: offer the readers for other scripts (bytes).
-    Readers(u64),
+    Readers(u64, String),
     /// The card's frame (`kit::panel_frame`): the App moves, resizes and
     /// closes it, as for the other result cards.
     Card(card::Event),
@@ -152,7 +152,7 @@ pub struct Session {
     /// While translating: what is translated so far.
     partial: Option<Part>,
     /// The OCR download asked for is the readers for other scripts (bytes).
-    readers: Option<u64>,
+    readers: Option<(u64, String)>,
 }
 
 /// The card of one clicked block.
@@ -272,9 +272,9 @@ impl Session {
                 self.phase = Phase::Downloading(0.0);
                 return self.run(true);
             }
-            Msg::Readers(bytes) if matches!(self.phase, Phase::Translating) && bytes > 0 => {
+            Msg::Readers(bytes, names) if matches!(self.phase, Phase::Translating) && bytes > 0 => {
                 self.work = None;
-                self.readers = Some(bytes);
+                self.readers = Some((bytes, names));
                 self.offline = None;
                 self.phase = Phase::Consent(None);
             }
@@ -501,8 +501,11 @@ impl Session {
                     return;
                 }
                 if real.wants_readers() {
-                    let bytes = actions::translate::readers_bytes();
-                    let _ = tx.unbounded_send(Msg::Readers(bytes));
+                    let (bytes, names) = (
+                        actions::translate::readers_bytes(),
+                        crate::ocr::models::missing_other_scripts(),
+                    );
+                    let _ = tx.unbounded_send(Msg::Readers(bytes, names));
                     return;
                 }
             }

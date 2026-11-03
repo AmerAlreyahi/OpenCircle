@@ -18,20 +18,20 @@ use crate::ui::kit::themes;
 use crate::ui::kit::tokens::{Role, radius};
 
 /// A model the card offers (the design's `models` catalog).
-pub struct Model {
+pub struct Model<'s> {
     pub name: &'static str,
     pub icon: Icon,
     /// The question's title.
     pub title: &'static str,
     /// What it does, before "on this PC; none of your content is sent."
-    pub does: &'static str,
+    pub does: &'s str,
     /// Where it comes from.
     pub source: &'static str,
     /// What runs once it is in place ("Continuing to …").
     pub then: &'static str,
 }
 
-pub const OCR: Model = Model {
+pub const OCR: Model<'static> = Model {
     name: "Text recognition",
     icon: Icon::Text,
     title: "Text recognition needs a small download",
@@ -41,7 +41,7 @@ pub const OCR: Model = Model {
 };
 
 /// The readers for other scripts, for a page read as noise.
-pub const SCRIPTS: Model = Model {
+pub const SCRIPTS: Model<'static> = Model {
     name: "Text in other scripts",
     icon: Icon::Text,
     title: "This text needs another reader",
@@ -50,7 +50,7 @@ pub const SCRIPTS: Model = Model {
     then: "translate the screen",
 };
 
-pub const TRANSLATION: Model = Model {
+pub const TRANSLATION: Model<'static> = Model {
     name: "Offline translation",
     icon: Icon::Translate,
     title: "Offline translation needs a download",
@@ -137,7 +137,7 @@ fn mb(bytes: u64) -> u64 {
 
 /// The card: `model` (`bytes` to download, the whole set) at `stage`.
 pub fn card<'a, M: Clone + 'a>(
-    model: &'static Model,
+    model: &Model,
     bytes: u64,
     stage: Stage<'a>,
     on: On<M>,
@@ -160,7 +160,7 @@ pub fn card<'a, M: Clone + 'a>(
 }
 
 /// The emblem, the stage's title and the model's line.
-fn heading<'a, M: 'a>(model: &'static Model, bytes: u64, stage: Stage<'a>) -> Element<'a, M> {
+fn heading<'a, M: 'a>(model: &Model, bytes: u64, stage: Stage<'a>) -> Element<'a, M> {
     let (icon, title) = match stage {
         Stage::Ask => (model.icon, model.title.to_string()),
         Stage::Downloading(_) => (
@@ -186,7 +186,7 @@ fn heading<'a, M: 'a>(model: &'static Model, bytes: u64, stage: Stage<'a>) -> El
 
 /// What the stage says and its buttons.
 fn body<'a, M: Clone + 'a>(
-    model: &'static Model,
+    model: &Model,
     bytes: u64,
     stage: Stage<'a>,
     on: On<M>,
@@ -282,7 +282,7 @@ mod tests {
 
     const FAILED: &str = "No internet connection. Reconnect, then try again.";
 
-    fn stages() -> Vec<(&'static str, &'static Model, Stage<'static>, bool)> {
+    fn stages() -> Vec<(&'static str, &'static Model<'static>, Stage<'static>, bool)> {
         vec![
             ("ask-ocr", &OCR, Stage::Ask, false),
             ("ask-translation", &TRANSLATION, Stage::Ask, true),
@@ -293,7 +293,7 @@ mod tests {
         ]
     }
 
-    fn view(model: &'static Model, stage: Stage<'static>, provider: bool) -> Element<'static, u8> {
+    fn view(model: &Model, stage: Stage<'static>, provider: bool) -> Element<'static, u8> {
         let on = On {
             download: 1,
             dismiss: Some(2),
