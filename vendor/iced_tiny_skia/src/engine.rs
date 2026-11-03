@@ -928,6 +928,9 @@ thread_local! {
     /// tests: an animation over the frozen screen must blit its tiles and edge
     /// strips (a small icon moving by fractions of a pixel may not).
     pub static PIPELINE_PIXELS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// OpenCircle patch: the clip mask pixels this thread set (`adjust_clip_mask`),
+    /// for the app's tests: a frame sets each about once, not per drawing.
+    pub static MASK_PIXELS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// OpenCircle patch (#89): a canvas's solid rectangle (`fill_rectangle`: not
@@ -1072,6 +1075,7 @@ pub fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
     let id = clip_mask.data().as_ptr() as usize;
     let rect = pixel_rect(bounds, w, h);
     let fill = |data: &mut [u8], [x0, y0, x1, y1]: [u32; 4], v: u8| {
+        MASK_PIXELS.set(MASK_PIXELS.get() + u64::from((x1 - x0) * (y1 - y0)));
         for y in y0..y1 {
             let row = (y * w) as usize;
             data[row + x0 as usize..row + x1 as usize].fill(v);

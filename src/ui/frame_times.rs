@@ -511,6 +511,25 @@ fn the_opening_blits_its_images() {
     }
 }
 
+/// The first frame of an opening (the freeze the user waits for) sets the
+/// clip mask a few screens' worth, not twice the screen for each dim tile:
+/// every group's clip was followed by the whole layer's, ~20 ms of the first
+/// frame at 3440x1440 (0.1.3 gate: freeze p95 232 ms there).
+#[test]
+fn the_first_frame_sets_the_clip_mask_about_once() {
+    let (w, h) = (1920, 1080);
+    let area = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
+    for mut app in [
+        open_app(w, h, 1.0),
+        super::app::tests::snipping_on(w, h, area),
+    ] {
+        let before = iced_tiny_skia::MASK_PIXELS.get();
+        let _ = frames(&mut app, 0, false, |_, _, _| {});
+        let screens = (iced_tiny_skia::MASK_PIXELS.get() - before) as f32 / (w * h) as f32;
+        assert!(screens < 6.0, "the mask set {screens:.1} screens' worth");
+    }
+}
+
 /// Once the opening, the bar and a card have settled, nothing asks for a
 /// frame: no frame messages, no canvas wanting a redraw (the edge glow at
 /// rest), and a frame drawn anyway redraws nothing.

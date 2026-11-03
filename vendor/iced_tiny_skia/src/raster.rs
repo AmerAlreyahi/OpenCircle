@@ -357,17 +357,30 @@ impl Cache {
             && *height > 0
             && pixels.len() == *width as usize * *height as usize * 4
         {
-            let buffer: Vec<u32> = pixels
-                .chunks_exact(4)
-                .map(|p| match p[3] {
-                    255 => u32::from_ne_bytes([p[2], p[1], p[0], 255]),
-                    a => bytemuck::cast(
-                        tiny_skia::ColorU8::from_rgba(p[2], p[1], p[0], a)
-                            .premultiply(),
-                    ),
-                })
-                .collect();
-            let opaque = pixels.chunks_exact(4).all(|p| p[3] == 255);
+            // in one pass, on every core for a screen (`rows`): a 3440x1440
+            // frozen screen took ~13 ms on one core, then another pass for
+            // `opaque`
+            let w = *width as usize;
+            let mut buffer = vec![0u32; pixels.len() / 4];
+            let translucent = std::sync::atomic::AtomicBool::new(false);
+            rows(&mut buffer, w, w, 0..*height as usize, |y, row| {
+                let from = &pixels[y * w * 4..(y + 1) * w * 4];
+                let mut alpha = 255;
+                for (p, q) in from.as_chunks::<4>().0.iter().zip(row) {
+                    alpha &= p[3];
+                    *q = match p[3] {
+                        255 => u32::from_ne_bytes([p[2], p[1], p[0], 255]),
+                        a => bytemuck::cast(
+                            tiny_skia::ColorU8::from_rgba(p[2], p[1], p[0], a)
+                                .premultiply(),
+                        ),
+                    };
+                }
+                if alpha != 255 {
+                    translucent.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            });
+            let opaque = !translucent.into_inner();
             let _ = entry.insert(Some(Entry {
                 width: *width,
                 height: *height,

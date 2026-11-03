@@ -222,58 +222,8 @@ fn idle_for() -> Duration {
 /// The area alone, from the screen as shown (GDI; windows that keep out of
 /// captures, ours among them, are not in it), RGBA.
 #[cfg(windows)]
-fn grab_area((x, y, w, h): (i32, i32, u32, u32)) -> io::Result<Vec<u8>> {
-    use windows::Win32::Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
-        DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SRCCOPY, SelectObject,
-    };
-    let (wi, hi) = (w as i32, h as i32);
-    let mut px = vec![0u8; w as usize * h as usize * 4];
-    let mut info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: wi,
-            biHeight: -hi, // top-down
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    // SAFETY: plain GDI calls on handles made here and released before
-    // returning; `px` holds exactly `h` top-down rows of 32-bit pixels.
-    let lines = unsafe {
-        let screen = GetDC(None);
-        let mem = CreateCompatibleDC(Some(screen));
-        let bitmap = CreateCompatibleBitmap(screen, wi, hi);
-        let old = SelectObject(mem, bitmap.into());
-        let copied = BitBlt(mem, 0, 0, wi, hi, Some(screen), x, y, SRCCOPY);
-        SelectObject(mem, old);
-        let lines = match copied {
-            Ok(()) => GetDIBits(
-                mem,
-                bitmap,
-                0,
-                h,
-                Some(px.as_mut_ptr().cast()),
-                &mut info,
-                DIB_RGB_COLORS,
-            ),
-            Err(_) => 0,
-        };
-        let _ = DeleteObject(bitmap.into());
-        let _ = DeleteDC(mem);
-        ReleaseDC(None, screen);
-        lines
-    };
-    if lines != hi {
-        return Err(io::Error::other("the area could not be grabbed"));
-    }
-    for p in px.as_chunks_mut::<4>().0 {
-        *p = [p[2], p[1], p[0], 255]; // BGRx -> RGBA
-    }
-    Ok(px)
+fn grab_area(region: (i32, i32, u32, u32)) -> io::Result<Vec<u8>> {
+    super::win::grab_rect(region).map_err(|_| io::Error::other("the area could not be grabbed"))
 }
 
 /// The area cut out of its monitor's capture.

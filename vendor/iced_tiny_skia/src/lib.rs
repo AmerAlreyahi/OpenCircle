@@ -21,7 +21,7 @@ use iced_debug as debug;
 pub use iced_graphics as graphics;
 pub use iced_graphics::core;
 
-pub use engine::PIPELINE_PIXELS;
+pub use engine::{MASK_PIXELS, PIPELINE_PIXELS};
 pub use raster::SPLIT;
 pub use layer::Layer;
 pub use primitive::Primitive;
@@ -172,9 +172,13 @@ impl Renderer {
                                 group_bounds,
                             );
                         }
-
-                        engine::adjust_clip_mask(clip_mask, layer_bounds);
                     }
+
+                    // OpenCircle patch: back to the layer's clip once, not
+                    // after each group: each group's clip and then the whole
+                    // layer's were set in turn, two full-window mask fills a
+                    // group (the dim's 85 tiles at 3440x1440: ~20 ms a frame).
+                    engine::adjust_clip_mask(clip_mask, layer_bounds);
 
                     render_span.finish();
                 }
