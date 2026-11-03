@@ -1,17 +1,17 @@
 use super::*;
-use crate::ui::screens::editor::toolbar;
+use crate::ui::screens::snip_toolbar::toolbar;
 use iced::Element;
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::column;
 
-/// The views of the editor's screen (`ui::screens::editor`), as the tests
+/// The views of the editor's screen (`ui::screens::snip_toolbar`), as the tests
 /// look at them.
-impl Editor {
+impl Annotator {
     fn canvas(&self) -> Element<'_, Message> {
-        crate::ui::screens::editor::canvas::canvas(
+        crate::ui::screens::snip_toolbar::canvas::canvas(
             self,
             1.0,
-            crate::ui::screens::editor::canvas::Lens::ONE,
+            crate::ui::screens::snip_toolbar::canvas::ScreenMap::ONE,
         )
     }
 
@@ -843,14 +843,14 @@ fn magnifier_shows_the_centre_zoomed() {
 
 // ---- editor: every tool, undo / redo -------------------------------------------
 
-fn editor(w: u32, h: u32) -> Editor {
-    let mut e = Editor::new(checker(w, h), 1.0);
+fn editor(w: u32, h: u32) -> Annotator {
+    let mut e = Annotator::new(checker(w, h), 1.0);
     e.assist = false; // not the user's config
     e
 }
 
 /// Press at `from`, drag through `via` to `to`, release.
-fn drag(e: &mut Editor, from: Point, via: &[Point], to: Point) {
+fn drag(e: &mut Annotator, from: Point, via: &[Point], to: Point) {
     e.update(Message::Press(from));
     for &p in via {
         e.update(Message::Move(p));
@@ -861,7 +861,7 @@ fn drag(e: &mut Editor, from: Point, via: &[Point], to: Point) {
 
 /// Draws one item with every tool; returns how many items it made.
 /// (Each one clear of the last: a click on a text types into it.)
-fn draw_with_every_tool(e: &mut Editor) -> usize {
+fn draw_with_every_tool(e: &mut Annotator) -> usize {
     let mut made = 0;
     for info in TOOLS {
         e.update(Message::Tool(info.tool));
@@ -941,7 +941,7 @@ fn every_tool_makes_one_undoable_item() {
 }
 
 /// Ctrl+drag the way the canvas sends it (`Message::PressMove`).
-fn ctrl_drag(e: &mut Editor, from: Point, to: Point) {
+fn ctrl_drag(e: &mut Annotator, from: Point, to: Point) {
     e.update(Message::PressMove(from));
     e.update(Message::Move(to));
     e.update(Message::Release);
@@ -1078,7 +1078,7 @@ fn text_edits_on_click_and_moves_only_with_ctrl() {
 /// the stroke, undo puts it back, Delete removes it. Shapes keep their handles.
 #[test]
 fn freehand_strokes_have_no_frame_and_move_by_the_stroke_with_ctrl() {
-    let canvas_px = |e: &Editor| crate::ui::kit::testing::shot::save("", e.canvas(), e.size());
+    let canvas_px = |e: &Annotator| crate::ui::kit::testing::shot::save("", e.canvas(), e.size());
     let wave = |y: f32| -> Vec<Point> {
         (0..40)
             .map(|i| pt(40.0 + 5.0 * i as f32, y + 12.0 * (i as f32 / 3.0).sin()))
@@ -1188,7 +1188,7 @@ fn text_options_style_the_text() {
     );
     // A box paints behind the glyphs: more of the frame changes than plain.
     let frame = e.doc.items[0].frame();
-    let changed = |e: &Editor| {
+    let changed = |e: &Annotator| {
         let plain = render(&doc_with(checker(400, 200), vec![]));
         let c = render(&e.doc);
         let mut n = 0;
@@ -1268,7 +1268,7 @@ fn move_resize_bend_delete_and_crop_undo() {
 #[test]
 fn steps_number_themselves_and_renumber_after_delete() {
     let steps_at = |xs: &[f32]| {
-        let mut e = Editor::new(image_of(200, 60, |_, _| [255; 4]), 1.0);
+        let mut e = Annotator::new(image_of(200, 60, |_, _| [255; 4]), 1.0);
         e.update(Message::Tool(Tool::Step));
         for &x in xs {
             drag(&mut e, pt(x, 30.0), &[], pt(x, 30.0));
@@ -1302,7 +1302,7 @@ fn steps_number_themselves_and_renumber_after_delete() {
 
 // ---- live layer == committed result ------------------------------------------------
 
-fn live_pixels(e: &Editor) -> (Rectangle, Vec<u8>) {
+fn live_pixels(e: &Annotator) -> (Rectangle, Vec<u8>) {
     let (r, handle) = e.live.as_ref().expect("live layer");
     let image::Handle::Rgba { pixels, .. } = handle else {
         panic!()
@@ -1349,7 +1349,7 @@ fn keys_pick_tools_shortcuts_and_type_text() {
     let mut e = editor(100, 100);
     let ctrl = Modifiers::CTRL;
     let letter = |c: &str| Key::Character(c.into());
-    let key = |e: &Editor, k: &Key, m: Modifiers| {
+    let key = |e: &Annotator, k: &Key, m: Modifiers| {
         let latin = match k {
             Key::Character(s) => s.chars().next(),
             _ => None,
@@ -1412,7 +1412,7 @@ fn keys_pick_tools_shortcuts_and_type_text() {
 
 #[test]
 fn every_icon_is_in_the_subset_font() {
-    let script = include_str!("../../assets/lucide/subset.sh");
+    let script = include_str!("../../../assets/lucide/subset.sh");
     let icons = TOOLS
         .iter()
         .map(|t| t.icon)
@@ -1428,7 +1428,7 @@ fn every_icon_is_in_the_subset_font() {
 // ---- steps' legend -------------------------------------------------------------------
 
 /// Places a step at `p` and types its note.
-fn step_with(e: &mut Editor, p: Point, note: &str) {
+fn step_with(e: &mut Annotator, p: Point, note: &str) {
     e.update(Message::Tool(Tool::Step));
     drag(e, p, &[], p);
     e.update(Message::Type(note.into()));
@@ -1439,7 +1439,7 @@ const SLATE: [u8; 4] = [40, 44, 60, 255];
 
 #[test]
 fn legend_lists_the_notes_in_a_free_corner_or_a_band() {
-    let mut e = Editor::new(image_of(400, 300, |_, _| SLATE), 1.0);
+    let mut e = Annotator::new(image_of(400, 300, |_, _| SLATE), 1.0);
     step_with(&mut e, pt(40.0, 40.0), "Open settings");
     step_with(&mut e, pt(100.0, 60.0), ""); // numbered, not listed
     step_with(&mut e, pt(160.0, 80.0), "Click Save");
@@ -1642,7 +1642,7 @@ fn group_buttons_pick_their_last_tool_and_open_one_panel() {
     );
     let _ = e.toolbar(); // the panel builds
     // Esc closes a panel before it leaves the editor; Select has none.
-    let esc = |e: &Editor| e.key(&Key::Named(Named::Escape), None, Modifiers::empty(), None);
+    let esc = |e: &Annotator| e.key(&Key::Named(Named::Escape), None, Modifiers::empty(), None);
     assert!(matches!(
         esc(&e),
         Some(Message::Menu(Menu::Options(Group::Text)))
@@ -1660,7 +1660,7 @@ fn group_buttons_pick_their_last_tool_and_open_one_panel() {
     // Remembered across sessions: the next editor's buttons show them.
     let saved = e.remembered();
     assert!(Group::valid(saved.group_tools.as_deref().unwrap()));
-    let next = Editor::restored(checker(10, 10), 1.0, saved);
+    let next = Annotator::restored(checker(10, 10), 1.0, saved);
     assert_eq!(next.last, e.last);
 }
 
@@ -1771,7 +1771,7 @@ fn presets_style_the_active_tool() {
     use crate::ui::theme::ANNOTATION;
     let colour = |i: usize| ANNOTATION[i].into_rgba8();
     let mut e = editor(200, 150);
-    let key = |e: &Editor, c: char| {
+    let key = |e: &Annotator, c: char| {
         e.key(
             &Key::Character(c.to_string().into()),
             Some(c),
@@ -1841,7 +1841,7 @@ fn copy_style_and_paste_it_on_another_item() {
 #[test]
 fn eyedropper_picks_a_colour_from_the_image() {
     let image = image_of(50, 40, |x, y| [(x * 5) as u8, (y * 6) as u8, 77, 255]);
-    let mut e = Editor::new(image, 1.0);
+    let mut e = Annotator::new(image, 1.0);
     let d = e.key(
         &Key::Character("d".into()),
         Some('d'),
@@ -1924,7 +1924,7 @@ fn board_layouts_place_captures() {
 
 #[test]
 fn a_board_legend_sits_beside_the_captures() {
-    let mut e = Editor::new(image_of(300, 200, |_, _| SLATE), 1.0);
+    let mut e = Annotator::new(image_of(300, 200, |_, _| SLATE), 1.0);
     e.append(image_of(300, 80, |_, _| SLATE));
     e.update(Message::Layout(board::Layout::Side));
     step_with(&mut e, pt(60.0, 60.0), "Open it");
@@ -1946,7 +1946,7 @@ fn the_board_keeps_annotations_on_their_capture() {
     use board::{BACKGROUND, GAP as G, Layout};
     let g = G as f32;
     let blue = [10, 132, 255, 255];
-    let mut e = Editor::new(image_of(100, 50, |_, _| SLATE), 1.0);
+    let mut e = Annotator::new(image_of(100, 50, |_, _| SLATE), 1.0);
     e.update(Message::Tool(Tool::Rect));
     drag(&mut e, pt(40.0, 15.0), &[], pt(80.0, 40.0));
     e.update(Message::Tool(Tool::Crop));
@@ -2192,7 +2192,7 @@ fn auto_blur_covers_all_of_the_line_it_starts_on_and_no_other() {
             let line = found[1];
             let c = line.centre();
             for start in [c - 2.0, c, c + 2.0] {
-                let mut e = Editor::new(
+                let mut e = Annotator::new(
                     Image {
                         rgba: page.rgba.clone(),
                         ..page
@@ -2272,7 +2272,7 @@ fn touching_lines_are_split_at_their_sparse_rows() {
     // Both get the sparse rows between the cores (each one's tails may be there).
     assert!(found[0].y1 >= 28.0 && found[1].y0 <= 20.0, "{found:?}");
     assert!(found[0].y0 >= 10.0 && found[1].y1 <= 38.0, "{found:?}");
-    let mut e = Editor::new(image_of(400, 50, bars), 1.0);
+    let mut e = Annotator::new(image_of(400, 50, bars), 1.0);
     e.update(Message::Tool(Tool::Blur));
     drag(&mut e, pt(12.0, 30.0), &[], pt(380.0, 30.0));
     let out = render(&e.doc);
@@ -2316,13 +2316,13 @@ fn line_help_holds_the_line_until_a_clear_move() {
 fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
     let image = page(400, 160, PAPER, INK, &PARAGRAPH);
     let bands = lines::detect(&image);
-    let mut e = Editor::new(image, 1.0);
+    let mut e = Annotator::new(image, 1.0);
     e.assist = true;
     e.update(Message::Tool(Tool::Blur));
     assert_eq!(e.blur_size, None, "Auto by default");
     let b = bands[1];
     let c = b.centre();
-    let size_of = |e: &Editor, i: usize| match &e.doc.items[i].shape {
+    let size_of = |e: &Annotator, i: usize| match &e.doc.items[i].shape {
         Shape::Blur { size, points, .. } => (*size, points.clone()),
         _ => panic!(),
     };
@@ -2372,7 +2372,7 @@ fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
     drag(&mut e, pt(15.0, c), &[], pt(220.0, c));
     assert_eq!(size_of(&e, 4).0, b.stroke(1.0).1);
     // Pixel size: fine 6 px cells by default (display px), coarser picked.
-    let cell_of = |e: &Editor, i: usize| match &e.doc.items[i].shape {
+    let cell_of = |e: &Annotator, i: usize| match &e.doc.items[i].shape {
         Shape::Blur { cell, .. } => *cell,
         _ => panic!(),
     };
@@ -2399,7 +2399,7 @@ fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
 /// and its tail's tip; a box: its corners).
 #[test]
 fn a_selection_has_no_frame_only_its_handles() {
-    let canvas_px = |e: &Editor| crate::ui::kit::testing::shot::save("", e.canvas(), e.size());
+    let canvas_px = |e: &Annotator| crate::ui::kit::testing::shot::save("", e.canvas(), e.size());
     for tool in [
         Tool::Rect,
         Tool::Ellipse,
@@ -2564,7 +2564,7 @@ fn ctrl_drag_moves_with_any_tool() {
 /// 2026-10-31): saved through the config file, the next editor opens on them;
 /// pointer messages never count as a choice; Crop is never the opening tool.
 #[test]
-fn the_editor_opens_on_the_last_tool_colour_sizes_and_options() {
+fn the_annotator_opens_on_the_last_tool_colour_sizes_and_options() {
     let mut e = editor(200, 100);
     let fresh = e.remembered();
     e.update(Message::Press(pt(10.0, 10.0)));
@@ -2604,7 +2604,7 @@ fn the_editor_opens_on_the_last_tool_colour_sizes_and_options() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(w.is_empty(), "{w:?}");
 
-    let r = Editor::restored(checker(200, 100), 1.0, back.editor);
+    let r = Annotator::restored(checker(200, 100), 1.0, back.editor);
     assert_eq!(r.tool, Tool::Highlighter);
     assert_eq!((r.colour, r.hex.as_str()), (purple, "#AF52DE"));
     assert_eq!(
@@ -2625,7 +2625,7 @@ fn the_editor_opens_on_the_last_tool_colour_sizes_and_options() {
     assert_eq!(item.width, Width::Thick.stroke());
 
     // Nothing remembered (an old file): the defaults.
-    let d = Editor::restored(checker(20, 20), 1.0, Default::default());
+    let d = Annotator::restored(checker(20, 20), 1.0, Default::default());
     assert_eq!(
         (d.tool, d.width, d.text_size),
         (Tool::Arrow, Width::Medium, 26.0)
@@ -2701,15 +2701,15 @@ fn demo_image() -> Image {
 }
 
 /// The demo document, made with the editor's own tools (every one of them).
-fn demo_editor() -> Editor {
-    let mut e = Editor::new(demo_image(), 1.0);
-    let colour = |e: &mut Editor, i: usize| {
+fn demo_editor() -> Annotator {
+    let mut e = Annotator::new(demo_image(), 1.0);
+    let colour = |e: &mut Annotator, i: usize| {
         e.update(Message::Colour(
             crate::ui::theme::ANNOTATION[i].into_rgba8(),
         ));
     };
     // Draws with `tool` from `from` through `via` to `to`.
-    let with = |e: &mut Editor, tool: Tool, from: Point, via: &[Point], to: Point| {
+    let with = |e: &mut Annotator, tool: Tool, from: Point, via: &[Point], to: Point| {
         e.update(Message::Tool(tool));
         drag(e, from, via, to);
     };
@@ -2854,14 +2854,14 @@ fn shoot(
     crate::actions::write_png(path, w, h, &rgba).unwrap();
 }
 
-/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test editor::tests::snapshots_move -- --ignored`
+/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test annotate::tests::snapshots_move -- --ignored`
 /// writes the editor before and after a box and an arrow are dragged with the
 /// Rect tool active (no Select).
 #[test]
 #[ignore = "writes PNGs to look at"]
 fn snapshots_move() {
     let dir = png_dir();
-    let mut e = Editor::new(demo_image(), 1.0);
+    let mut e = Annotator::new(demo_image(), 1.0);
     e.update(Message::Tool(Tool::Rect));
     drag(&mut e, pt(72.0, 54.0), &[], pt(300.0, 92.0));
     e.update(Message::Tool(Tool::Arrow));
@@ -2883,7 +2883,7 @@ fn snapshots_move() {
     shoot(e.view(), size, backdrop, &dir.join("move-1-after.png"));
 }
 
-/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test editor::tests::snapshots_popovers -- --ignored`
+/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test annotate::tests::snapshots_popovers -- --ignored`
 /// writes the colour and the text popovers of a toolbar at the bottom of a small
 /// screen (they open above it).
 #[test]
@@ -2892,7 +2892,7 @@ fn snapshots_popovers_at_the_bottom() {
     use iced::widget::{pin, stack};
     let dir = png_dir();
     let screen = Size::new(1000.0, 520.0);
-    let mut e = Editor::new(demo_image(), 0.5);
+    let mut e = Annotator::new(demo_image(), 0.5);
     let bar = toolbar::size();
     let at = Point::new(
         (screen.width - bar.width) / 2.0,
@@ -2916,7 +2916,7 @@ fn snapshots_popovers_at_the_bottom() {
     }
 }
 
-/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test editor::tests::snapshots -- --ignored`
+/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test annotate::tests::snapshots -- --ignored`
 /// writes the toolbar (Dark, Light), the editor with every tool, and the flattened
 /// result. Not run by default: it writes files and uses the system's sans-serif.
 #[test]
@@ -2969,7 +2969,7 @@ fn snapshots() {
 #[test]
 fn toolbar_tooltips_are_for_icon_only_buttons() {
     use crate::ui::kit::tooltip::tests_support::{assert_tips_add_something, shown};
-    let e = Editor::new(checker(200, 100), 1.0);
+    let e = Annotator::new(checker(200, 100), 1.0);
     let _ = e.toolbar();
     let tips = shown();
     assert!(tips.len() >= 11, "{tips:?}");
@@ -3026,7 +3026,7 @@ fn chat_block() -> Image {
     )
 }
 
-/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test editor::tests::snapshots_board -- --ignored`
+/// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test annotate::tests::snapshots_board -- --ignored`
 /// writes a 3-capture board (steps + legend, presets, the new tools), the editor
 /// around it, the toolbar with each popover, and a text block blurred line by line.
 #[test]
@@ -3036,7 +3036,7 @@ fn snapshots_board() {
     let dir = png_dir();
 
     // Blur brush with line assist: lines 3 and 4 (a key, an e-mail), wobbly strokes.
-    let mut e = Editor::new(chat_block(), 1.0);
+    let mut e = Annotator::new(chat_block(), 1.0);
     e.assist = true;
     write(&dir, "blur-before.png", &render(&e.doc));
     let bands = lines::detect(&e.doc.image);
@@ -3053,7 +3053,7 @@ fn snapshots_board() {
     write(&dir, "blur-after.png", &render(&e.doc));
 
     // The board: an app window, a form, the chat block.
-    let mut e = Editor::new(demo_image(), 1.0);
+    let mut e = Annotator::new(demo_image(), 1.0);
     e.assist = true;
     e.append(field("hunter2"));
     e.append(chat_block());
@@ -3124,7 +3124,7 @@ fn snapshots_board() {
         ("toolbar-arrows.png", Message::Slot(Tool::Arrow), false),
         ("toolbar-blur.png", Message::Slot(Tool::Blur), false),
     ] {
-        let mut e = Editor::new(demo_image(), 1.0);
+        let mut e = Annotator::new(demo_image(), 1.0);
         e.append(field("x"));
         if matches!(open, Message::Slot(Tool::Arrow)) {
             e.update(Message::Tool(Tool::Line));
@@ -3142,12 +3142,12 @@ fn snapshots_board() {
 }
 
 /// Timings on a 3440x1440 crop:
-/// `cargo test --release editor::tests::timing -- --ignored --nocapture`
+/// `cargo test --release annotate::tests::timing -- --ignored --nocapture`
 #[test]
 #[ignore = "timing; meaningful in release"]
 fn timing() {
     use std::time::Instant;
-    let mut e = Editor::new(checker(3440, 1440), 1.0);
+    let mut e = Annotator::new(checker(3440, 1440), 1.0);
     for k in 0..3 {
         let o = iced::Vector::new(1100.0 * k as f32, 0.0);
         for (t, a, b) in [
@@ -3235,9 +3235,9 @@ fn pin_hands_over_the_flattened_image() {
 
 /// Snip's live area (N-73): a 200x100 frame whose pixel (x, y) = [x, y, 0];
 /// the area starts at (40, 20) 60x30, shown at 1:1, Select tool.
-fn live_area() -> Editor {
+fn live_area() -> Annotator {
     let frame = image_of(200, 100, |x, y| [x as u8, y as u8, 0, 255]);
-    let mut e = Editor::new(frame, 1.0);
+    let mut e = Annotator::new(frame, 1.0);
     e.doc.crop = Some(Rectangle::new(pt(40.0, 20.0), Size::new(60.0, 30.0)));
     e.movable = true;
     e.tool = Tool::Select;
@@ -3332,7 +3332,7 @@ fn snips_live_area_handles_work_with_any_tool_and_a_drawing_tool_draws_inside() 
 #[test]
 fn snips_live_area_follows_the_arrow_keys_and_stays_put_once_on_a_board() {
     let mut e = live_area();
-    let key = |e: &Editor, named, m: Modifiers| e.key(&Key::Named(named), None, m, None);
+    let key = |e: &Annotator, named, m: Modifiers| e.key(&Key::Named(named), None, m, None);
     let none = Modifiers::empty();
     assert!(matches!(
         key(&e, Named::ArrowRight, none),
@@ -3353,7 +3353,7 @@ fn snips_live_area_follows_the_arrow_keys_and_stays_put_once_on_a_board() {
         Rectangle::new(pt(40.0, 30.0), Size::new(62.0, 30.0))
     );
     // Outside Snip, arrows do nothing to the crop.
-    let plain = Editor::new(checker(20, 20), 1.0);
+    let plain = Annotator::new(checker(20, 20), 1.0);
     assert!(key(&plain, Named::ArrowRight, none).is_none());
 
     // Add capture: the area is baked into a fixed capture first.
@@ -3382,7 +3382,7 @@ fn snips_live_area_follows_the_arrow_keys_and_stays_put_once_on_a_board() {
 #[test]
 fn snips_enter_adds_the_step_while_the_steps_strip_is_open() {
     let mut e = live_area();
-    let enter = |e: &Editor, m| e.key(&Key::Named(Named::Enter), None, m, None);
+    let enter = |e: &Annotator, m| e.key(&Key::Named(Named::Enter), None, m, None);
     let none = Modifiers::empty();
     assert!(matches!(enter(&e, none), Some(Message::Copy)));
     assert!(matches!(enter(&e, Modifiers::CTRL), Some(Message::AddStep)));
@@ -3406,7 +3406,7 @@ fn snips_enter_adds_the_step_while_the_steps_strip_is_open() {
 /// there: owner, 2026-11-03).
 #[test]
 fn ctrl_z_undoes_the_last_thing_also_while_typing() {
-    let ctrl_z = |e: &Editor| {
+    let ctrl_z = |e: &Annotator| {
         e.key(
             &Key::Character("z".into()),
             Some('z'),
@@ -3456,9 +3456,9 @@ fn ctrl_z_undoes_the_last_thing_also_while_typing() {
 #[test]
 fn text_font_bold_and_background_are_remembered_and_default_to_plain() {
     use crate::config::EditorConfig;
-    let fresh = Editor::restored(checker(50, 50), 1.0, EditorConfig::default());
+    let fresh = Annotator::restored(checker(50, 50), 1.0, EditorConfig::default());
     assert_eq!(fresh.text_style.back, text::Back::None);
-    let mut e = Editor::restored(checker(50, 50), 1.0, EditorConfig::default());
+    let mut e = Annotator::restored(checker(50, 50), 1.0, EditorConfig::default());
     let style = TextStyle {
         font: text::Font::Mono,
         bold: false,
@@ -3467,7 +3467,7 @@ fn text_font_bold_and_background_are_remembered_and_default_to_plain() {
     e.update(Message::TextStyle(style));
     let saved = e.remembered();
     assert_eq!(saved.text_back, Some(text::Back::Box));
-    let again = Editor::restored(checker(50, 50), 1.0, saved);
+    let again = Annotator::restored(checker(50, 50), 1.0, saved);
     assert_eq!(again.text_style, style);
     // the file: written snake_case, read back
     let toml = toml::to_string(&again.remembered()).unwrap();
@@ -3482,7 +3482,7 @@ fn text_font_bold_and_background_are_remembered_and_default_to_plain() {
 /// typed into; while typing, into the text. No text on the clipboard: nothing.
 #[test]
 fn ctrl_v_pastes_the_clipboard_text() {
-    let ctrl_v = |e: &Editor| {
+    let ctrl_v = |e: &Annotator| {
         e.key(
             &Key::Character("v".into()),
             Some('v'),
@@ -3490,7 +3490,7 @@ fn ctrl_v_pastes_the_clipboard_text() {
             None,
         )
     };
-    let text_of = |e: &Editor| match e.pending.as_ref().map(|p| &p.item.shape) {
+    let text_of = |e: &Annotator| match e.pending.as_ref().map(|p| &p.item.shape) {
         Some(Shape::Text { at, text, .. }) => (*at, text.clone()),
         other => panic!("not a text: {other:?}"),
     };

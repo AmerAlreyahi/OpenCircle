@@ -8,7 +8,7 @@
 use iced::futures::channel::oneshot;
 
 use super::Crop;
-use crate::editor::dragout::DragFile;
+use crate::snip::annotate::dragout::DragFile;
 
 /// The platform has a share sheet.
 pub const SUPPORTED: bool = cfg!(windows);

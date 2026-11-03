@@ -18,7 +18,7 @@ use crate::ui::app::quick::Quick;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::editor::Editing;
+use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::{overlay, snip, translate, update_card, windows};
 
 use super::capture::{TEST_SHOT, save_test_shot};
@@ -176,7 +176,9 @@ impl App {
                 self.on_tool(crate::ui::screens::tools::Msg::Close)
             }
             // The editor has its own Esc (finish typing, close the picker, back).
-            Message::Escape if self.o.edit.as_ref().is_some_and(Editing::is_open) => Task::none(),
+            Message::Escape if self.o.edit.as_ref().is_some_and(SnipToolbar::is_open) => {
+                Task::none()
+            }
             Message::Escape if std::env::var_os(TEST_SHOT).is_some() => self.test_shot(),
             // The editor's Esc went back to the bar: the same key's Escape
             // (it may come after) doesn't close the overlay too.
@@ -209,7 +211,7 @@ impl App {
                 letter: 'c',
                 ctrl: true,
             }),
-            Message::Editor(msg) => self.on_editor(msg),
+            Message::Annotate(msg) => self.on_snip_toolbar(msg),
             Message::Snip(msg) => self.on_snip(msg),
             Message::Confirm(place, result) => self.toast_for(place, result),
             Message::ThenClose(Some(pill)) => self.toast_then_close(pill),
@@ -260,7 +262,7 @@ impl App {
                 let at = self.bar_at();
                 self.o.bar_drag = Some((None, at));
                 if let Some(edit) = &mut self.o.edit {
-                    edit.editor.held = true; // lifted while it follows the pointer
+                    edit.annotator.held = true; // lifted while it follows the pointer
                     self.o.bar_was = Some(self.o.bar_left);
                 }
                 (self.o.bar_now, self.o.bar_glide, self.o.bar_eased) = (Some(at), None, None);
@@ -284,11 +286,11 @@ impl App {
                         Some(from) => {
                             let to = at + (p - from);
                             // Snip's toolbar may go onto any screen
-                            let desk = match self.o.edit.as_ref().is_some_and(|e| e.editor.movable)
-                            {
-                                true => self.o.desk(),
-                                false => Rectangle::with_size(self.o.screen),
-                            };
+                            let desk =
+                                match self.o.edit.as_ref().is_some_and(|e| e.annotator.movable) {
+                                    true => self.o.desk(),
+                                    false => Rectangle::with_size(self.o.screen),
+                                };
                             let fit = |lo: f32, whole: f32, side: f32| lo.max(lo + whole - side);
                             Point::new(
                                 to.x.clamp(desk.x, fit(desk.x, desk.width, size.width)),
@@ -304,11 +306,11 @@ impl App {
             // Let go: it glides to the nearest spot, remembered.
             Message::BarReleased => match self.o.bar_drag.take() {
                 // Snip's toolbar stays where it is dropped (this area only)
-                Some((_, at)) if self.o.edit.as_ref().is_some_and(|e| e.editor.movable) => {
+                Some((_, at)) if self.o.edit.as_ref().is_some_and(|e| e.annotator.movable) => {
                     self.o.bar_left = Some(at);
                     self.o.bar_was = None;
                     if let Some(edit) = &mut self.o.edit {
-                        edit.editor.held = false;
+                        edit.annotator.held = false;
                     }
                     self.o.bar_eased = None;
                     self.log_frames("toolbar drag");
@@ -496,12 +498,12 @@ impl App {
                     // handle comes within 12 px of it: then it jumps clear;
                     // let go, it glides to its dock (OPEN, expo-out). It rises
                     // 8 px from the area on the pick.
-                    let snip = self.o.edit.as_ref().filter(|e| e.editor.movable);
-                    let held = snip.is_some_and(|e| e.editor.area_held());
+                    let snip = self.o.edit.as_ref().filter(|e| e.annotator.movable);
+                    let held = snip.is_some_and(|e| e.annotator.area_held());
                     let size = self.dock_size();
                     let near = |at: Point| {
                         let handle = snip.and_then(|e| {
-                            let p = e.editor.area_handle()?;
+                            let p = e.annotator.area_handle()?;
                             Some(p + (e.canvas_rect().position() - Point::ORIGIN))
                         });
                         let bar = Rectangle::new(at, size).expand(STEP_ASIDE);
@@ -515,7 +517,7 @@ impl App {
                         (Some(at), _) if held && !near(at) => at,
                         _ if held => to,
                         (None, _) if snip.is_some() && !motion::reduced() => {
-                            let area = snip.map(Editing::canvas_rect).unwrap_or_default();
+                            let area = snip.map(SnipToolbar::canvas_rect).unwrap_or_default();
                             let rise = if to.y >= area.y { -RISE } else { RISE };
                             let from = to + Vector::new(0.0, rise);
                             self.o.bar_glide = Some((now, from, to));

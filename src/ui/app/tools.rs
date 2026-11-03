@@ -174,7 +174,7 @@ impl App {
                     Some((area, edit)) => {
                         self.select(area);
                         self.o.edit = Some(*edit);
-                        self.open_editor()
+                        self.open_snip_toolbar()
                     }
                     None => self.close(),
                 }
@@ -274,7 +274,7 @@ mod tests {
 
     use super::super::tests::{open_app, snipping_on};
     use crate::actions::copy;
-    use crate::editor;
+    use crate::snip::annotate;
     use crate::ui::app::App;
     use crate::ui::app::message::{Message, Purpose, Shot};
     use crate::ui::overlay::Event;
@@ -410,14 +410,14 @@ mod tests {
     }
 
     #[test]
-    fn esc_goes_back_to_the_picked_area_and_its_editor_or_closes() {
+    fn esc_goes_back_to_the_picked_area_and_its_snip_toolbar_or_closes() {
         let mut app = snipping_on(800, 600, WINDOW);
         let area = Rectangle::new(Point::new(120.0, 100.0), Size::new(200.0, 120.0));
         app.select(area);
         let crop = app.crop().unwrap();
         let _ = app.snip_routed(crop, true, false);
         assert!(app.o.edit.is_some());
-        let _ = app.on_editor(editor::Message::ScreenTool(Which::Ruler));
+        let _ = app.on_snip_toolbar(annotate::Message::ScreenTool(Which::Ruler));
         assert!(app.tool().is_some_and(|t| t.which == Which::Ruler));
         assert!(
             app.o.edit.is_none() && app.o.selection.is_none(),

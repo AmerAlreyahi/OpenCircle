@@ -200,8 +200,10 @@ impl App {
         }
         match action.run {
             // Snip is one flow: from main mode its selection is the pick.
-            Run::Edit if matches!(self.o.purpose, Purpose::Snip(_)) => return self.open_editor(),
-            Run::Edit => return self.snip_here(self.o.selection.map(|s| s.area)),
+            Run::Snip if matches!(self.o.purpose, Purpose::Snip(_)) => {
+                return self.open_snip_toolbar();
+            }
+            Run::Snip => return self.snip_here(self.o.selection.map(|s| s.area)),
             Run::Translate => return self.start_translate(),
             // Picked words (a word selection, or select-text mode's picks): Copy
             // (the bar's or Ctrl+C) copies exactly their text. In select-text
@@ -233,7 +235,7 @@ impl App {
             Run::Finish(_) => self.finish(action, crop),
             Run::Panel(kind) => self.open_panel(kind, crop, None),
             Run::Lens => self.search_image(crop),
-            Run::Edit | Run::Translate => Task::none(), // handled above
+            Run::Snip | Run::Translate => Task::none(), // handled above
         }
     }
 

@@ -230,7 +230,7 @@ impl App {
             if let Some((i, crop)) = step {
                 let _ = self.snip_routed(crop, false, false);
                 if let Some(edit) = &mut self.o.edit {
-                    edit.editor.updating = Some(i);
+                    edit.annotator.updating = Some(i);
                 }
             }
             let next = match (first, timer) {
@@ -445,7 +445,7 @@ impl App {
         let chat = Task::batch([chat, super::screens::close_all(&opening.screens)]);
         opening.finish();
         // hidden or closed alike: the editor's glyphs go with the opening
-        crate::editor::free_glyphs();
+        crate::snip::annotate::free_glyphs();
         if self.can_hide {
             // Gone at once: the hide steps draw the empty view (the theme's
             // background) full-screen, then restore the window from full-screen,

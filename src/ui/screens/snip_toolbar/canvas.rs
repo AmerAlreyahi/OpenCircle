@@ -1,21 +1,23 @@
 //! The editor's canvas: the flattened image, the item being drawn over it, and
 //! the input layer (pointer -> image px, keys -> editor messages) with the
 //! chrome (crop preview, the selection's handles, caret, a step's note).
-//! Annotations themselves are painted by `editor::render`, never here; what
-//! the pointer and keys mean is the editor's (`Editor::key`, `cursor`).
+//! Annotations themselves are painted by `annotate::render`, never here; what
+//! the pointer and keys mean is the editor's (`Annotator::key`, `cursor`).
 use iced::keyboard;
 use iced::mouse::{self, Cursor};
 use iced::widget::canvas::{self, Action, Fill, Frame, Geometry, Path, Stroke, fill};
 use iced::widget::{image, pin, stack};
 use iced::{ContentFit, Element, Point, Rectangle, Renderer, Size, Theme, Vector};
 
-use crate::editor::area::REACH;
-use crate::editor::style::{DIM_OUTSIDE, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK};
-use crate::editor::{Editor, Message};
+use crate::snip::annotate::area::REACH;
+use crate::snip::annotate::style::{
+    DIM_OUTSIDE, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
+};
+use crate::snip::annotate::{Annotator, Message};
 
 /// Room around the image for Snip's live area handles (display px; none
 /// otherwise): the canvas is this much bigger on every side.
-pub fn margin(e: &Editor) -> f32 {
+pub fn margin(e: &Annotator) -> f32 {
     if e.movable { REACH } else { 0.0 }
 }
 use crate::ui::kit::area;
@@ -25,14 +27,14 @@ use crate::ui::kit::themes::c;
 /// the starting screen's px * `k` + `at`; the image's top-left pixel is at
 /// `origin` (starting screen's px). The starting screen: `ONE` (k 1, at 0).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Lens {
+pub struct ScreenMap {
     pub k: f32,
     pub at: Vector,
     pub origin: Point,
 }
 
-impl Lens {
-    pub const ONE: Lens = Lens {
+impl ScreenMap {
+    pub const ONE: ScreenMap = ScreenMap {
         k: 1.0,
         at: Vector::ZERO,
         origin: Point::ORIGIN,
@@ -51,10 +53,10 @@ impl Lens {
 }
 
 /// The editing surface, `size()` big: for Edit in place, over the selection.
-/// `grown`: Snip's handles scaled in (0..1, the pick's motion); `lens`: the
+/// `grown`: Snip's handles scaled in (0..1, the pick's motion); `map`: the
 /// window it is drawn in (Snip's area may span screens), `k` times as big.
-pub fn canvas(e: &Editor, grown: f32, lens: Lens) -> Element<'_, Message> {
-    let k = lens.k;
+pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message> {
+    let k = map.k;
     let size = e.size() * k;
     let view = e.doc.view();
     let m = margin(e) * k;
@@ -88,7 +90,7 @@ pub fn canvas(e: &Editor, grown: f32, lens: Lens) -> Element<'_, Message> {
         iced::widget::canvas(Input {
             editor: e,
             grown,
-            lens,
+            map,
         })
         .width(outer.width)
         .height(outer.height)
@@ -98,15 +100,15 @@ pub fn canvas(e: &Editor, grown: f32, lens: Lens) -> Element<'_, Message> {
 }
 
 struct Input<'a> {
-    editor: &'a Editor,
+    editor: &'a Annotator,
     grown: f32,
-    lens: Lens,
+    map: ScreenMap,
 }
 
 impl Input<'_> {
     /// Snip's live area: a window point in image px (the canvas moves with the area).
     fn image_at(&self, p: Point) -> Point {
-        self.lens.to_image(p, self.editor.zoom)
+        self.map.to_image(p, self.editor.zoom)
     }
 }
 
@@ -211,7 +213,7 @@ impl canvas::Program<Message> for Input<'_> {
     ) -> Vec<Geometry> {
         let e = self.editor;
         let mut frame = Frame::new(renderer, bounds.size());
-        frame.scale(self.lens.k);
+        frame.scale(self.map.k);
         let accent = Stroke::default().with_color(c().accent).with_width(1.5);
         // Everything below in image-canvas px; the margin holds the area's handles.
         let m = margin(e);
@@ -307,8 +309,8 @@ mod tests {
     use iced::widget::row;
     use iced::{Point, Size, Vector};
 
-    use super::{Lens, canvas};
-    use crate::editor::{Editor, Image, Message, TOOLS, Tool};
+    use super::{ScreenMap, canvas};
+    use crate::snip::annotate::{Annotator, Image, Message, TOOLS, Tool};
     use crate::ui::kit::testing::golden;
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
@@ -343,8 +345,8 @@ mod tests {
 
     /// One `tool` item drawn on `page` (typing `text` where it takes text),
     /// left selected as the tool leaves it; `done` = released (else mid-drag).
-    fn drawn(tool: Tool, text: &str, done: bool) -> Editor {
-        let mut e = Editor::new(page(), 1.0);
+    fn drawn(tool: Tool, text: &str, done: bool) -> Annotator {
+        let mut e = Annotator::new(page(), 1.0);
         e.assist = false; // not the user's config
         e.update(Message::Tool(tool));
         // (each placed so its text and handles stay inside the page)
@@ -381,7 +383,7 @@ mod tests {
         }
         // The blur's secret seed is OS-random per stroke: fixed here, or no
         // two runs draw it alike.
-        if let Some(crate::editor::Shape::Blur { seed, .. }) =
+        if let Some(crate::snip::annotate::Shape::Blur { seed, .. }) =
             e.doc.items.first_mut().map(|i| &mut i.shape)
         {
             *seed = 7;
@@ -430,8 +432,8 @@ mod tests {
                 let file = format!("editor-{name}-{}", theme.id);
                 failed.extend(golden::check("editor", &file, size, &[1.0], || {
                     row![
-                        canvas(&plain, 1.0, Lens::ONE),
-                        canvas(&chosen, 1.0, Lens::ONE)
+                        canvas(&plain, 1.0, ScreenMap::ONE),
+                        canvas(&chosen, 1.0, ScreenMap::ONE)
                     ]
                     .spacing(GAP)
                     .into()

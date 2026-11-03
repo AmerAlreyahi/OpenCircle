@@ -1,10 +1,10 @@
 //! What the canvas draws over the image (display px), so the view
-//! (`ui::screens::editor::canvas`) needs none of the editor's internals.
+//! (`ui::screens::snip_toolbar::canvas`) needs none of the editor's internals.
 use iced::{Point, Rectangle, Size};
 
-use super::{Editor, Shape, select, text};
+use super::{Annotator, Shape, select, text};
 
-impl Editor {
+impl Annotator {
     /// The crop being dragged.
     pub fn crop_preview(&self) -> Option<Rectangle> {
         let (a, b) = self.cropping?;

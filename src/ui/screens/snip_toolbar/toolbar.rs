@@ -10,8 +10,8 @@ use iced::widget::{Space as Gap, row};
 use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 
 use crate::actions::share;
-use crate::editor::{
-    Editor, Group, Menu, Message, PRESETS, ScreenTool, Tool, Width, dragout, info,
+use crate::snip::annotate::{
+    Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, Width, dragout, info,
 };
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, State};
@@ -59,7 +59,7 @@ pub const GLYPHS: &[char] = &[
 ];
 
 /// Snip's Live pin (Windows; Labs Pins); it works only over the live screen
-/// (`Editor::scroll`). Still pins left Labs (owner, 2026-10-31): Pin is always there.
+/// (`Annotator::scroll`). Still pins left Labs (owner, 2026-10-31): Pin is always there.
 fn live_pin() -> bool {
     crate::labs::has(crate::labs::Feature::Pins) && crate::capture::live::SUPPORTED
 }
@@ -90,7 +90,7 @@ pub fn size() -> Size {
 }
 
 /// ...and with the Steps strip open ("Add step N" in Copy's place).
-pub fn size_for(e: &Editor) -> Size {
+pub fn size_for(e: &Annotator) -> Size {
     sized(steps_on(e))
 }
 
@@ -101,13 +101,13 @@ fn sized(primary: bool) -> Size {
 }
 
 /// The Steps strip is open, or one of its steps is edited.
-fn steps_on(e: &Editor) -> bool {
+fn steps_on(e: &Annotator) -> bool {
     e.steps.is_some() || e.updating.is_some()
 }
 
 /// What Tab walks on the toolbar, in its order (left to right), and what
 /// Enter / Space on each sends.
-pub fn stops(e: &Editor) -> Vec<Message> {
+pub fn stops(e: &Annotator) -> Vec<Message> {
     let mut stops: Vec<Message> = e.last.iter().map(|&t| Message::Slot(t)).collect();
     stops.extend([
         Message::Picker,
@@ -133,7 +133,7 @@ pub type MoreRow = (
 );
 
 /// More's rows (Labs and platform rows only where they work).
-pub fn more_rows(e: &Editor) -> Vec<MoreRow> {
+pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
     // a long capture running: only what finishes it stays live
     let idle = !e.capturing;
     let live = |m: Message| idle.then_some(m);
@@ -183,7 +183,7 @@ pub fn more_rows(e: &Editor) -> Vec<MoreRow> {
 
 /// The toolbar with its open panel by it (where nothing limits the room).
 #[cfg(test)]
-pub fn view(e: &Editor) -> Element<'_, Message> {
+pub fn view(e: &Annotator) -> Element<'_, Message> {
     let (bar, panel) = build(e, tooltip::Position::Bottom);
     match panel {
         None => bar,
@@ -198,7 +198,7 @@ pub fn view(e: &Editor) -> Element<'_, Message> {
 /// at its full size, then moved by `place_popover` (`side`: where the
 /// tooltips and the panel go, away from Snip's area).
 pub fn view_at(
-    e: &Editor,
+    e: &Annotator,
     bar: Rectangle,
     side: tooltip::Position,
 ) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
@@ -272,7 +272,7 @@ fn divide<'a>() -> Element<'a, Message> {
 /// The toolbar, and the open panel with its left edge (from the toolbar's).
 #[allow(clippy::type_complexity)]
 fn build(
-    e: &Editor,
+    e: &Annotator,
     side: tooltip::Position,
 ) -> (Element<'_, Message>, Option<(Element<'_, Message>, f32)>) {
     TIP_SIDE.set(side);
@@ -457,7 +457,7 @@ fn name_of(tool: Tool) -> &'static str {
 /// A group's panel (a click on its active button): the group's tools, the
 /// current one's name and key, then its options. They apply to the next
 /// item and to the selected one.
-fn options_panel(e: &Editor, group: Group) -> Element<'_, Message> {
+fn options_panel(e: &Annotator, group: Group) -> Element<'_, Message> {
     let base = info(info(e.tool).slot);
     let tools = group
         .tools()
@@ -487,7 +487,7 @@ fn options_panel(e: &Editor, group: Group) -> Element<'_, Message> {
 }
 
 /// `tool`'s options (one design for every tool).
-fn tool_options(e: &Editor, tool: Tool) -> Vec<Element<'_, Message>> {
+fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
     let width_at = Width::ALL.iter().position(|&w| w == e.width);
     let stroke = || {
         let px = e.stroke.round() as u8;
@@ -533,7 +533,7 @@ fn tool_options(e: &Editor, tool: Tool) -> Vec<Element<'_, Message>> {
     };
     match tool {
         Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Arrow => {
-            let shape = crate::editor::fills_inside(tool);
+            let shape = crate::snip::annotate::fills_inside(tool);
             let mut o = vec![stroke(), outline()];
             // shown dimmed for lines, so the panel doesn't jump
             let note = (!shape).then(|| ar("rectangle, ellipse", "مستطيل، شكل بيضاوي"));
@@ -546,7 +546,7 @@ fn tool_options(e: &Editor, tool: Tool) -> Vec<Element<'_, Message>> {
         }
         Tool::Pen | Tool::Highlighter => vec![stroke()],
         Tool::Text => {
-            use crate::editor::{TextBack as B, TextFont as F, TextStyle};
+            use crate::snip::annotate::{TextBack as B, TextFont as F, TextStyle};
             let style = e.text_style;
             let bold = TextStyle {
                 bold: !style.bold,
@@ -635,7 +635,7 @@ fn tool_options(e: &Editor, tool: Tool) -> Vec<Element<'_, Message>> {
 }
 
 /// Undo's second click: Undo, Redo and where the history is.
-fn undo_panel(e: &Editor) -> Element<'_, Message> {
+fn undo_panel(e: &Annotator) -> Element<'_, Message> {
     let (done, all) = e.doc.steps();
     let steps = match RTL.get() {
         true => format!("{done} من {all} خطوات"),
@@ -662,7 +662,7 @@ fn undo_panel(e: &Editor) -> Element<'_, Message> {
 
 /// The primary: Copy, or while the Steps strip is open "Add step N" (the
 /// next step), "Update step N" (one being edited) or "Steps full" (dimmed).
-fn primary<'a>(e: &Editor, focused: bool) -> Element<'a, Message> {
+fn primary<'a>(e: &Annotator, focused: bool) -> Element<'a, Message> {
     let accent = button::Kind::Accent;
     if !steps_on(e) {
         let copy = button::tool(COPY, accent, focused, Some(Message::Copy));
@@ -700,7 +700,7 @@ fn step_label(words: (&'static str, &'static str), n: usize) -> String {
 }
 
 /// More: long capture, pin, share, the screen tools (arrow keys walk it).
-fn more_panel(e: &Editor) -> Element<'_, Message> {
+fn more_panel(e: &Annotator) -> Element<'_, Message> {
     let rows = more_rows(e)
         .into_iter()
         .enumerate()
@@ -738,7 +738,7 @@ pub fn place_popover(at: Rectangle, bar_height: f32, screen: Rectangle) -> Vecto
 
 /// The kit's colour picker with the eyedropper, the presets (keys 1-9) and
 /// copy / paste style under its hex field.
-fn colour_panel(e: &Editor) -> Element<'_, Message> {
+fn colour_panel(e: &Annotator) -> Element<'_, Message> {
     let eyedropper = hinted(
         icon_button::square(PIPETTE, State::default(), Some(Message::Eyedropper)),
         ar("Pick a colour from the image", "اختر لونًا من الصورة"),
@@ -769,7 +769,7 @@ fn colour_panel(e: &Editor) -> Element<'_, Message> {
     ]
     .spacing(SPACING);
     colour::picker_with(
-        &crate::editor::style::ANNOTATION,
+        &crate::snip::annotate::style::ANNOTATION,
         e.ink(),
         &e.hex,
         |c| Message::Colour(c.into_rgba8()),
@@ -781,17 +781,17 @@ fn colour_panel(e: &Editor) -> Element<'_, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::Image;
+    use crate::snip::annotate::Image;
     use crate::ui::kit::testing::golden;
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
-    fn editor() -> Editor {
+    fn editor() -> Annotator {
         let image = Image {
             width: 688,
             height: 330,
             rgba: vec![255; 688 * 330 * 4],
         };
-        let mut e = Editor::new(image, 1.0);
+        let mut e = Annotator::new(image, 1.0);
         e.movable = true;
         e
     }
@@ -829,7 +829,7 @@ mod tests {
                 };
                 let mut add_more = with(Some(1), None);
                 add_more.update(Message::Menu(Menu::More));
-                let cases: Vec<(&str, Editor, f32)> = vec![
+                let cases: Vec<(&str, Annotator, f32)> = vec![
                     ("add-step", with(Some(1), None), 60.0),
                     ("steps-full", with(Some(12), None), 60.0),
                     ("update-step", with(Some(3), Some(1)), 60.0),

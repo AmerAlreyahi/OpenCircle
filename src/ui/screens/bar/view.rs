@@ -133,7 +133,7 @@ impl App {
             ),
             (
                 BarButton::Edit,
-                actions::edit::ACTION.icon,
+                actions::snip::ACTION.icon,
                 if selected {
                     "Snip image"
                 } else {

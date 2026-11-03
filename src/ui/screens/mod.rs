@@ -3,11 +3,11 @@
 //! time from `ui/` (the UI plan's phase 5).
 pub mod bar;
 pub mod common;
-pub mod editor;
 pub mod live;
 pub mod long_capture;
 pub mod model_download;
 pub mod onboarding;
+pub mod snip_toolbar;
 pub mod overlay {
     pub mod edge;
 }

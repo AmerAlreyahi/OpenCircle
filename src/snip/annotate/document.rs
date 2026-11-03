@@ -336,7 +336,7 @@ impl Document {
         &self.tiles
     }
 
-    /// Adds a capture to the board (one undoable edit; tests only, `Editor::append`).
+    /// Adds a capture to the board (one undoable edit; tests only, `Annotator::append`).
     #[cfg(test)]
     pub fn append(&mut self, image: Image) {
         if self.sources.is_empty() {

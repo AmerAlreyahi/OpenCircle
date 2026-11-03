@@ -14,7 +14,7 @@ use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::screens;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::editor::Editing;
+use crate::ui::screens::snip_toolbar::SnipToolbar;
 
 use super::{ASK_INPUT, App};
 
@@ -53,7 +53,8 @@ impl App {
             return size;
         }
         let (_, bar) = self.bar_size();
-        let tool = (self.o.edit.as_ref()).map_or_else(Editing::toolbar_size, Editing::bar_size);
+        let tool =
+            (self.o.edit.as_ref()).map_or_else(SnipToolbar::toolbar_size, SnipToolbar::bar_size);
         let t = self.swapped();
         Size::new(
             bar.width + (tool.width - bar.width) * t,
@@ -75,18 +76,19 @@ impl App {
         }
         // Snip's live area: the toolbar docks to it (under, above, inside),
         // clear of the handle being dragged, on the screen holding most of it.
-        if let Some(edit) = self.o.edit.as_ref().filter(|e| e.editor.movable)
+        if let Some(edit) = self.o.edit.as_ref().filter(|e| e.annotator.movable)
             && let Some((_, work, size)) = self.snip_dock()
         {
             if let Some(at) = self.o.bar_left {
                 return at;
             }
             let area = edit.canvas_rect();
-            let avoid = (edit.editor.area_handle()).map(|p| p + (area.position() - Point::ORIGIN));
+            let avoid =
+                (edit.annotator.area_handle()).map(|p| p + (area.position() - Point::ORIGIN));
             return bar::dock(area, size, &[work], avoid);
         }
         let size = self.dock_size();
-        let canvas = self.o.edit.as_ref().map(Editing::canvas_rect);
+        let canvas = self.o.edit.as_ref().map(SnipToolbar::canvas_rect);
         let room = self.bar_room();
         let off = Vector::new(room.x, room.y);
         let blocked: Vec<Rectangle> = (self.o.selection.iter())
@@ -125,7 +127,7 @@ impl App {
     /// screen holding the larger part of the area (design state 8): it fits
     /// there whole, never across a bezel.
     pub(in crate::ui) fn snip_dock(&self) -> Option<(Option<usize>, Rectangle, Size)> {
-        let edit = self.o.edit.as_ref().filter(|e| e.editor.movable)?;
+        let edit = self.o.edit.as_ref().filter(|e| e.annotator.movable)?;
         let works = self.work_areas();
         let rects: Vec<Rectangle> = works.iter().map(|(r, _)| *r).collect();
         let i = bar::dock_screen(edit.canvas_rect(), &rects);
@@ -138,7 +140,7 @@ impl App {
     /// The window Snip's toolbar is drawn in: the screen its spot is on now
     /// (where it docked, or where it was left), else the starting one.
     pub(in crate::ui) fn toolbar_on(&self) -> Option<iced::window::Id> {
-        self.o.edit.as_ref().filter(|e| e.editor.movable)?;
+        self.o.edit.as_ref().filter(|e| e.annotator.movable)?;
         let at = self.bar_at();
         let start = self.o.place();
         let here = (self.o.screens.iter())
@@ -199,7 +201,7 @@ impl App {
             BarButton::Translate => Some(Message::Pill(which)),
             BarButton::Live => Some(Message::LiveToggle),
             BarButton::Song => Some(Message::SongStart),
-            BarButton::Edit if selected => Some(Message::Run(&actions::edit::ACTION)),
+            BarButton::Edit if selected => Some(Message::Run(&actions::snip::ACTION)),
             BarButton::Edit => Some(Message::EditScreen),
         }
     }

@@ -4,7 +4,7 @@
 //! and the area is its crop:
 //! resizing only changes the crop (the capture is cut or extended from the
 //! frame, the drawing is never scaled); moving shifts the crop and every item
-//! with it. Pure geometry here; `Editor` applies it as one undoable edit.
+//! with it. Pure geometry here; `Annotator` applies it as one undoable edit.
 use iced::{Point, Rectangle, Size, Vector};
 
 /// Grips react this close to the area's outline (display px).

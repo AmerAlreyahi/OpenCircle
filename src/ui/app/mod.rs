@@ -29,11 +29,11 @@ use crate::ui::{live_layer, overlay, update_card, windows};
 pub(in crate::ui) mod actions;
 pub(in crate::ui) mod bar;
 pub(in crate::ui) mod capture;
-pub(in crate::ui) mod editing;
 pub(in crate::ui) mod results;
 pub(in crate::ui) mod screens;
 pub(in crate::ui) mod selection;
 pub(in crate::ui) mod snip;
+pub(in crate::ui) mod snip_toolbar;
 #[cfg(test)]
 pub(in crate::ui) mod tests;
 pub(in crate::ui) mod text;
@@ -325,7 +325,8 @@ impl App {
             || (self.o.panel.as_ref()).is_some_and(|(_, p)| p.spinning())
             || self.chat.as_ref().is_some_and(|c| c.panel.spinning())
             || self.o.bar_now.is_none()
-            || (self.o.edit.as_ref()).is_some_and(crate::ui::screens::editor::Editing::growing)
+            || (self.o.edit.as_ref())
+                .is_some_and(crate::ui::screens::snip_toolbar::SnipToolbar::growing)
             || !self.o.waiting.is_empty() // other screens wait for a frame after the opening
     }
 

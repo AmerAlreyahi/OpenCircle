@@ -1,4 +1,4 @@
-//! Edit in place and the snip editor: the annotation editor (`crate::editor`) over
+//! The Snip toolbar and its canvas: the annotation editor (`crate::snip::annotate`) over
 //! the frozen frame, its toolbar docked where the bottom bar is (the host
 //! places it: same anchors, same drag).
 use iced::mouse;
@@ -9,7 +9,7 @@ pub mod canvas;
 pub mod toolbar;
 
 use crate::actions::Crop;
-use crate::editor::{self, Editor, Image, Message, Output};
+use crate::snip::annotate::{self, Annotator, Image, Message, Output};
 use crate::ui::kit::chip;
 use crate::ui::kit::key_hint::{self, key_hint};
 use crate::ui::screens::bar::geometry::{BOTTOM_GAP, GAP};
@@ -26,8 +26,8 @@ const POSITION_W: f32 = 120.0;
 /// Snip's handles scale in after the pick (the design's 120 ms).
 const HANDLES_IN: std::time::Duration = std::time::Duration::from_millis(120);
 
-pub struct Editing {
-    pub editor: Editor,
+pub struct SnipToolbar {
+    pub annotator: Annotator,
     /// Screen position (logical px) of the image's top-left pixel.
     origin: Point,
     /// Display px per image px.
@@ -39,30 +39,24 @@ pub struct Editing {
     grow: (Option<std::time::Instant>, f32),
 }
 
-impl Editing {
-    /// Edit in place: `crop` is the frame's pixels `bounds` (see `actions::crop_bounds`)
-    /// of a frame with `scale` physical px per logical px; it shows exactly there.
-    pub fn in_place(crop: Crop, bounds: [u32; 4], scale: f32) -> Self {
-        Self::new(crop, on_screen(bounds, scale).position(), 1.0 / scale)
-    }
-
+impl SnipToolbar {
     /// Snip's live area: the whole frozen monitor `frame` (physical px), or
     /// every monitor's frame joined (desktop px), its top-left pixel shown at
     /// `origin` (logical px), with the frame pixels `bounds` as the area, which
-    /// then moves and resizes (`editor::area`), across screens too; it starts
+    /// then moves and resizes (`annotate::area`), across screens too; it starts
     /// with Select, so a drag inside moves it until a tool is picked.
     pub fn live(frame: Image, bounds: [u32; 4], scale: f32, origin: Point) -> Self {
         let mut e = Self::new_image(frame, origin, 1.0 / scale);
         let [x0, y0, x1, y1] = bounds;
         let px = |v: u32| v as f32;
-        e.editor.doc.crop = Some(Rectangle::new(
+        e.annotator.doc.crop = Some(Rectangle::new(
             Point::new(px(x0), px(y0)),
             Size::new(px(x1 - x0), px(y1 - y0)),
         ));
-        e.editor.movable = true;
-        e.editor.tool = editor::Tool::Select;
+        e.annotator.movable = true;
+        e.annotator.tool = annotate::Tool::Select;
         e.grow = (None, 0.0);
-        e.editor.refresh();
+        e.annotator.refresh();
         e
     }
 
@@ -84,22 +78,13 @@ impl Editing {
             rgba: crop.rgba,
         };
         let mut e = Self::live(image, bounds, 1.0 / zoom, origin);
-        e.editor.own_image = true; // (its base, the whole image, was painted on open)
+        e.annotator.own_image = true; // (its base, the whole image, was painted on open)
         e
     }
 
-    fn new(crop: Crop, origin: Point, zoom: f32) -> Self {
-        let image = Image {
-            width: crop.width,
-            height: crop.height,
-            rgba: crop.rgba,
-        };
-        Self::new_image(image, origin, zoom)
-    }
-
     fn new_image(image: Image, origin: Point, zoom: f32) -> Self {
-        Editing {
-            editor: Editor::new(image, zoom),
+        SnipToolbar {
+            annotator: Annotator::new(image, zoom),
             origin,
             zoom,
             flat: None,
@@ -128,25 +113,25 @@ impl Editing {
             // Snip's toolbar: Tab walks it, Enter / Space press what it is on.
             let message = match message {
                 Message::Focus(back) => {
-                    let n = toolbar::stops(&self.editor).len();
-                    let next = match (self.editor.focus, back) {
+                    let n = toolbar::stops(&self.annotator).len();
+                    let next = match (self.annotator.focus, back) {
                         (None, false) => 0,
                         (None, true) => n - 1,
                         (Some(i), false) => (i + 1) % n,
                         (Some(i), true) => (i + n - 1) % n,
                     };
-                    self.editor.focus = Some(next);
+                    self.annotator.focus = Some(next);
                     return None;
                 }
                 // More's rows: the arrow keys walk the live ones
                 Message::MenuStep(back) => {
-                    let rows = toolbar::more_rows(&self.editor);
+                    let rows = toolbar::more_rows(&self.annotator);
                     let live: Vec<usize> =
                         (0..rows.len()).filter(|&i| rows[i].3.is_some()).collect();
                     let n = live.len();
                     if n > 0 {
                         let at = self
-                            .editor
+                            .annotator
                             .row
                             .and_then(|r| live.iter().position(|&i| i == r));
                         let next = match (at, back) {
@@ -155,23 +140,23 @@ impl Editing {
                             (Some(i), false) => (i + 1) % n,
                             (Some(i), true) => (i + n - 1) % n,
                         };
-                        self.editor.row = Some(live[next]);
+                        self.annotator.row = Some(live[next]);
                     }
                     return None;
                 }
-                Message::Activate if self.editor.menu == Some(editor::Menu::More) => {
-                    let rows = toolbar::more_rows(&self.editor);
-                    let row = self.editor.row.and_then(|i| rows.into_iter().nth(i));
-                    self.editor.menu = None;
+                Message::Activate if self.annotator.menu == Some(annotate::Menu::More) => {
+                    let rows = toolbar::more_rows(&self.annotator);
+                    let row = self.annotator.row.and_then(|i| rows.into_iter().nth(i));
+                    self.annotator.menu = None;
                     row?.3?
                 }
                 Message::Activate => {
-                    let stops = toolbar::stops(&self.editor);
-                    self.editor.focus.and_then(|i| stops.get(i))?.clone()
+                    let stops = toolbar::stops(&self.annotator);
+                    self.annotator.focus.and_then(|i| stops.get(i))?.clone()
                 }
                 m => m,
             };
-            self.editor.update(message)
+            self.annotator.update(message)
         }
     }
 
@@ -192,15 +177,15 @@ impl Editing {
 
     /// The edited image (crop applied, annotations drawn): what actions get.
     pub fn image(&self) -> Crop {
-        editor::render(&self.editor.doc)
+        annotate::render(&self.annotator.doc)
     }
 
     /// Where the canvas is on screen, logical px (moves with the editor's crop).
     pub fn canvas_rect(&self) -> Rectangle {
-        let view = self.editor.doc.view();
+        let view = self.annotator.doc.view();
         Rectangle::new(
             self.origin + iced::Vector::new(view.x, view.y) * self.zoom,
-            self.editor.size(),
+            self.annotator.size(),
         )
     }
 
@@ -211,7 +196,7 @@ impl Editing {
 
     /// ...but while the Steps strip is open: Copy's place holds "Add step N".
     pub fn bar_size(&self) -> Size {
-        toolbar::size_for(&self.editor)
+        toolbar::size_for(&self.annotator)
     }
 
     /// The canvas over its place and the toolbar with its top-left at
@@ -224,33 +209,33 @@ impl Editing {
         &'a self,
         screen: Size,
         toolbar: Option<Point>,
-        lens: canvas::Lens,
-        map: fn(editor::Message) -> M,
+        lens: canvas::ScreenMap,
+        map: fn(annotate::Message) -> M,
         grab: M,
     ) -> Element<'a, M> {
         let main = lens.k == 1.0 && lens.at == iced::Vector::ZERO;
         let canvas = self.canvas_rect();
-        let m = canvas::margin(&self.editor);
+        let m = canvas::margin(&self.annotator);
         let at = lens.to_window(canvas.position() - iced::Vector::new(m, m));
-        let lens = canvas::Lens {
+        let lens = canvas::ScreenMap {
             origin: self.origin,
             ..lens
         };
         // a long capture shows the live page there: the toolbar alone
         let mut layers = stack![];
-        if !self.editor.capturing {
-            let drawn = canvas::canvas(&self.editor, self.grow.1, lens);
+        if !self.annotator.capturing {
+            let drawn = canvas::canvas(&self.annotator, self.grow.1, lens);
             layers = layers.push(pin(Element::from(drawn).map(map)).position(at));
         }
         // Snip moved by the keyboard: its keys above the area, its position
         // (frame px) in its bottom-right corner, until the pointer is used.
         // ponytail: shown until the next press, not the design's 2 s / 800 ms fades.
-        if main && self.editor.movable && self.editor.nudged {
+        if main && self.annotator.movable && self.annotator.nudged {
             let hint = key_hint(&NUDGE_HINT, false);
             let y = (canvas.y - 8.0 - key_hint::HEIGHT).max(8.0);
             let hint = container(hint).center_x(screen.width);
             layers = layers.push(pin(hint).position(Point::new(0.0, y)));
-            let view = self.editor.doc.view();
+            let view = self.annotator.doc.view();
             let label = format!("x {}  y {}", view.x.round(), view.y.round());
             let spot = Point::new(
                 canvas.x + canvas.width - 8.0 - POSITION_W,
@@ -262,13 +247,14 @@ impl Editing {
             layers = layers.push(pin(readout).position(spot));
         }
         if let Some(at) = toolbar {
-            let size = toolbar::size_for(&self.editor);
+            let size = toolbar::size_for(&self.annotator);
             // its tooltips and panels away from the area: above it when docked above
             let side = match at.y + size.height <= canvas.y {
                 true => iced::widget::tooltip::Position::Top,
                 false => iced::widget::tooltip::Position::Bottom,
             };
-            let (toolbar, popover) = toolbar::view_at(&self.editor, Rectangle::new(at, size), side);
+            let (toolbar, popover) =
+                toolbar::view_at(&self.annotator, Rectangle::new(at, size), side);
             let toolbar = mouse_area(toolbar.map(map))
                 .on_press(grab)
                 .interaction(mouse::Interaction::Move);
@@ -294,15 +280,6 @@ impl Editing {
     }
 }
 
-/// The logical rectangle the frame pixels `[x0, y0, x1, y1]` cover.
-fn on_screen([x0, y0, x1, y1]: [u32; 4], scale: f32) -> Rectangle {
-    let px = |v: u32| v as f32 / scale;
-    Rectangle::new(
-        Point::new(px(x0), px(y0)),
-        Size::new(px(x1 - x0), px(y1 - y0)),
-    )
-}
-
 /// Where an image of `size` px goes on the work area `screen` and its zoom (at
 /// most `max_zoom`): centred, scaled down to leave room for Snip's toolbar
 /// docked under it.
@@ -326,7 +303,6 @@ fn fit(size: Size, screen: Size, max_zoom: f32) -> (Point, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::crop_bounds;
 
     fn crop(width: u32, height: u32) -> Crop {
         Crop {
@@ -337,41 +313,8 @@ mod tests {
     }
 
     #[test]
-    fn in_place_canvas_covers_the_selection_on_its_own_pixels() {
-        // 150 % scaling: a 2880x1620 frame shown as 1920x1080.
-        let scale = 1.5;
-        let area = Rectangle::new(Point::new(100.3, 200.7), Size::new(300.2, 150.1));
-        let bounds = crop_bounds(2880, 1620, scale, area).unwrap();
-        let [x0, y0, x1, y1] = bounds;
-        let e = Editing::in_place(crop(x1 - x0, y1 - y0), bounds, scale);
-        let r = e.canvas_rect();
-        // Exactly the cropped pixels, back in logical px...
-        assert_eq!(
-            [r.x, r.y, r.x + r.width, r.y + r.height].map(|v| (v * scale).round() as u32),
-            bounds
-        );
-        // ...so it covers the selection, at most one physical px more on each side.
-        assert!(r.x <= area.x && r.y <= area.y);
-        assert!(r.x + r.width >= area.x + area.width);
-        assert!(r.y + r.height >= area.y + area.height);
-        assert!(area.x - r.x < 1.0 / scale && r.width - area.width < 2.0 / scale);
-        // The editor shows it at its on-screen size (zoom = 1 / scale).
-        assert_eq!(e.editor.size(), r.size());
-
-        // Cropping in the editor moves the canvas to the kept part, same zoom.
-        let mut e = e;
-        e.editor.doc.crop = Some(Rectangle::new(
-            Point::new(30.0, 60.0),
-            Size::new(90.0, 45.0),
-        ));
-        let c = e.canvas_rect();
-        assert!((c.x - (r.x + 20.0)).abs() < 1e-3 && (c.y - (r.y + 40.0)).abs() < 1e-3);
-        assert_eq!(c.size(), Size::new(60.0, 30.0));
-    }
-
-    #[test]
     fn back_keeps_the_edits_and_shows_them_flattened() {
-        let mut e = Editing::in_place(crop(40, 30), [10, 10, 50, 40], 1.0);
+        let mut e = SnipToolbar::fitted(crop(40, 30), Size::new(1920.0, 1080.0), 1.0);
         assert!(e.is_open() && e.flat_view::<()>().is_none());
         e.back();
         assert!(!e.is_open() && e.flat_view::<()>().is_some());

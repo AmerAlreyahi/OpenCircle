@@ -9,9 +9,9 @@ use crate::Trigger;
 use crate::actions::{self, Action, lens, qr, text};
 use crate::capture::CaptureError;
 use crate::config::{self, Target};
-use crate::editor;
 use crate::labs::BarButton;
 use crate::ocr::TextBlock;
+use crate::snip::annotate;
 use crate::ui::app::{keys, quick::Quick, word};
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::snip::{self, Snip};
@@ -60,8 +60,8 @@ pub(in crate::ui) enum Message {
     Resized(Size),
     /// Settings / onboarding windows and the OS theme (`windows.rs`).
     Windows(windows::Msg),
-    /// From the annotation editor (Edit in place, Snip).
-    Editor(editor::Message),
+    /// From the Snip annotation editor.
+    Annotate(annotate::Message),
     Snip(snip::Msg),
     /// The copy-text quick action read the text and copied it (or why not).
     TextRead(Result<(), String>),
@@ -167,7 +167,7 @@ impl BarKeys {
             translate: quick(actions::translate::ACTION.id, false),
             live: quick(actions::translate::ACTION.id, true),
             song: quick("song_search", false),
-            edit: key(&actions::edit::ACTION),
+            edit: key(&actions::snip::ACTION),
         }
     }
 }

@@ -2,7 +2,7 @@
 //! (the overlay's action bar turns into its toolbar) and Snip mode.
 //!
 //! Model: `Document` (image, items, selection, crop, undo stack), flattened by the
-//! pure `render`. UI: `Editor` = the image with a canvas over it (input + selection
+//! pure `render`. UI: `Annotator` = the image with a canvas over it (input + selection
 //! chrome) and the floating toolbar. One file per tool.
 //!
 //! Smooth on big crops: the flattened document (`base`) is cached and repainted
@@ -449,7 +449,7 @@ pub enum Output {
     Pin(Crop),
     /// A floating copy of the area that keeps following the window under it (Snip).
     LivePin,
-    /// The flattened image for the Steps strip (`Editor::updating`: in place
+    /// The flattened image for the Steps strip (`Annotator::updating`: in place
     /// of that step).
     AddStep(Crop),
     /// The share sheet is up: fires once the user picked a target (send
@@ -499,7 +499,7 @@ struct AreaDrag {
     items: Vec<Item>,
 }
 
-pub struct Editor {
+pub struct Annotator {
     pub doc: Document,
     pub tool: Tool,
     pub(crate) colour: [u8; 4],
@@ -560,7 +560,7 @@ pub struct Editor {
     bands: Option<((u32, u32, board::Board), Vec<lines::Band>)>,
     /// Snip's live area: the document is the whole frozen monitor (or every
     /// monitor joined) and its crop is the captured area, which moves and
-    /// resizes (`area`). The host places its top-left pixel (`canvas::Lens`).
+    /// resizes (`area`). The host places its top-left pixel (`canvas::ScreenMap`).
     pub movable: bool,
     /// The live area is on a capture of its own (a stitched long capture, a
     /// recent one), not on the frozen frame: its pixels are always painted.
@@ -582,7 +582,7 @@ pub struct Editor {
     saved: EditorConfig,
 }
 
-impl Editor {
+impl Annotator {
     /// Opens `image`, shown at `zoom` display px per image px (e.g. 1 / the
     /// monitor's scale factor, so the crop shows at its on-screen size), with
     /// the user's last tool and options (owner, 2026-10-31).
@@ -604,7 +604,7 @@ impl Editor {
             last.copy_from_slice(tools);
         }
         last[info(tool).group as usize] = tool;
-        let mut editor = Editor {
+        let mut editor = Annotator {
             doc: Document::new(image),
             tool,
             colour,
@@ -1548,7 +1548,7 @@ impl Editor {
 
     /// The colour/width picked while an item is selected (or typed) applies to it.
     fn restyle(&mut self) {
-        let styled = |item: &Item, editor: &Editor| {
+        let styled = |item: &Item, editor: &Annotator| {
             let mut new = editor.create(Point::ORIGIN);
             new.shape = item.shape.clone();
             let z = editor.zoom;

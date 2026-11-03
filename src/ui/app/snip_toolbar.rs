@@ -1,14 +1,14 @@
-//! The editor on a capture: opening it, its messages, the bar swap.
+//! The Snip toolbar on a capture: opening it, its messages, the bar swap.
 
 use iced::widget::image;
 use iced::{Task, Vector};
 
 use crate::actions::{self, Crop, copy, save};
-use crate::editor::{self, Image, Output};
+use crate::snip::annotate::{self, Image, Output};
 
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::kit::motion;
-use crate::ui::screens::editor::Editing;
+use crate::ui::screens::snip_toolbar::SnipToolbar;
 
 use super::App;
 use super::capture::TEST_SHOT;
@@ -17,7 +17,7 @@ impl App {
     /// Edit in place: the selection's pixels become the editor's canvas, at their
     /// place on screen; the toolbar takes the bar's place. Edits made before
     /// (then Back) are still there.
-    pub(in crate::ui) fn open_editor(&mut self) -> Task<Message> {
+    pub(in crate::ui) fn open_snip_toolbar(&mut self) -> Task<Message> {
         self.o.panel = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x
         self.o.zoom = None;
@@ -38,8 +38,7 @@ impl App {
             return Task::none();
         };
         let bounds = actions::crop_bounds(*width, *height, self.o.scale, selection.area);
-        let crop = actions::crop(pixels, *width, *height, self.o.scale, selection.area);
-        if let (Some(bounds), Some(crop)) = (bounds, crop) {
+        if let Some(bounds) = bounds {
             // Snip: the area stays live on the whole frozen monitor (N-73).
             let joined = match &self.o.purpose {
                 Purpose::Snip(_) => self.desktop_live(selection.area),
@@ -48,78 +47,73 @@ impl App {
             let mut edit = match &self.o.purpose {
                 // across screens: the document is every frame joined
                 Purpose::Snip(_) if let Some(edit) = joined => edit,
-                Purpose::Snip(_) => {
+                _ => {
                     let frame = Image {
                         width: *width,
                         height: *height,
                         rgba: pixels.to_vec(),
                     };
-                    Editing::live(frame, bounds, self.o.scale, iced::Point::ORIGIN)
+                    SnipToolbar::live(frame, bounds, self.o.scale, iced::Point::ORIGIN)
                 }
-                // The old in-place editor (Back / Crop / Drag): no entry reaches it
-                // since Snip is one flow (main mode's Snip runs `snip_here`) and
-                // every capture of its own opens picked (`Editing::fitted`).
-                // Hide, don't delete: kept, driven by its tests.
-                _ => Editing::in_place(crop, bounds, self.o.scale),
             };
             // Scrolling capture needs the page under the area: Snip, in place.
-            edit.editor.scroll = matches!(&self.o.purpose, Purpose::Snip(s) if s.can_scroll());
-            if edit.editor.movable {
+            edit.annotator.scroll = matches!(&self.o.purpose, Purpose::Snip(s) if s.can_scroll());
+            if edit.annotator.movable {
                 (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area
             }
-            edit.editor.steps = self.windows.steps();
+            edit.annotator.steps = self.windows.steps();
             self.o.edit = Some(edit);
         }
         Task::none()
     }
 
-    pub(in crate::ui) fn on_editor(&mut self, msg: editor::Message) -> Task<Message> {
+    pub(in crate::ui) fn on_snip_toolbar(&mut self, msg: annotate::Message) -> Task<Message> {
         // Test hook: the editor's Esc (Back) takes the shot of the editor instead.
-        if matches!(msg, editor::Message::Back) && std::env::var_os(TEST_SHOT).is_some() {
+        if matches!(msg, annotate::Message::Back) && std::env::var_os(TEST_SHOT).is_some() {
             return self.test_shot();
         }
         // The toolbar's grip (its own press, so the toolbar's `grab` under it
         // never hears it): drags the toolbar as the bar's grip does.
-        if matches!(msg, editor::Message::Grab) {
+        if matches!(msg, annotate::Message::Grab) {
             return self.update(Message::BarGrab);
         }
         // Esc while the toolbar is dragged: it glides back to where it was.
-        if matches!(msg, editor::Message::Back)
+        if matches!(msg, annotate::Message::Back)
             && let Some(was) = self.o.bar_was.take()
             && self.o.bar_drag.take().is_some()
         {
             self.o.bar_left = was;
             self.o.bar_eased = None;
             if let Some(edit) = &mut self.o.edit {
-                edit.editor.held = false;
+                edit.annotator.held = false;
             }
             return Task::none();
         }
         // Snip's live area: the frame times of each drag on it (the log).
-        let live = self.o.edit.as_ref().is_some_and(|e| e.editor.movable);
+        let live = self.o.edit.as_ref().is_some_and(|e| e.annotator.movable);
         match &msg {
-            editor::Message::Press(_) if live => self.frame_times.borrow_mut().clear(),
-            editor::Message::Release if live => self.log_frames("snip area drag"),
+            annotate::Message::Press(_) if live => self.frame_times.borrow_mut().clear(),
+            annotate::Message::Release if live => self.log_frames("snip area drag"),
             _ => {}
         }
         // (a press on another screen's part gave its window the focus: back)
-        if matches!(msg, editor::Message::Release) && !self.o.screens.is_empty() {
+        if matches!(msg, annotate::Message::Release) && !self.o.screens.is_empty() {
             let focus = iced::window::gain_focus(self.overlay);
-            return self.on_editor_here(msg).chain(focus);
+            return self.on_snip_toolbar_here(msg).chain(focus);
         }
-        self.on_editor_here(msg)
+        self.on_snip_toolbar_here(msg)
     }
 
-    fn on_editor_here(&mut self, msg: editor::Message) -> Task<Message> {
+    fn on_snip_toolbar_here(&mut self, msg: annotate::Message) -> Task<Message> {
         // A long capture running: the toolbar's finishing buttons end it, on
         // the stitched image; nothing else reaches the editor meanwhile.
         if self.scroll().is_some() {
             use crate::ui::screens::long_capture::Finish;
             let how = match msg {
-                editor::Message::Copy => Finish::Copy,
-                editor::Message::Save => Finish::Save,
-                editor::Message::Pin => Finish::Pin,
-                editor::Message::Share => Finish::Share,
+                annotate::Message::Copy => Finish::Copy,
+                annotate::Message::Save => Finish::Save,
+                annotate::Message::Pin => Finish::Pin,
+                annotate::Message::Share => Finish::Share,
                 _ => return Task::none(),
             };
             return self.on_snip(crate::ui::snip::Msg::Finish(how));
@@ -131,7 +125,7 @@ impl App {
         let out = edit.update(msg);
         // Snip's live area moved or resized: the selection (the overlay's dim,
         // scrolling capture, pin) follows it.
-        let live = edit.editor.movable.then(|| edit.canvas_rect());
+        let live = edit.annotator.movable.then(|| edit.canvas_rect());
         if let Some(area) = live.filter(|a| self.o.selection.is_none_or(|s| s.area != *a)) {
             self.select(area);
         }
@@ -142,7 +136,7 @@ impl App {
         match out {
             None => Task::none(),
             // a step of the Steps strip edited: Esc leaves it as it was
-            Some(Output::Back) if edit.editor.updating.is_some() => self.close(),
+            Some(Output::Back) if edit.annotator.updating.is_some() => self.close(),
             // Snip has no action bar: back to picking an area.
             Some(Output::Back) if matches!(o.purpose, Purpose::Snip(_)) => {
                 self.o.edit = None;
@@ -168,14 +162,14 @@ impl App {
                 None => Task::none(),
             },
             Some(Output::AddStep(crop)) => {
-                let update = edit.editor.updating;
+                let update = edit.annotator.updating;
                 self.add_step(crop, update)
             }
             // the colour picker, the ruler: Esc there comes back to this
             Some(Output::ScreenTool(tool)) => self.start_tool(tool),
             // The share sheet is up: once a target is picked, the editor closes.
             Some(Output::Sharing(chosen)) => Task::future(chosen).then(|picked| match picked {
-                Ok(()) => Task::done(Message::Editor(editor::Message::Shared)),
+                Ok(()) => Task::done(Message::Annotate(annotate::Message::Shared)),
                 Err(_) => Task::none(), // the sheet went without a target
             }),
             Some(Output::Dragged) => self.close(),
@@ -253,7 +247,7 @@ impl App {
 
     /// The editing toolbar is up (not back at the bar).
     pub(in crate::ui) fn editing(&self) -> bool {
-        self.o.edit.as_ref().is_some_and(Editing::is_open)
+        self.o.edit.as_ref().is_some_and(SnipToolbar::is_open)
     }
 
     /// The bar is the toolbar (1) while editing, else the bar (0).
@@ -282,12 +276,12 @@ mod tests {
     use iced::{Point, Rectangle, Size};
 
     use crate::actions::share;
-    use crate::editor::{Message as E, dragout};
     use crate::labs::Labs;
+    use crate::snip::annotate::{Message as E, dragout};
     use crate::ui::app::App;
     use crate::ui::app::message::Hiding;
-    use crate::ui::app::tests::{open_app, run_task, snipping_on};
-    use crate::ui::screens::editor::toolbar;
+    use crate::ui::app::tests::{run_task, snipping_on};
+    use crate::ui::screens::snip_toolbar::toolbar;
     use crate::ui::windows::Windows;
 
     /// Add to steps (More, owner 2026-11-02): the overlay closes and the
@@ -296,16 +290,16 @@ mod tests {
     /// adds nothing. A step edited: "Update step N" replaces it, Esc leaves.
     #[test]
     fn add_to_steps_then_each_next_snip_adds_the_next_step() {
-        let mut app = snip_editor();
+        let mut app = snip_toolbar_open();
         assert!(more(&app).contains(&Some(E::AddStep)), "More: Add to steps");
-        let task = app.on_editor(E::AddStep);
+        let task = app.on_snip_toolbar(E::AddStep);
         run_task(&mut app, task);
         assert!(app.hiding != Hiding::No, "the overlay closes");
         assert_eq!(app.windows.steps(), Some(1));
         let mut windows = std::mem::take(&mut app.windows);
-        for n in 1..crate::editor::STEPS_MAX {
-            let mut app = snip_editor_with(windows);
-            let editor = &app.o.edit.as_ref().unwrap().editor;
+        for n in 1..crate::snip::annotate::STEPS_MAX {
+            let mut app = snip_toolbar_open_with(windows);
+            let editor = &app.o.edit.as_ref().unwrap().annotator;
             assert_eq!(editor.steps, Some(n));
             assert!(toolbar::stops(editor).contains(&E::AddStep), "Enter adds");
             assert!(more(&app).contains(&Some(E::Copy)), "Copy moved to More");
@@ -314,13 +308,13 @@ mod tests {
                     .iter()
                     .any(|t| t.starts_with("Add as the next step"))
             );
-            let task = app.on_editor(E::AddStep);
+            let task = app.on_snip_toolbar(E::AddStep);
             run_task(&mut app, task);
             assert_eq!(app.windows.steps(), Some(n + 1));
             windows = std::mem::take(&mut app.windows);
         }
         // full: dimmed, nothing added, the overlay stays
-        let mut app = snip_editor_with(windows);
+        let mut app = snip_toolbar_open_with(windows);
         // Copy all: ONE image of the 12 (300 x 200) stacked and numbered
         use crate::ui::app::message::Message;
         use crate::ui::screens::steps::Msg as Steps;
@@ -334,35 +328,35 @@ mod tests {
                 .iter()
                 .any(|t| t.starts_with("Steps full (12 of 12)"))
         );
-        let task = app.on_editor(E::AddStep);
+        let task = app.on_snip_toolbar(E::AddStep);
         run_task(&mut app, task);
         assert!(app.editing() && app.hiding == Hiding::No);
         // a step edited: Update step 1 replaces it (still 12)
-        app.o.edit.as_mut().unwrap().editor.updating = Some(0);
+        app.o.edit.as_mut().unwrap().annotator.updating = Some(0);
         assert!(
             bar_names(&app)
                 .iter()
                 .any(|t| t.starts_with("Update the step"))
         );
-        let task = app.on_editor(E::AddStep);
+        let task = app.on_snip_toolbar(E::AddStep);
         run_task(&mut app, task);
         assert!(app.hiding != Hiding::No);
         assert_eq!(app.windows.steps(), Some(12));
         // Esc on an edited step leaves it as it was
-        let mut app = snip_editor_with(std::mem::take(&mut app.windows));
-        app.o.edit.as_mut().unwrap().editor.updating = Some(0);
-        let _ = app.on_editor(E::Back);
+        let mut app = snip_toolbar_open_with(std::mem::take(&mut app.windows));
+        app.o.edit.as_mut().unwrap().annotator.updating = Some(0);
+        let _ = app.on_snip_toolbar(E::Back);
         assert!(app.hiding != Hiding::No, "closed, nothing changed");
     }
 
     /// A snip of an area in its editor (Labs all on for the host; the toolbar
     /// reads the shared config, where Pins is off).
-    fn snip_editor() -> App {
-        snip_editor_with(Windows::default())
+    fn snip_toolbar_open() -> App {
+        snip_toolbar_open_with(Windows::default())
     }
 
     /// `snip_editor` with these windows (a Steps strip from an earlier snip).
-    fn snip_editor_with(windows: Windows) -> App {
+    fn snip_toolbar_open_with(windows: Windows) -> App {
         let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
         let mut app = snipping_on(800, 600, area);
         app.windows = windows;
@@ -374,22 +368,9 @@ mod tests {
         app
     }
 
-    /// Circle to Search's Snip button: the editor in place.
-    fn in_place_editor() -> App {
-        let mut app = open_app(1280, 800, 1.0);
-        app.select(Rectangle::new(
-            Point::new(200.0, 150.0),
-            Size::new(300.0, 200.0),
-        ));
-        let _ = app.open_editor();
-        app.o.swap = 1.0; // the bar has turned into the toolbar
-        assert!(app.editing(), "the editor is open");
-        app
-    }
-
     /// What More offers now (each row's message).
     fn more(app: &App) -> Vec<Option<E>> {
-        let editor = &app.o.edit.as_ref().unwrap().editor;
+        let editor = &app.o.edit.as_ref().unwrap().annotator;
         toolbar::more_rows(editor)
             .into_iter()
             .map(|r| r.3)
@@ -416,8 +397,8 @@ mod tests {
     /// leaves the editor as it was, and its file goes with the overlay.
     #[test]
     fn share_gives_the_sheet_the_capture_and_a_picked_target_closes_the_snip() {
-        let mut app = snip_editor();
-        let task = app.on_editor(E::Share);
+        let mut app = snip_toolbar_open();
+        let task = app.on_snip_toolbar(E::Share);
         let (path, picked) = share::TEST_SHEET.take().expect("the sheet has it");
         assert!(
             path.exists() && app.editing(),
@@ -430,8 +411,8 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         // the sheet went without a target: the editor stays, the file goes with it
-        let mut app = snip_editor();
-        let task = app.on_editor(E::Share);
+        let mut app = snip_toolbar_open();
+        let task = app.on_snip_toolbar(E::Share);
         let (path, picked) = share::TEST_SHEET.take().unwrap();
         drop(picked);
         run_task(&mut app, task);
@@ -444,8 +425,8 @@ mod tests {
     /// don't delete: Linux has none yet).
     #[test]
     fn share_shows_only_where_the_system_has_a_sheet() {
-        let mut app = snip_editor();
-        let _ = app.on_editor(E::Menu(crate::editor::Menu::More));
+        let mut app = snip_toolbar_open();
+        let _ = app.on_snip_toolbar(E::Menu(crate::snip::annotate::Menu::More));
         let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
         assert_eq!(texts.iter().any(|n| n == "Share"), share::SUPPORTED);
         assert_eq!(more(&app).contains(&Some(E::Share)), share::SUPPORTED);
@@ -456,12 +437,12 @@ mod tests {
     #[test]
     fn pin_shows_with_labs_pins_off_live_pin_does_not() {
         assert!(!crate::labs::has(crate::labs::Feature::Pins), "the default");
-        let mut app = snip_editor();
+        let mut app = snip_toolbar_open();
         app.o.labs.set(crate::labs::Feature::Pins, false);
         let names = bar_names(&app);
         assert!(names.iter().any(|n| n.starts_with("Copy")), "{names:?}");
         // More's rows
-        let _ = app.on_editor(E::Menu(crate::editor::Menu::More));
+        let _ = app.on_snip_toolbar(E::Menu(crate::snip::annotate::Menu::More));
         let names = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
         assert!(
             names.iter().any(|n| n.starts_with("Pin to screen")),
@@ -477,7 +458,7 @@ mod tests {
         );
         assert!(more(&app).contains(&Some(E::Pin)));
         // a pin with every Labs switch off
-        let _ = app.on_editor(E::Pin);
+        let _ = app.on_snip_toolbar(E::Pin);
         assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }
 
@@ -486,9 +467,9 @@ mod tests {
     /// rows, Enter runs one.
     #[test]
     fn more_holds_the_rest_and_the_keys_walk_it() {
-        use crate::editor::Menu;
-        let mut app = snip_editor();
-        let _ = app.on_editor(E::Menu(Menu::More));
+        use crate::snip::annotate::Menu;
+        let mut app = snip_toolbar_open();
+        let _ = app.on_snip_toolbar(E::Menu(Menu::More));
         let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
         for row in [
             "Long capture",
@@ -501,13 +482,13 @@ mod tests {
         }
         assert_eq!(texts.iter().any(|t| t == "Share"), share::SUPPORTED);
         // Down x3: the third live row (Pin); Enter pins (the overlay closes)
-        let _ = app.on_editor(E::MenuStep(false));
-        let _ = app.on_editor(E::MenuStep(false));
-        let _ = app.on_editor(E::MenuStep(false));
-        let editor = &app.o.edit.as_ref().unwrap().editor;
+        let _ = app.on_snip_toolbar(E::MenuStep(false));
+        let _ = app.on_snip_toolbar(E::MenuStep(false));
+        let _ = app.on_snip_toolbar(E::MenuStep(false));
+        let editor = &app.o.edit.as_ref().unwrap().annotator;
         let rows = toolbar::more_rows(editor);
         assert_eq!(rows[editor.row.unwrap()].3, Some(E::Pin));
-        let _ = app.on_editor(E::Activate);
+        let _ = app.on_snip_toolbar(E::Activate);
         assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }
 
@@ -515,23 +496,19 @@ mod tests {
     /// left floating over the desktop); one nothing took keeps the editor.
     #[test]
     fn after_a_drag_out_drop_no_toolbar_remains() {
-        for snip in [true, false] {
-            let mut app = if snip {
-                snip_editor()
-            } else {
-                in_place_editor()
-            };
+        {
+            let mut app = snip_toolbar_open();
             dragout::TEST_DROP.set(Some(false));
-            let _ = app.on_editor(E::DragOut);
+            let _ = app.on_snip_toolbar(E::DragOut);
             assert!(app.editing() && app.hiding == Hiding::No, "nothing took it");
             assert!(
                 bar_names(&app).iter().any(|n| n.starts_with("Copy")),
                 "toolbar back"
             );
             dragout::TEST_DROP.set(Some(true));
-            let task = app.on_editor(E::DragOut);
+            let task = app.on_snip_toolbar(E::DragOut);
             run_task(&mut app, task);
-            assert!(gone(&app), "dropped (snip: {snip}): no toolbar left");
+            assert!(gone(&app), "dropped: no toolbar left");
         }
     }
 }

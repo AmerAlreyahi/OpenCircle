@@ -129,14 +129,14 @@ impl Config {
             let p = "editor.";
             c.editor.line_assist = get(t, p, "line_assist", d.editor.line_assist, &mut w);
             c.editor.tool = get_checked(t, p, "tool", None, &mut w, |t| match t {
-                Some(crate::editor::Tool::Crop) => Err("crop is never remembered".into()),
+                Some(crate::snip::annotate::Tool::Crop) => Err("crop is never remembered".into()),
                 _ => Ok(()),
             });
             c.editor.colour =
                 get_checked(t, p, "colour", None, &mut w, |s: &Option<String>| {
                     match s
                         .as_deref()
-                        .is_none_or(|s| crate::editor::parse_hex(s).is_some())
+                        .is_none_or(|s| crate::snip::annotate::parse_hex(s).is_some())
                     {
                         true => Ok(()),
                         false => Err("expected #RRGGBB".into()),
@@ -159,7 +159,7 @@ impl Config {
             c.editor.text_bold = get(t, p, "text_bold", None, &mut w);
             c.editor.text_back = get(t, p, "text_back", None, &mut w);
             c.editor.group_tools = get_checked(t, p, "group_tools", None, &mut w, |g| {
-                match g.as_deref().is_none_or(crate::editor::Group::valid) {
+                match g.as_deref().is_none_or(crate::snip::annotate::Group::valid) {
                     true => Ok(()),
                     false => Err("expected one tool per toolbar group, in order".into()),
                 }

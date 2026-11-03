@@ -26,7 +26,7 @@ use crate::ui::kit::{grip, scroll, toast};
 use crate::ui::platform::monitor::Place;
 
 /// Steps at most (open point 3: 12).
-pub const MAX: usize = crate::editor::STEPS_MAX;
+pub const MAX: usize = crate::snip::annotate::STEPS_MAX;
 /// The strip's distance from the screen's edges.
 const MARGIN: f32 = 12.0;
 /// A press moves this far (logical px) before it drags a step.
@@ -649,7 +649,7 @@ pub fn compose(crops: &[Crop], colours: [[u8; 4]; 3], rtl: bool) -> Option<Crop>
             Point::new(x as f32, y as f32),
             Size::new(crop.width as f32, crop.height as f32),
         );
-        if let Some(path) = crate::editor::rounded_path(frame, CORNER) {
+        if let Some(path) = crate::snip::annotate::rounded_path(frame, CORNER) {
             let paint = Paint {
                 shader: Pattern::new(
                     picture.as_ref(),
@@ -687,7 +687,7 @@ pub fn compose(crops: &[Crop], colours: [[u8; 4]; 3], rtl: bool) -> Option<Crop>
         }
         let r = DISC as f32 / 2.0;
         let at = Point::new(disc_x as f32 + r, y as f32 + r);
-        pm = crate::editor::badge(pm, at, r, i as u32 + 1, accent);
+        pm = crate::snip::annotate::badge(pm, at, r, i as u32 + 1, accent);
         y += crop.height.max(DISC) + BETWEEN;
     }
     let rgba = pm.data().to_vec(); // opaque: premultiplied = straight

@@ -10,7 +10,7 @@ use crate::config::{self, SelectStyle};
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Grab, Message, Purpose};
 use crate::ui::app::word;
-use crate::ui::screens::editor::Editing;
+use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::{overlay, snip, translate};
 
 use super::App;
@@ -63,7 +63,7 @@ impl App {
             return self.on_snip(crate::ui::snip::Msg::Finish(how));
         }
         // The editor, a toast or a timer's pill has the screen.
-        if self.o.edit.as_ref().is_some_and(Editing::is_open)
+        if self.o.edit.as_ref().is_some_and(SnipToolbar::is_open)
             || self.o.toast.is_some()
             || self.snip_pill()
         {
@@ -398,7 +398,7 @@ impl App {
                     Some(id) if id == actions::translate::ACTION.id => {
                         Some(Message::TranslateScreen)
                     }
-                    Some(id) if id == actions::edit::ACTION.id => Some(Message::EditScreen),
+                    Some(id) if id == actions::snip::ACTION.id => Some(Message::EditScreen),
                     _ => None,
                 };
                 if let (None, Some(message)) = (self.o.selection, bar) {

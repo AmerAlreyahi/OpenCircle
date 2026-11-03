@@ -100,7 +100,7 @@ fn shape(text: &str, size: f32, family: Family<'_>, weight: Weight) -> Buffer {
         // Tests draw with OUR Inter on every OS: a PC's own "Inter" (another
         // version) is dropped, so a test's text is the same pixels everywhere.
         if cfg!(test) {
-            let ours: &[u8] = include_bytes!("../../assets/fonts/Inter.ttf");
+            let ours: &[u8] = include_bytes!("../../../assets/fonts/Inter.ttf");
             let db = fonts.raw().db_mut();
             let inter: Vec<_> = (db.faces())
                 .filter(|f| f.families.iter().any(|(n, _)| n == "Inter"))
@@ -117,7 +117,7 @@ fn shape(text: &str, size: f32, family: Family<'_>, weight: Weight) -> Buffer {
         };
         if !has(fonts.raw()) {
             fonts.load_font(
-                include_bytes!("../../assets/fonts/Inter.ttf")
+                include_bytes!("../../../assets/fonts/Inter.ttf")
                     .as_slice()
                     .into(),
             );

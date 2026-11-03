@@ -20,7 +20,7 @@ use crate::ui::app::{Reader, TextMode};
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::editor::Editing;
+use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::{overlay, panel, song, translate};
 
 pub(in crate::ui) struct Opening {
@@ -109,7 +109,7 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) lens_pages: Vec<lens::Held>,
     pub(in crate::ui) purpose: Purpose,
     /// The annotation editor on the selection; kept when going back to the bar.
-    pub(in crate::ui) edit: Option<Editing>,
+    pub(in crate::ui) edit: Option<SnipToolbar>,
     /// The shown monitor's origin (logical px): the key of `App::regions`.
     pub(in crate::ui) origin: Point,
     /// A short status over the frame (copy text).

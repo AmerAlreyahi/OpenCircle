@@ -14,8 +14,8 @@ use crate::config::{self};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
-use crate::ui::screens::editor::Editing;
 use crate::ui::screens::long_capture::{self, Finish};
+use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::{snip, windows};
 
 use super::{ASK_MARGIN, App, work_area};
@@ -62,7 +62,7 @@ impl App {
                     (o.bar_left, o.bar_now) = (was, None);
                 }
                 if let Some(edit) = &mut o.edit {
-                    edit.editor.capturing = false;
+                    edit.annotator.capturing = false;
                 }
                 let crop = match stitched {
                     Ok(crop) if crop.height > 0 && !long.cancelled() => crop,
@@ -83,7 +83,7 @@ impl App {
                         self.o.selection = None;
                         self.o.stroke.clear();
                         self.edit_fitted(crop);
-                        Task::done(Message::Editor(crate::editor::Message::Share))
+                        Task::done(Message::Annotate(crate::snip::annotate::Message::Share))
                     }
                 };
                 whole.chain(then)
@@ -343,7 +343,7 @@ impl App {
             false => Task::none(),
         };
         if in_place {
-            return Task::batch([copied, self.open_editor()]);
+            return Task::batch([copied, self.open_snip_toolbar()]);
         }
         self.edit_fitted(crop);
         copied
@@ -351,14 +351,14 @@ impl App {
 
     /// A capture of its own (stitched, recent, a toast's across screens) in
     /// Snip's picked state on this screen: the live area is its whole image,
-    /// with Snip's toolbar docked to it (`Editing::fitted`).
+    /// with Snip's toolbar docked to it (`SnipToolbar::fitted`).
     fn edit_fitted(&mut self, crop: Crop) {
-        let mut edit = Editing::fitted(
+        let mut edit = SnipToolbar::fitted(
             crop,
             work_area(self.o.screen, self.o.work_inset),
             self.o.scale,
         );
-        edit.editor.steps = self.windows.steps();
+        edit.annotator.steps = self.windows.steps();
         let area = edit.canvas_rect();
         self.o.panel = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x
@@ -434,7 +434,8 @@ impl App {
     /// Snip's toolbar during a long capture, as its picture and hint keep
     /// clear of it (logical px).
     pub(in crate::ui) fn long_bar(&self) -> Rectangle {
-        let size = (self.o.edit.as_ref()).map_or_else(Editing::toolbar_size, Editing::bar_size);
+        let size =
+            (self.o.edit.as_ref()).map_or_else(SnipToolbar::toolbar_size, SnipToolbar::bar_size);
         Rectangle::new(self.bar_at(), size)
     }
 
@@ -479,9 +480,9 @@ impl App {
         long.bar_was = bar_was;
         snip.scroll = Some(long);
         if let Some(edit) = &mut o.edit {
-            edit.editor.capturing = true;
-            edit.editor.focus = None;
-            edit.editor.menu = None;
+            edit.annotator.capturing = true;
+            edit.annotator.focus = None;
+            edit.annotator.menu = None;
         }
         o.stroke.clear(); // its outline is long capture's (dashed)
         let work = background(move |tx| {

@@ -13,8 +13,8 @@ use crate::ui::kit::panel_frame as card;
 use crate::ui::kit::{motion, surface};
 use crate::ui::overlay;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::editor::canvas::Lens;
 use crate::ui::screens::overlay::edge as border;
+use crate::ui::screens::snip_toolbar::canvas::ScreenMap;
 use crate::ui::snip;
 
 use super::{
@@ -209,8 +209,8 @@ impl App {
                 layers = layers.push(edit.view(
                     self.o.screen,
                     toolbar,
-                    Lens::ONE,
-                    Message::Editor,
+                    ScreenMap::ONE,
+                    Message::Annotate,
                     Message::BarGrab,
                 ));
                 if toolbar.is_none() {

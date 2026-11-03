@@ -118,7 +118,7 @@ pub fn span(frame: &mut Frame, a: Point, b: Point, look: (Color, Color)) {
 }
 
 /// The handle at `at` on an edge (`(sx, sy)`: -1, 0, 1 per axis as
-/// `editor::area::Grip::Edge`; both non-zero = a corner).
+/// `annotate::area::Grip::Edge`; both non-zero = a corner).
 pub fn handle(frame: &mut Frame, at: Point, (sx, sy): (i8, i8), shown: Handle, colour: Color) {
     let grow = if shown == Handle::Rest { 0.0 } else { HOT };
     let size = match (sx, sy) {

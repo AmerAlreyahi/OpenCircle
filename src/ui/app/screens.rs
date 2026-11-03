@@ -19,8 +19,8 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self, Crop};
 use crate::config;
-use crate::editor;
 use crate::ocr;
+use crate::snip::annotate;
 use crate::ui::app::background::background;
 use crate::ui::app::capture::overlay_window;
 use crate::ui::app::message::{Message, Purpose};
@@ -28,9 +28,9 @@ use crate::ui::app::opening::Opening;
 use crate::ui::app::word;
 use crate::ui::kit::motion;
 use crate::ui::platform::monitor::{Place, place_window};
-use crate::ui::screens::editor::Editing;
-use crate::ui::screens::editor::canvas::Lens;
 use crate::ui::screens::overlay::edge as border;
+use crate::ui::screens::snip_toolbar::SnipToolbar;
+use crate::ui::screens::snip_toolbar::canvas::ScreenMap;
 use crate::ui::{overlay, windows};
 
 use super::App;
@@ -180,18 +180,18 @@ pub(in crate::ui) fn area_of(start: Place, place: Place) -> Rectangle {
 /// image px: `u` at `u * start.scale / place.scale + (start - place origin) /
 /// place.scale` of its logical px, i.e. through the desktop px both share.
 pub(in crate::ui) fn view_of(start: Place, place: Place) -> overlay::View {
-    let Lens { k, at, .. } = lens_of(start, place);
+    let ScreenMap { k, at, .. } = screen_map_of(start, place);
     overlay::View::mapped(place.size(), k, at)
 }
 
 /// The same map for the editor drawn there (Snip's live area across screens).
-pub(in crate::ui) fn lens_of(start: Place, place: Place) -> Lens {
+pub(in crate::ui) fn screen_map_of(start: Place, place: Place) -> ScreenMap {
     let k = start.scale / place.scale;
     let at = Vector::new(
         (start.origin.0 - place.origin.0) as f32 / place.scale,
         (start.origin.1 - place.origin.1) as f32 / place.scale,
     );
-    Lens {
+    ScreenMap {
         k,
         at,
         origin: Point::ORIGIN,
@@ -284,7 +284,7 @@ impl App {
     /// the document, as before).
     // ponytail: a copy of every frame while the editor is open (as one screen
     // copies its frame); share the frames if several 4K screens ever weigh.
-    pub(in crate::ui) fn desktop_live(&self, area: Rectangle) -> Option<Editing> {
+    pub(in crate::ui) fn desktop_live(&self, area: Rectangle) -> Option<SnipToolbar> {
         if self.o.screens.is_empty() {
             return None;
         }
@@ -295,12 +295,12 @@ impl App {
         let [a0, b0, a1, b1] = self.desk_bounds(area)?;
         let bounds = [a0 - x0, b0 - y0, a1 - x0, b1 - y0].map(|v| v.max(0) as u32);
         let origin = from_desktop(start, Point::new(x0 as f32, y0 as f32));
-        let image = editor::Image {
+        let image = annotate::Image {
             width: joined.width,
             height: joined.height,
             rgba: joined.rgba,
         };
-        Some(Editing::live(image, bounds, self.o.scale, origin))
+        Some(SnipToolbar::live(image, bounds, self.o.scale, origin))
     }
 
     /// The desktop px `bounds` cut out of every frozen frame they meet.
@@ -706,14 +706,14 @@ impl App {
         // here), or the loupe and outline while the pointer is here.
         let start = self.o.place();
         if let Some(edit) = self.o.edit.as_ref().filter(|e| e.is_open()) {
-            let lens = lens_of(start, screen.place);
+            let lens = screen_map_of(start, screen.place);
             let toolbar =
                 (self.toolbar_on() == Some(window)).then(|| screen.view.to_screen(self.bar_at()));
             layers = layers.push(edit.view(
                 screen.place.size(),
                 toolbar,
                 lens,
-                Message::Editor,
+                Message::Annotate,
                 Message::BarGrab,
             ));
         } else if let Some(snip) = snip
@@ -926,8 +926,8 @@ mod tests {
     /// both screens' own pixels; the toolbar docks on the screen holding the
     /// larger part, drawn by that screen's window.
     #[test]
-    fn a_snip_area_spans_screens_and_its_editor_copies_both_frames() {
-        use crate::editor::Message as E;
+    fn a_snip_area_spans_screens_and_its_snip_toolbar_copies_both_frames() {
+        use crate::snip::annotate::Message as E;
         let (mut app, id) = snipped();
         // hover on the other screen: its window outlines (forwarded in start px)
         let local = |x: f32, y: f32| Point::new((x - 640.0) / 1.5, y / 1.5);
@@ -948,8 +948,8 @@ mod tests {
         assert_eq!((crop.width, crop.height), (100, 50));
         let _ = app.snip_routed(crop, true, route);
         let edit = app.o.edit.as_ref().expect("the live editor");
-        assert!(edit.editor.movable);
-        let doc = &edit.editor.doc.image;
+        assert!(edit.annotator.movable);
+        let doc = &edit.annotator.doc.image;
         assert_eq!((doc.width, doc.height), (3520, 1620), "both frames joined");
         let crop = app.crop().unwrap();
         assert_eq!((crop.width, crop.height), (100, 50));
@@ -958,9 +958,9 @@ mod tests {
             "both screens' pixels"
         );
         // the area moved 300 px right, onto the other screen (Select drags it)
-        let _ = app.on_editor(E::Press(Point::new(650.0, 125.0)));
-        let _ = app.on_editor(E::Move(Point::new(950.0, 125.0)));
-        let _ = app.on_editor(E::Release);
+        let _ = app.on_snip_toolbar(E::Press(Point::new(650.0, 125.0)));
+        let _ = app.on_snip_toolbar(E::Move(Point::new(950.0, 125.0)));
+        let _ = app.on_snip_toolbar(E::Release);
         let area = app.o.selection.expect("follows").area;
         assert!((area.x - 900.0).abs() < 0.01, "{area:?}");
         let crop = app.crop().unwrap();
@@ -1004,7 +1004,7 @@ mod tests {
         let _ = app.update(Message::Overlay(overlay::Event::ShiftEnter));
         let edit = app.o.edit.as_ref().expect("picked");
         assert!(
-            edit.editor.movable && !edit.editor.own_image,
+            edit.annotator.movable && !edit.annotator.own_image,
             "on the frozen frames"
         );
         // 640 + 2880 physical px wide, the taller screen high

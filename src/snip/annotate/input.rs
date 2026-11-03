@@ -1,15 +1,15 @@
 //! What the pointer and the keys mean to the editor: which item shows its
 //! handles, the cursor, canvas <-> image coordinates, key -> message.
-//! (The canvas that draws and feeds these is `ui::screens::editor::canvas`.)
+//! (The canvas that draws and feeds these is `ui::screens::snip_toolbar::canvas`.)
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::mouse;
 use iced::{Point, Rectangle};
 
 use super::{
-    Drag, Editor, Menu, Message, PRESETS, Shape, TOOLS, Tool, area, callout, label, select, text,
+    Annotator, Drag, Menu, Message, PRESETS, Shape, TOOLS, Tool, area, callout, label, select, text,
 };
 
-impl Editor {
+impl Annotator {
     /// The item that shows its handles (never a frame): the one drawn, moved
     /// or typed, else the selected one. Pen and highlighter strokes never do
     /// (Ctrl+drag or Select moves them by the stroke itself).

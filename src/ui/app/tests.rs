@@ -10,9 +10,9 @@ use crate::Trigger;
 use crate::actions::{self, Crop, copy, lens, qr, text};
 use crate::capture::CaptureError;
 use crate::config::{self, After, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target};
-use crate::editor::{self};
 use crate::labs::{self, BarButton};
 use crate::ocr::{self, TextBlock};
+use crate::snip::annotate::{self};
 
 use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot, WordRead};
 use crate::ui::app::opening::Opening;
@@ -20,7 +20,6 @@ use crate::ui::app::quick::Quick;
 use crate::ui::app::{keys, word};
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::editor::Editing;
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::snip::Snip;
 use crate::ui::{overlay, panel, snip, song, translate, windows};
@@ -610,7 +609,7 @@ fn snip_ctrl_c_copies_the_area_under_the_pointer_as_an_image() {
 /// Copy takes the area as it is now. Enter while picking = the whole screen.
 #[test]
 fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
-    use crate::editor::Message as E;
+    use crate::snip::annotate::Message as E;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
     app.o.labs = crate::labs::Labs::all_on();
@@ -618,23 +617,23 @@ fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
     let crop = app.crop().unwrap();
     let _ = app.snip_routed(crop, true, false);
     let edit = app.o.edit.as_ref().expect("the editor is open");
-    assert!(edit.editor.movable && edit.editor.tool == crate::editor::Tool::Select);
+    assert!(edit.annotator.movable && edit.annotator.tool == crate::snip::annotate::Tool::Select);
     assert_eq!(edit.canvas_rect(), area, "over the picked area");
     // The bottom-right handle out by (100, 50).
-    let _ = app.on_editor(E::Press(Point::new(400.0, 280.0)));
-    let _ = app.on_editor(E::Move(Point::new(500.0, 330.0)));
+    let _ = app.on_snip_toolbar(E::Press(Point::new(400.0, 280.0)));
+    let _ = app.on_snip_toolbar(E::Move(Point::new(500.0, 330.0)));
     let grown = Rectangle::new(area.position(), Size::new(400.0, 250.0));
     assert_eq!(
         app.o.selection.map(|s| s.area),
         Some(grown),
         "followed live"
     );
-    let _ = app.on_editor(E::Release);
+    let _ = app.on_snip_toolbar(E::Release);
     // The toolbar docks under the area, on the screen.
     let at = app.bar_target();
     assert!(at.y >= grown.y + grown.height, "{at:?}");
     let _ = copy::copied::image();
-    let task = app.on_editor(E::Copy);
+    let task = app.on_snip_toolbar(E::Copy);
     run_task(&mut app, task);
     assert_eq!(
         copied_image(),
@@ -656,16 +655,16 @@ fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
 /// stays put (no frame per move), and glides to its new dock once let go.
 #[test]
 fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
-    use crate::editor::Message as E;
-    use crate::ui::screens::editor::toolbar;
+    use crate::snip::annotate::Message as E;
+    use crate::ui::screens::snip_toolbar::toolbar;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
     app.o.labs = crate::labs::Labs::all_on();
     app.select(area);
     let crop = app.crop().unwrap();
     let _ = app.snip_routed(crop, true, false);
-    fn edit(app: &App) -> &editor::Editor {
-        &app.o.edit.as_ref().unwrap().editor
+    fn edit(app: &App) -> &annotate::Annotator {
+        &app.o.edit.as_ref().unwrap().annotator
     }
     fn key(app: &App, named: keyboard::key::Named) -> Option<E> {
         let none = keyboard::Modifiers::empty();
@@ -674,20 +673,20 @@ fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
     let stops = toolbar::stops(edit(&app));
     assert_eq!(stops.last(), Some(&E::Save), "no ×: Esc closes");
     assert!(
-        !stops.contains(&E::Slot(editor::Tool::Crop)),
+        !stops.contains(&E::Slot(annotate::Tool::Crop)),
         "no Crop in Snip"
     );
-    let _ = app.on_editor(E::Focus(true));
-    let _ = app.on_editor(E::Focus(true));
+    let _ = app.on_snip_toolbar(E::Focus(true));
+    let _ = app.on_snip_toolbar(E::Focus(true));
     let focus = edit(&app).focus.unwrap();
     assert_eq!(stops[focus], E::Copy);
-    let _ = app.on_editor(E::Focus(false));
+    let _ = app.on_snip_toolbar(E::Focus(false));
     assert_eq!(stops[edit(&app).focus.unwrap()], E::Save, "and forward");
     // the keys: Tab, Enter on the focus, Enter alone = Copy
     assert_eq!(key(&app, keyboard::key::Named::Tab), Some(E::Focus(false)));
     assert_eq!(key(&app, keyboard::key::Named::Enter), Some(E::Activate));
-    let _ = app.on_editor(E::Press(Point::new(250.0, 180.0)));
-    let _ = app.on_editor(E::Release);
+    let _ = app.on_snip_toolbar(E::Press(Point::new(250.0, 180.0)));
+    let _ = app.on_snip_toolbar(E::Release);
     assert_eq!(edit(&app).focus, None, "a press drops it");
     assert_eq!(key(&app, keyboard::key::Named::Enter), Some(E::Copy));
 
@@ -700,11 +699,11 @@ fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
         frame(&mut app, ms);
     }
     let docked = app.bar_at();
-    let _ = app.on_editor(E::Press(Point::new(250.0, 180.0)));
-    let _ = app.on_editor(E::Move(Point::new(350.0, 230.0)));
+    let _ = app.on_snip_toolbar(E::Press(Point::new(250.0, 180.0)));
+    let _ = app.on_snip_toolbar(E::Move(Point::new(350.0, 230.0)));
     frame(&mut app, 816);
     assert_eq!(app.bar_at(), docked, "still while held");
-    let _ = app.on_editor(E::Release);
+    let _ = app.on_snip_toolbar(E::Release);
     frame(&mut app, 832);
     frame(&mut app, 848);
     let at = app.bar_at();
@@ -842,8 +841,8 @@ fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
         let mut app = snipping_on(1716, 1271, area);
         app.o.work_inset = 40.0;
         app.select(area);
-        let _ = app.open_editor();
-        let _ = app.update(Message::Editor(editor::Message::Scroll));
+        let _ = app.open_snip_toolbar();
+        let _ = app.update(Message::Annotate(annotate::Message::Scroll));
         // docked inside the area's top once picked; beside it for the
         // capture (over it the overlay would be kept out of the grabs,
         // and the area showed blurred on Windows 11: owner, 2026-11-03)
@@ -906,8 +905,8 @@ fn a_full_screen_long_capture_shows_a_small_picture_in_the_corner() {
     let area = Rectangle::new(Point::ORIGIN, Size::new(1280.0, 720.0));
     let mut app = snipping_on(1280, 720, area);
     app.select(area);
-    let _ = app.open_editor();
-    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let _ = app.open_snip_toolbar();
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
     let bar = app.long_bar();
     assert!(bar.intersects(&area), "the toolbar stays over the area");
     let room = long_capture::room(area, app.o.screen, bar, 1.0).expect("the corner");
@@ -944,13 +943,13 @@ fn the_snip_toolbars_grip_drags_it_and_it_stays_where_dropped() {
     for long in [false, true] {
         let mut app = snipping(area);
         app.select(area);
-        let _ = app.open_editor();
+        let _ = app.open_snip_toolbar();
         if long {
-            let _ = app.update(Message::Editor(editor::Message::Scroll));
+            let _ = app.update(Message::Annotate(annotate::Message::Scroll));
             assert!(app.scroll().is_some());
         }
         let docked = app.bar_at();
-        let _ = app.update(Message::Editor(editor::Message::Grab));
+        let _ = app.update(Message::Annotate(annotate::Message::Grab));
         assert!(app.o.bar_drag.is_some(), "the grip holds the toolbar");
         let from = docked + Vector::new(10.0, 10.0);
         let _ = app.update(Message::BarMoved(from));
@@ -968,7 +967,7 @@ fn the_snip_toolbars_grip_drags_it_and_it_stays_where_dropped() {
     let mut app = snipping(area);
     app.o.bar_left = Some(Point::new(5.0, 5.0));
     app.select(area);
-    let _ = app.open_editor();
+    let _ = app.open_snip_toolbar();
     assert_ne!(app.bar_target(), Point::new(5.0, 5.0));
 }
 
@@ -979,41 +978,41 @@ fn the_snip_toolbars_grip_drags_it_and_it_stays_where_dropped() {
 /// toolbar re-docks to it).
 #[test]
 fn the_three_drags_each_move_their_own_thing() {
-    use crate::editor::{Message as E, dragout};
+    use crate::snip::annotate::{Message as E, dragout};
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
     app.select(area);
-    let _ = app.open_editor();
+    let _ = app.open_snip_toolbar();
     let canvas = |app: &App| app.o.edit.as_ref().unwrap().canvas_rect();
-    let held = |app: &App| app.o.edit.as_ref().unwrap().editor.held;
+    let held = |app: &App| app.o.edit.as_ref().unwrap().annotator.held;
     let (docked, picked) = (app.bar_at(), canvas(&app));
 
     // a) the grip: the toolbar follows, the area stays
-    let _ = app.update(Message::Editor(E::Grab));
+    let _ = app.update(Message::Annotate(E::Grab));
     assert!(held(&app), "lifted");
     let _ = app.update(Message::BarMoved(docked));
     let _ = app.update(Message::BarMoved(docked + Vector::new(60.0, 40.0)));
     assert_eq!(app.bar_target(), docked + Vector::new(60.0, 40.0));
     assert_eq!(canvas(&app), picked, "the area did not move");
     // Esc mid-drag: back where it was, the snip still open
-    let _ = app.update(Message::Editor(E::Back));
+    let _ = app.update(Message::Annotate(E::Back));
     assert!(app.o.bar_drag.is_none() && !held(&app));
     assert_eq!(app.bar_target(), docked, "glides back");
     assert!(app.editing(), "Esc only cancelled the drag");
 
     // b) the size chip: nothing moves; nothing took it = all stays
     dragout::TEST_DROP.set(Some(false));
-    let _ = app.on_editor(E::DragOut);
+    let _ = app.on_snip_toolbar(E::DragOut);
     assert_eq!((app.bar_target(), canvas(&app)), (docked, picked));
     assert!(app.editing());
 
     // c) inside the area with Select: the area moves, the toolbar re-docks
-    let _ = app.on_editor(E::Tool(editor::Tool::Select));
-    let z = app.o.edit.as_ref().unwrap().editor.zoom;
+    let _ = app.on_snip_toolbar(E::Tool(annotate::Tool::Select));
+    let z = app.o.edit.as_ref().unwrap().annotator.zoom;
     let inside = |p: Point| Point::new(p.x / z, p.y / z);
-    let _ = app.on_editor(E::Press(inside(Point::new(250.0, 180.0))));
-    let _ = app.on_editor(E::Move(inside(Point::new(290.0, 200.0))));
-    let _ = app.on_editor(E::Release);
+    let _ = app.on_snip_toolbar(E::Press(inside(Point::new(250.0, 180.0))));
+    let _ = app.on_snip_toolbar(E::Move(inside(Point::new(290.0, 200.0))));
+    let _ = app.on_snip_toolbar(E::Release);
     let moved = canvas(&app);
     assert_eq!(
         moved.position(),
@@ -1023,7 +1022,7 @@ fn the_three_drags_each_move_their_own_thing() {
 
     // b) again: an app took it, the snip closes
     dragout::TEST_DROP.set(Some(true));
-    let task = app.on_editor(E::DragOut);
+    let task = app.on_snip_toolbar(E::DragOut);
     run_task(&mut app, task);
     assert!(app.hiding != Hiding::No, "dropped: closed");
 }
@@ -1037,17 +1036,17 @@ fn long_capture_finishes_on_ctrl_c_and_ctrl_s_like_its_buttons() {
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let key = |letter| overlay::Event::Key { letter, ctrl: true };
     for (letter, button, how) in [
-        ('c', editor::Message::Copy, Finish::Copy),
-        ('s', editor::Message::Save, Finish::Save),
+        ('c', annotate::Message::Copy, Finish::Copy),
+        ('s', annotate::Message::Save, Finish::Save),
     ] {
         let finish = |by_key: bool| {
             let mut app = snipping(area);
             app.select(area);
-            let _ = app.open_editor();
-            let _ = app.update(Message::Editor(editor::Message::Scroll));
+            let _ = app.open_snip_toolbar();
+            let _ = app.update(Message::Annotate(annotate::Message::Scroll));
             let _ = match by_key {
                 true => app.on_overlay(key(letter)),
-                false => app.update(Message::Editor(button.clone())),
+                false => app.update(Message::Annotate(button.clone())),
             };
             app.scroll().and_then(|l| l.then)
         };
@@ -1057,7 +1056,7 @@ fn long_capture_finishes_on_ctrl_c_and_ctrl_s_like_its_buttons() {
 }
 
 #[test]
-fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
+fn the_snip_toolbars_scroll_button_starts_a_scrolling_capture_of_the_area() {
     use crate::ui::screens::long_capture::Finish;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let stitched = || {
@@ -1069,11 +1068,11 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
     };
     let mut app = snipping(area);
     app.select(area);
-    let _ = app.open_editor();
-    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let _ = app.open_snip_toolbar();
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
     assert!(app.scroll().is_some(), "scrolling and stitching has begun");
     assert!(
-        app.o.edit.as_ref().is_some_and(|e| e.editor.capturing),
+        app.o.edit.as_ref().is_some_and(|e| e.annotator.capturing),
         "Snip's toolbar stays, in its capturing state"
     );
     assert!(
@@ -1087,8 +1086,8 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
     });
     assert_eq!(app.o.selection.map(|s| s.area), Some(area));
     // the toolbar's tools do nothing meanwhile
-    let _ = app.update(Message::Editor(editor::Message::Undo));
-    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let _ = app.update(Message::Annotate(annotate::Message::Undo));
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
     assert!(app.scroll().is_some_and(|l| l.then.is_none()));
     // Esc is Cancel: once the thread hands over, back to the picked area
     let _ = app.update(Message::Escape);
@@ -1099,21 +1098,21 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
         app.o
             .edit
             .as_ref()
-            .is_some_and(|e| e.editor.movable && !e.editor.capturing),
+            .is_some_and(|e| e.annotator.movable && !e.annotator.capturing),
         "picked again"
     );
 
     // Save finishes it: the stitched image saved, the overlay closes
-    let _ = app.update(Message::Editor(editor::Message::Scroll));
-    let _ = app.update(Message::Editor(editor::Message::Save));
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
+    let _ = app.update(Message::Annotate(annotate::Message::Save));
     assert_eq!(app.scroll().and_then(|l| l.then), Some(Finish::Save));
     let _ = app.update(stitched());
     assert!(app.o.is_none(), "finished");
     // Enter is Copy
     let mut app = snipping(area);
     app.select(area);
-    let _ = app.open_editor();
-    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let _ = app.open_snip_toolbar();
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
     let _ = app.on_overlay(overlay::Event::Enter);
     assert_eq!(app.scroll().and_then(|l| l.then), Some(Finish::Copy));
     let _ = app.update(stitched());
@@ -1121,22 +1120,22 @@ fn the_editors_scroll_button_starts_a_scrolling_capture_of_the_area() {
     // Share: the stitched image picked (shown whole), the sheet from there
     let mut app = snipping(area);
     app.select(area);
-    let _ = app.open_editor();
-    let _ = app.update(Message::Editor(editor::Message::Scroll));
-    let _ = app.update(Message::Editor(editor::Message::Share));
+    let _ = app.open_snip_toolbar();
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
+    let _ = app.update(Message::Annotate(annotate::Message::Share));
     let _ = app.update(stitched());
     let edit = app
         .o
         .edit
         .as_ref()
         .expect("the editor on the stitched image");
-    assert!(edit.editor.movable && edit.editor.own_image && !edit.editor.capturing);
+    assert!(edit.annotator.movable && edit.annotator.own_image && !edit.annotator.capturing);
     assert_eq!((edit.image().width, edit.image().height), (300, 900));
     // no auto-scroll here (Wayland) or no snip (Edit in place): the button is dimmed
     let mut app = open_app(800, 600, 1.0);
     app.select(area);
-    let _ = app.open_editor();
-    let _ = app.update(Message::Editor(editor::Message::Scroll));
+    let _ = app.open_snip_toolbar();
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
     assert!(app.o.edit.is_some() && app.scroll().is_none());
 }
 
@@ -1150,7 +1149,7 @@ fn a_pick_is_picked_with_the_toolbar_and_copied_by_default() {
     let task = app.snip_next(Some(snip::Next::Edit(area)));
     let edit = app.o.edit.as_ref().expect("picked");
     assert!(
-        edit.editor.movable && !edit.editor.own_image,
+        edit.annotator.movable && !edit.annotator.own_image,
         "the live area"
     );
     run_task(&mut app, task);
@@ -1172,15 +1171,15 @@ fn a_recent_capture_opens_picked_with_snips_toolbar() {
     };
     let task = app.on_snip(snip::Msg::Loaded(Ok(crop)));
     let edit = app.o.edit.as_ref().expect("the editor");
-    assert!(edit.editor.movable && edit.editor.own_image);
+    assert!(edit.annotator.movable && edit.annotator.own_image);
     assert!(
-        !edit.editor.bare(),
+        !edit.annotator.bare(),
         "its own pixels drawn, not the frozen frame's"
     );
-    let stops = crate::ui::screens::editor::toolbar::stops(&edit.editor);
-    assert!(!stops.contains(&editor::Message::Back), "Snip's toolbar");
+    let stops = crate::ui::screens::snip_toolbar::toolbar::stops(&edit.annotator);
+    assert!(!stops.contains(&annotate::Message::Back), "Snip's toolbar");
     assert!(
-        !stops.contains(&editor::Message::Scroll),
+        !stops.contains(&annotate::Message::Scroll),
         "no page under it"
     );
     let shown = edit.canvas_rect();
@@ -1195,18 +1194,18 @@ fn a_recent_capture_opens_picked_with_snips_toolbar() {
 }
 
 #[test]
-fn after_a_drag_out_the_editor_is_still_there_or_the_overlay_closes_whole() {
+fn after_a_drag_out_the_snip_toolbar_is_still_there_or_the_overlay_closes_whole() {
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     // nothing took the drop: the overlay is back, toolbar and all
     let mut app = snipping(area);
     app.select(area);
-    let _ = app.open_editor();
-    editor::dragout::TEST_DROP.set(Some(false));
-    let _ = app.update(Message::Editor(editor::Message::DragOut));
+    let _ = app.open_snip_toolbar();
+    annotate::dragout::TEST_DROP.set(Some(false));
+    let _ = app.update(Message::Annotate(annotate::Message::DragOut));
     assert!(app.editing() && app.o.frame.is_some());
     // an app took it: closed like Copy, nothing of the editor or the frame left
-    editor::dragout::TEST_DROP.set(Some(true));
-    let _ = app.update(Message::Editor(editor::Message::DragOut));
+    annotate::dragout::TEST_DROP.set(Some(true));
+    let _ = app.update(Message::Annotate(annotate::Message::DragOut));
     assert!(app.o.edit.is_none() && app.o.frame.is_none() && !app.editing());
     assert_eq!(app.hiding, Hiding::Empty, "hides by the usual steps");
 }
@@ -2434,7 +2433,7 @@ fn hidden_features_have_no_bar_button_and_turning_them_on_brings_them_back() {
         Point::new(500.0, 350.0),
         false,
     );
-    let _ = app.update(Message::Run(&actions::edit::ACTION));
+    let _ = app.update(Message::Run(&actions::snip::ACTION));
     assert!(app.editing());
 }
 
@@ -2447,12 +2446,12 @@ fn main_modes_snip_runs_the_one_snip_flow() {
     let snip_toolbar = |app: &App| {
         let edit = app.o.edit.as_ref().expect("the editor");
         assert!(
-            edit.editor.movable,
+            edit.annotator.movable,
             "Snip's live area, not the in-place editor"
         );
-        let stops = crate::ui::screens::editor::toolbar::stops(&edit.editor);
+        let stops = crate::ui::screens::snip_toolbar::toolbar::stops(&edit.annotator);
         assert!(
-            !stops.contains(&editor::Message::Back),
+            !stops.contains(&annotate::Message::Back),
             "no Back: Snip's toolbar"
         );
     };
@@ -2474,7 +2473,7 @@ fn main_modes_snip_runs_the_one_snip_flow() {
     // with an area selected (the bar's Snip, E, `run edit`): picked at once
     for message in [
         |app: &App| app.bar_message(BarButton::Edit).unwrap(),
-        |_: &App| Message::Run(&actions::edit::ACTION),
+        |_: &App| Message::Run(&actions::snip::ACTION),
     ] {
         let mut app = open_app(1280, 800, 1.0);
         drag(
@@ -2502,9 +2501,9 @@ fn a_still_pin_needs_no_labs_switch() {
         Point::new(500.0, 350.0),
         false,
     );
-    let _ = app.update(Message::Run(&actions::edit::ACTION));
+    let _ = app.update(Message::Run(&actions::snip::ACTION));
     app.o.labs.set(labs::Feature::Pins, false);
-    let _ = app.update(Message::Editor(editor::Message::Pin));
+    let _ = app.update(Message::Annotate(annotate::Message::Pin));
     assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
 }
 
@@ -2648,7 +2647,7 @@ fn bar_box(app: &mut App) -> (Rectangle, bool) {
     );
     let is_edit = |m: &Message| match m {
         Message::EditScreen => true,
-        Message::Run(a) => a.id == actions::edit::ACTION.id,
+        Message::Run(a) => a.id == actions::snip::ACTION.id,
         _ => false,
     };
     let edits = edit.iter().any(is_edit);
@@ -2701,107 +2700,6 @@ fn the_bottom_bar_never_changes_size() {
     let (after, edits) = bar_box(&mut app);
     assert_eq!(after, before);
     assert!(edits);
-}
-
-/// Edit turns the bar into the editing toolbar in its place (same anchor,
-/// a short morph between them); the toolbar drags and docks like the bar,
-/// remembered; Back turns it into the bar again where the toolbar was.
-#[test]
-fn the_editing_toolbar_takes_the_bars_place_and_docks_like_it() {
-    let mut app = open_app(1280, 800, 1.0);
-    app.o.work_inset = 40.0;
-    // clear of both spots, even for a two-row toolbar
-    drag(
-        &mut app,
-        Point::new(200.0, 300.0),
-        Point::new(500.0, 450.0),
-        false,
-    );
-    let (bar_box, _) = bar_box(&mut app);
-    let spot = |app: &App, size| bar::anchor_at(app.o.bar_anchor, app.o.screen, size, 40.0);
-    assert_eq!(bar_box.position(), spot(&app, bar_box.size()));
-    let tool = Editing::toolbar_size();
-    // (the in-place editor: no entry runs it any more, Snip is one flow; kept)
-    let _ = app.open_editor();
-    assert!(app.editing());
-    // on its way: one shape between the two sizes, at the same spot
-    let start = Instant::now();
-    let _ = app.update(Message::Frame(start));
-    let _ = app.update(Message::Frame(start + Duration::from_millis(40)));
-    let mid = app.dock_size();
-    assert!(app.swapping(), "a morph, not a jump");
-    assert!(mid.width > bar_box.width.min(tool.width));
-    assert!(mid.width < bar_box.width.max(tool.width));
-    assert_eq!(app.bar_at(), spot(&app, mid));
-    // ...drawn at its whole size (inside it differs from just outside it)
-    // (over a plain frame)
-    app.o.frame = Some(image::Handle::from_rgba(4, 4, vec![9; 4 * 4 * 4]));
-    let px = crate::ui::kit::testing::shot::save("bar-morph", app.view(app.overlay), app.o.screen);
-    let at = app.bar_at();
-    let y = (at.y + mid.height / 2.0) as usize;
-    let pixel = |x: f32| {
-        let i = (y * 1280 + x as usize) * 4;
-        px[i..i + 4].to_vec()
-    };
-    assert_ne!(
-        pixel(at.x + mid.width - 30.0),
-        pixel(at.x + mid.width + 30.0),
-        "the morph's shape is there"
-    );
-    // there: the toolbar at the bar's anchor (bottom edge, centre the same)
-    settle_bar(&mut app);
-    assert!(!app.swapping());
-    let at = app.bar_at();
-    assert_eq!(at, spot(&app, tool));
-    assert_eq!(at.y + tool.height, bar_box.y + bar_box.height);
-    assert_eq!(at.x + tool.width / 2.0, bar_box.center_x());
-    let pad = bar::PAD;
-    let row = pad + crate::ui::kit::tokens::size::ICON_BUTTON / 2.0;
-    // its grip first
-    let grip = at + Vector::new(pad + bar::HANDLE / 2.0, row);
-    let hit =
-        |app: &App, p| crate::ui::kit::testing::shot::click(app.view(app.overlay), app.o.screen, p);
-    assert!(
-        hit(&app, grip)
-            .iter()
-            .any(|m| matches!(m, Message::Editor(editor::Message::Grab))),
-        "its grip is there"
-    );
-    // dragged by its edge, it docks at the nearest spot, remembered
-    let edge = at + Vector::new(pad / 2.0, row);
-    assert!(
-        hit(&app, edge)
-            .iter()
-            .any(|m| matches!(m, Message::BarGrab))
-    );
-    let _ = app.update(Message::BarGrab);
-    let _ = app.update(Message::BarMoved(edge));
-    let _ = app.update(Message::BarMoved(edge - Vector::new(0.0, 560.0)));
-    let _ = app.update(Message::BarReleased);
-    assert_eq!(app.o.bar_anchor, BarAnchor::Top);
-    assert_eq!(config::current().bar.anchor, BarAnchor::Top, "remembered");
-    settle_bar(&mut app);
-    assert_eq!(app.bar_at(), spot(&app, tool));
-    assert_eq!(app.bar_at().y, bar::TOP);
-    // Back: the bar again, at the toolbar's spot
-    let _ = app.update(Message::Editor(editor::Message::Back));
-    assert!(!app.editing());
-    // Esc did it: the same key's Escape doesn't close the overlay too
-    let _ = app.update(Message::Escape);
-    assert!(app.o.frame.is_some(), "still open, at the bar");
-    settle_bar(&mut app);
-    let (_, size) = app.bar_size();
-    assert_eq!(app.bar_at(), spot(&app, size));
-    assert_eq!(app.bar_at().y, bar::TOP);
-    let edit = hit(&app, bar_button(&app, 2));
-    assert!(
-        edit.iter()
-            .any(|m| matches!(m, Message::Run(a) if a.id == actions::edit::ACTION.id)),
-        "{edit:?}"
-    );
-    let mut cfg = config::current();
-    cfg.bar.anchor = BarAnchor::Bottom;
-    config::set_current(cfg);
 }
 
 /// The bar: by default a clear gap above the taskbar; dragged by its
@@ -5026,8 +4924,8 @@ fn ctrl_key_after(app: &App, c: char, physical: iced::keyboard::key::Code) -> Ve
 }
 
 #[test]
-fn ctrl_z_reaches_the_snip_editor() {
-    use crate::editor::Message as E;
+fn ctrl_z_reaches_the_snip_toolbar() {
+    use crate::snip::annotate::Message as E;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
     app.select(area);
@@ -5035,7 +4933,7 @@ fn ctrl_z_reaches_the_snip_editor() {
     let _ = app.snip_routed(crop, true, false);
     let keys = ctrl_key_after(&app, 'z', keyboard::key::Code::KeyZ);
     assert!(
-        keys.iter().any(|m| matches!(m, Message::Editor(E::Undo))),
+        keys.iter().any(|m| matches!(m, Message::Annotate(E::Undo))),
         "Ctrl+Z -> Undo, got {keys:?}"
     );
 }

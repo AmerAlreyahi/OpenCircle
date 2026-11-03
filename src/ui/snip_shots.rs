@@ -19,7 +19,7 @@ use super::snip;
 use crate::actions::Crop;
 use crate::capture::scroll::Update;
 use crate::capture::stitch::MAX_HEIGHT;
-use crate::editor::Message as E;
+use crate::snip::annotate::Message as E;
 
 const W: u32 = 1280;
 const H: u32 = 720;
@@ -132,19 +132,19 @@ fn states() -> Vec<(&'static str, App)> {
     // 5: resizing by the bottom-right handle
     let mut app = picked();
     let corner = AREA.position() + Vector::new(AREA.width, AREA.height);
-    let _ = app.on_editor(E::Press(corner));
-    let _ = app.on_editor(E::Move(corner + Vector::new(60.0, 40.0)));
+    let _ = app.on_snip_toolbar(E::Press(corner));
+    let _ = app.on_snip_toolbar(E::Move(corner + Vector::new(60.0, 40.0)));
     settle(&mut app);
     out.push(("5-resizing", app));
     // 6: moved by the keyboard
     let mut app = picked();
-    let _ = app.on_editor(E::Nudge((1, 0), (false, true, false)));
+    let _ = app.on_snip_toolbar(E::Nudge((1, 0), (false, true, false)));
     settle(&mut app);
     out.push(("6a-keyboard", app));
     // 6b: Shift+Tab twice: on Save
     let mut app = picked();
-    let _ = app.on_editor(E::Focus(true));
-    let _ = app.on_editor(E::Focus(true));
+    let _ = app.on_snip_toolbar(E::Focus(true));
+    let _ = app.on_snip_toolbar(E::Focus(true));
     out.push(("6b-tab", app));
     // 7: long capture: started (the hint), going (the picture), at the limit
     out.push(("7a-long-start", long(0, false)));
@@ -153,7 +153,7 @@ fn states() -> Vec<(&'static str, App)> {
     // 8: the colour picker: started from the toolbar (its hint), then three
     // colours picked (the swatches, the Copied pill)
     let mut app = picked();
-    let _ = app.on_editor(E::ScreenTool(Which::Picker));
+    let _ = app.on_snip_toolbar(E::ScreenTool(Which::Picker));
     let _ = app.on_overlay(Event::Hover(Point::new(520.0, 390.0)));
     out.push(("8a-picker", app));
     let mut app = tool(Which::Picker);
@@ -206,11 +206,11 @@ fn tool(which: Which) -> App {
 fn long(height: u32, full: bool) -> App {
     let mut app = picked();
     let picture = app.crop().unwrap();
-    let _ = app.on_editor(E::Scroll);
+    let _ = app.on_snip_toolbar(E::Scroll);
     if height == 0 {
         return app;
     }
-    let size = super::screens::editor::Editing::toolbar_size();
+    let size = super::screens::snip_toolbar::SnipToolbar::toolbar_size();
     let bar = Rectangle::new(app.bar_at(), size);
     let room = long_capture::layout(AREA, app.o.screen, bar, 1.0).unwrap();
     let w = picture.width as usize;

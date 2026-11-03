@@ -4,12 +4,12 @@
 pub mod ask;
 pub mod copy;
 pub mod crop;
-pub mod edit;
 pub mod entities;
 pub mod lens;
 pub mod qr;
 pub mod save;
 pub mod share;
+pub mod snip;
 pub mod text;
 pub mod translate;
 
@@ -19,7 +19,7 @@ pub const ACTIONS: &[Action] = &[
     ask::ACTION,
     text::ACTION,
     translate::ACTION,
-    edit::ACTION,
+    snip::ACTION,
     copy::ACTION,
     save::ACTION,
 ];
@@ -46,8 +46,8 @@ pub enum Run {
     Panel(Panel),
     /// Search the crop in the user's browser (Lens); nothing of ours shows.
     Lens,
-    /// Turn the action bar into the editing toolbar over the selection.
-    Edit,
+    /// Snip: the action bar turns into the Snip toolbar over the selection.
+    Snip,
     /// Replace the selection's text by its translation, in place.
     Translate,
 }
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn snip_has_its_key_with_every_labs_switch_off() {
         let (off, on) = (crate::labs::Labs::default(), crate::labs::Labs::all_on());
-        let e = edit::ACTION.key;
+        let e = snip::ACTION.key;
         // out of Labs since 0.1.3 (N-41)
         assert_eq!(for_key(&off, e.letter, e.ctrl).map(|a| a.id), Some("edit"));
         assert_eq!(for_key(&on, e.letter, e.ctrl).map(|a| a.id), Some("edit"));

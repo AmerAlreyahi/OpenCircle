@@ -34,7 +34,7 @@ pub use super::platform::windows::{
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::capture::live;
 use crate::config::{self, Config, Theme};
-use crate::editor::dragout::{self, DragFile};
+use crate::snip::annotate::dragout::{self, DragFile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {

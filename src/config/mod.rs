@@ -743,13 +743,13 @@ pub struct EditorConfig {
     pub line_assist: bool,
     /// The last tool (never Crop).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool: Option<crate::editor::Tool>,
+    pub tool: Option<crate::snip::annotate::Tool>,
     /// `#RRGGBB`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colour: Option<String>,
     /// The shared size (pen, arrows, shapes, steps, callouts).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub size: Option<crate::editor::Width>,
+    pub size: Option<crate::snip::annotate::Width>,
     /// The Text tool's font size, display px (`TEXT_SIZE`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text_size: Option<u8>,
@@ -759,23 +759,23 @@ pub struct EditorConfig {
     pub fill: Option<bool>,
     /// The blur brush's picked size; `None` = Auto.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub blur_size: Option<crate::editor::Width>,
+    pub blur_size: Option<crate::snip::annotate::Width>,
     /// The blur's pixel size (its mosaic cells).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub blur_cell: Option<crate::editor::Width>,
+    pub blur_cell: Option<crate::snip::annotate::Width>,
     /// The line width of shapes, arrows and the pen, display px (`STROKE`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stroke: Option<u8>,
     /// The Text tool's face, weight and background.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_font: Option<crate::editor::TextFont>,
+    pub text_font: Option<crate::snip::annotate::TextFont>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text_bold: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_back: Option<crate::editor::TextBack>,
+    pub text_back: Option<crate::snip::annotate::TextBack>,
     /// Each toolbar group's last tool (the grouped toolbar shows it).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub group_tools: Option<Vec<crate::editor::Tool>>,
+    pub group_tools: Option<Vec<crate::snip::annotate::Tool>>,
 }
 
 /// `editor.text_size`'s range (display px).
@@ -1552,6 +1552,26 @@ mod tests {
         assert_eq!((bad.bar.anchor, w.len()), (BarAnchor::Bottom, 1));
     }
 
+    /// The frozen spellings survive the renames of the code behind them (the Snip
+    /// editor is `snip::annotate` now): `[editor]` keys, `snip.after = "editor"`.
+    #[test]
+    fn editor_keys_and_snip_after_values_stay_as_written() {
+        let text = "[editor]\ntool = \"step\"\ncolour = \"#AF52DE\"\nsize = \"thin\"\n\n[snip]\nafter = \"editor\"\n";
+        let (c, w) = Config::parse(text);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(c.snip.after, SnipAfter::Editor);
+        let dir = tmp_dir("frozen-editor");
+        let path = dir.join("config.toml");
+        c.save_to(&path).unwrap();
+        let out = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            out.contains("[editor]") && out.contains("tool = \"step\""),
+            "{out}"
+        );
+        assert!(out.contains("after = \"editor\""), "{out}");
+        assert_eq!(Config::load_from(&path).0, c);
+    }
+
     #[test]
     fn save_then_load_round_trips() {
         let dir = tmp_dir("rt");
@@ -1631,7 +1651,7 @@ mod tests {
              outline = true\nfill = false\nblur_size = \"thick\"\nblur_cell = \"thin\"\n",
         );
         assert!(w.is_empty(), "{w:?}");
-        use crate::editor::{Tool, Width};
+        use crate::snip::annotate::{Tool, Width};
         assert_eq!(
             (c.editor.tool, c.editor.colour.as_deref(), c.editor.size),
             (Some(Tool::Step), Some("#AF52DE"), Some(Width::Thin))

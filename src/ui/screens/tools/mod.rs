@@ -14,12 +14,12 @@ use crate::ui::kit::key_hint::{self, key_hint};
 use crate::ui::kit::toast::{Tone, toast};
 use crate::ui::kit::tokens::{radius, space};
 use crate::ui::overlay;
-use crate::ui::screens::editor::Editing;
+use crate::ui::screens::snip_toolbar::SnipToolbar;
 
 pub mod picker;
 pub mod ruler;
 
-pub use crate::editor::ScreenTool as Which;
+pub use crate::snip::annotate::ScreenTool as Which;
 
 /// The glyphs the tools show (the font test checks them).
 #[cfg(test)]
@@ -70,13 +70,13 @@ pub struct Tool {
     pub ruler: ruler::Ruler,
     /// Opened from the Snip toolbar on this picked area and its editor: Esc
     /// goes back to them (the annotations kept).
-    pub back: Option<(Rectangle, Box<Editing>)>,
+    pub back: Option<(Rectangle, Box<SnipToolbar>)>,
     copied: Option<(u32, String)>,
     copies: u32,
 }
 
 impl Tool {
-    pub fn new(which: Which, back: Option<(Rectangle, Box<Editing>)>) -> Self {
+    pub fn new(which: Which, back: Option<(Rectangle, Box<SnipToolbar>)>) -> Self {
         Tool {
             which,
             at: None,

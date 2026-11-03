@@ -237,7 +237,7 @@ fn animation_frame_times() {
         settle_bar(&mut app);
         let t = frames(&mut app, 16, false, |app, i, now| {
             if i == 0 {
-                let _ = app.update(Message::Run(&actions::edit::ACTION));
+                let _ = app.update(Message::Run(&actions::snip::ACTION));
             }
             let _ = app.update(Message::Frame(now));
         });
@@ -1441,7 +1441,7 @@ enum SnipDrag {
 /// the live area starts there.
 fn snip_drag(w: u32, h: u32, drag: SnipDrag, n: u32, pixels: bool) -> (Vec<Drawn>, App) {
     use super::app::tests::snipping_on;
-    use crate::editor::Message as E;
+    use crate::snip::annotate::Message as E;
     use crate::ui::overlay::Event;
     let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
     let mut app = snipping_on(w, h, window);
@@ -1467,7 +1467,7 @@ fn snip_drag(w: u32, h: u32, drag: SnipDrag, n: u32, pixels: bool) -> (Vec<Drawn
             let _ = app.on_overlay(e);
             return;
         }
-        let _ = app.on_editor(match i {
+        let _ = app.on_snip_toolbar(match i {
             0 => E::Press(at),
             _ => E::Move(at),
         });
@@ -1497,7 +1497,7 @@ fn snip_frame_times() {
 #[ignore = "timing: run by hand, in release"]
 fn snip_toolbar_frame_times() {
     use super::app::tests::snipping_on;
-    use crate::editor::Message as E;
+    use crate::snip::annotate::Message as E;
     fn view(app: &App) -> Element<'_, Message> {
         app.view(app.overlay)
     }
@@ -1514,7 +1514,7 @@ fn snip_toolbar_frame_times() {
         let mut app = picked();
         let (at, size) = (
             app.bar_at(),
-            crate::ui::screens::editor::Editing::toolbar_size(),
+            crate::ui::screens::snip_toolbar::SnipToolbar::toolbar_size(),
         );
         let y = at.y + size.height / 2.0;
         let step = size.width / 40.0;
@@ -1529,7 +1529,7 @@ fn snip_toolbar_frame_times() {
         let mut app = picked();
         let t = frames(&mut app, 40, false, |app, i, now| {
             if i == 0 {
-                let _ = app.on_editor(E::Grab);
+                let _ = app.on_snip_toolbar(E::Grab);
                 let _ = app.update(Message::BarMoved(at));
             }
             let p = at + Vector::new(9.0 * i as f32, -5.0 * i as f32);
