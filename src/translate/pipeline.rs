@@ -485,8 +485,10 @@ fn made_up(src: &str, out: &str, target: &str) -> bool {
     let number_new = label && od.split_whitespace().any(|n| !sd.contains(n));
     // most of a sentence gone: Marian cut it short, or gave a stock phrase
     // instead (fr-ar: "( انظر الفقرة في مستهل المقالة . )" for 22 words; fr-es:
-    // "Usted Elige un" for "Vous lisez un « article de qualité » labellisé en 2021")
-    let lost = words(src) >= 6 && words(out) * 5 < words(src) * 2;
+    // "Usted Elige un" for "Vous lisez un « article de qualité » labellisé en 2021");
+    // by words and letters: German menus are short in words ("Faire un don
+    // Créer un compte Se connecter" -> "Spenden Registrieren Einloggen")
+    let lost = words(src) >= 6 && words(out) * 5 < words(src) * 2 && on * 5 < sn * 2;
     let script = lang::find(target).map_or(Script::Latin, |l| l.script);
     let letters: Vec<char> = out.chars().filter(|c| c.is_alphabetic()).collect();
     let foreign = match script {
@@ -2274,6 +2276,8 @@ pub(super) mod tests {
         assert!(made_up(title, "Sonnensystem ✓ Wikipedia", "de"), "a symbol");
         let s = "Vous Ilsez un « article de qualité » labemsé en 2021";
         assert!(made_up(s, "Usted Elige un", "es"), "fr-es: most of it lost");
+        let menu = "Faire un don Créer un compte Se connecter";
+        assert!(!made_up(menu, "Spenden Registrieren Einloggen", "de"));
         let s = "ainsi que des milliards de petits corps (la presque totalité des astéroides \
                  et autres planetes mineures, les cométes, les poussiéres cosmiquesv etc.).";
         assert!(
