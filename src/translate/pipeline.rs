@@ -149,30 +149,37 @@ impl Real {
                 .zip(lang::find(target))
                 .is_some_and(|(s, t)| s == t)
         };
-        // On a page clearly in one language (3/4 of the lines that tell), a
+        // On a page clearly in one language (most of the lines that tell), a
         // line's own language in the page's script (told by its words, which
         // can be wrong) only counts where its models are here, or the page
         // itself needs nothing: else it goes the page's way. A French line
         // taken for Spanish asked for es-de (112 MB) and the page waited on it.
         // Another script (an Arabic line) is sure: its pair is asked for.
-        let told = self
+        let (page, told) = self
             .guessed
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .1
             .clone();
-        let clear = told.iter().filter(|s| **s == fallback).count() * 4 >= told.len() * 3;
+        // (the lines, not the page's own guess; "most": 3/4 before, and on
+        // the Windows VM Edge's own "Translate page from French?" card made a
+        // French page with an Italian line 5 lines in 8: it waited on it-en)
+        let lines = &told[page.is_some() as usize..];
+        let clear = lines.iter().filter(|s| **s == fallback).count() * 2 > lines.len();
         let page_runs = clear && !same(fallback) && mt::route(fallback, target).is_some();
         let script = |s: &str| lang::find(s).map(|l| l.script);
         let mut own: Vec<(&str, bool)> = Vec::new();
         let mut usable = |s: &'static str| match own.iter().find(|(o, _)| *o == s) {
             Some((_, ok)) => *ok,
             None => {
-                let ok = !page_runs
-                    || same(s)
-                    || script(s) != script(fallback)
-                    || mt::route(s, target)
-                        .is_some_and(|r| r.iter().all(|p| p.missing_bytes() == 0));
+                // (a language no model takes into `target` is only kept: it
+                // failed the whole page with "no offline model")
+                let routed = mt::route(s, target).is_some() || same(s);
+                let ok = routed
+                    && (!page_runs
+                        || same(s)
+                        || script(s) != script(fallback)
+                        || mt::route(s, target)
+                            .is_some_and(|r| r.iter().all(|p| p.missing_bytes() == 0)));
                 own.push((s, ok));
                 ok
             }
@@ -185,12 +192,15 @@ impl Real {
                     // certainly another language (a Spanish subtitle on an
                     // English page into Arabic, es-ar not here): never
                     // translated as the page's language (nonsense); kept
-                    // as it is, its pair offered
+                    // as it is, its pair offered (one pair: a line of a
+                    // third language, or one no model takes, is only kept)
                     Some(s) if s != fallback && lang::certain(t) == Some(s) => {
                         if let Some(pair) = mt::next(s, target) {
                             let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
-                            let (_, lines) = held.get_or_insert((pair, Vec::new()));
-                            lines.push(t.clone());
+                            let (first, lines) = held.get_or_insert((pair, Vec::new()));
+                            if std::ptr::eq(*first, pair) {
+                                lines.push(t.clone());
+                            }
                         }
                         continue;
                     }
@@ -391,13 +401,15 @@ fn word_count(lines: &[TextBlock]) -> (usize, usize) {
     (tokens.len(), tokens.iter().filter(|t| word(t)).count())
 }
 
-/// Of a `misread` page, the lines read as words (most of their tokens), and
-/// their boxes: the second reader leaves them alone.
+/// Of a `misread` page, the lines read as words (most of their tokens) or
+/// an address (the browser's address bar: dropped, the tabs above it were
+/// not known as chrome on an Arabic page on Windows), and their boxes: the
+/// second reader leaves them alone.
 pub(super) fn words_read(lines: Vec<TextBlock>) -> (Vec<TextBlock>, Vec<[f32; 4]>) {
     let keep: Vec<TextBlock> = (lines.into_iter())
         .filter(|l| {
             let (t, w) = word_count(std::slice::from_ref(l));
-            t > 0 && w * 10 >= t * 8
+            (t > 0 && w * 10 >= t * 8) || address(&l.text)
         })
         .collect();
     let known = keep.iter().map(|l| l.bounds).collect();
@@ -1017,28 +1029,45 @@ pub(super) fn cut_off(b: &TextBlock, (width, height): (u32, u32)) -> bool {
     y <= 3.0 || y + h >= height as f32 - 3.0 || x <= 3.0 || x + w >= width as f32 - 3.0
 }
 
+/// An address bar's text: `code`, or mostly a path (Edge writes "File"
+/// before a local file's: "File C:/oc/trn/ar.html").
+fn address(t: &str) -> bool {
+    let letters = |w: &str| w.chars().filter(|c| c.is_alphabetic()).count();
+    let path: usize = (t.split_whitespace().filter(|w| code_like(w)).map(letters)).sum();
+    code(t) || path * 2 > letters(t)
+}
+
 /// The lines of a browser's own chrome left out (never translated, never
 /// redrawn): the tab strip above its address bar and the rest of the address
-/// row. The address bar is the topmost address line (`code`) in the top
-/// quarter of the frame; a tab title sits less than 1.3 of its heights above
-/// it (Firefox and Edge: ~1.4). Before, tab titles were translated and,
-/// read with the tab's icon and close button, garbled ("système wSolar").
+/// row. The address bar is the topmost address line (`code`, or mostly a
+/// path) in the top quarter of the frame; the tabs are the row of lines
+/// right above it, within 2.2 of its heights (Firefox on Ubuntu 0.7, Edge
+/// on Windows 1.5; the desktop's clock above Firefox's tabs, 1.6-1.8, is a
+/// row higher and stays). Before, tab titles were translated and, read
+/// with the tab's icon and close button, garbled ("système wSolar").
 // ponytail: the bookmarks bar is left to the page's rules: right under the
 // address row a page's own header looks the same (Wikipedia's logo, search).
 pub(super) fn without_chrome(lines: Vec<Line>, height: u32) -> Vec<Line> {
-    let bar = (lines.iter())
-        .filter(|l| l.bounds[1] < height as f32 / 4.0 && code(&l.text))
-        .min_by(|a, b| a.bounds[1].total_cmp(&b.bounds[1]));
-    let Some(&Line {
-        bounds: [_, top, _, h],
-        ..
-    }) = bar
-    else {
-        return lines;
-    };
+    let mid = |l: &Line| l.bounds[1] + l.bounds[3] / 2.0;
+    // per address line (a window title behind may read as one too): the
+    // band of lines above it, the lowest row in it (the tabs), its own row
+    let bars: Vec<(f32, f32, f32)> = (lines.iter())
+        .filter(|l| l.bounds[1] < height as f32 / 4.0 && address(&l.text))
+        .map(|b| {
+            let [_, top, _, h] = b.bounds;
+            let above = |l: &&Line| mid(l) > top - 2.2 * h && mid(l) < top;
+            let tabs = (lines.iter().filter(above))
+                .map(mid)
+                .fold(f32::MIN, f32::max);
+            (top, h, tabs)
+        })
+        .collect();
     let chrome = |l: &Line| {
-        let mid = l.bounds[1] + l.bounds[3] / 2.0;
-        mid > top - 1.3 * h && mid < top + h
+        let m = mid(l);
+        bars.iter().any(|&(top, h, tabs)| {
+            (m > top - 2.2 * h && m < top && m > tabs - 0.6 * l.bounds[3])
+                || (m >= top && m < top + h)
+        })
     };
     let (kept, left): (Vec<Line>, Vec<Line>) = lines.into_iter().partition(|l| !chrome(l));
     if left.len() > 1 {
@@ -2024,6 +2053,19 @@ pub(super) mod tests {
             assert_eq!(got, [("fr", vec![0, 1, 3, 4])]);
             let (pair, lines) = real.held().expect("offered");
             assert_eq!((pair.source, lines), ("it", vec![texts[2].clone()]));
+            // Windows VM: Edge's own card over the page ("Translate page
+            // from French?") made the page unclear, and it waited on it-en
+            let mut edge = page.to_vec();
+            let ru =
+                "Солнечная система включает Солнце и все небесные тела, вращающиеся вокруг него.";
+            edge.extend([ru, "Translate page from French?", "Translate to", "English"]);
+            let texts: Vec<String> = edge.iter().map(|s| s.to_string()).collect();
+            let real = Real::new(lang::AUTO, Via::Offline);
+            real.read(&edge);
+            let routes = real.routes(&texts, "ar").unwrap();
+            let got: Vec<_> = (routes.iter()).map(|(r, _)| r[0].source).collect();
+            assert!(!got.contains(&"it"), "{got:?}");
+            assert_eq!(real.held().expect("offered").0.source, "it");
         }
     }
 
@@ -2624,5 +2666,16 @@ pub(super) mod tests {
         ]);
         assert!(!misread(&french));
         assert!(!misread(&read(&["OK", "1:47 AM"])), "too little to judge");
+        // the address bar stays (Edge, a local file): it anchors the tabs
+        let (keep, _) = words_read(read(&[
+            "File C:/oc/trn/ar.html",
+            "JjLi-AJl clio vol-LOJI",
+            "Translate page from Arabic?",
+        ]));
+        let keep: Vec<&str> = keep.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(
+            keep,
+            ["File C:/oc/trn/ar.html", "Translate page from Arabic?"]
+        );
     }
 }

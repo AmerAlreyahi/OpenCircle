@@ -1396,6 +1396,20 @@ mod real {
                 "{name}: the page's header stays"
             );
         }
+        // Edge on the Windows VM (1024x768, Windows OCR): a local file's
+        // address reads "File C:/...", the tabs sit 1.5 of its heights above
+        let edge = vec![
+            line("file:///C:/oc/docs/article.html", 30.0, 6.0, 200.0, 18.0),
+            line("Système solaire — Wikipédia", 78.0, 72.0, 150.0, 18.0),
+            line("article.html", 276.0, 72.0, 70.0, 18.0),
+            line("Solar system", 574.0, 73.0, 64.0, 16.0),
+            line("File C:/oc/trn/ar.html", 112.0, 111.0, 136.0, 20.0),
+            line("Solar system", 670.0, 190.0, 190.0, 40.0),
+        ];
+        let kept = without_chrome(edge, 768);
+        let kept: Vec<&str> = kept.iter().map(|l| l.text.as_str()).collect();
+        // (the window title behind, an address too, is left as it is anyway)
+        assert_eq!(kept, ["Solar system"], "Edge");
     }
 
     /// Ubuntu, Firefox, PP-OCR (0.1.3 gate): French, English and Arabic
