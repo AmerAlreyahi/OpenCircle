@@ -236,6 +236,7 @@ pub fn kit_look(theme: config::LookTheme) -> Option<&'static crate::ui::kit::loo
         T::Solar => &SOLAR,
         T::Hud => &HUD,
         T::Borealis => &AURORA,
+        T::SapphireGlow => &SAPPHIRE_GLOW,
         T::Custom => return None,
     })
 }

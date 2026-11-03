@@ -78,11 +78,27 @@ pub const PRISM: Look = Look {
     preview: &[hex(0x38bdf8), hex(0xffffff), hex(0xa78bfa)],
 };
 
+/// The owner's own colours as the main look (owner, 2026-11-03): drawn exactly as
+/// a Custom pair is (`Active::Custom`: the Spectrum's alphas).
+pub const SAPPHIRE_GLOW: Look = Look {
+    id: "sapphire_glow",
+    name: "Sapphire Glow",
+    desc: "Sapphire blue to indigo glow round the screen",
+    badge: "Default",
+    kind: Kind::Glow,
+    solid: [hex(0x0a84ff), hex(0x5e5ce6)],
+    glow: [
+        Color::from_rgba8(10, 132, 255, 0.42),
+        Color::from_rgba8(94, 92, 230, 0.26),
+    ],
+    preview: &[hex(0x0a84ff), hex(0x5e5ce6)],
+};
+
 pub const SPECTRUM: Look = Look {
     id: "spectrum",
     name: "Spectrum",
     desc: "Multi-colour rainbow glow",
-    badge: "Default",
+    badge: "Vivid",
     kind: Kind::Glow,
     solid: [hex(0xff6b5e), hex(0x4aa8ff)],
     glow: [
@@ -210,8 +226,17 @@ pub const FROST: Look = Look {
     preview: &[hex(0xe2e8f0), hex(0x64748b)],
 };
 
-/// In the design's order (the Settings cards). Stealth Frost (`FROST`) has
-/// no card (owner, 2026-10-30); a config that has it ("mono") still shows it.
+/// The Settings cards. Stealth Frost (`FROST`, owner 2026-10-30) and Liquid
+/// Prism (`PRISM`, owner 2026-11-03: Sapphire Glow replaces it) have no card; a
+/// config that has them ("mono", "aurora") still shows and uses them.
 pub const LOOKS: [&Look; 9] = [
-    &PRISM, &SPECTRUM, &AURORA, &HORIZON, &SUNSET, &OCEAN, &NEON, &SOLAR, &HUD,
+    &SAPPHIRE_GLOW,
+    &SPECTRUM,
+    &AURORA,
+    &HORIZON,
+    &SUNSET,
+    &OCEAN,
+    &NEON,
+    &SOLAR,
+    &HUD,
 ];

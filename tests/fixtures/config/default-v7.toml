@@ -28,7 +28,7 @@ search_with = "lens"
 text_reader = "auto"
 
 [look]
-theme = "spectrum"
+theme = "sapphire_glow"
 
 [look.custom]
 palette = "spectrum"

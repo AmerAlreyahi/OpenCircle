@@ -543,7 +543,6 @@ pub enum TextReader {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LookTheme {
-    #[default]
     Spectrum,
     /// The thin violet-to-cyan line: the design's Prism (stored as "aurora").
     Aurora,
@@ -560,6 +559,9 @@ pub enum LookTheme {
     Hud,
     /// The design's Aurora Borealis ("aurora" is its Prism).
     Borealis,
+    /// The main look (2026-11-03): the owner's blue-to-indigo glow.
+    #[default]
+    SapphireGlow,
 }
 
 /// The edge / accent colours: a preset palette (its colours live in
@@ -728,7 +730,7 @@ impl LookConfig {
 impl Default for LookConfig {
     fn default() -> Self {
         LookConfig {
-            theme: LookTheme::Spectrum,
+            theme: LookTheme::SapphireGlow,
             custom: PRESETS[0].1,
         }
     }
@@ -1449,7 +1451,7 @@ mod tests {
             "nothing is sent before a choice"
         );
         assert_eq!(d.selection.search_with, SearchWith::Lens);
-        assert_eq!(d.look.theme, LookTheme::Spectrum);
+        assert_eq!(d.look.theme, LookTheme::SapphireGlow);
         let look = d.look.active();
         assert_eq!(look.overlay, edge(EdgeStyle::Glow, 6, true));
         assert_eq!(look.live, edge(EdgeStyle::Glow, 6, true));
@@ -1463,7 +1465,7 @@ mod tests {
         for (theme, _) in PRESETS {
             assert_ne!(theme, LookTheme::Custom);
         }
-        assert_eq!(PRESETS.len(), 11);
+        assert_eq!(PRESETS.len(), 12);
         // a custom look and a selection setting survive a save
         let mut c = Config {
             selection: SelectionConfig {
@@ -2184,8 +2186,15 @@ mod tests {
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
         // (schema 7 moves the old default 1568 px to Original)
-        assert_eq!(c, Config::default());
-        assert_eq!(fs_text(&path), fixture("default-v7.toml"));
+        // (its explicit theme = "spectrum" stays the user's: only a new file gets Sapphire Glow)
+        assert_eq!(c.look.theme, LookTheme::Spectrum);
+        let mut want = Config::default();
+        want.look.theme = LookTheme::Spectrum;
+        assert_eq!(c, want);
+        assert_eq!(
+            fs_text(&path),
+            fixture("default-v7.toml").replace("sapphire_glow", "spectrum")
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2361,6 +2370,33 @@ mod tests {
         assert_eq!(back, c);
     }
 
+    /// Sapphire Glow is the main look (owner, 2026-11-03): the default of a new
+    /// config and of one with no `[look] theme`; Liquid Prism ("aurora") has no
+    /// card but a config that has it still loads it; both round trip.
+    #[test]
+    fn sapphire_glow_is_the_default_and_prism_still_loads() {
+        assert_eq!(LookTheme::default(), LookTheme::SapphireGlow);
+        let (none, w) = Config::parse("version = 4\n");
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(none.look.theme, LookTheme::SapphireGlow);
+        let (prism, w) = Config::parse("version = 4\n[look]\ntheme = \"aurora\"\n");
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(prism.look.theme, LookTheme::Aurora);
+        assert_eq!(prism.look.active().palette, ColourSet::Aurora);
+        for t in [LookTheme::SapphireGlow, LookTheme::Aurora] {
+            let mut c = Config::default();
+            c.look.theme = t;
+            let text = toml::to_string_pretty(&c).unwrap();
+            let (back, w) = Config::parse(&text);
+            assert!(w.is_empty(), "{w:?}");
+            assert_eq!(back.look.theme, t);
+        }
+        let mut c = Config::default();
+        c.look.theme = LookTheme::SapphireGlow;
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert!(text.contains("theme = \"sapphire_glow\""), "{text}");
+    }
+
     /// The design's Aurora Borealis is stored as "borealis", written only when
     /// picked; a value a version doesn't know (as an older one reads
     /// "borealis") falls back to the default look with a warning.
@@ -2376,7 +2412,7 @@ mod tests {
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(back.look.theme, LookTheme::Borealis);
         let (old, w) = Config::parse("version = 4\n[look]\ntheme = \"glimmer\"\n");
-        assert_eq!(old.look.theme, LookTheme::Spectrum);
+        assert_eq!(old.look.theme, LookTheme::SapphireGlow);
         assert_eq!(w.len(), 1, "{w:?}");
     }
 }

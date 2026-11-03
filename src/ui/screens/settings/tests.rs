@@ -1547,7 +1547,7 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
         "Active look screen borders",
         "Spectrum",
         "Cyber Neon",
-        "Liquid Prism",
+        "Sapphire Glow",
         "Custom",
     ] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
@@ -1555,6 +1555,10 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
     assert!(
         !texts.iter().any(|t| t == "Stealth Frost"),
         "no card (owner, 2026-10-30)"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "Liquid Prism"),
+        "no card (owner, 2026-11-03)"
     );
     assert!(
         !texts.iter().any(|t| t == "Edge style"),
@@ -2124,6 +2128,7 @@ fn look_cards_write_the_stored_look_names() {
     s.draft.look.theme = LookTheme::Calm;
     update(&mut s, Message::Section(Section::Appearance));
     let texts = shot::texts(view(&s));
+    assert_eq!(looks::LOOKS[0].id, "sapphire_glow", "the first card");
     for l in looks::LOOKS {
         assert!(texts.iter().any(|t| t == l.name), "{}: {texts:?}", l.name);
     }
@@ -2131,19 +2136,16 @@ fn look_cards_write_the_stored_look_names() {
         let picks = pages::look_picks(s);
         picks.into_iter().find(|(l, _)| *l == id).unwrap().1
     };
-    assert_eq!(
-        of(&s, "prism"),
-        Some(LookTheme::Calm),
-        "the shown card keeps calm"
-    );
     assert!(
-        pages::look_picks(&s).iter().all(|(l, _)| *l != "frost"),
-        "no card"
+        pages::look_picks(&s)
+            .iter()
+            .all(|(l, _)| *l != "frost" && *l != "prism"),
+        "no card for Stealth Frost or Liquid Prism"
     );
     assert_eq!(of(&s, "horizon"), Some(LookTheme::Horizon));
     assert_eq!(of(&s, "aurora"), Some(LookTheme::Borealis));
     s.draft.look.theme = LookTheme::Spectrum;
-    assert_eq!(of(&s, "prism"), Some(LookTheme::Aurora));
+    assert_eq!(of(&s, "sapphire_glow"), Some(LookTheme::SapphireGlow));
     assert_eq!(of(&s, "spectrum"), Some(LookTheme::Spectrum));
 }
 

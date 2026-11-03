@@ -640,7 +640,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn spectrum() -> LookConfig {
-        LookConfig::default()
+        theme(LookTheme::Spectrum)
     }
 
     /// The design look stored as `theme`.
@@ -1052,6 +1052,30 @@ mod tests {
         assert_ne!(a, grey);
         let centre = ((54 * w + 96) * 4) as usize;
         assert_eq!(a[centre..centre + 3], [60, 60, 60], "the middle stays");
+    }
+
+    /// Sapphire Glow draws exactly what the owner's Custom look draws with the
+    /// same two colours and settings (owner, 2026-11-03), in every mode.
+    #[test]
+    fn sapphire_glow_is_pixel_identical_to_the_owners_custom() {
+        let sapphire = theme(LookTheme::SapphireGlow);
+        let mut custom = sapphire.active();
+        custom.palette = ColourSet::TwoColour;
+        custom.colours = [
+            config::Rgb([0x0a, 0x84, 0xff]),
+            config::Rgb([0x5e, 0x5c, 0xe6]),
+        ];
+        let own = own(custom);
+        for mode in [Mode::Overlay, Mode::Live, Mode::Snip] {
+            for breath in [0.0, 0.5, 1.0] {
+                let a = edge(&sapphire, mode, 1920, 1080, 1.0, false, breath);
+                let b = edge(&own, mode, 1920, 1080, 1.0, false, breath);
+                assert_eq!(a.map(|e| e.1), b.map(|e| e.1), "{mode:?} {breath}");
+            }
+        }
+        let l = sapphire.active();
+        assert_eq!((l.glow, l.dim), (100, 12));
+        assert_eq!(image(&sapphire), image(&own));
     }
 
     /// Each kind's edge at 1080p, pixel for pixel (`tests/fixtures/edge-*.png`,
