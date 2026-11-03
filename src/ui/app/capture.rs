@@ -28,8 +28,9 @@ use super::{App, CAPTURE_TIMEOUT, UIA_WINDOWS};
 use crate::ui::platform::monitor::can_hide_windows;
 
 /// How long the grab waits for the screen to redraw without our floating
-/// windows (`App::leave_frame`): a few frames.
-const LEAVE_FRAME: Duration = Duration::from_millis(80);
+/// windows (`App::leave_frame`): GNOME animates a closing window for ~150 ms
+/// (at 80 ms the Ubuntu VM's portal shot still held a fading Steps strip).
+const LEAVE_FRAME: Duration = Duration::from_millis(250);
 
 impl App {
     /// Captures on a thread: a Wayland portal may wait minutes for the user's OK.
@@ -54,81 +55,84 @@ impl App {
         let all = snip.is_none() && matches!(self.next, Purpose::Search);
         // Snip picking an area at once: the overlay gets ready meanwhile (`pre_show`).
         let early = snip.is_some_and(|k| k.picks()) && config::current().snip.delay == 0;
-        let shot = background(move |tx| {
-            // (a closure: its returns end the grab, then `Done`)
-            (|| {
-                let Some(kind) = snip else {
-                    // The monitor the mouse is on first: its overlay opens on it;
-                    // then the others.
-                    // The windows as frozen, listed beside the grab (the overlay
-                    // isn't up yet): the bar's Snip outlines them (`snip_here`).
-                    let mut listing = Some(std::thread::spawn(capture::window_rect::list));
-                    let mut first = true;
-                    capture::mouse_first(all, |frame| {
-                        let grabbed = match (std::mem::take(&mut first), frame) {
-                            (true, frame) => Grabbed::Active(frame.map(|frame| {
-                                let (place, image) = snip::screen_of(frame);
-                                let windows = (listing.take().map(|l| l.join()))
-                                    .and_then(Result::ok)
-                                    .unwrap_or_default();
-                                Shot {
-                                    origin: place.logical_origin(),
-                                    size: place.size(),
-                                    image,
-                                    scale: place.scale,
-                                    snip: None,
-                                    windows: (windows.into_iter())
-                                        .map(|w| {
-                                            let rect = snip::desktop_rect(w.rect);
-                                            snip::Pick::window(rect, &w.title, w.handle)
-                                        })
-                                        .collect(),
+        // (`background` starts its thread at once: made only when the grab may run)
+        let shot = move || {
+            background(move |tx| {
+                // (a closure: its returns end the grab, then `Done`)
+                (|| {
+                    let Some(kind) = snip else {
+                        // The monitor the mouse is on first: its overlay opens on it;
+                        // then the others.
+                        // The windows as frozen, listed beside the grab (the overlay
+                        // isn't up yet): the bar's Snip outlines them (`snip_here`).
+                        let mut listing = Some(std::thread::spawn(capture::window_rect::list));
+                        let mut first = true;
+                        capture::mouse_first(all, |frame| {
+                            let grabbed = match (std::mem::take(&mut first), frame) {
+                                (true, frame) => Grabbed::Active(frame.map(|frame| {
+                                    let (place, image) = snip::screen_of(frame);
+                                    let windows = (listing.take().map(|l| l.join()))
+                                        .and_then(Result::ok)
+                                        .unwrap_or_default();
+                                    Shot {
+                                        origin: place.logical_origin(),
+                                        size: place.size(),
+                                        image,
+                                        scale: place.scale,
+                                        snip: None,
+                                        windows: (windows.into_iter())
+                                            .map(|w| {
+                                                let rect = snip::desktop_rect(w.rect);
+                                                snip::Pick::window(rect, &w.title, w.handle)
+                                            })
+                                            .collect(),
+                                    }
+                                })),
+                                (false, Ok(frame)) => {
+                                    let (place, image) = snip::screen_of(frame);
+                                    Grabbed::Other(place, image)
                                 }
-                            })),
-                            (false, Ok(frame)) => {
-                                let (place, image) = snip::screen_of(frame);
-                                Grabbed::Other(place, image)
-                            }
-                            (false, Err(_)) => return, // (`mouse_first` hands over none)
-                        };
-                        let _ = tx.unbounded_send(grabbed);
-                    });
-                    return;
-                };
-                let chosen = |m: &capture::Monitor| {
-                    if !early {
+                                (false, Err(_)) => return, // (`mouse_first` hands over none)
+                            };
+                            let _ = tx.unbounded_send(grabbed);
+                        });
                         return;
-                    }
-                    let (x, y, w, h) = m.rect;
-                    let place = snip::Place {
-                        origin: (x, y),
-                        px: (w, h),
-                        scale: m.scale,
                     };
-                    let _ = tx.unbounded_send(Grabbed::Chosen(place));
-                };
-                let _ = tx.unbounded_send(Grabbed::Active(Self::snip_shot(kind, chosen)));
-            })();
-            let _ = tx.unbounded_send(Grabbed::Done);
-        })
-        .map(move |grabbed| match grabbed {
-            Grabbed::Active(shot) => Message::Captured(n, at, shot),
-            Grabbed::Other(place, image) => Message::Screen(n, place, image),
-            Grabbed::Chosen(place) => Message::Chosen(n, place),
-            Grabbed::Done => Message::Grabbed(n),
-        });
+                    let chosen = |m: &capture::Monitor| {
+                        if !early {
+                            return;
+                        }
+                        let (x, y, w, h) = m.rect;
+                        let place = snip::Place {
+                            origin: (x, y),
+                            px: (w, h),
+                            scale: m.scale,
+                        };
+                        let _ = tx.unbounded_send(Grabbed::Chosen(place));
+                    };
+                    let _ = tx.unbounded_send(Grabbed::Active(Self::snip_shot(kind, chosen)));
+                })();
+                let _ = tx.unbounded_send(Grabbed::Done);
+            })
+            .map(move |grabbed| match grabbed {
+                Grabbed::Active(shot) => Message::Captured(n, at, shot),
+                Grabbed::Other(place, image) => Message::Screen(n, place, image),
+                Grabbed::Chosen(place) => Message::Chosen(n, place),
+                Grabbed::Done => Message::Grabbed(n),
+            })
+        };
         // our floating windows leave the frame first (Linux), the screen redraws
         let shot = match self.leave_frame(n) {
-            Some(out) => out
-                .chain(
-                    background(|tx| {
-                        std::thread::sleep(LEAVE_FRAME);
-                        let _ = tx.unbounded_send(());
-                    })
-                    .discard(),
-                )
-                .chain(shot),
-            None => shot,
+            Some(out) => {
+                let mut shot = Some(shot);
+                let redrawn = background(|tx| {
+                    std::thread::sleep(LEAVE_FRAME);
+                    let _ = tx.unbounded_send(());
+                });
+                (out.discard().chain(redrawn))
+                    .then(move |()| shot.take().map_or_else(Task::none, |shot| shot()))
+            }
+            None => shot(),
         };
         Task::batch([shot, timeout])
     }

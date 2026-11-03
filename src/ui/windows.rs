@@ -998,6 +998,10 @@ impl Windows {
         }))
         .chain(hide)
         .collect();
+        crate::log!(
+            "[opencircle] {} floating windows out of the grab",
+            tasks.len()
+        );
         self.out = Some(out);
         Some(Task::batch(tasks))
     }
@@ -1019,6 +1023,7 @@ impl Windows {
         let Some(out) = self.out.take() else {
             return Task::none();
         };
+        crate::log!("[opencircle] floating windows back");
         let mut tasks: Vec<Task<Msg>> = (out.hidden.into_iter())
             .map(|id| window::set_mode(id, window::Mode::Windowed))
             .collect();
