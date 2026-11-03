@@ -111,7 +111,11 @@ pub fn holed(w: u32, h: u32, hole: Px, keep: &[Px]) -> Vec<Px> {
 pub fn hole(handle: RawWindowHandle, hole: Px, keep: &[Px]) -> Result<(), String> {
     match handle {
         #[cfg(windows)]
-        RawWindowHandle::Win32(h) => win::rects(h.hwnd.get(), |w, h| holed(w, h, hole, keep)),
+        RawWindowHandle::Win32(h) => win::rects(h.hwnd.get(), |w, h| {
+            // the owner's Windows 11 PC showed the area blurred (2026-11-03): the cut vs the window
+            crate::log!("[opencircle] window hole: window {w}x{h}, hole {hole:?}, kept {keep:?}");
+            holed(w, h, hole, keep)
+        }),
         #[cfg(target_os = "linux")]
         RawWindowHandle::Xlib(h) => x11::rects(h.window as u32, |w, h| holed(w, h, hole, keep)),
         #[cfg(target_os = "linux")]
