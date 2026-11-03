@@ -27,6 +27,9 @@ const PAD: f32 = 8.0;
 /// Button cells (one width per kind, consistency rule) and the drag grip.
 const CHIP_WIDTH: f32 = 76.0;
 const GRIP_WIDTH: f32 = grip::SIZE.width;
+/// What opens above the controls (the picker's list, the question): as wide
+/// as the controls without the grip.
+const LIST_WIDTH: f32 = picker::WIDTH + 3.0 * CHIP_WIDTH + 3.0 * SPACING;
 /// The minimised controller.
 const DOT: f32 = 28.0;
 /// The download question under the controls: two lines, then the buttons.
@@ -148,7 +151,7 @@ impl Controller {
         let pad = 2.0 * PAD;
         let mut below = match (&self.ask, self.picker.is_open()) {
             (Some(_), _) => ASK_HEIGHT,
-            (None, true) => picker::LIST_HEIGHT,
+            (None, true) => self.picker.list_height(LIST_WIDTH),
             (None, false) => 0.0,
         };
         if self.notice.is_some() {
@@ -176,7 +179,7 @@ impl Controller {
         // The window grows upward from the controls (it sits at the bottom of
         // the screen), so what opens goes above them.
         let mut body = column![].spacing(SPACING);
-        let width = self.size().width - 2.0 * PAD - GRIP_WIDTH - SPACING;
+        let width = LIST_WIDTH;
         let indent = |e: Element<'a, Msg>| {
             container(e).padding(iced::Padding::ZERO.left(GRIP_WIDTH + SPACING))
         };

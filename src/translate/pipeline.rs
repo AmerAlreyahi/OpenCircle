@@ -181,6 +181,19 @@ impl Real {
     /// `texts` into `target` with the on-device model(s): through English
     /// when there is no direct one.
     fn on_device(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
+        self.on_device_with(texts, target, |t, pair| {
+            mt::translate(t, pair).map_err(|e| AiError::Offline(e.to_string()))
+        })
+    }
+
+    /// `on_device` with `run` = one model over some texts (the helper in the
+    /// app; in process in the real-page tests).
+    pub(super) fn on_device_with(
+        &self,
+        texts: &[String],
+        target: &str,
+        run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
+    ) -> Result<Vec<String>, AiError> {
         let routes = self.routes(texts, target)?;
         let mut pairs = routes.iter().flat_map(|(r, _)| r);
         if let Some(pair) = pairs.find(|p| p.missing_bytes() > 0) {
@@ -196,19 +209,178 @@ impl Real {
         let mut out = texts.to_vec();
         for (route, idx) in routes {
             let part: Vec<String> = idx.iter().map(|&i| texts[i].clone()).collect();
-            let part = by_sentence(&part, |t| {
-                let mut t = t.to_vec();
-                for pair in &route {
-                    t = mt::translate(&t, pair).map_err(|e| AiError::Offline(e.to_string()))?;
-                }
-                Ok(t)
-            })?;
+            let part = by_sentence(&part, |src| hops(src, &route, target, &run))?;
             for (i, t) in idx.into_iter().zip(part) {
                 out[i] = t;
             }
         }
         Ok(out)
     }
+}
+
+/// `src` (sentences) through the models of `route` in turn. Through
+/// English, a phrase the first model gave back unchanged ("40 langues",
+/// "Pothos, Epipremnum", noise) never goes on to the next, which makes
+/// something up from words it doesn't know ("40 langues" -> "إيان غوس 40"); a
+/// single plain word may be English already ("Text", "Chat": German and
+/// French write them so) and goes on. An output that is the source again or
+/// made up (`made_up`) keeps the original.
+fn hops(
+    src: &[String],
+    route: &[&'static mt::Pair],
+    target: &str,
+    run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
+) -> Result<Vec<String>, AiError> {
+    let mut t = src.to_vec();
+    let mut on: Vec<usize> = (0..t.len()).collect();
+    for pair in route {
+        let sent: Vec<String> = on.iter().map(|&i| t[i].clone()).collect();
+        if sent.is_empty() {
+            break;
+        }
+        for (&i, r) in on.iter().zip(run(&sent, pair)?) {
+            t[i] = r;
+        }
+        let one_word = |s: &str| s.split_whitespace().count() == 1 && s.is_ascii();
+        on.retain(|&i| !echo(&src[i], &t[i]) || one_word(&src[i]));
+    }
+    for (s, t) in src.iter().zip(&mut t) {
+        if echo(s, t) || made_up(s, t, target) {
+            *t = s.clone();
+        }
+    }
+    Ok(t)
+}
+
+/// Windows OCR (the user's Windows language, Latin) shown a page in another
+/// script (Arabic) reads it as noise: "d-l.-lss '4.3.1>-0-11 a-LI.>I-LII".
+/// True when under 60 % of what it read (of 10 tokens or more) are words:
+/// letters only (an apostrophe or hyphen inside), lower case, Title or CAPS.
+/// Measured on 7 real pages (Edge, Win10 VM): French, German, Spanish,
+/// English pages 0.84-0.97; the Arabic Wikipedia page 0.32.
+pub(super) fn misread(lines: &[TextBlock]) -> bool {
+    let (tokens, words) = word_count(lines);
+    tokens >= 10 && words * 10 < tokens * 6
+}
+
+/// Tokens (of 2+ letters or digits) in `lines`, and how many are words.
+fn word_count(lines: &[TextBlock]) -> (usize, usize) {
+    let word = |t: &str| {
+        let t = t.trim_matches(|c: char| "([{\"'«».,:;!?)]}".contains(c));
+        let parts: Vec<&str> = t.split(['\'', '’', '-']).collect();
+        let letters: String = parts.concat();
+        parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(char::is_alphabetic))
+            && (letters.chars().all(char::is_lowercase)
+                || letters.chars().all(char::is_uppercase)
+                || letters.chars().skip(1).all(char::is_lowercase))
+    };
+    let tokens: Vec<&str> = (lines.iter())
+        .flat_map(|l| l.text.split_whitespace())
+        .filter(|w| w.chars().filter(|c| c.is_alphanumeric()).count() >= 2)
+        .collect();
+    (tokens.len(), tokens.iter().filter(|t| word(t)).count())
+}
+
+/// Of a `misread` page, the lines read as words (most of their tokens), and
+/// their boxes: the second reader leaves them alone.
+pub(super) fn words_read(lines: Vec<TextBlock>) -> (Vec<TextBlock>, Vec<[f32; 4]>) {
+    let keep: Vec<TextBlock> = (lines.into_iter())
+        .filter(|l| {
+            let (t, w) = word_count(std::slice::from_ref(l));
+            t > 0 && w * 10 >= t * 8
+        })
+        .collect();
+    let known = keep.iter().map(|l| l.bounds).collect();
+    (keep, known)
+}
+
+/// Two reads of one page as one, in reading order: by rows (8 px bands of
+/// the line's middle), left to right in a row.
+// ponytail: fixed bands; a line straddling two may sort a row early.
+pub(super) fn merged(mut a: Vec<TextBlock>, b: Vec<TextBlock>) -> Vec<TextBlock> {
+    a.extend(b);
+    let key = |l: &TextBlock| {
+        (
+            ((l.bounds[1] + l.bounds[3] / 2.0) / 8.0) as i32,
+            l.bounds[0],
+        )
+    };
+    a.sort_by(|p, q| {
+        let ((pr, px), (qr, qx)) = (key(p), key(q));
+        pr.cmp(&qr).then(px.total_cmp(&qx))
+    });
+    a
+}
+
+/// `out` is `src` again (case, spaces and punctuation aside).
+fn echo(src: &str, out: &str) -> bool {
+    let key = |s: &str| -> String {
+        (s.chars().filter(|c| c.is_alphanumeric()))
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    key(src) == key(out)
+}
+
+/// An offline output that isn't a translation of `src` (Marian makes things
+/// up from what it can't read): a loop ("- - - - -", "Ül-jjjjjjjjj"), far
+/// longer than the source, a short label grown into a sentence, a number
+/// lost or made up, letters of another script than the target's.
+fn made_up(src: &str, out: &str, target: &str) -> bool {
+    let words = |s: &str| s.split_whitespace().count();
+    let repeats = |s: &str| {
+        let chars: Vec<char> = s.chars().filter(|c| !c.is_whitespace()).collect();
+        let tokens: Vec<&str> = s.split_whitespace().collect();
+        let run = |n: usize, same: &dyn Fn(usize) -> bool| {
+            (1..n).fold((1, 1), |(best, cur), i| {
+                let cur = if same(i) { cur + 1 } else { 1 };
+                (best.max(cur), cur)
+            })
+        };
+        let (c, _) = run(chars.len(), &|i| chars[i] == chars[i - 1]);
+        let (t, _) = run(tokens.len(), &|i| tokens[i] == tokens[i - 1]);
+        (c, t)
+    };
+    let ((sc, st), (oc, ot)) = (repeats(src), repeats(out));
+    let looped = (oc >= 6 && oc > sc + 2) || (ot >= 4 && ot > st + 1);
+    let (sn, on) = (src.chars().count(), out.chars().count());
+    let long = on > 3 * sn + 15 || (words(src) <= 3 && words(out) > 2 * words(src) + 2);
+    // numbers: Arabic-Indic digits are the same numbers
+    let digits = |s: &str| -> String {
+        s.chars()
+            .map(|c| match c {
+                '\u{0660}'..='\u{0669}' => char::from(b'0' + (c as u32 - 0x0660) as u8),
+                '\u{06F0}'..='\u{06F9}' => char::from(b'0' + (c as u32 - 0x06F0) as u8),
+                c if c.is_ascii_digit() => c,
+                _ => ' ',
+            })
+            .collect()
+    };
+    let (sd, od) = (digits(src), digits(out));
+    // a number of its own ("40", "1:47", "(1894)"), not digits in a word
+    // OCR mangled ("tech07" for "techo")
+    let numbers = (src.split_whitespace())
+        .filter(|w| !w.chars().any(char::is_alphabetic))
+        .flat_map(|w| {
+            digits(w)
+                .split_whitespace()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        });
+    let number_lost = numbers.into_iter().any(|n| !od.contains(&n));
+    let number_new = od.split_whitespace().any(|n| !sd.contains(n));
+    let script = lang::find(target).map_or(Script::Latin, |l| l.script);
+    let letters: Vec<char> = out.chars().filter(|c| c.is_alphabetic()).collect();
+    let foreign = match script {
+        // into a Latin language: no letters of a script the source didn't have
+        Script::Latin => letters
+            .iter()
+            .any(|c| !Script::Latin.has(*c) && !src.contains(*c)),
+        s => letters.iter().filter(|c| s.has(**c)).count() * 2 < letters.len(),
+    };
+    looped || long || number_lost || number_new || foreign
 }
 
 /// Windows OCR reads the text (#62: a screen in ~0.1-0.3 s, in this
@@ -233,6 +405,20 @@ impl Deps for Real {
                 .last()
                 .unwrap_or(&1);
             match ocr::system::recognize(rgba, width, height, k) {
+                Ok(lines) if self.source == lang::AUTO && misread(&lines) => {
+                    // another script: what it read as words stays (the
+                    // address bar, Latin UI), the rest is read again in the
+                    // script that suits it (main mode's second reader)
+                    crate::log!("[opencircle] Windows OCR read no words: the second reader reads");
+                    let (keep, known) = words_read(lines);
+                    match ocr::recognize_except(rgba, width, height, &known) {
+                        Ok(other) if !other.is_empty() => return Ok(merged(keep, other)),
+                        Ok(_) => crate::log!("[opencircle] no other script read; PP-OCR reads"),
+                        Err(e) => {
+                            crate::log!("[opencircle] second reader failed ({e}); PP-OCR reads")
+                        }
+                    }
+                }
                 Ok(lines) => return Ok(lines),
                 Err(e) => crate::log!("[opencircle] Windows OCR failed ({e}); PP-OCR reads"),
             }
@@ -628,20 +814,35 @@ pub(super) fn translations(blocks: &[Block], tr: &[String]) -> Vec<Translation> 
 }
 
 /// One translation per block ("" = keep the original): cache first, then
-/// ONE call for the rest (each distinct text once, in reading order).
+/// ONE call for the rest (each distinct text once, in reading order). A
+/// block of short items ("[ modifier | modifier le code ]", [`items`]) is
+/// translated item by item and put back together with its brackets and
+/// bars, so each link label reads the same wherever it shows.
 pub(super) fn translate_blocks(
     blocks: &[Block],
     target: &str,
     cache: &Cache,
     deps: &impl Deps,
 ) -> Result<Vec<String>, AiError> {
-    let keys: Vec<Option<String>> = blocks
-        .iter()
-        .map(|b| needs_translation(&b.text, target).then(|| normalise(&b.text)))
+    let latin = matches!(
+        lang::find(target).map(|l| l.script),
+        Some(Script::Latin) | None
+    );
+    // per block: its pieces, each (text, Some(what is sent) | None = kept)
+    let pieces: Vec<Vec<(String, Option<String>)>> = (blocks.iter())
+        .map(|b| match needs_translation(&b.text, target) {
+            false => Vec::new(),
+            true => (items(&normalise(&b.text)).into_iter())
+                .map(|(p, text)| {
+                    let key = (text && needs_translation(&p, target)).then(|| sent(&p));
+                    (p, key)
+                })
+                .collect(),
+        })
         .collect();
     let mut found: HashMap<&str, String> = HashMap::new();
     let mut todo: Vec<String> = Vec::new();
-    for k in keys.iter().flatten() {
+    for k in pieces.iter().flatten().filter_map(|(_, k)| k.as_ref()) {
         if found.contains_key(k.as_str()) || todo.contains(k) {
             continue;
         }
@@ -663,7 +864,7 @@ pub(super) fn translate_blocks(
         }
         for (k, t) in todo.iter().zip(out) {
             // the model echoing the source (a name, noise) = nothing to redraw
-            let t = if normalise(&unmarked(&t)) == *k {
+            let t = if normalise(&unmarked(&t)).to_lowercase() == k.to_lowercase() {
                 String::new()
             } else {
                 t
@@ -672,29 +873,154 @@ pub(super) fn translate_blocks(
             found.insert(k, t);
         }
     }
-    Ok(keys
+    Ok(pieces
         .iter()
-        .map(|k| {
-            k.as_ref()
-                .map(|k| found[k.as_str()].clone())
-                .unwrap_or_default()
+        .map(|p| {
+            let mut any = false;
+            let whole: String = (p.iter())
+                .map(|(text, k)| match k.as_ref().map(|k| &found[k.as_str()]) {
+                    Some(t) if !t.is_empty() => {
+                        any = true;
+                        // sent capitalised (`sent`): back to its own case
+                        match latin && text.starts_with(char::is_lowercase) {
+                            true => lower_first(t),
+                            false => t.clone(),
+                        }
+                    }
+                    _ => text.clone(),
+                })
+                .collect();
+            if any { whole } else { String::new() }
         })
         .collect())
 }
 
+/// What is sent for a piece: a short label in lower case ("modifier", a
+/// link) as a label starts ("Modifier"): alone, MT reads a lower-case word
+/// as a fragment ("modifier" -> "amend", "Modifier" -> "Edit").
+fn sent(piece: &str) -> String {
+    match piece.split(' ').count() <= 3 && piece.starts_with(char::is_lowercase) {
+        true => upper_first(piece),
+        false => piece.to_string(),
+    }
+}
+
+fn upper_first(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
+}
+
+fn lower_first(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_lowercase().chain(c).collect())
+        .unwrap_or_default()
+}
+
+/// A line of short items: `[`, `]` and `|` (with their spaces) cut it into
+/// pieces, (piece, true) for text and (piece, false) for the cuts, in order;
+/// joined they are the line. OCR reads a bar between two link labels as a
+/// capital "I" ("[ modifier I modifier le code ]"): inside brackets a lone
+/// "I" or "l" is that bar. A line without a bar, or with a longer piece
+/// (more than 5 words: a paragraph with citations), is one piece.
+fn items(text: &str) -> Vec<(String, bool)> {
+    if !text.contains(['[', ']', '|']) {
+        return vec![(text.to_string(), true)];
+    }
+    // the bars OCR read as letters, inside brackets only (English "I" stays)
+    let mut depth = 0;
+    let words: Vec<&str> = (text.split(' '))
+        .map(|w| {
+            let bar = depth > 0 && matches!(w, "I" | "l");
+            depth += w.matches('[').count() as i32 - w.matches(']').count() as i32;
+            if bar { "|" } else { w }
+        })
+        .collect();
+    let text = words.join(" ");
+    // only a row of short items: a paragraph's citations ("planets.[12]")
+    // keep its sentences whole
+    let short = (text.split(['[', ']', '|'])).all(|p| p.split_whitespace().count() <= 5);
+    if !text.contains('|') || !short {
+        return vec![(text, true)];
+    }
+    let mut out: Vec<(String, bool)> = Vec::new();
+    let cut = |out: &mut Vec<(String, bool)>, c: &str| match out.last_mut() {
+        Some((p, false)) => p.push_str(c),
+        _ if !c.is_empty() => out.push((c.to_string(), false)),
+        _ => {}
+    };
+    let mut rest = text.as_str();
+    loop {
+        let k = rest.find(['[', ']', '|']).unwrap_or(rest.len());
+        let seg = &rest[..k];
+        let body = seg.trim();
+        if body.is_empty() {
+            cut(&mut out, seg);
+        } else {
+            let lead = seg.len() - seg.trim_start().len();
+            cut(&mut out, &seg[..lead]);
+            out.push((body.to_string(), true));
+            cut(&mut out, &seg[lead + body.len()..]);
+        }
+        if k == rest.len() {
+            return out;
+        }
+        cut(&mut out, &rest[k..k + 1]);
+        rest = &rest[k + 1..];
+    }
+}
+
 /// False for numbers/punctuation only, for lone Latin letters (an icon read
-/// as "X" or "C": no word, and MT makes "tenth" of it), and for text already
-/// in the target's script (Latin targets can't be told from English: the
-/// model decides).
+/// as "X" or "C": no word, and MT makes "tenth" of it), for addresses and
+/// code (`code_like`: a browser's address bar, a file name, an e-mail: left
+/// exactly as they are), and for text already in the target's script (Latin
+/// targets can't be told from English: the model decides).
 fn needs_translation(text: &str, target: &str) -> bool {
     let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
     let word =
         (text.split(|c: char| !c.is_alphabetic())).any(|w| w.chars().count() > 1 || !w.is_ascii());
+    let in_code: usize = (text.split_whitespace())
+        .filter(|w| code_like(w))
+        .map(|w| w.chars().filter(|c| c.is_alphabetic()).count())
+        .sum();
     match lang::find(target).map(|l| l.script) {
-        _ if !word => false,
+        _ if !word || in_code * 5 >= letters.len() * 4 => false,
         Some(Script::Latin) | None => true,
         Some(script) => letters.iter().filter(|c| script.has(**c)).count() * 2 < letters.len(),
     }
+}
+
+/// A web address, a path, an e-mail address, a file name or an identifier:
+/// "fr.wikipedia.org/wiki/Plante_d%27intérieur", "C:\Users", "a@b.org",
+/// "photo.jpg", "snake_case". Not a word with a full stop ("etc.", "U.S.",
+/// "e.g.") or a percentage ("50%").
+pub(crate) fn code_like(word: &str) -> bool {
+    let w = word.trim_matches(|c: char| "()[]<>\"'«»“”,;".contains(c));
+    let w = w.trim_end_matches(['.', ':', '!', '?']);
+    let n = w.chars().count();
+    if n < 4 {
+        return false;
+    }
+    let inner = &w[w.chars().next().map_or(0, char::len_utf8)..];
+    let inner = inner.strip_suffix(|_: char| true).unwrap_or(inner);
+    let domain = || {
+        let parts: Vec<&str> = w.split('.').collect();
+        let (first, last) = (parts[0], parts[parts.len() - 1]);
+        parts.len() > 1
+            && parts.iter().all(|p| !p.is_empty())
+            && first.chars().count() >= 2
+            && (2..=5).contains(&last.len())
+            && last
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    };
+    w.contains("://")
+        || w.starts_with("www.")
+        || (w.contains('@') && w.contains('.'))
+        || inner.contains(['/', '\\', '_', '%', '=', '#'])
+        || domain()
 }
 
 fn normalise(text: &str) -> String {
@@ -1338,5 +1664,223 @@ pub(super) mod tests {
                 .all(|b| !b.original.starts_with("Press"))
         );
         crate::log!("PNGs in {}", dir.display());
+    }
+
+    fn blocks_of(texts: &[&str]) -> Vec<Block> {
+        (texts.iter().enumerate())
+            .map(|(i, t)| {
+                let l = Line {
+                    bounds: [10.0, 40.0 * i as f32, 300.0, 20.0],
+                    text: t.to_string(),
+                };
+                Block {
+                    text: l.text.clone(),
+                    bounds: l.bounds,
+                    lines: vec![l],
+                }
+            })
+            .collect()
+    }
+
+    /// The owner's take (French Wikipedia -> en/de/ar/es): the address bar
+    /// came out as "en.wikipedia.org/wiki/Plante_d%27inside". Addresses,
+    /// paths, e-mail addresses, file names and identifiers are left exactly
+    /// as they are; a sentence that mentions one is still translated.
+    #[test]
+    fn addresses_and_code_are_never_translated() {
+        for code in [
+            "https://fr.wikipedia.org/wiki/Plante_d%27intérieur",
+            "fr.wikipedia.org/wiki/Plante_d%27intérieur",
+            "ar.wikipedia.org",
+            "www.example.com",
+            "jean.dupont@exemple.fr",
+            "C:\\Users\\test\\Documents",
+            "rapport_final.pdf",
+            "photo.jpg",
+            "translate_lines",
+            "?q=plante&lang=fr",
+        ] {
+            assert!(code_like(code), "{code}");
+            for target in ["en", "ar", "de"] {
+                assert!(!needs_translation(code, target), "{code} -> {target}");
+            }
+        }
+        for word in [
+            "etc.",
+            "U.S.",
+            "e.g.",
+            "50%",
+            "d'intérieur",
+            "Wikipédia",
+            "1.5",
+        ] {
+            assert!(!code_like(word), "{word}");
+        }
+        let mention = "Voir la page fr.wikipedia.org pour la liste complète des plantes";
+        assert!(needs_translation(mention, "en"));
+        // the fake translates everything it gets: the address never reaches it
+        let fake = Fake::new(|_, _, _| Vec::new());
+        let blocks = blocks_of(&["https://fr.wikipedia.org/wiki/Plante_d%27intérieur", "Lire"]);
+        let tr = translate_blocks(&blocks, "en", &Cache::new(8), &fake).unwrap();
+        assert_eq!(tr[0], "", "left as it was, not redrawn");
+        assert_eq!(*fake.ai_calls.borrow(), [vec!["Lire".to_string()]]);
+    }
+
+    /// "[modifier | modifier le code]" came out as "[amend | modifier le
+    /// code]" (OCR reads the bar as "I": one sentence to MT). Each item is
+    /// translated alone and put back between its brackets and bars, a
+    /// lower-case label as a label ("Modifier"), so the same label reads the
+    /// same everywhere: the tab "Modifier" and the link "modifier".
+    #[test]
+    fn link_items_are_translated_one_by_one() {
+        let s = |p: &str, t: bool| (p.to_string(), t);
+        assert_eq!(
+            items("Culture [ modifier I modifier le code]"),
+            [
+                s("Culture", true),
+                s(" [ ", false),
+                s("modifier", true),
+                s(" | ", false),
+                s("modifier le code", true),
+                s("]", false),
+            ]
+        );
+        assert_eq!(items("I think so").len(), 1, "no brackets: English I stays");
+        let mut fake = Fake::new(|_, _, _| Vec::new());
+        fake.answer = |s| match s {
+            "Modifier" => "Edit".into(),
+            "Modifier le code" => "Edit code".into(),
+            "Culture" => "Culture".into(),
+            "Lire" => "Read".into(),
+            other => format!("?{other}?"),
+        };
+        let blocks = blocks_of(&[
+            "Culture [ modifier I modifier le code]",
+            "Lumière [ modifier | modifier le code ]",
+            "Modifier",
+            "Lire",
+        ]);
+        let tr = translate_blocks(&blocks, "en", &Cache::new(64), &fake).unwrap();
+        assert_eq!(tr[0], "Culture [ edit | edit code]");
+        assert_eq!(tr[1], "?Lumière? [ edit | edit code ]");
+        assert_eq!((tr[2].as_str(), tr[3].as_str()), ("Edit", "Read"));
+        // each label once, as a label
+        let sent: Vec<String> = fake.ai_calls.borrow().concat();
+        assert_eq!(
+            sent,
+            ["Culture", "Modifier", "Modifier le code", "Lumière", "Lire"]
+        );
+        // into Arabic the case doesn't matter; the bars and brackets stay
+        fake.answer = |s| format!("ع{}", s.chars().count());
+        let tr = translate_blocks(&blocks[..1], "ar", &Cache::new(64), &fake).unwrap();
+        assert_eq!(tr[0], "ع7 [ ع8 | ع16]");
+    }
+
+    /// Through English (French -> Arabic): a label the first model gives
+    /// back unchanged ("40 langues") never goes on to English -> Arabic,
+    /// which made a name of it ("إيان غوس 40"); one plain word may be English
+    /// already ("Text"); an output that isn't a translation keeps the original.
+    #[test]
+    fn a_pivot_never_makes_up_a_translation() {
+        let route = mt::route("fr", "ar").unwrap();
+        assert_eq!(route.len(), 2, "French -> Arabic goes through English");
+        let calls = RefCell::new(Vec::new());
+        let run = |t: &[String], p: &'static mt::Pair| {
+            calls.borrow_mut().push((p.target, t.to_vec()));
+            Ok(t.iter()
+                .map(|s| match (p.target, s.as_str()) {
+                    ("en", "Plante d'intérieur") => "Interior plant".into(),
+                    ("en", "Sommaire") => "Contents".into(),
+                    ("en", other) => other.into(),
+                    ("ar", "Interior plant") => "نبتة داخلية".into(),
+                    ("ar", "Contents") => "المحتويات المحتويات المحتويات المحتويات".into(),
+                    ("ar", "Text") => "نص".into(),
+                    ("ar", _) => "إيان غوس 40".into(),
+                    _ => unreachable!(),
+                })
+                .collect())
+        };
+        let src: Vec<String> = [
+            "Plante d'intérieur",
+            "40 langues",
+            "Lumiere",
+            "Sommaire",
+            "Text",
+        ]
+        .map(String::from)
+        .into();
+        let out = hops(&src, &route, "ar", run).unwrap();
+        assert_eq!(
+            out,
+            ["نبتة داخلية", "40 langues", "Lumiere", "Sommaire", "نص"]
+        );
+        let second = &calls.borrow()[1];
+        assert_eq!(
+            second.1,
+            ["Interior plant", "Lumiere", "Contents", "Text"],
+            "a phrase given back unchanged stops after English, one plain word goes on"
+        );
+    }
+
+    #[test]
+    fn made_up_outputs_are_told_apart() {
+        // offline outputs on the matrix pages before this check
+        assert!(made_up("- .Jj.i.o Ü14j X", &"- ".repeat(30), "en"));
+        let looped = format!("Ül-{}", "j".repeat(40));
+        assert!(made_up("Ül-jß.o 'po ü4.JJj-A.Jl", &looped, "en"));
+        assert!(made_up("40 langues", "إيان غوس 40 عام 1990", "ar"));
+        assert!(made_up("40 langues", "أربعون لغة", "ar"), "a number lost");
+        assert!(
+            made_up("Standard", "Standard", "ar"),
+            "not in Arabic letters"
+        );
+        assert!(made_up("Sommaire", "目次", "en"), "another script");
+        // good ones
+        assert!(!made_up("40 langues", "40 لغة", "ar"));
+        assert!(!made_up("1:47 AM", "1: 47 صباحاً", "ar"));
+        assert!(!made_up(
+            "(novembre 2020)",
+            "(تشرين الثاني/نوفمبر ٢٠٢٠)",
+            "ar"
+        ));
+        assert!(!made_up("Plante d'intérieur", "Planta de interior", "es"));
+        let caption = "Aquarelle de Carl Larsson (1894)";
+        assert!(!made_up(caption, "لون الماء لكارل لارسون (1894)", "ar"));
+        assert!(echo("40 langues •v", "40 Langues v"));
+        // digits in a word OCR mangled are no number (es-ar on the matrix)
+        let src = "cultivada en lugares bajo tech07 como casas u oficinas.";
+        assert!(!made_up(
+            src,
+            "مزروعة في أماكن منخفضة التقنية مثل المنازل أو المكاتب.",
+            "ar"
+        ));
+    }
+
+    /// Windows OCR (English) on the Arabic Wikipedia page read noise: nothing
+    /// was translated into German, garbage into English. Such a read goes
+    /// to PP-OCR.
+    #[test]
+    fn a_page_windows_ocr_cannot_read_is_read_again() {
+        let read = |t: &[&str]| -> Vec<TextBlock> {
+            t.iter().map(|t| tb(t, [0.0, 0.0, 10.0, 10.0])).collect()
+        };
+        // lines of the real Windows OCR read (Win10 VM, Edge)
+        let arabic = read(&[
+            "d-l.-lss '4.3.1>-0-11 a-LI.>I-LII",
+            "JjLi-AJl clio vol-LOJI",
+            "axlj-i-o-ll üL.iLLLll",
+            "Q! j ÜIju-6 öJlzll Q-ISLOJI ülju-i-ll p JS-üujs",
+            "Qllj! 44-1>-0-11 ül-il-ü-ll ü.K.Aij -Lö I-OS",
+            "Oil Iii",
+        ]);
+        assert!(misread(&arabic));
+        let french = read(&[
+            "Les plantes d'intérieur ou plantes d'appartement sont des plantes cultivées",
+            "Faire un don Créer un compte Se connecter",
+            "https://fr.wikipedia.org/wiki/Plante_d%27intérieur",
+            "Culture [ modifier I modifier le code]",
+        ]);
+        assert!(!misread(&french));
+        assert!(!misread(&read(&["OK", "1:47 AM"])), "too little to judge");
     }
 }

@@ -30,12 +30,16 @@ const SEARCH_H: f32 = 32.0;
 /// Choices the open list shows (two columns), after filtering.
 const SHOWN: usize = 8;
 const COLUMNS: usize = 2;
-/// The line explaining the "AI" badge (`AI_ONLY`: 12 px on a 1.5 line).
-const NOTE_H: f32 = 18.0;
+/// One line of the note explaining the "AI" badge (`AI_ONLY`: 12 px on a
+/// 1.5 line), and the list width it surely fits on one line in (Inter: 487 px
+/// of ink, test `the_ai_note_fits_inside_the_list`; Segoe UI runs wider);
+/// narrower (the translate pill, the live controller) it wraps to two.
+const NOTE_LINE: f32 = 18.0;
+const NOTE_ONE_LINE: f32 = 520.0;
 /// What the open list adds under the chips: the search field, the rows and
-/// the badge's line (kept while it is empty: the list never jumps).
+/// a gap; offline also the badge's note (`Picker::list_height`).
 pub const LIST_HEIGHT: f32 =
-    SPACING + SEARCH_H + (SHOWN / COLUMNS) as f32 * (CHIP_HEIGHT + SPACING) + NOTE_H + SPACING;
+    SPACING + SEARCH_H + (SHOWN / COLUMNS) as f32 * (CHIP_HEIGHT + SPACING) + SPACING;
 /// The search field's widget id.
 const SEARCH: &str = "language-search";
 
@@ -81,6 +85,13 @@ impl Picker {
             open: None,
             query: String::new(),
         }
+    }
+
+    /// What the open list adds under the chips: offline with room for the
+    /// badge's note (kept while it is empty: the list never jumps while
+    /// typing); with AI nothing is marked.
+    pub fn list_height(&self, width: f32) -> f32 {
+        LIST_HEIGHT + if self.offline { note_h(width) } else { 0.0 }
     }
 
     pub fn is_open(&self) -> bool {
@@ -251,8 +262,16 @@ impl Picker {
             .push(note)
             .spacing(SPACING)
             .width(width)
-            .height(Length::Fixed(LIST_HEIGHT - SPACING));
+            .height(Length::Fixed(self.list_height(width) - SPACING));
         Some(list.into())
+    }
+}
+
+/// The note's height in a list `width` wide (one line or two).
+fn note_h(width: f32) -> f32 {
+    match width >= NOTE_ONE_LINE {
+        true => NOTE_LINE,
+        false => 2.0 * NOTE_LINE,
     }
 }
 
@@ -320,6 +339,58 @@ mod tests {
         p.update(Msg::Open(Side::Source));
         p.update(Msg::Open(Side::Source));
         assert!(!p.is_open());
+    }
+
+    /// The badge's note fits the list: it wraps to two lines at the
+    /// translate pill's width, and the list kept room for one (the second
+    /// was cut at the panel's bottom edge, owner's take 2026-11-03).
+    #[test]
+    fn the_ai_note_fits_inside_the_list() {
+        use crate::ui::kit::testing::{golden, shot};
+        use iced::Size;
+        // the note alone, with room to spare: its ink's height and width
+        let ink = |width: f32| {
+            let size = Size::new(width, 80.0);
+            let note = || {
+                let note: iced::widget::Container<Msg> =
+                    container(sub(Role::NOTE, AI_ONLY)).width(Fill).height(Fill);
+                let m = crate::ui::kit::surface::Material::Widget;
+                crate::ui::kit::surface::surface(m, 0.0, note).into()
+            };
+            let (_, px) = shot::redrawn(|i| (i == 0).then(note), size, 1.0);
+            let w = width as usize;
+            let p = |x: usize, y: usize| &px[(y * w + x) * 4..(y * w + x + 1) * 4];
+            let at = |x: usize, y: usize| p(x, y) != p(w - 14, y);
+            let rows = (0..70).filter(|&y| (8..w - 16).any(|x| at(x, y)));
+            let cols = (8..w - 16).filter(|&x| (0..70).any(|y| at(x, y)));
+            (rows.max().unwrap_or(0) + 1, cols.max().unwrap_or(0) + 1)
+        };
+        let (h, w) = ink(800.0);
+        assert!(
+            h <= NOTE_LINE as usize && w <= NOTE_ONE_LINE as usize,
+            "one line: {w}x{h}"
+        );
+        for width in [360.0, 420.0, NOTE_ONE_LINE] {
+            let (h, _) = ink(width);
+            assert!(
+                h <= note_h(width) as usize,
+                "{width}: needs {h}, keeps {}",
+                note_h(width)
+            );
+        }
+        let width = 360.0;
+        // the open list with the note, as the pill shows it
+        let mut p = Picker::new(AUTO, "en", true);
+        p.update(Msg::Open(Side::Target));
+        assert!(p.choices().iter().any(|(_, l)| l.ends_with(" · AI")));
+        let size = Size::new(width, p.list_height(width));
+        let view = || {
+            let list = p.list(width).unwrap();
+            crate::ui::kit::surface::surface(crate::ui::kit::surface::Material::Widget, 0.0, list)
+                .into()
+        };
+        let failed = golden::check("screens", "language-picker-ai-note", size, &[1.0], view);
+        assert!(failed.is_empty(), "{failed:?}");
     }
 
     #[test]

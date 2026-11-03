@@ -1031,6 +1031,142 @@ fn real_frames() {
     .unwrap();
 }
 
+/// The language matrix on real pages (not in CI; downloads the pinned
+/// models): each frame into each of its targets with the app's own offline
+/// path (`pipeline::Real`, "auto": detect, routes, pivot), the models in
+/// process. Per run: `<frame>-<target>.png` and `.json` (every block's
+/// original and translation), and one summary line.
+/// `OC_MATRIX="fr.png:en,ar;ar.png:en" OC_REAL_OUT=dir [OC_WINOCR=1] cargo test --release real_matrix -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn real_matrix() {
+    use super::pipeline::{Cache, Deps, Real, Via, translate_frame};
+    use crate::ai::AiError;
+    use crate::ocr::{self, OcrError, TextBlock};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    struct M {
+        real: Real,
+        found: Vec<TextBlock>,
+        models: RefCell<HashMap<&'static str, crate::mt::Translator>>,
+    }
+    impl Deps for M {
+        fn recognize(&self, _: &[u8], _: u32, _: u32) -> Result<Vec<TextBlock>, OcrError> {
+            Ok(self.found.clone())
+        }
+        fn read(&self, texts: &[&str]) {
+            self.real.read(texts)
+        }
+        fn batch(&self) -> usize {
+            self.real.batch()
+        }
+        fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
+            for (route, _) in self.real.routes(texts, target)? {
+                for pair in route {
+                    pair.ensure(|_, _| {})
+                        .map_err(|e| AiError::Offline(e.to_string()))?;
+                }
+            }
+            self.real.on_device_with(texts, target, |t, pair| {
+                let mut models = self.models.borrow_mut();
+                let key = Box::leak(format!("{}-{}", pair.source, pair.target).into_boxed_str());
+                let tr = models.entry(key).or_insert_with(|| {
+                    crate::mt::Translator::load(pair, &ocr::models_dir()).unwrap()
+                });
+                tr.translate(t).map_err(|e| AiError::Offline(e.to_string()))
+            })
+        }
+    }
+    let out = std::path::PathBuf::from(std::env::var("OC_REAL_OUT").unwrap());
+    std::fs::create_dir_all(&out).unwrap();
+    let models = RefCell::new(HashMap::new());
+    let mut engine = None;
+    // OC_ENSURE=ar: as after a user once picked Arabic (its recognizer is on disk)
+    for code in std::env::var("OC_ENSURE").unwrap_or_default().split(',') {
+        if let Some(p) = crate::mt::pair(code, "en") {
+            p.ensure(|_, _| {}).unwrap();
+        }
+    }
+    for run in std::env::var("OC_MATRIX").unwrap().split(';') {
+        let (p, targets) = run.split_once(':').unwrap();
+        let f = crate::capture::from_png(p.as_ref()).unwrap();
+        let name = std::path::Path::new(p)
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let ocr_path = out.join(format!("{name}.ocr.json"));
+        let found: Vec<TextBlock> = match std::fs::read(&ocr_path) {
+            Ok(b) => serde_json::from_slice(&b).unwrap(),
+            Err(_) => {
+                // as `Real::recognize`: Windows OCR, PP-OCR ("auto") when it misread
+                let win = std::env::var_os("OC_WINOCR").map(|_| {
+                    let k = *ocr::system::passes(1.0, f.width, f.height).last().unwrap();
+                    ocr::system::recognize(&f.rgba, f.width, f.height, k).unwrap()
+                });
+                let pp =
+                    engine.get_or_insert_with(|| ocr::Engine::load(&ocr::models_dir()).unwrap());
+                let got = match win {
+                    Some(lines) if !super::pipeline::misread(&lines) => lines,
+                    Some(lines) => {
+                        let (keep, known) = super::pipeline::words_read(lines);
+                        let other = pp
+                            .recognize_except(&f.rgba, f.width, f.height, &known)
+                            .unwrap();
+                        super::pipeline::merged(keep, other)
+                    }
+                    None => (pp.recognize(&f.rgba, f.width, f.height, ocr::Read::Auto)).unwrap(),
+                };
+                std::fs::write(&ocr_path, serde_json::to_vec_pretty(&got).unwrap()).unwrap();
+                got
+            }
+        };
+        for target in targets.split(',') {
+            let deps = M {
+                real: Real::new(super::lang::AUTO, Via::Offline),
+                found: found.clone(),
+                models: RefCell::new(std::mem::take(&mut *models.borrow_mut())),
+            };
+            let r = translate_frame(&f.rgba, f.width, f.height, target, &Cache::new(4096), &deps);
+            *models.borrow_mut() = deps.models.into_inner();
+            let r = match r {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("{name}->{target}: ERROR {e}");
+                    continue;
+                }
+            };
+            let changed = r
+                .blocks
+                .iter()
+                .filter(|b| !b.translation.is_empty())
+                .count();
+            eprintln!(
+                "{name}->{target}: {} blocks, {changed} translated, drawn {} busy {} no_room {}; first {:?} total {:?}",
+                r.blocks.len(),
+                r.drawn.drawn,
+                r.drawn.busy,
+                r.drawn.no_room,
+                r.timings.first,
+                r.timings.total
+            );
+            let rows: Vec<_> = (r.blocks.iter())
+                .map(|b| (b.bounds.map(|v| v as i32), &b.original, &b.translation))
+                .collect();
+            std::fs::write(
+                out.join(format!("{name}-{target}.json")),
+                serde_json::to_vec_pretty(&rows).unwrap(),
+            )
+            .unwrap();
+            save_png(
+                &out.join(format!("{name}-{target}.png")),
+                (f.width as usize, f.height as usize),
+                &r.rgba,
+            );
+        }
+    }
+}
+
 /// One-shot translate of real screenshots through the real helper (the built
 /// `OC_EXE`, warm as while the overlay is open): stage times, cold then warm
 /// (the helper logs its own stages). Not in CI; needs the models.
@@ -1465,7 +1601,11 @@ mod real {
             by_sentence(texts, |s| {
                 Ok(s.iter()
                     .map(|t| {
-                        all.get(t)
+                        // a short label is sent capitalised ("hide" as "Hide")
+                        let lower: String = (t.chars().take(1).flat_map(char::to_lowercase))
+                            .chain(t.chars().skip(1))
+                            .collect();
+                        (all.get(t).or_else(|| all.get(&lower)))
                             .cloned()
                             .unwrap_or_else(|| panic!("no MT for {t:?}"))
                     })
