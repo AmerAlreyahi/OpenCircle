@@ -30,6 +30,18 @@ mod shape;
 mod spotlight;
 mod step;
 pub mod style;
+/// Pasted text as a text item takes it: Windows line ends made `\n`, other
+/// control characters (tabs too) dropped, trailing blank lines off, at most
+/// `PASTE_MAX` characters.
+fn clean_paste(t: &str) -> String {
+    const PASTE_MAX: usize = 2000;
+    let t: String = (t.replace("\r\n", "\n").chars())
+        .filter(|c| *c == '\n' || !c.is_control())
+        .take(PASTE_MAX)
+        .collect();
+    t.trim_end().to_string()
+}
+
 #[cfg(test)]
 mod tests;
 mod text;
@@ -323,6 +335,9 @@ pub enum Message {
     Shift(bool),
     /// Typing into a text, label, callout, arrow label or step note.
     Type(String),
+    /// Ctrl+V: the clipboard's text into the text being typed, else a new
+    /// text at the pointer (image px; `None` = outside: the area's middle).
+    Paste(Option<Point>),
     Backspace,
     /// Ends typing.
     Finish,
@@ -737,6 +752,7 @@ impl Editor {
             Message::Release => self.release(),
             Message::Shift(on) => self.shift = on,
             Message::Type(s) => self.edit_text(|t| t.push_str(&s)),
+            Message::Paste(at) => self.paste(at),
             Message::Backspace => self.edit_text(|t| {
                 t.pop();
             }),
@@ -1423,6 +1439,31 @@ impl Editor {
                 | Shape::Redact { .. }
                 | Shape::Spotlight { .. }
         )
+    }
+
+    /// Ctrl+V (owner, 2026-11-03): the clipboard's text where the typing is,
+    /// else a new text (the last text style) at `at`, being typed into.
+    /// A picture on the clipboard: nothing (pasting pictures is not built).
+    fn paste(&mut self, at: Option<Point>) {
+        let Some(text) = crate::actions::copy::read_text().map(|t| clean_paste(&t)) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        if self.typing() {
+            return self.edit_text(|t| t.push_str(&text));
+        }
+        self.commit();
+        let view = self.doc.view();
+        let p = at.filter(|p| view.contains(*p)).unwrap_or(view.center());
+        let tool = std::mem::replace(&mut self.tool, Tool::Text);
+        let mut item = self.create(p);
+        self.tool = tool;
+        if let Some(t) = text_mut(&mut item.shape) {
+            *t = text;
+        }
+        self.begin(None, item, Drag::Type, p);
     }
 
     fn edit_text(&mut self, f: impl FnOnce(&mut String)) {

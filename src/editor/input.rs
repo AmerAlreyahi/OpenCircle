@@ -134,6 +134,9 @@ impl Editor {
                 Key::Named(Named::Escape) => Some(Message::Finish),
                 Key::Named(Named::Backspace) => Some(Message::Backspace),
                 Key::Named(Named::Enter) => Some(Message::Type("\n".into())),
+                _ if modifiers.command() && latin.map(|c| c.to_ascii_lowercase()) == Some('v') => {
+                    Some(Message::Paste(None))
+                }
                 // (Ctrl+Z ends the typing and undoes it: `Message::Undo`)
                 _ if modifiers.command() => (latin.map(|c| c.to_ascii_lowercase()) == Some('z')
                     && !modifiers.shift())
@@ -200,6 +203,7 @@ impl Editor {
                 (true, true, 'z') | (true, _, 'y') => Some(Message::Redo),
                 (true, _, 'c') => Some(Message::Copy),
                 (true, _, 's') => Some(Message::Save),
+                (true, false, 'v') => Some(Message::Paste(None)),
                 // Ctrl: plain P is the Pen tool.
                 (true, _, 'p') => Some(Message::Pin),
                 (false, _, 'd') => Some(Message::Eyedropper),

@@ -52,6 +52,21 @@ pub fn text(text: String) -> Result<(), String> {
     with_clipboard(|clipboard| clipboard.set_text(text))
 }
 
+/// The clipboard's text, if it holds any (Ctrl+V in the Snip editor).
+pub fn read_text() -> Option<String> {
+    #[cfg(test)]
+    return copied::pasted();
+    #[cfg(not(test))]
+    {
+        let mut slot = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
+        let clipboard = match &mut *slot {
+            Some(clipboard) => clipboard,
+            None => slot.insert(arboard::Clipboard::new().ok()?),
+        };
+        clipboard.get_text().ok()
+    }
+}
+
 fn with_clipboard(
     set: impl FnOnce(&mut arboard::Clipboard) -> Result<(), arboard::Error>,
 ) -> Result<(), String> {
@@ -93,6 +108,17 @@ pub mod copied {
     fn take<T>(last: &Last<T>) -> Option<T> {
         let mut last = last.lock().unwrap_or_else(|e| e.into_inner());
         last.as_mut()?.remove(&me())
+    }
+
+    static PASTE: Last<String> = Mutex::new(None);
+
+    /// What `read_text` gives this test (the clipboard's text).
+    pub fn set_paste(text: &str) {
+        put(&PASTE, text.to_string());
+    }
+
+    pub(super) fn pasted() -> Option<String> {
+        take(&PASTE)
     }
 
     pub(super) fn set_text(text: String) {

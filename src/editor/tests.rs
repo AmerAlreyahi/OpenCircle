@@ -3476,3 +3476,48 @@ fn text_font_bold_and_background_are_remembered_and_default_to_plain() {
     assert_eq!(c.editor.text_back, Some(text::Back::Box));
     assert_eq!(c.editor.text_bold, Some(false));
 }
+
+/// Ctrl+V (owner, 2026-11-03): with no text box, a new text with the
+/// clipboard's text at the pointer (the area's middle when outside), being
+/// typed into; while typing, into the text. No text on the clipboard: nothing.
+#[test]
+fn ctrl_v_pastes_the_clipboard_text() {
+    let ctrl_v = |e: &Editor| {
+        e.key(
+            &Key::Character("v".into()),
+            Some('v'),
+            Modifiers::CTRL,
+            None,
+        )
+    };
+    let text_of = |e: &Editor| match e.pending.as_ref().map(|p| &p.item.shape) {
+        Some(Shape::Text { at, text, .. }) => (*at, text.clone()),
+        other => panic!("not a text: {other:?}"),
+    };
+    let mut e = editor(200, 200);
+    e.update(Message::Tool(Tool::Arrow));
+    assert_eq!(ctrl_v(&e), Some(Message::Paste(None)));
+    crate::actions::copy::copied::set_paste("hello\r\nworld\t!\n\n");
+    e.update(Message::Paste(Some(Point::new(40.0, 50.0))));
+    assert!(e.typing());
+    assert_eq!(
+        text_of(&e),
+        (Point::new(40.0, 50.0), "hello\nworld!".into())
+    );
+    // typing: into the same text
+    assert_eq!(ctrl_v(&e), Some(Message::Paste(None)));
+    crate::actions::copy::copied::set_paste(" again");
+    e.update(Message::Paste(None));
+    assert_eq!(text_of(&e).1, "hello\nworld! again");
+    e.update(Message::Finish);
+    assert_eq!(e.doc.items.len(), 1, "committed like typed text");
+    // outside the area: its middle; the tool stays the user's
+    crate::actions::copy::copied::set_paste("x");
+    e.update(Message::Paste(None));
+    assert_eq!(text_of(&e).0, e.doc.view().center());
+    assert_eq!(e.tool, Tool::Arrow);
+    e.update(Message::Finish);
+    // nothing (or a picture) on the clipboard: nothing happens
+    e.update(Message::Paste(None));
+    assert!(!e.typing() && e.doc.items.len() == 2);
+}

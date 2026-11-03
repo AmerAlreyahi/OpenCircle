@@ -181,12 +181,21 @@ impl canvas::Program<Message> for Input<'_> {
                 modifiers,
                 text,
                 ..
-            }) => e.key(
+            }) => match e.key(
                 key,
                 key.to_latin(*physical_key),
                 *modifiers,
                 text.as_deref(),
-            )?,
+            )? {
+                // a paste lands at the pointer
+                Message::Paste(None) => {
+                    Message::Paste(cursor.position_in(bounds).map(|at| match e.movable {
+                        true => self.image_at(cursor.position().unwrap_or(at)),
+                        false => e.to_image(at),
+                    }))
+                }
+                message => message,
+            },
             _ => return None,
         };
         Some(Action::publish(message).and_capture())
