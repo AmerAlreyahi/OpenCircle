@@ -4,8 +4,10 @@
 //! goes through untouched (normal scrolling never waits); the next ones are
 //! held and replayed one notch at a time, each after the grab loop saw the
 //! page move (`moved`) or `WAIT` passed (the page's end: nothing moves).
-//! Scrolling up is never held (what it shows is stitched already). Nothing is
-//! lost: what is still held when the capture ends is replayed at once.
+//! Scrolling up is never held (what it shows is stitched already). Held notches
+//! are replayed only while the pointer is still over the area: what is held when
+//! it leaves, or when the capture ends, is dropped (replayed at the pointer, it
+//! would scroll whatever window is under it now).
 //! Windows only (a low-level mouse hook, `win`); elsewhere nothing is hooked.
 
 // (the pacer itself is Windows-only outside its tests)
@@ -24,7 +26,7 @@ const WAIT: Duration = Duration::from_millis(150);
 /// high-resolution wheels and touchpads send less).
 #[derive(Debug, Default)]
 pub struct Pacer {
-    /// Held, not yet replayed (summed: nothing is lost).
+    /// Held, not yet replayed (summed: nothing is lost while over the area).
     held: i32,
     /// When the last step down reached the page, until the page is seen moving.
     sent: Option<Instant>,
@@ -49,8 +51,12 @@ impl Pacer {
     }
 
     /// What to replay now, if anything: all of a net scroll up at once, else
-    /// one step down once the last one was seen (or `WAIT` passed).
-    pub fn next(&mut self, now: Instant) -> Option<i32> {
+    /// one step down once the last one was seen (or `WAIT` passed). `over`: the
+    /// pointer is still over the area; off it, everything held is dropped.
+    pub fn next(&mut self, now: Instant, over: bool) -> Option<i32> {
+        if !over {
+            self.held = 0;
+        }
         let step = match self.held {
             0 => return None,
             up if up > 0 => up,
@@ -67,11 +73,6 @@ impl Pacer {
     /// When `next` may give something (none: nothing held, or ready now).
     pub fn due(&self) -> Option<Instant> {
         (self.held < 0).then_some(self.sent?.checked_add(WAIT)?)
-    }
-
-    /// All still held (the capture ended): replayed at once.
-    pub fn rest(&mut self) -> i32 {
-        std::mem::take(&mut self.held)
     }
 
     fn ready(&self, now: Instant) -> bool {
@@ -119,9 +120,9 @@ pub mod win {
         INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, GA_ROOT, GetAncestor, GetMessageW, GetWindowThreadProcessId, HHOOK, MSG,
-        MSLLHOOKSTRUCT, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL,
-        WM_MOUSEWHEEL, WM_QUIT, WindowFromPoint,
+        CallNextHookEx, GA_ROOT, GetAncestor, GetCursorPos, GetMessageW, GetWindowThreadProcessId,
+        HHOOK, MSG, MSLLHOOKSTRUCT, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
+        WH_MOUSE_LL, WM_MOUSEWHEEL, WM_QUIT, WindowFromPoint,
     };
 
     use super::Pacer;
@@ -221,7 +222,8 @@ pub mod win {
         }
     }
 
-    /// Replays what the pacer lets go, then the rest once stopping.
+    /// Replays what the pacer lets go while the pointer is over the area; what
+    /// is held once stopping is dropped.
     fn replayer(shared: &Shared) {
         let Ok(mut guard) = shared.pacer.lock() else {
             return;
@@ -229,15 +231,13 @@ pub mod win {
         loop {
             let (pacer, stopping) = &mut *guard;
             if *stopping {
-                let rest = pacer.rest();
-                drop(guard);
-                if rest != 0 {
-                    wheel(rest);
-                }
                 return;
             }
             let now = Instant::now();
-            if let Some(step) = pacer.next(now) {
+            let mut at = POINT::default();
+            // SAFETY: GetCursorPos only writes into the POINT we own.
+            let over = unsafe { GetCursorPos(&mut at) }.is_ok() && inside(at, shared.region);
+            if let Some(step) = pacer.next(now, over) {
                 drop(guard);
                 wheel(step);
                 guard = match shared.pacer.lock() {
@@ -366,18 +366,22 @@ mod tests {
         for d in spin {
             assert!(!p.pass(d, t), "held while the first isn't seen");
         }
-        assert_eq!(p.next(t), None, "nothing until the page is seen moving");
+        assert_eq!(
+            p.next(t, true),
+            None,
+            "nothing until the page is seen moving"
+        );
         let mut out = Vec::new();
         for _ in 0..20 {
             p.moved();
-            if let Some(d) = p.next(t) {
+            if let Some(d) = p.next(t, true) {
                 assert!((-STEP..0).contains(&d), "{d}");
                 out.push(d);
-                assert_eq!(p.next(t), None, "one step per move");
+                assert_eq!(p.next(t, true), None, "one step per move");
             }
         }
         assert_eq!(out.iter().sum::<i32>(), total, "{out:?}");
-        assert_eq!(p.rest(), 0);
+        assert_eq!(p.held, 0);
     }
 
     #[test]
@@ -387,8 +391,8 @@ mod tests {
         assert!(p.pass(-120, t));
         assert!(!p.pass(-120, t));
         assert_eq!(p.due(), Some(t + WAIT));
-        assert_eq!(p.next(t + WAIT / 2), None);
-        assert_eq!(p.next(t + WAIT), Some(-120));
+        assert_eq!(p.next(t + WAIT / 2, true), None);
+        assert_eq!(p.next(t + WAIT, true), Some(-120));
         // ready again later: a lone notch passes untouched
         assert!(p.pass(-120, t + WAIT * 3));
     }
@@ -402,11 +406,21 @@ mod tests {
         assert!(!p.pass(-240, t));
         // the user turns back up: summed with what is held
         assert!(!p.pass(360, t));
-        assert_eq!(p.next(t), Some(120), "the net scroll up at once");
-        assert_eq!(p.next(t), None);
-        // held when the capture ends: all of it at once
-        assert!(!p.pass(-500, t));
-        assert_eq!(p.rest(), -500);
-        assert_eq!(p.next(t), None);
+        assert_eq!(p.next(t, true), Some(120), "the net scroll up at once");
+        assert_eq!(p.next(t, true), None);
+    }
+
+    #[test]
+    fn what_is_held_when_the_pointer_leaves_is_dropped() {
+        let t = Instant::now();
+        let mut p = Pacer::default();
+        assert!(p.pass(-120, t));
+        assert!(!p.pass(-600, t));
+        p.moved();
+        // the pointer went to another window (or the toolbar): not replayed there
+        assert_eq!(p.next(t, false), None);
+        assert_eq!(p.held, 0, "dropped, not kept for later");
+        p.moved();
+        assert_eq!(p.next(t, true), None, "nothing comes back over the area");
     }
 }
