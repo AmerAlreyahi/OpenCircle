@@ -456,6 +456,24 @@ mod tests {
         assert!(image.height as usize == truth.h && image.rgba == truth.px);
     }
 
+    /// The owner's Windows 11 PC (2026-11-03): after a fast flick the capture
+    /// stayed stuck; scrolling back up past where it stopped and on down
+    /// again never resumed (a step down from above that point was checked
+    /// against where the page was last seen, which never moved on).
+    #[test]
+    fn scrolling_back_past_the_stop_point_resumes_without_a_gap_or_a_repeat() {
+        let rig = Rig::new(400, 4000, 500, 4, 40);
+        // stitched to 200, a flick far past the 400 px body, back up past 200
+        // (to 150), then on down in steps of half an area
+        let at = [0, 100, 200, 1500, 1400, 900, 150, 350, 550, 750, 950];
+        let (updates, _, image) = drive(&rig, &at);
+        let truth = rig.truth(950);
+        assert_eq!(image.height as usize, truth.h, "{updates:?}");
+        assert!(image.rgba == truth.px, "no gap, nothing twice");
+        assert!(updates.iter().any(|u| u.lost), "the flick asked to scroll back");
+        assert!(!updates.last().unwrap().lost, "the note goes once it goes on");
+    }
+
     #[test]
     fn a_grab_that_fails_keeps_what_was_gathered() {
         let rig = Rig::new(400, 4000, 500, 5, 40);

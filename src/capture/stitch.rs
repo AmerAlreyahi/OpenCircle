@@ -353,8 +353,12 @@ pub struct Stitcher {
     w: usize,
     h: usize,
     prev: Option<Rows>,
-    /// Where the last frame placed is from `prev` (its offset; 0 or less).
+    /// Where the last frame placed is from `prev` (its offset; 0 or less,
+    /// or further down while followed from there: `back`).
     seen: isize,
+    /// That frame, while it is not `prev` (scrolled back up): a step down is
+    /// followed from it (`follow`).
+    back: Option<Rows>,
     /// Sticky (header, footer) rows, the minimum over every accepted moving pair.
     fixed: Option<(usize, usize)>,
     page: Vec<u8>,
@@ -373,6 +377,7 @@ impl Stitcher {
             h: height as usize,
             prev: None,
             seen: 0,
+            back: None,
             fixed: None,
             page: Vec::new(),
             foot: Vec::new(),
@@ -409,7 +414,7 @@ impl Stitcher {
             return Push::Added(self.h as u32);
         };
         let Some((t, b)) = fixed_rows(prev, &rows) else {
-            self.seen = 0;
+            (self.seen, self.back) = (0, None);
             return Push::NoMovement;
         };
         // Tentative: only kept when the pair turns out to be a real scroll.
@@ -427,15 +432,35 @@ impl Stitcher {
         // lookalike (scrolled back up further than the bar or the search
         // lets it match, then a section matched one repeated below it).
         let seen = self.seen;
-        let d = offset(prev, &rows, t, body, (-max_d, max_d))
-            .filter(|f| f.d <= 0 || seen == 0 || f.d.abs_diff(seen) <= max_d as usize / 2)
-            .and_then(Found::trusted);
+        let near = |d: isize| d <= 0 || seen == 0 || d.abs_diff(seen) <= max_d as usize / 2;
+        let found = offset(prev, &rows, t, body, (-max_d, max_d)).and_then(Found::trusted);
+        let d = match found {
+            Some(d) if near(d) => Some(d),
+            _ if seen == 0 => None,
+            // Back up, then a bigger step down: followed from the frame seen
+            // last (`back`). Where both agree it is real; else the page is
+            // where following puts it, and the next step is checked from
+            // there (it was checked from a spot left behind, forever: the
+            // owner's capture stuck after a flick, 2026-11-03). Not followed
+            // either (one more flick): nothing moves on, so back at `back`
+            // or `prev` it goes on (forgetting `back` let a README's
+            // lookalike lines through).
+            _ => match self.follow(&rows) {
+                Some(at) if found.is_some_and(|d| d.abs_diff(at) <= RIVAL_GAP) => found,
+                Some(at) if at <= 0 => Some(at),
+                Some(at) => {
+                    (self.seen, self.back) = (at, Some(rows));
+                    return Push::Rejected;
+                }
+                None => return Push::Rejected,
+            },
+        };
         let d = match d {
             // (the last frame placed stays the one to follow from)
             None => return Push::Rejected,
             // scrolled back up: what it shows is in the image already
             Some(d) if d <= 0 => {
-                self.seen = d;
+                (self.seen, self.back) = (d, Some(rows));
                 return Push::NoMovement;
             }
             Some(d) => d as usize,
@@ -465,8 +490,21 @@ impl Stitcher {
             .extend_from_slice(&rgba[start * stride..(start + take) * stride]);
         self.foot = rgba[end * stride..].to_vec();
         self.prev = Some(rows);
-        self.seen = 0;
+        (self.seen, self.back) = (0, None);
         Push::Added(take as u32)
+    }
+
+    /// Where `rows` is from `prev`, followed from `back` (`seen` from it);
+    /// none without `back` or a trusted match with it.
+    fn follow(&self, rows: &Rows) -> Option<isize> {
+        let back = self.back.as_ref()?;
+        let Some((t, b)) = fixed_rows(back, rows) else {
+            return Some(self.seen);
+        };
+        let body = self.h - t - b;
+        let max_d = (body * MAX_STEP_PCT / 100) as isize;
+        let d = offset(back, rows, t, body, (-max_d, max_d)).and_then(Found::trusted)?;
+        Some(self.seen + d)
     }
 
     /// The whole image so far, miniature (owner, 2026-11-02, as iTop): scaled
