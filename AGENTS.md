@@ -567,6 +567,10 @@ production systems.
   renamed or reshaped, its code is renamed in the same change (no leftover old names like "edit" for Snip or "board"
   for the Steps strip). Frozen contracts keep their spelling (CLI, config keys, update channel): map them at the edge.
 
+- Clean before every release (owner, 2026-11-03, from 0.1.3 on): the LAST step before a release, then the security
+  check: remove every dead or old config key, code path, test, asset, script and tool we no longer use AND won't use
+  (things waiting for a planned feature, e.g. glass in 0.1.4, stay). Old config keys: still read without a warning
+  so older files load, dropped on the next save (migration with a backup); frozen contracts keep working.
 - Learn from open source (owner, 2026-11-03): study solid open-source tools (e.g. ShareX, Flameshot) for how
   their logic works, then build it our way (Rust, iced, our kit). GPL code is read for the approach only, never
   copied or translated (we are MIT); MIT/Apache code may be reused with its notice.

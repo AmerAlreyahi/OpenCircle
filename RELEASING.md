@@ -5,6 +5,12 @@ and signs everything and creates a **draft**; it never publishes.
 
 ## Stable release, step by step
 
+0. **Clean-up pass, then the security check (last steps before the tag).** Remove
+   every dead or old config key, code path, test, asset, script and tool that is no
+   longer used and won't be (keep what a planned feature needs). Old config keys are
+   still read without a warning and dropped on the next save (migration with a
+   backup); the CLI and the update channel keep working. Then run the security review
+   of the whole diff since the last release. Gate and CI green after both.
 1. **Docs match the release.** README, `docs/privacy.md` and
    `docs/getting-started.md` describe what this version really does (features,
    shortcuts, network actions, install steps).
