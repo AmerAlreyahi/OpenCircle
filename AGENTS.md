@@ -589,6 +589,9 @@ production systems.
 - 0.1.3 draft tonight (owner, 2026-11-03, "okay"): the lead may tag v0.1.3 and let the workflow build the DRAFT tonight,
   after the clean-up, docs, security review and both VM passes, and run the update gate on it; publishing still waits
   for the owner's explicit "publish" after his morning check.
+- Config schema 9 (0.1.3 clean-up, 2026-11-03): [labs] snip/editor and the hidden snip window/full-screen entries are read
+  but no longer written; "Auto action" / "Search with" rows and auto-search removed (nothing is sent until the user picks
+  an action); selection.after / search_with still read and written but ignored (drop in a later schema).
 - Clean before every release (owner, 2026-11-03, from 0.1.3 on): the LAST step before a release, then the security
   check: remove every dead or old config key, code path, test, asset, script and tool we no longer use AND won't use
   (things waiting for a planned feature, e.g. glass in 0.1.4, stay). Docs and assets too (owner, 2026-11-03): public
