@@ -1060,15 +1060,15 @@ fn needs_translation(text: &str, target: &str) -> bool {
 /// An address or code line (`code_like`): its letters are >= 80 % in such
 /// tokens, or it starts with an address (a domain, "www.", "://"), as a
 /// browser's address bar does however OCR reads the rest of it: PP-OCR's
-/// "fr.wikipedia.org /wiki/Système solaire" has a gap, and a line in front
-/// ("Q", a lock icon read as a letter) is skipped.
+/// "fr.wikipedia.org /wiki/Système solaire" has a gap, and icons in front
+/// (Windows OCR's "C' I https://..."; up to two characters) are skipped.
 pub(crate) fn code(text: &str) -> bool {
     let letters = text.chars().filter(|c| c.is_alphabetic()).count();
     let in_code: usize = (text.split_whitespace())
         .filter(|w| code_like(w))
         .map(|w| w.chars().filter(|c| c.is_alphabetic()).count())
         .sum();
-    let first = text.split_whitespace().find(|w| w.chars().count() > 1);
+    let first = text.split_whitespace().find(|w| w.chars().count() > 2);
     let address = first.is_some_and(|w| {
         let host = w.split('/').next().unwrap_or_default();
         code_like(w) && (w.contains("://") || w.starts_with("www.") || host.contains('.'))
@@ -1895,6 +1895,19 @@ pub(super) mod tests {
         }
         let mention = "Voir la page fr.wikipedia.org pour la liste complète des plantes";
         assert!(needs_translation(mention, "en"));
+        // the address bar as the OCR engines read it (Ubuntu PP-OCR, Windows
+        // OCR on the 0.1.3 gate): a gap, the logo's word, icons in front
+        for bar in [
+            "fr.wikipedia.org/wiki/Système_solaire WIKIPÉDIA",
+            "fr.wikipedia.org /wiki/Système solaire",
+            "C' I https://fr.wikipedia.org/wikißystérne_solaire",
+            "المجموعة_الشمسيةar.wikipedia.org/wiki/",
+            "netwechyweki/Sun",
+        ] {
+            for target in ["en", "ar", "de"] {
+                assert!(!needs_translation(bar, target), "{bar} -> {target}");
+            }
+        }
         // the fake translates everything it gets: the address never reaches it
         let fake = Fake::new(|_, _, _| Vec::new());
         let blocks = blocks_of(&["https://fr.wikipedia.org/wiki/Plante_d%27intérieur", "Lire"]);
