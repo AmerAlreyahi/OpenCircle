@@ -541,8 +541,12 @@ impl App {
                         self.o.bar_glide = None;
                     }
                 }
-                if gliding && self.o.bar_glide.is_none() && !opening {
-                    self.log_frames("bar glide");
+                // The glide's own frames: none from before it (the idle time
+                // since the last one, e.g. between keyboard nudges, is no frame).
+                match (gliding, self.o.bar_glide.is_some()) {
+                    (false, true) if !opening => self.frame_times.borrow_mut().clear(),
+                    (true, false) if !opening => self.log_frames("bar glide"),
+                    _ => {}
                 }
                 if !opening || self.appearing() {
                     return revealed;

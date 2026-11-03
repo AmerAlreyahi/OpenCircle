@@ -1592,3 +1592,42 @@ fn a_snips_drags_redraw_round_what_moves() {
         assert_eq!(off, 0, "{drag:?}: as drawn afresh");
     }
 }
+
+/// Snip's area nudged by the keyboard (10 px), a key repeat a frame, then let
+/// go: each frame's time and when the toolbar is docked again (run in
+/// release: `cargo test --release snip_nudge_frame_times -- --ignored
+/// --nocapture`).
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn snip_nudge_frame_times() {
+    use super::app::tests::snipping_on;
+    use crate::snip::annotate::Message as E;
+    for (w, h) in [(1920, 1080), (1280, 720)] {
+        let (wf, hf) = (w as f32, h as f32);
+        let full = Rectangle::new(Point::ORIGIN, Size::new(wf, hf));
+        let large = Rectangle::new(Point::new(80.0, 60.0), Size::new(wf * 0.7, hf * 0.7));
+        for (what, area, keys) in [
+            ("full, Ctrl+Alt+Right", full, (true, true, true)),
+            ("large, Shift+Right", large, (false, true, false)),
+        ] {
+            let mut app = snipping_on(w, h, area);
+            app.select(area);
+            let crop = app.crop().unwrap();
+            let _ = app.snip_routed(crop, true, false);
+            settle_bar(&mut app);
+            let mut settled = None;
+            let t = frames(&mut app, 60, false, |app, i, now| {
+                if i < 20 {
+                    let _ = app.on_snip_toolbar(E::Nudge((1, 0), keys));
+                }
+                let _ = app.update(Message::Frame(now));
+                if i >= 20 && settled.is_none() && app.o.bar_glide.is_none() {
+                    settled = Some((i - 19) * 16);
+                }
+            });
+            report(&format!("nudge {what}"), app.o.screen, 1.0, &t);
+            let now = app.o.edit.as_ref().map(|e| e.canvas_rect());
+            println!("  docked {settled:?} ms after the last nudge; area {area:?} -> {now:?}");
+        }
+    }
+}

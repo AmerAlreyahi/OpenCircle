@@ -377,6 +377,32 @@ mod tests {
         app
     }
 
+    /// A keyboard nudge after a pause: the toolbar's glide logs only its own
+    /// frames, not the idle time before it (the VM's "bar glide ... max
+    /// 2001 ms apart" was the wait between two nudges); docked by OPEN.
+    #[test]
+    fn the_toolbar_glide_after_a_nudge_times_only_its_own_frames() {
+        use crate::ui::app::message::Message;
+        use crate::ui::app::tests::settle_bar;
+        use crate::ui::kit::motion;
+        use std::time::{Duration, Instant};
+        let mut app = snip_toolbar_open();
+        settle_bar(&mut app);
+        let start = Instant::now();
+        // a frame drawn 2 s before the nudge (the last glide's)
+        app.frame_times
+            .borrow_mut()
+            .push(start - Duration::from_secs(2));
+        let _ = app.on_snip_toolbar(E::Nudge((0, 1), (false, true, false)));
+        let to = app.bar_target();
+        assert_ne!(app.bar_at(), to, "the area went 10 px down");
+        let _ = app.update(Message::Frame(start));
+        assert!(app.o.bar_glide.is_some(), "it glides to the moved area");
+        assert!(app.frame_times.borrow().is_empty(), "nothing from before");
+        let _ = app.update(Message::Frame(start + motion::OPEN));
+        assert_eq!(app.bar_at(), to, "there by OPEN");
+    }
+
     /// What More offers now (each row's message).
     fn more(app: &App) -> Vec<Option<E>> {
         let editor = &app.o.edit.as_ref().unwrap().annotator;
