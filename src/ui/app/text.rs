@@ -558,7 +558,7 @@ impl App {
         // places) a text selection there picks; no second read (#150).
         if self.o.text_by == Some(ocr::Source::System) && self.text_whole() {
             let lines = word::within(self.lines_iter(), area);
-            self.o.panel = None;
+            self.o.ai_chat = None;
             self.o.text_mode = Some(TextMode {
                 boxes: word::boxes(&lines),
                 lines: Some(lines),
@@ -587,7 +587,7 @@ impl App {
             return Task::none();
         };
         let (scale, frame) = (self.o.scale, (*width, *height, pixels.clone()));
-        self.o.panel = None;
+        self.o.ai_chat = None;
         self.o.text_mode = Some(TextMode {
             lines: None,
             boxes: Vec::new(),

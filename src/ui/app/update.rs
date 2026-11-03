@@ -242,7 +242,7 @@ impl App {
             Message::OpenEntity(entity) => self.open_entity(entity),
             Message::ToastDone if self.o.toast.is_some() => self.close(),
             Message::ToastDone => Task::none(),
-            Message::Panel(id, msg) => self.on_panel(id, msg),
+            Message::AiChat(id, msg) => self.on_ai_chat(id, msg),
             Message::ChatMoved(id, at) => self.chat_moved(id, at),
             Message::ChatSettle(moves) => self.chat_settle(moves),
             Message::ChatFrame(now) => {
@@ -329,32 +329,32 @@ impl App {
                 None => Task::none(),
             },
             Message::CardMoved(p) => {
-                if let Some((how, last)) = self.o.card_drag {
-                    if let (Some(from), true, card::Drag::Resize) = (last, self.o.card_chat, how) {
+                if let Some((how, last)) = self.o.chat_drag {
+                    if let (Some(from), true, card::Drag::Resize) = (last, self.o.chat_docks, how) {
                         let at = card::drag(self.chat_rect(), how, p - from, self.o.screen);
                         self.chat_width = Some(at.width);
-                    } else if let (Some(from), true) = (last, self.o.card_chat) {
+                    } else if let (Some(from), true) = (last, self.o.chat_docks) {
                         self.o.chat_off += p - from;
                         self.o.chat_glide = None;
                     } else if let Some(from) = last {
-                        let at = self.card_at();
+                        let at = self.chat_card_at();
                         self.card = Some(card::drag(at, how, p - from, self.o.screen));
                     }
-                    self.o.card_drag = Some((how, Some(p)));
+                    self.o.chat_drag = Some((how, Some(p)));
                 }
                 Task::none()
             }
             // Let go: the card stays where the user put it, until the overlay closes.
             Message::CardReleased => {
                 // let go: back to scale 1 and the plain edge
-                if let Some((_, p)) = &mut self.o.panel {
+                if let Some((_, p)) = &mut self.o.ai_chat {
                     p.held = false;
                 }
                 if let Some(chat) = &mut self.chat {
                     chat.panel.held = false;
                 }
-                match self.o.card_drag.take() {
-                    Some((card::Drag::Move, _)) if self.o.card_chat => {
+                match self.o.chat_drag.take() {
+                    Some((card::Drag::Move, _)) if self.o.chat_docks => {
                         self.dock_chat(Instant::now());
                         self.log_frames("chat drag");
                     }
@@ -379,7 +379,7 @@ impl App {
                 let question = std::mem::take(&mut self.o.ask);
                 let question = (!question.trim().is_empty()).then_some(question);
                 match self.stacked().or_else(|| self.whole()) {
-                    Some(crop) => self.open_panel(actions::Panel::Ask, crop, question),
+                    Some(crop) => self.open_chat(crop, question),
                     None => Task::none(),
                 }
             }
@@ -429,7 +429,7 @@ impl App {
                     revealed = Task::batch([self.relevel(), fade.chain(self.unfloat_chat())]);
                 }
                 // a new result card grows open from its first frame
-                self.o.card_open = match (&self.o.panel, self.o.card_open) {
+                self.o.chat_open = match (&self.o.ai_chat, self.o.chat_open) {
                     (Some((id, _)), Some((was, shown, _))) if *id == was => {
                         Some((was, shown, shown.at(now)))
                     }
@@ -440,7 +440,7 @@ impl App {
                     (None, _) => None,
                 };
                 // the chat's logo spinner turning while the AI has not answered
-                if let Some((_, panel)) = &mut self.o.panel {
+                if let Some((_, panel)) = &mut self.o.ai_chat {
                     panel.tick(now);
                 }
                 self.step_zoom(now);
@@ -846,7 +846,7 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
             | Message::CaptureTimedOut(_)
             | Message::Escape
             | Message::EscapeTaken
-            | Message::Panel(..)
+            | Message::AiChat(..)
             | Message::ChatMoved(..)
             | Message::ChatSettle(_)
             | Message::ChatFrame(_)

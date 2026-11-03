@@ -209,7 +209,7 @@ impl App {
             overlay::Event::Press { at: p, shift } => {
                 self.o.pointer = p;
                 // A new selection: the panel and the edits were about the old one.
-                self.o.panel = None;
+                self.o.ai_chat = None;
                 self.o.text_mode = None;
                 self.o.morph = None;
                 self.o.edit = None;
@@ -468,7 +468,7 @@ impl App {
             .is_some_and(|s| s.kind == overlay::Kind::Snap);
         matches!(self.o.purpose, Purpose::Search)
             && !self.o.drawing
-            && (self.o.panel.is_none() || snapped)
+            && (self.o.ai_chat.is_none() || snapped)
             && self.o.edit.is_none()
             && self.o.translate.is_none()
     }
@@ -567,7 +567,7 @@ impl App {
             keep_on(desk, a + by)
         };
         self.o.morph = None;
-        self.o.panel = None;
+        self.o.ai_chat = None;
         self.o.text_mode = None;
         self.o.scan = None;
         self.o.stroke = overlay::refit(&self.o.stroke, a, area);

@@ -7,12 +7,12 @@ use iced::{Center, Element, Fill, Rectangle, Size};
 use super::{Card, Msg, PICKER_LIST, Phase, Session};
 use crate::actions::ask::Status;
 use crate::actions::{self};
+use crate::ui::ai_chat::{actions, card, note};
 use crate::ui::kit::markdown;
 use crate::ui::kit::panel_frame::{self as frame, Header};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{error, text as label};
 use crate::ui::kit::tokens::{Role, radius};
-use crate::ui::panel::{actions, card, note};
 use crate::ui::picker;
 use crate::ui::screens::model_download::{self, OCR, Stage, TRANSLATION};
 

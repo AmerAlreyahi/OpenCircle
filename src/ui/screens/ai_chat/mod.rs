@@ -1,5 +1,4 @@
-//! The result panel (DESIGN.md Flow step 5): Ask AI (the
-//! AI chat: docked, its answers as Markdown). One floating card (`kit::panel_frame::card`: on the side away from the
+//! The AI chat (DESIGN.md Flow step 5): Ask AI, docked, its answers as Markdown. One floating card (`kit::panel_frame::chat_frame`: on the side away from the
 //! selection, a card at the bottom on narrow screens; dragged and resized by
 //! its frame) over the frozen frame, so the selection stays visible. Slow work
 //! runs on its own thread (`background`); its results arrive as `Msg`s.
@@ -174,7 +173,7 @@ pub enum Msg {
     Saved,
 }
 
-pub struct Panel {
+pub struct AiChat {
     crop: Arc<Crop>,
     state: State,
     /// The follow-up input's text (one line, more with Shift / Ctrl+Enter).
@@ -228,23 +227,17 @@ enum Browse {
     Downloading(f32),
 }
 
-impl Panel {
+impl AiChat {
     /// Opens `kind` for `crop`. `question` (Ask AI only) is sent once ready:
     /// the user already pressed Enter on it elsewhere (Lens follow-up, the
     /// bar's AI field); `include`: its Include screen starts on.
-    pub fn open(
-        kind: actions::Panel,
-        crop: Crop,
-        question: Option<String>,
-        include: bool,
-    ) -> (Panel, Task<Msg>) {
+    pub fn open(crop: Crop, question: Option<String>, include: bool) -> (AiChat, Task<Msg>) {
         let crop = Arc::new(crop);
-        let mut panel = Panel {
+        let mut panel = AiChat {
             input: text_editor::Content::with_text(question.as_deref().unwrap_or_default()),
             queued: question.is_some(),
-            ..Panel::new(crop, State::ask(Chat::default()))
+            ..AiChat::new(crop, State::ask(Chat::default()))
         };
-        let actions::Panel::Ask = kind;
         if let State::Ask { include: on, .. } = &mut panel.state {
             *on = include;
         }
@@ -313,8 +306,8 @@ impl Panel {
     }
 
     /// A panel in `state` on `crop`, nothing typed, nothing running.
-    fn new(crop: Arc<Crop>, state: State) -> Panel {
-        Panel {
+    fn new(crop: Arc<Crop>, state: State) -> AiChat {
+        AiChat {
             crop,
             state,
             input: text_editor::Content::new(),
@@ -333,9 +326,9 @@ impl Panel {
     }
 
     /// Ask AI, continuing `chat` (e.g. the translate word card's explanation).
-    pub fn open_chat(crop: Crop, mut chat: Chat, include: bool) -> (Panel, Task<Msg>) {
+    pub fn open_chat(crop: Crop, mut chat: Chat, include: bool) -> (AiChat, Task<Msg>) {
         chat.cancel(); // a stream still running belonged to the card; it stopped
-        let (mut panel, task) = Panel::open(actions::Panel::Ask, crop, None, include);
+        let (mut panel, task) = AiChat::open(crop, None, include);
         if let State::Ask { chat: open, .. } = &mut panel.state {
             *open = chat;
         }
@@ -347,12 +340,6 @@ impl Panel {
     pub fn include(&self) -> Option<bool> {
         match self.state {
             State::Ask { include, .. } => Some(include),
-        }
-    }
-
-    pub fn kind(&self) -> actions::Panel {
-        match self.state {
-            State::Ask { .. } => actions::Panel::Ask,
         }
     }
 

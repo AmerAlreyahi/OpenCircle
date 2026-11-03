@@ -68,7 +68,7 @@ impl App {
         if let Some(chat) = self.chat.as_ref().filter(|c| c.window == Some(window)) {
             let (id, size) = (chat.id, chat.size);
             return (chat.panel.view(Rectangle::with_size(size), size, false))
-                .map(move |msg| Message::Panel(id, msg));
+                .map(move |msg| Message::AiChat(id, msg));
         }
         if let Some(screen) = self.o.screens.iter().find(|s| s.window == window) {
             return self.screen_view(screen);
@@ -248,17 +248,17 @@ impl App {
             let id = *id;
             song.view(self.o.screen)
                 .map(move |msg| Message::Song(id, msg))
-        } else if let Some((id, panel)) = &self.o.panel {
+        } else if let Some((id, panel)) = &self.o.ai_chat {
             let id = *id;
-            let at = self.card_at();
+            let at = self.chat_card_at();
             let card = panel
-                .view(at, self.o.screen, self.o.card_hover)
-                .map(move |msg| Message::Panel(id, msg));
-            lifted(grow(card, at, self.card_grown()), at, panel.held)
+                .view(at, self.o.screen, self.o.chat_hover)
+                .map(move |msg| Message::AiChat(id, msg));
+            lifted(grow(card, at, self.chat_grown()), at, panel.held)
         } else if let Some((id, session)) = &self.o.translate {
             let id = *id;
             session
-                .view(self.o.screen, self.card_at(), self.o.card_hover)
+                .view(self.o.screen, self.chat_card_at(), self.o.chat_hover)
                 .map(move |msg| Message::Translate(id, msg))
         } else if let Some(snip) = snip {
             let look = crate::ui::theme::accent_of(&config::look());
@@ -314,7 +314,7 @@ impl App {
         }
         // Beside a panel (an auto-search's): the chips.
         if let (Some(_), Some(selection), Purpose::Search, false) = (
-            &self.o.panel,
+            &self.o.ai_chat,
             self.o.selection,
             &self.o.purpose,
             self.o.drawing || self.settling(),
@@ -325,8 +325,8 @@ impl App {
         if let Some(chat) = &self.chat {
             let id = chat.id;
             let at = self.chat_rect();
-            let card = chat.panel.view(at, self.o.screen, self.o.card_hover);
-            let card = card.map(move |msg| Message::Panel(id, msg));
+            let card = chat.panel.view(at, self.o.screen, self.o.chat_hover);
+            let card = card.map(move |msg| Message::AiChat(id, msg));
             layers = layers.push(lifted(card, at, chat.panel.held));
         }
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
@@ -366,8 +366,8 @@ impl App {
     /// The part of the overlay a result card leaves free (all of it without
     /// one): the bar, chips, popup and pills go there.
     pub(in crate::ui) fn room(&self) -> Rectangle {
-        let card = match (&self.o.panel, &self.chat) {
-            (Some(_), _) => Some(self.card_at()),
+        let card = match (&self.o.ai_chat, &self.chat) {
+            (Some(_), _) => Some(self.chat_card_at()),
             (None, Some(_)) => Some(self.chat_rect()),
             (None, None) => None,
         };

@@ -27,9 +27,9 @@ use crate::ui::platform::monitor::can_hide_windows;
 use crate::ui::{live_layer, overlay, update_card, windows};
 
 pub(in crate::ui) mod actions;
+pub(in crate::ui) mod ai_chat;
 pub(in crate::ui) mod bar;
 pub(in crate::ui) mod capture;
-pub(in crate::ui) mod results;
 pub(in crate::ui) mod screens;
 pub(in crate::ui) mod selection;
 pub(in crate::ui) mod snip;
@@ -203,8 +203,8 @@ pub(in crate::ui) struct App {
     pub(in crate::ui) chat_side: Option<crate::ui::kit::panel_frame::Side>,
     /// The AI chat's width the user set by its inner edge (this run of the app).
     pub(in crate::ui) chat_width: Option<f32>,
-    /// The AI chat once pinned: it outlives the overlay (`results::Resident`).
-    pub(in crate::ui) chat: Option<results::Resident>,
+    /// The AI chat once pinned: it outlives the overlay (`ai_chat::Resident`).
+    pub(in crate::ui) chat: Option<ai_chat::Resident>,
     /// Song searches started (numbers them).
     pub(in crate::ui) songs: u32,
     /// A verified update waiting until nothing is open (`is_idle`).
@@ -318,11 +318,11 @@ impl App {
             || self.appearing()
             || self.swapping()
             || self.bar_gliding()
-            || self.card_opening()
+            || self.chat_opening()
             || self.o.chat_glide.is_some()
             || self.o.glow.moving()
             || self.o.zoom.is_some()
-            || (self.o.panel.as_ref()).is_some_and(|(_, p)| p.spinning())
+            || (self.o.ai_chat.as_ref()).is_some_and(|(_, p)| p.spinning())
             || self.chat.as_ref().is_some_and(|c| c.panel.spinning())
             || self.o.bar_now.is_none()
             || (self.o.edit.as_ref())
@@ -442,7 +442,7 @@ impl App {
                 Subscription::none()
             };
             // Dragging the result card: the pointer anywhere, until let go.
-            let card = match self.o.card_drag {
+            let card = match self.o.chat_drag {
                 Some(_) => iced::event::listen_with(|event, _, _| match event {
                     iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                         Some(Message::CardMoved(position))

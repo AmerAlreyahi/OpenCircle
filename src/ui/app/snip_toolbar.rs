@@ -18,7 +18,7 @@ impl App {
     /// place on screen; the toolbar takes the bar's place. Edits made before
     /// (then Back) are still there.
     pub(in crate::ui) fn open_snip_toolbar(&mut self) -> Task<Message> {
-        self.o.panel = None;
+        self.o.ai_chat = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x
         self.o.zoom = None;
         if let Some(edit) = &mut self.o.edit {

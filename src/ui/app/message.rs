@@ -15,7 +15,7 @@ use crate::snip::annotate;
 use crate::ui::app::{keys, quick::Quick, word};
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::snip::{self, Snip};
-use crate::ui::{live_layer, overlay, panel, song, translate, windows};
+use crate::ui::{ai_chat, live_layer, overlay, song, translate, windows};
 
 /// Where the overlay was when a Copy / Save ran: its origin, size and scale
 /// (logical px), and what its pill goes beside (overlay px; `actions::pill_at`).
@@ -46,7 +46,7 @@ pub(in crate::ui) enum Message {
     /// A focused field gave a key back (`keys`).
     Field(keys::Keyed),
     /// From the panel with this number (stale numbers are ignored).
-    Panel(u32, panel::Msg),
+    AiChat(u32, ai_chat::Msg),
     /// The pinned chat's own window moved (dragged) to here; it stopped
     /// moving after this many moves (it docks); a frame of its spinner.
     ChatMoved(iced::window::Id, iced::Point),

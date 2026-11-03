@@ -311,7 +311,7 @@ pub struct Header<'a> {
 /// without a shadow (glass joins with the GPU renderer). Presses never reach
 /// the canvas below.
 #[allow(clippy::too_many_arguments)]
-pub fn card<'a, Message: Clone + 'a>(
+pub fn chat_frame<'a, Message: Clone + 'a>(
     header: Header<'a>,
     ends: Option<Element<'a, Message>>,
     body: impl Into<Element<'a, Message>>,

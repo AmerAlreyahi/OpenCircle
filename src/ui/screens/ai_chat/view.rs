@@ -1,13 +1,13 @@
 //! What the result cards show (the design's app-states cards: Recognised
 //! text, Browser hand-off, Ask AI without a key), composed from kit parts
-//! only, in the one result card frame (`kit::panel_frame::card`).
+//! only, in the one result card frame (`kit::panel_frame::chat_frame`).
 use std::sync::Arc;
 
 use iced::widget::tooltip::Position;
 use iced::widget::{column, container, markdown as md, row, stack};
 use iced::{Center, Element, Fill, Rectangle, Right, Size};
 
-use super::{Browse, LOG, Msg, PICKS, Panel, State, Tab, classifier, picked};
+use super::{AiChat, Browse, LOG, Msg, PICKS, State, Tab, classifier, picked};
 use crate::actions;
 use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
 use crate::config::{self, StaysOpen};
@@ -58,7 +58,7 @@ pub fn card<'a, M: Clone + 'a>(
     hover: bool,
     on: impl Fn(Event) -> M,
 ) -> Element<'a, M> {
-    frame::card(header, None, body, footer, at, screen, hover, on)
+    frame::chat_frame(header, None, body, footer, at, screen, hover, on)
 }
 
 /// A small quiet text button (a message's Copy, Edit, Regenerate).
@@ -97,7 +97,7 @@ fn downloading<'a, M: 'a>(what: &'a str, done: f32) -> Element<'a, M> {
     column![label, progress::bar(done)].into()
 }
 
-impl Panel {
+impl AiChat {
     /// The panel as the floating result card at `at` on a `screen`;
     /// `hover`: the pointer is on its resize edge.
     pub fn view(&self, at: Rectangle, screen: Size, hover: bool) -> Element<'_, Msg> {
@@ -152,7 +152,7 @@ impl Panel {
             let pin = icon_button(glyph.glyph(), state, Some(Msg::Pin));
             let pin = hint(pin, tip, Why::Icon, Position::Bottom);
             let ends = row![new, pin].spacing(space::GAP).align_y(Center);
-            let card = frame::card(
+            let card = frame::chat_frame(
                 header,
                 Some(ends.into()),
                 body,

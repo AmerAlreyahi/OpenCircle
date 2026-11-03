@@ -11,6 +11,7 @@ use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 use crate::config;
 use crate::history::song as history;
 use crate::music::{self, LISTEN_SECS, Song};
+use crate::ui::ai_chat::{actions, note};
 use crate::ui::background;
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::chip;
@@ -19,7 +20,6 @@ use crate::ui::kit::panel_frame as card;
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{accent, error, sub, text as line};
 use crate::ui::kit::tokens::{Role, radius, size, space};
-use crate::ui::panel::{actions, note};
 
 /// Lucide "music" (in the subset font).
 pub const MUSIC: char = '\u{e125}';
@@ -180,7 +180,7 @@ impl Session {
             held: false,
             logo: None,
         };
-        super::panel::card(
+        super::ai_chat::card(
             header,
             body,
             footer,

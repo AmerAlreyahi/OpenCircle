@@ -200,7 +200,7 @@ impl App {
             snip.start_reading(); // its first frame is long up
         }
         let o = &mut *self.o;
-        (o.panel, o.translate, o.song, o.toast) = (None, None, None, None);
+        (o.ai_chat, o.translate, o.song, o.toast) = (None, None, None, None);
         (o.word, o.text_mode, o.edit, o.morph) = (None, None, None, None);
         (o.bar_focus, o.grab, o.drawing) = (None, None, false);
         o.others.clear();
@@ -360,7 +360,7 @@ impl App {
         );
         edit.annotator.steps = self.windows.steps();
         let area = edit.canvas_rect();
-        self.o.panel = None;
+        self.o.ai_chat = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x
         self.o.zoom = None;
         (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area

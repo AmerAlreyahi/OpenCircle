@@ -12,13 +12,13 @@
 use iced::widget::{column, container, row};
 use iced::{Center, Element, Fill, Size};
 
+use crate::ui::ai_chat::note;
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::grip::{self, grip};
 use crate::ui::kit::progress;
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, radius};
-use crate::ui::panel::note;
 use crate::ui::picker::{self, CHIP_HEIGHT, Picker, SPACING};
 
 /// The window's corners (`rounded-2xl`) and the room inside its edge (`p-2`).

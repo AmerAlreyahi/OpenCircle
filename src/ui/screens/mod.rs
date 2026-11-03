@@ -11,7 +11,7 @@ pub mod snip_toolbar;
 pub mod overlay {
     pub mod edge;
 }
-pub mod panel;
+pub mod ai_chat;
 pub mod settings;
 pub mod setup;
 pub mod song;

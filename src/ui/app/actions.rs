@@ -16,7 +16,7 @@ use crate::ui::app::message::{Message, PickAct, PillPlace, Purpose};
 use crate::ui::app::quick::Quick;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::platform::monitor::{self, taskbar_inset};
-use crate::ui::{live_layer, overlay, panel, settings, song, translate, windows};
+use crate::ui::{ai_chat, live_layer, overlay, settings, song, translate, windows};
 
 use super::{App, Reader, TOAST_MARGIN};
 
@@ -227,13 +227,13 @@ impl App {
         }
         // Several selections: Ask AI gets each of them (stacked), the rest the
         // box around all of them.
-        let all = matches!(action.run, Run::Panel(actions::Panel::Ask));
+        let all = matches!(action.run, Run::AskAi);
         let Some(crop) = (if all { self.stacked() } else { self.crop() }) else {
             return Task::none();
         };
         match action.run {
             Run::Finish(_) => self.finish(action, crop),
-            Run::Panel(kind) => self.open_panel(kind, crop, None),
+            Run::AskAi => self.open_chat(crop, None),
             Run::Lens => self.search_image(crop),
             Run::Snip | Run::Translate => Task::none(), // handled above
         }
@@ -330,8 +330,7 @@ impl App {
             }
             Quick::Song => self.start_song(),
             Quick::Explain => match self.crop() {
-                Some(crop) => self.open_panel(
-                    actions::Panel::Ask,
+                Some(crop) => self.open_chat(
                     crop,
                     Some(actions::ask::PRESETS[0].text(&config::current().translate.target)),
                 ),
@@ -361,7 +360,7 @@ impl App {
         self.songs = self.songs.wrapping_add(1);
         let id = self.songs;
         // The song's card takes the result card's turn: one card at a time.
-        self.o.panel = None;
+        self.o.ai_chat = None;
         let (session, work) = song::Session::start();
         self.o.song = Some((id, session));
         work.map(move |msg| Message::Song(id, msg))
@@ -422,7 +421,7 @@ impl App {
         let Some(area) = actions::crop_bounds(*width, *height, self.o.scale, selection.area) else {
             return Task::none();
         };
-        self.o.panel = None;
+        self.o.ai_chat = None;
         self.o.edit = None;
         self.o.view = self.o.view.reset(); // the translation is drawn at 1x
         self.o.zoom = None;
@@ -451,12 +450,12 @@ impl App {
         };
         match msg {
             translate::Msg::Card(card::Event::Grab(how)) => {
-                self.o.card_drag = Some((how, None));
+                self.o.chat_drag = Some((how, None));
                 self.frame_times.borrow_mut().clear();
                 Task::none()
             }
             translate::Msg::Card(card::Event::Hover(on)) => {
-                self.o.card_hover = on;
+                self.o.chat_hover = on;
                 Task::none()
             }
             translate::Msg::Card(card::Event::Reset) => {
@@ -482,10 +481,10 @@ impl App {
                 Some((crop, chat)) => {
                     self.panels = self.panels.wrapping_add(1);
                     let id = self.panels;
-                    let (panel, task) = panel::Panel::open_chat(crop, chat, self.o.include);
-                    self.o.panel = Some((id, panel));
+                    let (panel, task) = ai_chat::AiChat::open_chat(crop, chat, self.o.include);
+                    self.o.ai_chat = Some((id, panel));
                     self.keep_chat();
-                    task.map(move |msg| Message::Panel(id, msg))
+                    task.map(move |msg| Message::AiChat(id, msg))
                 }
                 None => Task::none(),
             },

@@ -72,7 +72,7 @@ fn styles(line: &str) -> bool {
 const NOT_SCREENS: [&str; 7] = [
     "arch_tests.rs",
     "frame_times.rs",
-    "screens/panel/tests.rs",
+    "screens/ai_chat/tests.rs",
     "screens/translate/tests.rs",
     "screens/settings/tests.rs",
     "theme.rs",

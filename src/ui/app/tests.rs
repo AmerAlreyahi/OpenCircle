@@ -22,7 +22,7 @@ use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::snip::Snip;
-use crate::ui::{overlay, panel, snip, song, translate, windows};
+use crate::ui::{ai_chat, overlay, snip, song, translate, windows};
 
 use super::actions::auto_targets;
 use super::view::chips_at;
@@ -425,7 +425,7 @@ fn the_crop_lens_gets_is_the_selection_at_any_scale_and_monitor() {
             false,
         );
         assert!(
-            app.o.panel.is_none(),
+            app.o.ai_chat.is_none(),
             "{scale}: nothing sent before a choice"
         );
         let crop = app.crop().expect("a crop");
@@ -1627,14 +1627,12 @@ fn the_ask_bar_shows_with_a_selection_and_opens_ask_ai() {
     // The design: an empty field opens Ask AI (its presets), asking nothing.
     let _ = app.update(Message::AskInput("   ".into()));
     let _ = app.update(Message::AskSubmit);
-    let (_, panel) = app.o.panel.as_mut().expect("Ask AI opens");
-    assert_eq!(panel.kind(), actions::Panel::Ask);
+    let (_, panel) = app.o.ai_chat.as_mut().expect("Ask AI opens");
     assert!(panel.take_input().is_empty(), "no question");
-    app.o.panel = None;
+    app.o.ai_chat = None;
     let _ = app.update(Message::AskInput("what is this?".into()));
     let _ = app.update(Message::AskSubmit);
-    let (_, panel) = app.o.panel.as_ref().expect("Ask AI opens");
-    assert_eq!(panel.kind(), actions::Panel::Ask);
+    assert!(app.o.ai_chat.is_some(), "Ask AI opens");
     assert!(app.o.ask.is_empty());
 }
 
@@ -1799,8 +1797,7 @@ fn selected_text_gets_the_text_actions_shift_extends_ctrl_a_takes_all() {
             ctrl: false,
         },
     );
-    let (_, panel) = app.o.panel.as_ref().expect("Ask AI opens");
-    assert_eq!(panel.kind(), actions::Panel::Ask);
+    assert!(app.o.ai_chat.is_some(), "Ask AI opens");
     assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Word);
 }
 
@@ -1836,10 +1833,7 @@ fn the_bottom_bar_is_there_from_the_first_frame() {
     let mut app = open_app(800, 600, 1.0);
     let _ = app.update(Message::AskInput("what is this?".into()));
     let _ = app.update(Message::AskSubmit);
-    assert_eq!(
-        app.o.panel.as_ref().map(|(_, p)| p.kind()),
-        Some(actions::Panel::Ask)
-    );
+    assert!(app.o.ai_chat.is_some());
     let bottom = |t: &String| ASK_PLACEHOLDERS.contains(&t.as_str());
     assert!(
         !overlay_texts(&app).iter().any(bottom),
@@ -2566,7 +2560,10 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
     );
     assert!(app.o.selection.is_some());
     assert!(app.auto_actions().is_empty(), "nothing runs by itself");
-    assert!(app.o.panel.is_none(), "no Lens, no Ask AI before a choice");
+    assert!(
+        app.o.ai_chat.is_none(),
+        "no Lens, no Ask AI before a choice"
+    );
     assert!(app.o.lens_pages.is_empty(), "nothing handed to the browser");
     let _ = crate::ui::kit::tooltip::tests_support::shown();
     let texts = overlay_texts(&app);
@@ -2599,10 +2596,7 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
     // Enter with nothing typed: Ask AI opens (the design), nothing is searched
     let _ = app.update(Message::AskInput("  ".into()));
     let _ = app.update(Message::AskSubmit);
-    assert_eq!(
-        app.o.panel.as_ref().map(|(_, p)| p.kind()),
-        Some(actions::Panel::Ask)
-    );
+    assert!(app.o.ai_chat.is_some());
     // "Auto action" opted back in: the selection searches by itself
     let mut app = open_app(1280, 800, 1.0);
     app.o.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
@@ -2612,9 +2606,9 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         Point::new(500.0, 350.0),
         false,
     );
-    assert!(app.o.panel.is_none(), "Search in browser shows no card");
+    assert!(app.o.ai_chat.is_none(), "Search in browser shows no card");
     // the key still works: A asks
-    app.o.panel = None;
+    app.o.ai_chat = None;
     event(
         &mut app,
         overlay::Event::Key {
@@ -2622,10 +2616,7 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
             ctrl: false,
         },
     );
-    assert_eq!(
-        app.o.panel.as_ref().map(|(_, p)| p.kind()),
-        Some(actions::Panel::Ask)
-    );
+    assert!(app.o.ai_chat.is_some());
 }
 
 /// Frames until the bar is where it goes (it glides there).
@@ -2678,13 +2669,13 @@ fn the_bottom_bar_never_changes_size() {
         Point::new(500.0, 350.0),
         false,
     );
-    app.o.panel = None; // the auto-search's card
+    app.o.ai_chat = None; // the auto-search's card
     let (selected, edits) = bar_box(&mut app);
     assert_eq!(selected, before);
     assert!(edits);
     // Ask AI's card opens (the bar steps aside) and closes: the same again
     let _ = app.update(Message::AskButton);
-    assert!(app.o.panel.is_some(), "Ask AI opens");
+    assert!(app.o.ai_chat.is_some(), "Ask AI opens");
     assert!(!app.bottom_bar_shown());
     // a click on the frozen screen outside the card closes it
     event(
@@ -2695,7 +2686,7 @@ fn the_bottom_bar_never_changes_size() {
         },
     );
     event(&mut app, overlay::Event::Release);
-    assert!(app.o.panel.is_none());
+    assert!(app.o.ai_chat.is_none());
     assert!(app.bottom_bar_shown());
     let (after, edits) = bar_box(&mut app);
     assert_eq!(after, before);
@@ -2842,10 +2833,7 @@ fn the_bottom_bar_buttons_work_on_the_whole_screen() {
     // Ask AI with an empty field: the panel with its presets, on the whole screen
     let mut app = open_app(800, 600, 1.0);
     let _ = app.update(Message::AskButton);
-    assert_eq!(
-        app.o.panel.as_ref().map(|(_, p)| p.kind()),
-        Some(actions::Panel::Ask)
-    );
+    assert!(app.o.ai_chat.is_some());
     // the same keys with nothing selected: A asks, R translates, all the
     // screen; E snips: Snip's pick step over the frozen screen
     let mut app = open_app(800, 600, 1.0);
@@ -2875,7 +2863,7 @@ fn the_bottom_bar_buttons_work_on_the_whole_screen() {
             ctrl: false,
         },
     );
-    assert!(app.o.panel.is_some());
+    assert!(app.o.ai_chat.is_some());
 }
 
 /// The opening as drawn `ms` after its first frame (`None`: the first frame).
@@ -3052,12 +3040,12 @@ fn letters_stay_shortcuts_with_a_result_card_open() {
         false,
     );
     let crop = app.crop().unwrap();
-    let opened = app.open_panel(actions::Panel::Ask, crop.clone(), None);
+    let opened = app.open_chat(crop.clone(), None);
     drop(opened); // its work (the setup) is done below by hand
-    let (id, _) = app.o.panel.as_ref().map(|(id, p)| (*id, p.kind())).unwrap();
+    let id = app.o.ai_chat.as_ref().map(|(id, _)| *id).unwrap();
     let setup = actions::ask::setup(&crop).map(Arc::new);
     assert!(setup.is_ok(), "the no-key provider needs no setup");
-    let ready = app.update(Message::Panel(id, panel::Msg::Ready(setup)));
+    let ready = app.update(Message::AiChat(id, ai_chat::Msg::Ready(setup)));
     let keys = key_after(&app, ready, None, 't');
     assert!(
         keys.iter().any(|m| is_key(m, 't')),
@@ -3099,7 +3087,7 @@ fn shortcuts(messages: &[Message]) -> String {
 /// overlay; no chat card, no pinned chat (the owner, 2026-10-28).
 #[test]
 fn in_browser_mode_asking_opens_no_chat() {
-    super::results::HAND_OFF.set(true);
+    super::ai_chat::HAND_OFF.set(true);
     let mut app = open_app(800, 600, 1.0);
     drag(
         &mut app,
@@ -3109,13 +3097,13 @@ fn in_browser_mode_asking_opens_no_chat() {
     );
     let crop = app.crop().unwrap();
     assert_eq!(config::current().ai.provider, config::Provider::Browser);
-    let _ = app.open_panel(actions::Panel::Ask, crop, Some("What is this?".into()));
+    let _ = app.open_chat(crop, Some("What is this?".into()));
     // the same from the bar: its Ask AI action and the AI field's Enter
     let _ = app.update(Message::Run(&actions::ask::ACTION));
     let _ = app.update(Message::AskInput("What is this?".into()));
     let _ = app.update(Message::AskSubmit);
-    super::results::HAND_OFF.set(false);
-    assert!(app.o.panel.is_none() && app.chat.is_none(), "no chat");
+    super::ai_chat::HAND_OFF.set(false);
+    assert!(app.o.ai_chat.is_none() && app.chat.is_none(), "no chat");
 }
 
 /// Search in browser (the pill, its key) never shows a card of ours, not for a
@@ -3130,9 +3118,9 @@ fn search_in_browser_shows_no_card() {
         false,
     );
     let _ = app.on_pill(BarButton::Search);
-    assert!(app.o.panel.is_none() && app.chat.is_none(), "the pill");
+    assert!(app.o.ai_chat.is_none() && app.chat.is_none(), "the pill");
     let _ = app.update(Message::Run(&lens::ACTION));
-    assert!(app.o.panel.is_none() && app.chat.is_none(), "the action");
+    assert!(app.o.ai_chat.is_none() && app.chat.is_none(), "the action");
 }
 
 /// An open overlay with a selection and a ready Ask AI panel (browser provider).
@@ -3145,10 +3133,10 @@ fn app_with_ask_panel() -> (App, u32) {
         false,
     );
     let crop = app.crop().unwrap();
-    let _ = app.open_panel(actions::Panel::Ask, crop.clone(), None);
-    let (id, _) = app.o.panel.as_ref().map(|(id, p)| (*id, p.kind())).unwrap();
+    let _ = app.open_chat(crop.clone(), None);
+    let id = app.o.ai_chat.as_ref().map(|(id, _)| *id).unwrap();
     let setup = actions::ask::setup(&crop).map(Arc::new);
-    let _ = app.update(Message::Panel(id, panel::Msg::Ready(setup)));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Ready(setup)));
     (app, id)
 }
 
@@ -3185,9 +3173,14 @@ fn typing_in_the_bars_field_runs_no_shortcut() {
 #[test]
 fn typing_in_the_ask_panels_input_runs_no_shortcut() {
     let (app, _) = app_with_ask_panel();
-    let (messages, _) = feed(&app, Focus::Id(panel::INPUT), &shot::typing("real estate"));
+    let (messages, _) = feed(
+        &app,
+        Focus::Id(ai_chat::INPUT),
+        &shot::typing("real estate"),
+    );
     assert_eq!(shortcuts(&messages), "", "{messages:?}");
-    let typed = (messages.iter()).filter(|m| matches!(m, Message::Panel(_, panel::Msg::Edit(_))));
+    let typed =
+        (messages.iter()).filter(|m| matches!(m, Message::AiChat(_, ai_chat::Msg::Edit(_))));
     assert_eq!(typed.count(), "real estate".len());
     let (messages, _) = feed(&app, Focus::Nothing, &shot::typing("aterl"));
     assert_eq!(
@@ -3241,11 +3234,11 @@ fn esc_leaves_a_focused_field_and_the_second_closes() {
     assert!(app.o.frame.is_none());
     // the Ask panel's input
     let (app, _) = app_with_ask_panel();
-    let (messages, status) = feed(&app, Focus::Id(panel::INPUT), &esc);
+    let (messages, status) = feed(&app, Focus::Id(ai_chat::INPUT), &esc);
     assert!(
         messages
             .iter()
-            .any(|m| matches!(m, Message::Panel(_, panel::Msg::Key(keys::Keyed::Left))))
+            .any(|m| matches!(m, Message::AiChat(_, ai_chat::Msg::Key(keys::Keyed::Left))))
     );
     assert_eq!(status[1], iced::event::Status::Captured);
 }
@@ -3366,11 +3359,11 @@ fn tab_walks_the_bar_in_the_designs_order_and_enter_or_space_press() {
     let mut app = open_app(800, 600, 1.0);
     app.o.bar_focus = Some(Logo);
     let _ = app.on_overlay(overlay::Event::Enter);
-    assert!(app.o.panel.is_some(), "the logo opens the AI chat");
+    assert!(app.o.ai_chat.is_some(), "the logo opens the AI chat");
     // Space with nothing focused does nothing
     let mut app = open_app(800, 600, 1.0);
     let _ = app.on_overlay(overlay::Event::Space);
-    assert!(app.o.panel.is_none() && app.o.bar_focus.is_none());
+    assert!(app.o.ai_chat.is_none() && app.o.bar_focus.is_none());
     // a click puts the focus back on the overlay
     app.o.bar_focus = Some(Badge);
     let _ = app.on_overlay(overlay::Event::Press {
@@ -3867,12 +3860,12 @@ fn nothing_floats_over_the_result_card() {
         false,
     );
     let _ = app.update(Message::Run(&actions::ask::ACTION));
-    let card = app.card_at();
+    let card = app.chat_card_at();
     let room = app.room();
     assert!(room.intersection(&card).is_none(), "{room:?} vs {card:?}");
     assert!(room.width > 0.0);
     // and with no card, the whole screen
-    app.o.panel = None;
+    app.o.ai_chat = None;
     assert_eq!(app.room(), Rectangle::with_size(app.o.screen));
 }
 
@@ -3888,8 +3881,7 @@ fn a_quick_action_on_a_drawn_area_runs_alone_not_the_auto_search_too() {
         Point::new(400.0, 300.0),
         false,
     );
-    let panel = app.o.panel.as_ref().map(|(_, p)| p.kind());
-    assert_eq!(panel, Some(actions::Panel::Ask), "Ask AI, not Lens over it");
+    assert!(app.o.ai_chat.is_some(), "Ask AI, not Lens over it");
 }
 
 #[test]
@@ -3903,12 +3895,12 @@ fn lens_in_the_browser_closes_the_overlay() {
     );
     let _ = app.update(Message::Run(&lens::ACTION));
     // never a card of ours, not even while the page is being written
-    assert!(app.o.panel.is_none(), "Search in browser opens no panel");
+    assert!(app.o.ai_chat.is_none(), "Search in browser opens no panel");
     let opened = Message::LensOpened(Ok(lens::Held::for_test()));
     let _ = app.update(opened);
     // Closed on every OS: nothing of ours stays on screen after the hand-off.
     assert!(app.o.frame.is_none());
-    assert!(app.o.panel.is_none());
+    assert!(app.o.ai_chat.is_none());
 }
 
 #[test]
@@ -3921,8 +3913,8 @@ fn the_result_card_opens_off_the_selection() {
         false,
     );
     let _ = app.update(Message::Run(&actions::ask::ACTION)); // a card
-    assert!(app.o.panel.is_some());
-    let at = app.card_at();
+    assert!(app.o.ai_chat.is_some());
+    let at = app.chat_card_at();
     assert_eq!(at.x + at.width, 1920.0 - 16.0, "right");
 }
 
@@ -3987,7 +3979,7 @@ fn look_shots() {
         false,
     );
     let _ = wide.update(Message::Run(&actions::ask::ACTION));
-    wide.o.card_hover = true;
+    wide.o.chat_hover = true;
     let rgba = crate::ui::kit::testing::shot::render(wide.view(wide.overlay), 1440, 900);
     actions::write_png(&dir.join("look-7-ask-card-1440.png"), 1440, 900, &rgba).unwrap();
     let mut app = select_text_app();
@@ -4019,7 +4011,7 @@ fn close_leaves_a_fresh_opening() {
     read_back(&mut app, at_word(1, 7.0), page(), false);
     assert!(app.o.word.is_some() && app.o.selection.is_some());
     let crop = app.crop().unwrap();
-    let _ = app.open_panel(actions::Panel::Ask, crop, None);
+    let _ = app.open_chat(crop, None);
     let frame = app.o.frame.clone().unwrap();
     let (session, _) =
         translate::Session::start(frame, [0, 0, 40, 20], 1.0, app.cache.clone(), false);
@@ -4029,14 +4021,14 @@ fn close_leaves_a_fresh_opening() {
     app.o.ask = "what is this".into();
     app.o.bar_focus = Some(bar::Stop::Logo);
     app.o.clicks = Some((Instant::now(), Point::ORIGIN, 2));
-    assert!(app.o.panel.is_some());
+    assert!(app.o.ai_chat.is_some());
     let _ = app.close();
     assert!(app.o.is_none(), "nothing of the opening is kept");
     let (o, fresh) = (&app.o, Opening::default());
     assert!(o.frame.is_none() && o.selection.is_none());
     assert!(o.stroke.is_empty() && o.others.is_empty() && o.word.is_none());
     assert_eq!(o.screen_text, fresh.screen_text);
-    assert!(o.panel.is_none() && o.translate.is_none() && o.song.is_none());
+    assert!(o.ai_chat.is_none() && o.translate.is_none() && o.song.is_none());
     assert!(o.helper.is_none() && o.lens_pages.is_empty() && o.edit.is_none());
     assert!(o.ask.is_empty() && o.reader == fresh.reader && o.held.is_none());
     assert!(matches!(o.purpose, Purpose::Search));
@@ -4068,8 +4060,8 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
     assert!(app.o.is_some() && app.o.frame.is_some());
     app.select(Rectangle::new(Point::new(4.0, 4.0), Size::new(40.0, 30.0)));
     let crop = app.crop().unwrap();
-    let _ = app.open_panel(actions::Panel::Ask, crop, None);
-    assert!(app.o.panel.is_some());
+    let _ = app.open_chat(crop, None);
+    assert!(app.o.ai_chat.is_some());
     let _ = app.start_translate(); // (the panel goes)
     assert!(app.o.translate.is_some());
     assert!(!pixels.is_unique(), "the opening holds the frame");
@@ -4086,7 +4078,7 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
         extend: false,
     };
     let late = [
-        Message::Panel(panel, panel::Msg::Delta("late".into())),
+        Message::AiChat(panel, ai_chat::Msg::Delta("late".into())),
         Message::Translate(translation, translate::Msg::Close),
         Message::ScreenText(opening, band, Ok(Vec::new())),
         Message::Tapped(read, Ok(Vec::new())),
@@ -4108,7 +4100,7 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
 #[test]
 fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     let (mut app, id) = app_with_ask_panel(); // 800 x 600, a selection at the left
-    let at = app.card_at();
+    let at = app.chat_card_at();
     let d = app.chat_dock(app.o.screen, card::Side::Right, app.o.work_inset);
     assert_eq!(
         (at.x, at.width, at.height),
@@ -4117,16 +4109,16 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
     // held: it follows the pointer 1:1 across, by fractions of a px too,
     // drawn on whole px, picked up (scaled, accent edge); full height, it
     // moves only across
-    let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Move));
-    let _ = app.update(Message::Panel(id, grab));
+    let grab = ai_chat::Msg::Card(card::Event::Grab(card::Drag::Move));
+    let _ = app.update(Message::AiChat(id, grab));
     let _ = app.update(Message::CardMoved(Point::new(700.0, 30.0)));
     let _ = app.update(Message::CardMoved(Point::new(500.3, 40.6)));
-    let held = app.card_at();
+    let held = app.chat_card_at();
     assert_eq!(held.position(), Point::new((at.x - 199.7).round(), at.y));
-    assert!(app.o.panel.as_ref().unwrap().1.held);
+    assert!(app.o.ai_chat.as_ref().unwrap().1.held);
     // ... but never past 6 px from the screen's edge (design 3.4)
     let _ = app.update(Message::CardMoved(Point::new(-400.0, 40.6)));
-    let held = app.card_at();
+    let held = app.chat_card_at();
     assert_eq!(held.x, motion::DRAG_EDGE);
     // let go left of the middle: it glides to the left dock, and stays there
     let _ = app.update(Message::CardReleased);
@@ -4143,22 +4135,22 @@ fn the_chat_docks_where_it_is_let_go_on_whole_pixels() {
         }
     }
     let _ = app.update(Message::Frame(began + motion::DOCK / 3));
-    let mid = app.card_at();
+    let mid = app.chat_card_at();
     assert!(
         mid.x > held.x && mid.x < 16.0 && mid.x == mid.x.round(),
         "{mid:?}"
     );
     let _ = app.update(Message::Frame(began + motion::DOCK));
     assert!(app.o.chat_glide.is_none());
-    assert!(!app.o.panel.as_ref().unwrap().1.held, "let go: scale 1");
+    assert!(!app.o.ai_chat.as_ref().unwrap().1.held, "let go: scale 1");
     shot::save("chat-glide-4", app.view(app.overlay), app.o.screen);
-    assert_eq!(app.card_at().x, 16.0);
+    assert_eq!(app.chat_card_at().x, 16.0);
     assert_eq!(app.chat_side, Some(card::Side::Left));
     // the next chat in this run opens on that side
-    app.o.panel = None;
+    app.o.ai_chat = None;
     let crop = app.crop().unwrap();
-    let _ = app.open_panel(actions::Panel::Ask, crop, None);
-    assert_eq!(app.card_at().x, 16.0);
+    let _ = app.open_chat(crop, None);
+    assert_eq!(app.chat_card_at().x, 16.0);
 }
 
 /// The chat never covers the bar: for every bar anchor and either side,
@@ -4175,8 +4167,8 @@ fn the_docked_chat_never_covers_the_bar() {
             false,
         );
         let crop = app.crop().unwrap();
-        drop(app.open_panel(actions::Panel::Ask, crop, None));
-        let id = app.o.panel.as_ref().unwrap().0;
+        drop(app.open_chat(crop, None));
+        let id = app.o.ai_chat.as_ref().unwrap().0;
         api_ready(&mut app, id, b"first");
         chat_turn(&mut app, id, "What is this?", "A chart.");
         chat_turn(&mut app, id, "And the trend?", "Up.");
@@ -4219,11 +4211,11 @@ fn the_chats_inner_edge_sets_its_width() {
         false,
     );
     let crop = app.crop().unwrap();
-    drop(app.open_panel(actions::Panel::Ask, crop, None));
-    let id = app.o.panel.as_ref().unwrap().0;
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
     let before = app.chat_rect();
-    let grab = panel::Msg::Card(card::Event::Grab(card::Drag::Resize));
-    let _ = app.update(Message::Panel(id, grab));
+    let grab = ai_chat::Msg::Card(card::Event::Grab(card::Drag::Resize));
+    let _ = app.update(Message::AiChat(id, grab));
     let _ = app.update(Message::CardMoved(Point::new(1000.0, 500.0)));
     let _ = app.update(Message::CardMoved(Point::new(900.0, 520.0)));
     let _ = app.update(Message::CardReleased);
@@ -4235,8 +4227,8 @@ fn the_chats_inner_edge_sets_its_width() {
         before.x + before.width,
         "still docked"
     );
-    let reset = panel::Msg::Card(card::Event::Reset);
-    let _ = app.update(Message::Panel(id, reset));
+    let reset = ai_chat::Msg::Card(card::Event::Reset);
+    let _ = app.update(Message::AiChat(id, reset));
     assert_eq!(app.chat_rect(), before);
 }
 
@@ -4252,8 +4244,8 @@ fn a_pinned_chat_window_glides_to_its_dock() {
         false,
     );
     let crop = app.crop().unwrap();
-    drop(app.open_panel(actions::Panel::Ask, crop, None));
-    let id = app.o.panel.as_ref().unwrap().0;
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
     api_ready(&mut app, id, b"first");
     chat_turn(&mut app, id, "What is this?", "A chart.");
     chat_turn(&mut app, id, "And the trend?", "Up.");
@@ -4295,7 +4287,7 @@ fn copy_text_copies_the_picked_words_and_opens_no_card() {
     let want = picked_text(&app).expect("a word is picked");
     let _ = copy::copied::text();
     let task = app.update(Message::Run(&text::ACTION));
-    assert!(app.o.panel.is_none(), "no Text card");
+    assert!(app.o.ai_chat.is_none(), "no Text card");
     run_task(&mut app, task);
     assert_eq!(copy::copied::text().as_deref(), Some(want.as_str()));
     assert_eq!(copy::copied::image(), None, "never the picture");
@@ -4313,9 +4305,9 @@ fn copy_text_without_models_shows_the_download_card_then_copies() {
         Point::new(500.0, 350.0),
         false,
     );
-    app.o.panel = None;
+    app.o.ai_chat = None;
     let _ = app.update(Message::Run(&text::ACTION));
-    assert!(app.o.panel.is_none(), "no Text card");
+    assert!(app.o.ai_chat.is_none(), "no Text card");
     assert!(app.o.copy_after && matches!(app.o.reader, Reader::Missing(_)));
     let texts = overlay_texts(&app);
     assert!(texts.contains(&"Download".to_string()), "{texts:?}");
@@ -4416,11 +4408,11 @@ fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
     assert!(esc.o.is_none(), "Esc closes");
     // a click outside the card (the card is docked right, the click is far left, away from the selection)
     let mut out = app_with_ask_panel().0;
-    let card = out.card_at();
+    let card = out.chat_card_at();
     let at = Point::new(card.x / 2.0, out.o.screen.height - 20.0);
     event(&mut out, overlay::Event::Press { at, shift: false });
     event(&mut out, overlay::Event::Release);
-    assert!(out.o.panel.is_none(), "the click closes the card");
+    assert!(out.o.ai_chat.is_none(), "the click closes the card");
     // the Lens card too
     let mut lens = open_app(800, 600, 1.0);
     drag(
@@ -4430,7 +4422,7 @@ fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
         false,
     );
     let crop = lens.crop().unwrap();
-    let _ = lens.open_panel(actions::Panel::Ask, crop, None);
+    let _ = lens.open_chat(crop, None);
     assert!(!overlay_texts(&lens).contains(&close));
 }
 
@@ -4572,11 +4564,11 @@ fn the_ai_fields_include_screen_is_the_chats_switch() {
     // its look follows: accent on, dimmed off (the golden images show both)
     let _ = app.update(Message::AskInput("what is this?".into()));
     let _ = app.update(Message::AskSubmit);
-    let (id, panel) = app.o.panel.as_ref().expect("Ask AI opens");
+    let (id, panel) = app.o.ai_chat.as_ref().expect("Ask AI opens");
     assert_eq!(panel.include(), Some(false), "the chat starts off too");
     // the chat's switch is the field's
     let id = *id;
-    let _ = app.update(Message::Panel(id, panel::Msg::IncludeScreen));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::IncludeScreen));
     assert!(app.o.include);
     // a new opening starts on
     let app = open_app(1280, 720, 1.0);
@@ -4664,23 +4656,26 @@ fn the_overlay_hint_matches_the_bar_in_every_theme() {
 /// Ask `question` in the chat `id` and answer it (an API provider that is
 /// never called: the answer is fed in, as its thread would send it).
 fn chat_turn(app: &mut App, id: u32, question: &str, answer: &str) {
-    let _ = app.update(Message::Panel(
+    let _ = app.update(Message::AiChat(
         id,
-        panel::Msg::Edit(iced::widget::text_editor::Action::SelectAll),
+        ai_chat::Msg::Edit(iced::widget::text_editor::Action::SelectAll),
     ));
-    let _ = app.update(Message::Panel(
+    let _ = app.update(Message::AiChat(
         id,
-        crate::ui::screens::panel::tests::typed(question),
+        crate::ui::screens::ai_chat::tests::typed(question),
     ));
-    let _ = app.update(Message::Panel(id, panel::Msg::Submit));
-    let _ = app.update(Message::Panel(id, panel::Msg::Delta(answer.into())));
-    let _ = app.update(Message::Panel(id, panel::Msg::Answered(Ok(()))));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Submit));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Delta(answer.into())));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Answered(Ok(()))));
 }
 
 fn api_ready(app: &mut App, id: u32, png: &[u8]) {
     let mut setup = actions::ask::tests::local_setup("http://127.0.0.1:9/v1".into());
     setup.png = png.to_vec();
-    let _ = app.update(Message::Panel(id, panel::Msg::Ready(Ok(Arc::new(setup)))));
+    let _ = app.update(Message::AiChat(
+        id,
+        ai_chat::Msg::Ready(Ok(Arc::new(setup))),
+    ));
 }
 
 /// A quick question closes on a click outside; a follow-up pins the chat: it
@@ -4697,8 +4692,8 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
         false,
     );
     let crop = app.crop().unwrap();
-    drop(app.open_panel(actions::Panel::Ask, crop, None));
-    let id = app.o.panel.as_ref().unwrap().0;
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
     api_ready(&mut app, id, b"first");
     chat_turn(&mut app, id, "What is this?", "A chart.");
     assert!(app.chat.is_none(), "one answer: not pinned");
@@ -4711,7 +4706,7 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
         },
     );
     event(&mut app, overlay::Event::Release);
-    assert!(app.o.panel.is_none(), "the click outside closed it");
+    assert!(app.o.ai_chat.is_none(), "the click outside closed it");
 
     drag(
         &mut app,
@@ -4720,13 +4715,13 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
         false,
     );
     let crop = app.crop().unwrap();
-    drop(app.open_panel(actions::Panel::Ask, crop, None));
-    let id = app.o.panel.as_ref().unwrap().0;
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
     api_ready(&mut app, id, b"first");
     chat_turn(&mut app, id, "What is this?", "A chart.");
     chat_turn(&mut app, id, "And the trend?", "Up.");
     assert!(
-        app.o.panel.is_none() && app.chat.is_some(),
+        app.o.ai_chat.is_none() && app.chat.is_some(),
         "the follow-up pinned it"
     );
     // clicks outside no longer close it
@@ -4753,9 +4748,9 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
     let texts = crate::ui::kit::testing::shot::texts(shown);
     assert!(texts.iter().any(|t| t == "And the trend?"), "{texts:?}");
     // its composer works while the overlay is closed (messages reach it)
-    let _ = app.update(Message::Panel(
+    let _ = app.update(Message::AiChat(
         id,
-        panel::Msg::Edit(iced::widget::text_editor::Action::SelectAll),
+        ai_chat::Msg::Edit(iced::widget::text_editor::Action::SelectAll),
     ));
 
     // the next capture: the overlay opens, the chat on it, and the bar's
@@ -4771,7 +4766,7 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
     let size = (new_crop.width, new_crop.height);
     app.o.ask = "Is this the same?".into();
     drop(app.update(Message::AskSubmit));
-    assert!(app.o.panel.is_none(), "never a second chat");
+    assert!(app.o.ai_chat.is_none(), "never a second chat");
     api_ready(&mut app, id, b"second");
     let turns = &app.chat.as_ref().unwrap().panel.chat().unwrap().turns;
     assert_eq!(turns.len(), 3, "the same chat");
@@ -4782,9 +4777,9 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
         texts.iter().any(|t| t == "Is this the same?"),
         "drawn on the overlay: {texts:?}"
     );
-    let _ = app.update(Message::Panel(id, panel::Msg::Answered(Ok(()))));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Answered(Ok(()))));
     // the pin closes it
-    let _ = app.update(Message::Panel(id, panel::Msg::Pin));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
     assert!(app.chat.is_none());
 }
 

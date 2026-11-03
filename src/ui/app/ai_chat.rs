@@ -10,24 +10,24 @@ use iced::{Point, Rectangle, Size, Task};
 use crate::actions::{self, Crop, lens, stack_crops};
 use crate::config::{self, Provider};
 
+use crate::ui::ai_chat;
 use crate::ui::app::background::background;
 use crate::ui::app::keys;
 use crate::ui::app::message::Message;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
-use crate::ui::panel;
 use crate::ui::platform::monitor::{Place, place_window};
 use crate::ui::screens::settings;
 use crate::ui::windows;
 
 use super::App;
 
-/// The AI chat once pinned (`panel::Panel::pinned`): it outlives the overlay
+/// The AI chat once pinned (`ai_chat::AiChat::pinned`): it outlives the overlay
 /// (`App::chat`) until its pin closes it. Never more than one.
 pub(in crate::ui) struct Resident {
-    /// Its panel number (`Message::Panel`).
+    /// Its panel number (`Message::AiChat`).
     pub id: u32,
-    pub panel: panel::Panel,
+    pub panel: ai_chat::AiChat,
     /// Its own window while the overlay is closed.
     pub window: Option<window::Id>,
     /// The monitor it docks on: origin and size (logical px), taskbar inset.
@@ -82,38 +82,37 @@ thread_local! {
 }
 
 impl App {
-    pub(in crate::ui) fn open_panel(
+    pub(in crate::ui) fn open_chat(
         &mut self,
-        kind: actions::Panel,
         crop: Crop,
         question: Option<String>,
     ) -> Task<Message> {
         // one chat: a question while one stays open goes into it, with this crop
-        if let (actions::Panel::Ask, Some(chat)) = (kind, &mut self.chat) {
+        if let Some(chat) = &mut self.chat {
             let id = chat.id;
             return (chat.panel.ask_about(crop, question, self.o.include))
-                .map(move |msg| Message::Panel(id, msg));
+                .map(move |msg| Message::AiChat(id, msg));
         }
         // No key (Google AI Mode): the browser opens, a pill says so, the
         // overlay closes; the chat is for an AI provider only.
-        if kind == actions::Panel::Ask && hands_off() {
+        if hands_off() {
             let include = self.o.include;
-            return self.confirm_after(move || panel::hand_off(&crop, question, include));
+            return self.confirm_after(move || ai_chat::hand_off(&crop, question, include));
         }
         self.panels = self.panels.wrapping_add(1);
         let id = self.panels;
-        let (panel, task) = panel::Panel::open(kind, crop, question, self.o.include);
-        self.o.panel = Some((id, panel));
+        let (panel, task) = ai_chat::AiChat::open(crop, question, self.o.include);
+        self.o.ai_chat = Some((id, panel));
         self.keep_chat();
-        task.map(move |msg| Message::Panel(id, msg))
+        task.map(move |msg| Message::AiChat(id, msg))
     }
 
     /// The overlay's chat pinned itself: the App keeps it from now on.
     pub(in crate::ui) fn keep_chat(&mut self) {
-        if !(self.o.panel.as_ref()).is_some_and(|(_, p)| p.pinned()) {
+        if !(self.o.ai_chat.as_ref()).is_some_and(|(_, p)| p.pinned()) {
             return;
         }
-        let Some((id, panel)) = self.o.panel.take() else {
+        let Some((id, panel)) = self.o.ai_chat.take() else {
             return;
         };
         crate::log!("[opencircle] AI chat pinned");
@@ -264,7 +263,7 @@ impl App {
         window::move_to(id, at)
     }
 
-    pub(in crate::ui) fn on_panel(&mut self, id: u32, msg: panel::Msg) -> Task<Message> {
+    pub(in crate::ui) fn on_ai_chat(&mut self, id: u32, msg: ai_chat::Msg) -> Task<Message> {
         let resident = self.chat.as_ref().is_some_and(|c| c.id == id);
         let open = self.o.is_some();
         if !resident && !open {
@@ -277,7 +276,7 @@ impl App {
             .filter(|_| resident);
         let Some(panel) = (match resident {
             true => self.chat.as_mut().map(|c| &mut c.panel),
-            false => (self.o.panel.as_mut())
+            false => (self.o.ai_chat.as_mut())
                 .filter(|(open, _)| *open == id)
                 .map(|(_, p)| p),
         }) else {
@@ -285,29 +284,28 @@ impl App {
         };
         match msg {
             // its own window: the OS moves it
-            panel::Msg::Card(card::Event::Grab(card::Drag::Move)) if floating.is_some() => {
+            ai_chat::Msg::Card(card::Event::Grab(card::Drag::Move)) if floating.is_some() => {
                 return floating.map_or_else(Task::none, window::drag);
             }
-            panel::Msg::Card(card::Event::Grab(how)) if open => {
-                let chat = panel.kind() == actions::Panel::Ask;
-                panel.held = chat && how == card::Drag::Move; // picked up (design 3.4)
-                self.o.card_drag = Some((how, None));
-                self.o.card_chat = chat;
+            ai_chat::Msg::Card(card::Event::Grab(how)) if open => {
+                panel.held = how == card::Drag::Move; // picked up (design 3.4)
+                self.o.chat_drag = Some((how, None));
+                self.o.chat_docks = true;
                 self.frame_times.borrow_mut().clear();
             }
-            panel::Msg::Card(card::Event::Hover(on)) if open => self.o.card_hover = on,
-            panel::Msg::Card(card::Event::Reset) => (self.card, self.chat_width) = (None, None),
-            panel::Msg::Card(card::Event::Grab(_) | card::Event::Hover(_)) => {}
-            panel::Msg::Search if open => return self.run(&lens::ACTION),
-            panel::Msg::Search => {}
+            ai_chat::Msg::Card(card::Event::Hover(on)) if open => self.o.chat_hover = on,
+            ai_chat::Msg::Card(card::Event::Reset) => (self.card, self.chat_width) = (None, None),
+            ai_chat::Msg::Card(card::Event::Grab(_) | card::Event::Hover(_)) => {}
+            ai_chat::Msg::Search if open => return self.run(&lens::ACTION),
+            ai_chat::Msg::Search => {}
             // A card's focused field gave Ctrl+C back (nothing selected in it).
-            panel::Msg::Key(keys::Keyed::Copy) if open => {
+            ai_chat::Msg::Key(keys::Keyed::Copy) if open => {
                 return self.update(Message::Field(keys::Keyed::Copy));
             }
-            panel::Msg::Key(_) => {}
+            ai_chat::Msg::Key(_) => {}
             // pinned: its pin is the way out
-            panel::Msg::Pin if resident => return self.drop_chat(),
-            panel::Msg::OpenAiSettings => {
+            ai_chat::Msg::Pin if resident => return self.drop_chat(),
+            ai_chat::Msg::OpenAiSettings => {
                 let settings = self.windows.open(windows::Kind::Settings);
                 let section =
                     self.windows
@@ -323,7 +321,7 @@ impl App {
                     self.o.include = on;
                 }
                 self.keep_chat();
-                return task.map(move |msg| Message::Panel(id, msg));
+                return task.map(move |msg| Message::AiChat(id, msg));
             }
         }
         Task::none()
@@ -388,7 +386,7 @@ impl App {
 
     /// Where the result card shows: where the user left it, else away from
     /// the selection (`card::place`). The AI chat docks (`chat_at`).
-    pub(in crate::ui) fn card_at(&self) -> Rectangle {
+    pub(in crate::ui) fn chat_card_at(&self) -> Rectangle {
         let selection = self.o.selection.map(|s| self.o.view.rect_to_screen(s.area));
         if self.chatting() {
             return self.chat_at(selection);
@@ -398,7 +396,7 @@ impl App {
 
     /// The AI chat is the card shown.
     pub(in crate::ui) fn chatting(&self) -> bool {
-        (self.o.panel.as_ref()).is_some_and(|(_, p)| p.kind() == actions::Panel::Ask)
+        self.o.ai_chat.is_some()
     }
 
     /// The AI chat's card: docked on the side the user last let it go on,
@@ -451,8 +449,8 @@ impl App {
 
     /// How open the result card is (0..1; 0 before its first frame, 1 at once
     /// when the OS asks for no animations).
-    pub(in crate::ui) fn card_grown(&self) -> f32 {
-        match (&self.o.panel, self.o.card_open) {
+    pub(in crate::ui) fn chat_grown(&self) -> f32 {
+        match (&self.o.ai_chat, self.o.chat_open) {
             _ if motion::reduced() => 1.0,
             (Some((id, _)), Some((was, _, grown))) if *id == was => grown,
             _ => 0.0,
@@ -460,7 +458,7 @@ impl App {
     }
 
     /// The result card still opening (frames wanted).
-    pub(in crate::ui) fn card_opening(&self) -> bool {
-        self.o.frame.is_some() && self.o.panel.is_some() && self.card_grown() < 1.0
+    pub(in crate::ui) fn chat_opening(&self) -> bool {
+        self.o.frame.is_some() && self.o.ai_chat.is_some() && self.chat_grown() < 1.0
     }
 }

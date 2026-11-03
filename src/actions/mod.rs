@@ -42,20 +42,14 @@ pub enum Run {
     /// Close the overlay, then do this with the crop (Copy, Save). Ok = the
     /// confirmation pill's text ("Copied", "Saved to ..."); Err = its error text.
     Finish(fn(Crop) -> Result<String, String>),
-    /// Open this result panel beside the selection; the overlay stays.
-    Panel(Panel),
+    /// Ask AI about the crop: opens the AI chat; the overlay stays.
+    AskAi,
     /// Search the crop in the user's browser (Lens); nothing of ours shows.
     Lens,
     /// Snip: the action bar turns into the Snip toolbar over the selection.
     Snip,
     /// Replace the selection's text by its translation, in place.
     Translate,
-}
-
-/// The result panels (`ui/panel.rs` draws them).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Panel {
-    Ask,
 }
 
 /// The action's key while the overlay is open: a Latin letter (layout-independent),

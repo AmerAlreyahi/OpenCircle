@@ -563,7 +563,7 @@ fn panel_frame_sheet() {
     sheet("panel_frame", Size::new(300.0, 200.0), &rows);
 }
 
-/// `panel_frame::card`, the result card on the overlay: at rest and with its
+/// `panel_frame::chat_frame`, the result card on the overlay: at rest and with its
 /// resize grip shown (`hover`), a model pill in the heading.
 #[test]
 fn panel_frame_card_sheet() {
@@ -588,7 +588,7 @@ fn panel_frame_card_sheet() {
                 Some(()),
             );
             let at = Rectangle::new(Point::new(4.0, 4.0), Size::new(260.0, 190.0));
-            panel_frame::card(
+            panel_frame::chat_frame(
                 header,
                 None,
                 body,

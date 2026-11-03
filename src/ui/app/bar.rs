@@ -24,7 +24,7 @@ impl App {
     /// take its place.
     pub(in crate::ui) fn bottom_bar_shown(&self) -> bool {
         matches!(self.o.purpose, Purpose::Search)
-            && self.o.panel.is_none()
+            && self.o.ai_chat.is_none()
             && self.o.translate.is_none()
             && self.o.song.is_none()
             && self.o.toast.is_none()

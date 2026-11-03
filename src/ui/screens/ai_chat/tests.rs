@@ -34,10 +34,10 @@ fn unknown_provider_shows_the_fix_and_sends_nothing() {
         height: 1,
         rgba: vec![0; 4],
     };
-    let mut panel = Panel {
+    let mut panel = AiChat {
         input: text_editor::Content::with_text("Explain"), // e.g. the Lens follow-up, sent once ready
         queued: true,
-        ..Panel::new(Arc::new(crop), State::ask(Chat::default()))
+        ..AiChat::new(Arc::new(crop), State::ask(Chat::default()))
     };
     let msg = ask::tests::invalid_provider_error();
     let _ = panel.update(Msg::Ready(Err(msg.clone())));
@@ -67,8 +67,8 @@ fn sample_crop() -> Crop {
     }
 }
 
-fn panel_in(state: State) -> Panel {
-    Panel::new(Arc::new(sample_crop()), state)
+fn panel_in(state: State) -> AiChat {
+    AiChat::new(Arc::new(sample_crop()), state)
 }
 
 /// The composer's text set to `text` (as a paste).
@@ -113,7 +113,7 @@ fn every_result_card_matches_its_golden_image() {
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     const CARD: Size = Size::new(420.0, 560.0);
     let at = Rectangle::with_size(CARD);
-    type Make = Box<dyn Fn() -> Panel>;
+    type Make = Box<dyn Fn() -> AiChat>;
     let states: Vec<(&str, Make)> = vec![(
         "ask",
         Box::new(move || {
@@ -139,20 +139,20 @@ fn every_result_card_matches_its_golden_image() {
 
 /// A chat with an API provider, ready (a local server that is never called:
 /// the answer is fed in as `Delta`s, as the stream's thread sends them).
-fn api_chat() -> Panel {
+fn api_chat() -> AiChat {
     let mut panel = panel_in(State::ask(Chat::default()));
     let setup = ask::tests::local_setup("http://127.0.0.1:9/v1".into());
     let _ = panel.update(Msg::Ready(Ok(Arc::new(setup))));
     panel
 }
 
-fn ask(panel: &mut Panel, question: &str) {
+fn ask(panel: &mut AiChat, question: &str) {
     let _ = panel.update(Msg::Edit(text_editor::Action::SelectAll));
     let _ = panel.update(typed(question));
     let _ = panel.update(Msg::Submit);
 }
 
-fn chat(panel: &Panel) -> &Chat {
+fn chat(panel: &AiChat) -> &Chat {
     let State::Ask { chat, .. } = &panel.state else {
         unreachable!()
     };
@@ -160,7 +160,7 @@ fn chat(panel: &Panel) -> &Chat {
 }
 
 /// What the answer's Markdown has parsed so far, per turn.
-fn parsed(panel: &Panel) -> Vec<usize> {
+fn parsed(panel: &AiChat) -> Vec<usize> {
     let State::Ask { answers, .. } = &panel.state else {
         unreachable!()
     };
@@ -243,7 +243,7 @@ fn an_error_says_why_and_offers_retry() {
 #[test]
 fn opened_with_include_screen_off_the_question_goes_alone() {
     let question = Some("What is this?".to_string());
-    let (mut panel, _) = Panel::open(actions::Panel::Ask, sample_crop(), question, false);
+    let (mut panel, _) = AiChat::open(sample_crop(), question, false);
     assert_eq!(panel.include(), Some(false));
     let setup = ask::tests::local_setup("http://127.0.0.1:9/v1".into());
     let _ = panel.update(Msg::Ready(Ok(Arc::new(setup))));
@@ -256,7 +256,7 @@ fn opened_with_include_screen_off_the_question_goes_alone() {
 #[test]
 fn the_screen_goes_only_while_include_screen_is_on() {
     let mut panel = api_chat();
-    let shown = |panel: &Panel| panel.include() == Some(true);
+    let shown = |panel: &AiChat| panel.include() == Some(true);
     assert!(shown(&panel), "on by default");
     ask(&mut panel, "With");
     let _ = panel.update(Msg::Answered(Ok(())));
@@ -296,7 +296,7 @@ fn the_chat_matches_its_golden_images() {
         }
         p
     };
-    type Make = Box<dyn Fn() -> Panel>;
+    type Make = Box<dyn Fn() -> AiChat>;
     let states: Vec<(&str, Make)> = vec![
         ("empty", Box::new(api_chat)),
         (
@@ -446,7 +446,7 @@ fn with_reduced_motion_the_logo_stands_still() {
 }
 
 /// One answer and its end.
-fn answer(panel: &mut Panel, text: &str) {
+fn answer(panel: &mut AiChat, text: &str) {
     let _ = panel.update(Msg::Delta(text.into()));
     let _ = panel.update(Msg::Answered(Ok(())));
 }
@@ -481,7 +481,7 @@ fn a_follow_up_pins_the_chat_and_always_pins_at_once() {
 fn the_pin_looks_different_once_pinned() {
     use crate::ui::kit::testing::shot;
     use crate::ui::kit::tooltip::tests_support::shown;
-    let glyphs = |panel: &Panel| {
+    let glyphs = |panel: &AiChat| {
         let texts = shot::texts(panel.view(at(SCREEN), SCREEN, false));
         let has = |i: Icon| texts.iter().any(|t| t.contains(i.glyph()));
         (has(Icon::Pin), has(Icon::Unpin))
@@ -510,7 +510,7 @@ fn the_pin_looks_different_once_pinned() {
 /// the stream), never for the wait alone.
 #[test]
 fn the_thought_chip_shows_only_when_the_model_reasoned() {
-    let thought = |panel: &Panel| {
+    let thought = |panel: &AiChat| {
         let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
         texts.iter().any(|t| t.starts_with("Thought for"))
     };
@@ -564,7 +564,8 @@ fn a_new_crop_goes_with_the_next_question_into_the_same_chat() {
 /// Send; no web search control (0.2.0) and no privacy line under it.
 #[test]
 fn the_composer_is_chip_field_then_controls() {
-    let texts = |p: &Panel| crate::ui::kit::testing::shot::texts(p.view(at(SCREEN), SCREEN, false));
+    let texts =
+        |p: &AiChat| crate::ui::kit::testing::shot::texts(p.view(at(SCREEN), SCREEN, false));
     let mut panel = api_chat();
     let t = texts(&panel);
     let chip = t.iter().position(|t| t == "Screen selection attached");

@@ -21,7 +21,7 @@ use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
-use crate::ui::{overlay, panel, song, translate};
+use crate::ui::{ai_chat, overlay, song, translate};
 
 pub(in crate::ui) struct Opening {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
@@ -103,8 +103,8 @@ pub(in crate::ui) struct Opening {
     /// Shown but still fully clear (`show`): fades in once its first full
     /// frame is drawn (`first_draw` taken), or after `REVEAL_WAIT` anyway.
     pub(in crate::ui) reveal: Option<Instant>,
-    /// The open result panel and its number.
-    pub(in crate::ui) panel: Option<(u32, panel::Panel)>,
+    /// The open AI chat and its number.
+    pub(in crate::ui) ai_chat: Option<(u32, ai_chat::AiChat)>,
     /// Lens pages opened from this overlay, released when it closes (`finish`).
     pub(in crate::ui) lens_pages: Vec<lens::Held>,
     pub(in crate::ui) purpose: Purpose,
@@ -157,17 +157,17 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) bar_eased: Option<Instant>,
     pub(in crate::ui) work_inset: f32,
     /// The card's grip or corner is held, and the pointer's last position.
-    pub(in crate::ui) card_drag: Option<(card::Drag, Option<Point>)>,
+    pub(in crate::ui) chat_drag: Option<(card::Drag, Option<Point>)>,
     /// The card held is the AI chat (it docks when let go).
-    pub(in crate::ui) card_chat: bool,
+    pub(in crate::ui) chat_docks: bool,
     /// Where the pinned chat's own window was when this frame was captured
     /// (logical px): it is kept out of captures, so the frame may be black there.
     pub(in crate::ui) chat_hole: Option<Rectangle>,
     /// The result card opening (`motion::WIDGET`): which panel, its motion,
     /// and how open it was at the latest frame (it grows from `OPEN_SCALE`).
-    pub(in crate::ui) card_open: Option<(u32, motion::Shown, f32)>,
+    pub(in crate::ui) chat_open: Option<(u32, motion::Shown, f32)>,
     /// The pointer is on the card's resize edge (its grip shows).
-    pub(in crate::ui) card_hover: bool,
+    pub(in crate::ui) chat_hover: bool,
     /// The AI chat card held away from its dock (logical px), and its glide
     /// back to a dock once let go: since when, from where, how far it is.
     pub(in crate::ui) chat_off: Vector,
@@ -224,7 +224,7 @@ impl Default for Opening {
             ask: String::new(),
             include: true,
             reveal: None,
-            panel: None,
+            ai_chat: None,
             lens_pages: Vec::new(),
             purpose: Purpose::Search,
             edit: None,
@@ -254,11 +254,11 @@ impl Default for Opening {
             bar_eased: None,
             bar_glide: None,
             work_inset: 0.0,
-            card_drag: None,
-            card_chat: false,
+            chat_drag: None,
+            chat_docks: false,
             chat_hole: None,
-            card_open: None,
-            card_hover: false,
+            chat_open: None,
+            chat_hover: false,
             chat_off: Vector::ZERO,
             chat_glide: None,
             song: None,

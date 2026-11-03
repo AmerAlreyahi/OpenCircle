@@ -351,7 +351,7 @@ mod tests {
             iced::Point::new(500.0, 350.0),
         );
         drag(&mut app, a, b, false);
-        app.o.panel = None; // an auto-search's card
+        app.o.ai_chat = None; // an auto-search's card
         assert!(app.selected_for_bar());
         shoot(&app, "selected");
         app.o.bar_focus = Some(Stop::Field);

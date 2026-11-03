@@ -4,7 +4,7 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
-use super::{Action, Crop, Key, Panel, Run};
+use super::{Action, Crop, Key, Run};
 use crate::ai::{self, Role};
 use crate::config::{AiConfig, Config, Provider};
 use crate::secrets::{self, Secret};
@@ -19,7 +19,7 @@ pub const ACTION: Action = Action {
     },
     // Nothing draws this: AI is the OpenCircle logo everywhere (owner, 2026-10-28).
     icon: '\u{e04e}', // lucide "arrow-up", neutral
-    run: Run::Panel(Panel::Ask),
+    run: Run::AskAi,
 };
 
 const SYSTEM: &str = "The image is part of the user's screen that they selected. \

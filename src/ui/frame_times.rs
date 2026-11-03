@@ -16,9 +16,9 @@ use crate::ocr::{self, TextBlock};
 
 use super::app::message::Message;
 use super::app::word;
+use crate::ui::ai_chat;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
-use crate::ui::panel;
 use crate::ui::screens::{onboarding, settings};
 
 use iced::advanced::graphics::{Viewport, damage};
@@ -260,11 +260,11 @@ fn animation_frame_times() {
             ("card resize", card::Drag::Resize),
         ] {
             let mut app = card_app(w, h);
-            let id = app.o.panel.as_ref().expect("a card").0;
+            let id = app.o.ai_chat.as_ref().expect("a card").0;
             let t = frames(&mut app, 16, false, |app, i, _| {
                 if i == 0 {
                     let grab = card::Event::Grab(how);
-                    let _ = app.update(Message::Panel(id, panel::Msg::Card(grab)));
+                    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Card(grab)));
                     let _ = app.update(Message::CardMoved(Point::new(1100.0, 200.0)));
                 }
                 let p = Point::new(1100.0 - 20.0 * i as f32, 200.0 + 5.0 * i as f32);
@@ -550,7 +550,7 @@ fn a_still_overlay_asks_for_no_frames() {
         }
         let _ = app.update(Message::Frame(now));
     });
-    assert!(app.o.panel.is_some(), "a card is up");
+    assert!(app.o.ai_chat.is_some(), "a card is up");
     assert!(!app.animating(), "no frame messages");
     let last = drawn.last().unwrap();
     assert_eq!(
@@ -646,7 +646,7 @@ fn widgets_open_by_the_design_motion_or_at_once() {
             .into_iter()
             .map(|ms| {
                 let _ = app.update(Message::Frame(start + Duration::from_millis(ms)));
-                (app.appeared(), app.card_grown())
+                (app.appeared(), app.chat_grown())
             })
             .collect();
         motion::set_reduced(false);
@@ -1356,11 +1356,11 @@ fn chat_drag_frame_times() {
         let _ = app.update(Message::AskInput("what is this?".into()));
         let _ = app.update(Message::AskSubmit);
         settle_bar(&mut app);
-        let id = app.o.panel.as_ref().expect("a chat").0;
+        let id = app.o.ai_chat.as_ref().expect("a chat").0;
         let t = frames(&mut app, 30, false, |app, i, _| {
             if i == 0 {
                 let grab = card::Event::Grab(card::Drag::Move);
-                let _ = app.update(Message::Panel(id, panel::Msg::Card(grab)));
+                let _ = app.update(Message::AiChat(id, ai_chat::Msg::Card(grab)));
                 let _ = app.update(Message::CardMoved(Point::new(600.0, 300.0)));
             }
             let p = Point::new(600.0 - 12.0 * i as f32, 300.0 + 4.0 * i as f32);
