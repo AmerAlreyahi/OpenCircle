@@ -334,8 +334,14 @@ fn a_translation_ends_with_its_overlay() {
     let mut app = closing_app();
     let frame = image::Handle::from_rgba(40, 20, vec![0; 40 * 20 * 4]);
     // no models: the session waits for consent (no thread starts)
-    let (session, _) =
-        translate::Session::start(frame.clone(), [0, 0, 40, 20], 1.0, app.cache.clone(), false);
+    let (session, _) = translate::Session::start(
+        frame.clone(),
+        [0, 0, 40, 20],
+        1.0,
+        app.cache.clone(),
+        false,
+        0,
+    );
     app.o.frame = Some(frame);
     app.hiding = Hiding::No;
     app.o.translate = Some((7, session));
@@ -3242,7 +3248,7 @@ fn a_translation_has_no_field_to_take_the_letters() {
     let mut app = open_app(800, 600, 1.0);
     let frame = app.o.frame.clone().unwrap();
     let (session, _) =
-        translate::Session::start(frame, [0, 0, 800, 600], 1.0, app.cache.clone(), false);
+        translate::Session::start(frame, [0, 0, 800, 600], 1.0, app.cache.clone(), false, 0);
     app.o.translate = Some((7, session));
     assert!(!app.bottom_bar_shown(), "no bar, so no ask field");
     // Tab has no bar to move through; the card's E / A stay the card's.
@@ -4023,7 +4029,7 @@ fn close_leaves_a_fresh_opening() {
     let _ = app.open_chat(crop, None);
     let frame = app.o.frame.clone().unwrap();
     let (session, _) =
-        translate::Session::start(frame, [0, 0, 40, 20], 1.0, app.cache.clone(), false);
+        translate::Session::start(frame, [0, 0, 40, 20], 1.0, app.cache.clone(), false, 0);
     app.o.translate = Some((1, session));
     let (song, _) = song::Session::start();
     app.o.song = Some((1, song));

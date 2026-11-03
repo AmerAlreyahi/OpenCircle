@@ -408,6 +408,7 @@ impl App {
             self.o.scale,
             self.cache.clone(),
             models,
+            (self.o.work_inset * self.o.scale).round() as u32,
         );
         if session.full() {
             // nothing to outline: the translation is the whole screen

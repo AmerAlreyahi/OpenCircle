@@ -176,13 +176,18 @@ impl Session {
     /// configured target. Asks first for what is missing: the OCR models
     /// (`models` = present), or, when translation will be offline, its
     /// models with OCR's in one download. The whole frame is all of it
-    /// (full screen means the full screen; only live reads the window).
+    /// (full screen means the full screen; only live reads the window),
+    /// but the OS taskbar (`taskbar` frame px under the monitor's work area)
+    /// is the desktop's chrome: its clock was translated ("PM" -> "مساءً").
+    // ponytail: a bottom taskbar only (`taskbar_inset`); a side or top one,
+    // or GNOME's top bar (Wayland tells no work area), is still read.
     pub fn start(
         frame: image::Handle,
         area: [u32; 4],
         scale: f32,
         cache: Arc<Cache>,
         models: bool,
+        taskbar: u32,
     ) -> (Session, Task<Msg>) {
         let cfg = crate::config::current().translate;
         let offline = actions::translate::will_be_offline();
@@ -191,6 +196,10 @@ impl Session {
             _ => (0, 0),
         };
         let whole = area == [0, 0, size.0, size.1];
+        let area = match whole && taskbar < size.1 {
+            true => [0, 0, size.0, size.1 - taskbar],
+            false => area,
+        };
         let mut session = Session {
             frame,
             area,

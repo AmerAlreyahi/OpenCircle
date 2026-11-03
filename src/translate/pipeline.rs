@@ -453,7 +453,12 @@ fn made_up(src: &str, out: &str, target: &str) -> bool {
     let words = |s: &str| s.split_whitespace().count();
     let repeats = |s: &str| {
         let chars: Vec<char> = s.chars().filter(|c| !c.is_whitespace()).collect();
-        let tokens: Vec<&str> = s.split_whitespace().collect();
+        // syllables joined by hyphens count as words: ar-en on the Win10 VM,
+        // "The sun of the yahoo-hoo-hoo-hoo-hoo-hoo!"
+        let tokens: Vec<&str> = (s.split(|c: char| c.is_whitespace() || c == '-'))
+            .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()))
+            .filter(|t| !t.is_empty())
+            .collect();
         let run = |n: usize, same: &dyn Fn(usize) -> bool| {
             (1..n).fold((1, 1), |(best, cur), i| {
                 let cur = if same(i) { cur + 1 } else { 1 };
@@ -465,7 +470,17 @@ fn made_up(src: &str, out: &str, target: &str) -> bool {
         (c, t)
     };
     let ((sc, st), (oc, ot)) = (repeats(src), repeats(out));
-    let looped = (oc >= 6 && oc > sc + 2) || (ot >= 4 && ot > st + 1);
+    // a word that is one syllable over and over ("hoohoohoo", "lalalala")
+    // the source didn't have
+    let chant = |w: &str| {
+        let c: Vec<char> = w.chars().flat_map(char::to_lowercase).collect();
+        (2..=4).any(|n| {
+            c.len() >= 3 * n && c.len().is_multiple_of(n) && (n..c.len()).all(|i| c[i] == c[i - n])
+        })
+    };
+    let chanted = (out.split(|c: char| !c.is_alphabetic()))
+        .any(|w| chant(w) && !src.split(|c: char| !c.is_alphabetic()).any(chant));
+    let looped = (oc >= 6 && oc > sc + 2) || (ot >= 4 && ot > st + 1) || chanted;
     let (sn, on) = (src.chars().count(), out.chars().count());
     let long = on > 3 * sn + 15 || (words(src) <= 3 && words(out) > 2 * words(src) + 2);
     // numbers: Arabic-Indic digits are the same numbers
@@ -1274,10 +1289,25 @@ fn needs_translation(text: &str, target: &str) -> bool {
     let word =
         (text.split(|c: char| !c.is_alphabetic())).any(|w| w.chars().count() > 1 || !w.is_ascii());
     match lang::find(target).map(|l| l.script) {
-        _ if !word || code(text) || misshapen(text) => false,
+        _ if !word || code(text) || misshapen(text) || icon_read(text) => false,
         Some(Script::Latin) | None => true,
         Some(script) => letters.iter().filter(|c| script.has(**c)).count() * 2 < letters.len(),
     }
+}
+
+/// A line of another script with a lone Latin letter at its start or end:
+/// an icon read as a letter (ar.wikipedia's radio buttons, PP-OCR on the
+/// Win10 VM: "O صغير", "Oداكن"; the title's ⊙: "الشُمْسO"). Translated, the
+/// button became a word ("Small O") drawn over it; the line stays as it is.
+fn icon_read(text: &str) -> bool {
+    let t = text.trim_matches(|c: char| !c.is_alphabetic());
+    let latin = |c: char| Script::Latin.has(c);
+    let lone = |mut s: Box<dyn Iterator<Item = char> + '_>| {
+        s.next().is_some_and(latin) && !s.next().is_some_and(latin)
+    };
+    let (n, l) = (t.chars().filter(|c| c.is_alphabetic()))
+        .fold((0, 0), |(n, l), c| (n + 1, l + latin(c) as usize));
+    l * 2 < n && (lone(Box::new(t.chars())) || lone(Box::new(t.chars().rev())))
 }
 
 /// Another script read as Latin letters (a Russian line by the Latin
@@ -2422,6 +2452,12 @@ pub(super) mod tests {
         let looped = format!("Ül-{}", "j".repeat(40));
         assert!(made_up("Ül-jß.o 'po ü4.JJj-A.Jl", &looped, "en"));
         assert!(made_up("40 langues", "إيان غوس 40 عام 1990", "ar"));
+        // ar-en on the Win10 VM (ar.wikipedia "شمس", PP-OCR): syllables
+        let sun = "The sun of the yahoo-hoo-hoo-hoo-hoo-hoo!";
+        assert!(made_up("شمس الياهو", sun, "en"), "hyphenated loop");
+        assert!(made_up("شمس الياهو", "The sun hoohoohoo", "en"), "chant");
+        assert!(!made_up("Hahaha, dit-il", "Hahaha, he said", "en"));
+        assert!(!made_up("bien-être", "well-being", "en"));
         assert!(made_up("40 langues", "أربعون لغة", "ar"), "a number lost");
         assert!(
             made_up("Standard", "Standard", "ar"),
@@ -2452,6 +2488,13 @@ pub(super) mod tests {
         let out = "\"سن ه ه س س ب ن ن ن ن ه ه ه ه ه ع 10، بطل بلال ب ب ب.";
         assert!(made_up(noise, out, "ar"), "letters strewn as words");
         assert!(!needs_translation(noise, "ar") && !needs_translation(noise, "en"));
+        // ar.wikipedia's radio buttons and the title's ⊙ read as "O" (PP-OCR)
+        for icon in ["O صغير", "Oداكن", "الشُمْسO", "صغير o"] {
+            assert!(!needs_translation(icon, "en"), "{icon}");
+        }
+        for fine in ["صغير", "الفئة G2V من النجوم", "OK", "O Canada"] {
+            assert!(needs_translation(fine, "en"), "{fine}");
+        }
         for fine in [
             "The iPhone and the MacBook are made by Apple",
             "Il est composé de cette étoile et des objets célestes",

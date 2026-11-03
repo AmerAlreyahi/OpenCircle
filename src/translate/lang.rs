@@ -240,6 +240,11 @@ pub fn common<'a>(texts: impl IntoIterator<Item = &'a str>) -> (usize, usize) {
 /// Which Latin-script language `texts` are in (`votes`); English when none
 /// stands out.
 fn latin(texts: &[&str]) -> &'static str {
+    // Italian has no `WORDS` row: its endings voted Spanish and an Italian
+    // page was offered "Spanish -> Arabic" (Win10 VM and Ubuntu, it.wikipedia)
+    if italian(&texts.join("\n")) {
+        return "it";
+    }
     let votes = votes(texts);
     let (best, n) = (votes.iter().enumerate())
         .max_by_key(|(i, n)| (**n, usize::MAX - i))
@@ -252,7 +257,8 @@ fn latin(texts: &[&str]) -> &'static str {
 
 /// What a detected source most likely is, from the script most of the
 /// letters are in: Arabic, Russian, Japanese (any kana) or Chinese; Latin
-/// letters by their common words (English, Spanish, French or German).
+/// letters by their common words (English, Spanish, French or German;
+/// Italian by `italian`).
 /// `None` = no letters.
 pub fn guess<'a>(texts: impl IntoIterator<Item = &'a str>) -> Option<&'static str> {
     let texts: Vec<&str> = texts.into_iter().collect();
@@ -286,7 +292,7 @@ pub fn guess<'a>(texts: impl IntoIterator<Item = &'a str>) -> Option<&'static st
 /// plain words the votes can't settle goes to `detected`.
 pub fn sure(text: &str) -> Option<&'static str> {
     match guess([text])? {
-        "en" | "es" | "fr" | "de" => {
+        "en" | "es" | "fr" | "de" | "it" => {
             let words = text.split_whitespace();
             if words.filter(|w| w.chars().any(char::is_alphabetic)).count() < 3 {
                 return None;
@@ -449,6 +455,42 @@ mod tests {
         assert_eq!(sure("Blender Studio"), None);
         assert_eq!(sure("Gracias."), None);
         assert_eq!(sure("Главное меню"), Some("ru"));
+    }
+
+    /// it.wikipedia "Sole" in Edge on the Win10 VM, read by PP-OCR: an
+    /// Italian page (before: Spanish, offered as "Spanish -> Arabic").
+    #[test]
+    fn an_italian_page_is_italian() {
+        let page = [
+            "QCerca in Wikipedia",
+            "Ricerca",
+            "L'enciclopedia libera",
+            "Indice",
+            "nascondi",
+            "Modifica Modifica wikitesto Cronolog",
+            ">Osservazione",
+            "Posizione allinterno della Galassia",
+            "Ciclo vitale",
+            "Il Sole (dal latino Sol) è la stella madre del sistema solare,[6]attorno alla quale \
+             orbitano gli otto pianeti principali (tra cui la Terra), i pianeti nani, i loro satelliti",
+            "Caratteristiche morfologiche e roazione",
+            "massa del Sole, che ammonta a circa 1,9891 × 1030 kg,²] rappresenta da sola il 99,86% \
+             della massa complessiva del sistema solare.[7][8]",
+            "Il Sole è una stella di dimensioni medio-piccole costituita principalmente da idrogeno \
+             (circa il 74% della sua massa, il 92,1% del suo volume) ed elio (circa il 24-25% della",
+            "Composizione chimica",
+            "Produzione di energia: le reazioni nucleari",
+            "Tale processo genera ogni secondo una grande quantità di energia (equivalente a una",
+        ];
+        assert_eq!(guess(page), Some("it"));
+        // a Spanish and a French page stay theirs
+        let es = "El Sol es la estrella del sistema solar y la más cercana a la Tierra";
+        assert_eq!(
+            guess([es, "Buscar en Wikipedia", "Herramientas"]),
+            Some("es")
+        );
+        let fr = "Le Soleil est l'étoile du Système solaire, dont la Terre fait partie";
+        assert_eq!(guess([fr, "Rechercher sur Wikipédia"]), Some("fr"));
     }
 
     /// "La Marseillaise" on English Wikipedia (Windows OCR on the VM): short

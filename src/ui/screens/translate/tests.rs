@@ -52,6 +52,24 @@ fn kept_lines_are_offered_without_holding_the_page() {
     assert_eq!(s.cache.get(&line, "ar"), None, "translated again");
 }
 
+/// Full screen leaves the taskbar out (its clock was translated on the Win10
+/// VM); a selection is read as it is.
+#[test]
+fn full_screen_leaves_the_taskbar_out() {
+    let cache = Arc::new(Cache::new(8));
+    let (s, _) = Session::start(
+        frame(200, 100),
+        [0, 0, 200, 100],
+        1.0,
+        cache.clone(),
+        false,
+        12,
+    );
+    assert_eq!((s.area, s.full()), ([0, 0, 200, 88], true));
+    let (s, _) = Session::start(frame(200, 100), [0, 50, 200, 100], 1.0, cache, false, 12);
+    assert_eq!((s.area, s.full()), ([0, 50, 200, 100], false));
+}
+
 /// A session as `start` leaves it, without a thread.
 fn session(models: bool) -> Session {
     Session {
