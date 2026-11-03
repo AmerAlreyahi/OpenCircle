@@ -221,8 +221,9 @@ mod win {
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, GWL_EXSTYLE, GWL_STYLE, GWLP_WNDPROC, GetPropW, GetWindowLongPtrW,
-        GetWindowRect, RemovePropW, STYLESTRUCT, SetPropW, SetWindowLongPtrW, WM_NCACTIVATE,
-        WM_NCDESTROY, WM_SETICON, WM_SETTEXT, WM_STYLECHANGING, WNDPROC, WS_EX_LAYERED, WS_VISIBLE,
+        GetWindowRect, RemovePropW, STYLESTRUCT, SWP_NOSIZE, SetPropW, SetWindowLongPtrW,
+        WINDOWPOS, WM_DPICHANGED, WM_NCACTIVATE, WM_NCDESTROY, WM_SETICON, WM_SETTEXT,
+        WM_STYLECHANGING, WM_WINDOWPOSCHANGED, WNDPROC, WS_EX_LAYERED, WS_VISIBLE,
     };
     use windows::core::{PCWSTR, w};
 
@@ -264,6 +265,22 @@ mod win {
                 let _ = RemovePropW(h, NEXT);
                 let _ = RemovePropW(h, LAYERED);
                 let _ = RemovePropW(h, TOOL);
+                let _ = RemovePropW(h, SHAPE);
+            }
+            // A cut window's shape follows every change of its size or DPI here,
+            // as it happens: a move onto a monitor of another scale resizes the
+            // window inside winit's WM_DPICHANGED, and iced's `Resized` (`reshape`)
+            // can come late or not at all (no size change), leaving the old cut.
+            let resized = msg == WM_DPICHANGED
+                || (msg == WM_WINDOWPOSCHANGED
+                    && (*(l.0 as *const WINDOWPOS)).flags.0 & SWP_NOSIZE.0 == 0);
+            if resized && !GetPropW(h, SHAPE).is_invalid() {
+                let result = CallWindowProcW(next, h, msg, w, l);
+                let max_radius = (GetPropW(h, SHAPE).0 as usize - 1) as f32 / 100.0;
+                if let Err(e) = cut(h, max_radius) {
+                    crate::log!("[opencircle] window shape: {e}");
+                }
+                return result;
             }
             // winit rewrites the extended style whole on every show, hide or
             // full-screen change: a faded window (`opacity`) stays layered, its
@@ -312,6 +329,9 @@ mod win {
     const LAYERED: PCWSTR = w!("OpenCircle.layered");
     /// Set on a window `no_taskbar` made a tool window (`wndproc` keeps it so).
     const TOOL: PCWSTR = w!("OpenCircle.tool");
+    /// Set on a window `apply` cut: its max radius in 1/100 logical px, plus 1
+    /// (never null); `wndproc` cuts it again at every size or DPI change.
+    const SHAPE: PCWSTR = w!("OpenCircle.shape");
 
     /// An extended style with no taskbar button.
     pub(super) fn tool_style(ex: u32) -> u32 {
@@ -451,7 +471,10 @@ mod win {
 
     pub fn clear(hwnd: isize) -> Result<(), String> {
         // SAFETY: `hwnd` is a live window of this process; no region = the whole window.
-        unsafe { SetWindowRgn(HWND(hwnd as *mut _), None, true) };
+        unsafe {
+            let _ = RemovePropW(HWND(hwnd as *mut _), SHAPE);
+            SetWindowRgn(HWND(hwnd as *mut _), None, true)
+        };
         Ok(())
     }
 
@@ -462,6 +485,7 @@ mod win {
         // SAFETY: `hwnd` is a live window of this process. Each part region is
         // deleted after it is merged; the whole one is handed to the system.
         unsafe {
+            let _ = RemovePropW(hwnd, SHAPE); // no rounded cut over these
             GetWindowRect(hwnd, &mut rect).map_err(|e| e.to_string())?;
             let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
             let region = CreateRectRgn(0, 0, 0, 0);
@@ -477,16 +501,30 @@ mod win {
         Ok(())
     }
 
+    /// Cuts the window now and after every later size or DPI change (`wndproc`).
     pub fn apply(hwnd: isize, max_radius: f32) -> Result<(), String> {
         let hwnd = HWND(hwnd as *mut _);
+        let tag = (max_radius.max(0.0) * 100.0).round() as usize + 1;
+        // SAFETY: a property of ours on a live window of this process.
+        unsafe { SetPropW(hwnd, SHAPE, Some(HANDLE(tag as *mut _))) }.map_err(|e| e.to_string())?;
+        cut(hwnd, max_radius)
+    }
+
+    /// The corner radius, physical px, of a `w` x `h` window at `dpi` cut to
+    /// `max_radius` logical px: the radius the kit draws there.
+    pub(super) fn radius_px(max_radius: f32, dpi: u32, w: i32, h: i32) -> i32 {
+        let scale = dpi.max(96) as f32 / 96.0;
+        corner(max_radius * scale, w as f32, h as f32).round() as i32
+    }
+
+    fn cut(hwnd: HWND, max_radius: f32) -> Result<(), String> {
         let mut rect = RECT::default();
         // SAFETY: `hwnd` is a live window of this process (the UI's raw handle). The
         // region is handed to the system, which owns it after a successful call.
         unsafe {
             GetWindowRect(hwnd, &mut rect).map_err(|e| e.to_string())?;
             let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
-            let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
-            let r = (corner(max_radius * scale, w as f32, h as f32)).round() as i32;
+            let r = radius_px(max_radius, GetDpiForWindow(hwnd), w, h);
             let region = if r <= 0 {
                 CreateRectRgn(0, 0, w, h)
             } else {
@@ -810,6 +848,56 @@ mod tests {
             let _ = DestroyWindow(hwnd);
         }
         assert_eq!(alpha, 0, "shown again after the clear");
+    }
+
+    /// The owner's box behind the Copied pill: a cut window resized after its
+    /// cut (a move onto a monitor of another scale resizes it inside winit's
+    /// WM_DPICHANGED, before or without iced's `Resized`) kept the old region.
+    /// The region follows the window at once, whatever moved it, at every scale
+    /// (a 200x60 logical card at 1.0 / 1.25 / 1.5 / 2.0, back to 1.0; a test
+    /// window can't be smaller than a caption's minimum, 153x44 at 1.0).
+    #[cfg(windows)]
+    #[test]
+    fn a_cut_window_keeps_its_shape_through_every_resize() {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::Graphics::Gdi::{COMPLEXREGION, GetWindowRgnBox};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DestroyWindow, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
+        };
+        let hwnd = test_window();
+        let mut boxes = Vec::new();
+        // SAFETY: the test's own window, destroyed at the end.
+        unsafe {
+            win::apply(hwnd.0 as isize, 12.0).unwrap();
+            for scale in [1.0, 1.25, 1.5, 2.0, 1.0] {
+                let (w, h) = ((200.0 * scale) as i32, (60.0 * scale) as i32);
+                let how = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
+                SetWindowPos(hwnd, None, 0, 0, w, h, how).unwrap();
+                let mut b = RECT::default();
+                let kind = GetWindowRgnBox(hwnd, &mut b);
+                boxes.push((scale, (w, h), (b.right - b.left, b.bottom - b.top), kind));
+            }
+            let _ = DestroyWindow(hwnd);
+        }
+        for (scale, want, got, kind) in boxes {
+            assert_eq!(got, want, "region at {scale}x");
+            assert_eq!(kind, COMPLEXREGION, "rounded at {scale}x");
+        }
+    }
+
+    /// The cut's corner is the one the kit draws: radius x the window's scale,
+    /// at most half its shorter side.
+    #[cfg(windows)]
+    #[test]
+    fn the_cut_corner_scales_with_the_monitor() {
+        let px = |scale: f32| (84.0 * scale) as i32;
+        let at = |scale: f32| win::radius_px(12.0, (96.0 * scale) as u32, px(scale), px(scale));
+        assert_eq!([1.0, 1.25, 1.5, 2.0].map(at), [12, 15, 18, 24]);
+        assert_eq!(
+            win::radius_px(999.0, 144, 126, 51),
+            26,
+            "a pill: a half circle"
+        );
     }
 
     #[test]
