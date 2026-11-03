@@ -515,7 +515,7 @@ impl Windows {
                 let colours = [c().bg, c().accent, c().rim].map(|c| c.into_rgba8());
                 let rtl = strip.rtl;
                 super::background(move |tx| {
-                    let ok = steps::compose(&crops, colours, rtl).is_some_and(copy_image);
+                    let ok = steps::stack_numbered(&crops, colours, rtl).is_some_and(copy_image);
                     let _ = tx.unbounded_send(ok);
                 })
                 .map(|ok| Msg::Steps(steps::Msg::Copied(ok)))

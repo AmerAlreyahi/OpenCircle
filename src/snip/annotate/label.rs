@@ -1,6 +1,5 @@
 //! Label: text on a rounded fill of its colour; the text is dark or white,
-//! whichever reads on that fill (`document::on`). Also an arrow's label and the
-//! board's capture numbers.
+//! whichever reads on that fill (`document::on`). Also an arrow's label.
 use iced::{Point, Rectangle, Size, Vector};
 
 use super::document::{Layer, halo, on, rounded};

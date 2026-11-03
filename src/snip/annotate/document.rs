@@ -6,7 +6,6 @@ use tiny_skia::{
     FillRule, IntRect, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform,
 };
 
-use super::board::{self, Board};
 use super::legend::{self, Legend};
 use super::{
     arrow, blur, callout, highlighter, label, magnifier, pen, pointer, shape, spotlight, step, text,
@@ -233,19 +232,9 @@ pub enum Edit {
     Change(usize, Item, Item),
     /// Crop before, after (`None` = the whole image).
     Crop(Option<Rectangle>, Option<Rectangle>),
-    /// The board (captures, layout) and everything on it, before and after.
-    Board(Box<Sheet>, Box<Sheet>),
     /// Snip's live area (the crop) before and after, and how far every item
     /// moved with it (zero for a resize: the drawing stays on its pixels).
     Area(Rectangle, Rectangle, Vector),
-}
-
-/// A board's state: its layout and the items and crop that go with it.
-#[derive(Clone, Debug)]
-pub struct Sheet {
-    pub board: Board,
-    pub crop: Option<Rectangle>,
-    pub items: Vec<Item>,
 }
 
 impl Edit {
@@ -255,7 +244,6 @@ impl Edit {
             Edit::Delete(i, item) => Edit::Insert(i, item),
             Edit::Change(i, before, after) => Edit::Change(i, after, before),
             Edit::Crop(before, after) => Edit::Crop(after, before),
-            Edit::Board(before, after) => Edit::Board(after, before),
             Edit::Area(before, after, moved) => Edit::Area(after, before, -moved),
         }
     }
@@ -275,13 +263,6 @@ impl Edit {
                 doc.selected = Some(*i);
             }
             Edit::Crop(_, after) => doc.crop = *after,
-            Edit::Board(_, after) => {
-                doc.board = after.board;
-                doc.crop = after.crop;
-                doc.items = after.items.clone();
-                doc.selected = None;
-                doc.compose();
-            }
             Edit::Area(_, after, moved) => {
                 doc.crop = Some(*after);
                 doc.shift(*moved);
@@ -291,7 +272,7 @@ impl Edit {
 }
 
 pub struct Document {
-    /// The capture, or the board of captures once there are more.
+    /// The capture.
     pub image: Image,
     /// Bottom to top.
     pub items: Vec<Item>,
@@ -300,112 +281,27 @@ pub struct Document {
     pub crop: Option<Rectangle>,
     /// The steps' notes show in a legend.
     pub legend: bool,
-    pub board: Board,
-    /// The captures once a second one is added (`board.count` of them are on the
-    /// board; the rest wait for a redo). Empty: `image` is the only capture.
-    sources: Vec<Image>,
-    /// Where each capture is on the board.
-    tiles: Vec<Rectangle>,
     done: Vec<Edit>,
     undone: Vec<Edit>,
 }
 
 impl Document {
     pub fn new(image: Image) -> Self {
-        let whole = Rectangle::new(
-            Point::ORIGIN,
-            Size::new(image.width as f32, image.height as f32),
-        );
         Document {
             image,
             items: Vec::new(),
             selected: None,
             crop: None,
             legend: true,
-            board: Board::default(),
-            sources: Vec::new(),
-            tiles: vec![whole],
             done: Vec::new(),
             undone: Vec::new(),
         }
     }
 
-    /// Where each capture is on the board, image px.
-    #[cfg(test)]
-    pub fn tiles(&self) -> &[Rectangle] {
-        &self.tiles
-    }
-
-    /// Adds a capture to the board (one undoable edit; tests only, `Annotator::append`).
-    #[cfg(test)]
-    pub fn append(&mut self, image: Image) {
-        if self.sources.is_empty() {
-            let first = std::mem::replace(
-                &mut self.image,
-                Image {
-                    width: 0,
-                    height: 0,
-                    rgba: Vec::new(),
-                },
-            );
-            self.sources.push(first);
-        }
-        self.sources.truncate(self.board.count); // drops captures undone earlier
-        self.sources.push(image);
-        let board = Board {
-            count: self.board.count + 1,
-            ..self.board
-        };
-        self.rearrange(board);
-    }
-
-    /// Lays the board out as `board` says; items move with their capture, the
-    /// crop is reset (one undoable edit).
-    pub fn rearrange(&mut self, board: Board) {
-        let count = board.count.clamp(1, self.sources.len().max(1));
-        let board = Board { count, ..board };
-        if board == self.board || self.sources.is_empty() {
-            return;
-        }
-        let sizes: Vec<_> = (self.sources.iter().take(count))
-            .map(|s| (s.width, s.height))
-            .collect();
-        let (to, _) = board::place(&sizes, board.layout);
-        let before = Sheet {
-            board: self.board,
-            crop: self.crop,
-            items: self.items.clone(),
-        };
-        let after = Sheet {
-            board,
-            crop: None,
-            items: board::remap(&self.items, &self.tiles, &to),
-        };
-        self.exec(Edit::Board(Box::new(before), Box::new(after)));
-    }
-
-    /// Rebuilds the board image from the captures.
-    fn compose(&mut self) {
-        if self.sources.is_empty() {
-            return;
-        }
-        let (image, tiles) = board::compose(&self.sources[..self.board.count], &self.board);
-        self.image = image;
-        self.tiles = tiles;
-    }
-
     /// The legend as it shows now (`None`: off, or no step has a note).
     pub fn legend_layout(&self) -> Option<Legend> {
         self.legend
-            .then(|| {
-                // On a board, beside or under a capture before the corners.
-                let tiles = if self.board.count > 1 {
-                    &self.tiles[..]
-                } else {
-                    &[]
-                };
-                legend::layout(self.view(), &self.items, tiles)
-            })
+            .then(|| legend::layout(self.view(), &self.items))
             .flatten()
     }
 
@@ -497,36 +393,6 @@ impl Document {
                 item.shape.transform(|p| p + by, 1.0);
             }
         }
-    }
-
-    /// The crop becomes the whole image (its pixels cut out, the items moved
-    /// with them): Snip's live area is fixed from here on (a board needs its
-    /// captures as they are). Undo starts again from this state.
-    #[cfg(test)]
-    pub fn bake(&mut self) {
-        let Some(crop) = self.crop.take() else {
-            return;
-        };
-        let whole = Rectangle::new(
-            Point::ORIGIN,
-            Size::new(self.image.width as f32, self.image.height as f32),
-        );
-        let r = int_rect(crop, whole);
-        let (x, y, w, h) = (r.x() as usize, r.y() as usize, r.width(), r.height());
-        let stride = self.image.width as usize * 4;
-        let rgba = (y..y + h as usize)
-            .flat_map(|row| &self.image.rgba[row * stride + x * 4..][..w as usize * 4])
-            .copied()
-            .collect();
-        self.image = Image {
-            width: w,
-            height: h,
-            rgba,
-        };
-        self.shift(Vector::new(-(x as f32), -(y as f32)));
-        self.tiles = vec![Rectangle::new(Point::ORIGIN, Size::new(w as f32, h as f32))];
-        self.done.clear();
-        self.undone.clear();
     }
 
     /// The visible part of the image, image px.

@@ -11,7 +11,6 @@
 pub(crate) mod area;
 mod arrow;
 pub(crate) mod blur;
-pub mod board;
 mod callout;
 mod chrome;
 mod crop;
@@ -380,13 +379,6 @@ pub enum Message {
     /// Snip: the flattened image to the Steps strip, as its next step or in
     /// place of the one being edited (`Output::AddStep`).
     AddStep,
-    /// The board's layout and numbers: hidden (owner, 2026-10-31: the Steps
-    /// strip replaces Add capture).
-    #[allow(dead_code)]
-    Layout(board::Layout),
-    /// Number labels on the board's captures.
-    #[allow(dead_code)]
-    Numbers,
     /// Left button down on the drag handle: OS drag of the image.
     DragOut,
     Undo,
@@ -557,7 +549,7 @@ pub struct Annotator {
     /// The blur's pixel size (its mosaic cells).
     pub(crate) blur_cell: Width,
     /// The image's text lines (Auto's), for the image they were found in.
-    bands: Option<((u32, u32, board::Board), Vec<lines::Band>)>,
+    bands: Option<((u32, u32), Vec<lines::Band>)>,
     /// Snip's live area: the document is the whole frozen monitor (or every
     /// monitor joined) and its crop is the captured area, which moves and
     /// resizes (`area`). The host places its top-left pixel (`canvas::ScreenMap`).
@@ -699,19 +691,6 @@ impl Annotator {
         out
     }
 
-    /// Adds `image` (another capture) to the board. No entry point since the
-    /// Steps strip replaced Add capture (owner, 2026-11-02): tests only.
-    // ponytail: the board model stays for its tests; delete it with them.
-    #[cfg(test)]
-    pub fn append(&mut self, image: Image) {
-        self.commit();
-        if std::mem::take(&mut self.movable) {
-            self.doc.bake(); // a board of captures as they are
-        }
-        self.doc.append(image);
-        self.refresh();
-    }
-
     fn handle(&mut self, message: Message) -> Option<Output> {
         // Undo's next click opens its panel only right after an undo.
         if !matches!(
@@ -846,14 +825,6 @@ impl Annotator {
                 return Some(Output::AddStep(render(&self.doc)));
             }
             Message::AddStep => {}
-            Message::Layout(layout) => self.rearrange(board::Board {
-                layout,
-                ..self.doc.board
-            }),
-            Message::Numbers => self.rearrange(board::Board {
-                numbers: !self.doc.board.numbers,
-                ..self.doc.board
-            }),
             Message::DragOut => {
                 self.commit();
                 let flat = render(&self.doc);
@@ -1028,8 +999,7 @@ impl Annotator {
         self.updating.is_some() || self.steps.is_none_or(|n| n < STEPS_MAX)
     }
 
-    /// The canvas size, display px (changes with the crop, the board and the
-    /// legend's band).
+    /// The canvas size, display px (changes with the crop and the legend's band).
     pub fn size(&self) -> Size {
         let band = self.legend.as_ref().map_or(0.0, |l| l.band);
         (self.doc.view().size() + Size::new(0.0, band)) * self.zoom
@@ -1078,12 +1048,6 @@ impl Annotator {
         self.restyle();
     }
 
-    fn rearrange(&mut self, board: board::Board) {
-        self.commit();
-        self.doc.rearrange(board);
-        self.refresh();
-    }
-
     /// A style preset: its colour and weight, for its tool (kept when the active
     /// one is one it suits). Redact on a selected box turns it into a solid box.
     fn preset(&mut self, i: usize) {
@@ -1115,9 +1079,9 @@ impl Annotator {
         self.set_colour(colour);
     }
 
-    /// The image's text lines (found once per board layout).
+    /// The image's text lines (found once per image).
     fn bands(&mut self) -> &[lines::Band] {
-        let key = (self.doc.image.width, self.doc.image.height, self.doc.board);
+        let key = (self.doc.image.width, self.doc.image.height);
         if self.bands.as_ref().is_none_or(|(k, _)| *k != key) {
             self.bands = Some((key, lines::detect(&self.doc.image)));
         }

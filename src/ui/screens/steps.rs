@@ -4,7 +4,7 @@
 //! capture here and the overlay closes; each next snip's "Add step N" adds
 //! the next one. Click a step = copy it, double-click = edit it, hover x =
 //! delete, drag = reorder; x on the strip clears it ("Steps cleared · Undo");
-//! Copy all = ONE image of every step stacked and numbered (`compose`).
+//! Copy all = ONE image of every step stacked and numbered (`stack_numbered`).
 //!
 //! Steps live in memory only and go when the strip is cleared or closed:
 //! each keeps its capture as PNG bytes (a screenshot packs to a few % of its
@@ -619,7 +619,7 @@ fn place(monitor: Place, work: Size, left: bool, top: Option<f32>, size: Size) -
 /// (radius 8, a 1 px `rim` edge), 32 px between steps; narrower captures keep
 /// to the start side (right to left: the numbers at the right). Natural px,
 /// never scaled up; scaled down to 8,000 px on the long side.
-pub fn compose(crops: &[Crop], colours: [[u8; 4]; 3], rtl: bool) -> Option<Crop> {
+pub fn stack_numbered(crops: &[Crop], colours: [[u8; 4]; 3], rtl: bool) -> Option<Crop> {
     use tiny_skia::{FillRule, Paint, Pattern, Pixmap, PixmapPaint, SpreadMode, Transform};
     const SIDE: u32 = 40;
     const DISC: u32 = 44;
@@ -921,7 +921,7 @@ mod tests {
     fn copy_all_stacks_numbered_steps() {
         let crops = [capture(300, 100, 200), capture(200, 30, 60)];
         let colours = [[11, 18, 32, 255], [56, 189, 248, 255], [40, 50, 70, 255]];
-        let img = compose(&crops, colours, false).unwrap();
+        let img = stack_numbered(&crops, colours, false).unwrap();
         let (w, h) = (40 + 44 + 16 + 300 + 40, 40 + 100 + 32 + 44 + 40);
         assert_eq!((img.width, img.height), (w, h));
         let px = |x: u32, y: u32| {
@@ -937,12 +937,12 @@ mod tests {
             [11, 18, 32],
             "narrower: start side"
         );
-        let rtl = compose(&crops, colours, true).unwrap();
+        let rtl = stack_numbered(&crops, colours, true).unwrap();
         let i = ((40 + 22) * w + (w - 40 - 8)) as usize * 4;
         assert_eq!(rtl.rgba[i..i + 3], [56, 189, 248], "disc at the right");
         // huge: scaled to 8,000 px on the long side
         let tall: Vec<Crop> = (0..3).map(|_| capture(10, 3000, 90)).collect();
-        let img = compose(&tall, colours, false).unwrap();
+        let img = stack_numbered(&tall, colours, false).unwrap();
         assert_eq!(img.height, 8000);
     }
 
