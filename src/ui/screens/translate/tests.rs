@@ -19,7 +19,37 @@ fn shown(blocks: Vec<Translation>) -> Msg {
     Msg::Done(Ok(Shown {
         image: frame(4, 4),
         blocks,
+        offer: None,
     }))
+}
+
+fn es_ar() -> &'static Pair {
+    crate::mt::route("es", "ar").unwrap()[0]
+}
+
+/// A page translated with a Spanish line kept (es-ar not here): the pill
+/// offers its pair quietly; Get forgets the kept line's cached "as it was",
+/// downloads the pair and translates again.
+#[test]
+fn kept_lines_are_offered_without_holding_the_page() {
+    let mut s = session(true);
+    let line = "Esta hoja tiene un pasado oscuro.".to_string();
+    s.cache.put(&line, "ar", String::new());
+    let offer = Offer::new((es_ar(), vec![line.clone()]), "es", "ar");
+    assert_eq!(
+        (offer.found.as_str(), offer.get.as_str()),
+        ("Spanish text found", "Get Spanish → Arabic")
+    );
+    let _ = s.update(Msg::Done(Ok(Shown {
+        image: frame(4, 4),
+        blocks: vec![block("Quit", "خروج", [10.0, 10.0, 50.0, 20.0])],
+        offer: Some(Box::new(offer)),
+    })));
+    assert!(s.image().is_some(), "the page is shown at once");
+    let _ = s.update(Msg::GetHeld);
+    assert!(matches!(&s.phase, Phase::Downloading(_)));
+    assert!(s.offline.is_some_and(|p| std::ptr::eq(p, es_ar())));
+    assert_eq!(s.cache.get(&line, "ar"), None, "translated again");
 }
 
 /// A session as `start` leaves it, without a thread.
@@ -673,6 +703,13 @@ fn every_translate_state_matches_its_golden_image() {
                 s.click(Point::new(50.0, 20.0));
                 explained(&mut s, EXPLANATION);
             }
+            "offer" => {
+                let mut shown = shown(Vec::new());
+                if let Msg::Done(Ok(s)) = &mut shown {
+                    s.offer = Some(Box::new(Offer::new((es_ar(), Vec::new()), "es", "ar")));
+                }
+                let _ = s.update(shown);
+            }
             "word" => {
                 let blocks = vec![block("Inventory", "المخزون", [0.0, 0.0, 100.0, 40.0])];
                 let _ = s.update(shown(blocks));
@@ -689,6 +726,7 @@ fn every_translate_state_matches_its_golden_image() {
         "translating",
         "failed",
         "picker",
+        "offer",
         "word",
         "word-explained",
     ];

@@ -8,6 +8,7 @@ use super::{Card, Msg, PICKER_LIST, Phase, Session};
 use crate::actions::ask::Status;
 use crate::actions::{self};
 use crate::ui::ai_chat::{actions, card, note};
+use crate::ui::kit::button::{Kind, button, label as button_label};
 use crate::ui::kit::markdown;
 use crate::ui::kit::panel_frame::{self as frame, Header};
 use crate::ui::kit::surface::{Material, surface};
@@ -86,6 +87,10 @@ impl Session {
                 let fit = Some((problem.message.chars().count(), 77.0));
                 with_pill(card(body, Some(buttons), fit, None))
             }
+            // lines kept in their own language: a quiet offer in the pill
+            Phase::Shown(shown) if self.card.is_none() && shown.offer.is_some() => {
+                self.offer(shown.offer.as_ref().expect("just checked"))
+            }
             Phase::Shown(_) => match &self.card {
                 Some(word) => {
                     let (body, footer) = card_view(word);
@@ -96,15 +101,30 @@ impl Session {
         }
     }
 
+    /// The pill with the offer: "Spanish text found" and its Get button.
+    fn offer<'a>(&'a self, o: &'a super::Offer) -> Element<'a, Msg> {
+        let get = button(button_label(&o.get), Kind::Elevated, Some(Msg::GetHeld));
+        self.pill(Some(&o.found), Some(get))
+    }
+
     /// The pill at the top (`.as-language-pill`): source → target (the
     /// picker), and `status`.
     fn languages<'a>(&'a self, status: Option<&'a str>) -> Element<'a, Msg> {
+        self.pill(status, None)
+    }
+
+    fn pill<'a>(
+        &'a self,
+        status: Option<&'a str>,
+        then: Option<Element<'a, Msg>>,
+    ) -> Element<'a, Msg> {
         let mut top = row![self.picker.chips(picker::CHIP_HEIGHT).map(Msg::Picker)]
             .spacing(PILL_PAD)
             .align_y(Center);
         if let Some(status) = status {
             top = top.push(note(status));
         }
+        top = top.push(then);
         let mut body = column![top].spacing(picker::SPACING);
         if let Some(list) = self.picker.list(PICKER_LIST) {
             body = body.push(list.map(Msg::Picker));

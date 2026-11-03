@@ -284,6 +284,21 @@ pub fn sure(text: &str) -> Option<&'static str> {
     }
 }
 
+/// [`sure`], and certain enough to keep a line out of the page's language
+/// (`pipeline::Real::routes`): another script, or 3+ words whose votes put
+/// one language strictly ahead AND the detector says the same. The lines
+/// the detector alone misjudged ("Known dwarf planets" as Spanish) are not.
+pub fn certain(text: &str) -> Option<&'static str> {
+    let s = sure(text)?;
+    if !matches!(s, "en" | "es" | "fr" | "de") {
+        return Some(s);
+    }
+    let v = votes(&[text]);
+    let i = WORDS.iter().position(|w| w.0 == s)?;
+    let ahead = (v.iter().enumerate()).all(|(k, n)| k == i || *n < v[i]);
+    (ahead && detected(text, &v) == Some(s)).then_some(s)
+}
+
 /// A short Latin line's language by a small trained detector (whichlang:
 /// MIT, a linear model over n-grams, exe +0.3 MB, microseconds a line):
 /// French lyric lines in an English page ("Le jour de gloire est arrivé"
@@ -386,6 +401,7 @@ mod tests {
         ] {
             assert_eq!((es, guess([es])), (es, Some("es")));
             assert_eq!((es, sure(es)), (es, Some("es")));
+            assert_eq!((es, certain(es)), (es, Some("es")));
         }
         let banner = "To exit full screen, move mouse to top of screen or press Esc";
         assert_eq!(sure(banner), Some("en"));
@@ -439,6 +455,8 @@ mod tests {
             ),
         ] {
             let got = sure(line);
+            assert!(got.is_none() || got == Some(page), "{line}: {got:?}");
+            let got = certain(line);
             assert!(got.is_none() || got == Some(page), "{line}: {got:?}");
         }
     }

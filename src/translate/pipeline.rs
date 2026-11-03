@@ -54,6 +54,11 @@ pub struct Real {
     /// from each call's lines), and every language the page's blocks are
     /// sure of (`lang::sure`): a Spanish subtitle in an English player.
     guessed: Mutex<(Option<&'static str>, Vec<&'static str>)>,
+    /// "auto": lines certainly in another language of the page's script
+    /// whose pair isn't downloaded (`lang::certain`), left as they are while
+    /// the rest is translated, and the first pair they need (offered, never
+    /// waited for).
+    held: Mutex<Option<(&'static mt::Pair, Vec<String>)>>,
 }
 
 pub enum Via {
@@ -74,6 +79,7 @@ impl Real {
             scale: 1.0,
             missing: Mutex::new(None),
             guessed: Mutex::default(),
+            held: Mutex::default(),
         }
     }
 
@@ -90,6 +96,13 @@ impl Real {
     /// The pair whose download a failed offline translation needs.
     pub fn missing(&self) -> Option<&'static mt::Pair> {
         *self.missing.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The pair the page's `held` lines need, and those lines (as sent:
+    /// their cached "kept as is" must be forgotten before they're
+    /// translated again).
+    pub fn held(&self) -> Option<(&'static mt::Pair, Vec<String>)> {
+        self.held.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// The set source, or ("auto") the page's language (`read`), else the
@@ -154,7 +167,22 @@ impl Real {
         let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
         for (i, t) in texts.iter().enumerate() {
             let s = match self.source.as_str() {
-                lang::AUTO => lang::sure(t).filter(|s| usable(s)).unwrap_or(fallback),
+                lang::AUTO => match lang::sure(t) {
+                    Some(s) if usable(s) => s,
+                    // certainly another language (a Spanish subtitle on an
+                    // English page into Arabic, es-ar not here): never
+                    // translated as the page's language (nonsense); kept
+                    // as it is, its pair offered
+                    Some(s) if s != fallback && lang::certain(t) == Some(s) => {
+                        if let Some(pair) = mt::next(s, target) {
+                            let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+                            let (_, lines) = held.get_or_insert((pair, Vec::new()));
+                            lines.push(t.clone());
+                        }
+                        continue;
+                    }
+                    _ => fallback,
+                },
                 _ => fallback,
             };
             if same(s) {
@@ -234,7 +262,7 @@ impl Real {
             let part = by_sentence(&part, |src| {
                 let (bodies, marks): (Vec<String>, Vec<String>) =
                     src.iter().map(|s| footnotes(s)).unzip();
-                let out = hops(&bodies, &route, target, &run)?;
+                let out = whole(&bodies, &route, target, &run)?;
                 Ok(out.into_iter().zip(marks).map(|(t, m)| t + &m).collect())
             })?;
             for (i, t) in idx.into_iter().zip(part) {
@@ -285,6 +313,38 @@ fn hops(
         }
     }
     Ok(t)
+}
+
+/// `hops`, and a long sentence it kept as it was (a stock phrase, a number
+/// lost: fr-ar left half a Wikipedia paragraph in French) or cut short (under
+/// half its length: Marian drops the last clauses of a long input) tried
+/// again in two halves, cut at the comma nearest its middle; the halves are
+/// used when both translate.
+fn whole(
+    src: &[String],
+    route: &[&'static mt::Pair],
+    target: &str,
+    run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
+) -> Result<Vec<String>, AiError> {
+    let mut out = hops(src, route, target, &run)?;
+    let retry: Vec<(usize, [String; 2])> = (0..src.len())
+        .filter(|&i| {
+            let short = out[i].chars().count() * 2 < src[i].chars().count();
+            (out[i] == src[i] || short) && src[i].split_whitespace().count() >= 12
+        })
+        .filter_map(|i| Some((i, cut(&src[i])?)))
+        .collect();
+    if retry.is_empty() {
+        return Ok(out);
+    }
+    let flat: Vec<String> = retry.iter().flat_map(|(_, h)| h.clone()).collect();
+    let got = hops(&flat, route, target, &run)?;
+    for ((i, h), t) in retry.iter().zip(got.chunks(2)) {
+        if t.iter().zip(h).all(|(t, s)| t != s) {
+            out[*i] = t.join(" ");
+        }
+    }
+    Ok(out)
 }
 
 /// Windows OCR (the user's Windows language, Latin) shown a page in another
@@ -361,8 +421,9 @@ fn echo(src: &str, out: &str) -> bool {
 
 /// An offline output that isn't a translation of `src` (Marian makes things
 /// up from what it can't read): a loop ("- - - - -", "Ül-jjjjjjjjj"), far
-/// longer than the source, a short label grown into a sentence, a number
-/// lost or made up, letters of another script than the target's.
+/// longer than the source, a short label grown into a sentence, most of a
+/// long sentence lost, a label's number lost or made up, letters of another
+/// script than the target's, a symbol the source didn't have.
 fn made_up(src: &str, out: &str, target: &str) -> bool {
     let words = |s: &str| s.split_whitespace().count();
     let repeats = |s: &str| {
@@ -404,8 +465,14 @@ fn made_up(src: &str, out: &str, target: &str) -> bool {
                 .map(String::from)
                 .collect::<Vec<_>>()
         });
-    let number_lost = numbers.into_iter().any(|n| !od.contains(&n));
-    let number_new = od.split_whitespace().any(|n| !sd.contains(n));
+    // in a sentence numbers move between digits and words ("deux cents" ->
+    // "200"): they judge labels and short phrases only
+    let label = words(src) <= 8;
+    let number_lost = label && numbers.into_iter().any(|n| !od.contains(&n));
+    let number_new = label && od.split_whitespace().any(|n| !sd.contains(n));
+    // most of a long sentence gone: Marian cut it short, or gave a stock
+    // phrase instead (fr-ar: "( انظر الفقرة في مستهل المقالة . )" for 22 words)
+    let lost = words(src) >= 12 && words(out) * 5 < words(src) * 2;
     let script = lang::find(target).map_or(Script::Latin, |l| l.script);
     let letters: Vec<char> = out.chars().filter(|c| c.is_alphabetic()).collect();
     let foreign = match script {
@@ -415,7 +482,16 @@ fn made_up(src: &str, out: &str, target: &str) -> bool {
             .any(|c| !Script::Latin.has(*c) && !src.contains(*c)),
         s => letters.iter().filter(|c| s.has(**c)).count() * 2 < letters.len(),
     };
-    looped || long || number_lost || number_new || foreign
+    // a symbol the source didn't have: "247 langues •v" -> "247 لغة □ ت"
+    let common = |c: char| {
+        c.is_alphanumeric()
+            || c.is_whitespace()
+            || c.is_ascii_punctuation()
+            || Script::Arabic.has(c)
+            || "«»“”‘’„–—…·•".contains(c)
+    };
+    let symbol = out.chars().any(|c| !common(c) && !src.contains(c));
+    looped || long || lost || number_lost || number_new || foreign || symbol
 }
 
 /// Windows OCR reads the text (#62: a screen in ~0.1-0.3 s, in this
@@ -601,21 +677,22 @@ const LONG: usize = 45;
 /// `s` cut at the comma (or semicolon, colon) nearest its middle until each
 /// part has at most [`LONG`] words; a part without one stays whole.
 fn halves(s: &str) -> Vec<String> {
-    let words = s.split(' ').count();
-    if words <= LONG {
+    if s.split(' ').count() <= LONG {
         return vec![s.to_string()];
     }
-    let mid = s.len() / 2;
-    let cut = (s.match_indices([',', ';', ':']).map(|(i, _)| i + 1))
-        .filter(|&i| s[i..].starts_with(' '))
-        .min_by_key(|&i| i.abs_diff(mid));
-    match cut {
-        Some(i) => [&s[..i], &s[i + 1..]]
-            .iter()
-            .flat_map(|p| halves(p.trim()))
-            .collect(),
+    match cut(s) {
+        Some(h) => h.iter().flat_map(|p| halves(p)).collect(),
         None => vec![s.to_string()],
     }
+}
+
+/// `s` cut at the comma (or semicolon, colon) nearest its middle.
+fn cut(s: &str) -> Option<[String; 2]> {
+    let mid = s.len() / 2;
+    let i = (s.match_indices([',', ';', ':']).map(|(i, _)| i + 1))
+        .filter(|&i| s[i..].starts_with(' '))
+        .min_by_key(|&i| i.abs_diff(mid))?;
+    Some([s[..i].trim().to_string(), s[i + 1..].trim().to_string()])
 }
 
 #[derive(Debug)]
@@ -1144,6 +1221,14 @@ impl Cache {
         let t = g[1].remove(&key)?;
         self.insert(&mut g, key, t.clone());
         Some(t)
+    }
+
+    /// Drops `text`'s translation (lines kept as they were until their
+    /// pair was downloaded).
+    pub fn forget(&self, text: &str, target: &str) {
+        let key = (normalise(text), target.to_string());
+        let mut g = self.gens.lock().unwrap_or_else(|e| e.into_inner());
+        g.iter_mut().for_each(|g| drop(g.remove(&key)));
     }
 
     pub fn put(&self, text: &str, target: &str, translation: String) {
@@ -1706,6 +1791,7 @@ pub(super) mod tests {
         ];
         let texts: Vec<String> = fr.iter().map(|s| s.to_string()).collect();
         assert_eq!(lang::sure(fr[3]), Some("es"));
+        assert_eq!(lang::certain(fr[3]), Some("es"));
         let real = Real::new(lang::AUTO, Via::Offline);
         real.read(&fr);
         let es_here = (mt::route("es", "de").unwrap().iter()).all(|p| p.missing_bytes() == 0);
@@ -1716,8 +1802,13 @@ pub(super) mod tests {
             .collect();
         if es_here {
             assert_eq!(got, [("fr", vec![0, 1, 2]), ("es", vec![3])]);
+            assert!(real.held().is_none());
         } else {
-            assert_eq!(got, [("fr", vec![0, 1, 2, 3])]);
+            // the Spanish line stays as it is (before: translated as French)
+            // and its pair is offered, the page isn't held
+            assert_eq!(got, [("fr", vec![0, 1, 2])]);
+            let (pair, lines) = real.held().expect("offered");
+            assert_eq!((pair.source, lines), ("es", vec![texts[3].clone()]));
         }
         // a page that isn't clearly one language keeps each line's own way
         let half = [fr[0], fr[3]];
@@ -1725,6 +1816,40 @@ pub(super) mod tests {
         real.read(&half);
         let texts: Vec<String> = half.iter().map(|s| s.to_string()).collect();
         assert_eq!(real.routes(&texts, "de").unwrap().len(), 2);
+    }
+
+    /// A Spanish subtitle on an English video page into Arabic, es-ar not
+    /// downloaded: it was translated as English (nonsense). It stays as it
+    /// is, the page is translated at once, and es-ar is offered.
+    #[test]
+    fn a_line_in_a_language_not_downloaded_is_kept_and_offered() {
+        let page = [
+            "Sintel is an independently produced short film, initiated by the Blender",
+            "Foundation as a means to further improve and validate the free and open",
+            "To exit full screen, move mouse to top of screen or press Esc",
+            "Subscribe to the channel for more of the films from the studio",
+            "Esta hoja tiene un pasado oscuro.",
+            "Known dwarf planets",
+        ];
+        let texts: Vec<String> = page.iter().map(|s| s.to_string()).collect();
+        let real = Real::new(lang::AUTO, Via::Offline);
+        real.read(&page);
+        let es_here = (mt::route("es", "ar").unwrap().iter()).all(|p| p.missing_bytes() == 0);
+        let routes = real.routes(&texts, "ar").unwrap();
+        let got: Vec<_> = (routes.iter())
+            .map(|(r, i)| (r[0].source, i.clone()))
+            .collect();
+        if es_here {
+            assert_eq!(got, [("en", vec![0, 1, 2, 3, 5]), ("es", vec![4])]);
+        } else {
+            // the detector's "Known dwarf planets" (Spanish, unsure) goes the page's way
+            assert_eq!(got, [("en", vec![0, 1, 2, 3, 5])]);
+            let (pair, lines) = real.held().expect("offered");
+            assert_eq!(
+                (pair.source, pair.target, lines),
+                ("es", "ar", vec![texts[4].clone()])
+            );
+        }
     }
 
     #[test]
@@ -2012,6 +2137,49 @@ pub(super) mod tests {
         );
     }
 
+    /// fr-ar on the Win10 VM: Marian cut a 33-word sentence after its first
+    /// clause, and gave a stock phrase for another; both are tried again in
+    /// halves (before: the second stayed French, the first lost its end).
+    #[test]
+    fn a_long_sentence_cut_short_is_translated_in_halves() {
+        let route = mt::route("fr", "ar").unwrap();
+        assert_eq!(route.len(), 1);
+        let cut = "II s'est formé il y a un peu moins de 4,6 milliards d'années à partir de \
+                   l'effondrement gravitationnel d'un nuage moléculaire, suivi de la \
+                   constitution d'un disque protoplanétaire selon l'hypothèse de la nébuleuse.";
+        let stock = "ainsi que des milliards de petits corps (la presque totalité des \
+                     astéroides et autres planetes mineures, les cométes, les poussiéres etc.).";
+        let calls = RefCell::new(0);
+        let run = |t: &[String], _: &'static mt::Pair| {
+            *calls.borrow_mut() += 1;
+            Ok(t.iter()
+                .map(|s| match s {
+                    s if s == cut => "لقد تكوّن قبل 4.6 مليار سنة من انهيار سحابة،".into(),
+                    s if s == stock => "( انظر الفقرة في مستهل المقالة . )".into(),
+                    s if s.ends_with("nébuleuse.") => "ثم تكون قرص حسب فرضية السديم.".into(),
+                    s if s.starts_with("II") => {
+                        "لقد تكوّن قبل 4.6 مليار سنة من انهيار سحابة جزيئية،".into()
+                    }
+                    s if s.starts_with("ainsi") => {
+                        "وبلايين الأجسام الصغيرة (كلها تقريباً من الكويكبات".into()
+                    }
+                    _ => "المذنبات، الغبار الكوني، الخ.".into(),
+                })
+                .collect())
+        };
+        let src = [cut.to_string(), stock.to_string(), "Lumière".to_string()];
+        let out = whole(&src, &route, "ar", run).unwrap();
+        assert_eq!(
+            out[0],
+            "لقد تكوّن قبل 4.6 مليار سنة من انهيار سحابة جزيئية، ثم تكون قرص حسب فرضية السديم."
+        );
+        assert_eq!(
+            out[1],
+            "وبلايين الأجسام الصغيرة (كلها تقريباً من الكويكبات المذنبات، الغبار الكوني، الخ."
+        );
+        assert_eq!(*calls.borrow(), 2, "one more call for all the halves");
+    }
+
     #[test]
     fn made_up_outputs_are_told_apart() {
         // offline outputs on the matrix pages before this check
@@ -2025,6 +2193,19 @@ pub(super) mod tests {
             "not in Arabic letters"
         );
         assert!(made_up("Sommaire", "目次", "en"), "another script");
+        // fr-ar on the Win10 VM (Edge, "Système solaire")
+        assert!(made_up("247 langues •v", "247 لغة □ ت", "ar"), "a symbol");
+        let s = "ainsi que des milliards de petits corps (la presque totalité des astéroides \
+                 et autres planetes mineures, les cométes, les poussiéres cosmiquesv etc.).";
+        assert!(
+            made_up(s, "( انظر الفقرة في مستهل المقالة . )", "ar"),
+            "lost"
+        );
+        let s = "II est composé de cette étoile et des objets célestes gravitant autour d'elle : \
+                 les huit planetes confirmées accompagnées de plus de deux cents satellites";
+        let t = "ويتألف من هذا النجم والأجسام السماوية المحيطة به: كوكبات الأرض الثمانية \
+                 المؤكدة، التي يزيد عدد السواتل الطبيعية المعروفة عنها على 200 ساتل";
+        assert!(!made_up(s, t, "ar"), "a sentence's number may be spelled");
         // good ones
         assert!(!made_up("40 langues", "40 لغة", "ar"));
         assert!(!made_up("1:47 AM", "1: 47 صباحاً", "ar"));

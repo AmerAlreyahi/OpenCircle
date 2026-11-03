@@ -1080,7 +1080,15 @@ fn real_matrix() {
                 let tr = models.entry(key).or_insert_with(|| {
                     crate::mt::Translator::load(pair, &ocr::models_dir()).unwrap()
                 });
-                tr.translate(t).map_err(|e| AiError::Offline(e.to_string()))
+                let out = tr
+                    .translate(t)
+                    .map_err(|e| AiError::Offline(e.to_string()))?;
+                if std::env::var_os("OC_ROUTES").is_some() {
+                    for (s, o) in t.iter().zip(&out) {
+                        eprintln!("MT {key}: {s:?}\n   => {o:?}");
+                    }
+                }
+                Ok(out)
             })
         }
     }

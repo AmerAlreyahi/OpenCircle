@@ -55,6 +55,8 @@ pub enum Msg {
     Ask,
     /// The AI is not set up: open Settings.
     OpenSettings,
+    /// Get the pair of the lines kept in their own language (`Offer`).
+    GetHeld,
     /// The card's frame (`kit::panel_frame`): the App moves, resizes and
     /// closes it, as for the other result cards.
     Card(card::Event),
@@ -74,6 +76,31 @@ pub struct Part {
 pub struct Shown {
     image: image::Handle,
     blocks: Vec<Translation>,
+    /// Lines certainly in another language whose pair isn't here, kept as
+    /// they were: offered quietly in the pill, never waited for.
+    offer: Option<Box<Offer>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Offer {
+    pair: &'static Pair,
+    /// The kept lines as sent (`Real::held`).
+    lines: Vec<String>,
+    /// "Spanish text found", "Get Spanish → Arabic".
+    found: String,
+    get: String,
+}
+
+impl Offer {
+    fn new((pair, lines): (&'static Pair, Vec<String>), source: &str, target: &str) -> Offer {
+        use crate::translate::lang::name;
+        Offer {
+            pair,
+            lines,
+            found: format!("{} text found", name(source)),
+            get: format!("Get {} → {}", name(source), name(target)),
+        }
+    }
 }
 
 /// Why nothing was translated. The original frame stays as it was.
@@ -242,6 +269,17 @@ impl Session {
             Msg::Offline(pair, bytes) if matches!(self.phase, Phase::Translating) => {
                 self.work = None;
                 self.phase = Phase::Consent(Some((pair, bytes)));
+            }
+            Msg::GetHeld => {
+                if let Phase::Shown(Shown { offer: Some(o), .. }) = &self.phase {
+                    // the kept lines were cached as "as they were"
+                    let target = &self.picker.target;
+                    o.lines.iter().for_each(|l| self.cache.forget(l, target));
+                    self.offline = Some(o.pair);
+                    self.card = None;
+                    self.phase = Phase::Downloading(0.0);
+                    return self.run(true);
+                }
             }
             Msg::Picker(msg) => {
                 if self.picker.update(msg) {
@@ -429,7 +467,15 @@ impl Session {
             let partial = |shown| {
                 let _ = tx.unbounded_send(Msg::Partial(shown));
             };
-            let result = translate(&frame, area, &cache, &deps, partial);
+            let result = translate(&frame, area, &cache, &deps, partial).map(|mut shown| {
+                if let Ok((real, target)) = &deps {
+                    shown.offer = real.held().map(|h| {
+                        let source = h.0.source;
+                        Box::new(Offer::new(h, source, target))
+                    });
+                }
+                shown
+            });
             // "auto" read another language than expected: ask for its pair
             if result.is_err()
                 && let Ok((real, _)) = &deps
@@ -501,6 +547,7 @@ fn translate(
         Shown {
             image: image::Handle::from_rgba(*width, *height, full),
             blocks,
+            offer: None,
         }
     };
     let out = pipeline::translate_progressively(

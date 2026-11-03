@@ -80,6 +80,32 @@ pub fn parse_marked(s: &str, color: [u8; 3], accent: [u8; 3]) -> Vec<Span> {
     spans
 }
 
+/// `s` cut into runs of Arabic-script text (true) and other letters, in
+/// order. Spaces, digits and punctuation stay in the run they're in (both
+/// fonts have them): moved to Inter in an Arabic line they lost their
+/// right-to-left order and mirroring ("( مع" drawn as "مع(").
+fn runs(s: &str) -> impl Iterator<Item = (&str, bool)> {
+    use crate::translate::lang::Script;
+    let kind = |c: char| match c {
+        c if Script::Arabic.has(c) => Some(true),
+        c if c.is_alphabetic() => Some(false),
+        _ => None,
+    };
+    let mut rest = s;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let own = rest.chars().find_map(kind).unwrap_or(false);
+        let end = (rest.char_indices())
+            .find(|&(_, c)| kind(c).is_some_and(|k| k != own))
+            .map_or(rest.len(), |(i, _)| i);
+        let (run, tail) = rest.split_at(end);
+        rest = tail;
+        Some((run, own))
+    })
+}
+
 impl Fonts {
     /// Shapes `spans` (full bidi + Arabic joining). `metrics` = font size and
     /// line height, `width` = wrap width.
@@ -112,9 +138,22 @@ impl Fonts {
         let base = Attrs::new()
             .family(Family::Name(if rtl { ARABIC } else { LATIN }))
             .weight(Weight(weight));
-        let rich = spans
-            .iter()
-            .map(|(t, c)| (t.as_str(), base.clone().color(Color::rgb(c[0], c[1], c[2]))));
+        // Each letter names its own bundled font: Arabic in Noto, the rest in
+        // Inter. Left to cosmic-text's fallback, Latin in an Arabic line went
+        // to the first system face of the exact weight once the system's
+        // fonts were loaded: on Windows the symbol font Marlett (a kept French
+        // sentence drawn as rows of ticks and boxes).
+        let rich = spans.iter().flat_map(|(t, c)| {
+            let attrs = base.clone().color(Color::rgb(c[0], c[1], c[2]));
+            runs(t).map(move |(r, arabic)| {
+                (
+                    r,
+                    attrs
+                        .clone()
+                        .family(Family::Name(if arabic { ARABIC } else { LATIN })),
+                )
+            })
+        });
         buf.set_rich_text(fs, rich, &base, Shaping::Advanced, Some(align));
         buf.shape_until_scroll(fs, false);
         buf
@@ -534,6 +573,45 @@ mod tests {
             vec![("a ".into(), w), ("b".into(), g)]
         );
         assert_eq!(parse_marked("a]] b", w, g), vec![("a b".into(), w)]);
+    }
+
+    /// fr->ar on the Win10 VM: a French sentence kept in an Arabic paragraph
+    /// was drawn in Marlett (ticks, boxes) once a "⁰" had loaded the
+    /// system's fonts. Every letter now comes from a bundled font, at any
+    /// weight, with the system's fonts loaded (this machine's weight-500
+    /// faces took the Latin before).
+    #[test]
+    fn mixed_arabic_and_latin_never_fall_back_to_a_system_font() {
+        let mut f = Fonts::new();
+        let text = "النظام الشمسي ⁰ Il est composé de cette étoile (1,99 × 10³⁰ kg) هو النظام";
+        for (rtl, weight) in [(true, 400), (true, 500), (true, 600), (false, 500)] {
+            let b = f.layout(
+                &[(text.into(), [255; 3])],
+                rtl,
+                Metrics::new(16.0, 22.0),
+                weight,
+                Some(400.0),
+                Align::Right,
+            );
+            assert!(f.system, "the test loads the system's fonts");
+            for run in b.layout_runs() {
+                for g in run.glyphs {
+                    let c = &run.text[g.start..g.end];
+                    if !c.chars().all(bundled) {
+                        continue;
+                    }
+                    let face = f.fs.db().face(g.font_id).expect("a face");
+                    let family = &face.families[0].0;
+                    assert!(
+                        family == LATIN || family == ARABIC,
+                        "{c:?} at weight {weight} drawn in {family}"
+                    );
+                    assert_ne!(g.glyph_id, 0, "{c:?} is .notdef");
+                }
+            }
+        }
+        let r: Vec<_> = runs("ب ج E (x) د.").collect();
+        assert_eq!(r, [("ب ج ", true), ("E (x) ", false), ("د.", true)]);
     }
 
     #[test]
