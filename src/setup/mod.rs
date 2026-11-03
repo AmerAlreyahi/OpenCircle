@@ -900,14 +900,25 @@ mod tests {
 
     /// The elevated setup inherits the user's environment (HKCU\Environment): the
     /// folders it trusts never come from it.
+    ///
+    /// Planted in a child run of this test only: planted in this process, the
+    /// variables reached every later test (the font system reads SystemRoot for
+    /// Windows' fonts: no Segoe UI, and the goldens drew without them).
     #[test]
     fn the_elevated_setup_never_takes_folders_from_the_environment() {
         let planted = r"C:\Users\u\AppData\Local\Planted";
-        // SAFETY: no other test reads these variables.
-        unsafe {
-            for var in ["WINDIR", "SystemRoot", "ProgramW6432", "ProgramFiles"] {
-                std::env::set_var(var, planted);
+        let vars = ["WINDIR", "SystemRoot", "ProgramW6432", "ProgramFiles"];
+        if std::env::var("SystemRoot").as_deref() != Ok(planted) {
+            let name = "setup::tests::the_elevated_setup_never_takes_folders_from_the_environment";
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", name, "--test-threads=1"]);
+            for var in vars {
+                child.env(var, planted);
             }
+            let out = child.output().unwrap();
+            let said = String::from_utf8_lossy(&out.stdout);
+            assert!(out.status.success() && said.contains("1 passed"), "{said}");
+            return;
         }
         for path in [
             admin_root().display().to_string(),

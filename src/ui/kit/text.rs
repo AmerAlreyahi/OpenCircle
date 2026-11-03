@@ -300,6 +300,15 @@ mod tests {
         (top, bottom)
     }
 
+    /// Windows' own fonts are in the font system: the UI font is Segoe UI, as
+    /// on every Windows PC (a test that planted SystemRoot left them out, and
+    /// every screen was drawn without them).
+    #[cfg(windows)]
+    #[test]
+    fn the_ui_font_on_windows_is_segoe_ui() {
+        assert_ne!(super::ui_font_name(), "Inter", "Windows' fonts not loaded");
+    }
+
     /// A field's line holds the tallest Latin and Arabic text (accents, Arabic
     /// marks above and below): a text field clips to its line (#53).
     #[test]

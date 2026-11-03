@@ -972,7 +972,15 @@ mod tests {
         use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
         let hwnd = test_window();
         win::accent(hwnd, Some((4, 0x3A23_2323))).expect("accent set");
-        let before = win::accent(hwnd, None).expect("accent read");
+        // CI's Windows Server session sets an accent but can't read one back
+        // (no check possible there; `no_backdrop` ignores a failed set)
+        let Some(before) = win::accent(hwnd, None) else {
+            let e = windows::core::Error::from_thread();
+            eprintln!("skipped: this session can't read a window's accent ({e})");
+            // SAFETY: the test's own window.
+            let _ = unsafe { DestroyWindow(hwnd) };
+            return;
+        };
         win::no_backdrop(hwnd.0 as isize, true);
         let after = win::accent(hwnd, None).expect("accent read");
         // SAFETY: the test's own window.
