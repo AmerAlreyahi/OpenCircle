@@ -77,6 +77,17 @@ pub fn download(
     done.map_err(|e| e.to_string())
 }
 
+/// The readers for other scripts (Arabic, Cyrillic, Chinese and Japanese)
+/// that aren't on disk, for a page read as noise.
+pub fn download_readers(progress: impl FnMut(u64, u64)) -> Result<(), String> {
+    models::ensure(&models::other_scripts_files(), progress).map_err(|e| e.to_string())
+}
+
+/// What `download_readers` fetches (bytes).
+pub fn readers_bytes() -> u64 {
+    models::missing_bytes(&models::other_scripts_files())
+}
+
 /// Offline is chosen, or the provider is the browser (which can't translate).
 pub fn will_be_offline() -> bool {
     let cfg = config::current();

@@ -15,7 +15,7 @@ use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{error, text as label};
 use crate::ui::kit::tokens::{Role, radius};
 use crate::ui::picker;
-use crate::ui::screens::model_download::{self, OCR, Stage, TRANSLATION};
+use crate::ui::screens::model_download::{self, OCR, SCRIPTS, Stage, TRANSLATION};
 
 /// The pill's padding and its gap (`.as-language-pill`: 10 px, gap 10), and
 /// its distance to the top of the screen.
@@ -65,7 +65,10 @@ impl Session {
         // what is (being) fetched: the pair's models, else OCR's
         let fetched = |stage| match self.offline {
             Some(pair) => download(&TRANSLATION, pair.full_size(), stage, None),
-            None => download(&OCR, crate::ocr::models::full_size(), stage, None),
+            None => match self.readers {
+                Some(bytes) => download(&SCRIPTS, bytes, stage, None),
+                None => download(&OCR, crate::ocr::models::full_size(), stage, None),
+            },
         };
         match &self.phase {
             Phase::Consent(None) => fetched(Stage::Ask),

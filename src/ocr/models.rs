@@ -206,6 +206,22 @@ pub(crate) fn ocr_files(rec: &'static Recognizer) -> Vec<(PathBuf, &'static Mode
         .collect()
 }
 
+/// The files of every reader for another script than Latin (Arabic,
+/// Cyrillic, Chinese and Japanese) that isn't on disk, ONNX Runtime and the
+/// detector too if missing: what a page OCR read as noise may need.
+pub(crate) fn other_scripts_files() -> Vec<(PathBuf, &'static ModelFile)> {
+    let mut files: Vec<(PathBuf, &'static ModelFile)> = Vec::new();
+    for rec in RECOGNIZERS.iter().filter(|r| r.script() != Script::Latin) {
+        for f in ocr_files(rec) {
+            if !files.iter().any(|(p, _)| *p == f.0) {
+                files.push(f);
+            }
+        }
+    }
+    files.retain(|f| missing_bytes(std::slice::from_ref(f)) > 0);
+    files
+}
+
 /// All of `rec`'s files are on disk (sizes only; `ensure` verifies).
 pub(crate) fn installed(rec: &'static Recognizer) -> bool {
     missing_bytes(&ocr_files(rec)) == 0

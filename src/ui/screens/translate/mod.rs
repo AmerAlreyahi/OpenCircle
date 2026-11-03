@@ -57,6 +57,8 @@ pub enum Msg {
     OpenSettings,
     /// Get the pair of the lines kept in their own language (`Offer`).
     GetHeld,
+    /// The page read as noise: offer the readers for other scripts (bytes).
+    Readers(u64),
     /// The card's frame (`kit::panel_frame`): the App moves, resizes and
     /// closes it, as for the other result cards.
     Card(card::Event),
@@ -149,6 +151,8 @@ pub struct Session {
     scale: f32,
     /// While translating: what is translated so far.
     partial: Option<Part>,
+    /// The OCR download asked for is the readers for other scripts (bytes).
+    readers: Option<u64>,
 }
 
 /// The card of one clicked block.
@@ -200,6 +204,7 @@ impl Session {
             picker: Picker::new(&cfg.source, &cfg.target, offline),
             scale,
             partial: None,
+            readers: None,
         };
         let task = session.begin(models);
         (session, task)
@@ -217,6 +222,7 @@ impl Session {
             .filter(|&(_, b)| b > 0);
         self.card = None;
         self.partial = None;
+        self.readers = None;
         if models && offline.is_none() {
             self.phase = Phase::Translating;
             self.run(false)
@@ -265,6 +271,12 @@ impl Session {
                 };
                 self.phase = Phase::Downloading(0.0);
                 return self.run(true);
+            }
+            Msg::Readers(bytes) if matches!(self.phase, Phase::Translating) && bytes > 0 => {
+                self.work = None;
+                self.readers = Some(bytes);
+                self.offline = None;
+                self.phase = Phase::Consent(None);
             }
             Msg::Offline(pair, bytes) if matches!(self.phase, Phase::Translating) => {
                 self.work = None;
@@ -433,7 +445,7 @@ impl Session {
     fn run(&mut self, download: bool) -> Task<Msg> {
         let (frame, area, cache) = (self.frame.clone(), self.area, self.cache.clone());
         let (source, target) = (self.picker.source.clone(), self.picker.target.clone());
-        let (agreed, scale) = (self.offline, self.scale);
+        let (agreed, scale, readers) = (self.offline, self.scale, self.readers.is_some());
         let (task, handle) = background(move |tx| {
             let deps = actions::translate::deps_for(&source, &target).map(|(mut real, target)| {
                 real.scale = scale;
@@ -444,7 +456,11 @@ impl Session {
                 let progress = |done: u64, total: u64| {
                     let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
                 };
-                if let Err(e) = actions::translate::download(&source, agreed, progress) {
+                let got = match readers {
+                    true => actions::translate::download_readers(progress),
+                    false => actions::translate::download(&source, agreed, progress),
+                };
+                if let Err(e) = got {
                     let _ = tx.unbounded_send(Msg::DownloadFailed(e));
                     return;
                 }
@@ -476,12 +492,19 @@ impl Session {
                 }
                 shown
             });
-            // "auto" read another language than expected: ask for its pair
+            // "auto" read another language than expected: ask for its pair;
+            // a page read as noise: the readers for other scripts
             if result.is_err()
                 && let Ok((real, _)) = &deps
-                && real.missing().and_then(ask).is_some()
             {
-                return;
+                if real.missing().and_then(ask).is_some() {
+                    return;
+                }
+                if real.wants_readers() {
+                    let bytes = actions::translate::readers_bytes();
+                    let _ = tx.unbounded_send(Msg::Readers(bytes));
+                    return;
+                }
             }
             let _ = tx.unbounded_send(Msg::Done(result));
         })

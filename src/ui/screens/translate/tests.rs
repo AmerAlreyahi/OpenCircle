@@ -71,7 +71,26 @@ fn session(models: bool) -> Session {
         picker: Picker::new("auto", "ar", false),
         scale: 1.0,
         partial: None,
+        readers: None,
     }
+}
+
+/// A page read as noise (no reader for its script here): the readers for
+/// other scripts are offered with the download card, and fetched on yes.
+#[test]
+fn a_page_read_as_noise_offers_the_other_readers() {
+    let mut s = session(true);
+    let _ = s.update(Msg::Readers(0));
+    assert!(matches!(&s.phase, Phase::Translating), "nothing to fetch");
+    let _ = s.update(Msg::Readers(32_000_000));
+    assert!(matches!(&s.phase, Phase::Consent(None)));
+    assert_eq!(s.readers, Some(32_000_000));
+    // the picker's next language asks for its own models, not these
+    let source = s.picker.source.clone();
+    let _ = s.begin(crate::ocr::models::installed(
+        crate::ocr::models::recognizer_for(&source),
+    ));
+    assert_eq!(s.readers, None);
 }
 
 /// A redraw of part of the screen (a hovered button, the progress bar)
@@ -703,6 +722,12 @@ fn every_translate_state_matches_its_golden_image() {
                 s.click(Point::new(50.0, 20.0));
                 explained(&mut s, EXPLANATION);
             }
+            "readers" => {
+                s.phase = {
+                    s.readers = Some(32_686_000);
+                    Phase::Consent(None)
+                }
+            }
             "offer" => {
                 let mut shown = shown(Vec::new());
                 if let Msg::Done(Ok(s)) = &mut shown {
@@ -727,6 +752,7 @@ fn every_translate_state_matches_its_golden_image() {
         "failed",
         "picker",
         "offer",
+        "readers",
         "word",
         "word-explained",
     ];

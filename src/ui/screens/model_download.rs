@@ -40,6 +40,16 @@ pub const OCR: Model = Model {
     then: "read text",
 };
 
+/// The readers for other scripts, for a page read as noise.
+pub const SCRIPTS: Model = Model {
+    name: "Text in other scripts",
+    icon: Icon::Text,
+    title: "This text needs another reader",
+    does: "Read Arabic, Cyrillic, Chinese and Japanese text",
+    source: "GitHub",
+    then: "translate the screen",
+};
+
 pub const TRANSLATION: Model = Model {
     name: "Offline translation",
     icon: Icon::Translate,

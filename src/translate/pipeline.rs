@@ -59,7 +59,14 @@ pub struct Real {
     /// the rest is translated, and the first pair they need (offered, never
     /// waited for).
     held: Mutex<Option<(&'static mt::Pair, Vec<String>)>>,
+    /// "auto": the page read as noise and readers for other scripts are
+    /// missing: the UI offers them (`ocr::models::other_scripts_files`).
+    readers: std::sync::atomic::AtomicBool,
 }
+
+/// The other scripts' readers are offered once per run (declined: the next
+/// page is read with what is here).
+static READERS_ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub enum Via {
     Ai {
@@ -80,6 +87,7 @@ impl Real {
             missing: Mutex::new(None),
             guessed: Mutex::default(),
             held: Mutex::default(),
+            readers: Default::default(),
         }
     }
 
@@ -103,6 +111,11 @@ impl Real {
     /// translated again).
     pub fn held(&self) -> Option<(&'static mt::Pair, Vec<String>)> {
         self.held.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The page read as noise; readers for other scripts would read it.
+    pub fn wants_readers(&self) -> bool {
+        self.readers.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The set source, or ("auto") the page's language (`read`), else the
@@ -509,8 +522,9 @@ fn system_reads(reader: TextReader, tag: Option<&str>, source: &str) -> bool {
         && (source == lang::AUTO || tag.is_some_and(|t| base(t) == base(source)))
 }
 
-impl Deps for Real {
-    fn recognize(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {
+impl Real {
+    /// `recognize` without the check for noise.
+    fn read_page(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {
         if self.system() {
             let k = *ocr::system::passes(self.scale, width, height)
                 .last()
@@ -535,6 +549,39 @@ impl Deps for Real {
             }
         }
         ocr::recognize_as(rgba, width, height, &self.source)
+    }
+}
+
+/// A read that is mostly noise: a page in a script none of the installed
+/// readers reads (Arabic or Russian Wikipedia read by PP-OCR's Latin reader:
+/// "ConHe4Hag cuctema", "Jih Ths"): of 10 lines or more, a quarter read
+/// unsurely (confidence < 0.7) and a quarter of the tokens aren't words.
+/// Measured (Edge, 1024x768, Latin and English readers only): Arabic page
+/// 43 % unsure / 66 % words, Russian 39 % / 42 %, French 6 % / 95 %.
+// ponytail: two ratios; the reader's own quality (lines read of the boxes
+// found) is the upgrade if a stylised game font ever trips it.
+pub(super) fn unreadable(lines: &[TextBlock]) -> bool {
+    let unsure = lines.iter().filter(|l| l.confidence < 0.7).count();
+    let (tokens, words) = word_count(lines);
+    lines.len() >= 10 && unsure * 4 >= lines.len() && words * 4 < tokens * 3
+}
+
+impl Deps for Real {
+    /// "auto": a page read as noise while readers for other scripts are
+    /// missing stops here (nothing is drawn); the UI offers them, once.
+    fn recognize(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let lines = self.read_page(rgba, width, height)?;
+        if self.source == lang::AUTO
+            && unreadable(&lines)
+            && !ocr::models::other_scripts_files().is_empty()
+            && !READERS_ASKED.swap(true, Relaxed)
+        {
+            crate::log!("[opencircle] the page read as noise: readers for other scripts offered");
+            self.readers.store(true, Relaxed);
+            return Err(OcrError::Missing("the text reader for this script".into()));
+        }
+        Ok(lines)
     }
 
     fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
@@ -2225,6 +2272,106 @@ pub(super) mod tests {
             "مزروعة في أماكن منخفضة التقنية مثل المنازل أو المكاتب.",
             "ar"
         ));
+    }
+
+    /// PP-OCR with the Latin and English readers only (Edge, Win10 VM,
+    /// 1024x768): the Arabic and Russian Wikipedia pages read as noise, the
+    /// French one as text.
+    #[test]
+    fn a_page_no_reader_reads_is_told_from_text() {
+        let read = |t: &[(&str, f32)]| -> Vec<TextBlock> {
+            (t.iter())
+                .map(|&(text, confidence)| TextBlock {
+                    confidence,
+                    ..tb(text, [0.0, 0.0, 10.0, 10.0])
+                })
+                .collect()
+        };
+        let arabic = read(&[
+            ("w", 0.88),
+            ("L", 0.62),
+            ("l", 0.68),
+            ("X", 0.99),
+            ("C", 0.98),
+            ("https://ar.wikipedia.org/wiki/_...úJl_c.g.aJl", 0.88),
+            ("=", 0.38),
+            ("InPrivate", 1.0),
+            ("Translate page from Arabic?", 0.98),
+            ("6d Q", 0.79),
+            ("Translate to", 0.96),
+            ("C", 0.33),
+            ("English", 1.0),
+            ("Translate", 1.0),
+            ("Not now", 1.0),
+            ("247", 0.85),
+            ("W", 0.32),
+            ("W Jic La", 0.61),
+            ("Jih Ths", 0.38),
+            ("C", 0.32),
+            ("[2] [1", 0.69),
+            ("(Solar System :)", 0.92),
+            ("Us", 0.36),
+            ("515", 0.61),
+            ("Jhl  4  4 i", 0.52),
+            ("x5", 0.32),
+            ("all1-ll:A", 0.59),
+            ("1:150", 0.82),
+            ("10:16 AM", 1.0),
+            ("11/3/2026", 1.0),
+        ]);
+        assert!(unreadable(&arabic));
+        let russian = read(&[
+            ("ConHe4Hag cuctema — BuknneAM X", 0.78),
+            ("¤", 0.23),
+            ("X", 0.99),
+            ("https://ru.wikipedia.org/wiki/CouHe4Haa_cncTema", 0.93),
+            ("InPrivate", 1.0),
+            ("BN", 0.34),
+            ("Translate page from Russian?", 0.98),
+            ("C3 4 3 B", 0.85),
+            ("C06oHa 3HuKrnua", 0.69),
+            ("247 A3bIKOB", 0.86),
+            ("Translate", 1.0),
+            ("[npabutb ko]", 0.82),
+            ("CóNHeHA TéMA", 0.72),
+            ("N  n6 B", 0.73),
+            ("LeHpaJbyo 3Be3Δy CoJHLe n", 0.69),
+            ("BCe eCTeCTBeHHbIe KoCMNYECKNE", 0.78),
+            ("o6beKTbl Ha rnx", 0.67),
+            ("op6ntax. OHa cφopnpoasacb", 0.83),
+            ("ConHue", 0.86),
+            ("ra3onbiJeBoro o6saKa npnmepo", 0.82),
+            ("3eM/ Mep", 0.6),
+            ("HenTyH", 0.95),
+            ("IntTep", 0.63),
+            ("i", 0.15),
+            ("10:17 AM", 1.0),
+            ("2", 0.19),
+        ]);
+        assert!(unreadable(&russian));
+        let french = read(&[
+            ("W", 0.54),
+            ("Système solaire — Wikipédia", 1.0),
+            ("X", 0.57),
+            ("X", 1.0),
+            ("https://fr.wikipedia.org/wiki/Système_solaire", 0.99),
+            ("InPrivate", 0.97),
+            (":", 0.72),
+            ("WIKIPÉDIA", 0.97),
+            ("Q 6d", 0.8),
+            ("Faire un don Créer un compte Se connecter", 0.99),
+            ("L'encyclopédie libre", 1.0),
+            ("Système solaire", 1.0),
+            ("247 langues", 1.0),
+            ("Lire Modifier Modifier le code Voir I'historique", 0.98),
+            ("W", 0.92),
+            (
+                "Cet article possède un paronyme, voir Système scolaire.",
+                0.98,
+            ),
+        ]);
+        assert!(!unreadable(&french));
+        assert!(!unreadable(&arabic[..8]), "too little to judge");
     }
 
     /// Windows OCR (English) on the Arabic Wikipedia page read noise: nothing
