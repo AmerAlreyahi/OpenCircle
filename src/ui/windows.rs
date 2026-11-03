@@ -27,7 +27,7 @@ use super::{settings, shape, theme, update_card};
 #[cfg(test)]
 pub use super::platform::windows::CLEARED;
 pub use super::platform::windows::{
-    POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, forget,
+    POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, foreground, forget,
     hide_from_capture, hole, is_floating, opacity, reshape, screen, setup_window, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};

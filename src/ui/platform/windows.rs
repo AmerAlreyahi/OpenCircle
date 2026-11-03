@@ -461,3 +461,90 @@ mod tests {
         );
     }
 }
+
+/// The keyboard for `id` (a capture overlay shown from a shortcut), so Esc,
+/// Enter and the arrows work without a click. `gain_focus` (winit: an Alt tap,
+/// then SetForegroundWindow) is refused while the foreground is a hidden
+/// window, e.g. the one Explorer keeps for the activation watermark (Windows
+/// VM, 2026-11-03: SetForegroundWindow again, SwitchToThisWindow and
+/// AllowSetForegroundWindow from our own process all failed). Then only
+/// joining the foreground thread's input for the call works; it is skipped
+/// for a hung window (attaching would hang us with it).
+pub fn foreground<T: Send + 'static>(id: window::Id) -> Task<T> {
+    window::gain_focus(id)
+        .chain(window::run(id, |w| {
+            #[cfg(windows)]
+            if let Ok(handle) = w.window_handle()
+                && let iced::window::raw_window_handle::RawWindowHandle::Win32(h) = handle.as_raw()
+            {
+                win::take_foreground(h.hwnd.get());
+            }
+            #[cfg(not(windows))]
+            let _ = w;
+        }))
+        .discard()
+}
+
+/// Whether `foreground` must join the foreground thread's input: another
+/// window than `ours` is in front (none: nothing to join) and it answers (a
+/// hung one would hang us).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn must_join(front: isize, ours: isize, hung: bool) -> bool {
+    front != 0 && front != ours && !hung
+}
+
+#[cfg(windows)]
+mod win {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsHungAppWindow,
+        SetForegroundWindow,
+    };
+
+    pub fn take_foreground(hwnd: isize) {
+        let ours = HWND(hwnd as *mut _);
+        // SAFETY: plain Win32 calls on our live window and the foreground one;
+        // the input is detached again before returning.
+        unsafe {
+            let front = GetForegroundWindow();
+            let hung = IsHungAppWindow(front).as_bool();
+            if !super::must_join(front.0 as isize, hwnd, hung) {
+                return;
+            }
+            let (them, me) = (GetWindowThreadProcessId(front, None), GetCurrentThreadId());
+            let joined = them != me && AttachThreadInput(them, me, true).as_bool();
+            let _ = SetForegroundWindow(ours);
+            let _ = BringWindowToTop(ours);
+            let _ = SetFocus(Some(ours));
+            if joined {
+                let _ = AttachThreadInput(them, me, false);
+            }
+            let taken = GetForegroundWindow() == ours;
+            crate::log!("[opencircle] overlay took the keyboard from a refusing window: {taken}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod foreground_tests {
+    use super::must_join;
+
+    #[test]
+    fn the_overlay_joins_the_foreground_input_only_when_another_live_window_holds_it() {
+        assert!(
+            must_join(0x10116, 0x2000, false),
+            "a refusing window holds it"
+        );
+        assert!(!must_join(0x2000, 0x2000, false), "ours already");
+        assert!(
+            !must_join(0, 0x2000, false),
+            "no foreground: nothing to join"
+        );
+        assert!(
+            !must_join(0x10116, 0x2000, true),
+            "a hung window: never attach"
+        );
+    }
+}

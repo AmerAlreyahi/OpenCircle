@@ -306,7 +306,7 @@ impl App {
             crate::log!("[opencircle] overlay window opened");
             (self.overlay, self.overlay_open) = (id, true);
             let chat = self.unfloat_chat();
-            return open.discard().chain(window::gain_focus(id)).chain(chat);
+            return open.discard().chain(windows::foreground(id)).chain(chat);
         }
         // Shown fully clear: it fades in as a whole once its first full frame
         // is drawn (`Message::Frame`), so the CPU never redraws a fade.
@@ -385,7 +385,7 @@ impl App {
             .chain(clear)
             .chain(place_window(self.overlay, place))
             .chain(window::set_mode(self.overlay, Mode::Fullscreen))
-            .chain(window::gain_focus(self.overlay));
+            .chain(windows::foreground(self.overlay));
         // (Windows: topmost again once it fades in, `relevel`)
         show.chain(chat)
     }

@@ -100,7 +100,7 @@ impl App {
                 crate::log!(
                     "[opencircle] shortcut while the overlay is open: brought to the front"
                 );
-                window::gain_focus(self.overlay)
+                windows::foreground(self.overlay)
             }
             Message::Trigger(Trigger::Capture(at)) => {
                 self.next = Purpose::Search;
