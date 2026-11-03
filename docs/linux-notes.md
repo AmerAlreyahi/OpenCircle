@@ -23,8 +23,8 @@ what it installed (your settings stay).
 ## X11
 
 Everything works the straightforward way: the screen is captured directly,
-shortcuts are real global key grabs, the window list is available for Snip's
-Window mode, and scrolling capture can scroll for you. Live translate is
+shortcuts are real global key grabs, the window list is available so Snip can
+outline and pick windows, and Long capture works while you scroll. Live translate is
 supported.
 
 ## Wayland
@@ -33,7 +33,7 @@ supported.
 |---|---|
 | Screen capture | The desktop's Screenshot portal. The desktop may ask you to allow it. |
 | Global shortcuts | The GlobalShortcuts portal (GNOME 48+, KDE Plasma 6, Hyprland's portal). The desktop asks you once. If the portal is missing or you decline, bind `opencircle capture` yourself: see [Shortcuts](shortcuts.md#wayland-without-the-shortcut-portal). |
-| Snip modes | Region and Full only: there is no window list and apps cannot send scroll input, so Window and Scrolling are not offered. |
+| Snip | Drag an area or press `Enter` for the full screen. There is no window list, so hovering a window to pick it is not offered, and there is no silent screen grab, so Long capture is not offered (its button is dimmed). |
 | Live translate | Not available; each press of the translate shortcut translates once. |
 
 The portal paths are verified on GNOME 50 (Ubuntu 26.04); other desktops are not
@@ -50,8 +50,8 @@ GNOME's own settings (Settings → Apps → OpenCircle → Global Shortcuts) sta
 
 ### Print Screen
 
-GNOME's shell takes `Print Screen` and `Alt+Print Screen` before any app's global
-shortcut, so OpenCircle's snip shortcuts there do nothing until you free them
+GNOME's shell takes `Print Screen` before any app's global
+shortcut, so OpenCircle's Snip shortcut there does nothing until you free them
 with `gsettings`: see [Shortcuts](shortcuts.md#defaults).
 
 ### App id and desktop file

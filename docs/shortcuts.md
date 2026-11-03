@@ -2,8 +2,8 @@
 
 ## Defaults
 
-The Snip rows and the Song search shortcut are hidden (not registered) until you turn Snip or
-Song search on in **Settings > Labs**. Live translate is a Labs feature too (unfinished, planned
+The Song search shortcut is hidden (not registered) until you turn Song search on in
+**Settings > Labs**. Live translate is a Labs feature too (unfinished, planned
 for 0.3.0): its shortcut, tray item and bar button appear only when it is on.
 
 | Action | Default | What it does |
@@ -14,30 +14,32 @@ for 0.3.0): its shortcut, tray item and bar button appear only when it is on.
 | Explain with AI | `Ctrl+Shift+E` | Circle something; the AI explains it |
 | Copy text | `Ctrl+Shift+X` | Circle something; its text is copied |
 | Search with Lens | unset | Circle something; Lens opens |
-| Snip a region | `Print Screen` | Drag or circle an area, then edit it |
-| Snip a window | `Alt+Print Screen` | Click a window, then edit it |
-| Snip the full screen | `Ctrl+Print Screen` | The whole screen, then edit it |
+| Snip | `Print Screen` | Hover a window and click, or drag an area; `Enter` = full screen |
+| Colour picker | unset | Pick a colour from anywhere on screen |
+| Screen ruler | unset | Measure distances on screen |
+| Live pin (Labs) | unset | Pin a window's area, updating live |
 
-Snip mode also opens from the tray menu (**Snip**, the region mode) and with
-`opencircle run snip`.
+Snip also opens from the tray menu (**Snip**), the bar's Snip button, and with
+`opencircle run snip`. The colour picker and ruler have no default key, because
+no combination is free on every PC; give them one in **Settings > Shortcuts**.
+While Snip is open: `Enter` full screen, `Esc` cancels, arrows nudge the area.
 
 **If Print Screen does nothing.** On Windows, the system uses `Print Screen`
 for its own screen capture. OpenCircle logs one line when it cannot register the
 key. Free it in Windows Settings → Accessibility → Keyboard → turn off **Use the
-Print screen key to open screen capture**, then restart OpenCircle. (Or give the
-snip shortcuts other keys in Settings → Shortcuts; the rest keep working.) On
+Print screen key to open screen capture**, then restart OpenCircle. (Or give
+Snip another key in Settings → Shortcuts; the rest keep working.) On
 Linux, a desktop's own screenshot tool may hold the key: unbind it in your
 desktop's keyboard shortcut settings. On GNOME (Wayland) the shell keeps
-`Print Screen` and `Alt+Print Screen` for itself even though OpenCircle's
+`Print Screen` for itself even though OpenCircle's
 shortcut shows as bound; free them, then restart OpenCircle:
 
 ```bash
 gsettings set org.gnome.shell.keybindings show-screenshot-ui "[]"   # Print Screen
-gsettings set org.gnome.shell.keybindings screenshot-window "[]"    # Alt+Print Screen
 # put GNOME's back: gsettings reset org.gnome.shell.keybindings show-screenshot-ui
 ```
 
-OpenCircle prints this when it starts under GNOME. (`Ctrl+Print Screen` is free.)
+OpenCircle prints this when it starts under GNOME.
 
 While the overlay is open: `Esc` closes, `Enter` runs the default action
 (Search unless you changed it in **Settings → General**), and the action keys
@@ -84,7 +86,7 @@ file:
 
 ```toml
 [[quick_actions]]
-action = "copy_text"        # translate | ai_explain | copy_text | lens | snip | song_search | ai | text | edit | copy | save
+action = "copy_text"        # translate | ai_explain | copy_text | lens | snip | colour_picker | ruler | live_pin | song_search | ai | text | edit | copy | save
 shortcut = "Ctrl+Shift+X"   # "" = not bound
 target = "circle"           # full_screen | circle | last_region | window
 live = false                # translate only: keep translating
@@ -92,25 +94,17 @@ live = false                # translate only: keep translating
 
 Targets: `full_screen` acts on the whole screen, `circle` lets you draw the
 area first, `last_region` repeats the previous area (handy for a game's
-subtitle bar). `window` is for Snip only: click a window. For `snip`, the target
-picks the mode, which is how the three defaults differ:
+subtitle bar). Snip is one flow and takes no target:
 
 ```toml
 [[quick_actions]]
 action = "snip"
 shortcut = "PrintScreen"
-target = "circle"           # region
-
-[[quick_actions]]
-action = "snip"
-shortcut = "Alt+PrintScreen"
-target = "window"
-
-[[quick_actions]]
-action = "snip"
-shortcut = "Ctrl+PrintScreen"
-target = "full_screen"
+target = "circle"
 ```
+
+Older `Alt+PrintScreen` (window) and `Ctrl+PrintScreen` (full screen) entries
+in a config keep working but are not shown in Settings.
 
 Edit the file while OpenCircle is closed, or change shortcuts in Settings.
 
@@ -122,7 +116,6 @@ desktop's own shortcut settings. They talk to the running copy (or start it):
 ```bash
 opencircle capture
 opencircle run snip
-opencircle run snip --target window
 opencircle run copy_text --target circle
 opencircle run lens --target circle
 opencircle run song_search          # needs your key: see song-search.md

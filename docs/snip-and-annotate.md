@@ -1,99 +1,129 @@
 # Snip and annotate
 
-> **Labs.** Snip and the image editor are unfinished and hidden until you turn them on in
-> **Settings > Labs** (Pins, in the editor, has its own switch there).
-
-Take a screenshot and mark it up. The same editor is also available on any
-circled selection: press `E` in the action bar.
+Take a screenshot, mark it up, and paste it into an AI chat in seconds. Snip is
+one flow, whichever way you start it.
 
 ## Take a snip
 
-Press `Print Screen` (region), `Alt+Print Screen` (window) or
-`Ctrl+Print Screen` (full screen), or open Snip mode from the tray menu
-(**Snip**) or with `opencircle run snip`. All of these can be changed
-([Shortcuts](shortcuts.md)). Choose a mode:
+Press `Print Screen`, choose **Snip** in the tray menu, press the Snip button on
+the bar (over a screen you already froze), or run `opencircle run snip`. The
+screen freezes and a glow around its edge shows it is captured. Then:
 
-| Mode | How |
-|---|---|
-| Region | Point at a window: it is outlined, with its name and size; click to take it. Point at a part of it (a toolbar, a panel, a button; Windows) to outline just that part, and scroll the wheel to step out to the bigger part, the window, the whole screen (and back). Or drag a rectangle, or circle an area. |
-| Window | Click a window |
-| Full | The whole screen |
+- **Hover** a window: its whole frame is outlined, with its name and size. Click
+  to take it. Scroll the wheel down to outline a part of it instead (a toolbar,
+  a panel, a button; Windows), and back up to step out to the window.
+- **Drag** to draw your own area; its exact size is shown. Edges snap to windows
+  and their parts; hold `Shift` to place them freely.
+- **Press `Enter`** for the full screen (the screen under the pointer;
+  `Shift+Enter` takes all screens as one picture). An area may cross screens.
 
-While you drag, the edges snap to windows and, on Windows, to their buttons,
-fields and panels; hold `Shift` to place them freely. On Wayland there is no
-window list: drag or circle the area. A loupe beside
-the pointer shows the pixels under it at 8x, with their position and colour.
+A loupe beside the pointer shows the pixels under it at 8x. `Esc` cancels.
 
-**Scrolling capture**: pick an area, then press the scrolling button in the
-editor toolbar. OpenCircle scrolls the page under the area and stitches the
-pieces into one tall image (the progress pill is kept out of it). `Esc` or Stop
-keeps what was gathered.
+Once an area is picked, the edge glow goes away and the area gets a soft outline
+with small handles. Drag the handles to resize, drag inside to move it, use the
+arrow keys to nudge (`Shift` = 10 px, `Ctrl`+arrows resize).
 
-**Timer** (Settings → Snip: Off / 3 s / 5 s / 10 s): the overlay hides and
-counts down in a small pill, so you can open a menu or a tooltip; then it
-captures again. `Ctrl+C` while pointing at an area copies it at once.
+The same flow starts from the bar's Snip button: if you had already selected an
+area, that area is the pick.
 
-**After a capture** (Settings → Snip): by default the snip goes straight to the
-clipboard, ready to paste into an AI chat, and a toast offers **Snip** for 4
-seconds. Choose *Editor* to open the editor instead, or *Both*. Copy is the
-picture only, so a browser or chat always pastes the image; text is copied by
-selecting it.
+## After the pick
 
-**Image size**: Copy and Save keep the capture's full size by default (Settings →
-Snip: Original, or scale the long edge down to 1024, 1568 or 2048 px); AI chats
-shrink bigger images anyway. Save writes PNG or JPEG and can keep the original size.
+By default the picked area **is already on the clipboard** (Copy when picked)
+and the Snip toolbar opens beside it, so you can paste at once or mark it up
+first. Change this in **Settings > Snip > After a capture**: copy only, open the
+editor only, or both (the default).
 
-**Recent** (Settings → Snip, off by default): keeps your last 20 captures on
-this PC only (your local app-data folder), shown as a strip under the modes;
-click one to copy or edit it again, × clears them. Turning it off deletes them.
+Copy and Save keep the capture's **original size**. Settings > Snip can scale
+the long edge down to 1024, 1568 or 2048 px instead. Copy is the picture only;
+text is copied by selecting it. Drag the size chip on the toolbar to drag the
+picture straight into any app.
 
-**Mouse pointer** (Settings → Snip, off by default): draws the pointer into the
-capture (Windows and X11).
+**Timer** (Settings > Snip: Off / 3 s / 5 s / 10 s): the overlay hides and
+counts down, so you can open a menu or a tooltip first.
 
-On Wayland there is no window list and no synthetic scrolling, so only Region
-and Full are offered and the scrolling button is dimmed.
+**Mouse pointer** (Settings > Snip, off by default) draws the pointer into the
+capture.
 
-## Annotate
+## The toolbar
 
-<p align="center">
-  <img src="images/editor-toolbar.png" alt="The editor toolbar at the bottom of a screenshot of an account page: tools in a row, a colour popover with presets, and Copy and Save buttons." width="900"><br>
-  <sub>An earlier look of the editor; the tools and shortcuts below still apply. It will be replaced with the new design.</sub>
-</p>
+One bar, in groups: a grip to move it, the size chip, **Select**, **Shapes**,
+**Draw**, **Text**, **Hide** (blur and redact), **Colour**, **Undo**, **More**,
+**Copy** and **Save**. Click a tool to turn it on; click the active tool again
+to open its options (outline, fill, size, and so on). `Esc` closes the toolbar.
 
-Every tool has a key while the editor is open:
+**More** holds Long capture, Add to steps, Pin, Live pin, Share (Windows),
+Colour picker and Screen ruler.
+
+Every tool has a key:
 
 | Tool | Key |
 |---|---|
-| Select, move, resize | `V` |
+| Select | `V` |
 | Crop | `X` |
 | Rectangle / Ellipse | `R` / `O` |
 | Arrow (drag the middle to curve it) | `A` |
-| Pen (rough boxes, circles, lines and arrows snap to clean ones) | `P` |
+| Pen (rough shapes snap to clean ones) | `P` |
 | Highlighter | `H` |
 | Text | `T` |
 | Callout | `C` |
 | Numbered step | `N` |
 | Blur | `B` |
+| Redact | `K` |
 | Spotlight (dims everything else) | `S` |
 | Magnifier | `M` |
 
-One colour button opens the colour picker, with three stroke widths and a
-custom colour. `Ctrl+Z` undoes, `Ctrl+Shift+Z` redoes. Annotations stay
-editable until you copy or save. `Esc` goes back.
+`Ctrl+Z` undoes, `Ctrl+Shift+Z` redoes. Annotations stay editable until you copy
+or save. With a drawing tool a plain drag always draws; to move an annotation,
+use **Select** or hold `Ctrl` and drag. A selected annotation shows only its own
+small handles. OpenCircle remembers your last tool, colour, sizes and options.
 
-**Blur is soft, Redact is solid.** Blur is a smooth brush for making text or a
-face less prominent; do not rely on it for secrets. To hide a password, a key or
-an account number, use **Redact** (a solid box; press `K`).
+**Blur or Redact.** Blur is a fine pixel mosaic along a text line, sized to the
+line (or set by hand in its options). It is a soft pixel mosaic that hides the
+text so it can't be recovered. **Redact** is a solid box, for when you want no
+trace at all.
 
-## Copy, save or pin
+## Long capture
 
-- **Copy** (`Ctrl+C`) puts the image on the clipboard (scaled for AI chats, see above).
-- **Save** (`Ctrl+S`) opens the system save dialog and writes a PNG (or JPEG), where you
-  choose. It starts in the folder set in **Settings → General** (the file is
-  named `OpenCircle-<date>-<time>.png`).
-- **Pin** (`Ctrl+P`, or the pin button) keeps the image on screen in a small
-  always-on-top window, right where you took it. Drag it to move it, scroll to
-  zoom, hover for Copy, Save and Close; `Esc` or a double-click closes it. You
-  can pin as many as you like; each frees its memory when closed.
+For a page taller than the screen: pick the area, then **More > Long capture**.
+Scroll the page yourself (wheel, scrollbar or keys); OpenCircle stitches what
+passes through the area into one tall image and shows the whole page so far
+beside it. Scrolling back up adds nothing twice, and bars that stay put (a site's
+header, a chat's message box) are kept once. **Copy** or **Save** finishes it.
+It stops at 20,000 px by default (Settings > Snip > Long capture: 5,000, 10,000
+or 20,000). Nothing is scrolled for you, and only the area is grabbed.
 
-Nothing is written to disk until you save (or turn Recent on).
+## Steps
+
+**More > Add to steps** (`Ctrl+Enter`) puts the capture, with its annotations, on
+a small floating strip and closes the overlay, so you can go to another window or
+screen. Each next snip becomes the next numbered step. Click a step to copy it,
+drag to reorder, double-click to edit it, `x` to delete. **Copy all**
+(`Ctrl+Shift+C`) puts every step on the clipboard as one numbered image, handy
+for explaining a process to an AI. Up to 12 steps; they are kept in memory only.
+
+## Colour picker and screen ruler
+
+- **Colour picker:** a loupe follows the pointer. Click copies the colour as
+  `#RRGGBB`; `Shift`+click copies `rgb(r, g, b)`. The last eight colours stay in
+  the toolbar for this run.
+- **Screen ruler:** measure a line (any angle; `Shift` for 0/45/90), a run of
+  like colour across or up and down, or a box. Sizes are in real pixels.
+  `Ctrl+C` copies the reading.
+
+Both are in More, and can have their own shortcut (unset by default: see
+[Shortcuts](shortcuts.md)).
+
+## Pin
+
+**Pin** (`Ctrl+P`) keeps the image on screen in a small always-on-top window.
+Drag it, scroll to zoom, hover for Copy, Save and Close; `Esc` or a double-click
+closes it. **Live pin** (a Labs feature, Settings > Labs > Pins; Windows) keeps a
+window's picked area updating live in a pin.
+
+## Save
+
+**Save** (`Ctrl+S`) writes a PNG or JPEG where you choose, starting in the folder
+from **Settings > Snip**. Nothing is written to disk until you save.
+
+**Recent** (Settings > History, off by default) keeps your last captures on this
+PC only; turning it off deletes them.

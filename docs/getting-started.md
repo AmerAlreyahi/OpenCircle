@@ -68,7 +68,7 @@ then the rest:
 | Translate | Translates the selection in place (no selection: the whole screen) | |
 | Live translate (Labs, unfinished) | Keeps translating the screen while you play | `Ctrl+Shift+L` |
 | Music | Finds a song from a short clip (Settings > Labs; see [Song search](song-search.md)) | |
-| Snip | Turns the bar into the annotation toolbar (Settings > Labs). A back arrow returns | `E` |
+| Snip | Starts Snip over the frozen screen: pick an area or a window, then annotate | `E` |
 
 `Ctrl+C` copies the selection as an image only (picked words are copied as text) and
 `Ctrl+S` saves it as a PNG or JPEG in your save folder (Settings > General).
@@ -140,21 +140,17 @@ Translation runs on your PC by default (Settings > Translate > Engine: Offline);
 
 ## Snip and annotate
 
-Snip, the editor, song search, search history, pins and live translate are in **Settings > Labs**: off by default,
-unfinished, and hidden everywhere until you turn them on.
+Press `Print Screen`. The screen freezes: hover a window and click, or drag an
+area (`Enter` takes the full screen). The pick is already on the clipboard
+(original size, picture only), ready to paste into an AI chat, and a toolbar
+opens beside it to mark it up.
 
-- `Print Screen` snips a region, `Alt+Print Screen` a window,
-  `Ctrl+Print Screen` the full screen.
-- Copy puts the picture only on the clipboard, ready to paste into an AI chat.
-  Copy text from a selection when you want the words.
-- Blur is a soft smoothing and is not made for secrets: use **Redact** (a solid
-  box) to hide passwords and similar.
-- Snip opens the annotation toolbar. Move any drawing, change its style and
-  text options, and use the board for notes.
-
-<p align="center">
-  <img src="images/snip-controls.png" alt="Snip mode controls: Region, Window, Full, Scrolling, a timer, and a tip that a window is clicked to capture it." width="800">
-</p>
+- More has Long capture (scroll the page yourself), Add to steps (several snips
+  as one numbered image), Pin, Colour picker and Screen ruler.
+- Blur is a soft pixel mosaic that hides text so it can't be recovered; Redact is
+  a solid box, for when you want no trace at all.
+- Song search, search history, pins and live translate are unfinished and in
+  **Settings > Labs**, off by default.
 
 Details: [Snip and annotate](snip-and-annotate.md).
 
@@ -169,8 +165,8 @@ Details: [Snip and annotate](snip-and-annotate.md).
 
 **Settings > Appearance** has 12 themes (pick a card: it sets the theme and its light or dark mode; until you pick one, OpenCircle follows Windows) and the screen-border looks shown while OpenCircle is open (Spectrum is the default), or Custom: your own colours, glow, dim, corners and a screen edge per mode.
 
-**Settings > Labs** switches the unfinished features on (Snip, Image editor,
-Song search, Search history, Pins). They are off by default.
+**Settings > Labs** switches the unfinished features on (Song search,
+Search history, Pins, Live translate). They are off by default.
 
 Changes save by themselves. Nothing needs a restart.
 
@@ -194,7 +190,7 @@ shows the release page instead.
 ## Settings and config file
 
 Settings (tray icon, left-click) has a sidebar with General, Appearance, Look & behaviour, AI, Text reading, Translate,
-Shortcuts, Privacy, About and Labs (Snip and Song search appear
+Shortcuts, Privacy, About and Labs (Snip has its own page; Song search appears
 once switched on in Labs). It writes a plain TOML file you may
 also edit by hand:
 

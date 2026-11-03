@@ -79,8 +79,8 @@ Also:
   one-time download of about 30 MB. Settings > Text reading > Engine
   chooses.
 - **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
-  browser, Copy text, and Translate; Live translate, Music and Snip appear
-  once you turn them on in Settings > Labs. `Ctrl+C` copies the selection as an
+  browser, Copy text, and Translate; Snip is on the bar too; Live translate and Music
+  appear once you turn them on in Settings > Labs. `Ctrl+C` copies the selection as an
   image (or the picked words as text), `Ctrl+S` saves it; a small pill confirms.
   Drag the bar to any edge.
 - **Ask AI about your selection.** No key needed: the question opens in Google
@@ -92,9 +92,17 @@ Also:
 - **Updates that check a signature.** Quiet, opt-in on first run, with release
   notes after each update.
 
+- **Snip and annotate.** Press `Print Screen`: the screen freezes, hover a
+  window or drag an area, and it is already on the clipboard (original size)
+  with a grouped toolbar beside it: shapes, arrows, text, callouts, numbered
+  steps, spotlight, magnifier, Blur (a soft mosaic that hides text for good) and a solid Redact. Long capture:
+  scroll the page yourself and OpenCircle stitches it. Steps collects several
+  snips into one numbered image. Also a colour picker, a screen ruler and Pin
+  (a live pin is in Labs). Details: [Snip and annotate](docs/snip-and-annotate.md).
+
 ### Optional Labs features
 
-Snip, the image editor, song search, search history, pins and live translate are
+Song search, search history, live pins and live translate are
 unfinished, off by default and hidden until enabled in **Settings > Labs**.
 They are not part of the default gallery above. Live translate is planned
 for v0.3.0.
@@ -183,7 +191,7 @@ operating it. See the [Privacy](docs/privacy.md) page.
 | Live translate on / off (Labs, unfinished) | `Ctrl+Shift+L` |
 | Circle, then explain with AI | `Ctrl+Shift+E` |
 | Circle, then copy its text | `Ctrl+Shift+X` |
-| Snip a region / a window / the full screen (with Labs > Snip on) | `Print Screen` / `Alt+Print Screen` / `Ctrl+Print Screen` |
+| Snip | `Print Screen` |
 
 All of them change in Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
 
@@ -191,8 +199,8 @@ All of them change in Settings. Full list and details: [Shortcuts](docs/shortcut
 
 - **Windows 10 and 11:** the full feature set.
 - **Linux (preview):** X11 and Wayland. On Wayland the desktop owns the keys and
-  the screen capture; live translate runs once per press, and window and
-  scrolling snips are not offered. See [Linux notes](docs/linux-notes.md).
+  the screen capture; live translate runs once per press, and picking a window
+  and long capture are not offered. See [Linux notes](docs/linux-notes.md).
 
 Games must run in borderless or windowed mode for live translate (Labs,
 unfinished). Linux text reading is slower than Windows OCR; on Wayland the
@@ -228,7 +236,7 @@ sudo apt-get install libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev l
 [Getting started](docs/getting-started.md) ·
 [Shortcuts](docs/shortcuts.md) ·
 [Translate](docs/translate.md) ·
-[Snip and annotate (Labs)](docs/snip-and-annotate.md) ·
+[Snip and annotate](docs/snip-and-annotate.md) ·
 [AI setup](docs/ai-setup.md) ·
 [Song search (Labs)](docs/song-search.md) ·
 [Privacy](docs/privacy.md) ·
