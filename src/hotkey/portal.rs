@@ -12,6 +12,7 @@ use gtk::glib::{self, ToVariant, Variant, VariantDict, variant::ObjectPath};
 
 use super::{
     Binding, bindings, desktop_spelling, gnome_print_key, managed, route_id, set_desktop_keys,
+    set_portal_failed,
 };
 use crate::Triggers;
 use crate::capture::portal::{DESKTOP, PATH, handle_path, request, session_bus};
@@ -40,6 +41,7 @@ thread_local! {
 pub fn bind(tx: Triggers) {
     std::thread::spawn(move || {
         if let Err(e) = serve(tx) {
+            set_portal_failed(true);
             crate::log!("{}", manual_hint(&e));
         }
     });
@@ -61,8 +63,14 @@ pub fn rebind() {
                 let old = p.session.borrow().clone();
                 close(&p.conn, &old);
                 match open_session(&p.conn, p.generation) {
-                    Ok(path) => *p.session.borrow_mut() = path,
-                    Err(e) => crate::log!("[opencircle] could not rebind shortcuts: {e}"),
+                    Ok(path) => {
+                        set_portal_failed(false);
+                        *p.session.borrow_mut() = path;
+                    }
+                    Err(e) => {
+                        set_portal_failed(true);
+                        crate::log!("[opencircle] could not rebind shortcuts: {e}");
+                    }
                 }
             });
         });

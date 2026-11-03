@@ -233,7 +233,14 @@ pub enum DesktopKey {
     Unassigned,
     /// The OS refused it: another app holds the key (`regrab`).
     Taken,
+    /// The portal could not bind shortcuts at all (its answer is an error).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Failed,
 }
+
+/// The portal's last `BindShortcuts` failed (cleared when one succeeds).
+#[cfg(target_os = "linux")]
+static PORTAL_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The shortcuts the OS refused at the last grab (another app holds them).
 static TAKEN: Mutex<Vec<HotKey>> = Mutex::new(Vec::new());
@@ -258,6 +265,12 @@ pub fn desktop_key(shortcut: &str) -> Option<DesktopKey> {
     let refused = parse_shortcut(shortcut).is_ok_and(|h| taken().contains(&h));
     if refused {
         return Some(DesktopKey::Taken);
+    }
+    #[cfg(target_os = "linux")]
+    if PORTAL_FAILED.load(std::sync::atomic::Ordering::Relaxed)
+        && parse_shortcut(shortcut).is_ok_and(|h| bindings().iter().any(|b| b.hotkey == h))
+    {
+        return Some(DesktopKey::Failed);
     }
     desktop_key_in(&bindings(), &desktop_keys(), shortcut)
 }
@@ -410,6 +423,12 @@ fn key_name(key: &str) -> String {
 #[cfg(target_os = "linux")]
 fn set_desktop_keys(keys: Vec<(String, Option<String>)>) {
     *desktop_keys() = keys;
+}
+
+/// The portal's answer to a bind: an error means no key is live.
+#[cfg(target_os = "linux")]
+fn set_portal_failed(failed: bool) {
+    PORTAL_FAILED.store(failed, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The trigger for a key press the OS reported by hotkey id.

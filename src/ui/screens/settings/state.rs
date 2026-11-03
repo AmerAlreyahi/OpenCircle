@@ -563,6 +563,10 @@ pub struct State {
     pub(super) notice: Option<String>,
     /// The desktop's own say on a running key (`hotkey::desktop_key`; tests swap it).
     pub(super) desktop: fn(&str) -> Option<DesktopKey>,
+    /// Wayland: the desktop eats a key it already uses, so the recorder never
+    /// sees it; modifiers held and let go with no key is the only sign.
+    pub(super) wayland: bool,
+    pub(super) mods_held: bool,
     /// Look & behaviour: whose screen edge the custom look edits, which of its
     /// two colours has the picker open (and the hex typed there).
     pub(super) edge_mode: EdgeMode,
@@ -665,6 +669,8 @@ pub enum Message {
     ThemeCard(&'static str),
     Record(Slot),
     Key(Chord),
+    /// A modifier went down (`true`) or the last one was released.
+    Mods(bool),
     Provider(Provider),
     Preset(Preset),
     BaseUrl(String),
@@ -913,6 +919,8 @@ impl State {
             path,
             store,
             recording: None,
+            wayland: cfg!(target_os = "linux") && linux_wayland(),
+            mods_held: false,
             shortcut_error: None,
             key,
             key_owner,
@@ -1047,8 +1055,9 @@ impl State {
         }
         Some(match (self.desktop)(shortcut)? {
             DesktopKey::Other(keys) => format!("In use: {keys}. {}", managed()),
-            DesktopKey::Unassigned => format!("No key in use. {}", managed()),
-            DesktopKey::Taken => "Taken by another app: pick another key".into(),
+            // the desktop bound nothing: another app (or the desktop) holds the key
+            DesktopKey::Unassigned | DesktopKey::Taken => TAKEN.into(),
+            DesktopKey::Failed => "Couldn't bind this key".into(),
         })
     }
 
@@ -1121,6 +1130,9 @@ impl State {
         }
     }
 }
+
+/// Wayland, modifiers pressed and released with no key recorded.
+const TAKEN: &str = "Taken by another app: pick another key";
 
 /// Print Screen alone: the key Windows' own screen capture can keep.
 pub(super) fn print_screen() -> Option<global_hotkey::hotkey::HotKey> {
@@ -1283,9 +1295,21 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Record(slot) => {
             state.recording = (state.recording != Some(slot)).then_some(slot);
             state.shortcut_error = None;
+            state.mods_held = false;
+        }
+        Message::Mods(held) => {
+            let Some(slot) = state.recording else {
+                return Outcome::None;
+            };
+            if held {
+                state.mods_held = true;
+            } else if std::mem::take(&mut state.mods_held) && state.wayland {
+                state.shortcut_error = Some((slot, TAKEN.into()));
+            }
         }
         Message::Key(chord) => {
             if let Some(slot) = state.recording {
+                state.mods_held = false;
                 state.on_chord(slot, chord);
             }
         }
@@ -1627,7 +1651,12 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     if state.recording.is_none() {
         return clock;
     }
-    let keys = event::listen_with(|event, _status, _window| chord_of(event).map(Message::Key));
+    let keys = event::listen_with(|event, _status, _window| {
+        if let iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) = event {
+            return Some(Message::Mods(!m.is_empty()));
+        }
+        chord_of(event).map(Message::Key)
+    });
     Subscription::batch([keys, clock])
 }
 
@@ -1722,4 +1751,14 @@ impl State {
             motion::progress(t, now, motion::MORPH, Curve::Out),
         ))
     }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_wayland() -> bool {
+    crate::sys::session::wayland_session()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_wayland() -> bool {
+    false
 }

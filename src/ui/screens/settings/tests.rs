@@ -1398,14 +1398,14 @@ fn shortcuts_show_the_key_the_desktop_actually_uses() {
         let texts = shot::texts(view(s));
         texts
             .into_iter()
-            .filter(|t| t.ends_with(managed()))
+            .filter(|t| t.ends_with(managed()) || t.starts_with("Taken by"))
             .collect()
     };
     assert_eq!(
         notes(&s),
         [
             format!("In use: Super+O. {}", managed()),
-            format!("No key in use. {}", managed()),
+            "Taken by another app: pick another key".to_string(),
         ]
     );
     // A key changed but not saved yet: the desktop only knows the saved one.
@@ -1413,7 +1413,7 @@ fn shortcuts_show_the_key_the_desktop_actually_uses() {
     assert_eq!(notes(&s).len(), 1, "no note while recording");
     press(&mut s, chord(true, true, "F7"));
     assert_eq!(s.draft.shortcut, "Ctrl+Shift+F7");
-    assert_eq!(notes(&s), [format!("No key in use. {}", managed())]);
+    assert_eq!(notes(&s), ["Taken by another app: pick another key"]);
     // Nothing to say (not Wayland, or the desktop uses our keys): no note at all.
     s.desktop = |_| None;
     assert!(notes(&s).is_empty());

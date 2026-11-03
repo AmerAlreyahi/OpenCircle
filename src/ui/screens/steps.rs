@@ -747,6 +747,19 @@ mod tests {
         s.crops().iter().map(|c| c.width).collect()
     }
 
+    /// Where windows can be placed (X11, Windows) the strip sits at its edge, clear of
+    /// a pin opened at the screen centre. Wayland (GNOME) places every new toplevel
+    /// itself, centred, and gives an app no say: there both overlap (known, no fix).
+    #[test]
+    fn the_strip_at_its_edge_is_clear_of_a_centred_pin() {
+        let p = strip(1).place();
+        let cx = MONITOR.px.0 as i32 / 2;
+        assert!(
+            p.origin.0 > cx + 300,
+            "right of a 600 px wide pin at the centre"
+        );
+    }
+
     #[test]
     fn sizes_and_place_follow_the_spec() {
         // 1 step 104 x 124, 4 steps 104 x 316
