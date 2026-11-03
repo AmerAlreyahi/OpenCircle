@@ -86,6 +86,40 @@ fn an_update_waits_until_nothing_is_open() {
     assert_eq!(app.update, None, "tried once idle");
 }
 
+/// Our floating windows (here a pin) are never in what we capture: every
+/// capture (Circle to Search, translate, Snip) takes them out of its grab at its
+/// entry (`App::capture`; Linux: no OS call keeps a window out of a grab) and
+/// they come back once it's over, after the overlay closes. Windows keeps them
+/// out of every capture instead (`windows::floating`).
+#[test]
+fn our_floating_windows_are_out_of_every_grab() {
+    let linux = !cfg!(windows);
+    let pin = Crop {
+        width: 4,
+        height: 4,
+        rgba: vec![9; 4 * 4 * 4],
+    };
+    let mut app = App::idle(window::Id::unique());
+    let _ = app.windows.pin(pin, None, 1.0);
+    for snip in [None, Some(snip::Kind::Region)] {
+        let _ = app.capture(Instant::now(), snip);
+        let n = app.capturing.unwrap();
+        assert_eq!(app.windows.out_of_frame(), linux, "out for the grab");
+        let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
+        let _ = app.update(Message::Grabbed(n));
+        assert_eq!(app.windows.out_of_frame(), linux, "not over the overlay");
+        let _ = app.close();
+        app.hiding = Hiding::No;
+        assert!(!app.windows.out_of_frame(), "back once it closed");
+    }
+    // a grab that opens nothing (failed, cancelled): back when it's over
+    let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+    let n = app.capturing.unwrap();
+    let _ = app.update(Message::Escape);
+    let _ = app.update(Message::Grabbed(n));
+    assert!(!app.windows.out_of_frame());
+}
+
 /// A copy the setup installed never installs by itself (its setup asks Windows for
 /// admin rights): the card offers it; a failed or declined "Install now" keeps it.
 #[test]

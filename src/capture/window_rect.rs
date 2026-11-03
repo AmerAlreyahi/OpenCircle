@@ -1,7 +1,8 @@
 //! The windows on screen, for snip (hover a window, click it; Window mode): outer
 //! rectangles (with the frame) in physical desktop pixels, topmost first, with
-//! their titles. Windows: our own count too (Settings, chat, pins), except the
-//! overlay and toasts (`no_pick`); X11: none of ours.
+//! their titles. Windows: our own count too (Settings, onboarding), except the
+//! overlay and every floating window (`no_pick`: they are out of every capture);
+//! X11: none of ours.
 //! ponytail: X11 still drops all of ours (Linux on hold); a property like
 //! Windows' `NO_PICK` is the upgrade.
 //!
@@ -54,8 +55,8 @@ pub fn no_pick(hwnd: isize) {
 }
 
 /// Windows: which visible, not minimised window is a snip target, like iTop's:
-/// every normal one, OpenCircle's own (Settings, the AI chat, pins: tool windows
-/// too) unless marked `no_pick`, and the taskbar; not the desktop (Progman /
+/// every normal one, OpenCircle's own (Settings, onboarding) unless marked `no_pick`
+/// (the overlay, every floating window: the chat's, pins), and the taskbar; not the desktop (Progman /
 /// WorkerW: over the wallpaper and its icons the target is the screen) nor
 /// another app's tool windows (invisible helpers, floating palettes) nor its
 /// click-through ones (`through`: WS_EX_TRANSPARENT, e.g. a GPU overlay or a

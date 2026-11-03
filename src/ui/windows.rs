@@ -107,6 +107,19 @@ pub struct Windows {
     chrome: HashMap<window::Id, Chrome>,
     /// The Steps strip and its window (none until its first step is packed).
     steps: Option<(Option<window::Id>, Strip)>,
+    /// Our floating windows taken out of a grab (Linux, `leave_frame`).
+    out: Option<Out>,
+}
+
+/// What `Windows::leave_frame` took out of capture number `capture`'s grab.
+struct Out {
+    capture: u32,
+    /// Where windows hide (X11): hidden, shown again as they are.
+    hidden: Vec<window::Id>,
+    /// Wayland (no hiding): closed, opened again after.
+    pins: Vec<Pin>,
+    steps: bool,
+    card: Option<update_card::Card>,
 }
 
 /// A normal window's header state.
@@ -535,8 +548,8 @@ impl Windows {
         Task::batch([open, close(id)])
     }
 
-    /// The strip's window at `place` (physical px): floating, kept out of
-    /// captures, faded in once there.
+    /// The strip's window at `place` (physical px): floating (so out of
+    /// captures), faded in once there.
     fn open_steps(&mut self, place: platform::monitor::Place) -> Task<Msg> {
         let (id, open) = floating(
             window::Settings {
@@ -552,12 +565,8 @@ impl Windows {
         if let Some((window, _)) = &mut self.steps {
             *window = Some(id);
         }
-        // (test hook: the VM proof's screenshots show it)
-        let hide = std::env::var_os("OPENCIRCLE_TEST_SHOW_STEPS").is_none();
         open.then(move |id| {
-            hide_from_capture::<()>(id, hide)
-                .chain(platform::monitor::place_window(id, place))
-                .chain(appear(id, POPUP))
+            platform::monitor::place_window::<()>(id, place).chain(appear(id, POPUP))
         })
         .discard()
     }
@@ -803,7 +812,6 @@ impl Windows {
             toast::RADIUS,
             TOAST,
         );
-        let open = open.then(|id| platform::windows::no_pick(id).chain(Task::done(id)));
         // At its exact place in physical px before it fades in (its rise moves
         // from there): iced places a new window in logical px at the scale of
         // the monitor it opens on, not the one it goes to (#149).
@@ -926,6 +934,119 @@ impl Windows {
         }))
     }
 
+    /// Linux: our floating windows (Steps strip, pins, pills, the update card, the
+    /// tray menu, and `chat`: the pinned chat's) out of capture number `capture`'s
+    /// grab: no OS call keeps a window out of an X11 grab or the Wayland portal's
+    /// shot (Windows: every floating window is out of every capture,
+    /// `windows::floating`, so `None` there). Hidden where windows hide, else
+    /// closed (pills for good; the others open again in `back_in_frame`).
+    /// `None`: nothing to take out (the grab needn't wait).
+    pub fn leave_frame(&mut self, capture: u32, chat: Option<window::Id>) -> Option<Task<Msg>> {
+        if cfg!(windows) {
+            return None;
+        }
+        self.leave_frame_as(capture, chat, platform::monitor::can_hide_windows())
+    }
+
+    fn leave_frame_as(
+        &mut self,
+        capture: u32,
+        chat: Option<window::Id>,
+        can_hide: bool,
+    ) -> Option<Task<Msg>> {
+        if let Some(out) = &mut self.out {
+            out.capture = capture; // still out: this grab's now
+            return None;
+        }
+        let toasts: Vec<_> = self.toasts.drain(..).map(|(id, ..)| id).collect();
+        let menu = self.tray_menu.take().map(|(id, _)| id);
+        let mut gone: Vec<window::Id> = toasts.into_iter().chain(menu).collect();
+        let mut out = Out {
+            capture,
+            hidden: Vec::new(),
+            pins: Vec::new(),
+            steps: false,
+            card: None,
+        };
+        let steps = self.steps.as_mut().and_then(|(id, _)| match can_hide {
+            true => *id,
+            false => id.take(), // its strip stays
+        });
+        if can_hide {
+            out.hidden = (self.pins.iter().map(|p| p.id))
+                .chain(steps)
+                .chain(self.update_card.as_ref().map(|(id, _)| *id))
+                .chain(chat)
+                .collect();
+        } else {
+            out.steps = steps.is_some();
+            out.pins = std::mem::take(&mut self.pins);
+            gone.extend(out.pins.iter().map(|p| p.id).chain(steps));
+            if let Some((id, card)) = self.update_card.take() {
+                gone.push(id);
+                out.card = Some(card);
+            }
+        }
+        if gone.is_empty() && out.hidden.is_empty() {
+            return None;
+        }
+        // at once (no fade): the grab follows
+        let hide = (out.hidden.iter()).map(|id| window::set_mode(*id, window::Mode::Hidden));
+        let tasks: Vec<_> = (gone.into_iter().map(|id| {
+            forget(id);
+            window::close(id)
+        }))
+        .chain(hide)
+        .collect();
+        self.out = Some(out);
+        Some(Task::batch(tasks))
+    }
+
+    /// Some window is out of a grab (`leave_frame`).
+    #[cfg(test)]
+    pub fn out_of_frame(&self) -> bool {
+        self.out.is_some()
+    }
+
+    /// The windows `leave_frame` took out of capture `capture`'s grab (any
+    /// capture's: `None`) come back: shown again, or opened again where they
+    /// can't hide (the strip at its place; pins and the card where the
+    /// desktop puts them: Wayland places new windows itself).
+    pub fn back_in_frame(&mut self, capture: Option<u32>) -> Task<Msg> {
+        if capture.is_some_and(|n| self.out.as_ref().is_some_and(|o| o.capture != n)) {
+            return Task::none();
+        }
+        let Some(out) = self.out.take() else {
+            return Task::none();
+        };
+        let mut tasks: Vec<Task<Msg>> = (out.hidden.into_iter())
+            .map(|id| window::set_mode(id, window::Mode::Windowed))
+            .collect();
+        for mut pin in out.pins {
+            // ponytail: a live pin's frames stay keyed by its first window (Wayland has no live pins).
+            let (id, open) = floating(
+                window::Settings {
+                    size: pin.base * pin.zoom,
+                    resizable: false,
+                    ..window::Settings::default()
+                },
+                0.0,
+                POPUP,
+            );
+            pin.id = id;
+            self.pins.push(pin);
+            tasks.push(open.discard());
+        }
+        let place = self.steps.as_ref().map(|(_, strip)| strip.place());
+        if let Some(place) = place.filter(|_| out.steps) {
+            tasks.push(self.open_steps(place));
+        }
+        if let Some(card) = out.card {
+            tasks.push(self.update_card(card));
+        }
+        Task::batch(tasks)
+    }
+
     /// Something the user is in the middle of lives in a window: Settings,
     /// onboarding, the permission prompt or a pinned image (an update waits).
     pub fn busy(&self) -> bool {
@@ -934,6 +1055,7 @@ impl Windows {
             || self.permission.is_some()
             || !self.pins.is_empty()
             || self.steps.is_some()
+            || self.out.is_some()
     }
 
     /// Opens the window, or focuses it when it is already open.
@@ -1884,6 +2006,78 @@ mod tests {
             height: h,
             rgba,
         }
+    }
+
+    /// Our floating windows with a strip, a pin, a pill and the update card open.
+    fn floating_windows() -> (Windows, window::Id, window::Id) {
+        let mut windows = Windows::default();
+        let _ = windows.pin(picture(200, 100), None, 1.0);
+        let monitor = platform::monitor::Place {
+            origin: (0, 0),
+            px: (1920, 1080),
+            scale: 1.0,
+        };
+        let strip = window::Id::unique();
+        windows.steps = Some((Some(strip), Strip::new(monitor, 0.0, false)));
+        let _ = windows.toast("Copied", true, None, 1000);
+        let card = update_card::Card::available("9.9.9", "notes", "https://example.invalid");
+        let _ = windows.update_card(card);
+        let pin = windows.pins[0].id;
+        (windows, pin, strip)
+    }
+
+    /// Wayland can't hide a window: for a grab our floating windows close (their
+    /// state kept: an OS "closed" for them drops nothing) and open again after it,
+    /// the pill for good. Only for that capture's end, or any (`None`).
+    #[test]
+    fn where_windows_cant_hide_a_grab_closes_our_floating_ones_and_opens_them_again() {
+        let (mut windows, pin, strip) = floating_windows();
+        assert!(windows.leave_frame_as(7, None, false).is_some());
+        assert!(windows.pins.is_empty() && windows.toasts.is_empty());
+        assert!(windows.update_card.is_none() && windows.steps_window().is_none());
+        let _ = windows.update(Msg::Closed(pin));
+        let _ = windows.update(Msg::Closed(strip));
+        assert!(windows.steps.is_some(), "the strip's steps stay");
+        assert!(
+            windows.leave_frame_as(8, None, false).is_none(),
+            "out already"
+        );
+        let _ = windows.back_in_frame(Some(7));
+        assert!(windows.out.is_some(), "capture 8's now");
+        let _ = windows.back_in_frame(Some(8));
+        assert!(windows.out.is_none());
+        let back = pin_ids(&windows);
+        assert_eq!(back.len(), 1);
+        assert!(
+            back[0] != pin && windows.view(back[0]).is_some(),
+            "a new window"
+        );
+        assert!(windows.steps_window().is_some_and(|id| id != strip));
+        assert!(windows.update_card.is_some());
+        assert!(windows.toasts.is_empty(), "a pill doesn't come back");
+        assert!(windows.leave_frame_as(9, None, false).is_some(), "again");
+        let _ = windows.back_in_frame(None);
+        assert_eq!(pin_ids(&windows).len(), 1);
+    }
+
+    /// Where windows hide (X11) they hide for the grab, the pinned chat's too, and
+    /// show again as they are; with none open the grab doesn't wait.
+    #[test]
+    fn where_windows_hide_a_grab_hides_our_floating_ones() {
+        let (mut windows, pin, strip) = floating_windows();
+        let chat = window::Id::unique();
+        assert!(windows.leave_frame_as(1, Some(chat), true).is_some());
+        let hidden = &windows.out.as_ref().unwrap().hidden;
+        for id in [pin, strip, chat] {
+            assert!(hidden.contains(&id));
+        }
+        assert_eq!(pin_ids(&windows), [pin], "kept as it is");
+        assert!(windows.toasts.is_empty(), "the pill went");
+        let _ = windows.back_in_frame(Some(1));
+        assert!(windows.out.is_none());
+        assert_eq!(windows.steps_window(), Some(strip));
+        assert!(Windows::default().leave_frame_as(2, None, true).is_none());
+        assert!(Windows::default().leave_frame_as(2, None, false).is_none());
     }
 
     fn pin_ids(windows: &Windows) -> Vec<window::Id> {

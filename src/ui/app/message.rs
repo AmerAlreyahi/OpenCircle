@@ -26,6 +26,8 @@ pub(in crate::ui) enum Message {
     Trigger(Trigger),
     /// Capture number `.0`'s thread is done (`Instant` = trigger time, latency log).
     Captured(u32, Instant, Result<Shot, CaptureError>),
+    /// Capture number `.0`'s grab is over (every monitor's).
+    Grabbed(u32),
     /// Capture number `.0` has waited `CAPTURE_TIMEOUT`.
     CaptureTimedOut(u32),
     /// Snip capture number `.0` will open on this monitor (its grab runs).

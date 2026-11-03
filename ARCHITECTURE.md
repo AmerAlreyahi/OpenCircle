@@ -203,8 +203,9 @@ every preset round-trips and draws no key colour on the live layer.
   release server) 3 s after start, also from a 0.0.0 build. Downloads still need a signature by `RELEASE_PUBLIC_KEY`,
   or, only with this hook, by a throwaway key baked in at BUILD time (`OPENCIRCLE_TEST_RELEASE_KEY`; release.yml never
   sets it). `scripts/update-gate.ps1` drives it as the release gate (RELEASING.md step 9).
-- `OPENCIRCLE_TEST_CAPTURABLE=1`: the pinned AI chat's own window is not excluded from screen capture
-  (VM screenshots of it over the desktop; it then also shows in the next capture's frozen frame).
+- `OPENCIRCLE_TEST_CAPTURABLE=1`: our floating windows (Steps strip, pins, pills, update card, the pinned chat's,
+  tray menu) are not excluded from screen capture on Windows (VM screenshots of them over the desktop; they then
+  also show in the next capture's frozen frame). Linux takes them out of each grab (`Windows::leave_frame`) whatever this says.
 - `OPENCIRCLE_TEST_SHOT=<out.png>`: Esc saves what the overlay shows before closing
   (shot ~150 ms after Esc, with no message in between: a relayout would drop the
   text editor's drawn text from the shot).

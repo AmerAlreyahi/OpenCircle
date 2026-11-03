@@ -93,10 +93,25 @@ pub fn floating(
         };
         reshape::<()>(id)
             .discard()
+            .chain(keep_out(id))
             .chain(shown)
             .chain(Task::done(id))
     });
     (id, open)
+}
+
+/// Test hook: our floating windows show in screen captures (VM screenshots of
+/// them over the desktop; they then also show in the next capture's frozen frame).
+const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
+
+/// A floating window of ours (Steps strip, pins, pills, the update card, the
+/// chat's, the tray menu) is never in what we capture or translate: Windows
+/// keeps it out of every capture (`hide_from_capture`, before it shows) and out
+/// of Snip's targets (`no_pick`: a pick would hold what is under it). Linux has
+/// no such call: the capture takes it out of the frame (`Windows::leave_frame`).
+fn keep_out<T: Send + 'static>(id: window::Id) -> Task<T> {
+    let out = std::env::var_os(CAPTURABLE).is_none();
+    hide_from_capture(id, out).chain(no_pick(id))
 }
 
 /// How a floating window comes and goes (`motion`): its pace, and how far it
@@ -196,8 +211,8 @@ pub fn screen(settings: window::Settings) -> (window::Id, Task<window::Id>) {
 }
 
 /// Snip never outlines or picks the window `id` (`window_rect::no_pick`): the
-/// overlay and the screen-sized ones (`screen`), toasts. Every other window of
-/// ours is a target like any app's (Settings, the AI chat, pins).
+/// overlay and the screen-sized ones (`screen`), every floating one (`keep_out`).
+/// Every other window of ours is a target like any app's (Settings, onboarding).
 pub fn no_pick<T: Send + 'static>(id: window::Id) -> Task<T> {
     window::run(id, |w| {
         if let Ok(handle) = w.window_handle()
@@ -298,10 +313,11 @@ pub fn cut<T: Send + 'static>(id: window::Id, radius: f32) -> Task<T> {
     reshape(id)
 }
 
-/// Windows: keeps the window out of every screen capture (`on`), or back in. The
-/// scrolling capture's pill sits over the area it grabs: in the frames its
-/// changing text would keep the page from ever settling, and end up in the
-/// stitched image. Needs Windows 10 2004+; elsewhere nothing.
+/// Windows: keeps the window out of every screen capture (`on`), or back in:
+/// every floating window (`keep_out`), and the overlay during a long capture
+/// (its pill sits over the area it grabs: in the frames its changing text would
+/// keep the page from ever settling, and end up in the stitched image). Needs
+/// Windows 10 2004+; elsewhere nothing.
 pub fn hide_from_capture<T: Send + 'static>(id: window::Id, on: bool) -> Task<T> {
     window::run(id, move |w| {
         #[cfg(windows)]

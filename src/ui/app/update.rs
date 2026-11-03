@@ -140,6 +140,7 @@ impl App {
             Message::Song(id, msg) => self.on_song(id, msg),
             Message::Chosen(n, place) if self.capturing == Some(n) => self.pre_show(place),
             Message::Chosen(..) => Task::none(),
+            Message::Grabbed(n) => self.grabbed(n),
             Message::CaptureTimedOut(n) if self.capturing == Some(n) => {
                 self.unshow();
                 crate::log!(
@@ -148,7 +149,7 @@ impl App {
                 );
                 self.capturing = None;
                 self.next = Purpose::Search;
-                Task::none()
+                self.windows.back_in_frame(Some(n)).map(Message::Windows)
             }
             Message::CaptureTimedOut(_) => Task::none(),
             Message::Escape if self.capturing.is_some() => {
@@ -156,7 +157,7 @@ impl App {
                 crate::log!("[opencircle] capture cancelled");
                 self.capturing = None;
                 self.next = Purpose::Search;
-                Task::none()
+                self.windows.back_in_frame(None).map(Message::Windows)
             }
             Message::Overlay(event) => self.on_overlay(event),
             Message::Screen(n, place, frame) => self.add_screen(n, place, frame),
@@ -845,6 +846,7 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
         message,
         Message::Trigger(_)
             | Message::Captured(..)
+            | Message::Grabbed(_)
             | Message::Chosen(..)
             | Message::CaptureTimedOut(_)
             | Message::Escape
