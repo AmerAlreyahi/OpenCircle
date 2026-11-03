@@ -31,8 +31,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
         Slot::Quick(i) => state.draft.quick_actions[*i].action == "snip",
         Slot::Capture => false,
     });
-    let mut rows = column(snips.map(|slot| shortcuts::row(state, slot)));
-    if state.print_screen_taken {
+    let snips: Vec<_> = snips.collect();
+    // The note is for a user whose Snip key is Print Screen (Alt+A is the default).
+    let on_print_screen = (snips.iter()).any(|&slot| {
+        crate::config::parse_shortcut(state.shortcut(slot)).ok()
+            == super::super::state::print_screen()
+    });
+    let mut rows = column(snips.into_iter().map(|slot| shortcuts::row(state, slot)));
+    if state.print_screen_taken && on_print_screen {
         rows = rows.push(pick(
             "Print Screen key",
             "Windows opens its own screen capture with it. To snip with Print Screen, \

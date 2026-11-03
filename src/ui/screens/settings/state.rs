@@ -1072,10 +1072,7 @@ impl State {
         let quick = self.draft.quick_actions.iter().enumerate();
         // Snip is one feature (owner, 2026-10-31): one row; the window and
         // full-screen snips' entries stay in the file, unseen (they still pre-pick).
-        let one_snip = |q: &crate::config::QuickAction| {
-            q.action != "snip" || !matches!(q.target, Target::Window | Target::FullScreen)
-        };
-        let shown = quick.filter(|(_, q)| crate::labs::quick_on(labs, q) && one_snip(q));
+        let shown = quick.filter(|(_, q)| crate::labs::quick_on(labs, q) && !q.is_hidden_snip());
         let mut all = vec![Slot::Capture];
         all.extend(shown.map(|(i, _)| Slot::Quick(i)));
         all.into_iter()

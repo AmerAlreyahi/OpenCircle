@@ -1479,13 +1479,10 @@ fn snip_shortcuts_are_listed_and_editable() {
         panic!("one snip row")
     };
     assert_eq!(
-        s.draft.quick_actions[i].shortcut, "PrintScreen",
-        "the user's key"
+        s.draft.quick_actions[i].shortcut, "Alt+A",
+        "the default key"
     );
-    for (target, key) in [
-        (Target::Window, "Alt+PrintScreen"),
-        (Target::FullScreen, "Ctrl+PrintScreen"),
-    ] {
+    for (target, key) in [(Target::Window, ""), (Target::FullScreen, "")] {
         let kept = (s.draft.quick_actions.iter())
             .any(|q| q.action == "snip" && q.target == target && q.shortcut == key);
         assert!(kept, "{key}: kept in the file (it pre-picks), unseen");
@@ -2014,6 +2011,14 @@ fn the_step_33_pages_match_their_golden_images() {
         }),
         ("snip", Section::Snip, 1180.0, |_| {}),
         ("snip-print-screen", Section::Snip, 1280.0, |s| {
+            // a user whose Snip key is Print Screen (the note is theirs)
+            for c in [&mut s.draft, &mut s.saved] {
+                for q in &mut c.quick_actions {
+                    if q.action == "snip" && q.target == Target::Circle {
+                        q.shortcut = "PrintScreen".into();
+                    }
+                }
+            }
             s.print_screen_taken = true;
         }),
         ("history", Section::History, 0.0, |s| {
@@ -2393,7 +2398,8 @@ fn the_snip_page_has_its_shortcuts_folder_and_long_capture_limit() {
     let texts = page(&mut s, Section::Snip);
     for want in [
         "Snip",
-        "PrtSc",
+        "Alt",
+        "A",
         "Save folder",
         "Long capture",
         "20,000 px",
@@ -2407,7 +2413,7 @@ fn the_snip_page_has_its_shortcuts_folder_and_long_capture_limit() {
         "Snip a region",
         "Snip a window",
         "Snip the full screen",
-        "Alt",
+        "PrtSc",
     ] {
         assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
     }
@@ -2430,7 +2436,15 @@ fn the_snip_page_has_its_shortcuts_folder_and_long_capture_limit() {
 /// row says who has the key. Another app holding a key: its row says so.
 #[test]
 fn the_snip_page_says_when_print_screen_or_a_key_is_taken() {
-    let (mut s, _) = state(None);
+    // The note belongs to a user whose Snip key is Print Screen (Alt+A is the default).
+    let mut config = Config::default();
+    for q in &mut config.quick_actions {
+        if q.action == "snip" && q.target == Target::Circle {
+            q.shortcut = "PrintScreen".into();
+        }
+    }
+    let store = Arc::new(MemoryStore::default());
+    let mut s = State::new(config, vec![], None, Box::new(Shared(store)));
     update(&mut s, Message::Section(Section::Snip));
     s.print_screen_taken = true;
     let texts = shot::texts(view(&s));
@@ -2441,7 +2455,15 @@ fn the_snip_page_says_when_print_screen_or_a_key_is_taken() {
     ] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
-    // only bare Print Screen: Alt+ / Ctrl+Print Screen are ours
+    // only bare Print Screen is Windows': the default Alt+A gets no note
+    let (mut other, _) = state(None);
+    update(&mut other, Message::Section(Section::Snip));
+    other.print_screen_taken = true;
+    assert!(
+        !shot::texts(view(&other))
+            .iter()
+            .any(|t| t == "Print Screen key")
+    );
     let notes = texts.iter().filter(|t| t.contains("uses this key")).count();
     assert_eq!(notes, 1, "{texts:?}");
     assert_eq!(

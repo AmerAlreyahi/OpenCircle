@@ -280,6 +280,23 @@ impl Config {
         }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
+            // Schema 8: Snip's old default key (Print Screen) moves to Alt+A, once,
+            // unless Alt+A is already someone's; a user's own key stays.
+            let taken = |k: &str| {
+                c.quick_actions
+                    .iter()
+                    .any(|q| q.shortcut.eq_ignore_ascii_case(k))
+            };
+            if file_version < Some(8) && !taken("Alt+A") && c.shortcut != "Alt+A" {
+                for q in &mut c.quick_actions {
+                    if q.action == "snip"
+                        && q.target == Target::Circle
+                        && q.shortcut == "PrintScreen"
+                    {
+                        q.shortcut = "Alt+A".into();
+                    }
+                }
+            }
         }
         // Schema 4: translate is on-device unless the user chose AI for it.
         // Before, "ai" was the default and only ever ran with an API provider

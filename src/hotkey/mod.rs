@@ -134,7 +134,7 @@ fn plan(cfg: &Config) -> (Vec<Binding>, Vec<String>) {
 
     for qa in &cfg.quick_actions {
         // A hidden (Labs) feature has no shortcut; its entry stays in the config.
-        if qa.shortcut.is_empty() || !crate::labs::quick_on(&cfg.labs, qa) {
+        if qa.shortcut.is_empty() || !crate::labs::quick_on(&cfg.labs, qa) || qa.is_hidden_snip() {
             continue;
         }
         let hotkey = match parse_shortcut(&qa.shortcut) {
@@ -645,6 +645,21 @@ mod tests {
         }
     }
 
+    /// A user who CHOSE the Print Screen keys: Snip on Print Screen, Lens on Alt+Print
+    /// Screen, song search on Ctrl+Print Screen (the hidden snip entries are never bound).
+    fn print_screen_user() -> Config {
+        let mut c = all_labs();
+        for q in &mut c.quick_actions {
+            match (q.action.as_str(), q.target) {
+                ("snip", Target::Circle) => q.shortcut = "PrintScreen".into(),
+                ("lens", _) => q.shortcut = "Alt+PrintScreen".into(),
+                ("song_search", _) => q.shortcut = "Ctrl+PrintScreen".into(),
+                _ => {}
+            }
+        }
+        c
+    }
+
     #[test]
     fn a_hidden_feature_has_no_shortcut_and_turning_it_on_brings_it_back() {
         use crate::labs::Feature;
@@ -655,17 +670,18 @@ mod tests {
             off.contains(&"capture".to_string())
                 && off.contains(&"quick-translate-full_screen".to_string())
         );
-        // Snip is out of Labs (N-41): its three keys are there with every switch off.
+        // Snip is out of Labs (N-41): its one key (Alt+A) is there with every switch off;
+        // the hidden window / full-screen entries are never bound.
         assert_eq!(
             off.iter().filter(|i| i.starts_with("quick-snip-")).count(),
-            3,
+            1,
             "{off:?}"
         );
         assert!(
             plan(&Config::default())
                 .0
                 .iter()
-                .any(|b| b.hotkey.key == Code::PrintScreen)
+                .all(|b| b.hotkey.key != Code::PrintScreen)
         );
         let with = |f: Feature| {
             let mut c = Config::default();
@@ -710,8 +726,6 @@ mod tests {
                 "quick-ai_explain-circle",
                 "quick-copy_text-circle",
                 "quick-snip-circle",
-                "quick-snip-window",
-                "quick-snip-full_screen",
             ]
         );
         assert_eq!(b[0].shortcut, "Ctrl+Shift+Space");
@@ -918,7 +932,7 @@ mod tests {
 
     #[test]
     fn a_refused_print_screen_says_how_to_free_it() {
-        let (b, _) = plan(&all_labs());
+        let (b, _) = plan(&print_screen_user());
         let by = |id: &str| b.iter().find(|b| b.id == id).unwrap();
         let line = unavailable(by("quick-snip-circle"), "already registered");
         assert!(line.contains("PrintScreen") && line.contains("already registered"));
@@ -927,7 +941,7 @@ mod tests {
         #[cfg(not(windows))]
         assert!(line.contains("screenshot tool"));
         // Alt+Print Screen needs the same hint; other keys get none.
-        assert!(unavailable(by("quick-snip-window"), "x").contains("free Print Screen"));
+        assert!(unavailable(by("quick-lens-circle"), "x").contains("free Print Screen"));
         assert!(!unavailable(by("quick-copy_text-circle"), "x").contains("free Print Screen"));
         assert_eq!(line.lines().count(), 1, "one line");
     }
@@ -971,13 +985,13 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn names_the_gnome_setting_that_holds_each_print_screen_key() {
-        let (b, _) = plan(&all_labs());
+        let (b, _) = plan(&print_screen_user());
         let by = |id: &str| b.iter().find(|b| b.id == id).unwrap();
         let hint = |id: &str, desktop: &str| gnome_print_key(by(id), desktop);
         let print = hint("quick-snip-circle", "ubuntu:GNOME").unwrap();
         assert!(print.contains("show-screenshot-ui") && print.contains("gsettings reset"));
         assert!(
-            hint("quick-snip-window", "GNOME")
+            hint("quick-lens-circle", "GNOME")
                 .unwrap()
                 .contains("screenshot-window")
         );
@@ -987,7 +1001,7 @@ mod tests {
             "only GNOME grabs it"
         );
         assert_eq!(
-            hint("quick-snip-full_screen", "GNOME"),
+            hint("quick-song_search-full_screen", "GNOME"),
             None,
             "Ctrl+Print is free"
         );
@@ -1051,5 +1065,21 @@ mod tests {
         assert!(known_action("translate") && known_action("lens"));
         assert!(known_action("song_search"));
         assert!(!known_action("") && !known_action("rm") && !known_action("Copy"));
+    }
+
+    /// No invisible shortcuts (owner, 2026-11-03): the hidden window / full-screen
+    /// snip entries are never bound, whatever key they hold.
+    #[test]
+    fn hidden_snip_entries_are_never_bound() {
+        let mut c = Config::default();
+        for q in c.quick_actions.iter_mut().filter(|q| q.is_hidden_snip()) {
+            q.shortcut = match q.target {
+                crate::config::Target::Window => "Alt+PrintScreen".into(),
+                _ => "Ctrl+PrintScreen".into(),
+            };
+        }
+        let (bound, _) = plan(&c);
+        assert!(!bound.iter().any(|b| b.shortcut.contains("PrintScreen")));
+        assert!(bound.iter().any(|b| b.shortcut == "Alt+A"));
     }
 }
