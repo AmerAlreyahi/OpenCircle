@@ -230,6 +230,31 @@ impl Opening {
     }
 }
 
+/// One of this opening's screens as what Snip puts on a screen meets it (the
+/// long capture's hole, picture and hint; a pin): its window, where it is, how
+/// the starting screen's px land on its logical px, and its work area (its
+/// logical px, the taskbar left out). The starting screen is one like any other.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(in crate::ui) struct On {
+    pub(in crate::ui) window: window::Id,
+    pub(in crate::ui) place: Place,
+    /// `None`: the starting screen, whose px they are (exactly, no float map).
+    pub(in crate::ui) view: Option<overlay::View>,
+    pub(in crate::ui) work: Size,
+}
+
+impl On {
+    /// A rect in the starting screen's px on this screen (its logical px).
+    pub(in crate::ui) fn to_local(self, r: Rectangle) -> Rectangle {
+        self.view.map_or(r, |v| v.rect_to_screen(r))
+    }
+
+    /// A point of this screen (its logical px) in the starting screen's px.
+    pub(in crate::ui) fn to_start(self, p: Point) -> Point {
+        self.view.map_or(p, |v| v.to_image(p))
+    }
+}
+
 /// `area` slid back inside `desk` (`overlay::keep_inside`, which keeps to a box at 0, 0).
 pub(in crate::ui) fn keep_on(desk: Rectangle, area: Rectangle) -> Rectangle {
     let at = Vector::new(desk.x, desk.y);
@@ -249,6 +274,64 @@ pub(in crate::ui) fn close_all<T: Send + 'static>(screens: &[Screen]) -> Task<T>
 }
 
 impl App {
+    /// Every screen of this opening, the starting one first.
+    pub(in crate::ui) fn screens_on(&self) -> Vec<On> {
+        let start = On {
+            window: self.overlay,
+            place: self.o.place(),
+            view: None,
+            work: super::work_area(self.o.screen, self.o.work_inset),
+        };
+        let others = (self.o.screens.iter()).map(|s| On {
+            window: s.window,
+            place: s.place,
+            view: Some(s.view),
+            work: Size::new(s.place.size().width, s.place.size().height - s.inset),
+        });
+        std::iter::once(start).chain(others).collect()
+    }
+
+    /// The screen holding the larger part of `area` (image px), the starting
+    /// one on a tie: where a long capture of it runs and a pin of it floats
+    /// (the toolbar's own rule, `bar::dock_screen`). An area across screens is
+    /// taken on that one only (its part there), never across a bezel.
+    pub(in crate::ui) fn on_area(&self, area: Rectangle) -> On {
+        let all = self.screens_on();
+        let rects: Vec<Rectangle> = all.iter().map(|on| self.monitor_of(on)).collect();
+        all[crate::ui::screens::bar::geometry::dock_screen(area, &rects)]
+    }
+
+    /// The monitor `on` in the starting screen's px.
+    pub(in crate::ui) fn monitor_of(&self, on: &On) -> Rectangle {
+        match on.view {
+            None => Rectangle::with_size(self.o.screen),
+            Some(_) => area_of(self.o.place(), on.place),
+        }
+    }
+
+    /// The screen whose window is `window` (the starting one if none is).
+    pub(in crate::ui) fn on_window(&self, window: window::Id) -> On {
+        let all = self.screens_on();
+        (all.iter().find(|on| on.window == window)).map_or(all[0], |on| *on)
+    }
+
+    /// `area` (image px) cut to the screen `on`: in its window's logical px,
+    /// and in physical desktop px (its frame's own pixels).
+    pub(in crate::ui) fn region_on(
+        &self,
+        on: On,
+        area: Rectangle,
+    ) -> Option<(Rectangle, crate::capture::window_rect::WinRect)> {
+        let part = area.intersection(&self.monitor_of(&on))?;
+        if on.view.is_none() {
+            return Some((part, self.screen_region(part)?)); // its own frame's px
+        }
+        let [x0, y0, x1, y1] = self.desk_bounds(part)?;
+        let (w, h) = (x1 - x0, y1 - y0);
+        let local = on.to_local(part);
+        (w > 0 && h > 0).then_some((local, (x0, y0, w as u32, h as u32)))
+    }
+
     /// `area` (image px) cut out of the frozen frames: the starting screen's
     /// alone, as with one screen, unless it reaches another screen; then
     /// stitched from every frame it meets in desktop px (`actions::stitch`), at
@@ -728,6 +811,9 @@ impl App {
         // here), or the loupe and outline while the pointer is here.
         let start = self.o.place();
         if let Some(edit) = self.o.edit.as_ref().filter(|e| e.is_open()) {
+            if let Some(long) = self.long_view(window) {
+                layers = layers.push(long); // a long capture on this screen
+            }
             let lens = screen_map_of(start, screen.place);
             let toolbar =
                 (self.toolbar_on() == Some(window)).then(|| screen.view.to_screen(self.bar_at()));
@@ -1067,6 +1153,177 @@ mod tests {
         assert_eq!(picked(&app), screen);
         let (on, ..) = app.snip_dock().expect("docked");
         assert_eq!(on, Some(0), "the toolbar docks on that screen");
+    }
+
+    /// Picks `area` (start px) with the Snip toolbar (a snip's own path).
+    fn pick(app: &mut App, area: Rectangle) {
+        app.select(area);
+        let crop = app.crop().expect("a crop");
+        let _ = app.snip_routed(crop, true, false);
+        assert!(app.o.edit.is_some(), "picked");
+    }
+
+    /// Long capture on ANY screen (owner, 2026-11-03): an area on the other
+    /// screen (150 %) runs there: that monitor's own px are grabbed, its
+    /// window gets the hole, and the outline, hint and picture are drawn by
+    /// that window in its own px, beside the area, never across the bezel.
+    /// It only ever ran on the starting screen (an area wholly elsewhere did
+    /// nothing; one across both was cut to the starting screen).
+    #[test]
+    fn a_long_capture_runs_on_the_screen_of_its_area() {
+        use crate::capture::scroll::Update;
+        use crate::snip::annotate::Message as E;
+        let (mut app, id) = snipped();
+        let area = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));
+        let on = app.on_area(area);
+        assert_eq!((on.window, on.place.scale), (id, 1.5));
+        let local = Rectangle::new(Point::new(240.0, 100.0), Size::new(600.0, 400.0));
+        let (shown, region) = app.region_on(on, area).expect("on that screen");
+        assert_eq!(region, (1000, 150, 900, 600));
+        assert!(near_rect(shown, local), "{shown:?}");
+        pick(&mut app, area);
+        let _ = app.update(Message::Annotate(E::Scroll));
+        let long = app.scroll().expect("the capture runs");
+        assert_eq!(long.window, Some(id), "on that screen");
+        assert!(near_rect(long.area, local), "in its window's px");
+        assert!(app.long_view(id).is_some() && app.long_view(app.overlay).is_none());
+        // its toolbar there too, and off the area (no window of ours over it)
+        let bar = app.long_bar();
+        assert_eq!(app.toolbar_on(), Some(id));
+        assert!(!bar.intersects(&local), "{bar:?}");
+        let screen = Rectangle::with_size(app.o.screens[0].place.size());
+        let hint = long.hint_spot(on.work, bar, false).expect("its hint");
+        assert!(screen.contains(hint), "{hint:?}");
+        // the picture: beside the area on that screen, 1:1 at its scale
+        let (w, h) = (150, 300);
+        let first = Update {
+            height: 600,
+            full: false,
+            lost: false,
+            preview: Some(Crop {
+                width: w,
+                height: h,
+                rgba: vec![200; (w * h * 4) as usize],
+            }),
+        };
+        let _ = app.update(Message::Snip(crate::ui::snip::Msg::Progress(first)));
+        let long = app.scroll().unwrap();
+        let picture = long.picture(on.work, bar).expect("the picture");
+        assert_eq!(picture.size(), Size::new(100.0, 200.0), "1:1 physical");
+        let inside = screen.intersection(&picture) == Some(picture);
+        assert!(inside && !picture.intersects(&local), "{picture:?}");
+        // done: that window is whole again, back to the picked area
+        let _ = app.update(Message::Escape);
+        let none = Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        };
+        let _ = app.update(Message::Snip(crate::ui::snip::Msg::Done(Ok(none))));
+        assert!(app.scroll().is_none() && app.o.edit.is_some());
+    }
+
+    fn near_rect(a: Rectangle, b: Rectangle) -> bool {
+        near(a.position(), b.position())
+            && (a.width - b.width).abs() < 0.01
+            && (a.height - b.height).abs() < 0.01
+    }
+
+    /// An area across two screens is captured on the one holding the larger
+    /// part of it (its part there, where its toolbar docks), never across the
+    /// bezel: whichever side that is.
+    #[test]
+    fn a_long_capture_across_screens_takes_the_larger_part() {
+        let (app, id) = snipped();
+        // more of it on the other screen (260 of 400 px)
+        let area = Rectangle::new(Point::new(500.0, 100.0), Size::new(400.0, 200.0));
+        let on = app.on_area(area);
+        assert_eq!(on.window, id);
+        let (local, region) = app.region_on(on, area).unwrap();
+        assert_eq!(region, (640, 100, 260, 200));
+        let want = Rectangle::new(
+            Point::new(0.0, 100.0 / 1.5),
+            Size::new(260.0 / 1.5, 200.0 / 1.5),
+        );
+        assert!(near_rect(local, want), "{local:?}");
+        // more on the starting screen (340 of 400 px)
+        let area = Rectangle::new(Point::new(300.0, 100.0), Size::new(400.0, 200.0));
+        let on = app.on_area(area);
+        assert_eq!(on.window, app.overlay);
+        let part = Rectangle::new(Point::new(300.0, 100.0), Size::new(340.0, 200.0));
+        assert_eq!(app.region_on(on, area), Some((part, (300, 100, 340, 200))));
+    }
+
+    /// Pins on ANY screen: a pin (still or live) of an area on the other
+    /// screen floats where the area was, in physical desktop px (iced would
+    /// place it at the wrong scale), at that screen's scale, from its frame.
+    #[test]
+    fn a_pin_of_another_screen_floats_where_the_area_was_at_its_scale() {
+        let (app, _) = snipped();
+        let area = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));
+        let (on, region) = app.pin_place(area).expect("on a screen");
+        assert_eq!((region, on.place.scale), ((1000, 150, 900, 600), 1.5));
+        // the live pin's first picture: that screen's own pixels
+        let first = app.crop_of(area).expect("a crop");
+        assert_eq!((first.width, first.height), (900, 600));
+        assert!(runs(&first).iter().all(|r| *r == [(90, 900)]));
+        // the starting screen's: as before
+        let area = Rectangle::new(Point::new(10.0, 20.0), Size::new(100.0, 50.0));
+        let (on, region) = app.pin_place(area).unwrap();
+        assert_eq!((region, on.place.scale), ((10, 20, 100, 50), 1.0));
+    }
+
+    /// The keys after a pick on ANY screen (owner, 2026-11-03): whichever
+    /// window has the focus (the starting screen's, given back after a
+    /// click, or the one the pick is on), arrows move the area, Enter and
+    /// Ctrl+C copy, Ctrl+S saves, Ctrl+Z undoes.
+    #[test]
+    fn the_keys_work_after_a_pick_on_another_screen() {
+        use crate::snip::annotate::Message as E;
+        use crate::ui::kit::testing::shot::{Clip, Focus, chord, feed, named};
+        use iced::keyboard::key::Named;
+        let (mut app, id) = snipped();
+        let area = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));
+        pick(&mut app, area);
+        app.o.bar_now = Some(app.bar_target());
+        for window in [app.overlay, id] {
+            let size = app.on_window(window).place.size();
+            let keys = |events: Vec<iced::Event>| {
+                let mut clip = Clip::default();
+                let view = app.view(window);
+                let (messages, _) = feed(view, size, Focus::Nothing, &events, &mut clip);
+                (messages.into_iter())
+                    .filter_map(|m| match m {
+                        Message::Annotate(E::Shift(_)) => None, // (the modifier changes)
+                        Message::Annotate(e) => Some(e),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let all = [
+                keys(named(Named::ArrowRight, false)),
+                keys(named(Named::Enter, false)),
+                keys(chord('c')),
+                keys(chord('s')),
+                keys(chord('z')),
+            ];
+            let want = [
+                vec![E::Nudge((1, 0), (false, false, false))],
+                vec![E::Copy],
+                vec![E::Copy],
+                vec![E::Save],
+                vec![E::Undo],
+            ];
+            assert_eq!(all, want, "window {window:?}");
+        }
+        // the arrow moves the area there
+        let _ = app.update(Message::Annotate(E::Nudge((1, 0), (false, false, false))));
+        let moved = app.o.selection.expect("picked").area;
+        assert!(moved.x > area.x && moved.x - area.x <= 1.5, "{moved:?}");
+        // and its keys and position show by the area, on that screen (they
+        // showed on the starting screen only)
+        let hinted = |w| shot::texts(app.view(w)).iter().any(|t| t == "Resize");
+        assert!(hinted(id) && !hinted(app.overlay));
     }
 
     /// The main bar's Snip is the same pick on every screen: it picks among

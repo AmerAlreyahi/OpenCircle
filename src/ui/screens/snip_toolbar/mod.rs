@@ -213,10 +213,11 @@ impl SnipToolbar {
         map: fn(annotate::Message) -> M,
         grab: M,
     ) -> Element<'a, M> {
-        let main = lens.k == 1.0 && lens.at == iced::Vector::ZERO;
         let canvas = self.canvas_rect();
         let m = canvas::margin(&self.annotator);
         let at = lens.to_window(canvas.position() - iced::Vector::new(m, m));
+        // the area in this window's px (another screen's: through its lens)
+        let shown = Rectangle::new(lens.to_window(canvas.position()), canvas.size() * lens.k);
         let lens = canvas::ScreenMap {
             origin: self.origin,
             ..lens
@@ -228,9 +229,11 @@ impl SnipToolbar {
             layers = layers.push(pin(Element::from(drawn).map(map)).position(at));
         }
         // Snip moved by the keyboard: its keys above the area, its position
-        // (frame px) in its bottom-right corner, until the pointer is used.
+        // (frame px) in its bottom-right corner, until the pointer is used;
+        // on the screen its toolbar docks on, whichever that is.
         // ponytail: shown until the next press, not the design's 2 s / 800 ms fades.
-        if main && self.annotator.movable && self.annotator.nudged {
+        if toolbar.is_some() && self.annotator.movable && self.annotator.nudged {
+            let canvas = shown;
             let hint = key_hint(&NUDGE_HINT, false);
             let y = (canvas.y - 8.0 - key_hint::HEIGHT).max(8.0);
             let hint = container(hint).center_x(screen.width);

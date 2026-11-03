@@ -60,9 +60,11 @@ pub struct Long {
     /// How it ends (the first finish asked for wins); the thread then hands
     /// over the image.
     pub then: Option<Finish>,
-    /// The area, logical px on the overlay's screen.
+    /// The area, logical px on its screen (the one holding the larger part
+    /// of the picked area), whose window is `window` (`None`: not set yet).
     pub area: Rectangle,
-    /// The overlay's scale: the preview is drawn 1:1 in physical px.
+    pub window: Option<iced::window::Id>,
+    /// That screen's scale: the preview is drawn 1:1 in physical px.
     scale: f32,
     height: u32,
     /// The first frame's height: more = the page was scrolled.
@@ -85,6 +87,7 @@ impl Long {
             stop,
             then: None,
             area,
+            window: None,
             scale,
             height: 0,
             first: None,

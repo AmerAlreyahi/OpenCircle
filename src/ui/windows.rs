@@ -628,25 +628,53 @@ impl Windows {
         }
     }
 
-    /// Pins `crop` (physical px, `scale` per logical px) in its own always-on-top
-    /// window, at `at` (logical desktop px) or centred. Any number can be open.
-    pub fn pin(&mut self, crop: Crop, at: Option<Point>, scale: f32) -> Task<Msg> {
+    /// Pins `crop` (physical px, `scale` per logical px: its monitor's) in its
+    /// own always-on-top window, its top-left at `at` (physical desktop px, on
+    /// any monitor) or centred. Any number can be open.
+    pub fn pin(&mut self, crop: Crop, at: Option<(i32, i32)>, scale: f32) -> Task<Msg> {
         self.open_pin(crop, at, scale).1
     }
 
-    fn open_pin(&mut self, crop: Crop, at: Option<Point>, scale: f32) -> (window::Id, Task<Msg>) {
-        let base = Size::new(crop.width as f32, crop.height as f32) * (1.0 / scale.max(0.1));
+    fn open_pin(
+        &mut self,
+        crop: Crop,
+        at: Option<(i32, i32)>,
+        scale: f32,
+    ) -> (window::Id, Task<Msg>) {
+        let scale = scale.max(0.1);
+        let base = Size::new(crop.width as f32, crop.height as f32) * (1.0 / scale);
         let zoom = fit_zoom(base);
+        let px = |v: f32| (v * scale).round() as u32;
+        let place = at.map(|origin| platform::monitor::Place {
+            origin,
+            px: (px(base.width * zoom), px(base.height * zoom)),
+            scale,
+        });
         let (id, open) = floating(
             window::Settings {
                 size: base * zoom,
-                position: at.map_or(Position::Centered, Position::Specific),
+                position: place.map_or(Position::Centered, |p| {
+                    Position::Specific(p.logical_origin())
+                }),
+                // placed first, then faded in (below)
+                visible: place.is_none(),
                 resizable: false,
                 ..window::Settings::default()
             },
             0.0, // a picture: square
             POPUP,
         );
+        // At its exact place in physical px before it shows: iced places a new
+        // window in logical px at the scale of the monitor it opens on, not the
+        // one it goes to (#149; a pin of another screen at another scale).
+        let open = match place {
+            Some(place) => open
+                .then(move |id| {
+                    platform::monitor::place_window::<()>(id, place).chain(appear(id, POPUP))
+                })
+                .discard(),
+            None => open.discard(),
+        };
         crate::log!("[opencircle] pinned {}x{}", crop.width, crop.height);
         self.pins.push(Pin {
             id,
@@ -657,7 +685,7 @@ impl Windows {
             dragged: None,
             live: None,
         });
-        (id, open.discard())
+        (id, open)
     }
 
     /// Live pins open now.
@@ -674,7 +702,7 @@ impl Windows {
         source: isize,
         region: crate::capture::window_rect::WinRect,
         first: Crop,
-        at: Option<Point>,
+        at: Option<(i32, i32)>,
         scale: f32,
     ) -> Task<Msg> {
         if self.live_pins() >= MAX_LIVE {
@@ -1441,7 +1469,7 @@ impl Windows {
                         height: h,
                         rgba,
                     };
-                    self.pin(crop, Some(Point::new(200.0, 150.0)), 1.0)
+                    self.pin(crop, Some((200, 150)), 1.0)
                 }
                 Err(e) => {
                     crate::log!("test pin failed: {e}");
@@ -1829,7 +1857,7 @@ mod tests {
     fn several_pins_coexist_and_each_frees_its_image_on_close() {
         let mut windows = Windows::default();
         for n in 0..3 {
-            let at = Point::new(100.0 * n as f32, 50.0);
+            let at = (100 * n as i32, 50);
             let _ = windows.pin(picture(200 + n * 10, 100), Some(at), 1.0);
         }
         let ids = pin_ids(&windows);

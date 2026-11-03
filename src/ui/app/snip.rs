@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use iced::widget::image;
 use iced::window::{self, Mode};
-use iced::{Point, Rectangle, Task, Vector};
+use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self, Crop, Run, copy, save};
 use crate::capture;
@@ -52,9 +52,10 @@ impl App {
                 let Some(long) = snip.scroll.take() else {
                     return Task::none();
                 };
-                // whole again, and in screenshots again
-                let whole = windows::uncut(self.overlay)
-                    .chain(windows::hide_from_capture(self.overlay, false))
+                // whole again, and in screenshots again (its screen's window)
+                let window = long.window.unwrap_or(self.overlay);
+                let whole = windows::uncut(window)
+                    .chain(windows::hide_from_capture(window, false))
                     .map(Message::Windows);
                 // back to the picked area (its editor kept, edits and all),
                 // its toolbar where it was
@@ -399,10 +400,10 @@ impl App {
     }
 
     /// Long capture's news; the small picture over the area (`Long::over_area`)
-    /// is kept in the overlay's hole as it grows.
+    /// is kept in its screen's hole as it grows.
     fn on_progress(&mut self, update: crate::capture::scroll::Update) -> Task<Message> {
-        let (bar, work) = (self.long_bar(), work_area(self.o.screen, self.o.work_inset));
-        let (overlay, scale) = (self.overlay, self.o.scale);
+        let on = self.long_on();
+        let bar = self.long_bar_on(&on);
         let Purpose::Snip(snip) = &mut self.o.purpose else {
             return Task::none();
         };
@@ -410,68 +411,79 @@ impl App {
             return Task::none();
         };
         long.update(update);
-        let picture = long.over_area(work, bar);
+        let picture = long.over_area(on.work, bar);
         if picture == long.cut {
             return Task::none();
         }
         long.cut = picture;
         let keep = [Some(bar).filter(|b| b.intersects(&long.area)), picture];
         windows::hole(
-            overlay,
+            on.window,
             long.area,
             keep.into_iter().flatten().collect(),
-            scale,
+            on.place.scale,
         )
         .map(Message::Windows)
     }
 
-    /// Snip's toolbar during a long capture, as its picture and hint keep
-    /// clear of it (logical px).
-    pub(in crate::ui) fn long_bar(&self) -> Rectangle {
-        let size =
-            (self.o.edit.as_ref()).map_or_else(SnipToolbar::toolbar_size, SnipToolbar::bar_size);
-        Rectangle::new(self.bar_at(), size)
+    /// The screen the running long capture is on (the starting one without one).
+    pub(in crate::ui) fn long_on(&self) -> super::screens::On {
+        let window = self.scroll().and_then(|l| l.window);
+        self.on_window(window.unwrap_or(self.overlay))
     }
 
-    /// Long capture of `area` (its part on this screen): the area is cut out
-    /// of the overlay, so the user scrolls the app under it by hand, and a
-    /// thread grabs and stitches it (`scroll::by_hand`) until Done or Cancel.
-    /// What is grabbed lies inside the hole; only when the toolbar has to sit
-    /// over the area (an area as big as the screen) is the overlay kept out of
-    /// captures (`hide_from_capture`).
+    /// Snip's toolbar during a long capture, as its picture and hint keep
+    /// clear of it: in the logical px of the long capture's screen.
+    pub(in crate::ui) fn long_bar(&self) -> Rectangle {
+        self.long_bar_on(&self.long_on())
+    }
+
+    /// Snip's toolbar in the logical px of the screen `on` (its size there).
+    fn long_bar_on(&self, on: &super::screens::On) -> Rectangle {
+        let size =
+            (self.o.edit.as_ref()).map_or_else(SnipToolbar::toolbar_size, SnipToolbar::bar_size);
+        let at = on.to_local(Rectangle::new(self.bar_at(), Size::ZERO));
+        Rectangle::new(at.position(), size)
+    }
+
+    /// Long capture of `area` (its part on the screen holding the larger part
+    /// of it, `on_area`; any screen, any scale): the area is cut out of that
+    /// screen's window, so the user scrolls the app under it by hand, and a
+    /// thread grabs and stitches it (`scroll::by_hand`: that monitor's
+    /// duplication, the wheel paced there) until Done or Cancel. Its picture,
+    /// hint and note are drawn there too. What is grabbed lies inside the hole;
+    /// only when the toolbar has to sit over the area (an area as big as the
+    /// screen) is the window kept out of captures (`hide_from_capture`).
     pub(in crate::ui) fn start_scroll(&mut self, area: Rectangle) -> Task<Message> {
-        let (Some(region), Some(area)) = (
-            self.screen_region(area),
-            area.intersection(&Rectangle::with_size(self.o.screen)),
-        ) else {
+        let on = self.on_area(area);
+        let Some((area, region)) = self.region_on(on, area) else {
             return Task::none();
         };
         // the toolbar stays where it is, but off the area where it fits
-        // beside it: over the area the overlay must be kept out of the grabs
-        let mut bar = self.long_bar();
-        let work = work_area(self.o.screen, self.o.work_inset);
+        // beside it: over the area the window must be kept out of the grabs
+        let mut bar = self.long_bar_on(&on);
+        let work = on.work;
         let mut bar_was = None;
         if bar.intersects(&area)
             && let Some(at) = long_capture::bar_beside(area, work, bar.size())
         {
             bar_was = Some(self.o.bar_left);
-            (self.o.bar_left, self.o.bar_now) = (Some(at), None);
+            (self.o.bar_left, self.o.bar_now) = (Some(on.to_start(at)), None);
             bar = Rectangle::new(at, bar.size());
         }
-        let o = &*self.o;
-        let room = long_capture::room(area, work, bar, o.scale);
+        let scale = on.place.scale;
+        let room = long_capture::room(area, work, bar, scale);
         let preview = room.map_or((0, 0), |r| {
-            let px = |v: f32| (v * o.scale).round() as u32;
+            let px = |v: f32| (v * scale).round() as u32;
             (px(r.width), px(r.height))
         });
-        let (overlay, scale) = (self.overlay, o.scale);
         let o = &mut *self.o;
         let Purpose::Snip(snip) = &mut o.purpose else {
             return Task::none();
         };
         let stop = Arc::new(AtomicBool::new(false));
         let mut long = long_capture::Long::new(area, stop.clone(), scale);
-        long.bar_was = bar_was;
+        (long.bar_was, long.window) = (bar_was, Some(on.window));
         snip.scroll = Some(long);
         if let Some(edit) = &mut o.edit {
             edit.annotator.capturing = true;
@@ -496,17 +508,20 @@ impl App {
         let keep = Some(bar).filter(|bar| bar.intersects(&area));
         let over = keep.is_some() || room.is_some_and(|r| r.intersects(&area));
         crate::log!(
-            "[opencircle] long capture: toolbar {}",
+            "[opencircle] long capture of {region:?} on the screen at {:?} ({}x): toolbar {}",
+            on.place.origin,
+            scale,
             match (keep.is_some(), bar_was.is_some()) {
                 (true, _) => "over the area (kept out of captures)",
                 (false, true) => "moved beside the area",
                 (false, false) => "beside the area",
             }
         );
-        let cut = windows::hide_from_capture(overlay, over)
-            .chain(windows::no_backdrop(overlay))
+        let window = on.window;
+        let cut = windows::hide_from_capture(window, over)
+            .chain(windows::no_backdrop(window))
             .chain(windows::hole(
-                overlay,
+                window,
                 area,
                 keep.into_iter().collect(),
                 scale,

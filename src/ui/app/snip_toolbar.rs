@@ -1,7 +1,7 @@
 //! The Snip toolbar on a capture: opening it, its messages, the bar swap.
 
+use iced::Task;
 use iced::widget::image;
-use iced::{Task, Vector};
 
 use crate::actions::{self, Crop, copy, save};
 use crate::snip::annotate::{self, Image, Output};
@@ -181,13 +181,13 @@ impl App {
         }
     }
 
-    /// Pin: the overlay closes and the image floats where the selection was.
+    /// Pin: the overlay closes and the image floats where the selection was,
+    /// on whichever screen holds the larger part of it (at that screen's scale).
     pub(in crate::ui) fn pin(&mut self, crop: Crop) -> Task<Message> {
-        let at = (self.o.selection).map(|s| self.o.origin + Vector::new(s.area.x, s.area.y));
-        let pinned = self
-            .windows
-            .pin(crop, at, self.o.scale)
-            .map(Message::Windows);
+        let place = (self.o.selection).and_then(|s| self.pin_place(s.area));
+        let at = place.map(|(_, (x, y, ..))| (x, y));
+        let scale = place.map_or(self.o.scale, |(on, _)| on.place.scale);
+        let pinned = self.windows.pin(crop, at, scale).map(Message::Windows);
         Task::batch([self.close(), pinned])
     }
 
@@ -216,30 +216,34 @@ impl App {
 
     /// Live pin (Snip, Labs Pins): the overlay closes and `area`'s part of the
     /// window under it floats where it was, kept updating (`Windows::live_pin`).
+    /// Any screen: its part on the screen holding the larger part of it, from
+    /// that screen's own frozen pixels, at that screen's scale.
     pub(in crate::ui) fn live_pin(&mut self, area: iced::Rectangle) -> Task<Message> {
-        let o = &*self.o;
-        let window = match &o.purpose {
+        let window = match &self.o.purpose {
             Purpose::Snip(snip) => snip.window_under(area),
             _ => None,
         };
-        let first = match &o.frame {
-            Some(image::Handle::Rgba {
-                width,
-                height,
-                pixels,
-                ..
-            }) => actions::crop(pixels, *width, *height, o.scale, area),
-            _ => None,
-        };
-        let (Some(window), Some(first), Some(region)) = (window, first, self.screen_region(area))
-        else {
+        let place = self.pin_place(area);
+        let part = place.and_then(|(on, _)| area.intersection(&self.monitor_of(&on)));
+        let first = part.and_then(|part| self.crop_of(part));
+        let (Some(window), Some(first), Some((on, region))) = (window, first, place) else {
             return self.close();
         };
-        let at = o.origin + Vector::new(area.x, area.y);
+        let at = Some((region.0, region.1));
         let pinned = (self.windows)
-            .live_pin(window, region, first, Some(at), o.scale)
+            .live_pin(window, region, first, at, on.place.scale)
             .map(Message::Windows);
         Task::batch([self.close(), pinned])
+    }
+
+    /// Where a pin of `area` (image px) goes: the screen holding the larger
+    /// part of it and that part in physical desktop px.
+    pub(in crate::ui) fn pin_place(
+        &self,
+        area: iced::Rectangle,
+    ) -> Option<(super::screens::On, crate::capture::window_rect::WinRect)> {
+        let on = self.on_area(area);
+        self.region_on(on, area).map(|(_, region)| (on, region))
     }
 
     /// The running long capture.

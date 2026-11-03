@@ -52,6 +52,18 @@ impl App {
         }
     }
 
+    /// The running long capture's outline, picture, hint and note, drawn by
+    /// the window of the screen it runs on (`window` is that one).
+    pub(in crate::ui) fn long_view(&self, window: window::Id) -> Option<Element<'_, Message>> {
+        let long = self.scroll()?;
+        let on = self.long_on();
+        (long.window.unwrap_or(self.overlay) == window).then(|| {
+            let look = crate::ui::theme::accent_of(&config::look());
+            let bar = self.long_bar();
+            long.view(on.work, bar, look, false).map(Message::Snip)
+        })
+    }
+
     pub(in crate::ui) fn view(&self, window: window::Id) -> Element<'_, Message> {
         if let Some(page) = self.windows.view(window) {
             return page.map(Message::Windows);
@@ -195,16 +207,9 @@ impl App {
                 let here = self.toolbar_on().is_none_or(|w| w == self.overlay);
                 let toolbar = (self.swapped() >= 1.0 && here).then_some(at);
                 // long capture: its outline, picture and hint under the toolbar
-                if let Some(long) = snip.and_then(|s| s.scroll.as_ref()) {
-                    let look = crate::ui::theme::accent_of(&config::look());
-                    let bar = self.long_bar();
-                    let shown = long.view(
-                        super::work_area(self.o.screen, self.o.work_inset),
-                        bar,
-                        look,
-                        false,
-                    );
-                    layers = layers.push(shown.map(Message::Snip));
+                // (on its own screen's window)
+                if let Some(shown) = self.long_view(self.overlay) {
+                    layers = layers.push(shown);
                 }
                 layers = layers.push(edit.view(
                     self.o.screen,
