@@ -322,7 +322,8 @@ fn run(
 /// log line per frame stitched (what the stitcher decided and how long it
 /// took); `OPENCIRCLE_LONG_DUMP=<folder>` = every such frame saved there as
 /// a PNG too (a replay fixture's source, `stitch::replay`). Captures stay on
-/// this PC, in the folder the user named, and nowhere else.
+/// this PC, in the folder the user named, and nowhere else: only an absolute
+/// path counts (empty or relative is ignored), and the log says it is on.
 struct Debug {
     log: bool,
     dump: Option<std::path::PathBuf>,
@@ -331,9 +332,16 @@ struct Debug {
 
 impl Debug {
     fn from_env(st: &Stitcher) -> Debug {
+        let dump = dump_dir(std::env::var_os("OPENCIRCLE_LONG_DUMP"));
+        if let Some(dir) = &dump {
+            crate::log!(
+                "[opencircle] long capture: saving frames to {}",
+                dir.display()
+            );
+        }
         Debug {
             log: std::env::var_os("OPENCIRCLE_LONG_LOG").is_some(),
-            dump: std::env::var_os("OPENCIRCLE_LONG_DUMP").map(Into::into),
+            dump,
             size: st.size(),
         }
     }
@@ -354,6 +362,14 @@ impl Debug {
             }
         }
     }
+}
+
+/// `OPENCIRCLE_LONG_DUMP`'s folder: an absolute path only (empty would be the
+/// working folder, a relative one depends on it).
+fn dump_dir(value: Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
+    value
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
 }
 
 /// Time since the user's last keyboard or mouse input (any app). Elsewhere
@@ -415,6 +431,15 @@ mod tests {
     use super::super::stitch::MAX_HEIGHT;
     use super::super::stitch::synth::Rig;
     use super::*;
+
+    #[test]
+    fn frames_are_dumped_only_to_an_absolute_folder() {
+        assert_eq!(dump_dir(None), None);
+        assert_eq!(dump_dir(Some("".into())), None, "not the working folder");
+        assert_eq!(dump_dir(Some("frames".into())), None, "relative");
+        let abs = std::env::temp_dir().join("frames");
+        assert_eq!(dump_dir(Some(abs.clone().into())), Some(abs));
+    }
 
     /// Runs the loop over the frames at scroll positions `at` (one per grab;
     /// the run stops after the last, or after twice as many rounds), the
