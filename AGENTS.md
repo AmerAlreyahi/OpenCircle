@@ -567,6 +567,9 @@ production systems.
   renamed or reshaped, its code is renamed in the same change (no leftover old names like "edit" for Snip or "board"
   for the Steps strip). Frozen contracts keep their spelling (CLI, config keys, update channel): map them at the edge.
 
+- Snip shortcut (owner, 2026-11-03): default Alt+A (a common screenshot key; Print Screen stays Windows'); one Snip
+  shortcut only: the old window / full-screen snip entries are never shown nor bound (no invisible shortcuts); an older
+  file's default Print Screen moves to Alt+A once (schema 8), a user's own key stays.
 - Clean before every release (owner, 2026-11-03, from 0.1.3 on): the LAST step before a release, then the security
   check: remove every dead or old config key, code path, test, asset, script and tool we no longer use AND won't use
   (things waiting for a planned feature, e.g. glass in 0.1.4, stay). Old config keys: still read without a warning
