@@ -268,10 +268,7 @@ impl Config {
             c.labs.live = get(t, p, "live", d.live, &mut w);
         }
         // Schema 6: "copy" (copy and close, a toast) is gone; a pick always shows
-        // the Snip toolbar, so it is "both" (copy when picked, plus the toolbar).
-        if file_version < Some(6) && c.snip.after == SnipAfter::Copy {
-            c.snip.after = SnipAfter::Both;
-        }
+        // the Snip toolbar, so it reads as "both" (`SnipAfter`'s alias).
         // Schema 7: Copy and Save keep the original size by default; the old
         // default (1568) moves to Original once, any other choice stays.
         if file_version < Some(7) && c.snip.max_edge == 1568 {

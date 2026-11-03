@@ -68,7 +68,7 @@
 //! [update]
 //! auto = true                       # keep OpenCircle up to date (unset = not asked yet: off)
 //! [snip]
-//! after = "copy"                    # after a capture: copy | editor | both
+//! after = "both"                    # both (copy when picked) | editor; an old "copy" reads as both
 //! max_edge = 0                      # Copy / Save scale the long edge down to this; 0 = original (default)
 //! format = "png"                    # Save writes png | jpeg (quality 85)
 //! save_original = false             # Save ignores max_edge
@@ -383,12 +383,12 @@ pub struct TranslateConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SnipAfter {
-    /// Retired (schema 6): read as `Both`, migrated to it.
-    Copy,
     /// Picked with the Snip toolbar, not copied until the user does.
     Editor,
-    /// Picked with the Snip toolbar and already copied (the default).
+    /// Picked with the Snip toolbar and already copied (the default). The
+    /// retired "copy" (copy and close, schema 6) reads as this.
     #[default]
+    #[serde(alias = "copy")]
     Both,
 }
 
@@ -2411,9 +2411,9 @@ mod tests {
                 let _ = std::fs::remove_dir_all(dir);
             }
         }
-        // a v6 file is never moved; a stored "copy" there still acts as "both"
-        let (c, _) = Config::parse("version = 9\n[snip]\nafter = \"copy\"\n");
-        assert_eq!(c.snip.after, SnipAfter::Copy);
+        // a stored "copy" in a newer file reads as "both" too, without a warning
+        let (c, w) = Config::parse("version = 9\n[snip]\nafter = \"copy\"\n");
+        assert_eq!((c.snip.after, w), (SnipAfter::Both, vec![]));
     }
 
     fn fs_text(path: &Path) -> String {
