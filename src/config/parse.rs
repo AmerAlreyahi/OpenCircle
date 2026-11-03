@@ -261,8 +261,7 @@ impl Config {
         }
         if let Some(t) = section(&root, "labs", &mut w) {
             let (p, d) = ("labs.", d.labs);
-            c.labs.snip = get(t, p, "snip", d.snip, &mut w);
-            c.labs.editor = get(t, p, "editor", d.editor, &mut w);
+            // `snip` / `editor` (Snip's switches until 0.1.2) are ignored since schema 9.
             c.labs.song = get(t, p, "song", d.song, &mut w);
             c.labs.history = get(t, p, "history", d.history, &mut w);
             c.labs.pins = get(t, p, "pins", d.pins, &mut w);
@@ -280,6 +279,11 @@ impl Config {
         }
         if let Some(v) = root.get("quick_actions") {
             c.quick_actions = parse_quick_actions(v, &mut w);
+            // Schema 9: Snip has one shortcut (owner, 2026-10-31); the window and
+            // full-screen snip entries (never shown nor bound since) are dropped.
+            c.quick_actions.retain(|q| {
+                !(q.action == "snip" && matches!(q.target, Target::Window | Target::FullScreen))
+            });
             // Schema 8: Snip's old default key (Print Screen) moves to Alt+A, once,
             // unless Alt+A is already someone's; a user's own key stays.
             let taken = |k: &str| {

@@ -1456,8 +1456,7 @@ fn snip_shortcuts_are_listed_and_editable() {
     let (mut s, _) = state(None);
     s.draft.labs = Labs::all_on();
     update(&mut s, Message::Section(Section::Shortcuts));
-    // Snip is one feature (owner, 2026-10-31): ONE row; the window and
-    // full-screen entries stay in the file, unseen.
+    // Snip is one feature (owner, 2026-10-31): ONE row.
     let texts = shot::texts(view(&s));
     // (the sidebar's page and the one row)
     assert_eq!(
@@ -1482,11 +1481,6 @@ fn snip_shortcuts_are_listed_and_editable() {
         s.draft.quick_actions[i].shortcut, "Alt+A",
         "the default key"
     );
-    for (target, key) in [(Target::Window, ""), (Target::FullScreen, "")] {
-        let kept = (s.draft.quick_actions.iter())
-            .any(|q| q.action == "snip" && q.target == target && q.shortcut == key);
-        assert!(kept, "{key}: kept in the file (it pre-picks), unseen");
-    }
     update(&mut s, Message::Record(Slot::Quick(i)));
     press(&mut s, chord(false, false, "F8"));
     assert_eq!(s.draft.quick_actions[i].shortcut, "F8");
@@ -1509,11 +1503,6 @@ fn snip_shortcuts_are_listed_and_editable() {
         assert_eq!(s.draft.quick_actions[i].shortcut, want);
         assert!(s.problems.is_empty(), "{want}: {:?}", s.problems);
     }
-    // the unseen window snip gave Alt+Print Screen up to the Snip row
-    let window = (s.draft.quick_actions.iter())
-        .find(|q| q.action == "snip" && q.target == Target::Window)
-        .unwrap();
-    assert_eq!(window.shortcut, "", "one key, one job");
     // each key still does one job
     update(&mut s, Message::Record(Slot::Quick(i)));
     press(&mut s, chord(true, true, "Space"));

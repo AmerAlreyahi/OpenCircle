@@ -1,9 +1,9 @@
 //! The one config reader/validator: `<user config dir>/opencircle/config.toml`.
 //!
-//! Schema (version 4). Every key is optional; a missing file means defaults.
+//! Schema (version 9). Every key is optional; a missing file means defaults.
 //!
 //! ```toml
-//! version = 4                       # schema version, written by save()
+//! version = 9                       # schema version, written by save()
 //! theme = "system"                  # system | light | dark
 //! widget_theme = "default"          # floating widgets (bar, cards, toolbar): default | frost | graphite
 //! glass_effect = true               # frost / graphite blur the screen behind them (false = solid tint)
@@ -95,8 +95,6 @@
 //! group_tools = ["select", "arrow", "pen", "text", "blur"]  # each toolbar group's last tool
 //!
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
-//! snip = false                      # until 0.1.2 Snip's switch; read and written, ignored since
-//! editor = false                    # 0.1.3 (Snip and its editor are on for everyone)
 //! song = false                      # song search
 //! history = false                   # the local search history
 //! pins = false                      # pinning a capture to the screen
@@ -107,7 +105,6 @@
 //! shortcut = "Ctrl+Shift+T"         # "" = not bound
 //! target = "full_screen"            # full_screen | circle | last_region | window
 //! live = false                      # optional: repeat while shown
-//!                                   # (snip: circle = region, window, full_screen)
 //! ```
 //!
 //! Rules: an invalid value gives a warning plus that field's default, never a
@@ -126,7 +123,9 @@
 //! moves from the old default "copy" to it (a Snip user's value stays); 6 retires "copy" (copy and
 //! close): every "copy" becomes "both", so `snip.after` is one switch, "Copy when picked"
 //! ("editor" = no auto copy; "both" = copy; a stored "copy" still reads as "both"); 7 moves the old default `snip.max_edge` 1568 to 0 (Original; any other value stays); 8 moves Snip's old default
-//! shortcut PrintScreen to Alt+A (unless Alt+A is taken; a user's own key stays). A file older than `VERSION` is copied to
+//! shortcut PrintScreen to Alt+A (unless Alt+A is taken; a user's own key stays); 9 drops retired keys on the
+//! next save (still read without a warning): `[labs] snip` / `editor` and the window / full-screen snip
+//! entries of `[[quick_actions]]` (Snip has one shortcut). A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -151,7 +150,7 @@ pub use store::{appearance, current, look, look_config, rebase, set_current, upd
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
@@ -353,15 +352,6 @@ pub struct QuickAction {
     pub target: Target,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub live: bool,
-}
-
-impl QuickAction {
-    /// Snip is one feature with one shortcut row (owner, 2026-10-31): the old
-    /// window and full-screen snip entries stay in the file but are never shown
-    /// nor bound (owner, 2026-11-03: no invisible shortcuts).
-    pub fn is_hidden_snip(&self) -> bool {
-        self.action == "snip" && matches!(self.target, Target::Window | Target::FullScreen)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -958,11 +948,8 @@ impl Default for Config {
                 qa("copy_text", "Ctrl+Shift+X", Target::Circle, false),
                 qa("lens", "", Target::Circle, false),
                 // Snip: one shortcut, a common screenshot key that leaves Print
-                // Screen to Windows (owner, 2026-11-03); the window and
-                // full-screen entries are kept unbound (`is_hidden_snip`).
+                // Screen to Windows (owner, 2026-11-03).
                 qa("snip", "Alt+A", Target::Circle, false),
-                qa("snip", "", Target::Window, false),
-                qa("snip", "", Target::FullScreen, false),
                 // Opt-in (needs the user's key): no key bound by default.
                 qa("song_search", "", Target::FullScreen, false),
             ],
@@ -1147,7 +1134,6 @@ mod tests {
             [
                 ("translate", "Ctrl+Shift+T"),
                 ("snip", "Alt+A"),
-                ("snip", "Ctrl+Shift+S"),
                 ("song_search", "Ctrl+Shift+M"),
             ]
         );
@@ -1164,7 +1150,7 @@ mod tests {
         // The file is the new schema now, with every old value and the Labs switches.
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 8") && text.contains("[labs]"),
+            text.contains("version = 9") && text.contains("[labs]"),
             "{text}"
         );
         let (again, w) = Config::load_from(&path);
@@ -1201,13 +1187,13 @@ mod tests {
 
     #[test]
     fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-        let (dir, path) = config_with("current", "version = 8\n[labs]\nsong = true\n");
+        let (dir, path) = config_with("current", "version = 9\n[labs]\nsong = true\n");
         let (c, w) = Config::load_from(&path);
-        assert!(w.is_empty() && c.labs.song && !c.labs.snip, "{w:?}");
+        assert!(w.is_empty() && c.labs.song, "{w:?}");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "version = 8\n[labs]\nsong = true\n"
+            "version = 9\n[labs]\nsong = true\n"
         );
         let gone = dir.join("none.toml");
         Config::load_from(&gone);
@@ -1275,7 +1261,6 @@ mod tests {
     #[test]
     fn labs_switches_round_trip_and_keep_the_hidden_features_settings() {
         let (mut c, _) = Config::parse(V010_USED);
-        c.labs.snip = true;
         c.labs.pins = true;
         let dir = tmp_dir("labs-roundtrip");
         let path = dir.join("config.toml");
@@ -1283,19 +1268,18 @@ mod tests {
         let (back, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(back, c);
-        assert!(back.labs.snip && back.labs.pins && !back.labs.song);
+        assert!(back.labs.pins && !back.labs.song);
         let _ = std::fs::remove_dir_all(dir);
-        let (c, w) = Config::parse("version = 2\n[labs]\nsnip = \"yes\"\n");
+        let (c, w) = Config::parse("version = 2\n[labs]\nsong = \"yes\"\n");
         assert!(
-            !c.labs.snip && w.iter().any(|w| w.starts_with("labs.snip")),
+            !c.labs.song && w.iter().any(|w| w.starts_with("labs.song")),
             "{w:?}"
         );
     }
 
     /// N-41: a v0.1.2 file (schema 4, Snip a Labs switch) loads as it is:
     /// Snip works whatever `[labs] snip` / `editor` say, the user's snip
-    /// choices are kept, and a save writes those two keys back unchanged (an
-    /// older OpenCircle reads them).
+    /// choices are kept, and a save drops those two keys (schema 9).
     #[test]
     fn a_v0_1_2_file_keeps_its_snip_settings_and_snip_is_on_whatever_labs_says() {
         for (snip, editor) in [(false, false), (true, true), (true, false)] {
@@ -1320,8 +1304,7 @@ mod tests {
             }
             c.save_to(&path).unwrap();
             let saved: Table = fs_text(&path).parse().unwrap();
-            assert_eq!(saved["labs"]["snip"].as_bool(), Some(snip));
-            assert_eq!(saved["labs"]["editor"].as_bool(), Some(editor));
+            assert!(saved["labs"].get("snip").is_none() && saved["labs"].get("editor").is_none());
             assert!(
                 saved["snip"].get("long_max").is_none(),
                 "default: not written"
@@ -1412,13 +1395,13 @@ mod tests {
     #[test]
     fn defaults_match_design() {
         let c = Config::default();
-        assert_eq!(c.version, 8);
+        assert_eq!(c.version, 9);
         assert_eq!(c.labs, Labs::default(), "Labs: everything off");
         assert_eq!(c.theme, Theme::System);
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
         assert_eq!(c.translate.target, "ar");
         assert_eq!(c.ai.provider, Provider::Browser);
-        assert_eq!(c.quick_actions.len(), 9);
+        assert_eq!(c.quick_actions.len(), 7);
         // Song search: unbound, history off.
         let song = c.quick_actions.last().unwrap();
         assert_eq!(
@@ -1432,21 +1415,14 @@ mod tests {
         assert_eq!(c.general.save_folder, "");
         assert_eq!(c.translate.live_interval_ms, 1500);
         assert_eq!(c.translate.engine, Engine::Offline);
-        // Snip: Alt+A is the one shortcut; the window / full-screen entries stay unbound.
+        // Snip: Alt+A, its one shortcut.
         let snip: Vec<_> = c
             .quick_actions
             .iter()
             .filter(|q| q.action == "snip")
             .map(|q| (q.shortcut.as_str(), q.target))
             .collect();
-        assert_eq!(
-            snip,
-            [
-                ("Alt+A", Target::Circle),
-                ("", Target::Window),
-                ("", Target::FullScreen),
-            ]
-        );
+        assert_eq!(snip, [("Alt+A", Target::Circle)]);
         // Every default shortcut is valid and unique.
         let (c2, warnings) = Config::parse("");
         assert_eq!(c2, c);
@@ -1813,7 +1789,7 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
             let text = std::fs::read_to_string(&path).unwrap();
             assert!(
-                text.contains("version = 8") && text.contains("after = \"wait\""),
+                text.contains("version = 9") && text.contains("after = \"wait\""),
                 "{text}"
             );
             assert!(!text.contains("[results]"), "{text}");
@@ -2052,7 +2028,7 @@ mod tests {
         assert_eq!(c, Config::unreadable());
         assert_eq!(w.len(), 1);
         assert!(w[0].contains("AI is off"), "{w:?}");
-        let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 9\n");
+        let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 10\n");
         assert_eq!(c, Config::unreadable());
         assert_eq!(w.len(), 3, "{w:?}");
         assert!(
@@ -2148,15 +2124,73 @@ mod tests {
         std::fs::read_to_string(dir.join(name)).unwrap()
     }
 
-    /// The default file is byte-for-byte the frozen v8 one (the file format is frozen).
+    /// The default file is byte-for-byte the frozen v9 one (the file format is frozen).
     #[test]
     fn the_default_file_is_byte_for_byte_the_frozen_one() {
         let dir = tmp_dir("default-bytes");
         let path = dir.join("config.toml");
         Config::default().save_to(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(written, fixture("default-v8.toml"));
+        assert_eq!(written, fixture("default-v9.toml"));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Schema 9 (the clean-up before 0.1.3): every older file, v1 to v8, loads
+    /// without a warning and acts the same; the next save (a backup first) drops
+    /// the retired keys: `[labs] snip` / `editor`, the window / full-screen snip
+    /// entries and the old `[results]`.
+    #[test]
+    fn older_files_load_quietly_and_schema_9_drops_the_retired_keys() {
+        let v2 = V010_USED.replace("version = 1", "version = 2");
+        let labs_on = fixture("default-v4.toml").replace(
+            "[labs]\nsnip = false\neditor = false",
+            "[labs]\nsnip = true\neditor = true",
+        );
+        let mut files = vec![
+            (1, V010_DEFAULT.to_string()),
+            (1, V010_USED.to_string()),
+            (2, v2),
+            (4, labs_on),
+        ];
+        files.extend((3..=8).map(|n| (n, fixture(&format!("default-v{n}.toml")))));
+        let snip_entries = |q: &[QuickAction]| {
+            (q.iter().filter(|q| q.action == "snip"))
+                .map(|q| q.target)
+                .collect::<Vec<_>>()
+        };
+        for (i, (n, text)) in files.iter().enumerate() {
+            let (dir, path) = config_with(&format!("schema9-{i}"), text);
+            let (c, w) = Config::load_from(&path);
+            assert!(w.is_empty(), "v{n}: {w:?}");
+            assert_eq!(&fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
+            // Same behaviour: what was read is what the rewritten file reads back.
+            let (again, w) = Config::load_from(&path);
+            assert!(w.is_empty(), "v{n}: {w:?}");
+            assert_eq!(again, c, "v{n}");
+            assert_eq!(c, Config::parse(text).0, "v{n}");
+            let saved: Table = fs_text(&path).parse().unwrap();
+            assert_eq!(saved["version"].as_integer(), Some(9));
+            let labs = saved["labs"].as_table().unwrap();
+            assert!(
+                !labs.contains_key("snip") && !labs.contains_key("editor"),
+                "v{n}"
+            );
+            assert!(!saved.contains_key("results"), "v{n}");
+            assert!(
+                snip_entries(&c.quick_actions)
+                    .iter()
+                    .all(|t| *t == Target::Circle)
+            );
+        }
+        // v8's default file is today's default.
+        assert_eq!(
+            Config::parse(&fixture("default-v8.toml")),
+            (Config::default(), vec![])
+        );
+        assert_eq!(
+            snip_entries(&Config::default().quick_actions),
+            [Target::Circle]
+        );
     }
 
     /// Additive only: every key of the frozen v3 default file is still written, so
@@ -2198,35 +2232,19 @@ mod tests {
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
         // (schema 7 moves the old default 1568 px to Original; schema 8 moves Snip to
-        // Alt+A; the hidden window / full-screen entries keep their old keys, unbound;
-        // its explicit theme = "spectrum" stays the user's: only a new file gets Sapphire Glow)
+        // Alt+A; schema 9 drops the window / full-screen snip entries; its explicit
+        // theme = "spectrum" stays the user's: only a new file gets Sapphire Glow)
         let mut want = Config::default();
         want.look.theme = LookTheme::Spectrum;
-        for q in want.quick_actions.iter_mut().filter(|q| q.is_hidden_snip()) {
-            q.shortcut = match q.target {
-                Target::Window => "Alt+PrintScreen",
-                _ => "Ctrl+PrintScreen",
-            }
-            .into();
-        }
         assert_eq!(c, want);
-        let frozen = fixture("default-v8.toml")
-            .replace("sapphire_glow", "spectrum")
-            .replace(
-                "\"snip\"\nshortcut = \"\"\ntarget = \"window\"",
-                "\"snip\"\nshortcut = \"Alt+PrintScreen\"\ntarget = \"window\"",
-            )
-            .replace(
-                "\"snip\"\nshortcut = \"\"\ntarget = \"full_screen\"",
-                "\"snip\"\nshortcut = \"Ctrl+PrintScreen\"\ntarget = \"full_screen\"",
-            );
+        let frozen = fixture("default-v9.toml").replace("sapphire_glow", "spectrum");
         assert_eq!(fs_text(&path), frozen);
         let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Schema 8 (owner, 2026-11-03): Snip's old default Print Screen moves to Alt+A once,
-    /// unless Alt+A is taken; a user's own key stays; the hidden window / full-screen
-    /// entries are never bound.
+    /// unless Alt+A is taken; a user's own key stays; the window / full-screen snip
+    /// entries are dropped (schema 9).
     #[test]
     fn schema_8_moves_snip_off_print_screen() {
         let snip = |c: &Config| {
@@ -2261,8 +2279,8 @@ mod tests {
             entry("Alt+PrintScreen", "window"),
             entry("Ctrl+PrintScreen", "full_screen")
         );
-        let (c, _) = Config::parse(&text);
-        assert!(c.quick_actions.iter().all(|q| q.is_hidden_snip()));
+        let (c, w) = Config::parse(&text);
+        assert!(w.is_empty() && c.quick_actions.is_empty(), "{w:?}");
     }
 
     /// Schema 7: the old default max_edge (1568) moves to Original once, with a backup;
@@ -2344,7 +2362,7 @@ mod tests {
         assert_eq!(look(&fs_text(&path)), look(old));
         let text = fs_text(&path);
         for want in [
-            "version = 8",
+            "version = 9",
             "widget_theme = \"graphite\"",
             "glass_effect = false",
             "theme = \"aurora\"",
@@ -2383,22 +2401,18 @@ mod tests {
                 let (dir, path) = config_with(&format!("v6-{name}-{snip}-{want:?}"), &text);
                 let (c, w) = Config::load_from(&path);
                 assert!(w.is_empty(), "{name}: {w:?}");
-                assert_eq!((c.labs.snip, c.snip.after), (snip, want), "{name}");
+                assert_eq!(c.snip.after, want, "{name} (labs snip {snip})");
                 assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
                 let saved: Table = fs_text(&path).parse().unwrap();
-                assert_eq!(saved["version"].as_integer(), Some(8));
-                assert_eq!(
-                    saved["labs"]["snip"].as_bool(),
-                    Some(snip),
-                    "kept as it was"
-                );
+                assert_eq!(saved["version"].as_integer(), Some(9));
+                assert!(saved["labs"].get("snip").is_none(), "dropped (schema 9)");
                 let (again, _) = Config::load_from(&path);
                 assert_eq!(again.snip.after, want, "migrated once");
                 let _ = std::fs::remove_dir_all(dir);
             }
         }
         // a v6 file is never moved; a stored "copy" there still acts as "both"
-        let (c, _) = Config::parse("version = 8\n[snip]\nafter = \"copy\"\n");
+        let (c, _) = Config::parse("version = 9\n[snip]\nafter = \"copy\"\n");
         assert_eq!(c.snip.after, SnipAfter::Copy);
     }
 

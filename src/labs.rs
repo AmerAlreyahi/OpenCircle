@@ -58,11 +58,6 @@ impl Feature {
 /// `[labs]`: which unfinished features are on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct Labs {
-    /// `snip` / `editor`: the switches Snip and its editor had until 0.1.2. Read
-    /// and written as they are (an older OpenCircle reads them), used for nothing:
-    /// Snip is on for everyone since 0.1.3.
-    pub snip: bool,
-    pub editor: bool,
     pub song: bool,
     pub history: bool,
     pub pins: bool,
@@ -91,8 +86,6 @@ impl Labs {
     /// Every switch on (the ids a shortcut had before it could be hidden).
     pub fn all_on() -> Labs {
         Labs {
-            snip: true,
-            editor: true,
             song: true,
             history: true,
             pins: true,

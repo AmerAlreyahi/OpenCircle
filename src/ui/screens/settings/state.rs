@@ -376,13 +376,9 @@ pub(super) static SOURCES: LazyLock<Vec<Language>> = LazyLock::new(|| {
     std::iter::once(auto).chain(readable).collect()
 });
 
-pub(super) fn action_name(id: &str, live: bool, target: Target) -> String {
+pub(super) fn action_name(id: &str, live: bool) -> String {
     match (id, live) {
-        ("snip", _) => match target {
-            Target::Window => "Snip a window".into(),
-            Target::FullScreen => "Snip the full screen".into(),
-            _ => "Snip".into(),
-        },
+        ("snip", _) => "Snip".into(),
         ("translate", false) => "Translate".into(),
         ("translate", true) => "Translate (live, Beta)".into(),
         ("ai_explain", _) => "Explain with AI".into(),
@@ -413,8 +409,6 @@ pub(super) fn target_name(t: Target) -> &'static str {
 /// The hint under a quick action's name: snip shows what the mode does.
 pub(super) fn quick_hint(q: &crate::config::QuickAction) -> &'static str {
     match (q.action.as_str(), q.target) {
-        ("snip", Target::Window) => "Click a window, then edit it",
-        ("snip", Target::FullScreen) => "The whole screen, then edit it",
         ("snip", _) => "Click a window or drag an area",
         ("song_search", _) => "Listens and names the song (needs a key)",
         ("live_pin", _) => "Pick a part of a window: it floats on top, kept up to date",
@@ -906,7 +900,7 @@ impl State {
             .quick_actions
             .iter()
             .map(|q| {
-                let label = action_name(&q.action, q.live, q.target);
+                let label = action_name(&q.action, q.live);
                 SlotText {
                     hint: quick_hint(q).to_string(),
                     tip: format!("{label} shortcut"),
@@ -1074,9 +1068,7 @@ impl State {
     pub(super) fn slots(&self) -> std::vec::IntoIter<Slot> {
         let labs = &self.draft.labs;
         let quick = self.draft.quick_actions.iter().enumerate();
-        // Snip is one feature (owner, 2026-10-31): one row; the window and
-        // full-screen snips' entries stay in the file, unseen (they still pre-pick).
-        let shown = quick.filter(|(_, q)| crate::labs::quick_on(labs, q) && !q.is_hidden_snip());
+        let shown = quick.filter(|(_, q)| crate::labs::quick_on(labs, q));
         let mut all = vec![Slot::Capture];
         all.extend(shown.map(|(i, _)| Slot::Quick(i)));
         all.into_iter()

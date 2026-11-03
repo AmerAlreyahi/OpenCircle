@@ -134,7 +134,7 @@ fn plan(cfg: &Config) -> (Vec<Binding>, Vec<String>) {
 
     for qa in &cfg.quick_actions {
         // A hidden (Labs) feature has no shortcut; its entry stays in the config.
-        if qa.shortcut.is_empty() || !crate::labs::quick_on(&cfg.labs, qa) || qa.is_hidden_snip() {
+        if qa.shortcut.is_empty() || !crate::labs::quick_on(&cfg.labs, qa) {
             continue;
         }
         let hotkey = match parse_shortcut(&qa.shortcut) {
@@ -646,7 +646,7 @@ mod tests {
     }
 
     /// A user who CHOSE the Print Screen keys: Snip on Print Screen, Lens on Alt+Print
-    /// Screen, song search on Ctrl+Print Screen (the hidden snip entries are never bound).
+    /// Screen, song search on Ctrl+Print Screen.
     fn print_screen_user() -> Config {
         let mut c = all_labs();
         for q in &mut c.quick_actions {
@@ -670,8 +670,7 @@ mod tests {
             off.contains(&"capture".to_string())
                 && off.contains(&"quick-translate-full_screen".to_string())
         );
-        // Snip is out of Labs (N-41): its one key (Alt+A) is there with every switch off;
-        // the hidden window / full-screen entries are never bound.
+        // Snip is out of Labs (N-41): its one key (Alt+A) is there with every switch off.
         assert_eq!(
             off.iter().filter(|i| i.starts_with("quick-snip-")).count(),
             1,
@@ -1067,17 +1066,23 @@ mod tests {
         assert!(!known_action("") && !known_action("rm") && !known_action("Copy"));
     }
 
-    /// No invisible shortcuts (owner, 2026-11-03): the hidden window / full-screen
-    /// snip entries are never bound, whatever key they hold.
+    /// No invisible shortcuts (owner, 2026-11-03): an older file's window /
+    /// full-screen snip entries are dropped on read, so never bound.
     #[test]
     fn hidden_snip_entries_are_never_bound() {
-        let mut c = Config::default();
-        for q in c.quick_actions.iter_mut().filter(|q| q.is_hidden_snip()) {
-            q.shortcut = match q.target {
-                crate::config::Target::Window => "Alt+PrintScreen".into(),
-                _ => "Ctrl+PrintScreen".into(),
-            };
-        }
+        let entry = |key: &str, target: &str| {
+            format!(
+                "[[quick_actions]]\naction = \"snip\"\nshortcut = \"{key}\"\ntarget = \"{target}\"\n"
+            )
+        };
+        let text = format!(
+            "version = 8\n{}{}{}",
+            entry("Alt+A", "circle"),
+            entry("Alt+PrintScreen", "window"),
+            entry("Ctrl+PrintScreen", "full_screen")
+        );
+        let (c, w) = Config::parse(&text);
+        assert!(w.is_empty(), "{w:?}");
         let (bound, _) = plan(&c);
         assert!(!bound.iter().any(|b| b.shortcut.contains("PrintScreen")));
         assert!(bound.iter().any(|b| b.shortcut == "Alt+A"));

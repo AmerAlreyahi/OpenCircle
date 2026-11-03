@@ -919,8 +919,7 @@ mod tests {
         ] {
             assert_eq!(Kind::for_target(target), kind, "{target:?}");
         }
-        // The default config: Alt+A is the one bound entry (Region); the hidden window /
-        // full-screen entries stay unbound but still start in their own mode.
+        // The default config: Alt+A is the one snip entry (Region).
         let by_target = |target: Target| {
             let q = (crate::config::Config::default().quick_actions.into_iter())
                 .find(|q| q.action == "snip" && q.target == target)
@@ -928,8 +927,6 @@ mod tests {
             (q.shortcut, Kind::for_target(q.target))
         };
         assert_eq!(by_target(Target::Circle), ("Alt+A".into(), Kind::Region));
-        assert_eq!(by_target(Target::Window), (String::new(), Kind::Window));
-        assert_eq!(by_target(Target::FullScreen), (String::new(), Kind::Full));
 
         // One flow: a window snip is the pick step with the user's window
         // already picked; the user's window unknown: the pick step.
