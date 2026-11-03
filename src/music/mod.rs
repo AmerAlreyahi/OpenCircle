@@ -3,7 +3,7 @@
 //!
 //! Audio is captured only while listening, kept in memory, and sent only when
 //! the user pressed the music button (or its quick action). Free fingerprint
-//! lookups can't match a clip (spikes/music), so this needs a service key: AudD
+//! lookups can't match a clip (an early spike showed it), so this needs a service key: AudD
 //! for now (`audd.rs`); another service = one more file + a `Service` variant.
 //! One capture file per platform: `capture_linux.rs` (the default sink's monitor
 //! over the PulseAudio protocol, also PipeWire), `capture_windows.rs` (WASAPI
