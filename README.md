@@ -253,6 +253,13 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
 [MIT](LICENSE)
 
+Media exception: the Translate preview animation
+(`assets/previews/translate.webp`) and its poster are licensed under
+[CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt) (they are based on a Wikipedia
+article); the app code stays MIT. The COFFEE photo in the Text reading clip
+stays under the [Unsplash License](https://unsplash.com/license). The other preview clips show third-party
+material credited in `NOTICE` and in Settings > About.
+
 OpenCircle is an independent project and is not affiliated with or endorsed
 by Google. "Google", "Google Lens" and "Circle to Search" are trademarks of
 Google LLC, used here only to describe the feature OpenCircle is an alternative

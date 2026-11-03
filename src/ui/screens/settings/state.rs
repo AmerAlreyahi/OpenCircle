@@ -606,6 +606,9 @@ pub struct State {
     /// The page's preview clips, by `hidden_previews` name: made at each
     /// visit, dropped with the page (and with Settings).
     pub(super) players: Vec<(&'static str, previews::player::Player)>,
+    /// Which Settings opening this is (`previews::next_opening`): a page
+    /// with several clips takes its turn from it.
+    pub(super) opening: usize,
     /// Windows opens its own screen capture with Print Screen
     /// (`hotkey::windows_snips_print_screen`), read when the window opens and
     /// at each visit of the Snip page.
@@ -950,6 +953,7 @@ impl State {
             picked: None,
             played: None,
             players: Vec::new(),
+            opening: previews::next_opening(),
             print_screen_taken: crate::hotkey::windows_snips_print_screen(),
             kept: None,
             clearing_all: false,
@@ -1202,6 +1206,9 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::CloseKeep
     );
     let out = apply(state, message);
+    if change {
+        state.refresh_clips();
+    }
     if state.auto && change && out == Outcome::None && state.dirty() && state.problems.is_empty() {
         return save(state);
     }
@@ -1687,12 +1694,22 @@ impl State {
         self.played = plays.then(|| Instant::now() - ago);
     }
 
+    /// A setting changed which clip a preview plays (the AI provider): play
+    /// the page's clips again from the start.
+    fn refresh_clips(&mut self) {
+        let stale = previews::clips(self, self.section)
+            .any(|(k, list)| (self.players.iter()).any(|(pk, p)| *pk == k && !p.plays(&list)));
+        if stale {
+            self.play();
+        }
+    }
+
     /// The page's preview clips play from their first frame (reduced motion:
     /// they stay there, and the clock stays off; none: the placeholder).
     fn play(&mut self) {
         let still = motion::reduced();
         self.players = previews::clips(self, self.section)
-            .filter_map(|(key, clip)| Some((key, previews::player::Player::new(clip, still)?)))
+            .filter_map(|(key, list)| Some((key, previews::player::Player::list(list, still)?)))
             .collect();
         let plays = self.players.iter().any(|(_, p)| p.playing());
         self.played = plays.then(Instant::now);

@@ -14,16 +14,20 @@ One animated WebP per feature, in `assets/previews/`:
 
 | File | Page |
 |---|---|
-| `circle.webp` | Look & behaviour (Circle to Search) |
+| `circle-1.webp` (`-2`, `-3`) | Look & behaviour: one clip per Settings opening, in turn |
 | `text.webp` | Text reading |
 | `translate.webp` | Translate |
-| `ai.webp` | AI |
-| `snip.webp` | Snip (Labs) |
+| `ai-chat.webp` | AI, with an AI provider set |
+| `ai-browser.webp` | AI, with Browser |
+| `snip-blur.webp`, `snip-comment.webp`, `snip-long.webp` | Snip: one after another, in a loop |
 | `live.webp` | Translate, Live translate (Labs) |
 | `song.webp` | Song search (Labs) |
 
-A missing file is the placeholder; nothing else changes. After adding or
-replacing a clip, rebuild (the build picks up the folder's changes).
+The build bundles every `.webp` in the folder; a page lists the names it
+wants (`previews::HEROES`) and a missing file is just absent. A page with no
+clip shows no preview at all. Clips with third-party material are credited in
+Settings > About and in NOTICE (`pages::about::CLIP_CREDITS`): add a line there
+with any new clip.
 
 ## Clip spec
 

@@ -54,6 +54,166 @@ pub const NOTICES: [(&str, &str, &str); 11] = [
     ("JetBrains Mono", "JetBrains", "OFL-1.1"),
 ];
 
+/// One preview-clip credit: the clips it covers, its text, and its links
+/// (name, address). It shows only while one of its clips is bundled; the same
+/// credits, with full addresses, are in NOTICE (owner's source list, 2026-11-03).
+pub struct Credit {
+    pub clips: &'static [&'static str],
+    pub text: &'static str,
+    pub links: &'static [(&'static str, &'static str)],
+}
+
+const CC0: (&str, &str) = (
+    "CC0 1.0",
+    "https://creativecommons.org/publicdomain/zero/1.0/",
+);
+const CC_BY: (&str, &str) = ("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/");
+const CC_BY_SA: (&str, &str) = (
+    "CC BY-SA 4.0",
+    "https://creativecommons.org/licenses/by-sa/4.0/",
+);
+
+pub const CLIP_CREDITS: [Credit; 9] = [
+    Credit {
+        clips: &["circle-1"],
+        text: "Succulent photograph: José Gabriel Jara Porras, WordPress Photo Directory, \
+               CC0 1.0. Cropped and shown in an edited OpenCircle screen recording.",
+        links: &[
+            ("Photo", "https://wordpress.org/photos/photo/4569e13887/"),
+            CC0,
+        ],
+    },
+    Credit {
+        clips: &["circle-2"],
+        text: "Lotus photograph: Shubham Patil, WordPress Photo Directory, CC0 1.0. \
+               Cropped and shown in an edited OpenCircle screen recording.",
+        links: &[
+            ("Photo", "https://wordpress.org/photos/photo/4766ac73e9/"),
+            CC0,
+        ],
+    },
+    Credit {
+        clips: &["circle-3"],
+        text: "Kingfisher photograph: sebascordero15, WordPress Photo Directory, CC0 1.0. \
+               Cropped and shown in an edited OpenCircle screen recording.",
+        links: &[
+            ("Photo", "https://wordpress.org/photos/photo/11669e53a4/"),
+            CC0,
+        ],
+    },
+    Credit {
+        clips: &["text"],
+        text: "COFFEE photograph: Tim Mossholder on Unsplash, photo jozE5L60Aj4, used under \
+               the Unsplash License (not CC0, not MIT). Shown in an edited OpenCircle screen \
+               recording. No endorsement implied.",
+        links: &[
+            (
+                "Photo",
+                "https://unsplash.com/photos/a-sign-on-a-brick-wall-that-says-coffee-jozE5L60Aj4",
+            ),
+            ("Unsplash License", "https://unsplash.com/license"),
+        ],
+    },
+    Credit {
+        clips: &["translate"],
+        text: "Based on \u{201c}Plante d\u{2019}intérieur\u{201d} by Wikipedia contributors, \
+               CC BY-SA 4.0. Machine translation into English, German, Arabic and Spanish \
+               shown by OpenCircle; framing, timing edits and active-state graphics added \
+               for the preview. This preview animation and its poster are licensed under \
+               CC BY-SA 4.0, including the adapter\u{2019}s contributions, as a media \
+               exception to the app\u{2019}s MIT licence (the code stays MIT). Embedded \
+               photograph \u{201c}Her, IFA 2018, Berlin (P1070094).jpg\u{201d} \u{a9} Matti \
+               Blume, CC BY-SA 4.0; embedded painting by Carl Larsson, \
+               \u{201c}Flowers on the Windowsill\u{201d}, public domain. Third-party names \
+               and trademarks keep their separate rights.",
+        links: &[
+            (
+                "Article",
+                "https://fr.wikipedia.org/wiki/Plante_d%27int%C3%A9rieur",
+            ),
+            (
+                "History",
+                "https://fr.wikipedia.org/w/index.php?title=Plante_d%27int%C3%A9rieur&action=history",
+            ),
+            CC_BY_SA,
+            (
+                "Photograph",
+                "https://fr.wikipedia.org/wiki/Fichier:Her,_IFA_2018,_Berlin_(P1070094).jpg",
+            ),
+            (
+                "Painting",
+                "https://commons.wikimedia.org/wiki/File:Blomsterf%C3%B6nstret_av_Carl_Larsson_1894.jpg",
+            ),
+            ("Licence text", LICENCE_TEXT),
+        ],
+    },
+    Credit {
+        clips: &["ai-chat", "ai-browser"],
+        text: "Solar photovoltaic panel prices: Our World in Data; IRENA (2025) and other \
+               sources, processed by Our World in Data, as credited in the recording. OWID \
+               visualization: CC BY 4.0. Cropped and time-edited screen recordings with \
+               OpenCircle active-state graphics.",
+        links: &[
+            (
+                "Chart",
+                "https://ourworldindata.org/grapher/solar-pv-prices",
+            ),
+            CC_BY,
+        ],
+    },
+    Credit {
+        clips: &["ai-browser"],
+        text: "OpenCircle is an independent project and is not affiliated with, sponsored \
+               by, or endorsed by Google. Google and its product names and logos are \
+               trademarks of their respective owners. Depicted third-party services and \
+               content are shown for demonstration only.",
+        links: &[],
+    },
+    Credit {
+        clips: &["snip-long"],
+        text: "\u{201c}Tourism\u{201d}, Bastian Herre and Veronika Samborska (2023), Our \
+               World in Data, CC BY 4.0 for OWID-produced article and visualizations. \
+               Cropped, time-edited screen recording. The chart \u{201c}Arrivals of tourists \
+               from abroad\u{201d} credits UN Tourism (2025); other chart and provider notices \
+               in the recording are kept.",
+        links: &[
+            ("Article", "https://ourworldindata.org/tourism"),
+            (
+                "Chart",
+                "https://ourworldindata.org/grapher/international-tourist-trips",
+            ),
+            CC_BY,
+            ("Reuse FAQ", "https://ourworldindata.org/faqs"),
+        ],
+    },
+    Credit {
+        clips: &[
+            "circle-1",
+            "circle-2",
+            "circle-3",
+            "text",
+            "translate",
+            "ai-chat",
+            "ai-browser",
+            "snip-long",
+        ],
+        text: "Credits are for source identification; they do not clear unrelated search-result \
+               thumbnails, third-party interfaces or data-provider terms shown in the clips.",
+        links: &[],
+    },
+];
+
+/// The repository's copy of the CC BY-SA 4.0 legal code (LICENSES/).
+pub const LICENCE_TEXT: &str =
+    "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSES/CC-BY-SA-4.0.txt";
+
+/// The credits of the clips `bundled` says are in the app.
+pub fn clip_credits(bundled: impl Fn(&str) -> bool) -> Vec<&'static Credit> {
+    (CLIP_CREDITS.iter())
+        .filter(|c| c.clips.iter().any(|n| bundled(n)))
+        .collect()
+}
+
 /// Between the cards (`space-y-3.5`) and inside one; between a tile and its text (`gap-4`).
 const CARD_GAP: f32 = 14.0;
 const TILE_GAP: f32 = 16.0;
@@ -107,9 +267,34 @@ fn link<'a>(name: &'a str, url: &str) -> Element<'a, Message> {
 }
 
 pub fn view(_: &State) -> Element<'_, Message> {
-    column![app(), developer(), notices(), problems(), telemetry()]
+    let mut page = column![app(), developer(), notices()];
+    if let Some(card) = clip_notice() {
+        page = page.push(card);
+    }
+    page.push(problems())
+        .push(telemetry())
         .spacing(CARD_GAP)
         .into()
+}
+
+/// "Preview clips": the credits of the bundled clips (none bundled, no card).
+fn clip_notice<'a>() -> Option<Element<'a, Message>> {
+    let lines = clip_credits(|c| super::super::previews::player::clip(c).is_some());
+    if lines.is_empty() {
+        return None;
+    }
+    let mut list = column![text(Role::ROW_TITLE, "Preview clips")].spacing(space::GAP);
+    for (i, credit) in lines.into_iter().enumerate() {
+        if i > 0 {
+            list = list.push(divider());
+        }
+        list = list.push(sub(Role::ROW_DESC, credit.text));
+        if !credit.links.is_empty() {
+            let links = credit.links.iter().map(|(name, url)| link(name, url));
+            list = list.push(row(links).spacing(BUTTON_GAP).wrap());
+        }
+    }
+    Some(card(list))
 }
 
 /// Logo, name, version, what it is, and its links.

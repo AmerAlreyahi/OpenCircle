@@ -2204,11 +2204,12 @@ fn with_clip(s: &mut State) {
 #[test]
 fn a_preview_without_a_clip_shows_only_its_heading() {
     let (mut s, _) = state(None);
-    moving_update(&mut s, Message::Section(Section::Translate));
+    s.draft.labs.song = true;
+    moving_update(&mut s, Message::Section(Section::Song));
     (s.moved, s.picked) = (None, None);
     assert!(s.players.is_empty() && !s.animating(), "nothing plays");
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Translate"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Song search"), "{texts:?}");
     for gone in [
         "Preview",
         "5 s preview",
@@ -2219,10 +2220,10 @@ fn a_preview_without_a_clip_shows_only_its_heading() {
         assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
     }
     // hidden by key, still no button to bring the stage back
-    moving_update(&mut s, Message::Preview("translate", false));
+    moving_update(&mut s, Message::Preview("song", false));
     assert!(!shot::texts(view(&s)).iter().any(|t| t == "Show preview"));
     // the clip arrives: the button and the stage appear
-    moving_update(&mut s, Message::Preview("translate", true));
+    moving_update(&mut s, Message::Preview("song", true));
     with_clip(&mut s);
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Hide preview"), "{texts:?}");
@@ -2238,7 +2239,8 @@ fn a_preview_without_a_clip_shows_only_its_heading() {
 #[test]
 fn a_preview_plays_once_then_rests_and_the_clock_stops() {
     let (mut s, _) = state(None);
-    update(&mut s, Message::Section(Section::Ai));
+    s.draft.labs.song = true;
+    update(&mut s, Message::Section(Section::Song));
     with_clip(&mut s);
     assert!(s.animating(), "playing");
     let texts = shot::texts(view(&s));
@@ -2259,6 +2261,24 @@ fn a_preview_plays_once_then_rests_and_the_clock_stops() {
     with_clip(&mut s);
     moving_update(&mut s, Message::Section(Section::General));
     assert!(s.players.is_empty(), "left the page: freed");
+}
+
+/// The AI page plays the bundled browser clip; with a provider set it
+/// switches to the chat clip at once.
+#[test]
+fn the_ai_preview_follows_the_provider() {
+    use super::previews::{HEROES, chosen};
+    let ai = HEROES.iter().find(|h| h.key == "ai").unwrap();
+    let (mut s, _) = state(None);
+    moving_update(&mut s, Message::Section(Section::Ai));
+    moving_update(&mut s, Message::Replay);
+    let want = chosen(ai, &s.draft, s.opening);
+    assert!(s.players[0].1.plays(&want));
+    s.draft.ai.provider = crate::config::Provider::Anthropic;
+    moving_update(&mut s, Message::Preview("ai", true));
+    let chat = chosen(ai, &s.draft, s.opening);
+    assert_ne!(chat, want, "another clip");
+    assert!(s.players[0].1.plays(&chat), "playing the chat clip");
 }
 
 /// Reduced motion: the first frame at once, and no clock for it.

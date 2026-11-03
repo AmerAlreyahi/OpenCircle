@@ -2,26 +2,27 @@
 //! is Cargo's (`CARGO_PKG_VERSION`), which release.yml stamps from the git tag.
 // ponytail: keyed on the host OS, so native Windows builds only (CI); cross builds skip it.
 //
-// The Settings previews: each `assets/previews/<clip>.webp` that exists is
-// bundled (`$OUT_DIR/previews.rs`, `CLIPS`); a missing one is the
-// placeholder (docs/previews.md).
+// The Settings previews: every `assets/previews/<name>.webp` found is bundled
+// (`$OUT_DIR/previews.rs`, `CLIPS`); a page lists the names it wants and a
+// missing one is simply absent (docs/previews.md).
 //
 // The setup build: `OPENCIRCLE_SETUP_MSI=<the release MSI>` embeds that MSI
 // (`setup::payload`, cfg `setup_payload`) and the exe becomes OpenCircle-Setup.
-/// The previews' clips, by name (`settings::previews`).
-const CLIPS: [&str; 7] = ["circle", "text", "translate", "ai", "snip", "live", "song"];
-
 fn previews() {
     // the folder: a clip added or removed reruns this
     println!("cargo::rerun-if-changed=assets/previews");
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/previews");
+    let mut files: Vec<_> = (std::fs::read_dir(&dir).into_iter().flatten())
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "webp"))
+        .collect();
+    files.sort();
     let mut out = String::from("pub const CLIPS: &[(&str, &[u8])] = &[\n");
-    for name in CLIPS {
-        let file = dir.join(format!("{name}.webp"));
-        if file.is_file() {
-            let path = file.to_str().expect("a UTF-8 path");
-            out.push_str(&format!("    ({name:?}, include_bytes!({path:?})),\n"));
-        }
+    for file in files {
+        let name = (file.file_stem().and_then(|n| n.to_str())).expect("a UTF-8 name");
+        let path = file.to_str().expect("a UTF-8 path");
+        out.push_str(&format!("    ({name:?}, include_bytes!({path:?})),\n"));
     }
     out.push_str("];\n");
     let to = std::path::Path::new(&std::env::var_os("OUT_DIR").unwrap()).join("previews.rs");
