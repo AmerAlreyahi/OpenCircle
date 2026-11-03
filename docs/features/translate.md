@@ -1,6 +1,5 @@
 <p align="center">
-  <img src="../../gallery/clips/clip-3-translate.webp" alt="An English page becomes Arabic in place, block by block." width="960"><br>
-  <a href="../../gallery/clips/clip-3-translate.mp4">Watch in full quality</a>
+  <img src="../images/translate-before-after.png" alt="A page in English before translation (left), and after (right): the text is erased and redrawn in Arabic in the same place." width="800">
 </p>
 
 # Translate in place
@@ -9,7 +8,7 @@ Translate the whole screen in place, offline by default, with the words drawn wh
 
 ## How to
 
-1. Open **Settings › Translate** and choose your target language. Arabic is the default; the clip shows English → Arabic.
+1. Open **Settings › Translate** and choose your target language. Arabic is the default; the picture shows English → Arabic.
 2. Leave the default setup for offline translation, or choose **Offline** under **Engine** to keep translation on your PC even if you have set up AI.
 3. Show the page you want to read and press `Ctrl+Shift+T`.
 4. On first use, accept the model download. It is downloaded once for that language direction and reused.
@@ -29,6 +28,8 @@ Translate the whole screen in place, offline by default, with the words drawn wh
 - The offline engine is the fastest choice for this flow. An AI provider can be slower, especially over the internet.
 - With the default setup and no AI provider configured, translation runs offline. No key or account is needed.
 - Choose the source language yourself if automatic detection reads the wrong script.
+- A browser's address bar, file names and e-mail addresses are left as they are, and big outlined subtitles (a film's, a game's) are erased and redrawn at their size. See [Translate](../translate.md).
+- Arabic to and from French and Spanish, and Arabic to German, have direct models: faster than going through English.
 - The translation replaces text in a captured image. It does not change the page or document underneath.
 
 ## Limits

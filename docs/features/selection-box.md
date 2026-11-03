@@ -1,6 +1,5 @@
 <p align="center">
-  <img src="../../gallery/clips/clip-4-adjust.webp" alt="Resize the box, move it with Alt+drag, and copy the image." width="960"><br>
-  <a href="../../gallery/clips/clip-4-adjust.mp4">Watch in full quality</a>
+  <img src="../images/circle-to-search.png" alt="A selection snapped to a rounded box with white corner brackets." width="800">
 </p>
 
 # Adjust the selection box

@@ -1,6 +1,5 @@
 <p align="center">
-  <img src="../../gallery/clips/clip-1-circle.webp" alt="Circle a photo on screen, then choose Search in browser." width="960"><br>
-  <a href="../../gallery/clips/clip-1-circle.mp4">Watch in full quality</a>
+  <img src="../images/circle-to-search.png" alt="Circle a picture on screen: the selection snaps to a rounded box, with the bar below." width="800">
 </p>
 
 # Circle to Search
@@ -28,7 +27,7 @@ Circle anything on your screen, then choose what to do with it.
 
 - **Search in browser** sends a picture selection to Google Lens in your own browser. A text selection opens a Google text search instead.
 - OpenCircle uploads your picture nowhere itself. Your browser sends it directly to Lens; no image-hosting service sits in between.
-- The default is to wait for your choice after you circle. You can change shortcuts and the automatic action in Settings.
+- The default is to wait for your choice after you circle. You can change shortcuts and the **Auto action** under Settings > Look & behaviour.
 - Unfinished features are in **Settings › Labs**.
 
 ## Limits

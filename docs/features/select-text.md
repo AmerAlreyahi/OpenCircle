@@ -1,6 +1,5 @@
 <p align="center">
-  <img src="../../gallery/clips/clip-2-text.webp" alt="Drag over text on screen, copy it, and paste it into Notepad." width="960"><br>
-  <a href="../../gallery/clips/clip-2-text.mp4">Watch in full quality</a>
+  <img src="../images/select-text.png" alt="Drag over words in the frozen screen: they highlight, with the bottom bar under the selection." width="800">
 </p>
 
 # Select text
@@ -13,7 +12,7 @@ Select text from what you can see, even when the original app will not let you c
 2. On Windows, Windows OCR reads the screen as the overlay opens. On Linux, accept the text reader download if asked, then allow it time to read.
 3. Drag across characters. Double-click for a word or triple-click for a line.
 4. Press `Ctrl+C`, then paste into another app. Use `Ctrl+A` to select all recognised text on the screen.
-5. On Windows, choose **Auto**, **Windows**, or **Downloaded** under **Settings › Look & behaviour › Text reader**.
+5. On Windows, choose **Auto**, **Windows**, or **Downloaded** under **Settings › Text reading › Engine**.
 
 ## Shortcuts
 
@@ -37,7 +36,7 @@ Select text from what you can see, even when the original app will not let you c
 
 - Recognition can miss small, stylised, or low-contrast text. Check the result before pasting it somewhere important.
 - Windows OCR depends on the recognition languages installed in Windows.
-- Linux is a preview. It uses the downloaded reader and is slower; the **Text reader** setting is Windows-only.
+- Linux is a preview. It uses the downloaded reader and is slower; the **Text reading** page is Windows-only.
 - `Ctrl+A` may wait while the rest of the screen is read.
 
 ---

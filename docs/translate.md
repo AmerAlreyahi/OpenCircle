@@ -7,7 +7,7 @@ works on anything you can see.
 
 <p align="center">
   <img src="images/translate-before-after.png" alt="A page in English before translation, and after: the text is erased and redrawn in Arabic in the same place, with the same layout." width="900"><br>
-  <sub>Before and after. The translation takes the original's place.</sub>
+  <sub>Before (left) and after (right). The translation takes the original's place.</sub>
 </p>
 
 Three ways in, all from the same bar or keys:
@@ -62,18 +62,17 @@ on. Hebrew, Hindi, Thai and Korean can be targets but not sources yet.
 
 Choose one in **Settings → Translate → Engine**.
 
-- **AI** (the default) uses the provider from [AI setup](ai-setup.md). It is
-  best at context and at marking names in their highlight colour; with a local
-  model it stays on your PC. If no AI provider with a key is set up, OpenCircle
-  translates offline instead, so live translate works without a key.
-- **Offline** needs no key and no account, and nothing leaves your PC. It is a
+- **Offline** (the default) needs no key and no account, and nothing leaves your PC. It is a
   small neural translation model (OPUS-MT, by the University of Helsinki) that
   runs on your CPU: about a third of a second for 20 game lines, fast enough
   for live mode. It is more literal than AI, can miss the game meaning of a
   word ("Quit" as in leaving, "pelts"). One model per direction; the
   first time you use a direction, OpenCircle asks before downloading it
-  (about 108-116 MB from Hugging Face, plus the text-recognition files if
-  they are missing, checked against pinned checksums). Licences and credits
+  (about 108-116 MB, plus the text-recognition files if they are missing,
+  checked against pinned checksums). Most come from Hugging Face; the direct
+  Arabic ones (below) come from
+  [AmerAlreyahi/OpenCircle-models](https://github.com/AmerAlreyahi/OpenCircle-models)
+  on GitHub. Licences and credits
   are in `NOTICE`.
 
   | From | Into |
@@ -87,7 +86,12 @@ Choose one in **Settings → Translate → Engine**.
   | Russian | Spanish, French, Ukrainian |
   | Ukrainian | Russian |
   | Dutch | French |
+  | French, Spanish | Arabic |
+  | Arabic | French, Spanish, German |
 
+  The last two rows are direct models we converted ourselves, so these pairs
+  take one model instead of two through English: about twice as fast, and as
+  good as or better than going through English on our test pages.
   Other pairs go through English when both halves exist (for example Italian
   into Arabic: Italian to English, then English to Arabic): two models, a bit
   slower and a little looser. A pair with no way offline (for example into
@@ -97,11 +101,26 @@ Choose one in **Settings → Translate → Engine**.
   text is told apart by its common words (English, Spanish, French or German).
   Detecting needs no download: only the translation model does.
 
+- **AI** uses the provider from [AI setup](ai-setup.md). It is best at context and
+  at marking names in their highlight colour; with a local model it stays on your
+  PC. Pick it in **Settings → Translate → Engine**. If no AI provider with a key
+  is set up, OpenCircle translates offline instead, so live translate works
+  without a key.
+
 Offline, a highlighted name inside a line is drawn in the line's colour: the
 model can't say which translated words are the name. A line drawn entirely
 in a highlight colour keeps it.
 
 Explain on a word card always asks your AI provider.
+
+## Subtitles, addresses and small text
+
+- Big outlined subtitles (a film's or a game's: white or yellow with a dark
+  outline over a moving picture) are erased as a whole, not in slivers, and the
+  translation is drawn at the subtitle's size. Lines a subtitle splits in two
+  are joined before they are translated.
+- A browser's address bar, file names and e-mail addresses are left exactly as
+  they are, and a lone letter (an icon read as "X") is not translated.
 
 ## One-shot
 

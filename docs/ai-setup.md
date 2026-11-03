@@ -5,27 +5,27 @@ open your question in Google AI Mode in your own browser, with no key. If you wa
 translation, choose a provider with your own key. Nothing is sent until you ask
 a question.
 
-## Google AI Mode (no key) — the default
+## Browser (no key): the default
 
-Nothing to set up. When you press Send in the Ask AI panel (or Explain on a
-word card, or the **Explain with AI** quick action), OpenCircle shows Google
-Search's AI Mode with your question already typed in, in your default browser.
-Nothing opens in your browser by itself: only Send does it.
+Nothing to set up. In **Settings → AI**, **Browser** is the default. When you
+press `Enter` in the bar's AI field (or use the **Explain with AI** quick
+action), OpenCircle shows Google Search's AI Mode with your question already
+typed in, in your default browser. Nothing opens in your browser by itself: only
+asking does it.
 
 - The question is your prompt plus the text read from your selection. Reading
   the text uses the same offline text reader as **Select text**; the first time,
   OpenCircle asks before downloading it (about 30 MB). If you say no, only
-  your prompt is sent, and the panel tells you the image could not be passed.
+  your prompt is sent, and OpenCircle tells you the image could not be passed.
 - The answer appears in your browser, where you can ask follow-ups on Google's
-  page. Press **Search the image with Lens** for questions about the picture
-  itself.
+  page. For questions about the picture itself, use **Search in browser** (Lens)
+  or an AI provider.
 - Long questions are shortened at a word boundary (about 1,800 characters) and
-  the panel says so.
+  OpenCircle says so.
 - **Translate in place needs a provider with a key** (below): the browser cannot
   send text back.
 - Only the question text goes to Google, from your browser, when you press
-  Send. The screenshot is not uploaded unless you choose Lens. See
-  [Privacy](privacy.md).
+  asking. The screenshot is not uploaded. See [Privacy](privacy.md).
 
 ## Providers with your own key
 
@@ -70,23 +70,28 @@ server with a key must use `https://`.
 
 1. Install [Ollama](https://ollama.com) or LM Studio and download a vision
    model (for example `llama3.2-vision`).
-2. In Settings → AI choose **OpenAI-compatible**, preset **Ollama (local)**
-   (or LM Studio's `http://localhost:1234/v1`), and the model name.
+2. In Settings → AI choose **AI provider**, then **Ollama (local)** (or **LM
+   Studio (local)**, `http://localhost:1234/v1`) from the Provider list, and set
+   the model name.
 3. Leave the key empty. Selections go to your own machine only.
 
 ## Using it
 
-Circle something and press `A` (or use the **Explain with AI** quick action,
-`Ctrl+Shift+E`). With a key, the answer streams in a side panel and you can ask
-follow-up questions. Only the selected area and your questions are sent, with
-the conversation so far. Closing the panel stops a running answer. With the
-browser provider, Send opens Google AI Mode in your browser instead (see above).
+Circle something and type in the bar's AI field, or press `A` (or use the
+**Explain with AI** quick action, `Ctrl+Shift+E`). With a provider and key, the
+answer streams into a chat with markdown, and you can ask follow-up questions: a
+follow-up pins the chat, so it stays open above other apps and a new capture asks
+into the same chat (**Settings → AI → AI chat stays open** changes this). Only
+the selected area (while **Include screen** is on) and your questions are sent,
+with the last 20 messages and one short summary of older ones. Chats are saved on
+this PC as text only (**Keep chat history** turns that off). With **Browser**,
+asking opens Google AI Mode in your browser instead (see above).
 
 ## Config
 
 ```toml
 [ai]
-provider = "browser"              # browser | anthropic | openai_compatible
+provider = "browser"              # browser | anthropic | openai_compatible (Settings shows service names)
 base_url = ""                     # "" = provider default; required for openai_compatible
 model = "claude-sonnet-5-5"
 ```

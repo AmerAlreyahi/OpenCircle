@@ -1,33 +1,30 @@
 # Gallery
 
-## OpenCircle v0.1.1 in action
-
-Real recordings of OpenCircle 0.1.1 on a Windows test machine. The pages are
-local demo pages with a NASA photo; nothing in the app is mocked up. Each clip is
-also available as an MP4. Only working default features are shown here; Labs
-features are off. See the [v0.1.1 release notes](https://github.com/AmerAlreyahi/OpenCircle/releases/tag/v0.1.1).
+Pictures and short recordings of OpenCircle on Windows. The screenshots use a
+local demo page with original text; nothing in the app is mocked up. The
+recordings are the clips bundled in the app (`assets/previews`): each plays at
+the top of its Settings page. Third-party material in them is credited in
+`NOTICE` and in Settings > About.
 
 ![OpenCircle banner](OpenCircleCoverIMG.png)
 
-### Short feature showcase
-
-[Watch or download the feature showcase (MP4)](clips/OpenCircle-v0.1.1-feature-showcase.mp4)
-— 42 seconds, 1.13 MB, with feature titles and smooth transitions. Circle to
-Search, select/copy text, offline translation, selection adjustment, and
-copy/save images. No installer, audio, or Labs features.
-
-### Individual clips
+## Pictures
 
 | | |
 |---|---|
-| [![Circle anything, then choose Search](clips/clip-1-circle.webp)](../docs/features/circle-to-search.md)<br>[Circle anything, then choose Search](../docs/features/circle-to-search.md) ([MP4](clips/clip-1-circle.mp4)) | [![Select text. Copy. Paste.](clips/clip-2-text.webp)](../docs/features/select-text.md)<br>[Select text. Copy. Paste.](../docs/features/select-text.md) ([MP4](clips/clip-2-text.mp4)) |
-| [![Read the page in Arabic](clips/clip-3-translate.webp)](../docs/features/translate.md)<br>[Read the page in Arabic](../docs/features/translate.md) ([MP4](clips/clip-3-translate.mp4)) | [![Tip: Alt+drag moves the box](clips/clip-4-adjust.webp)](../docs/features/selection-box.md)<br>[Tip: Alt+drag moves the box](../docs/features/selection-box.md) ([MP4](clips/clip-4-adjust.mp4)) |
-| [![Keep it with Ctrl+S](clips/clip-5-save.webp)](../docs/features/save-and-copy.md)<br>[Keep it with Ctrl+S](../docs/features/save-and-copy.md) ([MP4](clips/clip-5-save.mp4)) | [![Install. Launch. Ready.](clips/clip-6-install.webp)](../docs/features/install.md)<br>[Install. Launch. Ready.](../docs/features/install.md) ([MP4](clips/clip-6-install.mp4)) |
+| ![Circle a picture: it snaps to a box, with the bar below.](../docs/images/circle-to-search.png)<br>Circle, then choose ([guide](../docs/features/circle-to-search.md)) | ![Select text: words highlight under the pointer.](../docs/images/select-text.png)<br>Select text ([guide](../docs/features/select-text.md)) |
+| ![Snip: the grouped toolbar beside a picked area.](../docs/images/snip-toolbar.png)<br>Snip and annotate ([guide](../docs/features/snip.md)) | ![Snip's More menu.](../docs/images/snip-more.png)<br>More: long capture, steps, pin, share, picker, ruler |
+| ![Long capture in progress.](../docs/images/long-capture.png)<br>Long capture | ![The Steps strip.](../docs/images/steps-strip.png)<br>Steps strip |
+| ![A page before and after translation.](../docs/images/translate-before-after.png)<br>Translate in place ([guide](../docs/features/translate.md)) | ![Settings, Appearance.](../docs/images/settings-appearance.png)<br>Settings > Appearance: 12 themes, Sapphire Glow |
 
-These clips cover Circle to Search, text selection and copy, offline in-place
-translation (after the first model download), selection adjustment, image
-copy/save, and the Windows installer.
+## Recordings
 
-The numbered PNG files in this folder are older v0.1.0 screenshots and do not
-represent the current default interface. Snip/editor, song search, history,
-pins and live translate are unfinished Labs features, hidden and off by default.
+| | |
+|---|---|
+| ![Circle anything, then choose.](../assets/previews/circle-1.webp)<br>Circle anything ([also 2](../assets/previews/circle-2.webp), [3](../assets/previews/circle-3.webp)) | ![Select text and copy it.](../assets/previews/text.webp)<br>Select text |
+| ![Snip, then hide text with Blur.](../assets/previews/snip-blur.webp)<br>Snip and Blur | ![Add a comment with a callout.](../assets/previews/snip-comment.webp)<br>Snip with a comment |
+| ![Long capture of a page.](../assets/previews/snip-long.webp)<br>Long capture | ![Ask AI with a provider: a chat with markdown.](../assets/previews/ai-chat.webp)<br>AI chat |
+| ![Ask AI with the browser provider.](../assets/previews/ai-browser.webp)<br>Ask AI in your browser | |
+
+Song search, search history, live pins and live translate are unfinished Labs
+features, off by default and not shown here.

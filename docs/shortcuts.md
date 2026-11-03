@@ -4,7 +4,7 @@
 
 The Song search shortcut is hidden (not registered) until you turn Song search on in
 **Settings > Labs**. Live translate is a Labs feature too (unfinished, planned
-for 0.3.0): its shortcut, tray item and bar button appear only when it is on.
+for a later release): its shortcut, tray item and bar button appear only when it is on.
 
 | Action | Default | What it does |
 |---|---|---|
@@ -13,26 +13,39 @@ for 0.3.0): its shortcut, tray item and bar button appear only when it is on.
 | Live translate (Labs) | `Ctrl+Shift+L` | Toggle continuous translation |
 | Explain with AI | `Ctrl+Shift+E` | Circle something; the AI explains it |
 | Copy text | `Ctrl+Shift+X` | Circle something; its text is copied |
-| Search with Lens | unset | Circle something; Lens opens |
-| Snip | `Print Screen` | Hover a window and click, or drag an area; `Enter` = full screen |
+| Search in browser | unset | Circle something; it opens in Google Lens in your browser |
+| Snip | `Alt+A` | Hover a window and click, or drag an area; `Enter` = full screen |
 | Colour picker | unset | Pick a colour from anywhere on screen |
 | Screen ruler | unset | Measure distances on screen |
 | Live pin (Labs) | unset | Pin a window's area, updating live |
 
+Snip is one row in **Settings > Shortcuts**; there are no separate region,
+window and full-screen rows (older entries in a config still work: see below).
+Older configs that had Snip on `Print Screen` move to `Alt+A` once, unless a key
+of your own stays.
+
 Snip also opens from the tray menu (**Snip**), the bar's Snip button, and with
 `opencircle run snip`. The colour picker and ruler have no default key, because
 no combination is free on every PC; give them one in **Settings > Shortcuts**.
-While Snip is open: `Enter` full screen, `Esc` cancels, arrows nudge the area.
+While Snip is open: `Enter` full screen (`Shift+Enter` all screens), `Esc` clears
+the area and then closes, arrows nudge the area. After a pick: `Ctrl+C` copies,
+`Ctrl+S` saves, `Ctrl+Z` / `Ctrl+Shift+Z` undo / redo, `Ctrl+V` pastes the clipboard's text
+(into the text being typed, else as a new text), `Ctrl+Enter` adds to steps, `Ctrl+P` pins. The tool keys are in
+[Snip and annotate](snip-and-annotate.md).
 
-**If Print Screen does nothing.** On Windows, the system uses `Print Screen`
-for its own screen capture. OpenCircle logs one line when it cannot register the
-key. Free it in Windows Settings → Accessibility → Keyboard → turn off **Use the
-Print screen key to open screen capture**, then restart OpenCircle. (Or give
-Snip another key in Settings → Shortcuts; the rest keep working.) On
-Linux, a desktop's own screenshot tool may hold the key: unbind it in your
-desktop's keyboard shortcut settings. On GNOME (Wayland) the shell keeps
-`Print Screen` for itself even though OpenCircle's
-shortcut shows as bound; free them, then restart OpenCircle:
+**Using Print Screen for Snip.** `Alt+A` is the default because Windows uses
+`Print Screen` for its own screen capture. To use `Print Screen` anyway, give
+Snip that key in **Settings > Shortcuts**, then free it in Windows Settings >
+Accessibility > Keyboard: turn off **Use the Print screen key to open screen
+capture**, and restart OpenCircle. Settings > Snip shows a note with a button
+for this when Snip is on `Print Screen` and Windows holds the key. If `Alt+A`
+is already taken by another app (some screenshot tools use it), the shortcut may
+not register: give Snip another key; the rest keep working.
+
+On Linux, a desktop's own screenshot tool may hold a key you choose: unbind it
+in your desktop's keyboard shortcut settings. On GNOME (Wayland) the shell keeps
+`Print Screen` for itself even when OpenCircle's shortcut shows as bound; to use
+it for Snip, free it, then restart OpenCircle:
 
 ```bash
 gsettings set org.gnome.shell.keybindings show-screenshot-ui "[]"   # Print Screen
@@ -43,7 +56,7 @@ OpenCircle prints this when it starts under GNOME.
 
 While the overlay is open: `Esc` closes, `Enter` runs the default action
 (Search unless you changed it in **Settings → General**), and the action keys
-are `L` Search, `A` Ask AI, `T` Text, `E` Snip, `R` Translate.
+are `L` Search in browser, `A` Ask AI, `T` Copy text, `E` Snip, `R` Translate.
 
 **Selection box.** After you draw, the box can be moved (drag inside it, not over
 text; `Alt`+drag moves it over text), resized by its edges and corners, and
@@ -69,7 +82,7 @@ Pictures/OpenCircle) as `OpenCircle-<date>-<time>.png`. There are no Copy or Sav
 buttons: a pill at the bottom right says "Copied" or "Saved to <folder>" for about two
 seconds, or what went wrong (no green dot) if the clipboard was busy or the folder
 could not be written.
-In the editor, `Ctrl+P` pins the image to the screen (`P` alone is the Pen).
+In Snip, `Ctrl+P` pins the image to the screen (`P` alone is the Pen).
 
 ## Change a shortcut
 
@@ -99,7 +112,7 @@ subtitle bar). Snip is one flow and takes no target:
 ```toml
 [[quick_actions]]
 action = "snip"
-shortcut = "PrintScreen"
+shortcut = "Alt+A"
 target = "circle"
 ```
 
@@ -117,7 +130,7 @@ desktop's own shortcut settings. They talk to the running copy (or start it):
 opencircle capture
 opencircle run snip
 opencircle run copy_text --target circle
-opencircle run lens --target circle
+opencircle run lens --target circle   # "lens" is the command name for Search in browser
 opencircle run song_search          # needs your key: see song-search.md
 ```
 

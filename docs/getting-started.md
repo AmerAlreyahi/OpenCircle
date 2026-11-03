@@ -22,7 +22,7 @@ page (see the [README](../README.md#install)).
 - **Windows, no install:** `OpenCircle-<version>-x64-portable.exe` runs as it is.
 - **Linux (preview):** install the `.deb` or `.rpm`, or run the `.AppImage`.
 
-OpenCircle lives in the system tray. Left-click its icon to open Settings; right-click for the menu (Circle to Search, Translate screen, Settings, Quit). Starting it again while it runs hands the
+OpenCircle lives in the system tray. Left-click its icon to open Settings; right-click for the menu (Circle to Search, Translate screen, Snip, Settings, Quit). Starting it again while it runs hands the
 request to the running copy. It starts with Windows by default; turn that off
 in **Settings > General**.
 
@@ -49,6 +49,10 @@ can turn it off there or later in Settings. See
 
 Settings > Look & behaviour can change this: keep the drawn shape, or run a
 search as soon as you select (**Auto action**).
+
+<p align="center">
+  <img src="images/circle-to-search.png" alt="A picture circled on the frozen screen: it snaps to a rounded box, with the bottom bar below." width="800">
+</p>
 
 The box can be adjusted before you choose: drag inside it to move it (not over
 text; hold `Alt` to move it over text), drag its edges or corners to resize it,
@@ -107,10 +111,6 @@ may be needed; OpenCircle tells you if it is.
   <img src="images/select-text.png" alt="Select text: words are highlighted on a page, with the bottom bar under the selection." width="800">
 </p>
 
-<p align="center">
-  <img src="images/copy-text-and-translate.png" alt="Copy the picked words and they paste exactly into Notepad. Full-screen translate of a page. Live translate over a browser." width="900"><br>
-  <sub>Copy gives exactly the picked words. Translate and live translate work from the same selection.</sub>
-</p>
 
 ## Ask AI
 
@@ -131,7 +131,7 @@ on (the default) the selected area goes with it; off sends only your question.
 
 - `Ctrl+Shift+T` translates the whole screen once, in place. `Esc` closes it.
 - `Ctrl+Shift+L` turns live translate on or off (a Labs feature: unfinished, off
-  until you switch it on in **Settings > Labs**; planned for 0.3.0). It keeps translating as the
+  until you switch it on in **Settings > Labs**). It keeps translating as the
   screen changes.
 - Hold `Alt` to see the original; release to see the translation again.
 
@@ -140,7 +140,7 @@ Translation runs on your PC by default (Settings > Translate > Engine: Offline);
 
 ## Snip and annotate
 
-Press `Print Screen`. The screen freezes: hover a window and click, or drag an
+Press `Alt+A`. The screen freezes: hover a window and click, or drag an
 area (`Enter` takes the full screen). The pick is already on the clipboard
 (original size, picture only), ready to paste into an AI chat, and a toolbar
 opens beside it to mark it up.
@@ -151,6 +151,10 @@ opens beside it to mark it up.
   a solid box, for when you want no trace at all.
 - Song search, search history, pins and live translate are unfinished and in
   **Settings > Labs**, off by default.
+
+<p align="center">
+  <img src="images/snip-toolbar.png" alt="Snip: a picked area with the grouped toolbar beside it." width="800">
+</p>
 
 Details: [Snip and annotate](snip-and-annotate.md).
 
@@ -163,7 +167,11 @@ Details: [Snip and annotate](snip-and-annotate.md).
   run **Search with** as soon as you select.
 - **Search with**: Lens, Ask AI or both.
 
-**Settings > Appearance** has 12 themes (pick a card: it sets the theme and its light or dark mode; until you pick one, OpenCircle follows Windows) and the screen-border looks shown while OpenCircle is open (Spectrum is the default), or Custom: your own colours, glow, dim, corners and a screen edge per mode.
+**Settings > Appearance** has 12 themes (pick a card: it sets the theme and its light or dark mode; until you pick one, OpenCircle follows Windows) and the Active Look screen borders shown while OpenCircle is open (Sapphire Glow is the default; the same colours outline a snip area), or Custom: your own colours, glow, dim, corners and a screen edge per mode.
+
+<p align="center">
+  <img src="images/settings-appearance.png" alt="Settings > Appearance: 12 theme cards and the Active Look screen borders, Sapphire Glow marked Default." width="700">
+</p>
 
 **Settings > Labs** switches the unfinished features on (Song search,
 Search history, Pins, Live translate). They are off by default.
@@ -181,16 +189,12 @@ the signature checks out. The next start shows the release notes.
 On Linux packages (`.deb`, `.rpm`), OpenCircle does not replace itself. It
 shows the release page instead.
 
-<p align="center">
-  <img src="images/auto-update.png" alt="Auto-update: a found update installing quietly, the release notes card after relaunch, and a tampered download refused." width="800">
-</p>
-
 **Settings > General > Updates > Check now** looks at once, on request.
 
 ## Settings and config file
 
-Settings (tray icon, left-click) has a sidebar with General, Appearance, Look & behaviour, AI, Text reading, Translate,
-Shortcuts, Privacy, About and Labs (Snip has its own page; Song search appears
+Settings (tray icon, left-click) has a sidebar with General, Appearance, Look & behaviour, AI, Text reading (Windows), Translate,
+Shortcuts, Snip, History, Privacy, About and Labs (Song search appears
 once switched on in Labs). It writes a plain TOML file you may
 also edit by hand:
 
@@ -203,8 +207,9 @@ crashes the app. API keys are never in this file.
 ## Troubleshooting
 
 - **Nothing happens on the shortcut.** Another app may own that key; pick a
-  different one in Settings. On Windows, `Print Screen` may belong to the system:
-  see [Shortcuts](shortcuts.md). On Wayland see [Linux notes](linux-notes.md).
+  different one in Settings. Snip's `Alt+A` may be held by another app (some
+  screenshot tools use it): give Snip another key. On Windows, `Print Screen`
+  belongs to the system unless you free it: see [Shortcuts](shortcuts.md). On Wayland see [Linux notes](linux-notes.md).
 - **No tray icon on Linux.** Install AppIndicator support (Debian/Ubuntu:
   `libayatana-appindicator3-1`, Fedora: `libayatana-appindicator-gtk3`). The
   shortcuts and `opencircle capture` still work.

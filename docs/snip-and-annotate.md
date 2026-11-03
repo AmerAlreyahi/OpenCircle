@@ -3,9 +3,14 @@
 Take a screenshot, mark it up, and paste it into an AI chat in seconds. Snip is
 one flow, whichever way you start it.
 
+<p align="center">
+  <img src="images/snip-toolbar.png" alt="Snip: an area is picked and marked with an arrow; the grouped toolbar sits below it." width="800">
+</p>
+
 ## Take a snip
 
-Press `Print Screen`, choose **Snip** in the tray menu, press the Snip button on
+Press `Alt+A` (the default; change it in Settings > Shortcuts), choose **Snip**
+in the tray menu, press the Snip button on
 the bar (over a screen you already froze), or run `opencircle run snip`. The
 screen freezes and a glow around its edge shows it is captured. Then:
 
@@ -28,10 +33,10 @@ area, that area is the pick.
 
 ## After the pick
 
-By default the picked area **is already on the clipboard** (Copy when picked)
-and the Snip toolbar opens beside it, so you can paste at once or mark it up
-first. Change this in **Settings > Snip > After a capture**: copy only, open the
-editor only, or both (the default).
+A pick always opens the Snip toolbar beside the area. By default the area **is
+already on the clipboard** (**Copy when picked**), so you can paste at once or
+mark it up first. Turn **Copy when picked** off in **Settings > Snip** to copy
+only when you press Copy.
 
 Copy and Save keep the capture's **original size**. Settings > Snip can scale
 the long edge down to 1024, 1568 or 2048 px instead. Copy is the picture only;
@@ -54,6 +59,10 @@ to open its options (outline, fill, size, and so on). `Esc` closes the toolbar.
 **More** holds Long capture, Add to steps, Pin, Live pin, Share (Windows),
 Colour picker and Screen ruler.
 
+<p align="center">
+  <img src="images/snip-more.png" alt="The More menu on the Snip toolbar." width="800">
+</p>
+
 Every tool has a key:
 
 | Tool | Key |
@@ -72,7 +81,8 @@ Every tool has a key:
 | Spotlight (dims everything else) | `S` |
 | Magnifier | `M` |
 
-`Ctrl+Z` undoes, `Ctrl+Shift+Z` redoes. Annotations stay editable until you copy
+`Ctrl+Z` undoes, `Ctrl+Shift+Z` redoes, `Ctrl+V` pastes the clipboard's text (into
+the text being typed, else as a new text). Annotations stay editable until you copy
 or save. With a drawing tool a plain drag always draws; to move an annotation,
 use **Select** or hold `Ctrl` and drag. A selected annotation shows only its own
 small handles. OpenCircle remembers your last tool, colour, sizes and options.
@@ -89,6 +99,11 @@ Scroll the page yourself (wheel, scrollbar or keys); OpenCircle stitches what
 passes through the area into one tall image and shows the whole page so far
 beside it. Scrolling back up adds nothing twice, and bars that stay put (a site's
 header, a chat's message box) are kept once. **Copy** or **Save** finishes it.
+
+<p align="center">
+  <img src="images/long-capture.png" alt="Long capture: the page so far appears beside the area, with its height." width="800">
+</p>
+
 It stops at 20,000 px by default (Settings > Snip > Long capture: 5,000, 10,000
 or 20,000). Nothing is scrolled for you, and only the area is grabbed.
 
@@ -100,6 +115,11 @@ screen. Each next snip becomes the next numbered step. Click a step to copy it,
 drag to reorder, double-click to edit it, `x` to delete. **Copy all**
 (`Ctrl+Shift+C`) puts every step on the clipboard as one numbered image, handy
 for explaining a process to an AI. Up to 12 steps; they are kept in memory only.
+
+<p align="center">
+  <img src="images/steps-strip.png" alt="The Steps strip: three numbered thumbnails and Copy all." width="420">
+</p>
+
 
 ## Colour picker and screen ruler
 

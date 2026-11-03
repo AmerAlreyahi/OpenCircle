@@ -1,7 +1,8 @@
 # Signing your own build
 
-OpenCircle's release files are not code-signed. Signing needs a certificate
-that costs money and ties to an identity, and this project is free. Instead:
+OpenCircle's release files are not code-signed yet. Signing needs a
+certificate that costs money and ties to an identity, and this project is free;
+the project has applied for free signing (see the README). Until then:
 
 1. Verify the download with `SHA256SUMS.txt` from the release page.
 2. Or build from source yourself ([README](../README.md#build-from-source)).
@@ -12,6 +13,15 @@ that costs money and ties to an identity, and this project is free. Instead:
 
 Without a signature, SmartScreen shows "Windows protected your PC" on first
 run. A user can click **More info**, then **Run anyway**.
+
+**Smart App Control (Windows 11).** Where it is on, Windows blocks unsigned
+programs with no "Run anyway" option. Until OpenCircle is code-signed, either
+turn Smart App Control off (Windows Security > App & browser control > Smart App
+Control settings; on some versions Windows will not let you turn it back on), or
+build from source, or sign a build yourself as below. It does not exist on
+Windows 10, and many PCs have it off. Downloads are still verified by
+`SHA256SUMS.txt`, and in-app updates by a signature the app checks itself; both
+are separate from Windows code signing.
 
 To sign, you need a code-signing certificate (from a certificate authority, or
 your organisation's in-house CA for managed PCs) and `signtool` from the

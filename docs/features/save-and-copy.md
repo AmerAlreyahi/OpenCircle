@@ -1,8 +1,3 @@
-<p align="center">
-  <img src="../../gallery/clips/clip-5-save.webp" alt="Save a selection with Ctrl+S and see the confirmation pill." width="960"><br>
-  <a href="../../gallery/clips/clip-5-save.mp4">Watch in full quality</a>
-</p>
-
 # Save and copy
 
 Copy a selection as an image, or save it straight to your chosen folder.
@@ -39,4 +34,4 @@ Copy a selection as an image, or save it straight to your chosen folder.
 
 ---
 
-[Previous: Adjust the selection box](selection-box.md) · [Next: Install OpenCircle](install.md) · [All features](README.md) · [Back to README](../../README.md)
+[Previous: Adjust the selection box](selection-box.md) · [Next: Snip](snip.md) · [All features](README.md) · [Back to README](../../README.md)

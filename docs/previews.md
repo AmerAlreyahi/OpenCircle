@@ -3,7 +3,9 @@
 Each feature's page in Settings starts with a short preview: a real recording
 of the feature, played once when the page opens (Replay plays it again), then
 resting on its last frame. With reduced motion it shows its first frame only.
-Until a clip exists, the stage shows a quiet "Preview" placeholder.
+A page with no bundled clip shows no preview at all (and no Hide preview
+button); it appears by itself when its clip is added. The clips are recorded
+and edited by the project owner from the real app.
 
 Clips are bundled into the app when it is built. They are never downloaded:
 the app stays private and works offline.
@@ -23,9 +25,14 @@ One animated WebP per feature, in `assets/previews/`:
 | `live.webp` | Translate, Live translate (Labs) |
 | `song.webp` | Song search (Labs) |
 
+`translate.webp`, `live.webp` and `song.webp` are not recorded yet, so those pages show no preview.
+
 The build bundles every `.webp` in the folder; a page lists the names it
-wants (`previews::HEROES`) and a missing file is just absent. A page with no
-clip shows no preview at all. Clips with third-party material are credited in
+wants (`previews::HEROES`) and a missing file is just absent. Variants: the
+Look & behaviour page opens a different circle clip each time (`circle-1`,
+`-2`, `-3`, in turn), the AI page shows `ai-chat` with an AI provider set and
+`ai-browser` with Browser, and the Snip page plays its three clips one after
+another. Clips with third-party material are credited in
 Settings > About and in NOTICE (`pages::about::CLIP_CREDITS`): add a line there
 with any new clip.
 
@@ -36,8 +43,9 @@ with any new clip.
   sharp on high-DPI screens).
 - 15-20 fps, about 5 seconds.
 - About 1 MB each (lossy, quality around 70-80).
-- Recorded from the real app on the test VM, on a clean screen (no desktop
-  icons, taskbar or watermark), no private content.
+- Recorded from the real app on a clean screen (no desktop icons, taskbar or
+  watermark), no private content, on material the project may show: public
+  domain, CC0 or openly licensed (credited), or made for the purpose.
 
 ## Exporting
 
@@ -46,7 +54,7 @@ From a screen recording (`in.mp4`), cut to the 5 seconds you want:
     ffmpeg -ss 00:00:02 -t 5 -i in.mp4 \
       -vf "fps=18,scale=1200:680:flags=lanczos" \
       -c:v libwebp -lossless 0 -q:v 75 -compression_level 6 \
-      -loop 1 -an assets/previews/circle.webp
+      -loop 1 -an assets/previews/<name>.webp
 
 Check the size (`ls -lh assets/previews`): over about 1 MB, lower `-q:v` or
 `fps`. `-loop 1` plays it once in browsers too; OpenCircle plays it once

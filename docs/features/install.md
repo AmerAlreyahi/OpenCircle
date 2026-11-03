@@ -1,8 +1,3 @@
-<p align="center">
-  <img src="../../gallery/clips/clip-6-install.webp" alt="Install OpenCircle, launch it, and find it in the tray." width="960"><br>
-  <a href="../../gallery/clips/clip-6-install.mp4">Watch in full quality</a>
-</p>
-
 # Install OpenCircle
 
 Install OpenCircle on Windows, or use the portable executable; Linux packages are available as a preview.
@@ -34,10 +29,10 @@ Install OpenCircle on Windows, or use the portable executable; Linux packages ar
 ## Limits
 
 - Silent install (for IT): `OpenCircle-Setup-<version>-x64.exe /quiet [/dir="…"]`; silent uninstall: `/uninstall /quiet`. See [Getting started](../getting-started.md).
-- Update signatures verify downloads; they are separate from Windows code signing. Windows SmartScreen may warn about the unsigned executable. See [Signing](../signing.md).
+- Update signatures verify downloads; they are separate from Windows code signing. Windows SmartScreen may warn about the unsigned executable, and Windows 11 with Smart App Control on blocks it until OpenCircle is code-signed. See [Signing](../signing.md).
 - Linux is a preview. `.deb` and `.rpm` installations notify you about updates and link to the release rather than replacing the package themselves.
 - Windows OCR needs an installed recognition language. Other text readers and offline translation models download on first use.
 
 ---
 
-[Previous: Save and copy](save-and-copy.md) · [Next: Circle to Search](circle-to-search.md) · [All features](README.md) · [Back to README](../../README.md)
+[Previous: Snip](snip.md) · [Next: Circle to Search](circle-to-search.md) · [All features](README.md) · [Back to README](../../README.md)

@@ -5,112 +5,103 @@
 <p align="center">
   <b>Circle to Search for Windows and Linux. Free and open source.</b><br>
   Circle anything on your screen to search it, read it, translate it in place,<br>
-  or ask an AI about it. Fast, private and light.
+  or ask an AI about it. Snip and mark up screenshots. Fast, private and light.
 </p>
 
 OpenCircle is one small native program for Windows and Linux that puts search,
-text reading, in-place translation and AI questions behind one shortcut. It never
-uploads your screen on its own: search and AI Mode open in your own browser, only
-when you choose them, and translation runs on your PC by default. It is free, MIT
-licensed, and has no account and no telemetry.
+text reading, in-place translation, AI questions and a screenshot tool behind a
+few shortcuts. It never uploads your screen on its own: search and AI Mode open
+in your own browser, only when you choose them, and translation runs on your PC
+by default. It is free, MIT licensed, and has no account and no telemetry.
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7a6cf0"></a>
   <img alt="Platforms: Windows and Linux (preview)" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20(preview)-4fc9e0">
 </p>
 
-## See v0.1.1 in action
-
-Real recordings of the default v0.1.1 features on Windows. These clips show
-v0.1.1: version 0.1.2 has a new look (see below). Labs features are off. [v0.1.1 release notes](https://github.com/AmerAlreyahi/OpenCircle/releases/tag/v0.1.1).
+## See it
 
 <table>
   <tr>
-    <td width="50%"><a href="docs/features/circle-to-search.md"><img src="gallery/clips/clip-1-circle.webp" alt="Circle a photo, then Search in browser: Google Lens opens with the crop."><br><sub><b>Circle anything, then choose Search.</b> Lens opens in your own browser.</sub></a></td>
-    <td width="50%"><a href="docs/features/select-text.md"><img src="gallery/clips/clip-2-text.webp" alt="Select a line of text on screen, copy it and paste it into Notepad."><br><sub><b>Select text. Copy. Paste.</b> Text on screen is selectable at once.</sub></a></td>
+    <td width="50%"><a href="docs/features/circle-to-search.md"><img src="assets/previews/circle-1.webp" alt="Circle a picture on screen, then choose what to do with it."><br><sub><b>Circle anything, then choose.</b> Nothing is sent until you pick.</sub></a></td>
+    <td width="50%"><a href="docs/features/select-text.md"><img src="assets/previews/text.webp" alt="Select a line of text on screen and copy it."><br><sub><b>Select text like on a desktop.</b> Readable at once.</sub></a></td>
   </tr>
   <tr>
-    <td><a href="docs/features/translate.md"><img src="gallery/clips/clip-3-translate.webp" alt="An English article is translated to Arabic in place, block by block."><br><sub><b>Read the page in Arabic.</b> Offline, drawn where the text stood.</sub></a></td>
-    <td><a href="docs/features/selection-box.md"><img src="gallery/clips/clip-4-adjust.webp" alt="Resize the selection box, move it with Alt+drag and copy the image."><br><sub><b>Adjust the box.</b> Resize, Alt+drag or arrows; Ctrl+C copies the image.</sub></a></td>
-  </tr>
-  <tr>
-    <td><a href="docs/features/save-and-copy.md"><img src="gallery/clips/clip-5-save.webp" alt="Ctrl+S saves the selection and a pill shows where."><br><sub><b>Keep it with Ctrl+S.</b> Saved straight to your folder.</sub></a></td>
-    <td><a href="docs/features/install.md"><img src="gallery/clips/clip-6-install.webp" alt="The setup installs OpenCircle, launches it, and it waits in the tray."><br><sub><b>Install. Launch. Ready.</b> One small setup, then one shortcut.</sub></a></td>
+    <td><a href="docs/features/snip.md"><img src="assets/previews/snip-blur.webp" alt="Snip an area, then hide text with Blur."><br><sub><b>Snip, mark up, paste.</b> Blur hides text for good.</sub></a></td>
+    <td><a href="docs/features/snip.md"><img src="assets/previews/snip-long.webp" alt="Long capture: scroll a page by hand and OpenCircle stitches it."><br><sub><b>Long capture.</b> Scroll the page; it is stitched into one image.</sub></a></td>
   </tr>
 </table>
 
-Full-size MP4 videos and feature guides: [gallery](gallery/README.md).
+<p align="center">
+  <img src="docs/images/snip-toolbar.png" alt="Snip: an area is picked, with the grouped toolbar beside it." width="49%">
+  <img src="docs/images/translate-before-after.png" alt="Translate in place: a page in English, then the same page in Arabic." width="49%">
+</p>
 
-## What works by default in v0.1.2
+More in the [gallery](gallery/README.md) and the [feature guides](docs/features/README.md).
+The clips are short recordings of the real app; third-party material in them is
+credited in `NOTICE` and in Settings > About.
 
-New in 0.1.2:
+## What works by default
 
-- **New look.** 12 themes, picked from cards in Settings (light and dark), in
-  Settings, the bar, the chat, the tray menu and the installer.
-- **Settings with a sidebar.** Pages for General, Appearance, AI, Translate and
-  more; changes save by themselves.
-- **AI chat with markdown.** Ask AI answers in a chat card. A follow-up pins the
-  chat so it stays open above other apps; a new capture asks into the same chat.
-  Saved history (text only, on this PC), and one key per provider, shown as dots.
-- **Circle to Search on all screens.** It opens on the screen your mouse is on.
-- **Smooth wheel zoom and pan** over the frozen screen.
-- **Model download card.** A short card asks before the one-time text reader or
-  translation model download.
-- **A calmer tray menu.** Left-click opens Settings.
-- **Copy text** goes straight to the clipboard (the Text panel is gone).
-
-Also:
-
-- **Translate in place.** Press `Ctrl+Shift+T` to translate
-  the whole screen. The original text is erased and the translation is drawn in
-  its place, with matching colour and size. This translates one captured screen;
-  run it again after the page changes. Runs offline by default after a one-time
-  model download. Arabic is the default target.
 - **Circle, then choose.** Press `Ctrl+Shift+Space`, draw a circle or a box
   around anything, then pick what to do: Search in browser (the picture goes to
   Google Lens, selected text to a Google search), Copy text, Translate, or ask
   AI. Nothing is sent until you pick. The stroke snaps to a clean box that you
   can move, resize by its edges, or nudge with the arrow keys (`Alt`+drag moves
-  it even over text). It opens on the screen of your active window, so it works
-  with several monitors.
-- **Select text like on a desktop.** Drag over words to copy them, translate
-  them, or search them. On Windows the text is readable at once with Windows' own
-  text recognition; otherwise (and for Arabic or games) OpenCircle offers a
-  one-time download of about 30 MB. Settings > Text reading > Engine
-  chooses.
+  it even over text). It opens on the screen your mouse is on, and all screens
+  stay selectable.
+- **Select text like on a desktop.** Drag over words to copy, translate or
+  search them. On Windows the text is readable at once with Windows' own text
+  recognition; otherwise (and for Arabic or games) OpenCircle offers a one-time
+  download of about 30 MB. Settings > Text reading > Engine chooses.
+- **Translate in place.** Press `Ctrl+Shift+T` to translate the whole screen. The
+  original text is erased and the translation is drawn in its place, with
+  matching colour and size; browser address bars and file names are left alone,
+  and big outlined subtitles are erased and redrawn at their size. It runs
+  offline by default after a one-time model download (49 direct models, and
+  other pairs go through English); Arabic is the default target. Direct models
+  into and out of Arabic make it faster. See [Translate](docs/translate.md).
+- **Snip and annotate.** Press `Alt+A`: the screen freezes, hover a window and
+  click it, or drag an area (`Enter` takes the full screen). The pick is already
+  on the clipboard at its original size, with one grouped toolbar beside it:
+  shapes, arrows, text, callouts, numbered steps, spotlight, magnifier, Blur (a
+  fine pixel mosaic that hides text for good) and a solid Redact. **Long
+  capture**: scroll the page yourself and OpenCircle stitches it. **Steps** keeps
+  several snips on a slim strip and copies them as one numbered image. Also a
+  colour picker, a screen ruler, Pin and Share. Details:
+  [Snip and annotate](docs/snip-and-annotate.md).
 - **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
-  browser, Copy text, and Translate; Snip is on the bar too; Live translate and Music
-  appear once you turn them on in Settings > Labs. `Ctrl+C` copies the selection as an
+  browser, Copy text, Translate and Snip. `Ctrl+C` copies the selection as an
   image (or the picked words as text), `Ctrl+S` saves it; a small pill confirms.
-  Drag the bar to any edge.
+  Drag the bar to any of six spots.
 - **Ask AI about your selection.** No key needed: the question opens in Google
-  AI Mode in your browser. Or add your own key for answers inside OpenCircle: OpenRouter, OpenAI, Anthropic, Gemini, Groq, Mistral, DeepSeek, xAI, a local
-  Ollama or LM Studio, or your own server.
+  AI Mode in your browser. Or add your own key for a chat inside OpenCircle
+  with markdown and follow-ups: OpenRouter, OpenAI, Anthropic, Gemini, Groq,
+  Mistral, DeepSeek, xAI, a local Ollama or LM Studio, or your own server. A
+  follow-up pins the chat so it stays above other apps. History is text only
+  and stays on this PC.
 - **Shortcuts for everything.** Give any action its own key and skip the bar.
-- **Themes.** 12 themes (light and dark; System follows Windows) and looks for
-  the screen edge while OpenCircle is active.
+- **12 themes and Active Look.** Pick a card in Settings > Appearance (light and
+  dark; until you do, it follows the system). Sapphire Glow, a soft glow round
+  the screen edge, is the default look; its colours also outline the snip area.
 - **Updates that check a signature.** Quiet, opt-in on first run, with release
   notes after each update.
 
-- **Snip and annotate.** Press `Print Screen`: the screen freezes, hover a
-  window or drag an area, and it is already on the clipboard (original size)
-  with a grouped toolbar beside it: shapes, arrows, text, callouts, numbered
-  steps, spotlight, magnifier, Blur (a soft mosaic that hides text for good) and a solid Redact. Long capture:
-  scroll the page yourself and OpenCircle stitches it. Steps collects several
-  snips into one numbered image. Also a colour picker, a screen ruler and Pin
-  (a live pin is in Labs). Details: [Snip and annotate](docs/snip-and-annotate.md).
+<p align="center">
+  <img src="docs/images/settings-appearance.png" alt="Settings > Appearance: 12 themes and the Active Look borders, with Sapphire Glow as the default." width="70%">
+</p>
 
 ### Optional Labs features
 
-Song search, search history, live pins and live translate are
-unfinished, off by default and hidden until enabled in **Settings > Labs**.
-They are not part of the default gallery above. Live translate is planned
-for v0.3.0.
+Song search, search history, live pins and live translate are unfinished, off by
+default and hidden until enabled in **Settings > Labs**. Live translate is
+planned for a later release.
 
 ## Private by design
 
 - Nothing leaves your computer unless you choose an action.
 - No account, no telemetry, no image-hosting service.
+- Snips stay in memory until you save them; only what you copy or save leaves the app.
 - A small log stays on your PC (`logs/` in your local data folder) to help fix problems; nothing is sent. Settings > About has *Copy diagnostics* and *Report a problem*.
 - AI and song-search keys live in your system's keyring, never in a file.
 - Search and AI Mode open in your own browser, only when you press them. The
@@ -157,8 +148,15 @@ sha256sum -c SHA256SUMS.txt --ignore-missing
 ```
 
 **Windows SmartScreen** may say "Windows protected your PC" because the
-installers are not code-signed (the project is free). Click **More info**, then
-**Run anyway**. See [Signing](docs/signing.md) to sign your own build.
+installers are not code-signed yet (the project is free). Click **More info**,
+then **Run anyway**. See [Signing](docs/signing.md) to sign your own build.
+
+**Windows 11 Smart App Control.** Where Smart App Control is on, Windows blocks
+unsigned programs outright and there is no "Run anyway". Until OpenCircle is
+code-signed (see below), either turn Smart App Control off in Windows Security >
+App & browser control > Smart App Control settings (Windows does not let you
+turn it back on afterwards, on some versions), or build from source. It is off on
+many PCs, and Windows 10 does not have it.
 
 OpenCircle starts with Windows by default (tray only, no window). Turn that off
 in Settings.
@@ -191,16 +189,17 @@ operating it. See the [Privacy](docs/privacy.md) page.
 | Live translate on / off (Labs, unfinished) | `Ctrl+Shift+L` |
 | Circle, then explain with AI | `Ctrl+Shift+E` |
 | Circle, then copy its text | `Ctrl+Shift+X` |
-| Snip | `Print Screen` |
+| Snip | `Alt+A` |
 
-All of them change in Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
+Colour picker and screen ruler have no default key. All of them change in
+Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
 
 ## Platforms
 
 - **Windows 10 and 11:** the full feature set.
 - **Linux (preview):** X11 and Wayland. On Wayland the desktop owns the keys and
-  the screen capture; live translate runs once per press, and picking a window
-  and long capture are not offered. See [Linux notes](docs/linux-notes.md).
+  the screen capture; picking a window and long capture are not offered, and
+  Share is Windows only. See [Linux notes](docs/linux-notes.md).
 
 Games must run in borderless or windowed mode for live translate (Labs,
 unfinished). Linux text reading is slower than Windows OCR; on Wayland the
@@ -237,6 +236,8 @@ sudo apt-get install libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev l
 [Shortcuts](docs/shortcuts.md) ·
 [Translate](docs/translate.md) ·
 [Snip and annotate](docs/snip-and-annotate.md) ·
+[Feature guides](docs/features/README.md) ·
+[Gallery](gallery/README.md) ·
 [AI setup](docs/ai-setup.md) ·
 [Song search (Labs)](docs/song-search.md) ·
 [Privacy](docs/privacy.md) ·
@@ -248,6 +249,10 @@ sudo apt-get install libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev l
 Settings > About lists the project, the licence, and every component OpenCircle
 uses that is made by others, with its licence. Text-reading and translation
 models are downloaded on first use under their own licences; see `NOTICE`.
+The translation models come from Hugging Face (Xenova's ONNX exports of the
+Helsinki-NLP OPUS-MT models) and, for the five direct Arabic models we
+converted ourselves, from
+[AmerAlreyahi/OpenCircle-models](https://github.com/AmerAlreyahi/OpenCircle-models).
 
 ## Contributing
 
@@ -261,12 +266,10 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
 [MIT](LICENSE)
 
-Media exception: the Translate preview animation
-(`assets/previews/translate.webp`) and its poster are licensed under
-[CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt) (they are based on a Wikipedia
-article); the app code stays MIT. The COFFEE photo in the Text reading clip
-stays under the [Unsplash License](https://unsplash.com/license). The other preview clips show third-party
-material credited in `NOTICE` and in Settings > About.
+Media exception: the preview clips bundled in the app (`assets/previews`) show
+third-party material under its own terms, which the app's MIT licence does not
+relicense. Each clip's credit and licence is listed in `NOTICE` and in
+Settings > About.
 
 OpenCircle is an independent project and is not affiliated with or endorsed
 by Google. "Google", "Google Lens" and "Circle to Search" are trademarks of

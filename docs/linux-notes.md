@@ -33,11 +33,11 @@ supported.
 |---|---|
 | Screen capture | The desktop's Screenshot portal. The desktop may ask you to allow it. |
 | Global shortcuts | The GlobalShortcuts portal (GNOME 48+, KDE Plasma 6, Hyprland's portal). The desktop asks you once. If the portal is missing or you decline, bind `opencircle capture` yourself: see [Shortcuts](shortcuts.md#wayland-without-the-shortcut-portal). |
-| Snip | Drag an area or press `Enter` for the full screen. There is no window list, so hovering a window to pick it is not offered, and there is no silent screen grab, so Long capture is not offered (its button is dimmed). |
+| Snip | Drag an area or press `Enter` for the full screen. There is no window list, so hovering a window to pick it is not offered, and there is no silent screen grab, so Long capture is not offered (its button is dimmed). Copy, Save, the toolbar and its tools, Steps, the colour picker and the screen ruler all work. Share (Windows' share sheet) is Windows only. |
 | Live translate | Not available; each press of the translate shortcut translates once. |
 
-The portal paths are verified on GNOME 50 (Ubuntu 26.04); other desktops are not
-yet. If something fails, `opencircle` prints a line explaining it on its
+The portal paths and the Snip flow above are verified on GNOME 50 (Ubuntu 26.04,
+Wayland); other desktops are not yet. If something fails, `opencircle` prints a line explaining it on its
 standard error; run it from a terminal to read it.
 
 ### Changing a shortcut
@@ -48,11 +48,29 @@ shortcut, and GNOME shows its "Add Keyboard Shortcuts" dialog once: accept it.
 Keys you leave at OpenCircle's defaults keep their identity, so a key you set in
 GNOME's own settings (Settings → Apps → OpenCircle → Global Shortcuts) stays.
 
+### First start
+
+The first start shows GNOME's own "Add Keyboard Shortcuts" dialog once, listing
+OpenCircle's keys (including Snip's `Alt+A`). Accept it; GNOME keeps what you
+confirmed.
+
 ### Print Screen
 
-GNOME's shell takes `Print Screen` before any app's global
-shortcut, so OpenCircle's Snip shortcut there does nothing until you free them
-with `gsettings`: see [Shortcuts](shortcuts.md#defaults).
+Snip's default key is `Alt+A`, which GNOME leaves alone. GNOME's shell takes
+`Print Screen` before any app's global shortcut, so if you give Snip that key it
+does nothing until you free it with `gsettings`: see
+[Shortcuts](shortcuts.md#defaults).
+
+### Limits on Wayland
+
+- Popups (the Steps strip, toasts, pins) are square windows: Wayland cannot cut a
+  window to a rounded shape.
+- Circle to Search takes about half a second to appear (the portal screenshot),
+  and reading text uses the downloaded reader, so a full page can take around ten
+  seconds to become selectable.
+- The first offline translation needs a model download (for example about 117 MB
+  for German to English); a pair that goes through English needs two. A page
+  takes several seconds on a CPU-only machine.
 
 ### App id and desktop file
 

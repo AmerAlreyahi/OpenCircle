@@ -7,16 +7,17 @@ Every network action is something you start.
 
 | When you... | What is sent | To whom |
 |---|---|---|
-| Press **Search in browser** (or turn on **Auto action** in Settings, which runs it after every selection) | The selected area, as an image; for selected text, only the text | Google Lens (or Google Search for text), in your default browser. The image goes straight from your browser to Lens; no image-hosting service is involved. A selection of one plain colour is never sent. |
-| Press **Send** in Ask AI / Explain, with the default **Google AI Mode (no key)** | Your question and the text read from your selection (text only; the screenshot is not uploaded unless you choose Lens) | Google, in your default browser, which opens AI Mode with the question in the address. If you decline the one-time text reader download, only your prompt is sent. |
-| Ask AI / Explain, with an API provider | Your question; the selected area as an image only while **Include screen** is on (turn it off and no image is sent). A chat sends the last 20 messages in full plus one short summary of older ones, which your own provider writes. The whole chat is never sent | The AI provider you configured (or your local server) |
-| Translate with AI (only if you pick **AI** in Settings > Translate) | The text read from the screen (text only, not the image) | The AI provider you configured |
-| Translate with the **Offline** engine (the default) | Nothing. The model runs on your PC. A v0.1.1 config that had no API provider set up is moved to Offline when 0.1.2 first starts | Nobody |
+| Press **Search in browser** (or choose **Run at once** for **Auto action** in Settings > Look & behaviour, which runs it after every selection) | The selected area, as an image; for selected text, only the text | Google Lens (or Google Search for text), in your default browser. The image goes straight from your browser to Lens; no image-hosting service is involved. A selection of one plain colour is never sent. |
+| Ask AI / Explain with **Browser** (Settings > AI; the default, no key): press `Enter` in the bar's AI field | Your question and the text read from your selection (text only; the screenshot is not uploaded) | Google, in your default browser, which opens AI Mode with the question in the address. If you decline the one-time text reader download, only your prompt is sent. |
+| Ask AI / Explain, with an **AI provider** (Settings > AI) | Your question; the selected area as an image only while **Include screen** is on (turn it off and no image is sent). A chat sends the last 20 messages in full plus one short summary of older ones, which your own provider writes. The whole chat is never sent | The AI provider you configured (or your local server) |
+| Translate with AI (only if you pick **AI** as the engine in Settings > Translate) | The text read from the screen (text only, not the image) | The AI provider you configured |
+| Translate with the **Offline** engine (the default) | Nothing. The model runs on your PC | Nobody |
 | Select text for the first time, after you agree (Linux; on Windows only when Windows has no text recognizer for your languages, or for Arabic; Settings > Text reading > Engine chooses) | Nothing of yours. It downloads the text reader (about 30 MB). On Windows, text is otherwise read by Windows' own built-in OCR, on your PC | GitHub (ONNX Runtime releases and the oar-ocr model release), checked against pinned checksums |
-| Translate offline for the first time, after you agree | Nothing of yours. It downloads the translation model (about 120 MB, plus the OCR files if missing) | Hugging Face (a pinned commit of the OPUS-MT model) and GitHub, checked against pinned checksums |
+| Translate offline for the first time, after you agree | Nothing of yours. It downloads the translation model (about 120 MB, plus the OCR files if missing) | Hugging Face (a pinned commit of the OPUS-MT model) and GitHub (the five direct Arabic models, from `github.com/AmerAlreyahi/OpenCircle-models`, and the OCR files), checked against pinned checksums |
 | Press the **music button** (song search, only after you add your own key) | A ~10-second clip of the audio you choose (what this PC plays, or the microphone), plus your key. Then the song's cover image is downloaded | AudD (`api.audd.io`); the cover from Apple's image server (`mzstatic.com`) |
 | Update check (asked on first run, where the switch starts on; you can turn it off there or later in Settings) | Only the request for the latest release: no account, no ID, no screen data | GitHub (the release files and `SHA256SUMS.txt` with its signature) |
-| Anything else (circle, copy, save, snip, annotate, read text) | Nothing | Nobody |
+| Press **Share** in Snip | The picture, to the app you pick in Windows' own share sheet | The app you choose; OpenCircle sends nothing itself |
+| Anything else (circle, copy, save, snip, annotate, long capture, steps, pin, colour picker, ruler, read text) | Nothing | Nobody |
 
 Lens and your AI provider have their own privacy policies; OpenCircle cannot
 control what they do with what you send.
@@ -55,7 +56,11 @@ only to the server of the provider it belongs to. A remote server must use `http
   the chat's History drawer. Nothing in it is sent anywhere except as the
   context described above.
 - **Captures** are kept in memory. A screenshot is written to disk only when
-  you press Save and choose a place.
+  you press Save and choose a place. **Steps** and a long capture's pieces are
+  memory only too. Copying puts the picture on the clipboard, where other apps
+  (and Windows' clipboard history) can see it. **Settings > History > Recent
+  captures** (off by default) keeps the last 20 on this PC; turning it off
+  deletes them.
 - **Lens page.** The temporary web page that carries the image to Lens is
   deleted as soon as the browser has had time to read it, when the overlay
   closes. A page left behind by a crash is removed the next time OpenCircle
@@ -78,6 +83,6 @@ only to the server of the provider it belongs to. A remote server must use `http
 ## Offline use
 
 Circle, select text and offline translation (after their one-time downloads),
-Copy, Save and Snip work with no network. Search, Ask AI and AI translation need
+Copy, Save and Snip (long capture, steps, colour picker, ruler) work with no network. Search, Ask AI and AI translation need
 one; a local model removes the need for the last two (the browser provider
 always needs the web).
