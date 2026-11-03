@@ -7,7 +7,7 @@ Every network action is something you start.
 
 | When you... | What is sent | To whom |
 |---|---|---|
-| Press **Search in browser** (or choose **Run at once** for **Auto action** in Settings > Look & behaviour, which runs it after every selection) | The selected area, as an image; for selected text, only the text | Google Lens (or Google Search for text), in your default browser. The image goes straight from your browser to Lens; no image-hosting service is involved. A selection of one plain colour is never sent. |
+| Press **Search in browser** | The selected area, as an image; for selected text, only the text | Google Lens (or Google Search for text), in your default browser. The image goes straight from your browser to Lens; no image-hosting service is involved. A selection of one plain colour is never sent. |
 | Ask AI / Explain with **Browser** (Settings > AI; the default, no key): press `Enter` in the bar's AI field | Your question and the text read from your selection (text only; the screenshot is not uploaded) | Google, in your default browser, which opens AI Mode with the question in the address. If you decline the one-time text reader download, only your prompt is sent. |
 | Ask AI / Explain, with an **AI provider** (Settings > AI) | Your question; the selected area as an image only while **Include screen** is on (turn it off and no image is sent). A chat sends the last 20 messages in full plus one short summary of older ones, which your own provider writes. The whole chat is never sent | The AI provider you configured (or your local server) |
 | Translate with AI (only if you pick **AI** as the engine in Settings > Translate) | The text read from the screen (text only, not the image) | The AI provider you configured |

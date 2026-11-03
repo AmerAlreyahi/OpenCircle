@@ -47,8 +47,8 @@ can turn it off there or later in Settings. See
 3. Choose in the bottom bar: **Search in browser**, **Copy text**,
    **Translate**, or ask OpenCircle AI. `Esc` closes everything.
 
-Settings > Look & behaviour can change this: keep the drawn shape, or run a
-search as soon as you select (**Auto action**).
+Settings > Look & behaviour can change this: keep the shape you drew instead of
+a box. Nothing is sent until you pick an action.
 
 <p align="center">
   <img src="images/circle-to-search.png" alt="A picture circled on the frozen screen: it snaps to a rounded box, with the bottom bar below." width="800">
@@ -163,9 +163,6 @@ Details: [Snip and annotate](snip-and-annotate.md).
 **Settings > Look & behaviour**:
 
 - **Selection**: snap to a box, or keep the shape you drew.
-- **Auto action**: wait for you to choose (the default: nothing is sent), or
-  run **Search with** as soon as you select.
-- **Search with**: Lens, Ask AI or both.
 
 **Settings > Appearance** has 12 themes (pick a card: it sets the theme and its light or dark mode; until you pick one, OpenCircle follows Windows) and the Active Look screen borders shown while OpenCircle is open (Sapphire Glow is the default; the same colours outline a snip area), or Custom: your own colours, glow, dim, corners and a screen edge per mode.
 

@@ -27,7 +27,7 @@ Circle anything on your screen, then choose what to do with it.
 
 - **Search in browser** sends a picture selection to Google Lens in your own browser. A text selection opens a Google text search instead.
 - OpenCircle uploads your picture nowhere itself. Your browser sends it directly to Lens; no image-hosting service sits in between.
-- The default is to wait for your choice after you circle. You can change shortcuts and the **Auto action** under Settings > Look & behaviour.
+- Nothing is sent after you circle until you pick an action. Shortcuts are under Settings > Shortcuts; the selection style under Settings > Look & behaviour.
 - Unfinished features are in **Settings › Labs**.
 
 ## Limits
