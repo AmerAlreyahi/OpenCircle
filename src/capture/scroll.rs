@@ -167,6 +167,10 @@ fn run(
                 lost = rejects >= LOST_AFTER;
                 stale |= added;
                 last = Some(frame);
+            } else if rejects > 0 && !lost {
+                // one jump, then the page stopped: no frame comes to count the
+                // rest, and the user waits for a chip that never shows
+                (lost, news) = (true, true);
             }
         }
         // (a preview a few times a second is enough to look alive)
@@ -435,6 +439,18 @@ mod tests {
         let (updates, _, image) = drive(&rig, &at);
         let lost: Vec<bool> = updates.iter().map(|u| u.lost).collect();
         // the first frame, the jump (lost), back in step, on
+        assert_eq!(lost, [false, true, false, false], "{updates:?}");
+        let truth = rig.truth(500);
+        assert!(image.height as usize == truth.h && image.rgba == truth.px);
+    }
+
+    #[test]
+    fn one_jump_too_far_then_still_asks_to_scroll_back() {
+        let rig = Rig::new(400, 4000, 500, 4, 40);
+        // one fast flick far past the body, then the page rests there
+        let at = [0, 1500, 1500, 1500, 300, 500];
+        let (updates, _, image) = drive(&rig, &at);
+        let lost: Vec<bool> = updates.iter().map(|u| u.lost).collect();
         assert_eq!(lost, [false, true, false, false], "{updates:?}");
         let truth = rig.truth(500);
         assert!(image.height as usize == truth.h && image.rgba == truth.px);

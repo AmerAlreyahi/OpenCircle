@@ -218,11 +218,13 @@ pub(in crate::ui) fn open(settings: window::Settings) -> (window::Id, Task<windo
     let no_taskbar = settings.platform_specific.skip_taskbar;
     #[cfg(not(windows))]
     let no_taskbar = false;
+    let transparent = settings.transparent;
     let (id, opened) = window::open(app_window(settings));
     let caption_off = move |id| {
         window::run(id, move |w| {
             if let Ok(handle) = w.window_handle() {
                 super::shape::no_caption(handle.as_raw());
+                super::shape::no_backdrop(handle.as_raw(), transparent);
                 if no_taskbar {
                     super::shape::no_taskbar(handle.as_raw());
                 }
@@ -350,6 +352,19 @@ pub fn hole<T: Send + 'static>(
             && let Err(e) = super::shape::hole(handle.as_raw(), px(hole), &keep)
         {
             crate::log!("[opencircle] window shape: {e}");
+        }
+    })
+    .discard()
+}
+
+/// No system backdrop behind the transparent window `id` again
+/// (`super::shape::no_backdrop`; `open` did it once): a theming mod re-applies its
+/// blur to every window when its settings change, and long capture grabs
+/// through the overlay's hole.
+pub fn no_backdrop<T: Send + 'static>(id: window::Id) -> Task<T> {
+    window::run(id, |w| {
+        if let Ok(handle) = w.window_handle() {
+            super::shape::no_backdrop(handle.as_raw(), true);
         }
     })
     .discard()

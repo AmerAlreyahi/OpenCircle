@@ -215,6 +215,23 @@ pub fn no_taskbar(handle: RawWindowHandle) {
     let _ = handle;
 }
 
+/// Windows: no system backdrop (blur, acrylic, mica) behind the window behind
+/// `handle`, whatever put it there. A theming mod (Windhawk "Translucent Windows",
+/// owner 2026-11-03) gives every new top-level window of every process an
+/// acrylic blur over its whole rect, our cut-out holes included: long capture
+/// grabbed the blur instead of the page, and pills sat on a grey box. Called once
+/// by `platform/windows.rs` for every window it opens, after it is created
+/// (where such mods act); `transparent`: the window's per-pixel alpha (winit's
+/// empty blur-behind region) stays on. Elsewhere nothing.
+pub fn no_backdrop(handle: RawWindowHandle, transparent: bool) {
+    #[cfg(windows)]
+    if let RawWindowHandle::Win32(h) = handle {
+        win::no_backdrop(h.hwnd.get(), transparent);
+    }
+    #[cfg(not(windows))]
+    let _ = (handle, transparent);
+}
+
 #[cfg(windows)]
 mod win {
     use super::corner;
@@ -352,6 +369,96 @@ mod win {
                 let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
                 SetWindowLongPtrW(hwnd, GWL_EXSTYLE, tool_style(ex as u32) as isize);
             }
+        }
+    }
+
+    /// `SetWindowCompositionAttribute`'s data (undocumented, user32).
+    #[repr(C)]
+    struct Composition {
+        attribute: u32,
+        data: *mut std::ffi::c_void,
+        size: usize,
+    }
+    /// Its accent: `state` 0 = none (no blur, no acrylic behind the window).
+    #[repr(C)]
+    #[derive(Default)]
+    pub(super) struct Accent {
+        pub(super) state: u32,
+        flags: u32,
+        colour: u32,
+        animation: u32,
+    }
+    const WCA_ACCENT_POLICY: u32 = 19;
+    type Attribute = unsafe extern "system" fn(HWND, *mut Composition) -> i32;
+
+    /// user32's undocumented `name` (`Set`/`GetWindowCompositionAttribute`).
+    fn composition(name: windows::core::PCSTR) -> Option<Attribute> {
+        use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+        // SAFETY: user32 is loaded in every GUI process; both exports have this
+        // signature since Windows 7.
+        unsafe {
+            let user32 = GetModuleHandleW(w!("user32.dll")).ok()?;
+            GetProcAddress(user32, name).map(|f| std::mem::transmute::<_, Attribute>(f))
+        }
+    }
+
+    /// The window's accent `state` and colour, or set (`set`) to `accent`.
+    pub(super) fn accent(hwnd: HWND, set: Option<(u32, u32)>) -> Option<(u32, u32)> {
+        let name = match set {
+            Some(_) => windows::core::s!("SetWindowCompositionAttribute"),
+            None => windows::core::s!("GetWindowCompositionAttribute"),
+        };
+        let call = composition(name)?;
+        let (state, colour) = set.unwrap_or_default();
+        let mut accent = Accent {
+            state,
+            colour,
+            ..Accent::default()
+        };
+        let mut data = Composition {
+            attribute: WCA_ACCENT_POLICY,
+            data: &mut accent as *mut Accent as *mut _,
+            size: std::mem::size_of::<Accent>(),
+        };
+        // SAFETY: `data` points at a live `Accent` of the size given.
+        (unsafe { call(hwnd, &mut data) } != 0).then_some((accent.state, accent.colour))
+    }
+
+    pub fn no_backdrop(hwnd: isize, transparent: bool) {
+        use windows::Win32::Graphics::Dwm::{
+            DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND, DWMSBT_NONE,
+            DWMWA_SYSTEMBACKDROP_TYPE, DwmEnableBlurBehindWindow, DwmSetWindowAttribute,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::WS_EX_TRANSPARENT;
+        let hwnd = HWND(hwnd as *mut _);
+        // no accent (the blur / acrylic such a mod sets)
+        let _ = accent(hwnd, Some((0, 0)));
+        // SAFETY: `hwnd` is a live window of this thread; these calls only set
+        // its DWM attributes and, for a moment, its extended style.
+        unsafe {
+            // blur-behind: winit's empty region (per-pixel alpha) or off
+            let region = CreateRectRgn(0, 0, -1, -1);
+            let behind = DWM_BLURBEHIND {
+                dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION,
+                fEnable: transparent.into(),
+                hRgnBlur: region,
+                fTransitionOnMaximized: false.into(),
+            };
+            let _ = DwmEnableBlurBehindWindow(hwnd, &behind);
+            let _ = DeleteObject(region.into());
+            // no system backdrop (Windows 11 22H2+; an error elsewhere). Such a mod
+            // also rewrites this call, but leaves click-through windows alone: the
+            // window is one for this call only (no input can arrive in between).
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT.0 as isize);
+            let none = DWMSBT_NONE;
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_SYSTEMBACKDROP_TYPE,
+                &none as *const _ as *const _,
+                std::mem::size_of_val(&none) as u32,
+            );
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
         }
     }
 
@@ -857,6 +964,23 @@ mod tests {
     /// The owner's box behind the Copied pill: a cut window resized after its
     /// cut (a move onto a monitor of another scale resizes it inside winit's
     /// WM_DPICHANGED, before or without iced's `Resized`) kept the old region.
+    /// A theming mod's acrylic blur (Windhawk "Translucent Windows" sets accent 4,
+    /// colour 0x3A232323, on every new window) is gone after `no_backdrop`.
+    #[cfg(windows)]
+    #[test]
+    fn a_window_keeps_no_blur_a_mod_gave_it() {
+        use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
+        let hwnd = test_window();
+        win::accent(hwnd, Some((4, 0x3A23_2323))).expect("accent set");
+        let before = win::accent(hwnd, None).expect("accent read");
+        win::no_backdrop(hwnd.0 as isize, true);
+        let after = win::accent(hwnd, None).expect("accent read");
+        // SAFETY: the test's own window.
+        let _ = unsafe { DestroyWindow(hwnd) };
+        assert_eq!(before.0, 4, "the mod's blur is on (the check can see it)");
+        assert_eq!(after.0, 0, "no blur behind our window");
+    }
+
     /// The region follows the window at once, whatever moved it, at every scale
     /// (a 200x60 logical card at 1.0 / 1.25 / 1.5 / 2.0, back to 1.0; a test
     /// window can't be smaller than a caption's minimum, 153x44 at 1.0).

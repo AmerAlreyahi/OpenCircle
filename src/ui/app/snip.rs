@@ -482,6 +482,7 @@ impl App {
             }
         );
         let cut = windows::hide_from_capture(overlay, keep.is_some())
+            .chain(windows::no_backdrop(overlay))
             .chain(windows::hole(
                 overlay,
                 area,
