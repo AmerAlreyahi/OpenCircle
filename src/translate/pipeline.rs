@@ -480,12 +480,13 @@ fn made_up(src: &str, out: &str, target: &str) -> bool {
         });
     // in a sentence numbers move between digits and words ("deux cents" ->
     // "200"): they judge labels and short phrases only
-    let label = words(src) <= 8;
+    let label = words(src) <= 12;
     let number_lost = label && numbers.into_iter().any(|n| !od.contains(&n));
     let number_new = label && od.split_whitespace().any(|n| !sd.contains(n));
-    // most of a long sentence gone: Marian cut it short, or gave a stock
-    // phrase instead (fr-ar: "( انظر الفقرة في مستهل المقالة . )" for 22 words)
-    let lost = words(src) >= 12 && words(out) * 5 < words(src) * 2;
+    // most of a sentence gone: Marian cut it short, or gave a stock phrase
+    // instead (fr-ar: "( انظر الفقرة في مستهل المقالة . )" for 22 words; fr-es:
+    // "Usted Elige un" for "Vous lisez un « article de qualité » labellisé en 2021")
+    let lost = words(src) >= 6 && words(out) * 5 < words(src) * 2;
     let script = lang::find(target).map_or(Script::Latin, |l| l.script);
     let letters: Vec<char> = out.chars().filter(|c| c.is_alphabetic()).collect();
     let foreign = match script {
@@ -733,13 +734,22 @@ fn halves(s: &str) -> Vec<String> {
     }
 }
 
-/// `s` cut at the comma (or semicolon, colon) nearest its middle.
+/// `s` cut at the comma (or semicolon, colon; else before a bracket)
+/// nearest its middle, each part 3 words or more ("... du centre
+/// galactique," has its only comma at the end).
 fn cut(s: &str) -> Option<[String; 2]> {
     let mid = s.len() / 2;
-    let i = (s.match_indices([',', ';', ':']).map(|(i, _)| i + 1))
-        .filter(|&i| s[i..].starts_with(' '))
-        .min_by_key(|&i| i.abs_diff(mid))?;
-    Some([s[..i].trim().to_string(), s[i + 1..].trim().to_string()])
+    let after =
+        (s.match_indices([',', ';', ':']).map(|(i, _)| i + 1)).filter(|&i| s[i..].starts_with(' '));
+    let before = s.match_indices(" (").map(|(i, _)| i);
+    let parts = |i: usize| [s[..i].trim().to_string(), s[i..].trim().to_string()];
+    let fair = |p: &[String; 2]| p.iter().all(|p| p.split_whitespace().count() >= 3);
+    let best = |at: &mut dyn Iterator<Item = usize>| {
+        at.filter(|&i| fair(&parts(i)))
+            .min_by_key(|&i| i.abs_diff(mid))
+    };
+    let i = best(&mut after.into_iter()).or_else(|| best(&mut before.into_iter()))?;
+    Some(parts(i))
 }
 
 #[derive(Debug)]
@@ -2225,6 +2235,24 @@ pub(super) mod tests {
             "وبلايين الأجسام الصغيرة (كلها تقريباً من الكويكبات المذنبات، الغبار الكوني، الخ."
         );
         assert_eq!(*calls.borrow(), 2, "one more call for all the halves");
+        // fr-es: its only comma at the end; cut before the bracket instead
+        let s = "Le Système solaire fait partie de la galaxie appelée Voie lactée (parfois « la \
+                 Galaxie ») où il réside dans le bras d'Orion, est situé à environ 8 kpc du \
+                 centre galactique,";
+        let [a, b] = super::cut(s).unwrap();
+        assert!(
+            a.ends_with("bras d'Orion,") && b.starts_with("est situé"),
+            "{a} | {b}"
+        );
+        let s = "Il est situé à environ 8 kpc (26 100 al) du centre galactique,";
+        let [a, b] = super::cut(s).unwrap();
+        assert_eq!(
+            (a.as_str(), b.as_str()),
+            (
+                "Il est situé à environ 8 kpc",
+                "(26 100 al) du centre galactique,"
+            )
+        );
     }
 
     #[test]
@@ -2242,6 +2270,10 @@ pub(super) mod tests {
         assert!(made_up("Sommaire", "目次", "en"), "another script");
         // fr-ar on the Win10 VM (Edge, "Système solaire")
         assert!(made_up("247 langues •v", "247 لغة □ ت", "ar"), "a symbol");
+        let title = "Systéme solaire — Wikipédia";
+        assert!(made_up(title, "Sonnensystem ✓ Wikipedia", "de"), "a symbol");
+        let s = "Vous Ilsez un « article de qualité » labemsé en 2021";
+        assert!(made_up(s, "Usted Elige un", "es"), "fr-es: most of it lost");
         let s = "ainsi que des milliards de petits corps (la presque totalité des astéroides \
                  et autres planetes mineures, les cométes, les poussiéres cosmiquesv etc.).";
         assert!(
