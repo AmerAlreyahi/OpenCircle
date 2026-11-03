@@ -8,7 +8,7 @@ use iced::{Point, Rectangle, Size, Task};
 
 use crate::Trigger;
 use crate::actions::{self, Action, Crop, Run, copy, qr, search_in_browser, text};
-use crate::config::{self, After, QuickAction, SearchWith, SelectionConfig, Target};
+use crate::config::{self, QuickAction, Target};
 use crate::labs::BarButton;
 
 use crate::ui::app::background::background;
@@ -16,7 +16,7 @@ use crate::ui::app::message::{Message, PickAct, PillPlace, Purpose};
 use crate::ui::app::quick::Quick;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::platform::monitor::{self, taskbar_inset};
-use crate::ui::{ai_chat, live_layer, overlay, settings, song, translate, windows};
+use crate::ui::{ai_chat, live_layer, settings, song, translate, windows};
 
 use super::{App, Reader, TOAST_MARGIN};
 
@@ -92,30 +92,6 @@ impl App {
         use actions::entities::{Kind, find};
         let text = self.picked_text()?;
         find(&text).into_iter().find(|e| e.kind != Kind::Phone)
-    }
-
-    /// What runs by itself once a selection is made.
-    pub(in crate::ui) fn auto_actions(&self) -> &'static [&'static Action] {
-        let word = self
-            .o
-            .selection
-            .is_some_and(|s| s.kind == overlay::Kind::Word);
-        // (after the snap: the Settled message runs them)
-        if !matches!(self.o.purpose, Purpose::Search)
-            || word
-            || self.o.selection.is_none()
-            || self.settling()
-        {
-            return &[];
-        }
-        auto_targets(self.o.behaviour)
-    }
-
-    /// Runs `auto_actions` (Lens and Ask AI: the Lens page opens in the browser
-    /// and stays held whichever panel then shows).
-    pub(in crate::ui) fn auto_search(&mut self) -> Task<Message> {
-        let runs: Vec<_> = (self.auto_actions().iter()).map(|a| self.run(a)).collect();
-        Task::batch(runs)
     }
 
     /// Search in browser on a text selection: the text, as a Google search in
@@ -538,16 +514,6 @@ impl App {
             live: false,
         };
         self.update(Message::Trigger(Trigger::Quick(at, once)))
-    }
-}
-
-/// The actions a selection runs by itself under `behaviour`.
-pub(in crate::ui) fn auto_targets(behaviour: SelectionConfig) -> &'static [&'static Action] {
-    match (behaviour.after, behaviour.search_with) {
-        (After::Wait, _) => &[],
-        (After::Search, SearchWith::Lens) => &[&search_in_browser::ACTION],
-        (After::Search, SearchWith::Ai) => &[&actions::ask::ACTION],
-        (After::Search, SearchWith::Both) => &[&search_in_browser::ACTION, &actions::ask::ACTION],
     }
 }
 

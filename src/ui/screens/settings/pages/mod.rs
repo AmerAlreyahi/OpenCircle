@@ -32,7 +32,7 @@ pub mod rows {
     pub use super::ai::{key_row, keyed, preset_row, provider_row, url_row};
     pub use super::appearance::themes_row;
     pub use super::general::{start_row, update_row};
-    pub use super::look::{after_row, selection_row};
+    pub use super::look::selection_row;
 }
 #[cfg(test)]
 pub use song::SONG_PRIVACY;

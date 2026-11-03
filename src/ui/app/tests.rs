@@ -24,7 +24,6 @@ use crate::ui::screens::overlay::edge as border;
 use crate::ui::snip::Snip;
 use crate::ui::{ai_chat, overlay, snip, song, translate, windows};
 
-use super::actions::auto_targets;
 use super::view::chips_at;
 use super::*;
 use crate::ui::kit::field;
@@ -2567,7 +2566,6 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         false,
     );
     assert!(app.o.selection.is_some());
-    assert!(app.auto_actions().is_empty(), "nothing runs by itself");
     assert!(
         app.o.ai_chat.is_none(),
         "no Lens, no Ask AI before a choice"
@@ -2608,16 +2606,20 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
     let _ = app.update(Message::AskInput("  ".into()));
     let _ = app.update(Message::AskSubmit);
     assert!(app.o.ai_chat.is_some());
-    // "Auto action" opted back in: the selection searches by itself
+    // a file that still says "Run at once" (selection.after = "search", both):
+    // nothing runs by itself either (owner, 2026-10-26: no auto search)
     let mut app = open_app(1280, 800, 1.0);
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+    app.o.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Both);
     drag(
         &mut app,
         Point::new(200.0, 150.0),
         Point::new(500.0, 350.0),
         false,
     );
-    assert!(app.o.ai_chat.is_none(), "Search in browser shows no card");
+    let _ = app.update(Message::Settled);
+    assert!(app.o.selection.is_some());
+    assert!(app.o.ai_chat.is_none(), "no Ask AI by itself");
+    assert!(app.o.search_pages.is_empty(), "no search by itself");
     // the key still works: A asks
     app.o.ai_chat = None;
     event(
@@ -3394,43 +3396,6 @@ fn behaviour(style: SelectStyle, after: After, search_with: SearchWith) -> Selec
 }
 
 #[test]
-fn auto_search_runs_what_the_setting_says_and_only_for_a_search() {
-    let ids = |b| auto_targets(b).iter().map(|a| a.id).collect::<Vec<_>>();
-    let snap = SelectStyle::Snap;
-    assert!(ids(behaviour(snap, After::Wait, SearchWith::Both)).is_empty());
-    assert_eq!(
-        ids(behaviour(snap, After::Search, SearchWith::Lens)),
-        ["lens"]
-    );
-    assert_eq!(ids(behaviour(snap, After::Search, SearchWith::Ai)), ["ai"]);
-    assert_eq!(
-        ids(behaviour(snap, After::Search, SearchWith::Both)),
-        ["lens", "ai"]
-    );
-    // the defaults: snap, then wait for the user's choice (N-03)
-    assert_eq!(
-        config::Config::default().selection,
-        behaviour(snap, After::Wait, SearchWith::Lens)
-    );
-    // an App: a drawn selection searches; a tapped word, Snip or nothing doesn't
-    let mut app = open_app(400, 300, 1.0);
-    app.o.behaviour = behaviour(snap, After::Search, SearchWith::Ai);
-    assert!(app.auto_actions().is_empty(), "no selection yet");
-    app.select(Rectangle::new(
-        Point::new(10.0, 10.0),
-        Size::new(80.0, 60.0),
-    ));
-    assert_eq!(app.auto_actions().len(), 1);
-    app.o.selection.as_mut().unwrap().kind = overlay::Kind::Word;
-    assert!(app.auto_actions().is_empty(), "a tapped word waits");
-    app.o.selection.as_mut().unwrap().kind = overlay::Kind::Snap;
-    app.o.purpose = Purpose::Snip(Box::new(Snip::new(Vec::new(), app.place(), false, None)));
-    assert!(app.auto_actions().is_empty(), "Snip has no search");
-    // an App opened before the setting existed behaves as before
-    assert!(auto_targets(App::idle(window::Id::unique()).o.behaviour).is_empty());
-}
-
-#[test]
 fn a_circle_snaps_to_a_box_that_morphs_and_resizes_by_its_brackets() {
     let mut app = open_app(800, 600, 1.0);
     app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
@@ -3685,9 +3650,9 @@ fn the_selections_actions_wait_for_the_snap_to_finish() {
 }
 
 #[test]
-fn a_circle_snaps_and_searches_only_on_release() {
+fn a_circle_snaps_only_on_release() {
     let mut app = open_app(800, 600, 1.0);
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+    app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
     let ring = ring(300.0, 250.0, 80.0);
     let press = overlay::Event::Press {
         at: ring[0],
@@ -3700,15 +3665,14 @@ fn a_circle_snaps_and_searches_only_on_release() {
             app.o.selection.is_none() && app.o.morph.is_none(),
             "drawing"
         );
-        assert!(app.auto_actions().is_empty(), "nothing searches yet");
     }
     event(&mut app, overlay::Event::Release);
     assert_eq!(app.o.selection.unwrap().kind, overlay::Kind::Snap);
     assert!(app.o.morph.is_some(), "the stroke morphs into the box");
-    assert!(app.auto_actions().is_empty(), "not while it snaps");
+    assert!(app.settling(), "it snaps");
     let (from, _) = app.o.morph.take().unwrap();
     app.o.morph = Some((from, Instant::now() - overlay::MORPH * 2));
-    assert!(!app.auto_actions().is_empty(), "then the search runs");
+    assert!(!app.settling(), "then the box is settled");
 }
 
 /// A snapped box over `text_app`'s lines 1-3, in select-text mode with its words read.
@@ -3881,9 +3845,9 @@ fn nothing_floats_over_the_result_card() {
 }
 
 #[test]
-fn a_quick_action_on_a_drawn_area_runs_alone_not_the_auto_search_too() {
+fn a_quick_action_on_a_drawn_area_runs_it() {
     let mut app = open_app(1920, 1080, 1.0);
-    app.o.behaviour = SelectionConfig::default(); // auto search: Lens
+    app.o.behaviour = SelectionConfig::default();
     let ask = Quick::Action(&actions::ask::ACTION);
     app.o.purpose = Purpose::Quick(ask, config::Target::Circle);
     drag(
@@ -3966,7 +3930,7 @@ fn look_shots() {
     };
     let mut app = text_app();
     glowing(&mut app);
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Lens);
+    app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
     let ring = ring(280.0, 122.0, 110.0)
         .into_iter()
         .map(|p| Point::new(p.x * 1.9 - 250.0, p.y * 0.9 + 12.0))

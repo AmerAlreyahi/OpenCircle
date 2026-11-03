@@ -9,9 +9,8 @@ use super::pages::SONG_PRIVACY;
 use super::pages::{self, PAGES};
 use super::*;
 use crate::config::{
-    self, After, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
-    LookTheme, Provider, Rgb, SearchWith, SelectStyle, SnipAfter, SongSource, Target, TextReader,
-    Theme,
+    self, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
+    LookTheme, Provider, Rgb, SelectStyle, SnipAfter, SongSource, Target, TextReader, Theme,
 };
 use crate::hotkey::{DesktopKey, managed};
 use crate::labs::{Feature, Labs};
@@ -1551,8 +1550,6 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
         "a preset has no custom rows"
     );
     update(&mut s, Message::SelectStyle(SelectStyle::Shape));
-    update(&mut s, Message::After(After::Wait));
-    update(&mut s, Message::SearchWith(SearchWith::Both));
     // Custom starts as the look in use (Neon here), then changes on its own
     update(&mut s, Message::Look(LookTheme::Neon));
     update(&mut s, Message::Look(LookTheme::Custom));
@@ -1598,7 +1595,6 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
         "other modes kept"
     );
     assert_eq!(look.colours, [Rgb([255, 0, 0]), Rgb([0x12, 0x34, 0x56])]);
-    assert_eq!(back.selection.search_with, SearchWith::Both);
     // the page in both themes, a preset and the custom look
     for (name, theme_choice) in [("dark", Theme::Dark), ("light", Theme::Light)] {
         update(&mut s, Message::Theme(theme_choice));

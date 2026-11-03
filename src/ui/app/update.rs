@@ -69,8 +69,7 @@ impl App {
             }
             Message::Trigger(Trigger::Update(event)) => self.on_update(event),
             Message::UpdateTick => self.try_update(),
-            // the rebuilt view shows the actions; the opt-in auto action runs now
-            Message::Settled if self.o.others.is_empty() => self.auto_search(),
+            // the rebuilt view shows the actions (nothing runs by itself)
             Message::Settled => Task::none(),
             Message::Trigger(Trigger::Quick(at, qa))
                 if qa.live && qa.action == actions::translate::ACTION.id =>

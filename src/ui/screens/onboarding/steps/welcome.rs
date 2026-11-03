@@ -1,5 +1,5 @@
-//! Welcome (step 1): what OpenCircle does, then Settings' Selection, Auto action
-//! and Keep up to date rows.
+//! Welcome (step 1): what OpenCircle does, then Settings' Selection and Keep up
+//! to date rows.
 use iced::widget::{Space, column};
 use iced::{Element, Fill};
 
@@ -20,12 +20,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             None,
         ),
         Space::new().height(Fill),
-        Element::from(column![
-            rows::selection_row(s),
-            rows::after_row(s),
-            rows::update_row(s)
-        ])
-        .map(Message::Settings),
+        Element::from(column![rows::selection_row(s), rows::update_row(s)]).map(Message::Settings),
     ]
     .into()
 }

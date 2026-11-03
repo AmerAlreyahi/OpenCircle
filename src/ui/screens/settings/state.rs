@@ -22,9 +22,9 @@ use std::time::Instant;
 use iced::{Color, Size, Subscription, event, keyboard};
 
 use crate::config::{
-    self, After, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
-    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SearchWith, SelectStyle,
-    SnipConfig, SongSource, StaysOpen, Target, TextReader, Theme, parse_shortcut,
+    self, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
+    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SelectStyle, SnipConfig,
+    SongSource, StaysOpen, Target, TextReader, Theme, parse_shortcut,
 };
 use crate::history::{Counts, Kind};
 use crate::hotkey::{DesktopKey, managed};
@@ -627,8 +627,6 @@ pub enum Pick {
     ChatStays(StaysOpen),
     KeepChats(bool),
     Select(SelectStyle),
-    After(After),
-    SearchWith(SearchWith),
     Reader(TextReader),
 }
 
@@ -686,8 +684,6 @@ pub enum Message {
     /// What was typed in the live-interval field.
     LiveInterval(String),
     SelectStyle(SelectStyle),
-    After(After),
-    SearchWith(SearchWith),
     TextReader(TextReader),
     /// The text reader row's button: Windows' language settings.
     OpenLanguageSettings,
@@ -1224,8 +1220,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::ChatStays(_) => Some(Pick::ChatStays(state.draft.chat.stays_open)),
         Message::KeepChats(_) => Some(Pick::KeepChats(state.draft.chat.keep_history)),
         Message::SelectStyle(_) => Some(Pick::Select(state.draft.selection.style)),
-        Message::After(_) => Some(Pick::After(state.draft.selection.after)),
-        Message::SearchWith(_) => Some(Pick::SearchWith(state.draft.selection.search_with)),
         Message::TextReader(_) => Some(Pick::Reader(state.draft.selection.text_reader)),
         _ => None,
     };
@@ -1333,8 +1327,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::Autostart(on) => state.draft.general.autostart = on,
         Message::SelectStyle(v) => state.draft.selection.style = v,
-        Message::After(v) => state.draft.selection.after = v,
-        Message::SearchWith(v) => state.draft.selection.search_with = v,
         Message::TextReader(v) => state.draft.selection.text_reader = v,
         Message::OpenLanguageSettings => open_language_settings(),
         Message::OpenKeyboardSettings => open_keyboard_settings(),

@@ -280,10 +280,7 @@ impl App {
             }
             overlay::Event::Release if let Some(grab) = self.o.grab.take() => {
                 return if grab.moved {
-                    // The search first: a waiting quick action (`selected`)
-                    // turns the purpose back to Search, and must not get it too.
-                    let search = self.auto_search();
-                    Task::batch([self.selected(), search])
+                    self.selected()
                 } else {
                     self.tap(grab.from) // a click on the selection
                 };
@@ -350,13 +347,7 @@ impl App {
                 } else if overlay::is_tap(&drawn, zoom) {
                     return self.tap(drawn[0]);
                 }
-                // The search first: a waiting quick action (`selected`) turns
-                // the purpose back to Search, and must not get it too.
-                let search = match self.o.others.is_empty() {
-                    true => self.auto_search(),
-                    false => Task::none(), // Shift: more to come
-                };
-                return Task::batch([self.selected(), search, settle]);
+                return Task::batch([self.selected(), settle]);
             }
             // Tab moved the focus onto a bar button: Enter / Space press it.
             overlay::Event::Enter | overlay::Event::Space

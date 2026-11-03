@@ -42,8 +42,8 @@
 //!
 //! [selection]
 //! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
-//! after = "wait"                    # wait (nothing is sent until the user picks an action) | search (run search_with at once)
-//! search_with = "lens"              # lens | ai | both
+//! after = "wait"                    # kept, ignored: nothing is sent until the user picks an action
+//! search_with = "lens"              # kept, ignored (auto search is gone, owner 2026-10-26)
 //! text_reader = "auto"              # who reads text to select: auto | windows (Windows OCR) | pp_ocr
 //!
 //! [look]                            # how the screen looks while OpenCircle is active
