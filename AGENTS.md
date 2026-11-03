@@ -354,7 +354,8 @@ production systems.
   Mode clip stays until the owner replaces it), Snip = snip-blur, snip-comment, snip-long in sequence; clips with
   unresolved photo rights are held until cleared; credits on About + NOTICE. Clips go in exactly as delivered (no
   re-encode/edit; sha256 = outputs/final/qa.json). Photos must be CC0 (owner's rule): lotus and kingfisher cleared
-  (WordPress, CC0, 2026-11-03); COFFEE (Unsplash License) held unless the owner accepts that licence. The translate
+  (WordPress, CC0, 2026-11-03); COFFEE (Tim Mossholder, Unsplash License) accepted by the owner 2026-11-03 as a
+  media exception (the app's code stays MIT). The translate
   clip and its poster are CC BY-SA 4.0, an explicit media exception to the app's MIT licence. About + NOTICE carry the
   Google non-affiliation line verbatim.
 - Copy = button AND Ctrl+C (owner, 2026-11-03, universal): wherever the app has a Copy button, Ctrl+C does the same
