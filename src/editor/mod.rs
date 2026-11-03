@@ -40,7 +40,7 @@ pub use style::PRESETS;
 
 /// Steps the Steps strip holds at most (open point 3: 12).
 pub const STEPS_MAX: usize = 12;
-pub use text::{Style as TextStyle, free_glyphs};
+pub use text::{Back as TextBack, Font as TextFont, Style as TextStyle, free_glyphs};
 
 /// The numbered step tool's badge (a `colour` disc of `radius` with `number`
 /// on it) drawn on `pm` centred at `at` (the Steps strip's Copy all image).
@@ -601,7 +601,14 @@ impl Editor {
             outline: saved.outline.unwrap_or(false),
             fill: saved.fill.unwrap_or(false),
             text_size: saved.text_size.map_or(width.font(), f32::from),
-            text_style: TextStyle::default(),
+            text_style: {
+                let d = TextStyle::default();
+                TextStyle {
+                    font: saved.text_font.unwrap_or(d.font),
+                    bold: saved.text_bold.unwrap_or(d.bold),
+                    back: saved.text_back.unwrap_or(d.back),
+                }
+            },
             menu: None,
             hex: hex(colour),
             zoom,
@@ -652,6 +659,9 @@ impl Editor {
             blur_size: self.blur_size,
             blur_cell: Some(self.blur_cell),
             stroke: Some(self.stroke.round().clamp(1.0, 32.0) as u8),
+            text_font: Some(self.text_style.font),
+            text_bold: Some(self.text_style.bold),
+            text_back: Some(self.text_style.back),
             group_tools: Some(self.last.to_vec()),
         }
     }
@@ -869,13 +879,20 @@ impl Editor {
             Message::UndoClick if self.undid => self.toggle(Menu::Undo),
             Message::UndoClick => return self.handle(Message::Undo),
             Message::Undo | Message::Redo => {
+                // Ctrl+Z while typing ends the typing; that is the last thing
+                // done, so a text, callout or label it made goes with it, and
+                // an empty box just closes (the next Undo goes further back).
+                let (typing, depth) = (self.typing(), self.doc.depth());
                 self.commit();
                 let undo = matches!(message, Message::Undo);
-                if if undo {
-                    self.doc.undo()
-                } else {
-                    self.doc.redo()
-                } {
+                let closed = typing && self.doc.depth() == depth;
+                if !(closed && undo)
+                    && if undo {
+                        self.doc.undo()
+                    } else {
+                        self.doc.redo()
+                    }
+                {
                     self.refresh();
                 }
                 self.undid = true;

@@ -89,6 +89,9 @@
 //! blur_size = "medium"              # the blur brush: thin | medium | thick; missing = Auto
 //! blur_cell = "thin"                # the blur's pixel size: thin (6 px) | medium (9) | thick (12)
 //! stroke = 5                        # the line width of shapes, arrows, pen: 1-32 px
+//! text_font = "sans"                # the Text tool's face: sans | serif | mono
+//! text_bold = true                  # the Text tool's weight
+//! text_back = "none"                # behind the glyphs: none | outline | box
 //! group_tools = ["select", "arrow", "pen", "text", "blur"]  # each toolbar group's last tool
 //!
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
@@ -763,6 +766,13 @@ pub struct EditorConfig {
     /// The line width of shapes, arrows and the pen, display px (`STROKE`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stroke: Option<u8>,
+    /// The Text tool's face, weight and background.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_font: Option<crate::editor::TextFont>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_bold: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_back: Option<crate::editor::TextBack>,
     /// Each toolbar group's last tool (the grouped toolbar shows it).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group_tools: Option<Vec<crate::editor::Tool>>,
@@ -786,6 +796,9 @@ impl Default for EditorConfig {
             blur_size: None,
             blur_cell: None,
             stroke: None,
+            text_font: None,
+            text_bold: None,
+            text_back: None,
             group_tools: None,
         }
     }

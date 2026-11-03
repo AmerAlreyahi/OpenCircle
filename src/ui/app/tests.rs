@@ -4952,3 +4952,51 @@ fn the_breath_rests_while_the_pointer_draws_or_drags() {
     event(&mut app, overlay::Event::Release);
     assert!(app.o.grab.is_none());
 }
+
+/// What a real key press (Ctrl held) produces on the open Snip editor's view.
+fn ctrl_key_after(app: &App, c: char, physical: iced::keyboard::key::Code) -> Vec<Message> {
+    use iced::advanced::clipboard;
+    use iced::keyboard::{Key, Location, Modifiers, key};
+    use iced_runtime::user_interface::{Cache, UserInterface};
+    let mut renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0));
+    let mut ui = UserInterface::build(
+        app.view(app.overlay),
+        app.o.screen,
+        Cache::default(),
+        &mut renderer,
+    );
+    let letter = Key::Character(c.to_string().into());
+    let press = iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key: letter.clone(),
+        modified_key: letter,
+        physical_key: key::Physical::Code(physical),
+        location: Location::Standard,
+        modifiers: Modifiers::CTRL,
+        text: None,
+        repeat: false,
+    });
+    let mut messages = Vec::new();
+    ui.update(
+        &[press],
+        iced::mouse::Cursor::Unavailable,
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    messages
+}
+
+#[test]
+fn ctrl_z_reaches_the_snip_editor() {
+    use crate::editor::Message as E;
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = snipping(area);
+    app.select(area);
+    let crop = app.crop().unwrap();
+    let _ = app.snip_routed(crop, true, false);
+    let keys = ctrl_key_after(&app, 'z', keyboard::key::Code::KeyZ);
+    assert!(
+        keys.iter().any(|m| matches!(m, Message::Editor(E::Undo))),
+        "Ctrl+Z -> Undo, got {keys:?}"
+    );
+}

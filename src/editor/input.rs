@@ -134,7 +134,10 @@ impl Editor {
                 Key::Named(Named::Escape) => Some(Message::Finish),
                 Key::Named(Named::Backspace) => Some(Message::Backspace),
                 Key::Named(Named::Enter) => Some(Message::Type("\n".into())),
-                _ if modifiers.command() => None,
+                // (Ctrl+Z ends the typing and undoes it: `Message::Undo`)
+                _ if modifiers.command() => (latin.map(|c| c.to_ascii_lowercase()) == Some('z')
+                    && !modifiers.shift())
+                .then_some(Message::Undo),
                 _ => text
                     .filter(|t| !t.is_empty() && !t.chars().any(char::is_control))
                     .map(|t| Message::Type(t.to_string())),

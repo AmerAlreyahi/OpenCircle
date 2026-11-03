@@ -155,6 +155,9 @@ impl Config {
             c.editor.stroke = get_checked(t, p, "stroke", None, &mut w, |n| {
                 n.as_ref().map_or(Ok(()), &in_range)
             });
+            c.editor.text_font = get(t, p, "text_font", None, &mut w);
+            c.editor.text_bold = get(t, p, "text_bold", None, &mut w);
+            c.editor.text_back = get(t, p, "text_back", None, &mut w);
             c.editor.group_tools = get_checked(t, p, "group_tools", None, &mut w, |g| {
                 match g.as_deref().is_none_or(crate::editor::Group::valid) {
                     true => Ok(()),

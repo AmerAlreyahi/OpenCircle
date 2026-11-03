@@ -3400,3 +3400,79 @@ fn snips_enter_adds_the_step_while_the_steps_strip_is_open() {
     };
     assert_eq!((flat.width, flat.height), (60, 30), "the area, flattened");
 }
+
+/// Ctrl+Z undoes whatever was last done in every state, also while a text,
+/// callout, label or arrow label is being typed (the key used to be dropped
+/// there: owner, 2026-11-03).
+#[test]
+fn ctrl_z_undoes_the_last_thing_also_while_typing() {
+    let ctrl_z = |e: &Editor| {
+        e.key(
+            &Key::Character("z".into()),
+            Some('z'),
+            Modifiers::CTRL,
+            None,
+        )
+    };
+    for tool in [Tool::Text, Tool::Label, Tool::Callout, Tool::ArrowLabel] {
+        let mut e = editor(200, 200);
+        drag(&mut e, Point::new(10.0, 10.0), &[], Point::new(60.0, 60.0));
+        let before = e.doc.items.len();
+        e.update(Message::Tool(tool));
+        drag(
+            &mut e,
+            Point::new(80.0, 80.0),
+            &[],
+            Point::new(150.0, 140.0),
+        );
+        e.update(Message::Type("hi".into()));
+        assert!(e.typing(), "{tool:?}: typing");
+        let undo = ctrl_z(&e);
+        assert!(matches!(undo, Some(Message::Undo)), "{tool:?}: key");
+        e.update(undo.unwrap());
+        assert!(!e.typing(), "{tool:?}: typing ended");
+        assert_eq!(
+            e.doc.items.len(),
+            before,
+            "{tool:?}: what was typed is gone"
+        );
+    }
+    // an empty box just closes; the next Ctrl+Z goes further back
+    let mut e = editor(200, 200);
+    drag(&mut e, Point::new(10.0, 10.0), &[], Point::new(60.0, 60.0));
+    e.update(Message::Tool(Tool::Text));
+    e.update(Message::Press(Point::new(100.0, 100.0)));
+    e.update(Message::Release);
+    assert!(e.typing());
+    e.update(ctrl_z(&e).unwrap());
+    assert!(!e.typing());
+    assert_eq!(e.doc.items.len(), 1, "the rectangle stays");
+    e.update(ctrl_z(&e).unwrap());
+    assert_eq!(e.doc.items.len(), 0);
+}
+
+/// The Text panel's Font, Bold and Back are remembered; the first run is plain
+/// text (no outline); a config without the keys keeps working.
+#[test]
+fn text_font_bold_and_background_are_remembered_and_default_to_plain() {
+    use crate::config::EditorConfig;
+    let fresh = Editor::restored(checker(50, 50), 1.0, EditorConfig::default());
+    assert_eq!(fresh.text_style.back, text::Back::None);
+    let mut e = Editor::restored(checker(50, 50), 1.0, EditorConfig::default());
+    let style = TextStyle {
+        font: text::Font::Mono,
+        bold: false,
+        back: text::Back::Box,
+    };
+    e.update(Message::TextStyle(style));
+    let saved = e.remembered();
+    assert_eq!(saved.text_back, Some(text::Back::Box));
+    let again = Editor::restored(checker(50, 50), 1.0, saved);
+    assert_eq!(again.text_style, style);
+    // the file: written snake_case, read back
+    let toml = toml::to_string(&again.remembered()).unwrap();
+    assert!(toml.contains("text_font = \"mono\""), "{toml}");
+    let (c, _) = crate::config::Config::parse(&format!("[editor]\n{toml}"));
+    assert_eq!(c.editor.text_back, Some(text::Back::Box));
+    assert_eq!(c.editor.text_bold, Some(false));
+}

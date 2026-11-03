@@ -546,20 +546,38 @@ fn tool_options(e: &Editor, tool: Tool) -> Vec<Element<'_, Message>> {
         }
         Tool::Pen | Tool::Highlighter => vec![stroke()],
         Tool::Text => {
+            use crate::editor::{TextBack as B, TextFont as F, TextStyle};
             let style = e.text_style;
-            let bold = crate::editor::TextStyle {
+            let bold = TextStyle {
                 bold: !style.bold,
                 ..style
             };
+            let faces = [
+                (F::Sans, ar("Sans", "سانس")),
+                (F::Serif, ar("Serif", "سيريف")),
+                (F::Mono, ar("Mono", "أحادي")),
+            ];
+            let backs = [
+                (B::None, ar("None", "بلا")),
+                (B::Outline, ar("Outline", "إطار")),
+                (B::Box, ar("Box", "مربع")),
+            ];
+            let face = segmented::inline(&faces, style.font, style.font, 1.0, move |font| {
+                Message::TextStyle(TextStyle { font, ..style })
+            });
+            let back = segmented::inline(&backs, style.back, style.back, 1.0, move |back| {
+                Message::TextStyle(TextStyle { back, ..style })
+            });
             vec![
                 font(),
+                option(ar("Font", "الخط"), None, None, Some(face)),
                 switch(
                     ar("Bold", "عريض"),
                     None,
                     style.bold,
                     Some(Message::TextStyle(bold)),
                 ),
-                variant(ar("Background", "خلفية"), Tool::Text, Tool::Label),
+                option(ar("Back", "خلف"), None, None, Some(back)),
             ]
         }
         Tool::Callout => vec![font(), outline()],
@@ -821,7 +839,7 @@ mod tests {
                     ("shapes", panel(Tool::Arrow), 330.0),
                     ("rect", panel(Tool::Rect), 330.0),
                     ("draw", panel(Tool::Pen), 230.0),
-                    ("text", panel(Tool::Text), 330.0),
+                    ("text", panel(Tool::Text), 360.0),
                     ("steps", panel(Tool::Step), 330.0),
                     ("hide", panel(Tool::Blur), 360.0),
                     ("colour", colour, 440.0),

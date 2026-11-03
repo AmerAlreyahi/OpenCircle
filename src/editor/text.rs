@@ -35,15 +35,15 @@ impl Default for Style {
         Style {
             font: Font::Sans,
             bold: true,
-            back: Back::Outline,
+            // Plain text, like the shapes' no-outline default (owner, 2026-11-03).
+            back: Back::None,
         }
     }
 }
 
-/// The grouped toolbar offers Bold and Background only (owner, 2026-11-02):
-/// the other faces and backdrops are hidden, kept (and drawn).
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The Text panel's faces (owner, 2026-11-03: Font and Background are back).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Font {
     Sans,
     Serif,
@@ -61,8 +61,8 @@ impl Font {
 }
 
 /// What is behind the glyphs.
-#[allow(dead_code)] // hidden with the other faces (`Font`)
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Back {
     None,
     /// A halo: reads on any background.

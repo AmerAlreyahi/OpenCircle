@@ -467,6 +467,11 @@ impl Document {
         (self.done.len(), self.done.len() + self.undone.len())
     }
 
+    /// How many edits can be undone.
+    pub fn depth(&self) -> usize {
+        self.done.len()
+    }
+
     pub fn undo(&mut self) -> bool {
         let Some(edit) = self.done.pop() else {
             return false;
