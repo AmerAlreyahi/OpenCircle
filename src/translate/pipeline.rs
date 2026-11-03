@@ -209,7 +209,12 @@ impl Real {
         let mut out = texts.to_vec();
         for (route, idx) in routes {
             let part: Vec<String> = idx.iter().map(|&i| texts[i].clone()).collect();
-            let part = by_sentence(&part, |src| hops(src, &route, target, &run))?;
+            let part = by_sentence(&part, |src| {
+                let (bodies, marks): (Vec<String>, Vec<String>) =
+                    src.iter().map(|s| footnotes(s)).unzip();
+                let out = hops(&bodies, &route, target, &run)?;
+                Ok(out.into_iter().zip(marks).map(|(t, m)| t + &m).collect())
+            })?;
             for (i, t) in idx.into_iter().zip(part) {
                 out[i] = t;
             }
@@ -232,7 +237,15 @@ fn hops(
     run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
 ) -> Result<Vec<String>, AiError> {
     let mut t = src.to_vec();
-    let mut on: Vec<usize> = (0..t.len()).collect();
+    // Not in the source's script at all (Latin noise on an Arabic page): an
+    // Arabic model makes words up from it ("LILI" -> "LOLI"); it stays as is.
+    let script = lang::find(route[0].source).map_or(Script::Latin, |l| l.script);
+    let foreign = |s: &str| {
+        script != Script::Latin
+            && s.chars().any(char::is_alphabetic)
+            && !s.chars().any(|c| script.has(c))
+    };
+    let mut on: Vec<usize> = (0..t.len()).filter(|&i| !foreign(&src[i])).collect();
     for pair in route {
         let sent: Vec<String> = on.iter().map(|&i| t[i].clone()).collect();
         if sent.is_empty() {
@@ -523,6 +536,40 @@ fn sentences(t: &str) -> Vec<String> {
             .map(String::from),
     );
     out.into_iter().flat_map(|s| halves(&s)).collect()
+}
+
+/// `s` without its footnote marks ("cacti,[2]", "French original[c]", OCR's
+/// "conditions.[5" and "indoors[ ]"), and the marks: the model never reads
+/// them (it garbled them, or a lost "[5" made the whole line look made up
+/// and stay English); they are put back after the translation. A mark is
+/// `[`, up to 3 digits, lower-case letters or spaces, then `]` or the word's
+/// end; "[edit]" and IPA ("[la sug da") are text.
+fn footnotes(s: &str) -> (String, String) {
+    let (mut body, mut marks) = (String::new(), String::new());
+    let mut rest = s;
+    while let Some(i) = rest.find('[') {
+        let inner = rest[i + 1..]
+            .find(|c: char| !(c.is_ascii_digit() || c.is_ascii_lowercase() || c == ' '))
+            .unwrap_or(rest.len() - i - 1);
+        let tail = &rest[i + 1 + inner..];
+        let closed = tail.starts_with(']');
+        let ends = tail.is_empty() || tail.starts_with(char::is_whitespace);
+        let filled = !rest[i + 1..i + 1 + inner].trim().is_empty();
+        if inner <= 3 && (closed || (ends && filled)) {
+            let end = i + 1 + inner + usize::from(closed);
+            body.push_str(&rest[..i]);
+            marks.push_str(&rest[i..end]);
+            rest = &rest[end..];
+        } else {
+            body.push_str(&rest[..=i]);
+            rest = &rest[i + 1..];
+        }
+    }
+    if marks.is_empty() {
+        return (s.to_string(), marks);
+    }
+    body.push_str(rest);
+    (body.split_whitespace().collect::<Vec<_>>().join(" "), marks)
 }
 
 /// Words in one offline MT input at most (its 200-token cut is ~130 words;
@@ -1426,6 +1473,64 @@ pub(super) mod tests {
         assert_eq!(sentences(&words), [words], "no comma: whole");
     }
 
+    /// Footnote marks (as Windows OCR read them on the matrix pages) leave
+    /// the model's input and come back after the translation; brackets that
+    /// are text stay.
+    #[test]
+    fn footnote_marks_are_kept_out_of_the_model() {
+        let cases = [
+            (
+                "cacti,[2] which are well-suited",
+                "cacti, which are well-suited",
+                "[2]",
+            ),
+            (
+                "normal indoor conditions.[5",
+                "normal indoor conditions.",
+                "[5",
+            ),
+            (
+                "cultivated indoors[ ] for aesthetic",
+                "cultivated indoors for aesthetic",
+                "[ ]",
+            ),
+            ("(composed in 1786) [24]", "(composed in 1786)", "[24]"),
+            ("French original[c]", "French original", "[c]"),
+            ("Lyrics [edit]", "Lyrics [edit]", ""),
+            (
+                "Culture [ modifier I modifier le code]",
+                "Culture [ modifier I modifier le code]",
+                "",
+            ),
+            (
+                "[la sug da glwag e.t_a gi.ve II]",
+                "[la sug da glwag e.t_a gi.ve II]",
+                "",
+            ),
+            ("[24]", "", "[24]"),
+        ];
+        for (s, body, marks) in cases {
+            assert_eq!(footnotes(s), (body.to_string(), marks.to_string()), "{s}");
+        }
+    }
+
+    /// An Arabic model never reads a line with no Arabic letter (Latin OCR
+    /// noise on an Arabic page: ar-de made "LILI" into "LOLI", "Jho" into
+    /// "Joho!"); numbers still go.
+    #[test]
+    fn a_line_not_in_the_source_script_stays() {
+        let route = mt::route("ar", "de").unwrap();
+        let sent = RefCell::new(Vec::new());
+        let run = |t: &[String], _: &'static mt::Pair| {
+            sent.borrow_mut().extend(t.iter().cloned());
+            Ok(t.iter().map(|s| format!("{s} (de)")).collect())
+        };
+        let src: Vec<String> = ["نبات منزلي", "LILI", "Jho", "12"].map(String::from).into();
+        let out = hops(&src, &route, "de", run).unwrap();
+        assert_eq!(out, ["نبات منزلي (de)", "LILI", "Jho", "12 (de)"]);
+        assert_eq!(*sent.borrow(), ["نبات منزلي", "12"]);
+    }
+
     #[test]
     fn script_and_direction() {
         assert!(!needs_translation("12:30 — 4/5 !", "ar"));
@@ -1776,14 +1881,14 @@ pub(super) mod tests {
         assert_eq!(tr[0], "ع7 [ ع8 | ع16]");
     }
 
-    /// Through English (French -> Arabic): a label the first model gives
+    /// Through English (here German -> Arabic; French was too): a label the first model gives
     /// back unchanged ("40 langues") never goes on to English -> Arabic,
     /// which made a name of it ("إيان غوس 40"); one plain word may be English
     /// already ("Text"); an output that isn't a translation keeps the original.
     #[test]
     fn a_pivot_never_makes_up_a_translation() {
-        let route = mt::route("fr", "ar").unwrap();
-        assert_eq!(route.len(), 2, "French -> Arabic goes through English");
+        let route = mt::route("de", "ar").unwrap();
+        assert_eq!(route.len(), 2, "German -> Arabic goes through English");
         let calls = RefCell::new(Vec::new());
         let run = |t: &[String], p: &'static mt::Pair| {
             calls.borrow_mut().push((p.target, t.to_vec()));

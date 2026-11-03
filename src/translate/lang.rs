@@ -260,7 +260,8 @@ pub fn guess<'a>(texts: impl IntoIterator<Item = &'a str>) -> Option<&'static st
 /// The language of ONE text when it says so itself: its script (Arabic,
 /// Russian, Japanese, Chinese), or Latin words that clearly lean one way
 /// (two votes ahead of any other). `None` = too little to tell ("Gracias.",
-/// "Blender Studio"): the page's language applies.
+/// "Blender Studio"): the page's language applies. A line of three or more
+/// plain words the votes can't settle goes to `detected`.
 pub fn sure(text: &str) -> Option<&'static str> {
     match guess([text])? {
         "en" | "es" | "fr" | "de" => {
@@ -268,10 +269,44 @@ pub fn sure(text: &str) -> Option<&'static str> {
             let mut sorted = v;
             sorted.sort_unstable();
             let best = v.iter().position(|n| *n == sorted[3])?;
-            (sorted[3] >= sorted[2] + 2).then_some(WORDS[best].0)
+            if sorted[3] >= sorted[2] + 2 {
+                return Some(WORDS[best].0);
+            }
+            detected(text, &v)
         }
         other => Some(other),
     }
+}
+
+/// A short Latin line's language by a small trained detector (whichlang:
+/// MIT, a linear model over n-grams, exe +0.3 MB, microseconds a line):
+/// French lyric lines in an English page ("Le jour de gloire est arrivé"
+/// has one French and one Spanish vote). Only for 3+ plain words making 3/4
+/// of the line (never IPA "[a.löz_ö.fä da la]", menus, "Text"), and only
+/// when that language has a vote of its own: on the matrix pages the
+/// detector alone said "Modifier le code" is Spanish.
+fn detected(text: &str, votes: &[usize; WORDS.len()]) -> Option<&'static str> {
+    let plain = |w: &&&str| {
+        let w = w.trim_end_matches([',', ';', ':', '.', '!', '?']);
+        !w.is_empty()
+            && w.split(['\'', '’', '-'])
+                .all(|p| !p.is_empty() && p.chars().all(char::is_alphabetic))
+    };
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let words = tokens.iter().filter(plain).count();
+    if words < 3 || words * 4 < tokens.len() * 3 {
+        return None;
+    }
+    use whichlang::Lang;
+    let code = match whichlang::detect_language(text) {
+        Lang::Eng => "en",
+        Lang::Fra => "fr",
+        Lang::Deu => "de",
+        Lang::Spa => "es",
+        _ => return None,
+    };
+    let i = WORDS.iter().position(|w| w.0 == code)?;
+    (votes[i] > 0 || votes.iter().all(|v| *v <= votes[i])).then_some(code)
 }
 
 #[cfg(test)]
@@ -351,5 +386,40 @@ mod tests {
         assert_eq!(sure("Blender Studio"), None);
         assert_eq!(sure("Gracias."), None);
         assert_eq!(sure("Главное меню"), Some("ru"));
+    }
+
+    /// "La Marseillaise" on English Wikipedia (Windows OCR on the VM): short
+    /// French lyric lines are French on their own (before: none of these; the
+    /// page's English applied and they stayed untranslated); English lines,
+    /// menus, IPA and the other pages' short labels the detector misjudged
+    /// stay with the page.
+    #[test]
+    fn short_foreign_lines_are_told_by_the_detector() {
+        for fr in [
+            "Allons enfants de la Patrie,",
+            "Le jour de gloire est arrivé",
+            "Ils viennent jusque dans vos bras Égorger vos fils, vos compagnes",
+            "I} Aux armes, citoyens;",
+            "Qu'un sang impur",
+            "Abreuve nos sillons 41",
+        ] {
+            assert_eq!((fr, sure(fr)), (fr, Some("fr")));
+        }
+        for (page, line) in [
+            ("en", "Against us; tyranny's"),
+            ("en", "Form your battalions"),
+            ("en", "Let's marchl let's marchl"),
+            ("en", "Water our furrowsl 41"),
+            ("en", "IPA transcription"),
+            ("en", "[fog.me vo ba-ta.jö I]"),
+            ("en", "[il vje.na sys.ke dd vo bga l]"),
+            // whichlang alone: Spanish, German, English
+            ("fr", "Modifier le code"),
+            ("fr", "Q Rechercher sur Wikipédia"),
+            ("es", "Q Buscaren Wikipedia"),
+        ] {
+            let got = sure(line);
+            assert!(got.is_none() || got == Some(page), "{line}: {got:?}");
+        }
     }
 }

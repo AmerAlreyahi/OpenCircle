@@ -50,7 +50,7 @@ fn block(words: Vec<Word>) -> TextBlock {
         if !text.is_empty() && !joined(text.chars().last(), word.chars().next()) {
             text.push(' ');
         }
-        text.push_str(word.trim());
+        text.push_str(&comma(word.trim()));
         (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + w), y1.max(y + h));
     }
     TextBlock {
@@ -58,6 +58,27 @@ fn block(words: Vec<Word>) -> TextBlock {
         bounds: [x0, y0, x1 - x0, y1 - y0],
         // Windows gives no confidence; what it returns it stands by.
         confidence: 1.0,
+    }
+}
+
+/// Windows OCR reads a comma after a word in small text as a "7" glued to it
+/// ("spaces7 where", "However7 all", "cacti7[2]": every such "7" on the 7
+/// matrix pages, Edge on the Win10 VM, was a comma; MT kept it as a footnote
+/// number, "families7"). A 7 after three or more letters, the last lower
+/// case, at the word's end or before a footnote mark, is a comma.
+// ponytail: "Win7"-like names lose their 7; none seen on real pages.
+fn comma(word: &str) -> std::borrow::Cow<'_, str> {
+    let start = word.find(char::is_alphanumeric).unwrap_or(0);
+    let cut = (word[start..].find(|c: char| !c.is_alphabetic())).map_or(word.len(), |i| start + i);
+    let (letters, rest) = (&word[start..cut], &word[cut..]);
+    let after = rest.strip_prefix('7');
+    if letters.chars().count() >= 3
+        && letters.chars().last().is_some_and(char::is_lowercase)
+        && after.is_some_and(|r| r.is_empty() || r.starts_with('['))
+    {
+        format!("{},{}", &word[..cut], &rest[1..]).into()
+    } else {
+        word.into()
     }
 }
 
@@ -436,6 +457,26 @@ mod tests {
             w("하세요", 36.0, 0.0, 40.0),
         ]]);
         assert_eq!(ko[0].text, "안녕 하세요");
+    }
+
+    /// Windows OCR's "7" for a comma (matrix pages) is a comma again; real
+    /// numbers, short words and OCR's "tech07" stay as they are.
+    #[test]
+    fn a_seven_glued_to_a_word_is_a_comma() {
+        let line = |words: &[&str]| {
+            let words = (words.iter().enumerate())
+                .map(|(i, t)| w(t, i as f32 * 60.0, 0.0, 50.0))
+                .collect();
+            blocks(vec![words])[0].text.clone()
+        };
+        assert_eq!(
+            line(&["various", "indoor", "spaces7", "where", "However7", "all"]),
+            "various indoor spaces, where However, all"
+        );
+        assert_eq!(line(&["(levé7", "cacti7[2]"]), "(levé, cacti,[2]");
+        for same in ["A7", "is7", "MP7", "tech07", "spaces77", "1987", "x7y"] {
+            assert_eq!(line(&[same]), same);
+        }
     }
 
     /// Small text (under 150 %) is read doubled, unless that is too big for

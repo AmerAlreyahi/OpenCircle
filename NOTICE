@@ -1,6 +1,7 @@
-OpenCircle is MIT-licensed (see LICENSE). It ships no third-party models; the
-files below are downloaded on first use, after you agree, and are covered by
-their own licences.
+OpenCircle is MIT-licensed (see LICENSE). Apart from a small built-in
+language detector (below), it ships no third-party models; the files below
+are downloaded on first use, after you agree, and are covered by their own
+licences.
 
 Offline translation
 -------------------
@@ -64,6 +65,24 @@ https://github.com/Helsinki-NLP/Tatoeba-Challenge/tree/master/models/eng-ara.
 The others: the licence their Hugging Face model card lists (Apache-2.0,
 https://www.apache.org/licenses/LICENSE-2.0; CC BY 4.0,
 https://creativecommons.org/licenses/by/4.0/).
+
+Five direct Arabic pairs Xenova never exported were converted by OpenCircle
+from Helsinki-NLP's own weights the same way (optimum ONNX export, merged
+decoder, int8 dynamic quantization; scripts/convert-mt-models.py), weights
+unchanged, and are downloaded from the OpenCircle-models release (models-v1).
+OPUS-MT / Tatoeba-Challenge models, CC BY 4.0
+(https://creativecommons.org/licenses/by/4.0/; their Hugging Face cards list
+Apache-2.0):
+
+  Pair   Model (https://huggingface.co/...)   Helsinki-NLP commit
+  fr-ar  Helsinki-NLP/opus-mt-fr-ar           5469dc759cd9
+  es-ar  Helsinki-NLP/opus-mt-es-ar           76efb7da47ad
+  ar-fr  Helsinki-NLP/opus-mt-ar-fr           e507d7bc8508
+  ar-es  Helsinki-NLP/opus-mt-ar-es           da86e973e723
+  ar-de  Helsinki-NLP/opus-mt-ar-de           8e6cbcce68fe
+
+Short-line language detection: whichlang by Quickwit (MIT),
+https://github.com/quickwit-oss/whichlang, built into the app.
 
 Text recognition (OCR)
 ----------------------

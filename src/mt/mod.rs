@@ -50,15 +50,21 @@ pub struct Pair {
 /// ONNX and int8-quantized it: `Xenova/opus-mt-<pair>` at a pinned commit.
 /// Sizes and SHA-256 from the Hugging Face API; pad from its config.json
 /// (all of them: 6 layers, 8 heads, d_model 512, eos 0).
+/// `pair!(own, ...)`: a pair Xenova never exported, converted by us the same
+/// way from `Helsinki-NLP/opus-mt-<pair>` at commit `$rev`
+/// (`scripts/convert-mt-models.py`) and hosted as release assets (`own!`).
 macro_rules! pair {
-    ($src:literal, $tgt:literal, $pair:literal, $rev:literal,
+    ($src:literal, $tgt:literal, $($rest:tt)*) => {
+        pair!(hf, $src, $tgt, $($rest)*)
+    };
+    ($url:ident, $src:literal, $tgt:literal, $pair:literal, $rev:literal,
      [$es:literal, $eh:literal], [$ds:literal, $dh:literal],
      [$ss:literal, $sh:literal], [$vs:literal, $vh:literal], $token:expr, $pad:literal) => {
         Pair {
             source: $src,
             target: $tgt,
             dir: concat!("opus-mt-", $pair),
-            encoder: hf!(
+            encoder: $url!(
                 $pair,
                 $rev,
                 "encoder_model_quantized.onnx",
@@ -66,7 +72,7 @@ macro_rules! pair {
                 $es,
                 $eh
             ),
-            decoder: hf!(
+            decoder: $url!(
                 $pair,
                 $rev,
                 "decoder_model_merged_quantized.onnx",
@@ -74,8 +80,8 @@ macro_rules! pair {
                 $ds,
                 $dh
             ),
-            spm: hf!($pair, $rev, "source.spm", "source.spm", $ss, $sh),
-            vocab: hf!($pair, $rev, "vocab.json", "vocab.json", $vs, $vh),
+            spm: $url!($pair, $rev, "source.spm", "source.spm", $ss, $sh),
+            vocab: $url!($pair, $rev, "vocab.json", "vocab.json", $vs, $vh),
             lang_token: $token,
             pad: $pad,
             eos: 0,
@@ -105,10 +111,28 @@ macro_rules! hf {
     };
 }
 
+/// A file of a pair we converted (`pair!(own, ...)`): an asset of the
+/// models release, `opus-mt-<pair>-<name>` (one flat release for every pair).
+macro_rules! own {
+    ($pair:literal, $rev:literal, $name:literal, $path:literal, $size:literal, $sha:literal) => {
+        ModelFile::plain(
+            $name,
+            $size,
+            $sha,
+            concat!(
+                "https://github.com/AmerAlreyahi/OpenCircle-models/releases/download/models-v1/opus-mt-",
+                $pair,
+                "-",
+                $name
+            ),
+        )
+    };
+}
+
 /// Every offline pair. Another one is one more entry (Xenova/opus-mt-*;
 /// `jap` is Bible-only, so Japanese uses `ja`). The Chinese model writes
 /// several Chinese scripts: `>>cmn_Hans<<` asks for Simplified.
-pub static PAIRS: [Pair; 44] = [
+pub static PAIRS: [Pair; 49] = [
     // Helsinki-NLP/opus-mt-en-ar
     pair!(
         "en",
@@ -1209,6 +1233,139 @@ pub static PAIRS: [Pair; 44] = [
         None,
         57641
     ),
+    // Direct into and out of Arabic, converted by us (`own`): one model
+    // instead of two through English, about twice as fast; on the 2026-11-03
+    // matrix pages as good or better (de-ar was worse than the pivot: not
+    // here). Helsinki-NLP/opus-mt-fr-ar
+    pair!(
+        own,
+        "fr",
+        "ar",
+        "fr-ar",
+        "5469dc759cd9fd856e45b0a916001efe44d1e700",
+        [
+            51_577_879,
+            "f7c318194076e252bcd028a91f7534bc05e65181842ceda203fc56f8f6d9b3f0"
+        ],
+        [
+            58_881_020,
+            "58c62d87c8827fc1e58f6cb511b916d7ac43dfa6937bd3a5d0fe020d746f01ba"
+        ],
+        [
+            826_663,
+            "f32f818f2a89130ada3ab6b09a69cae104ae20ca5c9f1c309c41dae86a7dcc4e"
+        ],
+        [
+            2_188_546,
+            "2223539759870b832c9389e623bcbfefe8606c6ee6fedbce03a46c1add6e3ae3"
+        ],
+        Some(">>ara<<"),
+        62418
+    ),
+    // Helsinki-NLP/opus-mt-es-ar
+    pair!(
+        own,
+        "es",
+        "ar",
+        "es-ar",
+        "76efb7da47ad1ad8169635a847c1bd9d1c1815a7",
+        [
+            51_628_567,
+            "c21a425be06db48edc6c633f016e327801d2682ce224e93c98ab531ecb858a56"
+        ],
+        [
+            58_932_104,
+            "928ba379dd657b283045f4835b3244c2552597ffc1f227e8d600779b731f8ec3"
+        ],
+        [
+            831_392,
+            "d3e1ec508e9f334e1e5285ff6ac31ae92f139d2e6b4121169b7cc61b8f270667"
+        ],
+        [
+            2_180_565,
+            "632bac6ab53069e30188fb40389fe6246789b46a30e01796df3780056921005f"
+        ],
+        Some(">>ara<<"),
+        62517
+    ),
+    // Helsinki-NLP/opus-mt-ar-fr
+    pair!(
+        own,
+        "ar",
+        "fr",
+        "ar-fr",
+        "e507d7bc850855f060e6bbe4751bb03141b99b7d",
+        [
+            52_645_910,
+            "0ea1bb14d25530cd3d7a16da7570c94312cf79de8f42f6ff4eebfc1a47b3a154"
+        ],
+        [
+            59_957_395,
+            "b7ae3aeb3918ecccb829da241eea01ae4d6e82ac5c453de8ac31c57845d8222c"
+        ],
+        [
+            918_273,
+            "562fad8433a217ccafb56a30bad44a8d976fde802ee09e8b237f9cb281d1dcc7"
+        ],
+        [
+            2_227_927,
+            "f9e204a0b757316d939a4b332a83b2ab5ca31bb88fd3915787cb23bb25357c57"
+        ],
+        None,
+        64504
+    ),
+    // Helsinki-NLP/opus-mt-ar-es
+    pair!(
+        own,
+        "ar",
+        "es",
+        "ar-es",
+        "da86e973e723a8196adc90ed17119da2e096c776",
+        [
+            51_632_662,
+            "b9239b444b07047f189aba81bbda97f91f499ba991cfb5f1c62e48fa047419d1"
+        ],
+        [
+            58_936_231,
+            "fa2983e9b9284a68c37805ad47f4fee38e48d396e374f120dd21766a6acc9ef5"
+        ],
+        [
+            923_345,
+            "faf17ff693fa03d84e690faeb2cd2374587a125c732c612c0f0cdc6bb0ae4a06"
+        ],
+        [
+            2_182_313,
+            "e90e6b186669b0d5f8e921adc0d348e52705e4aa8c8c625b466e0cdec17ad975"
+        ],
+        None,
+        62525
+    ),
+    // Helsinki-NLP/opus-mt-ar-de
+    pair!(
+        own,
+        "ar",
+        "de",
+        "ar-de",
+        "8e6cbcce68feaf4eed2b926eccd31bfca97fab05",
+        [
+            51_915_799,
+            "d113e37d62a817df8859c9d7d7826277e9eaeab1ad7bee5b205d624e04fe536c"
+        ],
+        [
+            59_221_580,
+            "450b83f72b7cfc71f6ee4480bfa4dd11bc95db80f493ee4f98418d7ae78f09f1"
+        ],
+        [
+            902_787,
+            "4ce7a1936b414ccb43fd8d411c556c9ea57ebe1eb50fd963b9eecaf1813eaad1"
+        ],
+        [
+            2_128_799,
+            "af08b451ddd621880b739d077f05044e991dfe11ca49f0435cc03edff0e90146"
+        ],
+        None,
+        63078
+    ),
 ];
 
 /// Lines per decoder run (sorted by length first; a line that ended leaves
@@ -1588,9 +1745,17 @@ fn greedy(
 }
 
 /// The model's text as the pipeline wants it: trimmed, and no `[[`/`]]`
-/// (they would become accent spans; MT never marks names).
+/// (they would become accent spans; MT never marks names). Some OPUS-MT
+/// models learnt from escaped text and write `&apos;` (ar-fr: "d &apos; un
+/// compte"): written as the characters.
 fn clean(text: &str) -> String {
-    text.replace("[[", "").replace("]]", "").trim().to_string()
+    (text.replace("[[", "").replace("]]", ""))
+        .replace(" &apos; ", "'")
+        .replace("&apos;", "'")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -1668,6 +1833,24 @@ mod tests {
             [("it", "en"), ("en", "ar")]
         );
         assert!(available("it", "ar") && route("pt", "en").is_none());
+        // our own conversions go direct, downloaded from the models release
+        for (s, t) in [
+            ("fr", "ar"),
+            ("es", "ar"),
+            ("ar", "fr"),
+            ("ar", "es"),
+            ("ar", "de"),
+        ] {
+            let r = route(s, t).unwrap();
+            assert_eq!((r.len(), r[0].source, r[0].target), (1, s, t));
+            let url = format!(
+                "\"https://github.com/AmerAlreyahi/OpenCircle-models/releases/download/\
+                 models-v1/opus-mt-{s}-{t}-encoder_model_quantized.onnx\""
+            );
+            assert!(format!("{:?}", r[0].encoder).contains(&url), "{s}-{t}");
+        }
+        // German into Arabic stays through English (direct was worse)
+        assert_eq!(route("de", "ar").unwrap().len(), 2);
         let why = unavailable("fr", "ja");
         assert!(why.contains("from French into Japanese") && why.contains("Choose AI"));
         let p = pair("en", "ar").unwrap();
@@ -1720,6 +1903,10 @@ mod tests {
     #[test]
     fn cleaned_output_has_no_markup() {
         assert_eq!(clean("  أحضر [[السيف]] ]] "), "أحضر السيف");
+        assert_eq!(
+            clean("la création d &apos; un compte &quot;A&amp;B&quot;"),
+            "la création d'un compte \"A&B\""
+        );
     }
 
     fn rss_mb(field: &str) -> u64 {

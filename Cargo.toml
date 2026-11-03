@@ -51,6 +51,9 @@ flate2 = "1"
 ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 rqrr = { version = "0.11.0", default-features = false }
 minisign-verify = "0.3.0"
+# Short lines' language when the word votes can't tell (translate::lang::sure):
+# a trained linear model, MIT, no dependencies; exe +0.3 MB (lingua: +21 MB).
+whichlang = "=0.1.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -245,7 +245,7 @@ production systems.
   bar's spots instead (the bar fits there, shorter field if needed). Six bar spots: bottom/top centre and the
   four corners. The chat's log has no scrollbar; its composer sits 8 px under the log.
 - More offline languages (owner, 2026-10-30): offline translate covers every Xenova OPUS-MT model (6 layers, shared
-  vocab) for the languages in our table (44 directions, pinned in `mt::PAIRS`); a pair without a direct model goes
+  vocab) for the languages in our table (44 directions + 5 direct Arabic ones we convert, 2026-11-03; pinned in `mt::PAIRS`); a pair without a direct model goes
   through English (`mt::route`, two models). Detect tells Latin languages (en/es/fr/de) apart by common words.
 - Other scripts in main mode (owner, 2026-10-30, "second pass"): after Windows OCR (the user's Windows language) reads
   the screen, the helper's second reader (`ocr::recognize_except`) reads the lines Windows OCR didn't, each with the
