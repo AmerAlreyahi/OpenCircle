@@ -148,51 +148,78 @@ pub fn name(code: &str) -> &str {
     }
 }
 
-/// Common words that tell Latin-script languages apart (`latin`).
-const WORDS: [(&str, &[&str]); 4] = [
+/// What tells Latin-script languages apart (`latin`): common words, word
+/// endings (of words of 4+ letters) and letters only that language uses.
+/// A subtitle has few common words ("Ha derramado mucha sangre inocente."
+/// has none of the first list): its endings and accents decide.
+const WORDS: [(&str, &[&str], &[&str], &str); 4] = [
     (
         "en",
         &[
             "the", "and", "of", "to", "is", "in", "that", "with", "for", "are", "was", "this",
+            "it", "you", "be", "on", "not", "have", "or", "by", "from", "into", "also",
         ],
+        &["ing", "ght", "th", "ck", "sh", "ly", "ness", "ful"],
+        "",
     ),
     (
         "es",
         &[
             "el", "la", "los", "las", "de", "que", "y", "en", "es", "una", "por", "con", "del",
-            "se",
+            "se", "un", "esta", "este", "está", "su", "para", "como", "pero", "al", "lo", "muy",
+            "ha", "han", "hay", "mi", "tu", "te",
         ],
+        &[
+            "ado", "ada", "ido", "ida", "ción", "mente", "amos", "aba", "o", "a", "os", "as",
+        ],
+        "ñáíóú¿¡",
     ),
     (
         "fr",
         &[
             "le", "la", "les", "des", "et", "est", "une", "du", "que", "dans", "pour", "pas",
-            "sur", "au",
+            "sur", "au", "un", "il", "elle", "je", "vous", "ce", "qui", "avec",
         ],
+        &["eux", "eau", "aux", "ment", "ait", "ais", "ée", "ées"],
+        "èêçàùâîôûëïœ",
     ),
     (
         "de",
         &[
             "der", "die", "das", "und", "ist", "nicht", "ein", "eine", "mit", "den", "von", "zu",
-            "auf", "sich",
+            "auf", "sich", "ich", "du", "wir", "sie", "auch",
         ],
+        &["sch", "ung", "keit", "heit", "lich", "chen"],
+        "äöüß",
     ),
 ];
 
-/// Which Latin-script language `texts` are in, by their common words
-/// (`WORDS`); English when none stands out.
-// ponytail: four languages by stop words; more Latin pairs = more rows.
-fn latin(texts: &[&str]) -> &'static str {
+/// Votes per `WORDS` language for `texts`: a common word, an ending or an
+/// accent each count once per word.
+// ponytail: four languages by words, endings and accents; more Latin pairs =
+// more rows (a trigram model if this ever misreads too often).
+fn votes(texts: &[&str]) -> [usize; WORDS.len()] {
     let mut votes = [0usize; WORDS.len()];
     for word in texts
         .iter()
         .flat_map(|t| t.split(|c: char| !c.is_alphabetic()))
+        .filter(|w| !w.is_empty())
     {
         let word = word.to_lowercase();
-        for (i, (_, list)) in WORDS.iter().enumerate() {
-            votes[i] += list.contains(&word.as_str()) as usize;
+        let long = word.chars().count() >= 4;
+        for (i, (_, list, ends, marks)) in WORDS.iter().enumerate() {
+            votes[i] += list.contains(&word.as_str()) as usize
+                + (long && ends.iter().any(|e| word.ends_with(e))) as usize
+                + word.chars().any(|c| marks.contains(c)) as usize;
         }
     }
+    votes
+}
+
+/// Which Latin-script language `texts` are in (`votes`); English when none
+/// stands out.
+fn latin(texts: &[&str]) -> &'static str {
+    let votes = votes(texts);
     let (best, n) = (votes.iter().enumerate())
         .max_by_key(|(i, n)| (**n, usize::MAX - i))
         .unwrap_or((0, &0));
@@ -228,6 +255,23 @@ pub fn guess<'a>(texts: impl IntoIterator<Item = &'a str>) -> Option<&'static st
         3 => "zh",
         _ => latin(&texts),
     })
+}
+
+/// The language of ONE text when it says so itself: its script (Arabic,
+/// Russian, Japanese, Chinese), or Latin words that clearly lean one way
+/// (two votes ahead of any other). `None` = too little to tell ("Gracias.",
+/// "Blender Studio"): the page's language applies.
+pub fn sure(text: &str) -> Option<&'static str> {
+    match guess([text])? {
+        "en" | "es" | "fr" | "de" => {
+            let v = votes(&[text]);
+            let mut sorted = v;
+            sorted.sort_unstable();
+            let best = v.iter().position(|n| *n == sorted[3])?;
+            (sorted[3] >= sorted[2] + 2).then_some(WORDS[best].0)
+        }
+        other => Some(other),
+    }
 }
 
 #[cfg(test)]
@@ -290,5 +334,22 @@ mod tests {
             guess(["The lighthouse is a tower on the coast"]),
             Some("en")
         );
+        // film subtitles: few common words, their endings and accents decide
+        // (before: no listed word, so English)
+        for es in [
+            "Esta hoja tiene un pasado oscuro.",
+            "Ha derramado mucha sangre inocente.",
+            "Eres una tonta por viajar sola,",
+            "Éstas son tierras de dragones, Sintel.",
+        ] {
+            assert_eq!((es, guess([es])), (es, Some("es")));
+            assert_eq!((es, sure(es)), (es, Some("es")));
+        }
+        let banner = "To exit full screen, move mouse to top of screen or press Esc";
+        assert_eq!(sure(banner), Some("en"));
+        // too little to tell: the page decides
+        assert_eq!(sure("Blender Studio"), None);
+        assert_eq!(sure("Gracias."), None);
+        assert_eq!(sure("Главное меню"), Some("ru"));
     }
 }

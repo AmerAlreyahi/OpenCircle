@@ -49,7 +49,7 @@ fn run(name: &str) -> (Rgba, Rgba, (usize, usize), Vec<Block>, Drawn) {
 
 #[test]
 fn every_case_matches_its_golden() {
-    for name in ["subtitle", "subtitle2", "sign", "web"] {
+    for name in ["subtitle", "subtitle2", "sign", "web", "player"] {
         let (_, out, dims, _, _) = run(name);
         if std::env::var_os("OC_BLESS").is_some() {
             save_png(format!("{DIR}{name}_expected.png").as_ref(), dims, &out);
@@ -165,4 +165,83 @@ fn web_entries_join_and_titles_are_whole() {
         .map(|(_, r)| r[2])
         .fold(0f32, f32::max);
     assert!(title > 60.0, "the title's redraw is {title} px wide");
+}
+
+/// A paused video in a browser page (our own player-and-page layout around
+/// the source Sintel frame, `player.png`): white subtitle with a soft dark
+/// edge, the page's English all around. "auto" finds the Spanish line
+/// among the English (before: one guess for the whole screen said English
+/// and "the text is already in English"), only it is translated, and no
+/// dark edge of the Spanish is left beside the English.
+#[test]
+fn a_subtitle_in_an_english_player() {
+    use super::super::pipeline::{Deps, Real, Via};
+    let (img, (w, h)) = image("player");
+    let (blocks, en) = blocks("player", (w, h));
+    let texts: Vec<String> = blocks.iter().map(|b| b.text.clone()).collect();
+    let real = Real::new(lang::AUTO, Via::Offline);
+    real.read(&texts.iter().map(String::as_str).collect::<Vec<_>>());
+    let sub = (texts.iter().position(|t| t.contains("sangre"))).unwrap();
+    let routes = real.routes(&texts, "en").unwrap();
+    let got: Vec<_> = (routes.iter())
+        .map(|(r, i)| (r[0].source, i.clone()))
+        .collect();
+    assert_eq!(got, [("es", vec![sub])], "{texts:?}");
+    let tr: Vec<String> = (0..blocks.len())
+        .map(|i| {
+            if i == sub {
+                en[i].clone()
+            } else {
+                String::new()
+            }
+        })
+        .collect();
+    let mut out = img.clone();
+    let d = render(&mut out, w as u32, h as u32, &blocks, &tr, false);
+    let [bx, by, bw, bh] = blocks[sub].bounds.map(|v| v as usize);
+    let [ix, _, iw, _] = d.ink[sub].map(|v| v as usize);
+    assert!(iw > 0, "{d:?}");
+    // the Spanish's black edge (the film here is ~10): black pixels within 3 px
+    // of its white glyphs
+    let lum = |im: &[u8], x: usize, y: usize| {
+        let k = (y * w + x) * 4;
+        (im[k] as u32 + im[k + 1] as u32 + im[k + 2] as u32) / 3
+    };
+    let edge: Vec<(usize, usize)> = (by + 3..by + bh - 3)
+        .flat_map(|y| {
+            (bx + 3..ix)
+                .chain(ix + iw..bx + bw - 3)
+                .map(move |x| (x, y))
+        })
+        .filter(|&(x, y)| lum(&img, x, y) < 4)
+        .filter(|&(x, y)| (y - 3..=y + 3).any(|v| (x - 3..=x + 3).any(|u| lum(&img, u, v) > 200)))
+        .collect();
+    let left = (edge.iter()).filter(|&&(x, y)| lum(&out, x, y) < 4).count();
+    assert!(
+        edge.len() > 300 && left * 10 < edge.len(),
+        "dark Spanish edge pixels beside the English: {} -> {left}",
+        edge.len()
+    );
+    // no white Spanish glyph left beside it either
+    let white = (by..by + bh)
+        .flat_map(|y| {
+            (bx..ix)
+                .chain(ix + iw..bx + bw)
+                .map(move |x| (y * w + x) * 4)
+        })
+        .filter(|&k| out[k] > 200 && out[k + 1] > 200 && out[k + 2] > 200)
+        .count();
+    assert!(white < 20, "{white} white Spanish pixels left");
+    // the page's English is untouched outside the subtitle's box
+    let changed = (0..w * h)
+        .filter(|&i| {
+            let (x, y) = (i % w, i / w);
+            !(bx..bx + bw).contains(&x) || !(by..by + bh).contains(&y)
+        })
+        .filter(|&i| img[i * 4..][..3] != out[i * 4..][..3])
+        .count();
+    assert!(
+        changed < 200,
+        "{changed} pixels changed outside the subtitle"
+    );
 }

@@ -51,8 +51,9 @@ pub struct Real {
     /// UI then asks to download it).
     missing: Mutex<Option<&'static mt::Pair>>,
     /// "auto": the language `read` guessed from all the text (`None` = guess
-    /// from each call's lines).
-    guessed: Mutex<Option<&'static str>>,
+    /// from each call's lines), and every language the page's blocks are
+    /// sure of (`lang::sure`): a Spanish subtitle in an English player.
+    guessed: Mutex<(Option<&'static str>, Vec<&'static str>)>,
 }
 
 pub enum Via {
@@ -72,7 +73,7 @@ impl Real {
             via,
             scale: 1.0,
             missing: Mutex::new(None),
-            guessed: Mutex::new(None),
+            guessed: Mutex::default(),
         }
     }
 
@@ -91,18 +92,67 @@ impl Real {
         *self.missing.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The offline models for `texts` into `target` (`mt::route`): from the
-    /// set source, or the one their script and words suggest ("auto").
-    /// Err = no way offline (the message offers AI; nothing is sent anywhere).
-    fn route_for(&self, texts: &[String], target: &str) -> Result<Vec<&'static mt::Pair>, AiError> {
-        let source = match self.source.as_str() {
-            lang::AUTO => match *self.guessed.lock().unwrap_or_else(|e| e.into_inner()) {
+    /// The set source, or ("auto") the page's language (`read`), else the
+    /// one the script and words of `texts` suggest.
+    fn source(&self, texts: &[String]) -> &str {
+        match self.source.as_str() {
+            lang::AUTO => match self.guessed.lock().unwrap_or_else(|e| e.into_inner()).0 {
                 Some(page) => page,
                 None => lang::guess(texts.iter().map(String::as_str)).unwrap_or("en"),
             },
             s => s,
+        }
+    }
+
+    /// The offline models for `texts` into `target` (`mt::route`), with the
+    /// texts (indices) each route takes. "auto" judges each text by its own
+    /// words where they are clear (`lang::sure`), else by the page's
+    /// language: an English player around a Spanish subtitle no longer
+    /// outvotes it. Texts already in `target` take no route (left as they
+    /// are). Err = no way offline, or nothing on the page is in another
+    /// language (the message offers AI; nothing is sent anywhere).
+    #[allow(clippy::type_complexity)]
+    pub(super) fn routes(
+        &self,
+        texts: &[String],
+        target: &str,
+    ) -> Result<Vec<(Vec<&'static mt::Pair>, Vec<usize>)>, AiError> {
+        let fallback = self.source(texts);
+        let same = |s: &str| {
+            lang::find(s)
+                .zip(lang::find(target))
+                .is_some_and(|(s, t)| s == t)
         };
-        mt::route(source, target).ok_or_else(|| AiError::Offline(mt::unavailable(source, target)))
+        let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
+        for (i, t) in texts.iter().enumerate() {
+            let s = match self.source.as_str() {
+                lang::AUTO => lang::sure(t).unwrap_or(fallback),
+                _ => fallback,
+            };
+            if same(s) {
+                continue;
+            }
+            match groups.iter_mut().find(|(g, _)| *g == s) {
+                Some((_, idx)) => idx.push(i),
+                None => groups.push((s, vec![i])),
+            }
+        }
+        let page = self
+            .guessed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .1
+            .clone();
+        if groups.is_empty() && page.iter().all(|s| same(s)) {
+            return Err(AiError::Offline(mt::unavailable(fallback, target)));
+        }
+        (groups.into_iter())
+            .map(|(s, idx)| {
+                let route = mt::route(s, target)
+                    .ok_or_else(|| AiError::Offline(mt::unavailable(s, target)))?;
+                Ok((route, idx))
+            })
+            .collect()
     }
 
     /// `texts` into `target`, one call; `markup` = extra AI instructions.
@@ -121,7 +171,7 @@ impl Real {
         match ai::translate_lines(ai, key.as_ref(), texts, &self.source, target, markup) {
             // A reply that isn't the array (a chatty model): on-device instead
             // of an error card, when a model exists for these lines.
-            Err(AiError::BadResponse(why)) if self.route_for(texts, target).is_ok() => {
+            Err(AiError::BadResponse(why)) if self.routes(texts, target).is_ok() => {
                 crate::log!("[opencircle] AI translation unusable ({why}); on-device instead");
                 self.on_device(texts, target)
             }
@@ -132,8 +182,9 @@ impl Real {
     /// `texts` into `target` with the on-device model(s): through English
     /// when there is no direct one.
     fn on_device(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
-        let route = self.route_for(texts, target)?;
-        if let Some(pair) = route.iter().find(|p| p.missing_bytes() > 0) {
+        let routes = self.routes(texts, target)?;
+        let mut pairs = routes.iter().flat_map(|(r, _)| r);
+        if let Some(pair) = pairs.find(|p| p.missing_bytes() > 0) {
             *self.missing.lock().unwrap_or_else(|e| e.into_inner()) = Some(pair);
             return Err(AiError::Offline(format!(
                 "{} isn't downloaded yet. Translate once with Ctrl+Shift+T to \
@@ -142,13 +193,22 @@ impl Real {
             )));
         }
         ocr::keep_warm();
-        by_sentence(texts, |t| {
-            let mut t = t.to_vec();
-            for pair in &route {
-                t = mt::translate(&t, pair).map_err(|e| AiError::Offline(e.to_string()))?;
+        // a text in no route is in the target already: echoed, not redrawn
+        let mut out = texts.to_vec();
+        for (route, idx) in routes {
+            let part: Vec<String> = idx.iter().map(|&i| texts[i].clone()).collect();
+            let part = by_sentence(&part, |t| {
+                let mut t = t.to_vec();
+                for pair in &route {
+                    t = mt::translate(&t, pair).map_err(|e| AiError::Offline(e.to_string()))?;
+                }
+                Ok(t)
+            })?;
+            for (i, t) in idx.into_iter().zip(part) {
+                out[i] = t;
             }
-            Ok(t)
-        })
+        }
+        Ok(out)
     }
 }
 
@@ -187,8 +247,10 @@ impl Deps for Real {
 
     fn read(&self, texts: &[&str]) {
         if self.source == lang::AUTO {
+            let page = lang::guess(texts.iter().copied());
+            let sure = texts.iter().filter_map(|t| lang::sure(t));
             *self.guessed.lock().unwrap_or_else(|e| e.into_inner()) =
-                lang::guess(texts.iter().copied());
+                (page, page.into_iter().chain(sure).collect());
         }
     }
 
@@ -204,7 +266,7 @@ impl Deps for Real {
     /// Offline: loads the likely first model (English for "auto") in the
     /// helper, which stays warm, while the screen is read.
     fn warm(&self, target: &str) {
-        let Some(pair) = self.route_for(&[], target).ok().map(|r| r[0]) else {
+        let Some(pair) = mt::route(self.source(&[]), target).map(|r| r[0]) else {
             return;
         };
         if self.offline() && pair.missing_bytes() == 0 {
@@ -1049,7 +1111,7 @@ pub(super) mod tests {
         let auto = Real::new(lang::AUTO, Via::Offline);
         assert!(auto.offline() && auto.missing().is_none());
         let pair = |r: &Real, t: &[&str], target| {
-            let route = r.route_for(&texts(t), target)?;
+            let route = r.routes(&texts(t), target)?.remove(0).0;
             Ok::<_, AiError>((route[0].source, route[route.len() - 1].target, route.len()))
         };
         assert_eq!(pair(&auto, &["Main menu"], "ar").unwrap(), ("en", "ar", 1));
@@ -1105,6 +1167,45 @@ pub(super) mod tests {
             assert!(err.contains("Choose AI"), "offers AI: {err}");
             assert!(real.missing().is_none(), "nothing to download for it");
         }
+    }
+
+    /// "auto" on a paused video (the owner's Sintel take, read as one-shot
+    /// translate reads it): an English player banner and page around a
+    /// Spanish subtitle. Before: one guess for the whole screen (English, and
+    /// the subtitle had none of the common Spanish words) and "the text is
+    /// already in English". Now each line that says what it is goes its own
+    /// way; the rest follows the page.
+    #[test]
+    fn a_foreign_subtitle_in_an_english_page_is_translated() {
+        let texts = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let screen = [
+            "To exit full screen, move mouse to top of screen or press Esc",
+            "Esta hoja tiene un pasado oscuro.",
+            "Sintel is an independently produced short film, initiated by the Blender",
+            "Ha derramado mucha sangre inocente.",
+        ];
+        let real = Real::new(lang::AUTO, Via::Offline);
+        real.read(&screen);
+        let routes = real.routes(&texts(&screen), "en").unwrap();
+        let got: Vec<_> = (routes.iter())
+            .map(|(r, idx)| (r[0].source, r[r.len() - 1].target, idx.clone()))
+            .collect();
+        assert_eq!(got, [("es", "en", vec![1, 3])]);
+        // a part with only the page's English: left as it is, no error
+        assert!(real.routes(&texts(&screen[..1]), "en").unwrap().is_empty());
+        // into Arabic, everything goes, each from its own language
+        let routes = real.routes(&texts(&screen), "ar").unwrap();
+        let mut got: Vec<_> = (routes.iter())
+            .map(|(r, i)| (r[0].source, i.clone()))
+            .collect();
+        got.sort();
+        assert_eq!(got, [("en", vec![0, 2]), ("es", vec![1, 3])]);
+        // a page all in English still says so
+        let en = [screen[0], screen[2]];
+        let page = Real::new(lang::AUTO, Via::Offline);
+        page.read(&en);
+        let same = page.routes(&texts(&en), "en").unwrap_err();
+        assert!(same.to_string().contains("already in English"), "{same}");
     }
 
     #[test]

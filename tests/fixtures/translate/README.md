@@ -18,3 +18,7 @@ text. `lines.json` = the lines PP-OCR read on the whole frame (shifted to the cu
 
 The English in `translations.json` is the real on-device output (OPUS-MT es→en, the app's
 pinned model) for every block it was run on.
+- `player.png`: Sintel's source frame with its Spanish subtitle (`sintel-spanish.mp4`) inside a
+  video-page layout drawn for the test (no site's art or logos; the page text is our own English).
+  Sintel © Blender Foundation | durian.blender.org | CC BY 3.0. Its English is the film's own
+  English subtitle line, not MT output.
