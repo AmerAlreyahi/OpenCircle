@@ -373,6 +373,10 @@ production systems.
   Owner records the clips (owner, 2026-11-03, SUPERSEDES the Codex recordings): every Codex take was rejected
   (old snip tool, unclear text sample, translate not showing where it runs, subtitles not detected); agents record no
   preview clips; the owner records them himself with the dev exe and provides the samples.
+  Exception (owner, 2026-11-03): the translate preview may be made by an agent (Claude or Codex, whoever is free) as 5
+  scenario videos, one of them on an ORIGINAL generated game screen in the style of a monster/character banner (no
+  real game's art, names, logos or UI copied); the owner's guide comes first; ONE video is shown to the owner first,
+  then he decides to continue with the agent or do it himself. Uses the fixed translate build.
   The snip area's outline, handles and hover outline take their colours from the chosen Active Look (Settings >
   Appearance "Active look screen borders": Liquid Prism, Spectrum, Aurora Borealis, ..., Custom), the same source
   as the screen edge and main mode's selection line (one place, no snip-only colours).
