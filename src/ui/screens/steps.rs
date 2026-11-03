@@ -404,8 +404,10 @@ impl Strip {
             }
             Key::Enter => return Some(Do::Edit(at)),
             Key::Delete => return self.remove(at),
-            Key::Copy => return Some(Do::Copy(at)),
-            Key::CopyAll => return Some(Do::CopyAll),
+            // the step picked (a click, the arrows); none: the strip's
+            // own Copy button, Copy all
+            Key::Copy if self.focus.is_some() => return Some(Do::Copy(at)),
+            Key::Copy | Key::CopyAll => return Some(Do::CopyAll),
             Key::Undo => return self.undo(),
         }
         None
@@ -872,6 +874,8 @@ mod tests {
     #[test]
     fn keys_walk_move_and_act() {
         let mut s = strip(3);
+        // nothing picked: Ctrl+C is the strip's Copy button (Copy all)
+        assert_eq!(s.update(Msg::Key(Key::Copy)), Some(Do::CopyAll));
         s.update(Msg::Key(Key::Down));
         s.update(Msg::Key(Key::MoveDown));
         assert_eq!(order(&s), vec![400, 480, 440]);

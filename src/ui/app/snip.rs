@@ -59,7 +59,11 @@ impl App {
                 let whole = windows::uncut(self.overlay)
                     .chain(windows::hide_from_capture(self.overlay, false))
                     .map(Message::Windows);
-                // back to the picked area (its editor kept, edits and all)
+                // back to the picked area (its editor kept, edits and all),
+                // its toolbar where it was
+                if let Some(was) = long.bar_was {
+                    (o.bar_left, o.bar_now) = (was, None);
+                }
                 if let Some(edit) = &mut o.edit {
                     edit.editor.capturing = false;
                 }
@@ -423,10 +427,20 @@ impl App {
         ) else {
             return Task::none();
         };
-        // the toolbar stays docked where it is
-        let bar = self.long_bar();
+        // the toolbar stays where it is, but off the area where it fits
+        // beside it: over the area the overlay must be kept out of the grabs
+        let mut bar = self.long_bar();
+        let work = work_area(self.o.screen, self.o.work_inset);
+        let mut bar_was = None;
+        if bar.intersects(&area)
+            && let Some(at) = long_capture::bar_beside(area, work, bar.size())
+        {
+            bar_was = Some(self.o.bar_left);
+            (self.o.bar_left, self.o.bar_now) = (Some(at), None);
+            bar = Rectangle::new(at, bar.size());
+        }
         let o = &*self.o;
-        let room = long_capture::layout(area, work_area(o.screen, o.work_inset), bar, o.scale);
+        let room = long_capture::layout(area, work, bar, o.scale);
         let preview = room.map_or((0, 0), |r| {
             let px = |v: f32| (v * o.scale).round() as u32;
             (px(r.width), px(r.height))
@@ -437,7 +451,9 @@ impl App {
             return Task::none();
         };
         let stop = Arc::new(AtomicBool::new(false));
-        snip.scroll = Some(long_capture::Long::new(area, stop.clone(), scale));
+        let mut long = long_capture::Long::new(area, stop.clone(), scale);
+        long.bar_was = bar_was;
+        snip.scroll = Some(long);
         if let Some(edit) = &mut o.edit {
             edit.editor.capturing = true;
             edit.editor.focus = None;
@@ -457,6 +473,14 @@ impl App {
         .map(Message::Snip);
         // the toolbar stays where it is over an area that fills the screen
         let keep = Some(bar).filter(|bar| bar.intersects(&area));
+        crate::log!(
+            "[opencircle] long capture: toolbar {}",
+            match (keep.is_some(), bar_was.is_some()) {
+                (true, _) => "over the area (kept out of captures)",
+                (false, true) => "moved beside the area",
+                (false, false) => "beside the area",
+            }
+        );
         let cut = windows::hide_from_capture(overlay, keep.is_some())
             .chain(windows::hole(
                 overlay,

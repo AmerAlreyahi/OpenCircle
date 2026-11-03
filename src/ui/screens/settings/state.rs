@@ -1643,6 +1643,14 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     Subscription::batch([keys, clock])
 }
 
+/// Ctrl+C on the page shown (nothing in it took the key, e.g. a field's
+/// selected text): its Copy button's message, where it has one (About's
+/// Copy diagnostics). Copy is the button or Ctrl+C (owner, 2026-11-03).
+pub fn copy_key(state: &State) -> Option<Message> {
+    (state.section == Section::About && state.recording.is_none())
+        .then_some(Message::CopyDiagnostics)
+}
+
 /// The chord a key event records: a key going down, and Print Screen going
 /// up: Windows sends no key-down for it (alone or with Alt / Ctrl), only its
 /// key-up, so Print Screen and Alt+Print Screen could never be recorded.

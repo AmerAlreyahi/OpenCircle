@@ -1374,6 +1374,12 @@ fn about_shows_version_license_project_and_no_telemetry() {
         update(&mut s, Message::CopyDiagnostics),
         Outcome::CopyDiagnostics
     );
+    // Ctrl+C on the page is its Copy button (owner, 2026-11-03)
+    let ctrl_c = copy_key(&s).expect("About copies on Ctrl+C");
+    assert_eq!(update(&mut s, ctrl_c), Outcome::CopyDiagnostics);
+    let _ = update(&mut s, Message::Section(Section::General));
+    assert!(copy_key(&s).is_none(), "no Copy button there");
+    let _ = update(&mut s, Message::Section(Section::About));
     let Outcome::OpenLink(url) = update(&mut s, Message::ReportProblem) else {
         panic!("Report a problem opens a link");
     };

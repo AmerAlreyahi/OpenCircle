@@ -844,10 +844,14 @@ fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
         app.select(area);
         let _ = app.open_editor();
         let _ = app.update(Message::Editor(editor::Message::Scroll));
+        // docked inside the area's top once picked; beside it for the
+        // capture (over it the overlay would be kept out of the grabs,
+        // and the area showed blurred on Windows 11: owner, 2026-11-03)
         let bar = app.long_bar();
-        assert!(
-            bar.intersects(&area),
-            "docked inside the area's top: {bar:?}"
+        assert!(!bar.intersects(&area), "off the area: {bar:?}");
+        assert_eq!(
+            (bar.x + bar.width + 12.0, bar.y),
+            (area.x, area.y.max(12.0))
         );
         // the size start_scroll asks the thread for
         let room = long_capture::layout(area, app.o.screen, bar, 1.0);
@@ -880,6 +884,15 @@ fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
         let hint = long.hint_spot(app.o.screen, bar, false);
         let hint = hint.unwrap_or_else(|| panic!("the hint shows at y {y}"));
         assert!(hint.x + 1.0 < area.x && hint.y >= 0.0, "{hint:?}");
+        // cancelled: back to the picked area, the toolbar docked on it again
+        let _ = app.update(Message::Escape);
+        let _ = app.update(Message::Snip(snip::Msg::Done(Ok(Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        }))));
+        assert!(app.scroll().is_none() && app.o.bar_left.is_none());
+        assert!(app.long_bar().intersects(&area), "docked inside again");
     }
 }
 
@@ -974,6 +987,34 @@ fn the_three_drags_each_move_their_own_thing() {
     let task = app.on_editor(E::DragOut);
     run_task(&mut app, task);
     assert!(app.hiding != Hiding::No, "dropped: closed");
+}
+
+/// Copy is the button or Ctrl+C, Save the button or Ctrl+S (owner,
+/// 2026-11-03): during a long capture the keys finish it exactly as the
+/// toolbar's buttons do (its canvas, which takes the editor's keys, is off).
+#[test]
+fn long_capture_finishes_on_ctrl_c_and_ctrl_s_like_its_buttons() {
+    use crate::ui::screens::long_capture::Finish;
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let key = |letter| overlay::Event::Key { letter, ctrl: true };
+    for (letter, button, how) in [
+        ('c', editor::Message::Copy, Finish::Copy),
+        ('s', editor::Message::Save, Finish::Save),
+    ] {
+        let finish = |by_key: bool| {
+            let mut app = snipping(area);
+            app.select(area);
+            let _ = app.open_editor();
+            let _ = app.update(Message::Editor(editor::Message::Scroll));
+            let _ = match by_key {
+                true => app.on_overlay(key(letter)),
+                false => app.update(Message::Editor(button.clone())),
+            };
+            app.scroll().and_then(|l| l.then)
+        };
+        assert_eq!(finish(false), Some(how), "the button");
+        assert_eq!(finish(true), Some(how), "Ctrl+{letter}");
+    }
 }
 
 #[test]

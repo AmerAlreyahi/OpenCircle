@@ -65,6 +65,9 @@ pub struct Long {
     full: bool,
     lost: bool,
     preview: Option<(image::Handle, u32, u32)>,
+    /// The toolbar was moved off the area for the capture (`bar_beside`):
+    /// where it was dropped before (`None`: docked), restored after.
+    pub bar_was: Option<Option<Point>>,
 }
 
 impl Long {
@@ -80,6 +83,7 @@ impl Long {
             full: false,
             lost: false,
             preview: None,
+            bar_was: None,
         }
     }
 
@@ -276,6 +280,24 @@ pub fn layout(area: Rectangle, screen: Size, bar: Rectangle, scale: f32) -> Opti
         Point::new(snap(x), snap(top)),
         Size::new(floor(width), floor(height)),
     ))
+}
+
+/// Where Snip's toolbar (`size`) goes for the capture when it is docked over
+/// the area (an area as tall as the screen): beside it, on the roomier side
+/// (the picture's, which then starts under it), top-aligned with it; none
+/// where neither side holds it. Over the area the overlay has to be kept out
+/// of the grabs (`hide_from_capture`), and on the owner's Windows 11 PC the
+/// area then showed blurred while it was captured (photo, 2026-11-03);
+/// beside it the overlay stays a plain window.
+pub fn bar_beside(area: Rectangle, screen: Size, size: Size) -> Option<Point> {
+    let left = area.x - 2.0 * GAP;
+    let right = screen.width - (area.x + area.width) - 2.0 * GAP;
+    let x = match right >= left {
+        true => area.x + area.width + GAP,
+        false => area.x - GAP - size.width,
+    };
+    let y = area.y.min(screen.height - GAP - size.height).max(GAP);
+    (right.max(left) >= size.width).then_some(Point::new(x, y))
 }
 
 /// The hint beside the toolbar, on its side away from the area, else under
@@ -526,6 +548,28 @@ mod tests {
                 "{w}: {p:?}"
             );
         }
+    }
+
+    /// The toolbar off a full-height area: on the roomier side, top-aligned,
+    /// `GAP` from it; none where no side holds it (it stays over the area).
+    #[test]
+    fn the_toolbar_goes_beside_a_full_height_area_where_it_fits() {
+        let screen = Size::new(2293.0, 960.0); // 3440 x 1440 at 1.5
+        let bar = Size::new(620.0, 52.0);
+        // the owner's: the left half
+        let left_half = rect(0.0, 0.0, 1152.0, 960.0);
+        let at = bar_beside(left_half, screen, bar).expect("room on the right");
+        assert_eq!((at.x, at.y), (1152.0 + GAP, GAP));
+        // the right half: on its left
+        let right_half = rect(1141.0, 0.0, 1152.0, 960.0);
+        let at = bar_beside(right_half, screen, bar).expect("room on the left");
+        assert_eq!(at.x + bar.width + GAP, right_half.x);
+        // the whole screen, or too narrow a side: no spot
+        assert_eq!(bar_beside(rect(0.0, 0.0, 2293.0, 960.0), screen, bar), None);
+        assert_eq!(
+            bar_beside(rect(300.0, 0.0, 1700.0, 960.0), screen, bar),
+            None
+        );
     }
 
     #[test]

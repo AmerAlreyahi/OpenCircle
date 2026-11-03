@@ -82,6 +82,8 @@ pub enum Msg {
     Steps(steps::Msg),
     /// A key in a window (the Steps strip's, when it has the focus).
     StepKey(window::Id, steps::Key),
+    /// Ctrl+C in a window that nothing in it took (Settings: its page's Copy).
+    CopyKey(window::Id),
     /// A window moved (the Steps strip docks once it stops).
     Moved(window::Id, Point),
     /// Edit the strip's `i`th step in Snip: `ui::App` opens it ("Update step N").
@@ -336,6 +338,25 @@ fn pin_keys() -> Subscription<Msg> {
             _ => return None,
         };
         Some(Msg::Pin(window, msg))
+    })
+}
+
+/// Ctrl+C that no widget took (a field copies its own selection), with its
+/// window: `Msg::CopyKey`.
+fn copy_keys() -> Subscription<Msg> {
+    iced::event::listen_with(|event, status, window| match event {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            physical_key,
+            modifiers,
+            ..
+        }) if status == iced::event::Status::Ignored
+            && modifiers.command()
+            && key.to_latin(physical_key) == Some('c') =>
+        {
+            Some(Msg::CopyKey(window))
+        }
+        _ => None,
     })
 }
 
@@ -971,6 +992,14 @@ impl Windows {
             Msg::Moved(id, at) if self.steps_window() == Some(id) => {
                 return self.on_steps(steps::Msg::Moved(at));
             }
+            Msg::CopyKey(id) => {
+                let copy = (self.settings.as_ref())
+                    .filter(|(settings, _)| *settings == id)
+                    .and_then(|(_, state)| settings::copy_key(state));
+                if let Some(copy) = copy {
+                    return self.update(Msg::Settings(copy));
+                }
+            }
             Msg::StepKey(..) | Msg::Moved(..) | Msg::EditStep(_) => {}
             Msg::UpdateStatus(status) => {
                 if let Some((_, state)) = &mut self.settings {
@@ -1336,6 +1365,10 @@ impl Windows {
             window::resize_events().map(|(id, _)| Msg::Resized(id)),
             iced::system::theme_changes().map(Msg::OsTheme),
             keys,
+            match self.settings {
+                Some(_) => copy_keys(),
+                None => Subscription::none(),
+            },
             if self.pins.is_empty() {
                 Subscription::none()
             } else {
