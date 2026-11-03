@@ -49,6 +49,17 @@ fn session(models: bool) -> Session {
 /// outside the redrawn part too (tiny-skia doesn't clip shadows), so it
 /// piled up into a black block over the download prompt (VMs, 1125x575
 /// and 1280x800).
+/// Ubuntu gate: "auto" on a French page into German first asked for en-de
+/// (a guessed English page), then for the pair the page needed. Only a set
+/// source is asked for before the screen is read.
+#[test]
+fn auto_asks_only_for_what_the_page_needs() {
+    assert!(asked_first("auto", "de").is_none());
+    assert!(asked_first("auto", "ar").is_none());
+    let fr = asked_first("fr", "de").unwrap();
+    assert_eq!((fr.source, fr.target), ("fr", "de"));
+}
+
 #[test]
 fn a_partial_redraw_leaves_the_rest_of_the_download_prompt() {
     let mut s = session(false);

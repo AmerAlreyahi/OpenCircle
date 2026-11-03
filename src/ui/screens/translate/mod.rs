@@ -183,7 +183,9 @@ impl Session {
     /// (keyring), which then asks (`Msg::Offline`).
     fn begin(&mut self, models: bool) -> Task<Msg> {
         let (source, target) = (&self.picker.source, &self.picker.target);
-        let offline = actions::translate::surely_offline(source, target)
+        let offline = (actions::translate::will_be_offline())
+            .then(|| asked_first(source, target))
+            .flatten()
             .map(|p| (p, p.missing_bytes()))
             .filter(|&(_, b)| b > 0);
         self.card = None;
@@ -412,11 +414,15 @@ impl Session {
             }
             let ask = |pair: &'static Pair| {
                 let missing = pair.missing_bytes();
-                (missing > 0).then(|| tx.unbounded_send(Msg::Offline(pair, missing)))
+                (missing > 0).then(|| {
+                    crate::log!(
+                        "[opencircle] translate asks for {} ({missing} bytes)",
+                        pair.label()
+                    );
+                    tx.unbounded_send(Msg::Offline(pair, missing))
+                })
             };
-            let expected = offline
-                .then(|| crate::mt::next(if source == "auto" { "en" } else { &source }, &target))
-                .flatten();
+            let expected = offline.then(|| asked_first(&source, &target)).flatten();
             if expected.and_then(ask).is_some() {
                 return;
             }
@@ -437,6 +443,15 @@ impl Session {
         self.work = Some(handle.abort_on_drop());
         task
     }
+}
+
+/// The offline pair asked for before the screen is read: a set source's.
+/// "auto" asks only for what the page turns out to need (a guessed English
+/// pair asked a French page into German for en-de first, then for fr-de).
+fn asked_first(source: &str, target: &str) -> Option<&'static Pair> {
+    (source != crate::translate::lang::AUTO)
+        .then(|| crate::mt::next(source, target))
+        .flatten()
 }
 
 /// Runs the pipeline on `area` of `frame` and pastes the result back into a
