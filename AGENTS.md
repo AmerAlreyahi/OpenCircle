@@ -339,6 +339,9 @@ production systems.
   the
   normal Snip toolbar stays (close, pin, share, Copy, Save) and Copy / Save finish the long capture (no separate
   Cancel / Done bar over the page); a short hint "Scroll to capture the page" beside the area.
+- Copy = button AND Ctrl+C (owner, 2026-11-03, universal): wherever the app has a Copy button, Ctrl+C does the same
+  (long capture included: Ctrl+C finishes and copies); Save pairs with Ctrl+S the same way. A text field with a
+  selection still copies its text.
 - Snip look + size (owner, 2026-10-30, on the design's picked frame): the area's handles and its outline are
   SOFTER (smaller, rounder, quieter handles; a thinner, lower-contrast border than the design's v24 frame). Copy
   and Save keep the capture's full size by default: `snip.max_edge` default 0 (Original) instead of 1568 (a value
