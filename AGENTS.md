@@ -302,6 +302,9 @@ production systems.
   Window hover (owner, 2026-10-31, compared with iTop): hovering outlines the WHOLE top-level window under the
   pointer by default (its visible frame, like iTop); a part of it (element) only after the wheel goes down; every
   normal window counts, OpenCircle's own Settings / chat / pins too (only the snip overlay itself is skipped).
+  Own floating windows out of captures (owner, 2026-11-03, option A for 0.1.3): OpenCircle's floating widgets (Steps
+  strip, pins, pills, update card, chat) are never in any capture and not Snip targets. LATER (keep the idea): pickable
+  when the user deliberately hovers and clicks one in Snip.
   Editor feel (owner, 2026-10-31): no dashed selection box around any annotation (shapes, arrows, callouts, blur):
   a selected one shows only its own small handles (e.g. an arrow's ends). Blur: no blur assistant (no suggested
   areas); only the line help (stays on its line unless the pointer clearly moves down); brush size AUTO from the
