@@ -82,7 +82,8 @@ strip = true
 lto = "thin"
 codegen-units = 1
 
-[target.'cfg(windows)'.build-dependencies]
+# for a Windows target, also cross-built from Linux (dev builds: llvm-rc)
+[build-dependencies]
 winresource = "0.1"
 
 [package.metadata.packager]

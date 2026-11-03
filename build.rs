@@ -45,7 +45,10 @@ fn main() {
         println!("cargo::rustc-env=SETUP_MSI={}", msi.display());
         println!("cargo::rustc-cfg=setup_payload");
     });
-    #[cfg(windows)]
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        let _ = setup;
+        return;
+    }
     winresource::WindowsResource::new()
         .set_icon("assets/icons/opencircle.ico")
         .set("ProductName", "OpenCircle")
@@ -66,6 +69,4 @@ fn main() {
         .set("LegalCopyright", "MIT License")
         .compile()
         .expect("embed the Windows icon and version info");
-    #[cfg(not(windows))]
-    let _ = setup;
 }
