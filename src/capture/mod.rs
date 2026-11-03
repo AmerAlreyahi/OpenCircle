@@ -193,13 +193,13 @@ fn whole_desktop_only() -> bool {
     if wayland_session() {
         return true;
     }
-    std::env::var_os("OPENCIRCLE_TEST_FRAME").is_some()
+    crate::sys::test_hook("OPENCIRCLE_TEST_FRAME").is_some()
 }
 
 fn whole_desktop() -> Option<Result<Frame, CaptureError>> {
     // ponytail: test hook. WSLg and headless CI can't capture the screen, so a PNG
     // stands in; keep it for UI snapshot tests, never document it for users.
-    if let Some(path) = std::env::var_os("OPENCIRCLE_TEST_FRAME") {
+    if let Some(path) = crate::sys::test_hook("OPENCIRCLE_TEST_FRAME") {
         return Some(from_png(&path).map_err(CaptureError::from));
     }
     #[cfg(target_os = "linux")]

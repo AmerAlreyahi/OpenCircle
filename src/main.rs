@@ -205,7 +205,7 @@ fn main() -> ExitCode {
     log::install_panic_hook(log::dir());
     crate::log!("[opencircle] {} starting", env!("CARGO_PKG_VERSION"));
     // Hidden test hook (the CLI is frozen, so an env var): a thread panics, the crash file appears.
-    if std::env::var_os("OPENCIRCLE_TEST_CRASH").is_some() {
+    if sys::test_hook("OPENCIRCLE_TEST_CRASH").is_some() {
         let _ = std::thread::spawn(|| panic!("OPENCIRCLE_TEST_CRASH")).join();
     }
     let (tx, rx) = mpsc::unbounded();

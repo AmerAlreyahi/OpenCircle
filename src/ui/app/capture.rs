@@ -566,7 +566,7 @@ pub(in crate::ui) fn overlay_window(shown: Option<Size>) -> window::Settings {
 pub(in crate::ui) const TEST_SHOT: &str = "OPENCIRCLE_TEST_SHOT";
 
 pub(in crate::ui) fn save_test_shot(shot: &window::Screenshot) {
-    let Some(path) = std::env::var_os(TEST_SHOT) else {
+    let Some(path) = crate::sys::test_hook(TEST_SHOT) else {
         return;
     };
     let result = actions::write_png(path.as_ref(), shot.size.width, shot.size.height, &shot.rgba);

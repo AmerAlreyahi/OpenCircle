@@ -476,7 +476,7 @@ impl Live {
     /// error (no key or no models: the layer and its border still show).
     fn test_shot(&mut self) -> Outcome {
         match self.window() {
-            Some(window) if !self.shot_taken && std::env::var_os(TEST_SHOT).is_some() => {
+            Some(window) if !self.shot_taken && crate::sys::test_hook(TEST_SHOT).is_some() => {
                 self.shot_taken = true;
                 Outcome::Task(shot_later(window))
             }
@@ -730,7 +730,7 @@ fn shot_later(window: window::Id) -> Task<Msg> {
 }
 
 fn save_test_shot(shot: &window::Screenshot) {
-    let Some(path) = std::env::var_os(TEST_SHOT) else {
+    let Some(path) = crate::sys::test_hook(TEST_SHOT) else {
         return;
     };
     let (w, h) = (shot.size.width, shot.size.height);

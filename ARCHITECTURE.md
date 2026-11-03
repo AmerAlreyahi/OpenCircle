@@ -196,6 +196,10 @@ every preset round-trips and draws no key colour on the live layer.
 
 ## Test hooks (not for users)
 
+Read them through `sys::test_hook`: a release build (what the VM builds and users run) reads a hook only
+with `OPENCIRCLE_TEST_HOOKS=1` set too; debug and test builds always do. `OPENCIRCLE_TEST_UPDATE_URL` stays
+outside it (the update gate runs published builds).
+
 - `OPENCIRCLE_TEST_FRAME=<8-bit RGBA PNG>`: capture returns this image instead of the screen.
 - With the editor open, its Esc (Back) takes the test shot (`OPENCIRCLE_TEST_SHOT`).
 - `OPENCIRCLE_TEST_LIVE_SHOT=<out.png>`: live translate saves its layer once the first patches (or the first error) are drawn.

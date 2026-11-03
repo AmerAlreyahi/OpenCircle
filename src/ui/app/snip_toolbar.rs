@@ -74,7 +74,7 @@ impl App {
 
     pub(in crate::ui) fn on_snip_toolbar(&mut self, msg: annotate::Message) -> Task<Message> {
         // Test hook: the editor's Esc (Back) takes the shot of the editor instead.
-        if matches!(msg, annotate::Message::Back) && std::env::var_os(TEST_SHOT).is_some() {
+        if matches!(msg, annotate::Message::Back) && crate::sys::test_hook(TEST_SHOT).is_some() {
             return self.test_shot();
         }
         // The toolbar's grip (its own press, so the toolbar's `grab` under it

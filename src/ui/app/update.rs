@@ -179,7 +179,7 @@ impl App {
             Message::Escape if self.o.edit.as_ref().is_some_and(SnipToolbar::is_open) => {
                 Task::none()
             }
-            Message::Escape if std::env::var_os(TEST_SHOT).is_some() => self.test_shot(),
+            Message::Escape if crate::sys::test_hook(TEST_SHOT).is_some() => self.test_shot(),
             // The editor's Esc went back to the bar: the same key's Escape
             // (it may come after) doesn't close the overlay too.
             Message::Escape if self.o.esc_back => {

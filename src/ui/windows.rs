@@ -1798,7 +1798,9 @@ fn ask_screenshot(to: fn(onboarding::Message) -> Msg) -> Task<Msg> {
 }
 
 fn test_hook() -> Task<Msg> {
-    let Ok(script) = std::env::var("OPENCIRCLE_TEST_OPEN") else {
+    let Some(script) =
+        crate::sys::test_hook("OPENCIRCLE_TEST_OPEN").and_then(|s| s.into_string().ok())
+    else {
         return Task::none();
     };
     super::background(move |tx| {
@@ -1829,7 +1831,7 @@ fn open_url(url: &str) {
 }
 
 fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
-    let Some(dir) = std::env::var_os("OPENCIRCLE_TEST_DIR") else {
+    let Some(dir) = crate::sys::test_hook("OPENCIRCLE_TEST_DIR") else {
         return;
     };
     let name = format!("{name}-{step}.png");
