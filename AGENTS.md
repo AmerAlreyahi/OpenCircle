@@ -352,7 +352,11 @@ production systems.
 - Preview clips bundled (owner, 2026-11-03): the owner's edited clips (docs/internal/preview-edit/outputs/final) map
   Look = circle-1..3 in turn, Text = text, Translate = translate, AI = ai-chat / ai-browser by provider (the Google AI
   Mode clip stays until the owner replaces it), Snip = snip-blur, snip-comment, snip-long in sequence; clips with
-  unresolved photo rights (lotus, kingfisher, COFFEE) are held until cleared; credits on About + NOTICE.
+  unresolved photo rights are held until cleared; credits on About + NOTICE. Clips go in exactly as delivered (no
+  re-encode/edit; sha256 = outputs/final/qa.json). Photos must be CC0 (owner's rule): lotus and kingfisher cleared
+  (WordPress, CC0, 2026-11-03); COFFEE (Unsplash License) held unless the owner accepts that licence. The translate
+  clip and its poster are CC BY-SA 4.0, an explicit media exception to the app's MIT licence. About + NOTICE carry the
+  Google non-affiliation line verbatim.
 - Copy = button AND Ctrl+C (owner, 2026-11-03, universal): wherever the app has a Copy button, Ctrl+C does the same
   (long capture included: Ctrl+C finishes and copies); Save pairs with Ctrl+S the same way. A text field with a
   selection still copies its text.
@@ -616,3 +620,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Preview glow selection (owner, 2026-11-03): owner likes the minimal edits but requests a different reconstructed edge effect; show actual rendered Active Look samples including the new Sapphire Glow, then wait for their choice before replacing the full preview set.
 
 - Preview final glow (owner, 2026-11-03): apply the recommended sample A, Sapphire Glow (blue #0a84ff / indigo #5e5ce6, 100% preset strength), across the finished minimal previews. Keep the same genuine active-state gates and Snip pre-pick distinction. Supply a Claude handoff explaining every clip and the editing choices.
+
+- Preview source holds (owner, 2026-11-03): 1.2, 1.3 and 1.4 stay out of public/app preview delivery until their exact photo sources are established, or the owner records replacements using own/CC0 photos. Review exports may remain labelled. Text reading remains without a bundled preview until an approved clip is installed. Never substitute a new photo beneath unchanged old search/OCR results.
+- Translation preview pacing (owner, 2026-11-03): every target language must be recognizable; preserve actual language changes and allow readable result holds. Separate language clips and editorial labels/freezes are allowed. Do not compress the sequence so language choices disappear.
+
+- Preview task scope (owner, 2026-11-03, latest): stop image-source investigation; finish the translation-video pacing revision, then stop this editing task. Existing provenance findings remain notes; this is not an instruction to publish or install clips.
