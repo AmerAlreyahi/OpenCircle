@@ -1,7 +1,5 @@
 //! The design's sizes, radii, spacing, type roles and fixed colours
 //! (`newdesing/styles/ui-kit.css`): every screen takes its numbers from here.
-// ponytail: unread until step 5 (the kit components) and its later ports.
-#![allow(dead_code)]
 
 use iced::font::Weight;
 
@@ -19,11 +17,8 @@ pub mod radius {
     /// Card, toast, chip, the bar's input, CTA, tray row.
     pub const CARD: f32 = 12.0;
     pub const DROPDOWN: f32 = 14.0;
-    pub const EDGE: f32 = 14.0;
     pub const WINDOW: f32 = 16.0;
     pub const DRAWER: f32 = 18.0;
-    pub const VOICE: f32 = 20.0;
-    pub const AI_CARD: f32 = 22.0;
     pub const FULL: f32 = 999.0;
 }
 
@@ -129,13 +124,10 @@ impl Role {
 pub mod fixed {
     use iced::Color;
 
-    /// emerald-400 / -300.
+    /// emerald-400.
     pub const SUCCESS: Color = Color::from_rgb8(0x34, 0xd3, 0x99);
-    pub const SUCCESS_TEXT: Color = Color::from_rgb8(0x6e, 0xe7, 0xb7);
     /// rose-400.
     pub const DANGER: Color = Color::from_rgb8(0xfb, 0x71, 0x85);
-    /// amber-400.
-    pub const WARNING: Color = Color::from_rgb8(0xfb, 0xbf, 0x24);
     /// The window's close button under the cursor, and its glyph.
     pub const CLOSE_HOVER: Color = Color::from_rgb8(0xc4, 0x2b, 0x1c);
     pub const ON_CLOSE: Color = Color::WHITE;
@@ -150,8 +142,6 @@ pub mod fixed {
         Color::from_rgba8(15, 23, 42, 0.06),
         Color::from_rgb8(0x0f, 0x17, 0x2a),
     );
-    /// The dim behind a drawer (`bg-black/35`).
-    pub const SCRIM: Color = Color::from_rgba8(0, 0, 0, 0.35);
 
     /// The overlay's own marks over the frozen frame (the same over any
     /// picture, so no theme): text found in select-text mode, every word and

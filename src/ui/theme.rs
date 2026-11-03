@@ -261,7 +261,18 @@ mod tests {
         ] {
             assert_eq!(colours(set).glow, look.glow, "{}", look.id);
         }
-        let custom = looks::Active::Custom([Color::WHITE, Color::BLACK]).glow();
+        // A custom pair takes Spectrum's alphas.
+        let [ga, gb] = looks::SPECTRUM.glow;
+        let custom = [
+            Color {
+                a: ga.a,
+                ..Color::WHITE
+            },
+            Color {
+                a: gb.a,
+                ..Color::BLACK
+            },
+        ];
         let edge = edge_glow(&Look {
             palette: ColourSet::TwoColour,
             colours: [Rgb([255; 3]), Rgb([0; 3])],

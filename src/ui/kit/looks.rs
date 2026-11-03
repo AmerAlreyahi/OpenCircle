@@ -1,8 +1,6 @@
 //! The design's 10 Active Looks (the screen edge while the overlay is open) as
 //! data (`newdesing/core/theme-context.js` `ACTIVE_LOOKS`), plus the user's own
 //! two colours.
-// ponytail: `solid` and `Active` wait for their port; the edge reads `kind` and `glow`.
-#![allow(dead_code)]
 
 use iced::Color;
 
@@ -25,39 +23,14 @@ pub struct Look {
     pub desc: &'static str,
     pub badge: &'static str,
     pub kind: Kind,
-    /// `solid1`, `solid2`: the look's accent pair.
+    /// `solid1`, `solid2`: the look's accent pair (the config's two-colour
+    /// presets are checked against it).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub solid: [Color; 2],
     /// `c1`, `c2`: the edge glow near the edge and further in, alpha included.
     pub glow: [Color; 2],
     /// The look card's gradient stops (`previewGrad`).
     pub preview: &'static [Color],
-}
-
-/// The look in use: a design look or the user's own two colours.
-#[derive(Clone, Copy)]
-pub enum Active {
-    Design(&'static Look),
-    Custom([Color; 2]),
-}
-
-impl Active {
-    /// The edge glow; a custom pair takes Spectrum's alphas.
-    pub fn glow(self) -> [Color; 2] {
-        match self {
-            Active::Design(look) => look.glow,
-            Active::Custom([a, b]) => {
-                let [ga, gb] = SPECTRUM.glow;
-                [Color { a: ga.a, ..a }, Color { a: gb.a, ..b }]
-            }
-        }
-    }
-
-    pub fn solid(self) -> [Color; 2] {
-        match self {
-            Active::Design(look) => look.solid,
-            Active::Custom(pair) => pair,
-        }
-    }
 }
 
 const fn hex(rgb: u32) -> Color {

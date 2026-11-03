@@ -3,8 +3,6 @@
 //! Glass values and shadows are not ported: the CPU renderer draws neither
 //! (glass returns with the GPU renderer). Field names follow the design's
 //! variables (`--app-bg-solid` = `bg`, `--ui-elevated-bg` = `elevated`, …).
-// ponytail: used from step 5 on (the kit components); until then the setup reads Sapphire and Daylight.
-#![allow(dead_code)]
 
 use std::cell::Cell;
 
