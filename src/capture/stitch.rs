@@ -116,6 +116,53 @@ fn same(a: &[u8], b: &[u8]) -> bool {
     bad(a, b, None, 2) <= 1
 }
 
+/// Most changed width (px, in all) a fixed row may have: a scrollbar
+/// thumb, a spinner, a caret.
+const SMALL_PX: usize = 64;
+/// Moving pairs whose bands are voted on (`Stitcher::recent`).
+const RECENT: usize = 5;
+
+/// Same row but for a few changed bins (`SMALL_PX`): a scrollbar thumb or a
+/// spinner in a fixed bar, or a line whose number changed.
+fn still(a: &[u8], b: &[u8]) -> bool {
+    bad(a, b, None, (SMALL_PX / BIN_PX + 1) as u32) <= (SMALL_PX / BIN_PX) as u32
+}
+
+/// The longest run from the start whose votes sum highest.
+fn run(votes: impl Iterator<Item = i32>) -> usize {
+    let (mut sum, mut best, mut k) = (0, 0, 0);
+    for (i, v) in votes.enumerate() {
+        sum += v;
+        if sum >= best {
+            (best, k) = (sum, i + 1);
+        }
+    }
+    k
+}
+
+/// Fixed (top, bottom) bands of a pair that scrolled down by `d`, thumb
+/// and all: a scrollbar thumb that runs through a fixed bar changes its
+/// rows, so `fixed_rows` took them for page (a chat app's prompt box, 25 %
+/// of the area, stitched again and again in place of the messages, owner
+/// 2026-11-03). From each edge, the rows `still` in place each vote: fixed
+/// when they match in place better than scrolled by `d`, page when worse
+/// (a line whose number changed: page), none on a tie (plain rows); the
+/// band is the run whose votes sum highest.
+fn bands(a: &Rows, b: &Rows, d: usize) -> (usize, usize) {
+    let (h, all) = (a.info.len(), a.n as u32);
+    let cost = |x: &[u8], y: &[u8]| bad(x, y, None, all);
+    let vote = |here: u32, moved: u32| (here < moved) as i32 - (moved < here) as i32;
+    let held = |y: &usize| still(a.row(*y), b.row(*y));
+    let top = run((0..h - d)
+        .take_while(held)
+        .map(|y| vote(cost(a.row(y), b.row(y)), cost(a.row(y + d), b.row(y)))));
+    let bot = run((d..h)
+        .rev()
+        .take_while(held)
+        .map(|y| vote(cost(a.row(y), b.row(y)), cost(a.row(y), b.row(y - d)))));
+    (top, bot)
+}
+
 /// Fixed (top, bottom) row counts between two frames, or None when the pair
 /// looks unmoved (everything fixed), which says nothing about sticky bars.
 fn fixed_rows(a: &Rows, b: &Rows) -> Option<(usize, usize)> {
@@ -134,19 +181,37 @@ fn fixed_rows(a: &Rows, b: &Rows) -> Option<(usize, usize)> {
 /// put (a sticky bar, even one that appeared later and so is not in the
 /// fixed header) matches any offset whose overlap it fills, and so made a
 /// short scroll back up read as a step down by nearly a screen (the owner's
-/// README, 2026-11-02: sections twice, the limit reached).
+/// README, 2026-11-02: sections twice, the limit reached). So do the rows
+/// at the edges that changed only a little (`still`: a fixed bar with a
+/// caret, a spinner or a scrollbar thumb in it; a chat app's prompt box made
+/// a step down read as a scroll back up by most of a screen): left out
+/// while enough other rows changed (a document whose lines differ only in
+/// their numbers has only those).
 /// `d: 0` also means "nothing changed that says anything, assume no
 /// movement"; None = no trustworthy match (animated frame, too-large step).
 /// Not `sure` when another offset, `RIVAL_GAP` away or more, with as much
 /// evidence, matches about as well (repeated rows).
 fn offset(a: &Rows, b: &Rows, t: usize, h: usize, (lo, hi): (isize, isize)) -> Option<Found> {
-    let info: Vec<usize> = (0..h)
+    let mut info: Vec<usize> = (0..h)
         .filter(|&y| b.info[t + y] && !same(a.row(t + y), b.row(t + y)))
         .collect();
+    let held = |y: &usize| still(a.row(t + y), b.row(t + y));
+    let (up, down) = (
+        (0..h).take_while(held).count(),
+        (0..h).rev().take_while(held).count(),
+    );
+    let inner: Vec<usize> = (info.iter().copied())
+        .filter(|&y| y >= up && y + down < h)
+        .collect();
+    // the rows a's side may come from as well (b's edge rows are a's too)
+    let mut from = (0, h as isize);
+    if inner.len() >= MIN_MATCH {
+        (info, from) = (inner, (up as isize, (h - down) as isize));
+    }
     if info.is_empty() {
         return Some(Found { d: 0, sure: true });
     }
-    let need = MIN_MATCH.min(info.len());
+    let need = MIN_MATCH.max(info.len() / 16).min(info.len());
     let cost = |d: isize, y: usize| {
         let still = Some(a.row(t + y));
         bad(
@@ -158,7 +223,8 @@ fn offset(a: &Rows, b: &Rows, t: usize, h: usize, (lo, hi): (isize, isize)) -> O
     };
     // b's evidence rows that a overlaps at d.
     let overlap = |d: isize| {
-        let (lo, hi) = (d.min(0).unsigned_abs(), h - d.max(0) as usize);
+        let lo = (from.0 - d).clamp(0, h as isize) as usize;
+        let hi = (from.1 - d).clamp(lo as isize, h as isize) as usize;
         &info[info.partition_point(|&y| y < lo)..info.partition_point(|&y| y < hi)]
     };
     let (lo, hi) = (lo.max(1 - h as isize), hi.min(h as isize - 1));
@@ -271,17 +337,17 @@ impl Preview {
     fn show(
         &mut self,
         page: &[u8],
-        settled: bool,
+        settled: usize,
         foot: &[u8],
         max_h: usize,
     ) -> (Vec<u8>, u32, u32) {
         let stride = self.w * 4;
         let w0 = self.base.out_w();
-        if settled {
-            for row in page[self.fed * stride..].chunks_exact(stride) {
+        if settled > self.fed {
+            for row in page[self.fed * stride..settled * stride].chunks_exact(stride) {
                 self.base.feed(row, &mut self.small);
             }
-            self.fed = page.len() / stride;
+            self.fed = settled;
         }
         let mut rest = self.base.clone();
         let mut end = Vec::new();
@@ -359,8 +425,10 @@ pub struct Stitcher {
     /// That frame, while it is not `prev` (scrolled back up): a step down is
     /// followed from it (`follow`).
     back: Option<Rows>,
-    /// Sticky (header, footer) rows, the minimum over every accepted moving pair.
+    /// Sticky (header, footer) rows the last frame placed was cut at.
     fixed: Option<(usize, usize)>,
+    /// The bands of the last `RECENT` moving pairs (their median is used).
+    recent: Vec<(usize, usize)>,
     page: Vec<u8>,
     foot: Vec<u8>,
     /// The height cap (`MAX_HEIGHT` unless `limit` lowers it).
@@ -379,6 +447,7 @@ impl Stitcher {
             seen: 0,
             back: None,
             fixed: None,
+            recent: Vec::new(),
             page: Vec::new(),
             foot: Vec::new(),
             max: MAX_HEIGHT,
@@ -417,8 +486,6 @@ impl Stitcher {
             (self.seen, self.back) = (0, None);
             return Push::NoMovement;
         };
-        // Tentative: only kept when the pair turns out to be a real scroll.
-        let (top, bot) = self.fixed.map_or((t, b), |(ft, fb)| (ft.min(t), fb.min(b)));
         // matched on this pair's own body: rows fixed in both frames (a
         // sticky bar that appeared after the first pairs) say nothing, and
         // a's bar must not be compared with b's page (a scroll back up
@@ -468,10 +535,28 @@ impl Stitcher {
         if self.is_full() {
             return Push::Rejected;
         }
+        // This pair's bands (a thumb or spinner through them as well,
+        // `bands`), then the median of the last `RECENT` pairs: one noisy
+        // pair neither drops a footer nor grows one (the minimum over every
+        // pair let one such pair switch the footer off for good).
+        let (t, b) = match bands(prev, &rows, d) {
+            (vt, vb) if vt.max(t) + vb.max(b) + d < self.h => (vt.max(t), vb.max(b)),
+            _ => (t, b),
+        };
+        if self.recent.len() == RECENT {
+            self.recent.remove(0);
+        }
+        self.recent.push((t, b));
+        let median = |f: fn(&(usize, usize)) -> usize| {
+            let mut v: Vec<usize> = self.recent.iter().map(f).collect();
+            v.sort_unstable();
+            v[v.len() / 2]
+        };
+        let (top, bot) = (median(|p| p.0), median(|p| p.1));
+        let before = self.height();
         // The page ends at the last frame's body bottom (`old` footer rows
-        // above its end); in this frame that row is `d` higher. A footer found
-        // smaller now (`bot` < `old`) takes the rows it gave back as well, so
-        // the page has no gap. The first pair: the first frame's footer goes.
+        // above its end); in this frame that row is `d` higher. The first
+        // pair: the first frame's footer goes.
         let old = match self.fixed {
             Some((_, fb)) => fb,
             None => {
@@ -479,19 +564,29 @@ impl Stitcher {
                 bot
             }
         };
+        let end = self.h - bot;
         // ponytail: a footer shrinking by more than the step reaches into the
         // header (`top`); clamped there, a few rows may go missing once.
         let start = (self.h - old).saturating_sub(d).max(top);
-        let end = self.h - bot;
+        // The page's tail is painted again from this frame's lower part
+        // (half the area, or a quarter + the step; as Snow Shot): a fixed
+        // band no pair saw yet (up to about a quarter) is left only at the
+        // end, never stitched in; the same pixels when it was seen.
+        let from = (self.h.saturating_sub((self.h / 2).max(self.h / 4 + d)))
+            .min(start)
+            .min(end)
+            .max(top);
+        let cut = (start - from.min(start)).min(self.page.len() / stride);
+        self.page.truncate(self.page.len() - cut * stride);
         let room = (self.max as usize).saturating_sub(self.page.len() / stride + bot);
-        let take = (end - start).min(room);
+        let take = end.saturating_sub(from).min(room);
         self.fixed = Some((top, bot));
         self.page
-            .extend_from_slice(&rgba[start * stride..(start + take) * stride]);
+            .extend_from_slice(&rgba[from * stride..(from + take) * stride]);
         self.foot = rgba[end * stride..].to_vec();
         self.prev = Some(rows);
         (self.seen, self.back) = (0, None);
-        Push::Added(take as u32)
+        Push::Added(self.height().saturating_sub(before))
     }
 
     /// Where `rows` is from `prev`, followed from `back` (`seen` from it);
@@ -526,8 +621,13 @@ impl Stitcher {
             *p = Preview::new(w, w0);
         }
         // page rows are final once the first pair is matched (before it, the
-        // first frame's footer may still be cut off the page)
-        p.show(&self.page, self.fixed.is_some(), &self.foot, max_h as usize)
+        // first frame's footer may still be cut off the page), but for the
+        // last frame's height (`push` may paint its tail again)
+        let settled = match self.fixed {
+            Some(_) => (self.page.len() / (self.w * 4)).saturating_sub(self.h),
+            None => 0,
+        };
+        p.show(&self.page, settled, &self.foot, max_h as usize)
     }
 
     /// The stitched RGBA image and its width and height (empty when nothing was pushed).
@@ -1094,7 +1194,7 @@ mod tests {
         let mut p = Preview::new(w, 280);
         let mut widths = Vec::new();
         for h in (1440..=12_583).step_by(331).chain([12_583]) {
-            let (px, pw, ph) = p.show(&page.px[..h * w * 4], true, &[], 1112);
+            let (px, pw, ph) = p.show(&page.px[..h * w * 4], h, &[], 1112);
             assert_eq!(px.len(), (pw * ph * 4) as usize);
             assert!(ph <= 1112);
             // all of it: as tall as the page at that width (give or take a row)
@@ -1417,6 +1517,143 @@ mod tests {
                     let case = format!("{scale}x {speed}, bar from {}", b.head_from);
                     assert_eq!((h, bad), (truth, 0), "{case}: {h} px, {bad} rows wrong");
                 }
+            }
+        }
+    }
+
+    /// An app window: a page scrolling in a column (`left`..`w - right`, rows
+    /// `top`..`vh - bot`) between fixed bars and side panels, with its
+    /// scrollbar thumb inside the area (not at its right edge) running the
+    /// whole height, through the fixed bottom band too (a chat app's message
+    /// list over its prompt box, owner 2026-11-03).
+    struct App {
+        page: Img,
+        w: usize,
+        vh: usize,
+        top: usize,
+        bot: usize,
+        left: usize,
+        right: usize,
+        chrome: Img,
+    }
+
+    impl App {
+        fn new(w: usize, vh: usize, (top, bot, left, right): (usize, usize, usize, usize)) -> Self {
+            App {
+                page: synth::chat(w - left - right, 3000, 11),
+                w,
+                vh,
+                top,
+                bot,
+                left,
+                right,
+                chrome: synth::page(w, vh, 12, 20),
+            }
+        }
+        fn body(&self) -> usize {
+            self.vh - self.top - self.bot
+        }
+        fn max_scroll(&self) -> usize {
+            self.page.h - self.body()
+        }
+        fn positions(&self, steps: &[usize]) -> Vec<usize> {
+            let mut p = vec![0];
+            for st in steps {
+                p.push((p[p.len() - 1] + st).min(self.max_scroll()));
+            }
+            p
+        }
+        /// The thumb's columns (in the page column, just left of the right panel).
+        fn thumb(&self) -> std::ops::Range<usize> {
+            let x = self.w - self.right - 12;
+            x..x + 8
+        }
+        fn frame(&self, s: usize) -> Img {
+            let s = s.min(self.max_scroll());
+            let mut f = self.chrome.clone();
+            let cw = self.page.w;
+            for y in 0..self.body() {
+                let src = &self.page.px[(s + y) * cw * 4..(s + y + 1) * cw * 4];
+                let at = ((self.top + y) * self.w + self.left) * 4;
+                f.px[at..at + cw * 4].copy_from_slice(src);
+            }
+            let len = self.vh * self.body() / self.page.h;
+            let y = (self.vh - len) * s / self.max_scroll();
+            f.fill(self.thumb().start, y, 8, len, [120, 120, 120]);
+            if self.bot > 0 {
+                // a spinner on the bottom edge and a blinking caret in the
+                // prompt box, different in every frame
+                let k = s % 7;
+                f.fill(self.w / 2, self.vh - 16, 16, 16, [250, 250, 250]);
+                f.fill(self.w / 2 + 2 * k, self.vh - 14, 4, 12, [40, 90, 200]);
+                let c = if s.is_multiple_of(2) { 20 } else { 230 };
+                f.fill(self.left + 40, self.vh - self.bot / 2, 2, 14, [c, c, c]);
+            }
+            f
+        }
+        /// (stitched height, true height, rows of the page column, thumb left
+        /// out, that differ from the truth: the top bar, the page seen, the
+        /// bottom bar once, as last seen).
+        fn check(&self, pos: &[usize]) -> (usize, usize, usize) {
+            let mut st = Stitcher::new(self.w as u32, self.vh as u32);
+            for &s in pos {
+                st.push(&self.frame(s).px);
+            }
+            let (px, _, h) = st.finish();
+            let last = pos.iter().copied().max().unwrap().min(self.max_scroll());
+            let truth_h = self.top + last + self.body() + self.bot;
+            let (a, b) = (self.left, self.thumb().start);
+            // the bottom bar as the last frame shows it (spinner, caret)
+            let end = self.frame(last);
+            let want = |y: usize| -> &[u8] {
+                let cw = self.page.w;
+                match y {
+                    y if y < self.top => {
+                        &self.chrome.px[(y * self.w + a) * 4..(y * self.w + b) * 4]
+                    }
+                    y if y < truth_h - self.bot => {
+                        let p = y - self.top;
+                        &self.page.px[p * cw * 4..(p * cw + b - a) * 4]
+                    }
+                    y => {
+                        let y = y + self.vh - truth_h;
+                        &end.px[(y * self.w + a) * 4..(y * self.w + b) * 4]
+                    }
+                }
+            };
+            let rows = (h as usize).min(truth_h);
+            let bad = (0..rows)
+                .filter(|&y| px[(y * self.w + a) * 4..(y * self.w + b) * 4] != *want(y))
+                .count();
+            (h as usize, truth_h, bad)
+        }
+    }
+
+    /// Fixed bands that do not scroll, a scrollbar thumb moving through them:
+    /// a prompt box fixed at the bottom (25 % of the area) was stitched again
+    /// and again in place of the messages (owner, 2026-11-03); also a fixed
+    /// header + footer, a fixed left sidebar, and both side panels.
+    #[test]
+    fn fixed_bands_and_panels_are_left_out_of_the_scrolled_page() {
+        for (case, bands) in [
+            ("footer 25 %", (0, 175, 0, 40)),
+            ("header + footer", (60, 120, 0, 0)),
+            ("left sidebar", (0, 0, 200, 40)),
+            ("chat app", (40, 175, 0, 260)),
+            ("all four", (60, 140, 160, 200)),
+        ] {
+            let app = App::new(W + bands.2 + bands.3, VH, bands);
+            for (speed, steps) in [
+                ("by hand", by_hand(8, 60)),
+                ("big steps", random_steps(8, 60, 380, 15)),
+            ] {
+                let pos = app.positions(&steps);
+                let (h, truth, bad) = app.check(&pos);
+                assert_eq!(
+                    (h, bad),
+                    (truth, 0),
+                    "{case}, {speed}: {h} px, {bad} rows wrong"
+                );
             }
         }
     }
