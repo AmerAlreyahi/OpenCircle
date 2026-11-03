@@ -251,6 +251,9 @@ production systems.
   the screen, the helper's second reader (`ocr::recognize_except`) reads the lines Windows OCR didn't, each with the
   installed non-Latin recognizer that reads it best (Arabic, Cyrillic, CJK); gently, once per opening; the helper
   isn't started without such a recognizer. Its lines replace Windows OCR's noise lines they overlap.
+- Main look (owner, 2026-11-03): the owner's Custom (#0a84ff -> #5e5ce6, glow 100 %, dim 12 %, white corners, glow edge)
+  becomes a built-in look ("Sapphire Glow", lead's name) and the default, first card in Liquid Prism's place; Liquid Prism's
+  card is hidden (a config that has it keeps it).
 - Stealth Frost (owner, 2026-10-30): no card in Settings; a config that has it ("mono") still shows it.
 - Version plan (owner, 2026-10-30, supersedes "Version plan" and "Version scope" after 0.1.2; the roadmap table has
   the items): 0.1.2 (in progress, not finalised: owner checks + preview clips) -> 0.1.3 Snip and editor + colour picker,
