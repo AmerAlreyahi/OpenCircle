@@ -419,7 +419,7 @@ impl AiChat {
         let new = button(label("+ New"), Kind::Elevated, Some(Msg::NewChat));
         let top = row![search, new].spacing(space::GAP).align_y(Center);
         if !config::current().chat.keep_history {
-            let off = note("Chat history is off (Settings > AI). Nothing is saved.");
+            let off = note("Chat history is off (Settings > Ask AI). Nothing is saved.");
             return vec![top.into(), off.into()];
         }
         let open = match &self.state {

@@ -1,5 +1,5 @@
 //! Saved AI chats (tables `chats`, `messages`), on this PC only and only while
-//! Settings > AI "Keep chat history" is on (`chat.keep_history`, on by
+//! Settings > Ask AI "Keep chat history" is on (`chat.keep_history`, on by
 //! default): TEXT ONLY. A capture is never written: a question that had one
 //! keeps only a flag (`had_image`, shown as "Screenshot not kept"). The newest
 //! `KEEP` chats are kept. Nothing is uploaded. Blocking: call off the UI thread.

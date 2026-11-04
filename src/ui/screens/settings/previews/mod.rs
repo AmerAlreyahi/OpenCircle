@@ -102,7 +102,7 @@ pub const HEROES: [Hero; 7] = [
     Hero {
         page: Section::Ai,
         key: "ai",
-        title: "AI",
+        title: "Ask AI",
         desc: "Ask a question about what is on your screen.",
         lab: None,
         shortcut: ask,

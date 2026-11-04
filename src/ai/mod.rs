@@ -175,15 +175,15 @@ fn stream(
 ) -> Result<String, AiError> {
     match &cfg.provider {
         Provider::Browser => Err(AiError::NotConfigured(
-            "this needs an AI provider with an API key (Settings, AI); Google AI Mode in your \
+            "this needs an AI provider with an API key (Settings, Ask AI); Google AI Mode in your \
              browser cannot send an answer back"
                 .into(),
         )),
         Provider::Invalid(raw) => Err(AiError::NotConfigured(format!(
-            "the AI provider setting \"{raw}\" isn't recognised (Settings, AI)"
+            "the AI provider setting \"{raw}\" isn't recognised (Settings, Ask AI)"
         ))),
         Provider::Unreadable => Err(AiError::NotConfigured(
-            "the settings file couldn't be read, so AI is off (Settings, AI)".into(),
+            "the settings file couldn't be read, so AI is off (Settings, Ask AI)".into(),
         )),
         Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, fast, on_delta),
         Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, fast, on_delta),

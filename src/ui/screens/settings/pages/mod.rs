@@ -70,7 +70,7 @@ pub const PAGES: [Page; 13] = [
     page(Section::General, "General", general::view),
     page(Section::Appearance, "Appearance", appearance::view),
     page(Section::Look, "Look & behaviour", look::view),
-    page(Section::Ai, "AI", ai::view),
+    page(Section::Ai, "Ask AI", ai::view),
     page(Section::TextReading, "Text reading", text_reading::view),
     page(Section::Translate, "Translate", translate::view),
     Page {

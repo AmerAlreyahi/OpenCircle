@@ -273,7 +273,7 @@ impl Real {
             *self.missing.lock().unwrap_or_else(|e| e.into_inner()) = Some(pair);
             return Err(AiError::Offline(format!(
                 "{} isn't downloaded yet. Translate once with Ctrl+Shift+T to \
-                 download it, or set up AI in Settings > AI",
+                 download it, or set up AI in Settings > Ask AI",
                 pair.label()
             )));
         }

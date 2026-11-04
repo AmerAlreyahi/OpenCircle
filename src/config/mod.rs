@@ -156,7 +156,7 @@ pub const VERSION: u32 = 9;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
-const AI_OFF: &str = ", but AI is off until you choose a provider in Settings > AI";
+const AI_OFF: &str = ", but AI is off until you choose a provider in Settings > Ask AI";
 /// Live translate repeats this often (ms); the allowed range is `LIVE_INTERVAL_MS`.
 pub const DEFAULT_LIVE_INTERVAL_MS: u32 = 1500;
 pub const LIVE_INTERVAL_MS: std::ops::RangeInclusive<u32> = 500..=5000;
@@ -274,7 +274,7 @@ impl Provider {
             _ => {
                 w.push(format!(
                     "ai.provider: \"{raw}\" is not browser, anthropic or openai_compatible; \
-                     AI is off until you choose a provider in Settings > AI"
+                     AI is off until you choose a provider in Settings > Ask AI"
                 ));
                 Provider::Invalid(raw)
             }
@@ -864,7 +864,7 @@ impl Default for ChatConfig {
     }
 }
 
-/// Settings > AI "AI chat stays open".
+/// Settings > Ask AI "AI chat stays open".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StaysOpen {

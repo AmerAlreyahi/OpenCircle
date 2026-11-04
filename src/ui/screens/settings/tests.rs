@@ -82,7 +82,7 @@ fn general_has_the_start_with_the_os_switch_on_by_default() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// Settings > AI: "AI chat stays open", and Chat history's link to History
+/// Settings > Ask AI: "AI chat stays open", and Chat history's link to History
 /// (its switch lives there), for every provider, saved to the file.
 #[test]
 fn ai_has_the_chat_rows_and_saves_them() {
@@ -1795,7 +1795,7 @@ fn labs_pages_are_hidden_while_their_switch_is_off() {
             "General",
             "Appearance",
             "Look & behaviour",
-            "AI",
+            "Ask AI",
             "Translate",
             "Shortcuts",
             "Snip",

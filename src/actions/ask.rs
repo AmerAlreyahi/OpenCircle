@@ -126,10 +126,12 @@ pub fn credentials() -> Result<(AiConfig, Option<Secret>), String> {
 fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> {
     let why = match &cfg.provider {
         Provider::Invalid(raw) => {
-            format!("Your AI provider setting \"{raw}\" isn't recognised. Fix it in Settings > AI.")
+            format!(
+                "Your AI provider setting \"{raw}\" isn't recognised. Fix it in Settings > Ask AI."
+            )
         }
         Provider::Unreadable => "Your settings file couldn't be read; AI is off until you \
-            fix it in Settings > AI."
+            fix it in Settings > Ask AI."
             .into(),
         _ => String::new(),
     };
@@ -139,7 +141,7 @@ fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> 
     if cfg.provider == Provider::Browser {
         return Err(
             "This needs an AI provider with an API key: Google AI Mode in your \
-            browser cannot send text back.\n\nIn Settings > AI choose AI provider, \
+            browser cannot send text back.\n\nIn Settings > Ask AI choose AI provider, \
             pick yours and add your key."
                 .into(),
         );
@@ -208,7 +210,7 @@ fn steps(cfg: &AiConfig) -> String {
          base_url = \"\"  (openai_compatible: e.g. http://localhost:11434/v1)\n\n\
          2. Save the API key in the system keyring, never in that file.\n{keyring}\n\n\
          Then restart OpenCircle and press A again.\n\n\
-         Easier: tray icon > Settings > AI does all of this and needs no restart.",
+         Easier: tray icon > Settings > Ask AI does all of this and needs no restart.",
         ai::DEFAULT_ANTHROPIC_MODEL
     )
 }
@@ -928,7 +930,7 @@ pub(crate) mod tests {
         let msg = invalid_provider_error();
         assert!(
             msg.starts_with(
-                "Your AI provider setting \"antropic\" isn't recognised. Fix it in Settings > AI."
+                "Your AI provider setting \"antropic\" isn't recognised. Fix it in Settings > Ask AI."
             ),
             "{msg}"
         );
@@ -941,7 +943,7 @@ pub(crate) mod tests {
         // A config file that is there but broken: AI off, not Browser.
         let broken = Config::parse("theme = = =").0.ai;
         assert!(credentials_for(broken).unwrap_err().starts_with(
-            "Your settings file couldn't be read; AI is off until you fix it in Settings > AI."
+            "Your settings file couldn't be read; AI is off until you fix it in Settings > Ask AI."
         ));
         // A known provider is unchanged: Browser still needs no key and sends no image.
         let crop = Crop {

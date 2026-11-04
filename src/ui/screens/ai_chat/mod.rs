@@ -154,7 +154,7 @@ pub enum Msg {
     Pick(Pick),
     Model(String),
     SaveModel,
-    /// "Open AI settings →" (the App opens Settings > AI).
+    /// "Open AI settings →" (the App opens Settings > Ask AI).
     OpenAiSettings,
     /// The History tab's list of saved chats (newest first).
     Listed(Vec<chats::Entry>),
