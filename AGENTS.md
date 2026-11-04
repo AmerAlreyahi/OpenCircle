@@ -392,7 +392,9 @@ production systems.
   Editing rule (owner, 2026-11-04): when a clip is cropped or zoomed in the edit, the live effect (the Active Look edge
   glow, Sapphire Glow) is re-created at the edited frame's edge so it stays visible, only while the app is really
   active (as preview-edit/ACTIVE_LOOK.md does). Translate preview #1 framing: YouTube theater mode (no sidebar of other
-  people's thumbnails).
+  people's thumbnails). Glow may be an artificial, identical re-creation to deliver the idea (owner, 2026-11-04). Translate
+  preview set: the YouTube subtitle clip + 3-4 game clips made from the owner's original AI game images, animated as a
+  running game (motion on the art only), translated by the REAL app on the VM; raw takes approved before edits.
   The snip area's outline, handles and hover outline take their colours from the chosen Active Look (Settings >
   Appearance "Active look screen borders": Liquid Prism, Spectrum, Aurora Borealis, ..., Custom), the same source
   as the screen edge and main mode's selection line (one place, no snip-only colours).
