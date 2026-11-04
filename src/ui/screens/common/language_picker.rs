@@ -471,6 +471,8 @@ impl Picker {
         let search = field::search(self.tr("Search languages", "ابحث عن لغة"), &self.query, rtl)
             .id(SEARCH)
             .on_input(Msg::Query)
+            // Enter in the field (it takes the key before the list does): the ringed or first match
+            .on_submit(Msg::First)
             .width(Fill);
         let items = self.items();
         let q = self.query.trim().to_lowercase();
