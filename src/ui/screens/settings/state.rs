@@ -1799,6 +1799,8 @@ impl State {
     /// is downloaded here: only "Play preview" does (`Message::Fetch`).
     fn play(&mut self) {
         use previews::player::{Clip, Player};
+        // The OS setting is read on the first overlay / window fade; Settings can open first.
+        motion::refresh();
         let moving = !motion::reduced();
         self.players = previews::clips(self, self.section)
             .filter_map(|(key, names)| {
