@@ -1176,6 +1176,13 @@ fn real_matrix() {
                 let pp =
                     engine.get_or_insert_with(|| ocr::Engine::load(&ocr::models_dir()).unwrap());
                 let got = match win {
+                    Some(lines)
+                        if !super::pipeline::misread(&lines)
+                            && lines.len() <= super::pipeline::SPARSE =>
+                    {
+                        let read = pp.recognize(&f.rgba, f.width, f.height, ocr::Read::Auto);
+                        super::pipeline::reread(lines, read.unwrap())
+                    }
                     Some(lines) if !super::pipeline::misread(&lines) => lines,
                     Some(lines) => {
                         let (keep, known) = super::pipeline::words_read(lines);
@@ -1983,4 +1990,5 @@ fn busy_background_threshold() {
 
 mod evidence;
 mod game;
+mod games;
 mod subtitles;

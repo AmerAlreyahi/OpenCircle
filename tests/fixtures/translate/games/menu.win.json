@@ -1,0 +1,162 @@
+[
+  {
+    "text": "Gråficos",
+    "bounds": [
+      1428.0,
+      131.0,
+      307.0,
+      67.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Audio",
+    "bounds": [
+      248.0,
+      250.0,
+      178.0,
+      52.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Calidad de texturas",
+    "bounds": [
+      770.0,
+      373.0,
+      515.0,
+      48.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Alta",
+    "bounds": [
+      2103.0,
+      373.0,
+      112.0,
+      47.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Gråficos",
+    "bounds": [
+      218.0,
+      436.0,
+      241.0,
+      54.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Sombras",
+    "bounds": [
+      770.0,
+      531.0,
+      227.0,
+      48.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Medio",
+    "bounds": [
+      2076.0,
+      531.0,
+      166.0,
+      48.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Controles",
+    "bounds": [
+      195.0,
+      625.0,
+      286.0,
+      52.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Sincronizaci6n vertical",
+    "bounds": [
+      770.0,
+      688.0,
+      615.0,
+      49.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Activada",
+    "bounds": [
+      1985.0,
+      689.0,
+      235.0,
+      48.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "O",
+    "bounds": [
+      2331.0,
+      689.0,
+      48.0,
+      48.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Idioma",
+    "bounds": [
+      234.0,
+      812.0,
+      209.0,
+      53.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Limite de FPS",
+    "bounds": [
+      768.0,
+      846.0,
+      369.0,
+      49.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "60",
+    "bounds": [
+      2130.0,
+      850.0,
+      61.0,
+      45.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Cuenta",
+    "bounds": [
+      233.0,
+      1002.0,
+      212.0,
+      50.0
+    ],
+    "confidence": 1.0
+  },
+  {
+    "text": "Brillo",
+    "bounds": [
+      769.0,
+      1005.0,
+      144.0,
+      47.0
+    ],
+    "confidence": 1.0
+  }
+]

@@ -128,6 +128,19 @@ pub const LANGUAGES: &[Language] = &[
 
 /// The table's row for `code`: the exact code (any case), else its base
 /// language ("ar-SA" -> Arabic). `None` for "auto" and unknown codes.
+/// `c` without its accent, lower case ("É" -> 'e', "ñ" -> 'n'; others as
+/// they are): the letters of a Latin word as an English Windows OCR, which
+/// drops accents ("Limite", "Grafico"), compares them.
+pub fn plain(c: char) -> char {
+    const FROM: &str = "àáâãäåāăąçćčďèéêëēėęěìíîïīįñńňòóôõöøōőŕřśšşťùúûüūůűųýÿźżž";
+    const TO: &str = "aaaaaaaaacccdeeeeeeeeiiiiiinnnoooooooorrssstuuuuuuuuyyzzz";
+    let c = c.to_lowercase().next().unwrap_or(c);
+    match FROM.chars().position(|f| f == c) {
+        Some(i) => TO.chars().nth(i).unwrap_or(c),
+        None => c,
+    }
+}
+
 pub fn find(code: &str) -> Option<&'static Language> {
     let base = code.split(['-', '_']).next().unwrap_or_default();
     (LANGUAGES.iter().find(|l| l.code.eq_ignore_ascii_case(code)))
@@ -374,7 +387,22 @@ fn detected(text: &str, votes: &[usize; WORDS.len()]) -> Option<&'static str> {
         _ => return None,
     };
     let i = WORDS.iter().position(|w| w.0 == code)?;
-    (votes[i] > 0).then_some(code)
+    (votes[i] > 0 && spelled(text, code)).then_some(code)
+}
+
+/// Every accented letter of `text` is one `code` writes: a French gacha
+/// banner's "Chevalier du Givre Éternel" (Windows OCR, Win10 VM) has only
+/// "du", which German shares, and the detector said German; German has no "é".
+fn spelled(text: &str, code: &str) -> bool {
+    let own = match code {
+        "es" => "ñáéíóúü",
+        "fr" => "éèêëàâîïôûùüÿçœæ",
+        "de" => "äöüß",
+        _ => "",
+    };
+    (text.chars().flat_map(char::to_lowercase))
+        .filter(|c| c.is_alphabetic() && !c.is_ascii())
+        .all(|c| own.contains(c))
 }
 
 #[cfg(test)]
@@ -535,6 +563,9 @@ mod tests {
                 "fr",
                 "Nb. de satellites plus de 600, dont 205 naturels connus de planètes (150",
             ),
+            // a French gacha banner (Win10 VM, Windows OCR): its only common
+            // word, "du", is German too, and the detector said German
+            ("fr", "Chevalier du Givre Éternel"),
         ] {
             let got = sure(line);
             assert!(got.is_none() || got == Some(page), "{line}: {got:?}");

@@ -22,3 +22,10 @@ pinned model) for every block it was run on.
   video-page layout drawn for the test (no site's art or logos; the page text is our own English).
   Sintel © Blender Foundation | durian.blender.org | CC BY 3.0. Its English is the film's own
   English subtitle line, not MT output.
+
+## games/
+Three original game screens made for OpenCircle's tests by its owner (generated art, no game's
+assets), downscaled to 1280x720: `quest.jpg` (German cutscene + quest HUD), `gacha.jpg` (French
+event banner), `menu.jpg` (Spanish settings menu). `<name>.win.json` = Windows OCR's read (Win10
+VM, the 2560x1440 frame, frame px), `<name>.pp.json` = PP-OCR's read of the same frame
+(`src/translate/tests/games.rs`). OpenCircle, MIT.

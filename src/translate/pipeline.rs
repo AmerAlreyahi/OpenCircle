@@ -267,6 +267,20 @@ impl Real {
         target: &str,
         run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
     ) -> Result<Vec<String>, AiError> {
+        // menu words in their menu sense first (`glossed`); the rest to the models
+        let mut out: Vec<String> = texts.to_vec();
+        let mut rest = Vec::new();
+        for (i, t) in texts.iter().enumerate() {
+            match glossed(t, target) {
+                Some(g) => out[i] = g,
+                None => rest.push(i),
+            }
+        }
+        if rest.is_empty() {
+            return Ok(out);
+        }
+        let texts: Vec<String> = rest.iter().map(|&i| texts[i].clone()).collect();
+        let texts = &texts[..];
         let routes = self.routes(texts, target)?;
         let mut pairs = routes.iter().flat_map(|(r, _)| r);
         if let Some(pair) = pairs.find(|p| p.missing_bytes() > 0) {
@@ -279,21 +293,39 @@ impl Real {
         }
         ocr::keep_warm();
         // a text in no route is in the target already: echoed, not redrawn
-        let mut out = texts.to_vec();
         for (route, idx) in routes {
             let part: Vec<String> = idx.iter().map(|&i| texts[i].clone()).collect();
-            let part = by_sentence(&part, |src| {
-                let (bodies, marks): (Vec<String>, Vec<String>) =
-                    src.iter().map(|s| footnotes(s)).unzip();
-                let out = whole(&bodies, &route, target, &run)?;
-                Ok(out.into_iter().zip(marks).map(|(t, m)| t + &m).collect())
-            })?;
+            let idx = idx.into_iter().map(|i| rest[i]);
+            let part = by_sentence(&part, |src| through(src, &route, target, &run))?;
             for (i, t) in idx.into_iter().zip(part) {
                 out[i] = t;
             }
         }
         Ok(out)
     }
+}
+
+/// Sentences through `route` (`whole`), their footnote marks, key hints and
+/// counters kept out of the model and put back (`footnotes`, `shield`).
+pub(super) fn through(
+    src: &[String],
+    route: &[&'static mt::Pair],
+    target: &str,
+    run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
+) -> Result<Vec<String>, AiError> {
+    let (bodies, marks): (Vec<String>, Vec<String>) = src.iter().map(|s| footnotes(s)).unzip();
+    let (bodies, kept): (Vec<String>, Vec<_>) = bodies.iter().map(|s| shield(s)).unzip();
+    let out = whole(&bodies, route, target, &run)?;
+    let out = (out.iter().zip(&bodies).zip(src).zip(&kept))
+        // kept as it was: the source, its counters as they were
+        .map(|(((t, b), s), k)| {
+            if t == b {
+                footnotes(s).0
+            } else {
+                unshield(t, k)
+            }
+        });
+    Ok(out.zip(marks).map(|(t, m)| t + &m).collect())
 }
 
 /// `src` (sentences) through the models of `route` in turn. Through
@@ -319,7 +351,7 @@ fn hops(
             && !s.chars().any(|c| script.has(c))
     };
     let mut on: Vec<usize> = (0..t.len()).filter(|&i| !foreign(&src[i])).collect();
-    for pair in route {
+    for (k, pair) in route.iter().enumerate() {
         let sent: Vec<String> = on.iter().map(|&i| t[i].clone()).collect();
         if sent.is_empty() {
             break;
@@ -327,15 +359,146 @@ fn hops(
         for (&i, r) in on.iter().zip(run(&sent, pair)?) {
             t[i] = r;
         }
+        // (German writes every noun capitalised: its labels go as they are)
+        if k == 0 && script == Script::Latin && pair.source != "de" {
+            lowered(src, &mut t, &on, pair, &run)?;
+        }
         let one_word = |s: &str| s.split_whitespace().count() == 1 && s.is_ascii();
         on.retain(|&i| !echo(&src[i], &t[i]) || one_word(&src[i]));
     }
     for (s, t) in src.iter().zip(&mut t) {
-        if echo(s, t) || made_up(s, t, target) {
+        *t = unquoted(s, t);
+        if echo(s, t) || made_up(s, t, target) || spelled_out(s, t, target) {
             *t = s.clone();
         }
     }
     Ok(t)
+}
+
+/// A capitalised word of a short label the model kept as a name ("Dragon de
+/// Givre" -> "Dragon of Givre", "Chevalier du Givre Éternel" -> "Knight of
+/// the Eternal Givre"): the label is sent again with its words in lower case
+/// ("givre" -> "frost"), and that is used when the word is gone, in Title
+/// Case again where the source was. A real name stays in both ("le chevalier
+/// Aldric"): the first answer is kept.
+fn lowered(
+    src: &[String],
+    t: &mut [String],
+    on: &[usize],
+    pair: &'static mt::Pair,
+    run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
+) -> Result<(), AiError> {
+    let caps = |s: &str| -> Vec<String> {
+        (s.split_whitespace().skip(1))
+            .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()))
+            .filter(|w| w.chars().count() >= 4 && w.starts_with(char::is_uppercase))
+            .filter(|w| w.chars().any(char::is_lowercase))
+            .map(str::to_lowercase)
+            .collect()
+    };
+    // the word itself, or (into Arabic) written in Arabic letters
+    let has = |out: &str, w: &str| {
+        (out.split(|c: char| !c.is_alphabetic())).any(|o| {
+            o.to_lowercase() == w
+                || (o.chars().any(|c| Script::Arabic.has(c))
+                    && consonants(w).len() >= 3
+                    && consonants(o) == consonants(w))
+        })
+    };
+    let again: Vec<usize> = (on.iter().copied())
+        .filter(|&i| src[i].split_whitespace().count() <= 6)
+        .filter(|&i| caps(&src[i]).iter().any(|w| has(&t[i], w)))
+        .collect();
+    if again.is_empty() {
+        return Ok(());
+    }
+    let low = |s: &str| -> String {
+        let mut words = s.split(' ');
+        let first = words.next().unwrap_or_default().to_string();
+        let rest = words.map(|w| match w.chars().any(char::is_lowercase) {
+            true => w.to_lowercase(),
+            false => w.to_string(), // "FPS", "UI"
+        });
+        std::iter::once(first)
+            .chain(rest)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let sent: Vec<String> = again.iter().map(|&i| low(&src[i])).collect();
+    for (&i, r) in again.iter().zip(run(&sent, pair)?) {
+        if caps(&src[i]).iter().any(|w| has(&r, w)) {
+            continue;
+        }
+        // Title Case: every word of 4+ letters capitalised
+        let title = (src[i].split_whitespace())
+            .filter(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 4)
+            .all(|w| w.starts_with(char::is_uppercase));
+        t[i] = match title {
+            true => (r.split(' '))
+                .map(|w| match w.chars().count() >= 4 {
+                    true => upper_first(w),
+                    false => w.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+            false => upper_first(&r),
+        };
+    }
+    Ok(())
+}
+
+/// Quotes and brackets the model added ("إنبعاث التنين في \"جيفر\"" for "Le
+/// Réveil du Dragon de Givre"): a sign the source doesn't have is dropped.
+fn unquoted(src: &str, out: &str) -> String {
+    let added = |c: char| "\"“”«»„()".contains(c) && !src.contains(c);
+    let t: String = out.chars().filter(|c| !added(*c)).collect();
+    t.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A name the model only wrote in the target's letters ("Lyra" -> "لايرا",
+/// "Aldric" -> "ألدريك"): a short label of capitalised words whose
+/// consonants are the output's. Names stay as they are (an erase over the
+/// art behind a speaker's name left the old letters showing under the new).
+// ponytail: Arabic letters only (the offline targets in another script are
+// Arabic); a table per script for more.
+fn spelled_out(src: &str, out: &str, target: &str) -> bool {
+    let words: Vec<&str> = src.split_whitespace().collect();
+    let named = !words.is_empty()
+        && words.len() <= 3
+        && (words.iter())
+            .all(|w| w.starts_with(char::is_uppercase) && w.chars().all(char::is_alphabetic));
+    if !named || lang::find(target).map(|l| l.script) != Some(Script::Arabic) {
+        return false;
+    }
+    let s = consonants(src);
+    s.len() >= 2 && s == consonants(out)
+}
+
+/// The consonants of a word as a name sounds, Latin or Arabic letters alike
+/// ("Lyra" and "لايرا": l r; "Givre" and "جيفر": g f r), doubles once: how a
+/// name written in another script is told.
+fn consonants(text: &str) -> Vec<char> {
+    let latin = |c: char| match lang::plain(c) {
+        'c' | 'q' | 'k' => Some('k'),
+        'j' | 'g' => Some('g'),
+        'v' | 'f' => Some('f'),
+        'p' | 'b' => Some('b'),
+        'a' | 'e' | 'i' | 'o' | 'u' | 'y' | 'w' | 'h' => None,
+        c if c.is_alphabetic() && Script::Latin.has(c) => Some(c),
+        _ => None,
+    };
+    let arabic = |c: char| {
+        const FROM: &str = "بتثجخدذرزسشصضطظغفقكلمنپگڤ";
+        const TO: &str = "bttgkddrzsssdtzgfkklmnbgf";
+        FROM.chars()
+            .position(|f| f == c)
+            .and_then(|i| TO.chars().nth(i))
+    };
+    let mut v: Vec<char> = (text.chars())
+        .filter_map(|c| latin(c).or_else(|| arabic(c)))
+        .collect();
+    v.dedup();
+    v
 }
 
 /// `hops`, and a long sentence it kept as it was (a stock phrase, a number
@@ -434,6 +597,80 @@ pub(super) fn merged(mut a: Vec<TextBlock>, b: Vec<TextBlock>) -> Vec<TextBlock>
     a
 }
 
+/// A screen with at most this many lines read by Windows OCR (a game's HUD,
+/// menu or banner, not a page of text) is read by PP-OCR too (`reread`):
+/// Windows OCR misses serif or glowing game text ("Aplicar", "Restablecer"
+/// on a settings menu; Win10 VM) and garbles some ("[kVJQuestgebiét{mzéigeni"
+/// for "[V] Questgebiet anzeigen"). The three game screens: 8-17 lines.
+pub(super) const SPARSE: usize = 40;
+
+/// Windows OCR's read of a sparse screen with PP-OCR's (`pp`, the same
+/// frame): a garbled line (`garbled`), an accent Windows OCR dropped
+/// ("Limite" for "Límite") or an icon it read as a letter ("O Invocation
+/// d'Événement") takes PP-OCR's line in its place; text only PP-OCR read
+/// (surely, >= 0.8) is added. The rest stays Windows OCR's (it reads a star
+/// "4*" where PP-OCR drops it).
+pub(super) fn reread(win: Vec<TextBlock>, pp: Vec<TextBlock>) -> Vec<TextBlock> {
+    let overlap = |a: &[f32; 4], b: &[f32; 4]| {
+        let ox = (a[0] + a[2]).min(b[0] + b[2]) - a[0].max(b[0]);
+        let oy = (a[1] + a[3]).min(b[1] + b[3]) - a[1].max(b[1]);
+        ox > 0.5 * a[2].min(b[2]) && oy > 0.5 * a[3].min(b[3])
+    };
+    let key = |t: &str| -> String {
+        (t.chars().filter(|c| c.is_alphanumeric()))
+            .map(lang::plain)
+            .collect()
+    };
+    let accents = |t: &str| {
+        let bare = |c: &char| lang::plain(*c) == c.to_lowercase().next().unwrap_or(*c);
+        t.chars().filter(|c| !bare(c)).count()
+    };
+    let sure = |p: &TextBlock| p.confidence >= 0.8;
+    let mut used = vec![false; pp.len()];
+    let mut out = Vec::new();
+    for w in win {
+        let mine: Vec<usize> = (0..pp.len())
+            .filter(|&i| overlap(&w.bounds, &pp[i].bounds))
+            .collect();
+        // its line in PP-OCR's read: the longest sure one over it (an icon
+        // beside it may be read on its own: "10l")
+        let best = (mine.iter().copied())
+            .filter(|&i| sure(&pp[i]))
+            .max_by_key(|&i| key(&pp[i].text).chars().count());
+        let better = best.filter(|&i| {
+            let p = &pp[i];
+            let (kw, kp) = (key(&w.text), key(&p.text));
+            // the icon before or after the text, read as one letter
+            let icon = kw.chars().count() == kp.chars().count() + 1
+                && (kw.ends_with(&kp) || kw.starts_with(&kp));
+            garbled(&w.text) || icon || (kw == kp && accents(&p.text) > accents(&w.text))
+        });
+        mine.iter().for_each(|&i| used[i] = true);
+        out.push(better.map_or(w, |i| pp[i].clone()));
+    }
+    let new = (pp.into_iter().zip(used)).filter(|(p, used)| !used && sure(p));
+    merged(out, new.map(|(p, _)| p).collect())
+}
+
+/// A line Windows OCR garbled: a sign no word has inside a word ("$", "{"),
+/// a letter none of the Latin languages here writes ("å" for "á":
+/// "Gråficos"), a digit between letters ("Sincronizaci6n"), or a capital
+/// after a small letter inside a word ("kVJQuestgebiét").
+pub(super) fn garbled(text: &str) -> bool {
+    text.split_whitespace().any(|w| {
+        let c: Vec<char> = w.chars().collect();
+        let inner = |i: usize| i > 0 && i + 1 < c.len();
+        let letter = |i: usize| c[i].is_alphabetic();
+        let word = c.iter().any(|c| c.is_alphabetic());
+        (0..c.len()).any(|i| {
+            (word && "$€{}\\~^<>_".contains(c[i]))
+                || "åÅøØ".contains(c[i])
+                || (inner(i) && c[i].is_ascii_digit() && letter(i - 1) && letter(i + 1))
+                || (inner(i) && c[i].is_uppercase() && c[i - 1].is_lowercase() && letter(i + 1))
+        })
+    })
+}
+
 /// `out` is `src` again (case, spaces and punctuation aside).
 fn echo(src: &str, out: &str) -> bool {
     let key = |s: &str| -> String {
@@ -523,7 +760,16 @@ fn made_up(src: &str, out: &str, target: &str) -> bool {
         Script::Latin => letters
             .iter()
             .any(|c| !Script::Latin.has(*c) && !src.contains(*c)),
-        s => letters.iter().filter(|c| s.has(**c)).count() * 2 < letters.len(),
+        // (a word kept from the source is no other script: "حد FPS" for
+        // "Límite de FPS")
+        s => {
+            let kept = (out.split_whitespace())
+                .filter(|w| src.split_whitespace().any(|v| v == *w))
+                .flat_map(|w| w.chars().filter(|c| c.is_alphabetic()))
+                .count();
+            let own = letters.iter().filter(|c| s.has(**c)).count();
+            (own == 0 && !letters.is_empty()) || own * 2 < letters.len() - kept
+        }
     };
     // a symbol the source didn't have: "247 langues •v" -> "247 لغة □ ت"
     let common = |c: char| {
@@ -583,6 +829,16 @@ impl Real {
                             crate::log!("[opencircle] second reader failed ({e}); PP-OCR reads")
                         }
                     }
+                }
+                // a game's screen: PP-OCR reads it too (no PP-OCR here: as read)
+                Ok(lines) if lines.len() <= SPARSE => {
+                    return Ok(match ocr::recognize_as(rgba, width, height, &self.source) {
+                        Ok(pp) => reread(lines, pp),
+                        Err(e) => {
+                            crate::log!("[opencircle] no second read of a sparse screen ({e})");
+                            lines
+                        }
+                    });
                 }
                 Ok(lines) => return Ok(lines),
                 Err(e) => crate::log!("[opencircle] Windows OCR failed ({e}); PP-OCR reads"),
@@ -770,6 +1026,149 @@ fn footnotes(s: &str) -> (String, String) {
     }
     body.push_str(rest);
     (body.split_whitespace().collect::<Vec<_>>().join(" "), marks)
+}
+
+/// Units a game writes right after a number ("450m", "21ms").
+const UNITS: &[&str] = &[
+    "m", "km", "cm", "mm", "ms", "s", "h", "min", "hp", "mp", "xp", "fps", "kg", "g", "k",
+];
+
+/// A game's counter in `word` (brackets and punctuation around it aside):
+/// "×10", "4★", "450m"; its number and the counter as written.
+fn counter(word: &str) -> Option<(String, String)> {
+    let w = word.trim_matches(|c: char| "()[],.;:!?".contains(c));
+    let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+    let n = match w.strip_prefix('×') {
+        Some(n) if digits(n) => n,
+        _ => {
+            let k = w.find(|c: char| !c.is_ascii_digit())?;
+            let (n, rest) = w.split_at(k);
+            let unit = UNITS.contains(&rest.to_lowercase().as_str());
+            match digits(n) && (matches!(rest, "★" | "☆") || unit) {
+                true => n,
+                false => return None,
+            }
+        }
+    };
+    Some((n.to_string(), w.to_string()))
+}
+
+/// Offline, a menu word in its menu sense (`glossary`: "Controles" ->
+/// "Controls", not "Checks"), with its counters ("Invoquer ×10" -> "Summon
+/// ×10"); the target's own word comes back as it is. `None` = for the model.
+fn glossed(text: &str, target: &str) -> Option<String> {
+    let label: Vec<&str> = text.split(' ').filter(|w| counter(w).is_none()).collect();
+    let g = super::glossary::lookup(&label.join(" "), target)?;
+    let mut first = true;
+    let words = text.split(' ').filter_map(|w| match counter(w) {
+        Some(_) => Some(w),
+        None => std::mem::take(&mut first).then_some(g),
+    });
+    Some(words.collect::<Vec<_>>().join(" "))
+}
+
+/// What `shield` took out of a sentence: the key hint it starts with
+/// ("[V]") and its counters (number, counter as written).
+#[derive(Default)]
+struct Shielded {
+    hint: String,
+    counters: Vec<(String, String)>,
+}
+
+/// A key hint a line starts with ("[V] Questgebiet anzeigen", "[E]",
+/// "[Space]"): its length with the brackets.
+pub(super) fn key_hint(s: &str) -> Option<usize> {
+    let k = s.find(']')?;
+    (s.starts_with('[') && (2..=8).contains(&k) && s[1..k].starts_with(char::is_uppercase))
+        .then_some(k + 1)
+}
+
+/// Offline MT changes a game's counters ("Invoquer ×10" -> "اضغط x 10",
+/// "4★" dropped, "21ms" -> "21 مترا") and moves a key hint ("[V]
+/// Questgebiet anzeigen" -> "اعرض [V] منطقة البحث"): a counter is sent as its
+/// bare number (a number the model keeps), a leading key hint not at all,
+/// and both are put back after (`unshield`). A counter whose number shows
+/// elsewhere in the sentence too is sent as it is.
+fn shield(s: &str) -> (String, Shielded) {
+    let mut kept = Shielded::default();
+    let body = match key_hint(s) {
+        Some(k) if !s[k..].trim().is_empty() => {
+            kept.hint = s[..k].to_string();
+            s[k..].trim_start()
+        }
+        _ => s,
+    };
+    let mut out = Vec::new();
+    for w in body.split(' ') {
+        match counter(w) {
+            Some((n, c)) if numbers(body).filter(|m| *m == n).count() == 1 => {
+                out.push(w.replacen(&c, &n, 1));
+                kept.counters.push((n, c));
+            }
+            _ => out.push(w.to_string()),
+        }
+    }
+    (out.join(" "), kept)
+}
+
+/// The standalone numbers of `s` (Arabic-Indic digits as ASCII), in order.
+fn numbers(s: &str) -> impl Iterator<Item = String> + '_ {
+    let ascii = |c: char| match c {
+        '\u{0660}'..='\u{0669}' => char::from(b'0' + (c as u32 - 0x0660) as u8),
+        '\u{06F0}'..='\u{06F9}' => char::from(b'0' + (c as u32 - 0x06F0) as u8),
+        c => c,
+    };
+    s.split(move |c: char| !ascii(c).is_ascii_digit())
+        .filter(|n| !n.is_empty())
+        .map(move |n| n.chars().map(ascii).collect())
+}
+
+/// What `shield` took out put back in `out`: the key hint first, each
+/// counter where its number is (once), with what the model wrote around it
+/// ("x 10", "10 *", "١٠") replaced by the counter. A number the model lost
+/// stays lost (`made_up` judges the output).
+fn unshield(out: &str, kept: &Shielded) -> String {
+    let mut out = out.to_string();
+    for (n, c) in &kept.counters {
+        let found: Vec<std::ops::Range<usize>> = {
+            let ascii = |c: char| match c {
+                '\u{0660}'..='\u{0669}' | '\u{06F0}'..='\u{06F9}' => '0',
+                c => c,
+            };
+            let mut runs = Vec::new();
+            let mut start = None;
+            for (i, ch) in out.char_indices().chain([(out.len(), ' ')]) {
+                match (ascii(ch).is_ascii_digit(), start) {
+                    (true, None) => start = Some(i),
+                    (false, Some(s)) => {
+                        runs.push(s..i);
+                        start = None;
+                    }
+                    _ => {}
+                }
+            }
+            runs.into_iter()
+                .filter(|r| numbers(&out[r.clone()]).next().as_deref() == Some(n))
+                .collect()
+        };
+        let [r] = &found[..] else { continue };
+        let (mut a, mut b) = (r.start, r.end);
+        // a sign the model kept or moved next to it: "x 10", "×10", "10★"
+        let before = out[..a].trim_end_matches(' ');
+        if before.ends_with(['x', 'X', '×']) && c.starts_with('×') {
+            a = before.len() - before.chars().last().map_or(0, char::len_utf8);
+        }
+        let after = &out[b..];
+        let sign = after.trim_start_matches(' ');
+        if sign.starts_with(['★', '☆', '*']) && c.ends_with(['★', '☆']) {
+            b = out.len() - sign.len() + sign.chars().next().map_or(0, char::len_utf8);
+        }
+        out.replace_range(a..b, c);
+    }
+    match kept.hint.is_empty() {
+        true => out,
+        false => format!("{} {out}", kept.hint),
+    }
 }
 
 /// Words in one offline MT input at most (its 200-token cut is ~130 words;
@@ -1104,8 +1503,49 @@ pub(super) fn to_line(b: TextBlock, width: u32, height: u32) -> Line {
     let y1 = (y + h + 0.15 * h).min(height as f32);
     Line {
         bounds: [x0, y0, x1 - x0, y1 - y0],
-        text: b.text,
+        text: game_read(&b.text),
     }
+}
+
+/// A game's counters as OCR misreads them, put right: Windows OCR reads a
+/// star as "*" ("objet 4* ou") and a multiplier as letters ("Invoquer xl",
+/// "Invoquer XIO" for "×1", "×10"; the model then said "Invoking XIO").
+/// A multiplier is x or × then digits, with l I | read for 1 and O o for 0:
+/// a lower-case x or ×, a real digit, or two marks or more ("XL", a Roman
+/// "XI" and the word "Xo" stay).
+pub(super) fn game_read(text: &str) -> String {
+    let words: Vec<String> = (text.split(' '))
+        .map(|w| {
+            let mut c = w.chars();
+            let digits: String = c.clone().skip(1).collect();
+            match c.next() {
+                Some(x @ ('x' | 'X' | '×')) if !digits.is_empty() => {
+                    let read: String = (digits.chars())
+                        .map(|d| match d {
+                            'l' | 'I' | '|' => '1',
+                            'O' | 'o' => '0',
+                            d => d,
+                        })
+                        .collect();
+                    let sure = x != 'X'
+                        || digits.chars().any(|d| d.is_ascii_digit())
+                        || digits.chars().count() >= 2 && digits.ends_with(['O', 'o']);
+                    let number = read.chars().all(|d| d.is_ascii_digit()) && !read.starts_with('0');
+                    match number && sure {
+                        true => format!("×{read}"),
+                        false => w.to_string(),
+                    }
+                }
+                _ => match w.strip_suffix('*') {
+                    Some(n) if !n.is_empty() && n.chars().all(|d| d.is_ascii_digit()) => {
+                        format!("{n}★")
+                    }
+                    _ => w.to_string(),
+                },
+            }
+        })
+        .collect();
+    words.join(" ")
 }
 
 pub(super) fn translations(blocks: &[Block], tr: &[String]) -> Vec<Translation> {
@@ -1284,12 +1724,23 @@ fn items(text: &str) -> Vec<(String, bool)> {
 /// code (`code_like`: a browser's address bar, a file name, an e-mail: left
 /// exactly as they are), and for text already in the target's script (Latin
 /// targets can't be told from English: the model decides).
-fn needs_translation(text: &str, target: &str) -> bool {
+pub(super) fn needs_translation(text: &str, target: &str) -> bool {
     let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
     let word =
         (text.split(|c: char| !c.is_alphabetic())).any(|w| w.chars().count() > 1 || !w.is_ascii());
+    // a game's counters and badges only: "21ms", "Lv. 80", "×10" (an
+    // abbreviation's full stop before a number), a badge "UP!" (fr-ar made it
+    // "يو يو", drawn over a glow the erase can't take; "OK" is a word)
+    let alone = text.split_whitespace().count() == 1;
+    let counters = (text.split_whitespace()).all(|w| {
+        let badge = w.strip_suffix('!').filter(|b| b.len() <= 3);
+        counter(w).is_some()
+            || !w.chars().any(char::is_alphabetic)
+            || (w.ends_with('.') && w.chars().count() <= 4)
+            || (alone && badge.is_some_and(|b| b.chars().all(|c| c.is_ascii_uppercase())))
+    });
     match lang::find(target).map(|l| l.script) {
-        _ if !word || code(text) || misshapen(text) || icon_read(text) => false,
+        _ if !word || counters || code(text) || misshapen(text) || icon_read(text) => false,
         Some(Script::Latin) | None => true,
         Some(script) => letters.iter().filter(|c| script.has(**c)).count() * 2 < letters.len(),
     }
@@ -1845,11 +2296,11 @@ pub(super) mod tests {
         let sent = RefCell::new(Vec::new());
         let run = |t: &[String], _: &'static mt::Pair| {
             sent.borrow_mut().extend(t.iter().cloned());
-            Ok(t.iter().map(|s| format!("{s} (de)")).collect())
+            Ok(t.iter().map(|s| format!("{s} [de]")).collect())
         };
         let src: Vec<String> = ["نبات منزلي", "LILI", "Jho", "12"].map(String::from).into();
         let out = hops(&src, &route, "de", run).unwrap();
-        assert_eq!(out, ["نبات منزلي (de)", "LILI", "Jho", "12 (de)"]);
+        assert_eq!(out, ["نبات منزلي [de]", "LILI", "Jho", "12 [de]"]);
         assert_eq!(*sent.borrow(), ["نبات منزلي", "12"]);
     }
 

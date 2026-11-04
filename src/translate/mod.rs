@@ -9,6 +9,7 @@
 
 mod draw;
 mod erase;
+mod glossary;
 pub mod lang;
 pub mod live;
 pub mod pipeline;
@@ -214,7 +215,12 @@ fn continues(p: &Line, l: &Line) -> bool {
     // an address bar is never one block with the page under it ("...org/wiki/
     // Système_solaire WIKIPÉDIA": the logo's word made it a sentence)
     let code = |t: &str| pipeline::code(t);
+    // a key hint starts an item of its own ("[V] Questgebiet anzeigen" under
+    // a quest's goal is no next line of it)
+    // (a citation "[12]" wrapped to the line start goes on)
+    let key = pipeline::key_hint(&l.text).is_some();
     same_col
+        && !key
         && close
         && similar
         && fits

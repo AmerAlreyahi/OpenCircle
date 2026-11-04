@@ -1,0 +1,202 @@
+[
+  {
+    "text": "10l",
+    "bounds": [
+      64.0,
+      74.347824,
+      38.0,
+      35.217392
+    ],
+    "confidence": 0.27050146
+  },
+  {
+    "text": "Invocation d'Événement",
+    "bounds": [
+      110.0,
+      72.391304,
+      458.0,
+      41.08696
+    ],
+    "confidence": 0.9971195
+  },
+  {
+    "text": "3 240",
+    "bounds": [
+      1792.0,
+      60.652176,
+      118.0,
+      50.86956
+    ],
+    "confidence": 0.9896389
+  },
+  {
+    "text": "15",
+    "bounds": [
+      2236.0,
+      60.652176,
+      58.0,
+      48.91304
+    ],
+    "confidence": 0.9999529
+  },
+  {
+    "text": "Invocation d'Événement",
+    "bounds": [
+      560.0,
+      183.91304,
+      398.0,
+      41.08696
+    ],
+    "confidence": 0.99146503
+  },
+  {
+    "text": "ÉVÉNEMENT",
+    "bounds": [
+      118.0,
+      246.52174,
+      142.0,
+      33.26088
+    ],
+    "confidence": 0.9575528
+  },
+  {
+    "text": "Le Réveil du",
+    "bounds": [
+      542.0,
+      248.47826,
+      464.0,
+      86.08696
+    ],
+    "confidence": 0.99577934
+  },
+  {
+    "text": "Dragon de Givre",
+    "bounds": [
+      542.0,
+      332.6087,
+      622.0,
+      91.95651
+    ],
+    "confidence": 0.99989516
+  },
+  {
+    "text": "Événement limité · Du 12 au 26 novembre",
+    "bounds": [
+      548.0,
+      428.47827,
+      738.0,
+      46.956512
+    ],
+    "confidence": 0.9789196
+  },
+  {
+    "text": "Augmente fortement les chances",
+    "bounds": [
+      546.0,
+      500.86957,
+      594.0,
+      46.956543
+    ],
+    "confidence": 0.9679731
+  },
+  {
+    "text": "d'obtenir le chevalier Aldric.",
+    "bounds": [
+      548.0,
+      551.73914,
+      496.0,
+      43.043457
+    ],
+    "confidence": 0.9859438
+  },
+  {
+    "text": "Chaque série de 10 invocations",
+    "bounds": [
+      546.0,
+      602.6087,
+      556.0,
+      45.0
+    ],
+    "confidence": 0.99728656
+  },
+  {
+    "text": "garantit au moins un objet 4 ou",
+    "bounds": [
+      542.0,
+      649.56525,
+      598.0,
+      58.695618
+    ],
+    "confidence": 0.9549705
+  },
+  {
+    "text": "supérieur.",
+    "bounds": [
+      544.0,
+      706.3043,
+      188.0,
+      46.956543
+    ],
+    "confidence": 0.99650544
+  },
+  {
+    "text": "Personnages 4 à taux augmenté",
+    "bounds": [
+      558.0,
+      804.13043,
+      526.0,
+      46.956543
+    ],
+    "confidence": 0.91932374
+  },
+  {
+    "text": "UP!",
+    "bounds": [
+      2154.0,
+      890.2174,
+      92.0,
+      54.782593
+    ],
+    "confidence": 0.9988391
+  },
+  {
+    "text": "Aldric",
+    "bounds": [
+      1910.0,
+      911.73914,
+      246.0,
+      86.086975
+    ],
+    "confidence": 0.9998993
+  },
+  {
+    "text": "Chevalier du Givre Éternel",
+    "bounds": [
+      1912.0,
+      1060.4348,
+      460.0,
+      41.086914
+    ],
+    "confidence": 0.97937924
+  },
+  {
+    "text": "Invoquer ×1",
+    "bounds": [
+      1684.0,
+      1336.3043,
+      242.0,
+      54.782593
+    ],
+    "confidence": 0.985364
+  },
+  {
+    "text": "Invoquer ×10",
+    "bounds": [
+      2164.0,
+      1336.3043,
+      264.0,
+      54.782593
+    ],
+    "confidence": 0.96754074
+  }
+]
