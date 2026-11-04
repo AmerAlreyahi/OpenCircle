@@ -68,9 +68,8 @@ const CC0: (&str, &str) = (
     "https://creativecommons.org/publicdomain/zero/1.0/",
 );
 const CC_BY: (&str, &str) = ("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/");
-const CC_BY_3: (&str, &str) = ("CC BY 3.0", "https://creativecommons.org/licenses/by/3.0/");
 
-pub const CLIP_CREDITS: [Credit; 10] = [
+pub const CLIP_CREDITS: [Credit; 9] = [
     Credit {
         clips: &["circle-1"],
         text: "Succulent photograph: José Gabriel Jara Porras, WordPress Photo Directory, \
@@ -112,17 +111,6 @@ pub const CLIP_CREDITS: [Credit; 10] = [
         ],
     },
     Credit {
-        clips: &["translate-1"],
-        text: "\u{201c}Sintel\u{201d} \u{a9} Blender Foundation, durian.blender.org, CC BY \
-               3.0. Shown playing on YouTube in the user\u{2019}s browser, with OpenCircle \
-               translating its subtitles; cropped and time-edited screen recording.",
-        links: &[
-            ("Film", "https://studio.blender.org/projects/sintel/"),
-            ("Project", "https://durian.blender.org/"),
-            CC_BY_3,
-        ],
-    },
-    Credit {
         clips: &["translate-2", "translate-3", "translate-4"],
         text: "The game screens are original images made for OpenCircle\u{2019}s previews \
                (no real game).",
@@ -143,9 +131,9 @@ pub const CLIP_CREDITS: [Credit; 10] = [
         ],
     },
     Credit {
-        clips: &["ai-browser", "translate-1"],
+        clips: &["ai-browser"],
         text: "OpenCircle is an independent project and is not affiliated with, sponsored \
-               by, or endorsed by Google. Google, YouTube and their product names and logos are \
+               by, or endorsed by Google. Google and its product names and logos are \
                trademarks of their respective owners. Depicted third-party services and \
                content are shown for demonstration only.",
         links: &[],
@@ -173,7 +161,6 @@ pub const CLIP_CREDITS: [Credit; 10] = [
             "circle-2",
             "circle-3",
             "text",
-            "translate-1",
             "translate-2",
             "translate-3",
             "translate-4",

@@ -25,7 +25,7 @@ macro_rules! clip {
 }
 
 /// Every clip the app may download, by file name.
-pub(crate) const CLIPS: [ModelFile; 13] = [
+pub(crate) const CLIPS: [ModelFile; 12] = [
     clip!(
         "circle-1",
         561_423,
@@ -70,11 +70,6 @@ pub(crate) const CLIPS: [ModelFile; 13] = [
         "snip-long",
         652_219,
         "754451810c4b8a7a6200cbf6cd1bd51158312fd86248b731e7a820935c0476fd"
-    ),
-    clip!(
-        "translate-1",
-        540_851,
-        "94a51634b4d108b4b094a35251d852bcdc0916bafc8ca0e3c93603f9a0c61594"
     ),
     clip!(
         "translate-2",

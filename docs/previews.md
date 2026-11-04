@@ -15,7 +15,7 @@ still shows no preview at all (and no Hide preview button).
 |---|---|
 | `circle-1`, `-2`, `-3` | Look & behaviour, in turn |
 | `text` | Text reading |
-| `translate-1` ... `-4` | Translate, in turn |
+| `translate-4`, `translate-2`, `translate-3` | Translate, in turn |
 | `ai-chat` | Ask AI, with an AI provider set |
 | `ai-browser` | Ask AI, with Browser |
 | `snip-blur`, `snip-comment`, `snip-long` | Snip, in turn |

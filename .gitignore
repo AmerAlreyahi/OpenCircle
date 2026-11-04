@@ -7,4 +7,4 @@ dist/
 target/
 .env
 *.log
-docs/media/opencircle-promo/
+docs/media/opencircle-promo//target-*/
