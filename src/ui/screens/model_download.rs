@@ -10,7 +10,6 @@ use iced::{Center, Element, Fill, Padding, Rectangle, Size};
 use crate::ui::kit::button::{Kind, button, regular};
 use crate::ui::kit::chip::emblem;
 use crate::ui::kit::icon::Icon;
-use crate::ui::kit::panel_frame::{Side, side};
 use crate::ui::kit::progress;
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{accent, sub};
@@ -260,18 +259,28 @@ fn body<'a, M: Clone + 'a>(
     }
 }
 
-/// `card` in a result card's spot `at` on `screen`: as tall as it is, at the
-/// spot's end facing the screen's middle (a short card, not a slab).
-pub fn placed<'a, M: 'a>(card: Element<'a, M>, at: Rectangle, screen: Size) -> Element<'a, M> {
-    let end = match side(at, screen) {
-        Side::Top => iced::Bottom,
-        _ => iced::Top,
-    };
-    let spot = container(card)
-        .width(at.width)
-        .height(at.height)
-        .align_y(end);
-    pin(spot).position(at.position()).into()
+/// Clear space between a floating card and the screen's edges and the pill.
+pub const FLOAT_MARGIN: f32 = 32.0;
+
+/// Where `card` floats on `screen`: the top right, `FLOAT_MARGIN` from the
+/// edges, never touching the corner or the `pill`'s rect; where it doesn't fit
+/// beside the pill, under it (centred on the pill, kept on the screen).
+pub fn float_at(screen: Size, pill: Rectangle) -> iced::Point {
+    let width = WIDTH.min(screen.width - 2.0 * FLOAT_MARGIN).max(0.0);
+    let x = screen.width - FLOAT_MARGIN - width;
+    if x >= pill.x + pill.width + FLOAT_MARGIN {
+        return iced::Point::new(x, FLOAT_MARGIN);
+    }
+    let centred = pill.center_x() - width / 2.0;
+    let x = centred.clamp(FLOAT_MARGIN.min(x), x.max(FLOAT_MARGIN));
+    iced::Point::new(x, pill.y + pill.height + FLOAT_MARGIN / 2.0)
+}
+
+/// `card` floating at `float_at`.
+pub fn floating<'a, M: 'a>(card: Element<'a, M>, screen: Size, pill: Rectangle) -> Element<'a, M> {
+    pin(container(card).width(WIDTH.min(screen.width - 2.0 * FLOAT_MARGIN)))
+        .position(float_at(screen, pill))
+        .into()
 }
 
 #[cfg(test)]

@@ -224,6 +224,11 @@ fn the_prompts_are_short_cards_on_small_screens() {
                 view.into(),
                 size,
             );
+            // the card floats clear of the corner and the pill
+            let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
+            let p = crate::ui::screens::model_download::float_at(size, pill);
+            let cw = crate::ui::screens::model_download::WIDTH.min(w - 64.0);
+            let at = Rectangle::new(p, Size::new(cw, h - p.y));
             let at_px = |x: f32, y: f32| &px[((y as usize * w as usize) + x as usize) * 4..][..3];
             let dark = |p: &[u8]| p.iter().all(|&v| v < 100);
             // the card's rows: dark panel at a point right of its middle
@@ -231,7 +236,7 @@ fn the_prompts_are_short_cards_on_small_screens() {
             let x = at.x + 10.0;
             let rows: Vec<f32> = (0..h as usize)
                 .map(|y| y as f32)
-                .filter(|&y| dark(at_px(x, y)))
+                .filter(|&y| y >= at.y && dark(at_px(x, y)))
                 .collect();
             assert!(!rows.is_empty(), "{name} at {w}x{h}: no card");
             let (top, bottom) = (rows[0], rows[rows.len() - 1]);
@@ -431,7 +436,7 @@ fn notes_are_opaque_in_the_light_theme() {
         let px = crate::ui::kit::testing::shot::render(dark.into(), 720, 300);
         let at = |x: usize, y: usize| &px[(y * 720 + x) * 4..][..3];
         let want = solid.into_rgba8();
-        assert_eq!(at(360, 262), &want[..3], "the panel is solid");
+        assert_eq!(at(360, 180), &want[..3], "the panel is solid");
         // and the label is drawn in the theme's text colour
         let ink = text.into_rgba8();
         let near = |p: &[u8]| p.iter().zip(&ink).all(|(a, b)| a.abs_diff(*b) < 40);

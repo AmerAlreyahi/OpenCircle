@@ -10,7 +10,7 @@ use crate::actions::{self};
 use crate::ui::ai_chat::{actions, card, note};
 use crate::ui::kit::button::{Kind, button, label as button_label};
 use crate::ui::kit::markdown;
-use crate::ui::kit::panel_frame::{self as frame, Header};
+use crate::ui::kit::panel_frame::Header;
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{error, text as label};
 use crate::ui::kit::tokens::{Role, radius};
@@ -57,8 +57,11 @@ impl Session {
             };
         // the pill stays beside the card
         let with_pill = |card: Element<'a, Msg>| -> Element<'a, Msg> {
-            let free = frame::free(screen, Some(at));
-            stack![card, self.pill(free, None, None, None)].into()
+            stack![
+                card,
+                self.pill(Rectangle::with_size(screen), None, None, None)
+            ]
+            .into()
         };
         let whole = Rectangle::with_size(screen);
         // the download card (`model_download`): asks, its progress, why it failed
@@ -69,7 +72,12 @@ impl Session {
                 provider,
             };
             let card = model_download::card(model, bytes, stage, on);
-            with_pill(model_download::placed(card, at, screen))
+            let pill = Rectangle::new(pill_at(whole), picker::PILL);
+            stack![
+                model_download::floating(card, screen, pill),
+                self.pill(whole, None, None, None)
+            ]
+            .into()
         };
         // what is (being) fetched: the pair's models, else OCR's
         let fetched = |stage| match self.offline {
