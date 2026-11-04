@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.2 published (2026-10-30, re-release with the updater fix); now 0.1.3 Snip and editor.**
+(both local only). Status: **v0.1.3 published (2026-11-04); now 0.1.4 Game translation.**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -41,6 +41,8 @@ where they differ.
   downloads): its updater can't update Setup-exe installs (#151). v0.1.2 re-published 2026-10-30 16:33 UTC
   (owner OK) on 65e8902 with the updater fix; update gate on the draft: v0.1.1 portable PASS, v0.1.1 Setup FAIL as
   expected (old updater), manual Setup over 0.1.1 PASS; assets re-downloaded, byte-identical to the gated draft.
+  v0.1.3 published 2026-11-04 11:05 UTC (owner OK) on 29d4883: update gate on the final draft PASS (v0.1.2 Setup +
+  portable -> 0.1.3); published assets re-downloaded: SHA256SUMS OK, minisig OK ("OpenCircle v0.1.3"), latest = v0.1.3.
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
