@@ -15,11 +15,12 @@ still shows no preview at all (and no Hide preview button).
 |---|---|
 | `circle-1`, `-2`, `-3` | Look & behaviour, in turn |
 | `text` | Text reading |
+| `translate-1` ... `-4` | Translate, in turn |
 | `ai-chat` | Ask AI, with an AI provider set |
 | `ai-browser` | Ask AI, with Browser |
 | `snip-blur`, `snip-comment`, `snip-long` | Snip, in turn |
 
-`translate`, `live` and `song` are not published yet, so those pages show no
+`live` and `song` are not published yet, so those pages show no
 preview.
 
 - Still: `assets/previews/stills/<clip>.webp` (1640x922 WebP, ~25-75 KB: the clip's most telling sharp frame, the result moment),
@@ -30,8 +31,8 @@ preview.
   `src/ui/screens/settings/previews/online.rs` and saved under
   `<data>/OpenCircle/previews`. A wrong or partial file is deleted and fetched
   again on the next click.
-- `assets/previews/<clip>.webp`: the older animated versions, used by the
-  README only (not bundled).
+- `assets/previews/<clip>.webp`: the animated versions the README shows
+  (circle-1, text, snip-blur, snip-long); not bundled.
 
 Clips with third-party material are credited in Settings > About and in
 NOTICE (`pages::about::CLIP_CREDITS`): add a line there with any new clip.

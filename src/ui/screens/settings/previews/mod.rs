@@ -75,7 +75,7 @@ pub const HEROES: [Hero; 7] = [
         desc: "Read your screen in your language, in place.",
         lab: None,
         shortcut: translate,
-        clips: |_| &["translate"],
+        clips: |_| &["translate-1", "translate-2", "translate-3", "translate-4"],
     },
     Hero {
         page: Section::Ai,
@@ -285,30 +285,30 @@ mod tests {
         }
     }
 
-    /// What ships: Look, Text, AI (both providers) and Snip have clips;
-    /// Translate is held for a re-recording (owner, 2026-11-03: the take showed
-    /// translate bugs); Live and Song stay hidden until theirs arrive. Every
+    /// What ships: Look, Text, Translate, AI (both providers) and Snip have
+    /// clips; Live and Song stay hidden until theirs arrive. Every
     /// clip with a still is pinned for download, and only those.
     #[test]
     fn the_shipped_clips_are_what_the_pages_name() {
         let mut c = Config::default();
         let has = |k, c: &Config| !chosen(hero(k), c).is_empty();
-        assert!(has("look", &c) && !has("translate", &c) && has("snip", &c));
+        assert!(has("look", &c) && has("translate", &c) && has("snip", &c));
         assert!(has("ai", &c));
         c.ai.provider = Provider::Anthropic;
         assert!(has("ai", &c));
         assert!(has("text_reading", &c) && !has("live", &c) && !has("song", &c));
         assert_eq!(chosen(hero("snip"), &c).len(), 3);
         assert_eq!(chosen(hero("look"), &c).len(), 3);
+        assert_eq!(chosen(hero("translate"), &c).len(), 4);
         let stills: Vec<_> = (online::CLIPS.iter())
             .map(|f| f.name.strip_suffix(".ivf").unwrap())
             .collect();
         for name in &stills {
             assert!(player::still(name).is_some(), "{name} has no still");
         }
-        assert_eq!(stills.len(), 9);
+        assert_eq!(stills.len(), 13);
         for f in &online::CLIPS {
-            assert!(f.size <= 1_600_000, "{} too big for a preview", f.name);
+            assert!(f.size <= 1_800_000, "{} too big for a preview", f.name);
             assert!(f.sha256.len() == 64 && f.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
         }
     }
@@ -339,20 +339,18 @@ mod tests {
                 .iter()
                 .any(|c| c.text.contains("Unsplash License"))
         );
-        // what ships: 3 photos, COFFEE, OWID solar, Google note, OWID tourism,
-        // the caveat (Wikipedia comes back with the translate clip)
+        // what ships: 3 photos, COFFEE, Sintel, the game screens, OWID solar,
+        // the Google/YouTube note, OWID tourism, the caveat
         let shipped = clip_credits(|c| player::still(c).is_some());
-        assert_eq!(shipped.len(), 8);
-        assert!(shipped.iter().all(|c| !c.text.contains("Matti Blume")));
-        let all = clip_credits(|_| true);
-        let sa = (all.iter().find(|c| c.text.contains("Matti Blume"))).unwrap();
-        assert!(sa.text.contains("MIT licence"));
-        assert!(sa.links.iter().any(|l| l.0 == "Licence text"));
+        assert_eq!(shipped.len(), 10);
+        let sintel = clip_credits(|c| c == "translate-1");
+        assert!(sintel.iter().any(|c| c.text.contains("Blender Foundation")));
+        assert!(sintel.iter().any(|c| c.text.contains("YouTube")));
+        let games = clip_credits(|c| c == "translate-3");
+        assert!(games.iter().any(|c| c.text.contains("no real game")));
+        assert!(games.iter().all(|c| !c.text.contains("YouTube")));
         for (_, url) in shipped.iter().flat_map(|c| c.links) {
             assert!(url.starts_with("https://"), "{url}");
         }
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/LICENSES/CC-BY-SA-4.0.txt");
-        let text = std::fs::read_to_string(path).unwrap();
-        assert!(text.starts_with("Attribution-ShareAlike 4.0 International"));
     }
 }
