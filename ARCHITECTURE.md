@@ -157,12 +157,15 @@ beside it that composes kit parts (`setting_row`, `segmented`, `card`, …); a g
 **Add a feature preview** (the hero at the top of a feature's Settings page, only for a
 feature that ships; owner 2026-10-27/28): one `Hero` entry in
 `ui/screens/settings/previews/mod.rs` `HEROES` (its page, `hidden_previews` key, title, line,
-optional Labs feature, shortcut, clip name), the clip's name in `build.rs` `CLIPS`, and the
-owner's clip at `assets/previews/<clip>.webp` (spec: docs/previews.md; missing = the
-placeholder). `previews::player` decodes it frame by frame while it plays, once per page
-visit (`State::players`, `State::played`: the clock runs only meanwhile), then rests on the
-last frame with its decoder dropped (reduced motion: the first frame). Tests play
-`tests/fixtures/previews/tiny.webp` (`State::play_clip`).
+optional Labs feature, shortcut, clip names), the still at
+`assets/previews/stills/<clip>.webp` (bundled by `build.rs`; none = no preview) and the
+clip's pin in `previews/online.rs` `CLIPS` (1080p AV1 IVF on the models repo's
+`previews-1` release; spec: docs/previews.md). Nothing is downloaded before "Play preview"
+(`Message::Fetch` -> `Outcome::Fetch`, `models::ensure`). `previews::player` runs one thread
+per preview (still, then the page's clips in turn in a loop, decoded by rav1d in
+`previews::av1` at the stage's px width, `kit::hero` 16:9 `Media`); dropping it (page left,
+Settings closed) ends it. Tests play `tests/fixtures/previews/tiny-{a,b}.ivf`
+(`State::play_clip`).
 
 **Animate a widget**: keep its motion in `ui::kit::motion` terms: a `Shown` (open/close by
 `WIDGET` or `TOAST_PACE`) or the time it began plus a token (`OPEN`, `CLOSE`, `MORPH`,

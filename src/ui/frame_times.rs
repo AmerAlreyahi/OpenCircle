@@ -851,11 +851,14 @@ fn a_settings_page_switch_redraws_only_the_sidebar_glide() {
     }
 }
 
-/// The preview player's fixture clip (`scripts/make-preview-fixture.py`).
-const CLIP: &[u8] = include_bytes!("../../tests/fixtures/previews/tiny.webp");
+/// The preview player's fixture clips (`scripts/make-preview-fixture.py`).
+const CLIP: &[&[u8]] = &[
+    include_bytes!("../../tests/fixtures/previews/tiny-a.ivf"),
+    include_bytes!("../../tests/fixtures/previews/tiny-b.ivf"),
+];
 
 /// The settings page `section` with its previews playing the fixture clip,
-/// a frame of it (300 ms each) further at every drawn frame: their damage.
+/// a frame of them (100 ms each) further at every drawn frame: their damage.
 fn clip_damage(section: settings::Section) -> Vec<Vec<Rectangle>> {
     use settings::Message as M;
     let mut s = settings_at(section);
@@ -871,7 +874,7 @@ fn clip_damage(section: settings::Section) -> Vec<Vec<Rectangle>> {
         4,
         false,
         |s, i, _| {
-            s.play_clip(clip, Duration::from_millis(300 * u64::from(i)));
+            s.play_clip(clip, Duration::from_millis(100 * u64::from(i)));
             let _ = settings::update(s, M::Tick);
         },
         still,
@@ -885,22 +888,22 @@ fn a_playing_preview_redraws_only_its_stage() {
     let frames = clip_damage(settings::Section::Ai);
     // the clip's place: past the sidebar, under the preview's heading and
     // above the page's rows
-    let stage = |r: &Rectangle| r.x > SIDEBAR_RIGHT && r.y >= 150.0 && r.y + r.height <= 460.0;
+    let stage = |r: &Rectangle| r.x > SIDEBAR_RIGHT && r.y >= 150.0 && r.y + r.height <= 500.0;
     assert!(frames.iter().all(|d| !d.is_empty()), "the clip plays");
     for r in frames.iter().flatten() {
         assert!(stage(r), "{r:?} outside the stage");
     }
 }
 
-/// Replay on a preview resting on its last frame: drawn over it, the first
-/// frame leaves nothing of the last on screen (as drawn whole).
+/// A preview starting again (the page visited again) over a later frame: the
+/// first frame leaves nothing of the other on screen (as drawn whole).
 #[test]
-fn a_replayed_preview_leaves_no_ghost_of_its_last_frame() {
+fn a_restarted_preview_leaves_no_ghost_of_its_last_frame() {
     let size = settings::WINDOW_SIZE;
     let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
     let clip = CLIP;
     let mut s = settings_at(settings::Section::Ai);
-    // at rest on the last frame
+    // 9 s in
     s.play_clip(clip, Duration::from_secs(9));
     let _ = settings::update(&mut s, settings::Message::Tick);
     let drawn_on = drawn(

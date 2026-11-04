@@ -54,6 +54,9 @@ minisign-verify = "0.3.0"
 # Short lines' language when the word votes can't tell (translate::lang::sure):
 # a trained linear model, MIT, no dependencies; exe +0.3 MB (lingua: +21 MB).
 whichlang = "=0.1.1"
+# Settings' preview clips (1080p AV1, downloaded on "Play preview"): dav1d's Rust
+# port, BSD-2. No asm (nothing to assemble on any build; 1080p ~3.5 ms a frame).
+rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

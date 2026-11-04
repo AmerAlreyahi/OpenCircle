@@ -1,68 +1,62 @@
 # Feature preview clips
 
-Each feature's page in Settings starts with a short preview: a real recording
-of the feature, played once when the page opens (Replay plays it again), then
-resting on its last frame. With reduced motion it shows its first frame only.
-A page with no bundled clip shows no preview at all (and no Hide preview
-button); it appears by itself when its clip is added. The clips are recorded
-and edited by the project owner from the real app.
-
-Clips are bundled into the app when it is built. They are never downloaded:
-the app stays private and works offline.
+Each feature's page in Settings starts with a short preview of the real app,
+recorded and edited by the project owner. The app itself carries only a sharp
+still picture of each clip. The full clips (1080p video) are downloaded the
+first time you click **Play preview** on a page, never before, and kept on
+your PC, so later visits play them at once, offline. A page's clips play one
+after another in a loop while the page is open; the stage grows with the
+Settings window. With reduced motion only the still is shown. A page with no
+still shows no preview at all (and no Hide preview button).
 
 ## Files
 
-One animated WebP per feature, in `assets/previews/`:
-
-| File | Page |
+| Clip | Page |
 |---|---|
-| `circle-1.webp` (`-2`, `-3`) | Look & behaviour: one clip per Settings opening, in turn |
-| `text.webp` | Text reading |
-| `translate.webp` | Translate |
-| `ai-chat.webp` | AI, with an AI provider set |
-| `ai-browser.webp` | AI, with Browser |
-| `snip-blur.webp`, `snip-comment.webp`, `snip-long.webp` | Snip: one after another, in a loop |
-| `live.webp` | Translate, Live translate (Labs) |
-| `song.webp` | Song search (Labs) |
+| `circle-1`, `-2`, `-3` | Look & behaviour, in turn |
+| `text` | Text reading |
+| `ai-chat` | Ask AI, with an AI provider set |
+| `ai-browser` | Ask AI, with Browser |
+| `snip-blur`, `snip-comment`, `snip-long` | Snip, in turn |
 
-`translate.webp`, `live.webp` and `song.webp` are not recorded yet, so those pages show no preview.
+`translate`, `live` and `song` are not published yet, so those pages show no
+preview.
 
-The build bundles every `.webp` in the folder; a page lists the names it
-wants (`previews::HEROES`) and a missing file is just absent. Variants: the
-Look & behaviour page opens a different circle clip each time (`circle-1`,
-`-2`, `-3`, in turn), the AI page shows `ai-chat` with an AI provider set and
-`ai-browser` with Browser, and the Snip page plays its three clips one after
-another. Clips with third-party material are credited in
-Settings > About and in NOTICE (`pages::about::CLIP_CREDITS`): add a line there
-with any new clip.
+- Still: `assets/previews/stills/<clip>.webp` (1920x1080 WebP, ~25-135 KB),
+  bundled at build time (`build.rs`); a page lists the clips it wants
+  (`previews::HEROES`) and one without a still is just absent.
+- Clip: `<clip>.ivf` (AV1 in IVF, 1920x1080, 20 fps, BT.709, ~0.2-0.9 MB),
+  a GitHub release asset, pinned by size and SHA-256 in
+  `src/ui/screens/settings/previews/online.rs` and saved under
+  `<data>/OpenCircle/previews`. A wrong or partial file is deleted and fetched
+  again on the next click.
+- `assets/previews/<clip>.webp`: the older animated versions, used by the
+  README only (not bundled).
 
-## Clip spec
+Clips with third-party material are credited in Settings > About and in
+NOTICE (`pages::about::CLIP_CREDITS`): add a line there with any new clip.
 
-- Animated WebP, played once (no loop needed: the player stops at the end).
-- 1200x680 px (the stage draws it 200 px tall, about 353x200, so it stays
-  sharp on high-DPI screens).
-- 15-20 fps, about 5 seconds.
-- About 1 MB each (lossy, quality around 70-80).
-- Recorded from the real app on a clean screen (no desktop icons, taskbar or
-  watermark), no private content, on material the project may show: public
-  domain, CC0 or openly licensed (credited), or made for the purpose.
+## Making them
 
-## Exporting
+The owner's edits are compositions in a local editing project (not in this
+repository). They are rendered at 1080p (Remotion `--scale 1.6`, 1920x1088,
+cropped 4 px top and bottom to 1920x1080) and encoded with SVT-AV1:
 
-From a screen recording (`in.mp4`), cut to the 5 seconds you want:
+    ffmpeg -framerate 20 -i frames/element-%03d.png -an \
+      -vf "crop=1920:1080:0:4,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p" \
+      -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
+      -c:v libsvtav1 -preset 4 -crf 28 -g 400 -svtav1-params tune=0 <clip>.ivf
 
-    ffmpeg -ss 00:00:02 -t 5 -i in.mp4 \
-      -vf "fps=18,scale=1200:680:flags=lanczos" \
-      -c:v libwebp -lossless 0 -q:v 75 -compression_level 6 \
-      -loop 1 -an assets/previews/<name>.webp
-
-Check the size (`ls -lh assets/previews`): over about 1 MB, lower `-q:v` or
-`fps`. `-loop 1` plays it once in browsers too; OpenCircle plays it once
-either way.
+The still is the edit's poster frame, cropped the same way, as WebP quality
+82. A new clip = its line in `online.rs` (name, size, SHA-256), its still,
+and the file added to the release.
 
 ## How it plays
 
-The player (`src/ui/screens/settings/previews/player.rs`) decodes one frame at
-a time while the clip plays, never the whole clip at once; at the end it drops
-the decoder and keeps only the last frame. Leaving the page or closing
-Settings frees it. The frame clock runs only while a clip plays.
+`previews::player` runs one thread per preview: it decodes the still at the
+stage's width in pixels, then (clips on disk, motion allowed) reads each clip,
+checks it against its pin, and decodes it with rav1d (dav1d's Rust port,
+`previews::av1`), turning each frame into RGBA at the stage's width (area
+averaged, so text stays sharp), at most two frames ahead of the screen.
+Leaving the page or closing Settings drops the player and ends the thread.
+The frame clock runs only while a preview plays.

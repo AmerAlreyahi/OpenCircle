@@ -14,6 +14,7 @@ Every network action is something you start.
 | Translate with the **Offline** engine (the default) | Nothing. The model runs on your PC | Nobody |
 | Select text for the first time, after you agree (Linux; on Windows only when Windows has no text recognizer for your languages, or for Arabic; Settings > Text reading > Engine chooses) | Nothing of yours. It downloads the text reader (about 30 MB). On Windows, text is otherwise read by Windows' own built-in OCR, on your PC | GitHub (ONNX Runtime releases and the oar-ocr model release), checked against pinned checksums |
 | Translate offline for the first time, after you agree | Nothing of yours. It downloads the translation model (about 120 MB, plus the OCR files if missing) | Hugging Face (a pinned commit of the OPUS-MT model) and GitHub (the five direct Arabic models, from `github.com/AmerAlreyahi/OpenCircle-models`, and the OCR files), checked against pinned checksums |
+| Click **Play preview** on a Settings page | Nothing of yours. It downloads that page's preview clips (about 0.2-1 MB each), once | GitHub (`github.com/AmerAlreyahi/OpenCircle-models` releases), checked against pinned checksums |
 | Press the **music button** (song search, only after you add your own key) | A ~10-second clip of the audio you choose (what this PC plays, or the microphone), plus your key. Then the song's cover image is downloaded | AudD (`api.audd.io`); the cover from Apple's image server (`mzstatic.com`) |
 | Update check (asked on first run, where the switch starts on; you can turn it off there or later in Settings) | Only the request for the latest release: no account, no ID, no screen data | GitHub (the release files and `SHA256SUMS.txt` with its signature) |
 | Press **Share** in Snip | The picture, to the app you pick in Windows' own share sheet | The app you choose; OpenCircle sends nothing itself |
@@ -70,8 +71,8 @@ only to the server of the provider it belongs to. A remote server must use `http
   left behind by a crash is removed the next time OpenCircle starts.
 - **Wayland.** The screenshot file the desktop portal hands over is deleted
   right after it is read.
-- **OCR and offline translation files** (runtime and models, no personal
-  data) stay in your user data folder so they are downloaded once.
+- **OCR and offline translation files, and preview clips** (runtime, models
+  and videos, no personal data) stay in your user data folder so they are downloaded once.
 - **Song search** listens only while the "Listening…" pill shows; the clip
   stays in memory and is dropped once AudD has answered. Song history is off
   by default; when on, titles and artists (no audio) are kept in

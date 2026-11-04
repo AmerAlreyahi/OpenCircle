@@ -1,195 +1,371 @@
-//! A feature preview's clip: an animated WebP bundled at build time
-//! (`assets/previews/<clip>.webp`, `build.rs`), decoded one frame at a time
-//! while it plays (never the whole clip at once). It plays once, then rests
-//! on its last frame with the decoder dropped; a still one (reduced motion)
-//! shows its first frame only. Settings closing drops it with its state.
-use std::io::Cursor;
+//! A feature preview on the stage: its bundled still
+//! (`assets/previews/stills/<clip>.webp`, `build.rs`), then, once the page's
+//! clips are on disk (`online`, owner 2026-11-04), all of them one after
+//! another in a loop for as long as the page is open. A thread does the work
+//! (the still, each clip checked against its pin, AV1 decoded by `av1`) at the
+//! stage's size in px (`Width`), at most two frames ahead of the screen;
+//! dropping the player ends it, so nothing is decoded once the page or
+//! Settings closes. Reduced motion: the still only.
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::time::Duration;
 
 use iced::widget::image::Handle;
-use image::codecs::webp::WebPDecoder;
-use image::{AnimationDecoder, Frames};
+
+use super::{av1, online};
+use crate::ocr::models::ModelFile;
 
 mod bundled {
     include!(concat!(env!("OUT_DIR"), "/previews.rs"));
 }
 
-/// The bundled clip called `name` (`None`: not made yet, the placeholder).
-pub fn clip(name: &str) -> Option<&'static [u8]> {
-    (bundled::CLIPS.iter())
+/// The bundled still of the clip `name` (`None`: no such clip yet).
+pub fn still(name: &str) -> Option<&'static [u8]> {
+    (bundled::STILLS.iter())
         .find(|(n, _)| *n == name)
         .map(|(_, b)| *b)
 }
 
-pub struct Player {
-    /// The frames still to come; `None` once at rest.
-    frames: Option<Frames<'static>>,
-    shown: Handle,
-    /// When the frame shown ends, from the start of the first clip.
-    until: Duration,
-    /// The clips in play order and the one playing: with two or more, the
-    /// last is followed by the first, for as long as the page is open.
-    list: Vec<&'static [u8]>,
-    at: usize,
+/// The stage's width in px, as last laid out (0: not yet, full size).
+pub type Width = Arc<AtomicU32>;
+
+/// rav1d's threads for one preview: smooth at 1080p, light on the rest.
+const THREADS: i32 = 2;
+
+/// A clip to play.
+#[derive(Clone)]
+pub enum Clip {
+    /// Downloaded: used only when it is exactly the pinned file.
+    Disk(PathBuf, &'static ModelFile),
+    #[cfg(test)]
+    Bytes(&'static [u8]),
 }
 
-fn frames_of(bytes: &'static [u8]) -> Option<Frames<'static>> {
-    Some(WebPDecoder::new(Cursor::new(bytes)).ok()?.into_frames())
+struct Frame {
+    image: Handle,
+    /// How long it shows (0: the still, until the first clip frame).
+    length: Duration,
+}
+
+pub struct Player {
+    names: Vec<&'static str>,
+    shown: Option<Handle>,
+    /// From the thread; `None` once it is done (a still that was all, or a
+    /// clip that failed).
+    frames: Option<Receiver<Frame>>,
+    /// When the frame shown ends, from the start.
+    until: Duration,
+    /// The clips are on disk (else the stage offers "Play preview").
+    on_disk: bool,
+    files: Vec<Clip>,
 }
 
 impl Player {
-    /// One clip at its first frame (`None`: not a WebP that decodes); `still`
-    /// keeps it there.
-    #[cfg(test)]
-    pub fn new(bytes: &'static [u8], still: bool) -> Option<Self> {
-        Self::list(vec![bytes], still)
-    }
-
-    /// The clips one after another (a single one plays once and rests).
-    pub fn list(list: Vec<&'static [u8]>, still: bool) -> Option<Self> {
-        let mut frames = frames_of(list.first()?)?;
-        let (shown, until) = decode(frames.next()?.ok()?);
+    /// The still of `names`' first clip, then, with `play` and every clip on
+    /// disk, the clips in a loop (`None`: no still for it).
+    pub fn new(
+        names: Vec<&'static str>,
+        files: Vec<Clip>,
+        play: bool,
+        width: Width,
+    ) -> Option<Self> {
+        let still = still(names.first()?)?;
+        let on_disk = files.iter().all(Clip::present);
+        let clips = (play && on_disk).then(|| files.clone());
+        let (tx, rx) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("preview".into())
+            .spawn(move || run(still, clips, &width, &tx))
+            .ok()?;
         Some(Player {
-            frames: (!still).then_some(frames),
-            shown,
-            until,
-            list,
-            at: 0,
+            names,
+            shown: None,
+            frames: Some(rx),
+            until: Duration::ZERO,
+            on_disk,
+            files,
         })
     }
 
     /// Is this the list it was made from?
-    pub fn plays(&self, list: &[&'static [u8]]) -> bool {
-        self.list.len() == list.len()
-            && (self.list.iter().zip(list)).all(|(a, b)| std::ptr::eq(*a, *b))
+    pub fn plays(&self, names: &[&'static str]) -> bool {
+        self.names == names
     }
 
-    /// `at` into the clips: the frames due by then are decoded in turn (only
-    /// the last one kept); true while frames are still to come.
+    /// `at` since it began: the frames due by then, in turn (only the last
+    /// kept); true while the thread is still at work.
     pub fn advance(&mut self, at: Duration) -> bool {
-        while at >= self.until {
-            let Some(frames) = &mut self.frames else {
+        while let Some(frames) = &self.frames {
+            if self.shown.is_some() && at < self.until {
                 break;
-            };
-            let next = match frames.next() {
-                Some(Ok(frame)) => Some(frame),
-                // the end: the next clip of the list, if there is one
-                None if self.list.len() > 1 => {
-                    self.at = (self.at + 1) % self.list.len();
-                    self.frames = frames_of(self.list[self.at]);
-                    self.frames.as_mut().and_then(|f| f.next()?.ok())
-                }
-                // the end (or a frame that doesn't decode): rest here
-                _ => None,
-            };
-            match next {
-                Some(frame) => {
-                    let (shown, length) = decode(frame);
-                    self.shown = shown;
-                    self.until += length;
-                }
-                None => self.frames = None,
+            }
+            match frames.try_recv() {
+                Ok(f) => self.show(f, Some(at)),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => self.done(),
             }
         }
         self.playing()
     }
 
-    /// The clip playing now (its place in the list).
+    /// `f` from now on; `at` (the clock): a clip frame that came late (a slow
+    /// PC) goes on from then, rather than racing through the ones behind.
+    fn show(&mut self, f: Frame, at: Option<Duration>) {
+        if let Some(at) =
+            at.filter(|at| f.length > Duration::ZERO && *at > self.until + 2 * f.length)
+        {
+            self.until = at;
+        }
+        self.until += f.length;
+        self.shown = Some(f.image);
+    }
+
+    fn done(&mut self) {
+        self.frames = None;
+        self.on_disk = self.files.iter().all(Clip::present);
+    }
+
+    /// Waits for the thread's next frame (tests: the still, then each clip
+    /// frame in order); false when it is done.
     #[cfg(test)]
-    pub fn current(&self) -> usize {
-        self.at
+    pub fn next_frame(&mut self) -> bool {
+        let Some(f) = self.frames.as_ref().and_then(|r| r.recv().ok()) else {
+            self.done();
+            return false;
+        };
+        self.shown = Some(f.image);
+        true
+    }
+
+    /// `advance`, waiting for each frame due by `at` (tests).
+    #[cfg(test)]
+    pub fn catch_up(&mut self, at: Duration) {
+        while let Some(frames) = &self.frames {
+            if self.shown.is_some() && at < self.until {
+                break;
+            }
+            match frames.recv() {
+                Ok(f) => self.show(f, None),
+                Err(_) => self.done(),
+            }
+        }
     }
 
     pub fn playing(&self) -> bool {
         self.frames.is_some()
     }
 
-    pub fn frame(&self) -> &Handle {
-        &self.shown
+    pub fn on_disk(&self) -> bool {
+        self.on_disk
+    }
+
+    /// The frame to show (`None`: the still isn't decoded yet).
+    pub fn frame(&self) -> Option<&Handle> {
+        self.shown.as_ref()
     }
 }
 
-/// A frame as the stage draws it, and how long it shows (at least 10 ms, as
-/// browsers play a frame with no delay).
-fn decode(frame: image::Frame) -> (Handle, Duration) {
-    let (n, d) = frame.delay().numer_denom_ms();
-    let length = Duration::from_micros(u64::from(n) * 1000 / u64::from(d.max(1)));
-    let buffer = frame.into_buffer();
-    let (w, h) = buffer.dimensions();
-    (
-        Handle::from_rgba(w, h, buffer.into_raw()),
-        length.max(Duration::from_millis(10)),
-    )
+impl Clip {
+    fn present(&self) -> bool {
+        match self {
+            Clip::Disk(path, f) => online::ready(&[(path.clone(), *f)]),
+            #[cfg(test)]
+            Clip::Bytes(_) => true,
+        }
+    }
+
+    fn load(&self) -> Option<Vec<u8>> {
+        match self {
+            Clip::Disk(path, f) => online::load(path, f),
+            #[cfg(test)]
+            Clip::Bytes(b) => Some(b.to_vec()),
+        }
+    }
 }
 
-/// `tests/fixtures/previews/tiny.webp` (`scripts/make-preview-fixture.py`):
-/// 5 frames of 300 ms, 48x27, each one colour.
+/// The thread: the still, then the clips over and over until the player is
+/// dropped (a send fails) or a clip doesn't decode.
+fn run(
+    still: &[u8],
+    clips: Option<Vec<Clip>>,
+    width: &Width,
+    tx: &SyncSender<Frame>,
+) -> Option<()> {
+    // the page is laid out right after it opens: its first preview waits for
+    // the stage's width (at most 100 ms, then full size; tests: never)
+    let tries = if cfg!(test) { 0 } else { 20 };
+    for _ in 0..tries {
+        if width.load(Ordering::Relaxed) != 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    tx.send(Frame {
+        image: still_at(still, target(width))?,
+        length: Duration::ZERO,
+    })
+    .ok()?;
+    let clips: Vec<Vec<u8>> = clips?.iter().map(Clip::load).collect::<Option<_>>()?;
+    loop {
+        for clip in &clips {
+            play(clip, width, tx)?;
+        }
+    }
+}
+
+/// One clip's frames to `tx`, each at the stage's width then.
+fn play(clip: &[u8], width: &Width, tx: &SyncSender<Frame>) -> Option<()> {
+    let ivf = av1::ivf(clip)?;
+    let length = ivf.frame;
+    let mut decoder = av1::Decoder::new(THREADS)?;
+    for packet in ivf {
+        let mut out = None;
+        decoder
+            .decode(packet, |pic| {
+                let (sw, sh) = pic.size();
+                let w = target(width).min(sw as u32).max(1) as usize;
+                let h = ((w * sh + sw / 2) / sw).max(1);
+                out = pic.rgba(w, h).map(|rgba| Frame {
+                    image: Handle::from_rgba(w as u32, h as u32, rgba),
+                    length,
+                });
+            })
+            .ok()?;
+        if let Some(frame) = out {
+            tx.send(frame).ok()?;
+        }
+    }
+    Some(())
+}
+
+/// The px width to decode at.
+fn target(width: &Width) -> u32 {
+    match width.load(Ordering::Relaxed) {
+        0 => u32::MAX,
+        w => w,
+    }
+}
+
+/// The still, at most `w` px wide (smaller: area-averaged, so it stays sharp).
+fn still_at(bytes: &[u8], w: u32) -> Option<Handle> {
+    use image::imageops::{self, FilterType};
+    let img = image::load_from_memory_with_format(bytes, image::ImageFormat::WebP).ok()?;
+    let mut img = img.into_rgba8();
+    if w < img.width() {
+        let h = (u64::from(img.height()) * u64::from(w) / u64::from(img.width())).max(1) as u32;
+        img = imageops::resize(&img, w, h, FilterType::Triangle);
+    }
+    Some(Handle::from_rgba(img.width(), img.height(), img.into_raw()))
+}
+
+/// `tests/fixtures/previews/tiny-a.ivf` (red, green, blue) and `tiny-b.ivf`
+/// (white, black): 128x72, 100 ms a frame (`scripts/make-preview-fixture.py`).
 #[cfg(test)]
-pub const TINY: &[u8] = include_bytes!("../../../../../tests/fixtures/previews/tiny.webp");
+pub const TINY_A: &[u8] = include_bytes!("../../../../../tests/fixtures/previews/tiny-a.ivf");
+#[cfg(test)]
+pub const TINY_B: &[u8] = include_bytes!("../../../../../tests/fixtures/previews/tiny-b.ivf");
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn colour(p: &Player) -> [u8; 3] {
-        match p.frame() {
+    pub(crate) fn colour(h: &Handle) -> [u8; 3] {
+        match h {
             Handle::Rgba { pixels, .. } => [pixels[0], pixels[1], pixels[2]],
             other => panic!("{other:?}"),
         }
     }
 
-    /// Each frame shows for its delay, in turn; the last stays and the
-    /// decoder is dropped (nothing left to decode, nothing held but it).
+    fn player(clips: &[&'static [u8]], play: bool, width: u32) -> Player {
+        let clips = clips.iter().map(|b| Clip::Bytes(b)).collect();
+        let width = Arc::new(AtomicU32::new(width));
+        Player::new(vec!["circle-1"], clips, play, width).expect("circle-1 has a still")
+    }
+
+    /// The still first, then a's frames, b's, a's again: in turn, for ever.
     #[test]
-    fn a_clip_plays_frame_by_frame_then_rests_on_its_last() {
+    fn the_clips_play_in_turn_and_loop() {
+        let mut p = player(&[TINY_A, TINY_B], true, 0);
+        assert!(p.next_frame(), "the still");
+        let mut seen = Vec::new();
+        for _ in 0..12 {
+            assert!(p.next_frame());
+            let [r, g, b] = colour(p.frame().unwrap());
+            seen.push(match (r > 128, g > 128, b > 128) {
+                (true, false, false) => 'r',
+                (false, true, false) => 'g',
+                (false, false, true) => 'b',
+                (true, true, true) => 'w',
+                (false, false, false) => 'k',
+                _ => '?',
+            });
+        }
+        assert_eq!(seen.iter().collect::<String>(), "rgbwkrgbwkrg");
+    }
+
+    /// The clock shows each frame for its 100 ms; a late tick catches up.
+    #[test]
+    fn frames_follow_the_clock() {
         let ms = Duration::from_millis;
-        let mut p = Player::new(TINY, false).expect("the fixture decodes");
-        let first = colour(&p);
-        assert!(p.advance(ms(0)) && p.advance(ms(299)));
-        assert_eq!(colour(&p), first, "frame 1 until 300 ms");
-        assert!(p.advance(ms(300)));
-        let second = colour(&p);
-        assert_ne!(second, first, "frame 2 from 300 ms");
-        assert!(p.advance(ms(599)));
-        assert_eq!(colour(&p), second);
-        // a late tick skips to the frame due
-        assert!(p.advance(ms(1250)));
-        let fifth = colour(&p);
-        assert!(!p.advance(ms(1500)), "the end: at rest");
-        assert_eq!(colour(&p), fifth, "rests on the last frame");
-        assert!(p.frames.is_none(), "the decoder is freed");
-        assert!(!p.advance(ms(60_000)));
-        assert_eq!(colour(&p), fifth);
+        let mut p = player(&[TINY_A], true, 64);
+        // the thread is at most two frames ahead: wait for them to be there
+        let wait = |p: &mut Player, at| {
+            for _ in 0..10_000 {
+                p.advance(at);
+                if p.until > at {
+                    return;
+                }
+                std::thread::sleep(ms(2));
+            }
+        };
+        wait(&mut p, ms(0));
+        let first = colour(p.frame().unwrap());
+        assert_eq!(p.until, ms(100), "the still gives way to frame 1 at once");
+        wait(&mut p, ms(99));
+        assert_eq!(colour(p.frame().unwrap()), first);
+        wait(&mut p, ms(100));
+        assert_ne!(colour(p.frame().unwrap()), first, "frame 2 from 100 ms");
+        assert!(p.playing(), "a clip loops: never done");
     }
 
-    /// Two or more clips play one after another and wrap round; the list is
-    /// remembered for a refresh check.
+    /// Decoded at the stage's width (16:9 kept), never above the clip's own.
     #[test]
-    fn a_list_plays_in_turn_and_loops() {
-        let ms = Duration::from_millis;
-        let mut p = Player::list(vec![TINY, TINY], false).unwrap();
-        assert!(p.plays(&[TINY, TINY]) && !p.plays(&[TINY]));
-        assert!(p.advance(ms(1400)) && p.current() == 0);
-        assert!(p.advance(ms(1600)) && p.current() == 1, "the second clip");
-        assert!(p.advance(ms(3100)) && p.current() == 0, "round again");
-        assert!(p.advance(ms(100_000)), "never rests");
-        // reduced motion: the first frame of the first clip only
-        let mut still = Player::list(vec![TINY, TINY], true).unwrap();
-        assert!(!still.advance(ms(5000)) && still.current() == 0);
+    fn frames_are_decoded_at_the_stage_width() {
+        let size = |h: &Handle| match h {
+            Handle::Rgba { width, height, .. } => (*width, *height),
+            other => panic!("{other:?}"),
+        };
+        let mut p = player(&[TINY_A], true, 64);
+        assert!(p.next_frame());
+        // the still (1920x1080) at 64 px
+        assert_eq!(size(p.frame().unwrap()), (64, 36));
+        assert!(p.next_frame());
+        assert_eq!(size(p.frame().unwrap()), (64, 36));
+        let mut big = player(&[TINY_A], true, 4000);
+        assert!(big.next_frame() && big.next_frame());
+        assert_eq!(size(big.frame().unwrap()), (128, 72), "never upscaled");
     }
 
-    /// Reduced motion: the first frame, and nothing plays.
+    /// Without the clips on disk, or with reduced motion: the still, then done.
     #[test]
-    fn a_still_clip_shows_its_first_frame() {
-        let moving = Player::new(TINY, false).unwrap();
-        let mut still = Player::new(TINY, true).unwrap();
-        assert!(!still.playing() && !still.advance(Duration::from_secs(9)));
-        assert_eq!(colour(&still), colour(&moving));
+    fn a_still_is_all_without_the_clips_or_with_reduced_motion() {
+        let mut p = player(&[TINY_A], false, 0);
+        assert!(p.next_frame() && !p.next_frame());
+        assert!(!p.playing() && p.frame().is_some());
+        let missing = std::env::temp_dir().join("oc-no-such-preview.ivf");
+        let clips = vec![Clip::Disk(missing, &online::CLIPS[0])];
+        let mut p = Player::new(vec!["circle-1"], clips, true, Width::default()).unwrap();
+        assert!(!p.on_disk(), "offer Play preview");
+        assert!(p.next_frame() && !p.next_frame(), "the still only");
     }
 
+    /// A clip that isn't AV1 ends the thread (the still stays).
     #[test]
-    fn a_broken_clip_is_none() {
-        assert!(Player::new(b"RIFF....WEBPnope", false).is_none());
-        assert!(Player::new(&TINY[..40], false).is_none());
+    fn a_broken_clip_stops_at_the_still() {
+        let mut p = player(&[b"DKIF nope"], true, 0);
+        assert!(p.next_frame() && !p.next_frame());
+        assert!(p.frame().is_some());
     }
 }

@@ -266,7 +266,8 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
 [MIT](LICENSE)
 
-Media exception: the preview clips bundled in the app (`assets/previews`) show
+Media exception: the preview clips (`assets/previews`: the stills bundled in the
+app, the full clips downloaded when you play a preview) show
 third-party material under its own terms, which the app's MIT licence does not
 relicense. Each clip's credit and licence is listed in `NOTICE` and in
 Settings > About.

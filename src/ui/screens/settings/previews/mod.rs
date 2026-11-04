@@ -2,12 +2,12 @@
 //! `featurePreviews`; owner, 2026-10-27: only features that ship today, a Labs
 //! one only while its switch is on). One list, `HEROES`; a new preview = one
 //! entry here + its clip (owner, 2026-10-28: a real recording, made by the
-//! owner, `assets/previews/<clip>.webp`, docs/previews.md). A clip plays once
-//! per page visit (`player`), then rests on its last frame; the clock runs
-//! only meanwhile. No clip yet (owner, 2026-10-30): only the heading, no
-//! Hide / Show preview and no stage; the clip's file appearing shows both.
-use std::sync::atomic::{AtomicUsize, Ordering};
-
+//! owner; docs/previews.md). The app bundles a still per clip
+//! (`assets/previews/stills/<clip>.webp`); "Play preview" downloads the page's
+//! 1080p clips once (`online`, owner 2026-11-04), then they play in turn and
+//! loop while the page is open (`player`), also at later visits, from disk.
+//! No still yet (owner, 2026-10-30): only the heading, no Hide / Show preview
+//! and no stage; the still's file appearing shows both.
 use iced::widget::column;
 use iced::{Element, Padding};
 
@@ -17,6 +17,8 @@ use crate::hotkey::QuickId;
 use crate::labs::Feature;
 use crate::ui::kit::hero::{self, hero};
 
+mod av1;
+pub mod online;
 pub mod player;
 
 /// Under each preview (`margin-bottom: 12px`).
@@ -32,19 +34,9 @@ pub struct Hero {
     pub lab: Option<Feature>,
     /// The feature's shortcut in `config` ("" = not set).
     pub shortcut: fn(&Config) -> &str,
-    /// Its clips' names (`assets/previews/<name>.webp`, in order) for this
-    /// config; a name with no file is absent.
+    /// Its clips' names for this config, in play order (all in turn, in a
+    /// loop); a name with no still is absent.
     pub clips: fn(&Config) -> &'static [&'static str],
-    pub rule: Rule,
-}
-
-/// How a page with several clips plays them.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Rule {
-    /// One clip per Settings opening, taking turns.
-    Turns,
-    /// All of them one after another, in a loop.
-    Sequence,
 }
 
 /// The AI page: the in-app chat's clip with an AI provider, the browser's
@@ -54,17 +46,6 @@ fn ai_clips(c: &Config) -> &'static [&'static str] {
         Provider::Anthropic | Provider::OpenaiCompatible => &["ai-chat"],
         _ => &["ai-browser"],
     }
-}
-
-/// Settings openings so far: `Turns` takes the next clip at each one.
-static OPENINGS: AtomicUsize = AtomicUsize::new(0);
-
-pub fn next_opening() -> usize {
-    // tests (golden images) always see the first clip
-    if cfg!(test) {
-        return 0;
-    }
-    OPENINGS.fetch_add(1, Ordering::Relaxed)
 }
 
 /// In the design's order.
@@ -77,7 +58,6 @@ pub const HEROES: [Hero; 7] = [
         lab: None,
         shortcut: capture,
         clips: |_| &["circle-1", "circle-2", "circle-3"],
-        rule: Rule::Turns,
     },
     Hero {
         page: Section::TextReading,
@@ -87,7 +67,6 @@ pub const HEROES: [Hero; 7] = [
         lab: None,
         shortcut: copy_text,
         clips: |_| &["text"],
-        rule: Rule::Turns,
     },
     Hero {
         page: Section::Translate,
@@ -97,7 +76,6 @@ pub const HEROES: [Hero; 7] = [
         lab: None,
         shortcut: translate,
         clips: |_| &["translate"],
-        rule: Rule::Turns,
     },
     Hero {
         page: Section::Ai,
@@ -107,7 +85,6 @@ pub const HEROES: [Hero; 7] = [
         lab: None,
         shortcut: ask,
         clips: ai_clips,
-        rule: Rule::Turns,
     },
     Hero {
         page: Section::Snip,
@@ -117,7 +94,6 @@ pub const HEROES: [Hero; 7] = [
         lab: None,
         shortcut: snip,
         clips: |_| &["snip-blur", "snip-comment", "snip-long"],
-        rule: Rule::Sequence,
     },
     // Live translate has no page of its own: its rows are on Translate's.
     Hero {
@@ -128,7 +104,6 @@ pub const HEROES: [Hero; 7] = [
         lab: Some(Feature::Live),
         shortcut: live,
         clips: |_| &["live"],
-        rule: Rule::Turns,
     },
     Hero {
         page: Section::Song,
@@ -138,7 +113,6 @@ pub const HEROES: [Hero; 7] = [
         lab: Some(Feature::Song),
         shortcut: song,
         clips: |_| &["song"],
-        rule: Rule::Turns,
     },
 ];
 
@@ -188,26 +162,18 @@ fn hidden(state: &State, h: &Hero) -> bool {
     (state.draft.appearance.hidden_previews.iter()).any(|k| k == h.key)
 }
 
-/// The bundled clips `h` plays now, in play order (`opening`: this Settings
-/// opening's number); empty = it has none, so no preview.
-pub fn chosen(h: &Hero, config: &Config, opening: usize) -> Vec<&'static [u8]> {
-    chosen_from(h, config, opening, player::clip)
+/// The clips `h` plays now, in play order: those with a still (empty = none,
+/// so no preview).
+pub fn chosen(h: &Hero, config: &Config) -> Vec<&'static str> {
+    chosen_from(h, config, |n| player::still(n).is_some())
 }
 
-fn chosen_from(
-    h: &Hero,
-    config: &Config,
-    opening: usize,
-    bundled: impl Fn(&str) -> Option<&'static [u8]>,
-) -> Vec<&'static [u8]> {
-    let mut all: Vec<_> = (h.clips)(config)
+fn chosen_from(h: &Hero, config: &Config, has: impl Fn(&str) -> bool) -> Vec<&'static str> {
+    (h.clips)(config)
         .iter()
-        .filter_map(|n| bundled(n))
-        .collect();
-    if h.rule == Rule::Turns && !all.is_empty() {
-        all = vec![all[opening % all.len()]];
-    }
-    all
+        .copied()
+        .filter(|n| has(n))
+        .collect()
 }
 
 /// The page's shown previews that have a clip: (its `hidden_previews` name,
@@ -215,19 +181,29 @@ fn chosen_from(
 pub fn clips(
     state: &State,
     page: Section,
-) -> impl Iterator<Item = (&'static str, Vec<&'static [u8]>)> {
+) -> impl Iterator<Item = (&'static str, Vec<&'static str>)> {
     (on(state, page).filter(|h| !hidden(state, h)))
-        .map(|h| (h.key, chosen(h, &state.draft, state.opening)))
+        .map(|h| (h.key, chosen(h, &state.draft)))
         .filter(|(_, c)| !c.is_empty())
 }
 
+/// The calm line under a stage whose download failed.
+pub const FAILED: &str = "Couldn't download the preview. Check your connection and try again.";
+
 /// The page's previews, `None` when it has none.
 pub fn view(state: &State) -> Option<Element<'_, Message>> {
+    let reduced = crate::ui::kit::motion::reduced();
     let heroes: Vec<_> = on(state, state.section)
         .map(|h| {
             let shown = !hidden(state, h);
-            let frame = (state.players.iter()).find(|(k, _)| *k == h.key);
-            let has_clip = frame.is_some() || !chosen(h, &state.draft, state.opening).is_empty();
+            let player = (state.players.iter()).find(|(k, _)| *k == h.key);
+            let has_clip = player.is_some() || !chosen(h, &state.draft).is_empty();
+            // the clips aren't on disk yet: the click that downloads them
+            let play = match state.fetching.contains(&h.key) {
+                true => Some(("Downloading…", None)),
+                false => (player.is_some_and(|(_, p)| !p.on_disk()) && !reduced)
+                    .then_some(("Play preview", Some(Message::Fetch(h.key)))),
+            };
             hero(hero::Hero {
                 title: h.title,
                 desc: h.desc,
@@ -235,8 +211,10 @@ pub fn view(state: &State) -> Option<Element<'_, Message>> {
                 keys: key_labels((h.shortcut)(&state.draft)),
                 shown,
                 toggle: has_clip.then_some(Message::Preview(h.key, !shown)),
-                replay: Message::Replay,
-                frame: frame.map(|(_, p)| p.frame().clone()),
+                play,
+                note: state.failed.contains(&h.key).then_some(FAILED),
+                frame: player.and_then(|(_, p)| p.frame().cloned()),
+                width: (state.stage.clone(), state.scale),
             })
         })
         .collect();
@@ -257,42 +235,38 @@ mod tests {
         HEROES.iter().find(|h| h.key == key).unwrap()
     }
 
-    /// A fake bundle: each name's bytes are the name itself.
-    fn bundle(have: &'static [&'static str]) -> impl Fn(&str) -> Option<&'static [u8]> {
-        move |n| have.iter().find(|h| **h == n).map(|h| h.as_bytes())
+    /// A fake bundle of stills.
+    fn bundle(have: &'static [&'static str]) -> impl Fn(&str) -> bool {
+        move |n| have.contains(&n)
     }
 
     #[test]
     fn a_page_without_files_has_no_clips_and_a_missing_one_is_skipped() {
         let c = Config::default();
-        assert!(chosen_from(hero("text_reading"), &c, 0, bundle(&[])).is_empty());
-        assert!(chosen_from(hero("live"), &c, 0, bundle(&["circle-1"])).is_empty());
+        assert!(chosen_from(hero("text_reading"), &c, bundle(&[])).is_empty());
+        assert!(chosen_from(hero("live"), &c, bundle(&["circle-1"])).is_empty());
         // Snip with only its long capture bundled: just that one
-        let got = chosen_from(hero("snip"), &c, 0, bundle(&["snip-long"]));
-        assert_eq!(got, [b"snip-long".as_slice()]);
+        let got = chosen_from(hero("snip"), &c, bundle(&["snip-long"]));
+        assert_eq!(got, ["snip-long"]);
     }
 
-    /// Look: one clip per Settings opening, taking turns (held ones absent).
+    /// Every page plays all its clips, in order, in a loop (owner,
+    /// 2026-11-04: no more one per opening).
     #[test]
-    fn turns_take_one_clip_per_opening() {
+    fn a_page_plays_every_clip_in_order() {
         let c = Config::default();
-        let b = bundle(&["circle-1", "circle-2", "circle-3"]);
-        let at = |i| chosen_from(hero("look"), &c, i, &b);
-        assert_eq!(at(0), [b"circle-1".as_slice()]);
-        assert_eq!(at(1), [b"circle-2".as_slice()]);
-        assert_eq!(at(3), at(0));
-        // only the first bundled (the others held): it, every time
-        let one = bundle(&["circle-1"]);
-        assert_eq!(chosen_from(hero("look"), &c, 7, &one), at(0));
-    }
-
-    /// Snip: all of them, in order.
-    #[test]
-    fn a_sequence_gives_every_clip_in_order() {
-        let b = bundle(&["snip-long", "snip-blur", "snip-comment"]);
-        let got = chosen_from(hero("snip"), &Config::default(), 5, b);
-        let want: Vec<&[u8]> = vec![b"snip-blur", b"snip-comment", b"snip-long"];
-        assert_eq!(got, want);
+        let b = bundle(&[
+            "circle-3",
+            "circle-1",
+            "circle-2",
+            "snip-long",
+            "snip-blur",
+            "snip-comment",
+        ]);
+        let look = chosen_from(hero("look"), &c, &b);
+        assert_eq!(look, ["circle-1", "circle-2", "circle-3"]);
+        let snip = chosen_from(hero("snip"), &c, &b);
+        assert_eq!(snip, ["snip-blur", "snip-comment", "snip-long"]);
     }
 
     /// AI: the chat clip with a provider, the browser's without.
@@ -300,29 +274,39 @@ mod tests {
     fn ai_picks_its_clip_by_provider() {
         let b = bundle(&["ai-chat", "ai-browser"]);
         let mut c = Config::default();
-        assert_eq!(
-            chosen_from(hero("ai"), &c, 0, &b),
-            [b"ai-browser".as_slice()]
-        );
+        assert_eq!(chosen_from(hero("ai"), &c, &b), ["ai-browser"]);
         for p in [Provider::Anthropic, Provider::OpenaiCompatible] {
             c.ai.provider = p;
-            assert_eq!(chosen_from(hero("ai"), &c, 0, &b), [b"ai-chat".as_slice()]);
+            assert_eq!(chosen_from(hero("ai"), &c, &b), ["ai-chat"]);
         }
     }
 
     /// What ships: Look, Text, AI (both providers) and Snip have clips;
     /// Translate is held for a re-recording (owner, 2026-11-03: the take showed
-    /// translate bugs); Live and Song stay hidden until theirs arrive.
+    /// translate bugs); Live and Song stay hidden until theirs arrive. Every
+    /// clip with a still is pinned for download, and only those.
     #[test]
     fn the_shipped_clips_are_what_the_pages_name() {
         let mut c = Config::default();
-        let has = |k, c: &Config| !chosen(hero(k), c, 0).is_empty();
+        let has = |k, c: &Config| !chosen(hero(k), c).is_empty();
         assert!(has("look", &c) && !has("translate", &c) && has("snip", &c));
         assert!(has("ai", &c));
         c.ai.provider = Provider::Anthropic;
         assert!(has("ai", &c));
         assert!(has("text_reading", &c) && !has("live", &c) && !has("song", &c));
-        assert_eq!(chosen(hero("snip"), &c, 0).len(), 3);
+        assert_eq!(chosen(hero("snip"), &c).len(), 3);
+        assert_eq!(chosen(hero("look"), &c).len(), 3);
+        let stills: Vec<_> = (online::CLIPS.iter())
+            .map(|f| f.name.strip_suffix(".ivf").unwrap())
+            .collect();
+        for name in &stills {
+            assert!(player::still(name).is_some(), "{name} has no still");
+        }
+        assert_eq!(stills.len(), 9);
+        for f in &online::CLIPS {
+            assert!(f.size <= 1_600_000, "{} too big for a preview", f.name);
+            assert!(f.sha256.len() == 64 && f.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
+        }
     }
 
     /// About lists the credits of exactly the bundled clips.
@@ -345,7 +329,7 @@ mod tests {
                 .any(|c| c.text.contains("not affiliated with"))
         );
         // COFFEE: bundled, credited under the Unsplash License
-        assert!(player::clip("text").is_some());
+        assert!(player::still("text").is_some());
         assert!(
             CLIP_CREDITS
                 .iter()
@@ -353,7 +337,7 @@ mod tests {
         );
         // what ships: 3 photos, COFFEE, OWID solar, Google note, OWID tourism,
         // the caveat (Wikipedia comes back with the translate clip)
-        let shipped = clip_credits(|c| player::clip(c).is_some());
+        let shipped = clip_credits(|c| player::still(c).is_some());
         assert_eq!(shipped.len(), 8);
         assert!(shipped.iter().all(|c| !c.text.contains("Matti Blume")));
         let all = clip_credits(|_| true);

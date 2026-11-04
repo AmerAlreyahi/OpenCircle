@@ -9,16 +9,17 @@
 // The setup build: `OPENCIRCLE_SETUP_MSI=<the release MSI>` embeds that MSI
 // (`setup::payload`, cfg `setup_payload`) and the exe becomes OpenCircle-Setup.
 fn previews() {
-    // the folder: a clip added or removed reruns this
-    println!("cargo::rerun-if-changed=assets/previews");
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/previews");
+    // only the stills (the clips are downloaded on "Play preview"); the
+    // folder: a still added or removed reruns this
+    println!("cargo::rerun-if-changed=assets/previews/stills");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/previews/stills");
     let mut files: Vec<_> = (std::fs::read_dir(&dir).into_iter().flatten())
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "webp"))
         .collect();
     files.sort();
-    let mut out = String::from("pub const CLIPS: &[(&str, &[u8])] = &[\n");
+    let mut out = String::from("pub const STILLS: &[(&str, &[u8])] = &[\n");
     for file in files {
         let name = (file.file_stem().and_then(|n| n.to_str())).expect("a UTF-8 name");
         let path = file.to_str().expect("a UTF-8 path");

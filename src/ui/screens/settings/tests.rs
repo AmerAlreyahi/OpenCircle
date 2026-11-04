@@ -2178,14 +2178,15 @@ fn appearance_and_look_match_their_golden_images() {
 
 // ---- feature previews (`previews`, `kit::hero`) ----
 
-/// `s`'s page with the fixture as its clips (no clip is bundled yet).
+/// `s`'s page playing the fixture clips (as if downloaded).
 fn with_clip(s: &mut State) {
-    s.play_clip(super::previews::player::TINY, Duration::ZERO);
+    use super::previews::player::{TINY_A, TINY_B};
+    s.play_clip(&[TINY_A, TINY_B], Duration::ZERO);
 }
 
-/// Until the owner's clips exist (owner, 2026-10-30), a page shows only the
-/// feature's heading: no Hide / Show preview, no stage, no placeholder, no
-/// clock. With a clip, the button and the stage are there.
+/// Without a still (owner, 2026-10-30), a page shows only the feature's
+/// heading: no Hide / Show preview, no stage, no clock. With a clip, the
+/// button and the stage are there.
 #[test]
 fn a_preview_without_a_clip_shows_only_its_heading() {
     let (mut s, _) = state(None);
@@ -2195,13 +2196,7 @@ fn a_preview_without_a_clip_shows_only_its_heading() {
     assert!(s.players.is_empty() && !s.animating(), "nothing plays");
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Song search"), "{texts:?}");
-    for gone in [
-        "Preview",
-        "5 s preview",
-        "Replay",
-        "Hide preview",
-        "Show preview",
-    ] {
+    for gone in ["Preview", "Play preview", "Hide preview", "Show preview"] {
         assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
     }
     // hidden by key, still no button to bring the stage back
@@ -2212,70 +2207,114 @@ fn a_preview_without_a_clip_shows_only_its_heading() {
     with_clip(&mut s);
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Hide preview"), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "5 s preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Preview"), "{texts:?}");
     // a page without a preview starts no clock
     moving_update(&mut s, Message::Section(Section::Privacy));
     s.moved = None;
     assert!(!s.animating());
 }
 
-/// A clip plays once from the visit, then rests on its last frame and the
-/// clock stops; Replay plays it again; leaving the page drops it.
+/// The clips play in turn and loop for as long as the page is open (owner,
+/// 2026-11-04): the clock never rests; leaving the page frees them.
 #[test]
-fn a_preview_plays_once_then_rests_and_the_clock_stops() {
+fn a_preview_loops_until_the_page_is_left() {
     let (mut s, _) = state(None);
-    s.draft.labs.song = true;
-    update(&mut s, Message::Section(Section::Song));
+    update(&mut s, Message::Section(Section::Ai));
     with_clip(&mut s);
     assert!(s.animating(), "playing");
     let texts = shot::texts(view(&s));
-    assert!(!texts.iter().any(|t| t == "Preview"));
-    assert!(texts.iter().any(|t| t == "Replay"), "{texts:?}");
-    // the clip's time (1.5 s) has passed
-    s.played = Some(Instant::now() - Duration::from_millis(1600));
+    assert!(!texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    // long after both clips' 0.5 s: still going
+    s.played = Some(Instant::now() - Duration::from_secs(60));
     moving_update(&mut s, Message::Tick);
-    assert!(!s.animating(), "rests: no clock");
-    assert!(
-        s.players.iter().all(|(_, p)| !p.playing()),
-        "on its last frame"
-    );
-    assert_eq!(s.players.len(), 1, "the last frame stays shown");
-    // Replay: from the bundled clips again (none yet: the placeholder)
-    moving_update(&mut s, Message::Replay);
-    assert!(s.players.is_empty() && !s.animating());
-    with_clip(&mut s);
+    assert!(s.animating() && s.players.iter().all(|(_, p)| p.playing()));
     moving_update(&mut s, Message::Section(Section::General));
     assert!(s.players.is_empty(), "left the page: freed");
 }
 
-/// The AI page plays the bundled browser clip; with a provider set it
-/// switches to the chat clip at once.
+/// Nothing is downloaded until "Play preview": visiting every page asks for
+/// no download and offers the button (the clips aren't on this PC); the
+/// click downloads that preview's clips once, shows Downloading…, then
+/// plays; a failure shows the calm note and the button again.
+#[test]
+fn play_preview_downloads_only_on_the_click() {
+    use super::previews::FAILED;
+    let (mut s, _) = state(None);
+    s.draft.labs = crate::labs::Labs::all_on();
+    for page in super::pages::PAGES.iter().map(|p| p.id) {
+        let out = update(&mut s, Message::Section(page));
+        assert!(!matches!(out, Outcome::Fetch(..)), "{page:?} fetched");
+    }
+    update(&mut s, Message::Section(Section::Ai));
+    // a player with its still; the clips aren't here (empty data folder)
+    assert!(s.players.iter().all(|(_, p)| !p.on_disk()));
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    let out = update(&mut s, Message::Fetch("ai"));
+    assert_eq!(out, Outcome::Fetch("ai", vec!["ai-browser"]));
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Downloading…"));
+    assert_eq!(update(&mut s, Message::Fetch("ai")), Outcome::None, "once");
+    update(&mut s, Message::Fetched("ai", false));
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == FAILED) && texts.iter().any(|t| t == "Play preview"));
+    // the retry clears the note
+    assert!(matches!(
+        update(&mut s, Message::Fetch("ai")),
+        Outcome::Fetch(..)
+    ));
+    assert!(!shot::texts(view(&s)).iter().any(|t| t == FAILED));
+    update(&mut s, Message::Fetched("ai", true));
+    assert!(s.fetching.is_empty() && s.failed.is_empty());
+}
+
+/// The stage is as wide as the page and 16:9; its width in px (times the
+/// scale factor) is what the clips are decoded at.
+#[test]
+fn the_stage_scales_with_the_window() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    let _ = shot::texts(view(&s));
+    let w1 = s.stage.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(w1 > 300, "{w1}");
+    update(&mut s, Message::Scale(2.0));
+    let _ = shot::texts(view(&s));
+    let w2 = s.stage.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(w2.abs_diff(2 * w1) <= 1, "{w1} -> {w2}");
+}
+
+/// The AI page plays the browser clip; with a provider set it switches to
+/// the chat clip at once.
 #[test]
 fn the_ai_preview_follows_the_provider() {
     use super::previews::{HEROES, chosen};
     let ai = HEROES.iter().find(|h| h.key == "ai").unwrap();
     let (mut s, _) = state(None);
     moving_update(&mut s, Message::Section(Section::Ai));
-    moving_update(&mut s, Message::Replay);
-    let want = chosen(ai, &s.draft, s.opening);
+    let want = chosen(ai, &s.draft);
     assert!(s.players[0].1.plays(&want));
     s.draft.ai.provider = crate::config::Provider::Anthropic;
     moving_update(&mut s, Message::Preview("ai", true));
-    let chat = chosen(ai, &s.draft, s.opening);
+    let chat = chosen(ai, &s.draft);
     assert_ne!(chat, want, "another clip");
     assert!(s.players[0].1.plays(&chat), "playing the chat clip");
 }
 
-/// Reduced motion: the first frame at once, and no clock for it.
+/// Reduced motion: the still, no clock for it, no Play preview.
 #[test]
-fn with_reduced_motion_a_preview_shows_its_first_frame() {
+fn with_reduced_motion_a_preview_shows_its_still() {
     motion::set_reduced(true);
     let (mut s, _) = state(None);
     moving_update(&mut s, Message::Section(Section::Ai));
     with_clip(&mut s);
     s.moved = None;
     assert!(s.played.is_none() && !s.animating());
-    assert!(s.players.iter().all(|(_, p)| !p.playing()));
+    assert!(
+        s.players
+            .iter()
+            .all(|(_, p)| !p.playing() && p.frame().is_some())
+    );
+    update(&mut s, Message::Section(Section::Ai));
+    assert!(!shot::texts(view(&s)).iter().any(|t| t == "Play preview"));
     motion::set_reduced(false);
 }
 
@@ -2293,10 +2332,10 @@ fn hiding_a_preview_writes_its_key_and_showing_removes_it() {
     update(&mut s, Message::Save);
     let saved = Config::load_from(&path).0.appearance.hidden_previews;
     assert_eq!(saved, ["ai"]);
-    with_clip(&mut s); // no clip is bundled yet: the player stands in for it
+    with_clip(&mut s);
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Show preview"), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == "5 s preview" || t == "Replay"));
+    assert!(!texts.iter().any(|t| t == "Preview" || t == "Play preview"));
     moving_update(&mut s, Message::Preview("ai", true));
     with_clip(&mut s);
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide preview"));
@@ -2355,22 +2394,22 @@ fn with_labs(labs: Labs) -> State {
     s
 }
 
-/// Each page's previews (the placeholders until the clips exist), in
-/// Sapphire and Daylight.
+/// Each page's previews as first shown (the still and Play preview; heading
+/// only without a still), in Sapphire and Daylight.
 #[test]
-fn previews_last_frames_match_their_golden_images() {
+fn previews_stills_match_their_golden_images() {
     use crate::ui::kit::surface::{Material, surface};
     use crate::ui::kit::testing::golden;
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     let mut failed = Vec::new();
     for theme in [&SAPPHIRE, &DAYLIGHT] {
         for (name, section, height) in [
-            ("look", Section::Look, 280.0),
-            ("text-reading", Section::TextReading, 280.0),
-            ("translate-live", Section::Translate, 540.0),
-            ("ai", Section::Ai, 280.0),
-            ("snip", Section::Snip, 280.0),
-            ("song", Section::Song, 280.0),
+            ("look", Section::Look, 420.0),
+            ("text-reading", Section::TextReading, 420.0),
+            ("translate-live", Section::Translate, 200.0),
+            ("ai", Section::Ai, 420.0),
+            ("snip", Section::Snip, 420.0),
+            ("song", Section::Song, 120.0),
         ] {
             let (mut s, _) = state(None);
             s.draft.labs = Labs::all_on();
@@ -2378,13 +2417,17 @@ fn previews_last_frames_match_their_golden_images() {
             themes::set(theme);
             let file = format!("preview-{name}-{}", theme.id);
             let size = Size::new(640.0, height);
-            failed.extend(golden::check("screens", &file, size, &[1.0], || {
-                surface(Material::Window, 0.0, super::previews::view(&s).unwrap())
+            fn page(s: &State) -> Element<'_, Message> {
+                surface(Material::Window, 0.0, super::previews::view(s).unwrap())
                     .padding(16)
                     .width(iced::Fill)
                     .height(iced::Fill)
                     .into()
-            }));
+            }
+            // laid out once (the stage's width), then each still decoded at it
+            let _ = shot::render(page(&s), 640, height as u32);
+            update(&mut s, Message::Preview("look", true));
+            failed.extend(golden::check("screens", &file, size, &[1.0], || page(&s)));
         }
     }
     themes::set(&SAPPHIRE);

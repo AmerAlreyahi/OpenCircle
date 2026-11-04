@@ -1096,29 +1096,47 @@ fn hero_sheet() {
             .collect::<Vec<u8>>();
         Handle::from_rgba(w, h, pixels)
     };
-    let view = move |ar: bool, clip: bool, shown: bool, button: bool| -> Element<'static, ()> {
-        hero(Hero {
-            title: s(ar, "Circle to Search", "دائرة للبحث"),
-            desc: s(
-                ar,
-                "Circle anything and search.",
-                "ضع دائرة حول أي شيء وابحث.",
-            ),
-            lab: ar,
-            keys: vec!["Ctrl".into(), "Shift".into(), "Space".into()],
-            shown,
-            toggle: button.then_some(()),
-            replay: (),
-            frame: clip.then(frame),
-        })
-    };
+    // play: 0 = playing (no button), 1 = Play preview, 2 = downloading, 3 = failed
+    let view =
+        move |ar: bool, clip: bool, shown: bool, button: bool, play: u8| -> Element<'static, ()> {
+            hero(Hero {
+                title: s(ar, "Circle to Search", "دائرة للبحث"),
+                desc: s(
+                    ar,
+                    "Circle anything and search.",
+                    "ضع دائرة حول أي شيء وابحث.",
+                ),
+                lab: ar,
+                keys: vec!["Ctrl".into(), "Shift".into(), "Space".into()],
+                shown,
+                toggle: button.then_some(()),
+                play: match play {
+                    1 | 3 => Some((s(ar, "Play preview", "تشغيل المعاينة"), Some(()))),
+                    2 => Some((s(ar, "Downloading…", "جارٍ التنزيل…"), None)),
+                    _ => None,
+                },
+                note: (play == 3)
+                    .then(|| s(ar, "Couldn't download the preview.", "تعذّر تنزيل المعاينة.")),
+                frame: clip.then(frame),
+                width: (Default::default(), 1.0),
+            })
+        };
     let rows = vec![
-        row("clip", Act::Rest, move |ar| view(ar, true, true, true)),
-        row("placeholder", Act::Rest, move |ar| {
-            view(ar, false, true, true)
+        row("clip", Act::Rest, move |ar| view(ar, true, true, true, 0)),
+        row("still", Act::Rest, move |ar| view(ar, true, true, true, 1)),
+        row("downloading", Act::Rest, move |ar| {
+            view(ar, true, true, true, 2)
         }),
-        row("hidden", Act::Rest, move |ar| view(ar, false, false, true)),
-        row("no clip", Act::Rest, move |ar| view(ar, false, true, false)),
+        row("failed", Act::Rest, move |ar| view(ar, true, true, true, 3)),
+        row("not decoded yet", Act::Rest, move |ar| {
+            view(ar, false, true, true, 0)
+        }),
+        row("hidden", Act::Rest, move |ar| {
+            view(ar, false, false, true, 0)
+        }),
+        row("no clip", Act::Rest, move |ar| {
+            view(ar, false, true, false, 0)
+        }),
     ];
     sheet("hero", Size::new(420.0, 400.0), &rows);
 }

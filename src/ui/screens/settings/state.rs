@@ -604,9 +604,14 @@ pub struct State {
     /// The page's preview clips, by `hidden_previews` name: made at each
     /// visit, dropped with the page (and with Settings).
     pub(super) players: Vec<(&'static str, previews::player::Player)>,
-    /// Which Settings opening this is (`previews::next_opening`): a page
-    /// with several clips takes its turn from it.
-    pub(super) opening: usize,
+    /// The preview stage's width in px (`kit::hero`; the clips are decoded at
+    /// it) and the window's scale factor.
+    pub(super) stage: previews::player::Width,
+    pub(super) scale: f32,
+    /// Previews whose clips are downloading, and those whose download failed
+    /// (by `hidden_previews` name).
+    pub(super) fetching: Vec<&'static str>,
+    pub(super) failed: Vec<&'static str>,
     /// Windows opens its own screen capture with Print Screen
     /// (`hotkey::windows_snips_print_screen`), read when the window opens and
     /// at each visit of the Snip page.
@@ -727,9 +732,14 @@ pub enum Message {
     /// The frame clock (glides, previews).
     Tick,
     /// A feature preview's Hide (`false`) / Show (`true`), by its
-    /// `hidden_previews` name; and Replay.
+    /// `hidden_previews` name.
     Preview(&'static str, bool),
-    Replay,
+    /// "Play preview": download that preview's clips (`Outcome::Fetch`)...
+    Fetch(&'static str),
+    /// ... and whether they came (on the worker thread).
+    Fetched(&'static str, bool),
+    /// The window's scale factor (the preview stage's px).
+    Scale(f32),
     /// The footer's question when the window is closed with unsaved changes (#136).
     CloseSave,
     CloseDiscard,
@@ -809,6 +819,9 @@ pub enum Outcome {
     /// History: delete these kinds (none: only count) on a worker thread
     /// (`history::tidy`) and send what is kept back as `Message::Kept`.
     History(Vec<Kind>),
+    /// Download these preview clips on a worker thread (`previews::online::fetch`)
+    /// and answer `Message::Fetched` with this preview's name.
+    Fetch(&'static str, Vec<&'static str>),
 }
 
 /// A config write for a worker thread.
@@ -951,7 +964,10 @@ impl State {
             picked: None,
             played: None,
             players: Vec::new(),
-            opening: previews::next_opening(),
+            stage: Default::default(),
+            scale: 1.0,
+            fetching: Vec::new(),
+            failed: Vec::new(),
             print_screen_taken: crate::hotkey::windows_snips_print_screen(),
             kept: None,
             clearing_all: false,
@@ -1199,7 +1215,9 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         Message::Save
             | Message::Written(_)
             | Message::Tick
-            | Message::Replay
+            | Message::Fetch(_)
+            | Message::Fetched(..)
+            | Message::Scale(_)
             | Message::Caption(_)
             | Message::CloseSave
             | Message::CloseDiscard
@@ -1450,7 +1468,26 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 state.played = None;
             }
         }
-        Message::Replay => state.play(),
+        Message::Fetch(key) => {
+            let names = (previews::clips(state, state.section))
+                .find(|(k, _)| *k == key)
+                .map(|(_, names)| names);
+            // only pinned clips, one download at a time per preview
+            let pinned = |n: &Vec<_>| previews::online::files(n).is_some();
+            if let Some(names) = names.filter(|n| pinned(n) && !state.fetching.contains(&key)) {
+                state.fetching.push(key);
+                state.failed.retain(|k| *k != key);
+                return Outcome::Fetch(key, names);
+            }
+        }
+        Message::Fetched(key, ok) => {
+            state.fetching.retain(|k| *k != key);
+            match ok {
+                true => state.play(),
+                false => state.failed.push(key),
+            }
+        }
+        Message::Scale(scale) => state.scale = scale,
         Message::Tick => {
             if let Some(t) = state.played {
                 let at = t.elapsed();
@@ -1694,15 +1731,23 @@ impl State {
         self.moved.is_some() || self.picked.is_some() || self.played.is_some()
     }
 
-    /// The page's previews playing `clip` as if they began `ago` (no clip is
-    /// bundled until the owner makes them).
+    /// The page's previews playing `clips` (as if downloaded), as if they
+    /// began `ago` (each showing the frame due by then).
     #[cfg(test)]
-    pub fn play_clip(&mut self, clip: &'static [u8], ago: std::time::Duration) {
+    pub fn play_clip(&mut self, clips: &[&'static [u8]], ago: std::time::Duration) {
+        use previews::player::{Clip, Player};
         let still = motion::reduced();
         let keys: Vec<_> = previews::on(self, self.section).map(|h| h.key).collect();
+        let files: Vec<_> = clips.iter().map(|b| Clip::Bytes(b)).collect();
         self.players = (keys.into_iter())
-            .filter_map(|k| Some((k, previews::player::Player::new(clip, still)?)))
+            .filter_map(|k| {
+                let p = Player::new(vec!["ai-chat"], files.clone(), !still, self.stage.clone());
+                Some((k, p?))
+            })
             .collect();
+        for (_, p) in &mut self.players {
+            p.catch_up(ago);
+        }
         let plays = self.players.iter().any(|(_, p)| p.playing());
         self.played = plays.then(|| Instant::now() - ago);
     }
@@ -1717,13 +1762,24 @@ impl State {
         }
     }
 
-    /// The page's preview clips play from their first frame (reduced motion:
-    /// they stay there, and the clock stays off; none: the placeholder).
+    /// The page's previews from the start: each its still, then, when its
+    /// clips are on disk, the clips (reduced motion: the still only). Nothing
+    /// is downloaded here: only "Play preview" does (`Message::Fetch`).
     fn play(&mut self) {
-        let still = motion::reduced();
+        use previews::player::{Clip, Player};
+        let moving = !motion::reduced();
         self.players = previews::clips(self, self.section)
-            .filter_map(|(key, list)| Some((key, previews::player::Player::list(list, still)?)))
+            .filter_map(|(key, names)| {
+                let files = previews::online::files(&names)?;
+                let files = (files.into_iter()).map(|(p, f)| Clip::Disk(p, f)).collect();
+                Some((key, Player::new(names, files, moving, self.stage.clone())?))
+            })
             .collect();
+        // tests: each still is there at once (golden images)
+        #[cfg(test)]
+        for (_, p) in &mut self.players {
+            p.catch_up(std::time::Duration::ZERO);
+        }
         let plays = self.players.iter().any(|(_, p)| p.playing());
         self.played = plays.then(Instant::now);
     }

@@ -2,7 +2,7 @@
 //! header, sidebar, the page), one file per page (`pages`, one list) and one preview per feature
 //! (`previews`, one list).
 mod pages;
-mod previews;
+pub(in crate::ui) mod previews;
 mod state;
 #[cfg(test)]
 pub(crate) mod tests;

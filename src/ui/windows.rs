@@ -1077,7 +1077,13 @@ impl Windows {
             Kind::Permission => self.permission = Some((id, onboarding::Access::Unasked)),
         }
         self.chrome.insert(id, Chrome::default());
-        open.discard().chain(window::gain_focus(id))
+        // the preview stage decodes at the px it is shown at
+        let scale = window::scale_factor(id).map(|s| Msg::Settings(settings::Message::Scale(s)));
+        let open = open.discard().chain(window::gain_focus(id));
+        match kind {
+            Kind::Settings => open.chain(scale),
+            _ => open,
+        }
     }
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
@@ -1150,6 +1156,17 @@ impl Windows {
                             });
                             let kept = tidy.map(|k| Msg::Settings(settings::Message::Kept(k)));
                             return Task::batch([keys, kept]);
+                        }
+                        settings::Outcome::Fetch(key, names) => {
+                            let fetch = super::background(move |tx| {
+                                use settings::previews::online;
+                                let ok = online::files(&names)
+                                    .is_some_and(|f| online::fetch(&f).is_ok());
+                                let _ = tx.unbounded_send(ok);
+                            });
+                            let done = fetch
+                                .map(move |ok| Msg::Settings(settings::Message::Fetched(key, ok)));
+                            return Task::batch([keys, done]);
                         }
                         settings::Outcome::None => {}
                     }

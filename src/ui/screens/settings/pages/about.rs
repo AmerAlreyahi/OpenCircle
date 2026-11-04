@@ -279,7 +279,7 @@ pub fn view(_: &State) -> Element<'_, Message> {
 
 /// "Preview clips": the credits of the bundled clips (none bundled, no card).
 fn clip_notice<'a>() -> Option<Element<'a, Message>> {
-    let lines = clip_credits(|c| super::super::previews::player::clip(c).is_some());
+    let lines = clip_credits(|c| super::super::previews::player::still(c).is_some());
     if lines.is_empty() {
         return None;
     }

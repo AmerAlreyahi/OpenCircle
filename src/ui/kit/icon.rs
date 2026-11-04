@@ -31,8 +31,6 @@ pub enum Icon {
     /// (About's Star button): bundled, so no system font draws them.
     Enter,
     Star,
-    /// lucide "rotate-ccw" (a feature preview's Replay).
-    Replay,
     /// lucide "screen-share": the AI field's Include screen.
     Screen,
     /// lucide "pin" (the AI chat stays open), "pin-off" (a pinned chat's
@@ -56,7 +54,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 24] = [
+    pub const ALL: [Icon; 23] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -69,7 +67,6 @@ impl Icon {
         Icon::Translate,
         Icon::Enter,
         Icon::Star,
-        Icon::Replay,
         Icon::Screen,
         Icon::Pin,
         Icon::Unpin,
@@ -97,7 +94,6 @@ impl Icon {
             Icon::Translate => '\u{e103}',
             Icon::Enter => '\u{e0a5}',
             Icon::Star => '\u{e179}',
-            Icon::Replay => '\u{e14b}',
             Icon::Screen => '\u{e152}',
             Icon::Pin => '\u{e258}',
             Icon::Unpin => '\u{e2b5}',

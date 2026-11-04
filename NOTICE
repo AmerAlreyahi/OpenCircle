@@ -84,6 +84,27 @@ Apache-2.0):
 Short-line language detection: whichlang by Quickwit (MIT),
 https://github.com/quickwit-oss/whichlang, built into the app.
 
+Preview video decoder: rav1d (BSD-2-Clause), https://github.com/memorysafety/rav1d,
+built into the app. Copyright (c) 2018-2019, VideoLAN and dav1d authors;
+Copyright (c) 2023-2024, VideoLAN, dav1d authors, and Internet Security Research
+Group. All rights reserved. Redistribution and use in source and binary forms,
+with or without modification, are permitted provided that the following
+conditions are met: 1. Redistributions of source code must retain the above
+copyright notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution. THIS SOFTWARE IS
+PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 Text recognition (OCR)
 ----------------------
 PaddleOCR PP-OCRv5 models (Apache-2.0): the text detector and one
@@ -109,8 +130,9 @@ from vendor/iced_tiny_skia with one small fix; its licence is beside it.
 
 Preview clips
 -------------
-The short recordings at the top of Settings pages are bundled in the app
-(assets/previews), exactly as delivered. They show third-party material under
+The short recordings at the top of Settings pages (a still of each bundled in
+the app, assets/previews; the full clips downloaded when a preview is played)
+are the owner's approved edits. They show third-party material under
 its own terms; the app's MIT licence does not relicense it. CC0 credits are
 courtesy credits. OpenCircle's code remains MIT; the media exceptions below
 (Unsplash License for the COFFEE photo, CC BY-SA 4.0 for the translation

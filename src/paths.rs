@@ -30,6 +30,11 @@ pub fn ocr() -> PathBuf {
     app_data().join("ocr")
 }
 
+/// `<data>/OpenCircle/previews`: Settings' preview clips, once played.
+pub fn previews() -> PathBuf {
+    app_data().join("previews")
+}
+
 /// `<data>/OpenCircle/search_history.json`.
 pub fn search_history() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join(CAPITAL).join("search_history.json"))
