@@ -47,6 +47,8 @@ struct Frame {
     image: Handle,
     /// How long it shows (0: the still, until the first clip frame).
     length: Duration,
+    /// Which clip it is of.
+    clip: usize,
 }
 
 pub struct Player {
@@ -60,6 +62,10 @@ pub struct Player {
     /// The clips are on disk (else the stage offers "Play preview").
     on_disk: bool,
     files: Vec<Clip>,
+    /// The clip being shown (an index of `names`).
+    clip: usize,
+    moving: bool,
+    width: Width,
 }
 
 impl Player {
@@ -71,13 +77,26 @@ impl Player {
         play: bool,
         width: Width,
     ) -> Option<Self> {
-        let still = still(names.first()?)?;
+        Self::new_at(names, files, play, width, 0)
+    }
+
+    /// The same, beginning at clip `start` (the loop goes on from there).
+    pub fn new_at(
+        names: Vec<&'static str>,
+        files: Vec<Clip>,
+        play: bool,
+        width: Width,
+        start: usize,
+    ) -> Option<Self> {
+        let start = start % names.len().max(1);
+        let still = still(names.get(start)?)?;
         let on_disk = files.iter().all(Clip::present);
         let clips = (play && on_disk).then(|| files.clone());
         let (tx, rx) = mpsc::sync_channel(1);
+        let w = width.clone();
         std::thread::Builder::new()
             .name("preview".into())
-            .spawn(move || run(still, clips, &width, &tx))
+            .spawn(move || run(still, clips, &w, &tx, start))
             .ok()?;
         Some(Player {
             names,
@@ -86,7 +105,29 @@ impl Player {
             until: Duration::ZERO,
             on_disk,
             files,
+            clip: start,
+            moving: play,
+            width,
         })
+    }
+
+    /// How many clips, and which one shows.
+    pub fn position(&self) -> (usize, usize) {
+        (self.clip, self.names.len())
+    }
+
+    /// A player that begins at clip `to` (wrapping), its first frame due at
+    /// `at` on the page's clock.
+    pub fn jump(&self, to: usize, at: Duration) -> Option<Player> {
+        let mut p = Self::new_at(
+            self.names.clone(),
+            self.files.clone(),
+            self.moving,
+            self.width.clone(),
+            to,
+        )?;
+        p.until = at;
+        Some(p)
     }
 
     /// Is this the list it was made from?
@@ -119,6 +160,7 @@ impl Player {
             self.until = at;
         }
         self.until += f.length;
+        self.clip = f.clip;
         self.shown = Some(f.image);
     }
 
@@ -135,6 +177,7 @@ impl Player {
             self.done();
             return false;
         };
+        self.clip = f.clip;
         self.shown = Some(f.image);
         true
     }
@@ -192,6 +235,7 @@ fn run(
     clips: Option<Vec<Clip>>,
     width: &Width,
     tx: &SyncSender<Frame>,
+    start: usize,
 ) -> Option<()> {
     // the page is laid out right after it opens: its first preview waits for
     // the stage's width (at most 100 ms, then full size; tests: never)
@@ -205,18 +249,18 @@ fn run(
     tx.send(Frame {
         image: still_at(still, target(width))?,
         length: Duration::ZERO,
+        clip: start,
     })
     .ok()?;
     let clips: Vec<Vec<u8>> = clips?.iter().map(Clip::load).collect::<Option<_>>()?;
-    loop {
-        for clip in &clips {
-            play(clip, width, tx)?;
-        }
+    for i in (0..clips.len()).cycle().skip(start) {
+        play(&clips[i], i, width, tx)?;
     }
+    None
 }
 
 /// One clip's frames to `tx`, each at the stage's width then.
-fn play(clip: &[u8], width: &Width, tx: &SyncSender<Frame>) -> Option<()> {
+fn play(clip: &[u8], index: usize, width: &Width, tx: &SyncSender<Frame>) -> Option<()> {
     let ivf = av1::ivf(clip)?;
     let length = ivf.frame;
     let mut decoder = av1::Decoder::new(THREADS)?;
@@ -230,6 +274,7 @@ fn play(clip: &[u8], width: &Width, tx: &SyncSender<Frame>) -> Option<()> {
                 out = pic.rgba(w, h).map(|rgba| Frame {
                     image: Handle::from_rgba(w as u32, h as u32, rgba),
                     length,
+                    clip: index,
                 });
             })
             .ok()?;
@@ -254,7 +299,8 @@ fn still_at(bytes: &[u8], w: u32) -> Option<Handle> {
     let img = image::load_from_memory_with_format(bytes, image::ImageFormat::WebP).ok()?;
     let mut img = img.into_rgba8();
     if w < img.width() {
-        let h = (u64::from(img.height()) * u64::from(w) / u64::from(img.width())).max(1) as u32;
+        let (ih, iw) = (u64::from(img.height()), u64::from(img.width()));
+        let h = ((ih * u64::from(w) + iw / 2) / iw).max(1) as u32;
         img = imageops::resize(&img, w, h, FilterType::Triangle);
     }
     Some(Handle::from_rgba(img.width(), img.height(), img.into_raw()))
@@ -339,7 +385,7 @@ mod tests {
         };
         let mut p = player(&[TINY_A], true, 64);
         assert!(p.next_frame());
-        // the still (1920x1080) at 64 px
+        // the still (1640x922) at 64 px
         assert_eq!(size(p.frame().unwrap()), (64, 36));
         assert!(p.next_frame());
         assert_eq!(size(p.frame().unwrap()), (64, 36));

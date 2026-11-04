@@ -214,7 +214,11 @@ pub fn view(state: &State) -> Option<Element<'_, Message>> {
                 play,
                 note: state.failed.contains(&h.key).then_some(FAILED),
                 frame: player.and_then(|(_, p)| p.frame().cloned()),
-                width: (state.stage.clone(), state.scale),
+                width: (state.stage.clone(), state.scale, state.win_h),
+                pager: player.and_then(|(_, p)| {
+                    let (at, n) = p.position();
+                    (n > 1).then_some((at, n, Message::Step(h.key, -1), Message::Step(h.key, 1)))
+                }),
             })
         })
         .collect();

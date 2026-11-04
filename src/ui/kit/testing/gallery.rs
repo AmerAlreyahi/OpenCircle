@@ -1118,7 +1118,8 @@ fn hero_sheet() {
                 note: (play == 3)
                     .then(|| s(ar, "Couldn't download the preview.", "تعذّر تنزيل المعاينة.")),
                 frame: clip.then(frame),
-                width: (Default::default(), 1.0),
+                width: (Default::default(), 1.0, 720.0),
+                pager: None,
             })
         };
     let rows = vec![

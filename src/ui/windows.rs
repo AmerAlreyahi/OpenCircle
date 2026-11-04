@@ -63,7 +63,7 @@ pub enum Msg {
     /// From a normal window's header or edges.
     Chrome(window::Id, chrome::Event),
     /// A window was resized (any of ours; the overlay's is `ui::App`'s).
-    Resized(window::Id),
+    Resized(window::Id, f32),
     /// Whether a normal window is maximised now (asked after every resize).
     Maximised(window::Id, bool),
     /// Test hook step (see `test_hook`).
@@ -1079,9 +1079,10 @@ impl Windows {
         self.chrome.insert(id, Chrome::default());
         // the preview stage decodes at the px it is shown at
         let scale = window::scale_factor(id).map(|s| Msg::Settings(settings::Message::Scale(s)));
+        let height = window::size(id).map(|s| Msg::Settings(settings::Message::Height(s.height)));
         let open = open.discard().chain(window::gain_focus(id));
         match kind {
-            Kind::Settings => open.chain(scale),
+            Kind::Settings => open.chain(scale).chain(height),
             _ => open,
         }
     }
@@ -1279,7 +1280,10 @@ impl Windows {
             // `ui::App` takes it before here.
             Msg::Run(_) => {}
             Msg::Chrome(id, event) => return self.on_chrome(id, event),
-            Msg::Resized(id) => {
+            Msg::Resized(id, h) => {
+                if self.id(Kind::Settings) == Some(id) {
+                    let _ = self.handle(Msg::Settings(settings::Message::Height(h)));
+                }
                 if self.chrome.contains_key(&id) {
                     return window::is_maximized(id).map(move |on| Msg::Maximised(id, on));
                 }
@@ -1556,7 +1560,7 @@ impl Windows {
             welcome,
             window::close_events().map(Msg::Closed),
             window::close_requests().map(Msg::CloseRequest),
-            window::resize_events().map(|(id, _)| Msg::Resized(id)),
+            window::resize_events().map(|(id, size)| Msg::Resized(id, size.height)),
             iced::system::theme_changes().map(Msg::OsTheme),
             keys,
             match self.settings {

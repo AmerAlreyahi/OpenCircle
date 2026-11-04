@@ -17,7 +17,7 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced::{Color, Size, Subscription, event, keyboard};
 
@@ -608,6 +608,8 @@ pub struct State {
     /// it) and the window's scale factor.
     pub(super) stage: previews::player::Width,
     pub(super) scale: f32,
+    /// The window's height in logical px (the stage's smart size).
+    pub(super) win_h: f32,
     /// Previews whose clips are downloading, and those whose download failed
     /// (by `hidden_previews` name).
     pub(super) fetching: Vec<&'static str>,
@@ -734,12 +736,17 @@ pub enum Message {
     /// A feature preview's Hide (`false`) / Show (`true`), by its
     /// `hidden_previews` name.
     Preview(&'static str, bool),
+    /// The arrows under a preview with several clips: that many clips on
+    /// (-1: back), the loop going on from there.
+    Step(&'static str, isize),
     /// "Play preview": download that preview's clips (`Outcome::Fetch`)...
     Fetch(&'static str),
     /// ... and whether they came (on the worker thread).
     Fetched(&'static str, bool),
     /// The window's scale factor (the preview stage's px).
     Scale(f32),
+    /// The window's height in logical px.
+    Height(f32),
     /// The footer's question when the window is closed with unsaved changes (#136).
     CloseSave,
     CloseDiscard,
@@ -966,6 +973,7 @@ impl State {
             players: Vec::new(),
             stage: Default::default(),
             scale: 1.0,
+            win_h: 720.0,
             fetching: Vec::new(),
             failed: Vec::new(),
             print_screen_taken: crate::hotkey::windows_snips_print_screen(),
@@ -1218,6 +1226,8 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::Fetch(_)
             | Message::Fetched(..)
             | Message::Scale(_)
+            | Message::Height(_)
+            | Message::Step(..)
             | Message::Caption(_)
             | Message::CloseSave
             | Message::CloseDiscard
@@ -1468,6 +1478,27 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 state.played = None;
             }
         }
+        Message::Step(key, by) => {
+            let at = state.played.map_or(Duration::ZERO, |t| t.elapsed());
+            let next = (state.players.iter())
+                .find(|(k, _)| *k == key)
+                .and_then(|(_, p)| {
+                    let (now, n) = p.position();
+                    let to = (now as isize + by).rem_euclid(n as isize) as usize;
+                    p.jump(to, at)
+                });
+            if let Some(next) = next {
+                if let Some(slot) = state.players.iter_mut().find(|(k, _)| *k == key) {
+                    slot.1 = next;
+                }
+                // a still preview (reduced motion, clips not on disk) has no clock
+                state.played.get_or_insert_with(Instant::now);
+                #[cfg(test)]
+                if let Some(slot) = state.players.iter_mut().find(|(k, _)| *k == key) {
+                    slot.1.catch_up(Duration::ZERO);
+                }
+            }
+        }
         Message::Fetch(key) => {
             let names = (previews::clips(state, state.section))
                 .find(|(k, _)| *k == key)
@@ -1488,6 +1519,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             }
         }
         Message::Scale(scale) => state.scale = scale,
+        Message::Height(h) => state.win_h = h,
         Message::Tick => {
             if let Some(t) = state.played {
                 let at = t.elapsed();

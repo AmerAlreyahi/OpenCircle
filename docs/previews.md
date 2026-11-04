@@ -22,7 +22,7 @@ still shows no preview at all (and no Hide preview button).
 `translate`, `live` and `song` are not published yet, so those pages show no
 preview.
 
-- Still: `assets/previews/stills/<clip>.webp` (1920x1080 WebP, ~25-135 KB),
+- Still: `assets/previews/stills/<clip>.webp` (1640x922 WebP, ~25-75 KB: the clip's most telling sharp frame, the result moment),
   bundled at build time (`build.rs`); a page lists the clips it wants
   (`previews::HEROES`) and one without a still is just absent.
 - Clip: `<clip>.ivf` (AV1 in IVF, 1920x1080, 20 fps, BT.709, ~0.2-0.9 MB),

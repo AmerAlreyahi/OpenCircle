@@ -2404,11 +2404,11 @@ fn previews_stills_match_their_golden_images() {
     let mut failed = Vec::new();
     for theme in [&SAPPHIRE, &DAYLIGHT] {
         for (name, section, height) in [
-            ("look", Section::Look, 420.0),
-            ("text-reading", Section::TextReading, 420.0),
+            ("look", Section::Look, 470.0),
+            ("text-reading", Section::TextReading, 470.0),
             ("translate-live", Section::Translate, 200.0),
-            ("ai", Section::Ai, 420.0),
-            ("snip", Section::Snip, 420.0),
+            ("ai", Section::Ai, 470.0),
+            ("snip", Section::Snip, 470.0),
             ("song", Section::Song, 120.0),
         ] {
             let (mut s, _) = state(None);
@@ -2432,6 +2432,58 @@ fn previews_stills_match_their_golden_images() {
     }
     themes::set(&SAPPHIRE);
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A preview with several clips has previous / next arrows and a dot per clip;
+/// they jump to that clip (wrapping); a single-clip page has none.
+#[test]
+fn a_multi_clip_preview_has_arrows_that_jump() {
+    let pos = |s: &State| s.players[0].1.position();
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    assert_eq!(pos(&s), (0, 3));
+    let texts = shot::texts(view(&s));
+    // the arrows' labels are tooltips: reachable as buttons, one pair per stage
+    assert_eq!(s.players.len(), 1);
+    update(&mut s, Message::Step("look", 1));
+    assert_eq!(pos(&s), (1, 3));
+    update(&mut s, Message::Step("look", -1));
+    update(&mut s, Message::Step("look", -1));
+    assert_eq!(pos(&s), (2, 3), "wraps back");
+    update(&mut s, Message::Step("look", 1));
+    assert_eq!(pos(&s), (0, 3), "wraps on");
+    let _ = texts;
+    // a single clip: no arrows
+    update(&mut s, Message::Section(Section::Ai));
+    assert_eq!(pos(&s).1, 1);
+    // stepping is no setting change
+    assert!(!s.dirty());
+}
+
+/// A maximized window (3440x1440): the whole frame, at most 820 px, centred
+/// in the page, never cropped or zoomed (owner, 2026-11-04).
+#[test]
+fn the_preview_stage_stays_small_in_a_maximized_window() {
+    use crate::ui::kit::surface::{Material, surface};
+    use crate::ui::kit::testing::golden;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    s.win_h = 1440.0;
+    fn page(s: &State) -> Element<'_, Message> {
+        surface(Material::Window, 0.0, super::previews::view(s).unwrap())
+            .padding(16)
+            .width(iced::Fill)
+            .height(iced::Fill)
+            .into()
+    }
+    let _ = shot::render(page(&s), 1800, 640);
+    update(&mut s, Message::Preview("ai", true));
+    let size = Size::new(1800.0, 640.0);
+    let failed = golden::check("screens", "preview-maximized", size, &[1.0], || page(&s));
+    assert!(failed.is_empty(), "{failed:#?}");
+    // 16:9, the width the clips are decoded at
+    let px = s.stage.load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(px, 820);
 }
 
 /// N-41: the Snip page has its three shortcuts (the same rows as Shortcuts),
