@@ -179,7 +179,7 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
         assert_eq!(texts.contains("Set up AI"), setup, "{texts}");
         if setup {
             assert!(
-                texts.contains("There is no offline model into Portuguese yet |"),
+                texts.contains("There is no local model into Portuguese yet |"),
                 "{texts}"
             );
             assert!(!texts.contains("Settings >"), "one line: {texts}");
@@ -360,7 +360,7 @@ fn offline_models_are_asked_for_with_their_size() {
     assert!(
         texts
             .iter()
-            .any(|t| t == "Offline translation · 118 MB · from Hugging Face"),
+            .any(|t| t == "Local translation · 118 MB · from Hugging Face"),
         "{texts:?}"
     );
     for button in ["Download", "Use an AI provider instead", "Not now"] {
@@ -374,7 +374,7 @@ fn offline_models_are_asked_for_with_their_size() {
         card::place(Size::new(1920.0, 1080.0), None, None),
         false,
     ));
-    assert!(texts.iter().any(|t| t == "Downloading offline translation"));
+    assert!(texts.iter().any(|t| t == "Downloading local translation"));
 }
 
 /// A download that failed says why on the download card and offers Try

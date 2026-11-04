@@ -41,7 +41,7 @@ pub const NOTICES: [(&str, &str, &str); 11] = [
     ("OCR ONNX export", "oar-ocr, GreatV", "Apache-2.0"),
     ("ONNX Runtime", "Microsoft", "MIT"),
     (
-        "Offline translation",
+        "Local translation",
         "OPUS-MT, Helsinki-NLP; ONNX by Xenova",
         "CC BY 4.0 / Apache-2.0",
     ),

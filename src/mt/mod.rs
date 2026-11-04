@@ -1435,7 +1435,7 @@ pub fn unavailable(source: &str, target: &str) -> String {
         s => format!("from {} ", lang::name(s)),
     };
     format!(
-        "there is no offline model {from}into {} yet (coming in a future \
+        "there is no local model {from}into {} yet (coming in a future \
          update). Choose AI as the engine in Settings > Translate (and set it up \
          in Settings > Ask AI) to translate it now",
         lang::name(target)
@@ -1453,10 +1453,10 @@ impl Pair {
         models_root().join(self.dir)
     }
 
-    /// "English → French offline translation".
+    /// "English → French local translation".
     pub fn label(&self) -> String {
         format!(
-            "{} → {} offline translation",
+            "{} → {} local translation",
             lang::name(self.source),
             lang::name(self.target)
         )
@@ -1859,11 +1859,11 @@ mod tests {
         assert!(why.contains("from French into Japanese") && why.contains("Choose AI"));
         let why = unavailable(lang::AUTO, "pt");
         assert!(
-            why.starts_with("there is no offline model into Portuguese yet"),
+            why.starts_with("there is no local model into Portuguese yet"),
             "{why}"
         );
         let p = pair("en", "ar").unwrap();
-        assert_eq!(p.label(), "English → Arabic offline translation");
+        assert_eq!(p.label(), "English → Arabic local translation");
         let files = p.files();
         // OCR's files first (ORT), then the pair's, in its own folder
         assert_eq!(files[0].1.name, models::ORT.name);

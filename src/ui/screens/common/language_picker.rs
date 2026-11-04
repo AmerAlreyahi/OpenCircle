@@ -542,7 +542,7 @@ impl Picker {
             let hint = sub(
                 Role::META,
                 self.tr(
-                    "Needs AI · no offline model yet",
+                    "Needs AI · no local model yet",
                     "يحتاج الذكاء الاصطناعي · لا نموذج دون اتصال بعد",
                 ),
             );
@@ -784,7 +784,7 @@ mod tests {
         assert!(p.hint());
         let shown = shot::texts(p.list().unwrap());
         assert!(
-            shown.iter().any(|t| t == "Needs AI · no offline model yet"),
+            shown.iter().any(|t| t == "Needs AI · no local model yet"),
             "{shown:?}"
         );
         p.update(Msg::Hover(None));

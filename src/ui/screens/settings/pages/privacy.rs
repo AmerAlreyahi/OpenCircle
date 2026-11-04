@@ -38,7 +38,7 @@ const ROWS: [(&str, &str, &str); 7] = [
         "Your AI provider",
     ),
     ("Text reading (OCR)", "Nothing", "Runs on this PC"),
-    ("Offline translate", "Nothing", "Runs on this PC"),
+    ("Local translate", "Nothing", "Runs on this PC"),
     (
         "Updates",
         "Only the request for the latest version (when on)",

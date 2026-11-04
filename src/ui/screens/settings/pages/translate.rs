@@ -24,7 +24,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         _ => None,
     });
     let engine = segmented(
-        &[(Engine::Ai, "AI"), (Engine::Offline, "Offline")],
+        &[(Engine::Ai, "AI"), (Engine::Offline, "Local")],
         t.engine,
         from,
         glide,
@@ -33,7 +33,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let mut rows = column![setting_row::row(
         title("Engine"),
         match t.engine {
-            Engine::Ai => "Your AI provider; offline when it isn't set up",
+            Engine::Ai => "Your AI provider; local when it isn't set up",
             Engine::Offline => "No key, nothing leaves your PC; more literal than AI",
         },
         engine,
@@ -51,7 +51,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     // Offline can't do every pair: say so (AI is the other way).
     let target_desc = match t.engine == Engine::Offline && !mt::available(&t.source, &t.target) {
         true => {
-            "No offline model for this pair yet (coming in a future update): choose AI to translate it"
+            "No local model for this pair yet (coming in a future update): choose AI to translate it"
         }
         false => "What the text is translated into",
     };

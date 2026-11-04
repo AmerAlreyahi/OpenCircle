@@ -1264,8 +1264,8 @@ fn engine_choice_says_what_offline_means() {
     for want in [
         "Engine",
         "AI",
-        "Offline",
-        "Your AI provider; offline when it isn't set up",
+        "Local",
+        "Your AI provider; local when it isn't set up",
     ] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
@@ -1278,7 +1278,7 @@ fn engine_choice_says_what_offline_means() {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
     let gap =
-        "No offline model for this pair yet (coming in a future update): choose AI to translate it";
+        "No local model for this pair yet (coming in a future update): choose AI to translate it";
     assert!(!texts.iter().any(|t| t == gap));
     update(&mut s, Message::Source(lang::find("pt").copied().unwrap()));
     let texts = shot::texts(view(&s));

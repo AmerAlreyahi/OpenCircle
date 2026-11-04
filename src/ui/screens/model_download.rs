@@ -51,9 +51,9 @@ pub const SCRIPTS: Model<'static> = Model {
 };
 
 pub const TRANSLATION: Model<'static> = Model {
-    name: "Offline translation",
+    name: "Local translation",
     icon: Icon::Translate,
-    title: "Offline translation needs a download",
+    title: "Local translation needs a download",
     does: "Translate without internet",
     source: "Hugging Face",
     then: "translate the screen",

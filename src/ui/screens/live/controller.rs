@@ -373,7 +373,7 @@ mod tests {
         c.set_notice(Some("Nothing to translate on this screen yet.".into()));
         states.push(("notice", c.clone()));
         c.notice = None;
-        c.ask("English → Arabic offline translation", 117_600_822);
+        c.ask("English → Arabic local translation", 117_600_822);
         states.push(("ask", c.clone()));
         let mut failed = Vec::new();
         for theme in [&SAPPHIRE, &DAYLIGHT] {

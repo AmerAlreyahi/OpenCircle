@@ -2422,7 +2422,7 @@ pub(super) mod tests {
         ] {
             let err = real.lines(&texts(t), target, "").unwrap_err().to_string();
             assert!(
-                err.contains(&format!("no offline model from {from}")),
+                err.contains(&format!("no local model from {from}")),
                 "{err}"
             );
             assert!(err.contains("Choose AI"), "offers AI: {err}");

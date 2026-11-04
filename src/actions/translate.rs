@@ -183,7 +183,7 @@ mod tests {
             .err()
             .unwrap();
         assert!(
-            e.starts_with("There is no offline model from French into Japanese"),
+            e.starts_with("There is no local model from French into Japanese"),
             "{e}"
         );
         assert!(e.contains("Choose AI"), "offers AI: {e}");

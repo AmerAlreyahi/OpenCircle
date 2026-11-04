@@ -115,7 +115,7 @@ impl fmt::Display for AiError {
             AiError::Refused => f.write_str("The AI model declined to answer this request."),
             AiError::Network(why) => write!(f, "Could not reach the AI provider: {why}"),
             AiError::BadResponse(why) => write!(f, "The AI provider sent an unexpected answer: {why}"),
-            AiError::Offline(why) => write!(f, "Offline translation failed: {why}"),
+            AiError::Offline(why) => write!(f, "Local translation failed: {why}"),
             AiError::AlreadyIn(name) => write!(f, "Already in {name}"),
         }
     }
