@@ -368,6 +368,8 @@ production systems.
   only a sharp still per clip; a "Play preview" click downloads that page's full-HD clips once from a GitHub release of
   the owner's (sha256 pinned, like the models) and keeps them on the PC; nothing downloads before that click. A page's
   clips all play in turn and loop; the stage scales with the Settings window. Sidebar "AI" is named "Ask AI" (owner).
+  Format (owner, 2026-11-04): 1080p AV1 (~0.4-1.5 MB per 5 s clip, re-encoded from the owner's raw takes) played by a small
+  built-in decoder (dav1d's Rust port), Windows and Linux alike.
 - Copy = button AND Ctrl+C (owner, 2026-11-03, universal): wherever the app has a Copy button, Ctrl+C does the same
   (long capture included: Ctrl+C finishes and copies); Save pairs with Ctrl+S the same way. A text field with a
   selection still copies its text.
