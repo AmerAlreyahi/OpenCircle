@@ -178,7 +178,7 @@
   "racing": {
     "src": "fr",
     "elements": [
-      { "t": "STAGE COMPLETE!", "en": ["stage"] },
+      { "t": "STAGE COMPLETE!", "en": ["stage complete"] },
       { "t": "Nouveau record personnel !", "en": ["record"] },
       { "t": "Position", "en": ["position"] },
       { "t": "Pilote", "en": ["driver", "pilot"] },
