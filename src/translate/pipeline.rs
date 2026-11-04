@@ -1536,6 +1536,13 @@ pub(super) fn game_read(text: &str) -> String {
                         false => w.to_string(),
                     }
                 }
+                // a key hint's "]" read as I or l ("[VI Questgebiet", PP-OCR at 1080p)
+                Some('[') if w.chars().count() == 3 && w.ends_with(['I', 'l', '|']) => {
+                    match w.chars().nth(1).is_some_and(|k| k.is_ascii_uppercase()) {
+                        true => format!("{}]", &w[..2]),
+                        false => w.to_string(),
+                    }
+                }
                 _ => match w.strip_suffix('*') {
                     Some(n) if !n.is_empty() && n.chars().all(|d| d.is_ascii_digit()) => {
                         format!("{n}★")

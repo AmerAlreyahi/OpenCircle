@@ -93,7 +93,18 @@ fn counters_are_read_and_kept_exactly() {
     assert_eq!(game_read("Invoquer XIO"), "Invoquer ×10");
     assert_eq!(game_read("Invoquer xl"), "Invoquer ×1");
     assert_eq!(game_read("objet 4* ou"), "objet 4★ ou");
-    for same in ["Chapter XI", "Size XL", "xo xo", "x", "Personnages 4 à"] {
+    // the key hint at 1080p (PP-OCR read its "]" as "I")
+    let hint = game_read("[VI Questgebiet anzeigen");
+    assert_eq!(hint, "[V] Questgebiet anzeigen");
+    for same in [
+        "Chapter XI",
+        "Size XL",
+        "xo xo",
+        "x",
+        "Personnages 4 à",
+        "[ii",
+        "[VII]",
+    ] {
         assert_eq!(game_read(same), same);
     }
     // offline outputs (fr-en, fr-ar; Win10 VM build 3acbcc9 and here)

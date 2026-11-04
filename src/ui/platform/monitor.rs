@@ -107,14 +107,114 @@ pub fn taskbar_inset(origin: Point, size: Size, scale: f32) -> f32 {
         let monitor = MonitorFromPoint(centre, MONITOR_DEFAULTTONEAREST);
         GetMonitorInfoW(monitor, &mut info).as_bool()
     };
-    match read {
+    let band = [
+        info.rcMonitor.left,
+        info.rcWork.bottom,
+        info.rcMonitor.right,
+        info.rcMonitor.bottom,
+    ];
+    match read && !covered(band) {
         true => ((info.rcMonitor.bottom - info.rcWork.bottom) as f32 / scale).max(0.0),
         false => 0.0,
     }
+}
+
+/// The taskbar's band (`[left, top, right, bottom]`, physical px) is under
+/// another app's window: a game or a picture full screen (F11) covers it, so
+/// the frame has no taskbar there (one-shot translate left a game's bottom
+/// row out as "the taskbar", Win10 VM). The top window over the band that
+/// isn't ours decides: the taskbar itself, or one spanning the whole band.
+#[cfg(windows)]
+fn covered(band: [i32; 4]) -> bool {
+    use ::windows::Win32::Foundation::RECT;
+    use ::windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use ::windows::Win32::System::Threading::GetCurrentProcessId;
+    use ::windows::Win32::UI::WindowsAndMessaging::{
+        GW_HWNDNEXT, GetClassNameW, GetTopWindow, GetWindow, GetWindowRect,
+        GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    };
+    if band[3] <= band[1] {
+        return false;
+    }
+    // SAFETY (whole block): plain queries on handles the system just gave
+    // us; the buffers outlive the calls.
+    unsafe {
+        let me = GetCurrentProcessId();
+        let mut next = GetTopWindow(None).ok();
+        while let Some(h) = next {
+            next = GetWindow(h, GW_HWNDNEXT).ok();
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(h, Some(&mut pid));
+            let mut r = RECT::default();
+            // (a suspended Store app's window is "visible" but cloaked)
+            let mut cloaked = 0u32;
+            let cloak = DwmGetWindowAttribute(
+                h,
+                DWMWA_CLOAKED,
+                (&raw mut cloaked).cast::<std::ffi::c_void>(),
+                size_of::<u32>() as u32,
+            );
+            let shown = IsWindowVisible(h).as_bool()
+                && !IsIconic(h).as_bool()
+                && !(cloak.is_ok() && cloaked != 0);
+            if pid == me || !shown || GetWindowRect(h, &mut r).is_err() {
+                continue;
+            }
+            let mut b = [0u16; 32];
+            let n = GetClassNameW(h, &mut b).max(0) as usize;
+            let class = String::from_utf16_lossy(&b[..n]);
+            if let Some(hides) = over_band(&class, [r.left, r.top, r.right, r.bottom], band) {
+                return hides;
+            }
+        }
+        false
+    }
+}
+
+/// One window (top first, `rect` = `[left, top, right, bottom]`) against the
+/// taskbar's band: `Some(false)` = the taskbar is on top, `Some(true)` = a
+/// window spanning the band hides it, `None` = not over it, or smaller (a
+/// tooltip, a helper): the next window down decides.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn over_band(class: &str, rect: [i32; 4], band: [i32; 4]) -> Option<bool> {
+    let [l, t, r, b] = rect;
+    if !(l < band[2] && r > band[0] && t < band[3] && b > band[1]) {
+        return None;
+    }
+    if matches!(class, "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+        return Some(false);
+    }
+    (l <= band[0] && r >= band[2] && t <= band[1] && b >= band[3]).then_some(true)
 }
 
 /// Elsewhere the desktop's panels aren't known: the bar keeps its own gap.
 #[cfg(not(windows))]
 pub fn taskbar_inset(_: Point, _: Size, _: f32) -> f32 {
     0.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::over_band;
+
+    /// A 1920x1080 monitor, a 40 px taskbar band at the bottom.
+    const BAND: [i32; 4] = [0, 1040, 1920, 1080];
+
+    #[test]
+    fn a_full_screen_window_hides_the_taskbar() {
+        // a game or a picture at F11 over the band (Win10 VM): no taskbar
+        // in the frame, the bottom row is the game's
+        let game = over_band("WindowsForms10", [0, 0, 1920, 1080], BAND);
+        assert_eq!(game, Some(true));
+        let bigger = over_band("UnrealWindow", [-8, -8, 1928, 1088], BAND);
+        assert_eq!(bigger, Some(true));
+        // the taskbar on top of it all, as on a desktop
+        let bar = over_band("Shell_TrayWnd", [0, 1040, 1920, 1080], BAND);
+        assert_eq!(bar, Some(false));
+        // a maximised window ends above the band; a tooltip is too small
+        let max = over_band("Chrome_WidgetWin_1", [0, 0, 1920, 1040], BAND);
+        assert_eq!(max, None);
+        let tip = over_band("tooltips_class32", [900, 1030, 1100, 1060], BAND);
+        assert_eq!(tip, None);
+    }
 }
