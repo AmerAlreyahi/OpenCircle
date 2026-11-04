@@ -16,7 +16,7 @@ by default. It is free, MIT licensed, and has no account and no telemetry.
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7a6cf0"></a>
-  <img alt="Platforms: Windows and Linux (preview)" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20(preview)-4fc9e0">
+  <img alt="Platforms: Windows and Linux" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-4fc9e0">
 </p>
 
 ## See it
@@ -115,11 +115,11 @@ Details: [Privacy](docs/privacy.md).
   sent automatically, and translation and text reading can run fully offline.
 - **One flow.** Search, read, translate and ask AI come from the same selection
   and the same bar, instead of separate tools.
-- **Windows and Linux (preview)** with one native binary and no browser engine
+- **Windows and Linux** with one native binary and no browser engine
   inside.
 - **Honest limits.** Search in browser and AI Mode are Google's services, opened
   in your browser, so they need the web and follow Google's own policies.
-  Linux is a preview, and some features are Labs (unfinished).
+  Some features are Labs (unfinished).
 
 ## Install
 
@@ -129,7 +129,7 @@ page.
 | System | Files |
 |---|---|
 | Windows 10 / 11 | `OpenCircle-Setup-<version>-x64.exe` (the setup: one click, or pick the folder; for IT: `OpenCircle-Setup-<version>-x64.exe /quiet /dir="C:\Apps\OpenCircle"`, uninstall with `/uninstall /quiet`), `OpenCircle-<version>-x64-portable.exe` (no install) |
-| Linux (preview) | `.AppImage`, `.deb`, `.rpm` |
+| Linux | `.AppImage`, `.deb`, `.rpm` |
 
 On Linux, one command downloads the latest AppImage, checks its signature, installs it
 to `~/.local/bin` (no `sudo`), adds the app-menu entry and starts it:
@@ -197,7 +197,7 @@ Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
 ## Platforms
 
 - **Windows 10 and 11:** the full feature set.
-- **Linux (preview):** X11 and Wayland. On Wayland the desktop owns the keys and
+- **Linux:** X11 and Wayland. On Wayland the desktop owns the keys and
   the screen capture; picking a window and long capture are not offered, and
   Share is Windows only. See [Linux notes](docs/linux-notes.md).
 
