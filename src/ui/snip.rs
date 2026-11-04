@@ -626,7 +626,7 @@ impl Snip {
         match self.kind {
             _ if !self.hinting => {}
             Kind::Region if self.desktop.is_empty() => {
-                let hint = "Drag or circle an area (no window picking here) · Esc to close";
+                let hint = "Drag an area (no window picking here) · Esc to close";
                 top = top.push(surface::hint(hint));
             }
             Kind::Region => {

@@ -622,6 +622,35 @@ pub(in crate::ui) fn snipping_on(w: u32, h: u32, area: Rectangle) -> App {
     app
 }
 
+/// A snip drag is always the box between the press and the pointer: dragging
+/// back shrinks it, crossing the press flips it, and the size chip follows.
+#[test]
+fn a_snip_drag_shrinks_back_and_crosses_its_start() {
+    let window = Rectangle::new(Point::new(20.0, 20.0), Size::new(40.0, 40.0));
+    let mut app = snipping_on(1280, 720, window);
+    let box_ = |x, y, w, h| Rectangle::new(Point::new(x, y), Size::new(w, h));
+    let at = Point::new;
+    let start = at(700.0, 500.0);
+    let press = overlay::Event::Press {
+        at: start,
+        shift: false,
+    };
+    event(&mut app, press);
+    for p in [at(400.0, 300.0), at(200.0, 100.0)] {
+        event(&mut app, overlay::Event::Move(p));
+    }
+    let out = Some(box_(200.0, 100.0, 500.0, 400.0));
+    assert_eq!(app.snip_drag(), out, "out");
+    event(&mut app, overlay::Event::Move(at(600.0, 450.0)));
+    let back = Some(box_(600.0, 450.0, 100.0, 50.0));
+    assert_eq!(app.snip_drag(), back, "back: it shrinks");
+    event(&mut app, overlay::Event::Move(at(820.0, 580.0)));
+    let past = Some(box_(700.0, 500.0, 120.0, 80.0));
+    assert_eq!(app.snip_drag(), past, "past the start");
+    event(&mut app, overlay::Event::Release);
+    assert_eq!(app.o.selection.map(|s| s.area), past, "picked");
+}
+
 #[test]
 fn snip_ctrl_c_copies_the_area_under_the_pointer_as_an_image() {
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));

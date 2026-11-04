@@ -254,7 +254,14 @@ impl App {
             }
             overlay::Event::Move(p) if self.o.text_press.is_some() => return self.drag_text(p),
             overlay::Event::Move(p) if self.o.grab.is_some() => self.drag_grab(p),
-            overlay::Event::Move(p) if self.o.drawing => self.o.stroke.push(p),
+            overlay::Event::Move(p) if self.o.drawing => {
+                // Snip draws a box, never a loop: only the press and the pointer
+                // count, so dragging back shrinks it (owner, 2026-11-04).
+                if matches!(self.o.purpose, Purpose::Snip(_)) {
+                    self.o.stroke.truncate(1);
+                }
+                self.o.stroke.push(p);
+            }
             overlay::Event::Move(_) => {}
             overlay::Event::Hover(p) => {
                 self.o.pointer = p;
