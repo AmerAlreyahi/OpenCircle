@@ -572,6 +572,8 @@ production systems.
   Exception (owner, 2026-10-25): Gemini Pro or Flash 3.8 may run Linux TEST passes
   (test only, no code), now and after each release; scope for now: widgets, Circle
   to Search, OCR, translation (no song search, no snip tool).
+  Exception (owner, 2026-11-04): Antigravity (any of its models; images by Nano Banana) may generate marketing images
+  (banners); it writes no code and decides nothing.
   Gemini ONLY runs the steps and captures screenshots: it never touches code, never
   decides, never judges; any verdict it gives is ignored. The lead passes the pictures
   to the owner, who approves or rejects himself.
