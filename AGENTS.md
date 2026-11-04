@@ -608,6 +608,10 @@ production systems.
 - Config schema 9 (0.1.3 clean-up, 2026-11-03): [labs] snip/editor and the hidden snip window/full-screen entries are read
   but no longer written; "Auto action" / "Search with" rows and auto-search removed (nothing is sent until the user picks
   an action); selection.after / search_with still read and written but ignored (drop in a later schema).
+- Release now, games next (owner, 2026-11-04, A): v0.1.3 ships with today's state (limits in the notes); a version of its own
+  for GAME translation accuracy comes next (0.1.4 "Game translation": game mode, fit into buttons, names, game vocabulary,
+  pt/ru/ja readers + models, scored on the 13-image corpus, target >= 90 % per image with a model); the later versions
+  shift by one (GPU renderer + glass -> 0.1.5, ...).
 - Glass library (owner, 2026-11-04): the glass / refraction effect is its own project: a separate open-source Rust library
   (own repo and name, not "Liquid Glass"; MIT OR Apache-2.0; clean-room; wgpu + iced integration, demo, docs); OpenCircle
   only depends on it. Roadmap 0.1.4 "Glass library".
