@@ -608,6 +608,9 @@ production systems.
 - Config schema 9 (0.1.3 clean-up, 2026-11-03): [labs] snip/editor and the hidden snip window/full-screen entries are read
   but no longer written; "Auto action" / "Search with" rows and auto-search removed (nothing is sent until the user picks
   an action); selection.after / search_with still read and written but ignored (drop in a later schema).
+- Glass library (owner, 2026-11-04): the glass / refraction effect is its own project: a separate open-source Rust library
+  (own repo and name, not "Liquid Glass"; MIT OR Apache-2.0; clean-room; wgpu + iced integration, demo, docs); OpenCircle
+  only depends on it. Roadmap 0.1.4 "Glass library".
 - Clean before every release (owner, 2026-11-03, from 0.1.3 on): the LAST step before a release, then the security
   check: remove every dead or old config key, code path, test, asset, script and tool we no longer use AND won't use
   (things waiting for a planned feature, e.g. glass in 0.1.4, stay). Docs and assets too (owner, 2026-11-03): public
