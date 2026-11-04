@@ -389,6 +389,10 @@ production systems.
   scenario videos, one of them on an ORIGINAL generated game screen in the style of a monster/character banner (no
   real game's art, names, logos or UI copied); the owner's guide comes first; ONE video is shown to the owner first,
   then he decides to continue with the agent or do it himself. Uses the fixed translate build.
+  Editing rule (owner, 2026-11-04): when a clip is cropped or zoomed in the edit, the live effect (the Active Look edge
+  glow, Sapphire Glow) is re-created at the edited frame's edge so it stays visible, only while the app is really
+  active (as preview-edit/ACTIVE_LOOK.md does). Translate preview #1 framing: YouTube theater mode (no sidebar of other
+  people's thumbnails).
   The snip area's outline, handles and hover outline take their colours from the chosen Active Look (Settings >
   Appearance "Active look screen borders": Liquid Prism, Spectrum, Aurora Borealis, ..., Custom), the same source
   as the screen edge and main mode's selection line (one place, no snip-only colours).
