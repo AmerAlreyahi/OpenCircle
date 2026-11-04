@@ -23,29 +23,35 @@ const PILL_PAD: f32 = 10.0;
 const PILL_TOP: f32 = 24.0;
 /// Between a card's blocks.
 const STACK: f32 = 10.0;
+/// The note under the pill (`surface::hint`'s padding).
+const NOTE_PAD: [f32; 2] = [8.0, 14.0];
+
+/// A problem's first sentence: the rest is how-to the "Set up AI" action covers.
+fn gist(message: &str) -> &str {
+    let end = ([". ", " ("].iter().filter_map(|m| message.find(m)))
+        .min()
+        .unwrap_or(message.len());
+    message[..end].trim_end_matches('.')
+}
 
 impl Session {
     /// The layer over the frame: status and the language picker, and the
     /// floating result card (at `at`, like every result card) for prompts,
     /// errors and the word card. `hover`: on the card's resize edge.
     pub fn view<'a>(&'a self, screen: Size, at: Rectangle, hover: bool) -> Element<'a, Msg> {
-        // a prompt is as tall as its text and buttons, not a full-height slab
-        let card = |body: Element<'a, Msg>,
-                    footer: Option<Element<'a, Msg>>,
-                    fit: Option<(usize, f32)>,
-                    title: Option<&'a str>| {
-            let at = fit.map_or(at, |(chars, below)| frame::short(at, screen, chars, below));
-            let title = title.unwrap_or(actions::translate::ACTION.label);
-            let header = Header {
-                glyph: actions::translate::ACTION.icon,
-                title,
-                chip: None,
-                menu: false,
-                held: false,
-                logo: None,
+        let card =
+            |body: Element<'a, Msg>, footer: Option<Element<'a, Msg>>, title: Option<&'a str>| {
+                let title = title.unwrap_or(actions::translate::ACTION.label);
+                let header = Header {
+                    glyph: actions::translate::ACTION.icon,
+                    title,
+                    chip: None,
+                    menu: false,
+                    held: false,
+                    logo: None,
+                };
+                card(header, body, footer, at, screen, hover, Msg::Card)
             };
-            card(header, body, footer, at, screen, hover, Msg::Card)
-        };
         // the pill stays beside the card
         let with_pill = |card: Element<'a, Msg>| -> Element<'a, Msg> {
             let free = frame::free(screen, Some(at));
@@ -90,17 +96,19 @@ impl Session {
             Phase::Downloading(done) => fetched(Stage::at(*done)),
             Phase::DownloadFailed(why) => fetched(Stage::Failed(why)),
             Phase::Translating => self.languages(Some("Translating…")),
-            // already in the target: a note beside the languages (pick another)
-            Phase::Failed(problem) if problem.quiet => self.languages(Some(&problem.message)),
+            // Already in the target, no offline model, an AI error: one soft line
+            // under the pill, never a card, and the pill stays put (owner,
+            // 2026-11-04). The picker stays: another pair may work offline.
             Phase::Failed(problem) => {
-                let buttons = match problem.setup {
-                    true => actions(("Set up AI", Msg::OpenSettings), [("Close", Msg::Close)]),
-                    false => actions(("Close", Msg::Close), []),
-                };
-                // the picker stays: another pair may work offline
-                let body = error(Role::NOTE, problem.message.clone()).into();
-                let fit = Some((problem.message.chars().count(), 77.0));
-                with_pill(card(body, Some(buttons), fit, None))
+                let mut line = row![note(gist(&problem.message))]
+                    .spacing(PILL_PAD)
+                    .align_y(Center);
+                if problem.setup {
+                    let set_up = button_label("Set up AI");
+                    line = line.push(button(set_up, Kind::Quiet, Some(Msg::OpenSettings)));
+                }
+                let below = surface(Material::Widget, radius::FULL, line).padding(NOTE_PAD);
+                self.pill(None, None, Some(below.into()))
             }
             // lines kept in their own language: a quiet offer in the pill
             Phase::Shown(shown) if self.card.is_none() && shown.offer.is_some() => {
@@ -109,7 +117,7 @@ impl Session {
             Phase::Shown(_) => match &self.card {
                 Some(word) => {
                     let (body, footer) = card_view(word);
-                    with_pill(card(body, Some(footer), None, Some(&word.title)))
+                    with_pill(card(body, Some(footer), Some(&word.title)))
                 }
                 None => self.languages(None),
             },
@@ -119,19 +127,21 @@ impl Session {
     /// The pill with the offer: "Spanish text found" and its Get button.
     fn offer<'a>(&'a self, o: &'a super::Offer) -> Element<'a, Msg> {
         let get = button(button_label(&o.get), Kind::Elevated, Some(Msg::GetHeld));
-        self.pill(Some(&o.found), Some(get))
+        self.pill(Some(&o.found), Some(get), None)
     }
 
     /// The pill at the top (`.as-language-pill`): source → target (the
     /// picker), and `status`.
     fn languages<'a>(&'a self, status: Option<&'a str>) -> Element<'a, Msg> {
-        self.pill(status, None)
+        self.pill(status, None, None)
     }
 
+    /// `below`: a note under the pill; the pill keeps its place.
     fn pill<'a>(
         &'a self,
         status: Option<&'a str>,
         then: Option<Element<'a, Msg>>,
+        below: Option<Element<'a, Msg>>,
     ) -> Element<'a, Msg> {
         let mut top = row![self.picker.chips(picker::CHIP_HEIGHT).map(Msg::Picker)]
             .spacing(PILL_PAD)
@@ -145,10 +155,11 @@ impl Session {
             body = body.push(list.map(Msg::Picker));
         }
         let pill = surface(Material::Widget, radius::DRAWER, body).padding(PILL_PAD);
-        container(opaque(pill))
-            .center_x(Fill)
-            .padding(PILL_TOP)
-            .into()
+        let shown = column![opaque(pill)]
+            .push(below.map(opaque))
+            .spacing(STACK)
+            .align_x(Center);
+        container(shown).center_x(Fill).padding(PILL_TOP).into()
     }
 }
 

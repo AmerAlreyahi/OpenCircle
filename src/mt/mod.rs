@@ -1429,11 +1429,15 @@ pub fn unavailable(source: &str, target: &str) -> String {
             lang::name(target)
         );
     }
+    // Detect: "into Portuguese", never "from Detect into Portuguese"
+    let from = match source {
+        lang::AUTO => String::new(),
+        s => format!("from {} ", lang::name(s)),
+    };
     format!(
-        "there is no offline model from {} into {} yet (coming in a future \
+        "there is no offline model {from}into {} yet (coming in a future \
          update). Choose AI as the engine in Settings > Translate (and set it up \
-         in Settings > AI) to translate it now",
-        lang::name(source),
+         in Settings > Ask AI) to translate it now",
         lang::name(target)
     )
 }
@@ -1853,6 +1857,11 @@ mod tests {
         assert_eq!(route("de", "ar").unwrap().len(), 2);
         let why = unavailable("fr", "ja");
         assert!(why.contains("from French into Japanese") && why.contains("Choose AI"));
+        let why = unavailable(lang::AUTO, "pt");
+        assert!(
+            why.starts_with("there is no offline model into Portuguese yet"),
+            "{why}"
+        );
         let p = pair("en", "ar").unwrap();
         assert_eq!(p.label(), "English → Arabic offline translation");
         let files = p.files();

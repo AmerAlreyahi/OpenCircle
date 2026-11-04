@@ -153,7 +153,41 @@ fn a_partial_redraw_leaves_the_rest_of_the_download_prompt() {
     }
 }
 
-/// The download question, its progress and an error are short cards:
+/// A problem (no offline model, an AI error, already in the target) is one
+/// soft line under the language pill with "Set up AI" when that helps: no
+/// card, and the pill stays exactly where it was (owner, 2026-11-04; before:
+/// a big card at the right and the pill jumped left).
+#[test]
+fn a_problem_is_a_note_under_the_pill_that_never_moves() {
+    let size = Size::new(1280.0, 720.0);
+    let at = card::place(size, None, None);
+    let mut s = session(true);
+    let _ = s.update(shown(Vec::new()));
+    let calm = crate::ui::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
+    let why = crate::mt::unavailable(crate::translate::lang::AUTO, "pt");
+    for (message, setup) in [
+        (format!("T{}.", &why[1..]), true),
+        ("Already in English".into(), false),
+    ] {
+        s.phase = Phase::Failed(problem(message, setup));
+        let texts = crate::ui::kit::testing::shot::texts(s.view(size, at, false)).join(" | ");
+        let px = crate::ui::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
+        // the pill's band (24 px down, ~50 tall) is unchanged
+        let band = 1280 * 4 * 70;
+        assert!(px[..band] == calm[..band], "the pill moved: {texts}");
+        assert!(!texts.contains("Close"), "a card: {texts}");
+        assert_eq!(texts.contains("Set up AI"), setup, "{texts}");
+        if setup {
+            assert!(
+                texts.contains("There is no offline model into Portuguese yet |"),
+                "{texts}"
+            );
+            assert!(!texts.contains("Settings >"), "one line: {texts}");
+        }
+    }
+}
+
+/// The download question and its progress are short cards:
 /// as tall as their text and buttons, on any screen down to 1125x575 (a
 /// narrow one too), every text and button inside the window, nothing
 /// painted outside the card but its shadow. Before: a full-height slab
@@ -168,15 +202,6 @@ fn the_prompts_are_short_cards_on_small_screens() {
             Phase::Consent(Some((crate::mt::pair("en", "ar").unwrap(), 160_000_000))),
         ),
         ("downloading", Phase::Downloading(0.4)),
-        (
-            "failed",
-            Phase::Failed(problem(
-                "The AI provider has a problem right now (HTTP 503). Try again in a minute, \
-                 or pick another provider in Settings."
-                    .into(),
-                true,
-            )),
-        ),
     ];
     let backdrop = iced::Color::from_rgb8(240, 240, 240);
     for (name, phase) in phases {
