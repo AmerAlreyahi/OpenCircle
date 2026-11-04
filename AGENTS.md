@@ -361,6 +361,10 @@ production systems.
   media exception (the app's code stays MIT). The translate
   clip and its poster are CC BY-SA 4.0, an explicit media exception to the app's MIT licence. About + NOTICE carry the
   Google non-affiliation line verbatim.
+- Previews online on demand (owner, 2026-11-04, B; SUPERSEDES "bundled ... never loaded from the internet"): the exe bundles
+  only a sharp still per clip; a "Play preview" click downloads that page's full-HD clips once from a GitHub release of
+  the owner's (sha256 pinned, like the models) and keeps them on the PC; nothing downloads before that click. A page's
+  clips all play in turn and loop; the stage scales with the Settings window. Sidebar "AI" is named "Ask AI" (owner).
 - Copy = button AND Ctrl+C (owner, 2026-11-03, universal): wherever the app has a Copy button, Ctrl+C does the same
   (long capture included: Ctrl+C finishes and copies); Save pairs with Ctrl+S the same way. A text field with a
   selection still copies its text.
