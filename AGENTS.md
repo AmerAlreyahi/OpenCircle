@@ -361,6 +361,9 @@ production systems.
   media exception (the app's code stays MIT). The translate
   clip and its poster are CC BY-SA 4.0, an explicit media exception to the app's MIT licence. About + NOTICE carry the
   Google non-affiliation line verbatim.
+- Language picker (owner, 2026-11-04): design variant A approved (canvas board "Translate · language picker",
+  PICKER_SPEC.md): fixed pill at top centre, status tag beside it, a one-column list hanging from each chip, search /
+  Detect / Recent / A-Z, quiet needs-AI circle; "needs AI" is a one-line note, never a card, the pill never moves.
 - Previews online on demand (owner, 2026-11-04, B; SUPERSEDES "bundled ... never loaded from the internet"): the exe bundles
   only a sharp still per clip; a "Play preview" click downloads that page's full-HD clips once from a GitHub release of
   the owner's (sha256 pinned, like the models) and keeps them on the PC; nothing downloads before that click. A page's
