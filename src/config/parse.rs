@@ -219,6 +219,14 @@ impl Config {
             );
             c.translate.live_note_shown = get(t, "translate.", "live_note_shown", false, &mut w);
             c.translate.whole_screen = get(t, "translate.", "whole_screen", false, &mut w);
+            for (key, slot) in [
+                ("recent_sources", &mut c.translate.recent_sources),
+                ("recent_targets", &mut c.translate.recent_targets),
+            ] {
+                *slot = get_checked(t, "translate.", key, vec![], &mut w, |v: &Vec<String>| {
+                    v.iter().try_for_each(|s| check_lang(s))
+                });
+            }
         }
         if let Some(t) = section(&root, "song", &mut w) {
             c.song.source = get(t, "song.", "source", d.song.source, &mut w);

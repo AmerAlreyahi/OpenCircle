@@ -49,6 +49,34 @@ pub fn input<'a, Message: Clone + 'a>(
         })
 }
 
+/// A list's search field: `input` with the search glyph (`text_muted`) at
+/// its start; `rtl`: the glyph and the text at the right.
+pub fn search<'a, Message: Clone + 'a>(
+    placeholder: &str,
+    value: &str,
+    rtl: bool,
+) -> text_input::TextInput<'a, Message> {
+    use super::icon::{FONT, Icon};
+    use super::tokens::size;
+    let side = match rtl {
+        true => text_input::Side::Right,
+        false => text_input::Side::Left,
+    };
+    let align = match rtl {
+        true => iced::alignment::Horizontal::Right,
+        false => iced::alignment::Horizontal::Left,
+    };
+    input(placeholder, value, false, false)
+        .icon(text_input::Icon {
+            font: FONT,
+            code_point: Icon::Search.glyph(),
+            size: Some(size::ICON_SMALL.into()),
+            spacing: 8.0,
+            side,
+        })
+        .align_x(align)
+}
+
 /// Mono 10.5 px on `track`, a rim edge that turns `accent` while focused. No
 /// `on_input` = read-only.
 pub fn field<'a, Message: Clone + 'a>(

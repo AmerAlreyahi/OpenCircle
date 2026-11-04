@@ -172,8 +172,8 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
         s.phase = Phase::Failed(problem(message, setup));
         let texts = crate::ui::kit::testing::shot::texts(s.view(size, at, false)).join(" | ");
         let px = crate::ui::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
-        // the pill's band (24 px down, ~50 tall) is unchanged
-        let band = 1280 * 4 * 70;
+        // the pill's band (`PILL_TOP` down, `PILL` tall) is unchanged
+        let band = 1280 * 4 * (view::PILL_TOP + picker::PILL.height) as usize;
         assert!(px[..band] == calm[..band], "the pill moved: {texts}");
         assert!(!texts.contains("Close"), "a card: {texts}");
         assert_eq!(texts.contains("Set up AI"), setup, "{texts}");
@@ -755,10 +755,6 @@ fn every_translate_state_matches_its_golden_image() {
             "offline" => s.phase = Phase::Consent(Some((en_ar(), 117_600_822))),
             "downloading" => s.phase = Phase::Downloading(0.4),
             "failed" => s.phase = Phase::Failed(problem("No AI provider is set up.".into(), true)),
-            "picker" => {
-                let _ = s.update(shown(Vec::new()));
-                s.picker.update(picker::Msg::Open(picker::Side::Target));
-            }
             "word-explained" => {
                 let blocks = vec![block("Inventory", "المخزون", [0.0, 0.0, 100.0, 40.0])];
                 let _ = s.update(shown(blocks));
@@ -793,7 +789,6 @@ fn every_translate_state_matches_its_golden_image() {
         "downloading",
         "translating",
         "failed",
-        "picker",
         "offer",
         "readers",
         "word",
@@ -826,7 +821,7 @@ fn a_changed_language_leaves_no_ghost_text() {
     for scale in [1.0, 1.5] {
         let view = |i: usize| {
             (i <= 10).then(|| {
-                let chips = pickers[i % pickers.len()].chips(picker::CHIP_HEIGHT);
+                let chips = pickers[i % pickers.len()].chips();
                 c(chips).padding(20).into()
             })
         };
@@ -835,4 +830,88 @@ fn a_changed_language_leaves_no_ghost_text() {
         let differ = window.iter().zip(&fresh).filter(|(a, b)| a != b).count();
         assert_eq!(differ, 0, "{differ} stale bytes at {scale}x");
     }
+}
+
+/// The language picker (design variant A, the canvas board "Translate ·
+/// language picker") in every state, Sapphire and Daylight: closed with the
+/// status tag beside the pill, the source list, the target list with the
+/// keyboard's ring, filtering "po", a needs-AI row hovered (the hint at the
+/// foot), a needs-AI language picked (the one-line note), an Arabic UI
+/// (mirrored), and the found-language offer beside the pill.
+#[test]
+fn every_picker_state_matches_its_golden_image() {
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::ui::picker::{Msg as P, Nav, Side};
+    const SCREEN: Size = Size::new(720.0, 440.0);
+    let at = card::place(SCREEN, None, None);
+    let make = |name: &str| {
+        let mut s = session(true);
+        s.picker = Picker::new("auto", "en", true);
+        let _ = s.update(shown(Vec::new()));
+        let mut p = |m: P| {
+            let _ = s.picker.update(m);
+        };
+        match name {
+            "p2-source" => p(P::Open(Side::Source)),
+            "p3-target" => {
+                p(P::Open(Side::Target));
+                p(P::Key(Nav::Down));
+                p(P::Key(Nav::Down));
+            }
+            "p4-filter" => {
+                p(P::Open(Side::Target));
+                p(P::Query("po".into()));
+            }
+            "p5-ai-hover" => {
+                p(P::Open(Side::Target));
+                p(P::Hover(Some(3)));
+            }
+            "p6-ai-picked" => {
+                p(P::Open(Side::Target));
+                p(P::Pick("pt".into()));
+                let why = crate::mt::unavailable(crate::translate::lang::AUTO, "pt");
+                s.phase = Phase::Failed(problem(format!("T{}.", &why[1..]), true));
+            }
+            "p7-target-ar" => {
+                s.picker.rtl = true;
+                s.picker.target = "ar".into();
+                let _ = s.picker.update(P::Open(Side::Target));
+                let _ = s.picker.update(P::Key(Nav::Down));
+                let _ = s.picker.update(P::Key(Nav::Down));
+            }
+            "offer" => {
+                let mut shown = shown(Vec::new());
+                if let Msg::Done(Ok(s)) = &mut shown {
+                    s.offer = Some(Box::new(Offer::new((es_ar(), Vec::new()), "es", "ar")));
+                }
+                s.phase = Phase::Translating;
+                let _ = s.update(shown);
+            }
+            _ => s.phase = Phase::Translating, // p1: closed, a status beside the pill
+        }
+        s
+    };
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        themes::set(theme);
+        for name in [
+            "p1-closed",
+            "p2-source",
+            "p3-target",
+            "p4-filter",
+            "p5-ai-hover",
+            "p6-ai-picked",
+            "p7-target-ar",
+            "offer",
+        ] {
+            let s = make(name);
+            let file = format!("picker-{name}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SCREEN, &[1.0], || {
+                s.view(SCREEN, at, false)
+            }));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
 }

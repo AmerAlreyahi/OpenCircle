@@ -2,9 +2,9 @@
 //! screen" states), from kit parts only: the language pill (source → target,
 //! the status), and the result card for its prompts, errors and the word card.
 use iced::widget::{column, container, opaque, pin, row, stack};
-use iced::{Center, Element, Fill, Rectangle, Size};
+use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
-use super::{Card, Msg, PICKER_LIST, Phase, Session};
+use super::{Card, Msg, Phase, Session};
 use crate::actions::ask::Status;
 use crate::actions::{self};
 use crate::ui::ai_chat::{actions, card, note};
@@ -17,10 +17,13 @@ use crate::ui::kit::tokens::{Role, radius};
 use crate::ui::picker;
 use crate::ui::screens::model_download::{self, Model, OCR, SCRIPTS, Stage, TRANSLATION};
 
-/// The pill's padding and its gap (`.as-language-pill`: 10 px, gap 10), and
-/// its distance to the top of the screen.
-const PILL_PAD: f32 = 10.0;
-const PILL_TOP: f32 = 24.0;
+/// The pill's distance to the top of the screen, and the status tag's to
+/// the pill (PICKER_SPEC.md).
+pub const PILL_TOP: f32 = 14.0;
+const TAG_GAP: f32 = 8.0;
+/// Inside the status tag, and between its text and its button.
+const TAG_PAD: [f32; 2] = [3.0, 10.0];
+const TAG_SPACING: f32 = 8.0;
 /// Between a card's blocks.
 const STACK: f32 = 10.0;
 /// The note under the pill (`surface::hint`'s padding).
@@ -55,9 +58,9 @@ impl Session {
         // the pill stays beside the card
         let with_pill = |card: Element<'a, Msg>| -> Element<'a, Msg> {
             let free = frame::free(screen, Some(at));
-            let pill = container(self.languages(None)).width(free.width);
-            stack![pin(pill).position(free.position()), card].into()
+            stack![card, self.pill(free, None, None, None)].into()
         };
+        let whole = Rectangle::with_size(screen);
         // the download card (`model_download`): asks, its progress, why it failed
         let download = |model: &Model, bytes, stage, provider| {
             let on = model_download::On {
@@ -95,72 +98,94 @@ impl Session {
             }
             Phase::Downloading(done) => fetched(Stage::at(*done)),
             Phase::DownloadFailed(why) => fetched(Stage::Failed(why)),
-            Phase::Translating => self.languages(Some("Translating…")),
+            Phase::Translating => self.pill(whole, Some("Translating…"), None, None),
             // Already in the target, no offline model, an AI error: one soft line
             // under the pill, never a card, and the pill stays put (owner,
             // 2026-11-04). The picker stays: another pair may work offline.
             Phase::Failed(problem) => {
                 let mut line = row![note(gist(&problem.message))]
-                    .spacing(PILL_PAD)
+                    .spacing(TAG_SPACING)
                     .align_y(Center);
                 if problem.setup {
                     let set_up = button_label("Set up AI");
                     line = line.push(button(set_up, Kind::Quiet, Some(Msg::OpenSettings)));
                 }
                 let below = surface(Material::Widget, radius::FULL, line).padding(NOTE_PAD);
-                self.pill(None, None, Some(below.into()))
+                self.pill(whole, None, None, Some(below.into()))
             }
             // lines kept in their own language: a quiet offer in the pill
             Phase::Shown(shown) if self.card.is_none() && shown.offer.is_some() => {
-                self.offer(shown.offer.as_ref().expect("just checked"))
+                self.offer(whole, shown.offer.as_ref().expect("just checked"))
             }
             Phase::Shown(_) => match &self.card {
                 Some(word) => {
                     let (body, footer) = card_view(word);
                     with_pill(card(body, Some(footer), Some(&word.title)))
                 }
-                None => self.languages(None),
+                None => self.pill(whole, None, None, None),
             },
         }
     }
 
-    /// The pill with the offer: "Spanish text found" and its Get button.
-    fn offer<'a>(&'a self, o: &'a super::Offer) -> Element<'a, Msg> {
+    /// The pill with the offer beside it: "Spanish text found" and its Get.
+    fn offer<'a>(&'a self, region: Rectangle, o: &'a super::Offer) -> Element<'a, Msg> {
         let get = button(button_label(&o.get), Kind::Elevated, Some(Msg::GetHeld));
-        self.pill(Some(&o.found), Some(get), None)
+        self.pill(region, Some(&o.found), Some(get), None)
     }
 
-    /// The pill at the top (`.as-language-pill`): source → target (the
-    /// picker), and `status`.
-    fn languages<'a>(&'a self, status: Option<&'a str>) -> Element<'a, Msg> {
-        self.pill(status, None, None)
-    }
-
-    /// `below`: a note under the pill; the pill keeps its place.
+    /// The pill (`picker::PILL`, fixed) at the top centre of `region` (the
+    /// screen, or what a card leaves free); `status` (and `then`, a button) a
+    /// quiet tag beside it on its end side; `below` a note centred under it;
+    /// the open language list hanging from its chip. Nothing here changes
+    /// the pill's place or size.
     fn pill<'a>(
         &'a self,
+        region: Rectangle,
         status: Option<&'a str>,
         then: Option<Element<'a, Msg>>,
         below: Option<Element<'a, Msg>>,
     ) -> Element<'a, Msg> {
-        let mut top = row![self.picker.chips(picker::CHIP_HEIGHT).map(Msg::Picker)]
-            .spacing(PILL_PAD)
-            .align_y(Center);
-        if let Some(status) = status {
-            top = top.push(note(status));
+        let rtl = self.picker.rtl;
+        let at = pill_at(region);
+        let mut layer = stack![pin(opaque(self.picker.pill().map(Msg::Picker))).position(at)];
+        if status.is_some() || then.is_some() {
+            let line = row![].push(status.map(note)).push(then);
+            let tag = surface(
+                Material::Widget,
+                radius::FULL,
+                line.spacing(TAG_SPACING).align_y(Center),
+            )
+            .padding(TAG_PAD);
+            let tag = container(opaque(tag)).center_y(picker::PILL.height);
+            let tag: Element<'a, Msg> = match rtl {
+                true => {
+                    let room = (at.x - region.x - TAG_GAP).max(0.0);
+                    pin(tag.align_right(room))
+                        .position(Point::new(region.x, at.y))
+                        .into()
+                }
+                false => pin(tag)
+                    .position(Point::new(at.x + picker::PILL.width + TAG_GAP, at.y))
+                    .into(),
+            };
+            layer = layer.push(tag);
         }
-        top = top.push(then);
-        let mut body = column![top].spacing(picker::SPACING);
-        if let Some(list) = self.picker.list(PICKER_LIST) {
-            body = body.push(list.map(Msg::Picker));
+        if let Some(below) = below {
+            let y = at.y + picker::PILL.height + STACK;
+            let below = container(opaque(below)).center_x(region.width);
+            layer = layer.push(pin(below).position(Point::new(region.x, y)));
         }
-        let pill = surface(Material::Widget, radius::DRAWER, body).padding(PILL_PAD);
-        let shown = column![opaque(pill)]
-            .push(below.map(opaque))
-            .spacing(STACK)
-            .align_x(Center);
-        container(shown).center_x(Fill).padding(PILL_TOP).into()
+        if let (Some(list), Some(offset)) = (self.picker.list(), self.picker.list_at()) {
+            layer = layer.push(pin(opaque(list.map(Msg::Picker))).position(at + offset));
+        }
+        layer.into()
     }
+}
+
+/// Where the pill's top-left corner is in `region`: centred, `PILL_TOP` down.
+pub fn pill_at(region: Rectangle) -> Point {
+    let x = region.x + ((region.width - picker::PILL.width) / 2.0).round();
+    Point::new(x, region.y + PILL_TOP)
 }
 
 /// The word card (the design's "Word explanation", titled "translation ·

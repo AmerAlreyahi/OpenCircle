@@ -612,7 +612,7 @@ fn panel_frame_card_sheet() {
 /// item at rest, under the cursor, keyboard-focused, checked.
 #[test]
 fn option_list_sheet() {
-    use super::super::option_list::{item, opener, option};
+    use super::super::option_list::{Look, choice, item, opener, option};
     let menu_item = |focused, checked| {
         move |ar| {
             let hint = Some("Ctrl+Shift+L".to_string());
@@ -625,8 +625,35 @@ fn option_list_sheet() {
             )
         }
     };
-    let open =
-        |accent| move |ar| opener(s(ar, "English", "العربية").into(), accent, 140.0, 32.0, ());
+    let open = |accent, open| {
+        move |ar| {
+            let label = s(ar, "English", "العربية").into();
+            opener(label, accent, open, ar, (140.0, 32.0), ())
+        }
+    };
+    let lang = |look: Look, bold| {
+        move |ar| {
+            let (name, bold) = match ar {
+                true => ("البرتغالية", None),
+                false => ("Portuguese", bold),
+            };
+            choice(name, bold, look, 180.0, ar, ())
+        }
+    };
+    let (current, ringed, needs_ai) = (
+        Look {
+            current: true,
+            ..Look::default()
+        },
+        Look {
+            ringed: true,
+            ..Look::default()
+        },
+        Look {
+            needs_ai: true,
+            ..Look::default()
+        },
+    );
     let pick = |active, badge| {
         move |ar| {
             option(
@@ -639,9 +666,15 @@ fn option_list_sheet() {
         }
     };
     let rows = vec![
-        row("opener", Act::Rest, open(false)),
-        row("opener hover", Act::Hover, open(false)),
-        row("opener target", Act::Rest, open(true)),
+        row("opener", Act::Rest, open(false, false)),
+        row("opener hover", Act::Hover, open(false, false)),
+        row("opener target", Act::Rest, open(true, false)),
+        row("opener open", Act::Rest, open(false, true)),
+        row("opener target open", Act::Rest, open(true, true)),
+        row("choice", Act::Rest, lang(Look::default(), None)),
+        row("choice current", Act::Rest, lang(current, None)),
+        row("choice ringed", Act::Rest, lang(ringed, Some((0, 2)))),
+        row("choice needs AI", Act::Hover, lang(needs_ai, None)),
         row("option", Act::Rest, pick(false, None)),
         row("option hover", Act::Hover, pick(false, None)),
         row("option current", Act::Rest, pick(true, None)),

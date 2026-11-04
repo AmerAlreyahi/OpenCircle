@@ -72,18 +72,10 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
             on_pick(o.clone()),
         )
     });
-    let menu = container(scroll(column(rows)).height(Length::Shrink))
+    let menu = super::option_list::frame(scroll(column(rows)).height(Length::Shrink))
         .padding(MENU_PAD)
         .width(size::CONTROL_COLUMN)
-        .max_height(MENU_MAX)
-        .style(|_| container::Style {
-            background: Some(c().dropdown.into()),
-            border: Border::default()
-                .rounded(radius::DROPDOWN)
-                .width(1)
-                .color(c().rim),
-            ..container::Style::default()
-        });
+        .max_height(MENU_MAX);
     Element::new(Dropdown {
         opener: opener.into(),
         menu: menu.into(),

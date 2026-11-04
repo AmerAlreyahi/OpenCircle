@@ -72,6 +72,9 @@ ICONS=$(printf '%s,' \
   U+E0F9 `# image (Snip toolbar: the size chip, drag the picture out)` \
   U+E0BA `# ellipsis (Snip toolbar: More)` \
   U+E23E `# list-plus (Snip toolbar: Add step N; More: Add to steps)` \
+  U+E071 `# chevron-down (a list opener, closed)` \
+  U+E074 `# chevron-up (a list opener, open)` \
+  U+E04D `# arrow-right (the language pill: source -> target)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

@@ -39,6 +39,20 @@ pub fn across<'a, Message: 'a>(
         .style(style)
 }
 
+/// The scroller alone, `length` tall (a list that scrolls by rows draws its
+/// own): the same 5 px round `rim` bar.
+pub fn thumb<'a, Message: 'a>(length: f32) -> Element<'a, Message> {
+    iced::widget::container(iced::widget::Space::new())
+        .width(WIDTH)
+        .height(length)
+        .style(|_| iced::widget::container::Style {
+            background: Some(c().rim.into()),
+            border: Border::default().rounded(radius::FULL),
+            ..Default::default()
+        })
+        .into()
+}
+
 fn bar() -> Scrollbar {
     Scrollbar::new().width(WIDTH).scroller_width(WIDTH)
 }

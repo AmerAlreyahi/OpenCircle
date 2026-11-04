@@ -41,6 +41,8 @@
 //! live_note_shown = false           # the one-time live-mode note was shown
 //! whole_screen = false              # live translate reads the whole screen,
 //!                                   # not just the foreground window (no taskbar, no browser bars)
+//! recent_sources = []               # the language picker's last picks, newest first
+//! recent_targets = []               #   (written only when not empty)
 //!
 //! [selection]
 //! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
@@ -379,6 +381,11 @@ pub struct TranslateConfig {
     /// foreground window's page (`capture::window_rect::region`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub whole_screen: bool,
+    /// The language picker's recent picks, most recent first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub recent_sources: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub recent_targets: Vec<String>,
 }
 
 /// What a finished snip does.
@@ -919,6 +926,8 @@ impl Default for TranslateConfig {
             live_interval_ms: DEFAULT_LIVE_INTERVAL_MS,
             live_note_shown: false,
             whole_screen: false,
+            recent_sources: Vec::new(),
+            recent_targets: Vec::new(),
         }
     }
 }
@@ -1585,6 +1594,7 @@ mod tests {
         c.translate.live_interval_ms = 2500;
         c.translate.live_note_shown = true;
         c.translate.whole_screen = true;
+        c.translate.recent_targets = vec!["fr".into(), "ar".into()];
         c.translate.source = "ja".into();
         c.song.source = SongSource::Microphone;
         c.song.history = true;

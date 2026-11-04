@@ -151,7 +151,7 @@ impl Controller {
         let pad = 2.0 * PAD;
         let mut below = match (&self.ask, self.picker.is_open()) {
             (Some(_), _) => ASK_HEIGHT,
-            (None, true) => self.picker.list_height(LIST_WIDTH),
+            (None, true) => SPACING + picker::LIST.height,
             (None, false) => 0.0,
         };
         if self.notice.is_some() {
@@ -169,7 +169,7 @@ impl Controller {
         }
         let controls = row![
             container(grip(Msg::Drag)).center_y(CHIP_HEIGHT),
-            self.picker.chips(CHIP_HEIGHT).map(Msg::Picker),
+            self.picker.chips().map(Msg::Picker),
             cell(if self.paused { "Resume" } else { "Pause" }, Msg::Pause),
             cell("Hide", Msg::Minimise),
             cell("Stop", Msg::Stop),
@@ -185,7 +185,7 @@ impl Controller {
         };
         if let Some(ask) = &self.ask {
             body = body.push(indent(ask_view(ask, width)));
-        } else if let Some(list) = self.picker.list(width) {
+        } else if let Some(list) = self.picker.list() {
             body = body.push(indent(list.map(Msg::Picker)));
         }
         if let Some(notice) = &self.notice {
@@ -292,7 +292,7 @@ mod tests {
         let texts = crate::ui::kit::testing::shot::texts(c.view());
         assert!(texts.iter().any(|t| t == "English"), "{texts:?}");
         let arabic = texts.iter().filter(|t| *t == "Arabic").count();
-        assert_eq!(arabic, 1, "the chip only, not in the list: {texts:?}");
+        assert_eq!(arabic, 3, "the chip, the list's current and A–Z: {texts:?}");
         let size = c.size();
         let px = crate::ui::kit::testing::shot::save("live-controller-picker", c.view(), size);
         assert!(px.chunks(4).any(|p| p != &px[..4]), "something drawn");

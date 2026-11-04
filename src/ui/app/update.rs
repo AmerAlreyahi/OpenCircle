@@ -167,6 +167,15 @@ impl App {
                 Task::none()
             }
             Message::Escape if self.o.is_none() => Task::none(),
+            // translate's open language list: Esc closes the list (a second, translate)
+            Message::Escape | Message::EscapeTaken
+                if (self.o.translate.as_ref()).is_some_and(|(_, s)| s.picker_open()) =>
+            {
+                if let Some((_, s)) = self.o.translate.as_mut() {
+                    s.close_picker();
+                }
+                Task::none()
+            }
             // long capture's Esc is its Cancel: back to the picked area
             Message::Escape if self.scroll().is_some() => self.on_snip(snip::Msg::Finish(
                 crate::ui::screens::long_capture::Finish::Cancel,

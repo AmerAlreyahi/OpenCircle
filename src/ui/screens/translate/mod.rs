@@ -18,8 +18,6 @@ use crate::ui::background;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::picker::{self, Picker};
 
-/// The language list under the pill (two columns of names).
-const PICKER_LIST: f32 = 360.0;
 /// Context around a block in the image the word card sends (physical px).
 const CONTEXT: u32 = 8;
 
@@ -300,10 +298,18 @@ impl Session {
                 }
             }
             Msg::Picker(msg) => {
+                let opens = matches!(
+                    msg,
+                    picker::Msg::Open(_) | picker::Msg::Key(picker::Nav::Tab)
+                );
                 if self.picker.update(msg) {
                     let source = &self.picker.source;
                     let models = models::installed(models::recognizer_for(source));
                     return self.begin(models);
+                }
+                // typing filters at once
+                if opens && self.picker.is_open() {
+                    return iced::widget::operation::focus(picker::SEARCH);
                 }
             }
             Msg::Progress(done) if matches!(self.phase, Phase::Downloading(_)) => {
@@ -370,6 +376,10 @@ impl Session {
     /// anywhere else closes the card.
     pub fn click(&mut self, p: Point) {
         self.card = None;
+        if self.picker.is_open() {
+            self.picker.close();
+            return;
+        }
         let (
             Phase::Shown(shown),
             image::Handle::Rgba {
@@ -403,6 +413,15 @@ impl Session {
                 rtl: pipeline::is_rtl(&self.picker.target),
             });
         }
+    }
+
+    /// A language list is open (Esc closes it first).
+    pub fn picker_open(&self) -> bool {
+        self.picker.is_open()
+    }
+
+    pub fn close_picker(&mut self) {
+        self.picker.close();
     }
 
     pub fn has_card(&self) -> bool {

@@ -45,11 +45,18 @@ pub enum Icon {
     /// lucide "image" (Snip's size chip: the picture) and "ellipsis" (More).
     Picture,
     More,
+    /// lucide "search": a list's search field.
+    Search,
+    /// lucide "chevron-down" / "chevron-up": a list's opener, closed / open;
+    /// "arrow-right": the language pill's source -> target.
+    ChevronDown,
+    ChevronUp,
+    Forward,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 20] = [
+    pub const ALL: [Icon; 24] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -70,6 +77,10 @@ impl Icon {
         Icon::Grip,
         Icon::Picture,
         Icon::More,
+        Icon::Search,
+        Icon::ChevronDown,
+        Icon::ChevronUp,
+        Icon::Forward,
     ];
 
     pub const fn glyph(self) -> char {
@@ -94,6 +105,10 @@ impl Icon {
             Icon::Grip => '\u{e0ee}',
             Icon::Picture => '\u{e0f9}',
             Icon::More => '\u{e0ba}',
+            Icon::Search => '\u{e154}',
+            Icon::ChevronDown => '\u{e071}',
+            Icon::ChevronUp => '\u{e074}',
+            Icon::Forward => '\u{e04d}',
         }
     }
 }
