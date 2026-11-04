@@ -1226,8 +1226,8 @@ fn real_matrix() {
                 r.timings.first,
                 r.timings.total
             );
-            let rows: Vec<_> = (r.blocks.iter())
-                .map(|b| (b.bounds.map(|v| v as i32), &b.original, &b.translation))
+            let rows: Vec<_> = (r.blocks.iter().zip(&r.drawn.ink))
+                .map(|(b, ink)| (b.bounds.map(|v| v as i32), &b.original, &b.translation, ink))
                 .collect();
             std::fs::write(
                 out.join(format!("{name}-{target}.json")),
@@ -1988,6 +1988,7 @@ fn busy_background_threshold() {
     assert!(out == c.img, "left as it was");
 }
 
+mod corpus;
 mod evidence;
 mod game;
 mod games;

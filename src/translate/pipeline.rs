@@ -461,8 +461,11 @@ fn unquoted(src: &str, out: &str) -> String {
 /// art behind a speaker's name left the old letters showing under the new).
 // ponytail: Arabic letters only (the offline targets in another script are
 // Arabic); a table per script for more.
-fn spelled_out(src: &str, out: &str, target: &str) -> bool {
-    let words: Vec<&str> = src.split_whitespace().collect();
+pub(super) fn spelled_out(src: &str, out: &str, target: &str) -> bool {
+    // (a speaker's name in quotes: "“Camille”")
+    let words: Vec<&str> = (src.split_whitespace())
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .collect();
     let named = !words.is_empty()
         && words.len() <= 3
         && (words.iter())
@@ -614,7 +617,9 @@ pub(super) fn reread(win: Vec<TextBlock>, pp: Vec<TextBlock>) -> Vec<TextBlock> 
     let overlap = |a: &[f32; 4], b: &[f32; 4]| {
         let ox = (a[0] + a[2]).min(b[0] + b[2]) - a[0].max(b[0]);
         let oy = (a[1] + a[3]).min(b[1] + b[3]) - a[1].max(b[1]);
-        ox > 0.5 * a[2].min(b[2]) && oy > 0.5 * a[3].min(b[3])
+        // (Windows OCR's boxes of a serif menu sat ~20 px above PP-OCR's:
+        // "• Atacar" and "Atacar" were both kept, and both drawn)
+        ox > 0.5 * a[2].min(b[2]) && oy > 0.3 * a[3].min(b[3])
     };
     let key = |t: &str| -> String {
         (t.chars().filter(|c| c.is_alphanumeric()))
@@ -1098,10 +1103,38 @@ fn shield(s: &str) -> (String, Shielded) {
         }
         _ => s,
     };
-    let mut out = Vec::new();
+    // a number in groups of three ("3 482", "1 200 XP") is one counter: the
+    // model wrote "- 3.482" for "-3 482"
+    let mut words: Vec<String> = Vec::new();
     for w in body.split(' ') {
-        match counter(w) {
-            Some((n, c)) if numbers(body).filter(|m| *m == n).count() == 1 => {
+        let group = w.len() == 3 && w.bytes().all(|b| b.is_ascii_digit());
+        match words.last_mut() {
+            Some(p)
+                if group
+                    && p.rsplit(' ').next().is_some_and(|q| {
+                        let d = q.trim_start_matches(['-', '+']);
+                        (1..=3).contains(&d.len()) && d.bytes().all(|b| b.is_ascii_digit())
+                    }) =>
+            {
+                p.push(' ');
+                p.push_str(w);
+            }
+            _ => words.push(w.to_string()),
+        }
+    }
+    let mut out = Vec::new();
+    for w in &words {
+        let grouped = w.contains(' ').then(|| {
+            let c = w.trim_start_matches(['-', '+']).to_string();
+            (c.replace(' ', ""), c)
+        });
+        match grouped.or_else(|| counter(w)) {
+            Some((n, c))
+                if numbers(&words.join(" ").replace(&c, &n))
+                    .filter(|m| *m == n)
+                    .count()
+                    == 1 =>
+            {
                 out.push(w.replacen(&c, &n, 1));
                 kept.counters.push((n, c));
             }
@@ -1390,9 +1423,9 @@ fn draw(
     Translated {
         rgba: out,
         blocks: translations(blocks, tr),
+        // (the ink boxes stay: one per block, where its text was drawn)
         drawn: Drawn {
             rooms: Vec::new(),
-            ink: Vec::new(),
             ..drawn
         },
         timings: *timings,
@@ -1738,13 +1771,18 @@ pub(super) fn needs_translation(text: &str, target: &str) -> bool {
     // a game's counters and badges only: "21ms", "Lv. 80", "×10" (an
     // abbreviation's full stop before a number), a badge "UP!" (fr-ar made it
     // "يو يو", drawn over a glow the erase can't take; "OK" is a word)
+    // and a stat's short name beside its numbers ("PV 1 240/1 500": es-ar
+    // made it "ق ع ٢٤٠/١ ٥٠٠")
     let alone = text.split_whitespace().count() == 1;
+    let numbered = text.chars().any(|c| c.is_ascii_digit());
+    let caps = |w: &str| (1..=3).contains(&w.len()) && w.chars().all(|c| c.is_ascii_uppercase());
     let counters = (text.split_whitespace()).all(|w| {
         let badge = w.strip_suffix('!').filter(|b| b.len() <= 3);
         counter(w).is_some()
             || !w.chars().any(char::is_alphabetic)
             || (w.ends_with('.') && w.chars().count() <= 4)
-            || (alone && badge.is_some_and(|b| b.chars().all(|c| c.is_ascii_uppercase())))
+            || (alone && badge.is_some_and(caps))
+            || (numbered && caps(w))
     });
     match lang::find(target).map(|l| l.script) {
         _ if !word || counters || code(text) || misshapen(text) || icon_read(text) => false,

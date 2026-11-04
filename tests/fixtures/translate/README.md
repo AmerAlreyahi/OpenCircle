@@ -29,3 +29,7 @@ assets), downscaled to 1280x720: `quest.jpg` (German cutscene + quest HUD), `gac
 event banner), `menu.jpg` (Spanish settings menu). `<name>.win.json` = Windows OCR's read (Win10
 VM, the 2560x1440 frame, frame px), `<name>.pp.json` = PP-OCR's read of the same frame
 (`src/translate/tests/games.rs`). OpenCircle, MIT.
+- The scored corpus: the three above plus ten more of the owner's original screens (`inventory`
+  de, `shop` it, `novel` fr, `battle` es, `questlog` pt, `skills` ru, `loading` ja, `pause` de,
+  `racing` fr, `cards` ar), 1280x720 each; `corpus.json` = how each element must be handled
+  (`src/translate/tests/corpus.rs`). OpenCircle, MIT.

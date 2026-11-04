@@ -142,9 +142,52 @@ fn counters_are_read_and_kept_exactly() {
         sent.borrow()
     );
     // a counter or a badge alone is no text to translate
-    for keep in ["21ms", "Lv. 80", "×10", "UP!", "3240 +", "16400/16400"] {
+    // a stat's short name with its numbers too (the corpus' battle HUD)
+    for keep in [
+        "21ms",
+        "Lv. 80",
+        "×10",
+        "UP!",
+        "3240 +",
+        "16400/16400",
+        "PV 1 240/1 500",
+        "PM 80/120",
+    ] {
         assert!(!needs_translation(keep, "ar"), "{keep}");
     }
+    for word in ["OK", "PM", "B2B sales grew in 2024"] {
+        assert!(needs_translation(word, "ar"), "{word}");
+    }
+}
+
+#[test]
+fn a_number_in_groups_of_three_is_kept_as_written() {
+    // es-ar wrote "- 3.482" for the battle's "-3 482"
+    let route = crate::mt::route("es", "en").unwrap();
+    let sent = RefCell::new(Vec::new());
+    let run = |t: &[String], _: &'static crate::mt::Pair| {
+        sent.borrow_mut().extend(t.iter().cloned());
+        Ok(t.iter()
+            .map(|s| match s.as_str() {
+                "-3482 ¡Golpe crítico!" => "-3482 Critical hit!".to_string(),
+                "Recompensa: 500 monedas, 1200 XP" => "Reward: 500 coins, 1200 XP".to_string(),
+                s => s.to_string(),
+            })
+            .collect())
+    };
+    let src: Vec<String> = [
+        "-3 482 ¡Golpe crítico!",
+        "Recompensa: 500 monedas, 1 200 XP",
+    ]
+    .map(String::from)
+    .into();
+    let out = through(&src, &route, "en", run).unwrap();
+    assert_eq!(out, ["-3 482 Critical hit!", "Reward: 500 coins, 1 200 XP"]);
+    assert!(
+        !sent.borrow().iter().any(|s| s.contains("3 482")),
+        "{:?}",
+        sent.borrow()
+    );
 }
 
 #[test]
@@ -175,6 +218,9 @@ fn key_hints_names_and_quotes_stay_as_the_source_has_them() {
     assert_eq!(out[1], "Lyra");
     // no quotes the source doesn't have
     assert_eq!(out[2], "جسر الغسق");
+    // a speaker's name in quotes is a name too (fr-ar: "كاميل")
+    assert!(spelled_out("“Camille”", "\"كاميل\"", "ar"));
+    assert!(!spelled_out("Brücke der Dämmerung", "جسر الغسق", "ar"));
 }
 
 #[test]
@@ -229,4 +275,19 @@ fn menu_words_take_their_menu_sense_offline() {
         .on_device_with(&texts, "en", |_, _| panic!("no model for menu words"))
         .unwrap();
     assert_eq!(out, ["Controls", "Brightness", "Summon ×10", "Audio"]);
+}
+
+#[test]
+fn a_line_both_readers_read_is_kept_once() {
+    // the battle menu (Win10 VM, 1080p): Windows OCR's box ~20 px above
+    // PP-OCR's for the same serif item; both were kept and both drawn
+    let tb = |t: &str, b: [f32; 4], confidence: f32| TextBlock {
+        bounds: b,
+        text: t.into(),
+        confidence,
+    };
+    let win = vec![tb("• Atacar", [68.0, 719.0, 141.0, 39.0], 1.0)];
+    let pp = vec![tb("Atacar", [98.0, 743.0, 117.0, 41.0], 0.99)];
+    let got = reread(win, pp);
+    assert_eq!(got.len(), 1, "{got:?}");
 }

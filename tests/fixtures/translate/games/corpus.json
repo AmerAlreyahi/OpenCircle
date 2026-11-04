@@ -1,0 +1,211 @@
+{
+  "_": "Every element of the 13 game screens and how one-shot translate must handle it (src/translate/tests/corpus.rs). t = the text on screen; keep = shown exactly as it is (nothing drawn, or the same text); tokens = parts a translation must carry exactly; en = words one of which an English translation must have; src = the screen's language. Element texts are matched to blocks ignoring case, accents, spaces and punctuation.",
+  "quest": {
+    "src": "de",
+    "elements": [
+      { "t": "Brücke der Dämmerung", "en": ["bridge"] },
+      { "t": "Erreiche die Himmelsbrücke", "en": ["reach"] },
+      { "t": "(450m)", "tokens": ["450m"] },
+      { "t": "Questgebiet anzeigen", "tokens": ["[V]"], "en": ["quest"] },
+      { "t": "Lyra", "keep": true },
+      { "t": "Wir müssen die Brücke vor Einbruch der Nacht erreichen,", "en": ["bridge"] },
+      { "t": "bevor die Schattenwächter das Tor versiegeln.", "en": ["gate"] },
+      { "t": "16400/16400", "keep": true },
+      { "t": "Lv. 80", "keep": true },
+      { "t": "21ms", "keep": true }
+    ]
+  },
+  "gacha": {
+    "src": "fr",
+    "elements": [
+      { "t": "Invocation d'Événement", "en": ["event"] },
+      { "t": "ÉVÉNEMENT", "en": ["event"] },
+      { "t": "3 240", "keep": true },
+      { "t": "Le Réveil du Dragon de Givre", "en": ["frost"] },
+      { "t": "Événement limité", "en": ["limited"] },
+      { "t": "Du 12 au 26 novembre", "tokens": ["12", "26"], "en": ["november"] },
+      { "t": "Augmente fortement les chances", "en": ["chance"] },
+      { "t": "d'obtenir le chevalier Aldric.", "en": ["knight"] },
+      { "t": "Chaque série de 10 invocations", "tokens": ["10"] },
+      { "t": "garantit au moins un objet 4★ ou", "tokens": ["4★"] },
+      { "t": "Personnages 4★ à taux augmenté", "tokens": ["4★"], "en": ["character"] },
+      { "t": "UP!", "keep": true },
+      { "t": "Chevalier du Givre Éternel", "en": ["frost"] },
+      { "t": "Invoquer ×1", "tokens": ["×1"], "en": ["summon"] },
+      { "t": "Invoquer ×10", "tokens": ["×10"], "en": ["summon"] }
+    ]
+  },
+  "menu": {
+    "src": "es",
+    "elements": [
+      { "t": "Gráficos", "en": ["graphics"] },
+      { "t": "Audio", "en": ["audio"] },
+      { "t": "Calidad de texturas", "en": ["texture"] },
+      { "t": "Alta", "en": ["high"] },
+      { "t": "Sombras", "en": ["shadow"] },
+      { "t": "Medio", "en": ["medium"] },
+      { "t": "Controles", "en": ["controls"] },
+      { "t": "Sincronización vertical", "en": ["vertical"] },
+      { "t": "Activada", "en": ["enabled", "on", "activated"] },
+      { "t": "Idioma", "en": ["language"] },
+      { "t": "Límite de FPS", "tokens": ["FPS"], "en": ["limit"] },
+      { "t": "60", "keep": true },
+      { "t": "Cuenta", "en": ["account"] },
+      { "t": "Brillo", "en": ["brightness"] },
+      { "t": "Aplicar", "en": ["apply"] },
+      { "t": "Restablecer", "en": ["reset"] }
+    ]
+  },
+  "inventory": {
+    "src": "de",
+    "elements": [
+      { "t": "Waffen", "en": ["weapons"] },
+      { "t": "Rüstung", "en": ["armor", "armour"] },
+      { "t": "Tränke", "en": ["potion"] },
+      { "t": "Materialien", "en": ["material"] },
+      { "t": "12 450", "keep": true },
+      { "t": "Schwert der Morgenröte", "en": ["sword"] },
+      { "t": "Angriff", "en": ["attack"] },
+      { "t": "+245", "keep": true },
+      { "t": "Kritische Trefferrate", "en": ["critical"] },
+      { "t": "12 %", "keep": true },
+      { "t": "Haltbarkeit", "en": ["durability"] },
+      { "t": "87/100", "keep": true },
+      { "t": "Ausrüsten", "en": ["equip"] },
+      { "t": "Verkaufen", "en": ["sell"] },
+      { "t": "Ablegen", "en": ["drop", "discard", "unequip", "remove", "put"] }
+    ]
+  },
+  "shop": {
+    "src": "it",
+    "elements": [
+      { "t": "Semi di zucca", "en": ["pumpkin"] },
+      { "t": "40", "keep": true },
+      { "t": "Annaffiatoio di rame", "en": ["copper"] },
+      { "t": "1 200", "keep": true },
+      { "t": "Fertilizzante", "en": ["fertili"] },
+      { "t": "25", "keep": true },
+      { "t": "Benvenuto! Oggi le carote sono in offerta.", "en": ["carrot"] },
+      { "t": "Compra", "en": ["buy"] },
+      { "t": "Vendi", "en": ["sell"] },
+      { "t": "Esci", "en": ["exit", "leave", "quit"] }
+    ]
+  },
+  "novel": {
+    "src": "fr",
+    "elements": [
+      { "t": "Bien sûr que oui.", "en": ["course", "sure"] },
+      { "t": "Je n’en suis pas sûr…", "en": ["sure"] },
+      { "t": "On devrait partir.", "en": ["leave", "go"] },
+      { "t": "Camille", "keep": true },
+      { "t": "Tu crois vraiment qu’on peut encore changer les choses ?", "en": ["change"] },
+      { "t": "Sauvegarder", "en": ["save"] },
+      { "t": "Charger", "en": ["load"] },
+      { "t": "Auto", "en": ["auto"] }
+    ]
+  },
+  "battle": {
+    "src": "es",
+    "elements": [
+      { "t": "Gólem Ancestral", "en": ["golem"] },
+      { "t": "-3 482", "keep": true },
+      { "t": "¡Golpe crítico!", "en": ["critical"] },
+      { "t": "Atacar", "en": ["attack"] },
+      { "t": "Habilidades", "en": ["skills", "abilities"] },
+      { "t": "Objetos", "en": ["items", "objects"] },
+      { "t": "Defender", "en": ["defend"] },
+      { "t": "Huir", "en": ["flee", "run", "escape"] },
+      { "t": "Elena", "keep": true },
+      { "t": "Marco", "keep": true },
+      { "t": "1 240/1 500", "keep": true },
+      { "t": "80/120", "keep": true },
+      { "t": "980/1 100", "keep": true }
+    ]
+  },
+  "questlog": {
+    "src": "pt",
+    "elements": [
+      { "t": "Missões principais", "en": ["main"] },
+      { "t": "O Farol Perdido", "en": ["lighthouse"] },
+      { "t": "Segredos da Floresta", "en": ["forest"] },
+      { "t": "A Relíquia Antiga", "en": ["relic"] },
+      { "t": "Missões secundárias", "en": ["side", "secondary"] },
+      { "t": "O Cão Perdido", "en": ["dog"] },
+      { "t": "Recolha de Ervas", "en": ["herb"] },
+      { "t": "O Ferreiro do Vila", "en": ["blacksmith", "smith"] },
+      { "t": "A antiga guardiã do farol, Irene, fala de uma", "tokens": ["Irene"], "en": ["lighthouse"] },
+      { "t": "escuridão que consome a costa… Devo ajudá-la.", "en": ["dark"] },
+      { "t": "Objetivos", "en": ["objective", "goal"] },
+      { "t": "Fala com a guardiã Irene", "tokens": ["Irene"], "en": ["talk", "speak"] },
+      { "t": "Encontra 3 cristais de maré (1/3)", "tokens": ["3", "1/3"], "en": ["crystal"] },
+      { "t": "Recompensa: 500 moedas, 1 200 XP", "tokens": ["500", "XP"], "en": ["reward"] },
+      { "t": "Seguir missão", "en": ["follow", "track"] },
+      { "t": "Abandonar", "en": ["abandon"] }
+    ]
+  },
+  "skills": {
+    "src": "ru",
+    "elements": [
+      { "t": "ДЕРЕВО НАВЫКОВ", "en": ["skill"] },
+      { "t": "ПЛАЗМЕННЫЙ ЩИТ — УРОВЕНЬ 3", "tokens": ["3"], "en": ["shield"] },
+      { "t": "Поглощает 30% входящего урона", "tokens": ["30%"], "en": ["damage"] },
+      { "t": "в течение 8 секунд.", "tokens": ["8"], "en": ["second"] },
+      { "t": "Очки навыков: 2", "tokens": ["2"], "en": ["point"] },
+      { "t": "ИЗУЧИТЬ", "en": ["learn", "study"] },
+      { "t": "СБРОСИТЬ", "en": ["reset"] }
+    ]
+  },
+  "loading": {
+    "src": "ja",
+    "elements": [
+      { "t": "ヒント：敵の攻撃をジャストタイミングで回避すると、反撃のチャンスが生まれます。", "en": ["attack", "dodge", "evade"] },
+      { "t": "読み込み中… 73%", "tokens": ["73%"], "en": ["loading"] }
+    ]
+  },
+  "pause": {
+    "src": "de",
+    "elements": [
+      { "t": "Pause", "en": ["pause"] },
+      { "t": "Fortsetzen", "en": ["resume", "continue"] },
+      { "t": "Optionen", "en": ["options"] },
+      { "t": "Steuerung", "en": ["controls"] },
+      { "t": "Zum Hauptmenü", "en": ["main menu"] },
+      { "t": "Erfolg freigeschaltet:", "en": ["achievement", "unlocked"] },
+      { "t": "Sammler der Sterne", "en": ["star"] },
+      { "t": "Sammle 100 Sterne", "tokens": ["100"], "en": ["star"] }
+    ]
+  },
+  "racing": {
+    "src": "fr",
+    "elements": [
+      { "t": "STAGE COMPLETE!", "en": ["stage"] },
+      { "t": "Nouveau record personnel !", "en": ["record"] },
+      { "t": "Position", "en": ["position"] },
+      { "t": "Pilote", "en": ["driver", "pilot"] },
+      { "t": "Temps", "en": ["time"] },
+      { "t": "Meilleur tour", "en": ["best"] },
+      { "t": "Nova", "keep": true },
+      { "t": "Kaito", "keep": true },
+      { "t": "Vous", "en": ["you"] },
+      { "t": "2:31.084", "keep": true },
+      { "t": "0:49.112", "keep": true },
+      { "t": "2:33.910", "keep": true },
+      { "t": "0:50.045", "keep": true },
+      { "t": "2:35.402", "keep": true },
+      { "t": "0:50.418", "keep": true },
+      { "t": "Rejouer", "en": ["replay", "again"] },
+      { "t": "Course suivante", "en": ["next"] },
+      { "t": "Garage", "en": ["garage"] }
+    ]
+  },
+  "cards": {
+    "src": "ar",
+    "elements": [
+      { "t": "حارس اللهب", "en": ["guard", "keeper"] },
+      { "t": "عند دخوله ساحة المعركة:", "en": ["battle"] },
+      { "t": "يُلحق ٣ نقاط ضرر بجميع الأعداء.", "tokens": ["3"], "en": ["damage"] },
+      { "t": "إنهاء الدور", "en": ["end"] },
+      { "t": "البطاقات المتبقية: ٢٢", "tokens": ["22"], "en": ["card"] }
+    ]
+  }
+}
