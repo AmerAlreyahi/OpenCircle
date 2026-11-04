@@ -436,7 +436,11 @@ fn notes_are_opaque_in_the_light_theme() {
         let px = crate::ui::kit::testing::shot::render(dark.into(), 720, 300);
         let at = |x: usize, y: usize| &px[(y * 720 + x) * 4..][..3];
         let want = solid.into_rgba8();
-        assert_eq!(at(360, 180), &want[..3], "the panel is solid");
+        // the card floats (top right, or under the pill when narrow): look for
+        // its solid body wherever it is, not at one fixed pixel
+        let _ = at;
+        let body = px.chunks(4).filter(|p| p[..3] == want[..3]).count();
+        assert!(body > 20_000, "the panel is solid ({body} px of it)");
         // and the label is drawn in the theme's text colour
         let ink = text.into_rgba8();
         let near = |p: &[u8]| p.iter().zip(&ink).all(|(a, b)| a.abs_diff(*b) < 40);
