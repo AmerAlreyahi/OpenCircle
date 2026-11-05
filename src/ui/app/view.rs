@@ -159,7 +159,8 @@ impl App {
                 };
                 canvas(zoomed).width(Fill).height(Fill).into()
             }
-            None if self.o.view.crop().is_none() => {
+            None if self.o.view.crop().is_none()
+                && (!self.o.imported || matches!(self.o.purpose, Purpose::Snip(_))) => {
                 let scale = self.o.scale;
                 let frozen = overlay::Frozen { frame, scale };
                 canvas(frozen).width(Fill).height(Fill).into()

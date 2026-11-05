@@ -29,7 +29,9 @@ pub const BLANK: &str =
 
 /// `crop` as the PNG Lens gets, every pixel opaque (a screen has no
 /// see-through pixels, and a zero alpha from any capture path would reach Lens
-/// as blank white). `Err(BLANK)` for a crop of one flat colour: never sent.
+/// as blank white). Imported search images are composited over black before
+/// display (`capture::import::search_pixels`); their RGB already matches what
+/// the user saw. `Err(BLANK)` for a crop of one flat colour: never sent.
 pub fn search_png(crop: &Crop) -> Result<Vec<u8>, String> {
     let mut rgba = crop.rgba.clone();
     let (pixels, _) = rgba.as_chunks_mut::<4>();

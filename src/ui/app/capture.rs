@@ -32,7 +32,164 @@ use crate::ui::platform::monitor::can_hide_windows;
 /// (at 80 ms the Ubuntu VM's portal shot still held a fading Steps strip).
 const LEAVE_FRAME: Duration = Duration::from_millis(250);
 
+/// Use the same pointer/primary fallback as captures, irrespective of image size.
+/// Wayland may place the window elsewhere; its resize event supplies the viewport.
+fn import_place(monitors: &[capture::Monitor], pointer: Option<(i32, i32)>) -> (Point, Size, f32) {
+    let Some(m) = capture::choose(monitors, None, pointer).map(|i| monitors[i]) else {
+        return (Point::ORIGIN, Size::new(1280.0, 720.0), 1.0);
+    };
+    let (x, y, w, h) = m.rect;
+    let scale = if m.scale.is_finite() {
+        m.scale.max(1.0)
+    } else {
+        1.0
+    };
+    (
+        Point::new(x as f32 / scale, y as f32 / scale),
+        Size::new(w as f32 / scale, h as f32 / scale),
+        scale,
+    )
+}
+
+fn import_shot(
+    crop: &mut actions::Crop,
+    search: bool,
+    origin: Point,
+    size: Size,
+    scale: f32,
+) -> Shot {
+    let image = if search {
+        image::Handle::from_rgba(crop.width, crop.height, std::mem::take(&mut crop.rgba))
+    } else {
+        let w = (size.width * scale).ceil() as u32;
+        let h = (size.height * scale).ceil() as u32;
+        image::Handle::from_rgba(w, h, vec![0; w as usize * h as usize * 4])
+    };
+    Shot {
+        image,
+        scale,
+        origin,
+        size,
+        snip: None,
+        windows: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+
+    #[test]
+    fn imported_editor_keeps_secondary_monitor_dpi_and_physical_backdrop() {
+        let mut crop = actions::Crop {
+            width: 1,
+            height: 1,
+            rgba: vec![1, 2, 3, 255],
+        };
+        let shot = import_shot(
+            &mut crop,
+            false,
+            Point::new(960.0, 0.0),
+            Size::new(960.0, 540.0),
+            2.0,
+        );
+        let opening = Opening {
+            origin: shot.origin,
+            screen: shot.size,
+            scale: shot.scale,
+            ..Opening::default()
+        };
+        let place = opening.place();
+        assert_eq!(place.origin, (1920, 0));
+        assert_eq!(place.px, (1920, 1080));
+        assert!(matches!(
+            shot.image,
+            image::Handle::Rgba {
+                width: 1920,
+                height: 1080,
+                ..
+            }
+        ));
+        assert_eq!(crop.rgba, [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn import_uses_pointer_monitor_even_with_duplicate_resolutions() {
+        let monitors = [
+            capture::Monitor {
+                rect: (0, 0, 1920, 1080),
+                scale: 1.0,
+                primary: true,
+            },
+            capture::Monitor {
+                rect: (1920, 0, 1920, 1080),
+                scale: 2.0,
+                primary: false,
+            },
+        ];
+        assert_eq!(
+            import_place(&monitors, Some((2500, 400))),
+            (Point::new(960.0, 0.0), Size::new(960.0, 540.0), 2.0)
+        );
+        assert_eq!(
+            import_place(&monitors, None),
+            (Point::ORIGIN, Size::new(1920.0, 1080.0), 1.0)
+        );
+        assert_eq!(
+            import_place(&[], None),
+            (Point::ORIGIN, Size::new(1280.0, 720.0), 1.0)
+        );
+    }
+}
+
 impl App {
+    /// Decode before replacing any state. The source is never kept as a save target.
+    pub(in crate::ui) fn open_external_image(
+        &mut self,
+        path: &std::path::Path,
+        search: bool,
+    ) -> Task<Message> {
+        if self.capturing.is_some() || self.scroll().is_some() {
+            crate::log!("[opencircle] cannot open PNG while capture is in progress");
+            return Task::none();
+        }
+        let mut crop = match crate::capture::import::open(path) {
+            Ok(crop) => crop,
+            Err(e) => {
+                crate::log!("[opencircle] cannot open PNG: {e}");
+                return Task::none();
+            }
+        };
+        if search {
+            // Composite once, before either display or any action sees it. Black
+            // is explicit and theme-independent; hidden RGB never becomes visible.
+            crate::capture::import::search_pixels(&mut crop);
+        }
+        // Close the previous session, including its other monitor windows and
+        // workers. Chain its window tasks before showing the new session.
+        let closed = self.close();
+        self.next = Purpose::Search;
+        self.timed = false;
+        self.live_next = false;
+        self.tool_next = None;
+        self.step_next = None;
+        let monitors = capture::monitor_list();
+        let (origin, size, monitor_scale) = import_place(&monitors, capture::pointer());
+        // Search uses opaque imported pixels, stretched to the viewport.
+        // Keep monitor DPI separate from the image's per-axis geometry.
+        let shot = import_shot(&mut crop, search, origin, size, monitor_scale);
+        let opened = self.open_frame(Instant::now(), Ok(shot), true);
+        if search {
+            self.o.view = overlay::View::new(crop.width, crop.height, size);
+        } else {
+            let mut snip = Snip::new(Vec::new(), self.place(), false, None);
+            let _ = snip.start(snip::Kind::Region, size);
+            self.o.purpose = Purpose::Snip(Box::new(snip));
+            let _ = self.snip_routed(crop, false, false);
+        }
+        closed.chain(opened)
+    }
+
     /// Captures on a thread: a Wayland portal may wait minutes for the user's OK.
     /// `snip`: Snip mode in this kind; also lists the windows, while the overlay is
     /// still hidden.
@@ -199,6 +356,15 @@ impl App {
         at: Instant,
         shot: Result<Shot, CaptureError>,
     ) -> Task<Message> {
+        self.open_frame(at, shot, false)
+    }
+
+    fn open_frame(
+        &mut self,
+        at: Instant,
+        shot: Result<Shot, CaptureError>,
+        imported: bool,
+    ) -> Task<Message> {
         self.capturing = None;
         let shot = match shot {
             Ok(shot) => shot,
@@ -226,6 +392,7 @@ impl App {
         let purpose = std::mem::replace(&mut self.next, Purpose::Search);
         self.o.start(Opening {
             purpose,
+            imported,
             windows: shot.windows,
             ..Opening::default()
         });
@@ -249,6 +416,9 @@ impl App {
         self.o.behaviour = cfg.selection;
         self.o.bar_keys = BarKeys::of(&cfg);
         self.o.labs = cfg.labs;
+        if imported {
+            return self.shown(); // no timer, recent strip, OCR, song key or quick action
+        }
         let mut first = None;
         let mut extras = Task::none();
         let mut timer = None;

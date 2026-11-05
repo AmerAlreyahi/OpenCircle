@@ -170,13 +170,13 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
         PIPETTE,
         ("Colour picker", "منتقي الألوان"),
         None,
-        live(Message::ScreenTool(ScreenTool::Picker)),
+        live(Message::ScreenTool(ScreenTool::Picker)).filter(|_| e.screen_tools),
     ));
     rows.push((
         crate::ui::screens::tools::ruler::ICON,
         ("Screen ruler", "مسطرة الشاشة"),
         None,
-        live(Message::ScreenTool(ScreenTool::Ruler)),
+        live(Message::ScreenTool(ScreenTool::Ruler)).filter(|_| e.screen_tools),
     ));
     rows
 }

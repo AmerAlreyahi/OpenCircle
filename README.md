@@ -194,6 +194,52 @@ operating it. See the [Privacy](docs/privacy.md) page.
 Colour picker and screen ruler have no default key. All of them change in
 Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
 
+### Open a PNG for annotation
+
+Run `opencircle open "/path/to/screenshot.png"` to open a PNG in Snip.
+The input is read only; opening for annotation retains the PNG's RGBA pixels,
+including transparency. An unedited copy preserves those pixels exactly; drawing
+or cropping flattens the result. Saving creates a new file in Snip's configured save
+folder, and Copy uses the configured image size limit. The command starts
+OpenCircle if needed or sends an absolute path to the running instance. Relative
+paths are resolved by the invoking process. PNG files are limited to 64 MiB and
+32 Mi pixels (and at most 32768 pixels on either edge). Animated PNGs are not
+supported. A bad file leaves the current overlay untouched. An active overlay is
+replaced; while a capture or long capture is running, the request is ignored.
+The command returns once accepted for delivery, so a later read failure is logged
+by the running instance.
+
+To open a single-monitor screenshot in Circle to Search without capturing again,
+use `opencircle open --search /absolute/path/to/screenshot.png`. The screenshot
+is shown as the frozen frame, stretched to fill the overlay; circle or select an
+area and choose an action. For this search mode only, transparency is composited
+onto a uniform black background and made opaque before display. This background
+is independent of the app theme: fully transparent pixels become black, and
+partly transparent pixels are blended over black. Search, OCR, AI and translation
+use those same opaque source pixels, so hidden RGB under transparency cannot be
+revealed by an upload. The source file remains unchanged.
+
+Nothing is sent automatically. On Windows and X11 the overlay opens on the
+pointer's monitor, falling back to the primary monitor when the pointer is
+unknown. On Wayland the compositor chooses the output. Selection coordinates
+follow the actual overlay size, including after a compositor resize; OCR boxes
+are read again on the next text interaction after resizing. This is intended for
+single-output captures, not a stitched desktop screenshot.
+
+For example, on a Wayland compositor with grim and slurp installed:
+
+```sh
+file="$(mktemp --suffix=.png)"
+if selection="$(slurp)" && grim -g "$selection" "$file"; then
+    opencircle open "$file"
+fi
+```
+
+`open` never deletes the input, even after it is decoded. Keep the file until
+OpenCircle has loaded it; remove it yourself when finished. The CLI returning
+does not mean the running instance has finished reading the path. A cancelled or
+failed capture should not be opened.
+
 ## Platforms
 
 - **Windows 10 and 11:** the full feature set.

@@ -1230,6 +1230,387 @@ fn a_pick_is_picked_with_the_toolbar_and_copied_by_default() {
     assert_eq!(copied_image(), Some((300, 200)), "and copied");
 }
 
+#[test]
+fn external_png_opens_in_snip_and_bad_input_keeps_the_editor() {
+    let mut app = App::idle(window::Id::unique());
+    let valid = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons/32x32.png");
+    let _ = app.open_external_image(&valid, false);
+    let edit = app.o.edit.as_ref().expect("external image editor");
+    assert!(edit.annotator.own_image);
+    assert_eq!((edit.image().width, edit.image().height), (32, 32));
+    let bad_png = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
+    let _ = app.open_external_image(&bad_png, false);
+    let edit = app.o.edit.as_ref().expect("editor kept after error");
+    assert_eq!((edit.image().width, edit.image().height), (32, 32));
+    assert!(app.o.imported && app.o.reading.is_none());
+    assert!(copy::copied::image().is_none(), "import does not copy");
+    let _ = app.on_snip_toolbar(annotate::Message::Back);
+    assert!(app.o.is_none(), "back closes the imported image");
+}
+
+#[test]
+fn external_png_copy_uses_imported_pixels_and_preserves_source() {
+    let valid = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons/32x32.png");
+    let before = std::fs::read(&valid).unwrap();
+    let mut app = App::idle(window::Id::unique());
+    let _ = copy::copied::image();
+    let _ = app.open_external_image(&valid, false);
+    let task = app.on_snip_toolbar(annotate::Message::Copy);
+    assert!(app.o.is_none());
+    run_task(&mut app, task);
+    assert_eq!(copied_image(), Some((32, 32)));
+    assert_eq!(std::fs::read(&valid).unwrap(), before);
+}
+
+#[test]
+fn external_png_save_output_preserves_source_pixels() {
+    let valid = std::env::temp_dir().join(format!("oc-import-save-{}.png", std::process::id()));
+    let pixels = [10, 20, 30, 255].repeat(32 * 32);
+    actions::write_png(&valid, 32, 32, &pixels).unwrap();
+    let before = std::fs::read(&valid).unwrap();
+    let mut app = App::idle(window::Id::unique());
+    let _ = app.open_external_image(&valid, false);
+    let output = app.o.edit.as_mut().unwrap().update(annotate::Message::Save);
+    let Some(crate::snip::annotate::Output::Save(crop)) = output else {
+        panic!("Save must export the imported image");
+    };
+    assert_eq!((crop.width, crop.height), (32, 32));
+    assert_eq!(crop.rgba, pixels);
+    assert_eq!(std::fs::read(&valid).unwrap(), before);
+    std::fs::remove_file(valid).unwrap();
+}
+
+#[test]
+fn imported_search_composites_transparency_but_annotation_preserves_rgba() {
+    let source = std::env::temp_dir().join(format!("oc-import-alpha-{}.png", std::process::id()));
+    let rgba = vec![250, 100, 50, 0, 200, 100, 50, 128, 10, 20, 30, 255];
+    actions::write_png(&source, 3, 1, &rgba).unwrap();
+    let original = std::fs::read(&source).unwrap();
+    let mut app = App::idle(window::Id::unique());
+    let _ = app.open_external_image(&source, false);
+    assert_eq!(app.o.edit.as_ref().unwrap().image().rgba, rgba);
+    let _ = app.open_external_image(&source, true);
+    let shown = app.whole().unwrap();
+    assert_eq!((shown.width, shown.height), (3, 1));
+    assert_eq!(
+        shown.rgba,
+        [0, 0, 0, 255, 100, 50, 25, 255, 10, 20, 30, 255]
+    );
+    let png = search_in_browser::search_png(&shown).unwrap();
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(png))
+        .read_info()
+        .unwrap();
+    let mut sent = vec![0; decoder.output_buffer_size().unwrap()];
+    decoder.next_frame(&mut sent).unwrap();
+    assert_eq!(
+        sent, shown.rgba,
+        "Lens receives the displayed opaque pixels"
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), original);
+    assert!(app.o.reading.is_none() && app.o.translate.is_none() && app.o.ai_chat.is_none());
+    std::fs::remove_file(source).unwrap();
+}
+
+#[test]
+fn imported_search_resize_maps_selection_to_the_same_image_pixels() {
+    let valid = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons/32x32.png");
+    let mut app = App::idle(window::Id::unique());
+    let _ = app.open_external_image(&valid, true);
+    let _ = app.update(Message::Resized(Size::new(1920.0, 1080.0)));
+    assert_eq!(app.o.screen, Size::new(1920.0, 1080.0));
+    app.select(Rectangle::new(
+        Point::new(480.0, 270.0),
+        Size::new(960.0, 540.0),
+    ));
+    let crop = app.crop().unwrap();
+    assert_eq!((crop.width, crop.height), (16, 16));
+}
+
+#[test]
+fn imported_search_ocr_translate_and_actions_share_source_pixels_after_resize() {
+    let previous_models = text::MODELS_HERE.replace(Some(false));
+    let mut app = open_app(120, 80, 1.0);
+    app.o.imported = true;
+    let _ = app.update(Message::Resized(Size::new(300.0, 100.0)));
+    app.select(Rectangle::new(
+        Point::new(75.0, 25.0),
+        Size::new(150.0, 50.0),
+    ));
+    let geometry = app.frame_geometry().unwrap();
+    let area = app.o.selection.unwrap().area;
+    assert_eq!(geometry.bounds(area), Some([30, 20, 90, 60]));
+    assert_eq!(
+        geometry.point(Point::new(150.0, 50.0)),
+        Point::new(60.0, 40.0)
+    );
+    let selected = app.crop().unwrap();
+    assert_eq!((selected.width, selected.height), (60, 40));
+    assert_eq!(&selected.rgba[..4], &[30, 20, 0, 255]);
+    assert_eq!(&selected.rgba[selected.rgba.len() - 4..], &[89, 59, 0, 255]);
+    // These are OCR coordinates relative to the SAME source crop.
+    let blocks = vec![TextBlock {
+        text: "word".into(),
+        bounds: [4.0, 8.0, 20.0, 8.0],
+        confidence: 1.0,
+    }];
+    let full = app.whole().unwrap();
+    let lines = geometry.lines(blocks.clone(), [30, 20], &full.rgba);
+    assert!(close_to(
+        lines[0].bounds,
+        Rectangle::new(Point::new(85.0, 35.0), Size::new(50.0, 10.0))
+    ));
+    let _ = app.start_translate(); // Missing-model consent: no worker or network starts.
+    assert_eq!(
+        app.o.translate.as_ref().unwrap().1.area_for_test(),
+        [30, 20, 90, 60]
+    );
+    app.o.translate = None;
+    // A tall window changes both axis ratios; the selection must keep its pixels.
+    let _ = app.update(Message::Resized(Size::new(160.0, 320.0)));
+    assert_eq!(app.crop().unwrap().rgba, selected.rgba);
+    let geometry = app.frame_geometry().unwrap();
+    let lines = geometry.lines(blocks, [30, 20], &full.rgba);
+    assert!(close_to(
+        lines[0].bounds,
+        Rectangle::new(Point::new(34.0 / 0.75, 112.0), Size::new(20.0 / 0.75, 32.0))
+    ));
+    let _ = app.start_translate();
+    assert_eq!(
+        app.o.translate.as_ref().unwrap().1.area_for_test(),
+        [30, 20, 90, 60]
+    );
+    app.o.translate = None;
+    assert_eq!(
+        (app.whole().unwrap().width, app.whole().unwrap().height),
+        (120, 80)
+    );
+    app.o.work_inset = 20.0; // Desktop chrome must not trim a file's bottom.
+    let _ = app.update(Message::TranslateScreen);
+    let session = &app.o.translate.as_ref().unwrap().1;
+    assert!(session.full());
+    assert_eq!(
+        session.area_for_test(),
+        [0, 0, 120, 80],
+        "no desktop taskbar excluded from a file"
+    );
+    text::MODELS_HERE.set(previous_models);
+}
+
+#[test]
+fn imported_search_resize_preserves_all_selections_and_discards_old_ocr() {
+    let mut app = open_app(120, 80, 1.0);
+    app.o.imported = true;
+    app.select(Rectangle::new(
+        Point::new(10.0, 10.0),
+        Size::new(20.0, 10.0),
+    ));
+    let other = (app.o.selection.unwrap(), app.o.stroke.clone());
+    app.o.others.push(other);
+    app.select(Rectangle::new(
+        Point::new(60.0, 40.0),
+        Size::new(20.0, 20.0),
+    ));
+    let before = app.stacked().unwrap();
+    let revision = app.o.geometry_revision;
+    app.o.reading = Some(Rectangle::with_size(app.o.screen));
+    let _ = app.update(Message::Resized(Size::new(300.0, 100.0)));
+    assert_eq!(app.stacked().unwrap().rgba, before.rgba);
+    assert!(app.o.reading.is_none());
+    app.o.toast = Some("kept");
+    let _ = app.update(Message::ForGeometry(
+        revision,
+        Box::new(Message::ThenClose(None)),
+    ));
+    assert!(
+        app.o.is_some(),
+        "stale geometry cannot change the current overlay"
+    );
+    let area = app.area();
+    app.o.text_mode = Some(TextMode {
+        lines: None,
+        boxes: Vec::new(),
+        picked: None,
+        picking: false,
+    });
+    let old = vec![word::Line {
+        text: "stale".into(),
+        bounds: area,
+        carets: vec![],
+    }];
+    let _ = app.update(Message::ForGeometry(
+        revision,
+        Box::new(Message::TextLines(area, Ok(old))),
+    ));
+    assert!(app.o.text_mode.as_ref().unwrap().lines.is_none());
+}
+
+#[test]
+fn imported_search_measures_carets_in_source_pixels_before_mapping() {
+    let mut app = open_app(120, 80, 1.0);
+    app.o.imported = true;
+    let mut pixels = vec![255; 120 * 80 * 4];
+    for y in 20..28 {
+        for x in (30..34).chain(40..44) {
+            let i = (y * 120 + x) * 4;
+            pixels[i..i + 3].fill(0);
+        }
+    }
+    app.o.frame = Some(image::Handle::from_rgba(120, 80, pixels.clone()));
+    let _ = app.update(Message::Resized(Size::new(300.0, 100.0)));
+    let blocks = vec![TextBlock {
+        text: "ab".into(),
+        bounds: [30.0, 20.0, 14.0, 8.0],
+        confidence: 1.0,
+    }];
+    let source = word::lines(blocks.clone(), [0, 0], 1.0);
+    let mut expected = source;
+    word::measure(&mut expected, &pixels, 120, 80, 1.0);
+    assert!(!expected[0].carets.is_empty());
+    let lines = app.frame_geometry().unwrap().lines(blocks, [0, 0], &pixels);
+    assert_eq!(
+        lines[0].carets,
+        expected[0]
+            .carets
+            .iter()
+            .map(|x| x / 0.4)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn imported_editor_resize_keeps_annotations_and_refits_the_canvas() {
+    let valid = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons/128x128.png");
+    let mut app = App::idle(window::Id::unique());
+    let _ = app.open_external_image(&valid, false);
+    let original = app.o.edit.as_ref().unwrap().image().rgba;
+    let _ = app.update(Message::Annotate(annotate::Message::Tool(
+        annotate::Tool::Arrow,
+    )));
+    // Draw away from crop handles, which take precedence near the edge.
+    let _ = app.update(Message::Annotate(annotate::Message::Press(Point::new(
+        30.0, 30.0,
+    ))));
+    let _ = app.update(Message::Annotate(annotate::Message::Move(Point::new(
+        95.0, 95.0,
+    ))));
+    let _ = app.update(Message::Annotate(annotate::Message::Release));
+    let before = app.o.edit.as_ref().unwrap().image().rgba;
+    assert_ne!(before, original, "the imported editor renders the arrow");
+    // The host monitor may already be 1920×1080; force a different starting size.
+    let _ = app.update(Message::Resized(Size::new(1280.0, 720.0)));
+    let _ = app.update(Message::Resized(Size::new(1920.0, 1080.0)));
+    let edit = app.o.edit.as_ref().unwrap();
+    assert_eq!(edit.image().rgba, before);
+    assert!(
+        (edit.canvas_rect().center_x() - 960.0).abs() < 1.0,
+        "refitted canvas: {:?}",
+        edit.canvas_rect()
+    );
+}
+
+#[test]
+fn imported_editor_resize_retains_secondary_monitor_dpi() {
+    let valid = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons/128x128.png");
+    let mut app = App::idle(window::Id::unique());
+    let _ = app.open_external_image(&valid, false);
+    let original = app.o.edit.as_ref().unwrap().image().rgba;
+    app.o.scale = 2.0;
+    app.o.origin = Point::new(960.0, 0.0);
+    let _ = app.update(Message::Resized(Size::new(800.0, 450.0)));
+    let _ = app.update(Message::Resized(Size::new(960.0, 540.0)));
+    assert_eq!(app.o.place().origin, (1920, 0));
+    assert_eq!(app.o.place().px, (1920, 1080));
+    assert_eq!(app.o.edit.as_ref().unwrap().image().rgba, original);
+    assert!(matches!(
+        app.o.frame.as_ref(),
+        Some(image::Handle::Rgba {
+            width: 1920,
+            height: 1080,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn imported_editor_disables_screen_tools_without_a_frozen_desktop() {
+    let valid = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons/32x32.png");
+    let mut app = App::idle(window::Id::unique());
+    let _ = app.open_external_image(&valid, false);
+    let edit = app.o.edit.as_ref().unwrap();
+    let rows = crate::ui::screens::snip_toolbar::toolbar::more_rows(&edit.annotator);
+    for name in ["Colour picker", "Screen ruler"] {
+        assert!(rows.iter().any(|row| row.1.0 == name && row.3.is_none()));
+    }
+    let _ = app.on_snip_toolbar(annotate::Message::ScreenTool(annotate::ScreenTool::Picker));
+    assert!(app.o.edit.is_some());
+    assert!(app.tool().is_none());
+}
+
+#[test]
+fn external_search_replaces_opening_and_drops_stale_messages() {
+    let valid = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons/32x32.png");
+    let mut app = open_app(100, 100, 1.0);
+    app.opening = 10;
+    let _ = app.open_external_image(&valid, true);
+    assert_eq!(app.opening, 11);
+    assert!(matches!(app.o.purpose, Purpose::Search));
+    assert!(app.o.imported && app.o.edit.is_none() && app.o.reading.is_none());
+    assert_eq!(app.capturing, None);
+    let size = app.o.screen;
+    app.select(Rectangle::new(
+        Point::ORIGIN,
+        Size::new(size.width / 2.0, size.height / 2.0),
+    ));
+    let crop = app.crop().unwrap();
+    assert_eq!((crop.width, crop.height), (16, 16));
+    let _ = app.update(Message::ForOpening(10, Box::new(Message::ThenClose(None))));
+    assert!(
+        app.o.is_some(),
+        "late completion cannot close the new overlay"
+    );
+    let _ = app.update(Message::ForOpening(
+        10,
+        Box::new(Message::Snip(snip::Msg::Loaded(Err("stale".into())))),
+    ));
+    assert!(app.o.edit.is_none());
+    let selected = app.o.selection.unwrap().area;
+    let _ = app.snip_here(Some(selected));
+    let image = app.o.edit.as_ref().unwrap().image();
+    assert_eq!((image.width, image.height), (16, 16));
+    assert_eq!(
+        app.capturing, None,
+        "editing still uses the file, never recaptures"
+    );
+    let _ = app.on_snip(snip::Msg::Delay(3));
+    assert!(!app.snip_pill(), "an import cannot start a capture timer");
+    let _ = app.close();
+    assert!(app.o.is_none());
+}
+
+#[test]
+fn import_during_capture_or_long_capture_keeps_current_state() {
+    let valid = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons/32x32.png");
+    let mut app = open_app(100, 100, 1.0);
+    app.capturing = Some(12);
+    let previous = app.opening;
+    let _ = app.open_external_image(&valid, false);
+    assert_eq!(app.capturing, Some(12));
+    assert_eq!(app.opening, previous);
+    assert!(app.o.edit.is_none());
+    app.capturing = None;
+    let area = Rectangle::with_size(app.o.screen);
+    let mut snip = Snip::new(Vec::new(), app.place(), false, None);
+    snip.scroll = Some(crate::ui::screens::long_capture::Long::new(
+        area,
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        1.0,
+    ));
+    app.o.purpose = Purpose::Snip(Box::new(snip));
+    let _ = app.open_external_image(&valid, true);
+    assert_eq!(app.opening, previous);
+    assert!(app.scroll().is_some());
+}
+
 /// A recent capture (the Recent strip) opens picked on its own image: the
 /// whole image is the area, Snip's toolbar docks to it; taller than the
 /// screen, it is shown whole (scaled down), kept at full size.

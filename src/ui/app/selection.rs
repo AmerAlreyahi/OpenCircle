@@ -141,6 +141,7 @@ impl App {
         };
         // Over a translation: a tap opens a block's word card, E / A are the
         // card's; a new selection leaves the translation.
+        let geometry = self.frame_geometry();
         let o = &mut *self.o;
         if let Some((id, session)) = &mut o.translate {
             let id = *id;
@@ -162,7 +163,9 @@ impl App {
                 }
                 overlay::Event::Release if overlay::select(&o.stroke, 1.0).is_none() => {
                     let at = o.stroke.last().copied().unwrap_or(Point::ORIGIN);
-                    session.click(Point::new(at.x * o.scale, at.y * o.scale));
+                    if let Some(geometry) = geometry {
+                        session.click(geometry.point(at));
+                    }
                     self.o.drawing = false;
                     self.o.stroke.clear();
                     return Task::none();

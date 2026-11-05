@@ -557,6 +557,8 @@ pub struct Annotator {
     /// The live area is on a capture of its own (a stitched long capture, a
     /// recent one), not on the frozen frame: its pixels are always painted.
     pub own_image: bool,
+    /// Whether screen picker and ruler can use the frozen backdrop.
+    pub screen_tools: bool,
     area_drag: Option<AreaDrag>,
     /// Snip's toolbar control Tab is on (its index in the toolbar's order);
     /// a press anywhere drops it.
@@ -638,6 +640,7 @@ impl Annotator {
             bands: None,
             movable: false,
             own_image: false,
+            screen_tools: true,
             area_drag: None,
             focus: None,
             nudged: false,

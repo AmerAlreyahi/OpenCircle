@@ -82,6 +82,16 @@ impl SnipToolbar {
         e
     }
 
+    /// Refit an imported image when the compositor reports the window size.
+    pub fn refit(&mut self, screen: Size, scale: f32) {
+        let image = &self.annotator.doc.image;
+        let size = Size::new(image.width as f32, image.height as f32);
+        let (origin, zoom) = fit(size, screen, 1.0 / scale);
+        self.origin = origin;
+        self.zoom = zoom;
+        self.annotator.zoom = zoom;
+    }
+
     fn new_image(image: Image, origin: Point, zoom: f32) -> Self {
         SnipToolbar {
             annotator: Annotator::new(image, zoom),

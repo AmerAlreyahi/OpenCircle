@@ -24,6 +24,10 @@ pub(in crate::ui) type PillPlace = (Point, Size, f32, Option<Rectangle>);
 #[derive(Debug, Clone)]
 pub(in crate::ui) enum Message {
     Trigger(Trigger),
+    /// A task result belonging to one opening; dropped after another opens.
+    ForOpening(u32, Box<Message>),
+    /// OCR work produced in one viewport geometry; dropped after a resize.
+    ForGeometry(u32, Box<Message>),
     /// Capture number `.0`'s thread is done (`Instant` = trigger time, latency log).
     Captured(u32, Instant, Result<Shot, CaptureError>),
     /// Capture number `.0`'s grab is over (every monitor's).
@@ -60,6 +64,7 @@ pub(in crate::ui) enum Message {
     /// While closing: a frame was drawn / the window was resized (see `Hiding`).
     Drawn,
     Resized(Size),
+    OverlayResized(window::Id, Size),
     /// Settings / onboarding windows and the OS theme (`windows.rs`).
     Windows(windows::Msg),
     /// From the Snip annotation editor.

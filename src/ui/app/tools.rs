@@ -33,7 +33,9 @@ impl App {
     /// Starts `which` over the frozen screens. From Snip's toolbar the picked
     /// area and its editor wait for Esc (kept as they are).
     pub(in crate::ui) fn start_tool(&mut self, which: Which) -> Task<Message> {
-        if !matches!(self.o.purpose, Purpose::Snip(_)) {
+        if !matches!(self.o.purpose, Purpose::Snip(_))
+            || (self.o.imported && self.o.edit.as_ref().is_some_and(|e| e.annotator.own_image))
+        {
             return Task::none();
         }
         let back = (self.o.selection.map(|s| s.area))

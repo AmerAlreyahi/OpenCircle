@@ -407,6 +407,20 @@ impl Document {
 /// The flattened result (crop applied, every annotation drawn): what Copy and
 /// Save get. Pure: no window, no state.
 pub fn render(doc: &Document) -> Crop {
+    // With no marks or crop, preserve the imported RGBA exactly. A round trip
+    // through a premultiplied pixmap would discard RGB under zero alpha and
+    // quantize partially transparent colours, even though nothing was edited.
+    let full = Rectangle::new(
+        Point::ORIGIN,
+        Size::new(doc.image.width as f32, doc.image.height as f32),
+    );
+    if doc.items.is_empty() && doc.crop.is_none_or(|area| area == full) {
+        return Crop {
+            width: doc.image.width,
+            height: doc.image.height,
+            rgba: doc.image.rgba.clone(),
+        };
+    }
     let layers: Vec<_> = doc.items.iter().map(|item| (item, true)).collect();
     let pm = doc.flatten(&layers, doc.legend_layout().as_ref());
     let rgba = pm

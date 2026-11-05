@@ -15,7 +15,7 @@ iced = { version = "0.14", default-features = false, features = [
     # the AI chat's answers (pulldown-cmark; never "highlighter": no syntect)
     "markdown",
 ] }
-arboard = "3.7"
+arboard = { version = "3.7", features = ["wayland-data-control"] }
 base64 = "0.22"
 dirs = "7"
 # same version iced already builds: no second text stack in the binary

@@ -17,7 +17,8 @@ use crate::Triggers;
 use crate::config::Target;
 
 /// Longest accepted command line; anything longer is dropped.
-const MAX_LINE: u64 = 64;
+const MAX_PATH: usize = 4095;
+const MAX_LINE: u64 = (MAX_PATH * 2 + 13) as u64;
 const MAX_ACTION: usize = 32;
 
 /// A command from a later launch. Built only by `parse_command` / `from_args`, so an
@@ -25,6 +26,11 @@ const MAX_ACTION: usize = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Capture,
+    /// Open an external PNG in Snip, or Circle to Search.
+    Open {
+        path: String,
+        search: bool,
+    },
     /// A bare second launch (the empty line, internal: not a CLI command): open Settings.
     OpenSettings,
     /// Ask the running instance to exit (removes its tray icon cleanly).
@@ -44,6 +50,14 @@ impl Command {
     pub fn line(&self) -> String {
         match self {
             Command::Capture => "capture".into(),
+            Command::Open { path, search } => format!(
+                "{} {}",
+                if *search { "open-search" } else { "open" },
+                path.as_bytes()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            ),
             Command::OpenSettings => String::new(),
             Command::Quit => "quit".into(),
             Command::Version => "version".into(),
@@ -64,6 +78,8 @@ impl Command {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         match args.as_slice() {
             ["capture", ..] => Ok(Command::Capture),
+            ["open", path] => open(path, false),
+            ["open", "--search", path] => open(path, true),
             ["run", action] => run(action, None),
             ["run", action, "--target", t] => run(action, Some(t)),
             ["run", action, t] if t.starts_with("--target=") => {
@@ -73,6 +89,16 @@ impl Command {
             _ => Err("unrecognised arguments".into()),
         }
     }
+}
+
+fn open(path: &str, search: bool) -> Result<Command, String> {
+    if path.is_empty() || path.len() > MAX_PATH || path.contains('\0') || path.starts_with("--") {
+        return Err("invalid image path".into());
+    }
+    Ok(Command::Open {
+        path: path.into(),
+        search,
+    })
 }
 
 fn run(action: &str, target: Option<&str>) -> Result<Command, String> {
@@ -117,6 +143,29 @@ pub fn parse_command(line: &str) -> Result<Command, String> {
     let words: Vec<&str> = line.split(' ').collect();
     match words.as_slice() {
         ["capture"] => Ok(Command::Capture),
+        [kind @ ("open" | "open-search"), encoded] => {
+            if encoded.is_empty() || encoded.len() > MAX_PATH * 2 || encoded.len() % 2 != 0 {
+                return Err("invalid path length".into());
+            }
+            let bytes = encoded
+                .as_bytes()
+                .chunks_exact(2)
+                .map(|pair| {
+                    let digit = |b: u8| match b {
+                        b'0'..=b'9' => Some(b - b'0'),
+                        b'a'..=b'f' => Some(b - b'a' + 10),
+                        _ => None,
+                    };
+                    Some(digit(pair[0])? * 16 + digit(pair[1])?)
+                })
+                .collect::<Option<Vec<_>>>()
+                .ok_or("invalid path encoding")?;
+            let path = String::from_utf8(bytes).map_err(|_| "invalid path UTF-8")?;
+            if !std::path::Path::new(&path).is_absolute() {
+                return Err("image path must be absolute".into());
+            }
+            open(&path, *kind == "open-search")
+        }
         [""] => Ok(Command::OpenSettings),
         ["quit"] => Ok(Command::Quit),
         ["version"] => Ok(Command::Version),
@@ -380,6 +429,25 @@ mod tests {
             Command::from_args(&args(&["run", "nope"])).unwrap_err(),
             "unknown action \"nope\""
         );
+    }
+
+    #[test]
+    fn open_path_round_trips_without_interpreting_spaces_or_newlines() {
+        let path = std::env::current_dir()
+            .unwrap()
+            .join("снимок с пробелом\nname.png");
+        let path = path.to_str().unwrap();
+        let command = Command::from_args(&args(&["open", path])).unwrap();
+        assert_eq!(parse_command(&format!("{}\n", command.line())), Ok(command));
+        let search = Command::from_args(&args(&["open", "--search", path])).unwrap();
+        assert_eq!(parse_command(&format!("{}\n", search.line())), Ok(search));
+        assert!(Command::from_args(&args(&["open", "--search"])).is_err());
+        assert!(parse_command("open 72656c6174697665\n").is_err());
+        assert!(Command::from_args(&args(&["open"])).is_err());
+        assert!(Command::from_args(&args(&["open", "a", "b"])).is_err());
+        assert!(parse_command("open 0g\n").is_err());
+        assert!(parse_command("open 00\n").is_err());
+        assert!(parse_command(&format!("open {}\n", "61".repeat(5000))).is_err());
     }
 
     #[test]

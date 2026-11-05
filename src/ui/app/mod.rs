@@ -496,7 +496,13 @@ impl App {
                     _ => None,
                 }),
             };
-            Subscription::batch([triggers, escape, alt, card, shift, frames, bar, glow])
+            let resize = iced::event::listen_with(|event, _, id| match event {
+                iced::Event::Window(window::Event::Resized(size)) => {
+                    Some(Message::OverlayResized(id, size))
+                }
+                _ => None,
+            });
+            Subscription::batch([triggers, escape, alt, card, shift, frames, bar, glow, resize])
         } else if self.hiding != Hiding::No {
             // One stream for both, so a resize is always seen before the frames after it.
             // Every message makes iced redraw, so frames keep coming while this runs.

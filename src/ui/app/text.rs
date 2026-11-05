@@ -6,7 +6,7 @@ use std::time::Instant;
 use iced::widget::image;
 use iced::{Point, Rectangle, Task, Vector};
 
-use crate::actions::{self, Crop, copy, text};
+use crate::actions::{Crop, copy, text};
 use crate::ocr::screen::Wants;
 use crate::ocr::{self, TextBlock};
 
@@ -149,7 +149,7 @@ impl App {
     /// if it didn't start at the capture, or the held helper starts and loads its models (gently), so the first
     /// text read is quick. Nothing during it.
     pub(in crate::ui) fn warm(&mut self) -> Task<Message> {
-        if !self.reads_text() {
+        if self.o.imported || !self.reads_text() {
             return Task::none();
         }
         if self.system_text() {
@@ -220,27 +220,25 @@ impl App {
     /// user waits for it, else gently (the helper on at most two cores, below
     /// normal priority).
     pub(in crate::ui) fn read_band(&mut self, band: Rectangle, gently: bool) -> Task<Message> {
-        let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
-        else {
+        let Some(image::Handle::Rgba { pixels, .. }) = &self.o.frame else {
             return Task::none();
         };
-        let (width, height, pixels) = (*width, *height, pixels.clone());
-        let Some([x0, y0, ..]) = actions::crop_bounds(width, height, self.o.scale, band) else {
+        let pixels = pixels.clone();
+        let Some(geometry) = self.frame_geometry() else {
+            return Task::none();
+        };
+        let Some([x0, y0, ..]) = geometry.bounds(band) else {
             return Task::none();
         };
         // only the lines it is read for (frame px in the crop)
         let Some((top, bottom)) = self.o.screen_text.unread(band, self.o.screen) else {
             return Task::none();
         };
-        let at = |y: f32| ((y * self.o.scale) as u32).saturating_sub(y0);
+        let at = |y: f32| ((y * geometry.y) as u32).saturating_sub(y0);
         let rows = (at(top), at(bottom));
         self.o.reading = Some(band);
-        let (scale, opening) = (self.o.scale, self.opening);
+        let (scale, opening) = (geometry.y, self.opening);
+        let revision = self.o.geometry_revision;
         let held = self
             .o
             .helper
@@ -255,14 +253,10 @@ impl App {
                 return;
             };
             let send = |read: Result<Vec<TextBlock>, ocr::OcrError>| {
-                let lines = read.map(|blocks| {
-                    let mut lines = word::lines(blocks, [x0, y0], scale);
-                    word::measure(&mut lines, &pixels, width, height, scale);
-                    lines
-                });
+                let lines = read.map(|blocks| geometry.lines(blocks, [x0, y0], &pixels));
                 let _ = tx.unbounded_send(lines.map_err(|e| e.to_string()));
             };
-            let Some(c) = actions::crop(&pixels, width, height, scale, band) else {
+            let Some(c) = geometry.crop(&pixels, band) else {
                 return send(Err(ocr::OcrError::BadImage("an empty band".into())));
             };
             let Some(setting) = system else {
@@ -286,7 +280,9 @@ impl App {
                 }
             }
         })
-        .map(move |read| Message::ScreenText(opening, band, read))
+        .map(move |read| {
+            Message::ForGeometry(revision, Box::new(Message::ScreenText(opening, band, read)))
+        })
     }
 
     /// After Windows OCR's read (one language: the user's Windows language),
@@ -301,24 +297,21 @@ impl App {
         {
             return Task::none();
         }
-        let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
-        else {
+        let Some(image::Handle::Rgba { pixels, .. }) = &self.o.frame else {
             return Task::none();
         };
-        let (width, height, pixels) = (*width, *height, pixels.clone());
+        let pixels = pixels.clone();
         self.o.other_read = true;
-        let scale = self.o.scale;
+        let Some(geometry) = self.frame_geometry() else {
+            return Task::none();
+        };
+        let revision = self.o.geometry_revision;
         // clean Latin lines are Windows OCR's; one that reads like noise may
         // be another script it misread: the second reader looks there too
         let known: Vec<[f32; 4]> = (self.o.screen_text.lines().iter())
             .filter(|l| plain(&l.text))
             .map(|l| {
-                let r = l.bounds * scale;
+                let r = geometry.rect(l.bounds);
                 [r.x, r.y, r.width, r.height]
             })
             .collect();
@@ -330,14 +323,14 @@ impl App {
             let Some(_held) = held.upgrade() else {
                 return; // closed meanwhile
             };
-            let read = ocr::recognize_except(&pixels, width, height, &known, true).map(|blocks| {
-                let mut lines = word::lines(blocks, [0, 0], scale);
-                word::measure(&mut lines, &pixels, width, height, scale);
-                lines
-            });
+            let (width, height) = geometry.size();
+            let read = ocr::recognize_except(&pixels, width, height, &known, true)
+                .map(|blocks| geometry.lines(blocks, [0, 0], &pixels));
             let _ = tx.unbounded_send(read.map_err(|e| e.to_string()));
         })
-        .map(move |read| Message::ScreenOther(opening, read))
+        .map(move |read| {
+            Message::ForGeometry(revision, Box::new(Message::ScreenOther(opening, read)))
+        })
     }
 
     /// The held release (and the events after it) go on, now that the band
@@ -401,17 +394,7 @@ impl App {
 
     /// The whole frozen frame (Ask before a selection).
     pub(in crate::ui) fn whole(&self) -> Option<Crop> {
-        let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
-        else {
-            return None;
-        };
-        let all = Rectangle::with_size(self.o.screen);
-        actions::crop(pixels, *width, *height, self.o.scale, all)
+        self.crop_of(Rectangle::with_size(self.o.screen))
     }
 
     /// The picked words stretch to `at` (image px), where a drag ended or a Shift
@@ -445,22 +428,19 @@ impl App {
         at: Point,
         extend: bool,
     ) -> Task<Message> {
-        let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
-        else {
+        let Some(image::Handle::Rgba { pixels, .. }) = &self.o.frame else {
             return Task::none();
         };
         if !text::models_present() {
             return Task::none();
         }
-        let (Some([x0, y0, ..]), Some(crop)) = (
-            actions::crop_bounds(*width, *height, self.o.scale, region),
-            actions::crop(pixels, *width, *height, self.o.scale, region),
-        ) else {
+        let Some(geometry) = self.frame_geometry() else {
+            return Task::none();
+        };
+        let revision = self.o.geometry_revision;
+        let (Some([x0, y0, ..]), Some(crop)) =
+            (geometry.bounds(region), geometry.crop(pixels, region))
+        else {
             return Task::none();
         };
         self.taps = self.taps.wrapping_add(1);
@@ -475,7 +455,7 @@ impl App {
             let read = ocr::recognize_in_child(&crop.rgba, crop.width, crop.height);
             let _ = tx.unbounded_send(read.map_err(|e| e.to_string()));
         })
-        .map(move |read| Message::Tapped(what, read))
+        .map(move |read| Message::ForGeometry(revision, Box::new(Message::Tapped(what, read))))
     }
 
     /// OCR for tap or drag `what` is back: the word under the tap is the
@@ -495,16 +475,13 @@ impl App {
                 return Task::none();
             }
         };
-        let mut lines = word::lines(blocks, what.origin, self.o.scale);
-        if let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
-        {
-            word::measure(&mut lines, pixels, *width, *height, self.o.scale);
-        }
+        let Some(geometry) = self.frame_geometry() else {
+            return Task::none();
+        };
+        let Some(image::Handle::Rgba { pixels, .. }) = &self.o.frame else {
+            return Task::none();
+        };
+        let lines = geometry.lines(blocks, what.origin, pixels);
         if what.extend {
             let Some(word) = &mut self.o.word else {
                 return Task::none();
@@ -571,22 +548,18 @@ impl App {
             self.o.reader = Reader::Missing(ocr::download_size());
             return Task::none();
         }
-        let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
+        let Some(image::Handle::Rgba { pixels, .. }) = &self.o.frame else {
+            return Task::none();
+        };
+        let Some(geometry) = self.frame_geometry() else {
+            return Task::none();
+        };
+        let revision = self.o.geometry_revision;
+        let (Some([x0, y0, ..]), Some(crop)) = (geometry.bounds(area), geometry.crop(pixels, area))
         else {
             return Task::none();
         };
-        let (Some([x0, y0, ..]), Some(crop)) = (
-            actions::crop_bounds(*width, *height, self.o.scale, area),
-            actions::crop(pixels, *width, *height, self.o.scale, area),
-        ) else {
-            return Task::none();
-        };
-        let (scale, frame) = (self.o.scale, (*width, *height, pixels.clone()));
+        let pixels = pixels.clone();
         self.o.ai_chat = None;
         self.o.text_mode = Some(TextMode {
             lines: None,
@@ -596,14 +569,10 @@ impl App {
         });
         background(move |tx| {
             let read = ocr::recognize_in_child(&crop.rgba, crop.width, crop.height);
-            let lines = read.map(|blocks| {
-                let mut lines = word::lines(blocks, [x0, y0], scale);
-                word::measure(&mut lines, &frame.2, frame.0, frame.1, scale);
-                lines
-            });
+            let lines = read.map(|blocks| geometry.lines(blocks, [x0, y0], &pixels));
             let _ = tx.unbounded_send(lines.map_err(|e| e.to_string()));
         })
-        .map(move |read| Message::TextLines(area, read))
+        .map(move |read| Message::ForGeometry(revision, Box::new(Message::TextLines(area, read))))
     }
 
     /// OCR read the box `area` for select-text mode (dropped if the selection

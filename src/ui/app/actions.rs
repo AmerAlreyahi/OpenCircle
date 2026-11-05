@@ -389,12 +389,15 @@ impl App {
     /// frame) is translated on a thread, then swapped in.
     pub(in crate::ui) fn start_translate(&mut self) -> Task<Message> {
         let frame = self.o.frame.clone();
-        let (Some(frame @ image::Handle::Rgba { width, height, .. }), Some(selection)) =
+        let (Some(frame @ image::Handle::Rgba { .. }), Some(selection)) =
             (&frame, self.o.selection)
         else {
             return Task::none();
         };
-        let Some(area) = actions::crop_bounds(*width, *height, self.o.scale, selection.area) else {
+        let Some(geometry) = self.frame_geometry() else {
+            return Task::none();
+        };
+        let Some(area) = geometry.bounds(selection.area) else {
             return Task::none();
         };
         self.o.ai_chat = None;
@@ -405,10 +408,14 @@ impl App {
         let (session, task) = translate::Session::start(
             frame.clone(),
             area,
-            self.o.scale,
+            geometry.y,
             self.cache.clone(),
             models,
-            (self.o.work_inset * self.o.scale).round() as u32,
+            if self.o.imported {
+                0
+            } else {
+                (self.o.work_inset * geometry.y).round() as u32
+            },
         );
         if session.full() {
             // nothing to outline: the translation is the whole screen

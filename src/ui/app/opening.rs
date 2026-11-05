@@ -27,7 +27,12 @@ pub(in crate::ui) struct Opening {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
     /// Its RGBA bytes are also what actions crop (shared, never copied whole).
     pub(in crate::ui) frame: Option<image::Handle>,
-    /// Physical px per logical px of `frame`.
+    /// A file import: never warm/read text or start capture work automatically.
+    pub(in crate::ui) imported: bool,
+    /// Changes when a resized import invalidates OCR's overlay coordinates.
+    pub(in crate::ui) geometry_revision: u32,
+    /// Monitor DPI (physical desktop px per logical px). Imported search
+    /// frames use `App::frame_geometry` for their independent pixel mapping.
     pub(in crate::ui) scale: f32,
     /// The overlay's logical size (the monitor's).
     pub(in crate::ui) screen: Size,
@@ -193,6 +198,8 @@ impl Default for Opening {
     fn default() -> Self {
         Opening {
             frame: None,
+            imported: false,
+            geometry_revision: 0,
             scale: 1.0,
             screen: Size::ZERO,
             stroke: Vec::new(),

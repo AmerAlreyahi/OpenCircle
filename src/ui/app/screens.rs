@@ -35,6 +35,85 @@ use crate::ui::{overlay, windows};
 
 use super::App;
 
+/// Unzoomed overlay model px <-> source frame px. Events have already passed
+/// through `View::to_image`, so zoom must never be applied a second time here.
+#[derive(Clone, Copy)]
+pub(in crate::ui) struct FrameGeometry {
+    width: u32,
+    height: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+impl FrameGeometry {
+    pub fn size(self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    pub fn point(self, p: Point) -> Point {
+        Point::new(p.x * self.x, p.y * self.y)
+    }
+
+    pub fn rect(self, r: Rectangle) -> Rectangle {
+        Rectangle::new(
+            self.point(r.position()),
+            Size::new(r.width * self.x, r.height * self.y),
+        )
+    }
+
+    pub fn bounds(self, r: Rectangle) -> Option<[u32; 4]> {
+        let r = self.rect(r);
+        // A resize round-trip can put an integral source edge a few float ULPs
+        // past its pixel. Avoid adding a spurious row/column in that case.
+        let snap = |v: f32| {
+            if (v - v.round()).abs() < 0.0001 {
+                v.round()
+            } else {
+                v
+            }
+        };
+        let (x, y) = (snap(r.x), snap(r.y));
+        let right = snap(r.x + r.width);
+        let bottom = snap(r.y + r.height);
+        actions::crop_bounds(
+            self.width,
+            self.height,
+            1.0,
+            Rectangle::new(Point::new(x, y), Size::new(right - x, bottom - y)),
+        )
+    }
+
+    pub fn crop(self, pixels: &[u8], r: Rectangle) -> Option<Crop> {
+        let [x0, y0, x1, y1] = self.bounds(r)?;
+        // Bounds already are source pixels: no DPI/viewport scaling here.
+        let r = Rectangle::new(
+            Point::new(x0 as f32, y0 as f32),
+            Size::new((x1 - x0) as f32, (y1 - y0) as f32),
+        );
+        actions::crop(pixels, self.width, self.height, 1.0, r)
+    }
+
+    /// Measure on the original pixels, then convert bounds AND character carets
+    /// to overlay model px. A single DPI factor cannot describe a stretched PNG.
+    pub fn lines(
+        self,
+        blocks: Vec<ocr::TextBlock>,
+        origin: [u32; 2],
+        pixels: &[u8],
+    ) -> Vec<word::Line> {
+        let mut lines = word::lines(blocks, origin, 1.0);
+        word::measure(&mut lines, pixels, self.width, self.height, 1.0);
+        for line in &mut lines {
+            line.bounds.x /= self.x;
+            line.bounds.width /= self.x;
+            line.bounds.y /= self.y;
+            line.bounds.height /= self.y;
+            line.carets.iter_mut().for_each(|x| *x /= self.x);
+        }
+        lines
+    }
+}
+
 /// Another monitor's overlay while the overlay is open.
 pub(in crate::ui) struct Screen {
     /// Its overlay window.
@@ -332,22 +411,34 @@ impl App {
         (w > 0 && h > 0).then_some((local, (x0, y0, w as u32, h as u32)))
     }
 
-    /// `area` (image px) cut out of the frozen frames: the starting screen's
-    /// alone, as with one screen, unless it reaches another screen; then
-    /// stitched from every frame it meets in desktop px (`actions::stitch`), at
-    /// each screen's own pixels: one image whose text reads in order across.
+    /// One mapping for all source-pixel consumers of the starting frame.
+    pub(in crate::ui) fn frame_geometry(&self) -> Option<FrameGeometry> {
+        let image::Handle::Rgba { width, height, .. } = self.o.frame.as_ref()? else {
+            return None;
+        };
+        let (x, y) = if self.o.imported && matches!(self.o.purpose, Purpose::Search) {
+            (
+                *width as f32 / self.o.screen.width,
+                *height as f32 / self.o.screen.height,
+            )
+        } else {
+            (self.o.scale, self.o.scale)
+        };
+        (x.is_finite() && y.is_finite() && x > 0.0 && y > 0.0).then_some(FrameGeometry {
+            width: *width,
+            height: *height,
+            x,
+            y,
+        })
+    }
+
+    /// Cut `area` from the frozen frames, stitching screens when necessary.
     pub(in crate::ui) fn crop_of(&self, area: Rectangle) -> Option<Crop> {
-        let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
-        else {
+        let Some(image::Handle::Rgba { pixels, .. }) = &self.o.frame else {
             return None;
         };
         if !self.spans(area) {
-            return actions::crop(pixels, *width, *height, self.o.scale, area);
+            return self.frame_geometry()?.crop(pixels, area);
         }
         self.stitched(self.desk_bounds(area)?)
     }
@@ -428,15 +519,16 @@ impl App {
 
     /// The desktop px (physical) of `crop_of(area)`'s top-left corner.
     pub(in crate::ui) fn crop_origin(&self, area: Rectangle) -> Option<(i32, i32)> {
-        let image::Handle::Rgba { width, height, .. } = self.o.frame.as_ref()? else {
+        if self.o.imported {
             return None;
-        };
+        }
+        let geometry = self.frame_geometry()?;
         if self.spans(area) {
             let [x, y, ..] = self.desk_bounds(area)?;
             return Some((x, y));
         }
         let start = self.o.place();
-        let [x, y, ..] = actions::crop_bounds(*width, *height, self.o.scale, area)?;
+        let [x, y, ..] = geometry.bounds(area)?;
         Some((start.origin.0 + x as i32, start.origin.1 + y as i32))
     }
 

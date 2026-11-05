@@ -453,6 +453,10 @@ fn route_id(bindings: &[Binding], id: &str, at: Instant) -> Option<Trigger> {
 pub fn trigger(command: &Command, at: Instant) -> Trigger {
     match command {
         Command::Capture => Trigger::Capture(at),
+        Command::Open { path, search } => Trigger::OpenImage {
+            path: std::path::PathBuf::from(path),
+            search: *search,
+        },
         Command::OpenSettings => Trigger::OpenSettings,
         Command::Quit => Trigger::Quit,
         Command::Version => unreachable!("answered by the socket, never a trigger"),

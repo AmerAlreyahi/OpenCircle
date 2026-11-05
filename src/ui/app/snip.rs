@@ -22,6 +22,9 @@ use super::{ASK_MARGIN, App, work_area};
 
 impl App {
     pub(in crate::ui) fn on_snip(&mut self, msg: snip::Msg) -> Task<Message> {
+        if self.o.imported && matches!(msg, snip::Msg::Delay(_) | snip::Msg::Shoot(_)) {
+            return Task::none();
+        }
         // The timer ran out and the overlay is gone (hidden or closed): capture
         // again in that mode, unless something else opened meanwhile.
         if let snip::Msg::Shoot(kind) = msg {
@@ -176,6 +179,33 @@ impl App {
     /// it picked, as a pick would; none = the pick step, with the edge glow.
     /// Main mode's state (selections, words, cards) goes; the frame stays.
     pub(in crate::ui) fn snip_here(&mut self, picked: Option<Rectangle>) -> Task<Message> {
+        if self.o.imported {
+            // A file has no live desktop behind it. Edit its pixels without
+            // starting window-control readers, timers or capture history.
+            let crop = match picked {
+                Some(area) => self.crop_of(area),
+                None => match &self.o.frame {
+                    Some(image::Handle::Rgba {
+                        width,
+                        height,
+                        pixels,
+                        ..
+                    }) => Some(Crop {
+                        width: *width,
+                        height: *height,
+                        rgba: pixels.to_vec(),
+                    }),
+                    _ => None,
+                },
+            };
+            let Some(crop) = crop else {
+                return Task::none();
+            };
+            let mut snip = snip::Snip::new(Vec::new(), self.place(), false, None);
+            let _ = snip.start(snip::Kind::Region, self.o.screen);
+            self.o.purpose = Purpose::Snip(Box::new(snip));
+            return self.snip_routed(crop, false, false);
+        }
         // the windows as they were at the freeze (as Snip's own shortcut lists
         // them), not now: a late list drifts from the frozen frames
         let windows = std::mem::take(&mut self.o.windows);
@@ -354,6 +384,7 @@ impl App {
             self.o.scale,
         );
         edit.annotator.steps = self.windows.steps();
+        edit.annotator.screen_tools = !self.o.imported;
         let area = edit.canvas_rect();
         self.o.ai_chat = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x

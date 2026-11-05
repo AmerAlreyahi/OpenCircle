@@ -243,6 +243,11 @@ impl Session {
         self.whole
     }
 
+    #[cfg(test)]
+    pub(in crate::ui) fn area_for_test(&self) -> [u32; 4] {
+        self.area
+    }
+
     /// What to show instead of the original frame: the translation, unless
     /// Alt is held or it isn't ready.
     pub fn image(&self) -> Option<&image::Handle> {

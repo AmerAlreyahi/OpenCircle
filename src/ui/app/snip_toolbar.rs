@@ -141,7 +141,12 @@ impl App {
         match out {
             None => Task::none(),
             // a step of the Steps strip edited: Esc leaves it as it was
-            Some(Output::Back) if edit.annotator.updating.is_some() => self.close(),
+            Some(Output::Back)
+                if edit.annotator.updating.is_some()
+                    || (o.imported && matches!(o.purpose, Purpose::Snip(_))) =>
+            {
+                self.close()
+            }
             // Snip has no action bar: back to picking an area.
             Some(Output::Back) if matches!(o.purpose, Purpose::Snip(_)) => {
                 self.o.edit = None;

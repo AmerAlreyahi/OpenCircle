@@ -31,6 +31,34 @@ const STEP_ASIDE: f32 = 12.0;
 
 impl App {
     pub(in crate::ui) fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.update_inner(message);
+        let opening = self.opening;
+        task.map(move |message| {
+            if matches!(
+                message,
+                Message::ForOpening(..)
+                    | Message::Trigger(_)
+                    | Message::Captured(..)
+                    | Message::Grabbed(_)
+                    | Message::Chosen(..)
+                    | Message::CaptureTimedOut(_)
+                    | Message::Windows(_)
+                    | Message::Live(_)
+                    | Message::AiChat(..)
+                    | Message::ChatMoved(..)
+                    | Message::ChatSettle(_)
+                    | Message::ChatFrame(_)
+                    | Message::UpdateTick
+                    | Message::Screen(..)
+            ) {
+                message
+            } else {
+                Message::ForOpening(opening, Box::new(message))
+            }
+        })
+    }
+
+    fn update_inner(&mut self, message: Message) -> Task<Message> {
         // Late answers for an overlay closed meanwhile (a panel, translate, OCR,
         // song, a frame...) are dropped: nothing of a closed opening comes back.
         if self.o.is_none() && !works_closed(&message) {
@@ -38,6 +66,34 @@ impl App {
         }
         match message {
             Message::Trigger(Trigger::Quit) => iced::exit(),
+            Message::ForOpening(opening, message) if opening == self.opening => {
+                self.update_inner(*message)
+            }
+            Message::ForOpening(_, message) => {
+                // Older queued tasks can already contain nested wrappers. Keep
+                // the Lens page alive long enough even when dropping them.
+                let mut stale = *message;
+                loop {
+                    match stale {
+                        Message::ForOpening(_, inner) | Message::ForGeometry(_, inner) => {
+                            stale = *inner
+                        }
+                        Message::SearchOpened(Ok(page)) => {
+                            page.release();
+                            break;
+                        }
+                        _ => break,
+                    }
+                }
+                Task::none()
+            }
+            Message::ForGeometry(revision, message) if revision == self.o.geometry_revision => {
+                self.update_inner(*message)
+            }
+            Message::ForGeometry(..) => Task::none(),
+            Message::Trigger(Trigger::OpenImage { path, search }) => {
+                self.open_external_image(&path, search)
+            }
             Message::Trigger(Trigger::OpenSettings) => self
                 .windows
                 .open(windows::Kind::Settings)
@@ -719,6 +775,85 @@ impl App {
                 }
                 Task::none()
             }
+            Message::OverlayResized(id, size) if id == self.overlay => {
+                self.update(Message::Resized(size))
+            }
+            Message::OverlayResized(..) => Task::none(),
+            Message::Resized(size)
+                if self.o.imported
+                    && size.width.is_finite()
+                    && size.height.is_finite()
+                    && size.width > 0.0
+                    && size.height > 0.0
+                    && size != self.o.screen =>
+            {
+                let old = self.o.screen;
+                self.o.screen = size;
+                self.o.work_inset = 0.0;
+                self.o.geometry_revision = self.o.geometry_revision.wrapping_add(1);
+                // OCR's lines, carets and in-flight reads refer to the old model
+                // geometry. Read again on the next touch, never apply stale boxes.
+                self.o.screen_text = Default::default();
+                self.o.reading = None;
+                self.o.text_by = None;
+                self.o.other_read = false;
+                self.o.word = None;
+                self.o.text_mode = None;
+                self.o.awaits = None;
+                self.o.want_all = false;
+                self.o.held = None;
+                self.o.text_press = None;
+                self.o.text_used = false;
+                self.o.clicks = None;
+                self.o.scan = None;
+                self.o.morph = None;
+                self.o.zoom = None;
+                self.o.pan = None;
+                self.o.grab = None;
+                let scale = self.o.scale;
+                if let Some(edit) = &mut self.o.edit {
+                    edit.refit(size, scale);
+                    let area = edit.canvas_rect();
+                    let w = (size.width * scale).ceil() as u32;
+                    let h = (size.height * scale).ceil() as u32;
+                    self.o.frame = Some(iced::widget::image::Handle::from_rgba(
+                        w,
+                        h,
+                        vec![0; w as usize * h as usize * 4],
+                    ));
+                    self.o.view = overlay::View::new(w, h, size);
+                    self.select(area);
+                    self.o.bar_now = None;
+                    self.o.bar_glide = None;
+                } else if let Some(iced::widget::image::Handle::Rgba { width, height, .. }) =
+                    &self.o.frame
+                {
+                    self.o.view = overlay::View::new(*width, *height, size);
+                    if let Some(selection) = &mut self.o.selection {
+                        selection.area.x *= size.width / old.width;
+                        selection.area.y *= size.height / old.height;
+                        selection.area.width *= size.width / old.width;
+                        selection.area.height *= size.height / old.height;
+                    }
+                    for point in &mut self.o.stroke {
+                        point.x *= size.width / old.width;
+                        point.y *= size.height / old.height;
+                    }
+                    for (selection, stroke) in &mut self.o.others {
+                        selection.area.x *= size.width / old.width;
+                        selection.area.y *= size.height / old.height;
+                        selection.area.width *= size.width / old.width;
+                        selection.area.height *= size.height / old.height;
+                        for point in stroke {
+                            point.x *= size.width / old.width;
+                            point.y *= size.height / old.height;
+                        }
+                    }
+                    self.o.bar_now = None;
+                    self.o.bar_glide = None;
+                }
+                Task::none()
+            }
             Message::Resized(_) => Task::none(),
             Message::TestShot(shot) => {
                 save_test_shot(&shot);
@@ -854,6 +989,8 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
     matches!(
         message,
         Message::Trigger(_)
+            | Message::ForOpening(..)
+            | Message::SearchOpened(..)
             | Message::Captured(..)
             | Message::Grabbed(_)
             | Message::Chosen(..)

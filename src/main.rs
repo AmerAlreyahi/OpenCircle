@@ -37,6 +37,10 @@ use iced::futures::channel::mpsc;
 #[derive(Debug, Clone)]
 pub enum Trigger {
     Capture(Instant),
+    OpenImage {
+        path: std::path::PathBuf,
+        search: bool,
+    },
     /// A quick action (its shortcut or `opencircle run`): action id + target + live flag.
     Quick(Instant, config::QuickAction),
     /// Tray "Settings…": open the Settings window, or focus it if it is open.
@@ -52,7 +56,7 @@ pub enum Trigger {
 /// Where every trigger source (shortcut, tray, CLI socket) sends.
 pub type Triggers = mpsc::UnboundedSender<Trigger>;
 
-const USAGE: &str = "usage: opencircle [capture | quit | run <action> [--target full_screen|circle|last_region|window]]";
+const USAGE: &str = "usage: opencircle [capture | quit | open [--search] <image.png> | run <action> [--target full_screen|circle|last_region|window]]";
 
 /// A GUI-subsystem exe has no stdout/stderr. When started from a terminal, attach
 /// to its console so `eprintln!` shows; a redirect (file, pipe) is already valid
@@ -158,7 +162,7 @@ fn main() -> ExitCode {
             let _ = hotkey::forward(&hotkey::Command::Quit.line());
             return ExitCode::SUCCESS;
         }
-        Some("capture" | "run") => match hotkey::Command::from_args(&args) {
+        Some("capture" | "run" | "open") => match hotkey::Command::from_args(&args) {
             Ok(command) => Some(command),
             Err(e) => {
                 crate::log!("{e}\n{USAGE}");
@@ -169,6 +173,39 @@ fn main() -> ExitCode {
             crate::log!("{USAGE}");
             return ExitCode::from(2);
         }
+    };
+
+    let command = match command {
+        Some(hotkey::Command::Open { path, search }) => {
+            let path = match std::fs::canonicalize(&path) {
+                Ok(path) => path,
+                Err(e) => {
+                    eprintln!("Cannot open PNG: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Err(e) = capture::import::open(&path) {
+                eprintln!("Cannot open PNG: {e}");
+                return ExitCode::FAILURE;
+            }
+            let Some(path) = path.to_str() else {
+                eprintln!("Cannot open PNG: path is not valid UTF-8");
+                return ExitCode::FAILURE;
+            };
+            let args = if search {
+                vec!["open".into(), "--search".into(), path.into()]
+            } else {
+                vec!["open".into(), path.into()]
+            };
+            match hotkey::Command::from_args(&args) {
+                Ok(command) => Some(command),
+                Err(e) => {
+                    eprintln!("Cannot open PNG: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        other => other,
     };
 
     // A running instance takes the command; this launch is done. A command with
