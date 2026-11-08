@@ -652,6 +652,12 @@ production systems.
   backup), a value the user changed on purpose stays.
 - The circled part goes to the AI (owner, 2026-11-08): Ask AI sends the selected crop, never the text alone, in the browser
   provider AND in the in-app AI chat; check both paths.
+- App languages + Arabic RTL (owner, 2026-11-08): the app's UI becomes multi-language, the language chosen in onboarding
+  (and changeable in Settings); Arabic first, fully right-to-left (mirrored layout). Planned in 0.1.4 BEFORE the game
+  translation work, but ON HOLD until the owner says to start (he checks whether it fits today). The existing Arabic/RTL
+  toolbar code (Snip toolbar, Steps strip, picker, ruler, long-capture hint) is KEPT for it (audit item 5.1).
+- No duplicate code (owner, 2026-11-08): logic needed in two places or more is built once as shared, reusable code and
+  called from each place; never the same thing twice (recorded in the owner's engineering rules too).
 - Edge assist (owner, 2026-11-08): a simple, gentle magnetic edge when dragging a Snip area by hand: it helps the user land on
   window/element edges, never aggressive; no mockup needed.
 
