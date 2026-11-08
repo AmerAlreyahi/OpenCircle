@@ -77,7 +77,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::actions::Crop;
-use crate::config::EditorConfig;
+use crate::config::{EditorConfig, Rgb};
 use document::int_rect;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1809,18 +1809,14 @@ fn handle(pm: tiny_skia::Pixmap) -> image::Handle {
     image::Handle::from_rgba(pm.width(), pm.height(), pm.take())
 }
 
-fn hex(c: [u8; 4]) -> String {
-    format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2])
+fn hex([r, g, b, _]: [u8; 4]) -> String {
+    Rgb([r, g, b]).hex(true)
 }
 
 /// `#RRGGBB` (the `#` optional) as an opaque colour.
 pub(crate) fn parse_hex(s: &str) -> Option<[u8; 4]> {
-    let s = s.trim().trim_start_matches('#');
-    if s.len() != 6 || !s.is_ascii() {
-        return None;
-    }
-    let byte = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
-    Some([byte(0)?, byte(2)?, byte(4)?, 255])
+    let Rgb([r, g, b]) = Rgb::parse(&format!("#{}", s.trim().trim_start_matches('#')))?;
+    Some([r, g, b, 255])
 }
 
 /// `r` on whole image px (the captured pixels are whole).

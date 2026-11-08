@@ -56,17 +56,11 @@ mod tests {
 
     /// WCAG contrast of `fg` (laid over `bg` by its alpha) against opaque `bg`.
     fn contrast(fg: Color, bg: Color) -> f32 {
-        let lum = |c: Color| {
-            let f = |v: f32| match v <= 0.04045 {
-                true => v / 12.92,
-                false => ((v + 0.055) / 1.055).powf(2.4),
-            };
-            0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
-        };
         let mix = |a: f32, b: f32| a * fg.a + b * (1.0 - fg.a);
-        let fg = Color::from_rgb(mix(fg.r, bg.r), mix(fg.g, bg.g), mix(fg.b, bg.b));
-        let (a, b) = (lum(fg), lum(bg));
-        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+        themes::contrast(
+            Color::from_rgb(mix(fg.r, bg.r), mix(fg.g, bg.g), mix(fg.b, bg.b)),
+            bg,
+        )
     }
 
     fn materials(c: &Colours) -> [(&str, Color); 9] {

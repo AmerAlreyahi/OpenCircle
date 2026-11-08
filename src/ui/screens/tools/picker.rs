@@ -34,11 +34,6 @@ pub const HINT: [Group<'static>; 4] = [
     (Some("Esc"), "Close"),
 ];
 
-/// `#RRGGBB`, upper case.
-pub fn hex([r, g, b]: [u8; 3]) -> String {
-    format!("#{r:02X}{g:02X}{b:02X}")
-}
-
 /// `rgb(r, g, b)`, as CSS writes it.
 pub fn rgb([r, g, b]: [u8; 3]) -> String {
     format!("rgb({r}, {g}, {b})")
@@ -93,7 +88,11 @@ pub fn loupe<'a>(
 /// ×. `rtl`: mirrored.
 pub fn toolbar<'a>(under: Option<[u8; 3]>, recent: &[[u8; 3]], rtl: bool) -> Element<'a, Msg> {
     let ar = |latin: &'a str, arabic: &'a str| if rtl { arabic } else { latin };
-    let now = chip::readout(under.map_or_else(|| "#------".into(), hex), true, None);
+    let now = chip::readout(
+        under.map_or_else(|| "#------".into(), |c| crate::config::Rgb(c).hex(true)),
+        true,
+        None,
+    );
     let mut parts: Vec<Element<'a, Msg>> = vec![now];
     match recent.is_empty() {
         true => parts.push(
@@ -134,8 +133,6 @@ mod tests {
 
     #[test]
     fn colours_are_written_as_hex_and_rgb() {
-        assert_eq!(hex([30, 144, 255]), "#1E90FF");
-        assert_eq!(hex([0, 0, 0]), "#000000");
         assert_eq!(rgb([30, 144, 255]), "rgb(30, 144, 255)");
     }
 

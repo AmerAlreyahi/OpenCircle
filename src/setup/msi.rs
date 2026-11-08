@@ -243,10 +243,7 @@ mod win {
     use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
     use super::*;
-
-    fn wide(s: &str) -> Vec<u16> {
-        s.encode_utf16().chain([0]).collect()
-    }
+    use crate::sys::wide;
 
     /// A string property of an MSI handle by `get(handle, buffer, len)`.
     fn read(get: impl Fn(Option<PWSTR>, *mut u32) -> u32) -> Option<String> {

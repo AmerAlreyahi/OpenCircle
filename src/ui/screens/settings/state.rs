@@ -1405,7 +1405,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::EdgeMode(m) => state.edge_mode = m,
         Message::Picker(i) => {
             state.picker = (state.picker != Some(i)).then_some(i);
-            state.hex = state.draft.look.custom.colours[i.min(1)].hex();
+            state.hex = state.draft.look.custom.colours[i.min(1)].hex(false);
         }
         Message::Hex(hex) => {
             if let (Some(i), Some(c)) = (state.picker, Rgb::parse(&hex)) {
@@ -1417,7 +1417,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             if let Some(i) = state.picker {
                 let [r, g, b, _] = c.into_rgba8();
                 state.draft.look.custom.colours[i] = Rgb([r, g, b]);
-                state.hex = Rgb([r, g, b]).hex();
+                state.hex = Rgb([r, g, b]).hex(false);
             }
         }
         Message::Palette(_)

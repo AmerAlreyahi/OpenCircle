@@ -75,16 +75,14 @@ mod os {
     };
     use windows::core::PCWSTR;
 
+    use crate::sys::wide;
+
     const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     const NAME: &str = "OpenCircle";
 
     /// A registry key under HKCU holding the value.
     pub struct Store {
         pub(super) subkey: String,
-    }
-
-    fn wide(s: &str) -> Vec<u16> {
-        s.encode_utf16().chain([0]).collect()
     }
 
     fn check(e: windows::Win32::Foundation::WIN32_ERROR) -> io::Result<()> {
