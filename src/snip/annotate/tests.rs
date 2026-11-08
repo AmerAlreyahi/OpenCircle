@@ -2158,6 +2158,26 @@ fn line_help_holds_the_line_until_a_clear_move() {
     );
 }
 
+/// Sliding the pointer back while the button is down un-blurs what it left (#154).
+#[test]
+fn blur_follows_the_pointer_back() {
+    let mut e = Annotator::new(image_of(400, 50, |_, _| [255; 4]), 1.0);
+    e.update(Message::Tool(Tool::Blur));
+    e.update(Message::Press(pt(100.0, 25.0)));
+    for x in [150.0, 200.0, 300.0, 250.0, 200.0] {
+        e.update(Message::Move(pt(x, 25.0)));
+    }
+    let right = |e: &Annotator| match &e.pending.as_ref().unwrap().item.shape {
+        Shape::Blur { points, .. } => points.iter().map(|p| p.x).fold(f32::MIN, f32::max),
+        _ => panic!(),
+    };
+    assert_eq!(right(&e), 200.0);
+    // And forward again.
+    e.update(Message::Move(pt(260.0, 25.0)));
+    assert_eq!(right(&e), 260.0);
+    e.update(Message::Release);
+}
+
 /// The blur brush: Auto = as tall as the text line it starts on (the
 /// default off any text); a size picked in its options overrides that, Auto
 /// gives it back; line help keeps a wobbly stroke on its line, Shift frees it.

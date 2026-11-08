@@ -1706,7 +1706,20 @@ fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool) -> Item {
             *b = if shift { arrow::snap_angle(*a, p) } else { p };
             *bend = Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
         }
-        Shape::Pen(points) | Shape::Highlighter(points) | Shape::Blur { points, .. } => {
+        Shape::Blur { points, .. } => {
+            // The span is press..pointer: sliding back un-blurs what it left.
+            let dir = points.last().map_or(0.0, |l| l.x - start.x).signum();
+            while points.len() > 1 && points.last().is_some_and(|l| (l.x - p.x) * dir > 0.0) {
+                points.pop();
+            }
+            if points
+                .last()
+                .is_none_or(|last| last.distance(p) * zoom >= 1.0)
+            {
+                points.push(p);
+            }
+        }
+        Shape::Pen(points) | Shape::Highlighter(points) => {
             if points
                 .last()
                 .is_none_or(|last| last.distance(p) * zoom >= 1.0)
