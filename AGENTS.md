@@ -656,6 +656,12 @@ production systems.
   (and changeable in Settings); Arabic first, fully right-to-left (mirrored layout). Planned in 0.1.4 BEFORE the game
   translation work, but ON HOLD until the owner says to start (he checks whether it fits today). The existing Arabic/RTL
   toolbar code (Snip toolbar, Steps strip, picker, ruler, long-capture hint) is KEPT for it (audit item 5.1).
+- Lighter translation models (owner, 2026-11-08, approved): the OPUS-MT decoders are re-exported by us with the output layer
+  outside the decoder's two branches (W6: 501 -> 256 MB per loaded pair, identical output) and hosted as a new release of
+  OpenCircle-models (models-v2, sha256 pinned in `mt::PAIRS`); an old decoder already on a user's PC is replaced, never kept
+  beside the new one.
+- Labs search history removed (owner, 2026-11-08, "del"): it stored searches nobody could see. The key is still read and
+  dropped on save (backup); an existing search_history.json is deleted.
 - No duplicate code (owner, 2026-11-08): logic needed in two places or more is built once as shared, reusable code and
   called from each place; never the same thing twice (recorded in the owner's engineering rules too).
 - Edge assist (owner, 2026-11-08): a simple, gentle magnetic edge when dragging a Snip area by hand: it helps the user land on
