@@ -32,7 +32,7 @@ impl App {
     /// takes the keys only once clicked: until then letters are the action
     /// shortcuts (L, A, T still search, ask and translate).
     pub(in crate::ui) fn bottom_bar(&self) -> Element<'_, Message> {
-        let (width, _) = self.bar_size();
+        let (.., width) = self.bar_spot();
         let kbd = |stop| self.o.bar_focus == Some(stop);
         let logo = field::logo(
             crate::ui::kit::logo::logo(16),

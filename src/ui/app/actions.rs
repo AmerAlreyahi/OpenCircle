@@ -251,7 +251,7 @@ impl App {
     /// shown, else the bottom bar; `None`: neither shows.
     pub(in crate::ui) fn pill_near(&self) -> Option<Rectangle> {
         let selected = (self.o.selection.as_ref()).map(|s| self.o.view.rect_to_screen(s.area));
-        let bar = (self.bottom_bar_shown() && self.o.edit.is_none())
+        let bar = (self.bottom_bar_shown() && self.o.edit.is_none() && self.o.bar_on.is_none())
             .then(|| Rectangle::new(self.bar_at(), self.bar_size().1));
         selected.or(bar)
     }

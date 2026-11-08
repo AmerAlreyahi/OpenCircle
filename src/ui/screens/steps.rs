@@ -23,7 +23,7 @@ use crate::ui::kit::thumb::{self, Look, PAD, TOP, WELL};
 use crate::ui::kit::tokens::radius;
 use crate::ui::kit::tooltip::tip;
 use crate::ui::kit::{grip, scroll, toast};
-use crate::ui::platform::monitor::Place;
+use crate::ui::platform::monitor::{self, Place};
 
 /// Steps at most (open point 3: 12).
 pub const MAX: usize = crate::snip::annotate::STEPS_MAX;
@@ -130,6 +130,9 @@ pub enum Msg {
     Moved(Point),
     /// No move since the `n`th: dock now.
     Settle(u32),
+    /// The same, with the scale its window has by now (it changes on a
+    /// monitor of another DPI): dock on the monitor it was left on.
+    Docked(u32, f32),
     /// The `n`th clear's undo time is over.
     Expire(u32),
     /// Copy all is on the clipboard (`false`: it failed).
@@ -377,10 +380,13 @@ impl Strip {
                 self.moved_to = at;
                 return Some(Do::Wait(self.moves));
             }
-            Msg::Settle(n) if n == self.moves && !self.cleared => {
-                return self.dock(self.moved_to).then_some(Do::Resize);
+            Msg::Docked(n, k) if n == self.moves && !self.cleared => {
+                return self
+                    .dock_on(self.moved_to, k, &monitor::places())
+                    .then_some(Do::Resize);
             }
-            Msg::Settle(_) | Msg::Ready(..) | Msg::Expire(_) | Msg::Copied(_) => {}
+            Msg::Settle(_) | Msg::Docked(..) | Msg::Ready(..) | Msg::Expire(_) | Msg::Copied(_) => {
+            }
         }
         None
     }
@@ -457,14 +463,27 @@ impl Strip {
     /// docks to the nearer side and keeps its height from then on (`true`:
     /// place it). Where it was placed already (its own placement settling,
     /// 1 px rounding): nothing changes, it stays centred until dragged.
-    pub fn dock(&mut self, at: Point) -> bool {
+    ///
+    /// First moving to the monitor of `monitors` holding the strip
+    /// (`at` is logical px at its window's `scale`): dragged to another
+    /// screen it docks to that screen's edge (its work area, its DPI).
+    pub fn dock_on(&mut self, at: Point, scale: f32, monitors: &[Place]) -> bool {
+        if let Some(m) = monitor::holding(monitors, at, self.size(), scale)
+            && m != self.monitor
+        {
+            self.inset = monitor::taskbar_inset(m.logical_origin(), m.size(), m.scale);
+            self.monitor = m;
+        }
         let now = self.place().origin;
-        let k = self.monitor.scale;
+        let k = scale;
         let here = ((at.x * k).round() as i32, (at.y * k).round() as i32);
         if (here.0 - now.0).abs() <= 1 && (here.1 - now.1).abs() <= 1 {
             return false;
         }
-        let origin = self.monitor.logical_origin();
+        let origin = Point::new(
+            self.monitor.origin.0 as f32 / k,
+            self.monitor.origin.1 as f32 / k,
+        );
         let mid = at.x - origin.x + self.size().width / 2.0;
         self.left = mid < self.work().width / 2.0;
         self.top = Some(at.y - origin.y);
@@ -813,19 +832,42 @@ mod tests {
         // its own placement settling: it stays centred as it grows (VM: it
         // grew down from a pinned top before)
         let p = s.place().origin;
-        assert!(!s.dock(Point::new(p.0 as f32, p.1 as f32)));
+        assert!(!s.dock_on(Point::new(p.0 as f32, p.1 as f32), 1.0, &[]));
         s.push(step(8, 8, 1));
         assert_eq!(s.place().origin.1, (1040 - 252) / 2);
         s.update(Msg::Delete(2));
-        assert!(s.dock(Point::new(300.0, 200.0)));
+        assert!(s.dock_on(Point::new(300.0, 200.0), 1.0, &[]));
         let p = s.place();
         assert_eq!(p.origin, (12, 200));
         // its own placement settling: no second move
-        assert!(!s.dock(Point::new(12.0, 200.0)));
+        assert!(!s.dock_on(Point::new(12.0, 200.0), 1.0, &[]));
         // dragged off the bottom: kept inside
-        s.dock(Point::new(1500.0, 5000.0));
+        s.dock_on(Point::new(1500.0, 5000.0), 1.0, &[]);
         let p = s.place();
         assert_eq!(p.origin, (1920 - 12 - 104, 1040 - 12 - 188));
+    }
+
+    /// Dragged onto another monitor (another DPI) it docks to THAT monitor's
+    /// edge and work area, not back to the one it opened on (#125).
+    #[test]
+    fn a_strip_dragged_to_another_screen_docks_there() {
+        let mut s = strip(2);
+        let right = Place {
+            origin: (1920, 0),
+            px: (3840, 2160),
+            scale: 2.0,
+        };
+        let monitors = [s.monitor, right];
+        // logical px at 200 %: its middle (x 1100 -> 2200 + 52 px) is on `right`
+        assert!(s.dock_on(Point::new(1100.0, 300.0), 2.0, &monitors));
+        assert_eq!(s.monitor, right);
+        let p = s.place();
+        // the near (left) edge of the right monitor, 12 logical px in, at 200 %
+        assert_eq!(p.origin, (1920 + 24, 600));
+        assert_eq!(p.scale, 2.0);
+        // and back
+        assert!(s.dock_on(Point::new(500.0, 300.0), 1.0, &monitors));
+        assert_eq!(s.place().origin, (12, 300));
     }
 
     #[test]

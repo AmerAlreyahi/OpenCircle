@@ -145,6 +145,9 @@ pub(in crate::ui) struct Opening {
     /// bottom the taskbar takes (logical px).
     pub(in crate::ui) bar_anchor: BarAnchor,
     pub(in crate::ui) bar_drag: Option<(Option<Point>, Point)>,
+    /// The other screen (index in `screens`) the bar was dropped on; `None`:
+    /// the starting one.
+    pub(in crate::ui) bar_on: Option<usize>,
     /// Snip's toolbar dropped here by the user: it stays (no docking to the
     /// area) until a new area is picked.
     pub(in crate::ui) bar_left: Option<Point>,
@@ -251,6 +254,7 @@ impl Default for Opening {
             bar_focus: None,
             bar_anchor: BarAnchor::Bottom,
             bar_drag: None,
+            bar_on: None,
             bar_left: None,
             bar_was: None,
             bar_now: None,

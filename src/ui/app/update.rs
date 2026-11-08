@@ -17,6 +17,7 @@ use crate::ui::app::message::{Hiding, Message, Purpose};
 use crate::ui::app::quick::Quick;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
+use crate::ui::platform::monitor;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::{overlay, snip, translate, update_card, windows};
@@ -254,6 +255,7 @@ impl App {
             Message::AiChat(id, msg) => self.on_ai_chat(id, msg),
             Message::ChatMoved(id, at) => self.chat_moved(id, at),
             Message::ChatSettle(moves) => self.chat_settle(moves),
+            Message::ChatDocked(moves, k) => self.chat_docked(moves, k, &monitor::places()),
             Message::ChatFrame(now) => {
                 if let Some(chat) = &mut self.chat {
                     chat.panel.tick(now);
@@ -294,12 +296,11 @@ impl App {
                     let at = match last {
                         Some(from) => {
                             let to = at + (p - from);
-                            // Snip's toolbar may go onto any screen
-                            let desk =
-                                match self.o.edit.as_ref().is_some_and(|e| e.annotator.movable) {
-                                    true => self.o.desk(),
-                                    false => Rectangle::with_size(self.o.screen),
-                                };
+                            // the bar and Snip's toolbar may go onto any screen
+                            let desk = match self.o.edit.as_ref().map(|e| e.annotator.movable) {
+                                Some(false) => Rectangle::with_size(self.o.screen),
+                                _ => self.o.desk(),
+                            };
                             let fit = |lo: f32, whole: f32, side: f32| lo.max(lo + whole - side);
                             Point::new(
                                 to.x.clamp(desk.x, fit(desk.x, desk.width, size.width)),
@@ -326,10 +327,7 @@ impl App {
                     Task::none()
                 }
                 Some((_, at)) => {
-                    let size = self.dock_size();
-                    let room = self.bar_room();
-                    let at = at - iced::Vector::new(room.x, room.y);
-                    self.o.bar_anchor = bar::nearest(at, room.size(), size, self.o.work_inset);
+                    self.dock_bar(at);
                     crate::log!("[opencircle] bar docked: {:?}", self.o.bar_anchor);
                     self.log_frames("bar drag");
                     self.o.bar_eased = None; // the glide goes on from where it is drawn
@@ -863,6 +861,7 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
             | Message::AiChat(..)
             | Message::ChatMoved(..)
             | Message::ChatSettle(_)
+            | Message::ChatDocked(..)
             | Message::ChatFrame(_)
             | Message::Windows(_)
             | Message::Live(_)

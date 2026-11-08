@@ -87,9 +87,8 @@ impl App {
                 (edit.annotator.area_handle()).map(|p| p + (area.position() - Point::ORIGIN));
             return bar::dock(area, size, &[work], avoid);
         }
-        let size = self.dock_size();
         let canvas = self.o.edit.as_ref().map(SnipToolbar::canvas_rect);
-        let room = self.bar_room();
+        let (room, size, inset, _) = self.bar_spot();
         let off = Vector::new(room.x, room.y);
         let blocked: Vec<Rectangle> = (self.o.selection.iter())
             .chain(self.o.others.iter().map(|(s, _)| s))
@@ -97,14 +96,13 @@ impl App {
             .chain(canvas)
             .map(|r| r - off)
             .collect();
-        let inset = self.o.work_inset;
         let spot = bar::free(self.o.bar_anchor, &blocked, room.size(), size, inset);
         bar::anchor_at(spot, room.size(), size, inset) + off
     }
 
     /// Every screen's work area (the starting screen's px, the taskbar left
     /// out), the starting one first, with its scale against it (`Lens::k`).
-    fn work_areas(&self) -> Vec<(Rectangle, f32)> {
+    pub(in crate::ui) fn work_areas(&self) -> Vec<(Rectangle, f32)> {
         let start = self.o.place();
         let here = Size::new(
             self.o.screen.width,
@@ -147,6 +145,46 @@ impl App {
             .find(|s| screens::area_of(start, s.place).contains(at))
             .map(|s| s.window);
         Some(here.unwrap_or(self.overlay))
+    }
+
+    /// Where the bar's spots are now, in the starting screen's px: the room
+    /// (`bar_room`, or the work area of the other screen it was dropped on,
+    /// `bar_on`), the bar's size there, the taskbar's share of the room's
+    /// bottom, and the bar's field width (logical px, the screen's own).
+    pub(in crate::ui) fn bar_spot(&self) -> (Rectangle, Size, f32, f32) {
+        let other = (self.o.bar_on.filter(|_| self.o.edit.is_none()))
+            .and_then(|i| self.work_areas().get(i + 1).copied());
+        match other {
+            Some((work, k)) => {
+                let (field, size) = self.bar_size_on(work.width * k);
+                (work, size * (1.0 / k), 0.0, field)
+            }
+            None => (
+                self.bar_room(),
+                self.dock_size(),
+                self.o.work_inset,
+                self.bar_size().0,
+            ),
+        }
+    }
+
+    /// The window the bar is drawn in: the screen it is on now.
+    pub(in crate::ui) fn bar_window(&self) -> iced::window::Id {
+        let (at, start) = (self.bar_at(), self.o.place());
+        (self.o.screens.iter())
+            .find(|s| self.o.edit.is_none() && screens::area_of(start, s.place).contains(at))
+            .map_or(self.overlay, |s| s.window)
+    }
+
+    /// The bar was let go at `at`: it docks to the nearest spot of the screen
+    /// holding most of it, however many screens there are.
+    pub(in crate::ui) fn dock_bar(&mut self, at: Point) {
+        let rects: Vec<Rectangle> = self.work_areas().iter().map(|(r, _)| *r).collect();
+        let held = Rectangle::new(at, self.dock_size());
+        self.o.bar_on = bar::dock_screen(held, &rects).checked_sub(1);
+        let (room, size, inset, _) = self.bar_spot();
+        let at = at - Vector::new(room.x, room.y);
+        self.o.bar_anchor = bar::nearest(at, room.size(), size, inset);
     }
 
     /// The part of the screen the bar's spots are in: beside the pinned AI

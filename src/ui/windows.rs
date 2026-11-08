@@ -488,6 +488,15 @@ impl Windows {
                 };
             }
             steps::Msg::Copied(ok) => return self.steps_toast(ok),
+            // stopped: its window's scale now says which monitor it is on
+            steps::Msg::Settle(n) => {
+                return match window {
+                    Some(id) => {
+                        window::scale_factor(id).map(move |k| Msg::Steps(steps::Msg::Docked(n, k)))
+                    }
+                    None => Task::none(),
+                };
+            }
             msg => strip.update(msg),
         };
         let Some(todo) = todo else {

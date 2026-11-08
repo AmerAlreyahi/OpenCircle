@@ -4317,7 +4317,7 @@ fn a_pinned_chat_window_glides_to_its_dock() {
     // the OS dragged it to the middle-left, then it stopped
     let _ = app.update(Message::ChatMoved(window, Point::new(150.0, 100.0)));
     let moves = app.chat.as_ref().unwrap().moves;
-    let _ = app.update(Message::ChatSettle(moves));
+    let _ = app.update(Message::ChatDocked(moves, 1.0));
     let (began, from, to) = app
         .chat
         .as_ref()
@@ -4334,6 +4334,53 @@ fn a_pinned_chat_window_glides_to_its_dock() {
     let chat = app.chat.as_ref().unwrap();
     assert_eq!(chat.at, to, "exactly on the dock");
     assert!(chat.glide.is_none(), "the frames stop");
+}
+
+/// The pinned chat's window dragged onto another screen (another DPI) docks to
+/// THAT screen's side and glides there, not back to the one it opened on (#125).
+#[test]
+fn a_pinned_chat_dragged_to_another_screen_docks_there() {
+    use crate::ui::platform::monitor::Place;
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    chat_turn(&mut app, id, "What is this?", "A chart.");
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    let _ = app.update(Message::Escape);
+    let window = app.chat.as_ref().and_then(|c| c.window).expect("window");
+    let here = Place {
+        origin: (0, 0),
+        px: (800, 600),
+        scale: 1.0,
+    };
+    let there = Place {
+        origin: (800, 0),
+        px: (1600, 1200),
+        scale: 2.0,
+    };
+    // the OS dragged it onto the 200 % screen (logical px at that scale) and it stopped
+    let _ = app.update(Message::ChatMoved(window, Point::new(500.0, 100.0)));
+    let moves = app.chat.as_ref().unwrap().moves;
+    let _ = app.chat_docked(moves, 2.0, &[here, there]);
+    let chat = app.chat.as_ref().unwrap();
+    let (origin, screen, _) = chat.home;
+    assert_eq!(
+        (origin, screen),
+        (Point::new(400.0, 0.0), Size::new(800.0, 600.0))
+    );
+    let (_, _, to) = chat.glide.expect("a glide to its dock");
+    assert!(
+        to.x >= 400.0 && to.x + chat.size.width <= 1200.0 + 0.5,
+        "docked on the second screen: {to:?}"
+    );
 }
 
 /// Copy text (the key T, `opencircle run text`) on picked words copies exactly

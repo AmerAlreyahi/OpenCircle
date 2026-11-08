@@ -30,6 +30,31 @@ impl Place {
     }
 }
 
+/// Every monitor as a `Place` (empty where the platform can't list them).
+pub fn places() -> Vec<Place> {
+    (crate::capture::monitor_list().iter())
+        .map(|m| Place {
+            origin: (m.rect.0, m.rect.1),
+            px: (m.rect.2, m.rect.3),
+            scale: m.scale.max(0.1),
+        })
+        .collect()
+}
+
+/// The monitor holding the middle of a window at `at` (`size`), logical px at
+/// the window's own `scale` (`window::scale_factor`: it changes as the window
+/// crosses to a monitor of another DPI, so ask after it stopped). THE way a
+/// floating widget finds the screen it was dragged to (the Steps strip, the
+/// pinned chat); `None`: none holds it, it stays where it was docked.
+pub fn holding(places: &[Place], at: Point, size: Size, scale: f32) -> Option<Place> {
+    let x = ((at.x + size.width / 2.0) * scale).round() as i32;
+    let y = ((at.y + size.height / 2.0) * scale).round() as i32;
+    places.iter().copied().find(|m| {
+        let (ox, oy) = m.origin;
+        (ox..ox + m.px.0 as i32).contains(&x) && (oy..oy + m.px.1 as i32).contains(&y)
+    })
+}
+
 /// THE way to resize one of our windows at run time (a test forbids
 /// `window::resize` elsewhere). Wayland: winit applies a program's resize without
 /// a `Resized` event, so iced keeps drawing the old size and the compositor
@@ -203,7 +228,52 @@ pub fn taskbar_inset(_: Point, _: Size, _: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::over_band;
+    use super::{Place, holding, over_band};
+    use iced::{Point, Size};
+
+    /// A 4K monitor at 200 % (left of the origin) and a 1080p one at 100 %.
+    fn two() -> [Place; 2] {
+        [
+            Place {
+                origin: (0, 0),
+                px: (1920, 1080),
+                scale: 1.0,
+            },
+            Place {
+                origin: (-3840, 0),
+                px: (3840, 2160),
+                scale: 2.0,
+            },
+        ]
+    }
+
+    #[test]
+    fn a_widget_is_on_the_monitor_holding_its_middle_at_its_own_scale() {
+        let m = two();
+        let size = Size::new(400.0, 300.0);
+        // on the 1080p one (logical = physical)
+        assert_eq!(
+            holding(&m, Point::new(1000.0, 100.0), size, 1.0),
+            Some(m[0])
+        );
+        // on the 4K one at 200 %: logical x -1500 is physical -3000
+        assert_eq!(
+            holding(&m, Point::new(-1500.0, 100.0), size, 2.0),
+            Some(m[1])
+        );
+        // the same numbers at 100 % are another spot: x 1500 at 200 % is off both
+        assert_eq!(holding(&m, Point::new(3000.0, 100.0), size, 2.0), None);
+        // half over the bezel: the middle decides
+        assert_eq!(
+            holding(&m, Point::new(-250.0, 100.0), size, 2.0),
+            Some(m[1])
+        );
+        assert_eq!(
+            holding(&m, Point::new(-150.0, 100.0), size, 1.0),
+            Some(m[0])
+        );
+        assert_eq!(holding(&m, Point::new(9000.0, 9000.0), size, 1.0), None);
+    }
 
     /// A 1920x1080 monitor, a 40 px taskbar band at the bottom.
     const BAND: [i32; 4] = [0, 1040, 1920, 1080];

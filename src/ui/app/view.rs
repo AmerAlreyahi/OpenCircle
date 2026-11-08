@@ -309,12 +309,15 @@ impl App {
             // slides up into place as the overlay opens
             let rise = (1.0 - self.appeared()) * SLIDE;
             let at = self.bar_at() + Vector::new(0.0, rise);
-            layers = layers.push(match self.swapped() > 0.0 {
-                true => self.morphing_bar(at), // the toolbar turning back into it
-                false => iced::widget::pin(self.bottom_bar()).position(at).into(),
-            });
-            if let Some(note) = self.reader_note() {
-                layers = layers.push(self.beside_bar(note, at));
+            // (on another screen: that screen's window draws it)
+            if self.bar_window() == self.overlay {
+                layers = layers.push(match self.swapped() > 0.0 {
+                    true => self.morphing_bar(at), // the toolbar turning back into it
+                    false => iced::widget::pin(self.bottom_bar()).position(at).into(),
+                });
+                if let Some(note) = self.reader_note() {
+                    layers = layers.push(self.beside_bar(note, at));
+                }
             }
         }
         // Beside a panel (an auto-search's): the chips.

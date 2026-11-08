@@ -824,6 +824,10 @@ impl App {
                 Message::Annotate,
                 Message::BarGrab,
             ));
+        } else if self.bottom_bar_shown() && self.o.edit.is_none() && self.bar_window() == window {
+            // the bar dropped on this screen (`bar_on`)
+            let at = screen.view.to_screen(self.bar_at());
+            layers = layers.push(iced::widget::pin(self.bottom_bar()).position(at));
         } else if let Some(snip) = snip
             && self.o.edit.is_none()
             && snip
@@ -915,6 +919,43 @@ mod tests {
         let rgba = shot::render(app.view(app.overlay), 640, 400);
         let (pixels, _) = rgba.as_chunks::<4>();
         assert!(pixels.iter().any(|p| *p != pixels[320 * 640 + 200]));
+    }
+
+    /// The bar drags onto another screen (owner, 2026-11-08): it is not held
+    /// to the screen it opened on, lands on the nearest spot of the screen it
+    /// is let go on, whole, and that screen's window draws it (#125).
+    #[test]
+    fn the_bar_goes_onto_another_screen_and_docks_there() {
+        let (mut app, n) = opened();
+        let right = place((640, 0), (960, 600), 1.5);
+        let _ = app.update(Message::Screen(n, right, solid(right, 90)));
+        let id = app.o.screens[0].window;
+        app.o.bar_now = Some(app.bar_target());
+        let from = app.bar_at() + Vector::new(20.0, 10.0);
+        let _ = app.update(Message::BarGrab);
+        let _ = app.update(Message::BarMoved(from));
+        // 800 px right of the start, 100 up: the middle of the other screen
+        let _ = app.update(Message::BarMoved(from + Vector::new(800.0, -100.0)));
+        assert!(app.bar_target().x > 640.0, "not held to the first screen");
+        app.o.bar_now = Some(app.bar_target()); // (the frames ease it there)
+        assert_eq!(app.bar_window(), id, "drawn by the screen it is on");
+        let _ = app.update(Message::BarReleased);
+        assert_eq!(app.o.bar_on, Some(0));
+        let (room, bar_size, ..) = app.bar_spot();
+        let at = app.bar_target();
+        assert!(
+            at.x >= room.x && at.x + bar_size.width <= room.x + room.width + 0.01,
+            "whole on the other screen: {at:?} {room:?}"
+        );
+        app.o.bar_now = Some(at);
+        assert_eq!(app.bar_window(), id);
+        // and back: the starting screen again
+        let _ = app.update(Message::BarGrab);
+        let _ = app.update(Message::BarMoved(at));
+        let _ = app.update(Message::BarMoved(at - Vector::new(900.0, 0.0)));
+        let _ = app.update(Message::BarReleased);
+        assert_eq!(app.o.bar_on, None);
+        assert!(app.bar_target().x < 640.0);
     }
 
     /// The edge glow follows the mouse (owner, 2026-10-28): onto the screen it

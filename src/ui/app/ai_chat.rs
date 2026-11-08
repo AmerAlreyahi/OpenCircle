@@ -16,7 +16,7 @@ use crate::ui::app::keys;
 use crate::ui::app::message::Message;
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
-use crate::ui::platform::monitor::{Place, place_window};
+use crate::ui::platform::monitor::{self, Place, place_window};
 use crate::ui::screens::settings;
 use crate::ui::windows;
 
@@ -205,14 +205,34 @@ impl App {
         })
     }
 
-    /// The drag is over: the window docks to the side its middle is on.
+    /// The drag is over: its window's scale now says which monitor it is on.
     pub(in crate::ui) fn chat_settle(&mut self, moves: u32) -> Task<Message> {
+        match self.chat.as_ref().filter(|c| c.moves == moves) {
+            Some(Resident {
+                window: Some(id), ..
+            }) => window::scale_factor(*id).map(move |k| Message::ChatDocked(moves, k)),
+            _ => Task::none(),
+        }
+    }
+
+    /// The window docks to the side its middle is on, on the monitor of
+    /// `monitors` holding it (`scale`: its window's).
+    pub(in crate::ui) fn chat_docked(
+        &mut self,
+        moves: u32,
+        scale: f32,
+        monitors: &[Place],
+    ) -> Task<Message> {
         let Some(chat) = self.chat.as_mut().filter(|c| c.moves == moves) else {
             return Task::none();
         };
         let Some(id) = chat.window else {
             return Task::none();
         };
+        if let Some(m) = monitor::holding(monitors, chat.at, chat.size, scale) {
+            let (origin, size) = (m.logical_origin(), m.size());
+            chat.home = (origin, size, monitor::taskbar_inset(origin, size, m.scale));
+        }
         let (origin, screen, inset) = chat.home;
         let here = Rectangle::new(chat.at - iced::Vector::new(origin.x, origin.y), chat.size);
         let side = card::dock_side(here, screen);
