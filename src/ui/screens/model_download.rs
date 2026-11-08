@@ -26,8 +26,6 @@ pub struct Model<'s> {
     pub does: &'s str,
     /// Where it comes from.
     pub source: &'static str,
-    /// What runs once it is in place ("Continuing to …").
-    pub then: &'static str,
 }
 
 pub const OCR: Model<'static> = Model {
@@ -36,7 +34,6 @@ pub const OCR: Model<'static> = Model {
     title: "Text recognition needs a small download",
     does: "Read text in images",
     source: "GitHub",
-    then: "read text",
 };
 
 /// The readers for other scripts, for a page read as noise.
@@ -46,7 +43,6 @@ pub const SCRIPTS: Model<'static> = Model {
     title: "This text needs another reader",
     does: "Read Arabic, Cyrillic, Chinese and Japanese text",
     source: "GitHub",
-    then: "translate the screen",
 };
 
 pub const TRANSLATION: Model<'static> = Model {
@@ -55,7 +51,6 @@ pub const TRANSLATION: Model<'static> = Model {
     title: "Local translation needs a download",
     does: "Translate without internet",
     source: "Hugging Face",
-    then: "translate the screen",
 };
 
 /// Where the download is.
@@ -67,10 +62,6 @@ pub enum Stage<'a> {
     Downloading(f32),
     /// All fetched: checked and set up.
     Verifying,
-    // ponytail: the design's Done stage; the callers go straight on to their
-    // work once it is Done, so only the gallery and tests show it.
-    #[cfg_attr(not(test), allow(dead_code))]
-    Done,
     /// Why it stopped.
     Failed(&'a str),
 }
@@ -167,7 +158,6 @@ fn heading<'a, M: 'a>(model: &Model, bytes: u64, stage: Stage<'a>) -> Element<'a
             format!("Downloading {}", model.name.to_lowercase()),
         ),
         Stage::Verifying => (model.icon, "Checking your download".into()),
-        Stage::Done => (Icon::Check, "Ready".into()),
         Stage::Failed(_) => (Icon::Close, "Download could not finish".into()),
     };
     let meta = format!("{} · {} MB · from {}", model.name, mb(bytes), model.source);
@@ -248,11 +238,6 @@ fn body<'a, M: Clone + 'a>(
             .push(Space::new().height(ABOVE_BAR))
             .push(progress::bar(1.0))
             .into(),
-        Stage::Done => said(format!(
-            "{} is installed. Continuing to {}…",
-            model.name, model.then
-        ))
-        .into(),
         Stage::Failed(why) => said(why.to_string())
             .push(buttons("Try again", "Cancel"))
             .into(),
@@ -297,7 +282,6 @@ mod tests {
             ("ask-translation", &TRANSLATION, Stage::Ask, true),
             ("downloading", &OCR, Stage::Downloading(0.42), false),
             ("verifying", &OCR, Stage::Verifying, false),
-            ("done", &OCR, Stage::Done, false),
             ("failed", &OCR, Stage::Failed(FAILED), false),
         ]
     }
