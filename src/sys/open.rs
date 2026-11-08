@@ -322,7 +322,9 @@ fn command_for(template: &str, url: &str) -> Option<(String, String)> {
     let t = template.trim();
     let (exe, rest) = match t.strip_prefix('"') {
         Some(q) => q.split_once('"')?,
-        None => t.split_once(char::is_whitespace).unwrap_or((t, "")),
+        None => t
+            .find(char::is_whitespace)
+            .map_or((t, ""), |i| t.split_at(i)),
     };
     let name = exe.rsplit(['\\', '/']).next()?.to_ascii_lowercase();
     if !name.ends_with(".exe") || DENIED.contains(&name.as_str()) || exe.contains(['%', '"']) {
