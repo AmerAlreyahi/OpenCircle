@@ -215,9 +215,15 @@ fn drag(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool, Str
                 return Ok(false);
             }
         }
-        let hidden = window.filter(|_| hide_source);
-        if let Some(w) = hidden {
-            let _ = ShowWindow(w, SW_HIDE);
+        // The drag's own window and every other screen's frozen overlay: a screen
+        // we left visible would swallow a drop meant for the app behind it.
+        let hidden = if hide_source {
+            window.into_iter().chain(other_overlays(window)).collect()
+        } else {
+            Vec::new()
+        };
+        for w in &hidden {
+            let _ = ShowWindow(*w, SW_HIDE);
         }
         let effect =
             SHDoDragDrop(window, &data, None::<&IDropSource>, DROPEFFECT_COPY).map_err(e("drag"));
@@ -226,7 +232,7 @@ fn drag(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool, Str
         // decides what happens next (the overlay stays up, or closes by its own
         // steps, which assume a visible window; a window hidden behind their back
         // was left half-hidden with its toolbar on screen).
-        if let Some(w) = hidden {
+        for w in hidden {
             let _ = ShowWindow(w, SW_SHOW);
         }
         effect.map(|_| dropped)
@@ -238,6 +244,71 @@ fn drag(file: &mut DragFile, crop: &Crop, hide_source: bool) -> Result<bool, Str
         file.dropped = true;
     }
     result
+}
+
+/// The visible windows of this thread that fill their whole monitor (the
+/// frozen overlays), except `skip`.
+#[cfg(windows)]
+fn other_overlays(
+    skip: Option<windows::Win32::Foundation::HWND>,
+) -> Vec<windows::Win32::Foundation::HWND> {
+    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    };
+    use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumThreadWindows, GetWindowRect, IsWindowVisible,
+    };
+    use windows::core::BOOL;
+
+    unsafe extern "system" fn each(w: HWND, out: LPARAM) -> BOOL {
+        unsafe {
+            let (mut r, mut mi) = (RECT::default(), MONITORINFO::default());
+            mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            let m = MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST);
+            if IsWindowVisible(w).as_bool()
+                && GetWindowRect(w, &mut r).is_ok()
+                && GetMonitorInfoW(m, &mut mi).as_bool()
+                && covers(
+                    [r.left, r.top, r.right, r.bottom],
+                    [
+                        mi.rcMonitor.left,
+                        mi.rcMonitor.top,
+                        mi.rcMonitor.right,
+                        mi.rcMonitor.bottom,
+                    ],
+                )
+            {
+                (*(out.0 as *mut Vec<HWND>)).push(w);
+            }
+        }
+        BOOL(1)
+    }
+    let mut found = Vec::new();
+    unsafe {
+        let _ = EnumThreadWindows(
+            GetCurrentThreadId(),
+            Some(each),
+            LPARAM(&mut found as *mut _ as isize),
+        );
+    }
+    found.retain(|w| Some(*w) != skip);
+    found
+}
+
+/// `win` (l, t, r, b) fills `monitor` (a frozen overlay, not a toolbar).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn covers(win: [i32; 4], monitor: [i32; 4]) -> bool {
+    win[0] <= monitor[0] && win[1] <= monitor[1] && win[2] >= monitor[2] && win[3] >= monitor[3]
+}
+
+#[test]
+fn only_a_window_filling_its_screen_counts_as_an_overlay() {
+    let screen = [1920, 0, 3840, 1080];
+    assert!(covers([1920, 0, 3840, 1080], screen));
+    assert!(covers([1919, -1, 3841, 1081], screen)); // a pixel of slack
+    assert!(!covers([2000, 900, 2400, 1000], screen)); // a toolbar
 }
 
 #[cfg(not(windows))]
