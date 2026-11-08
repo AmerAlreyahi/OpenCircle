@@ -524,7 +524,8 @@ impl App {
             return chat; // never shown (Copy, Save)
         }
         crate::log!("[opencircle] overlay window closed");
-        crate::sys::mem::trim_heap();
+        // the window's buffers are freed after the close: trim then, not now
+        crate::sys::mem::trim_heap_soon();
         chat.chain(window::close(self.overlay))
     }
 }
