@@ -1248,24 +1248,25 @@ impl Annotator {
         );
         match self.shift {
             true => whole(r),
-            false => whole(self.snapped(drag.grip, r)),
+            false => whole(self.snapped(drag.grip, r, p)),
         }
     }
 
     /// `r` with the edges the grip moves pulled onto a window or control edge
     /// within the snap reach (as a first drag is; the same `snap`); Shift = off.
-    fn snapped(&self, grip: area::Grip, r: Rectangle) -> Rectangle {
+    fn snapped(&self, grip: area::Grip, r: Rectangle, at: Point) -> Rectangle {
         use crate::ui::snip::{SNAP, snap};
         let reach = SNAP / self.zoom;
         // The edge value `v` snapped; probed along the area's side, middle and
-        // far side so a window's edge is found wherever the area meets it.
+        // far side and at the pointer, so a window's edge is found wherever the
+        // area (or the pointer) meets it.
         let pull = |v: f32, x_axis: bool| {
-            let (lo, len) = if x_axis {
-                (r.y, r.height)
+            let (lo, len, near) = if x_axis {
+                (r.y, r.height, at.y)
             } else {
-                (r.x, r.width)
+                (r.x, r.width, at.x)
             };
-            [lo, lo + len / 2.0, lo + len]
+            [lo, lo + len / 2.0, lo + len, near]
                 .into_iter()
                 .map(|o| {
                     let p = if x_axis {
@@ -1276,6 +1277,7 @@ impl Annotator {
                     let s = snap(p, &self.edges, reach);
                     if x_axis { s.x } else { s.y }
                 })
+                .filter(|s| *s != v) // (a probe that found no edge returns `v`)
                 .min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()))
                 .unwrap_or(v)
         };

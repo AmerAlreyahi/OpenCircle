@@ -3253,3 +3253,15 @@ fn the_live_area_snaps_to_window_edges() {
     e.update(Message::Nudge((1, 0), (false, false, false)));
     assert_eq!(e.doc.crop.unwrap().x, before.x + 1.0);
 }
+
+/// A window beside a tall area (its rows nowhere near the area's top, middle or
+/// bottom) still catches a handle dragged level with it.
+#[test]
+fn the_live_area_snaps_to_a_window_the_pointer_is_level_with() {
+    let mut e = live_area(); // area (40, 20) 60x30 in a 200x100 frame
+    e.edges = vec![Rectangle::new(pt(130.0, 70.0), Size::new(40.0, 20.0))];
+    // right handle (press at its edge, x=100) dragged to 125 at y=80
+    drag(&mut e, pt(100.0, 35.0), &[pt(110.0, 80.0)], pt(125.0, 80.0));
+    let r = e.doc.crop.unwrap();
+    assert_eq!(r.x + r.width, 130.0);
+}
