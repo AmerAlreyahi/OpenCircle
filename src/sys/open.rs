@@ -19,6 +19,17 @@ pub fn open_file(path: &Path) -> io::Result<()> {
     if !path.is_absolute() {
         return Err(bad("page path must be absolute"));
     }
+    #[cfg(windows)]
+    if test_browser().is_none() {
+        // The page is a .html: ShellExecute would use the .html default (often Edge),
+        // not the browser the user chose for the web. Use the https handler instead.
+        if let Some(mut cmd) = https_handler_command(path) {
+            hand_off_foreground();
+            if reap(&mut cmd).is_ok() {
+                return Ok(());
+            }
+        }
+    }
     spawn(path.as_os_str())
 }
 
@@ -78,16 +89,19 @@ pub fn open_mailto(address: &str) -> io::Result<()> {
     spawn(std::ffi::OsStr::new(&format!("mailto:{address}")))
 }
 
+/// Debug builds only: tests and manual runs point this at a script that
+/// gets the target as its one argument, so no real browser opens.
+fn test_browser() -> Option<std::ffi::OsString> {
+    #[cfg(debug_assertions)]
+    return std::env::var_os("OPENCIRCLE_TEST_BROWSER");
+    #[cfg(not(debug_assertions))]
+    None
+}
+
 fn spawn(target: &std::ffi::OsStr) -> io::Result<()> {
     #[cfg(windows)]
     hand_off_foreground();
-    // Debug builds only: tests and manual runs point this at a script that
-    // gets the target as its one argument, so no real browser opens.
-    #[cfg(debug_assertions)]
-    let test_browser = std::env::var_os("OPENCIRCLE_TEST_BROWSER");
-    #[cfg(not(debug_assertions))]
-    let test_browser: Option<std::ffi::OsString> = None;
-    if let Some(program) = test_browser {
+    if let Some(program) = test_browser() {
         return reap(Command::new(program).arg(target));
     }
     #[cfg(target_os = "linux")]
@@ -232,6 +246,97 @@ fn hand_off_foreground() {
         let _ = AllowSetForegroundWindow(ASFW_ANY);
         let _ = EnumWindows(Some(each), LPARAM(0));
     }
+}
+
+/// The https handler's launch command for the local page `path`, or `None`
+/// (then the caller falls back to ShellExecute).
+#[cfg(windows)]
+fn https_handler_command(path: &Path) -> Option<Command> {
+    use std::os::windows::process::CommandExt;
+    use windows::Win32::UI::Shell::{
+        ASSOCF_IS_PROTOCOL, ASSOCF_NOTRUNCATE, ASSOCSTR_COMMAND, AssocQueryStringW,
+    };
+    use windows::core::{PWSTR, w};
+
+    let mut buf = [0u16; 2048];
+    let mut len = buf.len() as u32;
+    // SAFETY: `buf` and `len` outlive the call; len is its size in u16s.
+    unsafe {
+        AssocQueryStringW(
+            ASSOCF_IS_PROTOCOL | ASSOCF_NOTRUNCATE,
+            ASSOCSTR_COMMAND,
+            w!("https"),
+            None,
+            Some(PWSTR(buf.as_mut_ptr())),
+            &raw mut len,
+        )
+        .ok()
+        .ok()?;
+    }
+    let template = String::from_utf16(buf.get(..(len as usize).saturating_sub(1))?).ok()?;
+    let url = file_url(path.to_str()?)?;
+    let (exe, rest) = command_for(&template, &url)?;
+    let mut c = Command::new(exe);
+    c.raw_arg(rest).creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    Some(c)
+}
+
+/// `C:\a b\x.html` as `file:///C:/a%20b/x.html`: only unreserved bytes, `/` and
+/// the drive colon stay as they are, so the URL holds no space, quote or `&`.
+/// `None` for anything but a plain drive path (UNC, `\\?\`).
+#[cfg(any(windows, test))]
+fn file_url(path: &str) -> Option<String> {
+    let b = path.as_bytes();
+    if !(b.len() > 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/'))
+    {
+        return None;
+    }
+    let mut url = format!("file:///{}:", b[0] as char);
+    for &c in &b[2..] {
+        match c {
+            b'\\' | b'/' => url.push('/'),
+            c if c.is_ascii_alphanumeric() || b"-._~".contains(&c) => url.push(c as char),
+            c => url.push_str(&format!("%{c:02X}")),
+        }
+    }
+    Some(url)
+}
+
+/// Splits a registry command template (`"C:\..\brave.exe" --single-argument %1`)
+/// into the program and the raw argument string with `%1` replaced by `url`
+/// (already percent-encoded: no quote, space or `&`). Strict: the program is an
+/// absolute `.exe` path (quoted or plain) with no `%`, not a shell or generic
+/// launcher; the arguments hold exactly one `%1` and no other `%`. Else `None`.
+#[cfg(any(windows, test))]
+fn command_for(template: &str, url: &str) -> Option<(String, String)> {
+    const DENIED: [&str; 8] = [
+        "cmd.exe",
+        "rundll32.exe",
+        "explorer.exe",
+        "powershell.exe",
+        "pwsh.exe",
+        "wscript.exe",
+        "cscript.exe",
+        "mshta.exe",
+    ];
+    let t = template.trim();
+    let (exe, rest) = match t.strip_prefix('"') {
+        Some(q) => q.split_once('"')?,
+        None => t.split_once(char::is_whitespace).unwrap_or((t, "")),
+    };
+    let name = exe.rsplit(['\\', '/']).next()?.to_ascii_lowercase();
+    if !name.ends_with(".exe") || DENIED.contains(&name.as_str()) || exe.contains(['%', '"']) {
+        return None;
+    }
+    if !(rest.is_empty() || rest.starts_with(char::is_whitespace))
+        || rest.matches('%').count() != 1
+        || rest.matches("%1").count() != 1
+        || file_url(exe).is_none()
+    // a plain absolute drive path
+    {
+        return None;
+    }
+    Some((exe.to_string(), rest.trim().replace("%1", url)))
 }
 
 /// A Windows Settings page (`ms-settings:...`), through the same launcher as links.
@@ -400,6 +505,76 @@ mod tests {
         assert_eq!(route("/tmp/opencircle-lens-1-2.html"), Route::Browser);
         for other in ["file:///etc/passwd", "-x", "ftp://example.com/", ""] {
             assert_eq!(route(other), Route::Command, "{other}");
+        }
+    }
+
+    const URL: &str = "file:///C:/Users/a%20b/Temp/opencircle-lens-1-2.html";
+
+    fn args(template: &str) -> Option<String> {
+        command_for(template, URL).map(|(exe, rest)| format!("{exe}|{rest}"))
+    }
+
+    #[test]
+    fn command_for_fills_real_browser_templates() {
+        for (t, want) in [
+            (
+                r#""C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --single-argument %1"#,
+                format!(
+                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe|--single-argument {URL}"
+                ),
+            ),
+            (
+                r#""C:\Program Files\Google\Chrome\Application\chrome.exe" --single-argument %1"#,
+                format!(
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe|--single-argument {URL}"
+                ),
+            ),
+            (
+                r#""C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" --single-argument %1"#,
+                format!(
+                    r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe|--single-argument {URL}"
+                ),
+            ),
+            (
+                r#""C:\Program Files\Mozilla Firefox\firefox.exe" -osint -url "%1""#,
+                format!(r#"C:\Program Files\Mozilla Firefox\firefox.exe|-osint -url "{URL}""#),
+            ),
+            (r"C:\Tools\b.exe %1", format!(r"C:\Tools\b.exe|{URL}")),
+        ] {
+            assert_eq!(args(t), Some(want), "{t}");
+        }
+    }
+
+    #[test]
+    fn command_for_refuses_hostile_or_unusable_templates() {
+        for t in [
+            "",
+            r#""C:\b\brave.exe" --single-argument"#,
+            r#""C:\b\brave.exe" %1 %1"#,
+            r#""C:\b\brave.exe" %1 %2"#,
+            r#""C:\b\brave.exe" %1 --x=%*"#,
+            r#""C:\b\br%PATH%.exe" %1"#,
+            r#""C:\Windows\System32\cmd.exe" /c start %1"#,
+            r"C:\Windows\System32\rundll32.exe url.dll,OpenURL %1",
+            r#""C:\Windows\explorer.exe" %1"#,
+            r#""C:\b\brave.exe"--x %1"#,
+            r#""C:\b\brave.exe %1"#,
+            "brave.exe %1",
+            r#""C:\b\brave.dll" %1"#,
+            "{some-delegate-guid}",
+        ] {
+            assert_eq!(args(t), None, "{t}");
+        }
+    }
+
+    #[test]
+    fn file_url_has_no_space_quote_or_ampersand() {
+        assert_eq!(
+            file_url(r#"C:\Users\a b\x&y"z.html"#).as_deref(),
+            Some("file:///C:/Users/a%20b/x%26y%22z.html")
+        );
+        for bad in [r"\\?\C:\x.html", r"\\srv\share\x.html", "x.html", "C:x"] {
+            assert_eq!(file_url(bad), None, "{bad}");
         }
     }
 
