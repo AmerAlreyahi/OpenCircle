@@ -1384,6 +1384,259 @@ pub static PAIRS: [Pair; 49] = [
     ),
 ];
 
+/// models-v1's decoders (pair, size, sha256): the files the app downloaded
+/// before models-v2. One already on a user's PC keeps working (`Pair::needed`)
+/// until the pair's next download replaces it.
+// ponytail: drop in 0.2.0 (with this check; a v1 decoder then counts as
+// missing and the download card offers the lighter one).
+const V1_DECODERS: [(&str, u64, &str); 49] = [
+    (
+        "en-ar",
+        59_078_120,
+        "c0e553b0c26611780c70417c9b4c1ca7169e9cdb18ba9e649197efb017af9f02",
+    ),
+    (
+        "en-fr",
+        57_381_512,
+        "333b244bce16023df04541c8cf9fd60aec9b0569da393c4b831d561897b0bda8",
+    ),
+    (
+        "en-es",
+        60_212_804,
+        "58ee5ddd6e22d1693d8722b90c1486afb93700a4376cf28fd74175052ad530ae",
+    ),
+    (
+        "en-de",
+        56_652_404,
+        "8b46a825964cdd182fe47cc780f0fb87d357eae1f47cf20aa63c1c09be5b510c",
+    ),
+    (
+        "en-ru",
+        58_931_576,
+        "7efefcd793a5663bc204224a92a123524f3dfe2ffad59e5f73d6734d1b11ad04",
+    ),
+    (
+        "en-zh",
+        60_212_804,
+        "023be4f841f4c47cd65fffcbaa81c0d99d7f7e0138f7ba0e03fa220a4e688aff",
+    ),
+    (
+        "ar-en",
+        59_094_632,
+        "cdb25ae736afe9d48035b0ea311ab4b25f315810fab7f3c6f6cb0d8d87af35fa",
+    ),
+    (
+        "fr-en",
+        57_381_512,
+        "73bc7ac8e29c42e6f212ebcc29a2991d3646a04aabb642c0036aa54b40e4e1a9",
+    ),
+    (
+        "zh-en",
+        60_212_804,
+        "c6b7f04ff1ba0fbd1bf6852599b4c0cad6fe512d57cd887f44ef36cf705424cb",
+    ),
+    (
+        "ja-en",
+        58_001_744,
+        "b304d0014e4e1575437b6af95467b6cb54405d923732d8359113bd6dbbee93c0",
+    ),
+    (
+        "es-en",
+        60_212_804,
+        "4cd91ab30240d295ce907b5100826031838c672005e57e524d711122d75605fa",
+    ),
+    (
+        "de-en",
+        56_652_404,
+        "4712800584b2d77c2f9e620bf29523e2b20b62f65ade5011ee01780e2b0ea5d3",
+    ),
+    (
+        "ru-en",
+        58_931_576,
+        "25e7ff97b201bce64ab9c39749761d657b70b8602bcbc1ce01c67f713e90ffdf",
+    ),
+    (
+        "it-en",
+        68_147_852,
+        "aebc2789cd2ef8062fbda020bac90b61e68458ba98a4c43cea63c1d2310ba2b8",
+    ),
+    (
+        "nl-en",
+        61_258_736,
+        "ad4df9a08f16952c0d9ee06807f54d62fcd07a9109c2c0b8ea05a4422d7bf4d7",
+    ),
+    (
+        "uk-en",
+        58_451_180,
+        "ffa6d28d5fa0ff4ed930969d9ca4bac2d80ff11172198e93dc6332db49ddb36b",
+    ),
+    (
+        "pl-en",
+        59_402_168,
+        "9ad9da5bce473ca06a9b0a3dbf0793675827e5668ab501e5dc65dac8cecd93ba",
+    ),
+    (
+        "hi-en",
+        58_213_820,
+        "52655659006c8ce742cc761282d49b3be4e73bfbf080f1b6a546aa96170d5813",
+    ),
+    (
+        "id-en",
+        54_947_024,
+        "d65eeab370c2873bdf22a7b2b311f0f636aa693b8edd55c60b6b1db8473268dd",
+    ),
+    (
+        "vi-en",
+        54_401_611,
+        "540edbcc08bab0b42c03576a759fd9b4d5fc99996ac3178630733916dc2325cb",
+    ),
+    (
+        "th-en",
+        58_822_700,
+        "65b9ea697b1b3fc318ab8376d321dcba21b389c61939d13c21bf8b9044300082",
+    ),
+    (
+        "ko-en",
+        60_212_803,
+        "e131732653a6d3cec42a8b65f8844980042b036bdaca931446bc4b3530bc3506",
+    ),
+    (
+        "en-it",
+        67_970_348,
+        "f9db146ed7665ea7d437dc4df564e3af5df923366de4d52aaf2c4b4e3e4ae4f1",
+    ),
+    (
+        "en-nl",
+        61_258_735,
+        "5f8034fddc4cdcb6fa6c3b64a06e1cd9b1955c0c6dcd13e0e47610ab99ac4a99",
+    ),
+    (
+        "en-uk",
+        58_451_180,
+        "0892312ea1d359fb749b16deb5005246eb17974bd2b5424344b0e9ae83e0a142",
+    ),
+    (
+        "en-hi",
+        58_638_488,
+        "8baba43a14b15ca4543d30ab36e7d34f2e516fb9af7e0b83b77a5e6a6f66d198",
+    ),
+    (
+        "en-id",
+        54_947_023,
+        "0a59ebfe85137a21055d9f73d9f83a59487f0cff31db452c7db3b6cdeca8e7c2",
+    ),
+    (
+        "en-vi",
+        54_373_748,
+        "1cfc6a84f9c189e6928c9710b281fae3f1f42d4ffbba109e7b4ec8e31ceb06dd",
+    ),
+    (
+        "de-es",
+        58_303_604,
+        "8b426d5cafcc60359eeb3577d4becd021be84c4a9eefabef811a6b0dd10e0082",
+    ),
+    (
+        "de-fr",
+        58_227_235,
+        "2b834e8f8fc9c5159c36127fca1126224299848e04b8aa1f2936255ba339f435",
+    ),
+    (
+        "es-de",
+        58_303_604,
+        "cb6d365ceaefd8141ec6cc3dfa4e2c332d03ffc891ea732efb714e230a94cc2b",
+    ),
+    (
+        "es-fr",
+        65_280_440,
+        "f6e43796a68566c95ab387277c223726ac988b307e875c239b340424eb057a92",
+    ),
+    (
+        "es-it",
+        57_132_284,
+        "11ac94f23d5c31305d1ff16a8018292eec9b61d5514dd365de856bc6a744ef3f",
+    ),
+    (
+        "es-ru",
+        59_402_168,
+        "70fed4fafbc55053da784680b37745224210da4678fbaf69d92c1f6dec3f4e00",
+    ),
+    (
+        "fr-de",
+        58_227_236,
+        "d3f4dbe5fbdeae2668a189edfc17edd87876f6df7ff5282803d535c5980bd4a4",
+    ),
+    (
+        "fr-es",
+        65_280_440,
+        "ff991f24d534a62db615697ed9555db80be28fbf9e5677d8ebb1f78c6aabc2c6",
+    ),
+    (
+        "fr-ru",
+        59_890_819,
+        "6f2c1c7baf1c3d7ceed89708bfeabecb4c9987047b6046b85aa71c55580f4512",
+    ),
+    (
+        "it-es",
+        57_132_284,
+        "147aa9f62b543cb7a7a119aabc89ce26b7defab212fb2486b2bff94e09986dce",
+    ),
+    (
+        "it-fr",
+        57_297_404,
+        "062ee6c4f6c2318114239a681849667492667e21b5617458e73a27b1d2db23b7",
+    ),
+    (
+        "ru-es",
+        59_402_168,
+        "c16a3a885622460e9654ba5c22e09768c0165c1a564935ed0de20520df36ac1d",
+    ),
+    (
+        "ru-fr",
+        59_890_819,
+        "3d25927b7b8f58d46b69782193a55663f5738af397734c834249840c835d51eb",
+    ),
+    (
+        "ru-uk",
+        56_485_220,
+        "7b28ef096a0f4dc8eb989ebe6e3ab0b56095f812e7b86258087a8cc6aa8b100b",
+    ),
+    (
+        "uk-ru",
+        56_485_220,
+        "2a99fed7dd89b22fee3752b8f6c7ac5e81d563635cf8198f49ca551f498daf76",
+    ),
+    (
+        "nl-fr",
+        56_415_560,
+        "7915cb6d03674552b6f7a3bcd4fe04e4dedd2a16fc120b4bcab39a03c6e6ecb4",
+    ),
+    (
+        "fr-ar",
+        58_881_020,
+        "58c62d87c8827fc1e58f6cb511b916d7ac43dfa6937bd3a5d0fe020d746f01ba",
+    ),
+    (
+        "es-ar",
+        58_932_104,
+        "928ba379dd657b283045f4835b3244c2552597ffc1f227e8d600779b731f8ec3",
+    ),
+    (
+        "ar-fr",
+        59_957_395,
+        "b7ae3aeb3918ecccb829da241eea01ae4d6e82ac5c453de8ac31c57845d8222c",
+    ),
+    (
+        "ar-es",
+        58_936_231,
+        "fa2983e9b9284a68c37805ad47f4fee38e48d396e374f120dd21766a6acc9ef5",
+    ),
+    (
+        "ar-de",
+        59_221_580,
+        "450b83f72b7cfc71f6ee4480bfa4dd11bc95db80f493ee4f98418d7ae78f09f1",
+    ),
+];
+
 /// Lines per decoder run (sorted by length first; a line that ended leaves
 /// the run). Each decoding step costs about the same for 1 line or 32, so
 /// fewer, fuller runs are faster: the 32 sentences of a release-notes page
@@ -1489,9 +1742,22 @@ impl Pair {
         files
     }
 
+    /// `files` without the decoder while its v1 file (`V1_DECODERS`) is on
+    /// disk, `v1_ok` with it and nothing else is missing (`without_v1`).
+    fn needed(
+        &'static self,
+        v1_ok: impl Fn(&Path, &ModelFile) -> bool,
+    ) -> Vec<(PathBuf, &'static ModelFile)> {
+        let v1 = V1_DECODERS
+            .iter()
+            .find(|f| self.dir.strip_prefix("opus-mt-") == Some(f.0))
+            .map(|&(_, size, sha)| ModelFile::plain(self.decoder.name, size, sha, ""));
+        without_v1(self.files(), &self.decoder, v1.as_ref(), v1_ok)
+    }
+
     /// Bytes still to download (0 = ready). Cheap: sizes only.
     pub fn missing_bytes(&'static self) -> u64 {
-        models::missing_bytes(&self.files())
+        models::missing_bytes(&self.needed(|path, f| has_size(path, f.size)))
     }
 
     /// Bytes of everything this pair needs, present or not: what `ensure`'s
@@ -1502,9 +1768,42 @@ impl Pair {
 
     /// Downloads and verifies whatever is missing (OCR's files too), with
     /// one `progress(done, total)`. Only after the user agreed.
+    /// A v1 decoder that verifies is kept; else the v2 one replaces it.
     pub fn ensure(&'static self, progress: impl FnMut(u64, u64)) -> Result<(), OcrError> {
-        models::ensure(&self.files(), progress)
+        models::ensure(&self.needed(verified), progress)
     }
+}
+
+/// `files` without `decoder` when its previous version `v1` is on disk and
+/// `v1_ok`, and every other file is there (sizes): an upgrading user keeps
+/// translating with it, nothing downloaded. Any download of the pair (a
+/// file missing) fetches the v2 decoder too, over the v1 file (one copy).
+fn without_v1<'a>(
+    mut files: Vec<(PathBuf, &'a ModelFile)>,
+    decoder: &ModelFile,
+    v1: Option<&ModelFile>,
+    v1_ok: impl Fn(&Path, &ModelFile) -> bool,
+) -> Vec<(PathBuf, &'a ModelFile)> {
+    let Some(at) = files.iter().position(|(_, f)| std::ptr::eq(*f, decoder)) else {
+        return files;
+    };
+    let others = (files.iter().enumerate()).all(|(i, (path, f))| i == at || has_size(path, f.size));
+    if others && v1.is_some_and(|v1| v1_ok(&files[at].0, v1)) {
+        files.remove(at);
+    }
+    files
+}
+
+fn has_size(path: &Path, size: u64) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.len() == size)
+}
+
+/// `path` is exactly `f` (size, then sha256).
+fn verified(path: &Path, f: &ModelFile) -> bool {
+    has_size(path, f.size)
+        && std::fs::File::open(path)
+            .and_then(crate::update::verify::sha256)
+            .is_ok_and(|h| h.iter().map(|b| format!("{b:02x}")).collect::<String>() == f.sha256)
 }
 
 /// App side: translates `texts` with `pair` in the helper process. The
@@ -1927,62 +2226,9 @@ mod tests {
         assert_eq!(bytes, 113_896_297);
     }
 
-    /// The decoders models-v1 pinned (Xenova's and ours), by size.
-    const V1_DECODER_BYTES: [(&str, u64); 49] = [
-        ("en-ar", 59_078_120),
-        ("en-fr", 57_381_512),
-        ("en-es", 60_212_804),
-        ("en-de", 56_652_404),
-        ("en-ru", 58_931_576),
-        ("en-zh", 60_212_804),
-        ("ar-en", 59_094_632),
-        ("fr-en", 57_381_512),
-        ("zh-en", 60_212_804),
-        ("ja-en", 58_001_744),
-        ("es-en", 60_212_804),
-        ("de-en", 56_652_404),
-        ("ru-en", 58_931_576),
-        ("it-en", 68_147_852),
-        ("nl-en", 61_258_736),
-        ("uk-en", 58_451_180),
-        ("pl-en", 59_402_168),
-        ("hi-en", 58_213_820),
-        ("id-en", 54_947_024),
-        ("vi-en", 54_401_611),
-        ("th-en", 58_822_700),
-        ("ko-en", 60_212_803),
-        ("en-it", 67_970_348),
-        ("en-nl", 61_258_735),
-        ("en-uk", 58_451_180),
-        ("en-hi", 58_638_488),
-        ("en-id", 54_947_023),
-        ("en-vi", 54_373_748),
-        ("de-es", 58_303_604),
-        ("de-fr", 58_227_235),
-        ("es-de", 58_303_604),
-        ("es-fr", 65_280_440),
-        ("es-it", 57_132_284),
-        ("es-ru", 59_402_168),
-        ("fr-de", 58_227_236),
-        ("fr-es", 65_280_440),
-        ("fr-ru", 59_890_819),
-        ("it-es", 57_132_284),
-        ("it-fr", 57_297_404),
-        ("ru-es", 59_402_168),
-        ("ru-fr", 59_890_819),
-        ("ru-uk", 56_485_220),
-        ("uk-ru", 56_485_220),
-        ("nl-fr", 56_415_560),
-        ("fr-ar", 58_881_020),
-        ("es-ar", 58_932_104),
-        ("ar-fr", 59_957_395),
-        ("ar-es", 58_936_231),
-        ("ar-de", 59_221_580),
-    ];
-
     /// Every pair's decoder is the lighter models-v2 one, of another size
-    /// than its v1 file: an old decoder on a user's PC counts as missing
-    /// (sizes only), so the next download replaces it.
+    /// than its v1 file (the two are told apart by size); encoders and
+    /// tokenizers keep their v1 pins.
     #[test]
     fn every_decoder_is_the_lighter_v2_one() {
         for p in &PAIRS {
@@ -1992,11 +2238,10 @@ mod tests {
                 p.source, p.target
             );
             assert!(format!("{:?}", p.decoder).contains(&url), "{}", p.dir);
-            let (_, v1) = (V1_DECODER_BYTES.iter())
-                .find(|(d, _)| p.dir == format!("opus-mt-{d}"))
-                .unwrap();
-            assert_ne!(p.decoder.size, *v1, "{}", p.dir);
-            // encoders and tokenizers keep their v1 pins
+            let v1 = V1_DECODERS
+                .iter()
+                .find(|f| p.dir == format!("opus-mt-{}", f.0));
+            assert_ne!(p.decoder.size, v1.unwrap().1, "{}", p.dir);
             assert!(
                 !format!("{:?}", p.encoder).contains("models-v2"),
                 "{}",
@@ -2005,41 +2250,93 @@ mod tests {
         }
     }
 
-    /// A v1 decoder on disk (same name, another size) is missing; a failed
-    /// download keeps it and fails as before (nothing half-written); the
-    /// verified new file replaces it in place: one decoder on disk.
-    #[test]
-    fn a_v1_decoder_is_replaced_in_place() {
-        models::LOCAL_FAKE.set(true); // no network: the URL is empty
-        let dir = std::env::temp_dir().join(format!("oc-mt-v2-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let new = b"the lighter decoder";
-        let hash = crate::update::verify::sha256(&new[..]).unwrap();
+    /// A pinned file with `bytes` as its content.
+    fn pinned(name: &'static str, bytes: &[u8]) -> &'static ModelFile {
+        let hash = crate::update::verify::sha256(bytes).unwrap();
         let hash: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-        let decoder = ModelFile::plain(
-            "decoder_model_merged_quantized.onnx",
-            new.len() as u64,
+        Box::leak(Box::new(ModelFile::plain(
+            name,
+            bytes.len() as u64,
             Box::leak(hash.into_boxed_str()),
             "",
+        )))
+    }
+
+    /// An upgrading user never loses translation: a v1 decoder on disk is
+    /// used (nothing to download) while it verifies; a download of the pair
+    /// (another file missing, or a damaged v1) fetches v2, which replaces the
+    /// v1 file (one decoder on disk) and is then used; a failed download
+    /// keeps the v1 file and fails as before.
+    #[test]
+    fn a_v1_decoder_keeps_working_until_the_next_download() {
+        models::LOCAL_FAKE.set(true); // no network: the URLs are empty
+        let dir = std::env::temp_dir().join(format!("oc-mt-v1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (old, new) = (
+            &b"the v1 decoder, two output layers"[..],
+            &b"the v2 decoder"[..],
         );
-        let path = dir.join(decoder.name);
-        let old = b"the v1 decoder, two output layers";
-        std::fs::write(&path, old).unwrap();
-        let files = [(path.clone(), &decoder)];
-        assert_eq!(models::missing_bytes(&files), decoder.size);
+        let (v1, v2) = (pinned("decoder.onnx", old), pinned("decoder.onnx", new));
+        let vocab = pinned("vocab.json", b"{}");
+        let (dec_path, vocab_path) = (dir.join("decoder.onnx"), dir.join("vocab.json"));
+        let list = |ok: fn(&Path, &ModelFile) -> bool| {
+            let files = vec![(dec_path.clone(), v2), (vocab_path.clone(), vocab)];
+            without_v1(files, v2, Some(v1), ok)
+        };
+        let names =
+            |l: Vec<(PathBuf, &ModelFile)>| l.iter().map(|(_, f)| f.name).collect::<Vec<_>>();
+        let sizes: fn(&Path, &ModelFile) -> bool = |p, f| has_size(p, f.size);
+        std::fs::write(&vocab_path, b"{}").unwrap();
+        // v1 only on disk: used, nothing to download (sizes, then verified)
+        std::fs::write(&dec_path, old).unwrap();
+        assert_eq!(names(list(sizes)), ["vocab.json"]);
+        assert_eq!(names(list(verified)), ["vocab.json"]);
+        assert_eq!(models::missing_bytes(&list(sizes)), 0);
+        models::ensure(&list(verified), |_, _| {}).unwrap();
+        assert_eq!(std::fs::read(&dec_path).unwrap(), old, "kept");
+        // a damaged v1 (right size) is fetched again, as v2
+        std::fs::write(&dec_path, b"the v1 decoder, two output layerZ").unwrap();
+        assert_eq!(names(list(verified)), ["decoder.onnx", "vocab.json"]);
+        std::fs::write(&dec_path, old).unwrap();
+        // another file missing: the download takes the v2 decoder too ...
+        std::fs::remove_file(&vocab_path).unwrap();
+        assert_eq!(models::missing_bytes(&list(sizes)), v2.size + vocab.size);
+        // ... a failed one keeps the v1 file (no part file) ...
         assert!(matches!(
-            models::ensure(&files, |_, _| {}),
+            models::ensure(&list(verified), |_, _| {}),
             Err(OcrError::Download(_))
         ));
-        assert_eq!(std::fs::read(&path).unwrap(), old);
-        models::write_verified(&new[..], &path, &decoder, |_| {}).unwrap();
-        assert_eq!(models::missing_bytes(&files), 0);
-        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
-        assert_eq!(left.len(), 1);
-        assert_eq!(std::fs::read(&path).unwrap(), new);
+        assert_eq!(std::fs::read(&dec_path).unwrap(), old);
+        // ... a verified one writes v2 over it: one decoder on disk, v2 used
+        models::write_verified(new, &dec_path, v2, |_| {}).unwrap();
+        models::write_verified(&b"{}"[..], &vocab_path, vocab, |_| {}).unwrap();
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+        assert_eq!(std::fs::read(&dec_path).unwrap(), new);
+        assert_eq!(names(list(verified)), ["decoder.onnx", "vocab.json"]);
+        assert_eq!(models::missing_bytes(&list(sizes)), 0);
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    /// The real en-ar pair with its v1 decoder (the file 0.1.3 downloaded)
+    /// translates without a download. XDG_DATA_HOME must hold v0.1.3's
+    /// OpenCircle/ocr and OpenCircle/mt/opus-mt-en-ar:
+    /// `cargo test --release mt::tests::real_v1 -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_v1_decoder_still_translates() {
+        let p = pair("en", "ar").unwrap();
+        let on_disk = std::fs::metadata(p.dir().join(p.decoder.name)).unwrap();
+        assert_eq!(on_disk.len(), V1_DECODERS[0].1, "the v1 decoder");
+        assert_eq!(p.missing_bytes(), 0);
+        // a test that tried to download would panic
+        p.ensure(|_, _| {}).unwrap();
+        let mut tr = Translator::load(p, &ocr::models_dir()).unwrap();
+        let out = tr.translate(&["New Game".to_string()]).unwrap();
+        println!("v1 decoder: New Game -> {}", out[0]);
+        assert_eq!(out[0], "لعبة جديدة");
+    }
+
     #[test]
     fn cleaned_output_has_no_markup() {
         assert_eq!(clean("  أحضر [[السيف]] ]] "), "أحضر السيف");
