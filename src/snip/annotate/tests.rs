@@ -3220,3 +3220,36 @@ fn ctrl_v_pastes_the_clipboard_text() {
     e.update(Message::Paste(None));
     assert!(!e.typing() && e.doc.items.len() == 2);
 }
+
+/// The live area's edges snap gently to a window's edges (#106): within the
+/// reach a handle lands on the edge, a move brings its nearest edge to it;
+/// Shift or distance leaves the pointer alone.
+#[test]
+fn the_live_area_snaps_to_window_edges() {
+    let area_after = |tweak: &dyn Fn(&mut Annotator), press: Point, to: Point| {
+        let mut e = live_area(); // area (40, 20) 60x30
+        e.edges = vec![Rectangle::new(pt(130.0, 10.0), Size::new(40.0, 80.0))];
+        tweak(&mut e);
+        drag(&mut e, press, &[], to);
+        e.doc.crop.unwrap()
+    };
+    let none = |_: &mut Annotator| {};
+    // The right handle at 125: 5 px from the window's left edge (130).
+    let r = area_after(&none, pt(100.0, 35.0), pt(125.0, 35.0));
+    assert_eq!(r.x + r.width, 130.0);
+    // Shift: off.
+    let r = area_after(&|e| e.shift = true, pt(100.0, 35.0), pt(125.0, 35.0));
+    assert_eq!(r.x + r.width, 125.0);
+    // Farther than the reach: off.
+    let r = area_after(&none, pt(100.0, 35.0), pt(120.0, 35.0));
+    assert_eq!(r.x + r.width, 120.0);
+    // Moving the area by 27: its right edge (127) lands on 130, size kept.
+    let r = area_after(&none, pt(70.0, 35.0), pt(97.0, 35.0));
+    assert_eq!((r.x, r.width), (70.0, 60.0));
+    // A keyboard nudge is never snapped.
+    let mut e = live_area();
+    e.edges = vec![Rectangle::new(pt(102.0, 10.0), Size::new(40.0, 80.0))];
+    let before = e.doc.crop.unwrap();
+    e.update(Message::Nudge((1, 0), (false, false, false)));
+    assert_eq!(e.doc.crop.unwrap().x, before.x + 1.0);
+}

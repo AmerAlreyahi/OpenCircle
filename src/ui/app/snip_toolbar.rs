@@ -1,7 +1,7 @@
 //! The Snip toolbar on a capture: opening it, its messages, the bar swap.
 
-use iced::Task;
 use iced::widget::image;
+use iced::{Point, Rectangle, Task};
 
 use crate::actions::{self, Crop, copy, save};
 use crate::snip::annotate::{self, Image, Output};
@@ -12,6 +12,7 @@ use crate::ui::screens::snip_toolbar::SnipToolbar;
 
 use super::App;
 use super::capture::TEST_SHOT;
+use super::screens::to_desktop;
 
 impl App {
     /// Edit in place: the selection's pixels become the editor's canvas, at their
@@ -68,6 +69,23 @@ impl App {
             (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area
         }
         edit.annotator.steps = self.windows.steps();
+        if let Purpose::Snip(s) = &self.o.purpose {
+            // window edges for the picked area to snap to, in the editor's image px
+            let place = self.o.place();
+            let origin = match self.desk_bounds(self.o.desk()) {
+                Some([x0, y0, ..]) if !self.o.screens.is_empty() => (x0 as f32, y0 as f32),
+                _ => (place.origin.0 as f32, place.origin.1 as f32),
+            };
+            edit.annotator.edges = (s.edge_rects().into_iter())
+                .map(|r| {
+                    let at = to_desktop(place, r.position());
+                    Rectangle::new(
+                        Point::new(at.x - origin.0, at.y - origin.1),
+                        iced::Size::new(r.width * place.scale, r.height * place.scale),
+                    )
+                })
+                .collect();
+        }
         self.o.edit = Some(edit);
         Task::none()
     }

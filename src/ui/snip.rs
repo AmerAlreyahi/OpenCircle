@@ -32,7 +32,7 @@ use crate::capture::window_rect::WinRect;
 use crate::config::{SnipAfter, Target};
 
 /// An edge snaps to a window / control edge this near (logical px).
-const SNAP: f32 = 8.0;
+pub(crate) const SNAP: f32 = 8.0;
 /// The hover info chip's height, the drag size chip's width (logical px).
 const INFO_H: f32 = 30.0;
 const SIZE_CHIP_W: f32 = 96.0;
@@ -480,6 +480,14 @@ impl Snip {
         snap(p, rects, SNAP)
     }
 
+    /// Every window and control rectangle (starting monitor's logical px): what
+    /// the picked area's edges snap to.
+    pub fn edge_rects(&self) -> Vec<Rectangle> {
+        (self.windows.iter().chain(&self.controls))
+            .map(|t| t.rect)
+            .collect()
+    }
+
     pub fn set_shift(&mut self, held: bool) {
         self.shift = held;
     }
@@ -783,7 +791,11 @@ fn clip(targets: Vec<Pick>, whole: Rectangle) -> Vec<Pick> {
 
 /// `p` moved onto the nearest edge of the rectangles it is in or near, per axis,
 /// if one is within `reach`.
-fn snap<'a>(p: Point, rects: impl IntoIterator<Item = &'a Rectangle>, reach: f32) -> Point {
+pub(crate) fn snap<'a>(
+    p: Point,
+    rects: impl IntoIterator<Item = &'a Rectangle>,
+    reach: f32,
+) -> Point {
     let (mut x, mut y) = ((reach, p.x), (reach, p.y));
     for r in rects {
         let near = p.x >= r.x - reach

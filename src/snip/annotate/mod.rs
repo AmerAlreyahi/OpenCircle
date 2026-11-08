@@ -541,6 +541,9 @@ pub struct Annotator {
     /// A long capture of the area is running: the toolbar keeps only what
     /// finishes it (Copy, Save, Pin, Share, close); the rest is dimmed.
     pub capturing: bool,
+    /// Window and control rectangles (image px) the live area's edges snap to
+    /// while it is dragged (the host sets them; none on Wayland).
+    pub edges: Vec<Rectangle>,
     /// The height (image px) the blur stroke being drawn is held at.
     lock: Option<f32>,
     /// The blur brush's size picked in its options; `None` = Auto: as tall
@@ -637,6 +640,7 @@ impl Annotator {
             blur_cell: saved.blur_cell.unwrap_or(Width::Thin),
             bands: None,
             movable: false,
+            edges: Vec::new(),
             own_image: false,
             area_drag: None,
             focus: None,
@@ -1242,7 +1246,71 @@ impl Annotator {
             self.frame(),
             area::MIN_SIDE,
         );
-        whole(r)
+        match self.shift {
+            true => whole(r),
+            false => whole(self.snapped(drag.grip, r)),
+        }
+    }
+
+    /// `r` with the edges the grip moves pulled onto a window or control edge
+    /// within the snap reach (as a first drag is; the same `snap`); Shift = off.
+    fn snapped(&self, grip: area::Grip, r: Rectangle) -> Rectangle {
+        use crate::ui::snip::{SNAP, snap};
+        let reach = SNAP / self.zoom;
+        // The edge value `v` snapped; probed along the area's side, middle and
+        // far side so a window's edge is found wherever the area meets it.
+        let pull = |v: f32, x_axis: bool| {
+            let (lo, len) = if x_axis {
+                (r.y, r.height)
+            } else {
+                (r.x, r.width)
+            };
+            [lo, lo + len / 2.0, lo + len]
+                .into_iter()
+                .map(|o| {
+                    let p = if x_axis {
+                        Point::new(v, o)
+                    } else {
+                        Point::new(o, v)
+                    };
+                    let s = snap(p, &self.edges, reach);
+                    if x_axis { s.x } else { s.y }
+                })
+                .min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()))
+                .unwrap_or(v)
+        };
+        let (x1, y1) = (r.x + r.width, r.y + r.height);
+        let min = area::MIN_SIDE;
+        let frame = self.frame();
+        let axis = |s: i8, lo: f32, hi: f32, x_axis: bool| {
+            let (a, b) = (pull(lo, x_axis), pull(hi, x_axis));
+            match s {
+                -1 => (a.min(hi - min), hi),
+                1 => (lo, b.max(lo + min)),
+                // A move: the edge that moved less (0 = none) brings the other.
+                _ if grip == area::Grip::Move => {
+                    let far = |d: f32| if d == 0.0 { f32::MAX } else { d.abs() };
+                    let (da, db) = (a - lo, b - hi);
+                    let by = if far(da) <= far(db) { da } else { db };
+                    (lo + by, hi + by)
+                }
+                _ => (lo, hi),
+            }
+        };
+        let (sx, sy) = match grip {
+            area::Grip::Move => (0, 0),
+            area::Grip::Edge(x, y) => (x, y),
+        };
+        let (nx0, nx1) = axis(sx, r.x, x1, true);
+        let (ny0, ny1) = axis(sy, r.y, y1, false);
+        let snapped = Rectangle::new(Point::new(nx0, ny0), Size::new(nx1 - nx0, ny1 - ny0));
+        // never out of the frozen frame
+        match frame.contains(snapped.position())
+            && frame.contains(Point::new(nx1 - 0.01, ny1 - 0.01))
+        {
+            true => snapped,
+            false => r,
+        }
     }
 
     fn drag_to(&mut self, mut p: Point) {
