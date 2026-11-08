@@ -384,7 +384,11 @@ impl App {
         if self.chatting() {
             return self.chat_at(selection);
         }
-        card::place(self.o.screen, selection, self.card)
+        let at = card::place(self.o.screen, selection, self.card);
+        if self.o.translate.is_some() {
+            return crate::ui::screens::translate::view::clear_of_pill(at, self.o.screen);
+        }
+        at
     }
 
     /// The AI chat is the card shown.

@@ -196,6 +196,20 @@ pub fn pill_at(region: Rectangle) -> Point {
     Point::new(x, region.y + PILL_TOP)
 }
 
+/// `at` (a result card) kept off the pill: where it would reach the pill's
+/// rect (a side card on a screen too narrow to pass it), its top moves under
+/// the pill, its bottom staying; never shorter than `card::MIN`.
+pub fn clear_of_pill(at: Rectangle, screen: Size) -> Rectangle {
+    let pill = Rectangle::new(pill_at(Rectangle::with_size(screen)), picker::PILL);
+    let below = pill.y + pill.height + STACK;
+    if at.x >= pill.x + pill.width || at.x + at.width <= pill.x || at.y >= below {
+        return at;
+    }
+    let bottom = at.y + at.height;
+    let top = below.min(bottom - crate::ui::kit::panel_frame::MIN.height.min(at.height));
+    Rectangle::new(Point::new(at.x, top), Size::new(at.width, bottom - top))
+}
+
 /// The word card (the design's "Word explanation", titled "translation ·
 /// original"): its body (the translation, the AI's explanation) and actions
 /// (Explain = E, Ask AI = A).

@@ -924,3 +924,32 @@ fn every_picker_state_matches_its_golden_image() {
     themes::set(&SAPPHIRE);
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// On narrow screens the word card's side slot reaches the pill: it moves
+/// under it instead (the pill never moves), at every width.
+#[test]
+fn the_word_card_never_covers_the_pill() {
+    for (w, h) in [
+        (1920.0, 1080.0),
+        (1280.0, 720.0),
+        (1024.0, 768.0),
+        (900.0, 600.0),
+    ] {
+        let screen = Size::new(w, h);
+        let at = view::clear_of_pill(card::place(screen, None, None), screen);
+        let pill = Rectangle::new(view::pill_at(Rectangle::with_size(screen)), picker::PILL);
+        assert!(
+            at.intersection(&pill).is_none(),
+            "{w}x{h}: {at:?} vs {pill:?}"
+        );
+        assert!(at.y + at.height <= h && at.x >= 0.0, "{w}x{h}: {at:?}");
+    }
+    let screen = Size::new(1280.0, 720.0);
+    let at = view::clear_of_pill(card::place(screen, None, None), screen);
+    let mut s = session(true);
+    let blocks = vec![block("Inventory", "المخزون", [600.0, 20.0, 100.0, 40.0])];
+    let _ = s.update(shown(blocks));
+    s.click(Point::new(650.0, 30.0));
+    let view = s.view(screen, at, false);
+    crate::ui::kit::testing::shot::save("translate-word-card-1280", view, screen);
+}

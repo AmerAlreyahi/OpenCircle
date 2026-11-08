@@ -688,7 +688,7 @@ fn explain_question(block: &Translation, target: &str) -> String {
     )
 }
 
-mod view;
+pub(crate) mod view;
 
 #[cfg(test)]
 mod tests;
