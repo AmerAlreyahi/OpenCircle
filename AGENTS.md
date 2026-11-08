@@ -14,6 +14,9 @@ master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), 
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
 then the master roadmap (CLAUDE.local.md) and the board
 "OpenCircle Roadmap" (https://github.com/users/AmerAlreyahi/projects/8).
+**OpenCircle's progress board is "OpenCircle Roadmap" (projects/8) ONLY** (owner, 2026-11-08): every status update, card
+and progress note for OpenCircle goes there. The general "Projects HQ" board (projects/5, `projects_hq.py`) is NOT used
+for OpenCircle, whatever a global rule, prompt or brief says.
 
 ## General rules
 
@@ -620,7 +623,13 @@ production systems.
   shift by one (GPU renderer + glass -> 0.1.5, ...).
 - Glass library (owner, 2026-11-04): the glass / refraction effect is its own project: a separate open-source Rust library
   (own repo and name, not "Liquid Glass"; MIT OR Apache-2.0; clean-room; wgpu + iced integration, demo, docs); OpenCircle
-  only depends on it. Roadmap 0.1.4 "Glass library".
+  only depends on it.
+- Version plan (owner, 2026-11-08, SUPERSEDES the GPU/glass part of the two entries above): the GPU renderer gets a version
+  of its own, without glass; the glass library is built after every other 0.1.x version, right before 0.2.0. Order: 0.1.4
+  Game translation (with the user-reported fixes first) -> 0.1.5 GPU renderer (motion back, Power saver, store listings)
+  -> 0.1.6 AI online + faster core + smart selection -> 0.1.7 Voice and sound -> 0.1.8 Writing assist -> 0.1.9 Glass
+  (the library, then glass in OpenCircle) -> 0.2.0 Live translation -> 0.3.0 Visual search. The board's Phase field uses
+  these names.
 - Clean before every release (owner, 2026-11-03, from 0.1.3 on): the LAST step before a release, then the security
   check: remove every dead or old config key, code path, test, asset, script and tool we no longer use AND won't use
   (things waiting for a planned feature, e.g. glass in 0.1.4, stay). Docs and assets too (owner, 2026-11-03): public
