@@ -51,10 +51,32 @@ fn detect_size(width: u32, height: u32) -> (u32, u32) {
     (side(width), side(height))
 }
 
-/// Lines read per recognizer run. One run over all 72 lines of a busy 1080p
-/// screen grew RAM to 1.2 GB (ORT keeps its peak); 8 kept it ~250 MB at the
-/// same speed.
+/// Lines read per recognizer run, at most. One run over all 72 lines of a busy
+/// 1080p screen grew RAM to 1.2 GB (ORT keeps its peak); 8 kept it ~250 MB at
+/// the same speed.
 const REC_BATCH: usize = 8;
+
+/// A run's padded size, in columns at the recognizer's 48 px height (lines x
+/// the widest line): ORT's peak grows with it (~29 KB per column per line), so
+/// eight full-width lines (8 x 4500) cost ~1 GB while eight of 1500 cost 326
+/// MB. Ordinary pages stay at 8 lines per run.
+const REC_BATCH_COLUMNS: f32 = 12_000.0;
+
+/// How many of `boxes` (widest last, as `recognize_rows` sorts them) go in
+/// the first run: up to `REC_BATCH`, fewer while the widest would pad past
+/// `REC_BATCH_COLUMNS`; always at least one.
+fn rec_batch_len(boxes: &[[f32; 4]]) -> usize {
+    let mut n = 0;
+    let mut widest = 0f32;
+    for b in boxes.iter().take(REC_BATCH) {
+        widest = widest.max(b[2] / b[3].max(1.0) * 48.0);
+        if n > 0 && (n + 1) as f32 * widest > REC_BATCH_COLUMNS {
+            break;
+        }
+        n += 1;
+    }
+    n
+}
 
 /// One line of text found in the image.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -518,7 +540,10 @@ impl Engine {
         let rtl = models::RECOGNIZERS[i].rtl();
         let rec = self.recognizer(i)?;
         let mut blocks = Vec::with_capacity(boxes.len());
-        for chunk in boxes.chunks(REC_BATCH) {
+        let mut rest = boxes;
+        while !rest.is_empty() {
+            let (chunk, tail) = rest.split_at(rec_batch_len(rest));
+            rest = tail;
             let crops = chunk
                 .iter()
                 .map(|b| {
@@ -725,6 +750,34 @@ mod tests {
         ] {
             assert_eq!(route(setting, system), want, "{setting:?} {system:?}");
         }
+    }
+
+    #[test]
+    fn recognition_runs_are_limited_by_padded_width() {
+        let run = |ratios: &[f32]| {
+            let boxes: Vec<_> = ratios.iter().map(|r| [0.0, 0.0, r * 40.0, 40.0]).collect();
+            let mut rest = &boxes[..];
+            let mut sizes = vec![];
+            while !rest.is_empty() {
+                let n = rec_batch_len(rest);
+                sizes.push(n);
+                rest = &rest[n..];
+            }
+            sizes
+        };
+        // ordinary lines: 8 per run as before
+        assert_eq!(run(&[5.0; 20]), [8, 8, 4]);
+        // eight lines of ~1500 columns (ratio 31) still fit
+        assert_eq!(run(&[31.0; 8]), [8]);
+        // full-width lines (ratio ~94 = 4500 columns): 2 per run, not 8
+        assert_eq!(run(&[94.0; 5]), [2, 2, 1]);
+        // one huge line still reads
+        assert_eq!(run(&[400.0]), [1]);
+        // narrow first, wide last: the wide ones close the run early
+        assert_eq!(
+            run(&[5.0, 5.0, 5.0, 5.0, 94.0, 94.0, 94.0, 94.0]),
+            [4, 2, 2]
+        );
     }
 
     #[test]
