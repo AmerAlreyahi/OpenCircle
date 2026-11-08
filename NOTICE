@@ -10,7 +10,12 @@ at the University of Helsinki (Helsinki-NLP), one per direction. Paper:
 Tiedemann and Thottingal, "OPUS-MT - Building open translation services for
 the World", EAMT 2020. ONNX export and int8 quantization: Xenova
 (Transformers.js), https://huggingface.co/Xenova/opus-mt-<pair> at the
-commit below. OpenCircle uses the files unmodified.
+commit below. OpenCircle uses the encoders and tokenizer files unmodified.
+Every decoder (these and the five below) is changed by OpenCircle in one
+way: the output layer, built in both branches of the merged decoder, is
+built once before them (scripts/lighten-mt-decoders.py; same weights, same
+translations, less memory); the changed decoders are downloaded from the
+OpenCircle-models release (models-v2).
 
   Pair   Licence     Model (https://huggingface.co/...)   Xenova commit
   en-ar  CC BY 4.0   Helsinki-NLP/opus-mt-en-ar           034a684356c1

@@ -53,6 +53,7 @@ pub struct Pair {
 /// `pair!(own, ...)`: a pair Xenova never exported, converted by us the same
 /// way from `Helsinki-NLP/opus-mt-<pair>` at commit `$rev`
 /// (`scripts/convert-mt-models.py`) and hosted as release assets (`own!`).
+/// The decoder of every pair is our lighter rewrite of that file (models-v2).
 macro_rules! pair {
     ($src:literal, $tgt:literal, $($rest:tt)*) => {
         pair!(hf, $src, $tgt, $($rest)*)
@@ -72,11 +73,16 @@ macro_rules! pair {
                 $es,
                 $eh
             ),
-            decoder: $url!(
+            // Every pair's decoder: the pinned one (Xenova's or ours) with
+            // its output layer built once instead of in both branches of the
+            // merged decoder (`scripts/lighten-mt-decoders.py`: same weights
+            // and translations, ~120 MB less per loaded pair). Same name on
+            // disk: a v1 decoder (another size) counts as missing, and its
+            // download replaces it in place (`models::ensure`).
+            decoder: release!(
+                "models-v2",
                 $pair,
-                $rev,
                 "decoder_model_merged_quantized.onnx",
-                "onnx/decoder_model_merged_quantized.onnx",
                 $ds,
                 $dh
             ),
@@ -112,15 +118,25 @@ macro_rules! hf {
 }
 
 /// A file of a pair we converted (`pair!(own, ...)`): an asset of the
-/// models release, `opus-mt-<pair>-<name>` (one flat release for every pair).
+/// models-v1 release.
 macro_rules! own {
     ($pair:literal, $rev:literal, $name:literal, $path:literal, $size:literal, $sha:literal) => {
+        release!("models-v1", $pair, $name, $size, $sha)
+    };
+}
+
+/// An asset of the OpenCircle-models release `$tag`: `opus-mt-<pair>-<name>`
+/// (one flat release for every pair).
+macro_rules! release {
+    ($tag:literal, $pair:literal, $name:literal, $size:literal, $sha:literal) => {
         ModelFile::plain(
             $name,
             $size,
             $sha,
             concat!(
-                "https://github.com/AmerAlreyahi/OpenCircle-models/releases/download/models-v1/opus-mt-",
+                "https://github.com/AmerAlreyahi/OpenCircle-models/releases/download/",
+                $tag,
+                "/opus-mt-",
                 $pair,
                 "-",
                 $name
@@ -144,8 +160,8 @@ pub static PAIRS: [Pair; 49] = [
             "53c354d87ced44b39085fe8a46a25f09ea4578d442dbce9663f3977228f8a04e"
         ],
         [
-            59_078_120,
-            "c0e553b0c26611780c70417c9b4c1ca7169e9cdb18ba9e649197efb017af9f02"
+            59_077_788,
+            "59308c4ec1a61954badad066c7b85a7876549ec91d0a9b22fa218afd872fb48d"
         ],
         [
             801_074,
@@ -169,8 +185,8 @@ pub static PAIRS: [Pair; 49] = [
             "0a81bdba62f53223740a8c6c6f58e716eba8ea1f92dfa569caf27ed5e3b6a0f7"
         ],
         [
-            57_381_512,
-            "333b244bce16023df04541c8cf9fd60aec9b0569da393c4b831d561897b0bda8"
+            57_381_180,
+            "96a6477026fdc00bd14f63e54ad02320cbf14ecec67ada79281e193c11a55167"
         ],
         [
             778_395,
@@ -194,8 +210,8 @@ pub static PAIRS: [Pair; 49] = [
             "03434edd1147e6c49e22066e9dc5888235e99cc35a6711d1c4ea5b06455d5da9"
         ],
         [
-            60_212_804,
-            "58ee5ddd6e22d1693d8722b90c1486afb93700a4376cf28fd74175052ad530ae"
+            60_212_472,
+            "4c9caf323108bc916b608b023ffd8cdf9ccd49ce1c0e62e63d931c81b9bc5084"
         ],
         [
             801_636,
@@ -219,8 +235,8 @@ pub static PAIRS: [Pair; 49] = [
             "15834b45fabd2dfb8c6c029b3ca3e7289aeefd90ece798ce42bcf548d1bd3b8d"
         ],
         [
-            56_652_404,
-            "8b46a825964cdd182fe47cc780f0fb87d357eae1f47cf20aa63c1c09be5b510c"
+            56_652_072,
+            "ab0ae18ee7fca5ed4093c37d47aa8ccd03aca3074c1c15fafbb59ce49de49780"
         ],
         [
             768_489,
@@ -244,8 +260,8 @@ pub static PAIRS: [Pair; 49] = [
             "97f28d8295d231b7da721ded06fa8c034787df2122cd8f85b904abdc4d15bd53"
         ],
         [
-            58_931_576,
-            "7efefcd793a5663bc204224a92a123524f3dfe2ffad59e5f73d6734d1b11ad04"
+            58_931_244,
+            "0f61b4ecd26e232bf0084a51ce104cd6933830bee65393492756b4b4929670a2"
         ],
         [
             802_781,
@@ -269,8 +285,8 @@ pub static PAIRS: [Pair; 49] = [
             "d3b7912bf6a9bd27e4c074c2df91d4ff3d5b4bc5f7f6c8d7cc9c805c98fbafee"
         ],
         [
-            60_212_804,
-            "023be4f841f4c47cd65fffcbaa81c0d99d7f7e0138f7ba0e03fa220a4e688aff"
+            60_212_472,
+            "47ab6181e8b241c54dd17c9ec088e122d671c49425627e82bee7080d2de07eba"
         ],
         [
             806_435,
@@ -294,8 +310,8 @@ pub static PAIRS: [Pair; 49] = [
             "d9b0d612acff86cf87634b49bda566d1ef39b312837de549786ea18fecefc708"
         ],
         [
-            59_094_632,
-            "cdb25ae736afe9d48035b0ea311ab4b25f315810fab7f3c6f6cb0d8d87af35fa"
+            59_094_300,
+            "3b580f8bb33683fe3f4552a21646f0d6a492ee1bb2d56780fdd720de31651945"
         ],
         [
             917_407,
@@ -319,8 +335,8 @@ pub static PAIRS: [Pair; 49] = [
             "e727cb26ac6bf816394c49671af69c9ae5798868fed1e40849872415dffc1772"
         ],
         [
-            57_381_512,
-            "73bc7ac8e29c42e6f212ebcc29a2991d3646a04aabb642c0036aa54b40e4e1a9"
+            57_381_180,
+            "bbbb96e87399efc2a1d9e878ccb9e56dccd481b9a082d1860d5cb9d71b878401"
         ],
         [
             802_397,
@@ -344,8 +360,8 @@ pub static PAIRS: [Pair; 49] = [
             "84d5e171b626bc8b6b220d022ac58696e9528c25deeacca62b5cbf4364547a99"
         ],
         [
-            60_212_804,
-            "c6b7f04ff1ba0fbd1bf6852599b4c0cad6fe512d57cd887f44ef36cf705424cb"
+            60_212_472,
+            "ef9bbdba03642c9db4be12107329c6e567167692641d0fe5fc7f668839cee614"
         ],
         [
             804_677,
@@ -369,8 +385,8 @@ pub static PAIRS: [Pair; 49] = [
             "345262b16bcdda1468b0f3380c112b7ce79f731176b4b1d21f6edd5b2ae0d25c"
         ],
         [
-            58_001_744,
-            "b304d0014e4e1575437b6af95467b6cb54405d923732d8359113bd6dbbee93c0"
+            58_001_412,
+            "6366a67461afcd7f966f5b8b05f6050a9c74e5b6490f0d2f9ea25f8be29bae57"
         ],
         [
             781_853,
@@ -394,8 +410,8 @@ pub static PAIRS: [Pair; 49] = [
             "c01e70f8455efc350831aa2af7ed187b16829241f0018ba07d1ba643a391bc18"
         ],
         [
-            60_212_804,
-            "4cd91ab30240d295ce907b5100826031838c672005e57e524d711122d75605fa"
+            60_212_472,
+            "218b6fc3896b585876698f84d37eb309339d6f2b497e36e890e1cc93be5e3832"
         ],
         [
             825_924,
@@ -419,8 +435,8 @@ pub static PAIRS: [Pair; 49] = [
             "4cedda8f8c89b72a42b3c6cd1e7a27f2de24457093e3bf80cb3e46829641fcd8"
         ],
         [
-            56_652_404,
-            "4712800584b2d77c2f9e620bf29523e2b20b62f65ade5011ee01780e2b0ea5d3"
+            56_652_072,
+            "d9218390aec5c4588090dfa32d98bb796d7e89c4fe38f15611bf34e84669169b"
         ],
         [
             796_845,
@@ -444,8 +460,8 @@ pub static PAIRS: [Pair; 49] = [
             "c10df0466540534bb70c4402d539c349b8bfa9968184cad89f51408cf13e7eb7"
         ],
         [
-            58_931_576,
-            "25e7ff97b201bce64ab9c39749761d657b70b8602bcbc1ce01c67f713e90ffdf"
+            58_931_244,
+            "a4fcff5376935b15833ac213965e27c47e6490a1c33de42ba95224237874bde3"
         ],
         [
             1_080_169,
@@ -469,8 +485,8 @@ pub static PAIRS: [Pair; 49] = [
             "a025d2d85c90da23880116b67175e43e71921d8d2bf446b9f1eacdc86015aa4c"
         ],
         [
-            68_147_852,
-            "aebc2789cd2ef8062fbda020bac90b61e68458ba98a4c43cea63c1d2310ba2b8"
+            68_147_520,
+            "a7a46ab70be9b525ef7d8a1370e6752ad6cdb9af5819650fc378db8a4b7e7e60"
         ],
         [
             813_709,
@@ -494,8 +510,8 @@ pub static PAIRS: [Pair; 49] = [
             "7b8b1e9071bed8e2394e3bd2f65b952700b1dd1293d087141134c8bac018653b"
         ],
         [
-            61_258_736,
-            "ad4df9a08f16952c0d9ee06807f54d62fcd07a9109c2c0b8ea05a4422d7bf4d7"
+            61_258_404,
+            "94dd7329eaa3644b3110efcd97e55f1046b94ee3f81213360cd4fc8fd08d872b"
         ],
         [
             813_866,
@@ -519,8 +535,8 @@ pub static PAIRS: [Pair; 49] = [
             "5e8c4c7e88742efa0a8e013f3897f17e29357d54b8c86a13472669546d6ed561"
         ],
         [
-            58_451_180,
-            "ffa6d28d5fa0ff4ed930969d9ca4bac2d80ff11172198e93dc6332db49ddb36b"
+            58_450_848,
+            "450c899d01b3e4114c06d4a794d264f796ac6e0f231b9ae37126fd25c4aa41f8"
         ],
         [
             1_007_605,
@@ -544,8 +560,8 @@ pub static PAIRS: [Pair; 49] = [
             "2416eb3c6db52a2d116539bf673b596e6a3d1453153b17778e85c9f55249c832"
         ],
         [
-            59_402_168,
-            "9ad9da5bce473ca06a9b0a3dbf0793675827e5668ab501e5dc65dac8cecd93ba"
+            59_401_836,
+            "12ef8c518a6fc1dfd5ef3f771c01917df858ecffb07357b3ffc0629e8ff2bdd9"
         ],
         [
             834_921,
@@ -569,8 +585,8 @@ pub static PAIRS: [Pair; 49] = [
             "dc5a1b084a83019bbb9798809dea5f2d16cc30a9a257238ec93120b3c2892ebf"
         ],
         [
-            58_213_820,
-            "52655659006c8ce742cc761282d49b3be4e73bfbf080f1b6a546aa96170d5813"
+            58_213_488,
+            "607895853fccd0fa894b1c3fb68c30f235e2d0fb7f7854b3541ee72f52915ee0"
         ],
         [
             1_057_690,
@@ -594,8 +610,8 @@ pub static PAIRS: [Pair; 49] = [
             "c5ab889ecf81e120e53f0f39800c0609d8d77b6c4a32212d73a85e3cfeb66293"
         ],
         [
-            54_947_024,
-            "d65eeab370c2873bdf22a7b2b311f0f636aa693b8edd55c60b6b1db8473268dd"
+            54_946_692,
+            "ed7c0c6aa53da96d0633aabf223ba164afb0394a6c5646b9070b903940473132"
         ],
         [
             800_687,
@@ -619,8 +635,8 @@ pub static PAIRS: [Pair; 49] = [
             "fa7bd78e8bed6bdc03728f62f1592c4bb52d9e12795496604c1e990e102abdb2"
         ],
         [
-            54_401_611,
-            "540edbcc08bab0b42c03576a759fd9b4d5fc99996ac3178630733916dc2325cb"
+            54_401_279,
+            "699ef5a7a2c6ba1d9fa05879dd13adaccbc496454b08e3fb6919ecf70744a51a"
         ],
         [
             756_168,
@@ -644,8 +660,8 @@ pub static PAIRS: [Pair; 49] = [
             "37e31edabcadfca300cf13d4dd20087aa1a920cba7b20c738cba8ff44f320bbf"
         ],
         [
-            58_822_700,
-            "65b9ea697b1b3fc318ab8376d321dcba21b389c61939d13c21bf8b9044300082"
+            58_822_368,
+            "d47e46270210fdb53dcb98f14d5b9ebea3e297145f9604924de44e5bda2613fb"
         ],
         [
             1_213_743,
@@ -669,8 +685,8 @@ pub static PAIRS: [Pair; 49] = [
             "210e1d2cb5b457cdeeffe288099cc9d1df9f13c35dc3d39fde4ba252af877380"
         ],
         [
-            60_212_803,
-            "e131732653a6d3cec42a8b65f8844980042b036bdaca931446bc4b3530bc3506"
+            60_212_471,
+            "3a8bd3efa1e0d79cb74552b08ff8b204ee9a564aa680fc0f32b37677306231b4"
         ],
         [
             841_805,
@@ -694,8 +710,8 @@ pub static PAIRS: [Pair; 49] = [
             "b51c5110c7ba356ef01ee400d427afe162e657de1d7a2e9a40deedd811b49e6f"
         ],
         [
-            67_970_348,
-            "f9db146ed7665ea7d437dc4df564e3af5df923366de4d52aaf2c4b4e3e4ae4f1"
+            67_970_016,
+            "eb870c207294754cf62b743d75a2b81994c9fecb7c0955f1d601c16674bb2c9f"
         ],
         [
             789_468,
@@ -719,8 +735,8 @@ pub static PAIRS: [Pair; 49] = [
             "0febb990f8ca8ed9fd3e0017dfcb55ec5293999f20ead81d2bb4370e9e3120ff"
         ],
         [
-            61_258_735,
-            "5f8034fddc4cdcb6fa6c3b64a06e1cd9b1955c0c6dcd13e0e47610ab99ac4a99"
+            61_258_403,
+            "c41791e07e4995f06c719eb8917140d8150f3404d8fecbdaee2287a74bcdd5f8"
         ],
         [
             789_525,
@@ -744,8 +760,8 @@ pub static PAIRS: [Pair; 49] = [
             "234c3738c258b3b7c913452a4ab6203b1a24f459355af8ef563dd4d94792d087"
         ],
         [
-            58_451_180,
-            "0892312ea1d359fb749b16deb5005246eb17974bd2b5424344b0e9ae83e0a142"
+            58_450_848,
+            "ec57db15ca5e7466242367332b56840f36ee33319d6ffb34297b52bcd71f2e9a"
         ],
         [
             808_645,
@@ -769,8 +785,8 @@ pub static PAIRS: [Pair; 49] = [
             "3045cd6eaf06db96cff853204d6f0ffeb0c5af238a4f5a87a19fcaa94f7493c4"
         ],
         [
-            58_638_488,
-            "8baba43a14b15ca4543d30ab36e7d34f2e516fb9af7e0b83b77a5e6a6f66d198"
+            58_638_156,
+            "f50e7418ea2bd0856a591e857bdb1dccfc0c411cab27aa8587b621f4fd610a94"
         ],
         [
             812_240,
@@ -794,8 +810,8 @@ pub static PAIRS: [Pair; 49] = [
             "9bfc9cf0f400f86ec11da24b2f56380fcfabab17fb2dbcf7bb4c1754b7076e24"
         ],
         [
-            54_947_023,
-            "0a59ebfe85137a21055d9f73d9f83a59487f0cff31db452c7db3b6cdeca8e7c2"
+            54_946_691,
+            "2067ad87ac34662df919d750f3417f976592577d68b2d21aef7dc0f298673613"
         ],
         [
             795_925,
@@ -819,8 +835,8 @@ pub static PAIRS: [Pair; 49] = [
             "dfcd7a32be3fdd21cbcf5d354520d626f1768fd6e205ca62a6a11a4641d31f36"
         ],
         [
-            54_373_748,
-            "1cfc6a84f9c189e6928c9710b281fae3f1f42d4ffbba109e7b4ec8e31ceb06dd"
+            54_373_416,
+            "0a294c7468ce910fec5018b96245210a5863b7c7de49bf081d633a95e22b83aa"
         ],
         [
             808_612,
@@ -844,8 +860,8 @@ pub static PAIRS: [Pair; 49] = [
             "54a64cdcdef126647fe4922b33744f6643982084ee0a58b6d441bec5d17f7deb"
         ],
         [
-            58_303_604,
-            "8b426d5cafcc60359eeb3577d4becd021be84c4a9eefabef811a6b0dd10e0082"
+            58_303_272,
+            "c91ebc9b40c62d542c6c7dc3005911fb08581a054f374c762c8ffe4927fb0615"
         ],
         [
             828_663,
@@ -869,8 +885,8 @@ pub static PAIRS: [Pair; 49] = [
             "90cba5278e60ad6be15594760e718135640185b041d5706cba7762ece724d489"
         ],
         [
-            58_227_235,
-            "2b834e8f8fc9c5159c36127fca1126224299848e04b8aa1f2936255ba339f435"
+            58_226_903,
+            "3fec3907056b8d37d383d309b131111e80ea8dc751606d68edd7f5d0d2797383"
         ],
         [
             827_737,
@@ -894,8 +910,8 @@ pub static PAIRS: [Pair; 49] = [
             "bb5765b2b22eb48c2865c65098558cfd7e45a45f2f20aafb1cdc85a1f65c4de3"
         ],
         [
-            58_303_604,
-            "cb6d365ceaefd8141ec6cc3dfa4e2c332d03ffc891ea732efb714e230a94cc2b"
+            58_303_272,
+            "c0a41b0291d1faf1ecdc73b5270a46d6bb6d1e9f82f8d5a684c85a80655f0978"
         ],
         [
             818_345,
@@ -919,8 +935,8 @@ pub static PAIRS: [Pair; 49] = [
             "f2c497ebe1c3eadb329b8f36b250e7f87f9a327f46615dc5637492702cd0d2af"
         ],
         [
-            65_280_440,
-            "f6e43796a68566c95ab387277c223726ac988b307e875c239b340424eb057a92"
+            65_280_108,
+            "230ee7786e0277e48941514ae946d192fa5325af9a26cb5229c1ad0c0be779d7"
         ],
         [
             818_689,
@@ -944,8 +960,8 @@ pub static PAIRS: [Pair; 49] = [
             "9e4ba8017de817880e4ad24712015e5935147479d01c25af757af24d61e3fab0"
         ],
         [
-            57_132_284,
-            "11ac94f23d5c31305d1ff16a8018292eec9b61d5514dd365de856bc6a744ef3f"
+            57_131_952,
+            "c578aee5f9213e61187b93eceed72e8ba97f8beec1dbbea90e48b3ea8ce5118e"
         ],
         [
             818_750,
@@ -969,8 +985,8 @@ pub static PAIRS: [Pair; 49] = [
             "04702c95f2380c074b9458735fffe44b095ef1a7632f0e13a7f7c7440d995241"
         ],
         [
-            59_402_168,
-            "70fed4fafbc55053da784680b37745224210da4678fbaf69d92c1f6dec3f4e00"
+            59_401_836,
+            "a711177ea202844be123724adc3c177f78b640a07cc656d943af2e2959e0aa49"
         ],
         [
             829_382,
@@ -994,8 +1010,8 @@ pub static PAIRS: [Pair; 49] = [
             "76e81a715482c10d25fe3cbfe1129b236adcdc75bac4d9cee37bc97dc61ee8dd"
         ],
         [
-            58_227_236,
-            "d3f4dbe5fbdeae2668a189edfc17edd87876f6df7ff5282803d535c5980bd4a4"
+            58_226_904,
+            "26ada70f131c8fffbea44462c190dede181fc4e6411ace33278ef50d71a0122f"
         ],
         [
             812_399,
@@ -1019,8 +1035,8 @@ pub static PAIRS: [Pair; 49] = [
             "946954149b0179a0fb60145a3ed85da2f58868ef2e6a442a1cb4301563b70ac3"
         ],
         [
-            65_280_440,
-            "ff991f24d534a62db615697ed9555db80be28fbf9e5677d8ebb1f78c6aabc2c6"
+            65_280_108,
+            "2ad44e9c44b09f738ae2d8412f276b93d1adb0b51f24c1caa0cf5c084b3417f9"
         ],
         [
             811_963,
@@ -1044,8 +1060,8 @@ pub static PAIRS: [Pair; 49] = [
             "058326a2132a61b250d117ca78b4b3b6f53e81479c3d3b6bebf3c58850618743"
         ],
         [
-            59_890_819,
-            "6f2c1c7baf1c3d7ceed89708bfeabecb4c9987047b6046b85aa71c55580f4512"
+            59_890_487,
+            "f76aaff1e74e9e0314a72a0707ef236e7e5b9a6c0b99138bf390a899f7248434"
         ],
         [
             820_963,
@@ -1069,8 +1085,8 @@ pub static PAIRS: [Pair; 49] = [
             "3e0ef961235dc192d99555fe015ac0c28c0a93d006e98e6050a13dc45f45bb88"
         ],
         [
-            57_132_284,
-            "147aa9f62b543cb7a7a119aabc89ce26b7defab212fb2486b2bff94e09986dce"
+            57_131_952,
+            "935a8b889645360b605451a96c92ade40be45584496fb377e2d342ea69421376"
         ],
         [
             813_114,
@@ -1094,8 +1110,8 @@ pub static PAIRS: [Pair; 49] = [
             "02efa49882a03300453fa6816ebc965baff791b280b2d03ac93316739768dd19"
         ],
         [
-            57_297_404,
-            "062ee6c4f6c2318114239a681849667492667e21b5617458e73a27b1d2db23b7"
+            57_297_072,
+            "fe60a7e329f527bb4f0c1ac904355356a7881ba194a59b4c66c50dabac182ff1"
         ],
         [
             813_967,
@@ -1119,8 +1135,8 @@ pub static PAIRS: [Pair; 49] = [
             "0e48e0ea0f45b967a2994b992027915e1a3983086c40bd11c01c762c0bd36718"
         ],
         [
-            59_402_168,
-            "c16a3a885622460e9654ba5c22e09768c0165c1a564935ed0de20520df36ac1d"
+            59_401_836,
+            "de5aca8325d90629fd63c7fd5a9f40307182407982535069248183bc6afa4500"
         ],
         [
             1_060_731,
@@ -1144,8 +1160,8 @@ pub static PAIRS: [Pair; 49] = [
             "2b2801424d0f56825cee08950e945189444d08773131c2e3386a71ce1f87fc72"
         ],
         [
-            59_890_819,
-            "3d25927b7b8f58d46b69782193a55663f5738af397734c834249840c835d51eb"
+            59_890_487,
+            "fe803a860bdcfa0aab2cefa3e9095c867e8ca51c91e1824d7ab7219f96c62b16"
         ],
         [
             1_063_848,
@@ -1169,8 +1185,8 @@ pub static PAIRS: [Pair; 49] = [
             "5d1531b6d1bad2a7168f82d2c74acbf9a625e4f2913fe7ff476b61b6c7ec4d9a"
         ],
         [
-            56_485_220,
-            "7b28ef096a0f4dc8eb989ebe6e3ab0b56095f812e7b86258087a8cc6aa8b100b"
+            56_484_888,
+            "198db0b935a13776ee0b6d2282eb9ddba90166a664517ce9e9d8011791b821d0"
         ],
         [
             1_049_819,
@@ -1194,8 +1210,8 @@ pub static PAIRS: [Pair; 49] = [
             "6b599e2f4fbf1ea36cf983f1c0f40fcb2bb0ad8f6e0d1a7591da46b5ca9bf48a"
         ],
         [
-            56_485_220,
-            "2a99fed7dd89b22fee3752b8f6c7ac5e81d563635cf8198f49ca551f498daf76"
+            56_484_888,
+            "a52c00a861b44955850227f06db554d1d853dc922df960f3bfd9c809e14147ca"
         ],
         [
             1_031_670,
@@ -1219,8 +1235,8 @@ pub static PAIRS: [Pair; 49] = [
             "357de84fa0df0fe4b8e95adb9d0061118a2a9a4602863390e5e7c2ff505b1b7c"
         ],
         [
-            56_415_560,
-            "7915cb6d03674552b6f7a3bcd4fe04e4dedd2a16fc120b4bcab39a03c6e6ecb4"
+            56_415_228,
+            "5acf1e46d4b6e216e6692fb66f2ad35ecfca6432c31ecd7c6c2767cbb054e2bb"
         ],
         [
             814_095,
@@ -1248,8 +1264,8 @@ pub static PAIRS: [Pair; 49] = [
             "f7c318194076e252bcd028a91f7534bc05e65181842ceda203fc56f8f6d9b3f0"
         ],
         [
-            58_881_020,
-            "58c62d87c8827fc1e58f6cb511b916d7ac43dfa6937bd3a5d0fe020d746f01ba"
+            58_880_688,
+            "83e0d1115910d4830bc98bc28da5b3dadacc993de130f72c74c812d2740573f3"
         ],
         [
             826_663,
@@ -1274,8 +1290,8 @@ pub static PAIRS: [Pair; 49] = [
             "c21a425be06db48edc6c633f016e327801d2682ce224e93c98ab531ecb858a56"
         ],
         [
-            58_932_104,
-            "928ba379dd657b283045f4835b3244c2552597ffc1f227e8d600779b731f8ec3"
+            58_931_772,
+            "68a89aa78cbff2afaf70b8d86262ffc23b296c6a74b34c316b716648390b12c6"
         ],
         [
             831_392,
@@ -1300,8 +1316,8 @@ pub static PAIRS: [Pair; 49] = [
             "0ea1bb14d25530cd3d7a16da7570c94312cf79de8f42f6ff4eebfc1a47b3a154"
         ],
         [
-            59_957_395,
-            "b7ae3aeb3918ecccb829da241eea01ae4d6e82ac5c453de8ac31c57845d8222c"
+            59_957_063,
+            "704cebff0f82550db204ac2d0be9c514d0d7dcbfbf3dfeccb5a04b3aeabc8bca"
         ],
         [
             918_273,
@@ -1326,8 +1342,8 @@ pub static PAIRS: [Pair; 49] = [
             "b9239b444b07047f189aba81bbda97f91f499ba991cfb5f1c62e48fa047419d1"
         ],
         [
-            58_936_231,
-            "fa2983e9b9284a68c37805ad47f4fee38e48d396e374f120dd21766a6acc9ef5"
+            58_935_899,
+            "843298b031f231baabdf2912a53e72acec769c170f8129fbb65cdc696ebb6a9d"
         ],
         [
             923_345,
@@ -1352,8 +1368,8 @@ pub static PAIRS: [Pair; 49] = [
             "d113e37d62a817df8859c9d7d7826277e9eaeab1ad7bee5b205d624e04fe536c"
         ],
         [
-            59_221_580,
-            "450b83f72b7cfc71f6ee4480bfa4dd11bc95db80f493ee4f98418d7ae78f09f1"
+            59_221_248,
+            "8f3fe121b9d05be779238cf65d0449057ba751d6e7dcc4578ec9f380873d4f27"
         ],
         [
             902_787,
@@ -1534,7 +1550,8 @@ impl Translator {
         // made the 62k x 512 float matrix again (~70 ms a step, 2.8x the
         // whole page). Without QDQ handling (these models have none: they use
         // MatMulInteger) it is folded once at load: ~130 MB more in the
-        // helper, the same translations.
+        // helper, the same translations (once: the v2 decoders build it
+        // outside the two branches, the original ones had it in both).
         let session = |f: &ModelFile| {
             Session::builder()
                 .and_then(|b| b.with_memory_pattern(false).map_err(Into::into))
@@ -1907,7 +1924,121 @@ mod tests {
             .map(|f| f.size)
             .iter()
             .sum();
-        assert_eq!(bytes, 113_896_629);
+        assert_eq!(bytes, 113_896_297);
+    }
+
+    /// The decoders models-v1 pinned (Xenova's and ours), by size.
+    const V1_DECODER_BYTES: [(&str, u64); 49] = [
+        ("en-ar", 59_078_120),
+        ("en-fr", 57_381_512),
+        ("en-es", 60_212_804),
+        ("en-de", 56_652_404),
+        ("en-ru", 58_931_576),
+        ("en-zh", 60_212_804),
+        ("ar-en", 59_094_632),
+        ("fr-en", 57_381_512),
+        ("zh-en", 60_212_804),
+        ("ja-en", 58_001_744),
+        ("es-en", 60_212_804),
+        ("de-en", 56_652_404),
+        ("ru-en", 58_931_576),
+        ("it-en", 68_147_852),
+        ("nl-en", 61_258_736),
+        ("uk-en", 58_451_180),
+        ("pl-en", 59_402_168),
+        ("hi-en", 58_213_820),
+        ("id-en", 54_947_024),
+        ("vi-en", 54_401_611),
+        ("th-en", 58_822_700),
+        ("ko-en", 60_212_803),
+        ("en-it", 67_970_348),
+        ("en-nl", 61_258_735),
+        ("en-uk", 58_451_180),
+        ("en-hi", 58_638_488),
+        ("en-id", 54_947_023),
+        ("en-vi", 54_373_748),
+        ("de-es", 58_303_604),
+        ("de-fr", 58_227_235),
+        ("es-de", 58_303_604),
+        ("es-fr", 65_280_440),
+        ("es-it", 57_132_284),
+        ("es-ru", 59_402_168),
+        ("fr-de", 58_227_236),
+        ("fr-es", 65_280_440),
+        ("fr-ru", 59_890_819),
+        ("it-es", 57_132_284),
+        ("it-fr", 57_297_404),
+        ("ru-es", 59_402_168),
+        ("ru-fr", 59_890_819),
+        ("ru-uk", 56_485_220),
+        ("uk-ru", 56_485_220),
+        ("nl-fr", 56_415_560),
+        ("fr-ar", 58_881_020),
+        ("es-ar", 58_932_104),
+        ("ar-fr", 59_957_395),
+        ("ar-es", 58_936_231),
+        ("ar-de", 59_221_580),
+    ];
+
+    /// Every pair's decoder is the lighter models-v2 one, of another size
+    /// than its v1 file: an old decoder on a user's PC counts as missing
+    /// (sizes only), so the next download replaces it.
+    #[test]
+    fn every_decoder_is_the_lighter_v2_one() {
+        for p in &PAIRS {
+            let url = format!(
+                "\"https://github.com/AmerAlreyahi/OpenCircle-models/releases/download/\
+                 models-v2/opus-mt-{}-{}-decoder_model_merged_quantized.onnx\"",
+                p.source, p.target
+            );
+            assert!(format!("{:?}", p.decoder).contains(&url), "{}", p.dir);
+            let (_, v1) = (V1_DECODER_BYTES.iter())
+                .find(|(d, _)| p.dir == format!("opus-mt-{d}"))
+                .unwrap();
+            assert_ne!(p.decoder.size, *v1, "{}", p.dir);
+            // encoders and tokenizers keep their v1 pins
+            assert!(
+                !format!("{:?}", p.encoder).contains("models-v2"),
+                "{}",
+                p.dir
+            );
+        }
+    }
+
+    /// A v1 decoder on disk (same name, another size) is missing; a failed
+    /// download keeps it and fails as before (nothing half-written); the
+    /// verified new file replaces it in place: one decoder on disk.
+    #[test]
+    fn a_v1_decoder_is_replaced_in_place() {
+        models::LOCAL_FAKE.set(true); // no network: the URL is empty
+        let dir = std::env::temp_dir().join(format!("oc-mt-v2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let new = b"the lighter decoder";
+        let hash = crate::update::verify::sha256(&new[..]).unwrap();
+        let hash: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+        let decoder = ModelFile::plain(
+            "decoder_model_merged_quantized.onnx",
+            new.len() as u64,
+            Box::leak(hash.into_boxed_str()),
+            "",
+        );
+        let path = dir.join(decoder.name);
+        let old = b"the v1 decoder, two output layers";
+        std::fs::write(&path, old).unwrap();
+        let files = [(path.clone(), &decoder)];
+        assert_eq!(models::missing_bytes(&files), decoder.size);
+        assert!(matches!(
+            models::ensure(&files, |_, _| {}),
+            Err(OcrError::Download(_))
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), old);
+        models::write_verified(&new[..], &path, &decoder, |_| {}).unwrap();
+        assert_eq!(models::missing_bytes(&files), 0);
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
+        assert_eq!(left.len(), 1);
+        assert_eq!(std::fs::read(&path).unwrap(), new);
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn cleaned_output_has_no_markup() {

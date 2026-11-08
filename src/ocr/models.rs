@@ -405,7 +405,7 @@ fn is_verified(path: &Path, f: &ModelFile) -> io::Result<bool> {
 
 /// Streams `body` to `<dest>.part` and renames it to `dest` only when the size
 /// and checksum match; otherwise deletes the partial file.
-fn write_verified(
+pub(crate) fn write_verified(
     body: impl Read,
     dest: &Path,
     f: &ModelFile,
