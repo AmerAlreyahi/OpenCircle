@@ -103,7 +103,7 @@ pub fn setup(crop: &Crop) -> Result<Setup, String> {
 
 fn setup_for(cfg: AiConfig, crop: &Crop) -> Result<Setup, String> {
     if cfg.provider == Provider::Browser {
-        // No key, and the image never leaves (Lens re-encodes the crop itself).
+        // No key, no API: Ask AI opens the browser (`ai_chat::hand_off`), which sends the crop itself.
         return Ok(Setup {
             cfg,
             key: None,
@@ -765,6 +765,72 @@ pub(crate) mod tests {
             let _ = out.write_all(b"data: [DONE]\n\n");
         });
         url
+    }
+
+    /// Like [`stub`], but hands back the request body it received.
+    fn capture() -> (String, std::sync::mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = v.trim().parse().unwrap();
+                }
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let mut body = String::new();
+            reader
+                .by_ref()
+                .take(length)
+                .read_to_string(&mut body)
+                .unwrap();
+            let _ = tx.send(body);
+            let mut out = reader.into_inner();
+            let _ = out.write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+                  data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n",
+            );
+        });
+        (url, rx)
+    }
+
+    /// The API-key path, over a real socket (a "Custom server", no key): the
+    /// request carries the circled picture as an image part with Include
+    /// screen on, and no image at all with it off.
+    #[test]
+    fn the_request_carries_the_picture_only_when_include_screen_is_on() {
+        let png = b"\x89PNG-test-picture".to_vec();
+        for include in [true, false] {
+            let (url, body) = capture();
+            let setup = Setup {
+                png: png.clone(),
+                ..local_setup(url)
+            };
+            let mut chat = Chat::default();
+            let sent: &[u8] = if include { &setup.png } else { &[] };
+            let messages = chat.ask("What is this?", sent).unwrap();
+            assert_eq!(stream(&setup, &messages, |_| true), Ok(()));
+            let body: serde_json::Value = serde_json::from_str(&body.recv().unwrap()).unwrap();
+            let user = body["messages"].as_array().unwrap().last().unwrap().clone();
+            let parts = user["content"].as_array();
+            let image = parts.and_then(|p| p.iter().find(|p| p["type"] == "image_url"));
+            assert_eq!(image.is_some(), include, "{user}");
+            if let Some(image) = image {
+                let want = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png);
+                assert_eq!(
+                    image["image_url"]["url"],
+                    format!("data:image/png;base64,{want}")
+                );
+            }
+        }
     }
 
     pub(crate) fn local_setup(base_url: String) -> Setup {

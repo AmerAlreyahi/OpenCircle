@@ -7,7 +7,7 @@ use iced::widget::tooltip::Position;
 use iced::widget::{column, container, markdown as md, row, stack};
 use iced::{Center, Element, Fill, Rectangle, Right, Size};
 
-use super::{AiChat, Browse, LOG, Msg, PICKS, State, Tab, classifier, picked};
+use super::{AiChat, LOG, Msg, PICKS, State, Tab, classifier, picked};
 use crate::actions;
 use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
 use crate::config::{self, StaysOpen};
@@ -28,7 +28,7 @@ use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::text_area::text_area;
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::tooltip::{Why, hint};
-use crate::ui::kit::{chip, field, progress};
+use crate::ui::kit::{chip, field};
 
 /// A card's body and its footer.
 type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
@@ -86,17 +86,6 @@ pub fn actions<'a, M: Clone + 'a>(
     line.into()
 }
 
-/// A download's line, its bar and its share (`.as-progress-label` +
-/// `.as-progress`): the Ask card's OCR download for its question.
-fn downloading<'a, M: 'a>(what: &'a str, done: f32) -> Element<'a, M> {
-    let label = row![
-        container(note(what)).width(Fill),
-        note(format!("{:.0} %", done * 100.0))
-    ]
-    .spacing(STACK);
-    column![label, progress::bar(done)].into()
-}
-
 impl AiChat {
     /// The panel as the floating result card at `at` on a `screen`;
     /// `hover`: the pointer is on its resize edge.
@@ -105,14 +94,13 @@ impl AiChat {
             State::Ask {
                 setup,
                 chat,
-                browse,
                 answers,
                 include,
                 ..
             } => (
                 actions::ask::ACTION.icon,
                 CHAT_TITLE,
-                self.ask_view(setup.as_ref(), chat, browse, answers, *include),
+                self.ask_view(setup.as_ref(), chat, answers, *include),
             ),
         };
         let chip = match &self.state {
@@ -181,7 +169,6 @@ impl AiChat {
         &'a self,
         setup: Option<&'a Result<Arc<Setup>, String>>,
         chat: &'a Chat,
-        browse: &'a Browse,
         answers: &'a [(usize, md::Content)],
         include: bool,
     ) -> Part<'a> {
@@ -208,12 +195,9 @@ impl AiChat {
             if let (false, Some((_, parsed))) = (turn.answer.is_empty(), answers.get(i)) {
                 answer = answer.push(markdown::markdown(parsed.items()).map(Msg::Answer));
             } else if busy {
-                answer = answer.push(match browse {
-                    Browse::Downloading(done) => {
-                        downloading("Downloading the text-recognition model…", *done)
-                    }
-                    _ if browser => note("Opening Google AI Mode…").into(),
-                    _ => spinner::thinking(
+                answer = answer.push(match browser {
+                    true => note("Opening your browser…").into(),
+                    false => spinner::thinking(
                         crate::ui::kit::logo::logo(16),
                         self.spin.map_or(0.0, |(_, turn)| turn),
                         motion::reduced(),
@@ -248,10 +232,7 @@ impl AiChat {
             Status::Cancelled => log = log.push(note("Stopped.")),
             _ => {}
         }
-        if let Browse::Consent(question) = browse {
-            // Waiting for the user's choice: the question is theirs, not yet a turn.
-            log = log.push(bubble(question));
-        } else if chat.turns.is_empty() {
+        if chat.turns.is_empty() {
             let prompts = PRESETS
                 .iter()
                 .enumerate()
@@ -269,28 +250,12 @@ impl AiChat {
             Some(Err(e)) => log.push(error(Role::NOTE, e)),
             None => log,
         };
-        let input: Element<'a, Msg> = if matches!(browse, Browse::Consent(_)) {
-            column![
-                note(
-                    "To add the text of your selection to the question, OpenCircle downloads \
-                     the text-recognition model once (about 20 MB, from GitHub). \
-                     Nothing else is sent."
-                ),
-                actions(
-                    ("Download", Msg::Download),
-                    [("Send without the text", Msg::SendWithoutText)]
-                ),
-            ]
-            .spacing(STACK)
-            .into()
-        } else {
-            let placeholder = placeholder(chat);
-            match browser {
-                true => self.follow_up(placeholder, streaming, None, None),
-                false => {
-                    let attached = include && chat.takes(&ready.png);
-                    self.composer(placeholder, include, attached, streaming)
-                }
+        let placeholder = placeholder(chat);
+        let input: Element<'a, Msg> = match browser {
+            true => self.follow_up(placeholder, streaming, None, None),
+            false => {
+                let attached = include && chat.takes(&ready.png);
+                self.composer(placeholder, include, attached, streaming)
             }
         };
         let body = crate::ui::kit::scroll::quiet(log).id(LOG).height(Fill);

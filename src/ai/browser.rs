@@ -42,12 +42,19 @@ pub fn search_url(text: &str) -> String {
 }
 
 fn link(base: &str, question: &str) -> (String, bool) {
+    let (enc, cut) = query(question);
+    (format!("{base}{enc}"), cut)
+}
+
+/// `question` cut to fit and percent-encoded: the one `q=` value every Google
+/// link and the Lens page's form use, and whether it was cut.
+pub(crate) fn query(question: &str) -> (String, bool) {
     let mut max = MAX_CHARS;
     loop {
         let (q, cut) = cut_words(question.trim(), max);
         let enc = encode(q);
         if enc.len() <= MAX_ENCODED || max <= 1 {
-            return (format!("{base}{enc}"), cut);
+            return (enc, cut);
         }
         // Too many bytes once encoded (Arabic, CJK, ...): shorten and retry.
         let used = q.chars().count();

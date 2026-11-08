@@ -57,7 +57,7 @@ form{display:none}
 </style>
 </head>
 <body>
-<form id="f" method="POST" enctype="multipart/form-data" action="https://lens.google.com/v3/upload?ep=gsbubb&amp;st={{ST}}&amp;hl={{HL}}">
+<form id="f" method="POST" enctype="multipart/form-data" action="https://lens.google.com/v3/upload?ep=gsbubb&amp;st={{ST}}&amp;hl={{HL}}{{Q}}">
   <input type="file" id="img" name="encoded_image" accept="image/png" hidden>
   <input type="hidden" name="processed_image_dimensions" value="{{W}},{{H}}">
 </form>
@@ -104,17 +104,19 @@ impl Drop for SearchPage {
 }
 
 /// Write the page for this PNG crop (`width` x `height`) and open it in the
-/// default browser. Hold the result until the overlay closes, then drop it.
-pub fn open(png: &[u8], width: u32, height: u32) -> io::Result<SearchPage> {
-    let page = write_page(&std::env::temp_dir(), &page(png, width, height)?)?;
+/// default browser. With a `question`, Google answers about the picture (Lens
+/// "add to your search"). Hold the result until the overlay closes, then drop it.
+pub fn open(png: &[u8], width: u32, height: u32, question: Option<&str>) -> io::Result<SearchPage> {
+    let html = page(png, width, height, question)?;
+    let page = write_page(&std::env::temp_dir(), &html)?;
     crate::sys::open::open_file(&page.path)?; // on error `page` drops and the file goes
     Ok(page)
 }
 
 /// The auto-submit page for this PNG crop, in memory.
-fn page(png: &[u8], width: u32, height: u32) -> io::Result<String> {
+fn page(png: &[u8], width: u32, height: u32, question: Option<&str>) -> io::Result<String> {
     let (png, w, h) = fit(png, width, height)?;
-    Ok(page_html(&png, w, h, &locale(), epoch_ms()))
+    Ok(page_html(&png, w, h, &locale(), epoch_ms(), question))
 }
 
 /// Delete our temp files left by a crash or a quick quit: Lens pages, and the
@@ -173,8 +175,16 @@ fn esc(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-fn page_html(png: &[u8], w: u32, h: u32, hl: &str, st: u128) -> String {
+fn page_html(png: &[u8], w: u32, h: u32, hl: &str, st: u128, question: Option<&str>) -> String {
+    // The encoded question holds only unreserved characters and %XX: it can't
+    // leave the attribute or add a parameter.
+    let q = question
+        .filter(|q| !q.trim().is_empty())
+        .map_or(String::new(), |q| {
+            format!("&amp;q={}", crate::ai::browser::query(q).0)
+        });
     TEMPLATE
+        .replace("{{Q}}", &q)
         .replace("{{ST}}", &st.to_string())
         .replace("{{HL}}", &esc(hl))
         .replace("{{W}}", &w.to_string())
@@ -353,7 +363,7 @@ mod tests {
 
     #[test]
     fn html_has_fields_dimensions_and_neutral_copy() {
-        let html = page_html(b"Ma", 3, 2, "en-US", 1234);
+        let html = page_html(b"Ma", 3, 2, "en-US", 1234, None);
         assert!(
             html.contains("https://lens.google.com/v3/upload?ep=gsbubb&amp;st=1234&amp;hl=en-US")
         );
@@ -365,12 +375,37 @@ mod tests {
         assert!(!html.contains("{{"));
     }
 
+    #[test]
+    fn a_question_rides_in_the_action_url_and_cannot_escape_it() {
+        let plain = page_html(b"Ma", 3, 2, "en", 7, None);
+        // no question (or a blank one) = today's page, byte for byte
+        assert_eq!(plain, page_html(b"Ma", 3, 2, "en", 7, Some(" \n ")));
+        let html = page_html(b"Ma", 3, 2, "en", 7, Some("What is this?"));
+        assert!(html.contains("hl=en&amp;q=What%20is%20this%3F\">"));
+        assert!(html.contains("atob(\"TWE=\")"), "the picture still goes");
+        assert_eq!(html.replace("&amp;q=What%20is%20this%3F", ""), plain);
+        // hostile text stays inside the one q value
+        let evil = page_html(b"Ma", 3, 2, "en", 7, Some("\"><script>x</script>&udm=50#'"));
+        let action = evil.split("action=\"").nth(1).unwrap();
+        let (url, _) = action.split_once('"').unwrap();
+        let q = url.split("&amp;q=").nth(1).unwrap();
+        assert!(
+            q.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"%-._~".contains(&b))
+        );
+        assert_eq!(url.matches("&amp;").count(), 3, "st, hl, q only: {url}");
+        assert!(!evil.contains("<script>x"));
+        // a long question is cut like the AI Mode link's
+        let long = page_html(b"Ma", 3, 2, "en", 7, Some(&"word ".repeat(2000)));
+        assert!(long.len() < plain.len() + 6100);
+    }
+
     /// The hand-off page should feel like nothing: the post goes before any text
     /// is drawn, on the OS's own light or dark background, and the button shows
     /// only if the post has not gone after 2 s.
     #[test]
     fn the_hand_off_page_posts_at_once_in_the_os_colours() {
-        let html = page_html(b"Ma", 3, 2, "en", 0);
+        let html = page_html(b"Ma", 3, 2, "en", 0, None);
         let submit = html.find(".submit()").expect("auto-submit script");
         let words = html.find("Opening Google Lens").unwrap();
         let logo = html
@@ -406,7 +441,7 @@ mod tests {
         assert_eq!(locale_tag("en\"><script>alert(1)</script>"), "en");
         assert_eq!(locale_tag("-x"), "en");
         // even if a bad value reached the template, it is escaped
-        let html = page_html(b"", 1, 1, "\"><script>x", 0);
+        let html = page_html(b"", 1, 1, "\"><script>x", 0, None);
         assert!(!html.contains("<script>x"));
         assert!(html.contains("hl=&quot;&gt;&lt;script&gt;x"));
     }

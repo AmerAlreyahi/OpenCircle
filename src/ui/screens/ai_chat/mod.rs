@@ -17,7 +17,6 @@ use iced::widget::{markdown, operation, text_editor};
 use iced::{Task, task};
 
 use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
-use crate::actions::text::{self, Progress};
 use crate::actions::{self, Crop};
 use crate::ai;
 use crate::ai::providers::{self, Preset};
@@ -120,11 +119,6 @@ pub enum Msg {
     Ready(Result<Arc<Setup>, String>),
     Delta(String),
     Answered(Result<(), String>),
-    /// The user agreed to the model download.
-    Download,
-    /// Browser provider: send the question without the selection's text.
-    SendWithoutText,
-    Progress(Progress),
     /// Search the crop with Lens (the chat's "Search the image with Lens").
     Search,
     /// What a link's click did (its note).
@@ -206,7 +200,6 @@ enum State {
         /// `None` while loading the config and key.
         setup: Option<Result<Arc<Setup>, String>>,
         chat: Chat,
-        browse: Browse,
         /// Each turn's answer parsed as Markdown, and how much of it.
         answers: Vec<(usize, markdown::Content)>,
         /// The selection goes with the next question (on by default).
@@ -214,17 +207,6 @@ enum State {
         /// The question being edited (its turn).
         editing: Option<usize>,
     },
-}
-
-/// Browser provider (Google AI Mode): adding the selection's text to the
-/// question needs the OCR model, so it asks before the first download.
-#[derive(Default)]
-enum Browse {
-    #[default]
-    Idle,
-    /// No models yet: this question waits for the user's choice.
-    Consent(String),
-    Downloading(f32),
 }
 
 impl AiChat {
@@ -449,16 +431,8 @@ impl AiChat {
                     let _ = tx.unbounded_send(Msg::Loaded(chats::load(&db, &id)));
                 });
             }
-            (
-                State::Ask {
-                    chat,
-                    browse,
-                    editing,
-                    ..
-                },
-                Msg::Loaded(Ok(saved)),
-            ) => {
-                (*chat, *browse, *editing) = (Chat::from_saved(saved), Browse::Idle, None);
+            (State::Ask { chat, editing, .. }, Msg::Loaded(Ok(saved))) => {
+                (*chat, *editing) = (Chat::from_saved(saved), None);
                 (self.work, self.summarizing, self.drawer) = (None, None, None);
             }
             (_, Msg::Loaded(Err(e))) => self.note = Some(Err(e)),
@@ -525,7 +499,6 @@ impl AiChat {
                 State::Ask {
                     chat,
                     setup: Some(Ok(_)),
-                    browse: Browse::Idle,
                     ..
                 },
                 Msg::Submit,
@@ -540,16 +513,8 @@ impl AiChat {
                 return self.send(&question);
             }
             (State::Ask { include, .. }, Msg::IncludeScreen) => *include = !*include,
-            (
-                State::Ask {
-                    chat,
-                    browse,
-                    editing,
-                    ..
-                },
-                Msg::NewChat,
-            ) => {
-                (*chat, *browse, *editing) = (Chat::default(), Browse::Idle, None);
+            (State::Ask { chat, editing, .. }, Msg::NewChat) => {
+                (*chat, *editing) = (Chat::default(), None);
                 (self.work, self.summarizing, self.drawer) = (None, None, None);
                 self.input = text_editor::Content::new();
                 self.note = None;
@@ -598,31 +563,8 @@ impl AiChat {
                     return self.send(&preset.text(&crate::config::current().translate.target));
                 }
             }
-            (
-                State::Ask {
-                    browse: Browse::Consent(_),
-                    ..
-                },
-                Msg::Download,
-            ) => return self.resume(true),
-            (
-                State::Ask {
-                    browse: Browse::Consent(_),
-                    ..
-                },
-                Msg::SendWithoutText,
-            ) => return self.resume(false),
-            (
-                State::Ask {
-                    browse: browse @ Browse::Downloading(_),
-                    ..
-                },
-                Msg::Progress(Progress::Download(done)),
-            ) => *browse = Browse::Downloading(done),
-            (State::Ask { browse, .. }, Msg::Progress(Progress::Reading)) => *browse = Browse::Idle,
-            (State::Ask { chat, browse, .. }, Msg::Stop) => {
+            (State::Ask { chat, .. }, Msg::Stop) => {
                 chat.cancel();
-                *browse = Browse::Idle;
                 self.work = None;
             }
             (State::Ask { setup, .. }, Msg::Ready(result)) => {
@@ -640,9 +582,8 @@ impl AiChat {
                 // Follow the answer. (anchor_bottom() hid short content in iced 0.14.)
                 return operation::snap_to_end(LOG);
             }
-            (State::Ask { chat, browse, .. }, Msg::Answered(result)) => {
+            (State::Ask { chat, .. }, Msg::Answered(result)) => {
                 chat.finish(result);
-                *browse = Browse::Idle;
                 self.work = None;
                 return self.answered();
             }
@@ -694,7 +635,6 @@ impl AiChat {
         let State::Ask {
             setup: Some(Ok(setup)),
             chat,
-            browse,
             include,
             ..
         } = &mut self.state
@@ -706,14 +646,8 @@ impl AiChat {
             if question.is_empty() || chat.status == Status::Streaming {
                 return Task::none();
             }
-            if !*include {
-                return self.browse(question.into(), false); // the question only
-            }
-            if !text::models_present() {
-                *browse = Browse::Consent(question.into());
-                return Task::none();
-            }
-            return self.browse(question.into(), true);
+            let include = *include;
+            return self.browse(question.into(), include);
         }
         // Include screen off: the question goes without the picture.
         let png: &[u8] = if *include { &setup.png } else { &[] };
@@ -735,23 +669,8 @@ impl AiChat {
         task
     }
 
-    /// The user chose about the text model (Browser provider): go on with the waiting question.
-    fn resume(&mut self, read_text: bool) -> Task<Msg> {
-        let State::Ask { browse, .. } = &mut self.state else {
-            return Task::none();
-        };
-        let Browse::Consent(question) = std::mem::take(browse) else {
-            return Task::none();
-        };
-        if read_text {
-            *browse = Browse::Downloading(0.0);
-        }
-        self.browse(question, read_text)
-    }
-
-    /// Browser provider: read the selection's text (`read_text`; the user agreed
-    /// to the model), then open `prompt` + that text in Google AI Mode.
-    fn browse(&mut self, prompt: String, read_text: bool) -> Task<Msg> {
+    /// Browser provider: open `prompt` in the user's browser (`open_in_browser`).
+    fn browse(&mut self, prompt: String, include: bool) -> Task<Msg> {
         let State::Ask {
             setup: Some(Ok(_)),
             chat,
@@ -763,17 +682,8 @@ impl AiChat {
         chat.ask(&prompt, &[]); // the turn (and "busy"); nothing is sent by this
         let crop = self.crop.clone();
         let (task, handle) = background(move |tx| {
-            let read = read_text.then(|| {
-                text::read(&crop, |progress| {
-                    let _ = tx.unbounded_send(Msg::Progress(progress));
-                })
-            });
-            let (question, note) = browser_turn(&prompt, read);
-            // The user pressed Send: AI Mode opens in their own browser.
-            let line = match ai::browser::ask(&question) {
-                Ok(opened) => format!("{opened}{note}"),
-                Err(e) => e,
-            };
+            // The user pressed Send: the browser opens, with their own question.
+            let line = open_in_browser(&crop, &prompt, include).unwrap_or_else(|e| e);
             let _ = tx.unbounded_send(Msg::Delta(line));
             let _ = tx.unbounded_send(Msg::Answered(Ok(())));
         })
@@ -789,7 +699,6 @@ impl State {
         State::Ask {
             setup: None,
             chat,
-            browse: Browse::Idle,
             answers: Vec::new(),
             include: true,
             editing: None,
@@ -860,39 +769,48 @@ fn copy(text: String) -> Task<Msg> {
     })
 }
 
-/// Browser provider (no key): Ask AI only hands the question to Google AI Mode
-/// in the user's browser, with the selection's text when Include screen is on
-/// and the text reader is here; no chat, no chat history (the owner,
-/// 2026-10-28). Blocking: the pill's text, or why not.
+/// Browser provider (no key): Ask AI only hands the question to the user's
+/// browser; no chat, no chat history (the owner, 2026-10-28). Blocking: the
+/// pill's text, or why not.
 pub fn hand_off(crop: &Crop, question: Option<String>, include: bool) -> Result<String, String> {
     let target = config::current().translate.target;
     let prompt = question
         .filter(|q| !q.trim().is_empty())
         .unwrap_or_else(|| PRESETS[0].text(&target));
-    let read = (include && text::models_present()).then(|| text::read(crop, |_| {}));
-    let (question, _) = browser_turn(&prompt, read);
-    ai::browser::ask(&question)?;
-    Ok("Opened in your browser".into())
+    open_in_browser(crop, &prompt, include)
 }
 
-/// Browser provider: the question to open in AI Mode and the line to add to the
-/// answer. `read` is the OCR result (`None` = the user declined to read text).
-fn browser_turn(prompt: &str, read: Option<Result<String, String>>) -> (String, String) {
-    let alone = |why: String| {
-        (
-            ai::browser::question(prompt, None),
-            format!("\n{why} Only your question was sent."),
-        )
-    };
-    match read {
-        Some(Ok(text)) if !text.trim().is_empty() => (
-            ai::browser::question(prompt, Some(&text)),
-            "\nSent with the text read from your selection.".into(),
-        ),
-        Some(Ok(_)) => alone("No text was found in the selection.".into()),
-        Some(Err(e)) => alone(format!("Could not read the text ({e}).")),
-        None => alone("The image itself cannot be passed to AI Mode.".into()),
+/// Opens `prompt` in the user's own browser and says what was sent. Include
+/// screen on: Google Lens gets the selection with the question (the owner,
+/// 2026-11-08: the circled part goes along), so Google answers about the
+/// picture; off: Google AI Mode gets the question alone, no page file.
+fn open_in_browser(crop: &Crop, prompt: &str, include: bool) -> Result<String, String> {
+    open_in_browser_with(
+        crop,
+        prompt,
+        include,
+        actions::search_in_browser::open_asking,
+        ai::browser::ask,
+    )
+}
+
+/// [`open_in_browser`] with the two launchers given (the tests': no browser).
+fn open_in_browser_with(
+    crop: &Crop,
+    prompt: &str,
+    include: bool,
+    lens: impl FnOnce(&Crop, &str) -> Result<actions::search_in_browser::Held, String>,
+    ai_mode: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<String, String> {
+    let prompt = ai::browser::question(prompt, None); // trimmed
+    if !include {
+        ai_mode(&prompt)?;
+        return Ok("Opened in your browser".into());
     }
+    // The page file is only needed while the browser reads it: it goes once
+    // the browser has had its time (`Held::release`).
+    lens(crop, &prompt)?.release();
+    Ok("Opened in your browser with your selection".into())
 }
 
 #[cfg(test)]

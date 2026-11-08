@@ -11,19 +11,62 @@ fn at(screen: Size) -> Rectangle {
 }
 
 #[test]
-fn browser_turn_sends_text_or_says_why_not() {
-    let (q, note) = browser_turn("Explain", Some(Ok("Sunstone\nRare gem".into())));
-    assert_eq!(q, "Explain\n\nText from my screen:\nSunstone\nRare gem");
-    assert!(note.contains("Sent with the text"));
-    // Declined (no model download), empty, failed: the prompt alone, and the reason.
-    for (read, why) in [
-        (None, "cannot be passed"),
-        (Some(Ok("  \n".into())), "No text was found"),
-        (Some(Err("helper crashed".into())), "helper crashed"),
-    ] {
-        let (q, note) = browser_turn("Explain", read);
-        assert_eq!(q, "Explain");
-        assert!(note.contains(why) && note.contains("Only your question was sent"));
+fn include_screen_on_opens_the_lens_page_with_the_question_and_never_ai_mode() {
+    let (mut lens, mut ai_mode) = (None, false);
+    let line = open_in_browser_with(
+        &sample_crop(),
+        "  What is this?  ",
+        true,
+        |crop, q| {
+            lens = Some((crop.width, crop.height, q.to_string()));
+            Ok(actions::search_in_browser::Held::for_test())
+        },
+        |_| {
+            ai_mode = true;
+            Ok(String::new())
+        },
+    );
+    assert_eq!(line.unwrap(), "Opened in your browser with your selection");
+    assert_eq!(lens, Some((240, 120, "What is this?".to_string())));
+    assert!(!ai_mode, "no AI Mode link on this path");
+}
+
+#[test]
+fn include_screen_off_opens_the_ai_mode_link_and_writes_no_page() {
+    let (mut url, mut lens) = (String::new(), false);
+    let line = open_in_browser_with(
+        &sample_crop(),
+        "What is this?",
+        false,
+        |_, _| {
+            lens = true;
+            Ok(actions::search_in_browser::Held::for_test())
+        },
+        |q| {
+            url = ai::browser::url(q).0;
+            Ok(String::new())
+        },
+    );
+    assert_eq!(line.unwrap(), "Opened in your browser");
+    assert_eq!(
+        url,
+        "https://www.google.com/search?udm=50&q=What%20is%20this%3F"
+    );
+    assert!(!lens, "no page file, no picture");
+}
+
+#[test]
+fn a_failed_launch_reports_its_reason_for_both_routes() {
+    for include in [true, false] {
+        let err = open_in_browser_with(
+            &sample_crop(),
+            "x",
+            include,
+            |_, _| Err("lens failed".into()),
+            |_| Err("ai failed".into()),
+        )
+        .unwrap_err();
+        assert_eq!(err, if include { "lens failed" } else { "ai failed" });
     }
 }
 
@@ -43,11 +86,11 @@ fn unknown_provider_shows_the_fix_and_sends_nothing() {
     let _ = panel.update(Msg::Ready(Err(msg.clone())));
     let _ = panel.update(Msg::Preset(0));
     let _ = panel.update(Msg::Submit);
-    let State::Ask { chat, browse, .. } = &panel.state else {
+    let State::Ask { chat, .. } = &panel.state else {
         unreachable!()
     };
     assert!(chat.turns.is_empty() && chat.status == Status::Idle);
-    assert!(matches!(browse, Browse::Idle) && panel.work.is_none());
+    assert!(panel.work.is_none());
     let texts = crate::ui::kit::testing::shot::texts(panel.view(
         at(Size::new(1920.0, 1080.0)),
         Size::new(1920.0, 1080.0),

@@ -43,8 +43,18 @@ pub fn search_png(crop: &Crop) -> Result<Vec<u8>, String> {
 /// Writes the Lens page for `crop` and opens it in the default browser.
 /// Blocking (PNG encode, file write, process spawn): call off the UI thread.
 pub fn open(crop: &Crop) -> Result<Held, String> {
+    open_with(crop, None)
+}
+
+/// [`open`] with the user's `question` added (Ask AI, browser provider): Google
+/// answers about the picture. The same crop and page; only the question is new.
+pub fn open_asking(crop: &Crop, question: &str) -> Result<Held, String> {
+    open_with(crop, Some(question))
+}
+
+fn open_with(crop: &Crop, question: Option<&str>) -> Result<Held, String> {
     let png = search_png(crop)?;
-    let page = page::open(&png, crop.width, crop.height).map_err(|e| {
+    let page = page::open(&png, crop.width, crop.height, question).map_err(|e| {
         crate::log!("[lens] browser not opened: {e}");
         "Couldn't open your browser. Check that a default browser is set, then try again."
             .to_string()
