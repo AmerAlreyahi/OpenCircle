@@ -1491,7 +1491,7 @@ fn run_action<'a, P, C>(
             }
             window::Action::Resize(id, size) => {
                 if let Some(window) = window_manager.get_mut(id) {
-                    let _ = window.raw.request_inner_size(
+                    let applied = window.raw.request_inner_size(
                         winit::dpi::LogicalSize {
                             width: size.width,
                             height: size.height,
@@ -1500,6 +1500,24 @@ fn run_action<'a, P, C>(
                             window.state.scale_factor(),
                         )),
                     );
+
+                    // OpenCircle: a size winit applied at once (Wayland) comes
+                    // with no `Resized` event, so the viewport stayed the old
+                    // size and the compositor stretched the window; feed it in.
+                    if let Some(size) = applied
+                        && (size.width, size.height)
+                            != {
+                                let old = window.state.physical_size();
+                                (old.width, old.height)
+                            }
+                    {
+                        window.state.update(
+                            program,
+                            &window.raw,
+                            &winit::event::WindowEvent::Resized(size),
+                        );
+                        window.raw.request_redraw();
+                    }
                 }
             }
             window::Action::SetMinSize(id, size) => {
