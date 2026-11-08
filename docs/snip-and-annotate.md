@@ -33,10 +33,10 @@ area, that area is the pick.
 
 ## After the pick
 
-A pick always opens the Snip toolbar beside the area. By default the area **is
-already on the clipboard** (**Copy when picked**), so you can paste at once or
-mark it up first. Turn **Copy when picked** off in **Settings > Snip** to copy
-only when you press Copy.
+A pick always opens the Snip toolbar beside the area. By default a pick
+copies nothing: press `Ctrl+C` or **Copy** when you want it on the clipboard.
+Turn **Copy when picked** on in **Settings > Snip** to copy the area at the
+moment you pick it.
 
 Copy and Save keep the capture's **original size**. Settings > Snip can scale
 the long edge down to 1024, 1568 or 2048 px instead. Copy is the picture only;

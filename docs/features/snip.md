@@ -10,7 +10,7 @@ Take a screenshot, mark it up, and paste it into an AI chat or any app in second
 
 1. Press `Alt+A`. The screen freezes and a glow round its edge shows it is captured.
 2. Hover a window and click it, or drag to draw your own area. `Enter` takes the full screen.
-3. The picked area is already on the clipboard, and the toolbar opens beside it.
+3. The toolbar opens beside the picked area. Nothing is copied until you press `Ctrl+C` or **Copy** (Settings > Snip > **Copy when picked** copies at the pick).
 4. Mark it up if you like: click a tool, then drag on the picture.
 5. Press **Copy** to copy it again with your marks, or **Save** to write it to a file. `Esc` closes the toolbar.
 
