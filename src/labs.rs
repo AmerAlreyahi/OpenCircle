@@ -16,8 +16,6 @@ use crate::hotkey::QuickId;
 pub enum Feature {
     /// Song search: bar button, shortcut and Settings page.
     Song,
-    /// The local history of searches (`general.search_history`).
-    History,
     /// Live pins: a part of a window kept up to date on top (still pins left Labs).
     Pins,
     /// Live translate: bar button, tray item, shortcut and its Settings rows.
@@ -25,18 +23,12 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Feature; 4] = [
-        Feature::Song,
-        Feature::History,
-        Feature::Pins,
-        Feature::Live,
-    ];
+    pub const ALL: [Feature; 3] = [Feature::Song, Feature::Pins, Feature::Live];
 
     /// The switch's name in Settings and in messages.
     pub fn title(self) -> &'static str {
         match self {
             Feature::Song => "Song search",
-            Feature::History => "Search history",
             Feature::Pins => "Pins",
             Feature::Live => "Live translate",
         }
@@ -46,7 +38,6 @@ impl Feature {
     pub fn blurb(self) -> &'static str {
         match self {
             Feature::Song => "Find the song playing on your PC. Unfinished; may change",
-            Feature::History => "Keep a list of your searches on this PC. Unfinished; may change",
             Feature::Pins => {
                 "Keep a part of a window live above your windows. Unfinished; may change"
             }
@@ -59,7 +50,6 @@ impl Feature {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct Labs {
     pub song: bool,
-    pub history: bool,
     pub pins: bool,
     pub live: bool,
 }
@@ -68,7 +58,6 @@ impl Labs {
     pub fn has(&self, f: Feature) -> bool {
         match f {
             Feature::Song => self.song,
-            Feature::History => self.history,
             Feature::Pins => self.pins,
             Feature::Live => self.live,
         }
@@ -77,7 +66,6 @@ impl Labs {
     pub fn set(&mut self, f: Feature, on: bool) {
         match f {
             Feature::Song => self.song = on,
-            Feature::History => self.history = on,
             Feature::Pins => self.pins = on,
             Feature::Live => self.live = on,
         }
@@ -87,7 +75,6 @@ impl Labs {
     pub fn all_on() -> Labs {
         Labs {
             song: true,
-            history: true,
             pins: true,
             live: true,
         }

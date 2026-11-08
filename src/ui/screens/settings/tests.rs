@@ -439,13 +439,6 @@ fn a_labs_switch_saves_and_applies_at_once_and_brings_its_rows_back() {
         shortcuts.iter().any(|t| t == "Song search"),
         "{shortcuts:?}"
     );
-    // History likewise.
-    update(&mut s, Message::Labs(Feature::History, true));
-    assert!(
-        page(&mut s, Section::General)
-            .iter()
-            .any(|t| t == "Search history")
-    );
     // Off again: gone again, and the page it was on is left.
     update(&mut s, Message::Section(Section::Song));
     update(&mut s, Message::Labs(Feature::Song, false));

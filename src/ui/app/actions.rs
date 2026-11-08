@@ -103,13 +103,9 @@ impl App {
             return Task::none();
         }
         let url = crate::ai::browser::search_url(text);
-        let (text, crop) = (text.to_string(), self.crop());
         background(move |tx| {
             let pill = match crate::sys::open::open_link(&url) {
-                Ok(()) => {
-                    crate::history::search::keep("text", &text, &url, crop.as_ref());
-                    None
-                }
+                Ok(()) => None,
                 Err(e) => {
                     crate::log!("[opencircle] text search not opened: {e}");
                     Some("Couldn't open your browser")

@@ -616,7 +616,7 @@ mod tests {
     use super::*;
 
     /// Forget-my-data removes the settings folder and BOTH data folders (the
-    /// capitalised one holds the models, logs and search history), nothing else.
+    /// capitalised one holds the models and logs), nothing else.
     #[test]
     fn forgetting_user_data_removes_both_data_folders() {
         let home = std::env::temp_dir().join(format!("oc-forget-{}", std::process::id()));

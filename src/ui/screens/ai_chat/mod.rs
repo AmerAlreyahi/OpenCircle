@@ -771,11 +771,7 @@ impl AiChat {
             let (question, note) = browser_turn(&prompt, read);
             // The user pressed Send: AI Mode opens in their own browser.
             let line = match ai::browser::ask(&question) {
-                Ok(opened) => {
-                    let url = ai::browser::url(&question).0;
-                    crate::history::search::keep("ai", &prompt, &url, Some(&crop));
-                    format!("{opened}{note}")
-                }
+                Ok(opened) => format!("{opened}{note}"),
                 Err(e) => e,
             };
             let _ = tx.unbounded_send(Msg::Delta(line));
@@ -876,8 +872,6 @@ pub fn hand_off(crop: &Crop, question: Option<String>, include: bool) -> Result<
     let read = (include && text::models_present()).then(|| text::read(crop, |_| {}));
     let (question, _) = browser_turn(&prompt, read);
     ai::browser::ask(&question)?;
-    let url = ai::browser::url(&question).0;
-    crate::history::search::keep("ai", &prompt, &url, Some(crop));
     Ok("Opened in your browser".into())
 }
 

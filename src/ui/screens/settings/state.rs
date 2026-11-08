@@ -629,7 +629,6 @@ pub struct State {
 pub enum Pick {
     Default(DefaultAction),
     Autostart(bool),
-    History(bool),
     Update(bool),
     Lab(Feature, bool),
     Engine(Engine),
@@ -658,7 +657,6 @@ pub enum Message {
     /// The header: drag, minimise, maximise, close (the shell does them).
     Caption(Caption),
     DefaultAction(DefaultAction),
-    SearchHistory(bool),
     Autostart(bool),
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
@@ -1251,7 +1249,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
     let picked = match &message {
         Message::DefaultAction(_) => Some(Pick::Default(state.draft.general.default_action)),
         Message::Autostart(_) => Some(Pick::Autostart(state.draft.general.autostart)),
-        Message::SearchHistory(_) => Some(Pick::History(state.draft.general.search_history)),
         Message::AutoUpdate(_) => Some(Pick::Update(state.draft.update.auto == Some(true))),
         Message::Labs(f, _) => Some(Pick::Lab(*f, state.draft.labs.has(*f))),
         Message::Engine(_) => Some(Pick::Engine(state.draft.translate.engine)),
@@ -1371,12 +1368,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             state.interval = s;
         }
         Message::DefaultAction(a) => state.draft.general.default_action = a,
-        Message::SearchHistory(on) => {
-            state.draft.general.search_history = on;
-            if !on {
-                crate::history::search::clear_default(); // turning it off deletes it
-            }
-        }
         Message::Autostart(on) => state.draft.general.autostart = on,
         Message::SelectStyle(v) => state.draft.selection.style = v,
         Message::TextReader(v) => state.draft.selection.text_reader = v,

@@ -93,7 +93,7 @@ credited in `NOTICE` and in Settings > About.
 
 ### Optional Labs features
 
-Song search, search history, live pins and live translate are unfinished, off by
+Song search, live pins and live translate are unfinished, off by
 default and hidden until enabled in **Settings > Labs**. Live translate is
 planned for a later release.
 

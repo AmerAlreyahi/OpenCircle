@@ -1,12 +1,11 @@
 //! General (`settings-window.js` "GENERAL"): what Enter does, start with the
-//! OS, search history (Labs), the save folder, updates.
+//! OS, the save folder, updates.
 use iced::widget::tooltip::Position;
 use iced::widget::{column, container};
 use iced::{Element, Fill};
 
 use super::super::state::{Message, Pick, State, UPDATE_PRIVACY, issue};
 use crate::config::DefaultAction;
-use crate::labs::Feature;
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::field::field;
 use crate::ui::kit::segmented::{boolean, segmented};
@@ -42,22 +41,6 @@ pub fn view(state: &State) -> Element<'_, Message> {
         ),
     )];
     rows = rows.push(start_row(state));
-    // Search history is a Labs feature: its row exists only while it is on.
-    if d.labs.has(Feature::History) {
-        rows = rows.push(setting_row::row(
-            title("Search history"),
-            "Only on this PC: what you searched, a small picture, the time",
-            switch(
-                state,
-                general.search_history,
-                |p| match p {
-                    Pick::History(v) => Some(v),
-                    _ => None,
-                },
-                Message::SearchHistory,
-            ),
-        ));
-    }
     rows = rows.push(folder_row(state));
     rows = rows.push(update_row(state));
     let status = state.update_status.as_deref();

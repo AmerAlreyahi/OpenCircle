@@ -222,6 +222,7 @@ fn main() -> ExitCode {
     #[cfg(target_os = "linux")]
     capture::portal::repair_user_launcher();
     std::thread::spawn(|| remove_old_webview(&paths::app_data()));
+    std::thread::spawn(|| remove_search_history(paths::search_history().as_deref()));
     // once: the key all OpenAI-compatible providers shared goes to the one chosen
     let ai = config.ai.clone();
     std::thread::spawn(move || {
@@ -269,8 +270,36 @@ fn remove_old_webview(data: &std::path::Path) {
     }
 }
 
+/// The Labs search history is gone (owner, 2026-11-08): its file, data nobody can
+/// see, is deleted at start. Logged once (the file is then gone); a failure is
+/// logged and retried next start.
+fn remove_search_history(file: Option<&std::path::Path>) {
+    let Some(file) = file else { return };
+    match std::fs::remove_file(file) {
+        Ok(()) => crate::log!("[opencircle] removed the old search history file"),
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            crate::log!("[opencircle] cannot remove the old search history: {e}");
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_old_search_history_file_is_removed_and_nothing_else() {
+        let d = std::env::temp_dir().join(format!("oc-sh-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let (old, other) = (d.join("search_history.json"), d.join("song_history.json"));
+        std::fs::write(&old, "[]").unwrap();
+        std::fs::write(&other, "[]").unwrap();
+        super::remove_search_history(Some(&old));
+        assert!(!old.exists() && other.exists());
+        super::remove_search_history(Some(&old)); // gone: no error
+        super::remove_search_history(None);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
     #[test]
     fn old_webview_data_is_removed_and_nothing_else() {
         let d = std::env::temp_dir().join(format!("oc-wv-{}", std::process::id()));

@@ -35,7 +35,7 @@ pub fn previews() -> PathBuf {
     app_data().join("previews")
 }
 
-/// `<data>/OpenCircle/search_history.json`.
+/// `<data>/OpenCircle/search_history.json`: the removed search history's file (deleted at start).
 pub fn search_history() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join(CAPITAL).join("search_history.json"))
 }

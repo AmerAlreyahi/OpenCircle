@@ -1,11 +1,10 @@
 //! What the app remembers on this PC, each only when the user turned it on:
-//! searches handed to the browser, recent songs, recent snip captures, and
+//! recent songs, recent snip captures, and
 //! (in `store::chats`) AI chats. Settings > History counts and clears the
 //! kinds it lists through `tidy`, from where each one lives.
 use std::path::Path;
 
 pub mod recent;
-pub mod search;
 pub mod song;
 
 /// A kind of record Settings > History lists.

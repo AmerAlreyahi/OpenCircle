@@ -95,13 +95,6 @@ impl Config {
                 &mut w,
                 |s: &String| check_folder(s),
             );
-            c.general.search_history = get(
-                t,
-                "general.",
-                "search_history",
-                d.general.search_history,
-                &mut w,
-            );
             c.general.autostart = get(t, "general.", "autostart", d.general.autostart, &mut w);
             c.general.shortcuts_taken_shown =
                 get(t, "general.", "shortcuts_taken_shown", vec![], &mut w);
@@ -274,7 +267,6 @@ impl Config {
             let (p, d) = ("labs.", d.labs);
             // `snip` / `editor` (Snip's switches until 0.1.2) are ignored since schema 9.
             c.labs.song = get(t, p, "song", d.song, &mut w);
-            c.labs.history = get(t, p, "history", d.history, &mut w);
             c.labs.pins = get(t, p, "pins", d.pins, &mut w);
             c.labs.live = get(t, p, "live", d.live, &mut w);
         }

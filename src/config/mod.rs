@@ -19,7 +19,6 @@
 //! [general]
 //! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
-//! search_history = false            # keep the searches handed to the browser on this PC (opt-in)
 //! autostart = true                  # start with Windows / at login (tray only, no window)
 //! shortcuts_taken_shown = []        # the shortcuts another app held when the one-time notice said so
 //!                                   # (written only when not empty)
@@ -95,7 +94,6 @@
 //!
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
 //! song = false                      # song search
-//! history = false                   # the local search history
 //! pins = false                      # pinning a capture to the screen
 //! live = false                      # live translate (unfinished until 0.3.0): bar button, tray item, shortcut
 //!
@@ -126,8 +124,8 @@
 //! next save (still read without a warning): `[labs] snip` / `editor` and the window / full-screen snip
 //! entries of `[[quick_actions]]` (Snip has one shortcut); 10 makes "editor" (a pick copies nothing; Ctrl+C or Copy
 //! does) the default `snip.after`: every stored "both" moves to it once (0.1.3 wrote the old default). 11 stops writing the keys nothing
-//! reads (`widget_theme`, `selection.after` / `search_with`, `activation_glow`, edge `animate`); they still read without a
-//! warning. A file older than `VERSION` is copied to
+//! reads (`widget_theme`, `selection.after` / `search_with`, `activation_glow`, edge `animate`) and the removed search history
+//! (`general.search_history`, `labs.history`); they still read without a warning. A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -454,9 +452,6 @@ pub struct GeneralConfig {
     pub default_action: DefaultAction,
     /// Where the Save dialog starts; "" = the system's choice.
     pub save_folder: String,
-    /// Keep the searches handed to the browser on this PC (`search_history`). Off by default.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub search_history: bool,
     /// Start OpenCircle with the OS (`autostart`). On by default.
     pub autostart: bool,
     /// The shortcuts another app held when the start notice last said so
@@ -470,7 +465,6 @@ impl Default for GeneralConfig {
         GeneralConfig {
             default_action: DefaultAction::default(),
             save_folder: String::new(),
-            search_history: false,
             autostart: true,
             shortcuts_taken_shown: Vec::new(),
         }
@@ -1145,7 +1139,7 @@ mod tests {
         // What the user had set is read as before, snip / song / history included.
         let (c, _) = Config::parse(V010_USED);
         assert_eq!(c.theme, Theme::Dark);
-        assert!(c.general.search_history && c.snip.history && c.song.history);
+        assert!(c.snip.history && c.song.history);
         assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Editor, 2048));
         assert_eq!(c.song.source, SongSource::Microphone);
         let quick: Vec<_> = c
@@ -1765,10 +1759,6 @@ mod tests {
         let abs = std::env::temp_dir().to_string_lossy().replace('\\', "/");
         let (c, w) = Config::parse(&format!("[general]\nsave_folder = \"{abs}\"\n"));
         assert_eq!((c.general.save_folder.as_str(), w.len()), (abs.as_str(), 0));
-        // Search history: opt-in.
-        assert!(!Config::default().general.search_history);
-        let (c, w) = Config::parse("[general]\nsearch_history = true\n");
-        assert!(c.general.search_history && w.is_empty());
         // Start with the OS: on unless turned off; a non-bool is reported.
         assert!(Config::default().general.autostart);
         let (c, w) = Config::parse("[general]\nautostart = false\n");
@@ -2494,6 +2484,25 @@ mod tests {
             assert!(!text.contains(gone), "{gone}: {text}");
         }
         assert!(text.contains("version = 11"), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The removed search history (owner, 2026-11-08; folded into schema 11, which no
+    /// release has written yet): its keys still load without a warning and a save
+    /// drops them, the old file backed up.
+    #[test]
+    fn the_removed_search_history_keys_load_quietly_and_are_not_written() {
+        let old =
+            "version = 10\n[general]\nsearch_history = true\n[labs]\nhistory = true\nsong = true\n";
+        let (dir, path) = config_with("no-search-history", old);
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty() && c.labs.song, "{w:?}");
+        assert_eq!(fs_text(&dir.join("config.toml.bak-v10")), old);
+        let text = fs_text(&path);
+        assert!(!text.contains("search_history"), "{text}");
+        let saved: Table = text.parse().unwrap();
+        assert!(saved["labs"].get("history").is_none(), "{text}");
+        assert_eq!(saved["labs"]["song"].as_bool(), Some(true));
         let _ = std::fs::remove_dir_all(dir);
     }
 

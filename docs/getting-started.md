@@ -149,7 +149,7 @@ opens beside it to mark it up.
   as one numbered image), Pin, Colour picker and Screen ruler.
 - Blur is a soft pixel mosaic that hides text so it can't be recovered; Redact is
   a solid box, for when you want no trace at all.
-- Song search, search history, pins and live translate are unfinished and in
+- Song search, pins and live translate are unfinished and in
   **Settings > Labs**, off by default.
 
 <p align="center">
@@ -171,7 +171,7 @@ Details: [Snip and annotate](snip-and-annotate.md).
 </p>
 
 **Settings > Labs** switches the unfinished features on (Song search,
-Search history, Pins, Live translate). They are off by default.
+Pins, Live translate). They are off by default.
 
 Changes save by themselves. Nothing needs a restart.
 

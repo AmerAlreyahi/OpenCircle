@@ -49,7 +49,6 @@ pub fn open(crop: &Crop) -> Result<Held, String> {
         "Couldn't open your browser. Check that a default browser is set, then try again."
             .to_string()
     })?;
-    crate::history::search::keep("lens", "", "", Some(crop));
     Ok(Held {
         _page: Arc::new(page),
         opened: Instant::now(),
