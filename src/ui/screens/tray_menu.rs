@@ -71,7 +71,7 @@ impl Menu {
     }
 
     /// The entries shown, in order.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn entries(&self) -> Vec<Entry> {
         self.rows.iter().map(|(e, _)| *e).collect()
     }

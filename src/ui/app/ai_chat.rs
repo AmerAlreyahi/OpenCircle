@@ -365,8 +365,8 @@ impl App {
     /// Every selection's crop, in the order made, stacked top to bottom on white
     /// (one image: Copy text reads them in that order, Ask AI sees them all).
     /// One selection: just its crop.
-    // ponytail: one stacked image, not one image per selection: the Ask panel
-    // (panel.rs) sends one; give `ai::Message` several images when it can.
+    // ponytail: one stacked image, not one image per selection: the AI chat
+    // sends one; give `ai::Message` several images when it can.
     pub(in crate::ui) fn stacked(&self) -> Option<Crop> {
         if self.o.others.is_empty() || self.o.edit.is_some() {
             return self.crop();

@@ -2,9 +2,9 @@
 //! is Cargo's (`CARGO_PKG_VERSION`), which release.yml stamps from the git tag.
 // ponytail: keyed on the host OS, so native Windows builds only (CI); cross builds skip it.
 //
-// The Settings previews: every `assets/previews/<name>.webp` found is bundled
-// (`$OUT_DIR/previews.rs`, `CLIPS`); a page lists the names it wants and a
-// missing one is simply absent (docs/previews.md).
+// The Settings previews: only the stills in `assets/previews/stills` are bundled
+// (`$OUT_DIR/previews.rs`, `STILLS`); the clips are downloaded on "Play preview"
+// (docs/previews.md).
 //
 // The setup build: `OPENCIRCLE_SETUP_MSI=<the release MSI>` embeds that MSI
 // (`setup::payload`, cfg `setup_payload`) and the exe becomes OpenCircle-Setup.

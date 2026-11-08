@@ -3,7 +3,7 @@
 //! (`general.search_history`, off by default), only in the user's data dir:
 //! the query text, a small thumbnail of the crop, the time and the kind.
 //! Turning it off deletes it.
-// ponytail: recorded only; a list to browse lands with the AI chat (N-05).
+// ponytail: recorded only; nothing lists it yet (the AI chat landed without a list).
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};

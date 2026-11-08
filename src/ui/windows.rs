@@ -834,7 +834,7 @@ impl Windows {
     }
 
     /// The open toasts' text and whether each says done (tests).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn toasts(&self) -> Vec<(String, bool)> {
         (self.toasts.iter())
             .map(|(_, text, tone)| (text.clone(), *tone == Tone::Ok))

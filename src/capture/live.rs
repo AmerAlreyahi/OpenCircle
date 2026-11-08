@@ -127,7 +127,6 @@ pub enum Event {
 }
 
 /// Why the capture thread wakes.
-#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug)]
 enum Wake {
     Frame,
