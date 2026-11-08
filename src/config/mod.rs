@@ -1,11 +1,10 @@
 //! The one config reader/validator: `<user config dir>/opencircle/config.toml`.
 //!
-//! Schema (version 9). Every key is optional; a missing file means defaults.
+//! Schema (version 11). Every key is optional; a missing file means defaults.
 //!
 //! ```toml
-//! version = 10                      # schema version, written by save()
+//! version = 11                      # schema version, written by save()
 //! theme = "system"                  # system | light | dark
-//! widget_theme = "default"          # floating widgets (bar, cards, toolbar): default | frost | graphite
 //! glass_effect = true               # frost / graphite blur the screen behind them (false = solid tint)
 //!                                   # (both kept and written; unused until glass returns)
 //! shortcut = "Ctrl+Shift+Space"     # global capture shortcut
@@ -46,8 +45,6 @@
 //!
 //! [selection]
 //! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
-//! after = "wait"                    # kept, ignored: nothing is sent until the user picks an action
-//! search_with = "lens"              # kept, ignored (auto search is gone, owner 2026-10-26)
 //! text_reader = "auto"              # who reads text to select: auto | windows (Windows OCR) | pp_ocr
 //!
 //! [look]                            # how the screen looks while OpenCircle is active
@@ -58,14 +55,12 @@
 //! colours = ["#8f80ff", "#4fc9e0"]  # palette = two_colour: from, to
 //! glow = 100                        # edge glow strength, 0-100 % (100 = the design's; 0 = no edge)
 //! dim = 12                          # dim over the frozen screen, 0-60 %
-//! activation_glow = true            # kept, unused: the edge is static (2026-10-27)
 //! brackets = "white"                # white | accent: the selection's corner colour
 //! bracket_style = "corners"         # corners | frame
 //! bar = "glass"                     # glass | glass_dark | glass_light | solid | outline
 //! [look.custom.overlay]             # the screen edge per mode: overlay, live, snip
 //! style = "glow"                    # glow | none (thin: the glow too)
 //! thickness = 6                     # 1-12 px; only the line on the live layer (Windows)
-//! animate = true                    # kept, unused: the edge is static
 //! [song]                            # song search (the service key: OS keyring only)
 //! source = "system"                 # system (what this PC plays) | microphone
 //! history = false                   # keep recent songs on this PC
@@ -130,7 +125,9 @@
 //! shortcut PrintScreen to Alt+A (unless Alt+A is taken; a user's own key stays); 9 drops retired keys on the
 //! next save (still read without a warning): `[labs] snip` / `editor` and the window / full-screen snip
 //! entries of `[[quick_actions]]` (Snip has one shortcut); 10 makes "editor" (a pick copies nothing; Ctrl+C or Copy
-//! does) the default `snip.after`: every stored "both" moves to it once (0.1.3 wrote the old default). A file older than `VERSION` is copied to
+//! does) the default `snip.after`: every stored "both" moves to it once (0.1.3 wrote the old default). 11 stops writing the keys nothing
+//! reads (`widget_theme`, `selection.after` / `search_with`, `activation_glow`, edge `animate`); they still read without a
+//! warning. A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -155,7 +152,7 @@ pub use store::{appearance, current, look, look_config, rebase, set_current, upd
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = 11;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
@@ -537,7 +534,11 @@ pub enum SearchWith {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct SelectionConfig {
     pub style: SelectStyle,
+    /// Read, ignored, not written (schema 11).
+    #[serde(skip_serializing)]
     pub after: After,
+    /// Read, ignored, not written (schema 11).
+    #[serde(skip_serializing)]
     pub search_with: SearchWith,
     pub text_reader: TextReader,
 }
@@ -652,15 +653,19 @@ impl Rgb {
         Some(Rgb([byte(0)?, byte(2)?, byte(4)?]))
     }
 
-    pub fn hex(self) -> String {
+    /// `#rrggbb`, or `#RRGGBB` with `upper` (the file always writes lower case).
+    pub fn hex(self, upper: bool) -> String {
         let [r, g, b] = self.0;
-        format!("#{r:02x}{g:02x}{b:02x}")
+        match upper {
+            true => format!("#{r:02X}{g:02X}{b:02X}"),
+            false => format!("#{r:02x}{g:02x}{b:02x}"),
+        }
     }
 }
 
 impl Serialize for Rgb {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&self.hex())
+        s.serialize_str(&self.hex(false))
     }
 }
 
@@ -677,7 +682,8 @@ pub struct Edge {
     pub style: EdgeStyle,
     /// Logical px (`EDGE_THICKNESS`); a glow reaches 8x this far inward.
     pub thickness: u8,
-    /// Overlay / snip: once when it opens. Live: all the time.
+    /// Read, ignored, not written (schema 11): the edge is static.
+    #[serde(skip_serializing)]
     pub animate: bool,
 }
 
@@ -695,6 +701,8 @@ pub struct Look {
     pub glow: u8,
     /// Dim over the frozen screen, % (`DIM`).
     pub dim: u8,
+    /// Read, ignored, not written (schema 11).
+    #[serde(skip_serializing)]
     pub activation_glow: bool,
     pub brackets: BracketColour,
     pub bracket_style: BracketStyle,
@@ -826,7 +834,6 @@ impl Default for EditorConfig {
 pub struct Config {
     pub version: u32,
     pub theme: Theme,
-    pub widget_theme: WidgetTheme,
     /// Blur the screen behind `Frost` / `Graphite` widgets (off = solid tint).
     pub glass_effect: bool,
     pub shortcut: String,
@@ -945,7 +952,6 @@ impl Default for Config {
         Config {
             version: VERSION,
             theme: Theme::System,
-            widget_theme: WidgetTheme::Default,
             glass_effect: true,
             shortcut: DEFAULT_CAPTURE_SHORTCUT.to_string(),
             appearance: AppearanceConfig::default(),
@@ -1168,12 +1174,12 @@ mod tests {
         // The file is the new schema now, with every old value and the Labs switches.
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 10") && text.contains("[labs]"),
+            text.contains("version = 11") && text.contains("[labs]"),
             "{text}"
         );
         let (again, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
-        assert_eq!(again, c, "nothing lost in the rewrite");
+        assert_eq!(kept(&again), kept(&c), "nothing lost in the rewrite");
         assert_eq!(
             again.quick_actions,
             Config::parse(V010_USED).0.quick_actions
@@ -1205,13 +1211,13 @@ mod tests {
 
     #[test]
     fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-        let (dir, path) = config_with("current", "version = 10\n[labs]\nsong = true\n");
+        let (dir, path) = config_with("current", "version = 11\n[labs]\nsong = true\n");
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty() && c.labs.song, "{w:?}");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "version = 10\n[labs]\nsong = true\n"
+            "version = 11\n[labs]\nsong = true\n"
         );
         let gone = dir.join("none.toml");
         Config::load_from(&gone);
@@ -1285,7 +1291,7 @@ mod tests {
         c.save_to(&path).unwrap();
         let (back, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
-        assert_eq!(back, c);
+        assert_eq!(kept(&back), kept(&c));
         assert!(back.labs.pins && !back.labs.song);
         let _ = std::fs::remove_dir_all(dir);
         let (c, w) = Config::parse("version = 2\n[labs]\nsong = \"yes\"\n");
@@ -1477,7 +1483,7 @@ mod tests {
             selection: SelectionConfig {
                 style: SelectStyle::Shape,
                 after: After::Wait,
-                search_with: SearchWith::Both,
+                search_with: SearchWith::Lens,
                 text_reader: TextReader::PpOcr,
             },
             ..Config::default()
@@ -1486,7 +1492,7 @@ mod tests {
         c.look.custom.palette = ColourSet::TwoColour;
         c.look.custom.colours = [Rgb([1, 2, 3]), Rgb([0xfe, 0xdc, 0xba])];
         c.look.custom.bar = BarStyle::Outline;
-        *c.look.edge_mut(EdgeMode::Live) = edge(EdgeStyle::None, 12, false);
+        *c.look.edge_mut(EdgeMode::Live) = edge(EdgeStyle::None, 12, true); // animate is not written
         let text = toml::to_string_pretty(&c).unwrap();
         assert!(
             text.contains("\"#fedcba\"") && text.contains("[look.custom.live]"),
@@ -1541,6 +1547,8 @@ mod tests {
         assert_eq!((c.look.custom.glow, c.look.custom.dim), (0, 60));
         assert_eq!(Rgb::parse("#8F80ff"), Some(Rgb([0x8f, 0x80, 0xff])));
         assert_eq!(Rgb::parse("8f80ff"), None);
+        assert_eq!(Rgb([30, 144, 255]).hex(true), "#1E90FF");
+        assert_eq!(Rgb([30, 144, 255]).hex(false), "#1e90ff");
     }
 
     #[test]
@@ -1606,7 +1614,6 @@ mod tests {
         c.snip.max_edge = 0;
         c.snip.delay = 3;
         c.editor.line_assist = false;
-        c.widget_theme = WidgetTheme::Frost;
         c.glass_effect = false;
         c.quick_actions.pop();
         c.save_to(&path).unwrap();
@@ -1621,13 +1628,10 @@ mod tests {
         assert!(!path.with_extension("toml.tmp").exists());
         assert!(text.contains("[general]") && text.contains("default_action = \"copy\""));
         assert!(text.contains("[editor]\nline_assist = false"), "{text}");
-        assert!(text.contains("widget_theme = \"frost\"") && text.contains("glass_effect = false"));
+        assert!(text.contains("glass_effect = false"));
         // A typo falls back to the default with a warning.
         let (bad, w) = Config::parse("widget_theme = \"frosty\"\nglass_effect = 3\n");
-        assert_eq!(
-            (bad.widget_theme, bad.glass_effect),
-            (WidgetTheme::Default, true)
-        );
+        assert!(bad.glass_effect);
         assert_eq!(w.len(), 2, "{w:?}");
         assert!(text.contains("[update]\nauto = false"), "{text}");
         // Not asked yet: no [update] key written, none read.
@@ -1808,7 +1812,7 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
             let text = std::fs::read_to_string(&path).unwrap();
             assert!(
-                text.contains("version = 10") && text.contains("after = \"wait\""),
+                text.contains("version = 11") && !text.contains("search_with"),
                 "{text}"
             );
             assert!(!text.contains("[results]"), "{text}");
@@ -2047,7 +2051,7 @@ mod tests {
         assert_eq!(c, Config::unreadable());
         assert_eq!(w.len(), 1);
         assert!(w[0].contains("AI is off"), "{w:?}");
-        let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 11\n");
+        let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 12\n");
         assert_eq!(c, Config::unreadable());
         assert_eq!(w.len(), 3, "{w:?}");
         assert!(
@@ -2138,19 +2142,36 @@ mod tests {
         );
     }
 
+    /// `c` without the keys that are read but never written (schema 11): what a
+    /// save and reload keeps.
+    fn kept(c: &Config) -> Config {
+        let d = Config::default();
+        let mut c = c.clone();
+        c.selection.after = d.selection.after;
+        c.selection.search_with = d.selection.search_with;
+        let look = |l: &mut Look| {
+            l.activation_glow = d.look.custom.activation_glow;
+            for m in EdgeMode::ALL {
+                l.edge_mut(m).animate = d.look.custom.edge(m).animate;
+            }
+        };
+        look(&mut c.look.custom);
+        c
+    }
+
     fn fixture(name: &str) -> String {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config");
         std::fs::read_to_string(dir.join(name)).unwrap()
     }
 
-    /// The default file is byte-for-byte the frozen v10 one (the file format is frozen).
+    /// The default file is byte-for-byte the frozen v11 one (the file format is frozen).
     #[test]
     fn the_default_file_is_byte_for_byte_the_frozen_one() {
         let dir = tmp_dir("default-bytes");
         let path = dir.join("config.toml");
         Config::default().save_to(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(written, fixture("default-v10.toml"));
+        assert_eq!(written, fixture("default-v11.toml"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2185,10 +2206,10 @@ mod tests {
             // Same behaviour: what was read is what the rewritten file reads back.
             let (again, w) = Config::load_from(&path);
             assert!(w.is_empty(), "v{n}: {w:?}");
-            assert_eq!(again, c, "v{n}");
+            assert_eq!(kept(&again), kept(&c), "v{n}");
             assert_eq!(c, Config::parse(text).0, "v{n}");
             let saved: Table = fs_text(&path).parse().unwrap();
-            assert_eq!(saved["version"].as_integer(), Some(10));
+            assert_eq!(saved["version"].as_integer(), Some(11));
             let labs = saved["labs"].as_table().unwrap();
             assert!(
                 !labs.contains_key("snip") && !labs.contains_key("editor"),
@@ -2256,7 +2277,7 @@ mod tests {
         let mut want = Config::default();
         want.look.theme = LookTheme::Spectrum;
         assert_eq!(c, want);
-        let frozen = fixture("default-v10.toml").replace("sapphire_glow", "spectrum");
+        let frozen = fixture("default-v11.toml").replace("sapphire_glow", "spectrum");
         assert_eq!(fs_text(&path), frozen);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -2381,8 +2402,7 @@ mod tests {
         assert_eq!(look(&fs_text(&path)), look(old));
         let text = fs_text(&path);
         for want in [
-            "version = 10",
-            "widget_theme = \"graphite\"",
+            "version = 11",
             "glass_effect = false",
             "theme = \"aurora\"",
             "[appearance]",
@@ -2423,7 +2443,7 @@ mod tests {
                 assert_eq!(c.snip.after, want, "{name} (labs snip {snip})");
                 assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
                 let saved: Table = fs_text(&path).parse().unwrap();
-                assert_eq!(saved["version"].as_integer(), Some(10));
+                assert_eq!(saved["version"].as_integer(), Some(11));
                 assert!(saved["labs"].get("snip").is_none(), "dropped (schema 9)");
                 let (again, _) = Config::load_from(&path);
                 assert_eq!(again.snip.after, want, "migrated once");
@@ -2447,11 +2467,34 @@ mod tests {
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(c.snip.after, SnipAfter::Editor);
         assert_eq!(fs_text(&dir.join("config.toml.bak-v9")), v9);
-        assert_eq!(fs_text(&path), fixture("default-v10.toml"));
+        assert_eq!(fs_text(&path), fixture("default-v11.toml"));
         let _ = std::fs::remove_dir_all(dir);
         // a v10 file keeps a deliberate "both"
         let (c, w) = Config::parse("version = 10\n[snip]\nafter = \"both\"\n");
         assert_eq!((c.snip.after, w), (SnipAfter::Both, vec![]));
+    }
+
+    /// Schema 11 (clean-up before 0.1.4): the keys nothing reads stop being written.
+    /// A v10 file still loads without a warning, with its (ignored) values read; a
+    /// save drops them, the old file backed up.
+    #[test]
+    fn schema_11_stops_writing_the_ignored_keys_with_a_backup() {
+        let mut v10 = fixture("default-v10.toml");
+        for key in ["widget_theme", "search_with", "activation_glow", "animate"] {
+            assert!(v10.contains(key), "{key}");
+        }
+        v10 = v10.replace("search_with = \"lens\"", "search_with = \"both\"");
+        let (dir, path) = config_with("v11-drop", &v10);
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(c.selection.search_with, SearchWith::Both, "still read");
+        assert_eq!(fs_text(&dir.join("config.toml.bak-v10")), v10);
+        let text = fs_text(&path);
+        for gone in ["widget_theme", "search_with", "activation_glow", "animate"] {
+            assert!(!text.contains(gone), "{gone}: {text}");
+        }
+        assert!(text.contains("version = 11"), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn fs_text(path: &Path) -> String {

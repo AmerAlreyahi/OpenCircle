@@ -41,7 +41,8 @@ impl Config {
             }
         }
         c.theme = get(&root, "", "theme", d.theme, &mut w);
-        c.widget_theme = get(&root, "", "widget_theme", d.widget_theme, &mut w);
+        let widget_theme: WidgetTheme =
+            get(&root, "", "widget_theme", WidgetTheme::Default, &mut w);
         c.glass_effect = get(&root, "", "glass_effect", d.glass_effect, &mut w);
         c.shortcut = get_checked(&root, "", "shortcut", d.shortcut, &mut w, |s: &String| {
             parse_shortcut(s).map(drop)
@@ -71,7 +72,7 @@ impl Config {
             c.appearance.hidden_previews = get(t, p, "hidden_previews", vec![], &mut w);
         } else if file_version < Some(4) {
             // Schema 4: the old widget theme becomes that mode's app theme.
-            match c.widget_theme {
+            match widget_theme {
                 WidgetTheme::Frost => c.appearance.light = "frost".into(),
                 WidgetTheme::Graphite => c.appearance.dark = "graphite".into(),
                 WidgetTheme::Default => {}

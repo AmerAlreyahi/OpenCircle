@@ -33,7 +33,7 @@ pub fn report(c: &Config) -> String {
     let text = format!(
         "OpenCircle {version} ({build})\nOS: {os}\n\n\
          Screens:\n{screens}\n\n\
-         Settings:\n  theme {theme:?}, widget theme {widget:?}, default action {action}\n  \
+         Settings:\n  theme {theme:?}, default action {action}\n  \
          AI provider {provider}, model set: {model}\n  \
          translate {src} -> {dst}, engine {engine:?}, live every {ms} ms\n  \
          text reader {reader:?}, snip after {after:?}, format {format:?}\n  \
@@ -53,7 +53,6 @@ pub fn report(c: &Config) -> String {
         },
         os = os(),
         theme = c.theme,
-        widget = c.widget_theme,
         action = c.general.default_action.id(),
         provider = c.ai.provider.id(),
         model = !c.ai.model.is_empty(),
