@@ -143,7 +143,8 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Guard<'_, Message
                 (_, Some('c')) if modifiers.command() => Some(Keyed::Copy),
                 _ => None,
             },
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => Some(Keyed::Focus),
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+            | Event::Touch(iced::touch::Event::FingerPressed { .. }) => Some(Keyed::Focus),
             _ => None,
         };
         let mut focused = Focused(false);

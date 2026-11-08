@@ -937,6 +937,8 @@ pub struct Pointer {
     right: Option<Instant>,
     shift: bool,
     alt: bool,
+    /// The finger held (touch or pen acts as the left button: `ui::touch`).
+    finger: Option<iced::touch::Finger>,
     /// The last drawing and what it shows: drawn again only when that
     /// changes, so a frame where only a widget above it moves redraws only
     /// round that widget (the window redraws what changed).
@@ -979,6 +981,16 @@ impl canvas::Program<Event> for Overlay<'_> {
         bounds: Rectangle,
         cursor: Cursor,
     ) -> Option<Action<Event>> {
+        // A finger or pen is the mouse: its place is the pointer (no cursor comes with it).
+        let touched = super::touch::as_mouse(event, &mut pointer.finger);
+        let (event, cursor) = match touched {
+            Some((mouse, at)) => {
+                pointer.at = Some(at - (bounds.position() - Point::ORIGIN));
+                (canvas::Event::Mouse(mouse), Cursor::Available(at))
+            }
+            None => (event.clone(), cursor),
+        };
+        let event = &event;
         if pointer.opening != self.opening {
             *pointer = Pointer {
                 opening: self.opening,
@@ -2300,6 +2312,96 @@ mod tests {
         // back on screen, the selection sits where it was drawn
         let r = v.rect_to_screen(sel.area);
         assert!(near(r.position(), a) && (r.width - 300.0).abs() < 0.01);
+    }
+
+    /// What the canvas publishes for `events`, with the cursor where the last mouse event
+    /// put it (as iced would hand it over); a touch brings no cursor.
+    fn published(events: &[iced::Event]) -> Vec<String> {
+        let first_draw = Cell::new(None);
+        let overlay = Overlay {
+            stroke: &[],
+            selection: None,
+            others: &[],
+            view: View::new(960, 540, Size::new(960.0, 540.0)),
+            zooming: false,
+            handles: false,
+            opening: 0,
+            first_draw: &first_draw,
+            frame_times: &RefCell::default(),
+            hover: false,
+            dim: true,
+            live_drag: false,
+            look: crate::config::Config::default().look.active(),
+            morph: None,
+            words: &[],
+            picked: Vec::new(),
+            text: Vec::new(),
+        };
+        let bounds = Rectangle::with_size(Size::new(960.0, 540.0));
+        let mut state = Pointer::default();
+        let mut cursor = Cursor::Unavailable;
+        let mut out = Vec::new();
+        for e in events {
+            if let iced::Event::Mouse(mouse::Event::CursorMoved { position }) = e {
+                cursor = Cursor::Available(*position);
+            }
+            let action = canvas::Program::update(&overlay, &mut state, e, bounds, cursor);
+            out.extend(
+                action
+                    .and_then(|a| a.into_inner().0)
+                    .map(|m| format!("{m:?}")),
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn finger_circles_like_the_left_button() {
+        use iced::touch::{Event as T, Finger};
+        let ring: Vec<Point> = (0..=12)
+            .map(|i| {
+                let a = i as f32 / 12.0 * std::f32::consts::TAU;
+                Point::new(300.0 + 80.0 * a.cos(), 200.0 + 60.0 * a.sin())
+            })
+            .collect();
+        let id = Finger(7);
+        let finger = |f: fn(Finger, Point) -> T, p| iced::Event::Touch(f(id, p));
+        let mut touch = vec![finger(
+            |id, position| T::FingerPressed { id, position },
+            ring[0],
+        )];
+        touch.extend(
+            ring[1..]
+                .iter()
+                .map(|p| finger(|id, position| T::FingerMoved { id, position }, *p)),
+        );
+        touch.push(finger(
+            |id, position| T::FingerLifted { id, position },
+            ring[12],
+        ));
+        // a second finger on the screen is ignored
+        touch.insert(
+            2,
+            iced::Event::Touch(T::FingerMoved {
+                id: Finger(8),
+                position: Point::new(5.0, 5.0),
+            }),
+        );
+        let mut mouse = vec![
+            iced::Event::Mouse(mouse::Event::CursorMoved { position: ring[0] }),
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        ];
+        mouse.extend(
+            ring[1..]
+                .iter()
+                .map(|p| iced::Event::Mouse(mouse::Event::CursorMoved { position: *p })),
+        );
+        mouse.push(iced::Event::Mouse(mouse::Event::ButtonReleased(
+            mouse::Button::Left,
+        )));
+        let by_finger = published(&touch);
+        assert!(by_finger.len() > 12, "{by_finger:?}");
+        assert_eq!(by_finger, published(&mouse));
     }
 
     /// The overlay drawn headless (960x540, image = screen px) with `stroke` and

@@ -19,6 +19,7 @@ mod snip;
 #[cfg(test)]
 mod snip_shots;
 pub mod theme;
+mod touch;
 mod windows;
 
 use crate::Trigger;

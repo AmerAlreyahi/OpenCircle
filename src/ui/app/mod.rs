@@ -24,6 +24,7 @@ use self::message::{Hiding, Message, Purpose};
 use self::opening::Open;
 use crate::ui::kit::motion;
 use crate::ui::platform::monitor::can_hide_windows;
+use crate::ui::touch;
 use crate::ui::{live_layer, overlay, update_card, windows};
 
 pub(in crate::ui) mod actions;
@@ -443,14 +444,10 @@ impl App {
             };
             // Dragging the result card: the pointer anywhere, until let go.
             let card = match self.o.chat_drag {
-                Some(_) => iced::event::listen_with(|event, _, _| match event {
-                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
-                        Some(Message::CardMoved(position))
-                    }
-                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
-                        iced::mouse::Button::Left,
-                    )) => Some(Message::CardReleased),
-                    _ => None,
+                Some(_) => iced::event::listen_with(|event, _, _| match touch::drag(&event) {
+                    Some(touch::Drag::Moved(position)) => Some(Message::CardMoved(position)),
+                    Some(touch::Drag::Released) => Some(Message::CardReleased),
+                    None => None,
                 }),
                 None => Subscription::none(),
             };
@@ -473,15 +470,11 @@ impl App {
             // whenever the bar shows (not only once held), so no move or release
             // is lost while the grab is still being handled.
             let bar = match self.bottom_bar_shown() || self.editing() {
-                true => iced::event::listen_with(|event, _, id| match event {
+                true => iced::event::listen_with(|event, _, id| match touch::drag(&event) {
                     // (in that window's px: Snip's toolbar may be on another screen)
-                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
-                        Some(Message::BarMovedOn(id, position))
-                    }
-                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
-                        iced::mouse::Button::Left,
-                    )) => Some(Message::BarReleased),
-                    _ => None,
+                    Some(touch::Drag::Moved(position)) => Some(Message::BarMovedOn(id, position)),
+                    Some(touch::Drag::Released) => Some(Message::BarReleased),
+                    None => None,
                 }),
                 false => Subscription::none(),
             };

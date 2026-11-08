@@ -119,6 +119,8 @@ struct Pointer {
     hot: Option<(i8, i8)>,
     /// Ctrl is held: a press moves what is under it (`Message::PressMove`).
     ctrl: bool,
+    /// The finger held (touch or pen acts as the left button: `ui::touch`).
+    finger: Option<iced::touch::Finger>,
 }
 
 impl canvas::Program<Message> for Input<'_> {
@@ -132,7 +134,11 @@ impl canvas::Program<Message> for Input<'_> {
         cursor: Cursor,
     ) -> Option<Action<Message>> {
         let e = self.editor;
-        let message = match event {
+        let (event, cursor) = match crate::ui::touch::as_mouse(event, &mut pointer.finger) {
+            Some((mouse, at)) => (canvas::Event::Mouse(mouse), Cursor::Available(at)),
+            None => (event.clone(), cursor),
+        };
+        let message = match &event {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?; // None = over the toolbar
                 pointer.down = true;
@@ -337,6 +343,64 @@ mod tests {
             height: H,
             rgba,
         }
+    }
+
+    /// A stroke by finger is the same messages as by the left button.
+    #[test]
+    fn finger_draws_like_the_left_button() {
+        use iced::mouse::{self, Cursor};
+        use iced::touch::{Event as T, Finger};
+        use iced::widget::canvas::Program;
+        let e = Annotator::new(page(), 1.0);
+        let input = super::Input {
+            editor: &e,
+            grown: 0.0,
+            map: ScreenMap::ONE,
+        };
+        let bounds = iced::Rectangle::new(Point::ORIGIN, Size::new(W as f32, H as f32));
+        let run = |events: &[iced::Event]| {
+            let mut state = super::Pointer::default();
+            let mut cursor = Cursor::Unavailable;
+            let mut out = Vec::new();
+            for ev in events {
+                if let iced::Event::Mouse(mouse::Event::CursorMoved { position }) = ev {
+                    cursor = Cursor::Available(*position);
+                }
+                let a = input.update(&mut state, ev, bounds, cursor);
+                out.extend(a.and_then(|a| a.into_inner().0));
+            }
+            out
+        };
+        let id = Finger(1);
+        let path = [pt(40.0, 40.0), pt(80.0, 50.0), pt(120.0, 90.0)];
+        let mut touch = vec![iced::Event::Touch(T::FingerPressed {
+            id,
+            position: path[0],
+        })];
+        touch.extend(
+            path[1..]
+                .iter()
+                .map(|p| iced::Event::Touch(T::FingerMoved { id, position: *p })),
+        );
+        touch.push(iced::Event::Touch(T::FingerLifted {
+            id,
+            position: path[2],
+        }));
+        let mut by_mouse = vec![
+            iced::Event::Mouse(mouse::Event::CursorMoved { position: path[0] }),
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        ];
+        by_mouse.extend(
+            path[1..]
+                .iter()
+                .map(|p| iced::Event::Mouse(mouse::Event::CursorMoved { position: *p })),
+        );
+        by_mouse.push(iced::Event::Mouse(mouse::Event::ButtonReleased(
+            mouse::Button::Left,
+        )));
+        let got = run(&touch);
+        assert_eq!(got.len(), 4, "{got:?}");
+        assert_eq!(got, run(&by_mouse));
     }
 
     fn pt(x: f32, y: f32) -> Point {
