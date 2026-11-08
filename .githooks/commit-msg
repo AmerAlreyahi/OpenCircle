@@ -1,0 +1,13 @@
+#!/bin/sh
+# Owner rule (2026-11-04, never override): no AI is ever credited in Git.
+# Strips AI co-author / "generated with" lines from the message, then refuses
+# the commit if one is still there (e.g. a trailer glued to another line).
+f="$1"
+pat='^[[:space:]]*(co-authored-by:.*(claude|anthropic|codex|openai|chatgpt|gpt|gemini|copilot|cursor|antigravity|bot)|.*generated with.*(claude|codex|chatgpt|gemini|copilot)|.*noreply@anthropic\.com)'
+grep -v -i -E "$pat" "$f" > "$f.clean" && mv "$f.clean" "$f"
+# drop blank lines left at the end
+sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$f"
+if grep -i -E "$pat|claude code" "$f" >/dev/null; then
+  echo "commit refused: the message credits an AI (owner rule: never)." >&2
+  exit 1
+fi

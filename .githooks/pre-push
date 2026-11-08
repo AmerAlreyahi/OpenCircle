@@ -1,0 +1,17 @@
+#!/bin/sh
+# Owner rule (2026-11-04): never push a NEW commit that credits an AI.
+# Only commits not yet on any remote are checked (the old ones stay as they are).
+pat='co-authored-by:.*(claude|anthropic|codex|openai|chatgpt|gpt|gemini|copilot|cursor|antigravity)|generated with.*(claude|codex|chatgpt|gemini|copilot)|noreply@anthropic\.com'
+zero=0000000000000000000000000000000000000000
+bad=""
+while read -r lref lsha rref rsha; do
+  [ "$lsha" = "$zero" ] && continue
+  for c in $(git rev-list "$lsha" --not --remotes 2>/dev/null); do
+    if git log -1 --format=%B "$c" | grep -i -E "$pat" >/dev/null; then bad="$bad $c"; fi
+  done
+done
+if [ -n "$bad" ]; then
+  echo "push refused: these new commits credit an AI (owner rule: never):$bad" >&2
+  echo "fix: git commit --amend (or rebase -i to reword), then push again." >&2
+  exit 1
+fi

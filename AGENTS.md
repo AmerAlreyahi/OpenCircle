@@ -632,6 +632,20 @@ production systems.
   their logic works, then build it our way (Rust, iced, our kit). GPL code is read for the approach only, never
   copied or translated (we are MIT); MIT/Apache code may be reused with its notice.
 
+- No AI credit in Git (owner, 2026-11-04, never override; guard added 2026-11-08): no `Co-Authored-By`, "Generated with" or
+  any AI name on commits, PRs or tags, from any agent. Guards: Claude Code's attribution setting is off; `.githooks/commit-msg`
+  strips such lines and `.githooks/pre-push` refuses new commits that carry them (after a fresh clone run
+  `git config core.hooksPath .githooks`). Commits already in history (701 on main, v0.1.3 tag included) stay as they are
+  (owner, 2026-11-08: "leave it for now"); only new commits must be clean.
+- Copy only on request (owner, 2026-11-08, SUPERSEDES "Copy when picked on by default" of 2026-11-02): a Snip pick no longer
+  copies; the clipboard is written only by Ctrl+C or the Copy button (so no double entry in Win+V). Settings keeps its
+  "Copy when picked" switch, now off by default (hide, don't delete); an older file's default-on moves to off once (schema 10,
+  backup), a value the user changed on purpose stays.
+- The circled part goes to the AI (owner, 2026-11-08): Ask AI sends the selected crop, never the text alone, in the browser
+  provider AND in the in-app AI chat; check both paths.
+- Edge assist (owner, 2026-11-08): a simple, gentle magnetic edge when dragging a Snip area by hand: it helps the user land on
+  window/element edges, never aggressive; no mockup needed.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
