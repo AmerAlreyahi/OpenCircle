@@ -3,7 +3,7 @@
 //! Schema (version 9). Every key is optional; a missing file means defaults.
 //!
 //! ```toml
-//! version = 9                       # schema version, written by save()
+//! version = 10                      # schema version, written by save()
 //! theme = "system"                  # system | light | dark
 //! widget_theme = "default"          # floating widgets (bar, cards, toolbar): default | frost | graphite
 //! glass_effect = true               # frost / graphite blur the screen behind them (false = solid tint)
@@ -129,7 +129,8 @@
 //! ("editor" = no auto copy; "both" = copy; a stored "copy" still reads as "both"); 7 moves the old default `snip.max_edge` 1568 to 0 (Original; any other value stays); 8 moves Snip's old default
 //! shortcut PrintScreen to Alt+A (unless Alt+A is taken; a user's own key stays); 9 drops retired keys on the
 //! next save (still read without a warning): `[labs] snip` / `editor` and the window / full-screen snip
-//! entries of `[[quick_actions]]` (Snip has one shortcut). A file older than `VERSION` is copied to
+//! entries of `[[quick_actions]]` (Snip has one shortcut); 10 makes "editor" (a pick copies nothing; Ctrl+C or Copy
+//! does) the default `snip.after`: every stored "both" moves to it once (0.1.3 wrote the old default). A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -154,7 +155,7 @@ pub use store::{appearance, current, look, look_config, rebase, set_current, upd
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 9;
+pub const VERSION: u32 = 10;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 const DEFAULT_TRANSLATE_TARGET: &str = "ar";
 /// Ends the warning when `Provider::Unreadable` is set.
@@ -392,11 +393,12 @@ pub struct TranslateConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SnipAfter {
-    /// Picked with the Snip toolbar, not copied until the user does.
-    Editor,
-    /// Picked with the Snip toolbar and already copied (the default). The
-    /// retired "copy" (copy and close, schema 6) reads as this.
+    /// Picked with the Snip toolbar, copied only by Ctrl+C or the Copy button
+    /// (the default since schema 10).
     #[default]
+    Editor,
+    /// Picked with the Snip toolbar and already copied. The retired "copy"
+    /// (copy and close, schema 6) reads as this.
     #[serde(alias = "copy")]
     Both,
 }
@@ -438,7 +440,7 @@ fn is_default_long_max(px: &u32) -> bool {
 impl Default for SnipConfig {
     fn default() -> Self {
         SnipConfig {
-            after: SnipAfter::Both,
+            after: SnipAfter::Editor,
             max_edge: DEFAULT_MAX_EDGE,
             format: Format::Png,
             save_original: false,
@@ -1138,7 +1140,7 @@ mod tests {
         let (c, _) = Config::parse(V010_USED);
         assert_eq!(c.theme, Theme::Dark);
         assert!(c.general.search_history && c.snip.history && c.song.history);
-        assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Both, 2048));
+        assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Editor, 2048));
         assert_eq!(c.song.source, SongSource::Microphone);
         let quick: Vec<_> = c
             .quick_actions
@@ -1166,7 +1168,7 @@ mod tests {
         // The file is the new schema now, with every old value and the Labs switches.
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 9") && text.contains("[labs]"),
+            text.contains("version = 10") && text.contains("[labs]"),
             "{text}"
         );
         let (again, w) = Config::load_from(&path);
@@ -1203,13 +1205,13 @@ mod tests {
 
     #[test]
     fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-        let (dir, path) = config_with("current", "version = 9\n[labs]\nsong = true\n");
+        let (dir, path) = config_with("current", "version = 10\n[labs]\nsong = true\n");
         let (c, w) = Config::load_from(&path);
         assert!(w.is_empty() && c.labs.song, "{w:?}");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "version = 9\n[labs]\nsong = true\n"
+            "version = 10\n[labs]\nsong = true\n"
         );
         let gone = dir.join("none.toml");
         Config::load_from(&gone);
@@ -1411,7 +1413,7 @@ mod tests {
     #[test]
     fn defaults_match_design() {
         let c = Config::default();
-        assert_eq!(c.version, 9);
+        assert_eq!(c.version, VERSION);
         assert_eq!(c.labs, Labs::default(), "Labs: everything off");
         assert_eq!(c.theme, Theme::System);
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
@@ -1806,7 +1808,7 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
             let text = std::fs::read_to_string(&path).unwrap();
             assert!(
-                text.contains("version = 9") && text.contains("after = \"wait\""),
+                text.contains("version = 10") && text.contains("after = \"wait\""),
                 "{text}"
             );
             assert!(!text.contains("[results]"), "{text}");
@@ -1823,7 +1825,7 @@ mod tests {
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(
             (c.snip.delay, c.snip.after, c.snip.max_edge),
-            (0, SnipAfter::Both, 1024)
+            (0, SnipAfter::Editor, 1024)
         );
         let (c, w) = Config::parse("[snip]\ndelay = 5\n");
         assert!(w.is_empty() && c.snip.delay == 5, "{w:?}");
@@ -1836,8 +1838,8 @@ mod tests {
         let d = Config::default().snip;
         assert_eq!(
             d.after,
-            SnipAfter::Both,
-            "picked with the toolbar, and copied"
+            SnipAfter::Editor,
+            "picked with the toolbar, nothing copied"
         );
         assert_eq!(
             (d.max_edge, d.format),
@@ -1855,13 +1857,13 @@ mod tests {
         let s = &c.snip;
         assert_eq!(
             (s.after, s.max_edge, s.format),
-            (SnipAfter::Both, 0, Format::Jpeg)
+            (SnipAfter::Editor, 0, Format::Jpeg)
         );
         assert!(s.save_original && s.cursor && s.history);
         // and back through the writer
         let text = toml::to_string_pretty(&c).unwrap();
         assert!(
-            text.contains("[snip]") && text.contains("after = \"both\""),
+            text.contains("[snip]") && text.contains("after = \"editor\""),
             "{text}"
         );
         assert_eq!(Config::parse(&text).0, c);
@@ -2045,7 +2047,7 @@ mod tests {
         assert_eq!(c, Config::unreadable());
         assert_eq!(w.len(), 1);
         assert!(w[0].contains("AI is off"), "{w:?}");
-        let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 10\n");
+        let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 11\n");
         assert_eq!(c, Config::unreadable());
         assert_eq!(w.len(), 3, "{w:?}");
         assert!(
@@ -2141,14 +2143,14 @@ mod tests {
         std::fs::read_to_string(dir.join(name)).unwrap()
     }
 
-    /// The default file is byte-for-byte the frozen v9 one (the file format is frozen).
+    /// The default file is byte-for-byte the frozen v10 one (the file format is frozen).
     #[test]
     fn the_default_file_is_byte_for_byte_the_frozen_one() {
         let dir = tmp_dir("default-bytes");
         let path = dir.join("config.toml");
         Config::default().save_to(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(written, fixture("default-v9.toml"));
+        assert_eq!(written, fixture("default-v10.toml"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2169,7 +2171,7 @@ mod tests {
             (2, v2),
             (4, labs_on),
         ];
-        files.extend((3..=8).map(|n| (n, fixture(&format!("default-v{n}.toml")))));
+        files.extend((3..=9).map(|n| (n, fixture(&format!("default-v{n}.toml")))));
         let snip_entries = |q: &[QuickAction]| {
             (q.iter().filter(|q| q.action == "snip"))
                 .map(|q| q.target)
@@ -2186,7 +2188,7 @@ mod tests {
             assert_eq!(again, c, "v{n}");
             assert_eq!(c, Config::parse(text).0, "v{n}");
             let saved: Table = fs_text(&path).parse().unwrap();
-            assert_eq!(saved["version"].as_integer(), Some(9));
+            assert_eq!(saved["version"].as_integer(), Some(10));
             let labs = saved["labs"].as_table().unwrap();
             assert!(
                 !labs.contains_key("snip") && !labs.contains_key("editor"),
@@ -2254,7 +2256,7 @@ mod tests {
         let mut want = Config::default();
         want.look.theme = LookTheme::Spectrum;
         assert_eq!(c, want);
-        let frozen = fixture("default-v9.toml").replace("sapphire_glow", "spectrum");
+        let frozen = fixture("default-v10.toml").replace("sapphire_glow", "spectrum");
         assert_eq!(fs_text(&path), frozen);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -2379,7 +2381,7 @@ mod tests {
         assert_eq!(look(&fs_text(&path)), look(old));
         let text = fs_text(&path);
         for want in [
-            "version = 9",
+            "version = 10",
             "widget_theme = \"graphite\"",
             "glass_effect = false",
             "theme = \"aurora\"",
@@ -2410,9 +2412,9 @@ mod tests {
             let with =
                 |after: &str| old.replace("after = \"copy\"", &format!("after = \"{after}\""));
             for (snip, text, want) in [
-                (false, old.clone(), SnipAfter::Both),
-                (true, on(old), SnipAfter::Both),
-                (false, with("both"), SnipAfter::Both),
+                (false, old.clone(), SnipAfter::Editor),
+                (true, on(old), SnipAfter::Editor),
+                (false, with("both"), SnipAfter::Editor),
                 (false, with("editor"), SnipAfter::Editor),
             ] {
                 let (dir, path) = config_with(&format!("v6-{name}-{snip}-{want:?}"), &text);
@@ -2421,7 +2423,7 @@ mod tests {
                 assert_eq!(c.snip.after, want, "{name} (labs snip {snip})");
                 assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
                 let saved: Table = fs_text(&path).parse().unwrap();
-                assert_eq!(saved["version"].as_integer(), Some(9));
+                assert_eq!(saved["version"].as_integer(), Some(10));
                 assert!(saved["labs"].get("snip").is_none(), "dropped (schema 9)");
                 let (again, _) = Config::load_from(&path);
                 assert_eq!(again.snip.after, want, "migrated once");
@@ -2429,7 +2431,26 @@ mod tests {
             }
         }
         // a stored "copy" in a newer file reads as "both" too, without a warning
-        let (c, w) = Config::parse("version = 9\n[snip]\nafter = \"copy\"\n");
+        let (c, w) = Config::parse("version = 10\n[snip]\nafter = \"copy\"\n");
+        assert_eq!((c.snip.after, w), (SnipAfter::Both, vec![]));
+    }
+
+    /// Schema 10 (owner, 2026-11-08): a pick copies nothing by default. Every stored
+    /// "both" (and the old "copy") moves to "editor" once, with a backup; the frozen
+    /// v9 file still loads.
+    #[test]
+    fn schema_10_moves_both_to_editor_once_with_a_backup() {
+        let v9 = fixture("default-v9.toml");
+        assert!(v9.contains("after = \"both\""));
+        let (dir, path) = config_with("v10-both", &v9);
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(c.snip.after, SnipAfter::Editor);
+        assert_eq!(fs_text(&dir.join("config.toml.bak-v9")), v9);
+        assert_eq!(fs_text(&path), fixture("default-v10.toml"));
+        let _ = std::fs::remove_dir_all(dir);
+        // a v10 file keeps a deliberate "both"
+        let (c, w) = Config::parse("version = 10\n[snip]\nafter = \"both\"\n");
         assert_eq!((c.snip.after, w), (SnipAfter::Both, vec![]));
     }
 

@@ -279,6 +279,11 @@ impl Config {
         }
         // Schema 6: "copy" (copy and close, a toast) is gone; a pick always shows
         // the Snip toolbar, so it reads as "both" (`SnipAfter`'s alias).
+        // Schema 10: a pick copies nothing by default; every stored "both" (0.1.3
+        // wrote the old default, so a choice can't be told apart) moves to "editor".
+        if file_version < Some(10) && c.snip.after == SnipAfter::Both {
+            c.snip.after = SnipAfter::Editor;
+        }
         // Schema 7: Copy and Save keep the original size by default; the old
         // default (1568) moves to Original once, any other choice stays.
         if file_version < Some(7) && c.snip.max_edge == 1568 {

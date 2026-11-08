@@ -720,6 +720,10 @@ fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
     let _ = copy::copied::image();
     let task = app.on_overlay(overlay::Event::Enter);
     run_task(&mut app, task);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(copy::copied::image(), None, "a pick copies nothing");
+    let task = app.on_snip_toolbar(E::Copy);
+    run_task(&mut app, task);
     assert_eq!(copied_image(), Some((800, 600)));
 }
 
@@ -1213,10 +1217,11 @@ fn the_snip_toolbars_scroll_button_starts_a_scrolling_capture_of_the_area() {
     assert!(app.o.edit.is_some() && app.scroll().is_none());
 }
 
-/// After a pick (owner, 2026-10-31): "Both" by default: a pick lands in the
-/// picked state (the live area, Snip's toolbar) and is already copied.
+/// After a pick (owner, 2026-11-08): a pick lands in the picked state (the live
+/// area, Snip's toolbar) and copies NOTHING by default; the Copy button writes
+/// the clipboard (one Win+V entry, not two).
 #[test]
-fn a_pick_is_picked_with_the_toolbar_and_copied_by_default() {
+fn a_pick_copies_nothing_by_default_and_the_copy_button_does() {
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
     let _ = copy::copied::image();
@@ -1227,7 +1232,15 @@ fn a_pick_is_picked_with_the_toolbar_and_copied_by_default() {
         "the live area"
     );
     run_task(&mut app, task);
-    assert_eq!(copied_image(), Some((300, 200)), "and copied");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        copy::copied::image(),
+        None,
+        "the pick left the clipboard alone"
+    );
+    let task = app.on_snip_toolbar(crate::snip::annotate::Message::Copy);
+    run_task(&mut app, task);
+    assert_eq!(copied_image(), Some((300, 200)), "Copy wrote it");
 }
 
 /// A recent capture (the Recent strip) opens picked on its own image: the
@@ -1264,7 +1277,8 @@ fn a_recent_capture_opens_picked_with_snips_toolbar() {
     assert_eq!(app.o.selection.map(|s| s.area), Some(shown));
     assert!(app.snip_dock().is_some(), "its toolbar docks to it");
     run_task(&mut app, task);
-    assert_eq!(copied_image(), Some((400, 1500)), "full size, copied");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(copy::copied::image(), None, "a pick copies nothing");
 }
 
 #[test]

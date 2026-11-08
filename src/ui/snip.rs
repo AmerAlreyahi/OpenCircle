@@ -1014,8 +1014,8 @@ mod tests {
     fn only_editor_skips_the_copy_on_pick() {
         assert!(copies(SnipAfter::Both));
         assert!(!copies(SnipAfter::Editor));
-        // Out of the box a snip is picked with the toolbar and already copied.
-        assert!(copies(crate::config::Config::default().snip.after));
+        // Out of the box a pick copies nothing: only Ctrl+C / Copy write the clipboard.
+        assert!(!copies(crate::config::Config::default().snip.after));
     }
 
     #[test]
