@@ -249,9 +249,21 @@ fn backend_never_imports_ui() {
         if name.starts_with("ui/") || name == "main.rs" || name.ends_with("tests.rs") {
             continue;
         }
-        let src = std::fs::read_to_string(&p).unwrap();
-        // the production part: up to the test module
-        let prod = src.split("#[cfg(test)]\nmod ").next().unwrap();
+        // LF everywhere (Windows checks out CRLF), so both platforms scan the same code
+        let src = std::fs::read_to_string(&p).unwrap().replace("\r\n", "\n");
+        // the production part: up to an INLINE test module (`mod x {`); an
+        // out-of-line `mod tests;` ends nothing, the rest of the file is production
+        let end = src
+            .match_indices("#[cfg(test)]\nmod ")
+            .map(|(i, m)| i + m.len())
+            .find(|&i| {
+                src[i..]
+                    .lines()
+                    .next()
+                    .is_some_and(|l| l.trim_end().ends_with('{'))
+            })
+            .unwrap_or(src.len());
+        let prod = &src[..end];
         let hits: Vec<&str> = code(prod).filter(|l| l.contains("crate::ui")).collect();
         assert!(
             hits.is_empty(),
