@@ -30,9 +30,8 @@ use super::overlay;
 use crate::actions::Crop;
 use crate::capture::window_rect::WinRect;
 use crate::config::{SnipAfter, Target};
+use crate::snip::{SNAP, snap};
 
-/// An edge snaps to a window / control edge this near (logical px).
-pub(crate) const SNAP: f32 = 8.0;
 /// The hover info chip's height, the drag size chip's width (logical px).
 const INFO_H: f32 = 30.0;
 const SIZE_CHIP_W: f32 = 96.0;
@@ -787,38 +786,6 @@ fn clip(targets: Vec<Pick>, whole: Rectangle) -> Vec<Pick> {
             })
         })
         .collect()
-}
-
-/// `p` moved onto the nearest edge of the rectangles it is in or near, per axis,
-/// if one is within `reach`.
-pub(crate) fn snap<'a>(
-    p: Point,
-    rects: impl IntoIterator<Item = &'a Rectangle>,
-    reach: f32,
-) -> Point {
-    let (mut x, mut y) = ((reach, p.x), (reach, p.y));
-    for r in rects {
-        let near = p.x >= r.x - reach
-            && p.x <= r.x + r.width + reach
-            && p.y >= r.y - reach
-            && p.y <= r.y + r.height + reach;
-        if !near {
-            continue;
-        }
-        for edge in [r.x, r.x + r.width] {
-            let d = (p.x - edge).abs();
-            if d < x.0 {
-                x = (d, edge);
-            }
-        }
-        for edge in [r.y, r.y + r.height] {
-            let d = (p.y - edge).abs();
-            if d < y.0 {
-                y = (d, edge);
-            }
-        }
-    }
-    Point::new(x.1, y.1)
 }
 
 /// A window or control rectangle, still in physical desktop px (what `Pick`s

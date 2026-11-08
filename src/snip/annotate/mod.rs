@@ -1255,7 +1255,7 @@ impl Annotator {
     /// `r` with the edges the grip moves pulled onto a window or control edge
     /// within the snap reach (as a first drag is; the same `snap`); Shift = off.
     fn snapped(&self, grip: area::Grip, r: Rectangle, at: Point) -> Rectangle {
-        use crate::ui::snip::{SNAP, snap};
+        use crate::snip::{SNAP, snap};
         let reach = SNAP / self.zoom;
         // The edge value `v` snapped; probed along the area's side, middle and
         // far side and at the pointer, so a window's edge is found wherever the

@@ -15,7 +15,7 @@ use screens::common::language_picker as picker;
 use screens::live::controller as live_controller;
 pub(crate) use screens::setup;
 use screens::{ai_chat, settings, song, translate};
-pub(crate) mod snip;
+mod snip;
 #[cfg(test)]
 mod snip_shots;
 pub mod theme;
