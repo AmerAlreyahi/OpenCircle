@@ -37,6 +37,14 @@ impl Place {
 /// one instead (`Windows::place_steps`, `update_card`). Every other caller goes
 /// through here so the next one has one place to fix.
 pub fn resize<T: Send + 'static>(id: window::Id, size: Size) -> Task<T> {
+    // Wayland: our windows aren't resizable, which pins the compositor's min and
+    // max size to the old one (xdg_toplevel), so a bigger buffer is clipped or
+    // scaled back; the hints move to the new size first.
+    if !can_hide_windows() {
+        return window::set_min_size(id, Some(size))
+            .chain(window::set_max_size(id, Some(size)))
+            .chain(window::resize(id, size));
+    }
     window::resize(id, size)
 }
 

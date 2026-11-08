@@ -1584,7 +1584,7 @@ impl Windows {
     }
 
     /// Test hook, `OPENCIRCLE_TEST_OPEN=settings,shot,settings,shot`: one step every
-    /// 1.5 s. `settings` = the tray's Settings item, `permission` / `toast` / `toast-error` / `notice` / `update` / `whatsnew` = those windows (`close-card` closes the card), `max` = maximise or restore Settings, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `problem` = an unsaveable edit, `shot` = save the open window as
+    /// 1.5 s. `settings` = the tray's Settings item, `permission` / `toast` / `toast-error` / `notice` / `update` / `whatsnew` = those windows (`close-card` closes the card), `max` = maximise or restore Settings, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `pin` / `zoom` / `unpin` = a pin of the test frame, the wheel over it, closing it, `problem` = an unsaveable edit, `shot` = save the open window as
     /// `$OPENCIRCLE_TEST_DIR/<kind>-<step>.png`, `quit`.
     fn test_step(&mut self, step: usize, what: &str) -> Task<Msg> {
         match what {
@@ -1644,6 +1644,14 @@ impl Windows {
                     crate::log!("test pin failed: {e}");
                     Task::none()
                 }
+            },
+            // the wheel over the newest pin: it grows 10 % a notch, through `monitor::resize`
+            "zoom" => match self.pins.last().map(|p| p.id) {
+                Some(id) => self.on_pin(
+                    id,
+                    PinMsg::Zoom(mouse::ScrollDelta::Lines { x: 0.0, y: 4.0 }),
+                ),
+                None => Task::none(),
             },
             "unpin" => {
                 let last = self.pins.last().map(|p| p.id);
