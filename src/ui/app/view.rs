@@ -253,6 +253,13 @@ impl App {
             let id = *id;
             song.view(self.o.screen)
                 .map(move |msg| Message::Song(id, msg))
+        } else if let Some((_, _)) = self
+            .o
+            .ai_chat
+            .as_ref()
+            .filter(|_| self.chat_window() != self.overlay)
+        {
+            space().into() // (another screen's window draws the card)
         } else if let Some((id, panel)) = &self.o.ai_chat {
             let id = *id;
             let at = self.chat_card_at();
@@ -330,7 +337,11 @@ impl App {
             layers = layers.push(self.selection_ui(selection));
         }
         // The pinned chat over everything on its side.
-        if let Some(chat) = &self.chat {
+        if let Some(chat) = self
+            .chat
+            .as_ref()
+            .filter(|_| self.chat_window() == self.overlay)
+        {
             let id = chat.id;
             let at = self.chat_rect();
             let card = chat.panel.view(at, self.o.screen, self.o.chat_hover);
@@ -379,6 +390,7 @@ impl App {
             (None, Some(_)) => Some(self.chat_rect()),
             (None, None) => None,
         };
+        let card = card.filter(|_| self.o.chat_on.is_none()); // (on another screen: all is free here)
         card::free(self.o.screen, card)
     }
 

@@ -25,6 +25,7 @@ use crate::ui::app::background::background;
 use crate::ui::app::capture::overlay_window;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::opening::Opening;
+use crate::ui::app::view::{grow, lifted};
 use crate::ui::app::word;
 use crate::ui::kit::motion;
 use crate::ui::platform::monitor::{Place, place_window};
@@ -846,6 +847,27 @@ impl App {
                 layers = layers.push(guides.map(Message::Snip));
             }
         }
+        // the AI chat's card docked on (or dragged onto) this screen
+        if (self.o.ai_chat.is_some() || self.chat.is_some()) && self.chat_window() == window {
+            let at = screen.view.rect_to_screen(self.chat_card_at());
+            let size = screen.place.size();
+            let card = match (&self.o.ai_chat, &self.chat) {
+                (Some((id, panel)), _) => {
+                    let id = *id;
+                    let card = panel.view(at, size, self.o.chat_hover);
+                    let card = card.map(move |msg| Message::AiChat(id, msg));
+                    lifted(grow(card, at, self.chat_grown()), at, panel.held)
+                }
+                (None, Some(chat)) => {
+                    let id = chat.id;
+                    let card = chat.panel.view(at, size, self.o.chat_hover);
+                    let card = card.map(move |msg| Message::AiChat(id, msg));
+                    lifted(card, at, chat.panel.held)
+                }
+                (None, None) => return layers.into(),
+            };
+            layers = layers.push(card);
+        }
         layers.into()
     }
 }
@@ -956,6 +978,45 @@ mod tests {
         let _ = app.update(Message::BarReleased);
         assert_eq!(app.o.bar_on, None);
         assert!(app.bar_target().x < 640.0);
+    }
+
+    /// The quick AI chat card goes onto another screen the same way (#125):
+    /// drawn by the screen holding most of it, docked to THAT screen's side.
+    #[test]
+    fn the_quick_chat_goes_onto_another_screen_and_docks_there() {
+        let (mut app, n) = opened();
+        let right = place((640, 0), (960, 600), 1.5);
+        let _ = app.update(Message::Screen(n, right, solid(right, 90)));
+        let id = app.o.screens[0].window;
+        crate::ui::app::tests::drag(
+            &mut app,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 120.0),
+            false,
+        );
+        let crop = app.crop().unwrap();
+        drop(app.open_chat(crop, None));
+        assert_eq!(app.chat_window(), app.overlay, "docked on the first screen");
+        // picked up, then dragged 700 px right: across the bezel
+        let _ = app.update(Message::AiChat(
+            app.o.ai_chat.as_ref().unwrap().0,
+            crate::ui::ai_chat::Msg::Card(crate::ui::kit::panel_frame::Event::Grab(
+                crate::ui::kit::panel_frame::Drag::Move,
+            )),
+        ));
+        let _ = app.update(Message::CardMoved(Point::new(100.0, 100.0)));
+        let _ = app.update(Message::CardMoved(Point::new(780.0, 100.0)));
+        assert_eq!(app.chat_window(), id, "drawn by the screen it is over");
+        let _ = app.update(Message::CardReleased);
+        assert_eq!(app.o.chat_on, Some(0));
+        let (_, _, origin, k) = app.chat_room();
+        let rect = app.chat_rect();
+        let work = area_of(app.o.place(), app.o.screens[0].place);
+        let _ = (origin, k);
+        assert!(
+            rect.x >= work.x - 0.5 && rect.x + rect.width <= work.x + work.width + 0.5,
+            "docked whole on the other screen: {rect:?} {work:?}"
+        );
     }
 
     /// The edge glow follows the mouse (owner, 2026-10-28): onto the screen it

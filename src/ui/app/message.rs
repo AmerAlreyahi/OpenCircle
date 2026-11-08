@@ -133,6 +133,8 @@ pub(in crate::ui) enum Message {
     BarReleased,
     /// While the result card is dragged: the pointer moved / was let go.
     CardMoved(Point),
+    /// The same, in the px of the window the pointer is over.
+    CardMovedOn(window::Id, Point),
     CardReleased,
     /// The music button (or the song_search quick action).
     SongStart,

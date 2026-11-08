@@ -283,11 +283,7 @@ impl App {
             // While held its target follows the pointer (kept on screen); the
             // frames ease it there (`Frame`), never a jump per mouse event.
             Message::BarMovedOn(window, p) => {
-                let screen = self.o.screens.iter().find(|s| s.window == window);
-                let p = match screen {
-                    Some(s) => self.o.view.to_screen(s.view.to_image(p)),
-                    None => p,
-                };
+                let p = self.start_px(window, p);
                 self.update(Message::BarMoved(p))
             }
             Message::BarMoved(p) => {
@@ -335,10 +331,21 @@ impl App {
                 }
                 None => Task::none(),
             },
+            Message::CardMovedOn(window, p) => {
+                let p = self.start_px(window, p);
+                self.update(Message::CardMoved(p))
+            }
             Message::CardMoved(p) => {
                 if let Some((how, last)) = self.o.chat_drag {
                     if let (Some(from), true, card::Drag::Resize) = (last, self.o.chat_docks, how) {
-                        let at = card::drag(self.chat_rect(), how, p - from, self.o.screen);
+                        // (in the docked screen's own px)
+                        let (screen, _, origin, k) = self.chat_room();
+                        let r = self.chat_rect();
+                        let local = Rectangle::new(
+                            Point::ORIGIN + (r.position() - origin) * k,
+                            r.size() * k,
+                        );
+                        let at = card::drag(local, how, (p - from) * k, screen);
                         self.chat_width = Some(at.width);
                     } else if let (Some(from), true) = (last, self.o.chat_docks) {
                         self.o.chat_off += p - from;
@@ -862,6 +869,7 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
             | Message::ChatMoved(..)
             | Message::ChatSettle(_)
             | Message::ChatDocked(..)
+            | Message::CardMovedOn(..)
             | Message::ChatFrame(_)
             | Message::Windows(_)
             | Message::Live(_)

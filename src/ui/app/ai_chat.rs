@@ -51,11 +51,12 @@ pub(in crate::ui) fn glided(from: Point, to: Point, t: f32) -> Point {
 
 /// A dragged widget's top-left `at` (`size`) held inside the `screen`: 6 px
 /// from its left, right and top, 54 px from its bottom (design 3.4).
-pub(in crate::ui) fn held_in(at: Point, size: Size, screen: Size) -> Point {
+pub(in crate::ui) fn held_in(at: Point, size: Size, desk: Rectangle) -> Point {
     let (e, b) = (motion::DRAG_EDGE, motion::DRAG_EDGE_BOTTOM);
+    let (right, bottom) = (desk.x + desk.width, desk.y + desk.height);
     Point::new(
-        at.x.clamp(e, (screen.width - e - size.width).max(e)),
-        at.y.clamp(e, (screen.height - b - size.height).max(e)),
+        at.x.clamp(desk.x + e, (right - e - size.width).max(desk.x + e)),
+        at.y.clamp(desk.y + e, (bottom - b - size.height).max(desk.y + e)),
     )
 }
 
@@ -144,12 +145,29 @@ impl App {
     /// its dock (solid, always on top, cut to its corners, out of captures).
     pub(in crate::ui) fn float_chat(&mut self) -> Task<Message> {
         let at = self.chat_rect();
-        let (origin, screen, inset, scale) = (
-            self.o.origin,
-            self.o.screen,
-            self.o.work_inset,
-            self.o.scale,
-        );
+        // on the screen it was docked on (its px, its scale)
+        let (origin, screen, inset, scale, at) =
+            match self.o.chat_on.and_then(|i| self.o.screens.get(i)) {
+                Some(s) => {
+                    let (_, _, from, k) = self.chat_room();
+                    let local = Point::ORIGIN + (at.position() - from) * k;
+                    let at = Rectangle::new(local, at.size() * k);
+                    (
+                        s.place.logical_origin(),
+                        s.place.size(),
+                        s.inset,
+                        s.place.scale,
+                        at,
+                    )
+                }
+                None => (
+                    self.o.origin,
+                    self.o.screen,
+                    self.o.work_inset,
+                    self.o.scale,
+                    at,
+                ),
+            };
         let Some(chat) = self.chat.as_mut().filter(|c| c.window.is_none()) else {
             return Task::none();
         };
@@ -420,18 +438,29 @@ impl App {
     /// else the side `card::place` picks (away from the `selection`); held
     /// off it while dragged, gliding back once let go (`motion::DOCK`).
     fn chat_at(&self, selection: Option<Rectangle>) -> Rectangle {
-        let screen = self.o.screen;
+        let (screen, inset, origin, k) = self.chat_room();
+        let selection = selection.filter(|_| self.o.chat_on.is_none());
         let side = self
             .chat_side
             .unwrap_or_else(|| card::dock_side(card::place(screen, selection, None), screen));
-        let dock = self.chat_dock(screen, side, self.o.work_inset);
+        // docked in its screen's own px, shown in the starting screen's
+        let dock = self.chat_dock(screen, side, inset);
+        let dock = Rectangle::new(
+            origin + (dock.position() - Point::ORIGIN) * (1.0 / k),
+            dock.size() * (1.0 / k),
+        );
         let at = match self.o.chat_glide {
             Some((_, from, t)) => from.position() + (dock.position() - from.position()) * t,
             None => {
-                let at = held_in(dock.position() + self.o.chat_off, dock.size(), screen);
+                let at = held_in(
+                    dock.position() + self.o.chat_off,
+                    dock.size(),
+                    self.o.desk(),
+                );
                 // too tall to move up or down inside the edges: only across,
                 // never a jump up when picked up
-                match dock.height + motion::DRAG_EDGE + motion::DRAG_EDGE_BOTTOM > screen.height {
+                match dock.height + motion::DRAG_EDGE + motion::DRAG_EDGE_BOTTOM > screen.height / k
+                {
                     true => Point::new(at.x, dock.y),
                     false => at,
                 }
@@ -443,6 +472,26 @@ impl App {
             Point::new(at.x.round(), at.y.round()),
             iced::Size::new(dock.width.round(), dock.height.round()),
         )
+    }
+
+    /// Where the chat docks: the screen's logical size, its taskbar inset, its
+    /// origin in the starting screen's px and its scale against that (`k`).
+    pub(in crate::ui) fn chat_room(&self) -> (Size, f32, Point, f32) {
+        let other = (self.o.chat_on).and_then(|i| self.work_areas().get(i + 1).copied());
+        match other {
+            Some((work, k)) => (
+                Size::new(work.width * k, work.height * k),
+                0.0, // (a work area: the taskbar is out of it)
+                work.position(),
+                k,
+            ),
+            None => (self.o.screen, self.o.work_inset, Point::ORIGIN, 1.0),
+        }
+    }
+
+    /// The window drawing the AI chat's card: the screen holding most of it.
+    pub(in crate::ui) fn chat_window(&self) -> window::Id {
+        self.window_of(self.screen_holding(self.chat_rect()))
     }
 
     /// The chat docked on `side` of a `screen` (taskbar `inset`), as wide as
@@ -459,7 +508,10 @@ impl App {
     /// The chat card let go: it docks to the side its middle is on, gliding there.
     pub(in crate::ui) fn dock_chat(&mut self, now: std::time::Instant) {
         let at = self.chat_rect();
-        self.chat_side = Some(card::dock_side(at, self.o.screen));
+        self.o.chat_on = self.screen_holding(at); // dropped across a bezel: the larger part
+        let (screen, _, origin, k) = self.chat_room();
+        let local = Rectangle::new(Point::ORIGIN + (at.position() - origin) * k, at.size() * k);
+        self.chat_side = Some(card::dock_side(local, screen));
         self.o.chat_off = iced::Vector::ZERO;
         self.o.chat_glide = Some((now, at, 0.0));
     }

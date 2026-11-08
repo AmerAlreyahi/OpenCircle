@@ -170,18 +170,37 @@ impl App {
 
     /// The window the bar is drawn in: the screen it is on now.
     pub(in crate::ui) fn bar_window(&self) -> iced::window::Id {
-        let (at, start) = (self.bar_at(), self.o.place());
-        (self.o.screens.iter())
-            .find(|s| self.o.edit.is_none() && screens::area_of(start, s.place).contains(at))
-            .map_or(self.overlay, |s| s.window)
+        let held = Rectangle::new(self.bar_at(), self.dock_size());
+        let on = self.screen_holding(held).filter(|_| self.o.edit.is_none());
+        self.window_of(on)
+    }
+
+    /// Which other screen (index in `screens`; `None`: the starting one) holds
+    /// the larger part of `r` (the starting screen's px). THE way anything the
+    /// user drags across screens (the bar, the AI chat) finds the screen it is
+    /// on, whole at its drop and drawn by that screen's window.
+    pub(in crate::ui) fn screen_holding(&self, r: Rectangle) -> Option<usize> {
+        let rects: Vec<Rectangle> = self.work_areas().iter().map(|(w, _)| *w).collect();
+        bar::dock_screen(r, &rects).checked_sub(1)
+    }
+
+    /// The window of the screen `on` (`screen_holding`).
+    pub(in crate::ui) fn window_of(&self, on: Option<usize>) -> iced::window::Id {
+        (on.and_then(|i| self.o.screens.get(i))).map_or(self.overlay, |s| s.window)
+    }
+
+    /// A pointer position in `window`'s own px as the starting screen's px.
+    pub(in crate::ui) fn start_px(&self, window: iced::window::Id, p: Point) -> Point {
+        match self.o.screens.iter().find(|s| s.window == window) {
+            Some(s) => self.o.view.to_screen(s.view.to_image(p)),
+            None => p,
+        }
     }
 
     /// The bar was let go at `at`: it docks to the nearest spot of the screen
     /// holding most of it, however many screens there are.
     pub(in crate::ui) fn dock_bar(&mut self, at: Point) {
-        let rects: Vec<Rectangle> = self.work_areas().iter().map(|(r, _)| *r).collect();
-        let held = Rectangle::new(at, self.dock_size());
-        self.o.bar_on = bar::dock_screen(held, &rects).checked_sub(1);
+        self.o.bar_on = self.screen_holding(Rectangle::new(at, self.dock_size()));
         let (room, size, inset, _) = self.bar_spot();
         let at = at - Vector::new(room.x, room.y);
         self.o.bar_anchor = bar::nearest(at, room.size(), size, inset);

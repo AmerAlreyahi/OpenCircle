@@ -174,6 +174,9 @@ pub(in crate::ui) struct Opening {
     /// The AI chat card held away from its dock (logical px), and its glide
     /// back to a dock once let go: since when, from where, how far it is.
     pub(in crate::ui) chat_off: Vector,
+    /// The other screen (index in `screens`) the AI chat is docked on;
+    /// `None`: the starting one.
+    pub(in crate::ui) chat_on: Option<usize>,
     pub(in crate::ui) chat_glide: Option<(Instant, Rectangle, f32)>,
     /// Song search on this overlay, and its number.
     pub(in crate::ui) song: Option<(u32, song::Session)>,
@@ -267,6 +270,7 @@ impl Default for Opening {
             chat_open: None,
             chat_hover: false,
             chat_off: Vector::ZERO,
+            chat_on: None,
             chat_glide: None,
             song: None,
             capture: 0,

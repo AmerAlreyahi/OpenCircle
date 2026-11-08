@@ -444,8 +444,8 @@ impl App {
             };
             // Dragging the result card: the pointer anywhere, until let go.
             let card = match self.o.chat_drag {
-                Some(_) => iced::event::listen_with(|event, _, _| match touch::drag(&event) {
-                    Some(touch::Drag::Moved(position)) => Some(Message::CardMoved(position)),
+                Some(_) => iced::event::listen_with(|event, _, id| match touch::drag(&event) {
+                    Some(touch::Drag::Moved(position)) => Some(Message::CardMovedOn(id, position)),
                     Some(touch::Drag::Released) => Some(Message::CardReleased),
                     None => None,
                 }),
