@@ -288,49 +288,44 @@ impl App {
             }
             Message::BarMoved(p) => {
                 if let Some((last, at)) = self.o.bar_drag {
-                    let size = self.dock_size();
-                    let at = match last {
-                        Some(from) => {
-                            let to = at + (p - from);
-                            // the bar and Snip's toolbar may go onto any screen
-                            let desk = match self.o.edit.as_ref().map(|e| e.annotator.movable) {
-                                Some(false) => Rectangle::with_size(self.o.screen),
-                                _ => self.o.desk(),
-                            };
-                            let fit = |lo: f32, whole: f32, side: f32| lo.max(lo + whole - side);
-                            Point::new(
-                                to.x.clamp(desk.x, fit(desk.x, desk.width, size.width)),
-                                to.y.clamp(desk.y, fit(desk.y, desk.height, size.height)),
-                            )
-                        }
-                        None => at,
-                    };
+                    // where the pointer holds it; `bar_target` keeps it whole
+                    // on the screen holding most of it
+                    let at = last.map_or(at, |from| at + (p - from));
+                    if self.o.edit.is_none() {
+                        let held = Rectangle::new(at, self.dock_size());
+                        self.o.bar_on = self.screen_holding(held);
+                    }
                     self.o.bar_drag = Some((Some(p), at));
                 }
                 Task::none()
             }
             // Let go: it glides to the nearest spot, remembered.
-            Message::BarReleased => match self.o.bar_drag.take() {
-                // Snip's toolbar stays where it is dropped (this area only)
-                Some((_, at)) if self.o.edit.as_ref().is_some_and(|e| e.annotator.movable) => {
-                    self.o.bar_left = Some(at);
-                    self.o.bar_was = None;
-                    if let Some(edit) = &mut self.o.edit {
-                        edit.annotator.held = false;
+            // (where it is held: whole on one screen, `bar_target`)
+            Message::BarReleased => {
+                let held = self.o.bar_drag.is_some().then(|| self.bar_target());
+                self.o.bar_drag = None;
+                match held {
+                    // Snip's toolbar stays where it is dropped (this area only)
+                    Some(at) if self.o.edit.as_ref().is_some_and(|e| e.annotator.movable) => {
+                        self.o.bar_left = Some(at);
+                        self.o.bar_was = None;
+                        if let Some(edit) = &mut self.o.edit {
+                            edit.annotator.held = false;
+                        }
+                        self.o.bar_eased = None;
+                        self.log_frames("toolbar drag");
+                        Task::none()
                     }
-                    self.o.bar_eased = None;
-                    self.log_frames("toolbar drag");
-                    Task::none()
+                    Some(at) => {
+                        self.dock_bar(at);
+                        crate::log!("[opencircle] bar docked: {:?}", self.o.bar_anchor);
+                        self.log_frames("bar drag");
+                        self.o.bar_eased = None; // the glide goes on from where it is drawn
+                        self.remember_bar()
+                    }
+                    None => Task::none(),
                 }
-                Some((_, at)) => {
-                    self.dock_bar(at);
-                    crate::log!("[opencircle] bar docked: {:?}", self.o.bar_anchor);
-                    self.log_frames("bar drag");
-                    self.o.bar_eased = None; // the glide goes on from where it is drawn
-                    self.remember_bar()
-                }
-                None => Task::none(),
-            },
+            }
             Message::CardMovedOn(window, p) => {
                 let p = self.start_px(window, p);
                 self.update(Message::CardMoved(p))
@@ -498,9 +493,16 @@ impl App {
                         self.o.swap_at = None;
                     }
                 }
-                if let Some((_, to)) = self.o.bar_drag {
+                if self.o.bar_drag.is_some() {
+                    let to = self.bar_target();
                     let since = self.o.bar_eased.map_or(motion::FRAME, |t| now - t);
-                    let at = bar::follow(self.bar_at(), to, since);
+                    // onto another screen: there at once (a glide would cross the bezel)
+                    let was = Rectangle::new(self.bar_at(), self.dock_size());
+                    let at =
+                        match self.o.edit.is_none() && self.screen_holding(was) != self.o.bar_on {
+                            true => to,
+                            false => bar::follow(self.bar_at(), to, since),
+                        };
                     // caught up, the frames stop: the next move starts a fresh beat
                     self.o.bar_eased = (at != to).then_some(now);
                     self.o.bar_now = Some(at);

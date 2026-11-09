@@ -449,20 +449,37 @@ impl App {
             origin + (dock.position() - Point::ORIGIN) * (1.0 / k),
             dock.size() * (1.0 / k),
         );
-        let at = match self.o.chat_glide {
-            Some((_, from, t)) => from.position() + (dock.position() - from.position()) * t,
+        let (at, size) = match self.o.chat_glide {
+            Some((_, from, t)) => (
+                from.position() + (dock.position() - from.position()) * t,
+                dock.size(),
+            ),
             None => {
-                let at = held_in(
-                    dock.position() + self.o.chat_off,
-                    dock.size(),
-                    self.o.desk(),
-                );
+                // held whole on the screen holding most of it (never across a
+                // bezel: one window draws it), shorter if that one is
+                let held = Rectangle::new(dock.position() + self.o.chat_off, dock.size());
+                let on = self.screen_holding(held);
+                let area = self.screen_area(on);
+                let (e, b) = (motion::DRAG_EDGE, motion::DRAG_EDGE_BOTTOM);
+                let size = match on == self.o.chat_on {
+                    true => dock.size(),
+                    false => Size::new(
+                        dock.width.min(area.width - 2.0 * e).max(0.0),
+                        dock.height.min(area.height - e - b).max(0.0),
+                    ),
+                };
+                let at = held_in(held.position(), size, area);
                 // too tall to move up or down inside the edges: only across,
                 // never a jump up when picked up
-                match dock.height + motion::DRAG_EDGE + motion::DRAG_EDGE_BOTTOM > screen.height / k
-                {
-                    true => Point::new(at.x, dock.y),
-                    false => at,
+                match dock.height + e + b > screen.height / k {
+                    true => (
+                        Point::new(
+                            at.x,
+                            dock.y.clamp(area.y, area.y + area.height - size.height),
+                        ),
+                        size,
+                    ),
+                    false => (at, size),
                 }
             }
         };
@@ -470,7 +487,7 @@ impl App {
         // its edge on the frame (VM, 2026-10-28)
         Rectangle::new(
             Point::new(at.x.round(), at.y.round()),
-            iced::Size::new(dock.width.round(), dock.height.round()),
+            iced::Size::new(size.width.round(), size.height.round()),
         )
     }
 

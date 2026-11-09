@@ -323,7 +323,8 @@ impl App {
                     false => iced::widget::pin(self.bottom_bar()).position(at).into(),
                 });
                 if let Some(note) = self.reader_note() {
-                    layers = layers.push(self.beside_bar(note, at));
+                    let bar = Rectangle::new(at, self.bar_size().1);
+                    layers = layers.push(self.beside_bar(note, bar, self.o.screen.height));
                 }
             }
         }

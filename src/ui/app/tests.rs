@@ -4576,9 +4576,9 @@ fn the_copied_pill_goes_beside_the_selection_at_any_scale() {
     // what it goes beside: the selection as shown, else the bar
     let mut app = open_app(1280, 720, 1.0);
     let bar = Rectangle::new(app.bar_at(), app.bar_size().1);
-    assert_eq!(app.pill_near(), Some(bar));
+    assert_eq!(app.pill_place().3, Some(bar));
     app.select(sel);
-    assert_eq!(app.pill_near(), Some(sel));
+    assert_eq!(app.pill_place().3, Some(sel));
     // above the bar, not over it
     let at = pill_at((Point::ORIGIN, screen, 1.0, Some(bar)), size, 0.0);
     assert!(

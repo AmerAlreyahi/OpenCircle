@@ -52,7 +52,10 @@ impl App {
         if let Some((_, _, size)) = self.snip_dock() {
             return size;
         }
-        let (_, bar) = self.bar_size();
+        let bar = match self.bar_other() {
+            Some((work, k)) => self.bar_size_on(work.width * k).1 * (1.0 / k),
+            None => self.bar_size().1,
+        };
         let tool =
             (self.o.edit.as_ref()).map_or_else(SnipToolbar::toolbar_size, SnipToolbar::bar_size);
         let t = self.swapped();
@@ -72,7 +75,20 @@ impl App {
     /// (the editor's canvas) is where it would be.
     pub(in crate::ui) fn bar_target(&self) -> Point {
         if let Some((_, at)) = self.o.bar_drag {
-            return at;
+            // held whole on one screen (`bar_on`, set as it moves): never
+            // across a bezel, where one window would cut it
+            let area = match self.o.edit.as_ref().map(|e| e.annotator.movable) {
+                Some(false) => Rectangle::with_size(self.o.screen),
+                Some(true) => self.o.desk(), // (Snip's toolbar: its own rules)
+                None => self.screen_area(self.o.bar_on),
+            };
+            let size = self.dock_size();
+            let fit =
+                |at: f32, lo: f32, whole: f32, side: f32| at.clamp(lo, lo.max(lo + whole - side));
+            return Point::new(
+                fit(at.x, area.x, area.width, size.width),
+                fit(at.y, area.y, area.height, size.height),
+            );
         }
         // Snip's live area: the toolbar docks to it (under, above, inside),
         // clear of the handle being dragged, on the screen holding most of it.
@@ -150,22 +166,24 @@ impl App {
     /// Where the bar's spots are now, in the starting screen's px: the room
     /// (`bar_room`, or the work area of the other screen it was dropped on,
     /// `bar_on`), the bar's size there, the taskbar's share of the room's
-    /// bottom, and the bar's field width (logical px, the screen's own).
+    /// bottom, and the room's width (logical px, the screen's own: the bar's
+    /// field and pills are laid out for it, `bar_size_on`).
     pub(in crate::ui) fn bar_spot(&self) -> (Rectangle, Size, f32, f32) {
-        let other = (self.o.bar_on.filter(|_| self.o.edit.is_none()))
-            .and_then(|i| self.work_areas().get(i + 1).copied());
-        match other {
-            Some((work, k)) => {
-                let (field, size) = self.bar_size_on(work.width * k);
-                (work, size * (1.0 / k), 0.0, field)
+        match self.bar_other() {
+            Some((work, k)) => (work, self.dock_size(), 0.0, work.width * k),
+            None => {
+                let room = self.bar_room();
+                (room, self.dock_size(), self.o.work_inset, room.width)
             }
-            None => (
-                self.bar_room(),
-                self.dock_size(),
-                self.o.work_inset,
-                self.bar_size().0,
-            ),
         }
+    }
+
+    /// The other screen the bar is on (`bar_on`; Snip keeps it on the
+    /// starting one): its work area (the starting screen's px) and its scale
+    /// against the starting one (`k`).
+    fn bar_other(&self) -> Option<(Rectangle, f32)> {
+        (self.o.bar_on.filter(|_| self.o.edit.is_none()))
+            .and_then(|i| self.work_areas().get(i + 1).copied())
     }
 
     /// The window the bar is drawn in: the screen it is on now.
@@ -179,9 +197,34 @@ impl App {
     /// the larger part of `r` (the starting screen's px). THE way anything the
     /// user drags across screens (the bar, the AI chat) finds the screen it is
     /// on, whole at its drop and drawn by that screen's window.
+    /// Off every screen (held past the desktop's edge): the nearest one.
     pub(in crate::ui) fn screen_holding(&self, r: Rectangle) -> Option<usize> {
         let rects: Vec<Rectangle> = self.work_areas().iter().map(|(w, _)| *w).collect();
-        bar::dock_screen(r, &rects).checked_sub(1)
+        let off = |w: &Rectangle| {
+            let c = r.center();
+            let d = Vector::new(
+                (w.x - c.x).max(c.x - w.x - w.width).max(0.0),
+                (w.y - c.y).max(c.y - w.y - w.height).max(0.0),
+            );
+            d.x * d.x + d.y * d.y
+        };
+        match rects.iter().any(|w| w.intersects(&r)) {
+            true => bar::dock_screen(r, &rects),
+            false => (0..rects.len())
+                .min_by(|a, b| off(&rects[*a]).total_cmp(&off(&rects[*b])))
+                .unwrap_or(0),
+        }
+        .checked_sub(1)
+    }
+
+    /// The screen `on` (`screen_holding`) whole, in the starting screen's px:
+    /// where anything dragged across screens (the bar, the AI chat) is held
+    /// while dragged. Only that screen's window draws it, so across a bezel it
+    /// would be cut (or squeezed at the window's edge); it moves over whole
+    /// once most of it is over.
+    pub(in crate::ui) fn screen_area(&self, on: Option<usize>) -> Rectangle {
+        let all = self.screens_on();
+        self.monitor_of(&all[on.map_or(0, |i| i + 1).min(all.len() - 1)])
     }
 
     /// The window of the screen `on` (`screen_holding`).

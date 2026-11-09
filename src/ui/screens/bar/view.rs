@@ -32,7 +32,9 @@ impl App {
     /// takes the keys only once clicked: until then letters are the action
     /// shortcuts (L, A, T still search, ask and translate).
     pub(in crate::ui) fn bottom_bar(&self) -> Element<'_, Message> {
-        let (.., width) = self.bar_spot();
+        // laid out for the screen it is on (its own logical px), as `bar_spot` sizes it
+        let (.., room) = self.bar_spot();
+        let (width, _) = self.bar_size_on(room);
         let kbd = |stop| self.o.bar_focus == Some(stop);
         let logo = field::logo(
             crate::ui::kit::logo::logo(16),
@@ -70,7 +72,7 @@ impl App {
         let selected = self.selected_for_bar();
         let shown = labs::bar(&self.o.labs);
         let icons = shown.iter().filter(|b| !b.is_pill()).count() as f32;
-        let widths = bar::pill_widths(self.o.screen.width, icons);
+        let widths = bar::pill_widths(room, icons);
         let pills = [
             (
                 BarButton::Search,
@@ -199,16 +201,17 @@ impl App {
         Some(download::card(&download::OCR, bytes, stage, on))
     }
 
-    /// `note` centred on the bar at `at`: above it, or below it when the bar
-    /// is at the top, as tall as it is; opaque, so a press on it never
-    /// starts a selection.
+    /// `note` centred on the bar (`bar`, in the logical px of the window
+    /// drawing it, `screen` px tall): above it, or below it when the bar is at
+    /// the top, as tall as it is; opaque, so a press on it never starts a
+    /// selection.
     pub(in crate::ui) fn beside_bar<'a>(
         &self,
         note: Element<'a, Message>,
-        at: Point,
+        bar: iced::Rectangle,
+        screen: f32,
     ) -> Element<'a, Message> {
-        let (_, size) = self.bar_size();
-        let screen = self.o.screen.height;
+        let (at, size) = (bar.position(), bar.size());
         let (y, room, align) = match at.y > screen / 2.0 {
             true => (0.0, at.y - bar::SPACING, iced::Bottom),
             false => {

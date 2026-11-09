@@ -827,8 +827,12 @@ impl App {
             ));
         } else if self.bottom_bar_shown() && self.o.edit.is_none() && self.bar_window() == window {
             // the bar dropped on this screen (`bar_on`)
-            let at = screen.view.to_screen(self.bar_at());
-            layers = layers.push(iced::widget::pin(self.bottom_bar()).position(at));
+            let bar = (screen.view).rect_to_screen(Rectangle::new(self.bar_at(), self.dock_size()));
+            layers = layers.push(iced::widget::pin(self.bottom_bar()).position(bar.position()));
+            if let Some(note) = self.reader_note() {
+                let tall = screen.place.size().height;
+                layers = layers.push(self.beside_bar(note, bar, tall)); // (#130)
+            }
         } else if let Some(snip) = snip
             && self.o.edit.is_none()
             && snip
@@ -1017,6 +1021,177 @@ mod tests {
             rect.x >= work.x - 0.5 && rect.x + rect.width <= work.x + work.width + 0.5,
             "docked whole on the other screen: {rect:?} {work:?}"
         );
+    }
+
+    /// Unequal screens, as on the owner's PC (W17): right of `START`
+    /// (640 x 400 at 100 %) a 1920 x 1080 one at 150 %, lower; left of it a
+    /// short 480 x 200 one at 100 %. Returns their windows (right, left).
+    fn unequal(app: &mut App, n: u32) -> (window::Id, window::Id) {
+        let right = place((640, 100), (1920, 1080), 1.5);
+        let left = place((-480, 0), (480, 200), 1.0);
+        let _ = app.update(Message::Screen(n, right, solid(right, 90)));
+        let _ = app.update(Message::Screen(n, left, solid(left, 90)));
+        (app.o.screens[0].window, app.o.screens[1].window)
+    }
+
+    /// `r` (the starting screen's px) lies whole on one screen, the one whose
+    /// window draws it: never across a bezel (cut there by the other window).
+    fn whole(app: &App, r: Rectangle, drawn_by: window::Id) {
+        let on = app.screen_holding(r);
+        let area = app.screen_area(on);
+        let inside = r.x >= area.x - 0.5
+            && r.y >= area.y - 0.5
+            && r.x + r.width <= area.x + area.width + 0.5
+            && r.y + r.height <= area.y + area.height + 0.5;
+        assert!(inside, "whole on one screen: {r:?} on {area:?}");
+        assert_eq!(drawn_by, app.window_of(on), "drawn by that screen");
+    }
+
+    /// The bar dragged across a bezel between screens of different size AND
+    /// scale (owner's shots widgets-screens-2/-3, W17): at every step it is
+    /// whole on one screen, the one drawing it (it moves over whole), and
+    /// docked there it has the full width and layout of THAT screen, never
+    /// squeezed or cut.
+    #[test]
+    fn the_bar_crosses_unequal_screens_whole_and_full_width() {
+        let (mut app, n) = opened();
+        let (right, _) = unequal(&mut app, n);
+        app.o.bar_now = Some(app.bar_target());
+        let from = app.bar_at() + Vector::new(20.0, 10.0);
+        let _ = app.update(Message::BarGrab);
+        let _ = app.update(Message::BarMoved(from));
+        for step in 1..=40 {
+            let p = from + Vector::new(step as f32 * 30.0, step as f32 * 5.0);
+            let _ = app.update(Message::BarMoved(p));
+            app.o.bar_now = Some(app.bar_target()); // (a frame)
+            whole(
+                &app,
+                Rectangle::new(app.bar_at(), app.dock_size()),
+                app.bar_window(),
+            );
+        }
+        let _ = app.update(Message::BarReleased);
+        assert_eq!(app.o.bar_on, Some(0), "docked on the 150 % screen");
+        app.o.bar_now = Some(app.bar_target());
+        let bar = Rectangle::new(app.bar_at(), app.dock_size());
+        whole(&app, bar, right);
+        laid_out_for(&app, 0, right, (1280, 720));
+        // and onto the narrow screen on the left (its pills lose their labels)
+        let from = app.bar_at() + Vector::new(20.0, 10.0);
+        let _ = app.update(Message::BarGrab);
+        let _ = app.update(Message::BarMoved(from));
+        for step in 1..=60 {
+            let _ = app.update(Message::BarMoved(
+                from - Vector::new(step as f32 * 40.0, 0.0),
+            ));
+            app.o.bar_now = Some(app.bar_target());
+            whole(
+                &app,
+                Rectangle::new(app.bar_at(), app.dock_size()),
+                app.bar_window(),
+            );
+        }
+        let _ = app.update(Message::BarReleased);
+        assert_eq!(app.o.bar_on, Some(1), "docked on the narrow screen");
+        app.o.bar_now = Some(app.bar_target());
+        laid_out_for(&app, 1, app.o.screens[1].window, (480, 200));
+    }
+
+    /// The docked bar on the other screen `i` (its window, its logical size)
+    /// has that screen's own layout (`bar_size_on` its width) and is drawn
+    /// exactly that wide, whole.
+    fn laid_out_for(app: &App, i: usize, window: window::Id, (w, h): (u32, u32)) {
+        let bar = Rectangle::new(app.bar_at(), app.dock_size());
+        whole(app, bar, window);
+        let local = app.o.screens[i].view.rect_to_screen(bar);
+        let (_, size) = app.bar_size_on(w as f32);
+        assert!((local.width - size.width).abs() < 0.5, "{local:?} {size:?}");
+        // drawn that wide: the bar's row differs from the dim exactly there
+        let rgba = shot::render(app.view(window), w, h);
+        let (pixels, _) = rgba.as_chunks::<4>();
+        let (w, y) = (w as usize, (local.y + local.height / 2.0) as usize);
+        let row = &pixels[y * w..(y + 1) * w];
+        let lit: Vec<usize> = (0..w).filter(|&x| row[x] != row[0]).collect();
+        let (lo, hi) = (lit[0] as f32, *lit.last().unwrap() as f32 + 1.0);
+        assert!(
+            (lo - local.x).abs() < 3.0 && (hi - (local.x + local.width)).abs() < 3.0,
+            "drawn at {lo}..{hi}, laid out at {local:?}"
+        );
+    }
+
+    /// The AI chat dragged across unequal screens (owner's widgets-screens-4,
+    /// W17): whole on one screen at every step, the one drawing it; onto a
+    /// screen shorter than it, it gets shorter (never cut).
+    #[test]
+    fn the_chat_crosses_unequal_screens_whole() {
+        let (mut app, n) = opened();
+        let _ = unequal(&mut app, n);
+        crate::ui::app::tests::drag(
+            &mut app,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 120.0),
+            false,
+        );
+        let crop = app.crop().unwrap();
+        drop(app.open_chat(crop, None));
+        let id = app.o.ai_chat.as_ref().unwrap().0;
+        let _ = app.update(Message::AiChat(
+            id,
+            crate::ui::ai_chat::Msg::Card(crate::ui::kit::panel_frame::Event::Grab(
+                crate::ui::kit::panel_frame::Drag::Move,
+            )),
+        ));
+        let from = Point::new(300.0, 100.0);
+        let _ = app.update(Message::CardMoved(from));
+        // right, across onto the 150 % screen, then all the way left onto the short one
+        let steps = (1..=40).map(|i| from + Vector::new(i as f32 * 30.0, 0.0));
+        let back = (1..=80).map(|i| from + Vector::new(1200.0 - i as f32 * 30.0, 0.0));
+        for p in steps.chain(back) {
+            let _ = app.update(Message::CardMoved(p));
+            whole(&app, app.chat_rect(), app.chat_window());
+        }
+        let left = area_of(app.o.place(), app.o.screens[1].place);
+        assert!(
+            app.chat_rect().height <= left.height,
+            "shorter on the short screen"
+        );
+        let _ = app.update(Message::CardReleased);
+        assert_eq!(app.o.chat_on, Some(1));
+        whole(&app, app.chat_rect(), app.chat_window());
+    }
+
+    /// The reader note and the Copied pill go with the bar onto its screen (#130).
+    #[test]
+    fn the_reader_note_and_the_copied_pill_follow_the_bars_screen() {
+        let (mut app, n) = opened();
+        let (right, _) = unequal(&mut app, n);
+        app.o.bar_now = Some(app.bar_target());
+        let from = app.bar_at() + Vector::new(20.0, 10.0);
+        let _ = app.update(Message::BarGrab);
+        let _ = app.update(Message::BarMoved(from));
+        let _ = app.update(Message::BarMoved(from + Vector::new(1200.0, 100.0)));
+        let _ = app.update(Message::BarReleased);
+        app.o.bar_now = Some(app.bar_target());
+        assert_eq!(app.bar_window(), right);
+        // the pill: placed on that screen (its origin, size and scale), beside the bar
+        let place = app.pill_place();
+        let s = app.o.screens[0].place;
+        assert_eq!(
+            (place.0, place.1, place.2),
+            (s.logical_origin(), s.size(), s.scale)
+        );
+        let at = crate::ui::app::actions::pill_at(place, Size::new(120.0, 36.0), 0.0);
+        let (x0, y0) = s.origin;
+        let (x1, y1) = (x0 + s.px.0 as i32, y0 + s.px.1 as i32);
+        assert!(
+            (x0..x1).contains(&at.origin.0) && (y0..y1).contains(&at.origin.1),
+            "on the bar's screen: {at:?}"
+        );
+        // the reader note: drawn by that screen's window, beside the bar
+        let before = shot::render(app.view(right), 1280, 720);
+        app.o.reader = crate::ui::app::Reader::Missing(1000);
+        let after = shot::render(app.view(right), 1280, 720);
+        assert!(before != after, "the note shows on the bar's screen");
     }
 
     /// The edge glow follows the mouse (owner, 2026-10-28): onto the screen it

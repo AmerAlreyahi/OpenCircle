@@ -235,7 +235,7 @@ impl App {
         &mut self,
         work: impl FnOnce() -> Result<String, String> + Send + 'static,
     ) -> Task<Message> {
-        let place = (self.o.origin, self.o.screen, self.o.scale, self.pill_near());
+        let place = self.pill_place();
         let done = background(move |tx| {
             let _ = tx.unbounded_send(work());
         })
@@ -243,13 +243,34 @@ impl App {
         Task::batch([self.close(), done])
     }
 
-    /// What the Copy / Save pill goes beside (overlay px): the selection as
-    /// shown, else the bottom bar; `None`: neither shows.
-    pub(in crate::ui) fn pill_near(&self) -> Option<Rectangle> {
+    /// Where the Copy / Save pill goes (`pill_at`): beside the selection as
+    /// shown on the starting screen, else beside the bottom bar on the screen
+    /// it is on (#130), else at the starting screen's corner.
+    pub(in crate::ui) fn pill_place(&self) -> PillPlace {
+        let start = (self.o.origin, self.o.screen, self.o.scale);
         let selected = (self.o.selection.as_ref()).map(|s| self.o.view.rect_to_screen(s.area));
-        let bar = (self.bottom_bar_shown() && self.o.edit.is_none() && self.o.bar_on.is_none())
-            .then(|| Rectangle::new(self.bar_at(), self.bar_size().1));
-        selected.or(bar)
+        let bar = (self.bottom_bar_shown() && self.o.edit.is_none())
+            .then(|| Rectangle::new(self.bar_at(), self.dock_size()));
+        match (selected, bar) {
+            (Some(near), _) => (start.0, start.1, start.2, Some(near)),
+            (None, Some(bar)) => match self
+                .o
+                .bar_on
+                .and_then(|i| self.screens_on().get(i + 1).copied())
+            {
+                Some(on) => {
+                    let p = on.place;
+                    (
+                        p.logical_origin(),
+                        p.size(),
+                        p.scale,
+                        Some(on.to_local(bar)),
+                    )
+                }
+                None => (start.0, start.1, start.2, Some(bar)),
+            },
+            (None, None) => (start.0, start.1, start.2, None),
+        }
     }
 
     /// The Copy / Save pill for an overlay at `place` (origin, size, scale,
