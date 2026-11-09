@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The server closes this long after it starts, even if the page was never fetched.
-const LIFE: Duration = Duration::from_secs(30);
+const LIFE: Duration = Duration::from_secs(120);
 /// One deadline per connection, from accept, for its whole request head (a slow
 /// sender can't keep a slot alive by trickling bytes). A browser sends at once.
 const HEAD_WAIT: Duration = Duration::from_secs(3);
@@ -348,6 +348,12 @@ mod win {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A slow "How do you want to open this?" prompt (Windows) must not outlive the page.
+    #[test]
+    fn the_page_waits_two_minutes_for_the_browser() {
+        assert_eq!(LIFE, Duration::from_secs(120));
+    }
 
     /// One request on a fresh connection; the whole answer, or the connect error.
     fn fetch(url: &str, request: impl Fn(&str, &str) -> String) -> io::Result<String> {

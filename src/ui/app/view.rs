@@ -299,7 +299,7 @@ impl App {
         } else if let Some(selection) = self.o.selection {
             match self.o.purpose {
                 Purpose::Search if !self.o.drawing && !self.settling() => {
-                    self.selection_ui(selection)
+                    self.selection_ui(selection, self.overlay)
                 }
                 _ => space().into(),
             }
@@ -335,7 +335,7 @@ impl App {
             &self.o.purpose,
             self.o.drawing || self.settling(),
         ) {
-            layers = layers.push(self.selection_ui(selection));
+            layers = layers.push(self.selection_ui(selection, self.overlay));
         }
         // The pinned chat over everything on its side.
         if let Some(chat) = self
@@ -402,13 +402,30 @@ impl App {
 
     /// What floats around `selection`: only small chips ("Select text" under a
     /// snapped box, a QR code's); every action is in the bottom bar.
+    /// Drawn by `window` only if the selection is on that screen (the rule of
+    /// everything dragged across screens, `screen_holding`), in its own px (#147).
     pub(in crate::ui) fn selection_ui(
         &self,
         selection: overlay::Selection,
+        window: iced::window::Id,
     ) -> Element<'_, Message> {
-        let area = self.o.view.rect_to_screen(selection.area);
-        let room = self.room();
-        let bar = self.chip_bar();
+        let held = self.o.view.rect_to_screen(selection.area);
+        if self.window_of(self.screen_holding(held)) != window {
+            return space().into();
+        }
+        let (view, room, bar) = match self.o.screens.iter().find(|s| s.window == window) {
+            None => (self.o.view, self.room(), self.chip_bar()),
+            Some(s) => {
+                let card = (self.o.ai_chat.is_some() || self.chat.is_some())
+                    .then(|| s.view.rect_to_screen(self.chat_rect()))
+                    .filter(|_| self.chat_window() == window);
+                let bar = (self.bottom_bar_shown() && self.bar_window() == window)
+                    .then(|| Rectangle::new(self.bar_target(), self.dock_size()))
+                    .map(|r| s.view.rect_to_screen(r));
+                (s.view, card::free(s.place.size(), card), bar)
+            }
+        };
+        let area = view.rect_to_screen(selection.area);
         let mut layers = stack![];
         let mut below = area;
         if selection.kind == overlay::Kind::Snap {

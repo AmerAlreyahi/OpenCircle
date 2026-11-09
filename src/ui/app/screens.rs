@@ -851,6 +851,14 @@ impl App {
                 layers = layers.push(guides.map(Message::Snip));
             }
         }
+        // beside a selection on this screen: its chips (#147)
+        if let (Some(selection), Purpose::Search, false) = (
+            self.o.selection,
+            &self.o.purpose,
+            self.o.drawing || self.settling(),
+        ) {
+            layers = layers.push(self.selection_ui(selection, window));
+        }
         // the AI chat's card docked on (or dragged onto) this screen
         if (self.o.ai_chat.is_some() || self.chat.is_some()) && self.chat_window() == window {
             // (the quick chat's card and the pinned chat: both where `chat_rect` holds them)
@@ -1246,6 +1254,34 @@ mod tests {
             (x0..x1).contains(&at.origin.0) && (y0..y1).contains(&at.origin.1),
             "beside the selection on its screen: {at:?}"
         );
+    }
+
+    /// #147: the "Select text" chip goes beside a snapped box on the box's own
+    /// screen (unequal screens too), drawn by that screen's window only.
+    #[test]
+    fn the_select_text_chip_is_drawn_on_the_selections_screen() {
+        let (mut app, n) = opened();
+        let (right, _) = unequal(&mut app, n);
+        let mid = app.screen_area(Some(0)).center();
+        let snap = |app: &mut App, area| {
+            app.select(area);
+            app.o.selection.as_mut().expect("picked").kind = overlay::Kind::Snap;
+        };
+        let chip = |app: &App, w| shot::texts(app.view(w)).iter().any(|t| t == "Select text");
+        snap(
+            &mut app,
+            Rectangle::new(
+                Point::new(mid.x - 100.0, mid.y - 50.0),
+                Size::new(200.0, 100.0),
+            ),
+        );
+        assert!(chip(&app, right), "on the selection's screen");
+        assert!(!chip(&app, app.overlay), "not on the starting screen");
+        snap(
+            &mut app,
+            Rectangle::new(Point::new(100.0, 100.0), Size::new(200.0, 100.0)),
+        );
+        assert!(chip(&app, app.overlay) && !chip(&app, right));
     }
 
     /// The edge glow follows the mouse (owner, 2026-10-28): onto the screen it
