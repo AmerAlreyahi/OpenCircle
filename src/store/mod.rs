@@ -86,7 +86,8 @@ pub(crate) fn open(path: &Path) -> Result<Connection> {
     // deleted rows are overwritten, never left readable in free pages
     db.pragma_update(None, "secure_delete", "ON").map_err(err)?;
     let version = |db: &Connection| -> Result<usize> {
-        let v: usize = (db.pragma_query_value(None, "user_version", |r| r.get(0))).map_err(err)?;
+        let v: i64 = (db.pragma_query_value(None, "user_version", |r| r.get(0))).map_err(err)?;
+        let v = v as usize;
         match v > MIGRATIONS.len() {
             true => Err(err("written by a newer OpenCircle")),
             false => Ok(v),
@@ -99,7 +100,8 @@ pub(crate) fn open(path: &Path) -> Result<Connection> {
             .map_err(err)?;
         for (i, step) in MIGRATIONS.iter().enumerate().skip(version(&tx)?) {
             tx.execute_batch(step).map_err(err)?;
-            tx.pragma_update(None, "user_version", i + 1).map_err(err)?;
+            tx.pragma_update(None, "user_version", i as i64 + 1)
+                .map_err(err)?;
         }
         tx.commit().map_err(err)?;
     }
@@ -117,13 +119,13 @@ mod tests {
         let file = dir.join("opencircle.db");
         for _ in 0..2 {
             let db = open(&file).unwrap();
-            let v: usize = db
+            let v: i64 = db
                 .pragma_query_value(None, "user_version", |r| r.get(0))
                 .unwrap();
-            assert_eq!(v, MIGRATIONS.len());
+            assert_eq!(v as usize, MIGRATIONS.len());
         }
         let db = open(&file).unwrap();
-        db.pragma_update(None, "user_version", MIGRATIONS.len() + 1)
+        db.pragma_update(None, "user_version", MIGRATIONS.len() as i64 + 1)
             .unwrap();
         drop(db);
         assert!(open(&file).is_err(), "a newer schema is not touched");
