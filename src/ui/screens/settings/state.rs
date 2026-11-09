@@ -1080,7 +1080,17 @@ impl State {
             DesktopKey::UsedBy(name) => format!("Used by {name}"),
             // the desktop bound nothing: another app (or the desktop) holds the key
             DesktopKey::Unassigned | DesktopKey::Taken => TAKEN.into(),
-            DesktopKey::Failed => "Couldn't bind this key".into(),
+            DesktopKey::Failed => {
+                let command = match slot {
+                    Slot::Capture => "opencircle capture".to_string(),
+                    Slot::Quick(i) => {
+                        format!("opencircle run {}", self.draft.quick_actions[i].action)
+                    }
+                };
+                format!(
+                    "No shortcut service here: bind \"{command}\" in your desktop's keyboard settings"
+                )
+            }
         })
     }
 

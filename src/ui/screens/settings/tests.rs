@@ -2647,3 +2647,16 @@ fn the_history_switches_exist_only_on_the_history_page() {
         }
     }
 }
+
+/// No shortcut service at all (KDE without the portal): the row says how to bind the
+/// command by hand, never "taken by another app".
+#[test]
+fn a_desktop_without_shortcut_service_names_the_command_to_bind() {
+    let (mut s, _) = state(None);
+    s.desktop = |_| Some(DesktopKey::Failed);
+    let note = s.desktop_note(Slot::Capture).unwrap();
+    assert!(note.contains("\"opencircle capture\""), "{note}");
+    assert!(!note.contains("Taken"), "{note}");
+    let quick = s.desktop_note(Slot::Quick(0)).unwrap();
+    assert!(quick.contains("\"opencircle run translate\""), "{quick}");
+}
