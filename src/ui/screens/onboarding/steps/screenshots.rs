@@ -54,8 +54,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
         sub(
             Role::ROW_DESC,
             "Your desktop asks once whether OpenCircle may capture the screen, and only \
-             while an OpenCircle window is in front. Click Allow, then choose Allow in the \
-             dialog."
+             while an OpenCircle window is in front. Click Allow, then Share (or Allow) in \
+             its dialog."
         ),
         control(&state.access),
     ]
@@ -76,11 +76,7 @@ fn control(access: &Access) -> Element<'_, Message> {
         Position::Top,
     );
     let status: Element<'_, Message> = match access {
-        Access::Unasked => sub(
-            Role::ROW_DESC,
-            "A test picture is taken and deleted at once.",
-        )
-        .into(),
+        Access::Unasked => sub(Role::ROW_DESC, "You are asked once; nothing is saved.").into(),
         Access::Asking => sub(Role::ROW_DESC, "Answer the dialog your desktop shows.").into(),
         Access::Allowed => sub(Role::ROW_DESC, "OpenCircle can capture your screen now.").into(),
         Access::Failed(e) if e.is_refused() => error(
@@ -103,8 +99,8 @@ pub fn prompt_view(access: &Access) -> Element<'_, Message> {
         text(Role::PAGE_TITLE, "OpenCircle needs screenshot permission"),
         sub(
             Role::ROW_DESC,
-            "Your desktop asks only while an OpenCircle window is in front. Click Allow \
-             and accept the dialog, then press your shortcut again."
+            "Your desktop asks only while an OpenCircle window is in front. Click Allow, \
+             then Share (or Allow) in its dialog, and press your shortcut again."
         ),
         control(access),
     ]
