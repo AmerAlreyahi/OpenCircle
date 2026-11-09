@@ -853,7 +853,8 @@ impl App {
         }
         // the AI chat's card docked on (or dragged onto) this screen
         if (self.o.ai_chat.is_some() || self.chat.is_some()) && self.chat_window() == window {
-            let at = screen.view.rect_to_screen(self.chat_card_at());
+            // (the quick chat's card and the pinned chat: both where `chat_rect` holds them)
+            let at = screen.view.rect_to_screen(self.chat_rect());
             let size = screen.place.size();
             let card = match (&self.o.ai_chat, &self.chat) {
                 (Some((id, panel)), _) => {
@@ -1160,7 +1161,49 @@ mod tests {
         whole(&app, app.chat_rect(), app.chat_window());
     }
 
-    /// The reader note and the Copied pill go with the bar onto its screen (#130).
+    /// The pinned chat dragged onto another screen while the overlay is open is
+    /// drawn there (W17: it was placed where a result card would go on the
+    /// starting screen, off that screen's window).
+    #[test]
+    fn a_pinned_chat_dragged_onto_another_screen_is_drawn_there() {
+        let (mut app, n) = opened();
+        let (right, _) = unequal(&mut app, n);
+        crate::ui::app::tests::drag(
+            &mut app,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 120.0),
+            false,
+        );
+        let crop = app.crop().unwrap();
+        drop(app.open_chat(crop, None));
+        let id = app.o.ai_chat.as_ref().unwrap().0;
+        let _ = app.update(Message::AiChat(id, crate::ui::ai_chat::Msg::Pin));
+        assert!(app.chat.is_some() && app.o.ai_chat.is_none(), "pinned");
+        let _ = app.update(Message::AiChat(
+            id,
+            crate::ui::ai_chat::Msg::Card(crate::ui::kit::panel_frame::Event::Grab(
+                crate::ui::kit::panel_frame::Drag::Move,
+            )),
+        ));
+        let from = Point::new(300.0, 100.0);
+        let _ = app.update(Message::CardMoved(from));
+        let _ = app.update(Message::CardMoved(from + Vector::new(1000.0, 0.0)));
+        let _ = app.update(Message::CardReleased);
+        assert_eq!(app.chat_window(), right);
+        // drawn where it is: its middle row is lit, not the dim
+        let local = app.o.screens[0].view.rect_to_screen(app.chat_rect());
+        let rgba = shot::render(app.view(right), 1280, 720);
+        let (pixels, _) = rgba.as_chunks::<4>();
+        let (x, y) = (local.center_x() as usize, local.center_y() as usize);
+        assert!(
+            pixels[y * 1280 + x] != pixels[y * 1280 + 2],
+            "drawn on the screen it is on: {local:?} {:?}",
+            app.chat_card_at()
+        );
+    }
+
+    /// The reader note and the Copied pill go with the bar onto its screen, and
+    /// the pill beside a selection on another screen goes there (#130).
     #[test]
     fn the_reader_note_and_the_copied_pill_follow_the_bars_screen() {
         let (mut app, n) = opened();
@@ -1192,6 +1235,17 @@ mod tests {
         app.o.reader = crate::ui::app::Reader::Missing(1000);
         let after = shot::render(app.view(right), 1280, 720);
         assert!(before != after, "the note shows on the bar's screen");
+        // a selection on that screen: the pill goes beside it, there too
+        app.o.reader = crate::ui::app::Reader::Idle;
+        app.select(Rectangle::new(
+            Point::new(1500.0, 600.0),
+            Size::new(200.0, 100.0),
+        ));
+        let at = crate::ui::app::actions::pill_at(app.pill_place(), Size::new(120.0, 36.0), 0.0);
+        assert!(
+            (x0..x1).contains(&at.origin.0) && (y0..y1).contains(&at.origin.1),
+            "beside the selection on its screen: {at:?}"
+        );
     }
 
     /// The edge glow follows the mouse (owner, 2026-10-28): onto the screen it

@@ -243,33 +243,34 @@ impl App {
         Task::batch([self.close(), done])
     }
 
-    /// Where the Copy / Save pill goes (`pill_at`): beside the selection as
-    /// shown on the starting screen, else beside the bottom bar on the screen
-    /// it is on (#130), else at the starting screen's corner.
+    /// Where the Copy / Save pill goes (`pill_at`): beside the selection, else
+    /// beside the bottom bar, on the screen holding most of it (#130), else at
+    /// the starting screen's corner.
     pub(in crate::ui) fn pill_place(&self) -> PillPlace {
-        let start = (self.o.origin, self.o.screen, self.o.scale);
-        let selected = (self.o.selection.as_ref()).map(|s| self.o.view.rect_to_screen(s.area));
+        let selected = self.o.selection.as_ref().map(|s| s.area);
         let bar = (self.bottom_bar_shown() && self.o.edit.is_none())
             .then(|| Rectangle::new(self.bar_at(), self.dock_size()));
-        match (selected, bar) {
-            (Some(near), _) => (start.0, start.1, start.2, Some(near)),
-            (None, Some(bar)) => match self
-                .o
-                .bar_on
-                .and_then(|i| self.screens_on().get(i + 1).copied())
-            {
-                Some(on) => {
-                    let p = on.place;
-                    (
-                        p.logical_origin(),
-                        p.size(),
-                        p.scale,
-                        Some(on.to_local(bar)),
-                    )
-                }
-                None => (start.0, start.1, start.2, Some(bar)),
-            },
-            (None, None) => (start.0, start.1, start.2, None),
+        let Some(near) = selected.or(bar) else {
+            return (self.o.origin, self.o.screen, self.o.scale, None);
+        };
+        let on = self.on_area(near);
+        match on.view {
+            None => {
+                let near = match selected {
+                    Some(area) => self.o.view.rect_to_screen(area),
+                    None => near,
+                };
+                (self.o.origin, self.o.screen, self.o.scale, Some(near))
+            }
+            Some(_) => {
+                let p = on.place;
+                (
+                    p.logical_origin(),
+                    p.size(),
+                    p.scale,
+                    Some(on.to_local(near)),
+                )
+            }
         }
     }
 
