@@ -40,11 +40,33 @@ thread_local! {
 /// Never fails: on any error it prints, once, how to bind the shortcuts by hand.
 pub fn bind(tx: Triggers) {
     std::thread::spawn(move || {
+        // No portal (GNOME before 48): OpenCircle's own entries in GNOME's custom shortcuts.
+        if !present() && super::gnome::adopt(&bindings()) {
+            return;
+        }
         if let Err(e) = serve(tx) {
             set_portal_failed(true);
             crate::log!("{}", manual_hint(&e));
         }
     });
+}
+
+/// Does this desktop offer the GlobalShortcuts portal at all?
+fn present() -> bool {
+    session_bus().is_ok_and(|conn| {
+        conn.call_sync(
+            Some(DESKTOP),
+            PATH,
+            "org.freedesktop.DBus.Properties",
+            "Get",
+            Some(&(IFACE, "version").to_variant()),
+            None,
+            DBusCallFlags::NONE,
+            5000,
+            None::<&Cancellable>,
+        )
+        .is_ok()
+    })
 }
 
 /// After a config change: opens a fresh session with the new shortcut list. (The portal

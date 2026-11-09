@@ -1,6 +1,5 @@
 //! `.oc-keycap`: one key of a shortcut, 24 px tall, radius 6, `keycap` with a
-//! 1 px `keycap_border` edge and a 2 px one under it, mono 11 / 500. `empty`
-//! is the design's dimmed "—" cap (opacity .25) that pads a shortcut box.
+//! 1 px `keycap_border` edge and a 2 px one under it, mono 11 / 500.
 use iced::widget::{container, text};
 use iced::{Border, Color, Element, Fill, Padding};
 
@@ -12,11 +11,6 @@ use super::tokens::{Role, radius, size};
 /// The key's label, filling its cell (`width: 100%`).
 pub fn keycap<'a, Message: 'a>(label: impl Into<String>) -> Element<'a, Message> {
     cap(label.into(), 1.0)
-}
-
-/// An unused cell: "—" on a cap at 25 %.
-pub fn empty<'a, Message: 'a>() -> Element<'a, Message> {
-    cap("—".into(), 0.25)
 }
 
 fn cap<'a, Message: 'a>(label: String, alpha: f32) -> Element<'a, Message> {

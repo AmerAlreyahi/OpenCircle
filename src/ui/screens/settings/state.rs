@@ -1077,6 +1077,7 @@ impl State {
         }
         Some(match (self.desktop)(shortcut)? {
             DesktopKey::Other(keys) => format!("In use: {keys}. {}", managed()),
+            DesktopKey::UsedBy(name) => format!("Used by {name}"),
             // the desktop bound nothing: another app (or the desktop) holds the key
             DesktopKey::Unassigned | DesktopKey::Taken => TAKEN.into(),
             DesktopKey::Failed => "Couldn't bind this key".into(),
@@ -1107,6 +1108,9 @@ impl State {
             return Err(String::new()); // lone modifier: keep waiting
         };
         let hotkey = parse_shortcut(&shortcut)?;
+        if let Some(why) = crate::hotkey::unusable_reason(&shortcut) {
+            return Err(why);
+        }
         for other in self.slots().filter(|&o| o != slot) {
             if parse_shortcut(self.shortcut(other)).is_ok_and(|h| h == hotkey) {
                 return Err(format!("Already used by {}", self.label(other)));

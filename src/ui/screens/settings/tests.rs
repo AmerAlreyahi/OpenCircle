@@ -1689,17 +1689,17 @@ fn every_shortcut_field_is_the_same_size() {
     }
 }
 
-/// The shortcut page draws one keycap per key: "Ctrl+Shift+Space" is three
-/// caps and two keys leave one dimmed "—" cap at the left (the design's box).
+/// The shortcut page draws exactly one keycap per key: no "—" padding cap (#158).
 #[test]
-fn shortcut_boxes_pad_to_three_caps_from_the_left() {
+fn shortcut_boxes_draw_one_cap_per_key_and_no_padding() {
     let (mut s, _) = state(None);
     s.draft.quick_actions[0].shortcut = "Ctrl+T".into();
     let texts = page(&mut s, Section::Shortcuts);
     let at = texts.iter().position(|t| t == "Ctrl").unwrap();
     assert_eq!(texts[at..at + 3], ["Ctrl", "Shift", "Space"]);
-    let two = texts.iter().position(|t| t == "—").expect("an empty cap");
-    assert_eq!(texts[two..two + 3], ["—", "Ctrl", "T"]);
+    assert!(!texts.iter().any(|t| t == "—"), "{texts:?}");
+    let two = texts.iter().position(|t| t == "T").unwrap();
+    assert_eq!(texts[two - 1], "Ctrl");
     // a cleared quick action says so
     s.draft.quick_actions[0].shortcut.clear();
     let texts = shot::texts(view(&s));

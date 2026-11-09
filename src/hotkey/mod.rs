@@ -5,6 +5,8 @@
 //! truth for registering with the OS, for routing a key press to its `Trigger`, and
 //! for the stable ids the Wayland portal needs.
 #[cfg(target_os = "linux")]
+mod gnome;
+#[cfg(target_os = "linux")]
 mod portal;
 mod quick_id;
 mod socket;
@@ -233,6 +235,9 @@ pub enum DesktopKey {
     Unassigned,
     /// The OS refused it: another app holds the key (`regrab`).
     Taken,
+    /// One of the user's own GNOME custom shortcuts has this key (its name).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    UsedBy(String),
     /// The portal could not bind shortcuts at all (its answer is an error).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Failed,
@@ -262,6 +267,10 @@ pub fn taken_shortcuts() -> Vec<String> {
 /// not simply that key. `None` = active as configured, or nothing known (not
 /// Wayland, the desktop hasn't answered yet, or not a running shortcut).
 pub fn desktop_key(shortcut: &str) -> Option<DesktopKey> {
+    #[cfg(target_os = "linux")]
+    if let Some(name) = gnome::used_by(shortcut) {
+        return Some(DesktopKey::UsedBy(name));
+    }
     let refused = parse_shortcut(shortcut).is_ok_and(|h| taken().contains(&h));
     if refused {
         return Some(DesktopKey::Taken);
@@ -273,6 +282,27 @@ pub fn desktop_key(shortcut: &str) -> Option<DesktopKey> {
         return Some(DesktopKey::Failed);
     }
     desktop_key_in(&bindings(), &desktop_keys(), shortcut)
+}
+
+/// Why `shortcut` cannot be recorded here, when the desktop keeps it for itself or one
+/// of the user's own shortcuts has it (GNOME: Ctrl+Shift+U, Print, Super+...). Tests
+/// never read the machine's desktop.
+pub fn unusable_reason(shortcut: &str) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    if !cfg!(test) {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        return gnome::reserved_on(&desktop, shortcut)
+            .or_else(|| gnome::used_by(shortcut).map(|n| format!("Used by {n}")));
+    }
+    let _ = shortcut;
+    None
+}
+
+/// Removes the entries OpenCircle keeps in the desktop's own shortcut settings (GNOME
+/// custom shortcuts), for a reset or an uninstall. Only ours; nothing elsewhere.
+pub fn forget_desktop_shortcuts() {
+    #[cfg(target_os = "linux")]
+    gnome::forget();
 }
 
 /// A registry value `snipping_has_print_screen` reads.
@@ -535,7 +565,11 @@ pub fn reload(cfg: &Config) {
 
     #[cfg(target_os = "linux")]
     if crate::capture::wayland_session() {
-        portal::rebind();
+        if gnome::active() {
+            gnome::sync(&bindings(), suspended());
+        } else {
+            portal::rebind();
+        }
         return;
     }
     GRAB.with_borrow_mut(|slot| match slot {
@@ -561,6 +595,10 @@ pub fn suspend(on: bool) {
         "[opencircle] global shortcuts {}",
         if on { "held off" } else { "back on" }
     );
+    #[cfg(target_os = "linux")]
+    if gnome::active() {
+        gnome::sync(&bindings(), on); // keys cleared while recording, back after
+    }
     GRAB.with_borrow_mut(|slot| match slot {
         Some(grab) if on => {
             let _ = grab.manager.unregister_all(&grab.held);

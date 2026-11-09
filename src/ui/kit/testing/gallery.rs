@@ -952,18 +952,13 @@ fn chip_action_sheet() {
 
 #[test]
 fn keycap_sheet() {
-    use super::super::keycap::{empty, keycap};
+    use super::super::keycap::keycap;
     use iced::widget::row as line;
-    let rows = vec![
-        row("keys", Act::Rest, |ar| {
-            line![keycap("Ctrl"), keycap(s(ar, "Space", "مسافة"))]
-                .spacing(5)
-                .into()
-        }),
-        row("empty", Act::Rest, |_| {
-            line![empty(), keycap("T")].spacing(5).into()
-        }),
-    ];
+    let rows = vec![row("keys", Act::Rest, |ar| {
+        line![keycap("Ctrl"), keycap(s(ar, "Space", "مسافة"))]
+            .spacing(5)
+            .into()
+    })];
     sheet("keycap", Size::new(200.0, 40.0), &rows);
 }
 

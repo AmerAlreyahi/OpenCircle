@@ -593,6 +593,7 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
 
 /// The user's settings, downloaded models, histories and saved keys: gone.
 pub fn remove_user_data() {
+    crate::hotkey::forget_desktop_shortcuts();
     remove_dirs(&user_data());
     let owners = (crate::ai::providers::PRESETS.iter()).map(|p| crate::secrets::AiKey(p.id));
     for owner in owners.chain([crate::secrets::AiKey::SHARED]) {

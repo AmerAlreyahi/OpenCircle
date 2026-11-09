@@ -1,21 +1,20 @@
 //! `.oc-shortcut-box`: a shortcut as one keycap per key, as wide as a
 //! settings row's control column and 36 px tall for every shortcut (owner
 //! rule: every shortcut field the same width), `track` with a
-//! `rim` edge, radius 10. Three cells (more for a longer shortcut), the keys
-//! at the right, the rest `keycap::empty`; no keys = "Not set". Under the
+//! `rim` edge, radius 10. One keycap per key (no padding cells; owner, #158),
+//! sharing the width; no keys = "Not set". Under the
 //! cursor the edge is `accent`; recording (the design has no look for it) is
 //! a 2 px `accent` edge with the hint in `accent`; a conflict a 2 px `DANGER`
 //! edge. The box is the same size in every state.
 use iced::widget::{button, container, row, text};
 use iced::{Border, Element, Fill};
 
-use super::keycap::{empty, keycap};
+use super::keycap::keycap;
 use super::text::font;
 use super::themes::c;
 use super::tokens::{Role, fixed, radius, size};
 
-/// The design's cells and their gap (`grid-cols-3 gap-[5px]`), its side pad.
-const CELLS: usize = 3;
+/// The design's gap between cells (`gap-[5px]`), its side pad.
 const GAP: f32 = 5.0;
 const PAD: f32 = 8.0;
 
@@ -43,13 +42,7 @@ pub fn shortcut_field<'a, Message: Clone + 'a>(
     let inner = match state {
         State::Recording => line(recording_hint, c().accent),
         _ if keys.is_empty() => line("Not set", c().text_muted),
-        _ => {
-            let blank = CELLS.saturating_sub(keys.len());
-            let cells = (0..blank)
-                .map(|_| empty())
-                .chain(keys.into_iter().map(keycap));
-            row(cells).spacing(GAP).into()
-        }
+        _ => row(keys.into_iter().map(keycap)).spacing(GAP).into(),
     };
     button(container(inner).center_y(Fill))
         .width(size::SHORTCUT.width)
