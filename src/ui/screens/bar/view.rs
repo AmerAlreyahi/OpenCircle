@@ -229,7 +229,7 @@ impl App {
     /// The bar turning into the editing toolbar (or back) at `at`: its
     /// surface only, sized between the two (`dock_size`); opaque, so a press
     /// on it never starts a selection.
-    // ponytail: a plain size morph; the full motion returns with the GPU renderer (0.1.5).
+    // ponytail: a plain size morph; the full motion returns with the GPU renderer.
     pub(in crate::ui) fn morphing_bar(&self, at: Point) -> Element<'_, Message> {
         let size = self.dock_size();
         let shape = surface(Material::Widget, radius::WINDOW, space())

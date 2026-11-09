@@ -3,7 +3,7 @@
 //! speaks is chosen inside, never shown: owner, 2026-10-28), a Custom
 //! server's URL, the model and the key (key + Save; mono where a value is
 //! code). The design's sign-in, local-model and answer-style parts belong to
-//! 0.2.0 and are not drawn.
+//! AI online and are not drawn.
 use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, row};
 use iced::{Element, Fill};

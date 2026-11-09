@@ -1387,7 +1387,7 @@ pub static PAIRS: [Pair; 49] = [
 /// models-v1's decoders (pair, size, sha256): the files the app downloaded
 /// before models-v2. One already on a user's PC keeps working (`Pair::needed`)
 /// until the pair's next download replaces it.
-// ponytail: drop in 0.2.0 (with this check; a v1 decoder then counts as
+// ponytail: drop with Live translation (with this check; a v1 decoder then counts as
 // missing and the download card offers the lighter one).
 const V1_DECODERS: [(&str, u64, &str); 49] = [
     (

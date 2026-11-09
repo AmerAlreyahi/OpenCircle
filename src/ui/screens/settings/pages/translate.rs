@@ -62,7 +62,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         dropdown(LANGUAGES, target, &t.target, Message::Target),
         "translate.target",
     ));
-    // Live translate is a Labs feature (until 0.3.0): its row only while on.
+    // Live translate is a Labs feature (until Live translation): its row only while on.
     if state.draft.labs.has(Feature::Live) {
         let problem = issue(&state.problems, "translate.live_interval_ms");
         let field =

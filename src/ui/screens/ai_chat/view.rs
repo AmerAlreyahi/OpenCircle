@@ -286,7 +286,7 @@ impl AiChat {
     /// The chat's composer (the design's, solid): the attached screen's chip
     /// while a picture goes with the next message (`attached`), the field
     /// (more lines with Shift / Ctrl+Enter), then Include screen and Send
-    /// (Stop while answering). Web search's Auto / On / Off joins it in 0.2.0.
+    /// (Stop while answering). Web search's Auto / On / Off joins it with AI online.
     fn composer<'a>(
         &'a self,
         placeholder: &'a str,

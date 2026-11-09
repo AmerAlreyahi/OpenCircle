@@ -95,7 +95,7 @@
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
 //! song = false                      # song search
 //! pins = false                      # pinning a capture to the screen
-//! live = false                      # live translate (unfinished until 0.3.0): bar button, tray item, shortcut
+//! live = false                      # live translate (unfinished until Live translation): bar button, tray item, shortcut
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry

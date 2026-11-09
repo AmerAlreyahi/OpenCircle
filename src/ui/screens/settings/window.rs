@@ -5,7 +5,7 @@
 //! with its gliding highlight, and the page. The page switches at once: the
 //! design's rise (the whole page moving 14 px over 190 ms) redrew the whole
 //! window every frame on the CPU renderer (laggy on a 4K screen); it returns
-//! with the GPU renderer (0.1.4).
+//! with the GPU renderer.
 use iced::widget::{Space, column, container, row};
 use iced::{Center, Element, Fill, Padding};
 

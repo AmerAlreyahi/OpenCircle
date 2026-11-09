@@ -604,7 +604,7 @@ fn a_new_crop_goes_with_the_next_question_into_the_same_chat() {
 
 /// The composer as the design: the attached screen's chip only while a
 /// picture goes with the next message, the field, then Include screen and
-/// Send; no web search control (0.2.0) and no privacy line under it.
+/// Send; no web search control (AI online) and no privacy line under it.
 #[test]
 fn the_composer_is_chip_field_then_controls() {
     let texts =

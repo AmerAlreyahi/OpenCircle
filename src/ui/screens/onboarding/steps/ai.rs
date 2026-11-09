@@ -1,6 +1,6 @@
 //! Connect AI (step 2): Settings' Answers from row; for an AI provider its
 //! Provider, (Custom server) Server URL and key rows. The design's sign-in
-//! card is 0.2.0.
+//! card is AI online.
 use iced::Element;
 use iced::widget::column;
 

@@ -1568,7 +1568,7 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
     for want in ["Edge style", "Glow strength", "Your two colours"] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
-    // hidden until it does something: glass bars (0.1.4); Snip is out of
+    // hidden until it does something: glass bars; Snip is out of
     // Labs, so the edge row has two modes at least
     assert!(!texts.iter().any(|t| t == "Bars and pills"));
     assert!(texts.iter().any(|t| t == "Screen edge for"), "{texts:?}");

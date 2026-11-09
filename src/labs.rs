@@ -4,7 +4,7 @@
 //! has no shortcut, tray item, bar button or Settings row. Its own settings stay in
 //! the file untouched; turning it on brings them back.
 //!
-//! Live translate is hidden here until 0.3.0 (owner, 2026-10-27). Snip and its
+//! Live translate is hidden here until Live translation (owner, 2026-10-27). Snip and its
 //! editor left Labs in 0.1.3 (N-41): on for everyone, with the colour picker,
 //! the ruler, long capture, share and still pins (owner, 2026-10-31); live pins
 //! stay here (`Pins`).
