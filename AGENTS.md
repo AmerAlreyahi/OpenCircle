@@ -675,9 +675,15 @@ production systems.
   next release is v0.1.4 (owner: "keep 014"), made directly from main once today's fixes are settled (no rollback: the widgets-between-
   screens work #125 is fixed, not reverted). Linux fixes get a version of their own. Game translation shifts to after them.
   Order: next release -> Linux fixes -> Game translation -> Arabic UI + live groundwork -> the rest as listed above.
+- v0.1.4 publish OK (owner, 2026-11-09, going to sleep): the lead may PUBLISH v0.1.4 overnight only if every gate passes
+  (CI green incl. audit, security review clean, clean-up check, v0.1.3 Setup + portable update themselves to the draft on
+  the Windows VM, a fresh install's model download recovers from forced server errors); then re-download the assets and
+  verify SHA256SUMS + minisig. Any failure = it stays a draft for the owner.
 - General models project (owner, 2026-11-09): AFTER v0.1.4, build a general, professional models project (not only for
   OpenCircle), presented like research: reproducible measurements, a technical report, model cards, scripts. The owner
-  uploads to Hugging Face himself. OpenCircle-models' existing releases stay forever (installed copies pin their URLs);
+  uploads to Hugging Face himself (user AmerAlreyahi; one HF repo per pair, a full drop-in folder: our decoder + the
+  unchanged encoder, tokenizer and config, grouped in a Collection; working name "LiteTranslate", one setting in the
+  scripts, the owner picks the final name). OpenCircle-models' existing releases stay forever (installed copies pin their URLs);
   the app moves to the new source only in a later version, with new pins. Measured numbers only, no novelty claims.
   Owner-only authorship (owner, 2026-11-09, firm, "never ever"): agents NEVER commit, push, upload or publish anything to the
   models project (GitHub or Hugging Face). Agents only prepare files in a local folder outside any git repo; the owner
