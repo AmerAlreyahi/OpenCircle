@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.3 published (2026-11-04); now 0.1.4 Game translation.**
+(both local only). Status: **v0.1.3 published (2026-11-04); next: a fix release of main, then 0.2.0 Game translation.**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -628,8 +628,8 @@ production systems.
   of its own, without glass; the glass library is built after every other 0.1.x version, right before 0.2.0. Order: 0.1.4
   Game translation (with the user-reported fixes first) -> 0.1.5 GPU renderer (motion back, Power saver, store listings)
   -> 0.1.6 AI online + faster core + smart selection -> 0.1.7 Voice and sound -> 0.1.8 Writing assist -> 0.1.9 Glass
-  (the library, then glass in OpenCircle) -> 0.2.0 Live translation -> 0.3.0 Visual search. The board's Phase field uses
-  these names.
+  (the library, then glass in OpenCircle) -> 0.2.0 Live translation -> 0.3.0 Visual search. SUPERSEDED 2026-11-09 by
+  "Version plan (owner, 2026-11-09)" below.
 - Clean before every release (owner, 2026-11-03, from 0.1.3 on): the LAST step before a release, then the security
   check: remove every dead or old config key, code path, test, asset, script and tool we no longer use AND won't use
   (things waiting for a planned feature, e.g. glass in 0.1.4, stay). Docs and assets too (owner, 2026-11-03): public
@@ -652,12 +652,13 @@ production systems.
   backup), a value the user changed on purpose stays.
 - The circled part goes to the AI (owner, 2026-11-08): Ask AI sends the selected crop, never the text alone, in the browser
   provider AND in the in-app AI chat; check both paths.
-- App languages + Arabic RTL (owner, 2026-11-08): the app's UI becomes multi-language, the language chosen in onboarding
-  (and changeable in Settings); Arabic first, fully right-to-left (mirrored layout). Planned in 0.1.4 BEFORE the game
-  translation work, but ON HOLD until the owner says to start (he checks whether it fits today). The existing Arabic/RTL
+- App languages + Arabic RTL (owner, 2026-11-08; version moved 2026-11-09 to "Arabic UI + live groundwork"): the app's UI
+  becomes multi-language, the language chosen in onboarding (and changeable in Settings); Arabic first, fully right-to-left
+  (mirrored layout). ON HOLD until the owner says to start (he checks whether it fits today). The existing Arabic/RTL
   toolbar code (Snip toolbar, Steps strip, picker, ruler, long-capture hint) is KEPT for it (audit item 5.1).
 - Lighter translation models (owner, 2026-11-08, approved): the OPUS-MT decoders are re-exported by us with the output layer
-  outside the decoder's two branches (W6: 501 -> 256 MB per loaded pair, identical output) and hosted as a new release of
+  outside the decoder's two If branches (W6 measured 501 -> 256 MB and 9.2 -> 8.3 ms/step for ONE pair; W14 measured
+  -32..-34 % on five pairs; identical output) and hosted as a new release of
   OpenCircle-models (models-v2, sha256 pinned in `mt::PAIRS`); an old decoder already on a user's PC is replaced, never kept
   beside the new one.
 - Labs search history removed (owner, 2026-11-08, "del"): it stored searches nobody could see. The key is still read and
@@ -666,6 +667,37 @@ production systems.
   called from each place; never the same thing twice (recorded in the owner's engineering rules too).
 - Edge assist (owner, 2026-11-08): a simple, gentle magnetic edge when dragging a Snip area by hand: it helps the user land on
   window/element edges, never aggressive; no mockup needed.
+
+- Version plan (owner, 2026-11-09, SUPERSEDES every earlier "Version plan" entry): Game translation (0.2.0) -> Arabic UI +
+  live groundwork (0.3.0) -> Live translation (0.4.0) -> AI online (0.5.0) -> Reach (0.6.0) -> Voice and sound (0.7.0) ->
+  Writing assist (0.8.0) -> GPU renderer + cosmetics (0.9.0) -> later: Visual search, then Glass.
+- Version numbers (owner, 2026-11-09): each feature release bumps the middle number. Bugs found during a version are fixed
+  on main and ship with the next release (its notes list features and fixes). The last digit stays free (no planned use).
+  The board's Phase field uses the NAMES; a number is given only at release. The update gate stays strict: a broken updater
+  is the one bug users cannot wait out.
+- Every release passes the security scan and the QA gates (#84), from 0.2.0 on.
+- Two translation tracks (owner, 2026-11-09): normal translation = OPUS-MT base + models-v2 decoders on the CPU, unchanged.
+  Live translation (story games: Genshin, HSR, WuWa and similar) = its own model on the GPU, chosen by the 0.2.0 spike;
+  target >= 70 % en->ar on the 13-screen corpus plus a fixed ~200-line set scored with COMET (pass line fixed before
+  testing).
+- GPU rule for live translation (owner, 2026-11-09; simple, no FPS measuring): at start, Vulkan device type + free VRAM:
+  a discrete GPU with free VRAM >= model + ~1 GB -> GPU; otherwise (integrated, low VRAM) -> the CPU path with today's
+  models. While playing: each translation burst is timed; ~2x slower than its baseline several times in a row -> back off to
+  the CPU path. Setting "GPU for live translation: Auto / Off". Proved once on test PCs with the cutscene test (#82): the game
+  holds its 120 and 60 fps caps, never below 60. Never hook, inject into or read the game process (anti-cheat).
+- OCR (owner, 2026-11-09): one PP-OCR pipeline on Windows and Linux, on the CPU. The slim pipeline (#61) replaces oar-ocr
+  FIRST; all game tuning happens on it. Windows.Media.Ocr stays for main mode only.
+- models-v2 facts (owner, 2026-11-09; correct them wherever written): each If branch of the merged decoder held
+  Transpose -> DequantizeLinear(model.shared.weight, int8); with session.disable_quant_qdq=1 ORT folds it once PER BRANCH;
+  v2 moves it before the If. It is NOT MatMulInteger pre-packing. 501 -> 256 MB and 9.2 -> 8.3 ms/step are W6's numbers
+  for ONE pair. The vocab size differs per pair. No novelty claims anywhere.
+- Rejected for now (owner, 2026-11-09): Bergamot and CTranslate2 for normal translation (a second runtime); M2M100 (not
+  measured); NLLB (CC BY-NC); TranslateGemma 4B (4-6 GB VRAM); OneOCR as default (Microsoft's files, reverse-engineered
+  API, Windows 11 only); measuring game FPS (cost and risk for little gain); the CUDA pack #27 (1.3-2 GB; replaced by the
+  Vulkan path).
+- Model downloads never fail on a server hiccup (owner, 2026-11-09, "never ever again", after a fresh install failed on a
+  GitHub 504): every first-use download retries server errors and dropped connections with backoff and resumes partial
+  files; the user sees a plain message, never only a raw status code.
 
 ## Domain quirks
 
