@@ -92,7 +92,8 @@ pub fn open(png: &[u8], width: u32, height: u32, question: Option<&str>) -> io::
 }
 
 /// The page's Content-Security-Policy: only its own inline script and styles
-/// (by hash), no fetch from anywhere, and the form may post only to Lens.
+/// (by hash), no fetch from anywhere, and the form may post only to Lens (whose
+/// upload answers with a redirect to www.google.com: form-action covers redirects).
 fn csp(html: &str) -> String {
     let hashes = |tag: &str| -> String {
         let (open, close) = (format!("<{tag}>"), format!("</{tag}>"));
@@ -108,7 +109,7 @@ fn csp(html: &str) -> String {
             .collect()
     };
     format!(
-        "default-src 'none'; script-src{}; style-src{}; form-action https://lens.google.com; \
+        "default-src 'none'; script-src{}; style-src{}; form-action https://lens.google.com https://www.google.com; \
          base-uri 'none'; frame-ancestors 'none'",
         hashes("script"),
         hashes("style")
@@ -461,7 +462,7 @@ mod tests {
             .find_map(|l| l.strip_prefix("Content-Security-Policy: "))
             .unwrap();
         assert!(policy.starts_with("default-src 'none'; script-src 'sha256-"));
-        assert!(policy.contains("; form-action https://lens.google.com;"));
+        assert!(policy.contains("; form-action https://lens.google.com https://www.google.com;"));
         assert!(!policy.contains("unsafe"));
         // the one script and both style blocks (the page's and the logo's), each by its hash
         let script = html.split("<script>").nth(1).unwrap();
