@@ -675,6 +675,10 @@ production systems.
   next release is v0.1.4 (owner: "keep 014"), made directly from main once today's fixes are settled (no rollback: the widgets-between-
   screens work #125 is fixed, not reverted). Linux fixes get a version of their own. Game translation shifts to after them.
   Order: next release -> Linux fixes -> Game translation -> Arabic UI + live groundwork -> the rest as listed above.
+- General models project (owner, 2026-11-09): AFTER v0.1.4, build a general, professional models project (not only for
+  OpenCircle), presented like research: reproducible measurements, a technical report, model cards, scripts. The owner
+  uploads to Hugging Face himself. OpenCircle-models' existing releases stay forever (installed copies pin their URLs);
+  the app moves to the new source only in a later version, with new pins. Measured numbers only, no novelty claims.
 - Version numbers (owner, 2026-11-09): each feature release bumps the middle number. Bugs found during a version are fixed
   on main and ship with the next release (its notes list features and fixes). The last digit stays free (no planned use).
   The board's Phase field uses the NAMES; a number is given only at release. The update gate stays strict: a broken updater
