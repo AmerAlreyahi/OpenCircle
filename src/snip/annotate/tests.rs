@@ -947,6 +947,19 @@ fn ctrl_drag(e: &mut Annotator, from: Point, to: Point) {
     e.update(Message::Release);
 }
 
+/// A cancelled press (a lost touch) draws nothing; the same drag released does.
+#[test]
+fn a_cancelled_press_draws_nothing() {
+    let mut e = editor(400, 300);
+    e.update(Message::Tool(Tool::Rect));
+    e.update(Message::Press(pt(50.0, 50.0)));
+    e.update(Message::Move(pt(150.0, 120.0)));
+    e.update(Message::Cancel);
+    assert!(e.doc.items.is_empty() && e.pending.is_none());
+    drag(&mut e, pt(50.0, 50.0), &[], pt(150.0, 120.0));
+    assert_eq!(e.doc.items.len(), 1);
+}
+
 /// A drawing tool's plain drag always draws, even over an annotation; only the
 /// Select tool or Ctrl+drag moves one (owner, 2026-10-31). The selection's
 /// handles still resize with any tool; undo puts it all back.

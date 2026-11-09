@@ -22,6 +22,7 @@ pub fn margin(e: &Annotator) -> f32 {
 }
 use crate::ui::kit::area;
 use crate::ui::kit::themes::c;
+use crate::ui::touch::Touched;
 
 /// How a window shows Snip's live area (`app::screens`' one unit): its px =
 /// the starting screen's px * `k` + `at`; the image's top-left pixel is at
@@ -135,7 +136,10 @@ impl canvas::Program<Message> for Input<'_> {
     ) -> Option<Action<Message>> {
         let e = self.editor;
         let (event, cursor) = match crate::ui::touch::as_mouse(event, &mut pointer.finger) {
-            Some((mouse, at)) => (canvas::Event::Mouse(mouse), Cursor::Available(at)),
+            Some(Touched::Cancel) => {
+                return std::mem::take(&mut pointer.down).then(|| Action::publish(Message::Cancel));
+            }
+            Some(Touched::Mouse(mouse, at)) => (canvas::Event::Mouse(mouse), Cursor::Available(at)),
             None => (event.clone(), cursor),
         };
         let message = match &event {

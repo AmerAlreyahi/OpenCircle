@@ -23,7 +23,7 @@ impl App {
         }
     }
 
-    fn tool_mut(&mut self) -> Option<&mut Tool> {
+    pub(super) fn tool_mut(&mut self) -> Option<&mut Tool> {
         match &mut self.o.purpose {
             Purpose::Snip(snip) => snip.tool.as_mut(),
             _ => None,

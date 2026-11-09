@@ -101,6 +101,25 @@ impl App {
                 }
                 return Task::none();
             }
+            // A lost touch: the press ends and no circle, pick or text selection completes.
+            overlay::Event::Cancel => {
+                let o = &mut *self.o;
+                (o.drawing, o.grab, o.text_press) = (false, None, None);
+                if let Some(mode) = &mut o.text_mode {
+                    mode.picking = false;
+                }
+                if std::mem::take(&mut o.adding)
+                    && let Some((sel, stroke)) = o.others.pop()
+                {
+                    (o.selection, o.stroke) = (Some(sel), stroke); // the earlier one stays
+                } else {
+                    o.stroke.clear();
+                }
+                if let Some(tool) = self.tool_mut() {
+                    tool.ruler.release();
+                }
+                return Task::none();
+            }
             overlay::Event::ZoomReset => {
                 self.zoom_to(self.o.view.reset());
                 return Task::none();
@@ -444,7 +463,8 @@ impl App {
             | overlay::Event::PanStart(_)
             | overlay::Event::PanMove(_)
             | overlay::Event::PanEnd
-            | overlay::Event::ZoomReset => {}
+            | overlay::Event::ZoomReset
+            | overlay::Event::Cancel => {}
         }
         Task::none()
     }

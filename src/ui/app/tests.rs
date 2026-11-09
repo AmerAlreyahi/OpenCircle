@@ -1430,6 +1430,28 @@ fn shift_adds_selections_and_actions_get_all_of_them() {
     assert!(app.o.others.is_empty() && app.o.word.is_none() && app.o.ask.is_empty());
 }
 
+/// A lost touch ends the press: the circle is not completed (a lift would select).
+#[test]
+fn a_cancelled_touch_completes_no_circle() {
+    let mut app = open_app(800, 600, 1.0);
+    let ring = ring(300.0, 200.0, 40.0);
+    event(
+        &mut app,
+        overlay::Event::Press {
+            at: ring[0],
+            shift: false,
+        },
+    );
+    ring[1..]
+        .iter()
+        .for_each(|&p| event(&mut app, overlay::Event::Move(p)));
+    event(&mut app, overlay::Event::Cancel);
+    assert!(app.o.selection.is_none() && !app.o.drawing && app.o.stroke.is_empty());
+    // the lift of a finished circle does select
+    circle(&mut app, Point::new(300.0, 200.0), 40.0, false);
+    assert!(app.o.selection.is_some());
+}
+
 fn pixels(app: &App) -> Vec<u8> {
     match &app.o.frame {
         Some(image::Handle::Rgba { pixels, .. }) => pixels.to_vec(),

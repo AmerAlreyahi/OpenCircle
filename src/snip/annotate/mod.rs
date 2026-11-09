@@ -330,6 +330,8 @@ pub enum Message {
     PressMove(Point),
     Move(Point),
     Release,
+    /// The press was cancelled (a lost touch): nothing it began completes.
+    Cancel,
     /// Shift is held (lines snap to 45° steps).
     Shift(bool),
     /// Typing into a text, label, callout, arrow label or step note.
@@ -682,7 +684,11 @@ impl Annotator {
         // they are remembered with the next choice).
         let pointer = matches!(
             message,
-            Message::Press(_) | Message::PressMove(_) | Message::Move(_) | Message::Release
+            Message::Press(_)
+                | Message::PressMove(_)
+                | Message::Move(_)
+                | Message::Release
+                | Message::Cancel
         );
         let out = self.handle(message);
         if !pointer {
@@ -705,6 +711,7 @@ impl Annotator {
                 | Message::Menu(_)
                 | Message::Move(_)
                 | Message::Release
+                | Message::Cancel
                 | Message::Shift(_)
                 | Message::Focus(_)
                 | Message::MenuStep(_)
@@ -733,6 +740,7 @@ impl Annotator {
             }
             Message::Move(p) => self.drag_to(p),
             Message::Release => self.release(),
+            Message::Cancel => self.cancel_press(),
             Message::Shift(on) => self.shift = on,
             Message::Type(s) => self.edit_text(|t| t.push_str(&s)),
             Message::Paste(at) => self.paste(at),
@@ -1373,6 +1381,24 @@ impl Annotator {
             self.update_live();
         } else {
             self.hide();
+        }
+    }
+
+    /// A cancelled press (a lost touch) ends like a release that completes nothing:
+    /// the area and the pending item stay as they were before the press.
+    fn cancel_press(&mut self) {
+        self.lock = None;
+        if let Some(drag) = self.area_drag.take() {
+            (self.doc.crop, self.doc.items) = (Some(drag.start), drag.items);
+            self.refresh();
+        } else if self.cropping.take().is_none()
+            && self
+                .pending
+                .as_ref()
+                .is_some_and(|p| !matches!(p.drag, Drag::Type))
+        {
+            self.pending = None;
+            self.refresh();
         }
     }
 

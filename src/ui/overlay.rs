@@ -18,6 +18,7 @@ use iced::{Color, Point, Rectangle, Renderer, Size, Theme, Vector};
 
 use super::kit::{area as kit_area, motion, tokens::fixed};
 use super::theme;
+use super::touch::Touched;
 use crate::config::{BracketStyle, Look};
 
 /// A selection smaller than this (screen px, either side) is a tap, not a circle.
@@ -80,6 +81,8 @@ pub enum Event {
     /// The pointer moved with no button down (only when `Overlay::hover`).
     Hover(Point),
     Release,
+    /// The OS cancelled the touch: the press ends and nothing it began completes.
+    Cancel,
     /// Enter: the default action.
     Enter,
     /// Shift+Enter: Snip's every screen as one picture (elsewhere Enter).
@@ -984,7 +987,11 @@ impl canvas::Program<Event> for Overlay<'_> {
         // A finger or pen is the mouse: its place is the pointer (no cursor comes with it).
         let touched = super::touch::as_mouse(event, &mut pointer.finger);
         let (event, cursor) = match touched {
-            Some((mouse, at)) => {
+            Some(Touched::Cancel) => {
+                return std::mem::take(&mut pointer.down)
+                    .then(|| Action::publish(Event::Cancel).and_capture());
+            }
+            Some(Touched::Mouse(mouse, at)) => {
                 pointer.at = Some(at - (bounds.position() - Point::ORIGIN));
                 (canvas::Event::Mouse(mouse), Cursor::Available(at))
             }
