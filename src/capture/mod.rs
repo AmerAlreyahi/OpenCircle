@@ -1,13 +1,16 @@
 //! Screen capture: one frozen frame of a monitor (`choose`: the active window's,
 //! else the pointer's) first and then the others (Circle to Search), or of every
 //! monitor at once (snip).
-//! One file per platform: `x11.rs` (Linux X11/XWayland), `portal.rs` (Linux Wayland),
+//! One file per platform: `x11.rs` (Linux X11/XWayland), `portal.rs` (Linux Wayland;
+//! `screencast.rs` where GNOME's screenshot portal would ask every time),
 //! `win.rs` (Windows, xcap). Scrolling capture: `stitch.rs` + `scroll.rs`.
 pub mod cursor;
 pub mod live;
 pub mod pace;
 #[cfg(target_os = "linux")]
 pub mod portal;
+#[cfg(target_os = "linux")]
+mod screencast;
 pub mod scroll;
 pub mod shrink;
 pub mod snip;

@@ -27,13 +27,26 @@ pub const APP_ID: &str = "com.opencircle.app";
 
 /// The full desktop, without asking the user to pick (`interactive` = false). The
 /// desktop may still ask once for permission (GNOME does), hence the long wait.
+/// GNOME before 46 asks on every screenshot: there the ScreenCast portal, asked
+/// once, captures instead (`screencast`).
 pub fn capture() -> Result<Frame, CaptureError> {
+    if let Ok(conn) = session_bus()
+        && super::screencast::wanted(&conn)
+    {
+        return super::screencast::capture(&conn);
+    }
     Ok(read_and_delete(&screenshot()?)?)
 }
 
-/// One screenshot request just for its permission dialog: call while one of our
+/// One screenshot request just for its permission dialog (ScreenCast's dialog where
+/// that captures): call while one of our
 /// windows has the focus (GNOME won't ask otherwise). The image is deleted unread.
 pub fn allow() -> Result<(), CaptureError> {
+    if let Ok(conn) = session_bus()
+        && super::screencast::wanted(&conn)
+    {
+        return super::screencast::allow(&conn);
+    }
     forget_refusal();
     let path = screenshot()?;
     Ok(std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?)
