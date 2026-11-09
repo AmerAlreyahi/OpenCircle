@@ -689,6 +689,10 @@ production systems.
   models project (GitHub or Hugging Face). Agents only prepare files in a local folder outside any git repo; the owner
   commits and uploads them himself under his own name. The files must carry no trace of agent work: no AI/agent names, no
   "generated with", no worker or brief names, no tool chatter in text, comments or metadata (images, notebooks, PDFs).
+  HF upload (owner, 2026-11-09, refines the above): the owner put a write token in the gitignored .env (HF_TOKEN). The lead
+  may upload with it, as the owner (commits show AmerAlreyahi only; clean commit messages, no AI names): overnight ONE pair
+  as a PRIVATE repo in the OptimaMT organization as a test; everything public only after the owner's morning OK. GitHub
+  repo github.com/AmerAlreyahi/OptimaMT was created empty (owner: "do it"); the owner pushes its first commit himself.
   Visuals (owner, 2026-11-09): graphs and diagrams are included; data charts are drawn by a script from the measured data
   (reproducible); only illustrative art (cover, concept picture) may come from an image model (GPT or Gemini/Antigravity),
   never a chart or a number.
