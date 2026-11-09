@@ -309,7 +309,7 @@ fn file_url(path: &str) -> Option<String> {
 /// launcher; the arguments hold exactly one `%1` and no other `%`. Else `None`.
 #[cfg(any(windows, test))]
 fn command_for(template: &str, url: &str) -> Option<(String, String)> {
-    const DENIED: [&str; 8] = [
+    const DENIED: [&str; 10] = [
         "cmd.exe",
         "rundll32.exe",
         "explorer.exe",
@@ -318,6 +318,8 @@ fn command_for(template: &str, url: &str) -> Option<(String, String)> {
         "wscript.exe",
         "cscript.exe",
         "mshta.exe",
+        "msiexec.exe",
+        "regsvr32.exe",
     ];
     let t = template.trim();
     let (exe, rest) = match t.strip_prefix('"') {
@@ -559,6 +561,8 @@ mod tests {
             r#""C:\Windows\System32\cmd.exe" /c start %1"#,
             r"C:\Windows\System32\rundll32.exe url.dll,OpenURL %1",
             r#""C:\Windows\explorer.exe" %1"#,
+            r#""C:\Windows\System32\msiexec.exe" /i %1"#,
+            r#""C:\Windows\System32\regsvr32.exe" /s /i:%1 scrobj.dll"#,
             r#""C:\b\brave.exe"--x %1"#,
             r#""C:\b\brave.exe %1"#,
             "brave.exe %1",
