@@ -73,9 +73,9 @@ credited in `NOTICE` and in Settings > About.
 - **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
   browser, Copy text, Translate and Snip. `Ctrl+C` copies the selection as an
   image (or the picked words as text), `Ctrl+S` saves it; a small pill confirms.
-  Drag the bar to any of six spots.
-- **Ask AI about your selection.** No key needed: the question opens in Google
-  AI Mode in your browser. Or add your own key for a chat inside OpenCircle
+  Drag the bar to any of six spots, on any screen.
+- **Ask AI about your selection.** No key needed: the question and the circled picture
+  open in Google in your browser (Lens, then AI Mode). Or add your own key for a chat inside OpenCircle
   with markdown and follow-ups: OpenRouter, OpenAI, Anthropic, Gemini, Groq,
   Mistral, DeepSeek, xAI, a local Ollama or LM Studio, or your own server. A
   follow-up pins the chat so it stays above other apps. History is text only

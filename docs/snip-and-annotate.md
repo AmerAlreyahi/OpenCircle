@@ -22,7 +22,7 @@ screen freezes and a glow around its edge shows it is captured. Then:
 - **Press `Enter`** for the full screen (the screen under the pointer;
   `Shift+Enter` takes all screens as one picture). An area may cross screens.
 
-A loupe beside the pointer shows the pixels under it at 8x. `Esc` cancels.
+Everything also works with a finger or a pen on a touch screen. A loupe beside the pointer shows the pixels under it at 8x. `Esc` cancels.
 
 Once an area is picked, the edge glow goes away and the area gets a soft outline
 with small handles. Drag the handles to resize, drag inside to move it, use the
@@ -41,7 +41,7 @@ moment you pick it.
 Copy and Save keep the capture's **original size**. Settings > Snip can scale
 the long edge down to 1024, 1568 or 2048 px instead. Copy is the picture only;
 text is copied by selecting it. Drag the size chip on the toolbar to drag the
-picture straight into any app.
+picture straight into any app, on any screen.
 
 **Timer** (Settings > Snip: Off / 3 s / 5 s / 10 s): the overlay hides and
 counts down, so you can open a menu or a tooltip first.
@@ -90,7 +90,8 @@ small handles. OpenCircle remembers your last tool, colour, sizes and options.
 **Blur or Redact.** Blur is a fine pixel mosaic along a text line, sized to the
 line (or set by hand in its options). It is a soft pixel mosaic that hides the
 text so it can't be recovered. **Redact** is a solid box, for when you want no
-trace at all.
+trace at all. If the stroke overshoots, slide the pointer back and the blur
+follows it.
 
 ## Long capture
 

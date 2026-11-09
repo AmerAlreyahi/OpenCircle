@@ -78,8 +78,9 @@ then the rest:
 `Ctrl+S` saves it as a PNG or JPEG in your save folder (Settings > General).
 A small pill at the bottom right says "Copied" or "Saved to ..." for a moment.
 
-The bar snaps to the bottom centre, the top, or a bottom corner. Drag its
-handle to move it; it stays where you put it.
+The bar snaps to the bottom centre, the top, or a bottom corner on any screen.
+Drag its handle to move it (the AI chat moves to any screen too); it stays where
+you put it. A finger or a pen works like the mouse.
 
 Search in browser and Copy text are dimmed until something is selected. A
 selection of one plain colour is never sent: OpenCircle says so instead.
@@ -117,7 +118,8 @@ may be needed; OpenCircle tells you if it is.
 Type a question in the bar's AI field and press `Enter`. With **Include screen**
 on (the default) the selected area goes with it; off sends only your question.
 
-- With no key, the question opens in Google AI Mode in your browser.
+- With no key, the question opens in your browser: with the circled picture
+  through Google Lens (Include screen on), or in Google AI Mode (off).
 - With a provider set up (Settings > AI), the answer streams into a chat card
   with markdown. Ask a follow-up and the chat pins: it stays open above other
   apps, and a new capture asks into the same chat. The pin button in the header
