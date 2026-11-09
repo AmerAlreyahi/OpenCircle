@@ -567,6 +567,8 @@ pub struct State {
     /// sees it; modifiers held and let go with no key is the only sign.
     pub(super) wayland: bool,
     pub(super) mods_held: bool,
+    /// The modifiers last held while recording (what a key the desktop ate had).
+    pub(super) last_mods: iced::keyboard::Modifiers,
     /// Look & behaviour: whose screen edge the custom look edits, which of its
     /// two colours has the picker open (and the hex typed there).
     pub(super) edge_mode: EdgeMode,
@@ -675,7 +677,7 @@ pub enum Message {
     Record(Slot),
     Key(Chord),
     /// A modifier went down (`true`) or the last one was released.
-    Mods(bool),
+    Mods(iced::keyboard::Modifiers),
     Provider(Provider),
     Preset(Preset),
     BaseUrl(String),
@@ -939,6 +941,7 @@ impl State {
             recording: None,
             wayland: cfg!(target_os = "linux") && linux_wayland(),
             mods_held: false,
+            last_mods: iced::keyboard::Modifiers::empty(),
             shortcut_error: None,
             key,
             key_owner,
@@ -1336,14 +1339,32 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             state.shortcut_error = None;
             state.mods_held = false;
         }
-        Message::Mods(held) => {
+        Message::Mods(mods) => {
             let Some(slot) = state.recording else {
                 return Outcome::None;
             };
-            if held {
+            if !mods.is_empty() {
+                // modifiers come and go one at a time: keep everything held since the first
+                state.last_mods = if state.mods_held {
+                    state.last_mods | mods
+                } else {
+                    mods
+                };
                 state.mods_held = true;
             } else if std::mem::take(&mut state.mods_held) && state.wayland {
-                state.shortcut_error = Some((slot, TAKEN.into()));
+                // the desktop ate the key: say which of its own keys that was, when known
+                let m = state.last_mods;
+                let why =
+                    crate::hotkey::eaten_key_reason(m.control(), m.alt(), m.shift(), m.logo());
+                // a later, partial release (one modifier let go at a time) must not
+                // replace the reason the first one gave with the generic note
+                let noted = state
+                    .shortcut_error
+                    .as_ref()
+                    .is_some_and(|(s, _)| *s == slot);
+                if why.is_some() || !noted {
+                    state.shortcut_error = Some((slot, why.unwrap_or_else(|| TAKEN.into())));
+                }
             }
         }
         Message::Key(chord) => {
@@ -1727,7 +1748,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     }
     let keys = event::listen_with(|event, _status, _window| {
         if let iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) = event {
-            return Some(Message::Mods(!m.is_empty()));
+            return Some(Message::Mods(m));
         }
         chord_of(event).map(Message::Key)
     });

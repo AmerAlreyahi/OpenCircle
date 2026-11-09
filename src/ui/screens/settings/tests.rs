@@ -2660,3 +2660,23 @@ fn a_desktop_without_shortcut_service_names_the_command_to_bind() {
     let quick = s.desktop_note(Slot::Quick(0)).unwrap();
     assert!(quick.contains("\"opencircle run translate\""), "{quick}");
 }
+
+/// Wayland: modifiers held and let go with no key means the desktop ate the key; the row
+/// says so (tests never read the desktop, so the generic note).
+#[test]
+fn modifiers_let_go_with_no_key_on_wayland_flag_the_row() {
+    use iced::keyboard::Modifiers;
+    let (mut s, _) = state(None);
+    s.wayland = true;
+    update(&mut s, Message::Record(Slot::Capture));
+    update(&mut s, Message::Mods(Modifiers::CTRL | Modifiers::SHIFT));
+    assert_eq!(s.shortcut_error, None);
+    // let go one at a time, as a hand does: everything held counts
+    update(&mut s, Message::Mods(Modifiers::SHIFT));
+    assert_eq!(s.last_mods, Modifiers::CTRL | Modifiers::SHIFT);
+    update(&mut s, Message::Mods(Modifiers::empty()));
+    assert_eq!(
+        s.shortcut_error.as_ref().map(|(slot, _)| *slot),
+        Some(Slot::Capture)
+    );
+}

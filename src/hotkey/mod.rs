@@ -298,6 +298,18 @@ pub fn unusable_reason(shortcut: &str) -> Option<String> {
     None
 }
 
+/// A shortcut field on Wayland saw only modifiers (the desktop ate the key): which of its
+/// own keys that was, when we know. Ctrl+Shift on GNOME = its Unicode input (Ctrl+Shift+U).
+pub fn eaten_key_reason(ctrl: bool, alt: bool, shift: bool, logo: bool) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    if !cfg!(test) {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        return gnome::eaten_reason(&desktop, ctrl, alt, shift, logo);
+    }
+    let _ = (ctrl, alt, shift, logo);
+    None
+}
+
 /// Removes the entries OpenCircle keeps in the desktop's own shortcut settings (GNOME
 /// custom shortcuts), for a reset or an uninstall. Only ours; nothing elsewhere.
 pub fn forget_desktop_shortcuts() {

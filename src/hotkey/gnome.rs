@@ -304,6 +304,19 @@ pub fn reserved_on(desktop: &str, shortcut: &str) -> Option<String> {
     None
 }
 
+/// The desktop swallowed a key while only modifiers reached us: with Ctrl+Shift held on
+/// GNOME that is its Unicode input (Ctrl+Shift+U, IBus).
+pub fn eaten_reason(
+    desktop: &str,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    logo: bool,
+) -> Option<String> {
+    (is_gnome(desktop) && ctrl && shift && !alt && !logo)
+        .then(|| "Used by GNOME for Unicode input (Ctrl+Shift+U)".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,6 +465,18 @@ mod tests {
         );
         assert_eq!(found[0].1, "Open terminal");
         assert_eq!(found[0].0, parse_shortcut("Ctrl+Alt+T").unwrap());
+    }
+
+    #[test]
+    fn a_swallowed_ctrl_shift_key_on_gnome_is_named() {
+        let on = |c, a, s, l| eaten_reason("ubuntu:GNOME", c, a, s, l);
+        assert_eq!(
+            on(true, false, true, false).as_deref(),
+            Some("Used by GNOME for Unicode input (Ctrl+Shift+U)")
+        );
+        assert_eq!(on(true, false, false, false), None);
+        assert_eq!(on(true, true, true, false), None);
+        assert_eq!(eaten_reason("KDE", true, false, true, false), None);
     }
 
     #[test]
