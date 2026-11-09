@@ -679,6 +679,10 @@ production systems.
   OpenCircle), presented like research: reproducible measurements, a technical report, model cards, scripts. The owner
   uploads to Hugging Face himself. OpenCircle-models' existing releases stay forever (installed copies pin their URLs);
   the app moves to the new source only in a later version, with new pins. Measured numbers only, no novelty claims.
+  Owner-only authorship (owner, 2026-11-09, firm, "never ever"): agents NEVER commit, push, upload or publish anything to the
+  models project (GitHub or Hugging Face). Agents only prepare files in a local folder outside any git repo; the owner
+  commits and uploads them himself under his own name. The files must carry no trace of agent work: no AI/agent names, no
+  "generated with", no worker or brief names, no tool chatter in text, comments or metadata (images, notebooks, PDFs).
   Visuals (owner, 2026-11-09): graphs and diagrams are included; data charts are drawn by a script from the measured data
   (reproducible); only illustrative art (cover, concept picture) may come from an image model (GPT or Gemini/Antigravity),
   never a chart or a number.
