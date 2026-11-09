@@ -783,7 +783,7 @@ pub fn hand_off(crop: &Crop, question: Option<String>, include: bool) -> Result<
 /// Opens `prompt` in the user's own browser and says what was sent. Include
 /// screen on: Google Lens gets the selection with the question (the owner,
 /// 2026-11-08: the circled part goes along), so Google answers about the
-/// picture; off: Google AI Mode gets the question alone, no page file.
+/// picture; off: Google AI Mode gets the question alone, no Lens page.
 fn open_in_browser(crop: &Crop, prompt: &str, include: bool) -> Result<String, String> {
     open_in_browser_with(
         crop,
@@ -799,7 +799,7 @@ fn open_in_browser_with(
     crop: &Crop,
     prompt: &str,
     include: bool,
-    lens: impl FnOnce(&Crop, &str) -> Result<actions::search_in_browser::Held, String>,
+    lens: impl FnOnce(&Crop, &str) -> Result<(), String>,
     ai_mode: impl FnOnce(&str) -> Result<String, String>,
 ) -> Result<String, String> {
     let prompt = ai::browser::question(prompt, None); // trimmed
@@ -807,9 +807,7 @@ fn open_in_browser_with(
         ai_mode(&prompt)?;
         return Ok("Opened in your browser".into());
     }
-    // The page file is only needed while the browser reads it: it goes once
-    // the browser has had its time (`Held::release`).
-    lens(crop, &prompt)?.release();
+    lens(crop, &prompt)?;
     Ok("Opened in your browser with your selection".into())
 }
 

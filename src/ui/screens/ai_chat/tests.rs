@@ -19,7 +19,7 @@ fn include_screen_on_opens_the_lens_page_with_the_question_and_never_ai_mode() {
         true,
         |crop, q| {
             lens = Some((crop.width, crop.height, q.to_string()));
-            Ok(actions::search_in_browser::Held::for_test())
+            Ok(())
         },
         |_| {
             ai_mode = true;
@@ -40,7 +40,7 @@ fn include_screen_off_opens_the_ai_mode_link_and_writes_no_page() {
         false,
         |_, _| {
             lens = true;
-            Ok(actions::search_in_browser::Held::for_test())
+            Ok(())
         },
         |q| {
             url = ai::browser::url(q).0;

@@ -2675,10 +2675,6 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         app.o.ai_chat.is_none(),
         "no Lens, no Ask AI before a choice"
     );
-    assert!(
-        app.o.search_pages.is_empty(),
-        "nothing handed to the browser"
-    );
     let _ = crate::ui::kit::tooltip::tests_support::shown();
     let texts = overlay_texts(&app);
     let tips = crate::ui::kit::tooltip::tests_support::shown();
@@ -2724,7 +2720,6 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
     let _ = app.update(Message::Settled);
     assert!(app.o.selection.is_some());
     assert!(app.o.ai_chat.is_none(), "no Ask AI by itself");
-    assert!(app.o.search_pages.is_empty(), "no search by itself");
     // the key still works: A asks
     app.o.ai_chat = None;
     event(
@@ -3976,7 +3971,7 @@ fn search_in_browser_closes_the_overlay() {
     let _ = app.update(Message::Run(&search_in_browser::ACTION));
     // never a card of ours, not even while the page is being written
     assert!(app.o.ai_chat.is_none(), "Search in browser opens no panel");
-    let opened = Message::SearchOpened(Ok(search_in_browser::Held::for_test()));
+    let opened = Message::SearchOpened(Ok(()));
     let _ = app.update(opened);
     // Closed on every OS: nothing of ours stays on screen after the hand-off.
     assert!(app.o.frame.is_none());
@@ -4109,7 +4104,7 @@ fn close_leaves_a_fresh_opening() {
     assert!(o.stroke.is_empty() && o.others.is_empty() && o.word.is_none());
     assert_eq!(o.screen_text, fresh.screen_text);
     assert!(o.ai_chat.is_none() && o.translate.is_none() && o.song.is_none());
-    assert!(o.helper.is_none() && o.search_pages.is_empty() && o.edit.is_none());
+    assert!(o.helper.is_none() && o.edit.is_none());
     assert!(o.ask.is_empty() && o.reader == fresh.reader && o.held.is_none());
     assert!(matches!(o.purpose, Purpose::Search));
     assert_eq!(o.bar_focus, None, "the old reset forgot it");

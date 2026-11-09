@@ -3,6 +3,7 @@
 
 pub mod mem;
 pub mod open;
+pub mod serve_once;
 pub mod session;
 pub mod spawn;
 

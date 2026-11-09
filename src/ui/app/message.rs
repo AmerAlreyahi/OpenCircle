@@ -76,7 +76,7 @@ pub(in crate::ui) enum Message {
     /// after this pill if any.
     ThenClose(Option<&'static str>),
     /// Lens is open in the browser (the page is held), or why it could not.
-    SearchOpened(Result<crate::actions::search_in_browser::Held, String>),
+    SearchOpened(Result<(), String>),
     /// The toast has been shown long enough.
     ToastDone,
     /// The selection with this area was scanned (a stale area is ignored).

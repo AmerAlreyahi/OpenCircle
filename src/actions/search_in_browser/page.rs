@@ -1,14 +1,15 @@
 //! Google Lens through the user's own browser: no image host, no upload by us.
-//! We write a local HTML page that embeds the crop and auto-submits it (multipart
-//! POST) to lens.google.com, then open that page in the default browser. The
-//! page file lives until the overlay drops its [`SearchPage`] (or the next start
-//! sweeps it after a crash).
+//! We build an HTML page that embeds the crop and auto-submits it (multipart
+//! POST) to lens.google.com, serve it ONCE from this PC (`sys::serve_once`:
+//! 127.0.0.1, secret path, memory only) and open that link in the default
+//! browser, the same way on every OS.
 
-use std::fs::{self, OpenOptions};
-use std::io::{self, Cursor, Write};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::io::{self, Cursor};
+use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+/// Lens pages older versions wrote to the temp folder (still swept).
 const PREFIX: &str = "opencircle-lens-";
 /// Long edge cap for what we send. Lens does not need more, and the page stays small.
 const MAX_EDGE: u32 = 1600;
@@ -81,36 +82,37 @@ form{display:none}
 </html>
 "#;
 
-/// A written Lens page. Deletes its file when dropped.
-#[derive(Debug)]
-pub struct SearchPage {
-    path: PathBuf,
-}
-
-impl SearchPage {
-    /// A page with no file (tests).
-    #[cfg(test)]
-    pub fn none() -> SearchPage {
-        SearchPage {
-            path: PathBuf::new(),
-        }
-    }
-}
-
-impl Drop for SearchPage {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-/// Write the page for this PNG crop (`width` x `height`) and open it in the
-/// default browser. With a `question`, Google answers about the picture (Lens
-/// "add to your search"). Hold the result until the overlay closes, then drop it.
-pub fn open(png: &[u8], width: u32, height: u32, question: Option<&str>) -> io::Result<SearchPage> {
+/// Serve the page for this PNG crop (`width` x `height`) once and open it in
+/// the default browser. With a `question`, Google answers about the picture
+/// (Lens "add to your search"). Nothing is written to disk.
+pub fn open(png: &[u8], width: u32, height: u32, question: Option<&str>) -> io::Result<()> {
     let html = page(png, width, height, question)?;
-    let page = write_page(&std::env::temp_dir(), &html)?;
-    crate::sys::open::open_file(&page.path)?; // on error `page` drops and the file goes
-    Ok(page)
+    let url = crate::sys::serve_once::serve(&html, &csp(&html))?;
+    crate::sys::open::open_link(&url)
+}
+
+/// The page's Content-Security-Policy: only its own inline script and styles
+/// (by hash), no fetch from anywhere, and the form may post only to Lens.
+fn csp(html: &str) -> String {
+    let hashes = |tag: &str| -> String {
+        let (open, close) = (format!("<{tag}>"), format!("</{tag}>"));
+        html.split(&open)
+            .skip(1)
+            .filter_map(|rest| rest.split_once(&close))
+            .map(|(body, _)| {
+                format!(
+                    " 'sha256-{}'",
+                    base64(&hmac_sha256::Hash::hash(body.as_bytes()))
+                )
+            })
+            .collect()
+    };
+    format!(
+        "default-src 'none'; script-src{}; style-src{}; form-action https://lens.google.com; \
+         base-uri 'none'; frame-ancestors 'none'",
+        hashes("script"),
+        hashes("style")
+    )
 }
 
 /// The auto-submit page for this PNG crop, in memory.
@@ -150,21 +152,6 @@ fn epoch_ms() -> u128 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis())
-}
-
-fn write_page(dir: &Path, html: &str) -> io::Result<SearchPage> {
-    let nanos = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let path = dir.join(format!("{PREFIX}{}-{nanos}.html", std::process::id()));
-    let mut opts = OpenOptions::new();
-    opts.write(true).create_new(true); // O_EXCL: never follows a planted symlink
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-    let mut f = opts.open(&path)?;
-    let page = SearchPage { path }; // from here a failed write still cleans up
-    f.write_all(html.as_bytes())?;
-    Ok(page)
 }
 
 fn esc(s: &str) -> String {
@@ -344,7 +331,7 @@ mod tests {
         );
     }
 
-    fn scratch(tag: &str) -> PathBuf {
+    fn scratch(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("oc-lens-test-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
@@ -446,29 +433,45 @@ mod tests {
         assert!(html.contains("hl=&quot;&gt;&lt;script&gt;x"));
     }
 
+    /// The page is served from memory (`sys::serve_once`), byte for byte, with a
+    /// policy that lets only its own script run and its form post only to Lens.
     #[test]
-    fn file_is_private_and_deleted_on_drop() {
-        let dir = scratch("drop");
-        let page = write_page(&dir, "<html></html>").unwrap();
-        let path = page.path.clone();
-        assert!(
-            path.file_name()
+    fn the_page_is_served_once_from_memory_with_a_strict_policy() {
+        use std::io::{Read, Write};
+        let ours = || {
+            fs::read_dir(std::env::temp_dir())
                 .unwrap()
-                .to_string_lossy()
-                .starts_with(PREFIX)
-        );
-        assert!(path.exists());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
-        }
-        drop(page);
-        assert!(!path.exists());
-        fs::remove_dir_all(dir).unwrap();
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with(PREFIX))
+                .count()
+        };
+        let before = ours();
+        let html = page_html(b"Ma", 3, 2, "en", 7, Some("What is this?"));
+        let url = crate::sys::serve_once::serve(&html, &csp(&html)).unwrap();
+        let (host, path) = url[7..].split_at(url[7..].find('/').unwrap());
+        let mut s = std::net::TcpStream::connect(host).unwrap();
+        write!(s, "GET {path} HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+        let mut got = String::new();
+        s.read_to_string(&mut got).unwrap();
+        let (head, body) = got.split_once("\r\n\r\n").unwrap();
+        assert_eq!(body, html, "the page unchanged");
+        assert!(ours() <= before, "no page file written");
+        let policy = head
+            .lines()
+            .find_map(|l| l.strip_prefix("Content-Security-Policy: "))
+            .unwrap();
+        assert!(policy.starts_with("default-src 'none'; script-src 'sha256-"));
+        assert!(policy.contains("; form-action https://lens.google.com;"));
+        assert!(!policy.contains("unsafe"));
+        // the one script and both style blocks (the page's and the logo's), each by its hash
+        let script = html.split("<script>").nth(1).unwrap();
+        let script = script.split("</script>").next().unwrap();
+        let want = base64(&hmac_sha256::Hash::hash(script.as_bytes()));
+        assert!(policy.contains(&format!("script-src 'sha256-{want}';")));
+        let styles = policy.split("style-src").nth(1).unwrap();
+        let styles = styles.split(';').next().unwrap();
+        assert_eq!(html.matches("<style>").count(), 2);
+        assert_eq!(styles.matches("'sha256-").count(), 2);
     }
 
     #[test]

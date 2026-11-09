@@ -123,22 +123,12 @@ impl App {
         })
     }
 
-    /// The browser has the Lens page (held until the overlay is gone), or not.
-    pub(in crate::ui) fn on_search_opened(
-        &mut self,
-        opened: Result<search_in_browser::Held, String>,
-    ) -> Task<Message> {
+    /// The browser has the Lens page, or not.
+    pub(in crate::ui) fn on_search_opened(&mut self, opened: Result<(), String>) -> Task<Message> {
         match opened {
-            Ok(page) if self.o.frame.is_some() => {
-                self.o.search_pages.push(page);
-                self.close()
-            }
-            Ok(page) => {
-                page.release(); // the overlay closed meanwhile
-                Task::none()
-            }
-            Err(e) if self.o.frame.is_some() => self.confirm_after(move || Err(e)),
-            Err(_) => Task::none(),
+            _ if self.o.frame.is_none() => Task::none(), // the overlay closed meanwhile
+            Ok(()) => self.close(),
+            Err(e) => self.confirm_after(move || Err(e)),
         }
     }
 

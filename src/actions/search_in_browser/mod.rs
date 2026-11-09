@@ -2,11 +2,7 @@
 //! `page`; a text selection searches its text instead: `ui::App::run`).
 pub mod page;
 
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
 use super::{Action, Crop, Key, Run};
-use page::SearchPage;
 
 pub const ACTION: Action = Action {
     id: "lens",
@@ -18,10 +14,6 @@ pub const ACTION: Action = Action {
     icon: '\u{e154}', // lucide "search"
     run: Run::SearchInBrowser,
 };
-
-/// The browser reads the page a while after we launch it (a cold browser start
-/// can take seconds): never delete a page younger than this.
-const MIN_LIFE: Duration = Duration::from_secs(10);
 
 /// What the user reads when the selection is one flat colour (nothing is sent).
 pub const BLANK: &str =
@@ -40,68 +32,25 @@ pub fn search_png(crop: &Crop) -> Result<Vec<u8>, String> {
     super::encode_png(crop.width, crop.height, &rgba)
 }
 
-/// Writes the Lens page for `crop` and opens it in the default browser.
-/// Blocking (PNG encode, file write, process spawn): call off the UI thread.
-pub fn open(crop: &Crop) -> Result<Held, String> {
+/// Serves the Lens page for `crop` once and opens it in the default browser.
+/// Blocking (PNG encode, process spawn): call off the UI thread.
+pub fn open(crop: &Crop) -> Result<(), String> {
     open_with(crop, None)
 }
 
 /// [`open`] with the user's `question` added (Ask AI, browser provider): Google
 /// answers about the picture. The same crop and page; only the question is new.
-pub fn open_asking(crop: &Crop, question: &str) -> Result<Held, String> {
+pub fn open_asking(crop: &Crop, question: &str) -> Result<(), String> {
     open_with(crop, Some(question))
 }
 
-fn open_with(crop: &Crop, question: Option<&str>) -> Result<Held, String> {
+fn open_with(crop: &Crop, question: Option<&str>) -> Result<(), String> {
     let png = search_png(crop)?;
-    let page = page::open(&png, crop.width, crop.height, question).map_err(|e| {
+    page::open(&png, crop.width, crop.height, question).map_err(|e| {
         crate::log!("[lens] browser not opened: {e}");
         "Couldn't open your browser. Check that a default browser is set, then try again."
             .to_string()
-    })?;
-    Ok(Held {
-        _page: Arc::new(page),
-        opened: Instant::now(),
     })
-}
-
-/// An open Lens page; the file goes when the last clone is dropped.
-#[derive(Debug, Clone)]
-pub struct Held {
-    /// Only held: its Drop deletes the file.
-    _page: Arc<SearchPage>,
-    opened: Instant,
-}
-
-impl Held {
-    /// A held page with no file, for the overlay's tests.
-    #[cfg(test)]
-    pub fn for_test() -> Held {
-        Held {
-            _page: Arc::new(SearchPage::none()),
-            opened: Instant::now(),
-        }
-    }
-
-    /// The overlay is done with the page: delete it now, or once it is `MIN_LIFE` old.
-    pub fn release(self) {
-        let Some(wait) = linger(self.opened.elapsed()) else {
-            return; // dropped here
-        };
-        // A failed spawn drops the closure, and the page with it: deleted early
-        // rather than leaked (the next start's sweep would get it anyway).
-        let _ = std::thread::Builder::new()
-            .name("lens page".into())
-            .spawn(move || {
-                std::thread::sleep(wait);
-                drop(self);
-            });
-    }
-}
-
-/// How much longer a page `age` old must stay; `None` = delete it now.
-fn linger(age: Duration) -> Option<Duration> {
-    Some(MIN_LIFE.saturating_sub(age)).filter(|wait| !wait.is_zero())
 }
 
 #[cfg(test)]
@@ -169,19 +118,5 @@ mod tests {
         let mut dot = flat([255; 4]);
         dot.rgba[4 * 77..4 * 78].copy_from_slice(&[0, 0, 0, 255]);
         assert!(search_png(&dot).is_ok());
-    }
-
-    #[test]
-    fn a_page_lives_at_least_min_life() {
-        let s = Duration::from_secs;
-        assert_eq!(linger(s(0)), Some(MIN_LIFE));
-        assert_eq!(linger(s(3)), Some(MIN_LIFE - s(3)));
-        assert_eq!(
-            linger(MIN_LIFE - Duration::from_millis(1)),
-            Some(Duration::from_millis(1))
-        );
-        assert_eq!(linger(MIN_LIFE), None);
-        assert_eq!(linger(s(600)), None);
-        assert!(MIN_LIFE >= s(10), "the browser needs time to read the page");
     }
 }

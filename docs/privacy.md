@@ -8,7 +8,7 @@ Every network action is something you start.
 | When you... | What is sent | To whom |
 |---|---|---|
 | Press **Search in browser** | The selected area, as an image; for selected text, only the text | Google Lens (or Google Search for text), in your default browser. The image goes straight from your browser to Lens (the browser you set as default); no image-hosting service is involved. A selection of one plain colour is never sent. |
-| Ask AI / Explain with **Browser** (Settings > AI; the default, no key): press `Enter` in the bar's AI field | **Include screen on** (the default) and something selected: the circled picture (the crop, as at **Search in browser**) and your question. **Include screen off**, or nothing selected: only your question. No text read from your screen is added. | Google, in your default browser. With the picture: OpenCircle opens a temporary local page and your browser posts the picture and the question to Google Lens. Without it: Google AI Mode opens with the question in the address. Only when you press `Enter`; nothing is sent by OpenCircle itself. |
+| Ask AI / Explain with **Browser** (Settings > AI; the default, no key): press `Enter` in the bar's AI field | **Include screen on** (the default) and something selected: the circled picture (the crop, as at **Search in browser**) and your question. **Include screen off**, or nothing selected: only your question. No text read from your screen is added. | Google, in your default browser. With the picture: OpenCircle hands your browser a one-time local page and your browser posts the picture and the question to Google Lens. Without it: Google AI Mode opens with the question in the address. Only when you press `Enter`; nothing is sent by OpenCircle itself. |
 | Ask AI / Explain, with an **AI provider** (Settings > AI) | Your question; the selected area as an image only while **Include screen** is on (turn it off and no image is sent). A chat sends the last 20 messages in full plus one short summary of older ones, which your own provider writes. The whole chat is never sent | The AI provider you configured (or your local server) |
 | Translate with AI (only if you pick **AI** as the engine in Settings > Translate) | The text read from the screen (text only, not the image) | The AI provider you configured |
 | Translate with the **Offline** engine (the default) | Nothing. The model runs on your PC | Nobody |
@@ -62,10 +62,11 @@ only to the server of the provider it belongs to. A remote server must use `http
   (and Windows' clipboard history) can see it. **Settings > History > Recent
   captures** (off by default) keeps the last 20 on this PC; turning it off
   deletes them.
-- **Lens page.** The temporary web page that carries the image to Lens (and,
-  for Ask AI in the browser, your question) is deleted as soon as the browser
-  has had time to read it, when the overlay closes. A page left behind by a
-  crash is removed the next time OpenCircle starts.
+- **Lens page.** The web page that carries the image to Lens (and, for Ask AI
+  in the browser, your question) is never written to disk: OpenCircle serves it
+  from memory to your browser once, on this PC only (127.0.0.1, a random port
+  and a secret address), and stops serving it after that one read, or after
+  30 seconds if the browser never asks.
 - **Drag-out and Share** hand the picture to the app you pick as a temporary
   file, deleted about 30 seconds after the drop (at once when you quit); one
   left behind by a crash is removed the next time OpenCircle starts.

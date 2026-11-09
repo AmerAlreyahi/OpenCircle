@@ -508,7 +508,7 @@ impl App {
         // the other monitors' windows go with it, at once; what left the frame is back
         let back = self.windows.back_in_frame(None).map(Message::Windows);
         let chat = Task::batch([chat, super::screens::close_all(&opening.screens), back]);
-        opening.finish();
+        drop(opening); // the panel, translate, song, helper and frame stop or free themselves
         // hidden or closed alike: the editor's glyphs go with the opening
         crate::snip::annotate::free_glyphs();
         if self.can_hide {
