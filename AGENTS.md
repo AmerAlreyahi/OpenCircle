@@ -682,7 +682,7 @@ production systems.
 - General models project (owner, 2026-11-09): AFTER v0.1.4, build a general, professional models project (not only for
   OpenCircle), presented like research: reproducible measurements, a technical report, model cards, scripts. The owner
   uploads to Hugging Face himself (user AmerAlreyahi; one HF repo per pair, a full drop-in folder: our decoder + the
-  unchanged encoder, tokenizer and config, grouped in a Collection; working name "LiteTranslate", one setting in the
+  unchanged encoder, tokenizer and config, grouped in a Collection; name "OptimaMT" (owner, 2026-11-09), one setting in the
   scripts, the owner picks the final name). OpenCircle-models' existing releases stay forever (installed copies pin their URLs);
   the app moves to the new source only in a later version, with new pins. Measured numbers only, no novelty claims.
   Owner-only authorship (owner, 2026-11-09, firm, "never ever"): agents NEVER commit, push, upload or publish anything to the
