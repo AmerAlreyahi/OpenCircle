@@ -24,12 +24,13 @@ pub const AI: Policy = Policy {
     status_as_error: false,
     user_agent: None,
 };
-/// OCR / translation model download.
+/// OCR / translation model download: reads the status itself (a 5xx or 429
+/// is retried, with its Retry-After).
 pub const MODELS: Policy = Policy {
     connect_secs: Some(30),
     global_secs: 600,
     https_only: true,
-    status_as_error: true,
+    status_as_error: false,
     user_agent: None,
 };
 /// Release check and update download: nothing sent but the request and a User-Agent.
@@ -80,7 +81,7 @@ mod tests {
         let d = |s| Some(Duration::from_secs(s));
         let table = [
             (AI, d(10), d(300), false, false, false),
-            (MODELS, d(30), d(600), true, true, false),
+            (MODELS, d(30), d(600), true, false, false),
             (UPDATE, d(20), d(900), true, false, true),
             (SONG, d(10), d(30), false, false, false),
             (COVER, None, d(10), false, true, false),

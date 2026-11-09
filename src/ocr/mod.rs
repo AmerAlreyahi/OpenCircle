@@ -96,6 +96,9 @@ pub enum OcrError {
     Download(String),
     /// A downloaded model doesn't match its pinned size and SHA-256.
     Checksum(&'static str),
+    /// Every retry failed: the server answered with an error (`server`:
+    /// 5xx, 429) or couldn't be reached. The detail is in the log.
+    Unreachable { server: bool },
     /// Reading or writing the model files.
     Io(std::io::Error),
     /// What isn't on disk yet (the user hasn't agreed to its download):
@@ -111,6 +114,12 @@ impl fmt::Display for OcrError {
             Self::BadImage(m) => write!(f, "bad image: {m}"),
             Self::Download(m) => write!(f, "could not download the text models: {m}"),
             Self::Checksum(name) => write!(f, "downloaded model {name} is corrupt (checksum)"),
+            Self::Unreachable { server: true } => f.write_str(
+                "The download server had a problem. Try again in a minute.",
+            ),
+            Self::Unreachable { server: false } => f.write_str(
+                "Could not reach the download server. Check your internet connection, then try again in a minute.",
+            ),
             Self::Io(e) => write!(f, "text model files: {e}"),
             Self::Missing(what) => write!(
                 f,

@@ -5,6 +5,7 @@
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::OcrError;
 use crate::translate::lang::Script;
@@ -320,6 +321,21 @@ thread_local! {
     pub(crate) static LOCAL_FAKE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// Waits after a failed attempt (seconds): a transient server or network
+/// error is retried after each, then the download gives up (about 35 s).
+const BACKOFF: [u64; 4] = [1, 3, 9, 20];
+/// The longest `Retry-After` honoured (a longer one waits this long).
+const MAX_RETRY_AFTER: u64 = 30;
+
+/// A download is waiting to try a file again (the card says "Retrying...").
+static RETRYING: AtomicBool = AtomicBool::new(false);
+
+// ponytail: one flag for the process; two downloads at once share it (the
+// card may say "Retrying..." for the other one's wait).
+pub fn retrying() -> bool {
+    RETRYING.load(Ordering::Relaxed)
+}
+
 /// `ensure_models` for any list of pinned files (OCR's plus offline
 /// translation's: one download, one progress).
 pub(crate) fn ensure(
@@ -343,8 +359,20 @@ pub(crate) fn ensure(
                     path.display()
                 );
             }
-            let agent = agent.get_or_insert_with(|| crate::net::agent(crate::net::MODELS));
-            fetch(agent, f, path, |n| progress(done + n, total))?;
+            let agent = agent.get_or_insert_with(|| {
+                // tests' and the VM's fake servers are plain HTTP
+                let local = cfg!(test) || redirect("https://x").is_some();
+                crate::net::agent(crate::net::Policy {
+                    https_only: !local,
+                    ..crate::net::MODELS
+                })
+            });
+            let got = fetch_retrying(agent, f, path, |n| progress(done + n, total));
+            RETRYING.store(false, Ordering::Relaxed);
+            if got.is_err() {
+                let _ = fs::remove_file(path.with_extension("part"));
+            }
+            got?;
         }
         done += f.size;
         progress(done, total);
@@ -352,41 +380,263 @@ pub(crate) fn ensure(
     Ok(())
 }
 
+/// Why an attempt failed.
+enum Fail {
+    /// For good: a 4xx, a bad checksum, a disk error. No retry.
+    Now(OcrError),
+    /// Maybe for a moment (5xx, 429, timeout, reset, short body): try again,
+    /// after `after` seconds when the server said so.
+    Again {
+        why: String,
+        server: bool,
+        after: Option<u64>,
+    },
+}
+
+impl From<io::Error> for Fail {
+    fn from(e: io::Error) -> Self {
+        Fail::Now(e.into())
+    }
+}
+
+/// `fetch` until it works, with `BACKOFF` between attempts; a `Plain` file
+/// continues from its `.part` file. Each failure's detail is logged; the last
+/// one gives the user's text (`OcrError::Unreachable`).
+fn fetch_retrying(
+    agent: &ureq::Agent,
+    f: &ModelFile,
+    dest: &Path,
+    mut progress: impl FnMut(u64),
+) -> Result<(), OcrError> {
+    let mut waits = BACKOFF.iter();
+    loop {
+        let got = fetch(agent, f, dest, &mut |n| {
+            RETRYING.store(false, Ordering::Relaxed);
+            progress(n)
+        });
+        let (why, server, after) = match got {
+            Ok(()) => return Ok(()),
+            Err(Fail::Now(e)) => return Err(e),
+            Err(Fail::Again { why, server, after }) => (why, server, after),
+        };
+        let Some(&wait) = waits.next() else {
+            crate::log!(
+                "[opencircle] download of {} failed: {why}; giving up",
+                f.name
+            );
+            return Err(OcrError::Unreachable { server });
+        };
+        let wait = after.map_or(wait, |s| s.min(MAX_RETRY_AFTER));
+        crate::log!(
+            "[opencircle] download of {} failed: {why}; retrying in {wait} s",
+            f.name
+        );
+        RETRYING.store(true, Ordering::Relaxed);
+        progress(part_len(dest).min(f.size)); // the card redraws, saying so
+        pause(wait);
+    }
+}
+
+fn pause(secs: u64) {
+    // tests: milliseconds for seconds
+    let unit = if cfg!(test) { 1 } else { 1000 };
+    std::thread::sleep(std::time::Duration::from_millis(secs * unit));
+}
+
+fn part_len(dest: &Path) -> u64 {
+    fs::metadata(dest.with_extension("part")).map_or(0, |m| m.len())
+}
+
+/// Test hook `OPENCIRCLE_TEST_MODELS_URL`: model downloads go to that server
+/// instead, as `<base>/<host>/<path>` over plain HTTP (the VM's flaky-server
+/// test). Never read in a user's copy (`sys::test_hook`).
+fn redirect(url: &str) -> Option<String> {
+    let base = crate::sys::test_hook("OPENCIRCLE_TEST_MODELS_URL")?;
+    let base = base.to_str()?.trim_end_matches('/');
+    Some(format!("{base}/{}", url.strip_prefix("https://")?))
+}
+
+/// One attempt: the request, then the body into `<dest>.part`.
 fn fetch(
     agent: &ureq::Agent,
     f: &ModelFile,
     dest: &Path,
-    progress: impl FnMut(u64),
-) -> Result<(), OcrError> {
-    let net = |e: ureq::Error| OcrError::Download(e.to_string());
+    progress: &mut dyn FnMut(u64),
+) -> Result<(), Fail> {
+    let tmp = dest.with_extension("part");
+    let get = |url: &str, range: Option<String>| {
+        let url = redirect(url).unwrap_or_else(|| url.into());
+        let mut req = agent.get(&url);
+        if let Some(range) = range {
+            req = req.header("Range", range);
+        }
+        let response = req.call().map_err(classify)?;
+        let status = response.status().as_u16();
+        if status == 429 || status >= 500 {
+            let after = response.headers().get("retry-after");
+            let after = after.and_then(|v| v.to_str().ok()?.trim().parse().ok());
+            let why = format!("http status: {status}");
+            return Err(Fail::Again {
+                why,
+                server: true,
+                after,
+            });
+        }
+        if !(200..300).contains(&status) {
+            let why = format!("http status: {status}");
+            return Err(Fail::Now(OcrError::Download(why)));
+        }
+        Ok(response)
+    };
     match f.source {
         Source::Plain(url) => {
-            let body = agent.get(url).call().map_err(net)?.into_body();
-            write_verified(body.into_reader(), dest, f, progress)
+            // continue a cut-off attempt where it stopped
+            let have = Some(part_len(dest)).filter(|&n| n < f.size).unwrap_or(0);
+            let response = get(url, (have > 0).then(|| format!("bytes={have}-")))?;
+            let partial = have > 0 && response.status() == 206;
+            if partial && !starts_at(&response, have) {
+                let _ = fs::remove_file(&tmp);
+                return Err(Fail::Again {
+                    why: "the server sent another byte range".into(),
+                    server: true,
+                    after: None,
+                });
+            }
+            let have = if partial { have } else { 0 }; // a 200 starts over
+            let body = response.into_body().into_reader();
+            write_part(body, &tmp, dest, f, have, progress)
         }
         #[cfg(not(windows))]
         Source::Tgz { url, offset } => {
-            let body = agent.get(url).call().map_err(net)?.into_body();
+            let body = get(url, None)?.into_body();
             let mut tar = flate2::read::GzDecoder::new(body.into_reader());
-            io::copy(&mut (&mut tar).take(offset), &mut io::sink())
-                .map_err(|e| OcrError::Download(e.to_string()))?;
+            io::copy(&mut (&mut tar).take(offset), &mut io::sink()).map_err(cut)?;
             // The rest of the tar follows the member: stop at its end.
-            write_verified(tar.take(f.size), dest, f, progress)
+            write_part(tar.take(f.size), &tmp, dest, f, 0, progress)
         }
         #[cfg(windows)]
         Source::ZipRange { url, start, end } => {
-            let response = agent
-                .get(url)
-                .header("Range", format!("bytes={start}-{end}"))
-                .call()
-                .map_err(net)?;
+            // A deflate stream can't resume: the whole range again each time.
+            let response = get(url, Some(format!("bytes={start}-{end}")))?;
             if response.status() != 206 {
-                return Err(OcrError::Download("server ignored the byte range".into()));
+                let why = "server ignored the byte range".into();
+                return Err(Fail::Now(OcrError::Download(why)));
             }
-            let body = response.into_body().into_reader();
-            write_verified(flate2::read::DeflateDecoder::new(body), dest, f, progress)
+            let body = flate2::read::DeflateDecoder::new(response.into_body().into_reader());
+            write_part(body, &tmp, dest, f, 0, progress)
         }
     }
+}
+
+/// A 206 answer's `Content-Range` starts at byte `at`.
+fn starts_at(response: &ureq::http::Response<ureq::Body>, at: u64) -> bool {
+    let range = response.headers().get("content-range");
+    let range = range.and_then(|v| v.to_str().ok());
+    range.is_some_and(|r| r.starts_with(&format!("bytes {at}-")))
+}
+
+/// A request that got no answer: a network hiccup is retried.
+fn classify(e: ureq::Error) -> Fail {
+    use ureq::Error as E;
+    match e {
+        E::Timeout(_) | E::Io(_) | E::ConnectionFailed | E::HostNotFound | E::BodyStalled => {
+            Fail::Again {
+                why: e.to_string(),
+                server: false,
+                after: None,
+            }
+        }
+        e => Fail::Now(OcrError::Download(e.to_string())),
+    }
+}
+
+/// The body broke off while reading: retried (from the `.part` file).
+fn cut(e: io::Error) -> Fail {
+    Fail::Again {
+        why: format!("connection lost: {e}"),
+        server: false,
+        after: None,
+    }
+}
+
+/// Streams `body` to `<dest>.part` and renames it to `dest` only when the size
+/// and checksum match; otherwise deletes the partial file (tests).
+#[cfg(test)]
+pub(crate) fn write_verified(
+    body: impl Read,
+    dest: &Path,
+    f: &ModelFile,
+    mut progress: impl FnMut(u64),
+) -> Result<(), OcrError> {
+    let tmp = dest.with_extension("part");
+    let result = write_part(body, &tmp, dest, f, 0, &mut progress);
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result.map_err(|e| match e {
+        Fail::Now(e) => e,
+        Fail::Again { .. } => OcrError::Checksum(f.name),
+    })
+}
+
+/// Streams `body` onto `tmp` after its first `have` bytes (a resumed
+/// download; 0 starts it over) and renames it to `dest` once the size and
+/// checksum match. A body that ends short or breaks keeps `tmp` to continue
+/// (`Fail::Again`); a wrong one deletes it (`Checksum`).
+fn write_part(
+    body: impl Read,
+    tmp: &Path,
+    dest: &Path,
+    f: &ModelFile,
+    have: u64,
+    progress: &mut dyn FnMut(u64),
+) -> Result<(), Fail> {
+    let mut hash = hmac_sha256::Hash::new();
+    let mut buf = vec![0; 64 * 1024];
+    let mut out = if have > 0 {
+        // the bytes already there count towards the checksum
+        let mut old = File::open(tmp)?.take(have);
+        loop {
+            match old.read(&mut buf)? {
+                0 => break,
+                n => hash.update(&buf[..n]),
+            }
+        }
+        fs::OpenOptions::new().append(true).open(tmp)?
+    } else {
+        File::create(tmp)?
+    };
+    let mut body = body.take(f.size + 1 - have);
+    let mut got = have;
+    loop {
+        let n = match body.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => return Err(cut(e)),
+        };
+        hash.update(&buf[..n]);
+        out.write_all(&buf[..n])?;
+        got += n as u64;
+        progress(got.min(f.size));
+    }
+    if got < f.size {
+        return Err(Fail::Again {
+            why: format!("the body ended at {got} of {} bytes", f.size),
+            server: false,
+            after: None,
+        });
+    }
+    let digest: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if got != f.size || digest != f.sha256 {
+        drop(out);
+        let _ = fs::remove_file(tmp);
+        return Err(Fail::Now(OcrError::Checksum(f.name)));
+    }
+    out.sync_all()?;
+    drop(out);
+    fs::rename(tmp, dest)?;
+    Ok(())
 }
 
 fn is_verified(path: &Path, f: &ModelFile) -> io::Result<bool> {
@@ -401,48 +651,6 @@ fn is_verified(path: &Path, f: &ModelFile) -> io::Result<bool> {
     // Streamed: a model is tens of MB, never held in RAM to be hashed.
     let hash = crate::update::verify::sha256(file)?;
     Ok(hash.iter().map(|b| format!("{b:02x}")).collect::<String>() == f.sha256)
-}
-
-/// Streams `body` to `<dest>.part` and renames it to `dest` only when the size
-/// and checksum match; otherwise deletes the partial file.
-pub(crate) fn write_verified(
-    body: impl Read,
-    dest: &Path,
-    f: &ModelFile,
-    mut progress: impl FnMut(u64),
-) -> Result<(), OcrError> {
-    let tmp = dest.with_extension("part");
-    let result = (|| {
-        let mut out = File::create(&tmp)?;
-        let mut body = body.take(f.size + 1);
-        let mut hash = hmac_sha256::Hash::new();
-        let mut buf = vec![0; 64 * 1024];
-        let mut got = 0u64;
-        loop {
-            let n = match body.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-                Err(e) => return Err(OcrError::Download(e.to_string())),
-            };
-            hash.update(&buf[..n]);
-            out.write_all(&buf[..n])?;
-            got += n as u64;
-            progress(got.min(f.size));
-        }
-        let digest: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
-        if got != f.size || digest != f.sha256 {
-            return Err(OcrError::Checksum(f.name));
-        }
-        out.sync_all()?;
-        drop(out);
-        fs::rename(&tmp, dest)?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    result
 }
 
 #[cfg(test)]
@@ -562,6 +770,167 @@ mod tests {
             Err(OcrError::Download(_))
         ));
         assert!(!files[1].0.with_extension("part").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// What the fake server does with one request (given its Range start).
+    #[derive(Clone, Copy)]
+    enum Answer {
+        /// The file (206 from the Range's start when asked for one).
+        File,
+        /// The status, no body.
+        Status(u16),
+        /// 200 with the full length announced, then half the bytes and a hang-up.
+        Cut,
+        /// 200 with a wrong body of the right length.
+        Wrong,
+    }
+
+    type Seen = std::sync::Arc<std::sync::Mutex<Vec<Option<u64>>>>;
+
+    /// A local server answering request i with `answers[i]` (the last one for
+    /// any after), `Connection: close`; returns the file's pin and the Range
+    /// start of every request it got.
+    fn fake_server(
+        name: &str,
+        data: &'static [u8],
+        answers: Vec<Answer>,
+    ) -> (&'static ModelFile, Seen) {
+        use std::io::BufRead;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/{name}", listener.local_addr().unwrap());
+        let seen = Seen::default();
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for (i, conn) in listener.incoming().enumerate() {
+                let Ok(mut conn) = conn else { return };
+                let mut from = None;
+                let mut reader = io::BufReader::new(conn.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    let lower = line.to_ascii_lowercase();
+                    if let Some(r) = lower.strip_prefix("range: bytes=") {
+                        from = r
+                            .split('-')
+                            .next()
+                            .and_then(|n| n.trim().parse::<usize>().ok());
+                    }
+                }
+                log.lock().unwrap().push(from.map(|n| n as u64));
+                let len = data.len();
+                let head = |status: &str, extra: &str, n: usize| {
+                    format!("HTTP/1.1 {status}\r\nContent-Length: {n}\r\n{extra}Connection: close\r\n\r\n")
+                        .into_bytes()
+                };
+                let out: Vec<u8> = match (answers[i.min(answers.len() - 1)], from) {
+                    (Answer::File, Some(at)) => {
+                        let range = format!("Content-Range: bytes {at}-{}/{len}\r\n", len - 1);
+                        [
+                            head("206 Partial Content", &range, len - at),
+                            data[at..].to_vec(),
+                        ]
+                        .concat()
+                    }
+                    (Answer::File, None) => [head("200 OK", "", len), data.to_vec()].concat(),
+                    (Answer::Status(s), _) => head(&format!("{s} Oops"), "", 0),
+                    (Answer::Cut, _) => {
+                        [head("200 OK", "", len), data[..len / 2].to_vec()].concat()
+                    }
+                    (Answer::Wrong, _) => [head("200 OK", "", len), vec![b'x'; len]].concat(),
+                };
+                let _ = conn.write_all(&out);
+                let _ = conn.flush();
+            }
+        });
+        let sha: String = (hmac_sha256::Hash::hash(data).iter())
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+        let f = ModelFile::plain(leak(name.into()), data.len() as u64, leak(sha), leak(url));
+        (Box::leak(Box::new(f)), seen)
+    }
+
+    /// 300 kB of a pattern (several reads).
+    fn payload() -> &'static [u8] {
+        Box::leak((0..300_000u32).map(|i| (i * 7 % 251) as u8).collect())
+    }
+
+    /// Downloads `f` into a fresh folder: the result and the folder.
+    fn download(f: &'static ModelFile, name: &str) -> (Result<(), OcrError>, PathBuf) {
+        LOCAL_FAKE.set(true);
+        let dir = temp_dir(name);
+        let _ = fs::remove_file(dir.join(f.name));
+        let got = ensure(&[(dir.join(f.name), f)], |_, _| {});
+        (got, dir)
+    }
+
+    /// A GitHub 504 (a user's fresh install, 2026-11-09) is retried: the
+    /// third request works and the file is verified.
+    #[test]
+    fn a_server_error_is_retried_until_it_works() {
+        let data = payload();
+        let answers = vec![Answer::Status(504), Answer::Status(504), Answer::File];
+        let (f, seen) = fake_server("retry.bin", data, answers);
+        let (got, dir) = download(f, "retry");
+        got.unwrap();
+        assert_eq!(fs::read(dir.join(f.name)).unwrap(), data);
+        assert_eq!(seen.lock().unwrap().len(), 3);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A connection dropped mid-file continues from the `.part` file with a
+    /// Range request; the whole is verified.
+    #[test]
+    fn a_cut_download_resumes_with_a_range() {
+        let data = payload();
+        let (f, seen) = fake_server("resume.bin", data, vec![Answer::Cut, Answer::File]);
+        let (got, dir) = download(f, "resume");
+        got.unwrap();
+        assert_eq!(fs::read(dir.join(f.name)).unwrap(), data);
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen, [None, Some(data.len() as u64 / 2)]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A 404 fails at once (no hammering); a wrong body of the right size
+    /// fails the checksum at once and leaves no `.part` file.
+    #[test]
+    fn a_missing_or_wrong_file_fails_at_once() {
+        let data = payload();
+        let (f, seen) = fake_server("gone.bin", data, vec![Answer::Status(404)]);
+        let (got, dir) = download(f, "gone");
+        assert!(matches!(got, Err(OcrError::Download(_))), "{got:?}");
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        fs::remove_dir_all(dir).unwrap();
+
+        let (f, seen) = fake_server("wrong.bin", data, vec![Answer::Wrong]);
+        let (got, dir) = download(f, "wrong");
+        assert!(
+            matches!(got, Err(OcrError::Checksum("wrong.bin"))),
+            "{got:?}"
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert!(!dir.join("wrong.part").exists() && !dir.join(f.name).exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A server that keeps failing: a bounded number of tries, then the
+    /// user's plain text (never only "http status: 504"), no `.part` left.
+    #[test]
+    fn a_server_that_keeps_failing_gives_up_plainly() {
+        let data = payload();
+        let (f, seen) = fake_server("down.bin", data, vec![Answer::Status(504)]);
+        let (got, dir) = download(f, "down");
+        let Err(e) = got else { panic!("downloaded") };
+        assert!(matches!(e, OcrError::Unreachable { server: true }), "{e:?}");
+        let said = e.to_string();
+        assert!(said.contains("download server had a problem") && said.contains("minute"));
+        assert!(!said.contains("504"), "{said}");
+        assert_eq!(seen.lock().unwrap().len(), BACKOFF.len() + 1);
+        assert!(!dir.join("down.part").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 }

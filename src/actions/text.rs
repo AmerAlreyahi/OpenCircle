@@ -75,8 +75,10 @@ pub fn download(mut progress: impl FnMut(Progress)) -> Result<(), String> {
     let mut shown = None;
     ocr::ensure_models(|done, total| {
         let percent = done * 100 / total.max(1);
-        if shown != Some(percent) {
-            shown = Some(percent);
+        // a retry's wait redraws the card too ("Retrying...")
+        let now = (percent, ocr::models::retrying());
+        if shown != Some(now) {
+            shown = Some(now);
             progress(Progress::Download(percent as f32 / 100.0));
         }
     })

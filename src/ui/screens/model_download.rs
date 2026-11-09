@@ -60,6 +60,8 @@ pub enum Stage<'a> {
     Ask,
     /// Fetching, 0..1 of the whole.
     Downloading(f32),
+    /// Fetching, waiting to try a file again after a server or network error.
+    Retrying(f32),
     /// All fetched: checked and set up.
     Verifying,
     /// Why it stopped.
@@ -68,10 +70,16 @@ pub enum Stage<'a> {
 
 impl Stage<'_> {
     /// A download at `share`: the files are checked as the last ones land.
+    /// Retrying while the download waits for another try.
     pub fn at(share: f32) -> Self {
-        match share >= 1.0 {
-            true => Stage::Verifying,
-            false => Stage::Downloading(share),
+        Self::of(share, crate::ocr::models::retrying())
+    }
+
+    fn of(share: f32, retrying: bool) -> Self {
+        match (share >= 1.0, retrying) {
+            (true, _) => Stage::Verifying,
+            (false, true) => Stage::Retrying(share),
+            (false, false) => Stage::Downloading(share),
         }
     }
 }
@@ -153,7 +161,7 @@ pub fn card<'a, M: Clone + 'a>(
 fn heading<'a, M: 'a>(model: &Model, bytes: u64, stage: Stage<'a>) -> Element<'a, M> {
     let (icon, title) = match stage {
         Stage::Ask => (model.icon, model.title.to_string()),
-        Stage::Downloading(_) => (
+        Stage::Downloading(_) | Stage::Retrying(_) => (
             model.icon,
             format!("Downloading {}", model.name.to_lowercase()),
         ),
@@ -210,12 +218,17 @@ fn body<'a, M: Clone + 'a>(
             }
             c.into()
         }
-        Stage::Downloading(share) => {
+        Stage::Downloading(share) | Stage::Retrying(share) => {
             let total = bytes as f64 / 1e6;
             let done = total * share as f64;
+            // quietly: the download goes on by itself after a server hiccup
+            let state: Element<'a, M> = match stage {
+                Stage::Retrying(_) => sub(Role::META, "Retrying…").into(),
+                _ => accent(Role::META_STRONG, format!("{:.0}%", share * 100.0)).into(),
+            };
             let line = row![
                 sub(Role::META, format!("{done:.1} / {} MB", mb(bytes))).width(Fill),
-                accent(Role::META_STRONG, format!("{:.0}%", share * 100.0)),
+                state,
             ]
             .align_y(Center);
             let mut c = column![
@@ -358,5 +371,17 @@ mod tests {
     fn a_full_download_is_being_checked() {
         assert_eq!(Stage::at(0.4), Stage::Downloading(0.4));
         assert_eq!(Stage::at(1.0), Stage::Verifying);
+        assert_eq!(Stage::of(0.4, true), Stage::Retrying(0.4));
+        assert_eq!(Stage::of(1.0, true), Stage::Verifying);
+    }
+
+    /// While a file waits for another try, the card says so in place of the
+    /// percent (the bar stays).
+    #[test]
+    fn a_retry_says_so_quietly() {
+        let texts = shot::texts(view(&OCR, Stage::Retrying(0.5), false));
+        assert!(texts.iter().any(|t| t == "Retrying…"), "{texts:?}");
+        assert!(texts.iter().all(|t| t != "50%"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Downloading text recognition"));
     }
 }
