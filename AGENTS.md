@@ -698,6 +698,8 @@ production systems.
   may upload with it, as the owner (commits show AmerAlreyahi only; clean commit messages, no AI names): overnight ONE pair
   as a PRIVATE repo in the OptimaMT organization as a test; everything public only after the owner's morning OK. GitHub
   repo github.com/AmerAlreyahi/OptimaMT was created empty (owner: "do it"); the owner pushes its first commit himself.
+  Publish OK (owner, 2026-11-09): the lead may make the OptimaMT Hugging Face repos public (and test them) on one condition:
+  no Claude/AI signature, co-author or contribution anywhere, ever.
   Visuals (owner, 2026-11-09): graphs and diagrams are included; data charts are drawn by a script from the measured data
   (reproducible); only illustrative art (cover, concept picture) may come from an image model (GPT or Gemini/Antigravity),
   never a chart or a number.
@@ -728,6 +730,13 @@ production systems.
 - Model downloads never fail on a server hiccup (owner, 2026-11-09, "never ever again", after a fresh install failed on a
   GitHub 504): every first-use download retries server errors and dropped connections with backoff and resumes partial
   files; the user sees a plain message, never only a raw status code.
+
+- Windows and Linux together (owner, 2026-11-09, always): every fix and every new feature is designed for Windows AND Linux
+  (X11 + Wayland) at the same time, with the best-practice solution from the start, never a Windows-only path patched for
+  Linux later. Example: the browser hand-off uses a local one-time web server (127.0.0.1, random port, secret path, served
+  once) on every OS, instead of a temp file that sandboxed Linux browsers can't read (#156).
+- Linux fixes version (owner, 2026-11-09): after OptimaMT is published, the Linux fixes + optimisation work starts (#156, #157,
+  #158, planning #142-#145, #147, Wayland notes), each designed for both OSes per the rule above.
 
 ## Domain quirks
 
