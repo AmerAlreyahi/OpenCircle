@@ -700,6 +700,9 @@ production systems.
   repo github.com/AmerAlreyahi/OptimaMT was created empty (owner: "do it"); the owner pushes its first commit himself.
   Publish OK (owner, 2026-11-09): the lead may make the OptimaMT Hugging Face repos public (and test them) on one condition:
   no Claude/AI signature, co-author or contribution anywhere, ever.
+  GitHub too (owner, 2026-11-09, "push it" / "you can commit and push"): the lead may commit and push OptimaMT updates as
+  the owner (name AmerAlreyahi, his email), never with a Co-Authored-By, "Generated with" or any AI mention; workers still
+  only edit local files.
   Visuals (owner, 2026-11-09): graphs and diagrams are included; data charts are drawn by a script from the measured data
   (reproducible); only illustrative art (cover, concept picture) may come from an image model (GPT or Gemini/Antigravity),
   never a chart or a number.
