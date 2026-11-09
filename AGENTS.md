@@ -671,6 +671,10 @@ production systems.
 - Version plan (owner, 2026-11-09, SUPERSEDES every earlier "Version plan" entry): Game translation (0.2.0) -> Arabic UI +
   live groundwork (0.3.0) -> Live translation (0.4.0) -> AI online (0.5.0) -> Reach (0.6.0) -> Voice and sound (0.7.0) ->
   Writing assist (0.8.0) -> GPU renderer + cosmetics (0.9.0) -> later: Visual search, then Glass.
+- Next release + Linux version (owner, 2026-11-09, later the same day; SUPERSEDES the order above where it differs): the
+  next release is v0.1.4 (owner: "keep 014"), made directly from main once today's fixes are settled (no rollback: the widgets-between-
+  screens work #125 is fixed, not reverted). Linux fixes get a version of their own. Game translation shifts to after them.
+  Order: next release -> Linux fixes -> Game translation -> Arabic UI + live groundwork -> the rest as listed above.
 - Version numbers (owner, 2026-11-09): each feature release bumps the middle number. Bugs found during a version are fixed
   on main and ship with the next release (its notes list features and fixes). The last digit stays free (no planned use).
   The board's Phase field uses the NAMES; a number is given only at release. The update gate stays strict: a broken updater
