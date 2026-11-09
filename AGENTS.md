@@ -679,6 +679,9 @@ production systems.
   OpenCircle), presented like research: reproducible measurements, a technical report, model cards, scripts. The owner
   uploads to Hugging Face himself. OpenCircle-models' existing releases stay forever (installed copies pin their URLs);
   the app moves to the new source only in a later version, with new pins. Measured numbers only, no novelty claims.
+  Visuals (owner, 2026-11-09): graphs and diagrams are included; data charts are drawn by a script from the measured data
+  (reproducible); only illustrative art (cover, concept picture) may come from an image model (GPT or Gemini/Antigravity),
+  never a chart or a number.
 - Version numbers (owner, 2026-11-09): each feature release bumps the middle number. Bugs found during a version are fixed
   on main and ship with the next release (its notes list features and fixes). The last digit stays free (no planned use).
   The board's Phase field uses the NAMES; a number is given only at release. The update gate stays strict: a broken updater
