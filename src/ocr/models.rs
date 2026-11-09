@@ -631,6 +631,14 @@ fn write_part(
     if got != f.size || digest != f.sha256 {
         drop(out);
         let _ = fs::remove_file(tmp);
+        // A resumed `.part` may be another file version's: once more from byte 0.
+        if have > 0 {
+            return Err(Fail::Again {
+                why: "a resumed download failed its checksum".into(),
+                server: false,
+                after: None,
+            });
+        }
         return Err(Fail::Now(OcrError::Checksum(f.name)));
     }
     out.sync_all()?;
@@ -914,6 +922,22 @@ mod tests {
         );
         assert_eq!(seen.lock().unwrap().len(), 1);
         assert!(!dir.join("wrong.part").exists() && !dir.join(f.name).exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A `.part` left by another version of the file (a crash) is resumed, fails
+    /// its checksum, is deleted, and the download restarts from byte 0 once.
+    #[test]
+    fn a_stale_part_restarts_from_zero_once() {
+        let data = payload();
+        let (f, seen) = fake_server("stale.bin", data, vec![Answer::File]);
+        LOCAL_FAKE.set(true);
+        let dir = temp_dir("stale");
+        let _ = fs::remove_file(dir.join(f.name));
+        fs::write(dir.join("stale.part"), vec![b'x'; data.len() / 2]).unwrap();
+        ensure(&[(dir.join(f.name), f)], |_, _| {}).unwrap();
+        assert_eq!(fs::read(dir.join(f.name)).unwrap(), data);
+        assert_eq!(*seen.lock().unwrap(), [Some(data.len() as u64 / 2), None]);
         fs::remove_dir_all(dir).unwrap();
     }
 
