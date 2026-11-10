@@ -158,6 +158,9 @@ pub(in crate::ui) struct App {
     /// The overlay window exists: always where it is pre-created and hidden
     /// (`can_hide`), else only while it is shown.
     pub(in crate::ui) overlay_open: bool,
+    /// Linux: when the last opening's windows were closed (or hidden); the desktop
+    /// still fades them out a moment, so a grab then waits (`grab_wait`).
+    pub(in crate::ui) overlay_gone: Option<Instant>,
     /// `can_hide_windows()`, read once at boot.
     pub(in crate::ui) can_hide: bool,
     /// The number of the capture running on its thread. Cleared by Esc or the
@@ -257,6 +260,7 @@ impl App {
             next: Purpose::Search,
             overlay,
             overlay_open: true,
+            overlay_gone: None,
             can_hide: true,
             capturing: None,
             pre_shown: false,

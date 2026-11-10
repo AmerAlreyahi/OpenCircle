@@ -120,6 +120,37 @@ fn our_floating_windows_are_out_of_every_grab() {
     assert!(!app.windows.out_of_frame());
 }
 
+/// The overlay a capture closed is never in the next one's grab (Linux: the
+/// desktop fades the closed window out, so Esc then the shortcut at once froze
+/// it, its "Select text" chip and all): the grab waits until it's gone.
+#[test]
+fn a_grab_right_after_the_overlay_closed_waits_until_it_is_gone() {
+    let linux = !cfg!(windows);
+    let mut app = App {
+        can_hide: false,
+        overlay_open: false,
+        ..App::idle(window::Id::unique())
+    };
+    assert_eq!(app.overlay_gone, None, "nothing closed yet: no wait");
+    let _ = open_and_escape(&mut app);
+    let gone = app.overlay_gone;
+    assert_eq!(gone.is_some(), linux);
+    let now = Instant::now();
+    if let Some(gone) = gone {
+        assert!(super::capture::grab_wait(false, Some(gone), now) > Duration::ZERO);
+        let later = gone + Duration::from_secs(1);
+        assert_eq!(
+            super::capture::grab_wait(false, Some(gone), later),
+            Duration::ZERO
+        );
+    }
+    assert_eq!(super::capture::grab_wait(false, None, now), Duration::ZERO);
+    assert!(
+        super::capture::grab_wait(true, None, now) > Duration::ZERO,
+        "ours just left"
+    );
+}
+
 /// A copy the setup installed never installs by itself (its setup asks Windows for
 /// admin rights): the card offers it; a failed or declined "Install now" keeps it.
 #[test]

@@ -121,18 +121,20 @@ impl App {
                 Grabbed::Done => Message::Grabbed(n),
             })
         };
-        // our floating windows leave the frame first (Linux), the screen redraws
-        let shot = match self.leave_frame(n) {
-            Some(out) => {
+        // our windows leave the frame first (Linux), the screen redraws
+        let out = self.leave_frame(n);
+        let wait = grab_wait(out.is_some(), self.overlay_gone, Instant::now());
+        let shot = match wait.is_zero() {
+            true => shot(),
+            false => {
                 let mut shot = Some(shot);
-                let redrawn = background(|tx| {
-                    std::thread::sleep(LEAVE_FRAME);
+                let redrawn = background(move |tx| {
+                    std::thread::sleep(wait);
                     let _ = tx.unbounded_send(());
                 });
-                (out.discard().chain(redrawn))
+                (out.unwrap_or_else(Task::none).discard().chain(redrawn))
                     .then(move |()| shot.take().map_or_else(Task::none, |shot| shot()))
             }
-            None => shot(),
         };
         Task::batch([shot, timeout])
     }
@@ -505,6 +507,9 @@ impl App {
         let Some(opening) = self.o.take() else {
             return Task::none(); // closed already
         };
+        if !cfg!(windows) {
+            self.overlay_gone = Some(Instant::now()); // its windows fade out (`grab_wait`)
+        }
         // the other monitors' windows go with it, at once; what left the frame is back
         let back = self.windows.back_in_frame(None).map(Message::Windows);
         let chat = Task::batch([chat, super::screens::close_all(&opening.screens), back]);
@@ -527,6 +532,18 @@ impl App {
         // the window's buffers are freed after the close: trim then, not now
         crate::sys::mem::trim_heap_soon();
         chat.chain(window::close(self.overlay))
+    }
+}
+
+/// How long a grab waits for the screen to redraw without our windows: the
+/// whole `LEAVE_FRAME` when some just left it (`left`), else what is left of it
+/// since the last opening's windows went (`gone`, Linux: an Esc then the shortcut
+/// at once froze the closing overlay, its chips and all, into the next frame).
+pub(in crate::ui) fn grab_wait(left: bool, gone: Option<Instant>, now: Instant) -> Duration {
+    match (left, gone) {
+        (true, _) => LEAVE_FRAME,
+        (false, Some(gone)) => LEAVE_FRAME.saturating_sub(now.saturating_duration_since(gone)),
+        (false, None) => Duration::ZERO,
     }
 }
 
