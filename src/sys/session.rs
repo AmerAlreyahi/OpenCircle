@@ -59,7 +59,8 @@ pub fn can_hide_windows() -> bool {
 /// than Windows: none known, always "just now" (Wayland gives apps no idle
 /// time; only the lock says the user is away there).
 pub fn idle_for() -> std::time::Duration {
-    #[cfg(windows)]
+    // Tests never read the desk they run on: an untouched CI machine is "away".
+    #[cfg(all(windows, not(test)))]
     {
         use windows::Win32::System::SystemInformation::GetTickCount;
         use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
