@@ -31,13 +31,16 @@ Three ways in, all from the same bar or keys:
 
 Pick the languages in **Settings → Translate**: **Source** (what the text on
 screen is in; *Detect automatically* is the default) and **Target** (what it
-is translated into; Arabic is the default). Right-to-left targets (Arabic,
+is translated into; the first-run setup's **Your language** step sets it, and
+until then it is your system's language, or English). Right-to-left targets (Arabic,
 Persian, Urdu, Hebrew) are laid out right-aligned.
 
 While translating, the pill at the top shows the pair (*Detect → Arabic*);
 click either side to switch for this session, with your recent picks first
-and a search field for the rest. Live translate's controller has the same
-picker.
+and a search field for the rest. The pill's Snip button, after the language
+chips, takes the translated page into Snip (see
+[Snip and annotate](snip-and-annotate.md#take-a-snip)). Live translate's
+controller has the same picker.
 
 Reading the text (OCR) needs a model for the source's script. English is
 the default; the first time you pick a source in another script,

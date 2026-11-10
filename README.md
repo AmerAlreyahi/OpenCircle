@@ -59,16 +59,17 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
   matching colour and size; browser address bars and file names are left alone,
   and big outlined subtitles are erased and redrawn at their size. It runs
   offline by default after a one-time model download (49 direct models, and
-  other pairs go through English); Arabic is the default target. Direct models
-  into and out of Arabic make it faster. See [Translate](docs/translate.md).
+  other pairs go through English); the target is the language you pick at the
+  first start. Direct models into and out of Arabic make it faster. See [Translate](docs/translate.md).
 - **Snip and annotate.** Press `Alt+A`: the screen freezes, hover a window and
-  click it, or drag an area (`Enter` takes the full screen). The pick is already
-  on the clipboard at its original size, with one grouped toolbar beside it:
-  shapes, arrows, text, callouts, numbered steps, spotlight, magnifier, Blur (a
+  click it (OpenCircle's own widgets too), or drag an area (`Enter` takes the
+  full screen); `Ctrl+C` copies it at its original size. One grouped toolbar
+  sits beside it: shapes, arrows, text, callouts, numbered steps, spotlight, magnifier, Blur (a
   fine pixel mosaic that hides text for good) and a solid Redact. **Long
   capture**: scroll the page yourself and OpenCircle stitches it. **Steps** keeps
   several snips on a slim strip and copies them as one numbered image. Also a
-  colour picker, a screen ruler, Pin and Share. Details:
+  colour picker, a screen ruler, Pin and Share. Snip also takes a translated
+  page as you see it (the translate pill's Snip button). Details:
   [Snip and annotate](docs/snip-and-annotate.md).
 - **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
   browser, Copy text, Translate and Snip. `Ctrl+C` copies the selection as an
@@ -77,15 +78,17 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
 - **Ask AI about your selection.** No key needed: the question and the circled picture
   open in Google in your browser (Lens, then AI Mode). Or add your own key for a chat inside OpenCircle
   with markdown and follow-ups: OpenRouter, OpenAI, Anthropic, Gemini, Groq,
-  Mistral, DeepSeek, xAI, a local Ollama or LM Studio, or your own server. A
-  follow-up pins the chat so it stays above other apps. History is text only
-  and stays on this PC.
+  Mistral, DeepSeek, xAI, a local Ollama or LM Studio, or your own server, each
+  with a list of its current models (OpenRouter's free router is the default).
+  A follow-up pins the chat so it stays above other apps. Errors say plainly
+  what went wrong and offer one fix. History is text only and stays on this PC.
 - **Shortcuts for everything.** Give any action its own key and skip the bar.
 - **12 themes and Active Look.** Pick a card in Settings > Appearance (light and
   dark; until you do, it follows the system). Sapphire Glow, a soft glow round
   the screen edge, is the default look; its colours also outline the snip area.
-- **Updates that check a signature.** Quiet, opt-in on first run, with release
-  notes after each update.
+- **Updates that check a signature.** Opt-in on first run. A new version
+  downloads in the background and waits: a small pill above the tray offers
+  **Restart now**, and What's new shows after the restart.
 
 <p align="center">
   <img src="docs/images/settings-appearance.png" alt="Settings > Appearance: 12 themes and the Active Look borders, with Sapphire Glow as the default." width="70%">
@@ -197,9 +200,11 @@ Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
 ## Platforms
 
 - **Windows 10 and 11:** the full feature set.
-- **Linux:** X11 and Wayland. On Wayland the desktop owns the keys and
-  the screen capture; picking a window and long capture are not offered, and
-  Share is Windows only. See [Linux notes](docs/linux-notes.md).
+- **Linux:** X11 and Wayland. On Wayland the desktop owns the keys and the
+  screen capture (GNOME asks once); shortcuts work on GNOME with or without the
+  shortcut portal, long capture shows its progress in a small pop-up, picking a
+  window is not offered (a click takes the screen), and Share is Windows only.
+  See [Linux notes](docs/linux-notes.md).
 
 Games must run in borderless or windowed mode for live translate (Labs,
 unfinished). Linux text reading is slower than Windows OCR; on Wayland the

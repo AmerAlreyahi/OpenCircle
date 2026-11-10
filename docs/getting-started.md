@@ -28,8 +28,11 @@ in **Settings > General**.
 
 ## First run
 
-A short welcome shows your shortcut, an optional AI provider, a theme (12 to pick from) and
-whether OpenCircle starts with Windows. Skip any of it; everything can change
+A short setup asks your language first (it becomes the translate target, and
+the step names the offline model your first translation downloads), then shows
+your shortcut, an optional AI provider, a theme (12 to pick from) and whether
+OpenCircle starts with Windows. On Linux under Wayland it also asks the desktop
+for screenshot permission once. Skip any of it; everything can change
 later in **Settings** (tray menu). If a second launch finds it already running,
 it opens Settings.
 
@@ -57,7 +60,7 @@ a box. Nothing is sent until you pick an action.
 The box can be adjusted before you choose: drag inside it to move it (not over
 text; hold `Alt` to move it over text), drag its edges or corners to resize it,
 and use the arrow keys to nudge it (`Shift` = 10 px; `Ctrl`+arrows resize from
-the bottom-right). It opens on the screen your mouse is on, so it works with several monitors. Scroll the mouse wheel to zoom the frozen screen and drag with the middle button to pan.
+the bottom-right). It opens on the screen your mouse is on, so it works with several monitors; the edge glow follows the mouse, or the screen a finger or pen touches. Scroll the mouse wheel to zoom the frozen screen and drag with the middle button to pan.
 
 ## The bottom bar
 
@@ -120,13 +123,19 @@ on (the default) the selected area goes with it; off sends only your question.
 
 - With no key, the question opens in your browser: with the circled picture
   through Google Lens (Include screen on), or in Google AI Mode (off).
-- With a provider set up (Settings > AI), the answer streams into a chat card
+- With a provider set up (Settings > Ask AI), the answer streams into a chat card
   with markdown. Ask a follow-up and the chat pins: it stays open above other
   apps, and a new capture asks into the same chat. The pin button in the header
-  unpins and closes it. **Settings > AI > AI chat stays open** changes this.
+  unpins and closes it. **Settings > Ask AI > AI chat stays open** changes this.
+- **Model** in Settings > Ask AI lists each provider's current models, with the
+  provider's own Free or Paid tag where it publishes one; **Load models** asks
+  the provider for its full list (with your key, only on that click).
+- If the provider answers with an error, a calm card says what happened in a
+  short line, shows the provider's own message, and offers one fix (Choose
+  another model, Check the key, Retry).
 - Each provider has its own key, kept in the system keyring and shown as dots.
 - Chats are saved on this PC as text (never screenshots). The drawer's History
-  lists them; delete one or clear all. **Settings > AI > Keep chat history**
+  lists them; delete one or clear all. **Settings > Ask AI > Keep chat history**
   turns saving off and deletes the saved chats. See [AI setup](ai-setup.md).
 
 ## Translate and live translate
@@ -137,15 +146,17 @@ on (the default) the selected area goes with it; off sends only your question.
   screen changes.
 - Hold `Alt` to see the original; release to see the translation again.
 
-Pick the languages in **Settings > Translate**. The default target is Arabic.
+Pick the languages in **Settings > Translate**. The target is the language you
+chose in the first-run setup. The translate pill's Snip button takes the
+translated page into Snip.
 Translation runs on your PC by default (Settings > Translate > Engine: Offline); choose AI there to send page text to your AI provider. See [Translate](translate.md).
 
 ## Snip and annotate
 
 Press `Alt+A`. The screen freezes: hover a window and click, or drag an
-area (`Enter` takes the full screen). The pick is already on the clipboard
-(original size, picture only), ready to paste into an AI chat, and a toolbar
-opens beside it to mark it up.
+area (`Enter` takes the full screen). A toolbar opens beside it to mark it up;
+`Ctrl+C` or **Copy** puts it on the clipboard (original size, picture only),
+ready to paste into an AI chat.
 
 - More has Long capture (scroll the page yourself), Add to steps (several snips
   as one numbered image), Pin, Colour picker and Screen ruler.
@@ -202,8 +213,8 @@ looked; **Check now** looks at once, on request.
 
 ## Settings and config file
 
-Settings (tray icon, left-click) has a sidebar with General, Appearance, Look & behaviour, AI, Text reading (Windows), Translate,
-Shortcuts, Snip, History, Privacy, About and Labs (Song search appears
+Settings (tray icon, left-click) has a sidebar with General, Appearance, Look & behaviour, Ask AI, Text reading (Windows), Translate,
+Snip, History, Shortcuts, Privacy, About and Labs (Song search appears
 once switched on in Labs). It writes a plain TOML file you may
 also edit by hand:
 

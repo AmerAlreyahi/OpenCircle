@@ -22,6 +22,16 @@ screen freezes and a glow around its edge shows it is captured. Then:
 - **Press `Enter`** for the full screen (the screen under the pointer;
   `Shift+Enter` takes all screens as one picture). An area may cross screens.
 
+OpenCircle's own floating widgets (the Steps strip, a pin, the AI chat, a pill)
+count as windows here: hover one and click to take it. They never appear in any
+other capture. On Wayland there is no window list: a click takes the screen
+under the pointer, like `Enter`.
+
+**Snip a translated page.** With a translation on screen, Snip (the Snip button
+in the translate pill, after the language chips, or `Alt+A`, or the tray) takes
+the screen as you see it, translation included. Drag an area, or click or press
+`Enter` for the screen; then mark it up, copy, save or add it to Steps as usual.
+
 Everything also works with a finger or a pen on a touch screen. A loupe beside the pointer shows the pixels under it at 8x. `Esc` cancels.
 
 Once an area is picked, the edge glow goes away and the area gets a soft outline
@@ -107,6 +117,10 @@ header, a chat's message box) are kept once. **Copy** or **Save** finishes it.
 
 It stops at 20,000 px by default (Settings > Snip > Long capture: 5,000, 10,000
 or 20,000). Nothing is scrolled for you, and only the area is grabbed.
+
+On Wayland the page so far, with Copy, Save, Done and Cancel, shows in a small
+pop-up beside the area, and the tray icon shows a record dot while it runs: see
+[Linux notes](linux-notes.md#long-capture-on-wayland).
 
 ## Steps
 

@@ -7,7 +7,7 @@ Install OpenCircle on Windows, or use the portable executable; Linux packages ar
 1. Get the Windows Setup executable or portable executable from [Releases](https://github.com/AmerAlreyahi/OpenCircle/releases). Linux users can choose a `.deb`, `.AppImage`, or `.rpm`.
 2. On Windows, run `OpenCircle-Setup-<version>-x64.exe`. Choose **Install OpenCircle**, or customise the install folder. Running Setup for an existing installation offers **Update OpenCircle** or **Repair OpenCircle**, depending on the version.
 3. Choose whether to **Start with Windows** and launch OpenCircle. The portable executable runs without an install.
-4. Follow the first-run prompts, including your update preference. A tray notice tells you OpenCircle is running and shows the shortcut.
+4. Follow the first-run prompts: your language first, then your update preference and the rest. A tray notice tells you OpenCircle is running and shows the shortcut.
 5. Press `Ctrl+Shift+Space` to try it. You can change startup and update preferences in Settings.
 6. To uninstall an installed Windows copy, use Windows' installed-apps list. The uninstall window lets you **Keep** or **Remove** settings, downloaded models, and saved keys. Keep is the default.
 
@@ -22,7 +22,7 @@ Install OpenCircle on Windows, or use the portable executable; Linux packages ar
 ## Tips
 
 - OpenCircle starts with Windows by default and waits in the tray. Turn this off in Settings if you prefer to start it yourself.
-- Automatic updates are opt-in on first run. When enabled, they download and install while OpenCircle is idle, then relaunch it and show the release notes.
+- Automatic updates are opt-in on first run. A new version downloads in the background; a pill above the tray offers **Later** or **Restart now** (the tray icon gets a dot). It installs on Restart now, when you quit or sign out, or after a minute with the screen locked (a Setup install only on Restart now, with one Windows prompt), then shows what's new.
 - Updates must pass a signature check and a file checksum check before installation. The update check sends only the request, with no screen content, personal identifier, or telemetry.
 - For Linux setup and desktop shortcut details, see [Linux notes](../linux-notes.md) and [Getting started](../getting-started.md).
 

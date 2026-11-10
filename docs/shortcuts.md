@@ -168,11 +168,20 @@ works and where to change it:
 
 Wayland does not let apps grab keys. OpenCircle asks the desktop through the
 GlobalShortcuts portal (GNOME 48+, KDE Plasma 6) and the desktop asks you once.
-That path has not been verified on every desktop. If it is missing or you
-decline, bind the commands yourself. Use the full path to the binary if it is
+That path has not been verified on every desktop.
+
+On GNOME without the portal (before GNOME 48, for example Ubuntu 22.04),
+OpenCircle does this for you: it adds one entry per shortcut to GNOME's own
+custom shortcuts ("OpenCircle: ..."), each running the command below, and keeps
+them in step with its Settings. It never touches your own entries; a key one of
+them already uses, or one GNOME keeps for itself, is refused in Settings with
+the reason.
+
+Elsewhere, if the portal is missing or you decline, Settings names the command
+for each shortcut: bind it yourself. Use the full path to the binary if it is
 not on your `PATH` (for an AppImage, the path of the file).
 
-**GNOME:** Settings → Keyboard → View and Customize Shortcuts → Custom
+**GNOME (by hand):** Settings → Keyboard → View and Customize Shortcuts → Custom
 Shortcuts → **+**. Name: "OpenCircle", command: `opencircle capture`, then set
 the keys.
 

@@ -50,6 +50,8 @@ All tool keys are in [Snip and annotate](../snip-and-annotate.md).
 - **Colour picker** (click copies `#RRGGBB`) and **Screen ruler** (measure in real pixels) are in More and can have their own shortcut.
 - **Pin to screen** keeps the picture on top of your windows. **Share** opens Windows' share sheet.
 - **Blur** is a fine pixel mosaic that hides text for good. **Redact** is a solid box.
+- **Snip a translated page:** with a translation on screen, the Snip button in the translate pill (or `Alt+A`) takes the page as translated.
+- OpenCircle's own floating widgets (Steps strip, pin, AI chat, pills) can be picked like any window by hovering and clicking.
 
 ## Tips
 
@@ -59,7 +61,7 @@ All tool keys are in [Snip and annotate](../snip-and-annotate.md).
 
 ## Limits
 
-- Picking a window by hovering and Long capture are not offered on Wayland; drag an area instead. See [Linux notes](../linux-notes.md).
+- On Wayland there is no window list: drag an area, or click to take the screen under the pointer. Long capture there shows the page so far in a small pop-up beside the area. See [Linux notes](../linux-notes.md).
 - Share is Windows only.
 - Long capture scrolls down only, and an area across screens is captured on the screen that holds most of it.
 - Steps hold up to 12 captures and live in memory only.
