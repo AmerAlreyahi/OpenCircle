@@ -48,6 +48,19 @@ pub fn hint<'a, Message: 'a>(
         .into()
 }
 
+/// `content` whose text is cut short, with `full` (the whole text) as the
+/// visible tooltip above it: a `Why::Cut` for a row whose text isn't a
+/// control name of its own (a list's options).
+pub fn cut<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    full: String,
+) -> Element<'a, Message> {
+    let pill = iced::widget::container(super::surface::hint(full)).padding(EDGE);
+    iced::widget::tooltip(content, pill, Position::Top)
+        .gap(GAP - EDGE)
+        .into()
+}
+
 /// A control's accessible name (iced has no a11y tree): what automation calls it,
 /// and what the test registry checks is unique per screen. It shows NO tooltip,
 /// since the control's own text says it; `hint` is for icon-only, cut or

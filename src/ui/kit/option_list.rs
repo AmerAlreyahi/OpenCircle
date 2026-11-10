@@ -386,7 +386,9 @@ pub fn action<'a, Message: Clone + 'a>(
         .into()
 }
 
-/// One option: `label`, a `badge` at its end, `width` x `height`.
+/// One option: `label` on one line (cut in the middle with "…" when it does
+/// not fit, the whole text in a tooltip), a `badge` at its end in a column of
+/// its own, `width` x `height`.
 pub fn option<'a, Message: Clone + 'a>(
     label: String,
     badge: Option<&'a str>,
@@ -396,7 +398,24 @@ pub fn option<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     use button::Status;
     let role = Role::CONTROL;
-    let content = row![container(text(label).size(role.size).font(font(role))).width(Fill)]
+    // the badge's text, its 2x6 px room, the gap, and the row's own room
+    let tag_w = badge.map_or(0.0, |b| {
+        super::text::width(b, 9.5, super::text::weight(iced::font::Weight::Normal))
+            + 12.0
+            + space::GAP
+    });
+    let room = width - 2.0 * ROW_PAD[1] - 2.0 - tag_w;
+    let shown = super::text::cut_middle(&label, role.size, font(role), room);
+    let line: Element<'a, Message> = text(shown.clone())
+        .size(role.size)
+        .font(font(role))
+        .wrapping(text::Wrapping::None)
+        .into();
+    let line = match shown == label {
+        true => line,
+        false => super::tooltip::cut(line, label),
+    };
+    let content = row![container(line).width(Fill).clip(true)]
         .push(badge.map(tag))
         .spacing(space::GAP)
         .align_y(Center);
@@ -536,5 +555,61 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Keyed<'_, Message
         translation: iced::Vector,
     ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
         (self.content.as_widget_mut()).overlay(tree, layout, renderer, viewport, translation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::kit::testing::shot;
+    use iced::advanced::widget::{Id, Operation};
+    use iced::{Rectangle, Size};
+
+    /// Every text's bounds in a row, laid out in `size`.
+    fn texts(view: Element<'_, ()>, size: Size) -> Vec<(String, Rectangle)> {
+        struct Collect(Vec<(String, Rectangle)>);
+        impl Operation for Collect {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+                operate(self);
+            }
+            fn text(&mut self, _: Option<&Id>, bounds: Rectangle, text: &str) {
+                self.0.push((text.to_string(), bounds));
+            }
+        }
+        let mut renderer = shot::renderer();
+        let mut ui = iced_runtime::user_interface::UserInterface::build(
+            view,
+            size,
+            iced_runtime::user_interface::Cache::default(),
+            &mut renderer,
+        );
+        let mut c = Collect(Vec::new());
+        ui.operate(&renderer, &mut c);
+        c.0
+    }
+
+    /// A 60-character id and its tag in the narrowest list: the id is one
+    /// line, cut in the middle with its end kept, and stops before the tag;
+    /// the row keeps its height (the Settings list once wrapped long ids onto
+    /// the next row and its tag).
+    #[test]
+    fn a_long_id_stays_on_one_line_clear_of_its_tag() {
+        let id = "nvidia/nemotron-3-ultra-550b-a55b-instruct-extra-long-id:free";
+        assert!(id.len() >= 60);
+        let width = size::CONTROL_COLUMN - 2.0 * 4.0 - 6.0 - 2.0;
+        let row = option(
+            id.to_string(),
+            Some("Free at OpenRouter"),
+            false,
+            (width, 30.0),
+            (),
+        );
+        let got = texts(row, Size::new(width, 60.0));
+        let (label, at) = got.iter().find(|(t, _)| t.contains('…')).expect("cut");
+        let (_, tag) = got.iter().find(|(t, _)| t == "Free at OpenRouter").unwrap();
+        assert!(label.ends_with(":free"), "{label}");
+        assert!(at.height < 2.0 * Role::CONTROL.size, "one line: {at:?}");
+        assert!(at.x + at.width <= tag.x, "{at:?} runs into {tag:?}");
+        assert!(at.y + at.height <= 30.0, "{at:?} leaves the row");
     }
 }

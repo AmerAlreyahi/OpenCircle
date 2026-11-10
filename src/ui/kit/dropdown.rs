@@ -156,7 +156,13 @@ fn opener<'a, Message: 'a>(
         true => super::text::mono(iced::font::Weight::Normal),
         false => font(role),
     };
-    let value = text(shown.clone().unwrap_or_else(|| placeholder.to_string()))
+    let full = shown.clone().unwrap_or_else(|| placeholder.to_string());
+    // one line that stops before the arrow: cut in the middle, whole in a tooltip
+    let room =
+        size::CONTROL_COLUMN - 2.0 * PAD[1] - 2.0 - super::text::width("▾", role.size, MONO) - 4.0;
+    let line = super::text::cut_middle(&full, role.size, face, room);
+    let cut = line != full;
+    let value = text(line)
         .size(role.size)
         .font(face)
         .line_height(LINE)
@@ -170,6 +176,10 @@ fn opener<'a, Message: 'a>(
         .font(MONO)
         .line_height(LINE)
         .color(c().text);
+    let value: Element<'a, Message> = match cut {
+        true => super::tooltip::cut(value, full),
+        false => value.into(),
+    };
     container(row![container(value).width(Fill).clip(true), handle].align_y(Center))
         .padding(PAD)
         .width(size::CONTROL_COLUMN)
@@ -586,6 +596,65 @@ mod tests {
             .width(iced::Fill)
             .height(iced::Fill)
             .into()
+    }
+
+    /// The Model row with long OpenRouter ids and tags: the opener's value and
+    /// every row on one line, cut in the middle, tags clear of the ids.
+    #[test]
+    fn the_open_combo_with_long_ids_matches_its_golden_image() {
+        use super::super::testing::golden;
+        use super::super::themes::{self, DAYLIGHT, SAPPHIRE};
+        if !golden::enabled() {
+            return;
+        }
+        let long = "nvidia/nemotron-3-ultra-550b-a55b-instruct-extra-long-id:free";
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let view = || {
+                let rows = vec![
+                    (
+                        "openrouter/free".into(),
+                        Some("Free at OpenRouter"),
+                        false,
+                        "a",
+                    ),
+                    (long.into(), Some("Free at OpenRouter"), true, "b"),
+                    (
+                        "anthropic/claude-sonnet-5.5".into(),
+                        Some("Paid at OpenRouter"),
+                        false,
+                        "c",
+                    ),
+                    (
+                        "a-provider/an-extremely-long-model-name-for-a-vision-chat-model".into(),
+                        None,
+                        false,
+                        "d",
+                    ),
+                ];
+                let search = super::Search {
+                    id: "combo-search",
+                    hint: "Search or type a model id",
+                    query: "",
+                    on_query: Box::new(|_| "typed"),
+                    on_submit: "first",
+                };
+                let field = super::combo(Some(long), "", search, None, rows, None, "open");
+                iced::widget::container(field)
+                    .padding(20)
+                    .width(iced::Fill)
+                    .height(iced::Fill)
+                    .into()
+            };
+            let px = shot::after_clicks(view, Size::new(400.0, 260.0), &[Point::new(60.0, 36.0)]);
+            let name = format!("combo_long_open-{}@1x", theme.id);
+            if let Err(e) = golden::compare("kit", &name, 400, 260, &px) {
+                failed.push(e);
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
     }
 
     /// The open combo in both themes.

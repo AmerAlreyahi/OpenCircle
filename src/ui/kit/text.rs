@@ -127,6 +127,31 @@ pub fn cut(s: &str, size: f32, font: Font, room: f32) -> String {
     format!("{}…", t.trim_end())
 }
 
+/// `s` cut in the middle with "…" to fit `room` px (an id keeps its end:
+/// ":free", a version); as it is when it fits.
+pub fn cut_middle(s: &str, size: f32, font: Font, room: f32) -> String {
+    if width(s, size, font) <= room {
+        return s.to_string();
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let with = |k: usize| {
+        let tail = k / 3;
+        let head: String = chars[..k - tail].iter().collect();
+        let tail: String = chars[chars.len() - tail..].iter().collect();
+        format!("{}…{}", head.trim_end(), tail.trim_start())
+    };
+    let (mut lo, mut hi) = (0, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if width(&with(mid), size, font) <= room {
+            lo = mid
+        } else {
+            hi = mid - 1
+        }
+    }
+    with(lo)
+}
+
 /// The first of `texts` (longest first) that fits `room` px on one line at
 /// `size` in the UI font, else the last: a placeholder is never cut off.
 pub fn fitting<'a>(texts: &[&'a str], size: f32, room: f32) -> &'a str {

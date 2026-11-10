@@ -36,7 +36,10 @@ use Price::{Free, Paid};
 fn builtin(preset: &str) -> &'static [(&'static str, Option<Price>)] {
     match preset {
         // https://openrouter.ai/api/v1/models (each model's `pricing`; ":free" = 0)
+        // ("openrouter/free" = the Free Models Router: picks a free model, price 0;
+        // "openrouter/auto" = the paid router)
         "openrouter" => &[
+            ("openrouter/free", Some(Free)),
             ("nvidia/nemotron-3-ultra-550b-a55b:free", Some(Free)),
             ("nvidia/nemotron-3.5-super-vl:free", Some(Free)),
             ("google/gemma-4-31b-it:free", Some(Free)),
@@ -44,6 +47,7 @@ fn builtin(preset: &str) -> &'static [(&'static str, Option<Price>)] {
             ("anthropic/claude-sonnet-5.5", Some(Paid)),
             ("openai/gpt-6-luna", Some(Paid)),
             ("google/gemini-3.8-flash", Some(Paid)),
+            ("openrouter/auto", Some(Paid)),
         ],
         // https://developers.openai.com/api/docs/models and .../docs/pricing
         // (every chat model priced per token; no free chat model)
@@ -339,6 +343,12 @@ mod tests {
         let n = builtin("openrouter").len();
         assert_eq!(ids.len(), n + 2);
         assert_eq!(ids[0], or.model);
+        assert_eq!(ids[0], "openrouter/free");
+        assert_eq!(
+            merge(&or, &[])[0].tag.as_deref(),
+            Some("Free at OpenRouter")
+        );
+        assert!(ids.contains(&"openrouter/auto"));
         assert_eq!(&ids[n..], ["alpha/m:free", "zeta/m"]);
         let haiku = list
             .iter()

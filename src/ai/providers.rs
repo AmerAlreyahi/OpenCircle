@@ -120,7 +120,7 @@ pub const PRESETS: &[Preset] = &[
         "openrouter",
         "OpenRouter",
         "https://openrouter.ai/api/v1",
-        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "openrouter/free",
     ),
     openai(
         "openai",
