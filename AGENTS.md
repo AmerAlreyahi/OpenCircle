@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.4 published (2026-11-09); next: Linux fixes, then Game translation.**
+(both local only). Status: **v0.1.5 published (2026-11-10); next: 0.1.6 Languages + live border, then Game translation (0.2.0).**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -51,6 +51,10 @@ where they differ.
   fresh install recovers from forced 504s; Windows smoke); Ubuntu AppImage starts/downloads/translates, its Search in browser
   not verified (test input didn't reach the app). Published assets re-downloaded: SHA256SUMS OK, comment "OpenCircle v0.1.4",
   latest = v0.1.4.
+  v0.1.5 published 2026-11-10 20:55 UTC on tag v0.1.5 (29d8bc95): gate run 1 failed (AppImage: GNOME asked on every
+  capture, GST_PLUGIN_SYSTEM_PATH set into the image) -> fixed, draft rebuilt; run 2 PASS (assets + minisig; v0.1.4 Setup +
+  portable -> 0.1.5; What's new; Windows smoke; Ubuntu AppImage asks once). Published assets re-downloaded: SHA256SUMS OK,
+  minisig OK, trusted comment "OpenCircle v0.1.5", latest = v0.1.5.
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
