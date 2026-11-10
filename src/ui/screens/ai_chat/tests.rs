@@ -271,7 +271,7 @@ fn edit_resends_and_regenerate_asks_again() {
 fn an_error_says_why_and_offers_retry() {
     let mut panel = api_chat();
     ask(&mut panel, "Hi");
-    let why = ai::AiError::Auth(401).to_string();
+    let why = ai::AiError::Auth(401, String::new()).to_string();
     let _ = panel.update(Msg::Answered(Err(why.clone())));
     let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     assert!(texts.contains(&why), "{texts:?}");
@@ -382,7 +382,11 @@ fn the_chat_matches_its_golden_images() {
         (
             "error",
             Box::new(move || {
-                answered("Explain", "", Some(Err(ai::AiError::Auth(401).to_string())))
+                answered(
+                    "Explain",
+                    "",
+                    Some(Err(ai::AiError::Auth(401, String::new()).to_string())),
+                )
             }),
         ),
         (

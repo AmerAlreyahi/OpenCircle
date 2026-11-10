@@ -1984,7 +1984,7 @@ pub(super) mod tests {
             self.ai_calls.borrow_mut().push(texts.to_vec());
             std::thread::sleep(self.delay);
             if self.fail_ai {
-                return Err(AiError::Server(503));
+                return Err(AiError::Server(503, String::new()));
             }
             Ok(texts.iter().map(|t| (self.answer)(t)).collect())
         }
@@ -2248,7 +2248,7 @@ pub(super) mod tests {
         let err = translate_frame(&img, 800, 450, "ar", &cache, &fake)
             .err()
             .unwrap();
-        assert!(matches!(err, Error::Ai(AiError::Server(503))), "{err}");
+        assert!(matches!(err, Error::Ai(AiError::Server(503, _))), "{err}");
         assert_eq!(cache.get("Quit", "ar"), None);
         // a bad frame fails before OCR
         assert!(matches!(

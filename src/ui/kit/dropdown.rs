@@ -4,12 +4,14 @@
 //! `dropdown` material, a `rim` edge, radius 14), built from kit parts: one
 //! `option_list::option` row per choice in the one `scroll` area (its
 //! scrollbar is every other one's). It opens below (above when there is no
-//! room); a pick, a click outside or Esc closes it.
+//! room); a pick, a click outside or Esc closes it. `combo`: the same with a
+//! search field at the top of the menu (typing filters, Enter picks) and an
+//! action at its foot that leaves it open (the Model row).
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget, mouse, overlay, renderer};
 use iced::keyboard::{self, key::Named};
-use iced::widget::{column, container, row, text};
+use iced::widget::{Space, column, container, row, text};
 use iced::{Border, Center, Element, Event, Fill, Length, Point, Rectangle, Size, Vector};
 
 use super::option_list::option;
@@ -35,12 +37,127 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
     placeholder: &str,
     on_pick: impl Fn(T) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let role = Role::NOTE;
     let shown = chosen.as_ref().map(ToString::to_string);
+    let rows = options.iter().map(|o| {
+        let active = chosen.as_ref() == Some(o);
+        option(
+            o.to_string(),
+            None,
+            active,
+            (INNER, ROW_H),
+            on_pick(o.clone()),
+        )
+    });
+    let menu = super::option_list::frame(scroll(column(rows)).height(Length::Shrink))
+        .padding(MENU_PAD)
+        .width(size::CONTROL_COLUMN)
+        .max_height(MENU_MAX);
+    Element::new(Dropdown {
+        opener: opener(shown, placeholder, false),
+        menu: menu.into(),
+        on_open: None,
+        foot: false,
+    })
+}
+
+/// The rows' width (the scroller beside them, 2 px apart).
+const INNER: f32 = size::CONTROL_COLUMN - 2.0 * MENU_PAD - super::scroll::WIDTH - 2.0;
+
+/// A `combo` row: its label, its tag (a quiet `badge`), whether it is the
+/// current choice, and what a press sends.
+pub type Row<'a, Message> = (String, Option<&'a str>, bool, Message);
+
+/// A `combo`'s search field: its widget id (the caller focuses it on
+/// `on_open`), hint, text, and what typing and Enter send.
+pub struct Search<'a, Message> {
+    pub id: &'static str,
+    pub hint: &'a str,
+    pub query: &'a str,
+    pub on_query: Box<dyn Fn(String) -> Message + 'a>,
+    pub on_submit: Message,
+}
+
+/// A dropdown with a search: the opener shows `value` (mono: a value that is
+/// code) or `placeholder`; the menu holds the search field, an optional
+/// muted `note` line, the `rows` (filtered by the caller) and an optional
+/// `foot` action (no message = a muted status line) whose press keeps the
+/// menu open. `on_open` is sent when the menu opens.
+pub fn combo<'a, Message: Clone + 'a>(
+    value: Option<&str>,
+    placeholder: &str,
+    search: Search<'a, Message>,
+    note: Option<&'a str>,
+    rows: Vec<Row<'a, Message>>,
+    foot: Option<(&'a str, Option<Message>)>,
+    on_open: Message,
+) -> Element<'a, Message> {
+    let field = super::field::search(search.hint, search.query, false)
+        .id(search.id)
+        .on_input(search.on_query)
+        .on_submit(search.on_submit)
+        .width(Fill);
+    let line = |s: &'a str, h: f32| {
+        container(super::text::muted(Role::NOTE, s))
+            .padding([0.0, PAD[1]])
+            .center_y(h)
+    };
+    let room = COMBO_MAX
+        - SEARCH_H
+        - MENU_GAP
+        - NOTE_H * f32::from(note.is_some())
+        - ROW_H
+        - FOOT_RULE
+        - 1.0;
+    let rows_h = (rows.len() as f32 * ROW_H).min(room);
+    let rows = (rows.into_iter()).map(|(label, badge, active, message)| {
+        option(label, badge, active, (INNER, ROW_H), message)
+    });
+    let mut menu = column![field]
+        .push(Space::new().height(MENU_GAP))
+        .push(note.map(|n| line(n, NOTE_H)))
+        .push(scroll(column(rows)).height(rows_h));
+    if let Some((label, message)) = foot {
+        let rule = container(super::divider::divider()).padding([FOOT_RULE / 2.0, PAD[1]]);
+        menu = menu.push(rule).push(match message {
+            Some(m) => option(label.to_string(), None, false, (INNER, ROW_H), m),
+            None => line(label, ROW_H).into(),
+        });
+    }
+    let menu = super::option_list::frame(menu)
+        .padding(MENU_PAD)
+        .width(size::CONTROL_COLUMN);
+    Element::new(Dropdown {
+        opener: opener(value.map(str::to_string), placeholder, true),
+        menu: menu.into(),
+        on_open: Some(on_open),
+        foot: true,
+    })
+}
+
+/// A `combo`'s tallest menu, its search field and its note line.
+const COMBO_MAX: f32 = 360.0;
+const SEARCH_H: f32 = 32.0;
+const NOTE_H: f32 = 24.0;
+/// The room of the hairline over the foot (1 px in it).
+const FOOT_RULE: f32 = 8.0;
+
+/// The opener: the value (`text`; mono for code) or the placeholder
+/// (`text_muted`), and "▾".
+fn opener<'a, Message: 'a>(
+    shown: Option<String>,
+    placeholder: &str,
+    mono: bool,
+) -> Element<'a, Message> {
+    let role = Role::NOTE;
+    let face = match mono {
+        true => super::text::mono(iced::font::Weight::Normal),
+        false => font(role),
+    };
     let value = text(shown.clone().unwrap_or_else(|| placeholder.to_string()))
         .size(role.size)
-        .font(font(role))
+        .font(face)
         .line_height(LINE)
+        .wrapping(text::Wrapping::None)
         .color(match shown {
             Some(_) => c().text,
             None => c().text_muted,
@@ -50,7 +167,7 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
         .font(MONO)
         .line_height(LINE)
         .color(c().text);
-    let opener = container(row![container(value).width(Fill), handle].align_y(Center))
+    container(row![container(value).width(Fill).clip(true), handle].align_y(Center))
         .padding(PAD)
         .width(size::CONTROL_COLUMN)
         .style(|_| container::Style {
@@ -60,31 +177,17 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
                 .width(1)
                 .color(c().rim),
             ..container::Style::default()
-        });
-    let inner = size::CONTROL_COLUMN - 2.0 * MENU_PAD - super::scroll::WIDTH - 2.0;
-    let rows = options.iter().map(|o| {
-        let active = chosen.as_ref() == Some(o);
-        option(
-            o.to_string(),
-            None,
-            active,
-            (inner, ROW_H),
-            on_pick(o.clone()),
-        )
-    });
-    let menu = super::option_list::frame(scroll(column(rows)).height(Length::Shrink))
-        .padding(MENU_PAD)
-        .width(size::CONTROL_COLUMN)
-        .max_height(MENU_MAX);
-    Element::new(Dropdown {
-        opener: opener.into(),
-        menu: menu.into(),
-    })
+        })
+        .into()
 }
 
 struct Dropdown<'a, Message> {
     opener: Element<'a, Message>,
     menu: Element<'a, Message>,
+    /// Sent as the menu opens (a combo focuses its search field).
+    on_open: Option<Message>,
+    /// The menu's last part is an action that leaves it open.
+    foot: bool,
 }
 
 #[derive(Default)]
@@ -92,7 +195,9 @@ struct State {
     open: bool,
 }
 
-impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Dropdown<'a, Message> {
+impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
+    for Dropdown<'a, Message>
+{
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<State>()
     }
@@ -175,6 +280,9 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Dropdown<
                 if cursor.is_over(layout.bounds()) =>
             {
                 state.open = !state.open;
+                if let (true, Some(m)) = (state.open, &self.on_open) {
+                    shell.publish(m.clone());
+                }
                 shell.capture_event();
                 shell.request_redraw();
             }
@@ -218,6 +326,7 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Dropdown<
             tree: &mut children[1],
             menu: &mut self.menu,
             opener,
+            foot: self.foot,
         })))
     }
 }
@@ -229,6 +338,7 @@ struct Menu<'a, 'b, Message> {
     menu: &'b mut Element<'a, Message>,
     /// The opener's place in the window.
     opener: Rectangle,
+    foot: bool,
 }
 
 impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_, '_, Message> {
@@ -301,13 +411,24 @@ impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_
         (self.menu.as_widget_mut()).update(
             self.tree, event, layout, cursor, renderer, clipboard, shell, &bounds,
         );
-        // a row picked: closed
-        let picked = matches!(
+        // a row picked (not the foot's action) or Enter in the search: closed
+        let on_foot = self.foot
+            && (layout.children().next())
+                .and_then(|parts| parts.children().last())
+                .is_some_and(|f| cursor.is_over(f.bounds()));
+        let released = matches!(
             event,
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
         ) && inside
-            && shell.is_event_captured();
-        if picked {
+            && !on_foot;
+        let entered = matches!(
+            event,
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(Named::Enter),
+                ..
+            })
+        );
+        if (released || entered) && shell.is_event_captured() {
             *self.open = false;
             shell.request_redraw();
         }
@@ -385,6 +506,85 @@ mod tests {
         }
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// A combo as the Model row shows it: a value, a note, rows with the
+    /// provider's price tags, the typed id, the foot's action.
+    fn combo_view(query: &'static str) -> iced::Element<'static, &'static str> {
+        let rows = vec![
+            ("gemini-flash-lite-latest".into(), None, true, "a"),
+            (
+                "gemini-3.8-flash".into(),
+                Some("Free tier at Google"),
+                false,
+                "b",
+            ),
+            ("gemini-4-argon".into(), Some("Paid at Google"), false, "c"),
+        ];
+        let search = super::Search {
+            id: "combo-search",
+            hint: "Search or type a model id",
+            query,
+            on_query: Box::new(|_| "typed"),
+            on_submit: "first",
+        };
+        let field = super::combo(
+            Some("gemini-flash-lite-latest"),
+            "",
+            search,
+            Some("Pricing is set by Google"),
+            rows,
+            Some(("Load models from Google Gemini", Some("load"))),
+            "open",
+        );
+        iced::widget::container(field)
+            .padding(20)
+            .width(iced::Fill)
+            .height(iced::Fill)
+            .into()
+    }
+
+    /// The open combo in both themes.
+    #[test]
+    fn the_open_combo_matches_its_golden_image() {
+        use super::super::testing::golden;
+        use super::super::themes::{self, DAYLIGHT, SAPPHIRE};
+        if !golden::enabled() {
+            return;
+        }
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let px = shot::after_clicks(
+                || combo_view(""),
+                Size::new(400.0, 300.0),
+                &[Point::new(60.0, 36.0)],
+            );
+            let name = format!("combo_open-{}@1x", theme.id);
+            if let Err(e) = golden::compare("kit", &name, 400, 300, &px) {
+                failed.push(e);
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// Opening says so (the caller focuses the search); the foot's action
+    /// leaves the menu open, so a row can still be picked after it.
+    #[test]
+    fn the_combo_foot_keeps_it_open() {
+        let size = Size::new(400.0, 300.0);
+        // opener 20..52; menu from 56: 4 in, search 32, gap 4, note 24, rows 30 each
+        let (opener, row_b, foot) = (
+            Point::new(60.0, 36.0),
+            Point::new(60.0, 120.0 + 45.0),
+            Point::new(60.0, 120.0 + 90.0 + 9.0 + 15.0),
+        );
+        let got = shot::clicks(|| combo_view(""), size, &[opener, foot, row_b]);
+        assert_eq!(got, ["open", "load", "b"]);
+        // a row closes it: the next click there picks nothing
+        let got = shot::clicks(|| combo_view(""), size, &[opener, row_b, row_b]);
+        assert_eq!(got, ["open", "b"]);
     }
 
     /// A click opens the menu (the kit's rows, every choice), a row's click

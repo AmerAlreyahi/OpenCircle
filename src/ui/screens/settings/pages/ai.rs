@@ -8,13 +8,14 @@ use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, row};
 use iced::{Element, Fill};
 
+use super::super::model_list::SEARCH as MODEL_SEARCH;
 use super::super::state::{
     Busy, KEY_MASK, KeyField, KeyMessage, KeyStatus, Message, PRESETS, Pick, Preset, State, issue,
 };
 use crate::config::{Provider, StaysOpen};
 use crate::secrets::Secret;
 use crate::ui::kit::button::{Kind, button, label};
-use crate::ui::kit::dropdown::dropdown;
+use crate::ui::kit::dropdown::{Search, combo, dropdown};
 use crate::ui::kit::field::input;
 use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
@@ -66,18 +67,61 @@ fn provider_rows(state: &State) -> Element<'_, Message> {
         return rows.into(); // no model, server or key: the browser, or nothing chosen yet
     };
     rows = rows.push(preset_row(state)).push(url_row(state));
-    let example = match preset.name {
-        "OpenRouter" => "e.g. anthropic/claude-haiku-5.5 (fast, paid)".to_string(),
-        _ if preset.custom() => "e.g. gpt-4o-mini".to_string(),
-        _ => format!("e.g. {}", preset.model),
+    rows.push(model_row(state, preset))
+        .push(key_row(state))
+        .into()
+}
+
+/// The model: a list of the provider's models with a search; a typed id
+/// that is in no list is offered as is (every provider, Custom server too).
+fn model_row(state: &State, preset: Preset) -> Element<'_, Message> {
+    let list = &state.model_list;
+    let ai = &state.draft.ai;
+    let example = match preset.model {
+        "" => "Type or load a model id".to_string(),
+        m => format!("e.g. {m}"),
     };
-    rows = rows.push(text_row(
-        state,
-        ("Model", "The model id sent to the provider"),
-        (&example, &ai.model, "ai.model"),
-        Message::Model,
-    ));
-    rows.push(key_row(state)).into()
+    let rows = (list.choices().into_iter())
+        .map(|(id, tag, typed)| {
+            let label = match typed {
+                true => format!("Use \u{201c}{id}\u{201d}"),
+                false => id.to_string(),
+            };
+            let current = !typed && id == ai.model;
+            (label, tag, current, Message::ModelPick(id.to_string()))
+        })
+        .collect();
+    let foot = match list.loading {
+        true => ("Loading models\u{2026}", None),
+        false => (list.load.as_str(), Some(Message::LoadModels)),
+    };
+    let search = Search {
+        id: MODEL_SEARCH,
+        hint: "Search or type a model id",
+        query: &list.query,
+        on_query: Box::new(Message::ModelQuery),
+        on_submit: Message::ModelFirst,
+    };
+    let value = (!ai.model.is_empty()).then_some(ai.model.as_str());
+    let field = combo(
+        value,
+        &example,
+        search,
+        list.pricing.as_deref(),
+        rows,
+        Some(foot),
+        Message::ModelsOpened,
+    );
+    let mut control = column![tip(field, "Model", Position::Top)].spacing(space::GAP);
+    match &list.said {
+        Some(Ok(n)) => control = control.push(sub(Role::ROW_DESC, n.as_str())),
+        Some(Err(e)) => control = control.push(error(Role::ROW_DESC, e.as_str())),
+        None => {}
+    }
+    if let Some(e) = issue(&state.problems, "ai.model") {
+        control = control.push(error(Role::ROW_DESC, e));
+    }
+    setting_row::row(title("Model"), "The model id sent to the provider", control)
 }
 
 /// An AI provider with a model, a server and a key (not the browser, not an

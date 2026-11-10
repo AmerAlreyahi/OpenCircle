@@ -628,6 +628,8 @@ pub struct State {
     /// is asking to be sure.
     pub(super) kept: Option<Counts>,
     pub(super) clearing_all: bool,
+    /// Ask AI's Model list.
+    pub(super) model_list: super::model_list::ModelList,
 }
 
 /// A segmented control's value before a pick (`State::thumb`).
@@ -685,7 +687,15 @@ pub enum Message {
     Provider(Provider),
     Preset(Preset),
     BaseUrl(String),
-    Model(String),
+    /// The Model list: it opened (its search takes the focus), the search
+    /// typed, a row picked (the typed id too), Enter in the search, "Load
+    /// models", and that call's answer (the provider it asked).
+    ModelsOpened,
+    ModelQuery(String),
+    ModelPick(String),
+    ModelFirst,
+    LoadModels,
+    ModelsLoaded(config::AiConfig, Result<usize, String>),
     ApiKey(KeyMessage),
     SongKey(KeyMessage),
     SongSource(SongSource),
@@ -840,6 +850,11 @@ pub enum Outcome {
     /// Download these preview clips on a worker thread (`previews::online::fetch`)
     /// and answer `Message::Fetched` with this preview's name.
     Fetch(&'static str, Vec<&'static str>),
+    /// Give this field the keyboard focus.
+    Focus(&'static str),
+    /// Ask the provider for its models on a worker thread (`ModelsJob::run`)
+    /// and answer `Message::ModelsLoaded`.
+    LoadModels(super::model_list::ModelsJob),
 }
 
 /// A config write for a worker thread.
@@ -1004,7 +1019,9 @@ impl State {
             print_screen_taken: crate::hotkey::windows_snips_print_screen(),
             kept: None,
             clearing_all: false,
+            model_list: Default::default(),
         };
+        s.refresh_models();
         s.revalidate();
         s
     }
@@ -1052,6 +1069,7 @@ impl State {
     pub fn set_ai(&mut self, ai: config::AiConfig) {
         self.draft.ai = ai;
         self.sync_key();
+        self.new_model_list();
         self.revalidate();
     }
 
@@ -1272,6 +1290,10 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::Tick
             | Message::Fetch(_)
             | Message::Fetched(..)
+            | Message::ModelsOpened
+            | Message::ModelQuery(_)
+            | Message::LoadModels
+            | Message::ModelsLoaded(..)
             | Message::Scale(_)
             | Message::Height(_)
             | Message::Step(..)
@@ -1408,16 +1430,24 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Provider(p) => {
             set_provider(state, p);
             state.sync_key();
+            state.new_model_list();
         }
         Message::Preset(p) => {
             pick_preset(state, p);
             state.sync_key();
+            state.new_model_list();
         }
         Message::BaseUrl(s) => {
             state.draft.ai.base_url = s.trim().to_string();
             state.sync_key();
+            state.new_model_list();
         }
-        Message::Model(s) => state.draft.ai.model = s.trim().to_string(),
+        Message::ModelsOpened => return Outcome::Focus(super::model_list::SEARCH),
+        Message::ModelQuery(q) => state.model_list.query = q,
+        Message::ModelPick(id) => state.pick_model(&id),
+        Message::ModelFirst => state.pick_first_model(),
+        Message::LoadModels => return state.load_models(),
+        Message::ModelsLoaded(ai, n) => state.models_loaded(&ai, n),
         Message::ApiKey(k) => {
             if let Some(owner) = state.key_owner {
                 let slot = bind(&state.store, owner);

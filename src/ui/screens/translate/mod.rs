@@ -669,7 +669,7 @@ fn translate(
         // Offline can't do it (no model, not downloaded): AI is the other way.
         let setup = matches!(
             e,
-            Error::Ai(AiError::NotConfigured(_) | AiError::Auth(_) | AiError::Offline(_))
+            Error::Ai(AiError::NotConfigured(_) | AiError::Auth(..) | AiError::Offline(_))
         );
         problem(e.to_string(), setup)
     })?;

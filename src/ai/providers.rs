@@ -133,13 +133,13 @@ pub const PRESETS: &[Preset] = &[
         "gemini",
         "Google Gemini",
         "https://generativelanguage.googleapis.com/v1beta/openai",
-        "gemini-2.0-flash",
+        "gemini-flash-lite-latest",
     ),
     openai(
         "groq",
         "Groq",
         "https://api.groq.com/openai/v1",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "qwen/qwen3.8-27b",
     ),
     openai(
         "mistral",
@@ -151,9 +151,9 @@ pub const PRESETS: &[Preset] = &[
         "deepseek",
         "DeepSeek",
         "https://api.deepseek.com/v1",
-        "deepseek-chat",
+        "deepseek-flash",
     ),
-    openai("xai", "xAI", "https://api.x.ai/v1", "grok-4"),
+    openai("xai", "xAI", "https://api.x.ai/v1", "grok-4.3"),
     local(
         "ollama",
         "Ollama (local)",

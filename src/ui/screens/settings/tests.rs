@@ -549,7 +549,7 @@ fn a_valid_change_saves_itself() {
     );
     assert!(!s.close_requested());
     update(&mut s, Message::Preset(preset("Ollama (local)")));
-    update(&mut s, Message::Model("llama3:8b".into()));
+    update(&mut s, Message::ModelPick("llama3:8b".into()));
     assert!(!s.dirty(), "{:?}", s.problems);
     assert_eq!(Config::load_from(&path).0.ai.model, "llama3:8b");
 
@@ -567,7 +567,7 @@ fn save_round_trips_through_a_temp_config() {
     update(&mut s, Message::Theme(Theme::Light));
     update(&mut s, Message::Provider(Provider::OpenaiCompatible));
     update(&mut s, Message::Preset(preset("Ollama (local)")));
-    update(&mut s, Message::Model("llama3:8b".into()));
+    update(&mut s, Message::ModelPick("llama3:8b".into()));
     update(&mut s, Message::Target(LANGUAGES[1]));
     update(&mut s, Message::Source(SOURCES[2]));
     update(&mut s, Message::DefaultAction(DefaultAction::Copy));
@@ -617,7 +617,7 @@ fn invalid_values_block_save_with_a_reason() {
     assert!(!path.exists());
     // Bad scheme: the config validator's own reason.
     update(&mut s, Message::BaseUrl("ftp://x".into()));
-    update(&mut s, Message::Model("m".into()));
+    update(&mut s, Message::ModelPick("m".into()));
     assert!(
         issue(&s.problems, "ai.base_url")
             .unwrap()
@@ -2004,10 +2004,18 @@ fn the_step_33_pages_match_their_golden_images() {
     use crate::ui::kit::testing::golden;
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     type Setup = fn(&mut State);
-    let cases: [(&str, Section, f32, Setup); 14] = [
+    let cases: [(&str, Section, f32, Setup); 15] = [
         ("ai", Section::Ai, 0.0, |s| {
             update(s, Message::Provider(Provider::OpenaiCompatible));
             update(s, Message::Preset(preset("OpenRouter")));
+        }),
+        // the Model row after a Load models that failed (the provider's reason)
+        ("ai-gemini", Section::Ai, 1000.0, |s| {
+            update(s, Message::Provider(Provider::OpenaiCompatible));
+            update(s, Message::Preset(preset("Google Gemini")));
+            let ai = s.draft.ai.clone();
+            let why = "The AI provider rejected the API key (HTTP 401: API key not valid)";
+            update(s, Message::ModelsLoaded(ai, Err(why.into())));
         }),
         ("ai-key-saved", Section::Ai, 0.0, |s| {
             update(s, Message::Provider(Provider::Anthropic));
@@ -2716,4 +2724,99 @@ fn modifiers_let_go_with_no_key_on_wayland_flag_the_row() {
         s.shortcut_error.as_ref().map(|(slot, _)| *slot),
         Some(Slot::Capture)
     );
+}
+
+/// Gemini picked: its current default; a model the user chose before (even
+/// an old default the provider retired) is never rewritten.
+#[test]
+fn gemini_defaults_to_its_current_model_and_a_chosen_one_stays() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Provider(Provider::OpenaiCompatible));
+    update(&mut s, Message::Preset(preset("Google Gemini")));
+    assert_eq!(s.draft.ai.model, "gemini-flash-lite-latest");
+    update(&mut s, Message::ModelPick("gemini-2.0-flash".into()));
+    update(&mut s, Message::Preset(preset("Google Gemini")));
+    assert_eq!(s.draft.ai.model, "gemini-2.0-flash");
+}
+
+/// The Model list asks the network only on "Load models": opening it,
+/// searching and picking send nothing; one call at a time; its answer shows
+/// under the row (one for another provider is dropped).
+#[test]
+fn the_model_list_loads_only_on_its_click() {
+    use crate::ui::kit::testing::shot;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    update(&mut s, Message::Provider(Provider::OpenaiCompatible));
+    update(&mut s, Message::Preset(preset("Google Gemini")));
+    let quiet = [
+        Message::ModelsOpened,
+        Message::ModelQuery("flash".into()),
+        Message::ModelFirst,
+        Message::ModelPick("gemini-3.8-flash".into()),
+    ];
+    for m in quiet {
+        let out = update(&mut s, m.clone());
+        assert!(
+            !matches!(out, Outcome::LoadModels(_)),
+            "{m:?} asked the provider"
+        );
+    }
+    assert_eq!(
+        update(&mut s, Message::ModelsOpened),
+        Outcome::Focus(super::model_list::SEARCH)
+    );
+    let Outcome::LoadModels(_job) = update(&mut s, Message::LoadModels) else {
+        panic!("Load models starts the call");
+    };
+    assert_eq!(
+        update(&mut s, Message::LoadModels),
+        Outcome::None,
+        "one at a time"
+    );
+    let other = config::AiConfig {
+        base_url: "https://elsewhere.example/v1".into(),
+        ..s.draft.ai.clone()
+    };
+    update(&mut s, Message::ModelsLoaded(other, Ok(3)));
+    assert!(s.model_list.said.is_none() && s.model_list.loading);
+    let ai = s.draft.ai.clone();
+    let why = "HTTP 401: bad key".to_string();
+    update(&mut s, Message::ModelsLoaded(ai, Err(why.clone())));
+    assert_eq!(s.model_list.said, Some(Err(why)));
+    assert!(!s.model_list.loading);
+    assert!(
+        shot::texts(view(&s))
+            .iter()
+            .any(|t| t.contains("HTTP 401: bad key"))
+    );
+}
+
+/// Searching filters the provider's models; an id in no list is offered as
+/// typed (last, so Enter takes the first match); picking it keeps it.
+#[test]
+fn a_typed_model_id_is_offered_and_kept() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Provider(Provider::OpenaiCompatible));
+    update(&mut s, Message::Preset(preset("Google Gemini")));
+    update(&mut s, Message::ModelQuery("FLASH-lite".into()));
+    let rows = s.model_list.choices();
+    assert_eq!(rows[0].0, "gemini-flash-lite-latest");
+    assert!(rows.iter().all(|r| r.0.contains("flash-lite") || r.2));
+    assert_eq!(rows.last().unwrap(), &("FLASH-lite", None, true));
+    update(&mut s, Message::ModelFirst);
+    assert_eq!(s.draft.ai.model, "gemini-flash-lite-latest");
+    assert!(s.model_list.query.is_empty());
+    update(&mut s, Message::ModelQuery("my-tuned-model ".into()));
+    assert_eq!(s.model_list.choices(), [("my-tuned-model", None, true)]);
+    update(&mut s, Message::ModelFirst);
+    assert_eq!(s.draft.ai.model, "my-tuned-model");
+    // an exact id is not offered twice
+    update(&mut s, Message::ModelQuery("gemini-3.8-flash".into()));
+    assert!(s.model_list.choices().iter().all(|r| !r.2));
+    // a Custom server has no list of its own: typing is the way
+    update(&mut s, Message::Preset(CUSTOM));
+    assert!(s.model_list.models.is_empty());
+    update(&mut s, Message::ModelQuery("local".into()));
+    assert_eq!(s.model_list.choices(), [("local", None, true)]);
 }

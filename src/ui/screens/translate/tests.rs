@@ -555,7 +555,7 @@ fn the_result_is_pasted_in_place_or_nothing_is() {
         &original,
         area,
         &cache,
-        &ok(Err(AiError::Server(503))),
+        &ok(Err(AiError::Server(503, String::new()))),
         |_| {},
     )
     .unwrap_err();
@@ -564,7 +564,7 @@ fn the_result_is_pasted_in_place_or_nothing_is() {
         &original,
         area,
         &cache,
-        &ok(Err(AiError::Auth(401))),
+        &ok(Err(AiError::Auth(401, String::new()))),
         |_| {},
     )
     .unwrap_err();

@@ -10,6 +10,7 @@
 
 pub mod anthropic;
 pub mod browser;
+pub mod models;
 pub mod openai;
 pub mod providers;
 
@@ -82,13 +83,14 @@ impl fmt::Debug for Message {
 pub enum AiError {
     /// Something the user must set first (key, model, endpoint).
     NotConfigured(String),
-    /// 401 / 403.
-    Auth(u16),
+    /// 401 / 403. Each HTTP error keeps the provider's own (key-scrubbed)
+    /// reason, "" when it gave none.
+    Auth(u16, String),
     /// 429.
-    RateLimited,
+    RateLimited(String),
     /// 5xx (including Anthropic's 529 "overloaded").
-    Server(u16),
-    /// Any other HTTP error, with the provider's own (key-scrubbed) message.
+    Server(u16, String),
+    /// Any other HTTP error.
     Rejected(u16, String),
     /// The model declined to answer (`stop_reason: refusal`).
     Refused,
@@ -107,14 +109,37 @@ impl fmt::Display for AiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AiError::NotConfigured(what) => write!(f, "AI is not set up yet: {what}."),
-            AiError::Auth(code) => write!(f, "The AI provider rejected the API key (HTTP {code}). Check the key and that it may use this model."),
-            AiError::RateLimited => f.write_str("The AI provider says you are sending too much or the quota is used up (HTTP 429). Wait a moment and try again."),
-            AiError::Server(code) => write!(f, "The AI provider has a problem right now (HTTP {code}). Try again shortly."),
-            AiError::Rejected(code, why) if why.is_empty() => write!(f, "The AI provider rejected the request (HTTP {code})."),
-            AiError::Rejected(code, why) => write!(f, "The AI provider rejected the request (HTTP {code}): {why}"),
+            AiError::Auth(code, why) => write!(
+                f,
+                "The AI provider rejected the API key ({}). Check the key and that it may use this model.",
+                http(*code, why)
+            ),
+            AiError::RateLimited(why) => write!(
+                f,
+                "The AI provider says you are sending too much or the quota is used up ({}). Wait a moment and try again.",
+                http(429, why)
+            ),
+            AiError::Server(code, why) => write!(
+                f,
+                "The AI provider has a problem right now ({}). Try again shortly.",
+                http(*code, why)
+            ),
+            // a model the provider retired or never had: its list has the ones it has now
+            AiError::Rejected(404, why) => write!(
+                f,
+                "The AI provider rejected the request ({}). Choose another model from the list (Settings, Ask AI, Model).",
+                http(404, why)
+            ),
+            AiError::Rejected(code, why) => write!(
+                f,
+                "The AI provider rejected the request ({}).",
+                http(*code, why)
+            ),
             AiError::Refused => f.write_str("The AI model declined to answer this request."),
             AiError::Network(why) => write!(f, "Could not reach the AI provider: {why}"),
-            AiError::BadResponse(why) => write!(f, "The AI provider sent an unexpected answer: {why}"),
+            AiError::BadResponse(why) => {
+                write!(f, "The AI provider sent an unexpected answer: {why}")
+            }
             AiError::Offline(why) => write!(f, "Local translation failed: {why}"),
             AiError::AlreadyIn(name) => write!(f, "Already in {name}"),
         }
@@ -122,6 +147,14 @@ impl fmt::Display for AiError {
 }
 
 impl std::error::Error for AiError {}
+
+/// "HTTP 503", or "HTTP 503: <the provider's reason>".
+fn http(code: u16, why: &str) -> String {
+    match why.trim_end_matches('.') {
+        "" => format!("HTTP {code}"),
+        why => format!("HTTP {code}: {why}"),
+    }
+}
 
 /// A fully built request. Not `Debug` on purpose: the headers hold the key.
 pub(crate) struct HttpRequest {
@@ -173,7 +206,7 @@ fn stream(
     fast: Option<u32>,
     on_delta: impl FnMut(&str) -> ControlFlow<()>,
 ) -> Result<String, AiError> {
-    match &cfg.provider {
+    let answer = match &cfg.provider {
         Provider::Browser => Err(AiError::NotConfigured(
             "this needs an AI provider with an API key (Settings, Ask AI); Google AI Mode in your \
              browser cannot send an answer back"
@@ -187,7 +220,18 @@ fn stream(
         )),
         Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, fast, on_delta),
         Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, fast, on_delta),
+    };
+    if let Err(e) = &answer {
+        logged(cfg, e);
     }
+    answer
+}
+
+/// Every provider error goes to the log, so Copy diagnostics carries it: the
+/// provider's name and the error as shown (key-scrubbed, never the prompt).
+pub(crate) fn logged(cfg: &AiConfig, e: &AiError) {
+    let who = providers::Preset::of(cfg).map_or("AI", |p| p.name);
+    crate::log!("[ai] {who}: {e}");
 }
 
 /// Translate many on-screen lines in ONE call. The answer must be a JSON array
@@ -294,15 +338,22 @@ pub(crate) fn run_stream(
     parse: fn(&str) -> Result<Event, AiError>,
 ) -> Result<String, AiError> {
     let agent = crate::net::agent(crate::net::AI);
-    let mut builder = agent.post(&req.url);
-    for (name, value) in &req.headers {
-        builder = builder.header(*name, value.as_str());
-    }
     let body = serde_json::to_string(&req.body).map_err(|e| AiError::BadResponse(e.to_string()))?;
-    let mut resp = builder
-        .send(body)
-        .map_err(|e| AiError::Network(scrub(&e.to_string(), key)))?;
-
+    let send = || {
+        let mut builder = agent.post(&req.url);
+        for (name, value) in &req.headers {
+            builder = builder.header(*name, value.as_str());
+        }
+        builder
+            .send(body.as_str())
+            .map_err(|e| AiError::Network(scrub(&e.to_string(), key)))
+    };
+    let mut resp = send()?;
+    // busy (503) or overloaded (529): once more after a moment, silently
+    if matches!(resp.status().as_u16(), 503 | 529) {
+        std::thread::sleep(RETRY_AFTER);
+        resp = send()?;
+    }
     let status = resp.status().as_u16();
     if status >= 400 {
         let text = resp.body_mut().read_to_string().unwrap_or_default();
@@ -362,25 +413,36 @@ pub(crate) fn read_sse(
     Ok(())
 }
 
-/// Readable message for an HTTP error status. The provider's own text is kept
-/// only for "other" 4xx (it names the bad field), one line, key removed.
+/// How long a busy provider gets before the one retry.
+#[cfg(not(test))]
+const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
+#[cfg(test)]
+const RETRY_AFTER: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Readable message for an HTTP error status, with the provider's own reason
+/// (one line, key removed).
 pub(crate) fn map_status(status: u16, body: &str, key: Option<&Secret>) -> AiError {
+    let why = scrub(&reason(body), key);
     match status {
-        401 | 403 => AiError::Auth(status),
-        429 => AiError::RateLimited,
-        500..=599 => AiError::Server(status),
-        _ => {
-            let msg = serde_json::from_str::<Value>(body)
-                .ok()
-                .and_then(|v| {
-                    v.pointer("/error/message")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-                .unwrap_or_default();
-            AiError::Rejected(status, scrub(&msg, key))
-        }
+        401 | 403 => AiError::Auth(status, why),
+        429 => AiError::RateLimited(why),
+        500..=599 => AiError::Server(status, why),
+        _ => AiError::Rejected(status, why),
     }
+}
+
+/// The provider's reason in an error body: `{"error": {"message"}}` (OpenAI,
+/// Anthropic, most others), the same in an array (Google), `{"error": "..."}`
+/// (Ollama), `{"message"}`; "" for anything else (an HTML page, nothing).
+fn reason(body: &str) -> String {
+    let Ok(v) = serde_json::from_str::<Value>(body) else {
+        return String::new();
+    };
+    ["/error/message", "/0/error/message", "/error", "/message"]
+        .iter()
+        .find_map(|p| v.pointer(p).and_then(Value::as_str))
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// One line, at most 300 chars, with the key (if it appears) replaced.
@@ -439,6 +501,60 @@ pub(crate) fn join_url(base: &str, path: &str) -> String {
 pub(crate) fn png_b64(png: &[u8]) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.encode(png)
+}
+
+/// A provider on 127.0.0.1 for tests: answers each connection with the next
+/// canned reply and hands back each request's head (request line + headers).
+#[cfg(test)]
+pub(crate) mod mock {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc::{Receiver, channel};
+
+    pub fn reply(status: u16, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    pub fn stream(sse: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse}"
+        )
+    }
+
+    /// The base URL (`http://127.0.0.1:<port>/v1`) and the requests' heads.
+    pub fn serve(replies: Vec<String>) -> (String, Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            for reply in replies {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut reader = BufReader::new(stream);
+                let (mut head, mut length) = (String::new(), 0);
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = v.trim().parse().unwrap_or(0);
+                    }
+                    head.push_str(&line);
+                }
+                let _ = reader.by_ref().take(length).read_to_end(&mut Vec::new());
+                let _ = tx.send(head);
+                let mut out = reader.into_inner();
+                let _ = out.write_all(reply.as_bytes());
+                let _ = out.flush();
+            }
+        });
+        (url, rx)
+    }
 }
 
 #[cfg(test)]
@@ -580,11 +696,24 @@ mod tests {
     fn error_mapping_is_readable_and_never_echoes_the_key() {
         let key = Secret::new("sk-FAKE-SECRET-123456");
         let echo = r#"{"error":{"message":"Incorrect API key provided: sk-FAKE-SECRET-123456."}}"#;
-        assert_eq!(map_status(401, echo, Some(&key)), AiError::Auth(401));
-        assert_eq!(map_status(403, echo, Some(&key)), AiError::Auth(403));
-        assert_eq!(map_status(429, "", Some(&key)), AiError::RateLimited);
-        assert_eq!(map_status(500, "oops", None), AiError::Server(500));
-        assert_eq!(map_status(529, "", None), AiError::Server(529));
+        let said = "Incorrect API key provided: [key].".to_string();
+        assert_eq!(map_status(401, echo, Some(&key)), AiError::Auth(401, said));
+        assert!(matches!(
+            map_status(403, echo, Some(&key)),
+            AiError::Auth(403, _)
+        ));
+        assert_eq!(
+            map_status(429, "", Some(&key)),
+            AiError::RateLimited(String::new())
+        );
+        assert_eq!(
+            map_status(500, "oops", None),
+            AiError::Server(500, String::new())
+        );
+        assert_eq!(
+            map_status(529, "", None),
+            AiError::Server(529, String::new())
+        );
         // A 400 keeps the provider's message, minus the key, on one line.
         let e = map_status(
             400,
@@ -602,8 +731,113 @@ mod tests {
             assert!(!shown.contains("FAKE-SECRET"), "{shown}");
             assert!(!shown.is_empty());
         }
-        assert!(AiError::RateLimited.to_string().contains("429"));
-        assert!(AiError::Auth(401).to_string().contains("API key"));
+        assert!(
+            AiError::RateLimited(String::new())
+                .to_string()
+                .contains("429")
+        );
+        assert!(
+            AiError::Auth(401, String::new())
+                .to_string()
+                .contains("API key")
+        );
+    }
+
+    /// Google's bodies as recorded (2026-11-10): an array around the error.
+    const BUSY: &str = r#"[{"error":{"code":503,"message":"This model is currently experiencing high demand. Spikes in demand are usually temporary.","status":"UNAVAILABLE"}}]"#;
+    const GONE: &str = r#"[{"error":{"code":404,"message":"This model models/gemini-2.0-flash is no longer available.","status":"NOT_FOUND"}}]"#;
+
+    /// A 5xx says the provider's own reason, a 404 points at the model list.
+    #[test]
+    fn a_server_error_shows_the_providers_reason() {
+        let busy = map_status(503, BUSY, None).to_string();
+        assert!(
+            busy.contains("HTTP 503: This model is currently experiencing high demand"),
+            "{busy}"
+        );
+        let gone = map_status(404, GONE, None).to_string();
+        assert!(gone.contains("no longer available"), "{gone}");
+        assert!(
+            gone.contains("Choose another model from the list"),
+            "{gone}"
+        );
+        // Ollama's plain string, a bare message, an HTML page
+        let ollama = map_status(404, r#"{"error":"model \"x\" not found"}"#, None);
+        assert_eq!(
+            ollama,
+            AiError::Rejected(404, "model \"x\" not found".into())
+        );
+        let bare = map_status(500, r#"{"message":"boom"}"#, None);
+        assert_eq!(bare, AiError::Server(500, "boom".into()));
+        let page = map_status(502, "<html>Bad gateway</html>", None).to_string();
+        assert!(page.contains("(HTTP 502)"), "{page}");
+    }
+
+    /// A fake key made at run time (never a key-shaped literal in the source).
+    pub(crate) fn fake_key() -> Secret {
+        Secret::new(format!("{}-{}", "test", "k3y9z-w45-not-real"))
+    }
+
+    /// Every provider error is in the log (the provider's name, the reason
+    /// as shown), with the key gone even when the provider echoes it.
+    #[test]
+    fn a_provider_error_is_logged_without_the_key() {
+        let key = fake_key();
+        let body = format!(
+            r#"{{"error":{{"message":"w45 unique reason for {}"}}}}"#,
+            key.expose()
+        );
+        let url = mock::serve(vec![mock::reply(400, &body)]).0;
+        let cfg = AiConfig {
+            provider: Provider::OpenaiCompatible,
+            base_url: url,
+            model: "m".into(),
+        };
+        let err = ask_stream(&cfg, Some(&key), &[Message::user("secret prompt")], |_| {
+            ControlFlow::Continue(())
+        })
+        .unwrap_err();
+        assert!(matches!(err, AiError::Rejected(400, _)), "{err}");
+        let line = crate::log::tail(200)
+            .into_iter()
+            .find(|l| l.contains("w45 unique reason"))
+            .expect("the error is logged");
+        assert!(
+            line.contains("[ai] Custom server:") && line.contains("HTTP 400"),
+            "{line}"
+        );
+        assert!(
+            !line.contains(key.expose()) && !line.contains("secret prompt"),
+            "{line}"
+        );
+    }
+
+    /// A busy provider (503) is asked once more, silently; a second 503 shows.
+    #[test]
+    fn a_busy_provider_is_retried_once() {
+        let ok = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: [DONE]\n\n";
+        let (url, seen) = mock::serve(vec![mock::reply(503, BUSY), mock::stream(ok)]);
+        let cfg = AiConfig {
+            provider: Provider::OpenaiCompatible,
+            base_url: url,
+            model: "m".into(),
+        };
+        let go = |cfg: &AiConfig| {
+            ask_stream(cfg, None, &[Message::user("q")], |_| {
+                ControlFlow::Continue(())
+            })
+        };
+        assert_eq!(go(&cfg).unwrap(), "Hi");
+        assert_eq!(seen.try_iter().count(), 2);
+        // twice busy: the reason shows, and no third try
+        let (url, seen) = mock::serve(vec![mock::reply(503, BUSY), mock::reply(503, BUSY)]);
+        let err = go(&AiConfig {
+            base_url: url,
+            ..cfg
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("high demand"), "{err}");
+        assert_eq!(seen.try_iter().count(), 2);
     }
 
     #[test]

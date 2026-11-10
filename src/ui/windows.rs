@@ -1268,6 +1268,18 @@ impl Windows {
                                 .map(move |ok| Msg::Settings(settings::Message::Fetched(key, ok)));
                             return Task::batch([keys, done]);
                         }
+                        settings::Outcome::Focus(field) => {
+                            return Task::batch([keys, iced::widget::operation::focus(field)]);
+                        }
+                        settings::Outcome::LoadModels(job) => {
+                            let load = super::background(move |tx| {
+                                let _ = tx.unbounded_send(job.run());
+                            });
+                            let done = load.map(|(ai, n)| {
+                                Msg::Settings(settings::Message::ModelsLoaded(ai, n))
+                            });
+                            return Task::batch([keys, done]);
+                        }
                         settings::Outcome::None => {}
                     }
                     if leaving {

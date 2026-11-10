@@ -127,7 +127,7 @@ pub(crate) fn parse_event(data: &str) -> Result<Event, AiError> {
             let why = v["error"]["message"].as_str().unwrap_or("unknown error");
             // overloaded_error arrives mid-stream as an event, not as an HTTP status.
             Err(if v["error"]["type"] == "overloaded_error" {
-                AiError::Server(529)
+                AiError::Server(529, super::scrub(why, None))
             } else {
                 AiError::BadResponse(super::scrub(why, None))
             })
@@ -369,7 +369,7 @@ data: {"type":"message_stop"}
             r#"data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#;
         assert_eq!(
             collect(&format!("{overloaded}\n\n")).unwrap_err(),
-            AiError::Server(529)
+            AiError::Server(529, "Overloaded".into())
         );
         let bad = r#"data: {"type":"error","error":{"type":"invalid_request_error","message":"max_tokens too big"}}"#;
         assert_eq!(
