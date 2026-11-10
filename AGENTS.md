@@ -775,6 +775,13 @@ production systems.
   shortcuts if the machine is there + leftovers; it is the last 0.1.x, so it carries the security review and QA gates (#84).
   GPU translation runtime and the new OCR pipeline go to Live translation / 0.2.0. Then Game translation = v0.2.0 (owner, 2026-11-10).
 
+- Snip the translated page (owner, 2026-11-10, v0.1.5, "super great"): with a one-shot translation on screen, Snip (bar
+  button, Alt+A, tray) captures what the user sees: the frozen screen WITH the translation drawn on it, then the normal Snip
+  flow (pick, annotate, Copy / Save / drag, Steps).
+- Wayland long capture must show it is working (owner, 2026-11-10, rejects the silent flow): while it runs the user clearly
+  sees that OpenCircle is capturing, and finishes with Copy / Save / drag exactly like Windows, without having to press the
+  shortcut again to find the result.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
