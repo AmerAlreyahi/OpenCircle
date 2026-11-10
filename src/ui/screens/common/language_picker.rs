@@ -34,8 +34,13 @@ const ARROW: f32 = 24.0;
 const PAD: f32 = 6.0;
 /// The chips and the arrow between them.
 pub const WIDTH: f32 = 2.0 * CHIP.width + ARROW + 2.0 * SPACING;
-/// The pill: its size never changes.
-pub const PILL: Size = Size::new(WIDTH + 2.0 * PAD, CHIP.height + 2.0 * PAD);
+/// The Snip button's slot at the pill's end: a gap and the kit icon button.
+pub const SLOT: f32 = SPACING + size::ICON_BUTTON;
+/// The pill's vertical padding: the icon button (34) is 2 px taller than a
+/// chip, so the pill keeps its 44 px height.
+const PAD_Y: f32 = (CHIP.height + 2.0 * PAD - size::ICON_BUTTON) / 2.0;
+/// The pill: its size never changes (the Snip button's slot is always there).
+pub const PILL: Size = Size::new(WIDTH + 2.0 * PAD + SLOT, CHIP.height + 2.0 * PAD);
 /// The open list (fixed) and its gap under the pill.
 pub const LIST: Size = Size::new(248.0, 350.0);
 pub const LIST_GAP: f32 = 6.0;
@@ -448,10 +453,20 @@ impl Picker {
         row(parts).spacing(SPACING).align_y(Center).into()
     }
 
-    /// The pill (`PILL`): the chips on the widget surface, radius 18.
-    pub fn pill(&self) -> Element<'_, Msg> {
-        surface(Material::Widget, radius::DRAWER, self.chips())
-            .padding(PAD)
+    /// The pill (`PILL`): the chips, then `tail` (the Snip button, `SLOT`
+    /// wide; first when mirrored) on the widget surface, radius 18.
+    pub fn pill<'a, M: Clone + 'a>(
+        &'a self,
+        map: fn(Msg) -> M,
+        tail: Element<'a, M>,
+    ) -> Element<'a, M> {
+        let mut parts = vec![self.chips().map(map), tail];
+        if self.rtl {
+            parts.reverse();
+        }
+        let line = row(parts).spacing(SPACING).align_y(Center);
+        surface(Material::Widget, radius::DRAWER, line)
+            .padding([PAD_Y, PAD])
             .into()
     }
 
@@ -460,9 +475,14 @@ impl Picker {
     /// edge on the To chip's (mirrored right to left).
     pub fn list_at(&self) -> Option<Vector> {
         let side = self.open?;
+        // (mirrored: the Snip slot is at the start side)
+        let (start, end) = match self.rtl {
+            true => (PAD + SLOT, PILL.width - PAD),
+            false => (PAD, PILL.width - PAD - SLOT),
+        };
         let x = match (side == Side::Source) != self.rtl {
-            true => PAD,
-            false => PILL.width - PAD - LIST.width,
+            true => start,
+            false => end - LIST.width,
         };
         Some(Vector::new(x, PILL.height + LIST_GAP))
     }
@@ -721,7 +741,7 @@ mod tests {
         const MARGIN: f32 = 20.0;
         let from = PAD;
         let to_end = PAD + 2.0 * CHIP.width + ARROW + 2.0 * SPACING;
-        assert_eq!(to_end, PILL.width - PAD);
+        assert_eq!(to_end, PILL.width - PAD - SLOT);
         for rtl in [false, true] {
             for side in [Side::Source, Side::Target] {
                 let mut p = open(AUTO, "en", true, side);

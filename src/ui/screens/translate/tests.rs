@@ -90,6 +90,7 @@ fn session(models: bool) -> Session {
         scale: 1.0,
         partial: None,
         readers: None,
+        snip_keys: String::new(),
     }
 }
 
@@ -173,8 +174,19 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
         let texts = crate::ui::kit::testing::shot::texts(s.view(size, at, false)).join(" | ");
         let px = crate::ui::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
         // the pill's band (`PILL_TOP` down, `PILL` tall) is unchanged
-        let band = 1280 * 4 * (view::PILL_TOP + picker::PILL.height) as usize;
-        assert!(px[..band] == calm[..band], "the pill moved: {texts}");
+        // (but for the Snip button's own state: dimmed with nothing translated)
+        let pill = view::pill_at(Rectangle::with_size(size));
+        let (rows, cols) = (
+            (view::PILL_TOP + picker::PILL.height) as usize,
+            (pill.x + picker::PILL.width) as usize - 40,
+        );
+        for y in 0..rows {
+            let at = y * 1280 * 4;
+            assert!(
+                px[at..at + cols * 4] == calm[at..at + cols * 4],
+                "the pill moved: {texts}"
+            );
+        }
         assert!(!texts.contains("Close"), "a card: {texts}");
         assert_eq!(texts.contains("Set up AI"), setup, "{texts}");
         if setup {
@@ -979,4 +991,29 @@ fn seen_is_the_frame_as_the_translation_shows_it() {
     let page = frame(4, 4);
     s.show(page.clone());
     assert_eq!(s.seen(), Some(page), "the translated page");
+}
+
+/// The pill has a Snip button after the chips, always there (the pill never
+/// changes): dimmed until something translated is on screen, then a press
+/// sends `Snip`. It looks as the kit makes it (the picker goldens show it in both themes).
+#[test]
+fn the_pill_has_a_snip_button_that_wakes_with_the_first_result() {
+    use crate::ui::kit::testing::shot;
+    let size = Size::new(1280.0, 200.0);
+    let at = card::place(size, None, None);
+    let mut s = session(true);
+    s.snip_keys = "Alt+A".into();
+    let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
+    // the button's centre: the pill's end, inside its padding
+    let button = Point::new(
+        pill.x + pill.width - 6.0 - crate::ui::kit::tokens::size::ICON_BUTTON / 2.0,
+        pill.y + pill.height / 2.0,
+    );
+    let press = |s: &Session| -> Vec<Msg> { shot::click(s.view(size, at, false), size, button) };
+    assert!(press(&s).is_empty(), "nothing translated yet: dimmed");
+    let before = shot::render(s.view(size, at, false), 1280, 200);
+    let _ = s.update(shown(Vec::new()));
+    let after = shot::render(s.view(size, at, false), 1280, 200);
+    assert!(before != after, "the button wakes");
+    assert!(matches!(press(&s)[..], [Msg::Snip]), "{:?}", press(&s));
 }

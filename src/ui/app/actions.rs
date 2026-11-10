@@ -479,6 +479,7 @@ impl App {
             }
             // (the cards have no close button: Esc, or a click on the screen)
             translate::Msg::Close => self.close(),
+            translate::Msg::Snip => self.snip_here(None),
             translate::Msg::OpenSettings => {
                 let closing = self.close();
                 let settings = self.windows.open(windows::Kind::Settings);

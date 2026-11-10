@@ -9,11 +9,13 @@ use crate::actions::ask::Status;
 use crate::actions::{self};
 use crate::ui::ai_chat::{actions, card, note};
 use crate::ui::kit::button::{Kind, button, label as button_label};
+use crate::ui::kit::icon_button::{State, icon_button};
 use crate::ui::kit::markdown;
 use crate::ui::kit::panel_frame::Header;
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{error, text as label};
 use crate::ui::kit::tokens::{Role, radius};
+use crate::ui::kit::tooltip::{Why, hint};
 use crate::ui::picker;
 use crate::ui::screens::model_download::{self, Model, OCR, SCRIPTS, Stage, TRANSLATION};
 
@@ -135,6 +137,24 @@ impl Session {
         }
     }
 
+    /// The pill's Snip button (its slot is always there, so the pill never
+    /// changes): live once something translated is on screen (`seen`: what
+    /// Snip would take), dimmed before.
+    fn snip_button(&self) -> Element<'_, Msg> {
+        let on = self.seen().map(|_| Msg::Snip);
+        let button = icon_button(actions::snip::ACTION.icon, State::default(), on);
+        let why = match self.snip_keys.is_empty() {
+            true => Why::Icon,
+            false => Why::Keys(&self.snip_keys),
+        };
+        hint(
+            button,
+            actions::snip::ACTION.label,
+            why,
+            iced::widget::tooltip::Position::Bottom,
+        )
+    }
+
     /// The pill with the offer beside it: "Spanish text found" and its Get.
     fn offer<'a>(&'a self, region: Rectangle, o: &'a super::Offer) -> Element<'a, Msg> {
         let get = button(button_label(&o.get), Kind::Elevated, Some(Msg::GetHeld));
@@ -155,7 +175,8 @@ impl Session {
     ) -> Element<'a, Msg> {
         let rtl = self.picker.rtl;
         let at = pill_at(region);
-        let mut layer = stack![pin(opaque(self.picker.pill().map(Msg::Picker))).position(at)];
+        let mut layer =
+            stack![pin(opaque(self.picker.pill(Msg::Picker, self.snip_button()))).position(at)];
         if status.is_some() || then.is_some() {
             let line = row![].push(status.map(note)).push(then);
             let tag = surface(

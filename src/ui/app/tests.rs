@@ -5330,7 +5330,7 @@ fn snip_over_a_translation_takes_the_translated_page() {
         }];
     };
     let key = actions::snip::ACTION.key;
-    for entry in ["shortcut", "key"] {
+    for entry in ["shortcut", "key", "pill button"] {
         let mut app = open_app(40, 20, 1.0);
         translated(&mut app);
         match entry {
@@ -5339,6 +5339,9 @@ fn snip_over_a_translation_takes_the_translated_page() {
                     Instant::now(),
                     snip.clone(),
                 )));
+            }
+            "pill button" => {
+                let _ = app.on_translate(1, translate::Msg::Snip);
             }
             _ => event(
                 &mut app,

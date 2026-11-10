@@ -32,6 +32,9 @@ pub enum Msg {
     Picker(picker::Msg),
     /// Declined the download, or closed an error: the overlay closes.
     Close,
+    /// The pill's Snip button: Snip takes the page as translated (the App
+    /// does what Alt+A does).
+    Snip,
     /// Model download, 0..=1.
     Progress(f32),
     /// The download failed (why).
@@ -148,6 +151,8 @@ pub struct Session {
     partial: Option<Part>,
     /// The OCR download asked for is the readers for other scripts (bytes).
     readers: Option<(u64, String)>,
+    /// Snip's own shortcut, for its button's tooltip.
+    snip_keys: String,
 }
 
 /// The card of one clicked block.
@@ -209,6 +214,10 @@ impl Session {
             scale,
             partial: None,
             readers: None,
+            snip_keys: (crate::config::current().quick_actions.into_iter())
+                .find(|q| q.action == actions::snip::ACTION.id)
+                .map(|q| q.shortcut)
+                .unwrap_or_default(),
         };
         let task = session.begin(models);
         (session, task)
