@@ -72,6 +72,11 @@ pub(crate) const CLIPS: [ModelFile; 12] = [
         "754451810c4b8a7a6200cbf6cd1bd51158312fd86248b731e7a820935c0476fd"
     ),
     clip!(
+        "translate-page",
+        1_572_007,
+        "ea7f3f217b63d53db54373c85fd7173c2467bc4336c8e23cd2c4fec61bc0680b"
+    ),
+    clip!(
         "translate-2",
         521_310,
         "796ecd3097be9e29277a31d0e60401d93edbaa8b4ececf06900d89af325feebe"
@@ -80,11 +85,6 @@ pub(crate) const CLIPS: [ModelFile; 12] = [
         "translate-3",
         1_313_809,
         "9770e0645014cd88c55cf9b41d71a97d7d66c5ad695ba6b1a421af1dfefcbc1d"
-    ),
-    clip!(
-        "translate-4",
-        1_710_992,
-        "23674dc14621c8b30e3297bee4a423502adc237eeaf6782558f1d978d054102d"
     ),
 ];
 

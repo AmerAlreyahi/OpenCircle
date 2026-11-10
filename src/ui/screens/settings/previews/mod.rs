@@ -75,7 +75,7 @@ pub const HEROES: [Hero; 7] = [
         desc: "Read your screen in your language, in place.",
         lab: None,
         shortcut: translate,
-        clips: |_| &["translate-4", "translate-2", "translate-3"],
+        clips: |_| &["translate-page", "translate-2", "translate-3"],
     },
     Hero {
         page: Section::Ai,
@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(chosen(hero("look"), &c).len(), 3);
         assert_eq!(
             chosen(hero("translate"), &c),
-            ["translate-4", "translate-2", "translate-3"]
+            ["translate-page", "translate-2", "translate-3"]
         );
         let stills: Vec<_> = (online::CLIPS.iter())
             .map(|f| f.name.strip_suffix(".ivf").unwrap())
@@ -310,6 +310,8 @@ mod tests {
             assert!(player::still(name).is_some(), "{name} has no still");
         }
         assert_eq!(stills.len(), 12);
+        // the web page replaced translate-4 (owner, 2026-11-10): no pin, no still
+        assert!(!stills.contains(&"translate-4") && player::still("translate-4").is_none());
         for f in &online::CLIPS {
             assert!(f.size <= 1_800_000, "{} too big for a preview", f.name);
             assert!(f.sha256.len() == 64 && f.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -342,10 +344,16 @@ mod tests {
                 .iter()
                 .any(|c| c.text.contains("Unsplash License"))
         );
-        // what ships: 3 photos, COFFEE, the game screens, OWID solar, the
-        // Google note, OWID tourism, the caveat
+        // what ships: 3 photos, COFFEE, the Wikipedia page, the game screens,
+        // OWID solar, the Google note, OWID tourism, the caveat
         let shipped = clip_credits(|c| player::still(c).is_some());
-        assert_eq!(shipped.len(), 9);
+        assert_eq!(shipped.len(), 10);
+        let page = clip_credits(|c| c == "translate-page");
+        assert!(
+            page.iter()
+                .any(|c| c.text.contains("Plante d")
+                    && c.links.iter().any(|l| l.0 == "CC BY-SA 4.0"))
+        );
         let games = clip_credits(|c| c == "translate-3");
         assert!(games.iter().any(|c| c.text.contains("no real game")));
         assert!(games.iter().all(|c| !c.text.contains("YouTube")));

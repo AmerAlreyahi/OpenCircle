@@ -145,8 +145,9 @@ The short recordings at the top of Settings pages (a still of each bundled in
 the app, assets/previews; the full clips downloaded when a preview is played)
 are the owner's approved edits. They show third-party material under
 its own terms; the app's MIT licence does not relicense it. CC0 credits are
-courtesy credits. OpenCircle's code remains MIT; the media exception below
-(Unsplash License for the COFFEE photo) applies only to the named clip. The credits identify sources; they do not clear unrelated
+courtesy credits. OpenCircle's code remains MIT; the media exceptions below
+(Unsplash License for the COFFEE photo, CC BY-SA 4.0 for the web-page
+translation preview) apply only to the named clips. The credits identify sources; they do not clear unrelated
 search-result thumbnails, third-party interfaces or data-provider terms shown
 in the clips.
 
@@ -166,8 +167,28 @@ in the clips.
   stays under the Unsplash License (not MIT, not CC0).
   https://unsplash.com/photos/a-sign-on-a-brick-wall-that-says-coffee-jozE5L60Aj4
   https://unsplash.com/license
-- Game screens (translate-2, translate-3, translate-4): original images made
-  for OpenCircle's previews (no real game).
+- Wikipedia translation (translate-page): Based on "Plante d'intérieur" by
+  Wikipedia contributors, CC BY-SA 4.0. Machine translation into English,
+  German, Arabic and Spanish shown by OpenCircle; framing, timing edits,
+  captions and active-state graphics added for the preview. MEDIA EXCEPTION:
+  this preview clip (translate-page.ivf) and its still
+  (assets/previews/stills/translate-page.webp) are licensed under CC BY-SA
+  4.0, including the adapter's contributions; this does not change the app
+  code's MIT licence. Underlying public-domain material remains public domain;
+  third-party names and trademarks keep their separate rights. The exact
+  recorded Wikipedia revision has not been established.
+  Article: https://fr.wikipedia.org/wiki/Plante_d%27int%C3%A9rieur
+  History: https://fr.wikipedia.org/w/index.php?title=Plante_d%27int%C3%A9rieur&action=history
+  Licence: https://creativecommons.org/licenses/by-sa/4.0/ (legal code:
+  LICENSES/CC-BY-SA-4.0.txt)
+  Embedded photograph "Her, IFA 2018, Berlin (P1070094).jpg" (c) Matti Blume,
+  CC BY-SA 4.0:
+  https://fr.wikipedia.org/wiki/Fichier:Her,_IFA_2018,_Berlin_(P1070094).jpg
+  Embedded painting by Carl Larsson, "Flowers on the Windowsill", public
+  domain:
+  https://commons.wikimedia.org/wiki/File:Blomsterf%C3%B6nstret_av_Carl_Larsson_1894.jpg
+- Game screens (translate-2, translate-3): original images made for
+  OpenCircle's previews (no real game).
 - Solar photovoltaic panel prices (ai-chat, ai-browser; the same chart): Our
   World in Data; IRENA (2025) and other sources, processed by Our World in
   Data, as credited in the recording. OWID visualization: CC BY 4.0. Cropped

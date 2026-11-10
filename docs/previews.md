@@ -15,7 +15,7 @@ still shows no preview at all (and no Hide preview button).
 |---|---|
 | `circle-1`, `-2`, `-3` | Look & behaviour, in turn |
 | `text` | Text reading |
-| `translate-4`, `translate-2`, `translate-3` | Translate, in turn |
+| `translate-page`, `translate-2`, `translate-3` | Translate, in turn (the web page first) |
 | `ai-chat` | Ask AI, with an AI provider set |
 | `ai-browser` | Ask AI, with Browser |
 | `snip-blur`, `snip-comment`, `snip-long` | Snip, in turn |
@@ -26,7 +26,7 @@ preview.
 - Still: `assets/previews/stills/<clip>.webp` (1640x922 WebP, ~25-75 KB: the clip's most telling sharp frame, the result moment),
   bundled at build time (`build.rs`); a page lists the clips it wants
   (`previews::HEROES`) and one without a still is just absent.
-- Clip: `<clip>.ivf` (AV1 in IVF, 1920x1080, 20 fps, BT.709, ~0.2-0.9 MB),
+- Clip: `<clip>.ivf` (AV1 in IVF, 1920x1080, 20 fps, BT.709, ~0.2-1.6 MB),
   a GitHub release asset, pinned by size and SHA-256 in
   `src/ui/screens/settings/previews/online.rs` and saved under
   `<data>/OpenCircle/previews`. A wrong or partial file is deleted and fetched

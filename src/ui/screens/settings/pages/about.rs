@@ -68,8 +68,15 @@ const CC0: (&str, &str) = (
     "https://creativecommons.org/publicdomain/zero/1.0/",
 );
 const CC_BY: (&str, &str) = ("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/");
+const CC_BY_SA: (&str, &str) = (
+    "CC BY-SA 4.0",
+    "https://creativecommons.org/licenses/by-sa/4.0/",
+);
+/// The repository's copy of the CC BY-SA 4.0 legal code (LICENSES/).
+pub const LICENCE_TEXT: &str =
+    "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSES/CC-BY-SA-4.0.txt";
 
-pub const CLIP_CREDITS: [Credit; 9] = [
+pub const CLIP_CREDITS: [Credit; 10] = [
     Credit {
         clips: &["circle-1"],
         text: "Succulent photograph: José Gabriel Jara Porras, WordPress Photo Directory, \
@@ -111,7 +118,40 @@ pub const CLIP_CREDITS: [Credit; 9] = [
         ],
     },
     Credit {
-        clips: &["translate-2", "translate-3", "translate-4"],
+        clips: &["translate-page"],
+        text: "Based on \u{201c}Plante d\u{2019}intérieur\u{201d} by Wikipedia contributors, \
+               CC BY-SA 4.0. Machine translation into English, German, Arabic and Spanish \
+               shown by OpenCircle; framing, timing edits, captions and active-state graphics \
+               added for the preview. This preview clip and its still are licensed under \
+               CC BY-SA 4.0, including the adapter\u{2019}s contributions, as a media \
+               exception to the app\u{2019}s MIT licence (the code stays MIT). Embedded \
+               photograph \u{201c}Her, IFA 2018, Berlin (P1070094).jpg\u{201d} \u{a9} Matti \
+               Blume, CC BY-SA 4.0; embedded painting by Carl Larsson, \
+               \u{201c}Flowers on the Windowsill\u{201d}, public domain. Third-party names \
+               and trademarks keep their separate rights.",
+        links: &[
+            (
+                "Article",
+                "https://fr.wikipedia.org/wiki/Plante_d%27int%C3%A9rieur",
+            ),
+            (
+                "History",
+                "https://fr.wikipedia.org/w/index.php?title=Plante_d%27int%C3%A9rieur&action=history",
+            ),
+            CC_BY_SA,
+            (
+                "Photograph",
+                "https://fr.wikipedia.org/wiki/Fichier:Her,_IFA_2018,_Berlin_(P1070094).jpg",
+            ),
+            (
+                "Painting",
+                "https://commons.wikimedia.org/wiki/File:Blomsterf%C3%B6nstret_av_Carl_Larsson_1894.jpg",
+            ),
+            ("Licence text", LICENCE_TEXT),
+        ],
+    },
+    Credit {
+        clips: &["translate-2", "translate-3"],
         text: "The game screens are original images made for OpenCircle\u{2019}s previews \
                (no real game).",
         links: &[],
@@ -161,9 +201,9 @@ pub const CLIP_CREDITS: [Credit; 9] = [
             "circle-2",
             "circle-3",
             "text",
+            "translate-page",
             "translate-2",
             "translate-3",
-            "translate-4",
             "ai-chat",
             "ai-browser",
             "snip-long",
