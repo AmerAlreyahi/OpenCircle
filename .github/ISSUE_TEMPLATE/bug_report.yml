@@ -1,0 +1,56 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: OpenCircle version
+      description: Settings > About
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      placeholder: Windows 11 23H2, Ubuntu 24.04, ...
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: Linux desktop and session
+      description: Linux only. Which desktop, and Wayland or X11?
+      placeholder: GNOME 46, Wayland
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Drag a picture here if it helps. Hide anything private.
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: >-
+        The end of opencircle.log, in the logs folder inside your local data
+        folder (%LOCALAPPDATA%\OpenCircle\logs on Windows). It never holds your
+        text or keys, but look before you paste.
+      render: text
