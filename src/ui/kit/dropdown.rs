@@ -343,7 +343,12 @@ struct Menu<'a, 'b, Message> {
 
 impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_, '_, Message> {
     fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
-        let limits = layout::Limits::new(Size::ZERO, Size::new(self.opener.width, MENU_MAX));
+        // (a combo sizes its own rows: its whole menu, edge and padding in)
+        let max = match self.foot {
+            true => COMBO_MAX + 2.0 * MENU_PAD + 2.0,
+            false => MENU_MAX,
+        };
+        let limits = layout::Limits::new(Size::ZERO, Size::new(self.opener.width, max));
         let node = (self.menu.as_widget_mut()).layout(self.tree, renderer, &limits);
         let h = node.size().height;
         let below = self.opener.y + self.opener.height + MENU_GAP;
@@ -510,8 +515,8 @@ mod tests {
 
     /// A combo as the Model row shows it: a value, a note, rows with the
     /// provider's price tags, the typed id, the foot's action.
-    fn combo_view(query: &'static str) -> iced::Element<'static, &'static str> {
-        let rows = vec![
+    fn combo_view(more: usize) -> iced::Element<'static, &'static str> {
+        let mut rows = vec![
             ("gemini-flash-lite-latest".into(), None, true, "a"),
             (
                 "gemini-3.8-flash".into(),
@@ -521,10 +526,11 @@ mod tests {
             ),
             ("gemini-4-argon".into(), Some("Paid at Google"), false, "c"),
         ];
+        rows.extend((0..more).map(|i| (format!("model-{i}"), None, false, "m")));
         let search = super::Search {
             id: "combo-search",
             hint: "Search or type a model id",
-            query,
+            query: "",
             on_query: Box::new(|_| "typed"),
             on_submit: "first",
         };
@@ -556,7 +562,7 @@ mod tests {
         for theme in [&SAPPHIRE, &DAYLIGHT] {
             themes::set(theme);
             let px = shot::after_clicks(
-                || combo_view(""),
+                || combo_view(0),
                 Size::new(400.0, 300.0),
                 &[Point::new(60.0, 36.0)],
             );
@@ -580,11 +586,16 @@ mod tests {
             Point::new(60.0, 120.0 + 45.0),
             Point::new(60.0, 120.0 + 90.0 + 9.0 + 15.0),
         );
-        let got = shot::clicks(|| combo_view(""), size, &[opener, foot, row_b]);
+        let got = shot::clicks(|| combo_view(0), size, &[opener, foot, row_b]);
         assert_eq!(got, ["open", "load", "b"]);
         // a row closes it: the next click there picks nothing
-        let got = shot::clicks(|| combo_view(""), size, &[opener, row_b, row_b]);
+        let got = shot::clicks(|| combo_view(0), size, &[opener, row_b, row_b]);
         assert_eq!(got, ["open", "b"]);
+        // a long list scrolls inside; the foot stays at the menu's end (360 in)
+        let size = Size::new(400.0, 480.0);
+        let foot = Point::new(60.0, 56.0 + 4.0 + 360.0 - 15.0);
+        let got = shot::clicks(|| combo_view(60), size, &[opener, foot]);
+        assert_eq!(got, ["open", "load"]);
     }
 
     /// A click opens the menu (the kit's rows, every choice), a row's click
