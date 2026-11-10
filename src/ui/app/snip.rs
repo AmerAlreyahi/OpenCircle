@@ -588,7 +588,9 @@ impl App {
         );
         cast.show(0, false, false, None);
         self.cast = Some(cast);
-        let wait = Duration::from_millis(250);
+        // GNOME's close animation can outlast 250 ms: a frame of the fading overlay once
+        // slipped into the page (W40). Frames are read only after it has surely gone.
+        let wait = Duration::from_millis(500);
         Task::batch([self.close(), stitch(region, preview, wait, stop), clicks])
     }
 
