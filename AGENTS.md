@@ -523,7 +523,7 @@ production systems.
   must look pretty: smooth like a background fade, no visible squares or blocks, no
   noise/grain, weaker-looking, yet text stays unrecognisable (it reads as "no text
   there", not as a smear).
-- Translate default target (owner, 2026-10-23): Arabic, changeable in settings.
+- Translate default target (owner, 2026-10-23; SUPERSEDED 2026-11-10 by "Language in onboarding"): Arabic, changeable in settings.
 - Screen border (owner, 2026-10-24): a thin gradient border around the captured
   screen; live translate animates it subtly; snip shows it static.
 - Priorities (owner, 2026-10-24): when choosing between options, speed first,
@@ -757,6 +757,18 @@ production systems.
   Done; after a quit/lock install a small "Updated to <v> · What's new" pill once instead. No native OS notifications. The
   update widgets (ready pill, Updating pill, What's new) are capturable (exception to the 2026-11-03 rule). Frozen: the update
   channel.
+
+- Language in onboarding (owner, 2026-11-10, for the next release): onboarding asks "your language" first; it sets the
+  translate target (and the offline model to fetch) and, from the multi-language release on, the app language. No Arabic
+  default: before the user picks, the default follows the OS language. A config that already has a target keeps it.
+- Snip can capture OpenCircle's own widgets (owner, 2026-11-10, next release): in Snip, a deliberate hover + click on an
+  OpenCircle floating widget (pill, Steps strip, pin, chat, update widgets) picks it like any window; the widgets still never
+  appear uninvited in other captures (the 2026-11-03 "LATER" note, now scheduled).
+- Edge glow follows the last input (owner, 2026-11-10, nice to have, not mandatory): the screen that gets the Active Look edge
+  is the one of the last pointer input, mouse OR touch/pen (today: the mouse's screen only).
+- Next releases (owner, 2026-11-10): v0.1.5 = Linux fixes + the update experience + language in onboarding (+ Snip captures our
+  widgets; edge glow by last input if it fits); v0.1.6 = multi-language app UI including Arabic (RTL) + the live effect / live
+  groundwork. Game translation's place after that: owner to confirm.
 
 ## Domain quirks
 
