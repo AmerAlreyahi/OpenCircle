@@ -738,6 +738,10 @@ production systems.
   (X11 + Wayland) at the same time, with the best-practice solution from the start, never a Windows-only path patched for
   Linux later. Example: the browser hand-off uses a local one-time web server (127.0.0.1, random port, secret path, served
   once) on every OS, instead of a temp file that sandboxed Linux browsers can't read (#156).
+- Own windows in captures (owner, 2026-11-10, "yes"): OpenCircle's Settings window stays capturable on Windows AND Linux (a
+  normal window, per the 2026-10-31 rule); only the floating widgets stay out (2026-11-03). On GNOME Wayland a pin and the
+  Steps strip may open on top of each other (GNOME places windows): a known limit, no change (#144). KDE: the owner provides a
+  KDE machine later (#148).
 - Linux fixes version (owner, 2026-11-09): after OptimaMT is published, the Linux fixes + optimisation work starts (#156, #157,
   #158, planning #142-#145, #147, Wayland notes), each designed for both OSes per the rule above.
 
