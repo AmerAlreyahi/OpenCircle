@@ -770,8 +770,10 @@ production systems.
 - Edge glow follows the last input (owner, 2026-11-10, nice to have, not mandatory): the screen that gets the Active Look edge
   is the one of the last pointer input, mouse OR touch/pen (today: the mouse's screen only).
 - Next releases (owner, 2026-11-10): v0.1.5 = Linux fixes + the update experience + language in onboarding (+ Snip captures our
-  widgets; edge glow by last input if it fits); v0.1.6 = multi-language app UI including Arabic (RTL) + the live effect / live
-  groundwork. Then Game translation = v0.2.0 (owner, 2026-11-10).
+  widgets; edge glow by last input if it fits); v0.1.6 = multi-language app UI including Arabic (RTL) + the live border effect
+  (the Active Look edge that shows the app is active, with its soft breathing back, near 0 % CPU) + winget/Scoop + KDE
+  shortcuts if the machine is there + leftovers; it is the last 0.1.x, so it carries the security review and QA gates (#84).
+  GPU translation runtime and the new OCR pipeline go to Live translation / 0.2.0. Then Game translation = v0.2.0 (owner, 2026-11-10).
 
 ## Domain quirks
 
