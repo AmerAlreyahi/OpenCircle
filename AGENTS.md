@@ -745,6 +745,19 @@ production systems.
 - Linux fixes version (owner, 2026-11-09): after OptimaMT is published, the Linux fixes + optimisation work starts (#156, #157,
   #158, planning #142-#145, #147, Wayland notes), each designed for both OSes per the rule above.
 
+- Update experience (owner, 2026-11-10, design approved with every recommendation; W32 report
+  docs/internal/reports-0.1.4/w32-update-experience.md, canvas board "Update"): download in the background as today; when
+  ready a pill above the tray ("OpenCircle <v> is ready · Installs when you restart OpenCircle", Later / Restart now) that
+  waits while the user is away and fades after 30 s, leaving an accent dot on the tray icon, a "Restart to update (<v>)" first
+  tray-menu row and the ready status in Settings > General. Installs on Restart now, on quit / log-off, or after the session
+  has been locked >= 1 min; Setup installs only on the button (shield, one UAC prompt, never from nowhere); deb/rpm: the same
+  pill with "Get it". Visible relaunch: an "Updating OpenCircle… back in a few seconds" pill (spinning logo) from the old
+  process to the new one, then What's new. What's new is always shown after a button restart (no setting): summary + at most 6
+  Highlights rendered (bold, code as key caps, short link labels), Fixes / Upgrade notes folded, "Full release notes" link,
+  Done; after a quit/lock install a small "Updated to <v> · What's new" pill once instead. No native OS notifications. The
+  update widgets (ready pill, Updating pill, What's new) are capturable (exception to the 2026-11-03 rule). Frozen: the update
+  channel.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
