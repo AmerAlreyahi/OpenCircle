@@ -70,7 +70,8 @@ pub fn floating(
 
 /// `floating`, but it shows in screen captures, the user's screenshots and
 /// recordings (the update pills and What's new: owner, 2026-11-10, the one
-/// exception to "own floating windows out of captures"). Still no Snip target.
+/// exception to "own floating windows out of captures"), so a Snip target in
+/// every capture.
 pub fn floating_in_captures(
     settings: window::Settings,
     radius: f32,
@@ -125,14 +126,16 @@ fn floating_as(
 const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
 
 /// A floating window of ours (Steps strip, pins, pills, the update card, the
-/// chat's, the tray menu) is never in what we capture or translate: Windows
-/// keeps it out of every capture (`hide_from_capture`, before it shows) and out
-/// of Snip's targets (`no_pick`: a pick would hold what is under it). Linux has
-/// no such call: the capture takes it out of the frame (`Windows::leave_frame`).
+/// chat's, the tray menu) is never in what we capture or translate uninvited:
+/// Windows keeps it out of every capture (`hide_from_capture`, before it shows),
+/// and so out of the targets (`window_rect::list`: a pick would hold what is under
+/// it). Linux has no such call: the capture takes it out of the frame
+/// (`Windows::leave_frame`). Snip's grab alone has them in, to pick one
+/// (`window_rect::widgets_in_grab`; owner, 2026-11-10).
 /// `seen`: one that shows in captures (`floating_in_captures`).
 fn keep_out<T: Send + 'static>(id: window::Id, seen: bool) -> Task<T> {
     let out = !seen && crate::sys::test_hook(CAPTURABLE).is_none();
-    hide_from_capture(id, out).chain(no_pick(id))
+    hide_from_capture(id, out)
 }
 
 /// How a floating window comes and goes (`motion`): its pace, and how far it
@@ -232,15 +235,20 @@ pub fn screen(settings: window::Settings) -> (window::Id, Task<window::Id>) {
 }
 
 /// Snip never outlines or picks the window `id` (`window_rect::no_pick`): the
-/// overlay and the screen-sized ones (`screen`), every floating one (`keep_out`).
-/// Every other window of ours is a target like any app's (Settings, onboarding).
+/// overlay and the screen-sized ones (`screen`). Every other window of ours is a
+/// target like any app's (Settings, onboarding; the floating ones while they are
+/// in the grab, `keep_out`).
 pub fn no_pick<T: Send + 'static>(id: window::Id) -> Task<T> {
+    use iced::window::raw_window_handle::RawWindowHandle;
     window::run(id, |w| {
-        if let Ok(handle) = w.window_handle()
-            && let Some(hwnd) = super::shape::fadeable(handle.as_raw())
-        {
-            crate::capture::window_rect::no_pick(hwnd);
-        }
+        let handle = match w.window_handle().map(|h| h.as_raw()) {
+            #[cfg(windows)]
+            Ok(RawWindowHandle::Win32(h)) => h.hwnd.get(),
+            Ok(RawWindowHandle::Xlib(h)) => h.window as isize,
+            Ok(RawWindowHandle::Xcb(h)) => h.window.get() as isize,
+            _ => return,
+        };
+        crate::capture::window_rect::no_pick(handle);
     })
     .discard()
 }

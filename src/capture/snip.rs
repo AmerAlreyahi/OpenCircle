@@ -19,10 +19,12 @@ pub struct Snapshot {
 /// first (`every_monitor`): the overlay may show on it, unseen, meanwhile, so
 /// the window the user is in is read before anything else (the overlay is
 /// never listed, `window_rect::no_pick`, and a clear layered window is not in
-/// a GDI grab).
+/// a GDI grab). Our floating widgets are in this grab and listed, to be picked
+/// (`window_rect::widgets_in_grab`), and out of captures again after it.
 pub fn snapshot(cursor: bool, chosen: impl FnOnce(&super::Monitor)) -> Result<Snapshot, String> {
     let start = Instant::now();
     let foreground = window_rect::foreground();
+    let widgets = window_rect::widgets_in_grab();
     let (grabbed, (windows, listed)) = std::thread::scope(|s| {
         let listing = s.spawn(|| (window_rect::list(), start.elapsed()));
         let grabbed = every_monitor(chosen).map(|g| (g, start.elapsed()));
@@ -31,6 +33,7 @@ pub fn snapshot(cursor: bool, chosen: impl FnOnce(&super::Monitor)) -> Result<Sn
             .unwrap_or_else(|_| (Vec::new(), start.elapsed()));
         (grabbed, listed)
     });
+    drop(widgets);
     let ((mut frames, on), grab) = grabbed?;
     if cursor {
         frames.iter_mut().for_each(super::cursor::draw);

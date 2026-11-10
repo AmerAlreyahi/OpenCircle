@@ -143,11 +143,21 @@ impl App {
             // file is already deleted).
             Message::Captured(n, ..) if self.capturing != Some(n) => Task::none(),
             Message::Captured(n, at, shot) => {
+                // Snip's grab had our floating windows in (`App::capture`): out
+                // now (Linux), not over its overlay
+                let out = match &shot {
+                    Ok(s) if s.snip.is_some() => self.leave_frame(n),
+                    _ => None,
+                };
                 let opened = self.open(at, shot);
                 if self.o.is_some() {
                     self.o.capture = n; // its other monitors' frames are this one's
                 }
-                Task::batch([opened, self.check_song_key()])
+                Task::batch([
+                    out.unwrap_or_else(Task::none),
+                    opened,
+                    self.check_song_key(),
+                ])
             }
             Message::SongKey => Task::none(), // remembered by `music::check_key`
             // Song search is opt-in: without a key the button opens its setup

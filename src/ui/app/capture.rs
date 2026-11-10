@@ -121,8 +121,13 @@ impl App {
                 Grabbed::Done => Message::Grabbed(n),
             })
         };
-        // our windows leave the frame first (Linux), the screen redraws
-        let out = self.leave_frame(n);
+        // our windows leave the frame first (Linux), the screen redraws; Snip's
+        // grab has them in, to pick one (owner, 2026-11-10): they leave once it
+        // is over, before its overlay shows (`Message::Captured`)
+        let out = match snip {
+            Some(_) => None,
+            None => self.leave_frame(n),
+        };
         let wait = grab_wait(out.is_some(), self.overlay_gone, Instant::now());
         let shot = match wait.is_zero() {
             true => shot(),
@@ -143,7 +148,7 @@ impl App {
     /// Windows keeps them out of every capture). The pinned chat's window hides
     /// with them, or goes where windows can't hide (the overlay draws the chat).
     /// `None`: none was there.
-    fn leave_frame(&mut self, n: u32) -> Option<Task<Message>> {
+    pub(in crate::ui) fn leave_frame(&mut self, n: u32) -> Option<Task<Message>> {
         let chat = (self.chat.as_ref()).and_then(|c| c.window);
         let hides = can_hide_windows();
         let out = (self.windows.leave_frame(n, chat.filter(|_| hides)))

@@ -504,14 +504,12 @@ impl App {
                 false => Subscription::none(),
             };
             // Several screens: the edge glow follows the pointer onto the one it
-            // comes into (one message per crossing, none while it moves).
+            // comes into, the mouse or a finger / pen (one message per crossing or
+            // tap, none while it moves).
             let glow = match self.o.screens.is_empty() {
                 true => Subscription::none(),
-                false => iced::event::listen_with(|event, _, id| match event {
-                    iced::Event::Mouse(iced::mouse::Event::CursorEntered) => {
-                        Some(Message::PointerOn(id))
-                    }
-                    _ => None,
+                false => iced::event::listen_with(|event, _, id| {
+                    touch::came_in(&event).then_some(Message::PointerOn(id))
                 }),
             };
             Subscription::batch([triggers, escape, alt, card, shift, frames, bar, glow])

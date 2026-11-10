@@ -88,13 +88,15 @@ fn an_update_waits_for_a_moment_the_user_picks() {
     assert!(app.update.is_some(), "the update keeps waiting");
 }
 
-/// Our floating windows (here a pin) are never in what we capture: every
-/// capture (Circle to Search, translate, Snip) takes them out of its grab at its
-/// entry (`App::capture`; Linux: no OS call keeps a window out of a grab) and
-/// they come back once it's over, after the overlay closes. Windows keeps them
-/// out of every capture instead (`windows::floating`).
+/// Our floating windows (here a pin) are never in what we capture uninvited: every
+/// capture but Snip's (Circle to Search, translate) takes them out of its grab at
+/// its entry (`App::capture`; Linux: no OS call keeps a window out of a grab).
+/// Snip's grab has them in, to be picked (owner, 2026-11-10): they leave once it
+/// is over, before its overlay shows. Either way they come back after the overlay
+/// closes. Windows keeps them out of every capture but Snip's instead
+/// (`windows::floating`, `window_rect::widgets_in_grab`).
 #[test]
-fn our_floating_windows_are_out_of_every_grab() {
+fn our_floating_windows_are_out_of_every_grab_but_snips() {
     let linux = !cfg!(windows);
     let pin = Crop {
         width: 4,
@@ -106,8 +108,17 @@ fn our_floating_windows_are_out_of_every_grab() {
     for snip in [None, Some(snip::Kind::Region)] {
         let _ = app.capture(Instant::now(), snip);
         let n = app.capturing.unwrap();
-        assert_eq!(app.windows.out_of_frame(), linux, "out for the grab");
-        let _ = app.update(Message::Captured(n, Instant::now(), a_shot()));
+        let out = linux && snip.is_none();
+        assert_eq!(
+            app.windows.out_of_frame(),
+            out,
+            "out for the grab: {snip:?}"
+        );
+        let shot = a_shot().map(|shot| Shot {
+            snip: snip.map(|k| (k, Vec::new(), None, Vec::new())),
+            ..shot
+        });
+        let _ = app.update(Message::Captured(n, Instant::now(), shot));
         let _ = app.update(Message::Grabbed(n));
         assert_eq!(app.windows.out_of_frame(), linux, "not over the overlay");
         let _ = app.close();

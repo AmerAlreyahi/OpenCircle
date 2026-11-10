@@ -1,10 +1,10 @@
 //! The windows on screen, for snip (hover a window, click it; Window mode): outer
 //! rectangles (with the frame) in physical desktop pixels, topmost first, with
-//! their titles. Windows: our own count too (Settings, onboarding), except the
-//! overlay and every floating window (`no_pick`: they are out of every capture);
-//! X11: none of ours.
-//! ponytail: X11 still drops all of ours (Linux on hold); a property like
-//! Windows' `NO_PICK` is the upgrade.
+//! their titles. Our own count too (Settings, onboarding, and in Snip the floating
+//! widgets: Steps strip, pins, pills, the chat's; owner, 2026-11-10), except the
+//! overlay and the screen-sized ones (`no_pick`) and any window of ours that is
+//! not in the grab (Windows: kept out of captures; Linux: hidden for it), whose
+//! pick would hold what is under it.
 //!
 //! Windows: `EnumWindows` (z-order) + the DWM extended frame bounds (no invisible
 //! resize border). X11: `_NET_CLIENT_LIST_STACKING` + geometry + `_NET_FRAME_EXTENTS`.
@@ -34,29 +34,149 @@ pub fn list() -> Vec<Win> {
 }
 
 /// Windows: set on our windows that are never a snip target (the overlay and
-/// its window on every other screen, the live layer, toasts): `no_pick`.
+/// its window on every other screen, the live layer): `no_pick`.
 #[cfg(windows)]
 const NO_PICK: windows::core::PCWSTR = windows::core::w!("OpenCircle.no_pick");
+/// X11: the same mark, a property on the window.
+#[cfg(target_os = "linux")]
+const NO_PICK_X11: &str = "_OPENCIRCLE_NO_PICK";
 
-/// Windows: the window `hwnd` (one of ours) is left out of `list` from now on.
-pub fn no_pick(hwnd: isize) {
+/// The window `handle` (one of ours; Windows: its HWND, X11: its id) is left out of
+/// `list` from now on.
+pub fn no_pick(handle: isize) {
     #[cfg(windows)]
     // SAFETY: a property of ours on a live window of ours.
     unsafe {
         use windows::Win32::Foundation::{HANDLE, HWND};
         let _ = windows::Win32::UI::WindowsAndMessaging::SetPropW(
-            HWND(hwnd as *mut _),
+            HWND(handle as *mut _),
             NO_PICK,
             Some(HANDLE(std::ptr::dangling_mut())),
         );
     }
+    #[cfg(target_os = "linux")]
+    if let Err(e) = x11_no_pick(handle as u32) {
+        crate::log!("[opencircle] no_pick: {e}");
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let _ = handle;
+}
+
+#[cfg(target_os = "linux")]
+fn x11_no_pick(window: u32) -> Result<(), String> {
+    use xcb::{XidNew, x};
+    let (conn, _) = xcb::Connection::connect(None).map_err(|e| e.to_string())?;
+    let atom = conn
+        .wait_for_reply(conn.send_request(&x::InternAtom {
+            only_if_exists: false,
+            name: NO_PICK_X11.as_bytes(),
+        }))
+        .map_err(|e| format!("{e:?}"))?
+        .atom();
+    let window = x::Window::new(window); // the id of a live X11 window of ours
+    conn.send_and_check_request(&x::ChangeProperty {
+        mode: x::PropMode::Replace,
+        window,
+        property: atom,
+        r#type: x::ATOM_CARDINAL,
+        data: &[1u32],
+    })
+    .map_err(|e| format!("{e:?}"))
+}
+
+/// Snip (owner, 2026-11-10): our floating widgets (Steps strip, pins, pills, the
+/// chat's) are in this one grab, so a hover + click picks one like any window, and
+/// `list` has them; every other capture still leaves them out
+/// (`ui::platform::windows::keep_out`). Windows: each one's capture exclusion is
+/// lifted until the guard drops (then back on); the grab follows the next screen
+/// composition. Linux: nothing here (the UI leaves them on screen until Snip's
+/// grab is over, `App::capture`).
+#[must_use]
+pub struct InGrab(#[cfg_attr(not(windows), allow(dead_code))] Vec<isize>);
+
+pub fn widgets_in_grab() -> InGrab {
+    #[cfg(windows)]
+    {
+        let lifted = win::lift_exclusion();
+        if !lifted.is_empty() {
+            // the exclusion goes with the next composition: two, so the grab's
+            // frame surely has them
+            // SAFETY: plain calls.
+            unsafe {
+                let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+                let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+            }
+        }
+        InGrab(lifted)
+    }
     #[cfg(not(windows))]
-    let _ = hwnd;
+    InGrab(Vec::new())
+}
+
+impl Drop for InGrab {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        win::exclude(&self.0);
+    }
+}
+
+#[cfg(windows)]
+mod win {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetPropW, GetWindowDisplayAffinity, GetWindowThreadProcessId, IsWindowVisible,
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+    };
+    use windows::core::BOOL;
+
+    /// Every visible window of ours kept out of captures and not `no_pick` (the
+    /// floating widgets): in captures now. Their handles, to `exclude` again.
+    pub(super) fn lift_exclusion() -> Vec<isize> {
+        unsafe extern "system" fn each(hwnd: HWND, out: LPARAM) -> BOOL {
+            // SAFETY: `out` is the `&mut Vec` passed to EnumWindows below, alive for
+            // the call; plain queries on a window handle EnumWindows just gave us,
+            // and the affinity of a window of this process.
+            unsafe {
+                let out = &mut *(out.0 as *mut Vec<isize>);
+                let mut pid = 0;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                let mut affinity = 0;
+                let _ = GetWindowDisplayAffinity(hwnd, &mut affinity);
+                if pid == std::process::id()
+                    && IsWindowVisible(hwnd).as_bool()
+                    && GetPropW(hwnd, super::NO_PICK).is_invalid()
+                    && affinity == WDA_EXCLUDEFROMCAPTURE.0
+                    && SetWindowDisplayAffinity(hwnd, WDA_NONE).is_ok()
+                {
+                    out.push(hwnd.0 as isize);
+                }
+            }
+            BOOL(1)
+        }
+        let mut out: Vec<isize> = Vec::new();
+        // SAFETY: `each` only uses `out` during this call.
+        let _ = unsafe { EnumWindows(Some(each), LPARAM((&raw mut out) as isize)) };
+        out
+    }
+
+    /// The windows `lift_exclusion` gave: out of captures again (a closed one's
+    /// call just fails).
+    pub(super) fn exclude(windows: &[isize]) {
+        for &h in windows {
+            // SAFETY: a handle of a window of ours; a stale one just fails.
+            let done =
+                unsafe { SetWindowDisplayAffinity(HWND(h as *mut _), WDA_EXCLUDEFROMCAPTURE) };
+            if let Err(e) = done {
+                crate::log!("[opencircle] window affinity: {e}");
+            }
+        }
+    }
 }
 
 /// Windows: which visible, not minimised window is a snip target, like iTop's:
-/// every normal one, OpenCircle's own (Settings, onboarding) unless marked `no_pick`
-/// (the overlay, every floating window: the chat's, pins), and the taskbar; not the desktop (Progman /
+/// every normal one, OpenCircle's own (Settings, onboarding, the floating widgets
+/// while `widgets_in_grab` has them in) unless `no_pick` (marked: the overlay; or
+/// out of the grab: a floating widget outside Snip), and the taskbar; not the desktop (Progman /
 /// WorkerW: over the wallpaper and its icons the target is the screen) nor
 /// another app's tool windows (invisible helpers, floating palettes) nor its
 /// click-through ones (`through`: WS_EX_TRANSPARENT, e.g. a GPU overlay or a
@@ -137,10 +257,11 @@ fn platform() -> Result<Vec<Win>, String> {
         atom("_NET_CLIENT_LIST_STACKING").map_err(err)?,
         atom("_NET_FRAME_EXTENTS").map_err(err)?,
     );
-    let (name, utf8, pid) = (
+    let (name, utf8, pid, marked) = (
         atom("_NET_WM_NAME").map_err(err)?,
         atom("UTF8_STRING").map_err(err)?,
         atom("_NET_WM_PID").map_err(err)?,
+        atom(NO_PICK_X11).map_err(err)?,
     );
     if stacking == x::ATOM_NONE {
         return Ok(Vec::new()); // no EWMH window manager
@@ -168,7 +289,12 @@ fn platform() -> Result<Vec<Win>, String> {
         let ours = pid != x::ATOM_NONE
             && property(window, pid, x::ATOM_CARDINAL, 1)
                 .is_ok_and(|p| p.value::<u32>().first() == Some(&std::process::id()));
-        if ours {
+        // ours: a target unless `no_pick` (a floating widget out of the grab is
+        // hidden, not viewable)
+        let no_pick = marked != x::ATOM_NONE
+            && property(window, marked, x::ATOM_CARDINAL, 1)
+                .is_ok_and(|p| !p.value::<u32>().is_empty());
+        if ours && no_pick {
             continue;
         }
         let title = match property(window, name, utf8, 1024) {
@@ -226,7 +352,7 @@ fn platform() -> Result<Vec<Win>, String> {
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GWL_EXSTYLE, GetClassNameW, GetPropW, GetWindowDisplayAffinity,
         GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
-        IsWindowVisible, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+        IsWindowVisible, WDA_EXCLUDEFROMCAPTURE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
     };
     use windows::core::BOOL;
 
@@ -244,7 +370,11 @@ fn platform() -> Result<Vec<Win>, String> {
             let mut class = [0u16; 64];
             let n = GetClassNameW(hwnd, &mut class).max(0) as usize;
             let class = String::from_utf16_lossy(&class[..n]);
-            let unpickable = !GetPropW(hwnd, NO_PICK).is_invalid();
+            let mut affinity = 0;
+            let _ = GetWindowDisplayAffinity(hwnd, &mut affinity);
+            // ours out of the grab: its pick would hold what is under it
+            let unseen = ours && affinity == WDA_EXCLUDEFROMCAPTURE.0;
+            let unpickable = unseen || !GetPropW(hwnd, NO_PICK).is_invalid();
             if !IsWindowVisible(hwnd).as_bool()
                 || IsIconic(hwnd).as_bool()
                 || !listed(&class, tool, ours, unpickable, through)
@@ -281,11 +411,7 @@ fn platform() -> Result<Vec<Win>, String> {
                     ),
                     title: String::from_utf16_lossy(&title[..n]),
                     handle: hwnd.0 as isize,
-                    protected: {
-                        let mut affinity = 0;
-                        let _ = GetWindowDisplayAffinity(hwnd, &mut affinity);
-                        affinity != 0
-                    },
+                    protected: !ours && affinity != 0,
                 });
             }
         }
@@ -559,6 +685,72 @@ fn active(_: bool) -> Option<(WinRect, String, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Snip picks our own widgets (owner, 2026-11-10, #154): a floating window of
+    /// ours (visible, kept out of captures as `keep_out` keeps it) is no target in
+    /// any other capture (its pick would hold what is under it), but is in Snip's
+    /// grab (`widgets_in_grab`, taken on the grab's thread, not the window's), and
+    /// out of captures again after it. The overlay (`no_pick`) is never one.
+    #[cfg(windows)]
+    #[test]
+    fn our_widgets_are_snip_targets_in_its_grab_only() {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, GetWindowDisplayAffinity, SetWindowDisplayAffinity,
+            WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
+        };
+        use windows::core::w;
+        // SAFETY: a window of this thread, destroyed at the end.
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                w!("widget test"),
+                WS_POPUP | WS_VISIBLE,
+                40,
+                40,
+                120,
+                60,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        // SAFETY: our window, alive.
+        unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).unwrap() };
+        let h = hwnd.0 as isize;
+        let target = move || list().iter().any(|w| w.handle == h);
+        let affinity = || {
+            let mut a = 0;
+            // SAFETY: a plain query on our window.
+            let _ = unsafe { GetWindowDisplayAffinity(HWND(h as *mut _), &mut a) };
+            a
+        };
+        assert!(!target(), "out of every other capture: no target");
+        let in_grab = std::thread::spawn(move || {
+            let grab = widgets_in_grab();
+            (target(), grab)
+        });
+        let (listed, grab) = in_grab.join().unwrap();
+        assert!(listed, "in Snip's grab: a target");
+        assert_eq!(affinity(), WDA_NONE.0, "in the grab's frame");
+        drop(grab);
+        assert_eq!(
+            affinity(),
+            WDA_EXCLUDEFROMCAPTURE.0,
+            "out of captures again"
+        );
+        assert!(!target());
+        // the overlay: never, not even in Snip's grab
+        no_pick(h);
+        let grab = widgets_in_grab();
+        assert!(!target() && affinity() == WDA_EXCLUDEFROMCAPTURE.0);
+        drop(grab);
+        // SAFETY: our window.
+        unsafe { DestroyWindow(hwnd).unwrap() };
+    }
 
     #[test]
     fn only_windows_kept_out_of_captures_are_protected() {

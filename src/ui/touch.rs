@@ -67,6 +67,17 @@ pub(crate) fn drag(event: &Event) -> Option<Drag> {
     }
 }
 
+/// The pointer came into the window that gets this event: the mouse entering it, or a
+/// finger or pen put down on it (no cursor comes in with a touch). The edge glow follows
+/// the last pointer input onto its screen (owner, 2026-11-10, #155).
+pub(crate) fn came_in(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Mouse(mouse::Event::CursorEntered)
+            | Event::Touch(touch::Event::FingerPressed { .. })
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +163,26 @@ mod tests {
             position: at(0.0, 0.0),
         });
         assert!(as_mouse(&m, &mut first).is_none());
+    }
+
+    /// #155: a tap or pen press on a screen is pointer input there, like the mouse
+    /// coming in; moving on it is not a new arrival.
+    #[test]
+    fn a_touch_or_the_mouse_comes_in() {
+        let pressed = touch::Event::FingerPressed {
+            id: Finger(1),
+            position: at(5.0, 5.0),
+        };
+        assert!(came_in(&Event::Touch(pressed)));
+        assert!(came_in(&Event::Mouse(mouse::Event::CursorEntered)));
+        let moved = touch::Event::FingerMoved {
+            id: Finger(1),
+            position: at(6.0, 6.0),
+        };
+        assert!(!came_in(&Event::Touch(moved)));
+        let m = mouse::Event::CursorMoved {
+            position: at(0.0, 0.0),
+        };
+        assert!(!came_in(&Event::Mouse(m)));
     }
 }
