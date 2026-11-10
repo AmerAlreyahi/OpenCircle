@@ -67,7 +67,9 @@ When the provider refuses or fails, the chat shows a calm card: a short line
 saying what happened, the provider's own message (two lines; **Show details**
 for the rest) and one fix: **Choose another model** (opens the list), **Check
 the key**, **Open settings** or **Retry**. A busy server (503 or 529) is retried
-once by itself after two seconds. Every provider error goes into the local log
+once by itself after two seconds, and a connection that drops before any answer
+is tried again up to twice on a new connection (then the card says "The
+connection dropped"). Every provider error goes into the local log
 without your key or your question, so **Copy diagnostics** can include it.
 
 ## Your key
