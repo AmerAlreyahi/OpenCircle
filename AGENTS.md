@@ -710,7 +710,10 @@ production systems.
   on main and ship with the next release (its notes list features and fixes). The last digit stays free (no planned use).
   The board's Phase field uses the NAMES; a number is given only at release. The update gate stays strict: a broken updater
   is the one bug users cannot wait out.
-- Every release passes the security scan and the QA gates (#84), from 0.2.0 on.
+- Security review timing (owner, 2026-11-10, SUPERSEDES "every release passes the security scan" and the security step of
+  "Clean before every release"): the full security review/scan runs only in the LAST 0.x release before each big version
+  (0.2.0, 0.3.0, ...), not with the big version itself: e.g. if v0.1.6 is the last before 0.2.0, v0.1.6 gets the scan. Other
+  releases: clean-up pass, gate, CI, update gate as before. The QA gates (#84) go with that same release.
 - Two translation tracks (owner, 2026-11-09): normal translation = OPUS-MT base + models-v2 decoders on the CPU, unchanged.
   Live translation (story games: Genshin, HSR, WuWa and similar) = its own model on the GPU, chosen by the 0.2.0 spike;
   target >= 70 % en->ar on the 13-screen corpus plus a fixed ~200-line set scored with COMET (pass line fixed before

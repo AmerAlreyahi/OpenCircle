@@ -5,14 +5,15 @@ and signs everything and creates a **draft**; it never publishes.
 
 ## Stable release, step by step
 
-0. **Clean-up pass, then the security check (last steps before the tag).** Remove
+0. **Clean-up pass (last step before the tag); the security review only in the last release before a new 0.x.0.** Remove
    every dead or old config key, code path, test, asset, script and tool that is no
    longer used and won't be (keep what a planned feature needs), and every outdated
    doc: public docs show only what ships; old internal docs, samples, rejected takes,
    old designs and spikes go to an archive outside the repo after the owner sees the list. Old config keys are
    still read without a warning and dropped on the next save (migration with a
-   backup); the CLI and the update channel keep working. Then run the security review
-   of the whole diff since the last release. Gate and CI green after both.
+   backup); the CLI and the update channel keep working. In the last release before
+   a new 0.x.0 (e.g. the last 0.1.x before 0.2.0), then run the security review of the whole diff since the last
+   reviewed release. Gate and CI green after both.
 1. **Docs match the release.** README, `docs/privacy.md` and
    `docs/getting-started.md` describe what this version really does (features,
    shortcuts, network actions, install steps). Add the version to the `<releases>`
