@@ -1,0 +1,28 @@
+name: wiki
+# Mirrors docs/ into the wiki. docs/ is the source of truth; wiki edits are overwritten.
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "scripts/docs_to_wiki.py", ".github/workflows/wiki.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: wiki
+jobs:
+  mirror:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mirror docs/ into the wiki
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki \
+            || { echo "::warning::The wiki has no first page yet; create one in the web UI once."; exit 0; }
+          python3 scripts/docs_to_wiki.py . wiki "$GITHUB_REPOSITORY"
+          cd wiki
+          git add -A
+          git diff --cached --quiet && exit 0
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Mirror docs/ at ${GITHUB_SHA::7}"
+          git push
