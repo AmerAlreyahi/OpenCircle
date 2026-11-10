@@ -785,6 +785,21 @@ production systems.
   Cancel shown the whole time, the user scrolls by hand (like Windows). KDE / wlroots: an always-on-top layer-shell surface;
   GNOME: a small OpenCircle GNOME Shell extension (installed once, one logout). Where neither is available (e.g. GNOME 42
   without the extension, or the user declines), fall back to a floating panel + tray "capturing" state (lead default).
+  REFINED (owner, 2026-11-10, after W39's VM research): no extension. The preview strip + Copy / Save / Done / Cancel is an
+  XWayland pop-up (override-redirect) placed beside the area and kept on top (proved on GNOME 42); the tray "capturing" state
+  (record dot + live label + Finish / Copy / Save / Cancel menu) is the extra sign and the fallback without XWayland. The
+  pop-up follows the app's theming exactly (kit tokens, theme, Active Look), like every widget. Ships in v0.1.5 with the
+  Linux fixes. A native layer-shell surface / GNOME extension only if ever needed later (v0.1.6+).
+- Both OSes from the first design (owner, 2026-11-10, "this mistake should never happen in future"; strengthens "Windows and
+  Linux together"): before designing ANY feature, research how established tools do it on Windows AND Linux (X11, GNOME
+  Wayland, KDE, wlroots) and what the platform allows, and design one approach that fits both; a brief must name that research.
+  Long capture was designed for Windows first and broke on Wayland: never again.
+- Translate preview order (owner, 2026-11-10): the Translate page's first clip is the normal web-page translation (Preview2.1,
+  French Wikipedia in place, re-encoded from the source to 1080p AV1), aimed at non-gamers; then the game clips translate-2,
+  translate-3; translate-4 is removed from the list. The new clip is added to the archived OpenCircle-models previews-1 release
+  (briefly unarchived, owner OK).
+- macOS (owner, 2026-11-10): the LAST item on the board (Later). Distribution needs no payment (ad-hoc signed, users allow it
+  once in Privacy & Security), but testing needs the owner's own Mac; start only when the owner says.
 
 ## Domain quirks
 
