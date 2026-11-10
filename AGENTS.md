@@ -777,7 +777,8 @@ production systems.
 
 - Snip the translated page (owner, 2026-11-10, v0.1.5, "super great"): with a one-shot translation on screen, Snip (bar
   button, Alt+A, tray) captures what the user sees: the frozen screen WITH the translation drawn on it, then the normal Snip
-  flow (pick, annotate, Copy / Save / drag, Steps).
+  flow (pick, annotate, Copy / Save / drag, Steps). A small Snip button sits in the translate pill right after the language
+  chips (owner, 2026-11-10, option 1; the bottom bar stays hidden during translation).
 - Wayland long capture must show it is working (owner, 2026-11-10, rejects the silent flow): while it runs the user clearly
   sees that OpenCircle is capturing, and finishes with Copy / Save / drag exactly like Windows, without having to press the
   shortcut again to find the result.
