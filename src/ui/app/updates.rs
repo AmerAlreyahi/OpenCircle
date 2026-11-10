@@ -205,6 +205,7 @@ impl App {
         };
         match crate::update::restart(&staged, Moment::Button) {
             Ok(()) => {
+                self.update = None; // on its way (a quit meanwhile, e.g. the setup's, says nothing)
                 // the clock starts once the pill's window is there (GNOME on Wayland
                 // maps a new window late: it would never show)
                 let pill = Pill::new(Kind::Updating);
