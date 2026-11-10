@@ -771,7 +771,7 @@ production systems.
   is the one of the last pointer input, mouse OR touch/pen (today: the mouse's screen only).
 - Next releases (owner, 2026-11-10): v0.1.5 = Linux fixes + the update experience + language in onboarding (+ Snip captures our
   widgets; edge glow by last input if it fits); v0.1.6 = multi-language app UI including Arabic (RTL) + the live effect / live
-  groundwork. Game translation's place after that: owner to confirm.
+  groundwork. Then Game translation = v0.2.0 (owner, 2026-11-10).
 
 ## Domain quirks
 
