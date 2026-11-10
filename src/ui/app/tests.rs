@@ -5158,7 +5158,11 @@ fn ctrl_z_reaches_the_snip_toolbar() {
 /// area from the start (never over it), updates as the page grows, and the
 /// tray shows it is capturing.
 fn casting(area: Rectangle) -> App {
-    let mut app = snipping(area);
+    casting_on(800, 600, area)
+}
+
+fn casting_on(w: u32, h: u32, area: Rectangle) -> App {
+    let mut app = snipping_on(w, h, area);
     app.can_hide = false;
     app.select(area);
     let _ = app.open_snip_toolbar();
@@ -5228,8 +5232,67 @@ fn on_wayland_a_long_capture_shows_its_pop_up_beside_the_area_and_the_tray_state
     assert!(f.window.height > 300.0 && !f.window.intersects(&area));
     assert_eq!(
         SHOWN.with_borrow(|s| s.last().cloned()),
-        Some(Some("● 1,500 px".into()))
+        Some(Some("● 0 px".into())),
+        "the tray's label changes at most twice a second (it may be in the stream)"
     );
+    std::thread::sleep(Duration::from_millis(510));
+    let _ = app.update(Message::Snip(snip::Msg::Progress(Update {
+        height: 1600,
+        full: false,
+        lost: false,
+        preview: None,
+    })));
+    assert_eq!(
+        SHOWN.with_borrow(|s| s.last().cloned()),
+        Some(Some("● 1,600 px".into()))
+    );
+}
+
+/// An area that fills the screen (a click in Snip takes the screen on
+/// Wayland; owner 2026-11-10: "no actual effect", there was no pop-up): the
+/// pop-up still shows, inside the area's top-right corner, only once the
+/// first frame is read (it is then in the stream: the stitcher leaves its
+/// corner out), with the whole-screen tip until the page grows.
+#[test]
+fn on_wayland_a_whole_screen_long_capture_shows_its_pop_up_in_the_corner() {
+    use crate::capture::scroll::Update;
+    let area = Rectangle::new(Point::new(0.0, 0.0), Size::new(1280.0, 720.0));
+    let mut app = casting_on(1280, 720, area);
+    assert!(
+        app.cast.as_ref().is_some_and(|c| c.popup.is_some()),
+        "a pop-up"
+    );
+    assert!(
+        cast_frames().is_empty(),
+        "not before the first frame is read"
+    );
+    let progress = |height| {
+        Message::Snip(snip::Msg::Progress(Update {
+            height,
+            full: false,
+            lost: false,
+            preview: Some(Crop {
+                width: 100,
+                height: 60,
+                rgba: vec![0; 100 * 60 * 4],
+            }),
+        }))
+    };
+    let _ = app.update(progress(720));
+    let f = cast_frames().pop().expect("shown with the first frame");
+    assert!(f.left && f.tip, "{f:?}");
+    assert_eq!(
+        f.window.x + f.window.width,
+        1280.0 - 12.0,
+        "against the corner"
+    );
+    assert!(
+        f.inside && f.window.y + f.window.height < 200.0,
+        "only the top rows"
+    );
+    let _ = app.update(progress(1500));
+    let f = cast_frames().pop().expect("a new frame");
+    assert!(!f.tip, "the tip goes once the page grows");
 }
 
 /// Copy from the pop-up: the stitched page is copied at once (no Snip), the

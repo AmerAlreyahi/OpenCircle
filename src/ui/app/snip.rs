@@ -496,7 +496,7 @@ impl App {
         let mut long = long_capture::Long::new(area, stop.clone(), scale);
         (long.bar_was, long.window) = (bar_was, Some(on.window));
         // (let the window be cut first)
-        let work = stitch(region, preview, Duration::from_millis(150), stop);
+        let work = stitch(region, preview, (0, 0), Duration::from_millis(150), stop);
         snip.scroll = Some(long);
         if let Some(edit) = &mut o.edit {
             edit.annotator.capturing = true;
@@ -536,7 +536,8 @@ impl App {
     /// physical desktop px): the overlay can't be cut there (`can_hide`), so
     /// it goes, and only then is the screen streamed (none of the overlay, its
     /// dim or its fade in a frame: `capture::LEAVE_FRAME`, as a grab waits).
-    /// The user scrolls the page by hand; the pop-up beside the area shows the
+    /// The user scrolls the page by hand; the pop-up beside the area (inside
+    /// its top-right corner where no side has room: `popup_room`) shows the
     /// picture so far with Copy / Save / Done / Cancel (`long_capture_popup`,
     /// XWayland), and the tray says it is capturing (`tray::capturing`, the
     /// one sign without XWayland). Any shortcut, the pop-up or the tray ends it.
@@ -548,7 +549,9 @@ impl App {
     ) -> Task<Message> {
         let scale = on.place.scale;
         let room = long_capture::popup_room(area, on.work, scale);
-        let preview = room.map_or((0, 0), |r| physical(r, scale));
+        let preview = room.map_or((0, 0), |(r, _)| physical(r, scale));
+        let inside = room.is_some_and(|(_, inside)| inside);
+        let cover = long_capture::popup_cover(area, on.work, scale);
         let stop = Arc::new(AtomicBool::new(false));
         let origin = Point::new(
             on.place.origin.0 as f32 / scale,
@@ -564,6 +567,9 @@ impl App {
             scale,
             picture: Size::ZERO,
             label: String::new(),
+            labelled: None,
+            inside,
+            first: region.3,
         };
         let clicks = match room.is_some() {
             true => match long_capture_popup::Popup::start() {
@@ -574,16 +580,18 @@ impl App {
                 None => Task::none(),
             },
             false => {
-                crate::log!("[opencircle] long capture: no room beside the area for the pop-up");
+                crate::log!(
+                    "[opencircle] long capture: no room for the pop-up, beside or in the area"
+                );
                 Task::none()
             }
         };
         crate::log!(
             "[opencircle] long capture of {region:?} (Wayland): pop-up {}",
-            if cast.popup.is_some() {
-                "beside the area"
-            } else {
-                "none (tray only)"
+            match (cast.popup.is_some(), inside) {
+                (true, false) => "beside the area".to_string(),
+                (true, true) => format!("in the area's corner (left out: {cover:?})"),
+                (false, _) => "none (tray only)".to_string(),
             }
         );
         cast.show(0, false, false, None);
@@ -591,7 +599,11 @@ impl App {
         // GNOME's close animation can outlast 250 ms: a frame of the fading overlay once
         // slipped into the page (W40). Frames are read only after it has surely gone.
         let wait = Duration::from_millis(500);
-        Task::batch([self.close(), stitch(region, preview, wait, stop), clicks])
+        Task::batch([
+            self.close(),
+            stitch(region, preview, cover, wait, stop),
+            clicks,
+        ])
     }
 
     /// Wayland: the long capture going on without its overlay, so far.
@@ -677,19 +689,36 @@ pub(in crate::ui) struct Cast {
     scale: f32,
     /// The picture's logical size so far.
     picture: Size,
-    /// The tray's label as last shown.
+    /// The tray's label as last shown, and when (`LABEL_EVERY`).
     label: String,
+    labelled: Option<Instant>,
+    /// The pop-up sits inside the area (`popup_room`): it shows only once
+    /// the first frame is read, with the whole-screen tip until the page
+    /// grows past it (`first`: the area's height, physical px).
+    inside: bool,
+    first: u32,
 }
+
+/// The tray's label changes at most this often: it may be in the stream (the
+/// top bar, over a whole-screen area), and each change is a D-Bus round.
+const LABEL_EVERY: Duration = Duration::from_millis(500);
 
 impl Cast {
     /// The pop-up and the tray after a change (`preview`: the new picture).
     fn show(&mut self, height: u32, full: bool, lost: bool, preview: Option<Crop>) {
         let label = format!("● {}", long_capture::px(height));
-        if label != self.label {
+        // ponytail: the last change within LABEL_EVERY waits for the next
+        // update (the pop-up has the exact count); a timer if it matters
+        let due = self.labelled.is_none_or(|t| t.elapsed() >= LABEL_EVERY);
+        if label != self.label && due {
             crate::ui::platform::tray::capturing(Some(label.clone()));
-            self.label = label;
+            (self.label, self.labelled) = (label, Some(Instant::now()));
         }
         let Some(popup) = &self.popup else { return };
+        if self.inside && height == 0 {
+            return; // not in the first frame
+        }
+        let tip = self.inside && height <= self.first;
         let picture = preview.filter(|p| p.width > 0 && p.height > 0).map(|p| {
             let size = Size::new(p.width as f32, p.height as f32) * (1.0 / self.scale);
             (p, size)
@@ -698,13 +727,15 @@ impl Cast {
             self.picture = *size;
         }
         let Some((window, left)) =
-            long_capture::popup_at(self.area, self.work, self.picture, self.scale)
+            long_capture::popup_at(self.area, self.work, self.picture, tip, self.scale)
         else {
             return;
         };
         popup.frame(long_capture_popup::Frame {
             window: window + self.origin,
             left,
+            inside: self.inside,
+            tip,
             count: (height, full, lost),
             picture,
         });
@@ -723,10 +754,11 @@ fn physical(size: Size, scale: f32) -> (u32, u32) {
 }
 
 /// Long capture's thread: after `wait`, `region` grabbed and stitched
-/// (`scroll::by_hand`) until `stop`, then `Msg::Done`.
+/// (`scroll::by_hand`, `cover` its pop-up's corner) until `stop`, then `Msg::Done`.
 fn stitch(
     region: (i32, i32, u32, u32),
     preview: (u32, u32),
+    cover: (u32, u32),
     wait: Duration,
     stop: Arc<AtomicBool>,
 ) -> Task<Message> {
@@ -736,7 +768,7 @@ fn stitch(
             let _ = tx.unbounded_send(snip::Msg::Progress(update));
         };
         let max = config::current().snip.long_max;
-        let stitched = crate::capture::scroll::by_hand(region, preview, max, &stop, each);
+        let stitched = crate::capture::scroll::by_hand(region, preview, cover, max, &stop, each);
         let _ = tx.unbounded_send(snip::Msg::Done(stitched));
     })
     .map(Message::Snip)

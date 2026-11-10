@@ -101,17 +101,21 @@ fn offered(wayland: bool, can_stream: impl FnOnce() -> bool) -> bool {
 
 /// Grabs `region` (physical desktop px: x, y, width, height) while the user
 /// scrolls, until `stop` or `max` px tall; `each` gets every change, with a
-/// `preview` of the newest rows at most that size (physical px). Blocking: run
-/// it on a thread.
+/// `preview` of the newest rows at most that size (physical px); `cover`: our
+/// own pop-up's corner over the area's top right after the first frame
+/// (`Stitcher::cover`; zero: none). Blocking: run it on a thread.
 /// The image gathered so far is returned also when a later grab fails.
 pub fn by_hand(
     region: (i32, i32, u32, u32),
     preview: (u32, u32),
+    cover: (u32, u32),
     max: u32,
     stop: &AtomicBool,
     each: impl FnMut(Update),
 ) -> Result<Crop, String> {
-    let mut st = Stitcher::new(region.2, region.3).limit(max);
+    let mut st = Stitcher::new(region.2, region.3)
+        .limit(max)
+        .cover(cover.0, cover.1);
     let started = Instant::now();
     let source = std::cell::RefCell::new(Source::open(region));
     // (unhooked when it goes, as this returns: what it held is replayed)

@@ -30,6 +30,8 @@ pub const ARG: &str = "long-capture-popup";
 
 /// How long the pop-up shows how the capture ended ("Copied") before it goes.
 const END_HOLD: Duration = Duration::from_millis(1500);
+/// The window's shape is set again this long after it opens (`Event::Reshape`).
+const RESHAPE_AFTER: Duration = Duration::from_millis(300);
 /// The longest wait for the helper to go (`Popup::close`).
 const CLOSE_WAIT: Duration = Duration::from_millis(500);
 /// The largest picture a frame may carry (the preview is at most ~280 px wide).
@@ -48,8 +50,12 @@ pub enum Msg {
 #[derive(Debug, Clone)]
 pub struct Frame {
     pub window: Rectangle,
-    /// Left of the area: its content against its right edge.
+    /// Left of the area (or inside it): its content against its right edge.
     pub left: bool,
+    /// Inside the area (an area with no room beside it): one row against
+    /// its corner, with the whole-screen tip (`long_capture::popup_view`).
+    pub inside: bool,
+    pub tip: bool,
     /// The count: px so far, the limit reached, the page jumped.
     pub count: (u32, bool, bool),
     /// The picture so far (its px) and its logical size; none before the first.
@@ -69,8 +75,16 @@ impl Msg {
                     None => (0, 0, 0.0, 0.0, &[][..]),
                 };
                 let mut out = format!(
-                    "frame {} {} {} {} {} {height} {} {} {pw} {ph} {lw} {lh}\n",
-                    r.x, r.y, r.width, r.height, f.left as u8, full as u8, lost as u8
+                    "frame {} {} {} {} {} {} {} {height} {} {} {pw} {ph} {lw} {lh}\n",
+                    r.x,
+                    r.y,
+                    r.width,
+                    r.height,
+                    f.left as u8,
+                    f.inside as u8,
+                    f.tip as u8,
+                    full as u8,
+                    lost as u8
                 )
                 .into_bytes();
                 out.extend_from_slice(rgba);
@@ -93,6 +107,8 @@ impl Msg {
         let mut f = || words.next()?.parse::<f32>().ok();
         let window = Rectangle::new(Point::new(f()?, f()?), Size::new(f()?, f()?));
         let left = f()? != 0.0;
+        let inside = f()? != 0.0;
+        let tip = f()? != 0.0;
         let count = (f()? as u32, f()? != 0.0, f()? != 0.0);
         let (pw, ph) = (f()? as u32, f()? as u32);
         let shown = Size::new(f()?, f()?);
@@ -114,6 +130,8 @@ impl Msg {
         Some(Msg::Frame(Frame {
             window,
             left,
+            inside,
+            tip,
             count,
             picture,
         }))
@@ -267,6 +285,8 @@ enum Event {
     In(Option<Msg>),
     Click(Finish),
     OsTheme(iced::theme::Mode),
+    /// The shape again, a moment after the window opened (`frame`).
+    Reshape,
     Quit,
 }
 
@@ -274,6 +294,8 @@ enum Event {
 struct Helper {
     window: Option<(window::Id, Rectangle)>,
     left: bool,
+    inside: bool,
+    tip: bool,
     count: (u32, bool, bool),
     picture: Option<(image::Handle, Size)>,
     end: Option<String>,
@@ -317,6 +339,20 @@ impl Helper {
                 Task::none()
             }
             Event::Click(_) => Task::none(),
+            Event::Reshape => match self.window {
+                Some((id, r)) => {
+                    let picture = self.picture.as_ref().map_or(Size::ZERO, |(_, s)| *s);
+                    let parts = long_capture::popup_parts(
+                        r.size(),
+                        picture,
+                        self.left,
+                        self.tip,
+                        self.inside,
+                    );
+                    platform::popup_shape(id, parts, 1.0)
+                }
+                None => Task::none(),
+            },
             Event::OsTheme(mode) => {
                 super::theme::set_os(mode);
                 Task::none()
@@ -326,12 +362,12 @@ impl Helper {
 
     /// Shows `f`: opens the window the first time, then follows its place.
     fn frame(&mut self, f: Frame) -> Task<Event> {
-        (self.left, self.count) = (f.left, f.count);
+        (self.left, self.inside, self.tip, self.count) = (f.left, f.inside, f.tip, f.count);
         if let Some((c, size)) = f.picture {
             self.picture = Some((image::Handle::from_rgba(c.width, c.height, c.rgba), size));
         }
         let picture = self.picture.as_ref().map_or(Size::ZERO, |(_, s)| *s);
-        let parts = long_capture::popup_parts(f.window.size(), picture, f.left);
+        let parts = long_capture::popup_parts(f.window.size(), picture, f.left, f.tip, f.inside);
         // ponytail: X11 at scale 1 (XWayland on GNOME without HiDPI scaling);
         // fractional / HiDPI XWayland not checked (W39)
         let shape = move |id| platform::popup_shape(id, parts.clone(), 1.0);
@@ -343,7 +379,14 @@ impl Helper {
                     ..window::Settings::default()
                 });
                 self.window = Some((id, f.window));
-                open.then(shape)
+                // the shape set as it opens didn't hold on GNOME 42 (W46: a
+                // first frame with a picture and the tip showed a black box
+                // beside them until the next frame); set again a moment later
+                let again = background(|tx| {
+                    std::thread::sleep(RESHAPE_AFTER);
+                    let _ = tx.unbounded_send(Event::Reshape);
+                });
+                Task::batch([open.then(shape), again])
             }
             Some((id, was)) => {
                 self.window = Some((id, f.window));
@@ -361,8 +404,17 @@ impl Helper {
 
     fn view(&self, _: window::Id) -> Element<'_, Event> {
         let picture = self.picture.as_ref().map(|(h, s)| (h, *s));
-        long_capture::popup_view(picture, self.count, self.end.as_deref(), self.left, false)
-            .map(Event::Click)
+        let tip = self.tip && self.end.is_none();
+        long_capture::popup_view(
+            picture,
+            self.count,
+            self.end.as_deref(),
+            self.left,
+            tip,
+            self.inside,
+            false,
+        )
+        .map(Event::Click)
     }
 }
 
@@ -406,6 +458,8 @@ pub(in crate::ui) mod tests {
         let frame = Msg::Frame(Frame {
             window: Rectangle::new(Point::new(812.0, 140.0), Size::new(174.0, 420.0)),
             left: true,
+            inside: true,
+            tip: true,
             count: (3240, false, true),
             picture: Some((
                 Crop {
@@ -419,6 +473,8 @@ pub(in crate::ui) mod tests {
         let none = Msg::Frame(Frame {
             window: Rectangle::new(Point::new(1.0, 2.0), Size::new(3.0, 4.0)),
             left: false,
+            inside: false,
+            tip: false,
             count: (0, false, false),
             picture: None,
         });

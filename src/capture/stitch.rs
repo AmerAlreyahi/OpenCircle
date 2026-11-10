@@ -72,8 +72,10 @@ fn scrollbar_strip(w: usize) -> usize {
     (w / 40).clamp(6, 24).min(w / 4)
 }
 
-fn rows(rgba: &[u8], w: usize, h: usize) -> Rows {
-    let bins = ((w - scrollbar_strip(w)) / BIN_PX).max(1).min(w);
+/// `strip`: px at the right left out (at least the scrollbar's, `scrollbar_strip`).
+fn rows(rgba: &[u8], w: usize, h: usize, strip: usize) -> Rows {
+    let strip = strip.max(scrollbar_strip(w)).min(w.saturating_sub(BIN_PX));
+    let bins = ((w - strip) / BIN_PX).max(1).min(w);
     let px = (bins * BIN_PX).min(w);
     let n = bins * 3;
     let (mut sig, mut info) = (Vec::with_capacity(n * h), Vec::with_capacity(h));
@@ -247,14 +249,26 @@ fn offset(
     // Every 16th row first, to try the offsets best first: the full pass then
     // cuts the others short. Stable sort: on a tie the first of `ds` wins
     // (0, "did not move", then down over up).
+    // An offset's sample stops once it is past the lowest so far (`floor`):
+    // only the order needs it, and the lowest ones keep their exact cost (a
+    // whole-screen frame has ~1,400 offsets of 480 bins a row: W46, 2026-11-10).
+    let mut floor = u64::MAX;
     let mut order: Vec<(u64, isize)> = (ds.iter().copied())
         .filter_map(|d| {
             let rows = overlap(d);
-            (rows.len() >= need).then(|| {
-                let sample = rows.iter().step_by(16);
-                let (c, n) = sample.fold((0, 0), |(c, n), &y| (c + cost(d, y), n + 1));
-                (c * 1000 / n, d)
-            })
+            if rows.len() < need {
+                return None;
+            }
+            let n = rows.len().div_ceil(16) as u64;
+            let mut c = 0;
+            for &y in rows.iter().step_by(16) {
+                c += cost(d, y);
+                if c * 1000 > floor.saturating_mul(n) {
+                    return Some(((c * 1000 / n).max(floor + 1), d));
+                }
+            }
+            floor = floor.min(c * 1000 / n);
+            Some((c * 1000 / n, d))
         })
         .collect();
     order.sort_by_key(|&(c, _)| c);
@@ -567,6 +581,9 @@ pub struct Stitcher {
     preview: Option<Preview>,
     /// What the last `push` decided.
     pub step: Step,
+    /// Our own pop-up's corner at the frames' top right, (width, rows), in
+    /// every frame after the first (`cover`).
+    cover: (usize, usize),
 }
 
 impl Stitcher {
@@ -585,7 +602,18 @@ impl Stitcher {
             max: MAX_HEIGHT,
             preview: None,
             step: Step::default(),
+            cover: (0, 0),
         }
+    }
+
+    /// Every frame after the first has our own pop-up in its top-right
+    /// corner, `width` x `rows` (Wayland, an area with no room beside it:
+    /// the stream holds what the screen shows). Those columns are left out
+    /// of matching, as the scrollbar's are, and no row under it is added: a
+    /// step too big for the rows below it is rejected (scroll back a little).
+    pub fn cover(mut self, width: u32, rows: u32) -> Self {
+        self.cover = (width as usize, (rows as usize).min(self.h));
+        self
     }
 
     /// Stops growing at `max` px (at most `MAX_HEIGHT`; Settings > Snip).
@@ -623,7 +651,7 @@ impl Stitcher {
         if self.w == 0 || self.h == 0 || rgba.len() != stride * self.h {
             return Push::Rejected;
         }
-        let rows = rows(rgba, self.w, self.h);
+        let rows = rows(rgba, self.w, self.h, self.cover.0);
         let Some(prev) = &self.prev else {
             self.page = rgba.to_vec();
             self.sigs = rows.clone();
@@ -713,7 +741,9 @@ impl Stitcher {
             (self.at, self.prev) = (to, Some(rows));
             return Push::Moved;
         }
-        if anywhere && end as isize - start > max_d || self.is_full() {
+        // (the rows from `start` on are new: none may be under the pop-up)
+        let covered = self.cover.0 > 0 && start < self.cover.1 as isize;
+        if anywhere && end as isize - start > max_d || self.is_full() || covered {
             // (found anywhere, far past the end on a few rows: a lookalike)
             return Push::Rejected;
         }
@@ -735,7 +765,8 @@ impl Stitcher {
         let from = (self.h.saturating_sub((self.h / 2).max(self.h / 4 + grow)))
             .min(start)
             .min(end)
-            .max(top);
+            .max(top)
+            .max(self.cover.1.min(end));
         let keep = (to + from as isize) as usize;
         self.page.truncate(keep * stride);
         self.sigs.truncate(keep);
@@ -1311,6 +1342,45 @@ mod tests {
                 _ => r.range(1, 120) as usize,
             })
             .collect()
+    }
+
+    /// Wayland, an area that fills the screen: our pop-up sits in the
+    /// frames' top-right corner from the second frame on, its picture
+    /// changing every frame. Its corner is left out of matching and never
+    /// stitched in: the page comes out exact; a step too big for the rows
+    /// under the pop-up is rejected, not filled with the pop-up.
+    #[test]
+    fn our_pop_up_in_the_corner_is_never_matched_nor_stitched() {
+        let (cw, ch) = (220, 300);
+        let popup = |f: &mut Img, i: u64| {
+            let mut r = Rng::new(100 + i);
+            for y in (0..ch).step_by(6) {
+                let c = [r.range(0, 256) as u8, r.range(0, 256) as u8, 40];
+                f.fill(W - cw, y, cw, 6, c);
+            }
+        };
+        let run = |rig: &Rig, steps: &[usize], cover: bool| {
+            let (mut fr, last) = frames(rig, steps);
+            for (i, f) in fr.iter_mut().enumerate().skip(1) {
+                popup(f, i as u64);
+            }
+            let mut st = Stitcher::new(W as u32, VH as u32);
+            if cover {
+                st = st.cover(cw as u32, ch as u32);
+            }
+            let pushes: Vec<Push> = fr.iter().map(|f| st.push(&f.px)).collect();
+            (st.finish(), rig.truth(last), pushes)
+        };
+        for seed in 1..=3 {
+            let rig = Rig::new(W, 6000, VH, seed, 40);
+            let ((px, w, h), truth, _) = run(&rig, &by_hand(seed, 160), true);
+            assert_eq!((w as usize, h as usize), (truth.w, truth.h), "seed {seed}");
+            assert!(px == truth.px, "seed {seed}: the pop-up got into the page");
+        }
+        // a jump nearly a screen down: its new rows reach under the pop-up
+        let rig = Rig::new(W, 6000, VH, 4, 40);
+        let (.., pushes) = run(&rig, &[400], true);
+        assert_eq!(pushes[1], Push::Rejected);
     }
 
     #[test]

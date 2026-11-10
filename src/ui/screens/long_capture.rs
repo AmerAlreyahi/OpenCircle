@@ -392,28 +392,144 @@ const NO_BAR: Rectangle = Rectangle {
     height: 0.0,
 };
 
-/// The biggest picture the pop-up shows (logical px): `layout`'s room beside
-/// the area less the panel under it; none where both don't fit.
-pub fn popup_room(area: Rectangle, screen: Size, scale: f32) -> Option<Size> {
-    let room = layout(area, screen, NO_BAR, scale)?;
-    let height = (room.height - 2.0 - CHIP_GAP - POPUP_PANEL.height).floor();
-    (height >= MIN_H).then(|| Size::new(room.width - 2.0, height))
+/// Where no side of the area has room (an area that fills the screen; a
+/// click in Snip takes the screen on Wayland): the pop-up sits inside the
+/// area against its top-right corner (owner, 2026-11-10), in one row as
+/// tall as its panel: tip, picture, panel (`inside_items`). The stream then
+/// holds it: the first frame is read before it shows, and the stitcher
+/// leaves its corner out (`popup_cover`). Only the area's top `GAP` + panel
+/// rows are under it (mostly the browser's own bars and the page's header),
+/// so the new rows of a page scrolling down never come from under it (a
+/// taller pop-up there made Reddit's bigger steps "Scroll back": W46's VM).
+/// The biggest picture the pop-up shows (logical px) and whether it sits
+/// inside the area: `layout`'s room beside the area less the panel under
+/// it, else a small picture beside the panel in the area's corner; none
+/// where neither fits.
+pub fn popup_room(area: Rectangle, screen: Size, scale: f32) -> Option<(Size, bool)> {
+    if let Some(room) = layout(area, screen, NO_BAR, scale) {
+        let height = (room.height - 2.0 - CHIP_GAP - POPUP_PANEL.height).floor();
+        let beside = Size::new(room.width - 2.0, height);
+        if height >= MIN_H && popup_window(area, screen, beside, false, false, scale).is_some() {
+            return Some((beside, false));
+        }
+    }
+    let small = Size::new(SMALL_W, POPUP_PANEL.height - 2.0);
+    popup_window(area, screen, small, true, true, scale).map(|_| (small, true))
+}
+
+/// The tip beside the pop-up while a whole-screen capture hasn't scrolled
+/// yet (`popup_view`).
+fn tip(rtl: bool) -> [key_hint::Group<'static>; 1] {
+    match rtl {
+        true => [(None, "نصيحة: اسحب الجزء الذي يتمرّر فقط لصفحة أنظف")],
+        false => [(
+            None,
+            "Tip: drag just the part that scrolls for a cleaner page",
+        )],
+    }
+}
+
+/// The pop-up's corner over the area when it sits inside (`popup_room`):
+/// (width, rows) from the area's top-right, physical px at `scale`, as big
+/// as it ever gets (the widest picture and the tip); zero when it sits
+/// beside the area.
+pub fn popup_cover(area: Rectangle, screen: Size, scale: f32) -> (u32, u32) {
+    let Some((most, true)) = popup_room(area, screen, scale) else {
+        return (0, 0);
+    };
+    let Some((r, _)) = popup_window(area, screen, most, true, true, scale) else {
+        return (0, 0);
+    };
+    let px = |v: f32| (v * scale).ceil() as u32;
+    (px(area.x + area.width - r.x), px(r.y + r.height - area.y))
 }
 
 /// The pop-up's window (logical px on the area's screen `screen`) for a
-/// `picture` that big so far (zero before the first frame), and whether it
-/// is left of the area (its content then against its right edge): where
-/// `layout` puts the picture, never over the area or off the screen; none
-/// where it doesn't fit.
+/// `picture` that big so far (zero before the first frame), with the tip
+/// (`tip`, inside the area only), and whether its content is against its
+/// right edge (left of the area, or inside it): beside the area where
+/// `layout` puts the picture, never over it or off the screen, else in the
+/// area's top-right corner (`popup_room`); none where it doesn't fit.
 pub fn popup_at(
     area: Rectangle,
     screen: Size,
     picture: Size,
+    tip: bool,
     scale: f32,
 ) -> Option<(Rectangle, bool)> {
-    popup_room(area, screen, scale)?;
-    let room = layout(area, screen, NO_BAR, scale)?;
-    let left = room.x < area.x;
+    let (_, inside) = popup_room(area, screen, scale)?;
+    popup_window(area, screen, picture, tip, inside, scale)
+}
+
+fn popup_window(
+    area: Rectangle,
+    screen: Size,
+    picture: Size,
+    tip: bool,
+    inside: bool,
+    scale: f32,
+) -> Option<(Rectangle, bool)> {
+    let size = popup_size(picture, tip, inside);
+    let (x, y, left) = match inside {
+        true => (area.x + area.width - GAP - size.width, area.y + GAP, true),
+        false => {
+            let room = layout(area, screen, NO_BAR, scale)?;
+            let left = room.x < area.x;
+            let x = match left {
+                true => room.x + room.width - size.width,
+                false => room.x,
+            };
+            (x, room.y, left)
+        }
+    };
+    let r = Rectangle::new(
+        Point::new(x.floor(), y.round()),
+        Size::new(size.width.ceil(), size.height.ceil()),
+    );
+    let on = r.x >= 0.0 && r.x + r.width <= screen.width && r.y + r.height <= screen.height;
+    let fits = match inside {
+        true => r.x >= area.x && r.y + r.height <= area.y + area.height,
+        false => !r.intersects(&area),
+    };
+    (on && fits).then_some((r, left))
+}
+
+/// Inside the area (`popup_room`): the pop-up's parts in a `width` wide
+/// window, each with its corner radius: the picture with its edge (once
+/// there is one) and the panel in one row against the right edge, the tip
+/// (while `tip`) under them. Columns left out cost the stitcher evidence on
+/// every row, rows only at the top: the tip goes under, not beside.
+fn inside_parts(width: f32, picture: Size, tip: bool) -> Vec<(Rectangle, f32)> {
+    use crate::ui::kit::tokens::radius;
+    let panel = Rectangle::new(Point::new(width - POPUP_PANEL.width, 0.0), POPUP_PANEL);
+    let mut parts = vec![(panel, radius::DROPDOWN)];
+    if picture.height > 0.0 {
+        let framed = Size::new(picture.width + 2.0, picture.height + 2.0);
+        let at = Point::new(panel.x - CHIP_GAP - framed.width, 0.0);
+        parts.push((Rectangle::new(at, framed), 0.0));
+    }
+    if tip {
+        let pill = Size::new(key_hint::width(&self::tip(false)), key_hint::HEIGHT);
+        let at = Point::new(width - pill.width, POPUP_PANEL.height + CHIP_GAP);
+        parts.push((Rectangle::new(at, pill), radius::FULL));
+    }
+    parts
+}
+
+/// The pop-up's size: beside the area the picture with its edge (once there
+/// is one) over the panel; inside it `inside_parts`.
+fn popup_size(picture: Size, tip: bool, inside: bool) -> Size {
+    if inside {
+        let row = match picture.height > 0.0 {
+            true => picture.width + 2.0 + CHIP_GAP + POPUP_PANEL.width,
+            false => POPUP_PANEL.width,
+        };
+        let parts = inside_parts(row, picture, tip);
+        let (left, bottom) = (parts.iter()).fold((0.0f32, 0.0f32), |(l, b), (r, _)| {
+            (l.min(r.x), b.max(r.y + r.height))
+        });
+        return Size::new(row - left, bottom);
+    }
     let shown = picture.height > 0.0;
     let width = match shown {
         true => (picture.width + 2.0).max(POPUP_PANEL.width),
@@ -423,22 +539,23 @@ pub fn popup_at(
         true => picture.height + 2.0 + CHIP_GAP,
         false => 0.0,
     } + POPUP_PANEL.height;
-    let x = match left {
-        true => room.x + room.width - width,
-        false => room.x,
-    };
-    let r = Rectangle::new(
-        Point::new(x.floor(), room.y.round()),
-        Size::new(width.ceil(), height.ceil()),
-    );
-    let inside = r.x >= 0.0 && r.x + r.width <= screen.width && r.y + r.height <= screen.height;
-    (inside && !r.intersects(&area)).then_some((r, left))
+    Size::new(width, height)
 }
 
 /// What of the pop-up's `window` (its size) is drawn, in its own px: the
-/// picture with its edge and the panel (with its corner radius); the rest is
-/// cut away (`windows::popup_shape`), so no box shows beside a narrow picture.
-pub fn popup_parts(window: Size, picture: Size, left: bool) -> Vec<(Rectangle, f32)> {
+/// picture with its edge, the panel (with its corner radius) and, inside the
+/// area, the tip pill (`inside_parts`); the rest is cut away
+/// (`windows::popup_shape`), so no box shows beside a narrow picture.
+pub fn popup_parts(
+    window: Size,
+    picture: Size,
+    left: bool,
+    tip: bool,
+    inside: bool,
+) -> Vec<(Rectangle, f32)> {
+    if inside {
+        return inside_parts(window.width, picture, tip);
+    }
     let against = |w: f32| match left {
         true => window.width - w,
         false => 0.0,
@@ -466,6 +583,8 @@ pub fn popup_view<'a>(
     (height, full, lost): (u32, bool, bool),
     end: Option<&str>,
     left: bool,
+    tip: bool,
+    inside: bool,
     rtl: bool,
 ) -> Element<'a, Finish> {
     use crate::ui::kit::button::{self, Kind};
@@ -475,24 +594,18 @@ pub fn popup_view<'a>(
     use crate::ui::kit::tokens::{Role, radius, space};
     use crate::ui::screens::snip_toolbar::toolbar::{COPY, SAVE};
     use iced::widget::{Space, column, row};
-    let mut parts = column![].width(Fill).align_x(match left {
-        true => iced::alignment::Horizontal::Right,
-        false => iced::alignment::Horizontal::Left,
-    });
-    if let Some((handle, size)) = picture {
+    let picture = picture.map(|(handle, size)| {
         let shown = image(handle.clone())
             .width(size.width)
             .height(size.height)
             .filter_method(image::FilterMethod::Nearest);
         let framed = Size::new(size.width + 2.0, size.height + 2.0);
         let edge = Edge(Rectangle::new(Point::new(1.0, 1.0), size));
-        parts = parts
-            .push(stack![
-                container(shown).padding(PICTURE_EDGE),
-                draw(edge).width(framed.width).height(framed.height),
-            ])
-            .push(Space::new().height(CHIP_GAP));
-    }
+        stack![
+            container(shown).padding(PICTURE_EDGE),
+            draw(edge).width(framed.width).height(framed.height),
+        ]
+    });
     let top = match end {
         Some(end) => chip::readout(end.to_string(), false, None),
         None => count(height, full, lost, rtl),
@@ -515,6 +628,28 @@ pub fn popup_view<'a>(
         .padding(PANEL_PAD)
         .width(POPUP_PANEL.width)
         .height(POPUP_PANEL.height);
+    if inside {
+        // the picture and the panel in a row, the tip under (`inside_parts`)
+        let mut top = row![].spacing(CHIP_GAP);
+        if let Some(picture) = picture {
+            top = top.push(picture);
+        }
+        let mut parts = column![top.push(panel)]
+            .spacing(CHIP_GAP)
+            .width(Fill)
+            .align_x(iced::alignment::Horizontal::Right);
+        if tip {
+            parts = parts.push(key_hint(&self::tip(rtl), rtl));
+        }
+        return parts.into();
+    }
+    let mut parts = column![].width(Fill).align_x(match left {
+        true => iced::alignment::Horizontal::Right,
+        false => iced::alignment::Horizontal::Left,
+    });
+    if let Some(picture) = picture {
+        parts = parts.push(picture).push(Space::new().height(CHIP_GAP));
+    }
     parts.push(panel).into()
 }
 
@@ -938,11 +1073,11 @@ mod tests {
 
     /// Wayland's pop-up: where the picture would be, against the area's side,
     /// top-aligned, never over the area or off the screen; it widens to the
-    /// picture and grows down with it; none where no side has room.
+    /// picture and grows down with it.
     #[test]
     fn the_wayland_pop_up_sits_beside_the_area_never_over_it() {
         let left_area = rect(100.0, 80.0, 500.0, 400.0);
-        let (r, left) = popup_at(left_area, SCREEN, Size::ZERO, 1.0).expect("room");
+        let (r, left) = popup_at(left_area, SCREEN, Size::ZERO, false, 1.0).expect("room");
         assert_eq!((r.x, r.y, left), (612.0, 80.0, false), "right beside it");
         assert_eq!(
             r.size(),
@@ -950,28 +1085,75 @@ mod tests {
             "the panel alone before the first frame"
         );
         let wide = Size::new(260.0, 400.0);
-        let (r, _) = popup_at(left_area, SCREEN, wide, 1.0).unwrap();
+        let (r, _) = popup_at(left_area, SCREEN, wide, false, 1.0).unwrap();
         assert_eq!((r.x, r.width), (612.0, 262.0), "the picture and its edge");
         assert_eq!(r.height, 402.0 + CHIP_GAP + POPUP_PANEL.height);
         assert!(!r.intersects(&left_area) && r.x + r.width <= SCREEN.width);
         // an area on the right: the pop-up on its left, its edge GAP away
         let right_area = rect(700.0, 100.0, 500.0, 400.0);
-        let (r, left) = popup_at(right_area, SCREEN, Size::new(40.0, 300.0), 1.0).unwrap();
+        let (r, left) = popup_at(right_area, SCREEN, Size::new(40.0, 300.0), true, 1.0).unwrap();
         assert!(left && r.x + r.width == 700.0 - GAP, "{r:?}");
         assert_eq!(
             r.width, POPUP_PANEL.width,
-            "a narrow picture: the panel's width"
+            "a narrow picture: the panel's width, and no tip beside an area"
         );
         assert!(!r.intersects(&right_area));
         // the picture the pop-up asks for leaves the panel room under it
-        let most = popup_room(left_area, SCREEN, 1.0).unwrap();
-        let (r, _) = popup_at(left_area, SCREEN, most, 1.0).unwrap();
+        let (most, inside) = popup_room(left_area, SCREEN, 1.0).unwrap();
+        assert!(!inside);
+        let (r, _) = popup_at(left_area, SCREEN, most, false, 1.0).unwrap();
         assert!(r.y + r.height <= SCREEN.height, "{r:?}");
-        // an area filling the screen: no pop-up (it would be in the stream)
         assert_eq!(
-            popup_at(rect(0.0, 0.0, 1280.0, 700.0), SCREEN, Size::ZERO, 1.0),
-            None
+            popup_cover(left_area, SCREEN, 1.0),
+            (0, 0),
+            "nothing over the area"
         );
+    }
+
+    /// No side has room (an area that fills the screen, owner 2026-11-10: "no
+    /// actual effect", the pop-up was left out): the pop-up sits inside the
+    /// area against its top-right corner, small, with the tip under it until
+    /// the page grows; never below the top `INSIDE` share, which is what the
+    /// stitcher leaves out (`popup_cover`), at its biggest.
+    #[test]
+    fn with_no_room_beside_the_area_the_pop_up_sits_in_its_corner() {
+        let screen = Size::new(1918.0, 968.0);
+        let area = rect(0.0, 0.0, 1918.0, 968.0);
+        let (most, inside) = popup_room(area, screen, 1.0).expect("a pop-up, always");
+        assert!(
+            inside && most.width <= SMALL_W && most.height >= MIN_H,
+            "{most:?}"
+        );
+        // the picture and the panel in a row against the corner, the tip under
+        let (r, left) = popup_at(area, screen, Size::ZERO, true, 1.0).unwrap();
+        assert!(left, "its content against its right edge");
+        assert_eq!((r.x + r.width, r.y), (area.width - GAP, GAP), "{r:?}");
+        let tip_w = key_hint::width(&tip(false));
+        assert_eq!(r.width, tip_w.ceil().max(POPUP_PANEL.width));
+        assert_eq!(r.height, POPUP_PANEL.height + CHIP_GAP + key_hint::HEIGHT);
+        let (grown, _) = popup_at(area, screen, most, false, 1.0).unwrap();
+        assert_eq!(grown.width, most.width + 2.0 + CHIP_GAP + POPUP_PANEL.width);
+        assert_eq!(grown.height, POPUP_PANEL.height, "the picture is no taller");
+        let (both, _) = popup_at(area, screen, most, true, 1.0).unwrap();
+        // what the stitcher leaves out: the widest row, only the top rows
+        let (cw, ch) = popup_cover(area, screen, 1.0);
+        assert_eq!(
+            (cw, ch),
+            ((GAP + both.width).ceil() as u32, (GAP + both.height) as u32)
+        );
+        assert!(cw < 400 && ch < 200, "a small corner: {cw} x {ch}");
+        // HiDPI: the corner in physical px
+        assert_eq!(popup_cover(area, screen, 2.0), (2 * cw, 2 * ch));
+        // its parts: the panel, the picture left of it, the tip under them
+        let parts = popup_parts(both.size(), most, true, true, true);
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].0.x + POPUP_PANEL.width, both.width);
+        assert_eq!(parts[1].0.x + parts[1].0.width + CHIP_GAP, parts[0].0.x);
+        assert!(parts[1].0.x >= 0.0 && parts[2].0.x >= 0.0);
+        assert_eq!(parts[2].0.y, POPUP_PANEL.height + CHIP_GAP);
+        // an area too small for it even inside: none
+        let tiny = rect(0.0, 0.0, 300.0, 100.0);
+        assert_eq!(popup_room(tiny, Size::new(300.0, 100.0), 1.0), None);
     }
 
     /// Only the picture (with its edge) and the panel are kept of the window,
@@ -979,13 +1161,13 @@ mod tests {
     #[test]
     fn the_pop_up_is_cut_to_its_picture_and_panel() {
         let window = Size::new(POPUP_PANEL.width, 102.0 + CHIP_GAP + POPUP_PANEL.height);
-        let parts = popup_parts(window, Size::new(40.0, 100.0), true);
+        let parts = popup_parts(window, Size::new(40.0, 100.0), true, false, false);
         assert_eq!(parts.len(), 2);
         let (picture, panel) = (parts[0].0, parts[1].0);
         assert_eq!(picture, rect(window.width - 42.0, 0.0, 42.0, 102.0));
         assert_eq!(panel.position(), Point::new(0.0, 102.0 + CHIP_GAP));
         assert_eq!(parts[1].1, crate::ui::kit::tokens::radius::DROPDOWN);
-        let parts = popup_parts(POPUP_PANEL, Size::ZERO, false);
+        let parts = popup_parts(POPUP_PANEL, Size::ZERO, false, false, false);
         assert_eq!(parts, vec![(Rectangle::with_size(POPUP_PANEL), parts[0].1)]);
     }
 }
