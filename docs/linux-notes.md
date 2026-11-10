@@ -59,12 +59,17 @@ confirmed.
 Snip's default key is `Alt+A`, which GNOME leaves alone. GNOME's shell takes
 `Print Screen` before any app's global shortcut, so if you give Snip that key it
 does nothing until you free it with `gsettings`: see
-[Shortcuts](shortcuts.md#defaults).
+[Shortcuts](shortcuts.md#defaults). You can also bind `Print Screen` to
+`opencircle run snip` in GNOME's or KDE's own shortcut settings (same page).
 
 ### Limits on Wayland
 
-- Popups (the Steps strip, toasts, pins) are square windows: Wayland cannot cut a
-  window to a rounded shape.
+- Popups that belong to the open overlay (Snip's toolbar, its menus and size
+  readouts, hints, the Copied pill after Copy or Save) are drawn inside it, with
+  rounded corners. Windows that outlive the overlay (the Steps strip, pins, the
+  update pills) are square: Wayland cannot cut a window to a rounded shape.
+- The Snip timer (Settings > Snip) shows no countdown on Wayland: the frozen
+  screen closes, and the capture comes when the time is up.
 - Circle to Search takes about half a second to appear (the portal screenshot),
   and reading text uses the downloaded reader, so a full page can take around ten
   seconds to become selectable.

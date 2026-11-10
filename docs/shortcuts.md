@@ -54,6 +54,21 @@ gsettings set org.gnome.shell.keybindings show-screenshot-ui "[]"   # Print Scre
 
 OpenCircle prints this when it starts under GNOME.
 
+**Print Screen for Snip through your desktop.** Where the desktop, not
+OpenCircle, owns the keys (Wayland without the shortcut portal, or when you
+prefer it), bind `Print Screen` to the command `opencircle run snip`:
+
+- **GNOME:** free the key first (the `gsettings` line above: GNOME's own
+  screenshot tool holds `Print Screen`), then Settings → Keyboard → View and
+  Customize Shortcuts → Custom Shortcuts → **+**. Name "OpenCircle Snip",
+  command `opencircle run snip`, shortcut `Print Screen`.
+- **KDE Plasma:** System Settings → Keyboard → Shortcuts → Spectacle: clear its
+  `Print` key. Then **Add New → Command or Script**, command
+  `opencircle run snip`, and assign `Print`.
+
+Use the full path if `opencircle` is not on your `PATH` (an AppImage's path).
+Snip then opens as it does from `Alt+A`.
+
 While the overlay is open: `Esc` closes, `Enter` runs the default action
 (Search unless you changed it in **Settings → General**), and the action keys
 are `L` Search in browser, `A` Ask AI, `T` Copy text, `E` Snip, `R` Translate.

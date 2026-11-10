@@ -220,7 +220,8 @@ impl App {
     /// in its own window beside the selection (else the bar), so the screen is
     /// the user's again at once and the pill outlives the overlay. `work`
     /// (encoding, the clipboard, a file) runs on a thread: the pill comes when
-    /// it is done (#123).
+    /// it is done (#123). Wayland: the overlay stays until then and draws the
+    /// pill itself (`toast_for`).
     pub(in crate::ui) fn confirm_after(
         &mut self,
         work: impl FnOnce() -> Result<String, String> + Send + 'static,
@@ -230,6 +231,9 @@ impl App {
             let _ = tx.unbounded_send(work());
         })
         .map(move |result| Message::Confirm(place, result));
+        if !self.can_hide {
+            return done;
+        }
         Task::batch([self.close(), done])
     }
 
@@ -278,6 +282,32 @@ impl App {
         let size = windows::toast_size(&text);
         let (origin, screen, scale, _) = place;
         let inset = taskbar_inset(origin, screen, scale);
+        // Wayland can't cut a window to the pill (it would be a square box):
+        // the overlay, still up, draws it at its place, then closes; Snip's
+        // toolbar is still there too, so it goes beside both (beside the
+        // toolbar alone when both fill the screen). On another screen's
+        // window, or once closed, the window as elsewhere.
+        // ponytail: the starting screen's window only; the others' could draw it too.
+        if !self.can_hide && self.o.frame.is_some() && origin == self.o.origin {
+            let toolbar = (self.o.edit.as_ref().is_some_and(|e| e.is_open()))
+                .then(|| Rectangle::new(self.bar_at(), self.dock_size()));
+            let local = |near| {
+                let at = pill_at((origin, screen, scale, near), size, inset);
+                let px = |v: i32| v as f32 / scale;
+                Point::new(px(at.origin.0), px(at.origin.1)) - (origin - Point::ORIGIN)
+            };
+            let mut at = local(match (place.3, toolbar) {
+                (Some(near), Some(toolbar)) => Some(near.union(&toolbar)),
+                (near, toolbar) => near.or(toolbar),
+            });
+            if let Some(toolbar) = toolbar
+                && Rectangle::new(at, size).intersects(&toolbar)
+            {
+                at = local(Some(toolbar));
+            }
+            self.o.result = Some((text, ok, at));
+            return Self::hold_then_close();
+        }
         let at = pill_at(place, size, inset);
         self.windows
             .toast(&text, ok, Some(at), windows::TOAST_MS)

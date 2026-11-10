@@ -477,6 +477,11 @@ impl App {
     /// Shows `message` over the frame for a moment, then closes the overlay.
     pub(in crate::ui) fn toast_then_close(&mut self, message: &'static str) -> Task<Message> {
         self.o.toast = Some(message);
+        Self::hold_then_close()
+    }
+
+    /// `ToastDone` once a pill over the frame has been read (it then closes).
+    pub(in crate::ui) fn hold_then_close() -> Task<Message> {
         background(|tx| {
             std::thread::sleep(Duration::from_millis(900));
             let _ = tx.unbounded_send(());

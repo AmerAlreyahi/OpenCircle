@@ -1,6 +1,6 @@
 //! Message dispatch: every message to its handler.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Size, Task, Vector};
@@ -260,11 +260,7 @@ impl App {
                         "No text copied"
                     }
                 });
-                background(|tx| {
-                    std::thread::sleep(Duration::from_millis(900));
-                    let _ = tx.unbounded_send(());
-                })
-                .map(|()| Message::ToastDone)
+                Self::hold_then_close()
             }
             Message::TextRead(_) => Task::none(), // closed meanwhile
             Message::Scanned(area, scan) => {
@@ -275,7 +271,7 @@ impl App {
             }
             Message::Qr(act) => self.on_qr(act),
             Message::OpenEntity(entity) => self.open_entity(entity),
-            Message::ToastDone if self.o.toast.is_some() => self.close(),
+            Message::ToastDone if self.o.toast.is_some() || self.o.result.is_some() => self.close(),
             Message::ToastDone => Task::none(),
             Message::AiChat(id, msg) => self.on_ai_chat(id, msg),
             Message::ChatMoved(id, at) => self.chat_moved(id, at),

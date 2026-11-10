@@ -15,6 +15,7 @@ use crate::ui::overlay;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::screens::snip_toolbar::canvas::ScreenMap;
+use crate::ui::screens::toast;
 use crate::ui::snip;
 
 use super::{
@@ -221,7 +222,7 @@ impl App {
                 if toolbar.is_none() {
                     layers = layers.push(self.morphing_bar(at));
                 }
-                return layers.into();
+                return layers.extend(self.pill_view()).into();
             }
             layers = layers.extend(edit.flat_view());
         }
@@ -357,7 +358,15 @@ impl App {
                 .padding(24);
             layers = layers.push(iced::widget::pin(pill).position(room.position()));
         }
-        layers.into()
+        layers.extend(self.pill_view()).into()
+    }
+
+    /// Wayland: the Copy / Save pill drawn over the frame at its place, with its
+    /// rounded corners (no window there can be cut to it: `toast_for`).
+    fn pill_view(&self) -> Option<Element<'_, Message>> {
+        let (text, ok, at) = self.o.result.as_ref()?;
+        let pill = toast::view(text, (*ok).into(), toast::RADIUS);
+        Some(pin(pill).position(*at).into())
     }
 
     /// Snip: the box dragged so far (its stroke's span, image px), while drawing.

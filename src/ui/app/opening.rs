@@ -112,6 +112,9 @@ pub(in crate::ui) struct Opening {
     pub(in crate::ui) origin: Point,
     /// A short status over the frame (copy text).
     pub(in crate::ui) toast: Option<&'static str>,
+    /// Wayland: the Copy / Save pill over the frame (its text, done or not,
+    /// where), held a moment before the overlay closes (`App::toast_for`).
+    pub(in crate::ui) result: Option<(String, bool, Point)>,
     /// What the current selection holds (QR code, protected capture); `None` until scanned.
     pub(in crate::ui) scan: Option<qr::Scan>,
     /// Translate in place on this overlay, and its number.
@@ -236,6 +239,7 @@ impl Default for Opening {
             edit: None,
             origin: Point::ORIGIN,
             toast: None,
+            result: None,
             scan: None,
             translate: None,
             helper: None,

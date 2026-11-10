@@ -917,6 +917,61 @@ fn ctrl_c_and_ctrl_s_confirm_with_a_pill_and_failures_say_so() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #23: Wayland can't cut a window to a pill (it would be a square box): the
+/// overlay stays up and draws the Copied pill itself, rounded, beside the
+/// selection, then closes; where windows are cut (Windows, X11) the pill is
+/// its own window as before.
+#[test]
+fn on_wayland_the_copied_pill_is_drawn_in_the_overlay() {
+    let key = overlay::Event::Key {
+        letter: 'c',
+        ctrl: true,
+    };
+    let sel = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    for can_hide in [false, true] {
+        let mut app = open_app(800, 600, 1.0);
+        app.can_hide = can_hide;
+        app.select(sel);
+        let task = app.on_overlay(key);
+        run_task(&mut app, task);
+        if can_hide {
+            assert!(app.o.frame.is_none() && app.o.result.is_none());
+            assert_eq!(app.windows.toasts(), [("Copied".to_string(), true)]);
+            continue;
+        }
+        assert!(app.windows.toasts().is_empty(), "no window of its own");
+        let (text, ok, at) = app.o.result.clone().expect("the pill over the frame");
+        assert!(ok && text == "Copied" && app.o.frame.is_some());
+        // below the selection, centred on it
+        let size = windows::toast_size("Copied");
+        let want = Point::new(sel.center_x() - size.width / 2.0, 280.0 + TOAST_MARGIN);
+        assert!(at.distance(want) <= 1.0, "{at:?} != {want:?}");
+        assert!(overlay_texts(&app).contains(&"Copied".to_string()));
+        // read: the overlay goes with it
+        let _ = app.update(Message::ToastDone);
+        assert!(app.o.frame.is_none() && app.o.result.is_none());
+    }
+    // Snip's Copy: its toolbar is still drawn, so the pill goes clear of it
+    // too (and of the area, unless the area is the whole screen)
+    let whole = Rectangle::new(Point::new(2.0, 2.0), Size::new(796.0, 596.0));
+    for area in [sel, whole] {
+        let mut app = snipping(area);
+        app.can_hide = false;
+        app.select(area);
+        let _ = app.open_snip_toolbar();
+        let toolbar = Rectangle::new(app.bar_at(), app.dock_size());
+        let task = app.on_snip_toolbar(annotate::Message::Copy);
+        run_task(&mut app, task);
+        let (_, _, at) = app.o.result.clone().expect("the pill over the frame");
+        let pill = Rectangle::new(at, windows::toast_size("Copied"));
+        assert!(!pill.intersects(&toolbar), "{pill:?} over {toolbar:?}");
+        assert!(
+            area == whole || !pill.intersects(&area),
+            "{pill:?} {area:?}"
+        );
+    }
+}
+
 #[test]
 fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
     let shot = || {
