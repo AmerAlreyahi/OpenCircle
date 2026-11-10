@@ -377,12 +377,9 @@ impl Snip {
     }
 
     /// What a click at `p` can capture, smallest first: the controls of the
-    /// topmost window there that contain `p`, that window, the screen. Empty
-    /// without a window list (Wayland: free drags only).
+    /// topmost window there that contain `p`, that window, the screen. Without a
+    /// window list (Wayland) just the screen: a click takes it, like Enter.
     pub fn chain(&self, p: Point) -> Vec<Pick> {
-        if self.desktop.is_empty() {
-            return Vec::new();
-        }
         let top = self.windows.iter().find(|w| w.rect.contains(p));
         let mut chain: Vec<Pick> = match top {
             Some(w) => (self.controls.iter())
@@ -633,7 +630,7 @@ impl Snip {
         match self.kind {
             _ if !self.hinting => {}
             Kind::Region if self.desktop.is_empty() => {
-                let hint = "Drag an area (no window picking here) · Esc to close";
+                let hint = "Click for this screen or drag an area · Esc to close";
                 top = top.push(surface::hint(hint));
             }
             Kind::Region => {
@@ -1192,13 +1189,15 @@ mod tests {
         // Only Region mode outlines.
         let _ = s.switch(Kind::Full, SCREEN);
         assert!(s.outlined().is_none());
-        // Wayland (no window list): nothing to outline, a click takes nothing.
+        // Wayland (no window list): the screen is outlined, a click takes it.
         let mut w = Snip::new(Vec::new(), flat(SCREEN), false, None);
         w.hover(at);
-        assert!(w.outlined().is_none() && w.pick(None, at, SCREEN).is_none());
+        let screen = Rectangle::with_size(SCREEN);
+        assert_eq!(w.outlined().unwrap().rect, screen);
+        assert_eq!(w.pick(None, at, SCREEN), Some(Next::Edit(screen)));
         let texts = crate::ui::kit::testing::shot::texts(w.view());
         assert!(
-            texts.iter().any(|t| t.contains("no window picking")),
+            texts.iter().any(|t| t.contains("Click for this screen")),
             "{texts:?}"
         );
     }
@@ -1268,6 +1267,18 @@ mod tests {
         let texts = crate::ui::kit::testing::shot::texts(guides.unwrap());
         let size = format!("{} × {}", SCREEN.width, SCREEN.height);
         assert!(texts.iter().any(|t| t.contains(&size)), "{texts:?}");
+    }
+
+    /// Wayland gives no window list: a click without a drag takes the screen it is on.
+    #[test]
+    fn without_a_window_list_a_click_takes_the_whole_screen() {
+        let mut s = Snip::new(Vec::new(), flat(SCREEN), true, None);
+        let p = Point::new(300.0, 200.0);
+        s.hover(p);
+        let screen = Rectangle::with_size(SCREEN);
+        assert_eq!(s.outlined().unwrap().label, "Screen");
+        assert_eq!(s.pick(None, p, SCREEN), Some(Next::Edit(screen)));
+        assert_eq!(s.pick(None, p, SCREEN), Some(s.full()));
     }
 
     #[test]
