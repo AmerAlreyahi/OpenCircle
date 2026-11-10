@@ -159,6 +159,9 @@ files = { "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.
 # on first start under Wayland (capture/portal.rs).
 [package.metadata.packager.appimage]
 excludedLibs = ["libwayland-client*"]
+# winit dlopens these on X11 (linuxdeploy only follows linked libs): a minimal system lacks them
+# and the app panicked at start (xkbcommon-dl).
+libs = ["libxkbcommon-x11.so*", "libxcb-xkb.so*"]
 files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.opencircle.app.metainfo.xml" }
 
 # .rpm: `cargo generate-rpm` after `cargo build --release`. Same libraries, Fedora names.

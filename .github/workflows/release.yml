@@ -203,6 +203,9 @@ jobs:
           test -x "$RUNNER_TEMP/squashfs-root/usr/bin/opencircle"
           if find "$RUNNER_TEMP/squashfs-root" -name 'libwebkit2gtk*' | grep -q .; then echo "::error::the AppImage bundles WebKitGTK"; exit 1; fi
           if find "$RUNNER_TEMP/squashfs-root" -name 'libwayland-client*' | grep -q .; then echo "::error::the AppImage bundles libwayland-client (the system's must be used)"; exit 1; fi
+          for lib in libxkbcommon-x11 libxcb-xkb; do
+            find "$RUNNER_TEMP/squashfs-root" -name "$lib.so*" | grep -q . || { echo "::error::the AppImage lacks $lib (X11 start panics without it)"; exit 1; }
+          done
           test -f "$RUNNER_TEMP/squashfs-root/usr/share/metainfo/com.opencircle.app.metainfo.xml"
           echo "bundled libraries: $(find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' | wc -l)"
           find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' -printf '%f\n' | sort | head -100
