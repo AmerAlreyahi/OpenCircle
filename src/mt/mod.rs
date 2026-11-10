@@ -1,5 +1,5 @@
 //! Offline translation: no key, no account, nothing leaves the PC. OPUS-MT
-//! (Helsinki-NLP's Marian transformer models; attribution in `NOTICE`) as int8
+//! (Helsinki-NLP's Marian transformer models; attribution in `docs/NOTICE.md`) as int8
 //! ONNX, greedy decoding on the ONNX Runtime that OCR already downloads.
 //! Like OCR it runs only in the helper process (`ocr::worker`), so ORT and
 //! the ~600 MB it peaks at never stay in the app: the app calls

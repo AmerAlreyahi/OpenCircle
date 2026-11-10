@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Release gate (RELEASING.md step 9): the previous version must update itself to the new one.
+  Release gate (docs/RELEASING.md step 9): the previous version must update itself to the new one.
 
 .DESCRIPTION
   Serves a folder of release assets (a downloaded DRAFT: gh release download v<ver> -D <dir>)

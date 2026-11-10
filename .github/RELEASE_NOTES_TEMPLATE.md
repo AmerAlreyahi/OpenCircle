@@ -16,4 +16,4 @@ Nothing leaves your PC unless you press an action that needs the internet. No te
 - 
 
 ## Thanks
-Full list in the app's About page and NOTICE.
+Full list in the app's About page and docs/NOTICE.md.

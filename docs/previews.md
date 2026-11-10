@@ -35,7 +35,7 @@ preview.
   (circle-1, text, snip-blur, snip-long); not bundled.
 
 Clips with third-party material are credited in Settings > About and in
-NOTICE (`pages::about::CLIP_CREDITS`): add a line there with any new clip.
+[NOTICE](NOTICE.md) (`pages::about::CLIP_CREDITS`): add a line there with any new clip.
 
 ## Making them
 

@@ -1,15 +1,17 @@
-OpenCircle is MIT-licensed (see LICENSE). Apart from a small built-in
+# Notices
+
+OpenCircle is MIT-licensed (see [LICENSE](../LICENSE.md)). Apart from a small built-in
 language detector (below), it ships no third-party models; the files below
 are downloaded on first use, after you agree, and are covered by their own
 licences.
 
-Offline translation
--------------------
+## Offline translation
+
 OPUS-MT models by Jörg Tiedemann and the Language Technology Research Group
 at the University of Helsinki (Helsinki-NLP), one per direction. Paper:
 Tiedemann and Thottingal, "OPUS-MT - Building open translation services for
 the World", EAMT 2020. ONNX export and int8 quantization: Xenova
-(Transformers.js), https://huggingface.co/Xenova/opus-mt-<pair> at the
+(Transformers.js), `https://huggingface.co/Xenova/opus-mt-<pair>` at the
 commit below. OpenCircle uses the encoders and tokenizer files unmodified.
 Every decoder (these and the five below) is changed by OpenCircle in one
 way: the output layer, built in both branches of the merged decoder, is
@@ -17,51 +19,52 @@ built once before them (scripts/lighten-mt-decoders.py; same weights, same
 translations, less memory); the changed decoders are downloaded from the
 OpenCircle-models release (models-v2).
 
-  Pair   Licence     Model (https://huggingface.co/...)   Xenova commit
-  en-ar  CC BY 4.0   Helsinki-NLP/opus-mt-en-ar           034a684356c1
-  en-fr  Apache-2.0  Helsinki-NLP/opus-mt-en-fr           28726206f808
-  en-es  Apache-2.0  Helsinki-NLP/opus-mt-en-es           4b002a4c7edd
-  en-de  CC BY 4.0   Helsinki-NLP/opus-mt-en-de           1ca130c44c4c
-  en-ru  Apache-2.0  Helsinki-NLP/opus-mt-en-ru           e050376e9601
-  en-zh  Apache-2.0  Helsinki-NLP/opus-mt-en-zh           046f55aec303
-  ar-en  Apache-2.0  Helsinki-NLP/opus-mt-ar-en           09c755686640
-  fr-en  Apache-2.0  Helsinki-NLP/opus-mt-fr-en           6b166a182780
-  zh-en  CC BY 4.0   Helsinki-NLP/opus-mt-zh-en           39d480d52a9e
-  ja-en  Apache-2.0  Helsinki-NLP/opus-mt-ja-en           1a906cfaaf7c
-  es-en  Apache-2.0  Helsinki-NLP/opus-mt-es-en           eadfd7c658a9
-  de-en  Apache-2.0  Helsinki-NLP/opus-mt-de-en           399dfd687067
-  ru-en  CC BY 4.0   Helsinki-NLP/opus-mt-ru-en           afe8c6c738ec
-  it-en  Apache-2.0  Helsinki-NLP/opus-mt-it-en           fd0b89b9c052
-  nl-en  Apache-2.0  Helsinki-NLP/opus-mt-nl-en           82c42d95d150
-  uk-en  Apache-2.0  Helsinki-NLP/opus-mt-uk-en           b2ad6afa424a
-  pl-en  Apache-2.0  Helsinki-NLP/opus-mt-pl-en           aeaf0e003b04
-  hi-en  Apache-2.0  Helsinki-NLP/opus-mt-hi-en           99853100ed9d
-  id-en  Apache-2.0  Helsinki-NLP/opus-mt-id-en           c38ef36c843b
-  vi-en  Apache-2.0  Helsinki-NLP/opus-mt-vi-en           541dfd72ec07
-  th-en  Apache-2.0  Helsinki-NLP/opus-mt-th-en           7f0406b972f7
-  ko-en  Apache-2.0  Helsinki-NLP/opus-mt-ko-en           d9fa1ac60082
-  en-it  Apache-2.0  Helsinki-NLP/opus-mt-en-it           075406e3c8c2
-  en-nl  Apache-2.0  Helsinki-NLP/opus-mt-en-nl           c3a0541231a7
-  en-uk  Apache-2.0  Helsinki-NLP/opus-mt-en-uk           e6ca58729298
-  en-hi  Apache-2.0  Helsinki-NLP/opus-mt-en-hi           7aad72006a15
-  en-id  Apache-2.0  Helsinki-NLP/opus-mt-en-id           b3b41f654c2f
-  en-vi  Apache-2.0  Helsinki-NLP/opus-mt-en-vi           30bcd461c0d7
-  de-es  Apache-2.0  Helsinki-NLP/opus-mt-de-es           d339419ee3bd
-  de-fr  Apache-2.0  Helsinki-NLP/opus-mt-de-fr           e783da03d247
-  es-de  Apache-2.0  Helsinki-NLP/opus-mt-es-de           7f493e4b81b6
-  es-fr  Apache-2.0  Helsinki-NLP/opus-mt-es-fr           3bef5f612825
-  es-it  Apache-2.0  Helsinki-NLP/opus-mt-es-it           596c67cda7cb
-  es-ru  Apache-2.0  Helsinki-NLP/opus-mt-es-ru           268ccd60bde3
-  fr-de  Apache-2.0  Helsinki-NLP/opus-mt-fr-de           7eea1996b448
-  fr-es  Apache-2.0  Helsinki-NLP/opus-mt-fr-es           962338be5103
-  fr-ru  Apache-2.0  Helsinki-NLP/opus-mt-fr-ru           c2ec732b045a
-  it-es  Apache-2.0  Helsinki-NLP/opus-mt-it-es           0eba27fe6da2
-  it-fr  Apache-2.0  Helsinki-NLP/opus-mt-it-fr           7843e3b7137d
-  ru-es  Apache-2.0  Helsinki-NLP/opus-mt-ru-es           9cb5fb9fae4d
-  ru-fr  Apache-2.0  Helsinki-NLP/opus-mt-ru-fr           c7275f468246
-  ru-uk  Apache-2.0  Helsinki-NLP/opus-mt-ru-uk           6d8a744ed6ea
-  uk-ru  Apache-2.0  Helsinki-NLP/opus-mt-uk-ru           cfb76ccd2077
-  nl-fr  Apache-2.0  Helsinki-NLP/opus-mt-nl-fr           6c8ebb68522f
+| Pair | Licence | Model | Xenova commit |
+|---|---|---|---|
+| en-ar | CC BY 4.0 | [Helsinki-NLP/opus-mt-en-ar](https://huggingface.co/Helsinki-NLP/opus-mt-en-ar) | 034a684356c1 |
+| en-fr | Apache-2.0 | [Helsinki-NLP/opus-mt-en-fr](https://huggingface.co/Helsinki-NLP/opus-mt-en-fr) | 28726206f808 |
+| en-es | Apache-2.0 | [Helsinki-NLP/opus-mt-en-es](https://huggingface.co/Helsinki-NLP/opus-mt-en-es) | 4b002a4c7edd |
+| en-de | CC BY 4.0 | [Helsinki-NLP/opus-mt-en-de](https://huggingface.co/Helsinki-NLP/opus-mt-en-de) | 1ca130c44c4c |
+| en-ru | Apache-2.0 | [Helsinki-NLP/opus-mt-en-ru](https://huggingface.co/Helsinki-NLP/opus-mt-en-ru) | e050376e9601 |
+| en-zh | Apache-2.0 | [Helsinki-NLP/opus-mt-en-zh](https://huggingface.co/Helsinki-NLP/opus-mt-en-zh) | 046f55aec303 |
+| ar-en | Apache-2.0 | [Helsinki-NLP/opus-mt-ar-en](https://huggingface.co/Helsinki-NLP/opus-mt-ar-en) | 09c755686640 |
+| fr-en | Apache-2.0 | [Helsinki-NLP/opus-mt-fr-en](https://huggingface.co/Helsinki-NLP/opus-mt-fr-en) | 6b166a182780 |
+| zh-en | CC BY 4.0 | [Helsinki-NLP/opus-mt-zh-en](https://huggingface.co/Helsinki-NLP/opus-mt-zh-en) | 39d480d52a9e |
+| ja-en | Apache-2.0 | [Helsinki-NLP/opus-mt-ja-en](https://huggingface.co/Helsinki-NLP/opus-mt-ja-en) | 1a906cfaaf7c |
+| es-en | Apache-2.0 | [Helsinki-NLP/opus-mt-es-en](https://huggingface.co/Helsinki-NLP/opus-mt-es-en) | eadfd7c658a9 |
+| de-en | Apache-2.0 | [Helsinki-NLP/opus-mt-de-en](https://huggingface.co/Helsinki-NLP/opus-mt-de-en) | 399dfd687067 |
+| ru-en | CC BY 4.0 | [Helsinki-NLP/opus-mt-ru-en](https://huggingface.co/Helsinki-NLP/opus-mt-ru-en) | afe8c6c738ec |
+| it-en | Apache-2.0 | [Helsinki-NLP/opus-mt-it-en](https://huggingface.co/Helsinki-NLP/opus-mt-it-en) | fd0b89b9c052 |
+| nl-en | Apache-2.0 | [Helsinki-NLP/opus-mt-nl-en](https://huggingface.co/Helsinki-NLP/opus-mt-nl-en) | 82c42d95d150 |
+| uk-en | Apache-2.0 | [Helsinki-NLP/opus-mt-uk-en](https://huggingface.co/Helsinki-NLP/opus-mt-uk-en) | b2ad6afa424a |
+| pl-en | Apache-2.0 | [Helsinki-NLP/opus-mt-pl-en](https://huggingface.co/Helsinki-NLP/opus-mt-pl-en) | aeaf0e003b04 |
+| hi-en | Apache-2.0 | [Helsinki-NLP/opus-mt-hi-en](https://huggingface.co/Helsinki-NLP/opus-mt-hi-en) | 99853100ed9d |
+| id-en | Apache-2.0 | [Helsinki-NLP/opus-mt-id-en](https://huggingface.co/Helsinki-NLP/opus-mt-id-en) | c38ef36c843b |
+| vi-en | Apache-2.0 | [Helsinki-NLP/opus-mt-vi-en](https://huggingface.co/Helsinki-NLP/opus-mt-vi-en) | 541dfd72ec07 |
+| th-en | Apache-2.0 | [Helsinki-NLP/opus-mt-th-en](https://huggingface.co/Helsinki-NLP/opus-mt-th-en) | 7f0406b972f7 |
+| ko-en | Apache-2.0 | [Helsinki-NLP/opus-mt-ko-en](https://huggingface.co/Helsinki-NLP/opus-mt-ko-en) | d9fa1ac60082 |
+| en-it | Apache-2.0 | [Helsinki-NLP/opus-mt-en-it](https://huggingface.co/Helsinki-NLP/opus-mt-en-it) | 075406e3c8c2 |
+| en-nl | Apache-2.0 | [Helsinki-NLP/opus-mt-en-nl](https://huggingface.co/Helsinki-NLP/opus-mt-en-nl) | c3a0541231a7 |
+| en-uk | Apache-2.0 | [Helsinki-NLP/opus-mt-en-uk](https://huggingface.co/Helsinki-NLP/opus-mt-en-uk) | e6ca58729298 |
+| en-hi | Apache-2.0 | [Helsinki-NLP/opus-mt-en-hi](https://huggingface.co/Helsinki-NLP/opus-mt-en-hi) | 7aad72006a15 |
+| en-id | Apache-2.0 | [Helsinki-NLP/opus-mt-en-id](https://huggingface.co/Helsinki-NLP/opus-mt-en-id) | b3b41f654c2f |
+| en-vi | Apache-2.0 | [Helsinki-NLP/opus-mt-en-vi](https://huggingface.co/Helsinki-NLP/opus-mt-en-vi) | 30bcd461c0d7 |
+| de-es | Apache-2.0 | [Helsinki-NLP/opus-mt-de-es](https://huggingface.co/Helsinki-NLP/opus-mt-de-es) | d339419ee3bd |
+| de-fr | Apache-2.0 | [Helsinki-NLP/opus-mt-de-fr](https://huggingface.co/Helsinki-NLP/opus-mt-de-fr) | e783da03d247 |
+| es-de | Apache-2.0 | [Helsinki-NLP/opus-mt-es-de](https://huggingface.co/Helsinki-NLP/opus-mt-es-de) | 7f493e4b81b6 |
+| es-fr | Apache-2.0 | [Helsinki-NLP/opus-mt-es-fr](https://huggingface.co/Helsinki-NLP/opus-mt-es-fr) | 3bef5f612825 |
+| es-it | Apache-2.0 | [Helsinki-NLP/opus-mt-es-it](https://huggingface.co/Helsinki-NLP/opus-mt-es-it) | 596c67cda7cb |
+| es-ru | Apache-2.0 | [Helsinki-NLP/opus-mt-es-ru](https://huggingface.co/Helsinki-NLP/opus-mt-es-ru) | 268ccd60bde3 |
+| fr-de | Apache-2.0 | [Helsinki-NLP/opus-mt-fr-de](https://huggingface.co/Helsinki-NLP/opus-mt-fr-de) | 7eea1996b448 |
+| fr-es | Apache-2.0 | [Helsinki-NLP/opus-mt-fr-es](https://huggingface.co/Helsinki-NLP/opus-mt-fr-es) | 962338be5103 |
+| fr-ru | Apache-2.0 | [Helsinki-NLP/opus-mt-fr-ru](https://huggingface.co/Helsinki-NLP/opus-mt-fr-ru) | c2ec732b045a |
+| it-es | Apache-2.0 | [Helsinki-NLP/opus-mt-it-es](https://huggingface.co/Helsinki-NLP/opus-mt-it-es) | 0eba27fe6da2 |
+| it-fr | Apache-2.0 | [Helsinki-NLP/opus-mt-it-fr](https://huggingface.co/Helsinki-NLP/opus-mt-it-fr) | 7843e3b7137d |
+| ru-es | Apache-2.0 | [Helsinki-NLP/opus-mt-ru-es](https://huggingface.co/Helsinki-NLP/opus-mt-ru-es) | 9cb5fb9fae4d |
+| ru-fr | Apache-2.0 | [Helsinki-NLP/opus-mt-ru-fr](https://huggingface.co/Helsinki-NLP/opus-mt-ru-fr) | c7275f468246 |
+| ru-uk | Apache-2.0 | [Helsinki-NLP/opus-mt-ru-uk](https://huggingface.co/Helsinki-NLP/opus-mt-ru-uk) | 6d8a744ed6ea |
+| uk-ru | Apache-2.0 | [Helsinki-NLP/opus-mt-uk-ru](https://huggingface.co/Helsinki-NLP/opus-mt-uk-ru) | cfb76ccd2077 |
+| nl-fr | Apache-2.0 | [Helsinki-NLP/opus-mt-nl-fr](https://huggingface.co/Helsinki-NLP/opus-mt-nl-fr) | 6c8ebb68522f |
 
 en-ar is the Tatoeba-Challenge eng-ara model, released under CC BY 4.0
 (https://creativecommons.org/licenses/by/4.0/; its Hugging Face card lists
@@ -79,12 +82,15 @@ OPUS-MT / Tatoeba-Challenge models, CC BY 4.0
 (https://creativecommons.org/licenses/by/4.0/; their Hugging Face cards list
 Apache-2.0):
 
-  Pair   Model (https://huggingface.co/...)   Helsinki-NLP commit
-  fr-ar  Helsinki-NLP/opus-mt-fr-ar           5469dc759cd9
-  es-ar  Helsinki-NLP/opus-mt-es-ar           76efb7da47ad
-  ar-fr  Helsinki-NLP/opus-mt-ar-fr           e507d7bc8508
-  ar-es  Helsinki-NLP/opus-mt-ar-es           da86e973e723
-  ar-de  Helsinki-NLP/opus-mt-ar-de           8e6cbcce68fe
+| Pair | Model | Helsinki-NLP commit |
+|---|---|---|
+| fr-ar | [Helsinki-NLP/opus-mt-fr-ar](https://huggingface.co/Helsinki-NLP/opus-mt-fr-ar) | 5469dc759cd9 |
+| es-ar | [Helsinki-NLP/opus-mt-es-ar](https://huggingface.co/Helsinki-NLP/opus-mt-es-ar) | 76efb7da47ad |
+| ar-fr | [Helsinki-NLP/opus-mt-ar-fr](https://huggingface.co/Helsinki-NLP/opus-mt-ar-fr) | e507d7bc8508 |
+| ar-es | [Helsinki-NLP/opus-mt-ar-es](https://huggingface.co/Helsinki-NLP/opus-mt-ar-es) | da86e973e723 |
+| ar-de | [Helsinki-NLP/opus-mt-ar-de](https://huggingface.co/Helsinki-NLP/opus-mt-ar-de) | 8e6cbcce68fe |
+
+## Built into the app
 
 Short-line language detection: whichlang by Quickwit (MIT),
 https://github.com/quickwit-oss/whichlang, built into the app.
@@ -110,31 +116,31 @@ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
 OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-Text recognition (OCR)
-----------------------
+## Text recognition (OCR)
+
 PaddleOCR PP-OCRv5 models (Apache-2.0): the text detector and one
 recognizer per script (English, Latin, Arabic, Cyrillic, Chinese/Japanese),
 ONNX export by oar-ocr (https://github.com/GreatV/oar-ocr, Apache-2.0),
 release v0.3.0.
 
-ONNX Runtime
-------------
+## ONNX Runtime
+
 ONNX Runtime by Microsoft (MIT), https://github.com/microsoft/onnxruntime.
 
-Bundled fonts
--------------
+## Bundled fonts
+
 Inter by Rasmus Andersson, Noto Sans Arabic by Google and JetBrains Mono by
 JetBrains, all under the SIL Open Font License 1.1 (assets/fonts/OFL-Inter.txt,
 OFL-NotoSansArabic.txt, OFL-JetBrainsMono.txt), subset. Lucide icons (ISC,
 assets/lucide/LICENSE), subset.
 
-Renderer
---------
+## Renderer
+
 iced_tiny_skia (MIT, Copyright 2019 Hector Ramon, Iced contributors) is built
 from vendor/iced_tiny_skia with one small fix; its licence is beside it.
 
-Preview clips
--------------
+## Preview clips
+
 The short recordings at the top of Settings pages (a still of each bundled in
 the app, assets/previews; the full clips downloaded when a preview is played)
 are the owner's approved edits. They show third-party material under

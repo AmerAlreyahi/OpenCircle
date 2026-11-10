@@ -73,7 +73,7 @@ Choose one in **Settings → Translate → Engine**.
   Arabic ones (below) come from
   [AmerAlreyahi/OpenCircle-models](https://github.com/AmerAlreyahi/OpenCircle-models)
   on GitHub. Licences and credits
-  are in `NOTICE`. The decoders are the lighter build (about a third less memory
+  are in [NOTICE](NOTICE.md). The decoders are the lighter build (about a third less memory
   per pair); a pair you downloaded earlier keeps working and switches to the
   lighter one at its next download. A download that hits a server error or a
   dropped connection retries by itself and resumes where it stopped.

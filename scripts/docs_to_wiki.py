@@ -15,7 +15,8 @@ blob = f"https://github.com/{repo}/blob/main/"
 raw = f"https://raw.githubusercontent.com/{repo}/main/"
 IMG = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 
-sources = sorted(docs.glob("features/*.md")) + sorted(docs.glob("*.md"))
+# Lower-case files are guides; upper-case ones (NOTICE, CONTRIBUTING, ...) stay repo pages.
+sources = sorted(docs.glob("features/*.md")) + sorted(p for p in docs.glob("*.md") if p.name.islower())
 pages = {}
 for src in sources:
     title = next(l[2:].strip() for l in src.read_text().splitlines() if l.startswith("# "))

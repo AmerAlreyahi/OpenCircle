@@ -365,7 +365,7 @@ production systems.
 - Preview clips bundled (owner, 2026-11-03): the owner's edited clips (docs/internal/preview-edit/outputs/final) map
   Look = circle-1..3 in turn, Text = text, Translate = translate, AI = ai-chat / ai-browser by provider (the Google AI
   Mode clip stays until the owner replaces it), Snip = snip-blur, snip-comment, snip-long in sequence; clips with
-  unresolved photo rights are held until cleared; credits on About + NOTICE. Clips go in exactly as delivered (no
+  unresolved photo rights are held until cleared; credits on About + docs/NOTICE.md. Clips go in exactly as delivered (no
   re-encode/edit; sha256 = outputs/final/qa.json). Photos must be CC0 (owner's rule): lotus and kingfisher cleared
   (WordPress, CC0, 2026-11-03); COFFEE (Tim Mossholder, Unsplash License) accepted by the owner 2026-11-03 as a
   media exception (the app's code stays MIT). The translate
@@ -418,7 +418,7 @@ production systems.
   no release.
 - Update gate (owner, 2026-10-30, "insure this won't happen again"): no release is offered to the owner for
   "publish" until the previous published version, installed with the Setup exe (Program Files, normal user) AND as
-  the portable exe, has updated itself to the DRAFT on the Windows VM (RELEASING.md step 9, local update server +
+  the portable exe, has updated itself to the DRAFT on the Windows VM (docs/RELEASING.md step 9, local update server +
   OPENCIRCLE_TEST_UPDATE_URL). A unit test alone never proves an install path; every way users install is tested.
 - 0.1.3 go (owner, 2026-10-30): the plan in roadmap 2A is approved as is; Edit becomes Snip starts now (first
   0.1.3 item, after the updater fix); M2M100 418M is not measured.

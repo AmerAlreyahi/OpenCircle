@@ -4,7 +4,7 @@ Pictures and short recordings of OpenCircle on Windows. The screenshots use a
 local demo page with original text; nothing in the app is mocked up. The
 recordings are the clips bundled in the app (`assets/previews`): each plays at
 the top of its Settings page. Third-party material in them is credited in
-`NOTICE` and in Settings > About.
+[NOTICE](../docs/NOTICE.md) and in Settings > About.
 
 ![OpenCircle banner](OpenCircleCoverIMG.png)
 

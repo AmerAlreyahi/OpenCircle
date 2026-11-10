@@ -208,7 +208,7 @@ outside it (the update gate runs published builds).
 - `OPENCIRCLE_TEST_UPDATE_URL=<release JSON URL>`: the update check asks this URL (http allowed: a local fake
   release server) 3 s after start, also from a 0.0.0 build. Downloads still need a signature by `RELEASE_PUBLIC_KEY`,
   or, only with this hook, by a throwaway key baked in at BUILD time (`OPENCIRCLE_TEST_RELEASE_KEY`; release.yml never
-  sets it). `scripts/update-gate.ps1` drives it as the release gate (RELEASING.md step 9).
+  sets it). `scripts/update-gate.ps1` drives it as the release gate (docs/RELEASING.md step 9).
 - `OPENCIRCLE_TEST_CAPTURABLE=1`: our floating windows (Steps strip, pins, pills, update card, the pinned chat's,
   tray menu) are not excluded from screen capture on Windows (VM screenshots of them over the desktop; they then
   also show in the next capture's frozen frame). Linux takes them out of each grab (`Windows::leave_frame`) whatever this says.

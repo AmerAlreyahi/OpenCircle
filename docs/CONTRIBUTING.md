@@ -6,7 +6,7 @@ the [Security policy](SECURITY.md), not a public issue.
 
 ## Build and run
 
-You need a recent stable Rust. On Linux, see [docs/linux-notes.md](docs/linux-notes.md)
+You need a recent stable Rust. On Linux, see [Linux notes](linux-notes.md)
 for the system packages.
 
     cargo run                      # build and start

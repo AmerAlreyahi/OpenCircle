@@ -25,13 +25,13 @@ use crate::ui::kit::tokens::{Role, radius, space};
 use crate::ui::kit::{icon, themes};
 
 pub const PROJECT: &str = "https://github.com/AmerAlreyahi/OpenCircle";
-pub const LICENSE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSE";
+pub const LICENSE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSE.md";
 pub const WEBSITE: &str = "https://ameralreyahi.com/projects/opencircle";
-pub const NOTICE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/NOTICE";
+pub const NOTICE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/docs/NOTICE.md";
 pub const PROFILE_URL: &str = "https://github.com/AmerAlreyahi";
 
 /// Who made what we ship or download: (what, made by, licence). The full texts
-/// are in the repository's NOTICE file.
+/// are in the repository's docs/NOTICE.md.
 pub const NOTICES: [(&str, &str, &str); 11] = [
     (
         "Text recognition",
@@ -56,7 +56,7 @@ pub const NOTICES: [(&str, &str, &str); 11] = [
 
 /// One preview-clip credit: the clips it covers, its text, and its links
 /// (name, address). It shows only while one of its clips is bundled; the same
-/// credits, with full addresses, are in NOTICE (owner's source list, 2026-11-03).
+/// credits, with full addresses, are in docs/NOTICE.md (owner's source list, 2026-11-03).
 pub struct Credit {
     pub clips: &'static [&'static str],
     pub text: &'static str,
@@ -410,9 +410,9 @@ mod tests {
 
     #[test]
     fn notices_credit_the_models_we_download() {
-        let notice = include_str!("../../../../../NOTICE");
+        let notice = include_str!("../../../../../docs/NOTICE.md");
         for key in ["Helsinki-NLP", "Xenova", "PaddleOCR", "ONNX Runtime"] {
-            assert!(notice.contains(key), "{key} is in NOTICE");
+            assert!(notice.contains(key), "{key} is in docs/NOTICE.md");
         }
         let all: String = NOTICES.iter().map(|n| format!("{} {}", n.1, n.2)).collect();
         for key in [

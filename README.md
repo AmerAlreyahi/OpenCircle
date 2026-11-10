@@ -15,7 +15,7 @@ in your own browser, only when you choose them, and translation runs on your PC
 by default. It is free, MIT licensed, and has no account and no telemetry.
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7a6cf0"></a>
+  <a href="LICENSE.md"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7a6cf0"></a>
   <img alt="Platforms: Windows and Linux" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-4fc9e0">
 </p>
 
@@ -39,7 +39,7 @@ by default. It is free, MIT licensed, and has no account and no telemetry.
 
 More in the [gallery](gallery/README.md) and the [feature guides](docs/features/README.md).
 The clips are short recordings of the real app; third-party material in them is
-credited in `NOTICE` and in Settings > About.
+credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
 
 ## What works by default
 
@@ -248,7 +248,7 @@ sudo apt-get install libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev l
 
 Settings > About lists the project, the licence, and every component OpenCircle
 uses that is made by others, with its licence. Text-reading and translation
-models are downloaded on first use under their own licences; see `NOTICE`.
+models are downloaded on first use under their own licences; see [NOTICE](docs/NOTICE.md).
 The translation models come from Hugging Face (Xenova's ONNX exports of the
 Helsinki-NLP OPUS-MT models) and, for the five direct Arabic models we
 converted ourselves, from
@@ -264,12 +264,12 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE.md)
 
 Media exception: the preview clips (`assets/previews`: the stills bundled in the
 app, the full clips downloaded when you play a preview) show
 third-party material under its own terms, which the app's MIT licence does not
-relicense. Each clip's credit and licence is listed in `NOTICE` and in
+relicense. Each clip's credit and licence is listed in [NOTICE](docs/NOTICE.md) and in
 Settings > About.
 
 OpenCircle is an independent project and is not affiliated with or endorsed

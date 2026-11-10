@@ -164,7 +164,7 @@ assets = [
     { source = "target/release/opencircle", dest = "/usr/bin/opencircle", mode = "755" },
     { source = "packaging/com.opencircle.app.desktop", dest = "/usr/share/applications/com.opencircle.app.desktop", mode = "644" },
     { source = "assets/icons/256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", mode = "644" },
-    { source = "LICENSE", dest = "/usr/share/licenses/opencircle/LICENSE", mode = "644", doc = true },
+    { source = "LICENSE.md", dest = "/usr/share/licenses/opencircle/LICENSE", mode = "644", doc = true },
 ]
 
 [package.metadata.generate-rpm.requires]
