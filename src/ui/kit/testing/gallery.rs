@@ -550,7 +550,15 @@ fn panel_frame_sheet() {
         };
         let later = button::label(s(ar, "Later", "لاحقاً"));
         let actions = button::button(later, button::Kind::Quiet, Some(()));
-        panel_frame::frame(glyph, "OpenCircle 0.1.2", body, actions, radius::DRAWER, ())
+        panel_frame::frame(
+            glyph,
+            "OpenCircle 0.1.2",
+            None,
+            body,
+            actions,
+            radius::DRAWER,
+            (),
+        )
     };
     let rows = vec![
         row("download", Act::Rest, move |ar| {

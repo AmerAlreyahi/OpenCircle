@@ -1958,6 +1958,43 @@ fn the_ported_pages_match_their_golden_images() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// An update waits: General's Updates row says so ("OpenCircle 0.1.5 is
+/// ready"), with What's new and Restart now (a shield for a setup's copy),
+/// which ask the window for the card and the restart. Before: "Look for a new
+/// version now" and Check now, whatever waited.
+#[test]
+fn general_shows_the_waiting_update_with_restart_now() {
+    use crate::ui::kit::testing::{golden, shot};
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::update::How;
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        for (name, how) in [("restart", How::Restart), ("setup", How::Setup)] {
+            let (mut s, _) = state(None);
+            s.set_update(Some(("0.1.5".into(), how)), None);
+            update(&mut s, Message::Section(Section::General));
+            themes::set(theme);
+            let texts = shot::texts(view(&s));
+            for want in ["OpenCircle 0.1.5 is ready", "What's new", "Restart now"] {
+                assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+            }
+            assert!(!texts.iter().any(|t| t == "Check now"), "{texts:?}");
+            let file = format!("settings-general-update-{name}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
+                view(&s)
+            }));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+    let (mut s, _) = state(None);
+    assert_eq!(
+        update(&mut s, Message::RestartToUpdate),
+        Outcome::RestartToUpdate
+    );
+    assert_eq!(update(&mut s, Message::WhatsNew), Outcome::WhatsNew);
+}
+
 /// The pages of the UI plan's step 33 as drawn, in Sapphire and Daylight:
 /// AI (a server of your own; a saved key), Text reading, Translate (Live on),
 /// Shortcuts at rest, recording and with a conflict, Snip, Song search,

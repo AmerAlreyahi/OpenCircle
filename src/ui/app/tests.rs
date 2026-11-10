@@ -51,39 +51,41 @@ fn a_shot() -> Result<Shot, CaptureError> {
     })
 }
 
+/// A waiting update never installs while the user works, idle or not (owner,
+/// 2026-11-10): it shows its pill above the tray; Later puts the pill away and
+/// the update keeps waiting (tray dot, tray row, Settings). Before: it installed
+/// at the first idle minute, the app vanishing under the user.
 #[test]
-fn an_update_waits_until_nothing_is_open() {
-    use crate::update::{Event, Install, Staged};
+fn an_update_waits_for_a_moment_the_user_picks() {
+    use crate::ui::screens::update_pill::{Kind, Msg as PillMsg};
+    use crate::update::{Event, How, Install, Staged};
     let staged = Staged {
         version: "9.9.9".into(),
         file: "missing".into(),
         sha256: [0; 32],
         dir: std::env::temp_dir().join("oc-update-test-never-made"),
-        install: Install::Manual, // even if it ran, it could not touch anything
+        install: Install::Exe(std::env::temp_dir().join("oc-update-test-no-exe.exe")),
         notes: String::new(),
         url: String::new(),
     };
     let mut app = App::idle(window::Id::unique());
     assert!(app.is_idle());
-    let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
-    assert!(!app.is_idle(), "a capture is out");
     let _ = app.update(Message::Trigger(Trigger::Update(Event::Ready(
         staged.clone(),
     ))));
-    assert_eq!(app.update, Some(staged.clone()), "kept for later");
-    let _ = app.update(Message::Captured(
-        app.capturing.unwrap(),
-        Instant::now(),
-        a_shot(),
-    ));
-    assert!(!app.is_idle(), "the overlay is open");
+    let w = app.update.as_ref().expect("waits");
+    assert_eq!((w.version.as_str(), w.how), ("9.9.9", How::Restart));
+    assert!(
+        matches!(app.windows.shown_pill(), Some(Kind::Ready { .. })),
+        "the pill above the tray"
+    );
     let _ = app.update(Message::UpdateTick);
-    assert_eq!(app.update, Some(staged), "still waiting");
-    let _ = app.close();
-    app.hiding = Hiding::No; // the hidden window drew its last frames
-    assert!(app.is_idle());
+    assert!(app.update.is_some(), "idle, yet nothing installed");
+    let _ = app.update(Message::Windows(windows::Msg::UpdatePill(PillMsg::Later)));
+    assert!(app.windows.shown_pill().is_none(), "Later: the pill goes");
     let _ = app.update(Message::UpdateTick);
-    assert_eq!(app.update, None, "tried once idle");
+    assert!(app.windows.shown_pill().is_none(), "and stays away");
+    assert!(app.update.is_some(), "the update keeps waiting");
 }
 
 /// Our floating windows (here a pin) are never in what we capture: every
@@ -152,11 +154,11 @@ fn a_grab_right_after_the_overlay_closed_waits_until_it_is_gone() {
 }
 
 /// A copy the setup installed never installs by itself (its setup asks Windows for
-/// admin rights): the card offers it; a failed or declined "Install now" keeps it.
+/// admin rights): the pill offers it with a shield; a failed or declined Restart
+/// now keeps it for another try (the tray row, Settings).
 #[test]
-fn an_installed_copys_update_waits_for_install_now() {
-    use crate::ui::screens::update_card;
-    use crate::update::{Event, Install, Staged};
+fn an_installed_copys_update_waits_for_restart_now() {
+    use crate::update::{Event, How, Install, Staged};
     let staged = Staged {
         version: "9.9.9".into(),
         file: std::env::temp_dir().join("oc-update-test-no-setup.exe"), // missing: never runs
@@ -171,15 +173,13 @@ fn an_installed_copys_update_waits_for_install_now() {
         staged.clone(),
     ))));
     let _ = app.update(Message::UpdateTick);
-    assert_eq!(app.update, Some(staged.clone()), "idle, yet not on its own");
-    let _ = app.update(Message::Windows(windows::Msg::UpdateCard(
-        update_card::Msg::Install,
-    )));
     assert_eq!(
-        app.update,
-        Some(staged),
-        "it did not run: kept for another try"
+        app.update.as_ref().map(|w| w.how),
+        Some(How::Setup),
+        "idle, yet not on its own"
     );
+    let _ = app.update(Message::Trigger(Trigger::RestartToUpdate));
+    assert!(app.update.is_some(), "it did not run: kept for another try");
 }
 
 #[test]

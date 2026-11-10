@@ -48,6 +48,9 @@ pub enum Trigger {
     TrayMenu([i32; 4]),
     /// From the update thread (`update::Event`).
     Update(update::Event),
+    /// Restart now (the update pill, the tray menu's first row, Settings):
+    /// install the waiting update.
+    RestartToUpdate,
     Quit,
 }
 
@@ -197,6 +200,12 @@ fn main() -> ExitCode {
             }
             crate::log!("[opencircle] took over from v{was}");
         }
+        // Started by an update, or right after one (the setup's own start, Windows
+        // restarting what it closed): the running copy is the new one; open nothing.
+        Ok(_) if relaunched || update::just_updated() => {
+            crate::log!("OpenCircle is already running (just updated); nothing opened");
+            return ExitCode::SUCCESS;
+        }
         Ok(_) if hotkey::forward(&hotkey::Command::OpenSettings.line()).is_ok() => {
             crate::log!("OpenCircle is already running; opened its Settings");
             return ExitCode::SUCCESS;
@@ -240,7 +249,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             crate::log!("{e}");
-            if relaunched {
+            if relaunched || update::pending() {
                 update::roll_back(); // a new version that can't start: the old one again
             }
             ExitCode::FAILURE

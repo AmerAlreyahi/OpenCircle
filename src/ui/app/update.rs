@@ -20,7 +20,7 @@ use crate::ui::kit::panel_frame as card;
 use crate::ui::platform::monitor;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
-use crate::ui::{overlay, snip, translate, update_card, windows};
+use crate::ui::{overlay, snip, translate, windows};
 
 use super::capture::{TEST_SHOT, save_test_shot};
 use super::{App, BAR_MORPH, CAPTURE_TIMEOUT, GLIDE, REVEAL_WAIT, Reader, SHRINK_FRAMES, SHRUNK};
@@ -38,7 +38,10 @@ impl App {
             return Task::none();
         }
         match message {
-            Message::Trigger(Trigger::Quit) => iced::exit(),
+            Message::Trigger(Trigger::Quit) => {
+                self.on_quit();
+                iced::exit()
+            }
             Message::Trigger(Trigger::OpenSettings) => self
                 .windows
                 .open(windows::Kind::Settings)
@@ -57,9 +60,7 @@ impl App {
                     false => self.edit_step(i),
                 }
             }
-            Message::Windows(windows::Msg::UpdateCard(update_card::Msg::Install)) => {
-                self.install_update()
-            }
+            Message::Windows(windows::Msg::UpdatePill(msg)) => self.on_update_pill(msg),
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
             // A hidden (Labs) feature does nothing, whoever asks (no shortcut or tray
             // item reaches here; this is the one place that also covers a late trigger).
@@ -70,7 +71,8 @@ impl App {
                 Task::none()
             }
             Message::Trigger(Trigger::Update(event)) => self.on_update(event),
-            Message::UpdateTick => self.try_update(),
+            Message::Trigger(Trigger::RestartToUpdate) => self.restart_to_update(),
+            Message::UpdateTick => self.update_tick(),
             // the rebuilt view shows the actions (nothing runs by itself)
             Message::Settled => Task::none(),
             Message::Trigger(Trigger::Quick(at, qa))
@@ -734,125 +736,6 @@ impl App {
             }
         }
     }
-
-    /// From the update thread.
-    pub(in crate::ui) fn on_update(&mut self, event: crate::update::Event) -> Task<Message> {
-        use crate::update::Event;
-        match event {
-            Event::Status(status) => {
-                let status = self
-                    .windows
-                    .update(windows::Msg::UpdateStatus(status))
-                    .map(Message::Windows);
-                // Check now while an installed copy's update waits: its card again
-                // (the way back after "Later")
-                match self.update.clone().filter(needs_user) {
-                    Some(s) => Task::batch([status, self.ready_card(&s)]),
-                    None => status,
-                }
-            }
-            Event::Manual {
-                version,
-                notes,
-                url,
-            } => self
-                .windows
-                .update_card(update_card::Card::available(&version, &notes, &url))
-                .map(Message::Windows),
-            Event::Ready(staged) if needs_user(&staged) => {
-                let card = self.ready_card(&staged);
-                self.update = Some(staged);
-                card
-            }
-            Event::Ready(staged) => {
-                let toast = self
-                    .windows
-                    .toast(&update_card::ready_toast(&staged.version), true, None, 5000)
-                    .map(Message::Windows);
-                self.update = Some(staged);
-                // the notice stays readable before this process exits to update
-                let later = background(|tx| {
-                    std::thread::sleep(Duration::from_secs(6));
-                    let _ = tx.unbounded_send(());
-                })
-                .map(|()| Message::UpdateTick);
-                Task::batch([toast, later])
-            }
-        }
-    }
-
-    /// Nothing of OpenCircle is in use: no overlay (editor, snip, panel), capture,
-    /// live translate, Settings, onboarding or pinned image.
-    pub(in crate::ui) fn is_idle(&self) -> bool {
-        self.o.is_none()
-            && self.chat.is_none()
-            && self.capturing.is_none()
-            && self.live.is_none()
-            && self.hiding == Hiding::No
-            && !self.windows.busy()
-    }
-
-    /// Installs the waiting update now if idle (then this process exits), else
-    /// looks again in a minute.
-    pub(in crate::ui) fn try_update(&mut self) -> Task<Message> {
-        if self.update.is_none() {
-            return Task::none();
-        }
-        if !self.is_idle() {
-            return background(|tx| {
-                std::thread::sleep(Duration::from_secs(60));
-                let _ = tx.unbounded_send(());
-            })
-            .map(|()| Message::UpdateTick);
-        }
-        if self.update.as_ref().is_some_and(needs_user) {
-            return Task::none(); // only "Install now" (`install_update`)
-        }
-        let Some(staged) = self.update.take() else {
-            return Task::none();
-        };
-        match crate::update::install(&staged) {
-            Ok(()) => iced::exit(),
-            Err(e) => {
-                crate::log!("[opencircle] update {}: {e}", staged.version);
-                // can't replace itself (e.g. installed for all users): the page instead
-                self.windows
-                    .update_card(update_card::Card::available(
-                        &staged.version,
-                        &staged.notes,
-                        &staged.url,
-                    ))
-                    .map(Message::Windows)
-            }
-        }
-    }
-
-    /// The card that offers `staged` ("Install now" / "Later").
-    fn ready_card(&mut self, staged: &crate::update::Staged) -> Task<Message> {
-        let card = update_card::Card::ready(&staged.version, &staged.notes, &staged.url);
-        self.windows.update_card(card).map(Message::Windows)
-    }
-
-    /// "Install now": the waiting update's setup runs (Windows asks for admin rights)
-    /// and this process exits. Declined or failed: nothing changed, the update and its
-    /// card stay for another try.
-    pub(in crate::ui) fn install_update(&mut self) -> Task<Message> {
-        let Some(staged) = self.update.clone().filter(needs_user) else {
-            return Task::none();
-        };
-        match crate::update::install(&staged) {
-            Ok(()) => iced::exit(),
-            Err(e) => {
-                crate::log!("[opencircle] update {}: {e}", staged.version);
-                Task::none()
-            }
-        }
-    }
-}
-
-/// An update only the user may start (its setup asks for admin rights).
-fn needs_user(staged: &crate::update::Staged) -> bool {
-    matches!(staged.install, crate::update::Install::Setup(_))
 }
 
 /// The messages that mean something while no overlay is open (a trigger, a

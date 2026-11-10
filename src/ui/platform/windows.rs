@@ -65,6 +65,26 @@ pub fn floating(
     radius: f32,
     how: Motion,
 ) -> (window::Id, Task<window::Id>) {
+    floating_as(settings, radius, how, false)
+}
+
+/// `floating`, but it shows in screen captures, the user's screenshots and
+/// recordings (the update pills and What's new: owner, 2026-11-10, the one
+/// exception to "own floating windows out of captures"). Still no Snip target.
+pub fn floating_in_captures(
+    settings: window::Settings,
+    radius: f32,
+    how: Motion,
+) -> (window::Id, Task<window::Id>) {
+    floating_as(settings, radius, how, true)
+}
+
+fn floating_as(
+    settings: window::Settings,
+    radius: f32,
+    how: Motion,
+    seen: bool,
+) -> (window::Id, Task<window::Id>) {
     let fades = settings.visible && super::shape::can_fade();
     let settings = window::Settings {
         decorations: false,
@@ -93,7 +113,7 @@ pub fn floating(
         };
         reshape::<()>(id)
             .discard()
-            .chain(keep_out(id))
+            .chain(keep_out(id, seen))
             .chain(shown)
             .chain(Task::done(id))
     });
@@ -109,8 +129,9 @@ const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
 /// keeps it out of every capture (`hide_from_capture`, before it shows) and out
 /// of Snip's targets (`no_pick`: a pick would hold what is under it). Linux has
 /// no such call: the capture takes it out of the frame (`Windows::leave_frame`).
-fn keep_out<T: Send + 'static>(id: window::Id) -> Task<T> {
-    let out = crate::sys::test_hook(CAPTURABLE).is_none();
+/// `seen`: one that shows in captures (`floating_in_captures`).
+fn keep_out<T: Send + 'static>(id: window::Id, seen: bool) -> Task<T> {
+    let out = !seen && crate::sys::test_hook(CAPTURABLE).is_none();
     hide_from_capture(id, out).chain(no_pick(id))
 }
 

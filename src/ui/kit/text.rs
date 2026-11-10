@@ -230,28 +230,45 @@ pub fn error<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
 /// (Noto Sans Arabic inks about 1.6 times its size).
 pub const LINE: f32 = 1.7;
 
-/// The line height of `linked` text (times its size).
+/// The line height of `styled` text (times its size).
 pub const LINKED_LINE: f32 = 1.65;
 
-/// Text with links, in `role`: `parts` are (text, link); a link is the
-/// accent, underlined, and reaches `on_link` only when clicked. `sub` = the
-/// secondary text colour (a card's notes), else the main one.
-pub fn linked<'a, Message: 'a>(
-    parts: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+/// How a run of `styled` text is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ink {
+    /// The secondary text colour.
+    Plain,
+    /// The main text colour, 600 (a bold label).
+    Strong,
+    /// A key or name (inline code): mono on `hover`, radius 4.
+    Key,
+}
+
+/// Notes text (the What's new card): runs of `Ink`, links in the accent that
+/// reach `on_link` only when clicked, in `role`, wrapped.
+pub fn styled<'a, Message: 'a>(
+    parts: impl IntoIterator<Item = (&'a str, Ink, Option<&'a str>)>,
     role: Role,
-    sub: bool,
     on_link: impl Fn(String) -> Message + 'a,
 ) -> iced::Element<'a, Message> {
     use iced::widget::{rich_text, span};
     let c = &themes::current().c;
-    let plain = if sub { c.text_sub } else { c.text };
     let spans: Vec<iced::widget::text::Span<'a, String>> = (parts.into_iter())
-        .map(|(s, link)| match link {
-            Some(url) => span(s)
-                .color(c.accent)
-                .underline(true)
-                .link(url.to_string()),
-            None => span(s).color(plain),
+        .map(|(s, ink, link)| {
+            let run = match ink {
+                Ink::Plain => span(s).color(c.text_sub),
+                Ink::Strong => span(s).color(c.text).font(weight(Weight::Semibold)),
+                Ink::Key => span(s)
+                    .color(c.text)
+                    .font(mono(Weight::Medium))
+                    .background(c.hover)
+                    .border(iced::Border::default().rounded(4.0))
+                    .padding([0.0, 3.0]),
+            };
+            match link {
+                Some(url) => run.color(c.accent).underline(true).link(url.to_string()),
+                None => run,
+            }
         })
         .collect();
     rich_text(spans)

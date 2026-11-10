@@ -180,15 +180,25 @@ Changes save by themselves. Nothing needs a restart.
 ## Updates
 
 With **Settings > General > Keep OpenCircle up to date** on, OpenCircle asks
-GitHub for the latest release about twice a day, only while it is idle. The
-request carries no account or ID. A new release is downloaded with its
-checksums and a signature from the project; OpenCircle installs it only when
-the signature checks out. The next start shows the release notes.
+GitHub for the latest release about twice a day. The request carries no
+account or ID. A new release is downloaded in the background with its
+checksums and a signature from the project, and is used only when the
+signature checks out.
 
-On Linux packages (`.deb`, `.rpm`), OpenCircle does not replace itself. It
-shows the release page instead.
+Nothing installs while you work. When a new version is ready, a small pill
+above the tray says so (**Later** / **Restart now**), the tray icon gets a dot,
+and the tray menu's first row is **Restart to update**. The update installs
+when you press Restart now, when you quit OpenCircle or sign out, or after
+your screen has been locked for a minute. If you installed OpenCircle with the
+Setup, it installs only when you press Restart now: Windows asks once for
+permission. After Restart now, OpenCircle comes back in a few seconds and
+shows what's new.
 
-**Settings > General > Updates > Check now** looks at once, on request.
+On Linux packages (`.deb`, `.rpm`), OpenCircle does not replace itself. The
+pill offers **Get it**, which opens the release page.
+
+**Settings > General > Updates** shows what waits and when OpenCircle last
+looked; **Check now** looks at once, on request.
 
 ## Settings and config file
 

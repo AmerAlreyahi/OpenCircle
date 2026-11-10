@@ -20,6 +20,8 @@ pub struct Menu {
     rows: Vec<(Entry, Option<String>)>,
     live_on: bool,
     focus: Option<usize>,
+    /// The update row's text, while an update waits (`with_update`).
+    update: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,14 +49,35 @@ pub enum Outcome {
 impl Menu {
     /// The rows for `labs`, hints from `cfg`; `live_on` = live translate runs now (its ✓).
     pub fn new(labs: &Labs, cfg: &Config, live_on: bool) -> Menu {
-        let rows = (entries(labs).into_iter())
+        let rows = (entries(labs, false).into_iter())
             .map(|e| (e, e.shortcut(cfg)))
             .collect();
         Menu {
             rows,
             live_on,
             focus: None,
+            update: None,
         }
+    }
+
+    /// With the waiting update's row first ("Restart to update (0.1.5)").
+    pub fn with_update(mut self, label: String) -> Menu {
+        self.rows.insert(0, (Entry::Update, None));
+        self.update = Some(label);
+        self
+    }
+
+    /// A row's text.
+    fn label(&self, entry: Entry) -> &str {
+        match (entry, &self.update) {
+            (Entry::Update, Some(label)) => label,
+            _ => entry.label(),
+        }
+    }
+
+    /// A separator goes above row `i`.
+    fn separated(&self, i: usize) -> bool {
+        i > 0 && self.rows[i].0.separated()
     }
 
     /// With the "Make pins clickable" row (a live pin lets clicks pass through), above Settings.
@@ -66,7 +89,7 @@ impl Menu {
 
     /// The window's size (logical px).
     pub fn size(&self) -> Size {
-        let separators = self.rows.iter().filter(|(e, _)| e.separated()).count();
+        let separators = (0..self.rows.len()).filter(|i| self.separated(*i)).count();
         Size::new(MENU_WIDTH, menu_height(self.rows.len(), separators))
     }
 
@@ -102,22 +125,19 @@ impl Menu {
 pub fn view(m: &Menu) -> Element<'_, Msg> {
     let mut rows = Vec::new();
     for (i, (entry, hint)) in m.rows.iter().enumerate() {
-        if entry.separated() {
+        if m.separated(i) {
             rows.push(separator());
         }
         let checked = *entry == Entry::Live && m.live_on;
+        let label = m.label(*entry);
         let row = item(
-            entry.label(),
+            label,
             checked,
             hint.clone(),
             m.focus == Some(i),
             Msg::Pick(i),
         );
-        rows.push(tip(
-            row,
-            entry.label(),
-            iced::widget::tooltip::Position::Left,
-        ));
+        rows.push(tip(row, label, iced::widget::tooltip::Position::Left));
     }
     menu(rows)
 }
@@ -210,6 +230,18 @@ mod tests {
                     || view(&m),
                 ));
             }
+            // an update waits: its row first, a separator under it
+            let m = Menu::new(&Labs::default(), &Config::default(), false)
+                .with_update("Restart to update (0.1.5)".into());
+            assert_eq!(m.size().height, 10.0 + 6.0 * 32.0 + 2.0 * 9.0);
+            let file = format!("tray-menu-update-{}", theme.id);
+            failed.extend(golden::check(
+                "screens",
+                &file,
+                m.size(),
+                &[1.0, 2.0],
+                || view(&m),
+            ));
         }
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");

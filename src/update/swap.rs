@@ -79,6 +79,11 @@ pub struct Marker {
     pub backup: PathBuf,
     pub notes: String,
     pub url: String,
+    /// Started by something else than Restart now (a quit, a lock, a reboot):
+    /// the small "Updated" pill instead of What's new. A marker an older version
+    /// wrote has none: What's new, as it showed then.
+    #[serde(default)]
+    pub quiet: bool,
 }
 
 impl Marker {
@@ -160,6 +165,7 @@ mod tests {
             backup: backup.clone(),
             notes: "n".into(),
             url: "u".into(),
+            quiet: false,
         };
         marker.write(&marker_path).unwrap();
         assert_eq!(roll_back(&marker_path), Some(marker.clone()));

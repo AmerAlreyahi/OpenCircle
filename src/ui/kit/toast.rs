@@ -102,8 +102,18 @@ fn made<'a, Message: 'a>(
     let line = super::text::text(Role::NOTE, label)
         .line_height(iced::Pixels(LINE))
         .wrapping(iced::widget::text::Wrapping::None);
-    let pill = container(row![dot, line].push(action).spacing(GAP).align_y(Center))
-        .padding(PAD)
+    let content = row![dot, line].push(action).spacing(GAP).align_y(Center);
+    material(container(content).padding(PAD), radius, at)
+}
+
+/// The pill's material round `content`: elevated, its edge, corners of `radius`,
+/// exactly `at` big.
+fn material<'a, Message: 'a>(
+    content: container::Container<'a, Message>,
+    radius: f32,
+    at: Size,
+) -> Element<'a, Message> {
+    let pill = content
         .center_y(Fill)
         .width(Fill)
         .style(move |_| container::Style {
@@ -121,6 +131,65 @@ fn made<'a, Message: 'a>(
         .width(at.width)
         .height(at.height)
         .into()
+}
+
+/// The two-line pill (the update's, the design's board "Update"): a round
+/// accent mark (`lead`, `LEAD` px, in `accent_soft`), a 13 px / 600 title over
+/// an 11.5 px line, and its buttons at the end, padding 14 / 12.
+const BANNER_PAD: [f32; 2] = [14.0, 12.0];
+const BANNER_GAP: f32 = 12.0;
+const BANNER_H: f32 = 64.0;
+/// Without buttons (a status: "Updating…").
+const BANNER_LOW: f32 = 60.0;
+const LINES_GAP: f32 = 2.0;
+/// The round mark.
+pub const LEAD: f32 = 26.0;
+
+/// `banner`'s size for `title`, `line` and buttons `actions` px wide (0: none).
+pub fn banner_size(title: &str, line: &str, actions: f32) -> Size {
+    let text = width(title, Role::CTA.size, font(Role::CTA)).max(width(
+        line,
+        Role::ROW_DESC.size,
+        font(Role::ROW_DESC),
+    ));
+    let end = if actions > 0.0 {
+        BANNER_GAP + actions
+    } else {
+        0.0
+    };
+    Size::new(
+        (BANNER_PAD[0] + LEAD + BANNER_GAP + text + end + BANNER_PAD[1] + 2.0).ceil(),
+        if actions > 0.0 { BANNER_H } else { BANNER_LOW },
+    )
+}
+
+pub fn banner<'a, Message: 'a>(
+    lead: impl Into<Element<'a, Message>>,
+    title: &'a str,
+    line: &'a str,
+    actions: Option<Element<'a, Message>>,
+    radius: f32,
+    at: Size,
+) -> Element<'a, Message> {
+    let lead = container(lead).center(LEAD).style(|_| container::Style {
+        background: Some(c().accent_soft.into()),
+        text_color: Some(c().accent),
+        border: Border::default().rounded(LEAD / 2.0),
+        ..container::Style::default()
+    });
+    let none = iced::widget::text::Wrapping::None;
+    let lines = iced::widget::column![
+        super::text::text(Role::CTA, title).wrapping(none),
+        super::text::sub(Role::ROW_DESC, line).wrapping(none),
+    ]
+    .spacing(LINES_GAP)
+    .width(Fill);
+    let content = row![lead, lines]
+        .push(actions)
+        .spacing(BANNER_GAP)
+        .align_y(Center);
+    let pad = iced::Padding::ZERO.left(BANNER_PAD[0]).right(BANNER_PAD[1]);
+    material(container(content).padding(pad), radius, at)
 }
 
 #[cfg(test)]

@@ -28,12 +28,10 @@ const ABOVE_COMPOSER: f32 = 8.0;
 const ICON: f32 = 20.0;
 /// The heading row (the 20 px icon, the 16 px title).
 const HEADING: f32 = 24.0;
-/// The card's width (`.as-card`: `min(100%, 480px)`).
-pub const WIDTH: f32 = 480.0;
 const ICON_GAP: f32 = 10.0;
-
-/// The body's width (to wrap its text at).
-pub const BODY_WIDTH: f32 = WIDTH - 2.0 * PAD;
+/// Between the window's edge and the card's content (`body` wraps at the
+/// window's width less twice this).
+pub const PADDING: f32 = PAD;
 
 /// The card's height for a body `body` px tall, at most `max` (then the body scrolls).
 pub fn height(body: f32, max: f32) -> f32 {
@@ -41,10 +39,12 @@ pub fn height(body: f32, max: f32) -> f32 {
     (chrome + body).ceil().min(max)
 }
 
-/// The card with corners of `radius` (the window's cut).
+/// The card with corners of `radius` (the window's cut); `aside`: a muted note
+/// at the heading's end ("Updated just now").
 pub fn frame<'a, Message: Clone + 'a>(
     glyph: Icon,
     title: &'a str,
+    aside: Option<&'a str>,
     body: impl Into<Element<'a, Message>>,
     actions: impl Into<Element<'a, Message>>,
     radius: f32,
@@ -52,8 +52,9 @@ pub fn frame<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     let heading = row![
         icon(glyph, ICON).color(c().accent),
-        text(Role::PAGE_TITLE, title)
+        text(Role::PAGE_TITLE, title).width(Fill),
     ]
+    .push(aside.map(|a| super::text::muted(Role::ROW_DESC, a)))
     .spacing(ICON_GAP)
     .height(HEADING)
     .align_y(Center);

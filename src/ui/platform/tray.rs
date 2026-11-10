@@ -17,6 +17,8 @@ use crate::{Trigger, Triggers};
 /// The tray menu's entries, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Entry {
+    /// "Restart to update (<v>)", first, only while an update waits (`update::offer`).
+    Update,
     Circle,
     Translate,
     Snip,
@@ -30,7 +32,8 @@ pub enum Entry {
 }
 
 impl Entry {
-    const ALL: [Entry; 7] = [
+    const ALL: [Entry; 8] = [
+        Entry::Update,
         Entry::Circle,
         Entry::Translate,
         Entry::Snip,
@@ -40,9 +43,11 @@ impl Entry {
         Entry::Quit,
     ];
 
-    /// Its row's text (also its accessible name).
+    /// Its row's text (also its accessible name); the update row's names the
+    /// waiting version (`update_label`).
     pub fn label(self) -> &'static str {
         match self {
+            Entry::Update => "Restart to update",
             Entry::Circle => "Circle to Search",
             Entry::Translate => "Translate screen",
             Entry::Snip => "Snip",
@@ -54,9 +59,10 @@ impl Entry {
         }
     }
 
-    /// A separator goes above it.
+    /// A separator goes above it (unless it is the first row: Circle to Search
+    /// is separated from the update row above it).
     pub fn separated(self) -> bool {
-        self == Entry::Settings
+        matches!(self, Entry::Settings | Entry::Circle)
     }
 
     /// The Labs switch that shows it (`None` = always shown).
@@ -86,13 +92,16 @@ impl Entry {
             Entry::Snip => quick("snip", false, None),
             Entry::Live => quick("translate", true, None),
             Entry::Song => quick("song_search", false, None),
-            Entry::ClickPins | Entry::Settings | Entry::Quit => None,
+            Entry::Update | Entry::ClickPins | Entry::Settings | Entry::Quit => None,
         }
     }
 
     /// It captures the screen, so it waits until the menu is off it.
     pub fn captures(self) -> bool {
-        !matches!(self, Entry::ClickPins | Entry::Settings | Entry::Quit)
+        !matches!(
+            self,
+            Entry::Update | Entry::ClickPins | Entry::Settings | Entry::Quit
+        )
     }
 
     /// What choosing it does.
@@ -105,6 +114,7 @@ impl Entry {
             crate::hotkey::trigger(&run, at)
         };
         match self {
+            Entry::Update => Trigger::RestartToUpdate,
             Entry::Circle => Trigger::Capture(at),
             // the one-shot translate, never the live one bound to the same action
             Entry::Translate => run("translate", Some(Target::FullScreen)),
@@ -126,11 +136,23 @@ impl Entry {
     }
 }
 
-/// The entries shown with these Labs switches: a Labs feature's only while it is on.
-pub fn entries(labs: &Labs) -> Vec<Entry> {
+/// The entries shown with these Labs switches: a Labs feature's only while it is
+/// on; the update row only while an update waits (`update`).
+pub fn entries(labs: &Labs, update: bool) -> Vec<Entry> {
     (Entry::ALL.into_iter())
+        .filter(|e| *e != Entry::Update || update)
         .filter(|e| e.feature().is_none_or(|f| labs.has(f)))
         .collect()
+}
+
+/// The update row's text for the waiting update (`update::offer`): "Restart to
+/// update (0.1.5)", or "Get OpenCircle 0.1.5" where the user installs it.
+pub fn update_label() -> Option<String> {
+    let offer = crate::update::offer()?;
+    Some(match offer.how {
+        crate::update::How::GetIt => format!("Get OpenCircle {}", offer.version),
+        _ => format!("Restart to update ({})", offer.version),
+    })
 }
 
 /// After the menu is gone: the screen redraws what it covered.
@@ -221,7 +243,8 @@ fn monitor_of(icon: [i32; 4]) -> ([i32; 4], f32) {
 struct Built {
     menu: Menu,
     items: Vec<(Entry, MenuItem)>,
-    separator: PredefinedMenuItem,
+    /// Above Circle to Search (under the update row) and above Settings.
+    separators: [PredefinedMenuItem; 2],
 }
 
 #[cfg(target_os = "linux")]
@@ -229,35 +252,87 @@ thread_local! {
     static BUILT: std::cell::RefCell<Option<Built>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Shows exactly `entries(labs)` in the menu, the separator above Settings.
+thread_local! {
+    /// The icon, kept where it lives (Windows: the UI thread; Linux: the GTK thread)
+    /// to show the update dot (`show_update`). Windows lets go of it before the
+    /// process ends (`release`), or the shell would keep its icon.
+    static HELD: std::cell::RefCell<Option<TrayIcon>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Shows exactly `entries(labs, update)` in the menu, a separator above each
+/// separated row but the first; the update row says `update`.
 #[cfg(target_os = "linux")]
-fn fill(built: &Built, labs: &Labs) {
+fn fill(built: &Built, labs: &Labs, update: Option<&str>) {
     for (_, item) in &built.items {
         let _ = built.menu.remove(item);
     }
-    let _ = built.menu.remove(&built.separator);
-    let shown = entries(labs);
+    for s in &built.separators {
+        let _ = built.menu.remove(s);
+    }
+    let shown = entries(labs, update.is_some());
+    let mut separators = built.separators.iter();
+    let mut first = true;
     for (entry, item) in &built.items {
         if shown.contains(entry) {
-            if entry.separated() {
-                let _ = built.menu.append(&built.separator as &dyn IsMenuItem);
+            if entry.separated()
+                && !first
+                && let Some(s) = separators.next()
+            {
+                let _ = built.menu.append(s as &dyn IsMenuItem);
+            }
+            if *entry == Entry::Update {
+                item.set_text(update.unwrap_or_default());
             }
             let _ = built.menu.append(item as &dyn IsMenuItem);
+            first = false;
         }
     }
 }
 
-/// Labs changed: Linux rebuilds the menu now, on the tray's own (GTK) thread. Windows builds its popup at
-/// each opening.
+/// Labs changed, or an update now waits: Linux rebuilds the menu now, on the tray's own (GTK) thread.
+/// Windows builds its popup at each opening.
 pub fn refresh() {
     #[cfg(target_os = "linux")]
     {
         let labs = crate::config::current().labs;
-        let apply = move || BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs)));
+        let update = update_label();
+        let apply =
+            move || BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs, update.as_deref())));
         gtk::glib::idle_add_once(apply);
     }
 }
 
+/// An update waits (`dot`: its dot's colour, the theme's accent) or not
+/// (`None`): the icon with its dot or without, and (Linux) the menu's update
+/// row. Call it on the UI thread.
+pub fn show_update(dot: Option<[u8; 3]>) {
+    let set = move || {
+        HELD.with_borrow(|held| {
+            if let Some(tray) = held {
+                let _ = tray.set_icon(Some(icon(dot)));
+                let tip = match update_label() {
+                    Some(label) if dot.is_some() => format!("OpenCircle · {label}"),
+                    _ => "OpenCircle".into(),
+                };
+                let _ = tray.set_tooltip(Some(tip));
+            }
+        });
+    };
+    #[cfg(target_os = "linux")]
+    {
+        gtk::glib::idle_add_once(set);
+        refresh();
+    }
+    #[cfg(not(target_os = "linux"))]
+    set();
+}
+
+/// Windows: lets go of the icon kept for `show_update` (the UI is done), so the
+/// one `start` returned removes it from the tray when it goes.
+pub fn release() {
+    #[cfg(not(target_os = "linux"))]
+    HELD.with_borrow_mut(|held| *held = None);
+}
 /// The tray icon's identity for the exe at `path`: a hash of the lower-cased path (FNV-1a, 128 bit, so it never
 /// changes between Rust versions). Windows binds a GUID to the exe path that first registers it and refuses it
 /// from any other path, so one constant GUID fails for every copy but one (portable, installed, updated); a GUID
@@ -443,9 +518,16 @@ fn desktop_menu(tx: Triggers) -> Menu {
     let built = Built {
         menu: Menu::new(),
         items,
-        separator: PredefinedMenuItem::separator(),
+        separators: [
+            PredefinedMenuItem::separator(),
+            PredefinedMenuItem::separator(),
+        ],
     };
-    fill(&built, &crate::config::current().labs);
+    fill(
+        &built,
+        &crate::config::current().labs,
+        update_label().as_deref(),
+    );
     let menu = built.menu.clone();
     BUILT.set(Some(built));
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
@@ -453,7 +535,12 @@ fn desktop_menu(tx: Triggers) -> Menu {
             return;
         };
         // turned off in Labs meanwhile: nothing
-        if !entries(&crate::config::current().labs).contains(&entry) {
+        if !entries(
+            &crate::config::current().labs,
+            crate::update::offer().is_some(),
+        )
+        .contains(&entry)
+        {
             return;
         }
         let trigger = entry.trigger(Instant::now());
@@ -519,7 +606,7 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
     let menu = desktop_menu(tx);
     #[cfg(windows)]
     on_right_click(tx);
-    let icon = icon();
+    let icon = icon(None);
     let exe = std::env::current_exe().unwrap_or_default();
     #[cfg(windows)]
     let clear = delete_icon;
@@ -553,6 +640,7 @@ fn build(tx: Triggers) -> Option<TrayIcon> {
     if let Some(guid) = tray.1 {
         let _ = HELD_GUID.set(guid);
     }
+    HELD.set(Some(tray.0.clone()));
     Some(tray.0)
 }
 
@@ -576,9 +664,10 @@ fn add_with_fallback<T, E: std::fmt::Display>(
     }
 }
 
-/// The 32 px app icon, embedded in the binary.
+/// The 32 px app icon, embedded in the binary; `dot`: with the update dot in
+/// this colour (`with_dot`).
 // ponytail: one size; pick 16/24/32 by tray DPI if it looks soft on scaled displays.
-fn icon() -> Icon {
+fn icon(dot: Option<[u8; 3]>) -> Icon {
     let decoder = png::Decoder::new(std::io::Cursor::new(include_bytes!(
         "../../../assets/icons/32x32.png"
     )));
@@ -586,7 +675,32 @@ fn icon() -> Icon {
     let mut rgba = vec![0; reader.output_buffer_size().expect("small icon")];
     let info = reader.next_frame(&mut rgba).expect("embedded icon decodes");
     rgba.truncate(info.buffer_size());
+    if let Some(colour) = dot {
+        with_dot(&mut rgba, info.width, colour);
+    }
     Icon::from_rgba(rgba, info.width, info.height).expect("embedded icon is RGBA")
+}
+
+/// The update dot on the icon (`rgba`, `w` px square): a `colour` disc in the
+/// top-right corner, a clear ring round it so it reads on any taskbar (the
+/// design's board "Update" u1), anti-aliased at the edges.
+fn with_dot(rgba: &mut [u8], w: u32, colour: [u8; 3]) {
+    let s = w as f32 / 32.0;
+    let (cx, cy, r, ring) = (25.0 * s, 7.0 * s, 5.5 * s, 1.5 * s);
+    for y in 0..w {
+        for x in 0..w {
+            let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+            let px = &mut rgba[((y * w + x) * 4) as usize..][..4];
+            // inside the ring: the icon fades out; inside the disc: the colour in
+            let clear = (r + ring + 0.5 - d).clamp(0.0, 1.0);
+            px[3] = (px[3] as f32 * (1.0 - clear)) as u8;
+            let fill = (r + 0.5 - d).clamp(0.0, 1.0);
+            if fill > 0.0 {
+                px[..3].copy_from_slice(&colour);
+                px[3] = (fill * 255.0) as u8;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -631,18 +745,18 @@ mod tests {
         use Entry::*;
         // Snip is out of Labs (N-41): always there
         assert_eq!(
-            entries(&Labs::default()),
+            entries(&Labs::default(), false),
             [Circle, Translate, Snip, Settings, Quit]
         );
         let mut on = Labs::default();
         on.set(Feature::Live, true);
         assert_eq!(
-            entries(&on),
+            entries(&on, false),
             [Circle, Translate, Snip, Live, Settings, Quit]
         );
         on.set(Feature::Song, true);
         assert_eq!(
-            entries(&on),
+            entries(&on, false),
             [Circle, Translate, Snip, Live, Song, Settings, Quit]
         );
         assert_eq!(
@@ -650,8 +764,36 @@ mod tests {
                 .iter()
                 .filter(|e| e.separated())
                 .collect::<Vec<_>>(),
-            [&Settings]
+            [&Circle, &Settings]
         );
+    }
+
+    /// While an update waits its row comes first ("Restart to update"), and it
+    /// restarts into it; it captures nothing. Before: no such row.
+    #[test]
+    fn a_waiting_update_is_the_first_row() {
+        use Entry::*;
+        assert_eq!(
+            entries(&Labs::default(), true),
+            [Update, Circle, Translate, Snip, Settings, Quit]
+        );
+        assert!(matches!(
+            Update.trigger(std::time::Instant::now()),
+            crate::Trigger::RestartToUpdate
+        ));
+        assert!(!Update.captures());
+    }
+
+    /// The dot: the accent in the top-right corner, a clear ring round it, the
+    /// rest of the icon as it was.
+    #[test]
+    fn the_update_dot_sits_top_right_with_a_clear_ring() {
+        let mut rgba = vec![200u8; 32 * 32 * 4];
+        super::with_dot(&mut rgba, 32, [1, 2, 3]);
+        let at = |x: u32, y: u32| &rgba[((y * 32 + x) * 4) as usize..][..4];
+        assert_eq!(at(25, 7), [1, 2, 3, 255], "the disc");
+        assert!(at(25, 0)[3] < 10, "the ring is clear");
+        assert_eq!(at(5, 25), [200; 4], "the rest untouched");
     }
 
     /// The hints are the user's own shortcuts, and Translate screen runs the one-shot translate even when the

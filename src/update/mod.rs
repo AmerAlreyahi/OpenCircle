@@ -1,18 +1,21 @@
-//! Auto-update (owner decision "Auto-update", AGENTS.md). With `[update] auto = true`
-//! a thread asks GitHub for the latest release a little after start and then every
-//! 12 h (only the request: no id, no data; a User-Agent and the ETag). A newer final
-//! release is downloaded with `SHA256SUMS.txt` and its minisign signature, checked
-//! against `verify::RELEASE_PUBLIC_KEY`, and handed to the UI (`Event::Ready`),
-//! which installs it when nothing is open (`install`): swap the file, run the new one
-//! once (`--version`), relaunch it, exit. The new process confirms the update at
-//! start (`confirm`: notes card) or rolls it back if it cannot start (`roll_back`).
-//! A copy our setup installed (Program Files: the user can't write it) gets the
-//! release's setup instead, offered on the update card; "Install now" runs it
-//! elevated and quiet (`run_setup`), and it starts the new version (#151).
-//! deb / rpm / source builds can't replace themselves: `Event::Manual` (notes card
-//! with the release page). Failures are logged, never shown, unless the user asked
-//! (Settings > Check now: `Event::Status`).
+//! Auto-update (owner decisions "Auto-update" and "Update experience", AGENTS.md).
+//! With `[update] auto = true` a thread asks GitHub for the latest release a little
+//! after start and then every 12 h (only the request: no id, no data; a User-Agent
+//! and the ETag). A newer final release is downloaded with `SHA256SUMS.txt` and its
+//! minisign signature and checked against `verify::RELEASE_PUBLIC_KEY`. A portable
+//! exe or AppImage is then put in place at once (`prepare`: swap the file, run the
+//! new one once with `--version`; the running program keeps going): the new
+//! version is what starts next, whatever ends this run (quit, log-off, a reboot).
+//! The UI (`Event::Ready`) tells the user and restarts into it on Restart now, or
+//! after the session has been locked a minute (`restart`, `flow`). The new process
+//! confirms the update at start (`confirm`: What's new) or rolls it back if it
+//! cannot start (`roll_back`). A copy our setup installed (Program Files: the user
+//! can't write it) gets the release's setup instead, run elevated and quiet only on
+//! Restart now (`install`), and it starts the new version (#151). deb / rpm /
+//! source builds can't replace themselves: `Event::Manual` ("Get it"). Failures are
+//! logged, never shown, unless the user asked (Settings > Check now: `Event::Status`).
 
+mod flow;
 mod notes;
 mod release;
 pub use release::version;
@@ -23,9 +26,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
-pub use notes::{Kind as NoteKind, Line as NoteLine, parse as parse_notes};
+pub use flow::{How, Lock, Moment, Pill, Step, away, installs_at, status};
+pub use notes::{
+    Line as NoteLine, Notes, Style as NoteStyle, parse as parse_notes, plain as plain_note,
+};
 use release::{CheckError, Http, Memo};
 pub use release::{Install, Staged};
 
@@ -57,7 +63,8 @@ pub fn test_url() -> Option<String> {
 pub enum Event {
     /// The result of a check the user asked for (Settings shows it).
     Status(String),
-    /// Downloaded and verified: install when idle.
+    /// Downloaded and verified (a swap install: already in place for the next
+    /// start): the user is told, it installs at a `flow::Moment`.
     Ready(Staged),
     /// A newer release this install can't apply itself: show it, link the page.
     Manual {
@@ -69,6 +76,30 @@ pub enum Event {
 
 /// Wakes the update thread for a check now (Settings > Check now).
 static NOW: Mutex<Option<mpsc::Sender<()>>> = Mutex::new(None);
+
+/// An update waiting for the user (Settings, the tray), from the update thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Offer {
+    pub version: String,
+    pub notes: String,
+    pub url: String,
+    pub how: How,
+}
+
+static OFFER: Mutex<Option<Offer>> = Mutex::new(None);
+/// When GitHub last answered a check.
+static CHECKED: Mutex<Option<SystemTime>> = Mutex::new(None);
+
+/// The update waiting for the user, if any (the same until this process exits:
+/// one update per run).
+pub fn offer() -> Option<Offer> {
+    OFFER.lock().unwrap().clone()
+}
+
+/// When GitHub last answered a check in this run.
+pub fn checked() -> Option<SystemTime> {
+    *CHECKED.lock().unwrap()
+}
 
 /// Starts the update thread (once, from `main`).
 pub fn start(tx: Triggers) {
@@ -102,7 +133,7 @@ fn run(now: &mpsc::Receiver<()>, tx: &Triggers) {
     loop {
         if asked || crate::config::current().update.auto == Some(true) {
             let status = match Setup::this() {
-                Some(setup) => check(&release::Net, &setup, &mut memo, &mut handled, tx),
+                Some(setup) => check(&release::Net, &setup, &mut memo, &mut handled, tx, &prepare),
                 None => "this is a development build: it does not update itself".into(),
             };
             crate::log!("[opencircle] update: {status}");
@@ -154,14 +185,17 @@ fn key(hook: bool) -> &'static str {
     }
 }
 
-/// One check; sends `Ready` / `Manual` for a newer release (once per version:
-/// `handled`). Returns the status line.
+/// One check; sends `Ready` / `Manual` for a newer release, once per run
+/// (`handled`: the first update offered waits until this process ends; a newer
+/// one is the next run's). A swap install is put in place first (`prepare`).
+/// Returns the status line.
 fn check(
     http: &dyn Http,
     setup: &Setup,
     memo: &mut Memo,
     handled: &mut Option<String>,
     tx: &Triggers,
+    prepare: &dyn Fn(&Staged) -> Result<(), String>,
 ) -> String {
     let current = setup.current;
     let release = match release::latest(http, &setup.url, memo) {
@@ -174,26 +208,36 @@ fn check(
             return "could not reach GitHub: try again later".into();
         }
     };
+    *CHECKED.lock().unwrap() = Some(SystemTime::now());
+    let install = &setup.install;
+    if let Some(version) = handled.as_deref() {
+        // kept (never downloaded again): the UI holds it
+        return match How::of(install) {
+            How::GetIt => format!("OpenCircle {version} is out: get it from the release page"),
+            _ => format!("OpenCircle {version} is ready: restart OpenCircle to install it"),
+        };
+    }
     if !release::is_newer(&release, current) {
         return format!("OpenCircle {current} is up to date");
     }
     let version = release.tag_name.trim_start_matches('v').to_string();
-    let install = &setup.install;
-    if handled.as_deref() == Some(version.as_str()) {
-        // kept staged (never downloaded again): the UI holds it
-        return match install {
-            Install::Setup(_) => format!("OpenCircle {version} is ready: choose Install now"),
-            _ => format!("OpenCircle {version} is waiting to install"),
-        };
-    }
-    let manual = |handled: &mut Option<String>| {
+    let offer = |handled: &mut Option<String>, how: How| {
         *handled = Some(version.clone());
+        *OFFER.lock().unwrap() = Some(Offer {
+            version: version.clone(),
+            notes: release.body.clone().unwrap_or_default(),
+            url: release.html_url.clone(),
+            how,
+        });
+    };
+    let manual = |handled: &mut Option<String>| {
+        offer(handled, How::GetIt);
         let _ = tx.unbounded_send(Trigger::Update(Event::Manual {
             version: version.clone(),
             notes: release.body.clone().unwrap_or_default(),
             url: release.html_url.clone(),
         }));
-        format!("OpenCircle {version} is available: get it from the release page")
+        format!("OpenCircle {version} is out: get it from the release page")
     };
     if *install == Install::Manual {
         return manual(handled);
@@ -201,7 +245,7 @@ fn check(
     let Some(dir) = stage_dir() else {
         return "no data folder: not installed".into();
     };
-    match release::stage(
+    let staged = match release::stage(
         http,
         &release,
         install,
@@ -209,27 +253,24 @@ fn check(
         &dir,
         setup.key,
     ) {
-        Ok(staged) => {
-            *handled = Some(version.clone());
-            let _ = tx.unbounded_send(Trigger::Update(Event::Ready(staged)));
-            match install {
-                Install::Setup(_) => {
-                    format!("OpenCircle {version} is downloaded and verified: choose Install now")
-                }
-                _ => format!(
-                    "OpenCircle {version} is downloaded and verified: it installs when OpenCircle is not in use"
-                ),
-            }
-        }
-        Err(e) if e == "no download for this system" => manual(handled),
+        Ok(staged) => staged,
+        Err(e) if e == "no download for this system" => return manual(handled),
         Err(e) => {
             crate::log!(
                 "[opencircle] update {version} refused: {}",
                 release::scrub(&e)
             );
-            format!("OpenCircle {version} could not be verified: not installed")
+            return format!("OpenCircle {version} could not be verified: not installed");
         }
+    };
+    if let Err(e) = prepare(&staged) {
+        // can't replace itself (e.g. a folder the user can't write): the page instead
+        crate::log!("[opencircle] update {version}: {e}");
+        return manual(handled);
     }
+    offer(handled, How::of(install));
+    let _ = tx.unbounded_send(Trigger::Update(Event::Ready(staged)));
+    format!("OpenCircle {version} is ready: restart OpenCircle to install it")
 }
 
 /// Where downloads are staged: `<local data dir>/opencircle/update`, this user's
@@ -247,23 +288,38 @@ fn remove_stale_downloads() {
     }
 }
 
-/// Installs a verified update now (call only while OpenCircle is idle): swaps the
-/// file, runs the new one once, writes the marker and starts it. `Ok` = the caller
-/// exits now. On `Err` everything is as before.
-/// A copy installed by the setup (`Install::Setup`) runs the release's setup instead:
-/// call it only when the user chose Install (it asks Windows for admin rights).
-pub fn install(staged: &Staged) -> Result<(), String> {
-    let marker = swap::Marker::path().ok_or("no data folder")?;
-    if let Install::Setup(_) = staged.install {
-        // the setup runs from the staged folder: kept (a declined prompt can be
-        // retried); the next start's `remove_stale_downloads` takes it
-        return run_setup(staged, &marker, elevate);
+/// The update thread, right after a download is verified: a swap install's new
+/// program is put in place now (`prepare_at`), so it is what starts next,
+/// whatever ends this run. A setup's waits for Restart now (`restart`); deb /
+/// rpm never get here. `Err` = everything is as before.
+fn prepare(staged: &Staged) -> Result<(), String> {
+    if !matches!(staged.install, Install::Exe(_) | Install::AppImage(_)) {
+        return Ok(());
     }
-    let result = install_at(staged, &marker);
+    let marker = swap::Marker::path().ok_or("no data folder")?;
+    let result = prepare_at(staged, &marker);
     let _ = std::fs::remove_dir_all(&staged.dir);
     result
 }
 
+/// Restarts into the waiting update at `moment` (`flow::installs_at` says
+/// whether it may): a swap install starts its new program (already in place)
+/// and the caller exits; a setup's copy runs the release's setup, elevated (one
+/// Windows prompt), only on the button. `Ok` = the caller exits now; on `Err`
+/// nothing changed (a declined prompt can be retried).
+pub fn restart(staged: &Staged, moment: Moment) -> Result<(), String> {
+    if !installs_at(&staged.install, moment) {
+        return Err("this update installs only when asked".into());
+    }
+    let marker = swap::Marker::path().ok_or("no data folder")?;
+    match &staged.install {
+        // the setup runs from the staged folder: kept (a declined prompt can be
+        // retried); the next start's `remove_stale_downloads` takes it
+        Install::Setup(_) => run_setup(staged, &marker, elevate),
+        // after the button, What's new; after a lock, its small pill
+        _ => relaunch_at(&marker, moment != Moment::Button),
+    }
+}
 /// What the setup is told: install quietly, then start the app (`setup::Silent`).
 pub const SETUP_ARGS: &str = "/quiet /launch";
 
@@ -296,6 +352,7 @@ fn run_setup(
         backup: PathBuf::new(), // nothing to roll back: Windows Installer does that
         notes: staged.notes.clone(),
         url: staged.url.clone(),
+        quiet: false, // only ever on Restart now: What's new
     };
     marker.write(marker_path).map_err(|e| e.to_string())?;
     let hex: String = staged.sha256.iter().map(|b| format!("{b:02x}")).collect();
@@ -338,7 +395,10 @@ fn elevate(_: &Path, _: &str) -> std::io::Result<()> {
     Err(std::io::ErrorKind::Unsupported.into())
 }
 
-fn install_at(staged: &Staged, marker_path: &Path) -> Result<(), String> {
+/// Swaps the file, runs the new one once and writes the marker (a quiet one:
+/// a start that isn't Restart now shows the small "Updated" pill). The running
+/// program keeps going. On `Err` everything is as before.
+fn prepare_at(staged: &Staged, marker_path: &Path) -> Result<(), String> {
     let target = match &staged.install {
         Install::Exe(p) | Install::AppImage(p) => p,
         Install::Setup(_) => return Err("this install updates through its setup".into()),
@@ -357,16 +417,25 @@ fn install_at(staged: &Staged, marker_path: &Path) -> Result<(), String> {
         backup: backup.clone(),
         notes: staged.notes.clone(),
         url: staged.url.clone(),
+        quiet: true,
     };
     marker.write(marker_path).map_err(|e| undo(e.to_string()))?;
-    if let Err(e) = spawn(target, Some(RELAUNCH_ARG)) {
-        let _ = std::fs::remove_file(marker_path);
-        return Err(undo(format!("cannot start the new version: {e}")));
-    }
     crate::log!(
-        "[opencircle] update {}: installed, restarting",
+        "[opencircle] update {}: in place, starts with the next run",
         staged.version
     );
+    Ok(())
+}
+
+/// Starts the program the marker at `marker_path` waits for (`quiet`: its
+/// small pill instead of What's new). `Ok` = the caller exits now.
+fn relaunch_at(marker_path: &Path, quiet: bool) -> Result<(), String> {
+    let mut marker = swap::Marker::read(marker_path).ok_or("no update is waiting")?;
+    marker.quiet = quiet;
+    marker.write(marker_path).map_err(|e| e.to_string())?;
+    spawn(&marker.target, Some(RELAUNCH_ARG))
+        .map_err(|e| format!("cannot start the new version: {e}"))?;
+    crate::log!("[opencircle] update {}: restarting", marker.version);
     Ok(())
 }
 
@@ -451,11 +520,31 @@ pub fn wait_for_old(running: impl Fn() -> bool) -> bool {
     true
 }
 
+/// An update this process started with (`confirm`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Installed {
+    pub version: String,
+    pub notes: String,
+    pub url: String,
+    /// Not after Restart now (a quit, a lock, a reboot): the small "Updated" pill,
+    /// not What's new.
+    pub quiet: bool,
+}
+
 /// At start: an update that is waiting to be confirmed is confirmed (the old
-/// program goes). Returns its notes card: version, notes, release page.
-pub fn confirm() -> Option<(String, String, String)> {
-    let marker = swap::confirm(&swap::Marker::path()?, env!("CARGO_PKG_VERSION"))?;
+/// program goes). Another copy of OpenCircle (elsewhere on the disk) leaves it
+/// for the program it is for.
+pub fn confirm() -> Option<Installed> {
+    let path = swap::Marker::path()?;
+    let waiting = swap::Marker::read(&path)?;
+    if !is_this_program(&waiting.target) {
+        return None;
+    }
+    let marker = swap::confirm(&path, env!("CARGO_PKG_VERSION"))?;
     crate::log!("[opencircle] update {}: running", marker.version);
+    // a second start soon after (the setup's own start, Windows restarting what
+    // it closed) opens nothing (`just_updated`)
+    let _ = std::fs::write(stamp(&path), marker.version.as_bytes());
     // The old process may still be exiting (Windows locks a running exe).
     let backup = marker.backup.clone();
     std::thread::spawn(move || {
@@ -466,7 +555,55 @@ pub fn confirm() -> Option<(String, String, String)> {
             std::thread::sleep(Duration::from_secs(1));
         }
     });
-    Some((marker.version, marker.notes, marker.url))
+    Some(Installed {
+        version: marker.version,
+        notes: marker.notes,
+        url: marker.url,
+        quiet: marker.quiet,
+    })
+}
+
+/// `target` is this process's program (an AppImage's is the image, not its mount).
+fn is_this_program(target: &Path) -> bool {
+    let this = match Install::detect() {
+        Install::Exe(p) | Install::Setup(p) | Install::AppImage(p) => p,
+        Install::Manual => return false,
+    };
+    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    real(&this) == real(target)
+}
+
+/// `update.done` beside the marker: when the last update was confirmed.
+fn stamp(marker: &Path) -> PathBuf {
+    marker.with_file_name("update.done")
+}
+
+/// A second start this soon after an update's start opens nothing.
+const JUST: Duration = Duration::from_secs(60);
+
+/// An update just started (or is about to): a start that finds OpenCircle
+/// running then opens nothing (no Settings), whoever started it.
+pub fn just_updated() -> bool {
+    let Some(path) = swap::Marker::path() else {
+        return false;
+    };
+    let waiting = swap::Marker::read(&path).map(|m| m.version);
+    let age = (std::fs::metadata(stamp(&path)).and_then(|m| m.modified()))
+        .ok()
+        .and_then(|t| t.elapsed().ok());
+    is_just_updated(waiting.as_deref(), env!("CARGO_PKG_VERSION"), age)
+}
+
+/// This version's update is still unconfirmed (`waiting`), or one was confirmed
+/// `stamp_age` ago, within `JUST`.
+fn is_just_updated(waiting: Option<&str>, ours: &str, stamp_age: Option<Duration>) -> bool {
+    waiting == Some(ours) || stamp_age.is_some_and(|age| age < JUST)
+}
+
+/// An update to this version waits to be confirmed: a start that fails rolls it back.
+pub fn pending() -> bool {
+    (swap::Marker::path().and_then(|p| swap::Marker::read(&p)))
+        .is_some_and(|m| m.version == env!("CARGO_PKG_VERSION"))
 }
 
 /// The new program failed to start: the old one goes back in place and is started.
@@ -516,16 +653,48 @@ mod tests {
             verify::tests::TEST_KEY,
         );
         let (mut memo, mut handled) = (Memo::default(), None);
-        let status = check(&fake, &exe, &mut memo, &mut handled, &tx);
-        assert!(status.contains("verified"), "{status}");
+        let prepared = std::cell::Cell::new(0);
+        let prepare = |_: &Staged| {
+            prepared.set(prepared.get() + 1);
+            Ok(())
+        };
+        let status = check(&fake, &exe, &mut memo, &mut handled, &tx, &prepare);
+        assert!(status.contains("ready: restart"), "{status}");
+        assert_eq!(prepared.get(), 1, "put in place before it is offered");
         let [Event::Ready(staged)] = &events(&mut rx)[..] else {
             panic!("one Ready");
         };
         assert_eq!(std::fs::read(&staged.file).unwrap(), verify::tests::EXE);
+        assert_eq!(
+            offer().map(|o| (o.version, o.how)),
+            Some(("9.9.9".into(), How::Restart))
+        );
+        assert!(checked().is_some());
         let _ = std::fs::remove_dir_all(&staged.dir);
-        let again = check(&fake, &exe, &mut memo, &mut handled, &tx);
-        assert!(again.contains("waiting"), "{again}");
+        let again = check(&fake, &exe, &mut memo, &mut handled, &tx, &prepare);
+        assert!(again.contains("9.9.9 is ready"), "{again}");
+        // a newer one in the same run: the first stays the one offered
+        let newer = server(&release("v9.9.10"), SIG);
+        let later = check(
+            &newer,
+            &exe,
+            &mut Memo::default(),
+            &mut handled,
+            &tx,
+            &prepare,
+        );
+        assert!(later.contains("9.9.9 is ready"), "{later}");
         assert!(events(&mut rx).is_empty(), "no second download");
+        assert_eq!(prepared.get(), 1);
+
+        // can't be put in place: the release page instead, nothing to restart into
+        let fake = server(&release("v9.9.9"), SIG);
+        let status = check(&fake, &exe, &mut Memo::default(), &mut None, &tx, &|s| {
+            let _ = std::fs::remove_dir_all(&s.dir);
+            Err("cannot replace".into())
+        });
+        assert!(status.contains("release page"), "{status}");
+        assert!(matches!(&events(&mut rx)[..], [Event::Manual { .. }]));
 
         // deb / rpm: a notice with the page, nothing downloaded
         let fake = server(&release("v9.9.9"), SIG);
@@ -535,6 +704,7 @@ mod tests {
             &mut Memo::default(),
             &mut None,
             &tx,
+            &|_| panic!("nothing to put in place"),
         );
         assert!(status.contains("release page"), "{status}");
         assert!(
@@ -545,13 +715,17 @@ mod tests {
         // a bad signature: refused, nothing handed over
         let fake = server(&release("v9.9.9"), SIG);
         let wrong = setup(Install::Exe("C:/x/o.exe".into()), verify::tests::WRONG_KEY);
-        let status = check(&fake, &wrong, &mut Memo::default(), &mut None, &tx);
+        let status = check(&fake, &wrong, &mut Memo::default(), &mut None, &tx, &|_| {
+            Ok(())
+        });
         assert!(status.contains("not installed"), "{status}");
         assert!(events(&mut rx).is_empty());
 
         // up to date
         let fake = server(&release("v1.0.0"), SIG);
-        let status = check(&fake, &exe, &mut Memo::default(), &mut None, &tx);
+        let status = check(&fake, &exe, &mut Memo::default(), &mut None, &tx, &|_| {
+            Ok(())
+        });
         assert_eq!(status, "OpenCircle 1.0.0 is up to date");
     }
 
@@ -581,7 +755,7 @@ mod tests {
                 }
             };
             // says the wrong version: refused, the old file is back, no marker
-            let err = install_at(&staged("#!/bin/sh\necho 1.0.0\n"), &marker).unwrap_err();
+            let err = prepare_at(&staged("#!/bin/sh\necho 1.0.0\n"), &marker).unwrap_err();
             assert!(err.contains("1.0.0"), "{err}");
             assert_eq!(std::fs::read(&target).unwrap(), b"old");
             assert!(!marker.exists() && !swap::backup_of(&target).exists());
@@ -589,23 +763,29 @@ mod tests {
             let mut swapped = staged("#!/bin/sh\necho 9.9.9\n");
             std::fs::write(&swapped.file, "#!/bin/sh\necho 9.9.9 # evil\n").unwrap();
             swapped.dir = dir.join("dl-unused");
-            let err = install_at(&swapped, &marker).unwrap_err();
+            let err = prepare_at(&swapped, &marker).unwrap_err();
             assert!(err.contains("changed after"), "{err}");
             assert_eq!(std::fs::read(&target).unwrap(), b"old");
             // crashes: same
-            assert!(install_at(&staged("#!/bin/sh\nexit 3\n"), &marker).is_err());
+            assert!(prepare_at(&staged("#!/bin/sh\nexit 3\n"), &marker).is_err());
             assert_eq!(std::fs::read(&target).unwrap(), b"old");
-            // runs (the relaunch, with RELAUNCH_ARG, prints the version and exits too)
+            // runs: in place for the next start, quietly (no relaunch yet)
             let good = "#!/bin/sh\necho 9.9.9\n";
-            install_at(&staged(good), &marker).unwrap();
+            prepare_at(&staged(good), &marker).unwrap();
             assert_eq!(std::fs::read_to_string(&target).unwrap(), good);
             let m = swap::Marker::read(&marker).unwrap();
             assert_eq!((m.version.as_str(), m.backup.exists()), ("9.9.9", true));
+            assert!(m.quiet, "a start that isn't Restart now: the small pill");
             assert_eq!(
                 std::fs::read(&m.backup).unwrap(),
                 b"old",
                 "kept until confirmed"
             );
+            // Restart now: What's new next (the relaunch, with RELAUNCH_ARG, prints
+            // the version and exits)
+            relaunch_at(&marker, false).unwrap();
+            assert!(!swap::Marker::read(&marker).unwrap().quiet);
+            assert!(relaunch_at(&dir.join("none.json"), false).is_err());
             let _ = std::fs::remove_dir_all(&dir);
         }
     }
@@ -660,7 +840,7 @@ mod tests {
         assert!(err.contains("changed after"), "{err}");
         assert!(!marker.exists());
         // and the swap never touches an installed copy
-        assert!(install_at(&staged, &marker).is_err());
+        assert!(prepare_at(&staged, &marker).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -685,7 +865,14 @@ mod tests {
             verify::tests::TEST_KEY,
         );
         // the signed checksums don't list this setup: refused, nothing handed over
-        let status = check(&fake, &installed, &mut Memo::default(), &mut None, &tx);
+        let status = check(
+            &fake,
+            &installed,
+            &mut Memo::default(),
+            &mut None,
+            &tx,
+            &|_| Ok(()),
+        );
         assert!(status.contains("could not be verified"), "{status}");
         assert!(events(&mut rx).is_empty());
         // a wrong key: the same
@@ -693,7 +880,9 @@ mod tests {
             Install::Setup("C:/Program Files/OpenCircle/opencircle.exe".into()),
             verify::tests::WRONG_KEY,
         );
-        let status = check(&fake, &wrong, &mut Memo::default(), &mut None, &tx);
+        let status = check(&fake, &wrong, &mut Memo::default(), &mut None, &tx, &|_| {
+            Ok(())
+        });
         assert!(status.contains("could not be verified"), "{status}");
         assert!(events(&mut rx).is_empty());
     }
@@ -709,7 +898,7 @@ mod tests {
     #[test]
     fn manual_installs_get_a_notice_not_a_download() {
         assert_eq!(
-            install_at(
+            prepare_at(
                 &Staged {
                     version: "9.9.9".into(),
                     file: "x".into(),
@@ -723,5 +912,40 @@ mod tests {
             ),
             Err("this install updates by hand".into())
         );
+    }
+
+    /// A setup's update never runs at quit or lock (its prompt would come from
+    /// nowhere): refused before anything is touched.
+    #[test]
+    fn a_setup_update_restarts_only_on_the_button() {
+        let staged = Staged {
+            version: "9.9.9".into(),
+            file: "x".into(),
+            sha256: [0; 32],
+            dir: "y".into(),
+            install: Install::Setup("C:/Program Files/OpenCircle/opencircle.exe".into()),
+            notes: String::new(),
+            url: String::new(),
+        };
+        for moment in [Moment::Quit, Moment::Locked] {
+            let err = restart(&staged, moment).unwrap_err();
+            assert!(err.contains("only when asked"), "{err}");
+        }
+    }
+
+    /// A start that finds OpenCircle running opens nothing while this version's
+    /// update is unconfirmed or was confirmed under a minute ago (the setup's own
+    /// start, Windows restarting what it closed). Before: it opened Settings.
+    #[test]
+    fn a_start_right_after_an_update_opens_nothing() {
+        let s = Duration::from_secs;
+        assert!(is_just_updated(Some("9.9.9"), "9.9.9", None));
+        assert!(is_just_updated(None, "9.9.9", Some(s(10))));
+        assert!(!is_just_updated(None, "9.9.9", Some(s(61))));
+        assert!(
+            !is_just_updated(Some("9.9.8"), "9.9.9", None),
+            "another version's"
+        );
+        assert!(!is_just_updated(None, "9.9.9", None));
     }
 }

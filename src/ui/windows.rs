@@ -22,14 +22,14 @@ use super::screens::onboarding;
 use super::screens::steps::{self, Strip};
 use super::screens::toast::{self, Tone};
 use super::screens::tray_menu;
-use super::{settings, shape, theme, update_card};
+use super::{settings, shape, theme, update_card, update_pill};
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
 #[cfg(test)]
 pub use super::platform::windows::CLEARED;
 pub use super::platform::windows::{
-    POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, foreground, forget,
-    hide_from_capture, hole, is_floating, no_backdrop, opacity, reshape, screen, setup_window,
-    uncut,
+    POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, floating_in_captures,
+    foreground, forget, hide_from_capture, hole, is_floating, no_backdrop, opacity, reshape,
+    screen, setup_window, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::capture::live;
@@ -71,6 +71,12 @@ pub enum Msg {
     TestShot(usize, &'static str, window::Screenshot),
     /// From the update card.
     UpdateCard(update_card::Msg),
+    /// From the update pill (`ui::App` decides what its buttons do).
+    UpdatePill(update_pill::Msg),
+    /// A frame while the Updating pill's logo spins.
+    PillFrame(Instant),
+    /// What's new after Restart now: the Updating pill goes, the card opens.
+    ShowCard(Box<update_card::Card>),
     /// The result of Settings > Check now.
     UpdateStatus(String),
     /// From the tray menu's window.
@@ -101,6 +107,11 @@ pub struct Windows {
     toasts: Vec<(window::Id, String, Tone)>,
     /// The update card (release notes), at most one.
     update_card: Option<(window::Id, update_card::Card)>,
+    /// The update pill above the tray, at most one, and when it opened (the
+    /// Updating logo's turn).
+    update_pill: Option<(window::Id, update_pill::Pill, Instant)>,
+    /// Its logo's turn now (0..1).
+    pill_turn: f32,
     /// The tray menu (Windows), at most one.
     tray_menu: Option<(window::Id, tray_menu::Menu)>,
     /// What each normal window's header knows (see `Chrome`).
@@ -119,7 +130,6 @@ struct Out {
     /// Wayland (no hiding): closed, opened again after.
     pins: Vec<Pin>,
     steps: bool,
-    card: Option<update_card::Card>,
 }
 
 /// A normal window's header state.
@@ -868,7 +878,7 @@ impl Windows {
             self.update_card = Some((id, card));
             return platform::monitor::resize(id, size);
         }
-        let (id, open) = floating(
+        let (id, open) = floating_in_captures(
             window::Settings {
                 size,
                 position: Position::Centered,
@@ -885,11 +895,80 @@ impl Windows {
         }
     }
 
+    /// The update pill (`pill`; `None` = it goes): docked above the tray, bottom
+    /// right of the main screen, 16 px from its edge and 12 px above the taskbar
+    /// (GNOME on Wayland places it itself). Never takes the focus. A new pill
+    /// replaces the open one.
+    pub fn update_pill(&mut self, pill: Option<update_pill::Pill>) -> Task<Msg> {
+        let old = self.update_pill.take().map(|(id, ..)| close(id));
+        let Some(pill) = pill else {
+            return old.unwrap_or_else(Task::none);
+        };
+        let size = pill.size();
+        let place = platform::monitor::places()
+            .into_iter()
+            .min_by_key(|m| (m.origin.0 != 0 || m.origin.1 != 0, m.origin))
+            .map(|m| {
+                let inset = platform::monitor::taskbar_inset(m.logical_origin(), m.size(), m.scale);
+                pill_place(m, inset, size)
+            });
+        let (id, open) = floating_in_captures(
+            window::Settings {
+                size,
+                position: match place {
+                    Some(p) => Position::Specific(p.logical_origin()),
+                    None => Position::Default,
+                },
+                visible: place.is_none(),
+                resizable: false,
+                ..window::Settings::default()
+            },
+            update_pill::RADIUS,
+            TOAST,
+        );
+        let open = match place {
+            Some(place) => open
+                .then(move |id| {
+                    platform::monitor::place_window::<()>(id, place).chain(appear(id, TOAST))
+                })
+                .discard(),
+            None => open.discard(),
+        };
+        self.update_pill = Some((id, pill, Instant::now()));
+        self.pill_turn = 0.0;
+        Task::batch([old.unwrap_or_else(Task::none), open])
+    }
+
+    /// The update's state changed (a check answered, an update now waits):
+    /// Settings > General shows it.
+    pub fn refresh_update(&mut self) {
+        if let Some((_, s)) = &mut self.settings {
+            let waiting = crate::update::offer().map(|o| (o.version, o.how));
+            s.set_update(waiting, crate::update::checked());
+        }
+    }
+
+    /// The update pill shown now, if any.
+    pub fn shown_pill(&self) -> Option<&update_pill::Kind> {
+        self.update_pill.as_ref().map(|(_, p, _)| &p.kind)
+    }
+
+    /// The What's new card of the update waiting now (Settings > What's new).
+    fn whats_next(&mut self) -> Task<Msg> {
+        match crate::update::offer() {
+            Some(o) => self.update_card(update_card::Card::preview(&o.version, &o.notes, &o.url)),
+            None => Task::none(),
+        }
+    }
+
     /// The tray menu at the tray icon (`icon`: physical px), with the keyboard; `live_on` = live
     /// translate runs (its row's ✓). An open one goes first (a second right-click).
     pub fn tray_menu(&mut self, icon: [i32; 4], live_on: bool) -> Task<Msg> {
         let cfg = config::current();
         let mut menu = tray_menu::Menu::new(&cfg.labs, &cfg, live_on);
+        if let Some(label) = platform::tray::update_label() {
+            menu = menu.with_update(label);
+        }
         if self.pins_through() {
             menu = menu.with_click_pins();
         }
@@ -951,8 +1030,8 @@ impl Windows {
         }))
     }
 
-    /// Linux: our floating windows (Steps strip, pins, pills, the update card, the
-    /// tray menu, and `chat`: the pinned chat's) out of capture number `capture`'s
+    /// Linux: our floating windows (Steps strip, pins, pills, the tray menu, and
+    /// `chat`: the pinned chat's; not the update's, which show in captures) out of capture number `capture`'s
     /// grab: no OS call keeps a window out of an X11 grab or the Wayland portal's
     /// shot (Windows: every floating window is out of every capture,
     /// `windows::floating`, so `None` there). Hidden where windows hide, else
@@ -983,7 +1062,6 @@ impl Windows {
             hidden: Vec::new(),
             pins: Vec::new(),
             steps: false,
-            card: None,
         };
         let steps = self.steps.as_mut().and_then(|(id, _)| match can_hide {
             true => *id,
@@ -992,17 +1070,12 @@ impl Windows {
         if can_hide {
             out.hidden = (self.pins.iter().map(|p| p.id))
                 .chain(steps)
-                .chain(self.update_card.as_ref().map(|(id, _)| *id))
                 .chain(chat)
                 .collect();
         } else {
             out.steps = steps.is_some();
             out.pins = std::mem::take(&mut self.pins);
             gone.extend(out.pins.iter().map(|p| p.id).chain(steps));
-            if let Some((id, card)) = self.update_card.take() {
-                gone.push(id);
-                out.card = Some(card);
-            }
         }
         if gone.is_empty() && out.hidden.is_empty() {
             return None;
@@ -1063,9 +1136,6 @@ impl Windows {
         if let Some(place) = place.filter(|_| out.steps) {
             tasks.push(self.open_steps(place));
         }
-        if let Some(card) = out.card {
-            tasks.push(self.update_card(card));
-        }
         Task::batch(tasks)
     }
 
@@ -1089,7 +1159,10 @@ impl Windows {
         crate::log!("[opencircle] opening the {kind:?} window");
         let (id, open) = normal(kind);
         match kind {
-            Kind::Settings => self.settings = Some((id, settings::State::open())),
+            Kind::Settings => {
+                self.settings = Some((id, settings::State::open()));
+                self.refresh_update();
+            }
             Kind::Onboarding => self.onboarding = Some((id, onboarding::State::open())),
             Kind::Permission => self.permission = Some((id, onboarding::Access::Unasked)),
         }
@@ -1168,6 +1241,15 @@ impl Windows {
                             return Task::batch([keys, toast]);
                         }
                         settings::Outcome::CheckUpdate => crate::update::check_now(),
+                        settings::Outcome::RestartToUpdate => {
+                            return Task::batch([
+                                keys,
+                                Task::done(Msg::Run(crate::Trigger::RestartToUpdate)),
+                            ]);
+                        }
+                        settings::Outcome::WhatsNew => {
+                            return Task::batch([keys, self.whats_next()]);
+                        }
                         settings::Outcome::History(clear) => {
                             let tidy = super::background(move |tx| {
                                 let _ = tx.unbounded_send(crate::history::tidy(&clear));
@@ -1217,6 +1299,7 @@ impl Windows {
                 if let Some((_, state)) = &mut self.settings {
                     settings::update(state, settings::Message::UpdateStatus(status));
                 }
+                self.refresh_update();
             }
             Msg::UpdateCard(msg) => {
                 let Some((id, card)) = &self.update_card else {
@@ -1228,7 +1311,24 @@ impl Windows {
                     update_card::Msg::Close => return close(id),
                     update_card::Msg::Link(url) => open_url(&url),
                     update_card::Msg::Page => open_url(&card.url),
-                    update_card::Msg::Install => {} // the App's (`App::install_update`)
+                    update_card::Msg::Fold(i) => {
+                        let mut card = card.clone();
+                        card.fold(i);
+                        return self.update_card(card);
+                    }
+                }
+            }
+            Msg::UpdatePill(_) => {} // the App's (`App::on_update_pill`)
+            Msg::ShowCard(card) => {
+                let pill = match self.update_pill.as_ref().is_some_and(|(_, p, _)| p.spins()) {
+                    true => self.update_pill(None),
+                    false => Task::none(),
+                };
+                return Task::batch([pill, self.update_card(*card)]);
+            }
+            Msg::PillFrame(now) => {
+                if let Some((_, _, opened)) = &self.update_pill {
+                    self.pill_turn = super::kit::spinner::turn(now.duration_since(*opened));
                 }
             }
             Msg::Onboarding(onboarding::Message::Caption(caption)) => {
@@ -1322,6 +1422,9 @@ impl Windows {
                 self.toasts.retain(|(t, ..)| *t != id);
                 if self.update_card.as_ref().is_some_and(|(c, _)| *c == id) {
                     self.update_card = None;
+                }
+                if self.update_pill.as_ref().is_some_and(|(p, ..)| *p == id) {
+                    self.update_pill = None;
                 }
                 if self.tray_menu.as_ref().is_some_and(|(m, _)| *m == id) {
                     self.tray_menu = None;
@@ -1499,6 +1602,13 @@ impl Windows {
             let radius = shape::radius(update_card::RADIUS);
             return Some(update_card::view(card, radius).map(Msg::UpdateCard));
         }
+        if let Some((_, pill, _)) = self.update_pill.as_ref().filter(|(p, ..)| *p == window) {
+            let radius = shape::radius(update_pill::RADIUS);
+            let still = super::kit::motion::reduced();
+            return Some(
+                update_pill::view(pill, radius, self.pill_turn, still).map(Msg::UpdatePill),
+            );
+        }
         if let Some((_, menu)) = self.tray_menu.as_ref().filter(|(m, _)| *m == window) {
             return Some(tray_menu::view(menu).map(Msg::TrayMenu));
         }
@@ -1549,6 +1659,13 @@ impl Windows {
         if self.update_card.as_ref().is_some_and(|(c, _)| *c == window) {
             return "OpenCircle update";
         }
+        if self
+            .update_pill
+            .as_ref()
+            .is_some_and(|(p, ..)| *p == window)
+        {
+            return "OpenCircle update status";
+        }
         if self.tray_menu.as_ref().is_some_and(|(m, _)| *m == window) {
             return "OpenCircle menu";
         }
@@ -1592,6 +1709,13 @@ impl Windows {
                 Some(_) => steps_events(),
                 None => Subscription::none(),
             },
+            // the Updating pill's logo turns (a frame clock only while it shows)
+            match &self.update_pill {
+                Some((_, p, _)) if p.spins() && !super::kit::motion::reduced() => {
+                    super::kit::motion::frames().map(Msg::PillFrame)
+                }
+                _ => Subscription::none(),
+            },
         ])
     }
 
@@ -1611,10 +1735,10 @@ impl Windows {
                 TOAST_MS,
             ),
             "update" | "whatsnew" => {
-                const NOTES: &str = "## Fixed\n- [A crash](https://example.com) when the screen sleeps\n- Text selection on a second screen";
+                const NOTES: &str = "## Fixes\n- [A crash](https://example.com) when the screen sleeps\n- Text selection on a second screen";
                 let url = "https://example.com";
                 self.update_card(match what {
-                    "update" => update_card::Card::available("9.9.9", NOTES, url),
+                    "update" => update_card::Card::preview("9.9.9", NOTES, url),
                     _ => update_card::Card::installed("9.9.9", NOTES, url),
                 })
             }
@@ -1820,6 +1944,33 @@ pub fn taken_notice(taken: &[String], told: &[String]) -> Option<String> {
     ))
 }
 
+/// The update pill's window on `monitor` (a taskbar `inset` logical px tall at
+/// its bottom) for a pill of `size` logical px: its bottom-right corner, 16 px
+/// from the edge and 12 px above the taskbar (the design's board "Update").
+fn pill_place(
+    monitor: platform::monitor::Place,
+    inset: f32,
+    size: Size,
+) -> platform::monitor::Place {
+    const RIGHT: f32 = 16.0;
+    const ABOVE: f32 = 12.0;
+    let s = monitor.scale;
+    let px = (
+        (size.width * s).round() as i32,
+        (size.height * s).round() as i32,
+    );
+    let (ox, oy) = monitor.origin;
+    let (w, h) = (monitor.px.0 as i32, monitor.px.1 as i32);
+    platform::monitor::Place {
+        origin: (
+            ox + w - (RIGHT * s).round() as i32 - px.0,
+            oy + h - ((inset + ABOVE) * s).round() as i32 - px.1,
+        ),
+        px: (px.0 as u32, px.1 as u32),
+        scale: s,
+    }
+}
+
 /// A toast's window size (logical px): the pill's (`screens::toast::size`).
 pub fn toast_size(text: &str) -> Size {
     toast::size(text)
@@ -1865,7 +2016,7 @@ fn pick_folder() -> Task<Msg> {
 }
 
 /// Opens `url` in the browser if it is one plain web link (`search_in_browser::open_link`).
-fn open_url(url: &str) {
+pub fn open_url(url: &str) {
     if let Err(e) = crate::sys::open::open_link(url) {
         crate::log!("cannot open {url}: {e}");
     }
@@ -2080,21 +2231,25 @@ mod tests {
         let strip = window::Id::unique();
         windows.steps = Some((Some(strip), Strip::new(monitor, 0.0, false)));
         let _ = windows.toast("Copied", true, None, 1000);
-        let card = update_card::Card::available("9.9.9", "notes", "https://example.invalid");
+        let card = update_card::Card::preview("9.9.9", "notes", "https://example.invalid");
         let _ = windows.update_card(card);
+        let pill = update_pill::Pill::new(update_pill::Kind::Updating);
+        let _ = windows.update_pill(Some(pill));
         let pin = windows.pins[0].id;
         (windows, pin, strip)
     }
 
     /// Wayland can't hide a window: for a grab our floating windows close (their
     /// state kept: an OS "closed" for them drops nothing) and open again after it,
-    /// the pill for good. Only for that capture's end, or any (`None`).
+    /// the pill for good. Only for that capture's end, or any (`None`). The
+    /// update's card and pill stay: they show in captures (owner, 2026-11-10).
     #[test]
     fn where_windows_cant_hide_a_grab_closes_our_floating_ones_and_opens_them_again() {
         let (mut windows, pin, strip) = floating_windows();
         assert!(windows.leave_frame_as(7, None, false).is_some());
         assert!(windows.pins.is_empty() && windows.toasts.is_empty());
-        assert!(windows.update_card.is_none() && windows.steps_window().is_none());
+        assert!(windows.steps_window().is_none());
+        assert!(windows.update_card.is_some() && windows.update_pill.is_some());
         let _ = windows.update(Msg::Closed(pin));
         let _ = windows.update(Msg::Closed(strip));
         assert!(windows.steps.is_some(), "the strip's steps stay");
@@ -2138,6 +2293,37 @@ mod tests {
         assert_eq!(windows.steps_window(), Some(strip));
         assert!(Windows::default().leave_frame_as(2, None, true).is_none());
         assert!(Windows::default().leave_frame_as(2, None, false).is_none());
+    }
+
+    /// The update pill sits above the tray: the main screen's bottom-right
+    /// corner, 16 px in and 12 px over the taskbar, scaled with the screen.
+    /// Before: the ready toast opened in the screen's middle.
+    #[test]
+    fn the_update_pill_docks_above_the_tray() {
+        let monitor = platform::monitor::Place {
+            origin: (0, 0),
+            px: (1920, 1080),
+            scale: 1.0,
+        };
+        let p = pill_place(monitor, 40.0, Size::new(400.0, 64.0));
+        assert_eq!(p.origin, (1920 - 16 - 400, 1080 - 40 - 12 - 64));
+        let hidpi = platform::monitor::Place {
+            scale: 2.0,
+            px: (3840, 2160),
+            ..monitor
+        };
+        let p = pill_place(hidpi, 40.0, Size::new(400.0, 64.0));
+        assert_eq!(
+            (p.origin, p.px),
+            ((3840 - 32 - 800, 2160 - 104 - 128), (800, 128))
+        );
+        // Windows asks the pill's buttons of the App; closing it forgets it
+        let mut windows = Windows::default();
+        let _ = windows.update_pill(Some(update_pill::Pill::new(update_pill::Kind::Updating)));
+        assert_eq!(windows.shown_pill(), Some(&update_pill::Kind::Updating));
+        let id = windows.update_pill.as_ref().unwrap().0;
+        let _ = windows.update(Msg::Closed(id));
+        assert!(windows.shown_pill().is_none());
     }
 
     fn pin_ids(windows: &Windows) -> Vec<window::Id> {

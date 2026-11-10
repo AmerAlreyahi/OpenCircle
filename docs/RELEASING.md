@@ -51,6 +51,8 @@ and signs everything and creates a **draft**; it never publishes.
    PASS / FAIL per install kind and exits non-zero on any FAIL. A Setup install of a
    version before 0.1.2 can't update itself (#151: it can't write Program Files); from
    0.1.2 on it offers "Install now" (one admin prompt), which the script clicks and approves.
+   From the release after 0.1.4 on nothing installs by itself: both kinds show the ready pill above the tray
+   and the script clicks its "Restart now" (the setup's prompt approved for the run).
 10. **Publish by hand.** The owner reads the draft and presses Publish.
 11. **Post-release check** (on the test machine):
     - Install the previous version, let it auto-update to the new one, check

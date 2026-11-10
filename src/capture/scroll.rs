@@ -89,7 +89,7 @@ pub fn by_hand(
     // duplication waits for frames itself: no input check, no period
     let idle = || match source.borrow().fast() {
         true => Duration::ZERO,
-        false => idle_for(),
+        false => crate::sys::session::idle_for(),
     };
     let period = || match source.borrow().fast() {
         true => Duration::ZERO,
@@ -370,27 +370,6 @@ fn dump_dir(value: Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
     value
         .map(std::path::PathBuf::from)
         .filter(|p| p.is_absolute())
-}
-
-/// Time since the user's last keyboard or mouse input (any app). Elsewhere
-/// than Windows: none known, always "just now".
-fn idle_for() -> Duration {
-    #[cfg(windows)]
-    {
-        use windows::Win32::System::SystemInformation::GetTickCount;
-        use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
-        let mut info = LASTINPUTINFO {
-            cbSize: size_of::<LASTINPUTINFO>() as u32,
-            dwTime: 0,
-        };
-        // SAFETY: `info` is ours, its size set as the call needs.
-        if unsafe { GetLastInputInfo(&mut info) }.as_bool() {
-            // SAFETY: no arguments.
-            let now = unsafe { GetTickCount() };
-            return Duration::from_millis(now.wrapping_sub(info.dwTime).into());
-        }
-    }
-    Duration::ZERO
 }
 
 /// The area alone, from the screen as shown (GDI; windows that keep out of

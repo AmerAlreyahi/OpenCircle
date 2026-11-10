@@ -25,7 +25,7 @@ use self::opening::Open;
 use crate::ui::kit::motion;
 use crate::ui::platform::monitor::can_hide_windows;
 use crate::ui::touch;
-use crate::ui::{live_layer, overlay, update_card, windows};
+use crate::ui::{live_layer, overlay, windows};
 
 pub(in crate::ui) mod actions;
 pub(in crate::ui) mod ai_chat;
@@ -40,6 +40,7 @@ pub(in crate::ui) mod tests;
 pub(in crate::ui) mod text;
 pub(in crate::ui) mod tools;
 pub(in crate::ui) mod update;
+pub(in crate::ui) mod updates;
 pub(in crate::ui) mod view;
 pub(in crate::ui) mod zoom;
 
@@ -211,8 +212,23 @@ pub(in crate::ui) struct App {
     pub(in crate::ui) chat: Option<ai_chat::Resident>,
     /// Song searches started (numbers them).
     pub(in crate::ui) songs: u32,
-    /// A verified update waiting until nothing is open (`is_idle`).
-    pub(in crate::ui) update: Option<crate::update::Staged>,
+    /// The update waiting for a moment to install (`update::flow`), with its pill.
+    pub(in crate::ui) update: Option<Waiting>,
+    /// After a quiet install (a quit, a lock): its "Updated" pill, once.
+    pub(in crate::ui) updated: Option<(crate::update::Pill, crate::update::Installed)>,
+    /// The update clock runs (`Message::UpdateTick`).
+    pub(in crate::ui) update_ticks: bool,
+}
+
+/// An update waiting: what it is, how it installs, its pill, the lock watch.
+pub(in crate::ui) struct Waiting {
+    pub version: String,
+    pub url: String,
+    pub how: crate::update::How,
+    /// Downloaded and verified (none for one the user gets: "Get it").
+    pub staged: Option<crate::update::Staged>,
+    pub pill: crate::update::Pill,
+    pub lock: crate::update::Lock,
 }
 
 /// Translations kept for reuse (each a short text).
@@ -242,12 +258,10 @@ impl App {
             ..App::idle(overlay)
         };
         let start = app.windows.start().map(Message::Windows);
-        // Started by an update: it is confirmed (the old program goes), notes shown.
+        // Started by an update: it is confirmed (the old program goes), then
+        // What's new (after Restart now) or its small pill (after a quiet install).
         let notes = match crate::update::confirm() {
-            Some((version, notes, url)) => app
-                .windows
-                .update_card(update_card::Card::installed(&version, &notes, &url))
-                .map(Message::Windows),
+            Some(installed) => app.on_installed(installed),
             None => Task::none(),
         };
         (app, Task::batch([open, start, notes]))
@@ -287,6 +301,8 @@ impl App {
             chat: None,
             songs: 0,
             update: None,
+            updated: None,
+            update_ticks: false,
         }
     }
 

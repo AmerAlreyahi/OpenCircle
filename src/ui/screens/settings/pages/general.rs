@@ -1,13 +1,14 @@
 //! General (`settings-window.js` "GENERAL"): what Enter does, start with the
 //! OS, the save folder, updates.
 use iced::widget::tooltip::Position;
-use iced::widget::{column, container};
-use iced::{Element, Fill};
+use iced::widget::{column, container, row};
+use iced::{Center, Element, Fill};
 
 use super::super::state::{Message, Pick, State, UPDATE_PRIVACY, issue};
 use crate::config::DefaultAction;
-use crate::ui::kit::button::{Kind, button, label};
+use crate::ui::kit::button::{Kind, button, label, labelled, labelled_width};
 use crate::ui::kit::field::field;
+use crate::ui::kit::icon::Icon;
 use crate::ui::kit::segmented::{boolean, segmented};
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::text::error;
@@ -43,17 +44,49 @@ pub fn view(state: &State) -> Element<'_, Message> {
     rows = rows.push(start_row(state));
     rows = rows.push(folder_row(state));
     rows = rows.push(update_row(state));
-    let status = state.update_status.as_deref();
-    rows = rows.push(setting_row::row(
-        title("Updates"),
-        status.unwrap_or("Look for a new version now"),
-        button(
+    rows = rows.push(updates_row(state));
+    rows.into()
+}
+
+/// Updates: what waits and when GitHub last answered; Check now, or the
+/// waiting update's What's new and Restart now (Get it where the user installs it).
+fn updates_row(state: &State) -> Element<'_, Message> {
+    use crate::update::How;
+    let waiting = (state.update_waiting.as_ref()).map(|(v, how)| (v.as_str(), *how));
+    let (head, line) = crate::update::status(
+        waiting,
+        env!("CARGO_PKG_VERSION"),
+        state.update_checked,
+        state.update_status.as_deref(),
+        std::time::SystemTime::now(),
+    );
+    let control: Element<'_, Message> = match waiting {
+        None => button(
             label("Check now"),
             Kind::Elevated,
             Some(Message::CheckUpdate),
         ),
-    ));
-    rows.into()
+        Some((_, how)) => {
+            let (glyph, words) = match how {
+                How::Restart => (Icon::Restart, "Restart now"),
+                How::Setup => (Icon::Shield, "Restart now"),
+                How::GetIt => (Icon::External, "Get it"),
+            };
+            let main = labelled(
+                glyph.glyph(),
+                words,
+                labelled_width(words),
+                Kind::Accent,
+                false,
+                Some(Message::RestartToUpdate),
+            );
+            let notes = button(label("What's new"), Kind::Quiet, Some(Message::WhatsNew));
+            container(row![notes, main].spacing(space::GAP * 2.0).align_y(Center))
+                .align_right(Fill)
+                .into()
+        }
+    };
+    setting_row::row(title(head), line, control)
 }
 
 fn switch<'a>(

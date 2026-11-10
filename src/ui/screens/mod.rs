@@ -21,3 +21,4 @@ pub mod tools;
 pub mod translate;
 pub mod tray_menu;
 pub mod update_card;
+pub mod update_pill;

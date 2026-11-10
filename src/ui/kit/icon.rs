@@ -50,11 +50,16 @@ pub enum Icon {
     ChevronDown,
     ChevronUp,
     Forward,
+    /// lucide "rotate-ccw" (Restart now), "shield" (Windows asks for permission)
+    /// and "external-link" (a page in the browser: the release notes, Get it).
+    Restart,
+    Shield,
+    External,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 23] = [
+    pub const ALL: [Icon; 26] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -78,6 +83,9 @@ impl Icon {
         Icon::ChevronDown,
         Icon::ChevronUp,
         Icon::Forward,
+        Icon::Restart,
+        Icon::Shield,
+        Icon::External,
     ];
 
     pub const fn glyph(self) -> char {
@@ -105,6 +113,9 @@ impl Icon {
             Icon::ChevronDown => '\u{e071}',
             Icon::ChevronUp => '\u{e074}',
             Icon::Forward => '\u{e04d}',
+            Icon::Restart => '\u{e14b}',
+            Icon::Shield => '\u{e15b}',
+            Icon::External => '\u{e0bd}',
         }
     }
 }

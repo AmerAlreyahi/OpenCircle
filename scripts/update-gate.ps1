@@ -8,9 +8,11 @@
   previous published version through OPENCIRCLE_TEST_UPDATE_URL, once per install kind:
 
     setup     the previous OpenCircle-Setup exe installed (/quiet, Program Files), the app run
-              as the normal (non-elevated) user; an updater that asks the user ("Install now")
-              gets its card clicked, Windows' admin prompt auto-approved for the run
-    portable  the previous portable exe run from a temp folder of this user
+              as the normal (non-elevated) user; an updater that asks the user ("Install now"
+              card up to 0.1.4, the pill's "Restart now" after it) gets it clicked, Windows'
+              admin prompt auto-approved for the run
+    portable  the previous portable exe run from a temp folder of this user (after 0.1.4 it
+              waits for the pill's "Restart now", which is clicked)
 
   PASS per kind = the copy ends on the new version, it runs, and it says its notes were shown
   (the log's "update <ver>: running" line, written when the What's new card opens).
@@ -168,6 +170,26 @@ function ClickInstallNow {
     $true
 }
 
+# The update pill above the tray (after 0.1.4: a ~64 px tall floating window): its "Restart now".
+function ClickRestartNow {
+    $hits = New-Object System.Collections.ArrayList
+    $ids = @(Get-Process opencircle -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.Id })
+    [GateWin]::EnumWindows({ param($h, $l)
+        $p = [uint32]0; [GateWin]::GetWindowThreadProcessId($h, [ref]$p) | Out-Null
+        $r = New-Object GateWin+RECT
+        if ($ids -contains $p -and [GateWin]::IsWindowVisible($h) -and [GateWin]::GetWindowRect($h, [ref]$r)) {
+            $w = $r.R - $r.L; $hgt = $r.B - $r.T
+            if ($w -ge 250 -and $w -le 1400 -and $hgt -ge 40 -and $hgt -le 160) { [void]$hits.Add($r) }
+        }
+        $true }, [IntPtr]::Zero) | Out-Null
+    if ($hits.Count -eq 0) { return $false }
+    $r = $hits[0]; $s = ($r.B - $r.T) / 64.0
+    $x = [int]($r.R - 72 * $s); $y = [int](($r.T + $r.B) / 2)
+    [GateWin]::SetCursorPos($x, $y) | Out-Null; Start-Sleep -Milliseconds 300
+    [GateWin]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); [GateWin]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+    $true
+}
+
 function RunKind($kind) {
     QuitApp
     $from = LogEnd
@@ -188,10 +210,13 @@ function RunKind($kind) {
     StartAsUser $exe
     $declined = -not $ShowPrompt
     $carded = $false
+    $restarted = $false
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     $done = $false
     while ((Get-Date) -lt $deadline -and -not $done) {
         Start-Sleep -Seconds 2
+        # a user at the PC (the pill waits while nobody is: no input for 2 min)
+        [GateWin]::mouse_event(1, 1, 0, 0, [UIntPtr]::Zero); [GateWin]::mouse_event(1, -1, 0, 0, [UIntPtr]::Zero)
         $lines = LogSince $from
         if ($kind -eq "setup" -and ($lines -match "choose Install now") -and -not ($lines -match "the setup runs")) {
             if (-not $carded) { Shot "$kind-ready-card"; $carded = $true }
@@ -209,6 +234,16 @@ function RunKind($kind) {
             } else {
                 Set-ItemProperty $policy ConsentPromptBehaviorAdmin 0   # approved without a prompt
                 if (ClickInstallNow) { Start-Sleep -Seconds 5 }
+            }
+        }
+        # after 0.1.4 nothing installs by itself: the pill's Restart now (a setup's: one admin
+        # prompt, approved for the run)
+        if (($lines -match "is ready: restart OpenCircle") -and -not $restarted -and -not ($lines -match "restarting|the setup runs")) {
+            if ($kind -eq "setup") { Set-ItemProperty $policy ConsentPromptBehaviorAdmin 0 }
+            Start-Sleep -Seconds 2; Shot "$kind-ready-pill"
+            if (ClickRestartNow) {
+                $restarted = $true
+                Start-Sleep -Milliseconds 500; Shot "$kind-updating-pill"; Start-Sleep -Seconds 5
             }
         }
         $done = ($lines -match [regex]::Escape("update $($next.Version): running")) -and (Running $exe)

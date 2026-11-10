@@ -3,6 +3,7 @@
 //! Every row's control sits in one column (owner, 2026-10-28): the same left
 //! edge and width (`size::CONTROL_COLUMN`) on every page, centred on the
 //! row, which is at least `size::ROW_MIN` tall inside the same padding.
+use iced::widget::text::IntoFragment;
 use iced::widget::{Id, Space, column, container};
 use iced::{Element, Fill, Padding};
 
@@ -20,15 +21,16 @@ const BLOCK_GAP: f32 = 8.0;
 pub const CONTROL: &str = "setting-row-control";
 
 /// A row's title: `ROW_TITLE` text.
-pub fn title<'a, Message: 'a>(s: &'a str) -> Element<'a, Message> {
+pub fn title<'a, Message: 'a>(s: impl IntoFragment<'a>) -> Element<'a, Message> {
     super::text::text(Role::ROW_TITLE, s).into()
 }
 
 fn text_block<'a, Message: 'a>(
     title: Element<'a, Message>,
-    desc: &'a str,
+    desc: impl IntoFragment<'a>,
 ) -> iced::widget::Column<'a, Message> {
     let mut block = column![title].spacing(DESC_GAP);
+    let desc = desc.into_fragment();
     if !desc.is_empty() {
         block = block.push(super::text::sub(Role::ROW_DESC, desc).line_height(1.6));
     }
@@ -42,7 +44,7 @@ fn ruled<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Element<'
 /// The text, then the control in the page's control column.
 pub fn row<'a, Message: 'a>(
     title: Element<'a, Message>,
-    desc: &'a str,
+    desc: impl IntoFragment<'a>,
     control: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let text = container(text_block(title, desc))

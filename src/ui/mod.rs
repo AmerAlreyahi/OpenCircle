@@ -30,7 +30,7 @@ use iced::futures::channel::mpsc::UnboundedReceiver;
 use platform::monitor::taskbar_inset;
 use platform::shape;
 pub use platform::tray::{refresh as refresh_tray, start as start_tray};
-use screens::update_card;
+use screens::{update_card, update_pill};
 
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     app::background::set_triggers(triggers);
@@ -41,10 +41,13 @@ pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     for font in kit::text::FONTS {
         app = app.font(font);
     }
-    app.default_font(kit::text::ui_font())
+    let result = app
+        .default_font(kit::text::ui_font())
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)
         .run()
-        .inspect(|()| crate::snip::annotate::dragout::clear_own()) // a drop's grace ends with us
+        .inspect(|()| crate::snip::annotate::dragout::clear_own()); // a drop's grace ends with us
+    platform::tray::release(); // the tray icon goes with the one `main` holds
+    result
 }

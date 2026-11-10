@@ -520,8 +520,8 @@ pub enum Section {
 }
 
 /// What the update switch says it does (Settings and onboarding).
-pub const UPDATE_PRIVACY: &str = "Asks GitHub for the latest version twice a day and installs it when \
-     OpenCircle is idle. Sends only that request: nothing about you or your screen";
+pub const UPDATE_PRIVACY: &str = "Downloads new versions in the background; they install when \
+     OpenCircle restarts. Sends only the version request: nothing about you or your screen";
 
 /// A shortcut field: the capture shortcut or quick action `n`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -576,6 +576,10 @@ pub struct State {
     pub(super) hex: String,
     /// The last Check now's result (`None` = not checked in this window).
     pub(super) update_status: Option<String>,
+    /// The update waiting (its version, how it installs) and when GitHub last
+    /// answered (`set_update`, from `update::offer` / `update::checked`).
+    pub(super) update_waiting: Option<(String, crate::update::How)>,
+    pub(super) update_checked: Option<std::time::SystemTime>,
     /// Windows OCR's recognizers and the Windows display language, asked when
     /// the window opens (#63; empty off Windows).
     pub(super) recognizers: Vec<String>,
@@ -728,6 +732,9 @@ pub enum Message {
     AutoUpdate(bool),
     CheckUpdate,
     UpdateStatus(String),
+    /// The waiting update's Restart now, and its What's new.
+    RestartToUpdate,
+    WhatsNew,
     Save,
     /// A write (`Outcome::Write`) finished, on its thread.
     Written(Box<Done>),
@@ -823,6 +830,10 @@ pub enum Outcome {
     CopyDiagnostics,
     /// Check for an update now; the answer comes back as `Message::UpdateStatus`.
     CheckUpdate,
+    /// Restart into the waiting update (`Trigger::RestartToUpdate`).
+    RestartToUpdate,
+    /// Show the waiting update's What's new.
+    WhatsNew,
     /// History: delete these kinds (none: only count) on a worker thread
     /// (`history::tidy`) and send what is kept back as `Message::Kept`.
     History(Vec<Kind>),
@@ -897,6 +908,17 @@ impl State {
         s
     }
 
+    /// General's Updates row: the update waiting (version, how it installs) and
+    /// when GitHub last answered.
+    pub fn set_update(
+        &mut self,
+        waiting: Option<(String, crate::update::How)>,
+        checked: Option<std::time::SystemTime>,
+    ) {
+        self.update_waiting = waiting;
+        self.update_checked = checked;
+    }
+
     /// The keyring calls the last message started (`true` = song search's key).
     pub fn take_key_jobs(&mut self) -> Vec<(bool, KeyJob)> {
         std::mem::take(&mut self.key_jobs)
@@ -960,6 +982,8 @@ impl State {
             picker: None,
             hex: String::new(),
             update_status: None,
+            update_waiting: None,
+            update_checked: None,
             recognizers,
             profile,
             asking_close: false,
@@ -1487,6 +1511,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             return Outcome::CheckUpdate;
         }
         Message::UpdateStatus(status) => state.update_status = Some(status),
+        Message::RestartToUpdate => return Outcome::RestartToUpdate,
+        Message::WhatsNew => return Outcome::WhatsNew,
         Message::Save => return save(state),
         Message::Written(done) => return written(state, done),
         Message::Preview(key, show) => {

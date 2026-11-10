@@ -75,6 +75,8 @@ ICONS=$(printf '%s,' \
   U+E071 `# chevron-down (a list opener, closed)` \
   U+E074 `# chevron-up (a list opener, open)` \
   U+E04D `# arrow-right (the language pill: source -> target)` \
+  U+E15B `# shield (update: Windows asks for permission)` \
+  U+E0BD `# external-link (update: full release notes, Get it)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

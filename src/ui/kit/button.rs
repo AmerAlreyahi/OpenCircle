@@ -475,6 +475,60 @@ pub fn labelled<'a, Message: Clone + 'a>(
     tooled(content, width, kind, focused, on_press)
 }
 
+/// The width `labelled` needs for `label` (its glyph, the gap, 14 px each side).
+pub fn labelled_width(label: &str) -> f32 {
+    use super::tokens::{Role, space};
+    const SIDE: f32 = 14.0;
+    let words = super::text::width(label, Role::CONTROL.size, super::text::font(Role::CTA));
+    (2.0 * SIDE + size::ICON_SMALL + space::GAP + words).ceil()
+}
+
+/// A section that opens in place (the What's new card's Fixes): a chevron
+/// (`ChevronDown` closed, `ChevronUp` open), `title` (13 px / 600) and `count`
+/// (muted), across the row on `hover`, radius 9, 36 px tall.
+pub fn fold<'a, Message: Clone + 'a>(
+    title: &'a str,
+    count: usize,
+    open: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use super::icon::{Icon, icon};
+    use super::tokens::Role;
+    use iced_button::Status;
+    let chevron = match open {
+        true => Icon::ChevronUp,
+        false => Icon::ChevronDown,
+    };
+    let content = row![
+        icon(chevron, size::ICON_SMALL).color(c().text_sub),
+        super::text::text(Role::CTA, title),
+        super::text::muted(Role::ROW_DESC, count.to_string()),
+    ]
+    .spacing(8)
+    .align_y(Center);
+    iced_button(container(content).center_y(Fill))
+        .width(Fill)
+        .height(FOLD_H)
+        .padding([0.0, 10.0])
+        .on_press(on_press)
+        .style(|_, status| iced_button::Style {
+            background: Some(
+                match status {
+                    Status::Hovered | Status::Pressed => c().elevated_hover,
+                    _ => c().hover,
+                }
+                .into(),
+            ),
+            text_color: c().text,
+            border: Border::default().rounded(radius::CONTROL),
+            ..iced_button::Style::default()
+        })
+        .into()
+}
+
+/// `fold`'s height.
+pub const FOLD_H: f32 = 36.0;
+
 fn tooled<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
     width: f32,
