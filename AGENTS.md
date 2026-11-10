@@ -802,6 +802,25 @@ production systems.
 - macOS (owner, 2026-11-10): the LAST item on the board (Later). Distribution needs no payment (ad-hoc signed, users allow it
   once in Privacy & Security), but testing needs the owner's own Mac; start only when the owner says.
 
+- Version plan (owner, 2026-11-10, SUPERSEDES every earlier "Version plan" entry; numbers projected, given only at release):
+  0.1.5 Linux fixes -> 0.1.6 Languages + live border (+ Copy text / Ask AI / Translate under the Snip toolbar's More; last
+  0.1.x: security review + QA gates) -> 0.2.0 Game translation (+ the live-translation research: model, GPU inference path,
+  and a MEASUREMENT of what the live text layer costs on the CPU renderer during a game, cutscene test #82) -> 0.3.0 Live
+  translation (GPU inference and CPU path together from the start, never CPU first then GPU) -> 0.4.0 AI online -> 0.5.0
+  Snip Studio -> 0.6.0 Reach -> 0.7.0 Voice and sound -> 0.8.0 Writing assist -> 0.9.0 GPU renderer + cosmetics -> later
+  Visual search, then Glass -> last macOS. If the 0.2.0 measurement shows the live layer costs game frames on the CPU
+  renderer, the GPU renderer moves to right before Live translation (owner: build Live once, on the best foundation).
+  Two different GPU items: the GPU for the translation MODEL (inference) is part of Live translation; the GPU RENDERER draws
+  the app's windows/animations (cosmetics: later).
+- Snip Studio (owner, 2026-11-10, version 0.5.0 above): the quick widget stays as today; an optional separate Studio WINDOW
+  (never inside Settings): big canvas + zoom, the full editor (one editor shown two ways, shared kit and tools), Recent
+  captures, the Steps list with export, Ask AI / Copy text / Translate on the picture, edit text in the image (reuses the
+  translate erase-and-redraw), cut out. Entry: "Open in Studio" under the Snip toolbar's More, double-click a step on the
+  Steps strip, tray "Studio", optional Settings "After a capture: stay in the widget (default) / open the Studio". Steps
+  export (Markdown / HTML / images folder) lives on the Steps strip next to Copy all. Design round + owner OK first.
+- AI errors (owner, 2026-11-10, v0.1.5): provider errors show as a calm card: a short plain headline, the provider's own
+  message small and grey (two lines, "Show details"), one fix button (Choose another model / Retry); red only for the icon.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
