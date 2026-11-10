@@ -69,6 +69,9 @@ pub enum Msg {
     Progress(crate::capture::scroll::Update),
     /// Long capture ended (Done or Cancel): the image gathered.
     Done(Result<Crop, String>),
+    /// Wayland: the long capture's hint was read; the overlay (which can't be
+    /// cut there) goes so the user scrolls the page itself.
+    Leave,
     /// The timer: hide, wait this many seconds, capture again (0 = off).
     Delay(u8),
     /// Countdown `.0` has `.1` seconds left (0 = time to hide).

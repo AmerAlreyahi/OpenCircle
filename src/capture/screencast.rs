@@ -110,9 +110,167 @@ pub fn allow(conn: &DBusConnection) -> Result<(), CaptureError> {
     Session::start(conn).map(drop)
 }
 
+/// Whether long capture can stream the screen here: a ScreenCast portal that can
+/// persist (v4+, so the user's "Share" is asked once) and GStreamer's PipeWire
+/// source. Any desktop (GNOME, KDE, ...); asked once per process.
+pub fn can_stream(conn: &DBusConnection) -> bool {
+    static CAN: OnceLock<bool> = OnceLock::new();
+    *CAN.get_or_init(|| {
+        let version = property(conn, DESKTOP, PATH, IFACE, "version").and_then(|v| v.get::<u32>());
+        let can = version.unwrap_or(0) >= 4 && Gst::get().is_some();
+        if !can {
+            crate::log!(
+                "[opencircle] no long capture: it needs the ScreenCast portal (v4+) and GStreamer's PipeWire source"
+            );
+        }
+        can
+    })
+}
+
+/// Long capture's frames on Wayland (no silent repeated screenshots there): one
+/// ScreenCast session (the restore token: no dialog once allowed) streaming the
+/// monitor that holds the area, as the screen shows it, while the capture runs;
+/// the stream and the session close on drop (the indicator goes off).
+pub struct Cast {
+    // (dropped in this order: the pipeline before its session)
+    pipe: Pipe,
+    _session: Session,
+    fd: c_int,
+    /// The area in the stream's px.
+    area: (i32, i32, u32, u32),
+    /// Frames read (the log line).
+    pub frames: u32,
+}
+
+impl Cast {
+    /// Streams the monitor holding `region` (physical desktop px, as the frozen
+    /// frame's). The desktop shows its dialog only without a valid token.
+    pub fn start(region: (i32, i32, u32, u32)) -> Result<Cast, String> {
+        let gst = Gst::get().ok_or("GStreamer's PipeWire source is missing")?;
+        let conn = super::portal::session_bus()?;
+        let session = Session::start(&conn)?;
+        let (stream, area) =
+            holding(&session.streams, region).ok_or("the area is off the shared screens")?;
+        let fd = session.remote()?;
+        let pipe = match gst.launch(&streaming(fd, stream.node)) {
+            Ok(pipe) => pipe,
+            Err(e) => {
+                // SAFETY: our own duplicate, not handed on.
+                unsafe { libc::close(fd) };
+                return Err(e);
+            }
+        };
+        Ok(Cast {
+            pipe,
+            _session: session,
+            fd,
+            area,
+            frames: 0,
+        })
+    }
+
+    /// The area out of the newest frame within `wait`, RGBA; none when the
+    /// screen showed nothing new. An error once the stream ended (the user
+    /// stopped sharing).
+    pub fn next(&mut self, wait: Duration) -> Result<Option<Vec<u8>>, String> {
+        let sample = self.pipe.pull(wait);
+        if sample.is_null() {
+            return match self.pipe.ended() {
+                true => Err("the screen cast stopped".into()),
+                false => Ok(None),
+            };
+        }
+        self.frames += 1;
+        let area = self.area;
+        // SAFETY: a live sample, unreffed after the read.
+        let cut = unsafe {
+            let cut = self
+                .pipe
+                .gst
+                .read(sample, |b, w, h| cut_bgrx(b, w, h, area));
+            (self.pipe.gst.mini_object_unref)(sample);
+            cut
+        };
+        cut.map(Some)
+    }
+}
+
+impl Drop for Cast {
+    fn drop(&mut self) {
+        // SAFETY: our own duplicate from the fd list (pipewiresrc dups it again).
+        unsafe { libc::close(self.fd) };
+    }
+}
+
+/// The stream holding most of `region` and the region in its px.
+// ponytail: stream px = logical px (scale 1, the frozen frame's first-monitor rule
+// in `compose`); a HiDPI multi-monitor desktop needs the per-stream scale.
+fn holding(
+    streams: &[Stream],
+    region: (i32, i32, u32, u32),
+) -> Option<(Stream, (i32, i32, u32, u32))> {
+    let monitors: Vec<super::Monitor> = (streams.iter())
+        .map(|s| super::Monitor {
+            rect: (
+                s.position.0,
+                s.position.1,
+                s.size.0.max(0) as u32,
+                s.size.1.max(0) as u32,
+            ),
+            scale: 1.0,
+            primary: false,
+        })
+        .collect();
+    let at = match streams.len() {
+        1 => 0,
+        _ => super::choose(&monitors, Some(region), None)?,
+    };
+    let s = streams[at];
+    let origin = match streams.len() {
+        1 => (0, 0), // the frozen frame is this one stream, at 0,0 (`compose`)
+        _ => {
+            let left = streams.iter().map(|s| s.position.0).min().unwrap_or(0);
+            let top = streams.iter().map(|s| s.position.1).min().unwrap_or(0);
+            (s.position.0 - left, s.position.1 - top)
+        }
+    };
+    Some((
+        s,
+        (region.0 - origin.0, region.1 - origin.1, region.2, region.3),
+    ))
+}
+
+/// `area` of a `width` x `height` BGRx frame (rows maybe padded) as RGBA;
+/// an error when the area isn't inside it.
+pub(super) fn cut_bgrx(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    area: (i32, i32, u32, u32),
+) -> Result<Vec<u8>, String> {
+    let (x, y, w, h) = area;
+    let inside = x >= 0
+        && y >= 0
+        && x as u32 + w <= width
+        && y as u32 + h <= height
+        && bytes.len() >= width as usize * 4 * height as usize;
+    if !inside || height == 0 {
+        return Err(format!("the area left the screen ({width}x{height})"));
+    }
+    let stride = bytes.len() / height as usize;
+    let (x, y) = (x as usize, y as usize);
+    let mut rgba = Vec::with_capacity(w as usize * h as usize * 4);
+    for line in bytes.chunks(stride).skip(y).take(h as usize) {
+        for px in line[x * 4..(x + w as usize) * 4].as_chunks::<4>().0 {
+            rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
+        }
+    }
+    Ok(rgba)
+}
+
 /// A started ScreenCast session; closed on drop.
-struct Session<'a> {
-    conn: &'a DBusConnection,
+struct Session {
+    conn: DBusConnection,
     path: String,
     /// (PipeWire node, position, logical size) per shared monitor.
     streams: Vec<Stream>,
@@ -132,8 +290,8 @@ struct Stream {
     size: (i32, i32),
 }
 
-impl<'a> Session<'a> {
-    fn start(conn: &'a DBusConnection) -> Result<Self, CaptureError> {
+impl Session {
+    fn start(conn: &DBusConnection) -> Result<Self, CaptureError> {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let err = |e: CaptureError| match e {
             // "Cancel" in the desktop's dialog: the user said no; ask again next time.
@@ -173,7 +331,7 @@ impl<'a> Session<'a> {
         .map_err(err)?;
         // From here on the session exists: dropping it closes it, on every path.
         let mut session = Session {
-            conn,
+            conn: conn.clone(),
             path,
             streams: Vec::new(),
             asked: false,
@@ -224,6 +382,18 @@ impl<'a> Session<'a> {
     /// One frame of each stream, in stream order.
     fn grab(&self) -> Result<Vec<(Stream, Frame)>, CaptureError> {
         let gst = Gst::get().ok_or("GStreamer's PipeWire source is missing")?;
+        let fd = self.remote()?;
+        let frames = (self.streams.iter())
+            .map(|s| gst.frame(fd, s.node).map(|f| (*s, f)))
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(|e| format!("Wayland screen cast: {e}"));
+        // SAFETY: `fd` is our own duplicate from the fd list (pipewiresrc dups it again).
+        unsafe { libc::close(fd) };
+        Ok(frames?)
+    }
+
+    /// The session's PipeWire remote: an fd of our own (the caller closes it).
+    fn remote(&self) -> Result<c_int, String> {
         let (_, fds) = self
             .conn
             .call_with_unix_fd_list_sync(
@@ -245,20 +415,11 @@ impl<'a> Session<'a> {
                 None::<&Cancellable>,
             )
             .map_err(|e| format!("Wayland screen cast: no PipeWire connection ({e})"))?;
-        let fd = fds
-            .get(0)
-            .map_err(|e| format!("Wayland screen cast: {e}"))?;
-        let frames = (self.streams.iter())
-            .map(|s| gst.frame(fd, s.node).map(|f| (*s, f)))
-            .collect::<Result<Vec<_>, String>>()
-            .map_err(|e| format!("Wayland screen cast: {e}"));
-        // SAFETY: `fd` is our own duplicate from the fd list (pipewiresrc dups it again).
-        unsafe { libc::close(fd) };
-        Ok(frames?)
+        fds.get(0).map_err(|e| format!("Wayland screen cast: {e}"))
     }
 }
 
-impl Drop for Session<'_> {
+impl Drop for Session {
     fn drop(&mut self) {
         let _ = self.conn.call_sync(
             Some(DESKTOP),
@@ -481,10 +642,24 @@ impl Gst {
     }
 
     /// One RGBA frame of PipeWire node `node` on the remote `fd`.
-    fn frame(&self, fd: c_int, node: u32) -> Result<Frame, String> {
-        let line = CString::new(pipeline(fd, node)).expect("no NUL in the pipeline");
-        // SAFETY: plain GStreamer C API use; every object taken is unreffed below,
-        // the mapped buffer is copied before it's unmapped.
+    fn frame(&'static self, fd: c_int, node: u32) -> Result<Frame, String> {
+        let pipe = self.launch(&pipeline(fd, node))?;
+        let sample = pipe.pull(FRAME_WAIT);
+        if sample.is_null() {
+            return Err("no frame from the screen cast".to_string());
+        }
+        // SAFETY: a live sample, unreffed after the copy.
+        unsafe {
+            let frame = self.copy(sample);
+            (self.mini_object_unref)(sample);
+            frame
+        }
+    }
+
+    /// `line` parsed and playing; stopped and freed when the `Pipe` goes.
+    fn launch(&'static self, line: &str) -> Result<Pipe, String> {
+        let line = CString::new(line).expect("no NUL in the pipeline");
+        // SAFETY: plain GStreamer C API use; what is taken is unreffed (`Pipe::drop`).
         unsafe {
             let mut error = std::ptr::null_mut();
             let pipe = (self.parse_launch)(line.as_ptr(), &mut error);
@@ -499,34 +674,31 @@ impl Gst {
                 return Err(format!("GStreamer: {why}"));
             }
             let sink = (self.bin_get_by_name)(pipe, c"sink".as_ptr());
-            (self.set_state)(pipe, STATE_PLAYING);
-            let mut sample: *mut c_void = std::ptr::null_mut();
-            if !sink.is_null() {
-                glib::gobject_ffi::g_signal_emit_by_name(
-                    sink as *mut _,
-                    c"try-pull-sample".as_ptr(),
-                    FRAME_WAIT.as_nanos() as u64,
-                    &mut sample as *mut *mut c_void,
-                );
-            }
-            let frame = if sample.is_null() {
-                Err("no frame from the screen cast".to_string())
-            } else {
-                let frame = self.copy(sample);
-                (self.mini_object_unref)(sample);
-                frame
+            let pipe = Pipe {
+                gst: self,
+                pipe,
+                sink,
             };
-            (self.set_state)(pipe, STATE_NULL);
-            if !sink.is_null() {
-                (self.object_unref)(sink);
+            if sink.is_null() {
+                return Err("GStreamer: no sink".into());
             }
-            (self.object_unref)(pipe);
-            frame
+            (self.set_state)(pipe.pipe, STATE_PLAYING);
+            Ok(pipe)
         }
     }
 
     /// SAFETY: `sample` is a live GstSample.
     unsafe fn copy(&self, sample: *mut c_void) -> Result<Frame, String> {
+        unsafe { self.read(sample, rgba_rows) }
+    }
+
+    /// `take` over the sample's mapped bytes and its width and height.
+    /// SAFETY: `sample` is a live GstSample.
+    unsafe fn read<T>(
+        &self,
+        sample: *mut c_void,
+        take: impl FnOnce(&[u8], u32, u32) -> Result<T, String>,
+    ) -> Result<T, String> {
         unsafe {
             let caps = (self.sample_get_caps)(sample);
             let buffer = (self.sample_get_buffer)(sample);
@@ -542,9 +714,64 @@ impl Gst {
                 return Err("frame not readable".into());
             }
             let bytes = std::slice::from_raw_parts(map.data, map.size);
-            let frame = rgba_rows(bytes, w.max(0) as u32, h.max(0) as u32);
+            let taken = take(bytes, w.max(0) as u32, h.max(0) as u32);
             (self.buffer_unmap)(buffer, &mut map);
-            frame
+            taken
+        }
+    }
+}
+
+/// A playing pipeline and its appsink; stopped and freed on drop.
+struct Pipe {
+    gst: &'static Gst,
+    pipe: *mut c_void,
+    sink: *mut c_void,
+}
+
+// SAFETY: GStreamer objects are thread-safe; a `Pipe` is used by one thread at a time.
+unsafe impl Send for Pipe {}
+
+impl Pipe {
+    /// The sink's next sample within `wait` (null: none came; the caller unrefs it).
+    fn pull(&self, wait: Duration) -> *mut c_void {
+        let mut sample: *mut c_void = std::ptr::null_mut();
+        // SAFETY: `sink` is a live appsink (`launch`).
+        unsafe {
+            glib::gobject_ffi::g_signal_emit_by_name(
+                self.sink as *mut _,
+                c"try-pull-sample".as_ptr(),
+                wait.as_nanos() as u64,
+                &mut sample as *mut *mut c_void,
+            );
+        }
+        sample
+    }
+
+    /// The stream ended (the user stopped sharing in the desktop's menu).
+    fn ended(&self) -> bool {
+        let mut eos: glib::ffi::gboolean = 0;
+        // SAFETY: a live appsink; "eos" is its boolean property, the list ends with NULL.
+        unsafe {
+            glib::gobject_ffi::g_object_get(
+                self.sink as *mut _,
+                c"eos".as_ptr(),
+                &mut eos as *mut glib::ffi::gboolean,
+                std::ptr::null::<c_char>(),
+            );
+        }
+        eos != 0
+    }
+}
+
+impl Drop for Pipe {
+    fn drop(&mut self) {
+        // SAFETY: ours from `launch`, freed once.
+        unsafe {
+            (self.gst.set_state)(self.pipe, STATE_NULL);
+            if !self.sink.is_null() {
+                (self.gst.object_unref)(self.sink);
+            }
+            (self.gst.object_unref)(self.pipe);
         }
     }
 }
@@ -555,6 +782,15 @@ fn pipeline(fd: c_int, node: u32) -> String {
     format!(
         "pipewiresrc fd={fd} path={node} always-copy=true num-buffers=1 ! videoconvert ! \
          video/x-raw,format=RGBA ! appsink name=sink sync=false max-buffers=1"
+    )
+}
+
+/// pipewiresrc → BGRx (the screen cast's own format: no conversion) → appsink,
+/// always the newest frame (an older one waiting is dropped).
+fn streaming(fd: c_int, node: u32) -> String {
+    format!(
+        "pipewiresrc fd={fd} path={node} always-copy=true ! videoconvert ! \
+         video/x-raw,format=BGRx ! appsink name=sink sync=false max-buffers=1 drop=true"
     )
 }
 
@@ -696,6 +932,62 @@ mod tests {
             p.contains("num-buffers=1")
                 && p.contains("format=RGBA")
                 && p.contains("appsink name=sink")
+        );
+    }
+
+    #[test]
+    fn the_area_is_cut_out_of_a_padded_bgrx_frame_as_rgba() {
+        // 3x2 BGRx, 4 bytes of padding a row; pixel (x, y) = B x, G y, R 7
+        let mut bytes = Vec::new();
+        for y in 0..2u8 {
+            for x in 0..3u8 {
+                bytes.extend_from_slice(&[x, y, 7, 0]);
+            }
+            bytes.extend_from_slice(&[0; 4]);
+        }
+        let cut = cut_bgrx(&bytes, 3, 2, (1, 1, 2, 1)).unwrap();
+        assert_eq!(cut, [7, 1, 1, 255, 7, 1, 2, 255]);
+        assert!(
+            cut_bgrx(&bytes, 3, 2, (2, 0, 2, 1)).is_err(),
+            "past the edge"
+        );
+        assert!(cut_bgrx(&bytes, 3, 2, (-1, 0, 1, 1)).is_err());
+        assert!(cut_bgrx(&[], 0, 0, (0, 0, 0, 0)).is_err());
+    }
+
+    #[test]
+    fn the_cast_streams_the_screen_holding_the_area() {
+        let s = |node, x, y, w, h| Stream {
+            node,
+            position: (x, y),
+            size: (w, h),
+        };
+        // one screen: the frozen frame is it, at 0,0
+        let one = [s(35, 0, 0, 1280, 720)];
+        assert_eq!(
+            holding(&one, (10, 20, 300, 200)),
+            Some((one[0], (10, 20, 300, 200)))
+        );
+        // two side by side: the right one, the area in its px
+        let two = [s(35, 0, 0, 1280, 720), s(41, 1280, 0, 1920, 1080)];
+        assert_eq!(
+            holding(&two, (1400, 100, 300, 200)),
+            Some((two[1], (120, 100, 300, 200)))
+        );
+        assert_eq!(
+            holding(&two, (100, 100, 300, 200)).map(|h| h.0.node),
+            Some(35)
+        );
+        assert_eq!(holding(&[], (0, 0, 1, 1)), None);
+    }
+
+    #[test]
+    fn the_cast_keeps_the_newest_frame_in_the_screens_own_format() {
+        let p = streaming(7, 35);
+        assert!(p.starts_with("pipewiresrc fd=7 path=35 "));
+        assert!(!p.contains("num-buffers"), "it streams");
+        assert!(
+            p.contains("format=BGRx") && p.contains("drop=true") && p.contains("max-buffers=1")
         );
     }
 

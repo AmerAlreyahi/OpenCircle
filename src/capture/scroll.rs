@@ -13,7 +13,11 @@
 //! (`BitBlt`), ~15 times a second and only while the user is giving input or
 //! the area still moves (`GetLastInputInfo`). Our own windows are kept out
 //! with `hide_from_capture` either way. X11 grabs the monitor and cuts the
-//! area (no pacing). Wayland has no silent grab: not offered there.
+//! area (no pacing). Wayland has no silent grab: there the frames come from a
+//! ScreenCast stream of the area's monitor (`screencast::Cast`, the restore
+//! token: no dialog once allowed), open only while the capture runs; no pacing
+//! (no input injection there). Without that portal or GStreamer's PipeWire
+//! source it isn't offered.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +31,8 @@ const PERIOD: Duration = Duration::from_millis(66);
 /// Longest wait for a duplicated frame (the stop flag is read in between).
 #[cfg(windows)]
 const FRAME_WAIT_MS: u32 = 100;
+#[cfg(target_os = "linux")]
+const CAST_WAIT: Duration = Duration::from_millis(100);
 /// Grabs go on this long after the last input or the last change in the area
 /// (a smooth scroll finishing, a page loading under it).
 const SETTLE: Duration = Duration::from_secs(1);
@@ -59,13 +65,23 @@ impl std::fmt::Debug for Update {
     }
 }
 
-/// Long capture can run: the area can be grabbed silently (not on Wayland).
+/// Long capture can run: the area can be grabbed silently, or (Wayland)
+/// streamed by the ScreenCast portal.
 pub fn can_scroll() -> bool {
     #[cfg(target_os = "linux")]
     if super::wayland_session() {
-        return false;
+        let stream =
+            || super::portal::session_bus().is_ok_and(|c| super::screencast::can_stream(&c));
+        return offered(true, stream);
     }
     true
+}
+
+/// Long capture is offered: always where the screen can be grabbed silently,
+/// on Wayland only where it can be streamed (`can_stream`, asked only there).
+#[cfg(any(target_os = "linux", test))]
+fn offered(wayland: bool, can_stream: impl FnOnce() -> bool) -> bool {
+    !wayland || can_stream()
 }
 
 /// Grabs `region` (physical desktop px: x, y, width, height) while the user
@@ -139,10 +155,12 @@ pub fn by_hand(
 }
 
 /// Where frames come from: a Desktop Duplication (Windows) while it works,
-/// else a grab of the area each time.
+/// a screen cast (Wayland), else a grab of the area each time.
 struct Source {
     #[cfg(windows)]
     dup: Option<super::win::Duplication>,
+    #[cfg(target_os = "linux")]
+    cast: Option<super::screencast::Cast>,
     /// Why there is no duplication (it never started, or stopped).
     why: Option<String>,
     first: bool,
@@ -155,11 +173,21 @@ impl Source {
             Ok(dup) => (Some(dup), None),
             Err(e) => (None, Some(e)),
         };
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
+        let (cast, why) = match super::wayland_session() {
+            true => match super::screencast::Cast::start(region) {
+                Ok(cast) => (Some(cast), None),
+                Err(e) => (None, Some(e)),
+            },
+            false => (None, None),
+        };
+        #[cfg(not(any(windows, target_os = "linux")))]
         let (_, why) = (region, None);
         Source {
             #[cfg(windows)]
             dup,
+            #[cfg(target_os = "linux")]
+            cast,
             why,
             first: true,
         }
@@ -169,7 +197,9 @@ impl Source {
     fn fast(&self) -> bool {
         #[cfg(windows)]
         return self.dup.is_some();
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
+        return self.cast.is_some();
+        #[cfg(not(any(windows, target_os = "linux")))]
         false
     }
 
@@ -188,6 +218,16 @@ impl Source {
             }
         }
         let _ = first;
+        #[cfg(target_os = "linux")]
+        if let Some(cast) = &mut self.cast {
+            return cast.next(CAST_WAIT).map_err(io::Error::other);
+        }
+        #[cfg(target_os = "linux")]
+        if super::wayland_session() {
+            // (a screenshot each time would be a portal session each, or a dialog)
+            let why = self.why.as_deref().unwrap_or("no screen cast");
+            return Err(io::Error::other(why.to_string()));
+        }
         grab_area(region).map(Some)
     }
 
@@ -196,6 +236,10 @@ impl Source {
         #[cfg(windows)]
         if let Some(dup) = &self.dup {
             return format!("screen frames ({} read)", dup.frames);
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(cast) = &self.cast {
+            return format!("screen cast ({} frames read)", cast.frames);
         }
         match &self.why {
             Some(why) => format!("grabs (no screen frames: {why})"),
@@ -410,6 +454,71 @@ mod tests {
     use super::super::stitch::MAX_HEIGHT;
     use super::super::stitch::synth::Rig;
     use super::*;
+
+    /// #151: on Wayland long capture is offered where the screen can be
+    /// streamed, hidden where not; elsewhere always (nothing asked).
+    #[test]
+    fn long_capture_is_offered_on_wayland_where_the_screen_can_be_streamed() {
+        assert!(offered(false, || panic!("not asked off Wayland")));
+        assert!(
+            offered(true, || true),
+            "ScreenCast portal + PipeWire source"
+        );
+        assert!(!offered(true, || false), "no portal or no PipeWire source");
+    }
+
+    /// #151: the screen cast's frames (whole BGRx screens, rows padded) cut
+    /// to the area feed the same stitcher as every other source.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn screen_cast_frames_cut_to_the_area_are_stitched() {
+        let rig = Rig::new(400, 4000, 500, 7, 40);
+        // the area at (30, 50) on a 480 x 600 screen, 16 bytes of padding a row
+        let (sw, sh, at) = (480usize, 600usize, (30usize, 50usize));
+        let stride = sw * 4 + 16;
+        let screen = |s: usize| {
+            let area = rig.frame(s).px;
+            let mut bgrx = vec![9u8; stride * sh];
+            for (y, row) in area.as_chunks::<{ 400 * 4 }>().0.iter().enumerate() {
+                for (x, p) in row.as_chunks::<4>().0.iter().enumerate() {
+                    let i = (at.1 + y) * stride + (at.0 + x) * 4;
+                    bgrx[i..i + 4].copy_from_slice(&[p[2], p[1], p[0], 0]);
+                }
+            }
+            bgrx
+        };
+        let at_ = [0, 0, 120, 240, 240, 360, 480, 600];
+        let n = std::cell::Cell::new(0);
+        let stop = AtomicBool::new(false);
+        let grab = || {
+            let i = n.get();
+            n.set(i + 1);
+            if i + 1 >= at_.len() {
+                stop.store(true, Ordering::Relaxed);
+            }
+            let area = (at.0 as i32, at.1 as i32, 400, 500);
+            let cut =
+                super::super::screencast::cut_bgrx(&screen(at_[i]), sw as u32, sh as u32, area);
+            Ok(Some(cut.map_err(io::Error::other)?))
+        };
+        let mut st = Stitcher::new(400, 500);
+        run(
+            &mut st,
+            grab,
+            || Duration::ZERO,
+            Instant::now,
+            &stop,
+            || Duration::ZERO,
+            (0, 0),
+            || {},
+            |_| {},
+        )
+        .unwrap();
+        let truth = rig.truth(600);
+        let (rgba, _, height) = st.finish();
+        assert_eq!(height as usize, truth.h);
+        assert!(rgba == truth.px, "no gap, nothing twice");
+    }
 
     #[test]
     fn frames_are_dumped_only_to_an_absolute_folder() {

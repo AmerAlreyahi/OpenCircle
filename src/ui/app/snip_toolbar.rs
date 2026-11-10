@@ -224,7 +224,7 @@ impl App {
         let Some(crop) = self.windows.step_crop(i) else {
             return Task::none();
         };
-        self.step_next = Some((i, crop));
+        self.picked_next = Some((Some(i), crop));
         self.next = Purpose::Search;
         self.capture(
             std::time::Instant::now(),

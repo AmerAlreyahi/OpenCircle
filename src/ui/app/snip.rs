@@ -130,6 +130,14 @@ impl App {
             },
             snip::Msg::Shoot(_) => Task::none(), // handled above
             snip::Msg::Cancel => self.close(),
+            // (not finished meanwhile): the capture goes on without the overlay
+            snip::Msg::Leave => match snip.scroll.take_if(|l| l.then.is_none()) {
+                Some(long) => {
+                    self.cast = Some(long.stop_flag());
+                    self.close()
+                }
+                None => Task::none(),
+            },
             snip::Msg::Controls(opening, controls) => {
                 if opening == self.opening {
                     snip.add_controls(controls);
@@ -473,6 +481,8 @@ impl App {
         }
         let scale = on.place.scale;
         let room = long_capture::room(area, work, bar, scale);
+        // Wayland: no preview (the overlay goes, no window can sit beside the area)
+        let room = room.filter(|_| self.can_hide);
         let preview = room.map_or((0, 0), |r| {
             let px = |v: f32| (v * scale).round() as u32;
             (px(r.width), px(r.height))
@@ -484,6 +494,19 @@ impl App {
         let stop = Arc::new(AtomicBool::new(false));
         let mut long = long_capture::Long::new(area, stop.clone(), scale);
         (long.bar_was, long.window) = (bar_was, Some(on.window));
+        // Wayland: the overlay can't be cut (`can_hide`), so it shows how the
+        // capture ends, then goes (`Leave`); the stream starts under it meanwhile
+        let leave = match self.can_hide {
+            true => Task::none(),
+            false => {
+                long.finish_key = Some(snip_key());
+                background(|tx| {
+                    std::thread::sleep(CAST_HINT);
+                    let _ = tx.unbounded_send(snip::Msg::Leave);
+                })
+                .map(Message::Snip)
+            }
+        };
         snip.scroll = Some(long);
         if let Some(edit) = &mut o.edit {
             edit.annotator.capturing = true;
@@ -527,8 +550,38 @@ impl App {
                 scale,
             ))
             .map(Message::Windows);
-        cut.chain(work)
+        Task::batch([cut.chain(work), leave])
     }
+
+    /// Wayland: the long capture that went on without its overlay ended (the
+    /// shortcut, the stream stopped): Snip opens on a fresh frame with the
+    /// stitched page picked, its toolbar's Copy / Save / ... on it.
+    pub(in crate::ui) fn cast_done(&mut self, stitched: Result<Crop, String>) -> Task<Message> {
+        self.cast = None;
+        match stitched {
+            Ok(crop) if crop.height > 0 => {
+                crate::history::recent::remember(&crop);
+                self.picked_next = Some((None, crop));
+                self.next = Purpose::Search;
+                self.capture(Instant::now(), Some(snip::Kind::Region))
+            }
+            Ok(_) => Task::none(),
+            Err(e) => {
+                crate::log!("long capture failed: {e}");
+                Task::none()
+            }
+        }
+    }
+}
+
+/// How long the Wayland long capture's hint shows before the overlay goes.
+const CAST_HINT: Duration = Duration::from_millis(2500);
+
+/// The Snip shortcut (the one that ends a long capture on Wayland), as shown.
+fn snip_key() -> String {
+    (config::current().quick_actions.into_iter())
+        .find(|q| q.action == "snip" && q.target == crate::config::Target::Circle)
+        .map_or_else(|| "Alt+A".into(), |q| q.shortcut)
 }
 
 /// Copies a snip on a thread (encoding a big capture takes a while), through

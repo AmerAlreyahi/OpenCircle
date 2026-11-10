@@ -273,7 +273,7 @@ impl App {
             first = snip.start(kind, size); // Full = the whole screen at once
             let wait = config::current().snip.delay;
             let tool = self.tool_next.take();
-            step = self.step_next.take();
+            step = self.picked_next.take();
             if step.is_some() {
                 (first, self.timed) = (None, true); // no pick, no timer: the step is picked
             }
@@ -292,11 +292,12 @@ impl App {
             }
         }
         let Purpose::Quick(quick, target) = self.o.purpose else {
-            // a step of the Steps strip to update: picked at once ("Update step N")
+            // a step of the Steps strip to update: picked at once ("Update
+            // step N"); a long capture finished on Wayland: picked as well
             if let Some((i, crop)) = step {
                 let _ = self.snip_routed(crop, false, false);
                 if let Some(edit) = &mut self.o.edit {
-                    edit.annotator.updating = Some(i);
+                    edit.annotator.updating = i;
                 }
             }
             let next = match (first, timer) {

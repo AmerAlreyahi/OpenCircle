@@ -78,6 +78,9 @@ pub struct Long {
     /// The small picture's rect kept in the overlay's hole (`over_area`), as
     /// last cut.
     pub cut: Option<Rectangle>,
+    /// Wayland: the key that finishes the capture once the overlay has gone
+    /// (the Snip shortcut), named in the hint.
+    pub finish_key: Option<String>,
 }
 
 impl Long {
@@ -96,7 +99,14 @@ impl Long {
             preview: None,
             bar_was: None,
             cut: None,
+            finish_key: None,
         }
+    }
+
+    /// The flag that ends the grabbing, for whoever goes on holding it once
+    /// the overlay has gone (Wayland).
+    pub fn stop_flag(&self) -> Arc<AtomicBool> {
+        self.stop.clone()
     }
 
     /// Ends the grabbing, then `how` (unless an end was already asked for).
@@ -153,7 +163,7 @@ impl Long {
 
     /// Where the hint is drawn (none once scrolled, or without a free spot).
     pub fn hint_spot(&self, screen: Size, bar: Rectangle, rtl: bool) -> Option<Point> {
-        let width = key_hint::width(&hint(rtl));
+        let width = key_hint::width(&self.hint(rtl));
         let picture = self.picture(screen, bar);
         (!self.scrolled() && !self.lost).then(|| hint_at(bar, self.area, picture, width, screen))?
     }
@@ -243,7 +253,7 @@ impl Long {
             }
         }
         if let Some(spot) = self.hint_spot(screen, bar, rtl) {
-            layers = layers.push(pin(key_hint(&hint(rtl), rtl)).position(spot));
+            layers = layers.push(pin(key_hint(&self.hint(rtl), rtl)).position(spot));
         }
         if let Some(spot) = self.note_spot(screen, bar, rtl) {
             layers = layers.push(pin(key_hint(&note(rtl), rtl)).position(spot));
@@ -252,11 +262,18 @@ impl Long {
     }
 }
 
-/// The hint until the first scroll.
-fn hint(rtl: bool) -> [key_hint::Group<'static>; 1] {
-    match rtl {
-        true => [(None, "مرّر لالتقاط الصفحة")],
-        false => [(None, "Scroll to capture the page")],
+impl Long {
+    /// The hint until the first scroll; on Wayland, how it ends once the
+    /// overlay has gone (`finish_key`).
+    fn hint(&self, rtl: bool) -> Vec<key_hint::Group<'_>> {
+        let ar = |latin, arabic| if rtl { arabic } else { latin };
+        match &self.finish_key {
+            None => vec![(None, ar("Scroll to capture the page", "مرّر لالتقاط الصفحة"))],
+            Some(key) => vec![
+                (None, ar("Scroll the page", "مرّر الصفحة")),
+                (Some(key.as_str()), ar("Finish", "إنهاء")),
+            ],
+        }
     }
 }
 

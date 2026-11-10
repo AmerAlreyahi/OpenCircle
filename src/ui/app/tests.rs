@@ -5086,3 +5086,61 @@ fn ctrl_z_reaches_the_snip_toolbar() {
         "Ctrl+Z -> Undo, got {keys:?}"
     );
 }
+
+/// Wayland (#151): the overlay can't be cut there, so a long capture shows
+/// how it ends, then the overlay goes and the stream goes on; the Snip
+/// shortcut ends it and Snip opens with the stitched page picked.
+#[test]
+fn on_wayland_a_long_capture_goes_on_without_the_overlay_until_the_shortcut() {
+    use std::sync::atomic::Ordering;
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = snipping(area);
+    app.can_hide = false;
+    app.select(area);
+    let _ = app.open_snip_toolbar();
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
+    let long = app.scroll().expect("long capture started");
+    assert_eq!(
+        long.finish_key.as_deref(),
+        Some("Alt+A"),
+        "the hint names it"
+    );
+    let stop = long.stop_flag();
+    // the hint was read: the overlay goes, the capture goes on
+    let _ = app.update(Message::Snip(snip::Msg::Leave));
+    assert!(app.o.is_none(), "the overlay went");
+    assert!(app.cast.is_some() && !stop.load(Ordering::Relaxed));
+    // the shortcut ends it (no new capture yet: the image comes first)
+    let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+    assert!(stop.load(Ordering::Relaxed), "the stream stops");
+    assert!(app.capturing.is_none());
+    let page = Crop {
+        width: 300,
+        height: 900,
+        rgba: vec![255; 300 * 900 * 4],
+    };
+    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(page))));
+    assert!(app.cast.is_none());
+    assert!(app.capturing.is_some(), "Snip opens on a fresh frame");
+    assert!(
+        app.picked_next
+            .as_ref()
+            .is_some_and(|(step, c)| step.is_none() && c.height == 900),
+        "with the stitched page picked"
+    );
+}
+
+/// Esc while the hint shows cancels it as anywhere (the overlay is still up).
+#[test]
+fn on_wayland_esc_before_the_overlay_goes_cancels_the_long_capture() {
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = snipping(area);
+    app.can_hide = false;
+    app.select(area);
+    let _ = app.open_snip_toolbar();
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
+    let _ = app.update(Message::Escape);
+    let _ = app.update(Message::Snip(snip::Msg::Leave));
+    assert!(app.cast.is_none(), "not left: cancelled");
+    assert!(app.o.is_some() && app.scroll().is_some_and(|l| l.cancelled()));
+}
