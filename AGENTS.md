@@ -58,7 +58,7 @@ where they differ.
 
 ## Architecture
 
-Planned layout (details and change recipes: `ARCHITECTURE.md`, written with
+Planned layout (details and change recipes: `docs/ARCHITECTURE.md`, written with
 the first code):
 
 | Part | Role |
@@ -178,7 +178,7 @@ production systems.
   card, toast, ...) is built once; ONE design per object, never two looks for the same kind of
   control; screens only compose kit parts and never style; colours, sizes, radii, spacing and
   motion come only from tokens; screens/pages/steps/actions come from lists (a new feature = one
-  entry + one view file; recipe in ARCHITECTURE.md). Rebuilding or restructuring current UI code
+  entry + one view file; recipe in docs/ARCHITECTURE.md). Rebuilding or restructuring current UI code
   for this is allowed (behaviour, frozen contracts and tests kept).
 - Version scope (owner, 2026-10-27, supersedes the 0.1.2 line of "Version plan"): 0.1.2 = new UI +
   architecture: the UI restructure + the WHOLE backend cleanup of docs/internal/REPORT_backend_audit.md

@@ -1,4 +1,4 @@
-//! The UI's dependency and style rules as source scans (ARCHITECTURE.md, the
+//! The UI's dependency and style rules as source scans (docs/ARCHITECTURE.md, the
 //! UI plan's "How to enforce them"): screens compose kit parts and never style;
 //! the kit depends only on itself; platform (the OS) imports none of the UI.
 

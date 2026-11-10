@@ -1,6 +1,6 @@
 //! The action registry: ONE list of what can be done with a selection. The action
 //! bar renders it in order; the first entry is the default (Enter).
-//! To add an action: see ARCHITECTURE.md ("Add an action").
+//! To add an action: see docs/ARCHITECTURE.md ("Add an action").
 pub mod ask;
 pub mod copy;
 pub mod crop;

@@ -8,3 +8,6 @@ target/
 .env
 *.log
 docs/media/opencircle-promo//target-*/
+
+# Claude Code entry point (loads AGENTS.md); local only
+CLAUDE.md

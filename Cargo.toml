@@ -196,7 +196,7 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std", "si
 # renderer, out of reach of app code. Also the frame cost (#23): damage of a
 # layer that comes or goes, the clip mask, pixel-for-pixel images without the
 # pipeline, and only the redrawn rectangles presented on Windows (each marked
-# "OpenCircle patch" in the source; ARCHITECTURE.md). Drop each upstream fix.
+# "OpenCircle patch" in the source; docs/ARCHITECTURE.md). Drop each upstream fix.
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
 # iced 0.14's window shell with one fix: a window that draws also draws every
 # other window the app changed for, at once. On Windows a window draws on

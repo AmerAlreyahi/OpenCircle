@@ -1,4 +1,4 @@
-<p align="center"><img src="gallery/OpenCircleCoverIMG.png" alt="OpenCircle: circle anything on your screen to search, read, translate or ask AI" width="100%"></p>
+<p align="center"><img src="docs/gallery/OpenCircleCoverIMG.png" alt="OpenCircle: circle anything on your screen to search, read, translate or ask AI" width="100%"></p>
 
 <h1 align="center">OpenCircle</h1>
 
@@ -37,7 +37,7 @@ by default. It is free, MIT licensed, and has no account and no telemetry.
   <img src="docs/images/translate-before-after.png" alt="Translate in place: a page in English, then the same page in Arabic." width="49%">
 </p>
 
-More in the [gallery](gallery/README.md) and the [feature guides](docs/features/README.md).
+More in the [gallery](docs/gallery/README.md) and the [feature guides](docs/features/README.md).
 The clips are short recordings of the real app; third-party material in them is
 credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
 
@@ -228,7 +228,7 @@ Linux build dependencies (Debian/Ubuntu):
 sudo apt-get install libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libgtk-3-dev libxdo-dev
 ```
 
-[ARCHITECTURE.md](ARCHITECTURE.md) describes how the code is organised.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes how the code is organised.
 
 ## Guides
 
@@ -237,7 +237,7 @@ sudo apt-get install libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev l
 [Translate](docs/translate.md) ·
 [Snip and annotate](docs/snip-and-annotate.md) ·
 [Feature guides](docs/features/README.md) ·
-[Gallery](gallery/README.md) ·
+[Gallery](docs/gallery/README.md) ·
 [AI setup](docs/ai-setup.md) ·
 [Song search (Labs)](docs/song-search.md) ·
 [Privacy](docs/privacy.md) ·
