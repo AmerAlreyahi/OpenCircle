@@ -6,7 +6,8 @@
 //! scrollbar is every other one's). It opens below (above when there is no
 //! room); a pick, a click outside or Esc closes it. `combo`: the same with a
 //! search field at the top of the menu (typing filters, Enter picks) and an
-//! action at its foot that leaves it open (the Model row).
+//! action at its foot that leaves it open (the Model row). `open` opens a
+//! combo from code (its search field's id): an error card's "Choose another model".
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget, mouse, overlay, renderer};
@@ -57,6 +58,7 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
         menu: menu.into(),
         on_open: None,
         foot: false,
+        id: None,
     })
 }
 
@@ -131,6 +133,7 @@ pub fn combo<'a, Message: Clone + 'a>(
         menu: menu.into(),
         on_open: Some(on_open),
         foot: true,
+        id: Some(widget::Id::new(search.id)),
     })
 }
 
@@ -188,6 +191,30 @@ struct Dropdown<'a, Message> {
     on_open: Option<Message>,
     /// The menu's last part is an action that leaves it open.
     foot: bool,
+    /// A combo's id (its search field's): `open` finds it by it.
+    id: Option<widget::Id>,
+}
+
+/// Opens the combo whose search field is `id` (its `on_open` is not sent:
+/// the caller focuses the search itself).
+pub fn open<T: Send + 'static>(id: &'static str) -> iced::Task<T> {
+    iced::advanced::widget::operate(open_op(id))
+}
+
+/// `open`'s operation.
+pub fn open_op<T>(id: &'static str) -> impl widget::Operation<T> {
+    struct Open(widget::Id);
+    impl<T> widget::Operation<T> for Open {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn widget::Operation<T>)) {
+            operate(self);
+        }
+        fn custom(&mut self, id: Option<&widget::Id>, _: Rectangle, state: &mut dyn std::any::Any) {
+            if let (true, Some(state)) = (id == Some(&self.0), state.downcast_mut::<State>()) {
+                state.open = true;
+            }
+        }
+    }
+    Open(widget::Id::new(id))
 }
 
 #[derive(Default)]
@@ -216,6 +243,17 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
 
     fn size(&self) -> Size<Length> {
         self.opener.as_widget().size()
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        _renderer: &iced::Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        let state = tree.state.downcast_mut::<State>();
+        operation.custom(self.id.as_ref(), layout.bounds(), state);
     }
 
     fn layout(
@@ -596,6 +634,21 @@ mod tests {
         let foot = Point::new(60.0, 56.0 + 4.0 + 360.0 - 15.0);
         let got = shot::clicks(|| combo_view(60), size, &[opener, foot]);
         assert_eq!(got, ["open", "load"]);
+    }
+
+    /// `open` opens a combo by its search's id (an error card's "Choose
+    /// another model"): a row can be picked with no click on the opener;
+    /// another id opens nothing.
+    #[test]
+    fn open_opens_the_combo_by_its_id() {
+        let size = Size::new(400.0, 300.0);
+        let row_b = Point::new(60.0, 120.0 + 45.0);
+        let mut op = super::open_op::<()>("combo-search");
+        let got = shot::clicks_after(|| combo_view(0), size, Some(&mut op), &[row_b]);
+        assert_eq!(got, ["b"]);
+        let mut op = super::open_op::<()>("another");
+        let got = shot::clicks_after(|| combo_view(0), size, Some(&mut op), &[row_b]);
+        assert!(got.is_empty(), "{got:?}");
     }
 
     /// A click opens the menu (the kit's rows, every choice), a row's click

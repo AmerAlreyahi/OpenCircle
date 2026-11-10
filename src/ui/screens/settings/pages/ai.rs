@@ -8,20 +8,20 @@ use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, row};
 use iced::{Element, Fill};
 
-use super::super::model_list::SEARCH as MODEL_SEARCH;
 use super::super::state::{
     Busy, KEY_MASK, KeyField, KeyMessage, KeyStatus, Message, PRESETS, Pick, Preset, State, issue,
 };
 use crate::config::{Provider, StaysOpen};
 use crate::secrets::Secret;
 use crate::ui::kit::button::{Kind, button, label};
-use crate::ui::kit::dropdown::{Search, combo, dropdown};
+use crate::ui::kit::dropdown::dropdown;
 use crate::ui::kit::field::input;
 use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::tooltip::tip;
+use crate::ui::screens::model_list;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     column![provider_rows(state), chat_rows(state)].into()
@@ -75,49 +75,20 @@ fn provider_rows(state: &State) -> Element<'_, Message> {
 /// The model: a list of the provider's models with a search; a typed id
 /// that is in no list is offered as is (every provider, Custom server too).
 fn model_row(state: &State, preset: Preset) -> Element<'_, Message> {
-    let list = &state.model_list;
     let ai = &state.draft.ai;
     let example = match preset.model {
         "" => "Type or load a model id".to_string(),
         m => format!("e.g. {m}"),
     };
-    let rows = (list.choices().into_iter())
-        .map(|(id, tag, typed)| {
-            let label = match typed {
-                true => format!("Use \u{201c}{id}\u{201d}"),
-                false => id.to_string(),
-            };
-            let current = !typed && id == ai.model;
-            (label, tag, current, Message::ModelPick(id.to_string()))
-        })
-        .collect();
-    let foot = match list.loading {
-        true => ("Loading models\u{2026}", None),
-        false => (list.load.as_str(), Some(Message::LoadModels)),
+    let on = model_list::On {
+        opened: Message::ModelsOpened,
+        query: Message::ModelQuery,
+        first: Message::ModelFirst,
+        pick: Message::ModelPick,
+        load: Message::LoadModels,
     };
-    let search = Search {
-        id: MODEL_SEARCH,
-        hint: "Search or type a model id",
-        query: &list.query,
-        on_query: Box::new(Message::ModelQuery),
-        on_submit: Message::ModelFirst,
-    };
-    let value = (!ai.model.is_empty()).then_some(ai.model.as_str());
-    let field = combo(
-        value,
-        &example,
-        search,
-        list.pricing.as_deref(),
-        rows,
-        Some(foot),
-        Message::ModelsOpened,
-    );
+    let field = state.model_list.view(&ai.model, &example, on);
     let mut control = column![tip(field, "Model", Position::Top)].spacing(space::GAP);
-    match &list.said {
-        Some(Ok(n)) => control = control.push(sub(Role::ROW_DESC, n.as_str())),
-        Some(Err(e)) => control = control.push(error(Role::ROW_DESC, e.as_str())),
-        None => {}
-    }
     if let Some(e) = issue(&state.problems, "ai.model") {
         control = control.push(error(Role::ROW_DESC, e));
     }

@@ -10,7 +10,7 @@ use iced::{Center, Element, Fill, Rectangle, Right, Size};
 use super::{AiChat, LOG, Msg, PICKS, State, Tab, classifier, picked};
 use crate::actions;
 use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
-use crate::ai::providers;
+use crate::ai::providers::{self, Preset};
 use crate::ai::{AiError, Fix};
 use crate::config::{self, StaysOpen};
 use crate::ui::keys;
@@ -32,6 +32,7 @@ use crate::ui::kit::text_area::text_area;
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::tooltip::{Why, hint};
 use crate::ui::kit::{chip, field};
+use crate::ui::screens::model_list;
 
 /// A card's body and its footer.
 type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
@@ -216,7 +217,10 @@ impl AiChat {
                 }
                 answer = answer.push(tools);
             }
-            log = log.push(answer);
+            // nothing answered (a failed turn): no empty block, so no second gap
+            if turn.thought.is_some() || !turn.answer.is_empty() || busy {
+                log = log.push(answer);
+            }
         }
         // Questions about the picture itself: Lens takes the crop (browser provider).
         if browser && chat.status == Status::Done {
@@ -461,11 +465,21 @@ impl AiChat {
         .spacing(STACK)
         .width(Fill);
         if cfg.ai.provider != config::Provider::Browser {
-            let model = field::input("Model id", &self.model, true, false)
-                .on_input(Msg::Model)
-                .on_submit(Msg::SaveModel);
+            let on = model_list::On {
+                opened: Msg::ModelsOpened,
+                query: Msg::ModelQuery,
+                first: Msg::ModelFirst,
+                pick: Msg::ModelPick,
+                load: Msg::LoadModels,
+            };
+            let example = Preset::of(&cfg.ai)
+                .filter(|p| !p.model.is_empty())
+                .map_or("Type or load a model id".to_string(), |p| {
+                    format!("e.g. {}", p.model)
+                });
+            let model = self.models.view(&cfg.ai.model, &example, on);
             part = part.push(sub(Role::LABEL, "Model")).push(model);
-            if classifier(&self.model) {
+            if classifier(&cfg.ai.model) {
                 part = part.push(error(
                     Role::NOTE,
                     "This looks like a safety classifier: it rates messages instead of \
@@ -485,7 +499,7 @@ impl AiChat {
 /// AI (the key, the setup), or the question again.
 pub(super) fn fix(fix: Fix) -> Msg {
     match fix {
-        Fix::Model => Msg::Drawer(Some(Tab::Settings)),
+        Fix::Model => Msg::ChooseModel,
         Fix::Key | Fix::Settings => Msg::OpenAiSettings,
         Fix::Retry => Msg::Regenerate,
     }

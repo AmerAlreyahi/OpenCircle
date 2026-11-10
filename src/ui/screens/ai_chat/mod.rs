@@ -26,7 +26,8 @@ use crate::ui::background;
 use crate::ui::keys;
 use crate::ui::kit::markdown::Act;
 use crate::ui::kit::panel_frame::{self, Event};
-use crate::ui::kit::{motion, spinner};
+use crate::ui::kit::{dropdown, motion, spinner};
+use crate::ui::screens::model_list::{self, ModelList};
 
 mod view;
 pub use view::{actions, ai_error, card, note, provider_name};
@@ -146,10 +147,20 @@ pub enum Msg {
     Drawer(Option<Tab>),
     /// The drawer's "AI chat stays open".
     StaysOpen(StaysOpen),
-    /// The drawer's quick provider picker, its model field and Enter in it.
+    /// The drawer's quick provider picker.
     Pick(Pick),
-    Model(String),
-    SaveModel,
+    /// The drawer's Model list (`screens::model_list`, as Settings' own):
+    /// opened, searched, Enter, a pick, "Load models" and its answer.
+    ModelsOpened,
+    ModelQuery(String),
+    ModelFirst,
+    ModelPick(String),
+    LoadModels,
+    ModelsLoaded(config::AiConfig, Result<usize, String>),
+    /// An error card's "Choose another model": the drawer's Model list opens.
+    ChooseModel,
+    /// (Once the drawer is drawn: the list opens.)
+    OpenModels,
     /// "Open AI settings →" (the App opens Settings > Ask AI).
     OpenAiSettings,
     /// The History tab's list of saved chats (newest first).
@@ -181,11 +192,11 @@ pub struct AiChat {
     /// Picked up and dragged by its header (the App sets it).
     pub held: bool,
     /// The drawer's open tab, its History list (and what it was searched
-    /// for) and its model field.
+    /// for) and its Model list.
     drawer: Option<Tab>,
     listed: Vec<chats::Entry>,
     find: String,
-    model: String,
+    models: ModelList,
     /// The older messages' summary being written; dropping it stops that.
     summarizing: Option<task::Handle>,
     /// The running stream; dropping the handle aborts it.
@@ -303,7 +314,7 @@ impl AiChat {
             drawer: None,
             listed: Vec::new(),
             find: String::new(),
-            model: String::new(),
+            models: ModelList::default(),
             summarizing: None,
             work: None,
             note: None,
@@ -402,7 +413,7 @@ impl AiChat {
             }
             (State::Ask { .. }, Msg::Drawer(tab)) => {
                 self.drawer = tab;
-                self.model = config::current().ai.model;
+                self.models = ModelList::of(&config::current().ai);
                 if tab == Some(Tab::History) {
                     return list_saved(&self.find);
                 }
@@ -470,23 +481,44 @@ impl AiChat {
                 return save_config(move |c| c.chat.stays_open = how, None);
             }
             (State::Ask { .. }, Msg::Pick(pick)) => {
-                let model = self.model.clone();
-                let crop = self.crop.clone();
+                self.models = ModelList::default(); // the new provider's, once saved
                 return save_config(
-                    move |c| {
-                        c.ai.model = model; // what the field shows, then the pick's rule
-                        apply_pick(&mut c.ai, pick);
-                    },
-                    Some(crop),
+                    move |c| apply_pick(&mut c.ai, pick),
+                    Some(self.crop.clone()),
                 );
             }
-            (_, Msg::Model(model)) => self.model = model,
-            (State::Ask { .. }, Msg::SaveModel) => {
-                let model = self.model.trim().to_string();
-                if model.is_empty() {
-                    return Task::none();
+            (_, Msg::Saved) => self.models.refresh(&config::current().ai),
+            (_, Msg::ModelsOpened) => return operation::focus(model_list::SEARCH),
+            (_, Msg::ModelQuery(q)) => self.models.query = q,
+            (State::Ask { .. }, Msg::ModelPick(id)) => {
+                let model = self.models.pick(&id);
+                return self.save_model(model);
+            }
+            (State::Ask { .. }, Msg::ModelFirst) => {
+                if let Some(model) = self.models.pick_first() {
+                    return self.save_model(model);
                 }
-                return save_config(move |c| c.ai.model = model, Some(self.crop.clone()));
+            }
+            (_, Msg::LoadModels) => {
+                let ai = config::current().ai;
+                let owner = providers::key_of(&ai);
+                let store: Arc<dyn crate::secrets::KeyStore> = Arc::new(crate::secrets::Keyring);
+                if let Some(job) = self.models.load(&ai, store, owner) {
+                    return background(move |tx| {
+                        let (ai, n) = job.run();
+                        let _ = tx.unbounded_send(Msg::ModelsLoaded(ai, n));
+                    });
+                }
+            }
+            (_, Msg::ModelsLoaded(ai, n)) => self.models.loaded(&config::current().ai, &ai, n),
+            (State::Ask { .. }, Msg::ChooseModel) => {
+                let _ = self.on(Msg::Drawer(Some(Tab::Settings)));
+                // the drawer is drawn first; then its list opens
+                return Task::done(Msg::OpenModels);
+            }
+            (_, Msg::OpenModels) => {
+                return dropdown::open(model_list::SEARCH)
+                    .chain(operation::focus(model_list::SEARCH));
             }
             (State::Ask { chat, .. }, Msg::Summarized(at, result)) => {
                 self.summarizing = None;
@@ -627,6 +659,14 @@ impl AiChat {
             tasks.push(task);
         }
         Task::batch(tasks)
+    }
+
+    /// Saves `model` as the one the chat asks (an empty one is not saved).
+    fn save_model(&self, model: String) -> Task<Msg> {
+        if model.is_empty() {
+            return Task::none();
+        }
+        save_config(move |c| c.ai.model = model, Some(self.crop.clone()))
     }
 
     /// Asks `question`; the answer streams in on a thread. Nothing is sent before this.

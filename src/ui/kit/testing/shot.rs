@@ -209,10 +209,25 @@ pub fn clicks<'a, Message>(
     size: Size,
     points: &[iced::Point],
 ) -> Vec<Message> {
+    clicks_after(view, size, None, points)
+}
+
+/// `clicks`, after `op` ran on the window first (e.g. `dropdown::open_op`).
+pub fn clicks_after<'a, Message>(
+    view: impl Fn() -> Element<'a, Message>,
+    size: Size,
+    op: Option<&mut dyn iced::advanced::widget::Operation>,
+    points: &[iced::Point],
+) -> Vec<Message> {
     use iced::advanced::clipboard;
     use iced::{Event, mouse::Button, mouse::Event as Mouse};
     let mut renderer = renderer();
     let mut cache = Cache::default();
+    if let Some(op) = op {
+        let mut ui = UserInterface::build(view(), size, cache, &mut renderer);
+        ui.operate(&renderer, op);
+        cache = ui.into_cache();
+    }
     let mut messages = Vec::new();
     for &at in points {
         let mut ui = UserInterface::build(view(), size, cache, &mut renderer);

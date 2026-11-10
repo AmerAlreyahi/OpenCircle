@@ -338,19 +338,13 @@ fn an_error_is_a_calm_card_with_its_fix() {
     let _ = panel.update(Msg::Details);
     assert!(texts(&panel).contains(&full) && texts(&panel).iter().any(|t| t == "Hide details"));
     // each fix opens its place
-    assert!(matches!(
-        view::fix(ai::Fix::Model),
-        Msg::Drawer(Some(Tab::Settings))
-    ));
+    assert!(matches!(view::fix(ai::Fix::Model), Msg::ChooseModel));
     assert!(matches!(view::fix(ai::Fix::Key), Msg::OpenAiSettings));
     assert!(matches!(view::fix(ai::Fix::Settings), Msg::OpenAiSettings));
     assert!(matches!(view::fix(ai::Fix::Retry), Msg::Regenerate));
+    // Choose another model: the drawer's Settings tab, its Model list opened once drawn
     let _ = panel.update(view::fix(ai::Fix::Model));
-    assert_eq!(
-        panel.drawer,
-        Some(Tab::Settings),
-        "the drawer's model picker"
-    );
+    assert_eq!(panel.drawer, Some(Tab::Settings), "the drawer's Model list");
 }
 
 #[test]

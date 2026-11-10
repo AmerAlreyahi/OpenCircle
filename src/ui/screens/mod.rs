@@ -6,6 +6,7 @@ pub mod common;
 pub mod live;
 pub mod long_capture;
 pub mod model_download;
+pub mod model_list;
 pub mod onboarding;
 pub mod snip_toolbar;
 pub mod overlay {
