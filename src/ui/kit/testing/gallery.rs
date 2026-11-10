@@ -9,8 +9,8 @@ use iced::{Element, Event, Fill, Point, Size, mouse};
 use super::super::themes::{self, DAYLIGHT, SAPPHIRE, c};
 use super::super::tokens::{Role, radius};
 use super::super::{
-    button, card, chip, divider, field, header, panel_frame, progress, scroll, segmented,
-    setting_row, sidebar, surface, toast,
+    button, card, chip, divider, error_card, field, header, panel_frame, progress, scroll,
+    segmented, setting_row, sidebar, surface, toast,
 };
 use super::{golden, shot};
 
@@ -394,6 +394,50 @@ fn card_sheet() {
         ])
         .collect::<Vec<_>>();
     sheet("card", Size::new(260.0, 84.0), &rows);
+}
+
+/// `error_card`: a short cause with Retry, a long one clamped to two lines
+/// (fix + Retry), and opened.
+#[test]
+fn error_card_sheet() {
+    use error_card::{ErrorCard, error_card};
+    const LONG: &str = "HTTP 404: This model models/old-model is no longer available. Please \
+                        update your code to use a newer model for the latest features.";
+    const LONG_AR: &str = "HTTP 404: هذا النموذج لم يعد متاحًا. يرجى تحديث التطبيق لاستخدام \
+                           نموذج أحدث للحصول على أحدث الميزات والتحسينات المتاحة الآن.";
+    let view = |long: bool, open: bool| {
+        move |ar| {
+            let (headline, detail) = match long {
+                true => (
+                    s(ar, "This model isn't available", "هذا النموذج غير متاح"),
+                    s(ar, LONG, LONG_AR),
+                ),
+                false => (
+                    s(ar, "Gemini is busy right now", "Gemini مشغول الآن"),
+                    "HTTP 503",
+                ),
+            };
+            let fix = match long {
+                true => (s(ar, "Choose another model", "اختر نموذجًا آخر"), ()),
+                false => ("Retry", ()),
+            };
+            error_card(ErrorCard {
+                headline: headline.into(),
+                detail: detail.into(),
+                width: 388.0,
+                open,
+                on_details: (),
+                fix: Some(fix),
+                retry: long.then_some(()),
+            })
+        }
+    };
+    let rows = vec![
+        row("short", Act::Rest, view(false, false)),
+        row("clamped", Act::Rest, view(true, false)),
+        row("open", Act::Rest, view(true, true)),
+    ];
+    sheet("error_card", Size::new(420.0, 170.0), &rows);
 }
 
 #[test]

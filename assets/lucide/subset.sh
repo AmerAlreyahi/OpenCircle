@@ -77,6 +77,7 @@ ICONS=$(printf '%s,' \
   U+E04D `# arrow-right (the language pill: source -> target)` \
   U+E15B `# shield (update: Windows asks for permission)` \
   U+E0BD `# external-link (update: full release notes, Get it)` \
+  U+E07B `# circle-alert (the AI error card)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

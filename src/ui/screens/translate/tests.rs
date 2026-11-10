@@ -559,7 +559,10 @@ fn the_result_is_pasted_in_place_or_nothing_is() {
         |_| {},
     )
     .unwrap_err();
-    assert!(!e.setup && e.message.contains("503"), "{e:?}");
+    assert!(
+        !e.setup && e.message.ends_with("is busy right now"),
+        "{e:?}"
+    );
     let e = translate(
         &original,
         area,

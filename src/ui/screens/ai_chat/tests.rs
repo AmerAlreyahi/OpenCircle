@@ -230,7 +230,7 @@ fn a_streamed_answer_is_markdown_and_stop_keeps_the_part_so_far() {
     // Stop mid-stream: no panic, the part so far stays, a late piece is dropped.
     let _ = panel.update(Msg::Stop);
     let _ = panel.update(Msg::Delta(rest.into()));
-    let _ = panel.update(Msg::Answered(Err("Stopped.".into())));
+    let _ = panel.update(Msg::Answered(Err(ai::AiError::Network("Stopped.".into()))));
     assert_eq!(chat(&panel).status, Status::Cancelled);
     assert_eq!(chat(&panel).turns[0].answer, first);
     assert!(panel.work.is_none());
@@ -267,14 +267,102 @@ fn edit_resends_and_regenerate_asks_again() {
     assert!(turns[0].answer.is_empty() && parsed(&panel) == [0]);
 }
 
+/// A retired model's 404, as Gemini words it.
+const GONE: &str = "This model models/gemini-2.0-flash is no longer available. Please update \
+                    your code to use a newer model for the latest features and improvements.";
+
+/// An AI error is the calm card: its kind's headline and fix button, the
+/// provider's message clamped until Show details, and the fix opens its place.
+#[test]
+fn an_error_is_a_calm_card_with_its_fix() {
+    let cases = [
+        (
+            ai::AiError::Rejected(404, GONE.into()),
+            "This model isn't available",
+            "Choose another model",
+            true,
+        ),
+        (
+            ai::AiError::Server(503, String::new()),
+            "The AI provider is busy right now",
+            "Retry",
+            false,
+        ),
+        (
+            ai::AiError::Auth(401, String::new()),
+            "The API key was rejected",
+            "Check the key",
+            false,
+        ),
+        (
+            ai::AiError::Network("dns failed".into()),
+            "No connection",
+            "Retry",
+            false,
+        ),
+        (
+            ai::AiError::NotConfigured("add a key".into()),
+            "AI isn't set up yet",
+            "Open settings",
+            false,
+        ),
+    ];
+    let texts =
+        |p: &AiChat| crate::ui::kit::testing::shot::texts(p.view(at(SCREEN), SCREEN, false));
+    for (e, headline, button, long) in cases {
+        let mut panel = api_chat();
+        ask(&mut panel, "Hi");
+        let _ = panel.update(Msg::Answered(Err(e.clone())));
+        let shown = texts(&panel);
+        assert!(shown.iter().any(|t| t == headline), "{e:?}: {shown:?}");
+        assert!(shown.iter().any(|t| t == button), "{e:?}: {shown:?}");
+        let retries = shown.iter().filter(|t| *t == "Retry").count();
+        assert_eq!(retries, 1, "{e:?}: one Retry, beside the fix or as it");
+        assert_eq!(
+            shown.iter().any(|t| t == "Show details"),
+            long,
+            "{e:?}: {shown:?}"
+        );
+        assert!(
+            !shown
+                .iter()
+                .any(|t| t.contains("Choose another model from the list"))
+        );
+    }
+    // the 404's detail: two lines, then all of it
+    let mut panel = api_chat();
+    ask(&mut panel, "Hi");
+    let _ = panel.update(Msg::Answered(Err(ai::AiError::Rejected(404, GONE.into()))));
+    let full = ai::AiError::Rejected(404, GONE.into()).detail();
+    assert!(!texts(&panel).contains(&full) && texts(&panel).iter().any(|t| t.ends_with('…')));
+    let _ = panel.update(Msg::Details);
+    assert!(texts(&panel).contains(&full) && texts(&panel).iter().any(|t| t == "Hide details"));
+    // each fix opens its place
+    assert!(matches!(
+        view::fix(ai::Fix::Model),
+        Msg::Drawer(Some(Tab::Settings))
+    ));
+    assert!(matches!(view::fix(ai::Fix::Key), Msg::OpenAiSettings));
+    assert!(matches!(view::fix(ai::Fix::Settings), Msg::OpenAiSettings));
+    assert!(matches!(view::fix(ai::Fix::Retry), Msg::Regenerate));
+    let _ = panel.update(view::fix(ai::Fix::Model));
+    assert_eq!(
+        panel.drawer,
+        Some(Tab::Settings),
+        "the drawer's model picker"
+    );
+}
+
 #[test]
 fn an_error_says_why_and_offers_retry() {
     let mut panel = api_chat();
     ask(&mut panel, "Hi");
-    let why = ai::AiError::Auth(401, String::new()).to_string();
-    let _ = panel.update(Msg::Answered(Err(why.clone())));
+    let _ = panel.update(Msg::Answered(Err(ai::AiError::Server(503, String::new()))));
     let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
-    assert!(texts.contains(&why), "{texts:?}");
+    assert!(
+        texts.iter().any(|t| t.ends_with("is busy right now")),
+        "{texts:?}"
+    );
     assert!(texts.iter().any(|t| t == "Retry"), "{texts:?}");
     let _ = panel.update(Msg::Regenerate);
     assert_eq!(chat(&panel).status, Status::Streaming);
@@ -322,7 +410,7 @@ fn the_chat_matches_its_golden_images() {
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     const CARD: Size = Size::new(504.0, 760.0);
     let at = Rectangle::with_size(CARD);
-    let answered = |q: &str, a: &str, end: Option<Result<(), String>>| {
+    let answered = |q: &str, a: &str, end: Option<Result<(), ai::AiError>>| {
         let mut p = api_chat();
         ask(&mut p, q);
         let _ = p.update(Msg::Delta(a.into()));
@@ -380,13 +468,35 @@ fn the_chat_matches_its_golden_images() {
             Box::new(move || answered("Explain", "The first part of an", None)),
         ),
         (
-            "error",
+            "error-404",
             Box::new(move || {
+                let e = ai::AiError::Rejected(404, GONE.into());
+                answered("Explain", "", Some(Err(e)))
+            }),
+        ),
+        (
+            "error-503",
+            Box::new(move || {
+                let busy = "The model is overloaded. Please try again later.";
                 answered(
                     "Explain",
                     "",
-                    Some(Err(ai::AiError::Auth(401, String::new()).to_string())),
+                    Some(Err(ai::AiError::Server(503, busy.into()))),
                 )
+            }),
+        ),
+        (
+            "error-401",
+            Box::new(move || {
+                let bad = "API key not valid. Please pass a valid API key.";
+                answered("Explain", "", Some(Err(ai::AiError::Auth(401, bad.into()))))
+            }),
+        ),
+        (
+            "error-offline",
+            Box::new(move || {
+                let why = "dns lookup failed for generativelanguage.googleapis.com";
+                answered("Explain", "", Some(Err(ai::AiError::Network(why.into()))))
             }),
         ),
         (

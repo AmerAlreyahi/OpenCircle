@@ -49,7 +49,9 @@ pub enum Msg {
     /// The word card's Explain (or its key, E).
     Explain,
     Delta(String),
-    Explained(Result<(), String>),
+    Explained(Result<(), AiError>),
+    /// The error card's Show / Hide details.
+    Details,
     /// A click in the explanation: a link, or a code block's Copy.
     Answer(crate::ui::kit::markdown::Act),
     /// The word card's Ask AI (or `A`): continue as a chat.
@@ -169,6 +171,8 @@ struct Card {
     rtl: bool,
     /// Its heading: "translation · original".
     title: String,
+    /// Its error card shows the whole detail.
+    details: bool,
 }
 
 impl Session {
@@ -411,8 +415,14 @@ impl Session {
                     .discard(),
                 };
             }
+            Msg::Details => {
+                if let Some(card) = &mut self.card {
+                    card.details = !card.details;
+                }
+            }
             Msg::Explained(result) => {
                 if let Some(card) = &mut self.card {
+                    card.details = false;
                     card.chat.finish(result);
                     card.work = None;
                 }
@@ -461,6 +471,7 @@ impl Session {
                 answer: markdown::Content::new(),
                 work: None,
                 rtl: pipeline::is_rtl(&self.picker.target),
+                details: false,
             });
         }
     }
@@ -498,14 +509,16 @@ impl Session {
         card.answer = markdown::Content::new();
         let crop = card.crop.clone();
         let (task, handle) = background(move |tx| {
-            let result = ask::setup(&crop).and_then(|setup| {
-                let messages = Chat::default()
-                    .ask(&question, &setup.png)
-                    .unwrap_or_default();
-                ask::stream(&setup, &messages, |piece| {
-                    tx.unbounded_send(Msg::Delta(piece.into())).is_ok()
-                })
-            });
+            let result = ask::setup(&crop)
+                .map_err(AiError::NotConfigured)
+                .and_then(|setup| {
+                    let messages = Chat::default()
+                        .ask(&question, &setup.png)
+                        .unwrap_or_default();
+                    ask::stream(&setup, &messages, |piece| {
+                        tx.unbounded_send(Msg::Delta(piece.into())).is_ok()
+                    })
+                });
             let _ = tx.unbounded_send(Msg::Explained(result));
         })
         .abortable();
@@ -671,7 +684,15 @@ fn translate(
             e,
             Error::Ai(AiError::NotConfigured(_) | AiError::Auth(..) | AiError::Offline(_))
         );
-        problem(e.to_string(), setup)
+        // an AI provider's error: the error card's short headline (owner, 2026-11-10)
+        let message = match &e {
+            Error::Ai(AiError::Offline(_) | AiError::AlreadyIn(_)) => e.to_string(),
+            Error::Ai(ai) => ai.headline(&crate::ui::ai_chat::provider_name(
+                &crate::config::current().ai,
+            )),
+            _ => e.to_string(),
+        };
+        problem(message, setup)
     })?;
     let result = shown(&out);
     let t = out.timings;

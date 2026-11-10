@@ -55,11 +55,13 @@ pub enum Icon {
     Restart,
     Shield,
     External,
+    /// lucide "circle-alert" (the AI error card).
+    Alert,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 26] = [
+    pub const ALL: [Icon; 27] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -86,6 +88,7 @@ impl Icon {
         Icon::Restart,
         Icon::Shield,
         Icon::External,
+        Icon::Alert,
     ];
 
     pub const fn glyph(self) -> char {
@@ -116,6 +119,7 @@ impl Icon {
             Icon::Restart => '\u{e14b}',
             Icon::Shield => '\u{e15b}',
             Icon::External => '\u{e0bd}',
+            Icon::Alert => '\u{e07b}',
         }
     }
 }

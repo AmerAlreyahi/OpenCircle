@@ -7,13 +7,14 @@ use iced::{Center, Element, Fill, Point, Rectangle, Size};
 use super::{Card, Msg, Phase, Session};
 use crate::actions::ask::Status;
 use crate::actions::{self};
-use crate::ui::ai_chat::{actions, card, note};
+use crate::ai::Fix;
+use crate::ui::ai_chat::{actions, ai_error, card, note, provider_name};
 use crate::ui::kit::button::{Kind, button, label as button_label};
 use crate::ui::kit::icon_button::{State, icon_button};
 use crate::ui::kit::markdown;
-use crate::ui::kit::panel_frame::Header;
+use crate::ui::kit::panel_frame::{self as frame, Header};
 use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::{error, text as label};
+use crate::ui::kit::text::text as label;
 use crate::ui::kit::tokens::{Role, radius};
 use crate::ui::kit::tooltip::{Why, hint};
 use crate::ui::picker;
@@ -129,7 +130,7 @@ impl Session {
             }
             Phase::Shown(_) => match &self.card {
                 Some(word) => {
-                    let (body, footer) = card_view(word);
+                    let (body, footer) = card_view(word, at.width - frame::PADDING * 2.0);
                     with_pill(card(body, Some(footer), Some(&word.title)))
                 }
                 None => self.pill(whole, None, None, None),
@@ -234,7 +235,7 @@ pub fn clear_of_pill(at: Rectangle, screen: Size) -> Rectangle {
 /// The word card (the design's "Word explanation", titled "translation ·
 /// original"): its body (the translation, the AI's explanation) and actions
 /// (Explain = E, Ask AI = A).
-fn card_view(card: &Card) -> (Element<'_, Msg>, Element<'_, Msg>) {
+fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
     // Mixed lines ("«name» ...") would each pick their own side: a
     // right-to-left target's lines are laid at the right as a block. (A
     // `Fill` text aligned right drew nothing in the card.)
@@ -259,7 +260,19 @@ fn card_view(card: &Card) -> (Element<'_, Msg>, Element<'_, Msg>) {
         );
     }
     if let Status::Failed(e) = &card.chat.status {
-        body = body.push(error(Role::NOTE, e.clone()));
+        let on = |fix| match fix {
+            Fix::Retry => Msg::Explain,
+            Fix::Model | Fix::Key | Fix::Settings => Msg::OpenSettings,
+        };
+        let provider = provider_name(&crate::config::current().ai);
+        body = body.push(ai_error(
+            e,
+            &provider,
+            width,
+            card.details,
+            Msg::Details,
+            on,
+        ));
     }
     let ask = &actions::ask::ACTION;
     let buttons = actions(("Explain", Msg::Explain), [(ask.label, Msg::Ask)]);

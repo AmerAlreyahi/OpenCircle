@@ -29,7 +29,7 @@ use crate::ui::kit::panel_frame::{self, Event};
 use crate::ui::kit::{motion, spinner};
 
 mod view;
-pub use view::{actions, card, note};
+pub use view::{actions, ai_error, card, note, provider_name};
 
 /// The follow-up input. Never focused by itself: until it is clicked, letters
 /// are the overlay's action shortcuts.
@@ -118,7 +118,9 @@ pub enum Msg {
     Stop,
     Ready(Result<Arc<Setup>, String>),
     Delta(String),
-    Answered(Result<(), String>),
+    Answered(Result<(), ai::AiError>),
+    /// The error card's Show / Hide details.
+    Details,
     /// Search the crop with Lens (the chat's "Search the image with Lens").
     Search,
     /// What a link's click did (its note).
@@ -193,6 +195,8 @@ pub struct AiChat {
     /// The logo spinner while the AI has not answered yet: since when, and
     /// how far through its turn at the latest frame (`tick`).
     spin: Option<(Instant, f32)>,
+    /// The error card shows its whole detail.
+    details: bool,
 }
 
 enum State {
@@ -304,6 +308,7 @@ impl AiChat {
             work: None,
             note: None,
             spin: None,
+            details: false,
         }
     }
 
@@ -582,7 +587,9 @@ impl AiChat {
                 // Follow the answer. (anchor_bottom() hid short content in iced 0.14.)
                 return operation::snap_to_end(LOG);
             }
+            (_, Msg::Details) => self.details = !self.details,
             (State::Ask { chat, .. }, Msg::Answered(result)) => {
+                self.details = false;
                 chat.finish(result);
                 self.work = None;
                 return self.answered();

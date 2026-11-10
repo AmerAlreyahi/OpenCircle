@@ -238,7 +238,8 @@ pub enum Status {
     Idle,
     Streaming,
     Done,
-    Failed(String),
+    /// The answer failed: shown as the calm error card (`kit::error_card`).
+    Failed(ai::AiError),
     /// Stopped by the user; the partial answer stays.
     Cancelled,
 }
@@ -418,7 +419,7 @@ impl Chat {
         Some(question)
     }
 
-    pub fn finish(&mut self, result: Result<(), String>) {
+    pub fn finish(&mut self, result: Result<(), ai::AiError>) {
         if self.status == Status::Streaming {
             self.status = result.map_or_else(Status::Failed, |()| Status::Done);
         }
@@ -454,10 +455,10 @@ pub fn stream(
     setup: &Setup,
     messages: &[ai::Message],
     mut on_delta: impl FnMut(&str) -> bool,
-) -> Result<(), String> {
+) -> Result<(), ai::AiError> {
     if setup.browser() {
         let question = messages.last().map_or("", |m| m.text.as_str());
-        on_delta(&ai::browser::ask(question)?);
+        on_delta(&ai::browser::ask(question).map_err(ai::AiError::Browser)?);
         return Ok(());
     }
     let mut stopped = false;
@@ -470,9 +471,9 @@ pub fn stream(
         }
     });
     match answer {
-        Ok(_) if stopped => Err("Stopped.".into()),
+        Ok(_) if stopped => Err(ai::AiError::Network("Stopped.".into())),
         Ok(_) => Ok(()),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(e),
     }
 }
 
@@ -590,8 +591,9 @@ pub(crate) mod tests {
     fn chat_records_errors_and_cancels() {
         let mut chat = Chat::default();
         chat.ask("Explain", b"png").unwrap();
-        chat.finish(Err("HTTP 401".into()));
-        assert_eq!(chat.status, Status::Failed("HTTP 401".into()));
+        let e = ai::AiError::Auth(401, String::new());
+        chat.finish(Err(e.clone()));
+        assert_eq!(chat.status, Status::Failed(e));
         // A failed turn with no answer is not resent.
         let sent = chat.ask("Summarize", b"png").unwrap();
         assert_eq!(sent.len(), 2);
@@ -954,6 +956,7 @@ pub(crate) mod tests {
         assert!(
             result
                 .unwrap_err()
+                .to_string()
                 .starts_with("Could not open the browser")
         );
         unsafe { std::env::remove_var("OPENCIRCLE_TEST_BROWSER") };
@@ -1040,7 +1043,7 @@ pub(crate) mod tests {
             got.push(piece.to_string());
             false // the panel is gone
         });
-        assert_eq!(result, Err("Stopped.".into()));
+        assert_eq!(result, Err(ai::AiError::Network("Stopped.".into())));
         assert_eq!(got, ["one"]);
     }
 

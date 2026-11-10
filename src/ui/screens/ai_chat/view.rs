@@ -10,12 +10,15 @@ use iced::{Center, Element, Fill, Rectangle, Right, Size};
 use super::{AiChat, LOG, Msg, PICKS, State, Tab, classifier, picked};
 use crate::actions;
 use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
+use crate::ai::providers;
+use crate::ai::{AiError, Fix};
 use crate::config::{self, StaysOpen};
 use crate::ui::keys;
 use crate::ui::kit::bubble::bubble;
 use crate::ui::kit::button::{Kind, button, cta_label, label};
 use crate::ui::kit::chip::Tone;
 use crate::ui::kit::dropdown::dropdown;
+use crate::ui::kit::error_card::{ErrorCard, error_card};
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::markdown;
@@ -100,7 +103,7 @@ impl AiChat {
             } => (
                 actions::ask::ACTION.icon,
                 CHAT_TITLE,
-                self.ask_view(setup.as_ref(), chat, answers, *include),
+                self.ask_view(setup.as_ref(), chat, answers, *include, at.width),
             ),
         };
         let chip = match &self.state {
@@ -171,6 +174,7 @@ impl AiChat {
         chat: &'a Chat,
         answers: &'a [(usize, md::Content)],
         include: bool,
+        width: f32,
     ) -> Part<'a> {
         let Some(Ok(ready)) = setup else {
             let line: Element<'a, Msg> = match setup {
@@ -224,10 +228,17 @@ impl AiChat {
             log = log.push(lens);
         }
         match &chat.status {
-            Status::Failed(e) if browser => log = log.push(error(Role::NOTE, e)),
             Status::Failed(e) => {
-                let retry = quiet("Retry", Msg::Regenerate);
-                log = log.push(column![error(Role::NOTE, e), retry].spacing(STACK));
+                let width = width - 2.0 * frame::PADDING;
+                let provider = provider_name(&ready.cfg);
+                log = log.push(ai_error(
+                    e,
+                    &provider,
+                    width,
+                    self.details,
+                    Msg::Details,
+                    fix,
+                ));
             }
             Status::Cancelled => log = log.push(note("Stopped.")),
             _ => {}
@@ -468,6 +479,48 @@ impl AiChat {
         ))
         .into()
     }
+}
+
+/// Where an error card's fix goes: the drawer's model picker, Settings > Ask
+/// AI (the key, the setup), or the question again.
+pub(super) fn fix(fix: Fix) -> Msg {
+    match fix {
+        Fix::Model => Msg::Drawer(Some(Tab::Settings)),
+        Fix::Key | Fix::Settings => Msg::OpenAiSettings,
+        Fix::Retry => Msg::Regenerate,
+    }
+}
+
+/// The provider's name as Settings shows it ("" when the file names none).
+pub fn provider_name(cfg: &config::AiConfig) -> String {
+    match providers::Preset::of(cfg) {
+        Some(p) if !p.custom() => p.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// An AI error as the kit's calm card (`kit::error_card`): its headline,
+/// the provider's own message and the kind's fix (`on`), with Retry beside
+/// a fix that is not Retry itself. `width`: the card's.
+pub fn ai_error<'a, M: Clone + 'a>(
+    e: &'a AiError,
+    provider: &str,
+    width: f32,
+    open: bool,
+    on_details: M,
+    on: impl Fn(Fix) -> M,
+) -> Element<'a, M> {
+    let fix = e.fix();
+    let retry = matches!(fix, Some(f) if f != Fix::Retry);
+    error_card(ErrorCard {
+        headline: e.headline(provider),
+        detail: e.detail(),
+        width,
+        open,
+        on_details,
+        fix: fix.map(|f| (f.label(), on(f))),
+        retry: retry.then(|| on(Fix::Retry)),
+    })
 }
 
 /// The composer's placeholder: a first message, then a follow-up.

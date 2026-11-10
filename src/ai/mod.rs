@@ -103,6 +103,86 @@ pub enum AiError {
     /// Nothing to translate: the text is in the target already (its name).
     /// Not a failure: shown as a quiet note, never an error card.
     AlreadyIn(&'static str),
+    /// The browser provider could not open the browser (its reason).
+    Browser(String),
+}
+
+/// The one way out an error card offers (`AiError::fix`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fix {
+    /// The model list (the chat drawer's model picker).
+    Model,
+    /// Settings > Ask AI, where the key is.
+    Key,
+    /// Settings > Ask AI (something is not set up).
+    Settings,
+    Retry,
+}
+
+impl Fix {
+    pub fn label(self) -> &'static str {
+        match self {
+            Fix::Model => "Choose another model",
+            Fix::Key => "Check the key",
+            Fix::Settings => "Open settings",
+            Fix::Retry => "Retry",
+        }
+    }
+}
+
+impl AiError {
+    /// The error card's headline: short and plain, by kind. `provider`: the
+    /// provider's name as Settings shows it ("" when unknown).
+    pub fn headline(&self, provider: &str) -> String {
+        let who = if provider.is_empty() {
+            "The AI provider"
+        } else {
+            provider
+        };
+        match self {
+            AiError::NotConfigured(_) => "AI isn't set up yet".into(),
+            AiError::Auth(..) => "The API key was rejected".into(),
+            AiError::RateLimited(_) => "Too many requests, wait a moment".into(),
+            AiError::Server(..) => format!("{who} is busy right now"),
+            AiError::Rejected(404, _) => "This model isn't available".into(),
+            AiError::Rejected(..) => format!("{who} turned the request down"),
+            AiError::Refused => "The answer was blocked".into(),
+            AiError::Network(_) => "No connection".into(),
+            AiError::BadResponse(_) => format!("{who} sent an answer OpenCircle can't read"),
+            AiError::Offline(_) => "Local translation failed".into(),
+            AiError::AlreadyIn(name) => format!("Already in {name}"),
+            AiError::Browser(_) => "Couldn't open your browser".into(),
+        }
+    }
+
+    /// The card's detail: the provider's own (key-scrubbed) message, with
+    /// its HTTP status; else what went wrong in our words.
+    pub fn detail(&self) -> String {
+        match self {
+            AiError::Auth(code, why)
+            | AiError::Server(code, why)
+            | AiError::Rejected(code, why) => http(*code, why),
+            AiError::RateLimited(why) => http(429, why),
+            AiError::Refused => "The model declined to answer this request.".into(),
+            AiError::NotConfigured(why)
+            | AiError::Network(why)
+            | AiError::BadResponse(why)
+            | AiError::Offline(why)
+            | AiError::Browser(why) => why.clone(),
+            AiError::AlreadyIn(_) => String::new(),
+        }
+    }
+
+    /// The card's one fix for this kind (`None`: nothing the user can do here).
+    pub fn fix(&self) -> Option<Fix> {
+        match self {
+            AiError::NotConfigured(_) => Some(Fix::Settings),
+            AiError::Auth(..) => Some(Fix::Key),
+            AiError::Rejected(404, _) | AiError::Refused => Some(Fix::Model),
+            AiError::AlreadyIn(_) => None,
+            _ => Some(Fix::Retry),
+        }
+    }
 }
 
 impl fmt::Display for AiError {
@@ -142,6 +222,7 @@ impl fmt::Display for AiError {
             }
             AiError::Offline(why) => write!(f, "Local translation failed: {why}"),
             AiError::AlreadyIn(name) => write!(f, "Already in {name}"),
+            AiError::Browser(why) => f.write_str(why),
         }
     }
 }
@@ -560,6 +641,91 @@ pub(crate) mod mock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each kind's error card: its plain headline, the provider's own message
+    /// as the detail, and its one fix.
+    #[test]
+    fn every_error_kind_has_its_headline_detail_and_fix() {
+        let gone = "This model models/old is no longer available.";
+        let cases = [
+            (
+                AiError::NotConfigured("add a key".into()),
+                "AI isn't set up yet",
+                "add a key",
+                Some(Fix::Settings),
+            ),
+            (
+                AiError::Auth(401, "API key not valid".into()),
+                "The API key was rejected",
+                "HTTP 401: API key not valid",
+                Some(Fix::Key),
+            ),
+            (
+                AiError::RateLimited(String::new()),
+                "Too many requests, wait a moment",
+                "HTTP 429",
+                Some(Fix::Retry),
+            ),
+            (
+                AiError::Server(503, "Overloaded".into()),
+                "Groq is busy right now",
+                "HTTP 503: Overloaded",
+                Some(Fix::Retry),
+            ),
+            (
+                AiError::Rejected(404, gone.into()),
+                "This model isn't available",
+                "HTTP 404: This model models/old is no longer available",
+                Some(Fix::Model),
+            ),
+            (
+                AiError::Rejected(400, String::new()),
+                "Groq turned the request down",
+                "HTTP 400",
+                Some(Fix::Retry),
+            ),
+            (
+                AiError::Refused,
+                "The answer was blocked",
+                "The model declined to answer this request.",
+                Some(Fix::Model),
+            ),
+            (
+                AiError::Network("dns failed".into()),
+                "No connection",
+                "dns failed",
+                Some(Fix::Retry),
+            ),
+            (
+                AiError::BadResponse("no choices".into()),
+                "Groq sent an answer OpenCircle can't read",
+                "no choices",
+                Some(Fix::Retry),
+            ),
+            (
+                AiError::Browser("no browser".into()),
+                "Couldn't open your browser",
+                "no browser",
+                Some(Fix::Retry),
+            ),
+            (
+                AiError::AlreadyIn("English"),
+                "Already in English",
+                "",
+                None,
+            ),
+        ];
+        for (e, headline, detail, fix) in cases {
+            assert_eq!(e.headline("Groq"), headline, "{e:?}");
+            assert_eq!(e.detail(), detail, "{e:?}");
+            assert_eq!(e.fix(), fix, "{e:?}");
+        }
+        // no provider name (Custom server): plain words
+        assert_eq!(
+            AiError::Server(502, String::new()).headline(""),
+            "The AI provider is busy right now"
+        );
+    }
 
     fn lines(n: usize) -> Vec<String> {
         (0..n).map(|i| format!("line {i}")).collect()
