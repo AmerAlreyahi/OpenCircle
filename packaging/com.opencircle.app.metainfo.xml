@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres, the AppImage catalog). Add a <release> on top for each new version. -->
+<component type="desktop-application">
+  <id>com.opencircle.app</id>
+  <name>OpenCircle</name>
+  <summary>Circle anything on your screen to search, read, translate or ask about it</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.ameralreyahi">
+    <name>OpenCircle contributors</name>
+  </developer>
+  <description>
+    <p>
+      OpenCircle brings Circle to Search to the desktop. Press a shortcut, the screen freezes, and you circle or
+      drag over anything to search it, read it, translate it in place, or ask an AI about it.
+    </p>
+    <p>
+      A second mode snips and marks up screenshots: an area, a window, the full screen or a long scrolling
+      page, with arrows, text, blur and numbered steps, then copy, save or pin.
+    </p>
+    <p>
+      It never uploads your screen on its own: search and AI open in your own browser, only when you choose
+      them, and translation runs on your computer. No account and no telemetry.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.opencircle.app.desktop</launchable>
+  <provides>
+    <binary>opencircle</binary>
+  </provides>
+  <url type="homepage">https://github.com/AmerAlreyahi/OpenCircle</url>
+  <url type="bugtracker">https://github.com/AmerAlreyahi/OpenCircle/issues</url>
+  <categories>
+    <category>Utility</category>
+    <category>Graphics</category>
+  </categories>
+  <keywords>
+    <keyword>screenshot</keyword>
+    <keyword>search</keyword>
+    <keyword>translate</keyword>
+    <keyword>OCR</keyword>
+    <keyword>Lens</keyword>
+  </keywords>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <screenshots>
+    <screenshot type="default">
+      <image type="source" width="1024" height="768">https://raw.githubusercontent.com/AmerAlreyahi/OpenCircle/main/docs/images/circle-to-search.png</image>
+      <caption>Circle anything on the screen, then choose what to do with it</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source" width="1292" height="480">https://raw.githubusercontent.com/AmerAlreyahi/OpenCircle/main/docs/images/translate-before-after.png</image>
+      <caption>Translate a page in place</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source" width="1024" height="768">https://raw.githubusercontent.com/AmerAlreyahi/OpenCircle/main/docs/images/snip-toolbar.png</image>
+      <caption>Snip an area and mark it up</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source" width="1024" height="768">https://raw.githubusercontent.com/AmerAlreyahi/OpenCircle/main/docs/images/long-capture.png</image>
+      <caption>Long capture: scroll a page and it is stitched into one image</caption>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.1.4" date="2026-11-09"/>
+    <release version="0.1.3" date="2026-11-04"/>
+    <release version="0.1.2" date="2026-10-30"/>
+    <release version="0.1.1" date="2026-10-27"/>
+    <release version="0.1.0" date="2026-10-25"/>
+  </releases>
+</component>

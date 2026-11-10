@@ -336,13 +336,27 @@ pub fn start(tx: Triggers) -> Option<TrayIcon> {
     {
         // tray-icon on Linux needs a GTK main loop on the thread that owns the icon.
         std::thread::spawn(move || {
-            if let Some(why) = linux_tray_missing() {
+            // No icon can show: open a window instead of running unseen (an AppImage catalog's
+            // tray-less desktop saw nothing and the app looked dead).
+            let no_tray = |why: &str| {
                 crate::log!(
                     "[opencircle] tray unavailable: {why}; use the shortcut or `opencircle capture`"
                 );
-                return;
+                let _ = tx.unbounded_send(Trigger::NoTray);
+            };
+            if let Some(why) = linux_tray_missing() {
+                return no_tray(why);
             }
-            let _tray = build(tx);
+            let tray = build(tx.clone());
+            if tray.is_none() {
+                return no_tray("the icon was refused");
+            }
+            // A built icon shows nowhere without a host (GNOME without the AppIndicator extension, a bare
+            // X11 session). The host may start a moment after us (login): wait a little.
+            if !host_appears(linux_tray_host, 6, Duration::from_millis(500)) {
+                no_tray("no StatusNotifier host on the session bus");
+            }
+            let _tray = tray;
             gtk::main();
         });
         None
@@ -353,6 +367,43 @@ pub fn start(tx: Triggers) -> Option<TrayIcon> {
         remove_on_crash();
         build(tx)
     }
+}
+
+/// Calls `has` up to `tries` times, `pause` apart, until it says yes.
+#[cfg(target_os = "linux")]
+fn host_appears(mut has: impl FnMut() -> bool, tries: u32, pause: Duration) -> bool {
+    for i in 0..tries {
+        if i > 0 {
+            std::thread::sleep(pause);
+        }
+        if has() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Linux: something owns `org.kde.StatusNotifierWatcher` on the session bus (a desktop with a tray).
+#[cfg(target_os = "linux")]
+fn linux_tray_host() -> bool {
+    use gtk::gio::{self, Cancellable, DBusCallFlags, prelude::*};
+    let Ok(conn) = gio::bus_get_sync(gio::BusType::Session, None::<&Cancellable>) else {
+        return false;
+    };
+    conn.call_sync(
+        Some("org.freedesktop.DBus"),
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameHasOwner",
+        Some(&("org.kde.StatusNotifierWatcher",).to_variant()),
+        None,
+        DBusCallFlags::NONE,
+        -1,
+        None::<&Cancellable>,
+    )
+    .ok()
+    .and_then(|r| r.child_value(0).get::<bool>())
+    .unwrap_or(false)
 }
 
 /// Why a Linux tray cannot start, or `None` when it can. `libappindicator-sys`
@@ -540,10 +591,38 @@ fn icon() -> Icon {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    use super::host_appears;
     use super::{Entry, add_with_fallback, entries, guid_for, place};
     use crate::config::Config;
     use crate::labs::{Feature, Labs};
     use std::path::Path;
+
+    /// A tray host that never comes is reported after the tries; one that comes late is found.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_missing_tray_host_is_given_up_on_and_a_late_one_found() {
+        let pause = std::time::Duration::ZERO;
+        let mut calls = 0;
+        assert!(!host_appears(
+            || {
+                calls += 1;
+                false
+            },
+            3,
+            pause
+        ));
+        assert_eq!(calls, 3);
+        let mut calls = 0;
+        assert!(host_appears(
+            || {
+                calls += 1;
+                calls == 2
+            },
+            3,
+            pause
+        ));
+    }
 
     /// The design's rows in its order: a Labs feature's row only while it is on (Snip, Live translate, Song
     /// search); Translate screen always. Before: no Translate screen, Song search never.

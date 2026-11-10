@@ -150,12 +150,16 @@ depends = [
 # it gets our entry as the template, and release.yml renames the .deb's files to
 # com.opencircle.app.desktop / com.opencircle.app.png.
 desktop-template = "packaging/com.opencircle.app.desktop"
+files = { "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.opencircle.app.metainfo.xml" }
 
 # The AppImage's entry (same template) names Icon=com.opencircle.app: ship that icon.
+# libwayland-client is on the AppImage excludelist (the system's must be used, a bundled one
+# can mismatch the compositor's); the packager's linuxdeploy is too old to skip it itself.
 # A raw AppImage writes its own ~/.local/share/applications/com.opencircle.app.desktop
 # on first start under Wayland (capture/portal.rs).
 [package.metadata.packager.appimage]
-files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png" }
+excludedLibs = ["libwayland-client*"]
+files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.opencircle.app.metainfo.xml" }
 
 # .rpm: `cargo generate-rpm` after `cargo build --release`. Same libraries, Fedora names.
 [package.metadata.generate-rpm]
@@ -164,6 +168,7 @@ assets = [
     { source = "target/release/opencircle", dest = "/usr/bin/opencircle", mode = "755" },
     { source = "packaging/com.opencircle.app.desktop", dest = "/usr/share/applications/com.opencircle.app.desktop", mode = "644" },
     { source = "assets/icons/256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", mode = "644" },
+    { source = "packaging/com.opencircle.app.metainfo.xml", dest = "/usr/share/metainfo/com.opencircle.app.metainfo.xml", mode = "644" },
     { source = "LICENSE.md", dest = "/usr/share/licenses/opencircle/LICENSE", mode = "644", doc = true },
 ]
 

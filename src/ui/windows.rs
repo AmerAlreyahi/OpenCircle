@@ -639,6 +639,14 @@ impl Windows {
         Task::batch(tasks)
     }
 
+    /// With no tray to reach the app from: the onboarding while it is open (first run), else Settings.
+    pub fn open_main(&mut self) -> Task<Msg> {
+        self.open(match self.onboarding.is_some() {
+            true => Kind::Onboarding,
+            false => Kind::Settings,
+        })
+    }
+
     /// Shortcuts another app holds (`taken`, refused at the start): one quiet
     /// notice, once; the next start with the same ones says nothing (Settings
     /// shows each such row's note).
@@ -1896,6 +1904,18 @@ mod tests {
         fn delete(&self, _: AiKey) -> Result<(), SecretsError> {
             Ok(())
         }
+    }
+
+    /// No tray: a window opens (Settings; the onboarding while it is open, never both).
+    #[test]
+    fn with_no_tray_a_window_opens() {
+        let mut windows = Windows::default();
+        let _ = windows.open_main();
+        assert!(windows.settings.is_some() && windows.onboarding.is_none());
+        let mut first_run = Windows::default();
+        let _ = first_run.open(Kind::Onboarding);
+        let _ = first_run.open_main();
+        assert!(first_run.onboarding.is_some() && first_run.settings.is_none());
     }
 
     fn settings_state() -> settings::State {

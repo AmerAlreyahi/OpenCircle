@@ -15,7 +15,9 @@ and signs everything and creates a **draft**; it never publishes.
    of the whole diff since the last release. Gate and CI green after both.
 1. **Docs match the release.** README, `docs/privacy.md` and
    `docs/getting-started.md` describe what this version really does (features,
-   shortcuts, network actions, install steps).
+   shortcuts, network actions, install steps). Add the version to the `<releases>`
+   list of `packaging/com.opencircle.app.metainfo.xml` (AppStream; in the AppImage,
+   .deb and .rpm) and run `appstreamcli validate --no-net` on it.
 2. **CI is green on `main`**, including the installer job (`gh run list -b main`).
 3. **Test machine pass.** Install the build on a clean Windows 10 test machine
    without WebView2 and run the release gate (capture, search, copy text,

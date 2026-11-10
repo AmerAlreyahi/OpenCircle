@@ -43,6 +43,7 @@ impl App {
                 .windows
                 .open(windows::Kind::Settings)
                 .map(Message::Windows),
+            Message::Trigger(Trigger::NoTray) => self.windows.open_main().map(Message::Windows),
             Message::Trigger(Trigger::TrayMenu(icon)) => self
                 .windows
                 .tray_menu(icon, self.live.is_some())

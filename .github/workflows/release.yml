@@ -202,6 +202,8 @@ jobs:
           ls -la "$RUNNER_TEMP/squashfs-root/usr/bin"
           test -x "$RUNNER_TEMP/squashfs-root/usr/bin/opencircle"
           if find "$RUNNER_TEMP/squashfs-root" -name 'libwebkit2gtk*' | grep -q .; then echo "::error::the AppImage bundles WebKitGTK"; exit 1; fi
+          if find "$RUNNER_TEMP/squashfs-root" -name 'libwayland-client*' | grep -q .; then echo "::error::the AppImage bundles libwayland-client (the system's must be used)"; exit 1; fi
+          test -f "$RUNNER_TEMP/squashfs-root/usr/share/metainfo/com.opencircle.app.metainfo.xml"
           echo "bundled libraries: $(find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' | wc -l)"
           find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' -printf '%f\n' | sort | head -100
 

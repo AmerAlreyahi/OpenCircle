@@ -41,6 +41,8 @@ pub enum Trigger {
     Quick(Instant, config::QuickAction),
     /// Tray "Settings…": open the Settings window, or focus it if it is open.
     OpenSettings,
+    /// Linux: no tray icon can show (no host, library or GTK): open a window instead (first run: the onboarding).
+    NoTray,
     /// Windows, a right-click on the tray icon: open our tray menu at the icon
     /// (`[left, top, right, bottom]`, physical desktop px).
     TrayMenu([i32; 4]),
