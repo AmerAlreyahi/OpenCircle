@@ -1720,7 +1720,7 @@ impl Windows {
     }
 
     /// Test hook, `OPENCIRCLE_TEST_OPEN=settings,shot,settings,shot`: one step every
-    /// 1.5 s. `settings` = the tray's Settings item, `permission` / `toast` / `toast-error` / `notice` / `update` / `whatsnew` = those windows (`close-card` closes the card), `max` = maximise or restore Settings, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `pin` / `zoom` / `unpin` = a pin of the test frame, the wheel over it, closing it, `problem` = an unsaveable edit, `shot` = save the open window as
+    /// 1.5 s. `settings` = the tray's Settings item, `permission` / `toast` / `toast-error` / `notice` / `update` / `whatsnew` = those windows (`close-card` closes the card), `max` = maximise or restore Settings, `light`/`dark`/`save` and `next`/`finish` = the same clicks in Settings / onboarding, `close` = the X button on Settings, `pin` / `zoom` / `unpin` = a pin of the test frame, the wheel over it, closing it, `problem` = an unsaveable edit, `restart-update` = Restart now on a waiting update, `shot` = save the open window as
     /// `$OPENCIRCLE_TEST_DIR/<kind>-<step>.png`, `quit`.
     fn test_step(&mut self, step: usize, what: &str) -> Task<Msg> {
         match what {
@@ -1812,6 +1812,7 @@ impl Windows {
             },
             "next" => self.update(Msg::Onboarding(onboarding::Message::Next)),
             "finish" => self.update(Msg::Onboarding(onboarding::Message::Finish)),
+            "restart-update" => Task::done(Msg::Run(crate::Trigger::RestartToUpdate)),
             "quit" => iced::exit(),
             _ => Task::none(),
         }

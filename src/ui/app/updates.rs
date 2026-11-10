@@ -205,11 +205,11 @@ impl App {
         };
         match crate::update::restart(&staged, Moment::Button) {
             Ok(()) => {
+                // the clock starts once the pill's window is there (GNOME on Wayland
+                // maps a new window late: it would never show)
                 let pill = Pill::new(Kind::Updating);
-                Task::batch([
-                    self.windows.update_pill(Some(pill)).map(Message::Windows),
-                    after(UPDATING_FOR, ()).then(|()| iced::exit()),
-                ])
+                (self.windows.update_pill(Some(pill)).map(Message::Windows))
+                    .chain(after(UPDATING_FOR, ()).then(|()| iced::exit()))
             }
             Err(e) => {
                 crate::log!("[opencircle] update {}: {e}", staged.version);
