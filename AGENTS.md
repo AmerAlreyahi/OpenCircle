@@ -781,6 +781,10 @@ production systems.
 - Wayland long capture must show it is working (owner, 2026-11-10, rejects the silent flow): while it runs the user clearly
   sees that OpenCircle is capturing, and finishes with Copy / Save / drag exactly like Windows, without having to press the
   shortcut again to find the result.
+  Approach (owner, 2026-11-10, option A, modelled on wayscrollshot): a live preview strip beside the area + Copy / Save / Pause /
+  Cancel shown the whole time, the user scrolls by hand (like Windows). KDE / wlroots: an always-on-top layer-shell surface;
+  GNOME: a small OpenCircle GNOME Shell extension (installed once, one logout). Where neither is available (e.g. GNOME 42
+  without the extension, or the user declines), fall back to a floating panel + tray "capturing" state (lead default).
 
 ## Domain quirks
 
