@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use serde_json::Value;
 
 use super::providers::{Api, Preset};
-use super::{AiError, HttpRequest, join_url, map_status, scrub};
+use super::{AiError, HttpRequest, join_url, map_status};
 use crate::config::AiConfig;
 use crate::secrets::Secret;
 
@@ -192,14 +192,13 @@ fn fetch(cfg: &AiConfig, key: Option<&Secret>) -> Result<(Preset, Vec<Model>), A
     let preset = Preset::of(cfg)
         .ok_or_else(|| AiError::NotConfigured("choose an AI provider first".into()))?;
     let req = request(&preset, cfg, key)?;
-    let agent = crate::net::agent(crate::net::AI);
-    let mut get = agent.get(&req.url);
-    for (name, value) in &req.headers {
-        get = get.header(*name, value.as_str());
-    }
-    let mut resp = get
-        .call()
-        .map_err(|e| AiError::Network(scrub(&e.to_string(), key)))?;
+    let mut resp = super::send(key, |agent| {
+        let mut get = agent.get(&req.url);
+        for (name, value) in &req.headers {
+            get = get.header(*name, value.as_str());
+        }
+        get.call()
+    })?;
     let status = resp.status().as_u16();
     let body = resp.body_mut().read_to_string().unwrap_or_default();
     if status >= 400 {

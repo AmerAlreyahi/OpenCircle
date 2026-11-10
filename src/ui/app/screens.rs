@@ -860,11 +860,13 @@ impl App {
             layers = layers.push(self.selection_ui(selection, window));
         }
         // the AI chat's card docked on (or dragged onto) this screen
-        if (self.o.ai_chat.is_some() || self.chat.is_some()) && self.chat_window() == window {
+        if (self.o.ai_chat.is_some() || self.pinned_drawn().is_some())
+            && self.chat_window() == window
+        {
             // (the quick chat's card and the pinned chat: both where `chat_rect` holds them)
             let at = screen.view.rect_to_screen(self.chat_rect());
             let size = screen.place.size();
-            let card = match (&self.o.ai_chat, &self.chat) {
+            let card = match (&self.o.ai_chat, self.pinned_drawn()) {
                 (Some((id, panel)), _) => {
                     let id = *id;
                     let card = panel.view(at, size, self.o.chat_hover);

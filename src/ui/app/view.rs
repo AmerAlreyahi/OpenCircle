@@ -340,8 +340,7 @@ impl App {
         }
         // The pinned chat over everything on its side.
         if let Some(chat) = self
-            .chat
-            .as_ref()
+            .pinned_drawn()
             .filter(|_| self.chat_window() == self.overlay)
         {
             let id = chat.id;
@@ -395,7 +394,7 @@ impl App {
     /// The part of the overlay a result card leaves free (all of it without
     /// one): the bar, chips, popup and pills go there.
     pub(in crate::ui) fn room(&self) -> Rectangle {
-        let card = match (&self.o.ai_chat, &self.chat) {
+        let card = match (&self.o.ai_chat, self.pinned_drawn()) {
             (Some(_), _) => Some(self.chat_card_at()),
             (None, Some(_)) => Some(self.chat_rect()),
             (None, None) => None,

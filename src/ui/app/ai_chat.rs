@@ -13,7 +13,7 @@ use crate::config::{self, Provider};
 use crate::ui::ai_chat;
 use crate::ui::app::background::background;
 use crate::ui::app::keys;
-use crate::ui::app::message::Message;
+use crate::ui::app::message::{Message, Purpose};
 use crate::ui::kit::motion;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::platform::monitor::{self, Place, place_window};
@@ -427,6 +427,16 @@ impl App {
             return crate::ui::screens::translate::view::clear_of_pill(at, self.o.screen);
         }
         at
+    }
+
+    /// The pinned chat as the overlay draws it, live: not in Snip. Snip's
+    /// frozen screen shows it already (its window is in the grab, a pick like
+    /// any window, `widgets_in_grab`), and nothing of ours covers Snip's
+    /// outline; its own window comes back when Snip closes (`float_chat`).
+    pub(in crate::ui) fn pinned_drawn(&self) -> Option<&Resident> {
+        self.chat
+            .as_ref()
+            .filter(|_| !matches!(self.o.purpose, Purpose::Snip(_)))
     }
 
     /// The AI chat is the card shown.

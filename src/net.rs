@@ -70,9 +70,43 @@ pub fn agent(p: Policy) -> ureq::Agent {
     b.build().into()
 }
 
+/// The connection broke before an answer came back: reset, aborted, closed
+/// early (EOF) or a broken pipe. Nothing was received, so the request may be
+/// sent again on a new connection without repeating anything. Not "no
+/// connection" (DNS, refused, unreachable): that stays an error at once.
+pub fn dropped(e: &ureq::Error) -> bool {
+    use std::io::ErrorKind as K;
+    matches!(e, ureq::Error::Io(io) if matches!(
+        io.kind(),
+        K::ConnectionReset | K::ConnectionAborted | K::BrokenPipe | K::UnexpectedEof
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reset_is_dropped_but_offline_is_not() {
+        use std::io::{Error, ErrorKind as K};
+        let io = |k| ureq::Error::Io(Error::from(k));
+        for k in [
+            K::ConnectionReset,
+            K::ConnectionAborted,
+            K::BrokenPipe,
+            K::UnexpectedEof,
+        ] {
+            assert!(dropped(&io(k)), "{k:?}");
+        }
+        for e in [
+            io(K::ConnectionRefused),
+            io(K::HostUnreachable),
+            ureq::Error::HostNotFound,
+            ureq::Error::ConnectionFailed,
+        ] {
+            assert!(!dropped(&e), "{e}");
+        }
+    }
 
     /// (policy, connect, global, https_only, status_as_error, custom UA): the
     /// values each caller had before the builders were merged.

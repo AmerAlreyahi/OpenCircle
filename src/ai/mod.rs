@@ -94,8 +94,11 @@ pub enum AiError {
     Rejected(u16, String),
     /// The model declined to answer (`stop_reason: refusal`).
     Refused,
-    /// Could not reach the provider.
+    /// Could not reach the provider (offline, DNS, refused, unreachable).
     Network(String),
+    /// The connection broke: before the answer and still after the silent
+    /// retries (`send`), or while the answer streamed in.
+    Dropped(String),
     /// The provider answered, but not in the expected shape.
     BadResponse(String),
     /// The offline translation engine (`crate::mt`) failed; no AI involved.
@@ -148,6 +151,7 @@ impl AiError {
             AiError::Rejected(..) => format!("{who} turned the request down"),
             AiError::Refused => "The answer was blocked".into(),
             AiError::Network(_) => "No connection".into(),
+            AiError::Dropped(_) => "The connection dropped".into(),
             AiError::BadResponse(_) => format!("{who} sent an answer OpenCircle can't read"),
             AiError::Offline(_) => "Local translation failed".into(),
             AiError::AlreadyIn(name) => format!("Already in {name}"),
@@ -166,6 +170,7 @@ impl AiError {
             AiError::Refused => "The model declined to answer this request.".into(),
             AiError::NotConfigured(why)
             | AiError::Network(why)
+            | AiError::Dropped(why)
             | AiError::BadResponse(why)
             | AiError::Offline(why)
             | AiError::Browser(why) => why.clone(),
@@ -217,6 +222,9 @@ impl fmt::Display for AiError {
             ),
             AiError::Refused => f.write_str("The AI model declined to answer this request."),
             AiError::Network(why) => write!(f, "Could not reach the AI provider: {why}"),
+            AiError::Dropped(why) => {
+                write!(f, "The connection to the AI provider dropped: {why}")
+            }
             AiError::BadResponse(why) => {
                 write!(f, "The AI provider sent an unexpected answer: {why}")
             }
@@ -418,22 +426,21 @@ pub(crate) fn run_stream(
     mut on_delta: impl FnMut(&str) -> ControlFlow<()>,
     parse: fn(&str) -> Result<Event, AiError>,
 ) -> Result<String, AiError> {
-    let agent = crate::net::agent(crate::net::AI);
     let body = serde_json::to_string(&req.body).map_err(|e| AiError::BadResponse(e.to_string()))?;
-    let send = || {
-        let mut builder = agent.post(&req.url);
-        for (name, value) in &req.headers {
-            builder = builder.header(*name, value.as_str());
-        }
-        builder
-            .send(body.as_str())
-            .map_err(|e| AiError::Network(scrub(&e.to_string(), key)))
+    let post = || {
+        send(key, |agent| {
+            let mut builder = agent.post(&req.url);
+            for (name, value) in &req.headers {
+                builder = builder.header(*name, value.as_str());
+            }
+            builder.send(body.as_str())
+        })
     };
-    let mut resp = send()?;
+    let mut resp = post()?;
     // busy (503) or overloaded (529): once more after a moment, silently
     if matches!(resp.status().as_u16(), 503 | 529) {
         std::thread::sleep(RETRY_AFTER);
-        resp = send()?;
+        resp = post()?;
     }
     let status = resp.status().as_u16();
     if status >= 400 {
@@ -457,12 +464,49 @@ pub(crate) fn run_stream(
             false
         }
     })
-    .map_err(|e| AiError::Network(scrub(&e.to_string(), key)))?;
+    // the answer had started: never sent again (no repeated text)
+    .map_err(|e| AiError::Dropped(scrub(&e.to_string(), key)))?;
     match failure {
         Some(e) => Err(e),
         None => Ok(full),
     }
 }
+
+/// Every AI request goes out here. `request` builds it on the agent it is
+/// given. A connection that drops before any answer (`net::dropped`: a reset,
+/// often a provider closing it under load) is retried silently, at most
+/// `DROP_RETRIES.len()` times, each on a new agent (a new connection): nothing
+/// was received, so nothing repeats. Each agent lives for this call only, so
+/// no idle pooled connection is ever reused across calls.
+pub(crate) fn send(
+    key: Option<&Secret>,
+    mut request: impl FnMut(&ureq::Agent) -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+) -> Result<ureq::http::Response<ureq::Body>, AiError> {
+    let mut waits = DROP_RETRIES.iter();
+    loop {
+        match request(&crate::net::agent(crate::net::AI)) {
+            Ok(resp) => return Ok(resp),
+            Err(e) if crate::net::dropped(&e) => {
+                let why = scrub(&e.to_string(), key);
+                let Some(wait) = waits.next() else {
+                    return Err(AiError::Dropped(why));
+                };
+                crate::log!("[ai] connection dropped ({why}); sending again");
+                std::thread::sleep(*wait);
+            }
+            Err(e) => return Err(AiError::Network(scrub(&e.to_string(), key))),
+        }
+    }
+}
+
+/// The waits before each resend of a dropped request.
+#[cfg(not(test))]
+const DROP_RETRIES: [std::time::Duration; 2] = [
+    std::time::Duration::from_millis(300),
+    std::time::Duration::from_millis(1000),
+];
+#[cfg(test)]
+const DROP_RETRIES: [std::time::Duration; 2] = [std::time::Duration::from_millis(5); 2];
 
 /// Server-sent events: calls `on_data` with each event's joined `data:` lines;
 /// stops when it returns false. Other fields (`event:`, `id:`, comments) are ignored.
@@ -605,6 +649,17 @@ pub(crate) mod mock {
         )
     }
 
+    /// The connection is closed at once, unread (the client sees a reset or
+    /// an early EOF), and no head is handed back.
+    pub const DROP: &str = "";
+
+    /// An answer that breaks off after `sse`: the body is promised longer.
+    pub fn cut(sse: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: 100000\r\n\r\n{sse}"
+        )
+    }
+
     /// The base URL (`http://127.0.0.1:<port>/v1`) and the requests' heads.
     pub fn serve(replies: Vec<String>) -> (String, Receiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -615,6 +670,9 @@ pub(crate) mod mock {
                 let Ok((stream, _)) = listener.accept() else {
                     return;
                 };
+                if reply == DROP {
+                    continue;
+                }
                 let mut reader = BufReader::new(stream);
                 let (mut head, mut length) = (String::new(), 0);
                 loop {
@@ -694,6 +752,12 @@ mod tests {
                 AiError::Network("dns failed".into()),
                 "No connection",
                 "dns failed",
+                Some(Fix::Retry),
+            ),
+            (
+                AiError::Dropped("io: reset".into()),
+                "The connection dropped",
+                "io: reset",
                 Some(Fix::Retry),
             ),
             (
@@ -1004,6 +1068,54 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("high demand"), "{err}");
         assert_eq!(seen.try_iter().count(), 2);
+    }
+
+    /// A connection reset before any answer (a provider dropping it) is sent
+    /// again on a new connection, silently, at most twice; a reset after the
+    /// answer started is shown, and nothing is sent again (no repeated text).
+    #[test]
+    fn a_dropped_connection_is_resent_but_never_mid_answer() {
+        let ok = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: [DONE]\n\n";
+        let cfg = |base_url| AiConfig {
+            provider: Provider::OpenaiCompatible,
+            base_url,
+            model: "m".into(),
+        };
+        let ask = |cfg: &AiConfig, pieces: &mut Vec<String>| {
+            ask_stream(cfg, None, &[Message::user("q")], |p| {
+                pieces.push(p.to_string());
+                ControlFlow::Continue(())
+            })
+        };
+        let drop = || mock::DROP.to_string();
+        let (url, seen) = mock::serve(vec![drop(), drop(), mock::stream(ok)]);
+        let mut pieces = vec![];
+        assert_eq!(ask(&cfg(url), &mut pieces).unwrap(), "Hi");
+        assert_eq!(pieces, ["Hi"]);
+        assert_eq!(seen.try_iter().count(), 1);
+        // dropped three times: the card says so (not "No connection")
+        let (url, _) = mock::serve(vec![drop(), drop(), drop()]);
+        let err = ask(&cfg(url), &mut vec![]).unwrap_err();
+        assert!(matches!(err, AiError::Dropped(_)), "{err:?}");
+        assert_eq!(err.headline(""), "The connection dropped");
+        // mid-answer: the part so far was shown once, the error follows, no resend
+        let half = "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n";
+        let (url, seen) = mock::serve(vec![mock::cut(half), mock::stream(ok)]);
+        let mut pieces = vec![];
+        let err = ask(&cfg(url), &mut pieces).unwrap_err();
+        assert!(matches!(err, AiError::Dropped(_)), "{err:?}");
+        assert_eq!(pieces, ["Hel"]);
+        assert_eq!(seen.try_iter().count(), 1);
+        // the model list takes the same way
+        let (url, seen) = mock::serve(vec![drop(), mock::reply(200, r#"{"data":[]}"#)]);
+        let mut list = cfg(url);
+        list.model.clear();
+        let listed = models::load(&list, None);
+        assert!(listed.is_ok(), "{listed:?}");
+        assert_eq!(seen.try_iter().count(), 1);
+        // offline is still "No connection", at once
+        let err = ask(&cfg("http://127.0.0.1:1/v1".into()), &mut vec![]).unwrap_err();
+        assert_eq!(err.headline(""), "No connection", "{err:?}");
     }
 
     #[test]

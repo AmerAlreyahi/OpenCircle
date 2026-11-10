@@ -664,6 +664,38 @@ pub(in crate::ui) fn snipping_on(w: u32, h: u32, area: Rectangle) -> App {
     app
 }
 
+/// Snip over a pinned chat: the overlay draws no live chat over the frozen
+/// screen (the chat's window is in Snip's grab, a pick like any window, and
+/// nothing of ours covers the outline); main mode still draws it.
+#[test]
+fn snip_draws_no_live_chat_over_its_outline() {
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    chat_turn(&mut app, id, "What is this?", "A chart.");
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    assert!(app.chat.is_some() && app.o.ai_chat.is_none(), "pinned");
+    let drawn = |app: &App| {
+        let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
+        texts.iter().any(|t| t == "What is this?")
+    };
+    assert!(drawn(&app), "main mode draws the pinned chat");
+    let window = snip::Pick::window(app.chat_rect(), "OpenCircle chat", 1);
+    app.o.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.place(), true, None)));
+    let over = app.chat_rect().center();
+    event(&mut app, overlay::Event::Hover(over));
+    assert!(!drawn(&app), "Snip: only the frozen picture of it");
+    assert!(app.chat.is_some(), "kept: its window comes back after Snip");
+}
+
 /// A snip drag is always the box between the press and the pointer: dragging
 /// back shrinks it, crossing the press flips it, and the size chip follows.
 #[test]
