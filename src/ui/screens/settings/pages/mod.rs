@@ -65,7 +65,7 @@ const fn page(
     }
 }
 
-/// In the design's order.
+/// In the design's order, except Shortcuts: after every feature page (owner, 2026-11-10).
 pub const PAGES: [Page; 13] = [
     page(Section::General, "General", general::view),
     page(Section::Appearance, "Appearance", appearance::view),
@@ -73,16 +73,16 @@ pub const PAGES: [Page; 13] = [
     page(Section::Ai, "Ask AI", ai::view),
     page(Section::TextReading, "Text reading", text_reading::view),
     page(Section::Translate, "Translate", translate::view),
-    Page {
-        note: Some(shortcuts::NOTE),
-        ..page(Section::Shortcuts, "Shortcuts", shortcuts::view)
-    },
     page(Section::Snip, "Snip", snip::view),
     Page {
         lab: Some(Feature::Song),
         ..page(Section::Song, "Song search", song::view)
     },
     page(Section::History, "History", history::view),
+    Page {
+        note: Some(shortcuts::NOTE),
+        ..page(Section::Shortcuts, "Shortcuts", shortcuts::view)
+    },
     Page {
         note: Some(privacy::NOTE),
         ..page(Section::Privacy, "Privacy", privacy::view)

@@ -1790,9 +1790,9 @@ fn labs_pages_are_hidden_while_their_switch_is_off() {
             "Look & behaviour",
             "Ask AI",
             "Translate",
-            "Shortcuts",
             "Snip",
             "History",
+            "Shortcuts",
             "Privacy",
             "About",
             "Labs"
