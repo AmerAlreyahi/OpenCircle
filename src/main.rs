@@ -100,6 +100,7 @@ fn main() -> ExitCode {
     #[cfg(all(windows, not(debug_assertions)))]
     attach_parent_console();
     sys::mem::limit_malloc_arenas();
+    sys::fix_appimage_env();
     // The setup build (OpenCircle-Setup-*.exe) is the setup, whatever it is asked.
     if let Some(msi) = setup::payload() {
         // Elevated: DLLs it loads later come from System32 only, never from its folder.
