@@ -729,12 +729,9 @@ mod tests {
             a
         };
         assert!(!target(), "out of every other capture: no target");
-        let in_grab = std::thread::spawn(move || {
-            let grab = widgets_in_grab();
-            (target(), grab)
-        });
-        let (listed, grab) = in_grab.join().unwrap();
-        assert!(listed, "in Snip's grab: a target");
+        // (listed on this thread: a title is read through the window's own one)
+        let grab = std::thread::spawn(widgets_in_grab).join().unwrap();
+        assert!(target(), "in Snip's grab: a target");
         assert_eq!(affinity(), WDA_NONE.0, "in the grab's frame");
         drop(grab);
         assert_eq!(

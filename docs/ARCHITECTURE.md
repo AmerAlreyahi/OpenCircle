@@ -211,7 +211,8 @@ outside it (the update gate runs published builds).
   sets it). `scripts/update-gate.ps1` drives it as the release gate (docs/RELEASING.md step 9).
 - `OPENCIRCLE_TEST_CAPTURABLE=1`: our floating windows (Steps strip, pins, pills, the pinned chat's, tray menu;
   the update's pills and card always show) are not excluded from screen capture on Windows (VM screenshots of them over the desktop; they then
-  also show in the next capture's frozen frame). Linux takes them out of each grab (`Windows::leave_frame`) whatever this says.
+  also show in the next capture's frozen frame). Linux takes them out of each grab but Snip's (`Windows::leave_frame`) whatever this says.
+  Snip's grab always has them in, as targets (`window_rect::widgets_in_grab`; owner, 2026-11-10).
 - `OPENCIRCLE_TEST_SHOT=<out.png>`: Esc saves what the overlay shows before closing
   (shot ~150 ms after Esc, with no message in between: a relayout would drop the
   text editor's drawn text from the shot).
