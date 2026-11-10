@@ -5214,3 +5214,65 @@ fn on_wayland_esc_before_the_overlay_goes_cancels_the_long_capture() {
     );
     assert!(app.o.edit.as_ref().is_some_and(|e| !e.annotator.capturing));
 }
+
+/// Snip the translated page (owner, 2026-11-10): over a translation, every
+/// Snip entry (Alt+A / tray, the bar's Snip key) takes the page as translated,
+/// full size, with no windows outlined; without one, nothing changes.
+#[test]
+fn snip_over_a_translation_takes_the_translated_page() {
+    let snip = QuickAction {
+        action: "snip".into(),
+        shortcut: String::new(),
+        target: Target::Circle,
+        live: false,
+    };
+    let translated = |app: &mut App| {
+        let frame = app.o.frame.clone().unwrap();
+        let (mut session, _) =
+            translate::Session::start(frame, [0, 0, 40, 20], 1.0, app.cache.clone(), false, 0);
+        let page = [9, 9, 9, 255].repeat(40 * 20); // opaque (the editor premultiplies)
+        session.show(image::Handle::from_rgba(40, 20, page));
+        app.o.translate = Some((1, session));
+        app.o.windows = vec![snip::Pick {
+            rect: Rectangle::new(Point::new(2.0, 2.0), Size::new(10.0, 10.0)),
+            label: "Window: app".into(),
+            window: 5,
+        }];
+    };
+    let key = actions::snip::ACTION.key;
+    for entry in ["shortcut", "key"] {
+        let mut app = open_app(40, 20, 1.0);
+        translated(&mut app);
+        match entry {
+            "shortcut" => {
+                let _ = app.update(Message::Trigger(Trigger::Quick(
+                    Instant::now(),
+                    snip.clone(),
+                )));
+            }
+            _ => event(
+                &mut app,
+                overlay::Event::Key {
+                    letter: key.letter,
+                    ctrl: key.ctrl,
+                },
+            ),
+        }
+        let Purpose::Snip(s) = &app.o.purpose else {
+            panic!("{entry}: Snip opened");
+        };
+        assert!(
+            s.outlined().is_none() && app.o.translate.is_none(),
+            "{entry}"
+        );
+        event(&mut app, overlay::Event::Enter); // the screen
+        let crop = app.crop().expect("picked");
+        assert_eq!((crop.width, crop.height), (40, 20), "{entry}: full size");
+        let page = [9, 9, 9, 255].repeat(40 * 20);
+        assert!(crop.rgba == page, "{entry}: the translated page");
+    }
+    // no translation: the shortcut only brings the overlay to the front
+    let mut app = open_app(40, 20, 1.0);
+    let _ = app.update(Message::Trigger(Trigger::Quick(Instant::now(), snip)));
+    assert!(matches!(app.o.purpose, Purpose::Search));
+}

@@ -953,3 +953,30 @@ fn the_word_card_never_covers_the_pill() {
     let view = s.view(screen, at, false);
     crate::ui::kit::testing::shot::save("translate-word-card-1280", view, screen);
 }
+
+/// Snip takes what the translation shows: the translated page, or the
+/// original with the part done so far; Alt (peek) doesn't change it.
+#[test]
+fn seen_is_the_frame_as_the_translation_shows_it() {
+    let mut s = session(true);
+    assert!(s.seen().is_none(), "nothing translated yet");
+    let image::Handle::Rgba { width, height, .. } = s.frame.clone() else {
+        panic!("rgba frame")
+    };
+    s.phase = Phase::Translating;
+    s.partial = Some(Part {
+        image: image::Handle::from_rgba(1, 1, vec![200u8; 4]),
+        area: [1, 1, 2, 2],
+    });
+    let _ = s.update(Msg::Peek(true));
+    let Some(image::Handle::Rgba { pixels, .. }) = s.seen() else {
+        panic!("the partial page")
+    };
+    let px = |x: u32, y: u32| ((y * width + x) * 4) as usize;
+    assert_eq!(pixels[px(1, 1)], 200, "the translated part");
+    assert_ne!(pixels[px(0, 0)], 200, "the rest as it was");
+    assert_eq!(pixels.len(), (width * height * 4) as usize, "full size");
+    let page = frame(4, 4);
+    s.show(page.clone());
+    assert_eq!(s.seen(), Some(page), "the translated page");
+}

@@ -253,6 +253,47 @@ impl Session {
         }
     }
 
+    /// The frame as the translation shows it (full frame px, never scaled):
+    /// what Snip takes (owner, 2026-11-10). The translated page, or while
+    /// translating the original with what is translated so far pasted in;
+    /// `None` = nothing translated on screen yet. Alt (the peek) doesn't
+    /// count: Alt+A's own Alt is down when Snip asks.
+    pub fn seen(&self) -> Option<image::Handle> {
+        match &self.phase {
+            Phase::Shown(shown) => Some(shown.image.clone()),
+            Phase::Translating => {
+                let part = self.partial.as_ref()?;
+                let (
+                    image::Handle::Rgba {
+                        width,
+                        height,
+                        pixels,
+                        ..
+                    },
+                    image::Handle::Rgba { pixels: rgba, .. },
+                ) = (&self.frame, &part.image)
+                else {
+                    return None;
+                };
+                let mut full = pixels.to_vec();
+                paste(&mut full, *width, part.area, rgba);
+                Some(image::Handle::from_rgba(*width, *height, full))
+            }
+            _ => None,
+        }
+    }
+
+    /// Tests elsewhere: the translation `image` is shown.
+    #[cfg(test)]
+    pub(crate) fn show(&mut self, image: image::Handle) {
+        let blocks = Vec::new();
+        self.phase = Phase::Shown(Shown {
+            image,
+            blocks,
+            offer: None,
+        });
+    }
+
     /// While translating: the area translated so far and where it goes in the
     /// frame (px), to draw over the original frame, unless Alt is held.
     pub fn part(&self) -> Option<(&image::Handle, [u32; 4])> {

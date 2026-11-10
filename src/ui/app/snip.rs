@@ -196,10 +196,19 @@ impl App {
     /// over the frame already frozen. `picked` (main mode's selection) starts
     /// it picked, as a pick would; none = the pick step, with the edge glow.
     /// Main mode's state (selections, words, cards) goes; the frame stays.
+    /// With a translation on screen (every entry: the bar's E, Alt+A, tray),
+    /// Snip takes the page as translated (`Session::seen`) as its frame.
     pub(in crate::ui) fn snip_here(&mut self, picked: Option<Rectangle>) -> Task<Message> {
         // the windows as they were at the freeze (as Snip's own shortcut lists
         // them), not now: a late list drifts from the frozen frames
-        let windows = std::mem::take(&mut self.o.windows);
+        let mut windows = std::mem::take(&mut self.o.windows);
+        let seen = (self.o.translate.as_ref()).and_then(|(_, s)| s.seen());
+        if let Some(seen) = seen {
+            self.o.frame = Some(seen);
+            // the translated page's windows aren't the picture's: none outlined
+            // (drag = an area; a click or Enter = the screen)
+            windows.clear();
+        }
         // the user's app: the topmost titled window (the overlay wasn't up
         // yet; the taskbar has no title)
         // ponytail: an untitled app window is passed over for the next one

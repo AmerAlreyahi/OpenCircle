@@ -106,6 +106,12 @@ impl App {
                 crate::log!("[opencircle] shortcut ignored: a capture is still on its way");
                 Task::none()
             }
+            // Snip (Alt+A, tray) over a translation: Snip the translated page
+            Message::Trigger(Trigger::Quick(_, qa))
+                if qa.action == "snip" && self.o.frame.is_some() && self.o.translate.is_some() =>
+            {
+                self.snip_here(None)
+            }
             // Open but maybe behind another app (Alt+Tab, a click elsewhere): its
             // keys (Esc) went there. The shortcut brings it back in front, with
             // the keyboard, instead of nothing happening.

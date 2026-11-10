@@ -176,6 +176,14 @@ impl App {
                 } if session.has_card() => {
                     return self.on_translate(id, translate::Msg::Ask);
                 }
+                // Snip's key (the bar's Snip, hidden under the translation)
+                overlay::Event::Key { letter, ctrl }
+                    if !session.has_card()
+                        && actions::for_key(&o.labs, letter, ctrl)
+                            .is_some_and(|a| a.id == actions::snip::ACTION.id) =>
+                {
+                    return self.snip_here(None);
+                }
                 overlay::Event::Key { .. } | overlay::Event::Enter | overlay::Event::Space => {
                     return Task::none();
                 }
