@@ -45,6 +45,16 @@ impl App {
             snip::Msg::Finish(how) => {
                 if let Some(long) = &mut snip.scroll {
                     long.finish(how);
+                    if !self.can_hide {
+                        // Wayland, the hint still up: nothing streamed yet
+                        // (`Leave`), back to the picked area
+                        let nothing = Crop {
+                            width: 0,
+                            height: 0,
+                            rgba: Vec::new(),
+                        };
+                        return self.on_snip(snip::Msg::Done(Ok(nothing)));
+                    }
                 }
                 Task::none()
             }
@@ -131,10 +141,13 @@ impl App {
             snip::Msg::Shoot(_) => Task::none(), // handled above
             snip::Msg::Cancel => self.close(),
             // (not finished meanwhile): the capture goes on without the overlay
-            snip::Msg::Leave => match snip.scroll.take_if(|l| l.then.is_none()) {
+            // (once its fade is over: `capture::LEAVE_FRAME`, as a grab waits)
+            snip::Msg::Leave(region) => match snip.scroll.take_if(|l| l.then.is_none()) {
                 Some(long) => {
-                    self.cast = Some(long.stop_flag());
-                    self.close()
+                    let stop = long.stop_flag();
+                    self.cast = Some(stop.clone());
+                    let wait = Duration::from_millis(250);
+                    Task::batch([self.close(), stitch(region, (0, 0), wait, stop)])
                 }
                 None => Task::none(),
             },
@@ -495,14 +508,16 @@ impl App {
         let mut long = long_capture::Long::new(area, stop.clone(), scale);
         (long.bar_was, long.window) = (bar_was, Some(on.window));
         // Wayland: the overlay can't be cut (`can_hide`), so it shows how the
-        // capture ends, then goes (`Leave`); the stream starts under it meanwhile
-        let leave = match self.can_hide {
-            true => Task::none(),
+        // capture ends, then goes (`Leave`), and only then is the screen
+        // streamed (none of the overlay, its dim or its fade in a frame)
+        let work = match self.can_hide {
+            // (let the window be cut first)
+            true => stitch(region, preview, Duration::from_millis(150), stop),
             false => {
                 long.finish_key = Some(snip_key());
-                background(|tx| {
+                background(move |tx| {
                     std::thread::sleep(CAST_HINT);
-                    let _ = tx.unbounded_send(snip::Msg::Leave);
+                    let _ = tx.unbounded_send(snip::Msg::Leave(region));
                 })
                 .map(Message::Snip)
             }
@@ -514,17 +529,6 @@ impl App {
             edit.annotator.menu = None;
         }
         o.stroke.clear(); // its outline is long capture's (dashed)
-        let work = background(move |tx| {
-            // Let the window be cut first.
-            std::thread::sleep(Duration::from_millis(150));
-            let each = |update| {
-                let _ = tx.unbounded_send(snip::Msg::Progress(update));
-            };
-            let max = config::current().snip.long_max;
-            let stitched = crate::capture::scroll::by_hand(region, preview, max, &stop, each);
-            let _ = tx.unbounded_send(snip::Msg::Done(stitched));
-        })
-        .map(Message::Snip);
         // the toolbar stays where it is over an area that fills the screen,
         // and the small picture sits in its corner (`on_progress`): kept in the
         // hole, out of every grab (no other window of ours over the area)
@@ -550,7 +554,7 @@ impl App {
                 scale,
             ))
             .map(Message::Windows);
-        Task::batch([cut.chain(work), leave])
+        cut.chain(work)
     }
 
     /// Wayland: the long capture that went on without its overlay ended (the
@@ -572,6 +576,26 @@ impl App {
             }
         }
     }
+}
+
+/// Long capture's thread: after `wait`, `region` grabbed and stitched
+/// (`scroll::by_hand`) until `stop`, then `Msg::Done`.
+fn stitch(
+    region: (i32, i32, u32, u32),
+    preview: (u32, u32),
+    wait: Duration,
+    stop: Arc<AtomicBool>,
+) -> Task<Message> {
+    background(move |tx| {
+        std::thread::sleep(wait);
+        let each = |update| {
+            let _ = tx.unbounded_send(snip::Msg::Progress(update));
+        };
+        let max = config::current().snip.long_max;
+        let stitched = crate::capture::scroll::by_hand(region, preview, max, &stop, each);
+        let _ = tx.unbounded_send(snip::Msg::Done(stitched));
+    })
+    .map(Message::Snip)
 }
 
 /// How long the Wayland long capture's hint shows before the overlay goes.

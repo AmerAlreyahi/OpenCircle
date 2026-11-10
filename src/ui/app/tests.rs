@@ -5107,7 +5107,7 @@ fn on_wayland_a_long_capture_goes_on_without_the_overlay_until_the_shortcut() {
     );
     let stop = long.stop_flag();
     // the hint was read: the overlay goes, the capture goes on
-    let _ = app.update(Message::Snip(snip::Msg::Leave));
+    let _ = app.update(Message::Snip(snip::Msg::Leave((100, 80, 300, 200))));
     assert!(app.o.is_none(), "the overlay went");
     assert!(app.cast.is_some() && !stop.load(Ordering::Relaxed));
     // the shortcut ends it (no new capture yet: the image comes first)
@@ -5140,7 +5140,11 @@ fn on_wayland_esc_before_the_overlay_goes_cancels_the_long_capture() {
     let _ = app.open_snip_toolbar();
     let _ = app.update(Message::Annotate(annotate::Message::Scroll));
     let _ = app.update(Message::Escape);
-    let _ = app.update(Message::Snip(snip::Msg::Leave));
+    let _ = app.update(Message::Snip(snip::Msg::Leave((100, 80, 300, 200))));
     assert!(app.cast.is_none(), "not left: cancelled");
-    assert!(app.o.is_some() && app.scroll().is_some_and(|l| l.cancelled()));
+    assert!(
+        app.o.is_some() && app.scroll().is_none(),
+        "back to the picked area"
+    );
+    assert!(app.o.edit.as_ref().is_some_and(|e| !e.annotator.capturing));
 }
