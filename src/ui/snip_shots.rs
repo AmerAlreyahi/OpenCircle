@@ -275,7 +275,7 @@ fn the_long_capture_count_mirrors() {
             ("rtl", 3240, false, true),
             ("limit-rtl", MAX_HEIGHT, true, true),
         ] {
-            let view = long_capture::count(height, full, false, rtl);
+            let view = long_capture::count::<crate::ui::snip::Msg>(height, full, false, rtl);
             let px = super::kit::testing::shot::render(view, size.width as u32, size.height as u32);
             let name = format!("snip-7-count-{name}-{}@1x", theme.id);
             if golden::enabled() {

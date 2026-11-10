@@ -226,6 +226,55 @@ pub fn fade<T: Send + 'static>(id: window::Id, open: bool, how: Motion, wait: bo
     }
 }
 
+/// Wayland's long capture pop-up (`ui::long_capture_popup`, a helper process
+/// on XWayland): an X11 override-redirect window, so it sits exactly where
+/// asked and stays over every other window (a Wayland window can't be placed
+/// or kept on top on GNOME). Takes no keyboard. `popup_shape` cuts it.
+pub fn x11_popup(settings: window::Settings) -> (window::Id, Task<window::Id>) {
+    #[cfg(target_os = "linux")]
+    let settings = window::Settings {
+        platform_specific: window::settings::PlatformSpecific {
+            override_redirect: true,
+            ..settings.platform_specific
+        },
+        ..settings
+    };
+    open(window::Settings {
+        decorations: false,
+        resizable: false,
+        level: Level::AlwaysOnTop,
+        exit_on_close_request: false,
+        ..settings
+    })
+}
+
+/// Cuts the window `id` to `parts` (logical px of it, each with its corner
+/// radius) at `scale` (`super::shape::parts`).
+pub fn popup_shape<T: Send + 'static>(
+    id: window::Id,
+    parts: Vec<(iced::Rectangle, f32)>,
+    scale: f32,
+) -> Task<T> {
+    let px = move |(r, radius): (iced::Rectangle, f32)| {
+        let at = |v: f32| (v * scale).round() as i32;
+        let (x, y) = (at(r.x), at(r.y));
+        let (w, h) = (at(r.x + r.width) - x, at(r.y + r.height) - y);
+        (
+            (x, y, w.max(0) as u32, h.max(0) as u32),
+            (radius * scale).round() as u32,
+        )
+    };
+    window::run(id, move |w| {
+        let parts: Vec<_> = parts.into_iter().map(px).collect();
+        if let Ok(handle) = w.window_handle()
+            && let Err(e) = super::shape::parts(handle.as_raw(), &parts)
+        {
+            crate::log!("[opencircle] window shape: {e}");
+        }
+    })
+    .discard()
+}
+
 /// A screen-sized window (the capture overlay, the live layer): no frame, not
 /// cut to a shape; each sets its own transparency and level.
 /// Never a snip target (`no_pick`).

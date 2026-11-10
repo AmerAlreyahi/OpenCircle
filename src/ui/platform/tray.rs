@@ -10,6 +10,8 @@ use tray_icon::menu::{IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem}
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use super::monitor::Place;
+#[cfg(target_os = "linux")]
+use crate::capture::scroll::Finish;
 use crate::config::{Config, Target};
 use crate::labs::{Feature, Labs};
 use crate::{Trigger, Triggers};
@@ -245,11 +247,90 @@ struct Built {
     items: Vec<(Entry, MenuItem)>,
     /// Above Circle to Search (under the update row) and above Settings.
     separators: [PredefinedMenuItem; 2],
+    /// The menu while a long capture runs (`capturing`).
+    long: Vec<(Finish, MenuItem)>,
 }
 
 #[cfg(target_os = "linux")]
 thread_local! {
     static BUILT: std::cell::RefCell<Option<Built>> = const { std::cell::RefCell::new(None) };
+    /// A long capture runs (`capturing`): its menu is shown, not `entries`.
+    static CAPTURING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The update dot last asked for (`show_update`), put back after a capture.
+    static DOT: std::cell::Cell<Option<[u8; 3]>> = const { std::cell::Cell::new(None) };
+}
+
+/// The menu while a long capture runs (Wayland; owner, 2026-11-10): Finish
+/// (Snip opens with the page picked), Copy, Save, Cancel.
+#[cfg(target_os = "linux")]
+pub const LONG: [(Finish, &str); 4] = [
+    (Finish::Done, "Finish"),
+    (Finish::Copy, "Copy"),
+    (Finish::Save, "Save…"),
+    (Finish::Cancel, "Cancel"),
+];
+
+/// The record dot on the icon while a long capture runs.
+#[cfg(target_os = "linux")]
+const RECORD: [u8; 3] = [229, 57, 53];
+
+#[cfg(test)]
+thread_local! {
+    /// What `capturing` was asked, in order (the tests' view of the tray).
+    pub static SHOWN: std::cell::RefCell<Vec<Option<String>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Wayland's long capture in the tray (owner, 2026-11-10): while it runs
+/// (`Some(label)`, "● 3,240 px") the icon has a red record dot, the label
+/// shows beside it (AppIndicator's label) and the menu holds only `LONG`;
+/// `None` puts the icon and the menu back. The sign beside the pop-up, and
+/// the only one without XWayland. Windows' long capture never needs it.
+pub fn capturing(label: Option<String>) {
+    #[cfg(test)]
+    SHOWN.with_borrow_mut(|s| s.push(label.clone()));
+    #[cfg(target_os = "linux")]
+    gtk::glib::idle_add_once(move || {
+        let on = label.is_some();
+        let was = CAPTURING.replace(on);
+        HELD.with_borrow(|held| {
+            if let Some(tray) = held {
+                let dot = if on { Some(RECORD) } else { DOT.get() };
+                let _ = tray.set_icon(Some(icon(dot)));
+                tray.set_title(label.as_deref());
+            }
+        });
+        if on != was {
+            BUILT.with_borrow(|b| {
+                let Some(built) = b else { return };
+                match on {
+                    true => {
+                        clear(built);
+                        for (_, item) in &built.long {
+                            let _ = built.menu.append(item as &dyn IsMenuItem);
+                        }
+                    }
+                    false => {
+                        let labs = crate::config::current().labs;
+                        fill(built, &labs, update_label().as_deref());
+                    }
+                }
+            });
+        }
+    });
+    #[cfg(not(target_os = "linux"))]
+    let _ = label;
+}
+
+/// Takes every row out of the menu.
+#[cfg(target_os = "linux")]
+fn clear(built: &Built) {
+    let rows = (built.items.iter().map(|(_, i)| i)).chain(built.long.iter().map(|(_, i)| i));
+    for item in rows {
+        let _ = built.menu.remove(item);
+    }
+    for s in &built.separators {
+        let _ = built.menu.remove(s);
+    }
 }
 
 thread_local! {
@@ -263,12 +344,7 @@ thread_local! {
 /// separated row but the first; the update row says `update`.
 #[cfg(target_os = "linux")]
 fn fill(built: &Built, labs: &Labs, update: Option<&str>) {
-    for (_, item) in &built.items {
-        let _ = built.menu.remove(item);
-    }
-    for s in &built.separators {
-        let _ = built.menu.remove(s);
-    }
+    clear(built);
     let shown = entries(labs, update.is_some());
     let mut separators = built.separators.iter();
     let mut first = true;
@@ -296,8 +372,12 @@ pub fn refresh() {
     {
         let labs = crate::config::current().labs;
         let update = update_label();
-        let apply =
-            move || BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs, update.as_deref())));
+        // (a long capture's menu stays until it ends: `capturing` fills it then)
+        let apply = move || {
+            if !CAPTURING.get() {
+                BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs, update.as_deref())));
+            }
+        };
         gtk::glib::idle_add_once(apply);
     }
 }
@@ -307,6 +387,11 @@ pub fn refresh() {
 /// row. Call it on the UI thread.
 pub fn show_update(dot: Option<[u8; 3]>) {
     let set = move || {
+        #[cfg(target_os = "linux")]
+        let dot = {
+            DOT.set(dot);
+            if CAPTURING.get() { Some(RECORD) } else { dot }
+        };
         HELD.with_borrow(|held| {
             if let Some(tray) = held {
                 let _ = tray.set_icon(Some(icon(dot)));
@@ -515,6 +600,10 @@ fn desktop_menu(tx: Triggers) -> Menu {
         .map(|e| (e, MenuItem::new(e.label(), true, None)))
         .collect();
     let ids: Vec<_> = (items.iter()).map(|(e, i)| (*e, i.id().clone())).collect();
+    let long: Vec<_> = (LONG.into_iter())
+        .map(|(how, label)| (how, MenuItem::new(label, true, None)))
+        .collect();
+    let long_ids: Vec<_> = (long.iter()).map(|(h, i)| (*h, i.id().clone())).collect();
     let built = Built {
         menu: Menu::new(),
         items,
@@ -522,6 +611,7 @@ fn desktop_menu(tx: Triggers) -> Menu {
             PredefinedMenuItem::separator(),
             PredefinedMenuItem::separator(),
         ],
+        long,
     };
     fill(
         &built,
@@ -531,6 +621,15 @@ fn desktop_menu(tx: Triggers) -> Menu {
     let menu = built.menu.clone();
     BUILT.set(Some(built));
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+        // a long capture's row: once the menu is off the screen (Finish captures again)
+        if let Some(how) = (long_ids.iter()).find_map(|(h, id)| (*id == event.id).then_some(*h)) {
+            let tx = tx.clone();
+            drop(std::thread::spawn(move || {
+                std::thread::sleep(SETTLE);
+                let _ = tx.unbounded_send(Trigger::LongCapture(how));
+            }));
+            return;
+        }
         let Some(entry) = (ids.iter()).find_map(|(e, id)| (*id == event.id).then_some(*e)) else {
             return;
         };

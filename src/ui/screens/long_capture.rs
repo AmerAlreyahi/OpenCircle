@@ -42,17 +42,7 @@ const MIN_H: f32 = 80.0;
 /// The count chip under the picture.
 const CHIP_GAP: f32 = 6.0;
 
-/// How the capture ends.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Finish {
-    /// Esc / close: back to the picked area.
-    Cancel,
-    /// Enter / Copy, Save, Pin, Share: that, on the stitched image.
-    Copy,
-    Save,
-    Pin,
-    Share,
-}
+pub use crate::capture::scroll::Finish;
 
 /// The running capture (`Snip::scroll`).
 pub struct Long {
@@ -78,9 +68,6 @@ pub struct Long {
     /// The small picture's rect kept in the overlay's hole (`over_area`), as
     /// last cut.
     pub cut: Option<Rectangle>,
-    /// Wayland: the key that finishes the capture once the overlay has gone
-    /// (the Snip shortcut), named in the hint.
-    pub finish_key: Option<String>,
 }
 
 impl Long {
@@ -99,14 +86,7 @@ impl Long {
             preview: None,
             bar_was: None,
             cut: None,
-            finish_key: None,
         }
-    }
-
-    /// The flag that ends the grabbing, for whoever goes on holding it once
-    /// the overlay has gone (Wayland).
-    pub fn stop_flag(&self) -> Arc<AtomicBool> {
-        self.stop.clone()
     }
 
     /// Ends the grabbing, then `how` (unless an end was already asked for).
@@ -263,17 +243,17 @@ impl Long {
 }
 
 impl Long {
-    /// The hint until the first scroll; on Wayland, how it ends once the
-    /// overlay has gone (`finish_key`).
-    fn hint(&self, rtl: bool) -> Vec<key_hint::Group<'_>> {
-        let ar = |latin, arabic| if rtl { arabic } else { latin };
-        match &self.finish_key {
-            None => vec![(None, ar("Scroll to capture the page", "مرّر لالتقاط الصفحة"))],
-            Some(key) => vec![
-                (None, ar("Scroll the page", "مرّر الصفحة")),
-                (Some(key.as_str()), ar("Finish", "إنهاء")),
-            ],
-        }
+    /// The hint until the first scroll.
+    fn hint(&self, rtl: bool) -> [key_hint::Group<'static>; 1] {
+        [(None, scroll_hint(rtl))]
+    }
+}
+
+/// "Scroll to capture the page" (the hint here and in Wayland's pop-up).
+fn scroll_hint(rtl: bool) -> &'static str {
+    match rtl {
+        true => "مرّر لالتقاط الصفحة",
+        false => "Scroll to capture the page",
     }
 }
 
@@ -286,7 +266,7 @@ fn note(rtl: bool) -> [key_hint::Group<'static>; 1] {
 }
 
 /// The count chip: `3,240 px`, with "Limit reached" / "Scroll back".
-pub fn count<'a>(height: u32, full: bool, lost: bool, rtl: bool) -> Element<'a, Msg> {
+pub fn count<'a, M: 'a>(height: u32, full: bool, lost: bool, rtl: bool) -> Element<'a, M> {
     let ar = |latin: &'a str, arabic: &'a str| if rtl { arabic } else { latin };
     let note = match () {
         _ if full => Some(ar("Limit reached", "بلغت الحد")),
@@ -392,6 +372,172 @@ pub fn corner(area: Rectangle, bar: Rectangle, scale: f32) -> Option<Rectangle> 
     ))
 }
 
+/// Wayland's long capture pop-up (owner, 2026-11-10): the overlay can't be cut
+/// there, so the picture, its count and Copy / Save / Done / Cancel sit in a
+/// window of their own beside the area (`ui::long_capture_popup`, XWayland):
+/// the picture (with its 1 px edge) over this panel, both against the area's
+/// side, top-aligned with it. Never over the area: the stream would hold it.
+pub const POPUP_PANEL: Size = Size::new(174.0, 128.0);
+/// Inside the panel.
+const PANEL_PAD: f32 = 10.0;
+const PANEL_GAP: f32 = 8.0;
+const HINT_H: f32 = 32.0;
+/// The picture's 1 px edge round it (`area::edge`).
+const PICTURE_EDGE: f32 = 1.0;
+/// No toolbar beside the area (Wayland: the overlay has gone).
+const NO_BAR: Rectangle = Rectangle {
+    x: -1.0e6,
+    y: -1.0e6,
+    width: 0.0,
+    height: 0.0,
+};
+
+/// The biggest picture the pop-up shows (logical px): `layout`'s room beside
+/// the area less the panel under it; none where both don't fit.
+pub fn popup_room(area: Rectangle, screen: Size, scale: f32) -> Option<Size> {
+    let room = layout(area, screen, NO_BAR, scale)?;
+    let height = (room.height - 2.0 - CHIP_GAP - POPUP_PANEL.height).floor();
+    (height >= MIN_H).then(|| Size::new(room.width - 2.0, height))
+}
+
+/// The pop-up's window (logical px on the area's screen `screen`) for a
+/// `picture` that big so far (zero before the first frame), and whether it
+/// is left of the area (its content then against its right edge): where
+/// `layout` puts the picture, never over the area or off the screen; none
+/// where it doesn't fit.
+pub fn popup_at(
+    area: Rectangle,
+    screen: Size,
+    picture: Size,
+    scale: f32,
+) -> Option<(Rectangle, bool)> {
+    popup_room(area, screen, scale)?;
+    let room = layout(area, screen, NO_BAR, scale)?;
+    let left = room.x < area.x;
+    let shown = picture.height > 0.0;
+    let width = match shown {
+        true => (picture.width + 2.0).max(POPUP_PANEL.width),
+        false => POPUP_PANEL.width,
+    };
+    let height = match shown {
+        true => picture.height + 2.0 + CHIP_GAP,
+        false => 0.0,
+    } + POPUP_PANEL.height;
+    let x = match left {
+        true => room.x + room.width - width,
+        false => room.x,
+    };
+    let r = Rectangle::new(
+        Point::new(x.floor(), room.y.round()),
+        Size::new(width.ceil(), height.ceil()),
+    );
+    let inside = r.x >= 0.0 && r.x + r.width <= screen.width && r.y + r.height <= screen.height;
+    (inside && !r.intersects(&area)).then_some((r, left))
+}
+
+/// What of the pop-up's `window` (its size) is drawn, in its own px: the
+/// picture with its edge and the panel (with its corner radius); the rest is
+/// cut away (`windows::popup_shape`), so no box shows beside a narrow picture.
+pub fn popup_parts(window: Size, picture: Size, left: bool) -> Vec<(Rectangle, f32)> {
+    let against = |w: f32| match left {
+        true => window.width - w,
+        false => 0.0,
+    };
+    let mut parts = Vec::new();
+    let mut y = 0.0;
+    if picture.height > 0.0 {
+        let framed = Size::new(picture.width + 2.0, picture.height + 2.0);
+        parts.push((
+            Rectangle::new(Point::new(against(framed.width), 0.0), framed),
+            0.0,
+        ));
+        y = framed.height + CHIP_GAP;
+    }
+    let panel = Rectangle::new(Point::new(against(POPUP_PANEL.width), y), POPUP_PANEL);
+    parts.push((panel, crate::ui::kit::tokens::radius::DROPDOWN));
+    parts
+}
+
+/// The pop-up's content (`popup_parts`): the picture so far with its 1 px
+/// edge, then the panel: the count (or how it ended, `end`), Copy · Save ·
+/// Done · Cancel and the hint (it takes no keyboard: keys work after Done).
+pub fn popup_view<'a>(
+    picture: Option<(&image::Handle, Size)>,
+    (height, full, lost): (u32, bool, bool),
+    end: Option<&str>,
+    left: bool,
+    rtl: bool,
+) -> Element<'a, Finish> {
+    use crate::ui::kit::button::{self, Kind};
+    use crate::ui::kit::icon::Icon;
+    use crate::ui::kit::surface::{Material, surface};
+    use crate::ui::kit::text::muted;
+    use crate::ui::kit::tokens::{Role, radius, space};
+    use crate::ui::screens::snip_toolbar::toolbar::{COPY, SAVE};
+    use iced::widget::{Space, column, row};
+    let mut parts = column![].width(Fill).align_x(match left {
+        true => iced::alignment::Horizontal::Right,
+        false => iced::alignment::Horizontal::Left,
+    });
+    if let Some((handle, size)) = picture {
+        let shown = image(handle.clone())
+            .width(size.width)
+            .height(size.height)
+            .filter_method(image::FilterMethod::Nearest);
+        let framed = Size::new(size.width + 2.0, size.height + 2.0);
+        let edge = Edge(Rectangle::new(Point::new(1.0, 1.0), size));
+        parts = parts
+            .push(stack![
+                container(shown).padding(PICTURE_EDGE),
+                draw(edge).width(framed.width).height(framed.height),
+            ])
+            .push(Space::new().height(CHIP_GAP));
+    }
+    let top = match end {
+        Some(end) => chip::readout(end.to_string(), false, None),
+        None => count(height, full, lost, rtl),
+    };
+    let tool = |glyph, kind, how| button::tool(glyph, kind, false, Some(how));
+    let buttons = row![
+        tool(COPY, Kind::Accent, Finish::Copy),
+        tool(SAVE, Kind::Elevated, Finish::Save),
+        tool(Icon::Check.glyph(), Kind::Elevated, Finish::Done),
+        tool(Icon::Close.glyph(), Kind::Elevated, Finish::Cancel),
+    ]
+    .spacing(space::GAP);
+    let keys = match rtl {
+        true => "المفاتيح تعمل بعد «تم»",
+        false => "Keys work after Done",
+    };
+    let hint = column![muted(Role::META, scroll_hint(rtl)), muted(Role::META, keys)].height(HINT_H);
+    let panel = column![top, buttons, hint].spacing(PANEL_GAP);
+    let panel = surface(Material::Widget, radius::DROPDOWN, panel)
+        .padding(PANEL_PAD)
+        .width(POPUP_PANEL.width)
+        .height(POPUP_PANEL.height);
+    parts.push(panel).into()
+}
+
+/// The pop-up picture's 1 px edge (`area::edge`).
+struct Edge(Rectangle);
+
+impl<M> canvas::Program<M> for Edge {
+    type State = ();
+
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &Renderer,
+        _: &Theme,
+        bounds: Rectangle,
+        _: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        area::edge(&mut frame, self.0);
+        vec![frame.into_geometry()]
+    }
+}
+
 /// Where Snip's toolbar (`size`) goes for the capture when it is docked over
 /// the area (an area as tall as the screen): beside it, on the roomier side
 /// (the picture's, which then starts under it), top-aligned with it; none
@@ -444,7 +590,7 @@ fn hint_at(
 }
 
 /// `3,240 px`.
-fn px(height: u32) -> String {
+pub fn px(height: u32) -> String {
     format!("{} px", group(height))
 }
 
@@ -656,7 +802,7 @@ mod tests {
         assert_eq!(px(3240), "3,240 px");
         assert_eq!(px(20_000), "20,000 px");
         assert_eq!(group(1_234_567), "1,234,567");
-        let texts = crate::ui::kit::testing::shot::texts(count(20_000, true, false, false));
+        let texts = crate::ui::kit::testing::shot::texts(count::<Msg>(20_000, true, false, false));
         assert!(texts.iter().any(|t| t == "Limit reached"), "{texts:?}");
     }
 
@@ -788,5 +934,58 @@ mod tests {
         long.finish(Finish::Cancel);
         assert_eq!(long.then, Some(Finish::Save));
         assert!(long.stop.load(Ordering::Relaxed));
+    }
+
+    /// Wayland's pop-up: where the picture would be, against the area's side,
+    /// top-aligned, never over the area or off the screen; it widens to the
+    /// picture and grows down with it; none where no side has room.
+    #[test]
+    fn the_wayland_pop_up_sits_beside_the_area_never_over_it() {
+        let left_area = rect(100.0, 80.0, 500.0, 400.0);
+        let (r, left) = popup_at(left_area, SCREEN, Size::ZERO, 1.0).expect("room");
+        assert_eq!((r.x, r.y, left), (612.0, 80.0, false), "right beside it");
+        assert_eq!(
+            r.size(),
+            POPUP_PANEL,
+            "the panel alone before the first frame"
+        );
+        let wide = Size::new(260.0, 400.0);
+        let (r, _) = popup_at(left_area, SCREEN, wide, 1.0).unwrap();
+        assert_eq!((r.x, r.width), (612.0, 262.0), "the picture and its edge");
+        assert_eq!(r.height, 402.0 + CHIP_GAP + POPUP_PANEL.height);
+        assert!(!r.intersects(&left_area) && r.x + r.width <= SCREEN.width);
+        // an area on the right: the pop-up on its left, its edge GAP away
+        let right_area = rect(700.0, 100.0, 500.0, 400.0);
+        let (r, left) = popup_at(right_area, SCREEN, Size::new(40.0, 300.0), 1.0).unwrap();
+        assert!(left && r.x + r.width == 700.0 - GAP, "{r:?}");
+        assert_eq!(
+            r.width, POPUP_PANEL.width,
+            "a narrow picture: the panel's width"
+        );
+        assert!(!r.intersects(&right_area));
+        // the picture the pop-up asks for leaves the panel room under it
+        let most = popup_room(left_area, SCREEN, 1.0).unwrap();
+        let (r, _) = popup_at(left_area, SCREEN, most, 1.0).unwrap();
+        assert!(r.y + r.height <= SCREEN.height, "{r:?}");
+        // an area filling the screen: no pop-up (it would be in the stream)
+        assert_eq!(
+            popup_at(rect(0.0, 0.0, 1280.0, 700.0), SCREEN, Size::ZERO, 1.0),
+            None
+        );
+    }
+
+    /// Only the picture (with its edge) and the panel are kept of the window,
+    /// both against the area's side.
+    #[test]
+    fn the_pop_up_is_cut_to_its_picture_and_panel() {
+        let window = Size::new(POPUP_PANEL.width, 102.0 + CHIP_GAP + POPUP_PANEL.height);
+        let parts = popup_parts(window, Size::new(40.0, 100.0), true);
+        assert_eq!(parts.len(), 2);
+        let (picture, panel) = (parts[0].0, parts[1].0);
+        assert_eq!(picture, rect(window.width - 42.0, 0.0, 42.0, 102.0));
+        assert_eq!(panel.position(), Point::new(0.0, 102.0 + CHIP_GAP));
+        assert_eq!(parts[1].1, crate::ui::kit::tokens::radius::DROPDOWN);
+        let parts = popup_parts(POPUP_PANEL, Size::ZERO, false);
+        assert_eq!(parts, vec![(Rectangle::with_size(POPUP_PANEL), parts[0].1)]);
     }
 }

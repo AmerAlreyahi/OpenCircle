@@ -202,8 +202,8 @@ pub(in crate::ui) struct App {
     /// update it (its index), or a long capture finished on Wayland (none).
     pub(in crate::ui) picked_next: Option<(Option<usize>, crate::actions::Crop)>,
     /// Wayland: a long capture going on after its overlay went (the user
-    /// scrolls the page itself); set = it ends (`App::cast_done`).
-    pub(in crate::ui) cast: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// scrolls the page itself, its pop-up beside the area): `App::cast_done`.
+    pub(in crate::ui) cast: Option<snip::Cast>,
     /// The colours the picker copied, newest first (this run of the app only).
     pub(in crate::ui) colours: Vec<[u8; 3]>,
     /// Where the user moved / sized the result card (this run of the app).

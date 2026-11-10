@@ -5153,66 +5153,156 @@ fn ctrl_z_reaches_the_snip_toolbar() {
     );
 }
 
-/// Wayland (#151): the overlay can't be cut there, so a long capture shows
-/// how it ends, then the overlay goes and the stream goes on; the Snip
-/// shortcut ends it and Snip opens with the stitched page picked.
-#[test]
-fn on_wayland_a_long_capture_goes_on_without_the_overlay_until_the_shortcut() {
-    use std::sync::atomic::Ordering;
-    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+/// Wayland's long capture (owner, 2026-11-10): the overlay can't be cut, so
+/// it goes at once and the area is streamed; the pop-up shows beside the
+/// area from the start (never over it), updates as the page grows, and the
+/// tray shows it is capturing.
+fn casting(area: Rectangle) -> App {
     let mut app = snipping(area);
     app.can_hide = false;
     app.select(area);
     let _ = app.open_snip_toolbar();
     let _ = app.update(Message::Annotate(annotate::Message::Scroll));
-    let long = app.scroll().expect("long capture started");
-    assert_eq!(
-        long.finish_key.as_deref(),
-        Some("Alt+A"),
-        "the hint names it"
-    );
-    let stop = long.stop_flag();
-    // the hint was read: the overlay goes, the capture goes on
-    let _ = app.update(Message::Snip(snip::Msg::Leave((100, 80, 300, 200))));
-    assert!(app.o.is_none(), "the overlay went");
-    assert!(app.cast.is_some() && !stop.load(Ordering::Relaxed));
-    // the shortcut ends it (no new capture yet: the image comes first)
-    let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
-    assert!(stop.load(Ordering::Relaxed), "the stream stops");
-    assert!(app.capturing.is_none());
-    let page = Crop {
+    app
+}
+
+fn cast_frames() -> Vec<crate::ui::long_capture_popup::Frame> {
+    use crate::ui::long_capture_popup::{Msg, tests::sent};
+    (sent(false).into_iter())
+        .filter_map(|m| match m {
+            Msg::Frame(f) => Some(f),
+            Msg::End(_) => None,
+        })
+        .collect()
+}
+
+fn stitched_page(height: u32) -> Crop {
+    Crop {
         width: 300,
-        height: 900,
-        rgba: vec![255; 300 * 900 * 4],
+        height,
+        rgba: vec![255; 300 * height as usize * 4],
+    }
+}
+
+#[test]
+fn on_wayland_a_long_capture_shows_its_pop_up_beside_the_area_and_the_tray_state() {
+    use crate::capture::scroll::Update;
+    use crate::ui::platform::tray::SHOWN;
+    SHOWN.with_borrow_mut(Vec::clear);
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = casting(area);
+    assert!(app.o.is_none(), "the overlay went at once");
+    assert!(app.cast.as_ref().is_some_and(|c| c.popup.is_some()));
+    let first = cast_frames();
+    let f = first.last().expect("the pop-up shows from the start");
+    assert!(!f.window.intersects(&area), "never over the area: {f:?}");
+    assert_eq!(
+        (f.window.x, f.window.y),
+        (412.0, 80.0),
+        "right beside it, top-aligned"
+    );
+    assert!(!f.left && f.picture.is_none());
+    assert_eq!(
+        SHOWN.with_borrow(|s| s.last().cloned()),
+        Some(Some("● 0 px".into()))
+    );
+    // the page grows: the picture and the count follow, still beside the area
+    let preview = Crop {
+        width: 120,
+        height: 300,
+        rgba: vec![0; 120 * 300 * 4],
     };
-    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(page))));
-    assert!(app.cast.is_none());
-    assert!(app.capturing.is_some(), "Snip opens on a fresh frame");
-    assert!(
-        app.picked_next
-            .as_ref()
-            .is_some_and(|(step, c)| step.is_none() && c.height == 900),
-        "with the stitched page picked"
+    let _ = app.update(Message::Snip(snip::Msg::Progress(Update {
+        height: 1500,
+        full: false,
+        lost: false,
+        preview: Some(preview),
+    })));
+    let f = cast_frames().pop().expect("a new frame");
+    let (picture, size) = f.picture.as_ref().expect("the picture");
+    assert_eq!(
+        (picture.width, picture.height, size.width),
+        (120, 300, 120.0)
+    );
+    assert_eq!(f.count, (1500, false, false));
+    assert!(f.window.height > 300.0 && !f.window.intersects(&area));
+    assert_eq!(
+        SHOWN.with_borrow(|s| s.last().cloned()),
+        Some(Some("● 1,500 px".into()))
     );
 }
 
-/// Esc while the hint shows cancels it as anywhere (the overlay is still up).
+/// Copy from the pop-up: the stitched page is copied at once (no Snip), the
+/// pop-up says so and goes, the tray is itself again.
 #[test]
-fn on_wayland_esc_before_the_overlay_goes_cancels_the_long_capture() {
+fn on_wayland_copy_from_the_pop_up_copies_the_page() {
+    use crate::capture::scroll::Finish;
+    use crate::ui::long_capture_popup::{Msg, tests::sent};
+    use crate::ui::platform::tray::SHOWN;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
-    let mut app = snipping(area);
-    app.can_hide = false;
-    app.select(area);
-    let _ = app.open_snip_toolbar();
-    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
-    let _ = app.update(Message::Escape);
-    let _ = app.update(Message::Snip(snip::Msg::Leave((100, 80, 300, 200))));
-    assert!(app.cast.is_none(), "not left: cancelled");
+    let mut app = casting(area);
+    let _ = app.update(Message::Trigger(Trigger::LongCapture(Finish::Copy)));
     assert!(
-        app.o.is_some() && app.scroll().is_none(),
-        "back to the picked area"
+        app.cast.as_ref().is_some_and(|c| c.stopped()),
+        "the stream stops"
     );
-    assert!(app.o.edit.as_ref().is_some_and(|e| !e.annotator.capturing));
+    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(stitched_page(900)))));
+    assert!(
+        app.cast.is_none() && app.capturing.is_none(),
+        "no Snip opens"
+    );
+    let end = sent(true).into_iter().find_map(|m| match m {
+        Msg::End(said) => Some(said),
+        Msg::Frame(_) => None,
+    });
+    assert!(end.is_some(), "the pop-up says how it went");
+    assert_eq!(SHOWN.with_borrow(|s| s.last().cloned()), Some(None));
+}
+
+/// Done (the pop-up, the tray's Finish) or any shortcut: Snip opens on a
+/// fresh frame with the stitched page picked; Cancel drops the page.
+#[test]
+fn on_wayland_done_opens_snip_with_the_page_and_cancel_drops_it() {
+    use crate::capture::scroll::Finish;
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = casting(area);
+    let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
+    assert!(app.cast.as_ref().is_some_and(|c| c.stopped()));
+    assert!(app.capturing.is_none(), "the image comes first");
+    // a later Cancel doesn't undo the first end asked for
+    let _ = app.update(Message::Trigger(Trigger::LongCapture(Finish::Cancel)));
+    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(stitched_page(900)))));
+    assert!(app.capturing.is_some(), "Snip opens on a fresh frame");
+    assert!(
+        (app.picked_next.as_ref()).is_some_and(|(step, c)| step.is_none() && c.height == 900),
+        "with the stitched page picked"
+    );
+    let mut app = casting(area);
+    let _ = app.update(Message::Trigger(Trigger::LongCapture(Finish::Cancel)));
+    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(stitched_page(900)))));
+    assert!(app.cast.is_none() && app.capturing.is_none() && app.picked_next.is_none());
+}
+
+/// Without XWayland there is no pop-up: the tray's capturing state is the
+/// sign and its menu finishes it.
+#[test]
+fn on_wayland_without_xwayland_the_tray_alone_shows_the_capture() {
+    use crate::capture::scroll::Finish;
+    use crate::ui::long_capture_popup::tests::NO_X11;
+    use crate::ui::platform::tray::SHOWN;
+    NO_X11.set(true);
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    let mut app = casting(area);
+    NO_X11.set(false);
+    assert!(app.cast.as_ref().is_some_and(|c| c.popup.is_none()));
+    assert_eq!(
+        SHOWN.with_borrow(|s| s.last().cloned()),
+        Some(Some("● 0 px".into()))
+    );
+    let _ = app.update(Message::Trigger(Trigger::LongCapture(Finish::Done)));
+    let _ = app.update(Message::Snip(snip::Msg::Done(Ok(stitched_page(700)))));
+    assert!(app.picked_next.is_some(), "Snip opens with the page");
+    assert_eq!(SHOWN.with_borrow(|s| s.last().cloned()), Some(None));
 }
 
 /// Snip the translated page (owner, 2026-11-10): over a translation, every

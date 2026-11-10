@@ -42,6 +42,21 @@ const LOST_AFTER: u32 = 3;
 /// The preview is made at most this often.
 const PREVIEW_EVERY: Duration = Duration::from_millis(200);
 
+/// How the capture ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Finish {
+    /// Esc / close: back to the picked area.
+    Cancel,
+    /// Enter / Copy, Save, Pin, Share: that, on the stitched image.
+    Copy,
+    Save,
+    Pin,
+    Share,
+    /// Wayland (the pop-up's or the tray's Done, any shortcut): Snip opens
+    /// with the stitched page picked.
+    Done,
+}
+
 /// What the capture has so far, sent after each change.
 #[derive(Clone)]
 pub struct Update {

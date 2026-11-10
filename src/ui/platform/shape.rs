@@ -127,6 +127,32 @@ pub fn hole(handle: RawWindowHandle, hole: Px, keep: &[Px]) -> Result<(), String
     }
 }
 
+/// Shapes the X11 window behind `handle` to `parts` (window px, each with its
+/// corner radius): Wayland's long capture pop-up, a picture over a panel.
+/// `Ok` where nothing can be cut.
+pub fn parts(handle: RawWindowHandle, parts: &[(Px, u32)]) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    let of = |_, _| {
+        (parts.iter())
+            .flat_map(|&((x, y, w, h), r)| {
+                round_rect(w, h, r)
+                    .into_iter()
+                    .map(move |(bx, by, bw, bh)| (x + bx, y + by, bw, bh))
+            })
+            .collect()
+    };
+    match handle {
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xlib(h) => x11::rects(h.window as u32, of),
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xcb(h) => x11::rects(h.window.get(), of),
+        _ => {
+            let _ = parts;
+            Ok(())
+        }
+    }
+}
+
 /// Whether a whole window can fade here (`opacity`): Windows (DWM composites
 /// a layered window's alpha on the GPU, free for our CPU renderer).
 // ponytail: Windows only. X11 has _NET_WM_WINDOW_OPACITY (compositor-only),

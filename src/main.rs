@@ -51,6 +51,9 @@ pub enum Trigger {
     /// Restart now (the update pill, the tray menu's first row, Settings):
     /// install the waiting update.
     RestartToUpdate,
+    /// Wayland: the running long capture ends so (its pop-up or the tray's
+    /// capturing menu).
+    LongCapture(capture::scroll::Finish),
     Quit,
 }
 
@@ -134,6 +137,8 @@ fn main() -> ExitCode {
     let command = match args.first().map(String::as_str) {
         None => None,
         Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
+        // hidden: Wayland's long capture pop-up, spawned by the app on XWayland
+        Some(ui::long_capture_popup::ARG) => return ui::long_capture_popup::main(),
         Some(setup::FORGET_ARG) => {
             // hidden: the MSI's uninstall
             return setup::forget_user_data(args.get(1).is_some_and(|a| a == "--quiet"));

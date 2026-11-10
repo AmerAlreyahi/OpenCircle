@@ -88,14 +88,14 @@ impl App {
                 }
                 Task::none()
             }
-            // Wayland: a long capture going on with its overlay gone ends with
-            // any shortcut (or the tray): Snip opens with the page picked
+            // Wayland: a long capture going on with its overlay gone ends by its
+            // pop-up, the tray or any shortcut (Done: Snip opens with the page picked)
+            Message::Trigger(Trigger::LongCapture(how)) => self.cast_finish(how),
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..)) if self.cast.is_some() => {
-                crate::log!("[opencircle] long capture: finished by the shortcut");
-                if let Some(stop) = &self.cast {
-                    stop.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-                Task::none()
+                self.cast_finish(crate::capture::scroll::Finish::Done)
+            }
+            Message::Snip(snip::Msg::Progress(update)) if self.cast.is_some() => {
+                self.cast_progress(update)
             }
             Message::Snip(snip::Msg::Done(stitched)) if self.cast.is_some() => {
                 self.cast_done(stitched)
@@ -789,6 +789,6 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
             | Message::SongKey
             | Message::UpdateTick
             | Message::TestShot(_)
-            | Message::Snip(snip::Msg::Shoot(_) | snip::Msg::Done(_))
+            | Message::Snip(snip::Msg::Shoot(_) | snip::Msg::Done(_) | snip::Msg::Progress(_))
     )
 }

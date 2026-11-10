@@ -16,7 +16,7 @@ use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::screens::long_capture::{self, Finish};
 use crate::ui::screens::snip_toolbar::SnipToolbar;
-use crate::ui::{snip, windows};
+use crate::ui::{long_capture_popup, snip, windows};
 
 use super::{ASK_MARGIN, App, work_area};
 
@@ -45,16 +45,6 @@ impl App {
             snip::Msg::Finish(how) => {
                 if let Some(long) = &mut snip.scroll {
                     long.finish(how);
-                    if !self.can_hide {
-                        // Wayland, the hint still up: nothing streamed yet
-                        // (`Leave`), back to the picked area
-                        let nothing = Crop {
-                            width: 0,
-                            height: 0,
-                            rgba: Vec::new(),
-                        };
-                        return self.on_snip(snip::Msg::Done(Ok(nothing)));
-                    }
                 }
                 Task::none()
             }
@@ -86,7 +76,9 @@ impl App {
                 crate::history::recent::remember(&crop);
                 // the toolbar's button (Enter = Copy) acts on the stitched image
                 let then = match long.then.unwrap_or(Finish::Copy) {
-                    Finish::Copy | Finish::Cancel => self.finish(&copy::ACTION, crop),
+                    Finish::Copy | Finish::Cancel | Finish::Done => {
+                        self.finish(&copy::ACTION, crop)
+                    }
                     Finish::Save => self.finish(&save::ACTION, crop),
                     Finish::Pin => self.pin(crop),
                     // the share sheet comes from the editor: on the image, picked
@@ -140,17 +132,6 @@ impl App {
             },
             snip::Msg::Shoot(_) => Task::none(), // handled above
             snip::Msg::Cancel => self.close(),
-            // (not finished meanwhile): the capture goes on without the overlay
-            // (once its fade is over: `capture::LEAVE_FRAME`, as a grab waits)
-            snip::Msg::Leave(region) => match snip.scroll.take_if(|l| l.then.is_none()) {
-                Some(long) => {
-                    let stop = long.stop_flag();
-                    self.cast = Some(stop.clone());
-                    let wait = Duration::from_millis(250);
-                    Task::batch([self.close(), stitch(region, (0, 0), wait, stop)])
-                }
-                None => Task::none(),
-            },
             snip::Msg::Controls(opening, controls) => {
                 if opening == self.opening {
                     snip.add_controls(controls);
@@ -489,6 +470,9 @@ impl App {
         let Some((area, region)) = self.region_on(on, area) else {
             return Task::none();
         };
+        if !self.can_hide {
+            return self.start_cast(on, area, region);
+        }
         // the toolbar stays where it is, but off the area where it fits
         // beside it: over the area the window must be kept out of the grabs
         let mut bar = self.long_bar_on(&on);
@@ -503,12 +487,7 @@ impl App {
         }
         let scale = on.place.scale;
         let room = long_capture::room(area, work, bar, scale);
-        // Wayland: no preview (the overlay goes, no window can sit beside the area)
-        let room = room.filter(|_| self.can_hide);
-        let preview = room.map_or((0, 0), |r| {
-            let px = |v: f32| (v * scale).round() as u32;
-            (px(r.width), px(r.height))
-        });
+        let preview = room.map_or((0, 0), |r| physical(r.size(), scale));
         let o = &mut *self.o;
         let Purpose::Snip(snip) = &mut o.purpose else {
             return Task::none();
@@ -516,21 +495,8 @@ impl App {
         let stop = Arc::new(AtomicBool::new(false));
         let mut long = long_capture::Long::new(area, stop.clone(), scale);
         (long.bar_was, long.window) = (bar_was, Some(on.window));
-        // Wayland: the overlay can't be cut (`can_hide`), so it shows how the
-        // capture ends, then goes (`Leave`), and only then is the screen
-        // streamed (none of the overlay, its dim or its fade in a frame)
-        let work = match self.can_hide {
-            // (let the window be cut first)
-            true => stitch(region, preview, Duration::from_millis(150), stop),
-            false => {
-                long.finish_key = Some(snip_key());
-                background(move |tx| {
-                    std::thread::sleep(CAST_HINT);
-                    let _ = tx.unbounded_send(snip::Msg::Leave(region));
-                })
-                .map(Message::Snip)
-            }
-        };
+        // (let the window be cut first)
+        let work = stitch(region, preview, Duration::from_millis(150), stop);
         snip.scroll = Some(long);
         if let Some(edit) = &mut o.edit {
             edit.annotator.capturing = true;
@@ -566,25 +532,192 @@ impl App {
         cut.chain(work)
     }
 
-    /// Wayland: the long capture that went on without its overlay ended (the
-    /// shortcut, the stream stopped): Snip opens on a fresh frame with the
-    /// stitched page picked, its toolbar's Copy / Save / ... on it.
-    pub(in crate::ui) fn cast_done(&mut self, stitched: Result<Crop, String>) -> Task<Message> {
-        self.cast = None;
-        match stitched {
-            Ok(crop) if crop.height > 0 => {
-                crate::history::recent::remember(&crop);
-                self.picked_next = Some((None, crop));
-                self.next = Purpose::Search;
-                self.capture(Instant::now(), Some(snip::Kind::Region))
-            }
-            Ok(_) => Task::none(),
-            Err(e) => {
-                crate::log!("long capture failed: {e}");
+    /// Wayland's long capture of `area` (logical px on `on`; `region` its
+    /// physical desktop px): the overlay can't be cut there (`can_hide`), so
+    /// it goes, and only then is the screen streamed (none of the overlay, its
+    /// dim or its fade in a frame: `capture::LEAVE_FRAME`, as a grab waits).
+    /// The user scrolls the page by hand; the pop-up beside the area shows the
+    /// picture so far with Copy / Save / Done / Cancel (`long_capture_popup`,
+    /// XWayland), and the tray says it is capturing (`tray::capturing`, the
+    /// one sign without XWayland). Any shortcut, the pop-up or the tray ends it.
+    fn start_cast(
+        &mut self,
+        on: super::screens::On,
+        area: Rectangle,
+        region: (i32, i32, u32, u32),
+    ) -> Task<Message> {
+        let scale = on.place.scale;
+        let room = long_capture::popup_room(area, on.work, scale);
+        let preview = room.map_or((0, 0), |r| physical(r, scale));
+        let stop = Arc::new(AtomicBool::new(false));
+        let origin = Point::new(
+            on.place.origin.0 as f32 / scale,
+            on.place.origin.1 as f32 / scale,
+        );
+        let mut cast = Cast {
+            stop: stop.clone(),
+            then: None,
+            popup: None,
+            area,
+            work: on.work,
+            origin: Vector::new(origin.x, origin.y),
+            scale,
+            picture: Size::ZERO,
+            label: String::new(),
+        };
+        let clicks = match room.is_some() {
+            true => match long_capture_popup::Popup::start() {
+                Some((popup, clicks)) => {
+                    cast.popup = Some(popup);
+                    clicks.map(|how| Message::Trigger(crate::Trigger::LongCapture(how)))
+                }
+                None => Task::none(),
+            },
+            false => {
+                crate::log!("[opencircle] long capture: no room beside the area for the pop-up");
                 Task::none()
             }
-        }
+        };
+        crate::log!(
+            "[opencircle] long capture of {region:?} (Wayland): pop-up {}",
+            if cast.popup.is_some() {
+                "beside the area"
+            } else {
+                "none (tray only)"
+            }
+        );
+        cast.show(0, false, false, None);
+        self.cast = Some(cast);
+        let wait = Duration::from_millis(250);
+        Task::batch([self.close(), stitch(region, preview, wait, stop), clicks])
     }
+
+    /// Wayland: the long capture going on without its overlay, so far.
+    pub(in crate::ui) fn cast_progress(
+        &mut self,
+        u: crate::capture::scroll::Update,
+    ) -> Task<Message> {
+        if let Some(cast) = &mut self.cast {
+            cast.show(u.height, u.full, u.lost, u.preview);
+        }
+        Task::none()
+    }
+
+    /// Wayland: the long capture ends so (the pop-up, the tray, a shortcut =
+    /// Done); the first end asked for wins.
+    pub(in crate::ui) fn cast_finish(&mut self, how: Finish) -> Task<Message> {
+        if let Some(cast) = &mut self.cast {
+            crate::log!("[opencircle] long capture: {how:?}");
+            cast.then.get_or_insert(how);
+            cast.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        Task::none()
+    }
+
+    /// Wayland: the long capture that went on without its overlay ended. Copy /
+    /// Save act on the stitched page at once (the pop-up then says how it went
+    /// and goes); Done, a shortcut or the stream stopping: Snip opens on a
+    /// fresh frame with the stitched page picked (its toolbar's Copy / Save /
+    /// drag, Ctrl+C); Cancel drops it.
+    pub(in crate::ui) fn cast_done(&mut self, stitched: Result<Crop, String>) -> Task<Message> {
+        let Some(cast) = self.cast.take() else {
+            return Task::none();
+        };
+        crate::ui::platform::tray::capturing(None);
+        let crop = match stitched {
+            Ok(crop) if crop.height > 0 && cast.then != Some(Finish::Cancel) => crop,
+            Ok(_) => return Task::none(),
+            Err(e) => {
+                crate::log!("long capture failed: {e}");
+                return Task::none();
+            }
+        };
+        crate::history::recent::remember(&crop);
+        let action = match cast.then {
+            Some(Finish::Copy) => &copy::ACTION,
+            Some(Finish::Save) => &save::ACTION,
+            _ => {
+                if let Some(popup) = cast.popup {
+                    popup.close(); // out of the fresh frame
+                }
+                self.picked_next = Some((None, crop));
+                self.next = Purpose::Search;
+                return self.capture(Instant::now(), Some(snip::Kind::Region));
+            }
+        };
+        let (Run::Finish(run), id, popup) = (action.run, action.id, cast.popup) else {
+            return Task::none();
+        };
+        background(move |_| {
+            let said = run(crop).unwrap_or_else(|e| {
+                crate::log!("{id} failed: {e}");
+                e
+            });
+            if let Some(popup) = popup {
+                popup.end(&said);
+            }
+        })
+    }
+}
+
+/// Wayland's long capture going on without its overlay (`App::cast`).
+pub(in crate::ui) struct Cast {
+    stop: Arc<AtomicBool>,
+    /// How it ends (the first asked for).
+    pub(in crate::ui) then: Option<Finish>,
+    /// Its pop-up (none without XWayland or room beside the area).
+    pub(in crate::ui) popup: Option<long_capture_popup::Popup>,
+    /// The area and the work area of its screen (logical px), that screen's
+    /// origin (logical desktop px) and scale.
+    area: Rectangle,
+    work: Size,
+    origin: Vector,
+    scale: f32,
+    /// The picture's logical size so far.
+    picture: Size,
+    /// The tray's label as last shown.
+    label: String,
+}
+
+impl Cast {
+    /// The pop-up and the tray after a change (`preview`: the new picture).
+    fn show(&mut self, height: u32, full: bool, lost: bool, preview: Option<Crop>) {
+        let label = format!("● {}", long_capture::px(height));
+        if label != self.label {
+            crate::ui::platform::tray::capturing(Some(label.clone()));
+            self.label = label;
+        }
+        let Some(popup) = &self.popup else { return };
+        let picture = preview.filter(|p| p.width > 0 && p.height > 0).map(|p| {
+            let size = Size::new(p.width as f32, p.height as f32) * (1.0 / self.scale);
+            (p, size)
+        });
+        if let Some((_, size)) = &picture {
+            self.picture = *size;
+        }
+        let Some((window, left)) =
+            long_capture::popup_at(self.area, self.work, self.picture, self.scale)
+        else {
+            return;
+        };
+        popup.frame(long_capture_popup::Frame {
+            window: window + self.origin,
+            left,
+            count: (height, full, lost),
+            picture,
+        });
+    }
+
+    #[cfg(test)]
+    pub(in crate::ui) fn stopped(&self) -> bool {
+        self.stop.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// `size` (logical px) in physical px at `scale`.
+fn physical(size: Size, scale: f32) -> (u32, u32) {
+    let px = |v: f32| (v * scale).round() as u32;
+    (px(size.width), px(size.height))
 }
 
 /// Long capture's thread: after `wait`, `region` grabbed and stitched
@@ -605,16 +738,6 @@ fn stitch(
         let _ = tx.unbounded_send(snip::Msg::Done(stitched));
     })
     .map(Message::Snip)
-}
-
-/// How long the Wayland long capture's hint shows before the overlay goes.
-const CAST_HINT: Duration = Duration::from_millis(2500);
-
-/// The Snip shortcut (the one that ends a long capture on Wayland), as shown.
-fn snip_key() -> String {
-    (config::current().quick_actions.into_iter())
-        .find(|q| q.action == "snip" && q.target == crate::config::Target::Circle)
-        .map_or_else(|| "Alt+A".into(), |q| q.shortcut)
 }
 
 /// Copies a snip on a thread (encoding a big capture takes a while), through
