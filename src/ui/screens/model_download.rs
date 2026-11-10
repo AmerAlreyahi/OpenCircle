@@ -129,7 +129,7 @@ const TITLE_LINE: f32 = 1.4;
 const TEXT_LINE: f32 = 1.6;
 
 /// `bytes` as the design writes it: whole MB, at least 1.
-fn mb(bytes: u64) -> u64 {
+pub fn mb(bytes: u64) -> u64 {
     bytes.div_ceil(1_000_000).max(1)
 }
 

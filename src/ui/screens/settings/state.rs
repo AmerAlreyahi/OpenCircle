@@ -1040,6 +1040,14 @@ impl State {
         &self.problems
     }
 
+    /// Onboarding's "Your language": what text is translated into, and the
+    /// app language (shown from the multi-language release on).
+    pub fn set_language(&mut self, code: &str) {
+        self.draft.translate.target = code.into();
+        self.draft.general.language = code.into();
+        self.revalidate();
+    }
+
     /// Puts `ai` back (onboarding's Skip), its key looked up again.
     pub fn set_ai(&mut self, ai: config::AiConfig) {
         self.draft.ai = ai;

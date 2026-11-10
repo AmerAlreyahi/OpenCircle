@@ -1,4 +1,4 @@
-//! Connect AI (step 2): Settings' Answers from row; for an AI provider its
+//! Connect AI (step 3): Settings' Answers from row; for an AI provider its
 //! Provider, (Custom server) Server URL and key rows. The design's sign-in
 //! card is AI online.
 use iced::Element;

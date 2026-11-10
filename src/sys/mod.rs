@@ -1,6 +1,7 @@
 //! OS plumbing with no UI: opening links and files, detached process start,
-//! the desktop session's kind.
+//! the desktop session's kind, the user's language.
 
+pub mod locale;
 pub mod mem;
 pub mod open;
 pub mod serve_once;

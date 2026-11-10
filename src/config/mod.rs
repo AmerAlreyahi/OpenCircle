@@ -20,6 +20,8 @@
 //! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
 //! autostart = true                  # start with Windows / at login (tray only, no window)
+//! language = ""                     # the app language picked in onboarding ("" = the OS language;
+//!                                   # written only when set; the UI is English until the multi-language release)
 //! shortcuts_taken_shown = []        # the shortcuts another app held when the one-time notice said so
 //!                                   # (written only when not empty)
 //!
@@ -33,7 +35,8 @@
 //!
 //! [translate]
 //! source = "auto"                   # language code the text is in; auto = detect
-//! target = "ar"                     # language code to translate into
+//! target = "en"                     # language code to translate into; a new config: the OS language
+//!                                   # when it is in the language table, else English (never Arabic by default)
 //! engine = "offline"                # offline | ai (ai falls back to offline when AI isn't set up)
 //! live_interval_ms = 1500           # live translate repeats every N ms (500-5000)
 //! live_note_shown = false           # the one-time live-mode note was shown
@@ -152,7 +155,18 @@ use {look::*, migrate::*, parse::*};
 /// Schema version this build reads and writes.
 pub const VERSION: u32 = 11;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
-const DEFAULT_TRANSLATE_TARGET: &str = "ar";
+
+/// The OS's language as the language table has it, else English
+/// (`lang::yours`): a new config's `translate.target` (owner, 2026-11-10: no
+/// Arabic default) and onboarding's preselected "Your language". Tests get
+/// English on every machine.
+pub fn os_language() -> &'static str {
+    if cfg!(test) {
+        return "en";
+    }
+    static OS: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    OS.get_or_init(|| crate::translate::lang::yours(&crate::sys::locale::language()))
+}
 /// Ends the warning when `Provider::Unreadable` is set.
 const AI_OFF: &str = ", but AI is off until you choose a provider in Settings > Ask AI";
 /// Live translate repeats this often (ms); the allowed range is `LIVE_INTERVAL_MS`.
@@ -454,6 +468,10 @@ pub struct GeneralConfig {
     pub save_folder: String,
     /// Start OpenCircle with the OS (`autostart`). On by default.
     pub autostart: bool,
+    /// The app language onboarding's "Your language" picked (a language code);
+    /// "" = the OS language. Read from the multi-language release on.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub language: String,
     /// The shortcuts another app held when the start notice last said so
     /// (`hotkey::taken_notice`): the same ones aren't told again.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -466,6 +484,7 @@ impl Default for GeneralConfig {
             default_action: DefaultAction::default(),
             save_folder: String::new(),
             autostart: true,
+            language: String::new(),
             shortcuts_taken_shown: Vec::new(),
         }
     }
@@ -924,7 +943,7 @@ impl Default for TranslateConfig {
     fn default() -> Self {
         TranslateConfig {
             source: crate::translate::lang::AUTO.to_string(),
-            target: DEFAULT_TRANSLATE_TARGET.to_string(),
+            target: os_language().to_string(),
             engine: Engine::Offline,
             live_interval_ms: DEFAULT_LIVE_INTERVAL_MS,
             live_note_shown: false,
@@ -1417,7 +1436,10 @@ mod tests {
         assert_eq!(c.labs, Labs::default(), "Labs: everything off");
         assert_eq!(c.theme, Theme::System);
         assert_eq!(c.shortcut, "Ctrl+Shift+Space");
-        assert_eq!(c.translate.target, "ar");
+        assert_eq!(
+            c.translate.target, "en",
+            "the OS language (English in tests), never Arabic by default"
+        );
         assert_eq!(c.ai.provider, Provider::Browser);
         assert_eq!(c.quick_actions.len(), 7);
         // Song search: unbound, history off.
@@ -1599,6 +1621,7 @@ mod tests {
         c.translate.live_note_shown = true;
         c.translate.whole_screen = true;
         c.translate.recent_targets = vec!["fr".into(), "ar".into()];
+        c.general.language = "fr".into();
         c.translate.source = "ja".into();
         c.song.source = SongSource::Microphone;
         c.song.history = true;
@@ -1691,6 +1714,32 @@ mod tests {
             assert!(w.iter().any(|w| w.starts_with(&key)), "{key}: {w:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Owner, 2026-11-10: a config that already has a target keeps it (the old
+    /// default Arabic too, from any schema); one without gets the OS language.
+    #[test]
+    fn a_stored_target_is_kept_and_a_missing_one_follows_the_os() {
+        for version in [1, 10, VERSION] {
+            let text = format!("version = {version}\n[translate]\ntarget = \"ar\"\n");
+            let (c, w) = Config::parse(&text);
+            assert!(w.is_empty(), "{w:?}");
+            assert_eq!(c.translate.target, "ar", "schema {version}");
+            let saved = toml::to_string_pretty(&c).unwrap();
+            assert_eq!(Config::parse(&saved).0.translate.target, "ar");
+        }
+        let (c, _) = Config::parse("version = 11\n[translate]\nengine = \"offline\"\n");
+        assert_eq!(c.translate.target, os_language());
+        assert_eq!(c.general.language, "", "the app language follows the OS");
+        let (c, w) = Config::parse("[general]\nlanguage = \"not a code\"\n");
+        assert_eq!((c.general.language.as_str(), w.len()), ("", 1), "{w:?}");
+        assert_eq!(
+            Config::parse("[general]\nlanguage = \"fr\"\n")
+                .0
+                .general
+                .language,
+            "fr"
+        );
     }
 
     #[test]
@@ -2154,14 +2203,17 @@ mod tests {
         std::fs::read_to_string(dir.join(name)).unwrap()
     }
 
-    /// The default file is byte-for-byte the frozen v11 one (the file format is frozen).
+    /// The default file is byte-for-byte the frozen v11 one (the file format is
+    /// frozen), but for the target: the OS language since 2026-11-10 (English
+    /// in tests), no longer Arabic.
     #[test]
     fn the_default_file_is_byte_for_byte_the_frozen_one() {
         let dir = tmp_dir("default-bytes");
         let path = dir.join("config.toml");
         Config::default().save_to(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(written, fixture("default-v11.toml"));
+        let frozen = fixture("default-v11.toml").replace("target = \"ar\"", "target = \"en\"");
+        assert_eq!(written, frozen);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2212,11 +2264,10 @@ mod tests {
                     .all(|t| *t == Target::Circle)
             );
         }
-        // v8's default file is today's default.
-        assert_eq!(
-            Config::parse(&fixture("default-v8.toml")),
-            (Config::default(), vec![])
-        );
+        // v8's default file is today's default, its stored target kept.
+        let mut want = Config::default();
+        want.translate.target = "ar".into();
+        assert_eq!(Config::parse(&fixture("default-v8.toml")), (want, vec![]));
         assert_eq!(
             snip_entries(&Config::default().quick_actions),
             [Target::Circle]
@@ -2266,6 +2317,7 @@ mod tests {
         // theme = "spectrum" stays the user's: only a new file gets Sapphire Glow)
         let mut want = Config::default();
         want.look.theme = LookTheme::Spectrum;
+        want.translate.target = "ar".into(); // stored: kept
         assert_eq!(c, want);
         let frozen = fixture("default-v11.toml").replace("sapphire_glow", "spectrum");
         assert_eq!(fs_text(&path), frozen);

@@ -86,7 +86,7 @@ const fn row(
 use Script::*;
 const LATIN: Option<&str> = Some("latin");
 
-/// Picker order (Arabic, the default target, first).
+/// Picker order.
 pub const LANGUAGES: &[Language] = &[
     row("ar", "Arabic", "العربية", Arabic, Some("arabic")),
     row("en", "English", "English", Latin, Some("en")),
@@ -145,6 +145,21 @@ pub fn find(code: &str) -> Option<&'static Language> {
     let base = code.split(['-', '_']).next().unwrap_or_default();
     (LANGUAGES.iter().find(|l| l.code.eq_ignore_ascii_case(code)))
         .or_else(|| LANGUAGES.iter().find(|l| l.code.eq_ignore_ascii_case(base)))
+}
+
+/// The table's language for the OS's language tag ("fr-CA" -> "fr",
+/// "zh-Hant-TW" / "zh-TW" -> "zh-Hant"), else English: what a new config
+/// translates into (never Arabic unless the OS is).
+pub fn yours(tag: &str) -> &'static str {
+    let parts: Vec<String> = (tag.split(['-', '_']))
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let traditional = parts[0] == "zh"
+        && (parts.iter()).any(|p| matches!(p.as_str(), "hant" | "tw" | "hk" | "mo"));
+    match traditional {
+        true => "zh-Hant",
+        false => find(tag).map_or("en", |l| l.code),
+    }
 }
 
 /// Right-to-left: text is right-aligned when drawn.
@@ -425,10 +440,24 @@ mod tests {
             let letters: Vec<char> = l.native.chars().filter(|c| c.is_alphabetic()).collect();
             assert!(letters.iter().all(|c| l.script.has(*c)), "{}", l.code);
         }
-        assert_eq!(
-            LANGUAGES[0].code,
-            crate::config::Config::default().translate.target
-        );
+    }
+
+    #[test]
+    fn your_language_is_the_os_one_else_english() {
+        for (os, want) in [
+            ("en-US", "en"),
+            ("fr-CA", "fr"),
+            ("ar-SA", "ar"),
+            ("pt-BR", "pt-BR"),
+            ("pt-PT", "pt"),
+            ("zh-Hans-CN", "zh"),
+            ("zh-Hant-TW", "zh-Hant"),
+            ("zh-TW", "zh-Hant"),
+            ("sw-KE", "en"),
+            ("", "en"),
+        ] {
+            assert_eq!(yours(os), want, "{os}");
+        }
     }
 
     #[test]

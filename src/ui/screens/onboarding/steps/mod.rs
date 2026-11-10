@@ -1,6 +1,7 @@
 //! One file per onboarding step (`flow::STEPS` lists them).
 pub mod ai;
 pub mod done;
+pub mod language;
 pub mod look;
 pub mod screenshots;
 pub mod welcome;

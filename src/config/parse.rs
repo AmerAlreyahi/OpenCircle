@@ -96,6 +96,17 @@ impl Config {
                 |s: &String| check_folder(s),
             );
             c.general.autostart = get(t, "general.", "autostart", d.general.autostart, &mut w);
+            c.general.language = get_checked(
+                t,
+                "general.",
+                "language",
+                d.general.language,
+                &mut w,
+                |s: &String| match s.is_empty() {
+                    true => Ok(()),
+                    false => check_lang(s),
+                },
+            );
             c.general.shortcuts_taken_shown =
                 get(t, "general.", "shortcuts_taken_shown", vec![], &mut w);
         }

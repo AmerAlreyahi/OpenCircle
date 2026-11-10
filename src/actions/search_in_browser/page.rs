@@ -119,7 +119,14 @@ fn csp(html: &str) -> String {
 /// The auto-submit page for this PNG crop, in memory.
 fn page(png: &[u8], width: u32, height: u32, question: Option<&str>) -> io::Result<String> {
     let (png, w, h) = fit(png, width, height)?;
-    Ok(page_html(&png, w, h, &locale(), epoch_ms(), question))
+    Ok(page_html(
+        &png,
+        w,
+        h,
+        &crate::sys::locale::tag(),
+        epoch_ms(),
+        question,
+    ))
 }
 
 /// Delete our temp files left by a crash or a quick quit: Lens pages, and the
@@ -184,44 +191,6 @@ fn page_html(png: &[u8], w: u32, h: u32, hl: &str, st: u128, question: Option<&s
 fn base64(data: &[u8]) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.encode(data)
-}
-
-// ---- locale -------------------------------------------------------------
-
-/// A BCP-47-ish tag from the OS, or "en" (only letters, digits and '-').
-pub fn locale() -> String {
-    #[cfg(windows)]
-    {
-        #[link(name = "kernel32")]
-        unsafe extern "system" {
-            fn GetUserDefaultLocaleName(buf: *mut u16, len: i32) -> i32;
-        }
-        let mut buf = [0u16; 85]; // LOCALE_NAME_MAX_LENGTH
-        // SAFETY: buf is valid for 85 u16 and we pass its length.
-        let n = unsafe { GetUserDefaultLocaleName(buf.as_mut_ptr(), buf.len() as i32) };
-        if n > 1 {
-            return locale_tag(&String::from_utf16_lossy(&buf[..n as usize - 1]));
-        }
-        "en".into()
-    }
-    #[cfg(not(windows))]
-    {
-        let raw = ["LC_ALL", "LC_MESSAGES", "LANG"]
-            .iter()
-            .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
-            .unwrap_or_default();
-        locale_tag(&raw)
-    }
-}
-
-/// "en_US.UTF-8" -> "en-US". Anything odd (C, POSIX, markup, too long) -> "en".
-fn locale_tag(raw: &str) -> String {
-    let base = raw.split(['.', '@']).next().unwrap_or("").replace('_', "-");
-    let ok = base.len() <= 16
-        && base.starts_with(|c: char| c.is_ascii_alphabetic())
-        && base.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-        && !matches!(base.as_str(), "C" | "POSIX");
-    if ok { base } else { "en".into() }
 }
 
 // ---- downscale ----------------------------------------------------------
@@ -420,14 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn locale_is_sanitised_and_escaped() {
-        assert_eq!(locale_tag("en_US.UTF-8"), "en-US");
-        assert_eq!(locale_tag("ar_SA@x"), "ar-SA");
-        assert_eq!(locale_tag("C"), "en");
-        assert_eq!(locale_tag("POSIX"), "en");
-        assert_eq!(locale_tag(""), "en");
-        assert_eq!(locale_tag("en\"><script>alert(1)</script>"), "en");
-        assert_eq!(locale_tag("-x"), "en");
+    fn a_bad_locale_is_escaped() {
         // even if a bad value reached the template, it is escaped
         let html = page_html(b"", 1, 1, "\"><script>x", 0, None);
         assert!(!html.contains("<script>x"));

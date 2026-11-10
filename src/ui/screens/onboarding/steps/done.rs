@@ -1,4 +1,4 @@
-//! Done (step 4): OpenCircle runs in the tray, the shortcut that opens it (the one
+//! Done (step 5): OpenCircle runs in the tray, the shortcut that opens it (the one
 //! really set), and Settings' Start with the OS row. The design's feature
 //! cards are left out (owner: no showcase in onboarding; the previews live on
 //! each feature's Settings page).

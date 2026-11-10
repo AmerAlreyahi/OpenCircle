@@ -17,7 +17,7 @@ use iced::{Center, Element, Fill, Padding, Size, Subscription};
 
 use super::steps;
 use super::steps::screenshots::{Access, ask};
-use crate::config::{AiConfig, Config};
+use crate::config::{AiConfig, Config, Engine};
 use crate::secrets::{KeyStore, Keyring};
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::divider::divider;
@@ -27,6 +27,7 @@ use crate::ui::kit::segmented::spread;
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, space};
+use crate::ui::screens::common::language_picker::{self as picker, Picker, Side};
 use crate::ui::screens::settings::{self, KeyJob};
 
 /// The design's fixed size, the same for every step.
@@ -47,6 +48,8 @@ const FOOTER_TOP: f32 = 10.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
+    /// What text is translated into (and, later, the app language).
+    Language,
     Welcome,
     /// Wayland only: the desktop's screenshot permission, asked while we have the focus.
     Screenshots,
@@ -77,7 +80,8 @@ const fn page(
 }
 
 /// In the design's order. A new step = one entry here + one view file.
-pub const STEPS: [Page; 5] = [
+pub const STEPS: [Page; 6] = [
+    page(Step::Language, "Language", steps::language::view),
     page(Step::Welcome, "Welcome", steps::welcome::view),
     Page {
         wayland: true,
@@ -99,6 +103,8 @@ pub struct State {
     /// Wayland: the Screenshots step is shown.
     pub(super) wayland: bool,
     pub(super) access: Access,
+    /// The Language step's list (always open on the target side).
+    pub(super) picker: Picker,
     pub(super) error: Option<String>,
     /// The last step change (the step it left, and when): the thumb glides.
     moved: Option<(Step, Instant)>,
@@ -128,6 +134,8 @@ pub enum Message {
     Allow,
     /// The desktop's answer to the screenshot request.
     Allowed(Result<(), crate::capture::CaptureError>),
+    /// The Language step's list.
+    Language(picker::Msg),
     /// A Settings row (the same messages as in Settings).
     Settings(settings::Message),
     /// The header: drag, minimise, close (the shell does them).
@@ -163,14 +171,23 @@ impl State {
     pub fn new(mut base: Config, path: Option<PathBuf>, store: Box<dyn KeyStore>) -> Self {
         base.update.auto.get_or_insert(true);
         base.general.autostart = true;
+        // the app language is the one shown preselected, unless picked before
+        if base.general.language.is_empty() {
+            base.general.language = base.translate.target.clone();
+        }
         let base_ai = base.ai.clone();
+        let offline = base.translate.engine == Engine::Offline;
+        let mut picker = Picker::new(&base.translate.source, &base.translate.target, offline);
+        picker.saves_recent = false;
+        picker.update(picker::Msg::Open(Side::Target));
         let mut s = State {
             settings: settings::State::new(base, Vec::new(), path.clone(), store),
-            step: Step::Welcome,
+            step: Step::Language,
             base_ai,
             path,
             wayland: false,
             access: Access::Unasked,
+            picker,
             error: None,
             moved: None,
             labels: Vec::new(),
@@ -259,6 +276,17 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         // Settings with auto-save off: its rows edit the draft only.
         Message::Settings(m) => {
             let _ = settings::update(&mut state.settings, m);
+        }
+        // Tab would open the source list: there is none here
+        Message::Language(picker::Msg::Key(picker::Nav::Tab)) => {}
+        Message::Language(m) => {
+            if state.picker.update(m) {
+                state.settings.set_language(&state.picker.target);
+            }
+            // a pick closes the list: this step always shows it
+            if !state.picker.is_open() {
+                state.picker.update(picker::Msg::Open(Side::Target));
+            }
         }
         Message::Caption(_) => {}
         Message::Tick => {

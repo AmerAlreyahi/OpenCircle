@@ -129,6 +129,8 @@ pub struct Picker {
     recent: [Vec<String>; 2],
     /// Mirrored (an Arabic UI).
     pub rtl: bool,
+    /// Picks are remembered as recent (config); onboarding writes nothing before Finish.
+    pub saves_recent: bool,
 }
 
 impl Picker {
@@ -145,6 +147,7 @@ impl Picker {
             top: 0,
             recent: [saved.recent_sources, saved.recent_targets],
             rtl: false,
+            saves_recent: true,
         }
     }
 
@@ -382,7 +385,7 @@ impl Picker {
 
     /// Remembers a pick, most recent first (Detect isn't a pick to recall).
     fn remember(&mut self, side: Side, code: &str) {
-        if code == AUTO {
+        if code == AUTO || !self.saves_recent {
             return;
         }
         let recent = &mut self.recent[side as usize];

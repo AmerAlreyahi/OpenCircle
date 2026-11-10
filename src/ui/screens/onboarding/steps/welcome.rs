@@ -1,4 +1,4 @@
-//! Welcome (step 1): what OpenCircle does, then Settings' Selection and Keep up
+//! Welcome (step 2): what OpenCircle does, then Settings' Selection and Keep up
 //! to date rows.
 use iced::widget::{Space, column};
 use iced::{Element, Fill};

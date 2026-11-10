@@ -7,6 +7,7 @@ use super::*;
 use crate::config::{Config, Provider, Theme};
 use crate::secrets::{MemoryStore, Secret};
 use crate::ui::kit::testing::shot;
+use crate::ui::screens::common::language_picker as picker;
 use crate::ui::screens::settings::{self, KeyMessage, PRESETS, tests::tmp};
 use crate::ui::theme;
 
@@ -57,7 +58,7 @@ fn the_browser_is_preselected_and_steps_stay_in_range() {
     );
     assert!(back.is_empty(), "Back is off on step 1: {back:?}");
     update(&mut s, Message::Back);
-    assert_eq!(s.step(), Step::Welcome);
+    assert_eq!(s.step(), Step::Language, "your language comes first");
     next(&mut s, 9);
     assert_eq!(s.step(), Step::Done);
     assert!(texts(&s).iter().any(|t| t == "Finish"));
@@ -69,24 +70,33 @@ fn the_browser_is_preselected_and_steps_stay_in_range() {
         Point::new(50.0, WINDOW_SIZE.height - 30.0),
     );
     assert!(matches!(back[..], [Message::Back]), "{back:?}");
-    // the track: "1. Welcome" … "4. Done", each a jump
+    // the track: "1. Language" … "5. Done", each a jump
     let t = texts(&s);
-    for label in ["1. Welcome", "2. Connect AI", "3. Look", "4. Done"] {
+    for label in [
+        "1. Language",
+        "2. Welcome",
+        "3. Connect AI",
+        "4. Look",
+        "5. Done",
+    ] {
         assert!(t.iter().any(|x| x == label), "{label}: {t:?}");
     }
     let pill = shot::click(view(&s), WINDOW_SIZE, Point::new(100.0, 64.0));
-    assert!(matches!(pill[..], [Message::Go(Step::Welcome)]), "{pill:?}");
+    assert!(
+        matches!(pill[..], [Message::Go(Step::Language)]),
+        "{pill:?}"
+    );
 }
 
 #[test]
 fn wayland_adds_the_screenshot_step_and_asks_once_at_a_time() {
     let mut s = state(None);
-    next(&mut s, 1);
+    next(&mut s, 2);
     assert_eq!(s.step(), Step::Ai, "no Screenshots step off Wayland");
     let mut s = state(None).on_wayland(true);
-    next(&mut s, 1);
+    next(&mut s, 2);
     assert_eq!(s.step(), Step::Screenshots);
-    assert!(texts(&s).iter().any(|t| t == "2. Screenshots"));
+    assert!(texts(&s).iter().any(|t| t == "3. Screenshots"));
 
     // Allow sends one request; a second click while it is out sends none.
     assert_eq!(update(&mut s, Message::Allow), Outcome::AskScreenshot);
@@ -141,7 +151,7 @@ fn wayland_adds_the_screenshot_step_and_asks_once_at_a_time() {
 fn finish_writes_the_picked_config() {
     let path = tmp("onboarding-claude");
     let mut s = state(Some(path.clone()));
-    next(&mut s, 1);
+    next(&mut s, 2);
     row(&mut s, settings::Message::Provider(Provider::Anthropic));
     row(
         &mut s,
@@ -173,11 +183,85 @@ fn finish_writes_the_picked_config() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// Your language comes first, the OS language preselected (English in tests:
+/// `config::os_language`); a pick from the list (search, Enter) is the
+/// translate target and the app language, Finish writes it, and the list stays.
+#[test]
+fn your_language_comes_first_and_the_pick_lands_in_the_config() {
+    assert_eq!(STEPS[0].id, Step::Language);
+    let path = tmp("onboarding-language");
+    let mut s = state(Some(path.clone()));
+    assert_eq!(s.step(), Step::Language);
+    assert_eq!(s.config().translate.target, "en", "the OS language");
+    assert_eq!(s.config().general.language, "en", "shown = kept");
+    let t = texts(&s);
+    assert!(t.iter().any(|t| t == "Your language"), "{t:?}");
+    assert!(
+        t.iter().any(|t| t == "Suggested"),
+        "the list is open: {t:?}"
+    );
+    let pick = |s: &mut State, m| update(s, Message::Language(m));
+    pick(&mut s, picker::Msg::Query("fren".into()));
+    pick(&mut s, picker::Msg::First);
+    assert_eq!(s.config().translate.target, "fr");
+    assert_eq!(s.config().general.language, "fr");
+    assert!(s.picker.is_open(), "the list stays");
+    // Tab (the source list elsewhere) changes nothing here
+    pick(&mut s, picker::Msg::Key(picker::Nav::Tab));
+    assert!(s.picker.is_open() && s.picker.picks().contains(&"fr".to_string()));
+    let t = texts(&s);
+    assert!(
+        t.iter()
+            .any(|t| t.contains("English → French local translation") && t.contains("MB")),
+        "the model the first translation downloads: {t:?}"
+    );
+    let Outcome::Finished(cfg) = update(&mut s, Message::Finish) else {
+        panic!("{:?}", s.error)
+    };
+    let (back, _) = Config::load_from(&path);
+    assert_eq!(back, cfg);
+    assert_eq!(
+        (
+            back.translate.target.as_str(),
+            back.general.language.as_str()
+        ),
+        ("fr", "fr")
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// A config that already has a target keeps it: preselected, and written back
+/// as it was when the user just goes on.
+#[test]
+fn a_stored_target_is_preselected_and_kept() {
+    let mut base = Config::default();
+    base.translate.target = "ar".into();
+    let mut s = State::new(base, None, Box::new(MemoryStore::default()));
+    assert_eq!(s.picker.target, "ar");
+    next(&mut s, 9);
+    assert_eq!(s.config().translate.target, "ar");
+}
+
+/// What the note says per target: the model and its size, English's own
+/// case, and a language with no local model (AI).
+#[test]
+fn the_note_names_the_model_the_first_translation_downloads() {
+    use super::steps::language::model_note;
+    assert!(model_note("ar").starts_with("Your first translation downloads English → Arabic"));
+    assert!(model_note("en").contains("into English"));
+    assert!(
+        model_note("tr").contains("choose AI"),
+        "{}",
+        model_note("tr")
+    );
+}
+
 /// The last step shows Settings' Start-with-the-OS row (pre-set on) and the
 /// shortcut really set; the first step Settings' Keep up to date row.
 #[test]
 fn the_switches_are_settings_rows_and_kept() {
     let mut s = state(None);
+    next(&mut s, 1);
     assert!(texts(&s).iter().any(|t| t == "Keep OpenCircle up to date"));
     row(&mut s, settings::Message::AutoUpdate(false));
     assert_eq!(s.config().update.auto, Some(false));
@@ -196,7 +280,7 @@ fn the_switches_are_settings_rows_and_kept() {
 fn a_local_preset_and_skip() {
     let path = tmp("onboarding-ollama");
     let mut s = state(Some(path.clone()));
-    next(&mut s, 1);
+    next(&mut s, 2);
     row(
         &mut s,
         settings::Message::Provider(Provider::OpenaiCompatible),
@@ -216,7 +300,7 @@ fn a_local_preset_and_skip() {
     assert!(!cfg.ai.model.is_empty());
     // Skip: the AI settings as they were, on to the next step
     let mut s = state(Some(path.clone()));
-    next(&mut s, 1);
+    next(&mut s, 2);
     row(&mut s, settings::Message::Provider(Provider::Anthropic));
     update(&mut s, Message::Skip);
     assert_eq!(s.step(), Step::Look);
