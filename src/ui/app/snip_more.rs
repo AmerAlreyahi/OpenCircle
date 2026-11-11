@@ -491,6 +491,7 @@ mod tests {
         let (opening, id) = (app.opening, app.o.more.reads);
         let task = app.on_more_read(opening, id, Ok(vec![]));
         run_task(&mut app, task);
+        open_more(&mut app); // (the click closed the menu)
         assert_eq!(app.o.more.read, more::Read::NoText);
         assert_eq!(
             rows(&app),
@@ -579,7 +580,10 @@ mod tests {
     #[test]
     fn ask_ai_opens_the_chat_and_esc_closes_both() {
         let mut app = open();
+        open_more(&mut app);
         let _ = app.on_snip_toolbar(E::AskAi);
+        let menu = app.o.edit.as_ref().unwrap().annotator.menu;
+        assert_eq!(menu, None, "a row closes the menu");
         assert!(
             app.o.ai_chat.is_some(),
             "the chat is up over the picked area"

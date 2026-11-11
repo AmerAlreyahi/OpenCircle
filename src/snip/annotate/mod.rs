@@ -945,14 +945,17 @@ impl Annotator {
             }
             Message::CopyText => {
                 self.commit();
+                self.menu = None;
                 return Some(Output::CopyText);
             }
             Message::Translate => {
                 self.commit();
+                self.menu = None;
                 return Some(Output::Translate);
             }
             Message::AskAi => {
                 self.commit();
+                self.menu = None;
                 return Some(Output::AskAi(render(&self.doc)));
             }
             Message::Back => {
