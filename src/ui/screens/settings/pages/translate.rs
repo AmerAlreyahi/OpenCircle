@@ -52,9 +52,14 @@ pub enum Now {
 impl Models {
     /// Counted from the disk (sizes only).
     pub fn count() -> Models {
+        // (a pair whose v2 file is already here only waits for its swap)
         let (old, all) = mt::installed();
-        let bytes = old.iter().map(|p| p.update_bytes()).sum();
-        Models::of(old.len(), all, bytes, Now::Idle)
+        let bytes: Vec<u64> = old
+            .iter()
+            .map(|p| p.update_bytes())
+            .filter(|&b| b > 0)
+            .collect();
+        Models::of(bytes.len(), all, bytes.iter().sum(), Now::Idle)
     }
 
     pub(in super::super) fn of(old: usize, all: usize, bytes: u64, now: Now) -> Models {
@@ -107,7 +112,8 @@ impl Models {
         }
     }
 
-    /// The update ended (after a Cancel nothing changes: counted already).
+    /// The update ended (a Cancel too, once its thread has stopped and
+    /// swapped in what was complete): counted again.
     pub(in super::super) fn finished(&mut self, done: Result<(), String>) {
         if !matches!(self.now, Now::Updating(_)) {
             return;
@@ -134,11 +140,7 @@ fn models_row(m: &Models) -> Option<Element<'_, Message>> {
         return None;
     }
     let control: Element<'_, Message> = match m.now {
-        Now::Idle => button(
-            label(&m.button),
-            Kind::Elevated,
-            Some(Message::UpdateModels),
-        ),
+        Now::Idle => setting_row::action(&m.button, Kind::Elevated, Some(Message::UpdateModels)),
         Now::Updating(share) => column![
             progress::bar(share),
             crate::dir_row![
@@ -148,8 +150,8 @@ fn models_row(m: &Models) -> Option<Element<'_, Message>> {
         ]
         .spacing(space::GAP)
         .into(),
-        Now::Failed(_) => button(
-            label(t!(md_try_again)),
+        Now::Failed(_) => setting_row::action(
+            t!(md_try_again),
             Kind::Elevated,
             Some(Message::UpdateModels),
         ),

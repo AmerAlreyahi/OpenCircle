@@ -1310,10 +1310,18 @@ fn the_model_row_says_what_is_left_and_updates_it() {
     let t = texts(&s);
     assert!(t.iter().any(|t| t == "Updating · 50% of 178 MB"), "{t:?}");
     assert!(t.iter().any(|t| t == "Cancel"), "{t:?}");
-    // Cancel: counted again from the disk (nothing installed here), the late answer ignored
+    // Cancel: "updating" until the thread has stopped, then counted again
+    // from the disk (nothing installed here); a late progress changes nothing
     update(&mut s, Message::StopModels);
+    assert_eq!(s.models.now, Now::Updating(0.5));
+    assert_eq!(
+        update(&mut s, Message::UpdateModels),
+        Outcome::None,
+        "still stopping"
+    );
+    update(&mut s, Message::ModelsUpdated(Ok(())));
     assert_eq!(s.models.now, Now::Idle);
-    update(&mut s, Message::ModelsUpdated(Err("late".into())));
+    update(&mut s, Message::ModelsProgress(0.7));
     assert_eq!(s.models.now, Now::Idle);
     // a failure while something is left: its reason, Try again
     s.models = Models::of(

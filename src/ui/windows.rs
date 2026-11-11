@@ -1290,8 +1290,8 @@ impl Windows {
                                     ));
                                 };
                                 let got = match crate::mt::update(&pairs, progress) {
-                                    // Cancel: the row is counted again already
-                                    Err(crate::ocr::OcrError::Stopped) => return,
+                                    // Cancel: not a failure (the row is counted again)
+                                    Err(crate::ocr::OcrError::Stopped) => Ok(()),
                                     got => {
                                         got.map_err(|e| crate::ui::screens::model_download::why(&e))
                                     }

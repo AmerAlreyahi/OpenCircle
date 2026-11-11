@@ -1695,10 +1695,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             }
         }
         Message::ModelsProgress(share) => state.models.progress(share),
-        Message::StopModels => {
-            crate::mt::stop_update();
-            state.models = super::pages::translate::Models::count();
-        }
+        // the row stays "updating" until the thread has stopped (`ModelsUpdated`)
+        Message::StopModels => crate::mt::stop_update(),
         Message::ModelsUpdated(done) => state.models.finished(done),
         Message::Look(t) => {
             // The first time Custom is picked it starts as the look in use.
