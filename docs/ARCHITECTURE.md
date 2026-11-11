@@ -188,6 +188,31 @@ Settings > Look & behaviour > Text reader (Windows only) sets the setting; its n
 Windows recognizer comes from `ocr::system::missing` (installed list x display language + translate
 source) and its button opens ms-settings:regionlanguage (nothing is installed by us).
 
+**Add a string** (any word a screen shows): one entry in `src/app_language/strings.rs`, `key: "English" | "Arabic";`
+(the key names the screen and the thing: `g_lang_desc`), then `t!(key)` (or `tr(S::key)`) where it is shown; a value
+in a sentence is `{}` and goes through `app_language::fmt(S::key, &[&value])` (in Arabic a Latin value is isolated,
+U+2068/U+2069), a count through `app_language::count(n, [one, two, few, many])` (Arabic's plural forms). Never a
+literal: `app_language::tests` fails on a key without both languages, a key no code uses, and any word left in a
+Settings or onboarding file (`NOT_UI` lists the literals that are not words: key names, ids, the CLI). The kit takes
+its few words as parameters (`hero::Words`, `shortcut_field`'s "Not set"): it never reads the table.
+
+**Add a language**: a `Lang` variant (+ `code`, `rtl`, its `lang_<code>` name key for `endonym`), a column in the
+table's macro (`[en, ar, …]`) and its text in every entry, a `Choice` in `CHOICES` (Settings' App language list). The
+language resolves from `general.app_language` (Settings; "" = follow), else `general.language` (onboarding's pick), else
+the OS's (`app_language::of_config`); `apply` sets it on the UI thread (Settings' state at open and on a pick,
+onboarding's language step): the next redraw of every window speaks it, no restart.
+
+**Make a screen direction-aware**: its view starts with `let _dir = kit::dir::scope(app_language::rtl());` (the kit
+reads the direction while the view builds; views that don't set it stay left to right), writes its side-by-side
+children in reading order with `dir_row![a, b]` / `kit::dir::row(vec)` (never `row!` with a `.push` after it: the push
+lands at the wrong end in Arabic), aligns text columns with `.align_x(kit::dir::start())`, pads one side with
+`kit::dir::pad`, and uses `Icon::directed()` for arrows. The kit parts do the rest (setting rows, sidebar, header with
+the caption buttons top left, segmented/Off-On order, slider and progress from the right, dropdowns, cards, hero).
+Never mirrored: key caps, numbers, paths, URLs, the logo, colour strips, preview stages. A wrapped right-to-left
+paragraph goes in a column (a `sub` straight in a container was laid out past its edge). Older screens with their own
+`rtl: bool` (language picker, Snip toolbar, Steps strip, ruler, long-capture hint) take `kit::dir::rtl()` when they
+move onto the table (part 2).
+
 **Add a colour**: a theme colour goes in every theme of `kit/themes.rs`; one
 that is the same in every theme in `kit::tokens::fixed`. Nowhere else.
 
