@@ -4,6 +4,8 @@
 //! `recognize_in_child`, so ORT and its memory live only in an
 //! `opencircle ocr-worker` process that runs `Engine` (one per call, or one
 //! warm one while a `Hold` lives: `session`).
+#[cfg(all(test, target_os = "linux"))]
+mod bench;
 pub(crate) mod models;
 pub mod screen;
 pub(crate) mod session;
@@ -462,7 +464,17 @@ impl Engine {
     /// The text lines' boxes in `img` (`width` x `height`; image px), and
     /// the size detection ran at.
     fn detect(&mut self, img: &RgbImage, width: u32, height: u32) -> Result<Detected, OcrError> {
-        let (dw, dh) = detect_size(width, height);
+        self.detect_at(img, width, height, detect_size(width, height))
+    }
+
+    /// `detect` with the detector's input at `(dw, dh)`.
+    fn detect_at(
+        &mut self,
+        img: &RgbImage,
+        width: u32,
+        height: u32,
+        (dw, dh): (u32, u32),
+    ) -> Result<Detected, OcrError> {
         let small = if (dw, dh) == (width, height) {
             img.clone()
         } else {

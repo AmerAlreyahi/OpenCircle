@@ -589,7 +589,7 @@ fn word_count(lines: &[TextBlock]) -> (usize, usize) {
 /// an address (the browser's address bar: dropped, the tabs above it were
 /// not known as chrome on an Arabic page on Windows), and their boxes: the
 /// second reader leaves them alone.
-pub(super) fn words_read(lines: Vec<TextBlock>) -> (Vec<TextBlock>, Vec<[f32; 4]>) {
+pub(crate) fn words_read(lines: Vec<TextBlock>) -> (Vec<TextBlock>, Vec<[f32; 4]>) {
     let keep: Vec<TextBlock> = (lines.into_iter())
         .filter(|l| {
             let (t, w) = word_count(std::slice::from_ref(l));
@@ -603,7 +603,7 @@ pub(super) fn words_read(lines: Vec<TextBlock>) -> (Vec<TextBlock>, Vec<[f32; 4]
 /// Two reads of one page as one, in reading order: by rows (8 px bands of
 /// the line's middle), left to right in a row.
 // ponytail: fixed bands; a line straddling two may sort a row early.
-pub(super) fn merged(mut a: Vec<TextBlock>, b: Vec<TextBlock>) -> Vec<TextBlock> {
+pub(crate) fn merged(mut a: Vec<TextBlock>, b: Vec<TextBlock>) -> Vec<TextBlock> {
     a.extend(b);
     let key = |l: &TextBlock| {
         (
