@@ -107,6 +107,17 @@ impl Config {
                     false => check_lang(s),
                 },
             );
+            c.general.app_language = get_checked(
+                t,
+                "general.",
+                "app_language",
+                d.general.app_language,
+                &mut w,
+                |s: &String| match s.as_str() {
+                    "" | "en" | "ar" => Ok(()),
+                    _ => Err("expected \"en\" or \"ar\"".into()),
+                },
+            );
             c.general.shortcuts_taken_shown =
                 get(t, "general.", "shortcuts_taken_shown", vec![], &mut w);
         }

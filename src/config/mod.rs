@@ -20,8 +20,10 @@
 //! default_action = "lens"           # Enter on the action bar: lens | ai | text | copy
 //! save_folder = ""                  # Save dialog starts here; "" = the system's choice
 //! autostart = true                  # start with Windows / at login (tray only, no window)
-//! language = ""                     # the app language picked in onboarding ("" = the OS language;
-//!                                   # written only when set; the UI is English until the multi-language release)
+//! language = ""                     # the language picked in onboarding ("" = the OS language;
+//!                                   # written only when set)
+//! app_language = ""                 # the app's own language: "" = follow `language` (Settings' "Your
+//!                                   # language (...)"), else en | ar (written only when the user picks one)
 //! shortcuts_taken_shown = []        # the shortcuts another app held when the one-time notice said so
 //!                                   # (written only when not empty)
 //!
@@ -472,6 +474,10 @@ pub struct GeneralConfig {
     /// "" = the OS language. Read from the multi-language release on.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub language: String,
+    /// Settings' App language: "" = follow `language`, else a UI language code
+    /// ("en", "ar"); written only when the user picks one.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub app_language: String,
     /// The shortcuts another app held when the start notice last said so
     /// (`hotkey::taken_notice`): the same ones aren't told again.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -485,6 +491,7 @@ impl Default for GeneralConfig {
             save_folder: String::new(),
             autostart: true,
             language: String::new(),
+            app_language: String::new(),
             shortcuts_taken_shown: Vec::new(),
         }
     }

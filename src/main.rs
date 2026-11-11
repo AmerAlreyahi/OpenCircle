@@ -5,6 +5,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod actions;
 mod ai;
+mod app_language;
 mod autostart;
 mod capture;
 mod config;
