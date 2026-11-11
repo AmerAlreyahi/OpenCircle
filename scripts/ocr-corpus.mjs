@@ -130,6 +130,41 @@ const EN = {
   footer: 'This page was last edited on 12 March 2026. Text is available under a free licence; additional terms may apply.',
 };
 
+// French (a Latin page in another language than English: Latin reader, accents)
+const FR = {
+  site: "L'encyclopédie libre",
+  nav: ['Accueil', 'Modifications récentes', 'Article au hasard', 'Parcourir les thèmes', 'Aide', 'Communauté', 'Faire un don', 'Nous contacter'],
+  tools: ['Outils', 'Pages liées', 'Suivi des pages liées', 'Téléverser un fichier', 'Pages spéciales', 'Lien permanent', 'Informations sur la page', 'Citer cette page'],
+  title: 'Phare',
+  tagline: "De l'encyclopédie libre, le savoir pour tous",
+  tabs: ['Article', 'Discussion', 'Lire', 'Modifier', 'Historique'],
+  lead: [
+    "Un phare est une tour ou une autre construction qui émet une lumière à l'aide d'un système de lampes et de lentilles afin de guider les navires en mer ou sur les eaux intérieures. Les phares signalent les côtes dangereuses, les hauts-fonds, les récifs et les entrées sûres des ports.",
+    "Leur nombre a diminué depuis que la navigation par satellite s'est répandue, mais beaucoup fonctionnent encore aujourd'hui, souvent automatisés et surveillés à distance. Certaines vieilles tours sont devenues des musées, des hôtels ou de simples repères sur la côte.",
+  ],
+  sections: [
+    ['Histoire', [
+      "Avant la construction des tours, les marins se fiaient à des feux allumés sur les collines près du rivage. Plus tard, des tours de pierre élevèrent la flamme afin qu'elle soit visible de plus loin, et des gardiens vivaient à côté pour entretenir la lumière toute la nuit.",
+      "Au dix-neuvième siècle, de nouvelles lentilles faites de nombreux anneaux de verre concentrèrent la lumière en un faisceau puissant, et un mécanisme d'horlogerie faisait tourner la lentille pour que chaque station clignote selon son propre rythme.",
+    ]],
+    ['Conception', [
+      "Une tour typique possède une lanterne au sommet, une galerie autour et un escalier qui monte en spirale dans le fût. Des murs épais protègent la structure du vent et des vagues, et des bandes de peinture la rendent visible le jour.",
+    ]],
+  ],
+  infobox: {
+    caption: 'Un phare de pierre sur un cap rocheux',
+    rows: [['Type', 'Aide à la navigation'], ['Matériau', 'Pierre, brique ou acier'], ['Hauteur', '10 à 100 mètres'], ['Portée', "Jusqu'à 40 km"], ['Énergie', 'Électrique ou solaire']],
+  },
+  toc: ['Sommaire', '1 Histoire', '2 Conception', '3 Voir aussi'],
+  table: {
+    caption: 'Exemples de caractères des feux',
+    head: ['Rythme', 'Période', 'Signification'],
+    rows: [['Fixe', 'continu', 'Entrée de port'], ['Éclats', '5 s', 'Feu côtier'], ['Occultations', '10 s', 'Marque de chenal'], ['Groupe', '15 s', "Feu d'atterrissage"]],
+  },
+  see: ['Voir aussi', 'Bateau-phare', 'Balise', 'Bouée', 'Corne de brume'],
+  footer: 'Dernière modification de cette page le 12 mars 2026. Le texte est disponible sous licence libre ; des conditions supplémentaires peuvent s’appliquer.',
+};
+
 // e: tashkeel, digits (Arabic-Indic and Western), punctuation and brackets
 const TASHKEEL = [
   'العِلْمُ نُورٌ يَهْدِي صَاحِبَهُ إِلَى الطَّرِيقِ المُسْتَقِيمِ، وَالجَهْلُ ظُلْمَةٌ تُضِلُّ السَّائِرِينَ.',
@@ -180,7 +215,7 @@ function page(t, o) {
     .join('');
   const extra = (o.extra || []).map((x) => `<p>${x}</p>`).join('');
   const blocks = o.blocks || '';
-  return `<!doctype html><html lang="${rtl ? 'ar' : 'en'}" dir="${o.dir}"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="${o.lang || (rtl ? 'ar' : 'en')}" dir="${o.dir}"><head><meta charset="utf-8">
 <style>
 *{box-sizing:border-box} html,body{margin:0;background:${c.bg};color:${c.fg}}
 body{font-family:${font};font-size:${body}px;line-height:1.6}
@@ -277,6 +312,8 @@ const PAGES = [
   { name: 'f-mixed-blocks-1080', view: FHD, html: page({ ...AR, lead: [], sections: AR.sections.slice(1, 2) }, { dir: 'rtl', theme: 'light', blocks: mixedBlocks, noInfo: true }) },
   { name: 'g-mixed-inline-1080', view: FHD, html: page({ ...AR, lead: [], sections: [['مصطلحات أجنبية', MIXED_INLINE_AR], ['English with Arabic words', []]] }, { dir: 'rtl', theme: 'light', extra: [], blocks: `<div dir="ltr" lang="en" style="margin-top:12px">${MIXED_INLINE_EN.map((p) => `<p>${p}</p>`).join('')}</div>` }) },
   { name: 'h-en-1080', view: FHD, html: page(EN, { dir: 'ltr', theme: 'light' }) },
+  { name: 'h-fr-1080', view: FHD, html: page(FR, { dir: 'ltr', theme: 'light', lang: 'fr' }) },
+  { name: 'h-en-3440', view: UW, html: page(EN, { dir: 'ltr', theme: 'light', searchW: 500, repeat: 3 }) },
   // full-width paragraphs (~3100 px lines): wider than the recognizer's input
   { name: 'i-ar-wide-3440', view: UW, html: page(AR, { dir: 'rtl', theme: 'light', searchW: 500, repeat: 2, noInfo: true, long: true }) },
   { name: 'i-en-wide-3440', view: UW, html: page(EN, { dir: 'ltr', theme: 'light', searchW: 500, repeat: 2, noInfo: true, long: true }) },
